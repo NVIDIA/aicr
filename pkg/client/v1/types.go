@@ -122,25 +122,49 @@ func (s *Snapshot) Unwrap() *snapshotter.Snapshot {
 // this type — so an unplumbed field is a test failure rather than a silent
 // zero value.
 type AgentConfig struct {
-	Kubeconfig         string
-	Namespace          string
-	Image              string
-	ImagePullSecrets   []string
-	JobName            string
+	Kubeconfig       string
+	Namespace        string
+	Image            string
+	ImagePullSecrets []string
+	JobName          string
+
+	// ServiceAccountName selects the ServiceAccount the agent pod runs
+	// as. It is EXACT-IF-EXISTS, so it carries two meanings:
+	//
+	//   - A ServiceAccount of exactly this name already exists in
+	//     Namespace: it is used verbatim, and the run creates NO
+	//     ServiceAccount, Role, RoleBinding, ClusterRole or
+	//     ClusterRoleBinding — and deletes none at cleanup. This is how a
+	//     ServiceAccount carrying IRSA (eks.amazonaws.com/role-arn) or
+	//     GKE Workload Identity (iam.gke.io/gcp-service-account)
+	//     annotations stays usable: both providers pin trust to the
+	//     ServiceAccount NAME, which a run-scoped name can never satisfy.
+	//     Grant it the agent's permissions once with
+	//     snapshotter.ProvisionAgentRoles (CLI:
+	//     `aicr snapshot --add-roles-to-service-account`).
+	//   - Otherwise: a name prefix. The run creates "<prefix>-<RunID>"
+	//     and the full run-scoped RBAC set, and deletes them at cleanup.
+	//
+	// Empty falls back to NameBase and is never probed for existence.
+	//
+	// Using an existing ServiceAccount waives per-run permission
+	// isolation: concurrent runs sharing it share its grants, and grants
+	// provisioned for DiscoverNetwork persist beyond any one run.
 	ServiceAccountName string
-	NodeSelector       map[string]string
-	Tolerations        []corev1.Toleration
-	Timeout            time.Duration
-	Cleanup            bool
-	Debug              bool
-	Privileged         bool
-	RequireGPU         bool
-	RuntimeClassName   string
-	TemplatePath       string
-	MaxNodesPerEntry   int
-	OS                 string
-	Requests           corev1.ResourceList
-	Limits             corev1.ResourceList
+
+	NodeSelector     map[string]string
+	Tolerations      []corev1.Toleration
+	Timeout          time.Duration
+	Cleanup          bool
+	Debug            bool
+	Privileged       bool
+	RequireGPU       bool
+	RuntimeClassName string
+	TemplatePath     string
+	MaxNodesPerEntry int
+	OS               string
+	Requests         corev1.ResourceList
+	Limits           corev1.ResourceList
 
 	// Output selects where the agent Job stages its result. A cm://namespace/name
 	// URI makes that ConfigMap the delivery vehicle — the Job writes there and
@@ -193,9 +217,11 @@ type AgentConfig struct {
 	// Setting only one of the two therefore leaves NameBase governing the
 	// other. Defaults to "aicr" when also empty.
 	//
-	// JobName and ServiceAccountName themselves are optional prefixes,
-	// not required names — RunID is appended to whichever prefix
-	// applies, so the deployed object names are always run-scoped.
+	// JobName is likewise an optional prefix, not a required name —
+	// RunID is appended to whichever prefix applies, so the deployed Job
+	// name is always run-scoped. ServiceAccountName is a prefix only
+	// when no ServiceAccount of that exact name exists; see its own
+	// documentation above.
 	NameBase string
 }
 

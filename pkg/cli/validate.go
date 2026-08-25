@@ -498,7 +498,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
-			Usage:    "ServiceAccount name prefix (default: \"aicr-validate\"); the run ID is always appended",
+			Usage:    "ServiceAccount the live snapshot-capture agent runs as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and the agent creates and deletes no RBAC for the run (grant it permissions once with 'aicr snapshot --add-roles-to-service-account'). Otherwise it is a name prefix (default: \"aicr-validate\") and the run ID is appended.",
 			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{

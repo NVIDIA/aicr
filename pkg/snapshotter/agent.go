@@ -65,7 +65,31 @@ type AgentConfig struct {
 	// JobName for the agent Job
 	JobName string
 
-	// ServiceAccountName for the agent
+	// ServiceAccountName selects the ServiceAccount the agent pod runs
+	// as. It is EXACT-IF-EXISTS, so it carries two meanings resolved once
+	// per deployment:
+	//
+	//   - A ServiceAccount of exactly this name already exists in
+	//     Namespace: it is used verbatim, and the run creates NO
+	//     ServiceAccount, Role, RoleBinding, ClusterRole or
+	//     ClusterRoleBinding — and deletes none at cleanup. aicr adds and
+	//     removes no permissions on an identity it did not create. This
+	//     is how a ServiceAccount carrying IRSA
+	//     (eks.amazonaws.com/role-arn) or GKE Workload Identity
+	//     (iam.gke.io/gcp-service-account) annotations stays usable: both
+	//     providers pin trust to the ServiceAccount NAME, which a
+	//     run-scoped name can never satisfy. Grant it the agent's
+	//     permissions once with ProvisionAgentRoles.
+	//   - Otherwise: a name prefix. The run creates "<prefix>-<RunID>"
+	//     and the full run-scoped RBAC set, and deletes them at cleanup.
+	//
+	// Empty falls back to NameBase and is never probed for existence, so
+	// a stray ServiceAccount sitting at the default base cannot silently
+	// capture the run.
+	//
+	// Using an existing ServiceAccount waives per-run permission
+	// isolation: concurrent runs sharing it share its grants, and grants
+	// provisioned for DiscoverNetwork persist beyond any one run.
 	ServiceAccountName string
 
 	// NodeSelector for targeting specific nodes

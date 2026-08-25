@@ -132,7 +132,8 @@ aicr snapshot \
 - `--image`: Container image (default: matches the CLI version, e.g. `ghcr.io/nvidia/aicr:v0.19.0`; dev and snapshot builds use `:latest`)
 - `--image-pull-secret`: Secret name for pulling the agent image from a private registry (repeatable)
 - `--job-name`: Job name prefix (default: `aicr`); the run ID is always appended (`<prefix>-<run-id>`)
-- `--service-account-name`: ServiceAccount name prefix (default: `aicr`); the run ID is always appended (`<prefix>-<run-id>`)
+- `--service-account-name`: ServiceAccount the agent pod runs as. **Exact-if-exists** — an existing ServiceAccount of exactly this name in `--namespace` is used verbatim and the run creates no RBAC; otherwise it is a name prefix (default: `aicr`) and the run ID is appended (`<prefix>-<run-id>`). See [Using an existing ServiceAccount](#using-an-existing-serviceaccount-irsa-and-workload-identity)
+- `--add-roles-to-service-account`: Grant the agent's permissions to the named **existing** ServiceAccount and exit **without taking a snapshot**. Idempotent; what it creates is permanent. See [Using an existing ServiceAccount](#using-an-existing-serviceaccount-irsa-and-workload-identity)
 - `--node-selector`: Node selector (format: `key=value`, repeatable)
 - `--toleration`: Toleration (format: `key=value:effect`, repeatable). **Default: all taints are tolerated** (uses `operator: Exists` without key). Only specify this flag if you want to restrict which taints the Job can tolerate.
 - `--timeout`: Wait timeout (default: `5m`)
@@ -203,6 +204,109 @@ aicr snapshot --image ghcr.io/nvidia/aicr:v0.19.0
 **Finding versions:**
 - [GitHub Releases](https://github.com/NVIDIA/aicr/releases)
 - Container registry: [ghcr.io/nvidia/aicr](https://github.com/NVIDIA/aicr/pkgs/container/aicr)
+
+## Using an existing ServiceAccount (IRSA and Workload Identity)
+
+By default the agent creates its own ServiceAccount for each run and deletes it
+at cleanup, so no two runs share an identity. That does not work when the
+ServiceAccount must carry cloud IAM credentials: **EKS IRSA**
+(`eks.amazonaws.com/role-arn`) and **GKE Workload Identity**
+(`iam.gke.io/gcp-service-account`) both pin trust to the ServiceAccount *name*.
+IRSA's role trust policy conditions on
+`system:serviceaccount:<namespace>:<name>`, and a GKE IAM binding names the KSA
+as `PROJECT.svc.id.goog[<namespace>/<name>]` and accepts no wildcard. A
+per-run name can never be trusted by either, and copying the annotations onto a
+run-scoped ServiceAccount does not help.
+
+`--service-account-name` therefore behaves as **exact-if-exists**:
+
+| Does a ServiceAccount of exactly that name exist in `--namespace`? | Behavior |
+|---|---|
+| Yes | Used verbatim. aicr creates **no** ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding for the run, binds nothing to it, and deletes nothing at cleanup. |
+| No | The value is a name prefix. The run creates `<prefix>-<run-id>` plus the full run-scoped RBAC set, and deletes them at cleanup — the pre-existing behavior. |
+
+An unset `--service-account-name` is never probed for existence, so a stray
+ServiceAccount named `aicr` cannot silently capture a run.
+
+### Migrating a pre-created ServiceAccount
+
+**What changed.** Before run isolation, passing `--service-account-name` at a
+ServiceAccount you had created out of band got that ServiceAccount adopted, and
+aicr attached its Role and RoleBinding to it. Run isolation made every
+run-owned object run-scoped, which turned the flag into a prefix — so a
+pre-created ServiceAccount stopped being used at all, and an agent pod that
+had been running with IRSA or Workload Identity credentials silently started
+running without them. Exact-if-exists restores the pre-created ServiceAccount
+as the one the pod runs as; what does **not** come back is aicr managing its
+permissions.
+
+**Supported flow.** Run the provisioning command once, as an admin, then take
+snapshots normally:
+
+```shell
+# 1. Your ServiceAccount, created and annotated by you (or by eksctl / Terraform).
+kubectl create serviceaccount irsa-snapshotter -n gpu-operator
+kubectl annotate serviceaccount irsa-snapshotter -n gpu-operator \
+  eks.amazonaws.com/role-arn=arn:aws:iam::123456789012:role/aicr-snapshot
+
+# 2. Grant it the agent's permissions. Provisions and exits - no snapshot is taken.
+aicr snapshot --namespace gpu-operator --add-roles-to-service-account irsa-snapshotter
+
+# 3. Capture snapshots as that ServiceAccount, as often as you like.
+aicr snapshot \
+  --namespace gpu-operator \
+  --service-account-name irsa-snapshotter \
+  --output cm://gpu-operator/aicr-snapshot
+```
+
+Step 2 fails with `NOT_FOUND` when the ServiceAccount does not exist: aicr
+grants permissions to an identity you control, and never creates one.
+
+### What provisioning creates
+
+| Object | Name | Scope |
+|---|---|---|
+| `Role`, `RoleBinding` | `aicr-agent-<sa>-rbac` | `--namespace` |
+| `ClusterRole`, `ClusterRoleBinding` | `aicr-agent-<namespace>-<sa>-rbac` | Cluster |
+
+The rules are the same ones a run-scoped grant carries, so an adopted
+ServiceAccount is never less capable than a run-owned one. The names end in
+`-rbac`, which no run-scoped name can (a run-scoped name always ends in a run
+ID whose last segment is hexadecimal), so the two name spaces cannot collide.
+
+**These objects are permanent.** They carry no `aicr.run/run-id` label, no run
+enters them into its cleanup list, and no `aicr snapshot` or `aicr validate`
+invocation deletes them. Removing them is your job:
+
+```shell
+kubectl delete role,rolebinding aicr-agent-irsa-snapshotter-rbac -n gpu-operator
+kubectl delete clusterrole,clusterrolebinding aicr-agent-gpu-operator-irsa-snapshotter-rbac
+```
+
+The command is idempotent — re-run it after an aicr upgrade and the rules are
+refreshed in place rather than duplicated or left stale.
+
+### Trade-off: per-run permission isolation is waived
+
+Using an existing ServiceAccount is an opt-in exchange, and it is worth
+understanding before you choose it:
+
+- **Concurrent runs share one identity.** Two `aicr snapshot` invocations using
+  the same ServiceAccount hold exactly the same grants. Run isolation's
+  guarantee that one run's permissions cannot reach another run's does not
+  apply to them.
+- **`--discover-network` grants become permanent.** With a run-owned
+  ServiceAccount, the cluster-scoped **mutating** discovery rules
+  (`nodes: patch`, `pods/exec: create`, CRD / namespace / DaemonSet
+  create-delete — see [Security Considerations](#security-considerations))
+  exist for one run and are revoked at cleanup. Provisioned with
+  `aicr snapshot --add-roles-to-service-account <sa> --discover-network`, they
+  sit on that ServiceAccount until you remove them.
+
+Provision without `--discover-network` unless you need live network discovery;
+that grant is read-only. If you need discovery only occasionally, prefer a
+run-owned ServiceAccount for those runs, or provision a separate
+ServiceAccount used only for discovery.
 
 ## Post-Deployment
 

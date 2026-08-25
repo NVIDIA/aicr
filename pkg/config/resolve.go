@@ -344,9 +344,12 @@ type ValidateResolved struct {
 	// Job name is always run-scoped.
 	JobName string
 
-	// ServiceAccountName is spec.validate.agent.serviceAccountName — an
-	// optional ServiceAccount name prefix, not a required name. Same
-	// empty-value behavior as JobName.
+	// ServiceAccountName is spec.validate.agent.serviceAccountName. It is
+	// exact-if-exists: when a ServiceAccount of exactly this name already
+	// exists in the namespace, the live snapshot-capture agent runs as it
+	// verbatim and creates no RBAC for the run; otherwise it is an
+	// optional name prefix with the same empty-value behavior as JobName.
+	// See pkg/snapshotter.AgentConfig.ServiceAccountName.
 	ServiceAccountName string
 
 	// NodeSelector is spec.validate.agent.nodeSelector. Nil if unset;
@@ -654,9 +657,12 @@ type SnapshotResolved struct {
 	// name is always run-scoped.
 	JobName string
 
-	// ServiceAccountName is spec.snapshot.agent.serviceAccountName — an
-	// optional ServiceAccount name prefix, not a required name. Same
-	// empty-value behavior as JobName.
+	// ServiceAccountName is spec.snapshot.agent.serviceAccountName. It is
+	// exact-if-exists: when a ServiceAccount of exactly this name already
+	// exists in the namespace, the agent runs as it verbatim and creates
+	// no RBAC for the run; otherwise it is an optional name prefix with
+	// the same empty-value behavior as JobName. See
+	// pkg/snapshotter.AgentConfig.ServiceAccountName.
 	ServiceAccountName string
 
 	// NodeSelector is spec.snapshot.agent.nodeSelector. Nil if unset;
