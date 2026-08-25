@@ -106,11 +106,18 @@ NotFound are both treated as success. Cleanup also runs on the Deploy failure
 path, which is why it is scoped to what was created rather than to configured
 names.
 
-Recording before the Create is what keeps a lost Create response from orphaning
-an object forever: if the apiserver commits the create but the response never
-arrives, the entry is already in the set and Cleanup deletes it by its
-(run-unique) name with no UID precondition. The one response that proves the
-object is not ours — AlreadyExists — discards the entry again.
+Recording before the Create is what keeps a lost Create response from
+orphaning an object forever: if the apiserver commits the create but the
+response never arrives, the entry is already in the set. That entry carries no
+UID, and its (run-unique) name is not evidence of ownership — it says what
+this run WOULD have created, not what is standing there now — so Cleanup never
+deletes it by bare name. It Gets the live object and re-verifies it: the
+delete is issued only when that object carries the full label set this run
+stamps at creation time AND a non-empty UID, and it is pinned to the UID that
+Get observed. A label mismatch or a missing UID fails closed — no delete at
+all, and a warning names the object left behind for an operator to judge —
+while a NotFound means there is nothing to reclaim. The one response that
+proves the object is not ours — AlreadyExists — discards the entry again.
 
 The staging ConfigMap is written by the in-pod agent, so its UID is observed
 when GetSnapshot reads it. When the run owns that ConfigMap and failed before
