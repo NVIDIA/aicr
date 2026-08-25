@@ -52,28 +52,35 @@ spec:
         - gpu-operator
         - kai-scheduler
 
-  # Performance validation (inference-perf) deferred — blocked on the serving
-  # runtime, not on AICR. Measured 2026-08-25 on nhensley-gb300
-  # (2x p6e-gb300r.36xlarge, 4 GPUs/worker set, Qwen/Qwen3-8B, concurrency
-  # 1024): throughput 20,769 tok/s and TTFT p99 33,320 ms, against a GB200
-  # reference of ~65,952 tok/s and ~1,240 ms on the same configuration.
+  # Performance validation (inference-perf) deferred — the GB300 numbers are
+  # far below the GB200 reference and the cause is NOT yet understood, so no
+  # floor set from them would be meaningful.
   #
-  # The pinned Dynamo worker image (nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1)
-  # ships CUDA 12.9, which is not sm_103-optimized for GB300 (Blackwell Ultra).
-  # Plain CUDA kernels forward-compat via PTX JIT, but the runtime kernel
-  # compiler needs explicit arch support, so the workers serve from
-  # JIT-compiled kernels — which is what destroys first-token latency. The
-  # numbers therefore measure the CUDA 12 image, not GB300, and must not be
-  # used to set floors: doing so would enshrine a degraded configuration as
-  # the GB300 baseline and permanently mask the real gap.
+  # Measured 2026-08-25 on nhensley-gb300 (p6e-gb300r.36xlarge, 4 GPU workers,
+  # Qwen/Qwen3-8B, concurrency 1024, dynamo-router/least-loaded):
   #
-  # Same class of gap as VR200/sm_107a, where the workers crash-loop outright
-  # rather than degrade. Re-attempt when an sm_103-capable (CUDA 13) vLLM /
-  # Dynamo runtime image ships, then measure and set throughput/TTFT floors
-  # from that run. Tracked in https://github.com/NVIDIA/aicr/issues/2385.
+  #   vllm-runtime:1.2.1        (CUDA 12.9)  20,769 tok/s   TTFT p99 33,320 ms
+  #   vllm-runtime:1.2.1-cuda13 (CUDA 13.0)  21,100 tok/s   TTFT p99 33,362 ms
+  #   GB200 reference, same config          ~65,952 tok/s   TTFT p99  ~1,240 ms
+  #
+  # A CUDA 12 / sm_103 kernel mismatch was the leading hypothesis and was
+  # tested directly: rebuilding the worker on the CUDA 13.0.2 image of the
+  # same Dynamo version moved throughput by 1.6% and latency by 0.1%. That
+  # rules CUDA out as the cause. The cluster side is not implicated either —
+  # driver 580.173.02 reports CUDA 13.0 and compute capability 10.3.
+  #
+  # What is known: the benchmark completes (no crash-loop, unlike VR200 on
+  # sm_107a), the endpoint serves, and the ~112s run at concurrency 1024
+  # leaves most requests queued — which accounts for the TTFT but not for
+  # serving roughly a third of GB200's tokens/sec on identical settings.
+  #
+  # Enabling this check with the GB200 floors would fail; setting floors from
+  # the observed numbers would encode an unexplained deficit as the GB300
+  # baseline. Deferred until the cause is identified.
+  # Tracked in https://github.com/NVIDIA/aicr/issues/2385.
   #
   # Deployment and conformance are unaffected and still gate this leaf
-  # (validated 4/4 and 10/10 on the same cluster).
+  # (validated 4/4 and 10/10 on this cluster).
   validation:
     conformance:
       checks:
