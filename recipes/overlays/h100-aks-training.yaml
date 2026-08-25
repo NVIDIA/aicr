@@ -24,10 +24,17 @@ spec:
   # Machine type: qualified on Standard_ND96isr_H100_v5 (8x H100 SXM). These
   # criteria carry no machine-type axis, so they also match the smaller NCads
   # H100 shapes (Standard_NC80adis_H100_v5 = 2 GPUs, Standard_NC40ads_H100_v5 =
-  # 1 GPU). Those deploy normally, but the performance floors below are fixed
-  # absolute full-node values and can false-fail on them. Normalizing them was
-  # declined (#1256, #1254 — both closed not-planned); the qualified shape is
-  # the supported way to pass them.
+  # 1 GPU). Those do NOT merely under-perform: the aks base wires
+  # network-operator with a NicClusterPolicy unconditionally, so the
+  # deployment-phase expected-resources check runs verifyRDMAFabricReady, which
+  # fails closed when no node advertises the shared RDMA resource. NCads are
+  # PCIe H100 with no InfiniBand, so deployment fails before the performance
+  # floors below are ever evaluated. Opt out with
+  # `--set networkoperator:enabled=false`.
+  #
+  # On the qualified shape the floors still apply, and they are fixed absolute
+  # full-node values. Normalizing them was declined (#1256, #1254 — both closed
+  # not-planned); the qualified shape is the supported way to pass them.
   criteria:
     service: aks
     accelerator: h100
