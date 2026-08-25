@@ -56,12 +56,14 @@ spec:
     performance:
       checks:
         - inference-perf
-      # Conservative smoke gate mirrored from the GB200 EKS Dynamo overlay
-      # until GB300-specific inference baselines are available. GB300 NVL72
-      # exceeds GB200 per-GPU, so the GB200-derived floor should not false-fail
-      # a healthy run — it must be re-baselined on real GB300 hardware before
-      # it is treated as a regression gate. Model + concurrency are pinned so
-      # the gate stays valid independent of the compiled validator defaults.
+      # Smoke gate mirrored from the GB200 EKS Dynamo overlay until
+      # GB300-specific inference baselines are available. Unlike the NCCL
+      # checks, inference-perf has no accelerator gating, so this gate is live
+      # on GB300 from the first run — it is a real threshold, not a
+      # placeholder, and must be re-baselined on real GB300 hardware. GB300
+      # NVL72 exceeds GB200 per-GPU, so the GB200-derived floor should not
+      # false-fail a healthy run. Model + concurrency are pinned so the gate
+      # stays valid independent of the compiled validator defaults.
       #
       # NOTE: this throughput floor is a fixed absolute full-node value (here a
       # 4-GPU GB300 node) and is not normalized for GPU count, so a smaller SKU

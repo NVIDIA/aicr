@@ -27,8 +27,10 @@ spec:
     accelerator: gb300
     intent: inference
 
-  # Qualified on p6e-gb300r.36xlarge (GB300 NVL72, 4 GPUs per node, Grace
-  # ARM64 host, EFA scale-out fabric).
+  # Targets p6e-gb300r.36xlarge (GB300 NVL72, 4 GPUs per node, Grace ARM64
+  # host). This overlay assumes the EFA scale-out fabric, matching the
+  # reference EKS cluster whose GPU nodes carry an efa-only ENI. RoCE-fabric
+  # GB300 is out of scope here; fabric-aware selection is tracked in #1410.
   #
   # Specific constraints for GB300 on EKS inference workloads.
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}

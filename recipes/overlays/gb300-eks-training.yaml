@@ -27,8 +27,10 @@ spec:
     accelerator: gb300
     intent: training
 
-  # Qualified on p6e-gb300r.36xlarge (GB300 NVL72, 4 GPUs per node, Grace
-  # ARM64 host, EFA scale-out fabric).
+  # Targets p6e-gb300r.36xlarge (GB300 NVL72, 4 GPUs per node, Grace ARM64
+  # host). This overlay assumes the EFA scale-out fabric, matching the
+  # reference EKS cluster whose GPU nodes carry an efa-only ENI. RoCE-fabric
+  # GB300 is out of scope here; fabric-aware selection is tracked in #1410.
   #
   # Specific constraints for GB300 on EKS training workloads.
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
@@ -125,6 +127,18 @@ spec:
         - nccl-all-reduce-bw-net
         - nccl-all-reduce-bw-nvls
       constraints:
+        # Without this, both checks SKIP rather than run: the validator's
+        # applicability matrix registers only gb200 for EKS on the net and nvls
+        # variants, and an unsupported combination returns Skip — the
+        # thresholds below would be inert and the phase would report a vacuous
+        # pass. gb200/eks is the documented "existing service, new accelerator"
+        # borrow (see docs/user/validation.md), and it is the right template
+        # here because GB300 on EKS runs the same EFA scale-out fabric and the
+        # same NVL72 MNNVL/IMEX topology the gb200/eks profile was built for.
+        # Replace with a native gb300 matrix entry once GB300 runtime templates
+        # exist.
+        - name: nccl-benchmark-profile
+          value: gb200/eks
         - name: nccl-all-reduce-bw-net
           value: ">= 40"
         - name: nccl-all-reduce-bw-nvls
