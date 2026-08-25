@@ -28,18 +28,16 @@ spec:
     intent: training
 
   # Targets p6e-gb300r.36xlarge (GB300 NVL72, 4 GPUs per node, Grace ARM64
-  # host). This overlay assumes the EFA scale-out fabric, matching the
-  # reference EKS cluster whose GPU nodes carry an efa-only ENI.
+  # host) on the EFA scale-out fabric.
   #
-  # Note that EFA is the *minor* scale-out fabric on this shape: it
-  # advertises a maximum of 2 EFA interfaces (9 network cards), against 16 on
-  # p6e-gb200.36xlarge and 32 on p5.48xlarge. The high-bandwidth scale-out
-  # path for p6e-gb300r is ConnectX RoCE — see
-  # validators/performance/testdata/roce/eks/runtime-net.yaml, which records
-  # ~387 GB/s busbw over 8 rocep* devices on aicr-gb300. RoCE-fabric GB300 is
-  # out of scope here (no RoCE DeviceClass on the reference cluster, and the
-  # RoCE DRA driver is not in the public registry); fabric-aware selection is
-  # tracked in #1410.
+  # Verified on the reference cluster: each GPU node presents 2x Amazon ENA
+  # plus 1x Amazon EFA on the PCI bus and advertises
+  # vpc.amazonaws.com/efa: 1. The instance type supports a maximum of 2 EFA
+  # interfaces, so a node can carry at most one more than this cluster does.
+  #
+  # Fabric selection is not modelled in the recipe criteria today — this
+  # overlay targets EFA because that is what the reference cluster presents.
+  # Fabric-aware selection is tracked in #1410.
   #
   # Specific constraints for GB300 on EKS training workloads.
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
@@ -136,24 +134,17 @@ spec:
       # before the evaluator's additional 10% tolerance. The GB200 value of
       # 500 was far too loose for GB300's NVLink fabric.
       #
-      # net stays at the GB200 value of 40. The 44.04 GB/s measured here is
-      # the EFA path on p6e-gb300r, which is the *minor* scale-out fabric on
-      # this instance shape — it advertises a maximum of 2 EFA interfaces
-      # (9 network cards), against 16 on p6e-gb200.36xlarge and 32 on
-      # p5.48xlarge. The reference cluster attaches 1 of those 2.
+      # net stays at the GB200 value of 40 rather than being raised to the
+      # 44.04 GB/s measured here. That measurement is the EFA path on a node
+      # carrying a single EFA device (the instance type allows at most 2), so
+      # it reflects this cluster's NIC provisioning as much as the
+      # accelerator. Raising the floor to match would bind the recipe to this
+      # node shape and re-create the SKU-agnostic false-fail that
+      # h100-eks-training documents for p5.4xlarge — see #1256, which tracks
+      # fabric-class-aware floors.
       #
-      # For contrast, validators/performance/testdata/roce/eks/runtime-net.yaml
-      # records ~387 GB/s busbw on aicr-gb300 (2x p6e-gb300r) over 8 rocep*
-      # ConnectX RoCE devices. So 44 GB/s is not GB300's scale-out ceiling; it
-      # is what one EFA device delivers on a shape whose high-bandwidth
-      # scale-out path is RoCE.
-      #
-      # This overlay targets EFA deliberately (the reference cluster exposes
-      # efa-only ENIs and no RoCE DeviceClass, and the RoCE DRA driver is not
-      # in the public registry). Fabric-aware selection is tracked in #1410,
-      # and the general problem of a SKU-agnostic recipe carrying one absolute
-      # NIC-path floor is #1256 — the same trap the h100-eks-training comment
-      # documents for p5.4xlarge.
+      # Re-baseline once a GB300 cluster with fuller scale-out provisioning
+      # is available.
       checks:
         - nccl-all-reduce-bw-net
         - nccl-all-reduce-bw-nvls
