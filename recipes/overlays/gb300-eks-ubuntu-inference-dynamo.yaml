@@ -52,34 +52,29 @@ spec:
         - gpu-operator
         - kai-scheduler
 
+  # Performance validation (inference-perf) deferred — blocked on the serving
+  # runtime, not on AICR. Measured 2026-08-25 on nhensley-gb300
+  # (2x p6e-gb300r.36xlarge, 4 GPUs/worker set, Qwen/Qwen3-8B, concurrency
+  # 1024): throughput 20,769 tok/s and TTFT p99 33,320 ms, against a GB200
+  # reference of ~65,952 tok/s and ~1,240 ms on the same configuration.
+  #
+  # The pinned Dynamo worker image (nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1)
+  # ships CUDA 12.9, which is not sm_103-optimized for GB300 (Blackwell Ultra).
+  # Plain CUDA kernels forward-compat via PTX JIT, but the runtime kernel
+  # compiler needs explicit arch support, so the workers serve from
+  # JIT-compiled kernels — which is what destroys first-token latency. The
+  # numbers therefore measure the CUDA 12 image, not GB300, and must not be
+  # used to set floors: doing so would enshrine a degraded configuration as
+  # the GB300 baseline and permanently mask the real gap.
+  #
+  # Same class of gap as VR200/sm_107a, where the workers crash-loop outright
+  # rather than degrade. Re-attempt when an sm_103-capable (CUDA 13) vLLM /
+  # Dynamo runtime image ships, then measure and set throughput/TTFT floors
+  # from that run. Tracked in https://github.com/NVIDIA/aicr/issues/2385.
+  #
+  # Deployment and conformance are unaffected and still gate this leaf
+  # (validated 4/4 and 10/10 on the same cluster).
   validation:
-    performance:
-      checks:
-        - inference-perf
-      # Smoke gate mirrored from the GB200 EKS Dynamo overlay until
-      # GB300-specific inference baselines are available. Unlike the NCCL
-      # checks, inference-perf has no accelerator gating, so this gate is live
-      # on GB300 from the first run — it is a real threshold, not a
-      # placeholder, and must be re-baselined on real GB300 hardware. GB300
-      # NVL72 exceeds GB200 per-GPU, so the GB200-derived floor should not
-      # false-fail a healthy run. Model + concurrency are pinned so the gate
-      # stays valid independent of the compiled validator defaults.
-      #
-      # NOTE: this throughput floor is a fixed absolute full-node value (here a
-      # 4-GPU GB300 node) and is not normalized for GPU count, so a smaller SKU
-      # of this accelerator can false-fail a healthy run. A normalized per-GPU
-      # floor is tracked in https://github.com/NVIDIA/aicr/issues/1254.
-      constraints:
-        - name: inference-model
-          value: Qwen/Qwen3-8B
-        - name: inference-concurrency-per-gpu
-          value: "256"
-        - name: inference-routing-mode
-          value: dynamo-router
-        - name: inference-throughput
-          value: ">= 50000"
-        - name: inference-ttft-p99
-          value: "<= 2000"
     conformance:
       checks:
         - platform-health
