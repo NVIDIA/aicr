@@ -93,10 +93,16 @@ spec:
                 - "true"
               - key: cloud.google.com/gke-confidential-nodes-instance-type
                 operator: DoesNotExist
-      {{- if $vals.acceleratedTolerations }}
       tolerations:
+        {{- if $vals.acceleratedTolerations }}
         {{- toYaml $vals.acceleratedTolerations | nindent 8 }}
-      {{- end }}
+        {{- else }}
+        # Tolerate-all default, matching ParseTolerations()/DefaultTolerations()
+        # (operator Exists, no key). Only reached if no acceleratedTolerations
+        # are injected from scheduling defaults/flags — the driver must land on
+        # GPU pools GKE auto-taints in mixed clusters.
+        - operator: Exists
+        {{- end }}
       hostNetwork: true
       hostPID: true
       volumes:
