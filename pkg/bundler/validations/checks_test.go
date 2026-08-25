@@ -762,6 +762,19 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 		r.Metadata.SelectedProfile = &recipe.SelectedProfile{Name: "gpuStack", Value: "azure-managed"}
 		return r
 	}
+	gcpInstallerRef := func(gate any) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: "gcp-driver-installer",
+			Overrides: map[string]any{"installer": map[string]any{"enabled": gate}}}
+	}
+	// A GKE+COS bundle-installer recipe whose snapshot (correctly) saw no
+	// driver: pools are created gpu-driver-version=disabled, the bundle's
+	// gcp-driver-installer supplies the driver.
+	resultBundleInstaller := func(gate any) *recipe.RecipeResult {
+		r := resultOS(recipe.GPUDriverStateAbsent, recipe.CriteriaServiceGKE,
+			recipe.CriteriaOSCOS, gpuOpRef(driverOff()), gcpInstallerRef(gate))
+		r.Metadata.SelectedProfile = &recipe.SelectedProfile{Name: "gpuStack", Value: "bundle-installer"}
+		return r
+	}
 	aks := recipe.CriteriaServiceAKS
 
 	tests := []struct {
@@ -860,6 +873,48 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 				"gcp-driver-installer",
 				"do not deploy a standalone DaemonSet alongside it",
 			},
+		},
+		{
+			// The bundle-installer regression (#2360 review): a correctly
+			// provisioned pool has no driver, so the snapshot records
+			// absent and driver.enabled=false — but the bundle's own
+			// gcp-driver-installer supplies the driver, so Rule 1 must
+			// stand down and let the pool generate its own bundle.
+			name:         "Rule 1: absent + enabled gcp-driver-installer → bundle supplies driver, no message",
+			recipeResult: resultBundleInstaller(true),
+		},
+		{
+			// Template parity: the manifest gate is toString == "true",
+			// so a string \"true\" renders the DaemonSet and counts as a
+			// driver producer too.
+			name:         "Rule 1: absent + string-true installer gate → suppressed (template parity)",
+			recipeResult: resultBundleInstaller("true"),
+		},
+		{
+			name:         "Rule 1: absent + disabled installer gate → still blocked",
+			recipeResult: resultBundleInstaller(false),
+			wantMsgs:     1,
+			wantContains: []string{"driverless", "On GKE COS node images"},
+		},
+		{
+			// Unrecognized gate types must not disarm the driverless gate.
+			name:         "Rule 1: absent + non-boolean installer gate → still blocked (fail closed)",
+			recipeResult: resultBundleInstaller(map[string]any{"oops": true}),
+			wantMsgs:     1,
+			wantContains: []string{"driverless"},
+		},
+		{
+			// The suppression keys off the EFFECTIVE gate, not the profile
+			// name: a --set that turns the installer off re-arms Rule 1.
+			name:         "Rule 1: absent + installer gate turned off via --set → still blocked",
+			recipeResult: resultBundleInstaller(true),
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"gcpdriverinstaller": {"installer.enabled": "false"},
+				}),
+			),
+			wantMsgs:     1,
+			wantContains: []string{"driverless"},
 		},
 		{
 			name: "Rule 1: absent on GKE+ubuntu → operator-managed remedy, no COS instruction",

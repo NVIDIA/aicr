@@ -538,6 +538,83 @@ func TestApplyGPUDriverAutoOverride_ProfileOwnedDriverConflictWarning(t *testing
 	}
 }
 
+// TestApplyGPUDriverAutoOverride_BundleInstallerSuppressesMismatchWarn is
+// the snapshot-driven regression for the #2360 review finding: a
+// correctly provisioned bundle-installer pool has driver-loaded=false,
+// and the driver-mismatch warning must stand down because the bundle's
+// own gcp-driver-installer supplies the driver. The sibling case (the
+// installer gate off, i.e. the gke-default shape) must keep warning.
+func TestApplyGPUDriverAutoOverride_BundleInstallerSuppressesMismatchWarn(t *testing.T) {
+	absentSnap := gpuHardwareSnapshotWith(func(b *measurement.SubtypeBuilder) {
+		b.SetBool(measurement.KeyGPUPresent, true).
+			SetInt(measurement.KeyGPUCount, 8).
+			SetBool(measurement.KeyGPUDriverLoaded, false)
+	})
+	makeResult := func(installerGate bool) *recipe.RecipeResult {
+		r := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{
+				{
+					Name: gpuOperatorComponentName,
+					Overrides: map[string]any{
+						"driver": map[string]any{"enabled": false},
+					},
+				},
+				{
+					Name: "gcp-driver-installer",
+					Overrides: map[string]any{
+						"installer": map[string]any{"enabled": installerGate},
+					},
+				},
+			},
+			Criteria: &recipe.Criteria{
+				Service: recipe.CriteriaServiceGKE,
+				OS:      recipe.CriteriaOSCOS,
+			},
+		}
+		return r
+	}
+	tests := []struct {
+		name          string
+		installerGate bool
+		wantWarn      bool
+	}{
+		{
+			name:          "installer gate off (gke-default shape) warns",
+			installerGate: false,
+			wantWarn:      true,
+		},
+		{
+			name:          "installer gate on (bundle-installer) stays quiet",
+			installerGate: true,
+			wantWarn:      false,
+		},
+	}
+
+	previousLogger := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{
+				Level: slog.LevelWarn,
+			})))
+			result := makeResult(tt.installerGate)
+
+			applyGPUDriverAutoOverride(t.Context(), result, absentSnap)
+
+			if got := result.Metadata.GPUDriverState; got != recipe.GPUDriverStateAbsent {
+				t.Errorf("GPUDriverState = %q, want %q (state must stay recorded either way)",
+					got, recipe.GPUDriverStateAbsent)
+			}
+			gotWarn := strings.Contains(logs.String(), "gpu-operator driver mismatch")
+			if gotWarn != tt.wantWarn {
+				t.Errorf("mismatch warning present = %t, want %t; logs: %s",
+					gotWarn, tt.wantWarn, logs.String())
+			}
+		})
+	}
+}
+
 // gpuHardwareSnapshotWith builds a minimal snapshot with a single GPU
 // measurement carrying a "hardware" subtype the caller populates through
 // the passed builder callback. Colocated with the reducer tests because

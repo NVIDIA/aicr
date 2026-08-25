@@ -1155,7 +1155,21 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 	toolkitDisabled := toolkitToggle != nil && !*toolkitToggle
 
 	// Rule 1: recorded driverless cluster vs preinstalled-driver profile.
-	if recipeResult.Metadata.GPUDriverState == recipe.GPUDriverStateAbsent && (!driverEnabled || toolkitDisabled) {
+	// An effectively enabled gcp-driver-installer disarms it: the bundle
+	// itself provisions the driver, so the driverless snapshot is the
+	// expected pre-deployment state (a correctly provisioned
+	// bundle-installer pool must be able to generate its own bundle). A
+	// resolution failure for the installer's values fails closed as a
+	// hard error rather than degrading to the misleading driverless
+	// remediation.
+	bundleSuppliesDriver, supplyErr := BundleSuppliesGKEDriver(ctx, recipeResult, bundlerConfig)
+	if supplyErr != nil {
+		for _, msg := range msgs {
+			slog.Warn(msg, logKeyComponent, componentName)
+		}
+		return msgs, []error{supplyErr}
+	}
+	if recipeResult.Metadata.GPUDriverState == recipe.GPUDriverStateAbsent && (!driverEnabled || toolkitDisabled) && !bundleSuppliesDriver {
 		msgs = append(msgs, fmt.Sprintf(
 			"%s: the effective values assume a platform-preinstalled NVIDIA driver "+
 				"and container toolkit (driver.enabled=false and/or toolkit.enabled=false), "+
@@ -1238,6 +1252,53 @@ const gkeBundleInstallerProfileValue = "bundle-installer"
 // gpuStackProfileName is the ADR-015 configuration-profile name that
 // selects who installs the GPU driver on AKS and GKE.
 const gpuStackProfileName = "gpuStack"
+
+// gcpDriverInstallerComponentName is the values-gated GKE COS driver
+// component (issue #1716): present unconditionally in the GKE COS
+// composition, it renders the cos-gpu-installer DaemonSet only when its
+// nested installer.enabled gate is on.
+const gcpDriverInstallerComponentName = "gcp-driver-installer"
+
+// BundleSuppliesGKEDriver reports whether the composed bundle carries an
+// effectively enabled gcp-driver-installer — i.e. the bundle itself
+// provisions the NVIDIA kernel driver, so metadata.gpuDriverState=absent
+// is the expected pre-deployment state of a correctly provisioned pool
+// (gpu-driver-version=disabled) rather than a misconfiguration. It keys
+// off the EFFECTIVE installer gate (recipe values plus any --set
+// overrides in bundlerConfig), not the selected profile name: a --set
+// that flips the gate must flip this answer with it. The gate mirrors
+// the manifest template exactly (toString(installer.enabled) == "true"),
+// so only a value that actually renders the DaemonSet counts as a
+// producer; anything else — absent, false, or an unrecognized type —
+// leaves the driverless Rule 1 gate armed (fail closed). The lookup runs
+// against the declared-union view so a subset bundle
+// (--bundlers gpu-operator) still observes the installer its sibling
+// bundle carries. bundlerConfig may be nil (the resolution-time caller
+// in pkg/client/v1 has no override channel).
+func BundleSuppliesGKEDriver(ctx context.Context, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config) (bool, error) {
+	if recipeResult == nil {
+		return false, nil
+	}
+	unionView := declaredUnionView(recipeResult)
+	ref := unionView.GetComponentRef(gcpDriverInstallerComponentName)
+	if ref == nil {
+		return false, nil
+	}
+	keys := componentOverrideKeys(gcpDriverInstallerComponentName, unionView.DataProvider())
+	if componentDisabled(ref, bundlerConfig, keys) {
+		return false, nil
+	}
+	values, err := effectiveComponentValues(ctx, unionView, bundlerConfig,
+		gcpDriverInstallerComponentName, keys, "bundle-supplied driver detection")
+	if err != nil {
+		return false, err
+	}
+	installer, ok := values["installer"].(map[string]any)
+	if !ok {
+		return false, nil
+	}
+	return fmt.Sprint(installer["enabled"]) == "true", nil
+}
 
 // resolveGPUOperatorRef looks up the GPU Operator's ComponentRef by
 // trying every known name variant in turn, mirroring

@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/validations"
 	"github.com/NVIDIA/aicr/pkg/collector/topology"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -546,6 +547,20 @@ func applyGPUDriverAutoOverride(ctx context.Context, r *recipe.RecipeResult, sna
 		// bundle-time gate stays disarmed.
 	}
 	if state == gpuDriverAbsent && hasPreinstalledDriverProfile(ctx, r) {
+		// An effectively enabled gcp-driver-installer means the bundle
+		// itself provisions the driver, so a driverless snapshot is the
+		// expected pre-deployment state of a correctly provisioned pool
+		// — not a mismatch. Same suppression as the bundle-time Rule 1
+		// gate; no bundler config exists at resolution time, and a
+		// resolution failure here falls through to the warning (the
+		// fail-closed direction: bundle-time re-checks with the error).
+		if supplies, supplyErr := validations.BundleSuppliesGKEDriver(ctx, r, nil); supplyErr == nil && supplies {
+			slog.Debug("gpu-operator driver auto-detect: driver absent on sampled node, "+
+				"but the bundle's gcp-driver-installer is enabled and supplies it",
+				"component", gpuOperatorComponentName,
+				"state", state.String())
+			return
+		}
 		var service recipe.CriteriaServiceType
 		var osCriteria recipe.CriteriaOSType
 		if r.Criteria != nil {
