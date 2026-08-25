@@ -123,10 +123,10 @@ func (d *Deployer) deleteUnrecordedStagingConfigMap(ctx context.Context) error {
 	}
 	if cm.Labels[labels.Name] != labels.ValueAICR {
 		slog.Warn("cleanup left behind the ConfigMap at this run's staging name: it does not look like an aicr snapshot artifact, so this run did not write it",
-			slog.String("namespace", d.config.Namespace),
-			slog.String("name", name),
+			slog.String(attrNamespace, d.config.Namespace),
+			slog.String(attrName, name),
 			slog.String("uid", string(cm.UID)),
-			slog.String("runID", d.config.RunID))
+			slog.String(attrRunID, d.config.RunID))
 		return nil
 	}
 	return d.deleteStagingConfigMap(ctx, cm.Name, cm.UID)

@@ -69,9 +69,35 @@ type createdObject struct {
 
 // Config holds the configuration for deploying the agent.
 type Config struct {
-	Namespace          string
+	Namespace string
+
+	// ServiceAccountName is exact-if-exists, and therefore carries two
+	// meanings resolved once per Deploy (see resolveServiceAccount):
+	//
+	//   - A ServiceAccount of exactly this name already exists in
+	//     Namespace: the agent pod runs as it verbatim and this run
+	//     creates NO ServiceAccount, Role, RoleBinding, ClusterRole or
+	//     ClusterRoleBinding. aicr adds and removes no permissions on an
+	//     identity it did not create, and cleanup deletes none of them.
+	//     This is what keeps a ServiceAccount carrying IRSA or GKE
+	//     Workload Identity annotations usable: both providers pin trust
+	//     to the ServiceAccount NAME, which a run-scoped name can never
+	//     satisfy. Grant the agent's permissions to such a
+	//     ServiceAccount once with ProvisionServiceAccountRoles.
+	//   - Otherwise: a prefix. The run creates "<prefix>-<RunID>" and
+	//     the full run-scoped RBAC set, and deletes them at cleanup.
+	//
+	// Empty falls back to NameBase and is never probed for existence —
+	// the fallback base is aicr's own default, not a name the caller
+	// asked for, so a stray ServiceAccount sitting at it must not
+	// silently capture the run.
+	//
+	// Exact mode waives per-run permission isolation: concurrent runs
+	// sharing the ServiceAccount share its grants, and grants provisioned
+	// for DiscoverNetwork persist beyond any one run.
 	ServiceAccountName string
-	JobName            string
+
+	JobName string
 
 	// RunID scopes every resource this Deployer creates to a single run,
 	// so concurrent snapshot-agent runs never collide on a shared resource
@@ -150,13 +176,22 @@ type Deployer struct {
 	clientset kubernetes.Interface
 	config    Config
 
-	// mu guards created. Deploy's ensure* steps run sequentially today,
-	// but GetSnapshot (which records the staging ConfigMap) can be
-	// invoked from a different goroutine than Deploy, and Cleanup reads
-	// the created-set while a caller could still be recording into it,
-	// so every access is mutex-guarded.
+	// mu guards created and existingSA. Deploy's ensure* steps run
+	// sequentially today, but GetSnapshot (which records the staging
+	// ConfigMap) can be invoked from a different goroutine than Deploy,
+	// and Cleanup reads the created-set while a caller could still be
+	// recording into it, so every access is mutex-guarded.
 	mu      sync.Mutex
 	created []createdObject
+
+	// existingSA is the exact, operator-named ServiceAccount this run
+	// runs as instead of creating its own, or "" in prefix mode. It is
+	// resolved once by resolveServiceAccount at the top of Deploy and
+	// read afterwards by the Job builder. It shares mu with created
+	// rather than carrying its own: the Deployer is reachable from the
+	// caller's log-streaming and cleanup goroutines, so a field Deploy
+	// writes must not be read unsynchronized from any of them.
+	existingSA string
 }
 
 // NewDeployer creates a new agent Deployer with the given configuration.
@@ -179,6 +214,34 @@ func (d *Deployer) objectLabels() map[string]string {
 		labels.Component: labels.ValueSnapshotAgent,
 		labels.RunID:     d.config.RunID,
 	}
+}
+
+// setExistingServiceAccount records that this run uses the operator's
+// already-existing ServiceAccount verbatim rather than creating its own.
+// Called once, by resolveServiceAccount. Safe for concurrent use.
+func (d *Deployer) setExistingServiceAccount(name string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.existingSA = name
+}
+
+// existingServiceAccount returns the operator-supplied ServiceAccount this
+// run adopted verbatim, or "" when the run creates and owns its own
+// run-scoped one. Safe for concurrent use.
+func (d *Deployer) existingServiceAccount() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.existingSA
+}
+
+// managesRBAC reports whether this run creates (and therefore later deletes)
+// the ServiceAccount, Role, RoleBinding, ClusterRole and ClusterRoleBinding.
+// False in exact-ServiceAccount mode: aicr adds and removes no permissions
+// on an identity it did not create, so none of those objects is created,
+// none enters the created-set, and Cleanup consequently has nothing of those
+// kinds to delete.
+func (d *Deployer) managesRBAC() bool {
+	return d.existingServiceAccount() == ""
 }
 
 // recordIntent enters a run-owned object into the created-set with the zero

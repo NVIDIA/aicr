@@ -93,7 +93,7 @@ func (d *Deployer) buildJob() *batchv1.Job {
 // When Privileged=false: PSS-compliant restricted pod, only K8s collector works.
 func (d *Deployer) buildPodSpec(args []string) corev1.PodSpec {
 	spec := corev1.PodSpec{
-		ServiceAccountName: d.saName(),
+		ServiceAccountName: d.podServiceAccountName(),
 		RestartPolicy:      corev1.RestartPolicyNever,
 		NodeSelector:       d.config.NodeSelector,
 		Tolerations:        d.config.Tolerations,

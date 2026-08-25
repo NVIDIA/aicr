@@ -37,3 +37,14 @@ const (
 	// / ClusterRole / ClusterRoleBinding resources.
 	rbacAPIGroup = "rbac.authorization.k8s.io"
 )
+
+// Attribute keys shared by this package's structured log lines and error
+// contexts. Named for the same reason the ctxKey* constants in names.go are:
+// one spelling reaches every consumer that parses them, and a literal
+// repeated across files does not drift.
+const (
+	attrNamespace      = "namespace"
+	attrName           = "name"
+	attrRunID          = "runID"
+	attrServiceAccount = "serviceAccount"
+)

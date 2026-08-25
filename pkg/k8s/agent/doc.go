@@ -25,17 +25,42 @@ Every deployment belongs to a single run identified by Config.RunID (generate
 one with runid.Generate). The run ID is suffixed onto every object this package
 creates — Job, ServiceAccount, Role, RoleBinding, ClusterRole,
 ClusterRoleBinding, and the staging ConfigMap — so concurrent runs never share
-an object. Config.JobName and Config.ServiceAccountName are prefixes, not exact
-names; when empty they fall back to Config.NameBase (default "aicr"). See
-ADR-020 (docs/design/020-snapshot-agent-run-isolation.md).
+an object. Config.JobName is a prefix, not an exact name;
+Config.ServiceAccountName is a prefix only when no ServiceAccount of that
+exact name exists (see Existing ServiceAccounts below). When empty they fall
+back to Config.NameBase (default "aicr"). See ADR-020
+(docs/design/020-snapshot-agent-run-isolation.md).
 
 Because a run-scoped name cannot already belong to another run, creates are
 plain creates: there is no delete-and-recreate of the Job, and no
 create-or-update of the RBAC objects. An AlreadyExists implies a duplicate
-RunID and is returned as an error rather than adopted or overwritten. The one
-courtesy check is in ensureServiceAccount, which warns when a ServiceAccount
-already exists under the bare (unscoped) prefix so a caller relying on the old
-adoption behavior is not left guessing; it never blocks the deploy.
+RunID and is returned as an error rather than adopted or overwritten.
+
+# Existing ServiceAccounts
+
+Config.ServiceAccountName is exact-if-exists. When a ServiceAccount of exactly
+that name already exists in the namespace, the agent pod runs as it verbatim
+and the run creates NO ServiceAccount, Role, RoleBinding, ClusterRole or
+ClusterRoleBinding — aicr adds and removes no permissions on an identity it
+did not create. Nothing of those kinds enters the created-set, so Cleanup has
+nothing of those kinds to delete and the operator's grants outlive the run.
+
+This exists because IRSA (eks.amazonaws.com/role-arn) and GKE Workload
+Identity (iam.gke.io/gcp-service-account) both pin trust to the ServiceAccount
+NAME — IRSA's trust policy conditions on system:serviceaccount:<ns>/<name>,
+GKE's IAM binding names PROJECT.svc.id.goog[<ns>/<name>] and accepts no
+wildcard — so a per-run name can never be trusted by either, and copying the
+annotations onto a run-scoped ServiceAccount would not help.
+
+Grant the agent's permissions to such a ServiceAccount once with
+ProvisionServiceAccountRoles (CLI: aicr snapshot
+--add-roles-to-service-account). What it creates is permanent: no run-ID
+label, never in a created-set, never deleted by run cleanup.
+
+The trade-off is deliberate and opt-in: an adopted ServiceAccount waives
+per-run permission isolation. Concurrent runs sharing it share its grants, and
+a DiscoverNetwork provisioning leaves cluster-scoped mutating permissions in
+place permanently rather than for one run's lifetime.
 
 Two objects are deliberately NOT run-scoped:
 

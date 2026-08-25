@@ -77,6 +77,16 @@ func (d *Deployer) CheckPermissions(ctx context.Context) ([]permissionCheck, err
 		requiredChecks = append(requiredChecks, permCheck{resourceCM, verbDelete, d.config.Namespace})
 	}
 
+	// The RBAC create verbs above stay unconditional even though
+	// exact-ServiceAccount mode creates none of those objects
+	// (resolveServiceAccount). Narrowing them would mean resolving the
+	// ServiceAccount before this pre-flight, and this pre-flight is
+	// deliberately Deploy's first cluster call — the one thing that runs
+	// before any write. The cost of leaving them is that an operator using
+	// an existing ServiceAccount still needs the same grants they needed
+	// before, which is no regression; the cost of moving them would be a
+	// weaker fail-before-mutate guarantee.
+
 	// SelfSubjectAccessReview is a read-only query; running the N required
 	// checks in parallel cuts wall-clock from N×RTT to one RTT against the
 	// apiserver. Each iteration's index is preserved so the response slice

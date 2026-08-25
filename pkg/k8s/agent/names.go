@@ -213,6 +213,22 @@ func (d *Deployer) jobName() string {
 	return nameWithRunID(prefix, d.config.RunID)
 }
 
+// podServiceAccountName returns the ServiceAccount the agent pod actually
+// runs as: the operator's already-existing ServiceAccount when Deploy
+// resolved Config.ServiceAccountName to an exact match, otherwise this run's
+// own run-scoped one.
+//
+// It is deliberately separate from saName(), which stays the run-scoped
+// name unconditionally. saName() also names the Role and RoleBinding, and
+// those exist only in prefix mode — folding the exact name into it would
+// make roleName() silently return an operator-owned ServiceAccount's name.
+func (d *Deployer) podServiceAccountName() string {
+	if name := d.existingServiceAccount(); name != "" {
+		return name
+	}
+	return d.saName()
+}
+
 // saName returns the run-scoped name for the agent ServiceAccount.
 func (d *Deployer) saName() string {
 	prefix := d.config.ServiceAccountName

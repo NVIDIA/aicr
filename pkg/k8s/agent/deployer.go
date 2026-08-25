@@ -65,27 +65,45 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to ensure namespace", err)
 	}
 
+	// Step 1.5: Decide whether Config.ServiceAccountName names a
+	// ServiceAccount that already exists (use it verbatim, manage none of
+	// its permissions) or is a prefix for one this run creates and owns.
+	// It runs after ensureNamespace so the Get is issued against a
+	// namespace that exists, and before Step 2 because it decides whether
+	// Step 2 happens at all.
+	if err := d.resolveServiceAccount(ctx); err != nil {
+		return err
+	}
+
 	// Step 2: Create this run's RBAC. Every name carries the run ID, so
 	// nothing here can already exist; an AlreadyExists is reported as an
 	// error rather than adopted or overwritten.
-	if err := d.ensureServiceAccount(ctx); err != nil {
-		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ServiceAccount", err)
-	}
+	//
+	// Skipped entirely in exact-ServiceAccount mode: aicr will not add or
+	// remove permissions on a ServiceAccount it did not create. Nothing is
+	// created, so nothing enters the created-set, so Cleanup deletes none
+	// of these kinds — the operator's grants outlive the run. Provision
+	// them once with ProvisionServiceAccountRoles.
+	if d.managesRBAC() {
+		if err := d.ensureServiceAccount(ctx); err != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ServiceAccount", err)
+		}
 
-	if err := d.ensureRole(ctx); err != nil {
-		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create Role", err)
-	}
+		if err := d.ensureRole(ctx); err != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create Role", err)
+		}
 
-	if err := d.ensureRoleBinding(ctx); err != nil {
-		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create RoleBinding", err)
-	}
+		if err := d.ensureRoleBinding(ctx); err != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create RoleBinding", err)
+		}
 
-	if err := d.ensureClusterRole(ctx); err != nil {
-		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ClusterRole", err)
-	}
+		if err := d.ensureClusterRole(ctx); err != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ClusterRole", err)
+		}
 
-	if err := d.ensureClusterRoleBinding(ctx); err != nil {
-		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ClusterRoleBinding", err)
+		if err := d.ensureClusterRoleBinding(ctx); err != nil {
+			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ClusterRoleBinding", err)
+		}
 	}
 
 	// Step 3: Create this run's Job under its run-scoped name.
@@ -293,10 +311,10 @@ func (d *Deployer) resolveIntentUID(ctx context.Context, obj createdObject) (uid
 	if !d.createdByThisRun(live.GetLabels()) || live.GetUID() == "" {
 		slog.Warn("cleanup left behind an object it cannot prove this run created; if it is a stale orphan of this run, remove it by hand",
 			slog.String("kind", obj.kind),
-			slog.String("name", obj.name),
-			slog.String("namespace", live.GetNamespace()),
+			slog.String(attrName, obj.name),
+			slog.String(attrNamespace, live.GetNamespace()),
 			slog.String("uid", string(live.GetUID())),
-			slog.String("runID", d.config.RunID),
+			slog.String(attrRunID, d.config.RunID),
 			slog.String("objectRunID", live.GetLabels()[labels.RunID]))
 		return "", false, nil
 	}
