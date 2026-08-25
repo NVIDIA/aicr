@@ -15,95 +15,130 @@
 package snapshotter
 
 import (
-	"context"
+	stderrors "errors"
+	"io/fs"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/agent"
+	"github.com/NVIDIA/aicr/pkg/runid"
 )
 
-// AgentRolesConfig selects the ServiceAccount that ProvisionAgentRoles
-// grants the snapshot agent's permissions to, and the cluster it lives in.
+// AgentRolesConfig selects the ServiceAccount that WriteAgentRoleManifests
+// renders the snapshot agent's RBAC for.
+//
+// There is deliberately no Kubeconfig field: writing the manifests contacts
+// no cluster, so there is no connection to configure.
 type AgentRolesConfig struct {
-	// Kubeconfig is an optional path override; empty uses default
-	// discovery (KUBECONFIG, then ~/.kube/config, then in-cluster).
-	Kubeconfig string
-
-	// Namespace holds the ServiceAccount and receives the Role and
-	// RoleBinding. Required.
+	// Namespace is the namespace of the ServiceAccount, and the namespace
+	// the rendered Role and RoleBinding declare. Required.
 	Namespace string
 
-	// ServiceAccountName is the EXACT name of an already-existing
-	// ServiceAccount. Required.
+	// ServiceAccountName is the name of the ServiceAccount the rendered
+	// bindings name as their subject. Required, and not verified to
+	// exist — see WriteAgentRoleManifests.
 	ServiceAccountName string
 
-	// DiscoverNetwork also grants the cluster-scoped MUTATING rules that
-	// `aicr snapshot --discover-network` needs. Permanently, not for one
-	// run's lifetime.
+	// DiscoverNetwork also renders the cluster-scoped MUTATING rules that
+	// `aicr snapshot --discover-network` needs, with a header enumerating
+	// each one and the discovery step it exists for.
 	DiscoverNetwork bool
+
+	// RunID names the output directory (`snapshot-rbac-<RunID>`). Empty
+	// generates one, which is the normal path; it is injectable so tests
+	// and automation can pin a directory name.
+	RunID string
 }
 
-// AgentRolesResult names what ProvisionAgentRoles created or updated, so a
-// caller can report it without rebuilding the names.
+// AgentRoleObject identifies one written manifest so a caller can report
+// what landed where without re-deriving either the name or the file.
+type AgentRoleObject struct {
+	// Kind is the Kubernetes kind ("Role", "RoleBinding", "ClusterRole",
+	// "ClusterRoleBinding").
+	Kind string
+
+	// Name is the object's metadata.name.
+	Name string
+
+	// Path is the manifest's path, including the output directory.
+	Path string
+}
+
+// AgentRolesResult names the directory WriteAgentRoleManifests wrote and
+// what it put there.
 //
-// It is snapshotter-owned rather than pkg/k8s/agent's own ProvisionResult
-// so callers presenting the outcome — the CLI among them — need no
-// dependency on the Kubernetes-facing package.
+// It is snapshotter-owned rather than pkg/k8s/agent's own Manifest type so
+// callers presenting the outcome — the CLI among them — need no dependency
+// on the Kubernetes-facing package.
 type AgentRolesResult struct {
+	// Dir is the output directory, relative to the working directory the
+	// call was made from.
+	Dir string
+
+	// RunID is the run ID the directory name was built from.
+	RunID string
+
 	Namespace          string
 	ServiceAccountName string
-	Role               string
-	RoleBinding        string
-	ClusterRole        string
-	ClusterRoleBinding string
+
+	// Objects lists what was written, in the order the files apply.
+	Objects []AgentRoleObject
 
 	// DiscoverNetwork echoes AgentRolesConfig.DiscoverNetwork: it is the
 	// difference between a read-only grant and one carrying cluster-scoped
 	// mutating rules, so anything reporting this result can say which was
-	// provisioned.
+	// written.
 	DiscoverNetwork bool
 }
 
-// ProvisionAgentRoles grants the snapshot agent's permissions to an
-// existing, operator-supplied ServiceAccount so that ServiceAccount can be
-// named exactly via AgentConfig.ServiceAccountName
-// (`--service-account-name`) and keep its own identity — the IRSA or GKE
-// Workload Identity annotations a run-scoped ServiceAccount cannot carry,
-// because both providers pin trust to the ServiceAccount name.
+// WriteAgentRoleManifests writes the RBAC manifests that grant the snapshot
+// agent's permissions to an operator-supplied ServiceAccount into a new
+// `snapshot-rbac-<runID>` directory in the current working directory.
 //
-// It provisions and returns; it deploys no Job and collects no snapshot.
-// The objects it creates are PERMANENT: they carry no run-ID label, never
-// enter a run's created-set, and no run's cleanup deletes them. Removing
-// them is the operator's job.
+// It APPLIES NOTHING and contacts no cluster. No clientset is built, the
+// ServiceAccount is never looked up, and no permission pre-flight runs — so
+// the call succeeds with no kubeconfig and no cluster privileges at all. The
+// operator reviews the files and then applies them:
 //
-// Idempotent — re-run it after an aicr upgrade to refresh the rules in
-// place. Returns ErrCodeNotFound when the named ServiceAccount does not
-// exist.
-func ProvisionAgentRoles(ctx context.Context, config *AgentRolesConfig) (*AgentRolesResult, error) {
+//	kubectl apply -f snapshot-rbac-<runID>/
+//
+// and removes the grant with the matching delete:
+//
+//	kubectl delete -f snapshot-rbac-<runID>/
+//
+// The ServiceAccount named in ServiceAccountName is NOT verified to exist.
+// That is a deliberate simplification of the earlier behavior, which failed
+// with ErrCodeNotFound against the cluster: a mistyped name now yields
+// manifests the operator inspects before applying, and the rendered
+// RoleBinding tells them how to check.
+//
+// The directory must not already exist. Colliding with one returns
+// ErrCodeConflict rather than overwriting, because the manifests an operator
+// is midway through reviewing are exactly what must not change under them.
+//
+// The objects are outside every run's lifecycle: no run-ID label, never in a
+// run's created-set, never deleted by run cleanup. Teardown is the
+// operator's `kubectl delete`.
+func WriteAgentRoleManifests(config *AgentRolesConfig) (*AgentRolesResult, error) {
 	if config == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "agent roles config is required")
 	}
-	// Reject what can be rejected without contacting the cluster, so a bad
-	// value is never masked by a kubeconfig error.
+	// Reject what can be rejected before touching the filesystem, so a bad
+	// value never leaves a half-written directory behind.
 	if strings.TrimSpace(config.Namespace) == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"Namespace is required: it is where the ServiceAccount, Role and RoleBinding live")
+			"Namespace is required: it is the namespace the rendered Role and RoleBinding declare")
 	}
 	if strings.TrimSpace(config.ServiceAccountName) == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"ServiceAccountName is required: provisioning grants permissions to an existing ServiceAccount, it does not create one")
+			"ServiceAccountName is required: the rendered bindings need a subject to name")
 	}
 
-	clientset, err := getKubeClient(config.Kubeconfig)
-	if err != nil {
-		return nil, err
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, defaults.AgentRBACProvisionTimeout)
-	defer cancel()
-
-	res, err := agent.ProvisionServiceAccountRoles(ctx, clientset, agent.ProvisionOptions{
+	manifests, err := agent.BuildServiceAccountRoleManifests(agent.ManifestOptions{
 		Namespace:          config.Namespace,
 		ServiceAccountName: config.ServiceAccountName,
 		DiscoverNetwork:    config.DiscoverNetwork,
@@ -111,13 +146,62 @@ func ProvisionAgentRoles(ctx context.Context, config *AgentRolesConfig) (*AgentR
 	if err != nil {
 		return nil, err
 	}
+
+	runID := config.RunID
+	if runID == "" {
+		runID = runid.Generate()
+	}
+	dir := defaults.AgentRBACManifestDirPrefix + runID
+
+	// Mkdir, not MkdirAll: an existing directory must fail rather than have
+	// its contents joined by a second run's files.
+	if mkErr := os.Mkdir(dir, defaults.AgentRBACManifestDirMode); mkErr != nil {
+		if stderrors.Is(mkErr, fs.ErrExist) {
+			return nil, errors.NewWithContext(errors.ErrCodeConflict,
+				"refusing to overwrite the existing directory "+dir+
+					"; move or delete it, or pass a different run ID",
+				map[string]any{"directory": dir})
+		}
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			"failed to create the RBAC manifest directory", mkErr)
+	}
+
+	objects, writeErr := writeManifestFiles(dir, manifests)
+	if writeErr != nil {
+		// A partially written directory would block the retry with the
+		// ErrCodeConflict above, so remove what this call created. The
+		// write error is what the caller needs to see, not this one.
+		if rmErr := os.RemoveAll(dir); rmErr != nil {
+			slog.Warn("failed to remove the partially written RBAC manifest directory",
+				"directory", dir, "error", rmErr)
+		}
+		return nil, writeErr
+	}
+
 	return &AgentRolesResult{
-		Namespace:          res.Namespace,
-		ServiceAccountName: res.ServiceAccountName,
-		Role:               res.Role,
-		RoleBinding:        res.RoleBinding,
-		ClusterRole:        res.ClusterRole,
-		ClusterRoleBinding: res.ClusterRoleBinding,
-		DiscoverNetwork:    res.DiscoverNetwork,
+		Dir:                dir,
+		RunID:              runID,
+		Namespace:          config.Namespace,
+		ServiceAccountName: config.ServiceAccountName,
+		Objects:            objects,
+		DiscoverNetwork:    config.DiscoverNetwork,
 	}, nil
+}
+
+// writeManifestFiles writes each manifest into dir and returns what it
+// wrote. os.WriteFile is used rather than an explicit Create/Write/Close: it
+// reports the Close error, which for a writable handle is where a failed
+// flush surfaces.
+func writeManifestFiles(dir string, manifests []agent.Manifest) ([]AgentRoleObject, error) {
+	objects := make([]AgentRoleObject, 0, len(manifests))
+	for _, m := range manifests {
+		path := filepath.Join(dir, m.FileName)
+		if err := os.WriteFile(path, m.Content, defaults.AgentRBACManifestFileMode); err != nil {
+			return nil, errors.WrapWithContext(errors.ErrCodeInternal,
+				"failed to write the RBAC manifest", err,
+				map[string]any{"path": path, "kind": m.Kind})
+		}
+		objects = append(objects, AgentRoleObject{Kind: m.Kind, Name: m.Name, Path: path})
+	}
+	return objects, nil
 }

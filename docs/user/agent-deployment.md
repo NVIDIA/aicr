@@ -133,7 +133,7 @@ aicr snapshot \
 - `--image-pull-secret`: Secret name for pulling the agent image from a private registry (repeatable)
 - `--job-name`: Job name prefix (default: `aicr`); the run ID is always appended (`<prefix>-<run-id>`)
 - `--service-account-name`: ServiceAccount the agent pod runs as. **Exact-if-exists** — an existing ServiceAccount of exactly this name in `--namespace` is used verbatim and the run creates no RBAC; otherwise it is a name prefix (default: `aicr`) and the run ID is appended (`<prefix>-<run-id>`). See [Using an existing ServiceAccount](#using-an-existing-serviceaccount-irsa-and-workload-identity)
-- `--add-roles-to-service-account`: Grant the agent's permissions to the named **existing** ServiceAccount and exit **without taking a snapshot**. Idempotent; what it creates is permanent. See [Using an existing ServiceAccount](#using-an-existing-serviceaccount-irsa-and-workload-identity)
+- `--add-roles-to-service-account`: **Writes manifests and applies nothing.** Renders the RBAC that grants the agent's permissions to the named ServiceAccount into `./snapshot-rbac-<run-id>/` and exits **without taking a snapshot**. No cluster is contacted. You review the files, then apply and later delete them yourself. See [Using an existing ServiceAccount](#using-an-existing-serviceaccount-irsa-and-workload-identity)
 - `--node-selector`: Node selector (format: `key=value`, repeatable)
 - `--toleration`: Toleration (format: `key=value:effect`, repeatable). **Default: all taints are tolerated** (uses `operator: Exists` without key). Only specify this flag if you want to restrict which taints the Job can tolerate.
 - `--timeout`: Wait timeout (default: `5m`)
@@ -240,8 +240,8 @@ running without them. Exact-if-exists restores the pre-created ServiceAccount
 as the one the pod runs as; what does **not** come back is aicr managing its
 permissions.
 
-**Supported flow.** Run the provisioning command once, as an admin, then take
-snapshots normally:
+**Supported flow.** Generate the RBAC manifests, read them, apply them, then
+take snapshots normally:
 
 ```shell
 # 1. Your ServiceAccount, created and annotated by you (or by eksctl / Terraform).
@@ -249,42 +249,84 @@ kubectl create serviceaccount irsa-snapshotter -n gpu-operator
 kubectl annotate serviceaccount irsa-snapshotter -n gpu-operator \
   eks.amazonaws.com/role-arn=arn:aws:iam::123456789012:role/aicr-snapshot
 
-# 2. Grant it the agent's permissions. Provisions and exits - no snapshot is taken.
+# 2. Write the RBAC manifests. Applies NOTHING, contacts no cluster, takes no
+#    snapshot. Prints the directory it wrote and the commands below.
 aicr snapshot --namespace gpu-operator --add-roles-to-service-account irsa-snapshotter
 
-# 3. Capture snapshots as that ServiceAccount, as often as you like.
+# 3. Read what you are about to grant. Each file explains its rules.
+less snapshot-rbac-<run-id>/*.yaml
+
+# 4. Grant it, once you are satisfied.
+kubectl apply -f snapshot-rbac-<run-id>/
+
+# 5. Capture snapshots as that ServiceAccount, as often as you like.
 aicr snapshot \
   --namespace gpu-operator \
   --service-account-name irsa-snapshotter \
   --output cm://gpu-operator/aicr-snapshot
+
+# 6. Revoke the grant when the ServiceAccount no longer needs it.
+kubectl delete -f snapshot-rbac-<run-id>/
 ```
 
-Step 2 fails with `NOT_FOUND` when the ServiceAccount does not exist: aicr
-grants permissions to an identity you control, and never creates one.
+Step 2 does **not** check that the ServiceAccount exists — it contacts no
+cluster at all, so it cannot. A mistyped name yields manifests naming a subject
+that does not resolve; Kubernetes accepts such a binding and it simply grants
+nothing. The generated `02-rolebinding.yaml` tells you how to verify the name,
+and `aicr` never creates a ServiceAccount for you.
 
-### What provisioning creates
+### What the manifests contain
 
-| Object | Name | Scope |
-|---|---|---|
-| `Role`, `RoleBinding` | `aicr-agent-<sa>-rbac` | `--namespace` |
-| `ClusterRole`, `ClusterRoleBinding` | `aicr-agent-<namespace>-<sa>-rbac` | Cluster |
+`aicr snapshot --add-roles-to-service-account <sa>` writes a new directory in
+your current working directory, one object per file:
 
-The rules are the same ones a run-scoped grant carries, so an adopted
+```text
+snapshot-rbac-<run-id>/
+├── 01-role.yaml                 Role/aicr-agent-<sa>-rbac                       (namespaced)
+├── 02-rolebinding.yaml          RoleBinding/aicr-agent-<sa>-rbac                (namespaced)
+├── 03-clusterrole.yaml          ClusterRole/aicr-agent-<ns>-<sa>-rbac           (cluster)
+└── 04-clusterrolebinding.yaml   ClusterRoleBinding/aicr-agent-<ns>-<sa>-rbac    (cluster)
+```
+
+Every file opens with a YAML comment header naming what the object grants and
+why the agent needs each rule, so you can decide rule by rule whether to apply
+it. The numeric prefixes exist because `kubectl apply -f <dir>/` visits a
+directory in lexical order — they keep each Role ahead of the binding that
+references it. You can also apply or read the files individually.
+
+The rules are the same ones a run-scoped grant carries, so a shared
 ServiceAccount is never less capable than a run-owned one. The names end in
 `-rbac`, which no run-scoped name can (a run-scoped name always ends in a run
 ID whose last segment is hexadecimal), so the two name spaces cannot collide.
 
-**These objects are permanent.** They carry no `aicr.run/run-id` label, no run
-enters them into its cleanup list, and no `aicr snapshot` or `aicr validate`
-invocation deletes them. Removing them is your job:
+**Nothing is applied for you, and nothing is removed for you.** The objects you
+apply carry no `aicr.run/run-id` label, no run enters them into its cleanup
+list, and no `aicr snapshot` or `aicr validate` invocation deletes them.
+Teardown is one command, which is why keeping the directory is worth it:
+
+```shell
+kubectl delete -f snapshot-rbac-<run-id>/
+```
+
+If you no longer have the directory, delete the objects by name instead:
 
 ```shell
 kubectl delete role,rolebinding aicr-agent-irsa-snapshotter-rbac -n gpu-operator
 kubectl delete clusterrole,clusterrolebinding aicr-agent-gpu-operator-irsa-snapshotter-rbac
 ```
 
-The command is idempotent — re-run it after an aicr upgrade and the rules are
-refreshed in place rather than duplicated or left stale.
+The directory name carries a fresh run ID on every invocation, so generating
+twice never overwrites a set you are still reviewing; a directory that already
+exists fails the command with `CONFLICT`. After an aicr upgrade, re-generate
+and `kubectl apply -f` the new directory to refresh the rules in place.
+
+**Check for a name collision before applying the cluster-scoped pair.** Their
+name joins the namespace and the ServiceAccount name with `-`, which is not
+injective: namespace `a-b` with ServiceAccount `c` and namespace `a` with
+ServiceAccount `b-c` both compose `aicr-agent-a-b-c-rbac`. Because nothing
+reads your cluster, applying over an existing binding of that name would
+retarget it and revoke the other ServiceAccount's grants. The generated
+`04-clusterrolebinding.yaml` says so and gives you the `kubectl get` to run.
 
 ### Trade-off: per-run permission isolation is waived
 
@@ -299,14 +341,17 @@ understanding before you choose it:
   ServiceAccount, the cluster-scoped **mutating** discovery rules
   (`nodes: patch`, `pods/exec: create`, CRD / namespace / DaemonSet
   create-delete — see [Security Considerations](#security-considerations))
-  exist for one run and are revoked at cleanup. Provisioned with
-  `aicr snapshot --add-roles-to-service-account <sa> --discover-network`, they
-  sit on that ServiceAccount until you remove them.
+  exist for one run and are revoked at cleanup. Rendered with
+  `aicr snapshot --add-roles-to-service-account <sa> --discover-network` and
+  applied, they sit on that ServiceAccount until you remove them.
 
-Provision without `--discover-network` unless you need live network discovery;
-that grant is read-only. If you need discovery only occasionally, prefer a
-run-owned ServiceAccount for those runs, or provision a separate
-ServiceAccount used only for discovery.
+Generate without `--discover-network` unless you need live network discovery;
+that grant is read-only. When you do use it, `03-clusterrole.yaml` carries a
+warning header naming every mutating rule and the discovery step it exists for
+— read it before applying, which is precisely what writing manifests instead of
+applying them is for. If you need discovery only occasionally, prefer a
+run-owned ServiceAccount for those runs, or keep a separate ServiceAccount used
+only for discovery.
 
 ## Post-Deployment
 

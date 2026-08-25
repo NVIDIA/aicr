@@ -15,7 +15,6 @@
 package agent
 
 import (
-	"context"
 	stderrors "errors"
 	"reflect"
 	"strings"
@@ -23,376 +22,395 @@ import (
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
-	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
+	"sigs.k8s.io/yaml"
 )
 
 const provisionSA = "irsa-snapshotter"
 
-// seedServiceAccount creates the target ServiceAccount provisioning requires.
-func seedServiceAccount(ctx context.Context, t *testing.T, clientset *fake.Clientset, namespace, name string) {
+// buildManifests renders the four manifests for the standard test inputs and
+// fails the test on any error.
+func buildManifests(t *testing.T, discoverNetwork bool) []Manifest {
 	t.Helper()
-	if _, err := clientset.CoreV1().ServiceAccounts(namespace).Create(ctx, &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
-	}, metav1.CreateOptions{}); err != nil {
-		t.Fatalf("seeding ServiceAccount: %v", err)
-	}
-}
-
-// TestProvisionServiceAccountRoles_Names pins the naming scheme, because its
-// only real requirement is structural: a provisioned name must never be
-// mistakable for a run-scoped one. Every run-scoped name ends in a run ID
-// whose final segment is 16 lowercase-hex characters, and these end in
-// "-rbac" — "r" is not a hex digit, so the two name spaces are disjoint by
-// construction rather than by luck.
-func TestProvisionServiceAccountRoles_Names(t *testing.T) {
-	ctx := context.Background()
-	clientset := fake.NewClientset()
-	seedServiceAccount(ctx, t, clientset, testNamespace, provisionSA)
-
-	res, err := ProvisionServiceAccountRoles(ctx, clientset, ProvisionOptions{
+	manifests, err := BuildServiceAccountRoleManifests(ManifestOptions{
 		Namespace:          testNamespace,
 		ServiceAccountName: provisionSA,
+		DiscoverNetwork:    discoverNetwork,
 	})
 	if err != nil {
-		t.Fatalf("ProvisionServiceAccountRoles() error = %v", err)
+		t.Fatalf("BuildServiceAccountRoleManifests() error = %v", err)
 	}
+	return manifests
+}
+
+// manifestByFile indexes rendered manifests by file name.
+func manifestByFile(manifests []Manifest) map[string]Manifest {
+	byFile := make(map[string]Manifest, len(manifests))
+	for _, m := range manifests {
+		byFile[m.FileName] = m
+	}
+	return byFile
+}
+
+// TestBuildServiceAccountRoleManifests_FilesAndNames pins the file layout and
+// the naming scheme together, because both are contracts an operator's
+// commands depend on: `kubectl apply -f <dir>/` relies on one parseable
+// object per file in an order that puts a Role ahead of its RoleBinding, and
+// a rendered name must never be mistakable for a run-scoped one. Every
+// run-scoped name ends in a run ID whose final segment is 16 lowercase-hex
+// characters, and these end in "-rbac" — "r" is not a hex digit, so the two
+// name spaces are disjoint by construction rather than by luck.
+func TestBuildServiceAccountRoleManifests_FilesAndNames(t *testing.T) {
+	manifests := buildManifests(t, false)
 
 	wantRole := "aicr-agent-" + provisionSA + "-rbac"
 	wantClusterRole := "aicr-agent-" + testNamespace + "-" + provisionSA + "-rbac"
-	if res.Role != wantRole || res.RoleBinding != wantRole {
-		t.Errorf("Role/RoleBinding = %q/%q, want %q", res.Role, res.RoleBinding, wantRole)
-	}
-	if res.ClusterRole != wantClusterRole || res.ClusterRoleBinding != wantClusterRole {
-		t.Errorf("ClusterRole/ClusterRoleBinding = %q/%q, want %q", res.ClusterRole, res.ClusterRoleBinding, wantClusterRole)
-	}
 
-	// A run-scoped name is "<prefix>-<runID>". Nothing provisioned may be
-	// one, whatever prefix a caller supplies.
-	for _, name := range []string{res.Role, res.RoleBinding, res.ClusterRole, res.ClusterRoleBinding} {
-		if strings.HasSuffix(name, "-"+testRunID) {
-			t.Errorf("provisioned name %q collides with the run-scoped name space", name)
-		}
-		if !strings.HasSuffix(name, provisionedNameSuffix) {
-			t.Errorf("provisioned name %q does not carry the %q suffix that keeps it out of the run-scoped name space", name, provisionedNameSuffix)
-		}
-	}
-}
-
-// TestProvisionServiceAccountRoles_ObjectsArePermanentAndUnscoped asserts the
-// property the whole feature rests on: nothing provisioned carries a run ID,
-// so no run's cleanup can ever reclaim it. Deployer.createdByThisRun requires
-// the run-ID label, and these objects deliberately have none.
-func TestProvisionServiceAccountRoles_ObjectsArePermanentAndUnscoped(t *testing.T) {
-	ctx := context.Background()
-	clientset := fake.NewClientset()
-	seedServiceAccount(ctx, t, clientset, testNamespace, provisionSA)
-
-	res, err := ProvisionServiceAccountRoles(ctx, clientset, ProvisionOptions{
-		Namespace:          testNamespace,
-		ServiceAccountName: provisionSA,
-	})
-	if err != nil {
-		t.Fatalf("ProvisionServiceAccountRoles() error = %v", err)
-	}
-
-	role, err := clientset.RbacV1().Roles(testNamespace).Get(ctx, res.Role, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Role not created: %v", err)
-	}
-	cr, err := clientset.RbacV1().ClusterRoles().Get(ctx, res.ClusterRole, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("ClusterRole not created: %v", err)
-	}
-
-	for name, got := range map[string]map[string]string{res.Role: role.Labels, res.ClusterRole: cr.Labels} {
-		if _, ok := got[labels.RunID]; ok {
-			t.Errorf("%s carries the %s label; a run's cleanup could reclaim it", name, labels.RunID)
-		}
-		if got[labels.Component] != labels.ValueAgentRBAC {
-			t.Errorf("%s component label = %q, want %q", name, got[labels.Component], labels.ValueAgentRBAC)
-		}
-		if got[labels.Component] == labels.ValueSnapshotAgent {
-			t.Errorf("%s is labeled as a run-scoped snapshot-agent object", name)
-		}
-	}
-
-	// A Deployer must not be able to claim these as its own, whatever run
-	// ID it holds.
-	d := NewDeployer(clientset, Config{Namespace: testNamespace, RunID: testRunID})
-	if d.createdByThisRun(role.Labels) || d.createdByThisRun(cr.Labels) {
-		t.Error("createdByThisRun matched a provisioned object; run cleanup would delete a permanent grant")
-	}
-
-	// The bindings must point at the operator's ServiceAccount.
-	rb, err := clientset.RbacV1().RoleBindings(testNamespace).Get(ctx, res.RoleBinding, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("RoleBinding not created: %v", err)
-	}
-	crb, err := clientset.RbacV1().ClusterRoleBindings().Get(ctx, res.ClusterRoleBinding, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("ClusterRoleBinding not created: %v", err)
-	}
-	want := []rbacv1.Subject{{Kind: kindServiceAccount, Name: provisionSA, Namespace: testNamespace}}
-	if !reflect.DeepEqual(rb.Subjects, want) {
-		t.Errorf("RoleBinding subjects = %v, want %v", rb.Subjects, want)
-	}
-	if !reflect.DeepEqual(crb.Subjects, want) {
-		t.Errorf("ClusterRoleBinding subjects = %v, want %v", crb.Subjects, want)
-	}
-}
-
-// TestProvisionServiceAccountRoles_DiscoverNetworkRules covers both rule sets:
-// the read-only baseline, and the baseline plus the cluster-scoped mutating
-// rules live discovery needs. The distinction matters because a provisioned
-// grant is permanent — a --discover-network provisioning leaves nodes:patch
-// and pods/exec:create on the ServiceAccount indefinitely.
-func TestProvisionServiceAccountRoles_DiscoverNetworkRules(t *testing.T) {
-	tests := []struct {
-		name            string
-		discoverNetwork bool
-		wantMutating    bool
+	want := []struct {
+		file string
+		kind string
+		name string
 	}{
-		{name: "read-only baseline", discoverNetwork: false, wantMutating: false},
-		{name: "discovery adds the mutating rules", discoverNetwork: true, wantMutating: true},
+		{roleFileName, kindRole, wantRole},
+		{roleBindingFileName, kindRoleBinding, wantRole},
+		{clusterRoleFileName, kindClusterRole, wantClusterRole},
+		{clusterRoleBindingFileName, kindClusterRoleBinding, wantClusterRole},
+	}
+	if len(manifests) != len(want) {
+		t.Fatalf("manifests = %d, want %d (one file per object)", len(manifests), len(want))
+	}
+	for i, w := range want {
+		got := manifests[i]
+		if got.FileName != w.file {
+			t.Errorf("manifest[%d].FileName = %q, want %q (lexical order must apply a Role before its binding)", i, got.FileName, w.file)
+		}
+		if got.Kind != w.kind {
+			t.Errorf("manifest[%d].Kind = %q, want %q", i, got.Kind, w.kind)
+		}
+		if got.Name != w.name {
+			t.Errorf("manifest[%d].Name = %q, want %q", i, got.Name, w.name)
+		}
+		if !strings.HasSuffix(got.Name, "-rbac") {
+			t.Errorf("manifest[%d].Name = %q, want a name ending in -rbac so it cannot collide with a run-scoped name", i, got.Name)
+		}
+	}
+}
+
+// TestBuildServiceAccountRoleManifests_ParseableYAML asserts each file
+// round-trips through a YAML decoder into the typed object it claims to be,
+// with apiVersion and kind set. A typed object straight out of client-go
+// leaves TypeMeta empty, which `kubectl apply` rejects, so this is the check
+// that the files are usable at all.
+func TestBuildServiceAccountRoleManifests_ParseableYAML(t *testing.T) {
+	byFile := manifestByFile(buildManifests(t, false))
+	wantAPIVersion := rbacv1.SchemeGroupVersion.String()
+
+	tests := []struct {
+		name     string
+		file     string
+		wantKind string
+		into     func() any
+		check    func(t *testing.T, obj any)
+	}{
+		{
+			name:     "role carries the namespaced rules",
+			file:     roleFileName,
+			wantKind: kindRole,
+			into:     func() any { return &rbacv1.Role{} },
+			check: func(t *testing.T, obj any) {
+				t.Helper()
+				role, ok := obj.(*rbacv1.Role)
+				if !ok {
+					t.Fatalf("decoded %T, want *rbacv1.Role", obj)
+				}
+				if role.Namespace != testNamespace {
+					t.Errorf("Role namespace = %q, want %q", role.Namespace, testNamespace)
+				}
+				if !reflect.DeepEqual(role.Rules, namespacedRules()) {
+					t.Errorf("Role rules drifted from namespacedRules(); got %+v", role.Rules)
+				}
+			},
+		},
+		{
+			name:     "rolebinding names the ServiceAccount subject",
+			file:     roleBindingFileName,
+			wantKind: kindRoleBinding,
+			into:     func() any { return &rbacv1.RoleBinding{} },
+			check: func(t *testing.T, obj any) {
+				t.Helper()
+				rb, ok := obj.(*rbacv1.RoleBinding)
+				if !ok {
+					t.Fatalf("decoded %T, want *rbacv1.RoleBinding", obj)
+				}
+				wantSubjects := []rbacv1.Subject{{Kind: kindServiceAccount, Name: provisionSA, Namespace: testNamespace}}
+				if !reflect.DeepEqual(rb.Subjects, wantSubjects) {
+					t.Errorf("RoleBinding subjects = %+v, want %+v", rb.Subjects, wantSubjects)
+				}
+				if rb.RoleRef.Kind != kindRole {
+					t.Errorf("RoleBinding roleRef kind = %q, want %q", rb.RoleRef.Kind, kindRole)
+				}
+			},
+		},
+		{
+			name:     "clusterrole carries the cluster rules and no namespace",
+			file:     clusterRoleFileName,
+			wantKind: kindClusterRole,
+			into:     func() any { return &rbacv1.ClusterRole{} },
+			check: func(t *testing.T, obj any) {
+				t.Helper()
+				cr, ok := obj.(*rbacv1.ClusterRole)
+				if !ok {
+					t.Fatalf("decoded %T, want *rbacv1.ClusterRole", obj)
+				}
+				if cr.Namespace != "" {
+					t.Errorf("ClusterRole namespace = %q, want empty (it is cluster-scoped)", cr.Namespace)
+				}
+				if !reflect.DeepEqual(cr.Rules, clusterRules(false)) {
+					t.Errorf("ClusterRole rules drifted from clusterRules(false); got %+v", cr.Rules)
+				}
+			},
+		},
+		{
+			name:     "clusterrolebinding binds the clusterrole",
+			file:     clusterRoleBindingFileName,
+			wantKind: kindClusterRoleBinding,
+			into:     func() any { return &rbacv1.ClusterRoleBinding{} },
+			check: func(t *testing.T, obj any) {
+				t.Helper()
+				crb, ok := obj.(*rbacv1.ClusterRoleBinding)
+				if !ok {
+					t.Fatalf("decoded %T, want *rbacv1.ClusterRoleBinding", obj)
+				}
+				if crb.RoleRef.Kind != kindClusterRole {
+					t.Errorf("ClusterRoleBinding roleRef kind = %q, want %q", crb.RoleRef.Kind, kindClusterRole)
+				}
+				if got := crb.Labels[labels.Component]; got != labels.ValueAgentRBAC {
+					t.Errorf("component label = %q, want %q", got, labels.ValueAgentRBAC)
+				}
+				if _, ok := crb.Labels[labels.RunID]; ok {
+					t.Error("rendered object carries a run-ID label; these objects belong to no run")
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			clientset := fake.NewClientset()
-			seedServiceAccount(ctx, t, clientset, testNamespace, provisionSA)
+			m, ok := byFile[tt.file]
+			if !ok {
+				t.Fatalf("no manifest rendered for %s", tt.file)
+			}
+			obj := tt.into()
+			if err := yaml.Unmarshal(m.Content, obj); err != nil {
+				t.Fatalf("unmarshalling %s: %v\n%s", tt.file, err, m.Content)
+			}
+			var apiVersion, kind string
+			switch o := obj.(type) {
+			case *rbacv1.Role:
+				apiVersion, kind = o.APIVersion, o.Kind
+			case *rbacv1.RoleBinding:
+				apiVersion, kind = o.APIVersion, o.Kind
+			case *rbacv1.ClusterRole:
+				apiVersion, kind = o.APIVersion, o.Kind
+			case *rbacv1.ClusterRoleBinding:
+				apiVersion, kind = o.APIVersion, o.Kind
+			}
+			if apiVersion != wantAPIVersion {
+				t.Errorf("%s apiVersion = %q, want %q", tt.file, apiVersion, wantAPIVersion)
+			}
+			if kind != tt.wantKind {
+				t.Errorf("%s kind = %q, want %q", tt.file, kind, tt.wantKind)
+			}
+			tt.check(t, obj)
+		})
+	}
+}
 
-			res, err := ProvisionServiceAccountRoles(ctx, clientset, ProvisionOptions{
-				Namespace:          testNamespace,
-				ServiceAccountName: provisionSA,
-				DiscoverNetwork:    tt.discoverNetwork,
-			})
-			if err != nil {
-				t.Fatalf("ProvisionServiceAccountRoles() error = %v", err)
+// TestBuildServiceAccountRoleManifests_DiscoverNetwork covers both rule sets.
+// The default grant must stay read-only, and the --discover-network grant
+// must carry the mutating rules AND explain them in the header — the header
+// is what an operator reads to decide whether to apply the file at all, so a
+// silent "nodes: patch" would defeat the point of writing manifests out
+// instead of applying them.
+func TestBuildServiceAccountRoleManifests_DiscoverNetwork(t *testing.T) {
+	tests := []struct {
+		name            string
+		discoverNetwork bool
+		wantRuleCount   int
+		wantMutating    bool
+	}{
+		{name: "default grant is read-only", discoverNetwork: false, wantRuleCount: len(clusterRules(false))},
+		{name: "discovery grant adds the mutating rules", discoverNetwork: true, wantRuleCount: len(clusterRules(true)), wantMutating: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m, ok := manifestByFile(buildManifests(t, tt.discoverNetwork))[clusterRoleFileName]
+			if !ok {
+				t.Fatalf("no ClusterRole manifest rendered")
 			}
-			if res.DiscoverNetwork != tt.discoverNetwork {
-				t.Errorf("result DiscoverNetwork = %v, want %v", res.DiscoverNetwork, tt.discoverNetwork)
+			cr := &rbacv1.ClusterRole{}
+			if err := yaml.Unmarshal(m.Content, cr); err != nil {
+				t.Fatalf("unmarshalling ClusterRole: %v", err)
+			}
+			if len(cr.Rules) != tt.wantRuleCount {
+				t.Errorf("ClusterRole rules = %d, want %d", len(cr.Rules), tt.wantRuleCount)
+			}
+			for _, want := range []struct{ resource, verb string }{
+				{"nodes", "patch"},
+				{"pods/exec", verbCreate},
+				{"customresourcedefinitions", verbCreate},
+			} {
+				if got := hasRule(cr.Rules, want.resource, want.verb); got != tt.wantMutating {
+					t.Errorf("%s: %s present = %v, want %v", want.resource, want.verb, got, tt.wantMutating)
+				}
 			}
 
-			cr, err := clientset.RbacV1().ClusterRoles().Get(ctx, res.ClusterRole, metav1.GetOptions{})
-			if err != nil {
-				t.Fatalf("ClusterRole not created: %v", err)
+			header := string(m.Content)
+			for _, want := range []string{"nodes: patch", "pods/exec: create", "MUTATING"} {
+				if strings.Contains(header, want) != tt.wantMutating {
+					t.Errorf("header mentions %q = %v, want %v; header:\n%s", want, !tt.wantMutating, tt.wantMutating, header)
+				}
 			}
-			if got := hasRule(cr.Rules, "", "nodes", "patch"); got != tt.wantMutating {
-				t.Errorf("nodes:patch granted = %v, want %v", got, tt.wantMutating)
-			}
-			if got := hasRule(cr.Rules, "", "pods/exec", verbCreate); got != tt.wantMutating {
-				t.Errorf("pods/exec:create granted = %v, want %v", got, tt.wantMutating)
-			}
-			// The baseline read-only rules are present either way.
-			if !hasRule(cr.Rules, "", "nodes", verbList) {
-				t.Error("baseline nodes:list rule missing")
-			}
-
-			// The provisioned ClusterRole must carry exactly what a
-			// run-scoped one would, so an adopted ServiceAccount is not
-			// quietly less capable than a run-owned one.
-			if !reflect.DeepEqual(cr.Rules, clusterRules(tt.discoverNetwork)) {
-				t.Error("provisioned ClusterRole rules differ from the run-scoped agent's")
-			}
-			role, err := clientset.RbacV1().Roles(testNamespace).Get(ctx, res.Role, metav1.GetOptions{})
-			if err != nil {
-				t.Fatalf("Role not created: %v", err)
-			}
-			if !reflect.DeepEqual(role.Rules, namespacedRules()) {
-				t.Error("provisioned Role rules differ from the run-scoped agent's")
+			if !tt.wantMutating && !strings.Contains(header, "READ-ONLY") {
+				t.Errorf("read-only grant does not say so in the header:\n%s", header)
 			}
 		})
 	}
 }
 
-// TestProvisionServiceAccountRoles_Idempotent re-runs provisioning over a
-// stale rule set and asserts the rules are refreshed in place rather than the
-// call failing or the stale grant surviving. This is the aicr-upgrade path:
-// an operator re-runs the command and expects the current rules.
-func TestProvisionServiceAccountRoles_Idempotent(t *testing.T) {
-	ctx := context.Background()
-	clientset := fake.NewClientset()
-	seedServiceAccount(ctx, t, clientset, testNamespace, provisionSA)
+// hasRule reports whether any rule grants verb on resource.
+func hasRule(rules []rbacv1.PolicyRule, resource, verb string) bool {
+	for _, r := range rules {
+		for _, res := range r.Resources {
+			if res != resource {
+				continue
+			}
+			for _, v := range r.Verbs {
+				if v == verb {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
 
-	opts := ProvisionOptions{Namespace: testNamespace, ServiceAccountName: provisionSA, DiscoverNetwork: true}
-	res, err := ProvisionServiceAccountRoles(ctx, clientset, opts)
-	if err != nil {
-		t.Fatalf("first ProvisionServiceAccountRoles() error = %v", err)
+// TestBuildServiceAccountRoleManifests_HeadersExplainTheGrant asserts every
+// file states, in its own header, that nothing was applied and how to apply
+// and revoke. An operator may open exactly one of these files, and the fact
+// they must not miss is that the grant is not live yet.
+func TestBuildServiceAccountRoleManifests_HeadersExplainTheGrant(t *testing.T) {
+	wantEverywhere := []string{
+		"NOTHING HAS BEEN APPLIED",
+		"kubectl apply  -f",
+		"kubectl delete -f",
+		provisionSA,
 	}
-
-	// Simulate a stale grant left by an older aicr: strip the rules from
-	// both roles. A merely-idempotent implementation that skipped existing
-	// objects would leave them stripped.
-	stale, err := clientset.RbacV1().ClusterRoles().Get(ctx, res.ClusterRole, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("reading ClusterRole: %v", err)
-	}
-	stale.Rules = nil
-	if _, err = clientset.RbacV1().ClusterRoles().Update(ctx, stale, metav1.UpdateOptions{}); err != nil {
-		t.Fatalf("staling ClusterRole: %v", err)
-	}
-
-	res2, err := ProvisionServiceAccountRoles(ctx, clientset, opts)
-	if err != nil {
-		t.Fatalf("second ProvisionServiceAccountRoles() error = %v", err)
-	}
-	if !reflect.DeepEqual(res, res2) {
-		t.Errorf("second result = %+v, want %+v (names must be deterministic)", res2, res)
-	}
-
-	refreshed, err := clientset.RbacV1().ClusterRoles().Get(ctx, res.ClusterRole, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("reading ClusterRole: %v", err)
-	}
-	if !reflect.DeepEqual(refreshed.Rules, clusterRules(true)) {
-		t.Error("re-provisioning did not refresh the stale ClusterRole rules")
-	}
-
-	// Exactly one of each object, not a duplicate per run.
-	crs, err := clientset.RbacV1().ClusterRoles().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		t.Fatalf("listing ClusterRoles: %v", err)
-	}
-	if len(crs.Items) != 1 {
-		t.Errorf("ClusterRoles = %d, want 1", len(crs.Items))
-	}
-	roles, err := clientset.RbacV1().Roles(testNamespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		t.Fatalf("listing Roles: %v", err)
-	}
-	if len(roles.Items) != 1 {
-		t.Errorf("Roles = %d, want 1", len(roles.Items))
+	for _, m := range buildManifests(t, false) {
+		body := string(m.Content)
+		if !strings.HasPrefix(body, "# ") {
+			t.Errorf("%s does not open with a YAML comment header; got %.40q", m.FileName, body)
+		}
+		for _, want := range wantEverywhere {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s header does not contain %q", m.FileName, want)
+			}
+		}
 	}
 }
 
-// TestProvisionServiceAccountRoles_Rejections covers every input the call
-// refuses before writing anything — most importantly a ServiceAccount that
-// does not exist, which must be ErrCodeNotFound rather than four dangling
-// objects bound to nothing.
-func TestProvisionServiceAccountRoles_Rejections(t *testing.T) {
+// TestBuildServiceAccountRoleManifests_Deterministic asserts two renders of
+// the same inputs are byte-identical. The manifests are reviewed by hand and
+// diffed against a previous grant, so incidental churn between runs would
+// make a real change hard to spot.
+func TestBuildServiceAccountRoleManifests_Deterministic(t *testing.T) {
+	first := buildManifests(t, true)
+	second := buildManifests(t, true)
+	if len(first) != len(second) {
+		t.Fatalf("manifest counts differ: %d vs %d", len(first), len(second))
+	}
+	for i := range first {
+		if string(first[i].Content) != string(second[i].Content) {
+			t.Errorf("%s differs between renders:\n--- first ---\n%s\n--- second ---\n%s",
+				first[i].FileName, first[i].Content, second[i].Content)
+		}
+	}
+}
+
+// TestBuildServiceAccountRoleManifests_Rejections covers every input the call
+// refuses before rendering anything. A ServiceAccount that does not exist is
+// deliberately NOT among them: rendering contacts no cluster, so a mistyped
+// name yields manifests the operator inspects before applying.
+func TestBuildServiceAccountRoleManifests_Rejections(t *testing.T) {
 	tests := []struct {
 		name      string
-		seed      string
-		opts      ProvisionOptions
-		wantCode  aicrerrors.ErrorCode
+		opts      ManifestOptions
 		wantInMsg string
 	}{
 		{
-			name:      "missing ServiceAccount",
-			opts:      ProvisionOptions{Namespace: testNamespace, ServiceAccountName: provisionSA},
-			wantCode:  aicrerrors.ErrCodeNotFound,
-			wantInMsg: "not found in namespace",
+			name: "empty namespace",
+			opts: ManifestOptions{ServiceAccountName: provisionSA},
 		},
 		{
-			name:     "empty namespace",
-			opts:     ProvisionOptions{ServiceAccountName: provisionSA},
-			wantCode: aicrerrors.ErrCodeInvalidRequest,
+			name: "whitespace namespace",
+			opts: ManifestOptions{Namespace: "  ", ServiceAccountName: provisionSA},
 		},
 		{
-			name:     "empty ServiceAccount name",
-			opts:     ProvisionOptions{Namespace: testNamespace},
-			wantCode: aicrerrors.ErrCodeInvalidRequest,
+			name: "empty ServiceAccount name",
+			opts: ManifestOptions{Namespace: testNamespace},
 		},
 		{
-			name:     "whitespace ServiceAccount name",
-			opts:     ProvisionOptions{Namespace: testNamespace, ServiceAccountName: "   "},
-			wantCode: aicrerrors.ErrCodeInvalidRequest,
+			name: "whitespace ServiceAccount name",
+			opts: ManifestOptions{Namespace: testNamespace, ServiceAccountName: "   "},
 		},
 		{
 			name:      "name too long to compose",
-			seed:      strings.Repeat("a", 250),
-			opts:      ProvisionOptions{Namespace: testNamespace, ServiceAccountName: strings.Repeat("a", 250)},
-			wantCode:  aicrerrors.ErrCodeInvalidRequest,
+			opts:      ManifestOptions{Namespace: testNamespace, ServiceAccountName: strings.Repeat("a", 250)},
 			wantInMsg: "not a valid Kubernetes object name",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			clientset := fake.NewClientset()
-			if tt.seed != "" {
-				seedServiceAccount(ctx, t, clientset, testNamespace, tt.seed)
-			}
-
-			_, err := ProvisionServiceAccountRoles(ctx, clientset, tt.opts)
+			manifests, err := BuildServiceAccountRoleManifests(tt.opts)
 			if err == nil {
-				t.Fatal("ProvisionServiceAccountRoles() error = nil, want an error")
+				t.Fatal("BuildServiceAccountRoleManifests() error = nil, want ErrCodeInvalidRequest")
 			}
-			if !stderrors.Is(err, aicrerrors.New(tt.wantCode, "")) {
-				t.Errorf("error = %v, want code %s", err, tt.wantCode)
+			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want code %s", err, aicrerrors.ErrCodeInvalidRequest)
 			}
 			if tt.wantInMsg != "" && !strings.Contains(err.Error(), tt.wantInMsg) {
 				t.Errorf("error = %q, want it to contain %q", err.Error(), tt.wantInMsg)
 			}
-
-			// Nothing may be written on a rejected call.
-			crs, listErr := clientset.RbacV1().ClusterRoles().List(ctx, metav1.ListOptions{})
-			if listErr != nil {
-				t.Fatalf("listing ClusterRoles: %v", listErr)
-			}
-			if len(crs.Items) != 0 {
-				t.Errorf("ClusterRoles = %d, want 0 (a rejected call must write nothing)", len(crs.Items))
+			if manifests != nil {
+				t.Errorf("manifests = %v, want nil on a rejected call", manifests)
 			}
 		})
 	}
 }
 
-// TestProvisionServiceAccountRoles_RefusesToRetargetAnotherSubject covers the
-// one way the cluster-scoped name can be ambiguous: it joins namespace and
-// ServiceAccount with "-", so ("a-b", "c") and ("a", "b-c") compose the same
-// name. Silently updating the binding would revoke the first ServiceAccount's
-// cluster grants, so the second provisioning must fail closed.
-func TestProvisionServiceAccountRoles_RefusesToRetargetAnotherSubject(t *testing.T) {
-	ctx := context.Background()
-	clientset := fake.NewClientset()
-	seedServiceAccount(ctx, t, clientset, "a-b", "c")
-	seedServiceAccount(ctx, t, clientset, "a", "b-c")
-
-	first, err := ProvisionServiceAccountRoles(ctx, clientset, ProvisionOptions{Namespace: "a-b", ServiceAccountName: "c"})
+// TestBuildServiceAccountRoleManifests_UnknownServiceAccountStillRenders pins
+// the deliberate simplification: the old provisioning path failed with
+// ErrCodeNotFound when the ServiceAccount was absent. Rendering has no
+// cluster to ask, so it renders regardless and the RoleBinding header tells
+// the operator to check the name themselves.
+func TestBuildServiceAccountRoleManifests_UnknownServiceAccountStillRenders(t *testing.T) {
+	manifests, err := BuildServiceAccountRoleManifests(ManifestOptions{
+		Namespace:          testNamespace,
+		ServiceAccountName: "no-such-serviceaccount",
+	})
 	if err != nil {
-		t.Fatalf("first ProvisionServiceAccountRoles() error = %v", err)
+		t.Fatalf("BuildServiceAccountRoleManifests() error = %v, want manifests for an unverified name", err)
 	}
-
-	_, err = ProvisionServiceAccountRoles(ctx, clientset, ProvisionOptions{Namespace: "a", ServiceAccountName: "b-c"})
-	if err == nil {
-		t.Fatal("second ProvisionServiceAccountRoles() error = nil, want a conflict")
+	if len(manifests) != 4 {
+		t.Fatalf("manifests = %d, want 4", len(manifests))
 	}
-	if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeConflict, "")) {
-		t.Errorf("error = %v, want ErrCodeConflict", err)
+	rb, ok := manifestByFile(manifests)[roleBindingFileName]
+	if !ok {
+		t.Fatal("no RoleBinding manifest rendered")
 	}
-
-	// The first ServiceAccount keeps its grant.
-	crb, err := clientset.RbacV1().ClusterRoleBindings().Get(ctx, first.ClusterRoleBinding, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("reading ClusterRoleBinding: %v", err)
+	if !strings.Contains(string(rb.Content), "kubectl get serviceaccount no-such-serviceaccount") {
+		t.Errorf("RoleBinding header does not tell the operator how to verify the name:\n%s", rb.Content)
 	}
-	want := []rbacv1.Subject{{Kind: kindServiceAccount, Name: "c", Namespace: "a-b"}}
-	if !reflect.DeepEqual(crb.Subjects, want) {
-		t.Errorf("ClusterRoleBinding subjects = %v, want %v (the first grant must survive)", crb.Subjects, want)
-	}
-}
-
-// hasRule reports whether rules grant verb on resource in apiGroup.
-func hasRule(rules []rbacv1.PolicyRule, apiGroup, resource, verb string) bool {
-	for _, r := range rules {
-		if !contains(r.APIGroups, apiGroup) || !contains(r.Resources, resource) || !contains(r.Verbs, verb) {
-			continue
-		}
-		return true
-	}
-	return false
-}
-
-func contains(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
 }

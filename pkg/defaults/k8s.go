@@ -14,6 +14,8 @@
 
 package defaults
 
+import "os"
+
 // Kubernetes REST client rate limits for validator containers.
 //
 // client-go's default client-side rate limiter (QPS 5, Burst 10) is tuned for
@@ -50,3 +52,29 @@ const (
 // fits the object-name limit but not the label limit would fail Pod
 // creation, so name helpers must budget against this constant.
 const MaxK8sNameLength = 63
+
+// Layout of the RBAC manifest directory that
+// `aicr snapshot --add-roles-to-service-account` writes.
+//
+// That invocation applies nothing and contacts no cluster: it renders the
+// Role, RoleBinding, ClusterRole and ClusterRoleBinding that grant the
+// snapshot agent's permissions to an operator-supplied ServiceAccount, and
+// leaves applying them — and later deleting them — to the operator. The
+// directory is what makes both halves a single `kubectl -f` argument.
+const (
+	// AgentRBACManifestDirPrefix is prepended to the run ID to form the
+	// output directory name (`snapshot-rbac-<run-id>`). The run ID makes
+	// the name unique per invocation, so a second run never overwrites a
+	// set of manifests an operator is still reviewing.
+	AgentRBACManifestDirPrefix = "snapshot-rbac-"
+
+	// AgentRBACManifestDirMode is the permission of that directory.
+	// Owner-only: the manifests describe a permission grant, and there is
+	// no reason for another local user to read or replace them between
+	// generation and `kubectl apply`.
+	AgentRBACManifestDirMode os.FileMode = 0o700
+
+	// AgentRBACManifestFileMode is the permission of each manifest file,
+	// owner read/write only for the same reason as the directory.
+	AgentRBACManifestFileMode os.FileMode = 0o600
+)

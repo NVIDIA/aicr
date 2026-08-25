@@ -82,8 +82,9 @@ type Config struct {
 	//     This is what keeps a ServiceAccount carrying IRSA or GKE
 	//     Workload Identity annotations usable: both providers pin trust
 	//     to the ServiceAccount NAME, which a run-scoped name can never
-	//     satisfy. Grant the agent's permissions to such a
-	//     ServiceAccount once with ProvisionServiceAccountRoles.
+	//     satisfy. Generate the RBAC that grants such a ServiceAccount
+	//     the agent's permissions with
+	//     BuildServiceAccountRoleManifests, then apply it out of band.
 	//   - Otherwise: a prefix. The run creates "<prefix>-<RunID>" and
 	//     the full run-scoped RBAC set, and deletes them at cleanup.
 	//

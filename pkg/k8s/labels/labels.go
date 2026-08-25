@@ -37,12 +37,13 @@ const (
 	// ValueSnapshotAgent identifies snapshot-agent-owned resources.
 	ValueSnapshotAgent = "snapshot-agent"
 
-	// ValueAgentRBAC identifies the permanent, NON-run-scoped Role,
-	// RoleBinding, ClusterRole and ClusterRoleBinding that
-	// `aicr snapshot --add-roles-to-service-account` provisions onto an
-	// operator-supplied ServiceAccount. Objects carrying this value are
-	// deliberately outside every run's lifecycle: they carry no RunID
-	// label, never enter a run's created-set, and are never deleted by
-	// run cleanup. Teardown is the operator's job.
+	// ValueAgentRBAC identifies the NON-run-scoped Role, RoleBinding,
+	// ClusterRole and ClusterRoleBinding that
+	// `aicr snapshot --add-roles-to-service-account` renders as manifests
+	// for an operator-supplied ServiceAccount. aicr applies none of them;
+	// the operator does. Objects carrying this value are deliberately
+	// outside every run's lifecycle: they carry no RunID label, never
+	// enter a run's created-set, and are never deleted by run cleanup.
+	// Teardown is the operator's `kubectl delete -f`.
 	ValueAgentRBAC = "agent-rbac"
 )

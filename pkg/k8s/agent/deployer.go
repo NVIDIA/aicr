@@ -82,8 +82,9 @@ func (d *Deployer) Deploy(ctx context.Context) error {
 	// Skipped entirely in exact-ServiceAccount mode: aicr will not add or
 	// remove permissions on a ServiceAccount it did not create. Nothing is
 	// created, so nothing enters the created-set, so Cleanup deletes none
-	// of these kinds — the operator's grants outlive the run. Provision
-	// them once with ProvisionServiceAccountRoles.
+	// of these kinds — the operator's grants outlive the run. Generate its
+	// RBAC manifests with BuildServiceAccountRoleManifests and apply them
+	// out of band.
 	if d.managesRBAC() {
 		if err := d.ensureServiceAccount(ctx); err != nil {
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create ServiceAccount", err)

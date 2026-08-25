@@ -380,13 +380,14 @@ fi
 # runID suffix; we delete by label selector to catch all runs. Legacy resources
 # from the older job pattern lived in gpu-operator under the name "aicr".
 msg "Phase 2: Removing AICR validator artifacts..."
-# The component!=agent-rbac term spares the PERMANENT cluster RBAC that
-# `aicr snapshot --add-roles-to-service-account` grants to an operator-supplied
-# ServiceAccount. Those objects belong to no run — they carry no run-ID label
-# and no run's cleanup deletes them — and re-creating them needs the admin who
-# provisioned them, so a teardown tool must not sweep them away with the
-# per-run leftovers it exists to reclaim. Delete them by hand when the
-# ServiceAccount is retired.
+# The component!=agent-rbac term spares the cluster RBAC an operator applied
+# from the manifests `aicr snapshot --add-roles-to-service-account` wrote for
+# an operator-supplied ServiceAccount. Those objects belong to no run — they
+# carry no run-ID label and no run's cleanup deletes them — and restoring them
+# needs the admin who applied them, so a teardown tool must not sweep them away
+# with the per-run leftovers it exists to reclaim. Revoke them deliberately
+# with `kubectl delete -f snapshot-rbac-<run-id>/` when the ServiceAccount is
+# retired.
 kc delete clusterrolebinding -l 'app.kubernetes.io/managed-by=aicr,app.kubernetes.io/component!=agent-rbac' --ignore-not-found
 kc delete clusterrole        -l 'app.kubernetes.io/managed-by=aicr,app.kubernetes.io/component!=agent-rbac' --ignore-not-found
 kc delete clusterrolebinding -l app.kubernetes.io/name=aicr-validator --ignore-not-found

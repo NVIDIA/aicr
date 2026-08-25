@@ -86,7 +86,7 @@ aicr snapshot [flags]
 | `--image` | | string | matches CLI version | Container image for agent Job. Release builds default to `ghcr.io/nvidia/aicr:v<version>`; dev and `-next` snapshot builds default to `ghcr.io/nvidia/aicr:latest`. |
 | `--job-name` | | string | aicr | Prefix for the agent Job name; the run ID is always appended (`<prefix>-<run-id>`) |
 | `--service-account-name` | | string | aicr | ServiceAccount the agent pod runs as. **Exact-if-exists:** when a ServiceAccount of exactly this name already exists in `--namespace`, it is used verbatim and the run creates **no** ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding — and deletes none at cleanup. Otherwise the value is a name prefix and the run ID is appended (`<prefix>-<run-id>`). See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) |
-| `--add-roles-to-service-account` | | string | | Grant the agent's permissions to the named **existing** ServiceAccount in `--namespace`, then exit **without taking a snapshot**. Creates permanent, non-run-scoped `Role`/`RoleBinding` (`aicr-agent-<sa>-rbac`) and `ClusterRole`/`ClusterRoleBinding` (`aicr-agent-<namespace>-<sa>-rbac`) that no run cleanup ever removes. Idempotent — re-run it after an aicr upgrade to refresh the rules. Fails with `NOT_FOUND` when the ServiceAccount does not exist. Combine with `--discover-network` to also grant the mutating live-discovery rules, permanently |
+| `--add-roles-to-service-account` | | string | | **Writes manifests and applies nothing.** Renders the `Role`/`RoleBinding` (`aicr-agent-<sa>-rbac`) and `ClusterRole`/`ClusterRoleBinding` (`aicr-agent-<namespace>-<sa>-rbac`) that grant the agent's permissions to the named ServiceAccount into `./snapshot-rbac-<run-id>/`, one object per file with a comment header explaining what it grants, then exits **without taking a snapshot**. **No cluster is contacted** — no kubeconfig or privileges needed, and the ServiceAccount is not checked for existence. Review the files, then apply with `kubectl apply -f <dir>/` and revoke with `kubectl delete -f <dir>/` yourself; no run cleanup ever touches them. Fails with `CONFLICT` if the directory already exists. Combine with `--discover-network` to also render the mutating live-discovery rules |
 | `--node-selector` | | string[] | auto | Node selector for agent scheduling (key=value, repeatable). When omitted (and neither `--require-gpu` nor `--runtime-class` is set), the agent auto-targets GPU nodes labeled `nvidia.com/gpu.present=true` if the cluster has any — see [Agent Deployment](agent-deployment.md). Pass an explicit selector to override. |
 | `--toleration` | | string[] | all taints | Tolerations for agent scheduling (key=value:effect, repeatable). **Default: all taints tolerated** (uses `operator: Exists`). Only specify to restrict which taints are tolerated. |
 | `--timeout` | | duration | 5m | Timeout for agent Job completion |
@@ -176,11 +176,15 @@ aicr snapshot \
   --output cm://gpu-operator/aicr-snapshot \
   --no-cleanup
 
-# Grant the agent's permissions to an existing ServiceAccount, then exit.
-# Run once, by an admin. Takes no snapshot; what it creates is permanent.
+# Write the RBAC manifests that grant the agent's permissions to an existing
+# ServiceAccount, then exit. Applies nothing and contacts no cluster; takes no
+# snapshot. Writes ./snapshot-rbac-<run-id>/.
 aicr snapshot \
   --namespace gpu-operator \
   --add-roles-to-service-account irsa-snapshotter
+
+# Review what each file grants, then apply them yourself.
+kubectl apply -f snapshot-rbac-<run-id>/
 
 # Capture as that ServiceAccount. Because it already exists, the name is used
 # verbatim and this run creates and deletes no RBAC of its own.
@@ -1045,7 +1049,7 @@ aicr validate [flags]
 | `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for validation Job |
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
 | `--job-name` | | string | aicr-validate | Prefix for the **live snapshot-capture agent's** Job name; the run ID is always appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied — no agent is deployed. Does not name the validator Jobs (`aicr-<validator>-<hash>`) |
-| `--service-account-name` | | string | aicr-validate | ServiceAccount the **live snapshot-capture agent** runs as. **Exact-if-exists:** an existing ServiceAccount of exactly this name in `--namespace` is used verbatim and the agent creates no RBAC for the run; otherwise the value is a prefix for the agent's ServiceAccount, Role, and RoleBinding and the run ID is appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied. Does not name the validator Jobs' ServiceAccount (`aicr-validator-<run-id>`), whose RBAC is always run-scoped. Provision an existing ServiceAccount with `aicr snapshot --namespace <validate-namespace> --add-roles-to-service-account <name>`, matching this command's `--namespace` |
+| `--service-account-name` | | string | aicr-validate | ServiceAccount the **live snapshot-capture agent** runs as. **Exact-if-exists:** an existing ServiceAccount of exactly this name in `--namespace` is used verbatim and the agent creates no RBAC for the run; otherwise the value is a prefix for the agent's ServiceAccount, Role, and RoleBinding and the run ID is appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied. Does not name the validator Jobs' ServiceAccount (`aicr-validator-<run-id>`), whose RBAC is always run-scoped. Generate that ServiceAccount's RBAC manifests with `aicr snapshot --namespace <validate-namespace> --add-roles-to-service-account <name>` (matching this command's `--namespace`) and apply them yourself — that command applies nothing |
 | `--node-selector` | | string[] | | Override GPU node selection for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
 | `--toleration` | | string[] | | Override tolerations for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. When omitted, the snapshot agent tolerates all taints. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
 | `--timeout` | | duration | 5m | Timeout for validation Job completion |

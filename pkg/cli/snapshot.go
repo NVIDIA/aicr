@@ -20,6 +20,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -271,20 +272,23 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 	}, nil
 }
 
-// runAddRolesToServiceAccount handles the provision-and-exit invocation
-// `aicr snapshot --add-roles-to-service-account <name>`: it grants the agent's
-// permissions to an already-existing ServiceAccount and returns without
-// deploying a Job or capturing anything.
+// runWriteRoleManifests handles the generate-and-exit invocation
+// `aicr snapshot --add-roles-to-service-account <name>`: it writes the RBAC
+// manifests that would grant the agent's permissions to that ServiceAccount
+// and returns, applying nothing, contacting no cluster, and capturing
+// nothing.
 //
-// It is a thin adapter — every decision (name derivation, existence check,
-// rule set, idempotent create-or-update) lives in pkg/snapshotter and
+// It takes no context because there is no I/O to bound beyond writing four
+// local files.
+//
+// It is a thin adapter — name derivation, the rule sets, the explanatory
+// headers, and the directory layout all live in pkg/snapshotter and
 // pkg/k8s/agent. What belongs here is only presenting the outcome, including
-// the two properties an operator must not have to discover on their own: the
-// objects are permanent, and adopting one ServiceAccount across runs waives
-// per-run permission isolation.
-func runAddRolesToServiceAccount(ctx context.Context, cmd *cli.Command, opts *snapshotCmdOptions, saName string) error {
-	res, err := snapshotter.ProvisionAgentRoles(ctx, &snapshotter.AgentRolesConfig{
-		Kubeconfig:         opts.kubeconfig,
+// the two things an operator must not have to discover on their own: nothing
+// is live yet, and the exact commands that make it live and take it away
+// again.
+func runWriteRoleManifests(cmd *cli.Command, opts *snapshotCmdOptions, saName string) error {
+	res, err := snapshotter.WriteAgentRoleManifests(&snapshotter.AgentRolesConfig{
 		Namespace:          opts.namespace,
 		ServiceAccountName: saName,
 		DiscoverNetwork:    opts.discoverNetwork,
@@ -293,42 +297,73 @@ func runAddRolesToServiceAccount(ctx context.Context, cmd *cli.Command, opts *sn
 		return err
 	}
 
-	writeProvisionReport(cmd.Root().Writer, res)
+	writeManifestReport(cmd.Root().Writer, res)
 	return nil
 }
 
-// writeProvisionReport renders the outcome of a provisioning run. It is split
-// out from runAddRolesToServiceAccount so the two properties an operator must
-// not have to discover on their own — the objects are permanent, and adopting
-// one ServiceAccount across runs waives per-run permission isolation — are
-// assertable without a cluster.
-func writeProvisionReport(w io.Writer, res *snapshotter.AgentRolesResult) {
-	fmt.Fprintf(w, `Granted the snapshot agent's permissions to ServiceAccount %[1]q in namespace %[2]q.
+// writeManifestReport renders the outcome of a manifest-generating run. It is
+// split out from runWriteRoleManifests so the properties an operator must not
+// have to discover on their own — nothing was applied, how to apply it, how to
+// remove it again, and that a shared ServiceAccount waives per-run permission
+// isolation — are assertable without a cluster or a filesystem.
+func writeManifestReport(w io.Writer, res *snapshotter.AgentRolesResult) {
+	fmt.Fprintf(w, `Wrote the snapshot agent's RBAC manifests for ServiceAccount %[1]q in namespace
+%[2]q to:
 
-Created or updated:
-  role/%[3]s (namespace %[2]s)
-  rolebinding/%[4]s (namespace %[2]s)
-  clusterrole/%[5]s
-  clusterrolebinding/%[6]s
+  %[3]s/
 
-These objects are permanent: no aicr run creates, updates, or deletes them.
-Re-run this command after an aicr upgrade to refresh the rules; delete the four
-objects by hand when the ServiceAccount no longer needs them.
+NOTHING WAS APPLIED. No cluster was contacted, and %[1]s has no new permissions
+yet.
+
+`, res.ServiceAccountName, res.Namespace, res.Dir)
+
+	for _, obj := range res.Objects {
+		fmt.Fprintf(w, "  %-28s %s/%s\n", filepath.Base(obj.Path), strings.ToLower(obj.Kind), obj.Name)
+	}
+
+	fmt.Fprintf(w, `
+Read them — each file explains what it grants and why the agent needs it — then
+apply them yourself:
+  kubectl apply -f %[1]s/
 
 Capture a snapshot as this ServiceAccount with:
-  aicr snapshot --namespace %[2]s --service-account-name %[1]s
+  aicr snapshot --namespace %[2]s --service-account-name %[3]s
+
+Remove the grant when the ServiceAccount no longer needs it:
+  kubectl delete -f %[1]s/
+
+That delete is the only teardown: no aicr run creates, refreshes, or deletes
+these objects. Keep the directory for as long as you want the easy teardown.
+
+The ServiceAccount is not verified to exist — aicr contacted no cluster. Check
+it before you rely on the grant:
+  kubectl get serviceaccount %[3]s -n %[2]s
 
 Trade-off: runs that share this ServiceAccount share its permissions, so per-run
 permission isolation is waived for them.
-`, res.ServiceAccountName, res.Namespace, res.Role, res.RoleBinding, res.ClusterRole, res.ClusterRoleBinding)
+`, res.Dir, res.Namespace, res.ServiceAccountName)
 
-	if res.DiscoverNetwork {
-		fmt.Fprint(w, `
-WARNING: --discover-network also granted cluster-scoped MUTATING rules
-(nodes: patch, pods/exec: create, CRD/namespace/DaemonSet create-delete).
-This ServiceAccount now carries them permanently, not for one run.
-`)
+	if !res.DiscoverNetwork {
+		return
 	}
+	fmt.Fprintf(w, `
+WARNING: --discover-network means the ClusterRole in this directory also carries
+cluster-scoped MUTATING rules (nodes: patch, pods/exec: create, CRD/namespace/
+DaemonSet create-delete). Applying it grants them permanently, not for one run.
+Each rule and the discovery step it exists for is explained in %s.
+`, clusterRoleManifestName(res))
+}
+
+// clusterRoleManifestName returns the file name of the rendered ClusterRole,
+// looked up by kind rather than by position so the discovery warning keeps
+// pointing at the right file if the manifest order ever changes.
+func clusterRoleManifestName(res *snapshotter.AgentRolesResult) string {
+	for _, obj := range res.Objects {
+		if obj.Kind == "ClusterRole" {
+			return filepath.Base(obj.Path)
+		}
+	}
+	return "the ClusterRole manifest"
 }
 
 // snapshotTemplateOptions holds parsed template options for the snapshot command.
@@ -412,12 +447,12 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
-			Usage:    "ServiceAccount to run the agent as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and aicr creates and deletes no RBAC for the run (grant it permissions once with --add-roles-to-service-account). Otherwise it is a name prefix (default: \"aicr\") and the run ID is appended.",
+			Usage:    "ServiceAccount to run the agent as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and aicr creates and deletes no RBAC for the run (generate its RBAC manifests with --add-roles-to-service-account, then apply them yourself). Otherwise it is a name prefix (default: \"aicr\") and the run ID is appended.",
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     flagAddRolesToSA,
-			Usage:    "Grant the agent's permissions to the named EXISTING ServiceAccount in --namespace, then exit without taking a snapshot. Creates permanent, non-run-scoped Role/RoleBinding and ClusterRole/ClusterRoleBinding that no run cleanup removes; idempotent. Add --discover-network to also grant the mutating live-discovery rules.",
+			Usage:    "WRITES MANIFESTS AND APPLIES NOTHING. Renders the Role, RoleBinding, ClusterRole and ClusterRoleBinding that grant the agent's permissions to the named ServiceAccount into ./snapshot-rbac-<run-id>/, then exits without taking a snapshot. No cluster is contacted, so no kubeconfig or privileges are needed. Review the files, then grant with 'kubectl apply -f <dir>/' and revoke with 'kubectl delete -f <dir>/' yourself. Add --discover-network to include the mutating live-discovery rules.",
 			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{
@@ -593,13 +628,13 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 				return err
 			}
 
-			// Provision-and-exit: --add-roles-to-service-account grants the
-			// agent's permissions to an existing ServiceAccount and takes no
-			// snapshot. Checked ahead of every collection path (including the
-			// in-pod one below) so the flag can never be combined with a
-			// capture.
+			// Generate-and-exit: --add-roles-to-service-account writes the
+			// RBAC manifests for an existing ServiceAccount, applies nothing,
+			// and takes no snapshot. Checked ahead of every collection path
+			// (including the in-pod one below) so the flag can never be
+			// combined with a capture.
 			if saName := cmd.String(flagAddRolesToSA); saName != "" {
-				return runAddRolesToServiceAccount(ctx, cmd, opts, saName)
+				return runWriteRoleManifests(cmd, opts, saName)
 			}
 
 			agentCfg := opts.toAgentConfig()

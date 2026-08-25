@@ -139,9 +139,10 @@ type AgentConfig struct {
 	//     GKE Workload Identity (iam.gke.io/gcp-service-account)
 	//     annotations stays usable: both providers pin trust to the
 	//     ServiceAccount NAME, which a run-scoped name can never satisfy.
-	//     Grant it the agent's permissions once with
-	//     snapshotter.ProvisionAgentRoles (CLI:
-	//     `aicr snapshot --add-roles-to-service-account`).
+	//     Generate the RBAC that grants it the agent's permissions with
+	//     snapshotter.WriteAgentRoleManifests (CLI:
+	//     `aicr snapshot --add-roles-to-service-account`), which writes
+	//     manifests and applies nothing, then apply them yourself.
 	//   - Otherwise: a name prefix. The run creates "<prefix>-<RunID>"
 	//     and the full run-scoped RBAC set, and deletes them at cleanup.
 	//

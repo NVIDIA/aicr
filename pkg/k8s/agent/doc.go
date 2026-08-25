@@ -52,14 +52,18 @@ GKE's IAM binding names PROJECT.svc.id.goog[<ns>/<name>] and accepts no
 wildcard — so a per-run name can never be trusted by either, and copying the
 annotations onto a run-scoped ServiceAccount would not help.
 
-Grant the agent's permissions to such a ServiceAccount once with
-ProvisionServiceAccountRoles (CLI: aicr snapshot
---add-roles-to-service-account). What it creates is permanent: no run-ID
-label, never in a created-set, never deleted by run cleanup.
+Render the RBAC that grants such a ServiceAccount the agent's permissions
+with BuildServiceAccountRoleManifests (CLI: aicr snapshot
+--add-roles-to-service-account). That path APPLIES NOTHING and contacts no
+cluster: it writes manifests the operator reviews and applies themselves, so
+the decision to grant cluster-scoped -- and, under DiscoverNetwork, mutating
+-- permissions is an informed one. What they then apply sits outside every
+run: no run-ID label, never in a created-set, never deleted by run cleanup,
+and removed with kubectl delete -f.
 
 The trade-off is deliberate and opt-in: an adopted ServiceAccount waives
 per-run permission isolation. Concurrent runs sharing it share its grants, and
-a DiscoverNetwork provisioning leaves cluster-scoped mutating permissions in
+a DiscoverNetwork grant leaves cluster-scoped mutating permissions in
 place permanently rather than for one run's lifetime.
 
 Two objects are deliberately NOT run-scoped:

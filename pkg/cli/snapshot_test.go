@@ -453,11 +453,13 @@ func TestOutputDestinationParsing(t *testing.T) {
 }
 
 // TestSnapshotCmd_AddRolesFlagWiring covers the CLI surface of the
-// provision-and-exit invocation. The provisioning itself is cluster work and
-// is covered in pkg/k8s/agent; what this asserts is the wiring an operator
-// touches: the flag exists under the agent-deployment category, and it is
-// single-valued so a repeated flag is rejected rather than silently taking
-// the last value and provisioning the wrong ServiceAccount.
+// generate-and-exit invocation. Rendering the manifests is covered in
+// pkg/k8s/agent and pkg/snapshotter; what this asserts is the wiring an
+// operator touches: the flag exists under the agent-deployment category, its
+// usage says outright that it applies nothing (the flag NAME reads like it
+// mutates the cluster, so nobody may run it and assume the grant is live),
+// and it is single-valued so a repeated flag is rejected rather than silently
+// taking the last value and writing manifests for the wrong ServiceAccount.
 func TestSnapshotCmd_AddRolesFlagWiring(t *testing.T) {
 	t.Run("flag is registered under agent deployment", func(t *testing.T) {
 		var found cli.Flag
@@ -480,6 +482,12 @@ func TestSnapshotCmd_AddRolesFlagWiring(t *testing.T) {
 		}
 		if !strings.Contains(sf.Usage, "without taking a snapshot") {
 			t.Errorf("--%s usage must say it takes no snapshot; got %q", flagAddRolesToSA, sf.Usage)
+		}
+		if !strings.Contains(sf.Usage, "APPLIES NOTHING") {
+			t.Errorf("--%s usage must state plainly that it applies nothing; got %q", flagAddRolesToSA, sf.Usage)
+		}
+		if !strings.Contains(sf.Usage, "kubectl apply") || !strings.Contains(sf.Usage, "kubectl delete") {
+			t.Errorf("--%s usage must name the apply and delete commands; got %q", flagAddRolesToSA, sf.Usage)
 		}
 	})
 
@@ -516,20 +524,90 @@ func TestSnapshotCmd_ServiceAccountNameUsageStatesExactIfExists(t *testing.T) {
 	t.Fatal("snapshot command must define --service-account-name")
 }
 
-// TestWriteProvisionReport asserts the two properties the provisioning output
-// must state outright, because an operator who does not read them cannot
-// discover either from the cluster: the objects are permanent (nothing in aicr
-// will ever remove them), and adopting one ServiceAccount across runs waives
-// per-run permission isolation. The --discover-network warning is separate
-// because that grant is the one that is also mutating.
-func TestWriteProvisionReport(t *testing.T) {
+// TestSnapshotCmd_AddRolesWritesManifestsWithoutACluster runs the real command
+// action end to end. It is the test that pins the whole point of the flag: with
+// KUBECONFIG pointed at a file no client can be built from and the in-cluster
+// environment cleared, the invocation still succeeds and writes a reviewable
+// directory. Any clientset construction, ServiceAccount lookup, or permission
+// pre-flight on this path would fail here rather than pass quietly.
+func TestSnapshotCmd_AddRolesWritesManifestsWithoutACluster(t *testing.T) {
+	unreachable := filepath.Join(t.TempDir(), "not-a-kubeconfig")
+	if seedErr := os.WriteFile(unreachable, []byte("this is not a kubeconfig\n"), 0o600); seedErr != nil {
+		t.Fatalf("seeding the kubeconfig: %v", seedErr)
+	}
+	t.Setenv("KUBECONFIG", unreachable)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("KUBERNETES_SERVICE_HOST", "")
+	t.Setenv("KUBERNETES_SERVICE_PORT", "")
+	t.Chdir(t.TempDir())
+
+	var buf bytes.Buffer
+	cmd := snapshotCmd()
+	cmd.Writer = &buf
+	if err := cmd.Run(context.Background(), []string{
+		"snapshot",
+		"--namespace", "gpu-operator",
+		"--" + flagAddRolesToSA, "irsa-snapshotter",
+		"--discover-network",
+	}); err != nil {
+		t.Fatalf("snapshot --%s error = %v; the path must need no cluster at all", flagAddRolesToSA, err)
+	}
+
+	entries, readErr := os.ReadDir(".")
+	if readErr != nil {
+		t.Fatalf("reading the working directory: %v", readErr)
+	}
+	var dir string
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "snapshot-rbac-") {
+			dir = e.Name()
+		}
+	}
+	if dir == "" {
+		t.Fatalf("no snapshot-rbac-<run-id> directory written; got %v", entries)
+	}
+
+	for _, name := range []string{"01-role.yaml", "02-rolebinding.yaml", "03-clusterrole.yaml", "04-clusterrolebinding.yaml"} {
+		body, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Errorf("reading %s: %v", name, err)
+			continue
+		}
+		if !strings.HasPrefix(string(body), "# ") {
+			t.Errorf("%s does not open with a YAML comment header", name)
+		}
+	}
+
+	// The report goes to the command writer, not stdout, and must name the
+	// directory and both halves of the operator's workflow.
+	out := buf.String()
+	for _, want := range []string{"NOTHING WAS APPLIED", dir, "kubectl apply -f", "kubectl delete -f", "MUTATING"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("command output does not contain %q; got:\n%s", want, out)
+		}
+	}
+}
+
+// TestWriteManifestReport asserts the properties the output must state
+// outright, because an operator who does not read them cannot discover any of
+// them from the cluster: nothing was applied, where the manifests are, the
+// command that makes the grant live, the command that removes it again, and
+// that sharing one ServiceAccount waives per-run permission isolation. The
+// --discover-network warning is separate because that grant is the one that
+// is also mutating.
+func TestWriteManifestReport(t *testing.T) {
+	dir := "snapshot-rbac-20260821-142233-9f3a1c0b7e2d4a55"
 	res := &snapshotter.AgentRolesResult{
+		Dir:                dir,
+		RunID:              "20260821-142233-9f3a1c0b7e2d4a55",
 		Namespace:          "gpu-operator",
 		ServiceAccountName: "irsa-snapshotter",
-		Role:               "aicr-agent-irsa-snapshotter-rbac",
-		RoleBinding:        "aicr-agent-irsa-snapshotter-rbac",
-		ClusterRole:        "aicr-agent-gpu-operator-irsa-snapshotter-rbac",
-		ClusterRoleBinding: "aicr-agent-gpu-operator-irsa-snapshotter-rbac",
+		Objects: []snapshotter.AgentRoleObject{
+			{Kind: "Role", Name: "aicr-agent-irsa-snapshotter-rbac", Path: dir + "/01-role.yaml"},
+			{Kind: "RoleBinding", Name: "aicr-agent-irsa-snapshotter-rbac", Path: dir + "/02-rolebinding.yaml"},
+			{Kind: "ClusterRole", Name: "aicr-agent-gpu-operator-irsa-snapshotter-rbac", Path: dir + "/03-clusterrole.yaml"},
+			{Kind: "ClusterRoleBinding", Name: "aicr-agent-gpu-operator-irsa-snapshotter-rbac", Path: dir + "/04-clusterrolebinding.yaml"},
+		},
 	}
 
 	tests := []struct {
@@ -541,22 +619,27 @@ func TestWriteProvisionReport(t *testing.T) {
 		{
 			name: "read-only grant",
 			wantSubstrings: []string{
-				`ServiceAccount "irsa-snapshotter" in namespace "gpu-operator"`,
+				`ServiceAccount "irsa-snapshotter" in namespace`,
+				"NOTHING WAS APPLIED",
+				"kubectl apply -f " + dir + "/",
+				"kubectl delete -f " + dir + "/",
+				"01-role.yaml",
 				"role/aicr-agent-irsa-snapshotter-rbac",
 				"clusterrolebinding/aicr-agent-gpu-operator-irsa-snapshotter-rbac",
-				"These objects are permanent",
+				"not verified to exist",
 				"permission isolation is waived",
 				"aicr snapshot --namespace gpu-operator --service-account-name irsa-snapshotter",
 			},
 			notWant: "MUTATING",
 		},
 		{
-			name:            "discovery grant warns about the permanent mutating rules",
+			name:            "discovery grant warns about the mutating rules",
 			discoverNetwork: true,
 			wantSubstrings: []string{
-				"These objects are permanent",
+				"NOTHING WAS APPLIED",
 				"MUTATING",
-				"carries them permanently, not for one run",
+				"grants them permanently, not for one run",
+				"03-clusterrole.yaml",
 			},
 		},
 	}
@@ -566,7 +649,7 @@ func TestWriteProvisionReport(t *testing.T) {
 			r := *res
 			r.DiscoverNetwork = tt.discoverNetwork
 			var buf bytes.Buffer
-			writeProvisionReport(&buf, &r)
+			writeManifestReport(&buf, &r)
 
 			for _, want := range tt.wantSubstrings {
 				if !strings.Contains(buf.String(), want) {

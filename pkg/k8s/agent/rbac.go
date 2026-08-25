@@ -121,7 +121,7 @@ func (d *Deployer) resolveServiceAccount(ctx context.Context) error {
 			attrServiceAccount, name,
 			attrNamespace, d.config.Namespace,
 			attrRunID, d.config.RunID,
-			"note", "no ServiceAccount, Role, RoleBinding, ClusterRole or ClusterRoleBinding is created or deleted; grant the agent's permissions once with 'aicr snapshot --add-roles-to-service-account "+name+"'")
+			"note", "no ServiceAccount, Role, RoleBinding, ClusterRole or ClusterRoleBinding is created or deleted; generate this ServiceAccount's RBAC manifests with 'aicr snapshot --add-roles-to-service-account "+name+"' and apply them yourself")
 	case apierrors.IsNotFound(err):
 		// Normal path: the value is a prefix and this run creates its own
 		// run-scoped ServiceAccount below.
@@ -165,8 +165,8 @@ func (d *Deployer) ensureServiceAccount(ctx context.Context) error {
 // writing its snapshot result into a staging ConfigMap, and reading pods.
 //
 // It is the single definition consumed by both the run-scoped Role
-// ensureRole creates and the permanent Role ProvisionServiceAccountRoles
-// grants to an operator-supplied ServiceAccount, so the two can never drift.
+// ensureRole creates and the Role BuildServiceAccountRoleManifests renders
+// for an operator-supplied ServiceAccount, so the two can never drift.
 func namespacedRules() []rbacv1.PolicyRule {
 	return []rbacv1.PolicyRule{
 		{
@@ -187,8 +187,8 @@ func namespacedRules() []rbacv1.PolicyRule {
 // l8k network discovery requires (see discoverNetworkClusterRules).
 //
 // It is the single definition consumed by both the run-scoped ClusterRole
-// ensureClusterRole creates and the permanent ClusterRole
-// ProvisionServiceAccountRoles grants.
+// ensureClusterRole creates and the ClusterRole
+// BuildServiceAccountRoleManifests renders.
 func clusterRules(discoverNetwork bool) []rbacv1.PolicyRule {
 	rules := []rbacv1.PolicyRule{
 		{

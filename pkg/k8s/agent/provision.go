@@ -15,24 +15,22 @@
 package agent
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	rbacv1 "k8s.io/api/rbac/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
-	"k8s.io/client-go/kubernetes"
+	"sigs.k8s.io/yaml"
 )
 
-// Naming of the permanent RBAC objects ProvisionServiceAccountRoles creates.
+// Naming of the RBAC objects BuildServiceAccountRoleManifests renders.
 //
 // The names are deterministic — the same (namespace, ServiceAccount) pair
-// always resolves to the same four names, which is what makes re-running the
-// provisioning idempotent — and they cannot collide with a run-scoped name.
+// always resolves to the same four names — and they cannot collide with a
+// run-scoped name.
 //
 // The non-collision is structural, not probabilistic. Every run-scoped name
 // is "<prefix>-<runID>" and every runID ends in 16 lowercase-hex characters
@@ -44,81 +42,112 @@ const (
 	provisionedNameSuffix = "-rbac"
 )
 
-// ProvisionOptions selects the ServiceAccount that
-// ProvisionServiceAccountRoles grants the snapshot agent's permissions to.
-type ProvisionOptions struct {
-	// Namespace holds the ServiceAccount and is where the Role and
-	// RoleBinding are created. Required.
+// File names of the rendered manifests, one object per file.
+//
+// The numeric prefixes are not decoration. `kubectl apply -f <dir>/` visits a
+// directory in lexical order, so they put each Role ahead of the RoleBinding
+// that references it, and they keep the reading order an operator sees when
+// they list the directory the same as the order the objects take effect in.
+const (
+	roleFileName               = "01-role.yaml"
+	roleBindingFileName        = "02-rolebinding.yaml"
+	clusterRoleFileName        = "03-clusterrole.yaml"
+	clusterRoleBindingFileName = "04-clusterrolebinding.yaml"
+)
+
+// ManifestOptions selects the ServiceAccount that
+// BuildServiceAccountRoleManifests renders RBAC for.
+type ManifestOptions struct {
+	// Namespace is the namespace of the ServiceAccount, and the namespace
+	// the rendered Role and RoleBinding declare. Required.
 	Namespace string
 
-	// ServiceAccountName is the EXACT name of an already-existing
-	// ServiceAccount. Required; provisioning fails with ErrCodeNotFound
-	// when no such ServiceAccount exists, because the whole point is to
-	// grant permissions to an identity the operator created and controls
-	// (typically one carrying IRSA or GKE Workload Identity annotations).
+	// ServiceAccountName is the name of the ServiceAccount the rendered
+	// RoleBinding and ClusterRoleBinding name as their subject. Required.
+	//
+	// It is NOT verified to exist: rendering contacts no cluster, by
+	// design (see BuildServiceAccountRoleManifests). A name that does not
+	// resolve produces manifests that grant nothing, which the operator
+	// sees when they review the files or when the ServiceAccount they
+	// meant to name still cannot snapshot.
 	ServiceAccountName string
 
-	// DiscoverNetwork also grants the cluster-scoped MUTATING rules that
+	// DiscoverNetwork also renders the cluster-scoped MUTATING rules that
 	// `aicr snapshot --discover-network` needs — nodes: patch,
 	// pods/exec: create, and CRD, namespace, DaemonSet and namespaced-RBAC
 	// create/delete (see discoverNetworkClusterRules).
 	//
-	// Unlike a run-scoped grant, this one is permanent: the ServiceAccount
-	// carries those permissions until the operator removes them, not for
-	// one run's lifetime.
+	// The rendered ClusterRole carries an explicit warning header
+	// enumerating each mutating rule and the discovery step it exists for,
+	// because deciding whether to grant them is the whole reason these
+	// manifests are written out instead of applied.
 	DiscoverNetwork bool
 }
 
-// ProvisionResult names what ProvisionServiceAccountRoles created or
-// updated, so a caller can report it without rebuilding the names.
-type ProvisionResult struct {
-	Namespace          string
-	ServiceAccountName string
-	Role               string
-	RoleBinding        string
-	ClusterRole        string
-	ClusterRoleBinding string
+// Manifest is one rendered RBAC object: the bytes to write, the file name to
+// write them under, and the object's kind and name so a caller can report
+// what it wrote without re-deriving either.
+type Manifest struct {
+	// FileName is the name of the file within the output directory. It is
+	// a bare file name, never a path.
+	FileName string
 
-	// DiscoverNetwork echoes ProvisionOptions.DiscoverNetwork: it is the
-	// difference between a read-only grant and one carrying cluster-scoped
-	// mutating rules, so a caller reporting the result must be able to say
-	// which was provisioned.
-	DiscoverNetwork bool
+	// Kind is the Kubernetes kind ("Role", "RoleBinding", "ClusterRole",
+	// "ClusterRoleBinding").
+	Kind string
+
+	// Name is the object's metadata.name.
+	Name string
+
+	// Content is the complete file body: a YAML comment header explaining
+	// what the object grants and why the agent needs it, followed by the
+	// object itself.
+	Content []byte
 }
 
-// ProvisionServiceAccountRoles grants the snapshot agent's permissions to an
-// already-existing, operator-supplied ServiceAccount by creating a Role,
-// RoleBinding, ClusterRole and ClusterRoleBinding for it.
+// BuildServiceAccountRoleManifests renders the Role, RoleBinding,
+// ClusterRole and ClusterRoleBinding that grant the snapshot agent's
+// permissions to an operator-supplied ServiceAccount.
 //
-// These four objects are PERMANENT and deliberately outside every run's
-// lifecycle: they carry no run-ID label, they never enter any Deployer's
-// created-set, and no run's Cleanup deletes them. Removing them is the
-// operator's job. That is the counterpart to Config.ServiceAccountName's
-// exact-if-exists behavior, where a run that adopts an existing
-// ServiceAccount creates and deletes no RBAC of its own.
+// It APPLIES NOTHING and contacts no cluster. There is no clientset, no
+// ServiceAccount lookup and no permission pre-flight on this path, so it
+// works with no kubeconfig and no cluster privileges at all. Applying the
+// manifests, and deleting them when the grant is no longer wanted, is the
+// operator's decision and the operator's command.
 //
-// The call is idempotent: each object is created, or updated in place when
-// it already exists, so re-running it after an aicr upgrade refreshes the
-// rules rather than failing or leaving a stale rule set behind.
+// That is deliberate. The rules being granted include, under
+// DiscoverNetwork, cluster-scoped mutating permissions (nodes: patch,
+// pods/exec: create, CRD create) that outlive any single run. An operator
+// consenting to that should be able to read exactly what they are granting
+// first, which a command that provisions on their behalf does not allow.
 //
-// Trade-off the caller must surface to the operator: an adopted
-// ServiceAccount waives per-run permission isolation. Concurrent runs using
-// it share its grants, and a DiscoverNetwork provisioning leaves mutating
-// cluster permissions in place permanently rather than for one run.
-func ProvisionServiceAccountRoles(ctx context.Context, clientset kubernetes.Interface, opts ProvisionOptions) (*ProvisionResult, error) {
+// Every rule set comes from namespacedRules and clusterRules — the same
+// definitions the run-scoped ensureRole and ensureClusterRole build from —
+// so a rendered manifest can never drift from what a run-owned grant
+// carries.
+//
+// The objects are NOT run-scoped: they carry no run-ID label, never enter a
+// Deployer's created-set, and no run's Cleanup deletes them. Teardown is
+// `kubectl delete -f <dir>/`.
+//
+// Trade-off the caller must surface to the operator: a shared ServiceAccount
+// waives per-run permission isolation. Concurrent runs using it share its
+// grants, and a DiscoverNetwork grant leaves mutating cluster permissions in
+// place until the operator removes them.
+func BuildServiceAccountRoleManifests(opts ManifestOptions) ([]Manifest, error) {
 	if strings.TrimSpace(opts.Namespace) == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"namespace is required: it is where the ServiceAccount, Role and RoleBinding live")
+			"namespace is required: it is the namespace the rendered Role and RoleBinding declare")
 	}
 	if strings.TrimSpace(opts.ServiceAccountName) == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			"ServiceAccount name is required: provisioning grants permissions to an existing ServiceAccount, it does not create one")
+			"ServiceAccount name is required: the rendered bindings need a subject to name")
 	}
 
 	// Both halves of each composed name are valid on their own, but their
-	// concatenation can exceed the length ceiling. Reject that here, before
-	// anything is created, rather than as an opaque apiserver "Invalid
-	// value: metadata.name" partway through.
+	// concatenation can exceed the length ceiling. Reject that here, while
+	// rendering, rather than leaving the operator to discover it as an
+	// opaque apiserver "Invalid value: metadata.name" at apply time.
 	roleName := provisionedRoleName(opts.ServiceAccountName)
 	clusterRoleName := provisionedClusterRoleName(opts.Namespace, opts.ServiceAccountName)
 	for _, name := range []string{roleName, clusterRoleName} {
@@ -132,52 +161,321 @@ func ProvisionServiceAccountRoles(ctx context.Context, clientset kubernetes.Inte
 			map[string]any{ctxKeyValue: opts.ServiceAccountName, ctxKeyResolvedName: name})
 	}
 
-	// Fail closed before creating anything when the ServiceAccount is
-	// absent. Provisioning permissions for an identity that does not exist
-	// would leave four dangling objects and a binding to nothing, and the
-	// most likely cause is a typo the operator needs to see.
-	if _, err := clientset.CoreV1().ServiceAccounts(opts.Namespace).
-		Get(ctx, opts.ServiceAccountName, metav1.GetOptions{}); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil, errors.NewWithContext(errors.ErrCodeNotFound,
-				fmt.Sprintf("ServiceAccount %q not found in namespace %q; create it first (aicr grants permissions to an existing ServiceAccount, it never creates one)",
-					opts.ServiceAccountName, opts.Namespace),
-				map[string]any{attrServiceAccount: opts.ServiceAccountName, attrNamespace: opts.Namespace})
-		}
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read the target ServiceAccount", err)
-	}
-
 	subjects := []rbacv1.Subject{{
 		Kind:      kindServiceAccount,
 		Name:      opts.ServiceAccountName,
 		Namespace: opts.Namespace,
 	}}
-
-	if err := provisionRole(ctx, clientset, opts.Namespace, roleName); err != nil {
-		return nil, err
+	// Each object gets its own ObjectMeta rather than sharing one value:
+	// ObjectMeta copies by value but its Labels map does not, and four
+	// objects aliasing one map is a mutation hazard for anything that later
+	// adjusts labels per object.
+	namespacedMeta := func() metav1.ObjectMeta {
+		return metav1.ObjectMeta{Name: roleName, Namespace: opts.Namespace, Labels: provisionedLabels()}
 	}
-	if err := provisionRoleBinding(ctx, clientset, opts.Namespace, roleName, subjects); err != nil {
-		return nil, err
-	}
-	if err := provisionClusterRole(ctx, clientset, clusterRoleName, opts.DiscoverNetwork); err != nil {
-		return nil, err
-	}
-	if err := provisionClusterRoleBinding(ctx, clientset, clusterRoleName, subjects); err != nil {
-		return nil, err
+	clusterMeta := func() metav1.ObjectMeta {
+		return metav1.ObjectMeta{Name: clusterRoleName, Labels: provisionedLabels()}
 	}
 
-	return &ProvisionResult{
-		Namespace:          opts.Namespace,
-		ServiceAccountName: opts.ServiceAccountName,
-		Role:               roleName,
-		RoleBinding:        roleName,
-		ClusterRole:        clusterRoleName,
-		ClusterRoleBinding: clusterRoleName,
-		DiscoverNetwork:    opts.DiscoverNetwork,
-	}, nil
+	objects := []struct {
+		fileName string
+		kind     string
+		name     string
+		header   string
+		object   any
+	}{
+		{
+			fileName: roleFileName,
+			kind:     kindRole,
+			name:     roleName,
+			header:   roleHeader(roleName, opts.Namespace, opts.ServiceAccountName),
+			object: &rbacv1.Role{
+				TypeMeta:   rbacTypeMeta(kindRole),
+				ObjectMeta: namespacedMeta(),
+				Rules:      namespacedRules(),
+			},
+		},
+		{
+			fileName: roleBindingFileName,
+			kind:     kindRoleBinding,
+			name:     roleName,
+			header:   roleBindingHeader(roleName, opts.Namespace, opts.ServiceAccountName),
+			object: &rbacv1.RoleBinding{
+				TypeMeta:   rbacTypeMeta(kindRoleBinding),
+				ObjectMeta: namespacedMeta(),
+				Subjects:   subjects,
+				RoleRef:    rbacv1.RoleRef{APIGroup: rbacAPIGroup, Kind: kindRole, Name: roleName},
+			},
+		},
+		{
+			fileName: clusterRoleFileName,
+			kind:     kindClusterRole,
+			name:     clusterRoleName,
+			header:   clusterRoleHeader(clusterRoleName, opts.ServiceAccountName, opts.DiscoverNetwork),
+			object: &rbacv1.ClusterRole{
+				TypeMeta:   rbacTypeMeta(kindClusterRole),
+				ObjectMeta: clusterMeta(),
+				Rules:      clusterRules(opts.DiscoverNetwork),
+			},
+		},
+		{
+			fileName: clusterRoleBindingFileName,
+			kind:     kindClusterRoleBinding,
+			name:     clusterRoleName,
+			header:   clusterRoleBindingHeader(clusterRoleName, opts.Namespace, opts.ServiceAccountName),
+			object: &rbacv1.ClusterRoleBinding{
+				TypeMeta:   rbacTypeMeta(kindClusterRoleBinding),
+				ObjectMeta: clusterMeta(),
+				Subjects:   subjects,
+				RoleRef:    rbacv1.RoleRef{APIGroup: rbacAPIGroup, Kind: kindClusterRole, Name: clusterRoleName},
+			},
+		},
+	}
+
+	manifests := make([]Manifest, 0, len(objects))
+	for _, o := range objects {
+		content, err := renderManifest(o.header, o.object, opts.ServiceAccountName)
+		if err != nil {
+			return nil, err
+		}
+		manifests = append(manifests, Manifest{
+			FileName: o.fileName,
+			Kind:     o.kind,
+			Name:     o.name,
+			Content:  content,
+		})
+	}
+	return manifests, nil
 }
 
-// provisionedRoleName returns the permanent Role and RoleBinding name for a
+// rbacTypeMeta returns the apiVersion/kind pair a standalone manifest needs.
+// The typed objects client-go hands back leave TypeMeta empty — the wire
+// format carries it out of band — so a file written from one is unusable
+// with `kubectl apply` until it is set explicitly.
+func rbacTypeMeta(kind string) metav1.TypeMeta {
+	return metav1.TypeMeta{APIVersion: rbacv1.SchemeGroupVersion.String(), Kind: kind}
+}
+
+// renderManifest assembles one file: the explanatory header, the marshaled
+// object, and the shared trailer that states nothing was applied and how to
+// apply and revoke.
+//
+// Marshaling goes through sigs.k8s.io/yaml, which encodes the typed struct
+// via encoding/json rather than walking a Go map, so the field order is the
+// struct's and two runs over the same inputs produce identical bytes.
+func renderManifest(header string, obj any, serviceAccount string) ([]byte, error) {
+	body, err := yaml.Marshal(obj)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to render the RBAC manifest", err)
+	}
+	var buf strings.Builder
+	buf.WriteString(header)
+	buf.WriteString(manifestTrailer(serviceAccount))
+	buf.WriteString("---\n")
+	buf.Write(body)
+	return []byte(buf.String()), nil
+}
+
+// manifestTrailer is the block every rendered file ends its header with. It
+// repeats on all four because an operator may open, review, and act on one
+// file alone, and the single fact none of them can afford to omit is that
+// nothing has been applied yet.
+func manifestTrailer(serviceAccount string) string {
+	return fmt.Sprintf(`#
+# Generated by: aicr snapshot --add-roles-to-service-account %s
+#
+# NOTHING HAS BEEN APPLIED TO YOUR CLUSTER. aicr wrote these files and
+# contacted no cluster to do it. Review them, then grant and revoke yourself:
+#
+#   kubectl apply  -f <this directory>/     # grant the permissions
+#   kubectl delete -f <this directory>/     # revoke them again
+#
+# No aicr run creates, refreshes, or deletes these objects. They last until
+# you delete them.
+#
+`, serviceAccount)
+}
+
+// roleHeader explains the namespaced grant: two rules, both confined to one
+// namespace, and what the agent does with each.
+func roleHeader(name, namespace, serviceAccount string) string {
+	return fmt.Sprintf(`# aicr snapshot agent -- namespaced permissions
+#
+#   Role/%s
+#   in namespace %s
+#
+# Bound to ServiceAccount %q by %s.
+#
+# Grants only what the agent Job needs inside this one namespace:
+#
+#   configmaps: create, get, update, patch
+#     The agent runs as a Kubernetes Job and cannot hand its result back to
+#     the CLI directly. It stages the snapshot it collected in a ConfigMap
+#     in this namespace and the CLI reads that ConfigMap. Confined to this
+#     namespace: it grants nothing in any other.
+#
+#   pods: get, list
+#     The agent reads its own pod to learn which node it was scheduled onto,
+#     and lists pods when collecting workload state.
+#
+# Read-mostly and namespace-local: nothing here is cluster-scoped, and
+# nothing here can modify a node, a CRD, or any workload.
+`, name, namespace, serviceAccount, roleBindingFileName)
+}
+
+// roleBindingHeader explains that this file is what makes the Role take
+// effect, and states the consequence of the unverified ServiceAccount name:
+// Kubernetes accepts a binding to a subject that does not exist and it
+// simply grants nothing, so a typo fails silently.
+func roleBindingHeader(name, namespace, serviceAccount string) string {
+	return fmt.Sprintf(`# aicr snapshot agent -- binds the namespaced permissions
+#
+#   RoleBinding/%[1]s
+#   in namespace %[2]s
+#     Role/%[1]s  ->  ServiceAccount %[2]s/%[3]s
+#
+# Applying this is what actually gives ServiceAccount %[3]q the rules
+# in %[4]s. Until it is applied, that Role grants nothing to anyone.
+#
+# CHECK THE NAME FIRST. aicr rendered these manifests without contacting a
+# cluster, so it did not verify that this ServiceAccount exists. Kubernetes
+# accepts a binding whose subject does not exist and simply grants nothing,
+# so a typo here fails silently rather than loudly:
+#
+#   kubectl get serviceaccount %[3]s -n %[2]s
+#
+# The ServiceAccount must be one you created and control -- typically one
+# carrying IRSA (eks.amazonaws.com/role-arn) or GKE Workload Identity
+# (iam.gke.io/gcp-service-account) annotations. aicr never creates it.
+`, name, namespace, serviceAccount, roleFileName)
+}
+
+// clusterRoleHeader explains the cluster-scoped grant. Without
+// discoverNetwork it is entirely read-only and says so; with it, the
+// mutating rules get a rule-by-rule account of the discovery step each one
+// exists for, since that is the grant an operator most needs to read before
+// consenting to it.
+func clusterRoleHeader(name, serviceAccount string, discoverNetwork bool) string {
+	header := fmt.Sprintf(`# aicr snapshot agent -- cluster-scoped permissions
+#
+#   ClusterRole/%s
+#   (cluster-scoped -- these rules apply in EVERY namespace)
+#
+# Bound to ServiceAccount %q by %s.
+#
+# The baseline rule set below is READ-ONLY -- every verb is get, list or
+# watch, and nothing in it creates, patches, or deletes anything:
+#
+#   nodes: get, list
+#     Node inventory: labels, taints, allocatable capacity, kubelet and
+#     container-runtime versions, OS image.
+#
+#   pods: get, list
+#     Cluster-wide workload inventory, used to detect which GPU and
+#     networking components are already deployed.
+#
+#   nvidia.com clusterpolicies: get, list
+#     GPU Operator ClusterPolicy: the driver, toolkit, and device-plugin
+#     configuration currently in effect.
+#
+#   slinky.slurm.net controllers, nodesets, loginsets, restapis,
+#   accountings: list
+#     Slurm-on-Kubernetes topology, when Slinky is installed.
+#
+#   k8s.mariadb.com mariadbs: list
+#     The MariaDB instance backing Slurm accounting, when present.
+`, name, serviceAccount, clusterRoleBindingFileName)
+	if !discoverNetwork {
+		return header
+	}
+	return header + discoverNetworkHeaderSection()
+}
+
+// discoverNetworkHeaderSection is the warning block appended to the
+// ClusterRole manifest when DiscoverNetwork is set. Each rule is named
+// alongside the concrete discovery step that needs it, so an operator
+// reading "nodes: patch" can tell from the file why it is there.
+func discoverNetworkHeaderSection() string {
+	return `#
+# ==========================================================================
+# WARNING -- --discover-network was requested, so this ClusterRole ALSO
+# carries MUTATING, cluster-scoped rules. Read them before you apply it.
+# ==========================================================================
+#
+# Live network discovery (k8s-launch-kit) does not read topology from the
+# API. It stands up a probe DaemonSet, execs into it, and writes what it
+# learns back onto your cluster. Every mutating rule below maps to one
+# concrete step of that flow:
+#
+#   nodes: patch
+#     Writes nvidia.kubernetes-launch-kit.machine and .gpu labels onto every
+#     node discovery matches. This modifies YOUR nodes, and the labels
+#     remain after the run finishes.
+#
+#   pods/exec: create
+#     Execs into each probe pod to read NIC VPD and link metadata via the
+#     in-pod CLI. Note that pods/exec: create at cluster scope permits
+#     running commands in ANY pod in the cluster, not only the probe pods.
+#
+#   namespaces: get, create, delete
+#   apps daemonsets: get, list, watch, create, delete
+#   serviceaccounts, configmaps: get, create, delete
+#   rbac.authorization.k8s.io roles, rolebindings: get, create, delete
+#     Discovery creates the nvidia-k8s-launch-kit namespace, deploys the
+#     nic-configuration-daemon DaemonSet and its supporting RBAC into it,
+#     and deletes the namespace when it is done.
+#
+#   apiextensions.k8s.io customresourcedefinitions:
+#     get, list, create, update, patch
+#     Installs the nic-configuration-operator CRDs (NicDevice,
+#     NicClusterPolicy) when they are absent. This is a cluster-wide schema
+#     change that outlives the run.
+#
+#   configuration.net.nvidia.com nicdevices: get, list
+#     Reads the NicDevice CRs the probe daemon publishes.
+#
+#   mellanox.com nicclusterpolicies: get, patch
+#     Server-side-applies the NicConfigurationOperator section of YOUR
+#     existing NicClusterPolicy.
+#
+# These permissions last as long as the objects do -- they are NOT scoped to
+# one run. A run that lets aicr create its own ServiceAccount instead gets
+# the same rules for the lifetime of that one run and has them revoked at
+# cleanup. If you need discovery only occasionally, prefer that, or keep a
+# separate ServiceAccount used only for discovery runs.
+`
+}
+
+// clusterRoleBindingHeader explains the cluster-scoped binding and warns
+// about the one hazard aicr can no longer detect for the operator: the
+// generated name is not injective, so an apply can silently retarget an
+// existing binding. Reading the file is the check that replaces the cluster
+// read the old provisioning path performed.
+func clusterRoleBindingHeader(name, namespace, serviceAccount string) string {
+	return fmt.Sprintf(`# aicr snapshot agent -- binds the cluster-scoped permissions
+#
+#   ClusterRoleBinding/%[1]s
+#   (cluster-scoped)
+#     ClusterRole/%[1]s  ->  ServiceAccount %[2]s/%[3]s
+#
+# Applying this is what gives ServiceAccount %[3]q the rules in
+# %[4]s, across every namespace in the cluster.
+#
+# CHECK FOR A NAME COLLISION FIRST. This name joins the namespace and the
+# ServiceAccount name with "-", which is not injective: namespace "a-b" with
+# ServiceAccount "c" and namespace "a" with ServiceAccount "b-c" both compose
+# "aicr-agent-a-b-c-rbac". aicr contacted no cluster and could not check.
+# Applying over an existing binding of this name would retarget it and revoke
+# the other ServiceAccount's cluster permissions:
+#
+#   kubectl get clusterrolebinding %[1]s -o yaml
+#
+# If it already exists and names a different subject, rename one of the two
+# namespaces or ServiceAccounts so the generated names differ.
+`, name, namespace, serviceAccount, clusterRoleFileName)
+}
+
+// provisionedRoleName returns the Role and RoleBinding name for a
 // ServiceAccount. It is injective within a namespace — the name is a pure
 // function of the ServiceAccount name, and a ServiceAccount name is unique
 // in its namespace — so two ServiceAccounts can never share these objects.
@@ -185,20 +483,20 @@ func provisionedRoleName(serviceAccount string) string {
 	return provisionedNamePrefix + serviceAccount + provisionedNameSuffix
 }
 
-// provisionedClusterRoleName returns the permanent ClusterRole and
-// ClusterRoleBinding name for a ServiceAccount. The namespace is part of the
-// name because these objects are cluster-scoped and the same ServiceAccount
-// name can exist in several namespaces.
+// provisionedClusterRoleName returns the ClusterRole and ClusterRoleBinding
+// name for a ServiceAccount. The namespace is part of the name because these
+// objects are cluster-scoped and the same ServiceAccount name can exist in
+// several namespaces.
 //
 // Joining two "-"-bearing segments is not injective ("a-b"/"c" and
-// "a"/"b-c" compose the same string), so provisionClusterRoleBinding
-// additionally refuses to retarget a binding that already names a different
-// subject rather than silently revoking the first ServiceAccount's grants.
+// "a"/"b-c" compose the same string). Nothing here can detect that — no
+// cluster is read — so the rendered ClusterRoleBinding warns about it in its
+// header and tells the operator how to check before applying.
 func provisionedClusterRoleName(namespace, serviceAccount string) string {
 	return provisionedNamePrefix + namespace + "-" + serviceAccount + provisionedNameSuffix
 }
 
-// provisionedLabels is the label set stamped on every permanent object.
+// provisionedLabels is the label set stamped on every rendered object.
 // It deliberately omits labels.RunID: these objects belong to no run, so
 // Deployer.createdByThisRun can never match one and no run's Cleanup can
 // reclaim it. The component value is what distinguishes them from the
@@ -209,141 +507,4 @@ func provisionedLabels() map[string]string {
 		labels.ManagedBy: labels.ValueAICR,
 		labels.Component: labels.ValueAgentRBAC,
 	}
-}
-
-// provisionRole creates the permanent Role, or refreshes its rules in place
-// when it already exists so an aicr upgrade that changes the rule set takes
-// effect on a re-run instead of leaving stale rules behind.
-func provisionRole(ctx context.Context, clientset kubernetes.Interface, namespace, name string) error {
-	role := &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			Labels:    provisionedLabels(),
-		},
-		Rules: namespacedRules(),
-	}
-	_, err := clientset.RbacV1().Roles(namespace).Create(ctx, role, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		if _, err = clientset.RbacV1().Roles(namespace).Update(ctx, role, metav1.UpdateOptions{}); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update the permanent Role", err)
-		}
-		return nil
-	}
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create the permanent Role", err)
-	}
-	return nil
-}
-
-// provisionRoleBinding creates or refreshes the permanent RoleBinding.
-// It needs no subject-collision guard: the name is a pure function of the
-// ServiceAccount name within one namespace, so it can only ever refer to
-// the ServiceAccount it is being written for.
-func provisionRoleBinding(ctx context.Context, clientset kubernetes.Interface, namespace, name string, subjects []rbacv1.Subject) error {
-	rb := &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-			Labels:    provisionedLabels(),
-		},
-		Subjects: subjects,
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: rbacAPIGroup,
-			Kind:     kindRole,
-			Name:     name,
-		},
-	}
-	_, err := clientset.RbacV1().RoleBindings(namespace).Create(ctx, rb, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		if _, err = clientset.RbacV1().RoleBindings(namespace).Update(ctx, rb, metav1.UpdateOptions{}); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update the permanent RoleBinding", err)
-		}
-		return nil
-	}
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create the permanent RoleBinding", err)
-	}
-	return nil
-}
-
-// provisionClusterRole creates or refreshes the permanent ClusterRole.
-func provisionClusterRole(ctx context.Context, clientset kubernetes.Interface, name string, discoverNetwork bool) error {
-	cr := &rbacv1.ClusterRole{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   name,
-			Labels: provisionedLabels(),
-		},
-		Rules: clusterRules(discoverNetwork),
-	}
-	_, err := clientset.RbacV1().ClusterRoles().Create(ctx, cr, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		if _, err = clientset.RbacV1().ClusterRoles().Update(ctx, cr, metav1.UpdateOptions{}); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update the permanent ClusterRole", err)
-		}
-		return nil
-	}
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create the permanent ClusterRole", err)
-	}
-	return nil
-}
-
-// provisionClusterRoleBinding creates or refreshes the permanent
-// ClusterRoleBinding.
-//
-// Before updating an existing one it checks the subject: because the
-// cluster-scoped name joins namespace and ServiceAccount with "-", two
-// distinct pairs can compose the same name (see
-// provisionedClusterRoleName). Overwriting a binding that names a different
-// ServiceAccount would silently revoke that ServiceAccount's cluster grants,
-// so refuse with ErrCodeConflict — the request is well formed, the cluster
-// state is what makes it unserviceable.
-func provisionClusterRoleBinding(ctx context.Context, clientset kubernetes.Interface, name string, subjects []rbacv1.Subject) error {
-	crb := &rbacv1.ClusterRoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:   name,
-			Labels: provisionedLabels(),
-		},
-		Subjects: subjects,
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: rbacAPIGroup,
-			Kind:     kindClusterRole,
-			Name:     name,
-		},
-	}
-	_, err := clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		existing, getErr := clientset.RbacV1().ClusterRoleBindings().Get(ctx, name, metav1.GetOptions{})
-		if getErr != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to read the existing ClusterRoleBinding", getErr)
-		}
-		if other := conflictingSubject(existing.Subjects, subjects[0]); other != "" {
-			return errors.NewWithContext(errors.ErrCodeConflict,
-				fmt.Sprintf("ClusterRoleBinding %q already grants these permissions to %s; updating it would revoke them. Rename one of the two ServiceAccounts or namespaces so the generated names differ",
-					name, other),
-				map[string]any{ctxKeyResolvedName: name, "existingSubject": other})
-		}
-		if _, err = clientset.RbacV1().ClusterRoleBindings().Update(ctx, crb, metav1.UpdateOptions{}); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update the permanent ClusterRoleBinding", err)
-		}
-		return nil
-	}
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create the permanent ClusterRoleBinding", err)
-	}
-	return nil
-}
-
-// conflictingSubject returns a description of the first subject in existing
-// that is not want, or "" when every subject is want (the idempotent
-// re-provisioning case) or existing is empty.
-func conflictingSubject(existing []rbacv1.Subject, want rbacv1.Subject) string {
-	for _, s := range existing {
-		if s.Kind == want.Kind && s.Name == want.Name && s.Namespace == want.Namespace {
-			continue
-		}
-		return fmt.Sprintf("%s %q in namespace %q", s.Kind, s.Name, s.Namespace)
-	}
-	return ""
 }

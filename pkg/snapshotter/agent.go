@@ -78,8 +78,8 @@ type AgentConfig struct {
 	//     (eks.amazonaws.com/role-arn) or GKE Workload Identity
 	//     (iam.gke.io/gcp-service-account) annotations stays usable: both
 	//     providers pin trust to the ServiceAccount NAME, which a
-	//     run-scoped name can never satisfy. Grant it the agent's
-	//     permissions once with ProvisionAgentRoles.
+	//     run-scoped name can never satisfy. Generate its RBAC manifests
+	//     with WriteAgentRoleManifests, then apply them out of band.
 	//   - Otherwise: a name prefix. The run creates "<prefix>-<RunID>"
 	//     and the full run-scoped RBAC set, and deletes them at cleanup.
 	//
