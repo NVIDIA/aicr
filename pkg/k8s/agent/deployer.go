@@ -24,6 +24,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -158,15 +159,15 @@ func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
 	// to observe its UID. A run that fails after the agent wrote it (Job
 	// timeout, wait error, canceled context) would otherwise leak it — and
 	// with run-scoped naming that is one leaked object per failed run, not
-	// one shared object. Sweep it here: the name is run-unique, and the
-	// delete is still UID-pinned against the UID observed by the Get.
+	// one shared object. Sweep it here.
 	//
-	// The presence test reads the `created` snapshot taken above rather than
-	// re-entering the mutex (see containsKind): two separate lock
-	// acquisitions would let a concurrent recordCreated land between them,
-	// producing a snapshot without the ConfigMap and a second read reporting
-	// it present — skipping both delete paths and leaking the object.
-	if d.config.OwnsOutputConfigMap && !containsKind(created, kindConfigMap) {
+	// The name alone does not license that delete: Config.RunID is caller-
+	// settable, so a second run reusing a RunID resolves the same staging
+	// name as the first. needsStagingConfigMapSweep therefore requires this
+	// run to hold a CONFIRMED Job entry — the only way this run could have
+	// produced a staging ConfigMap at all — and deleteUnrecordedStagingConfigMap
+	// re-checks the object it finds before deleting it.
+	if d.config.OwnsOutputConfigMap && needsStagingConfigMapSweep(created) {
 		name := d.stagingConfigMapName()
 		tasks = append(tasks, task{
 			label: fmt.Sprintf("%s %q", kindConfigMap, name),
@@ -215,7 +216,20 @@ func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
 // deleteCreatedObject deletes a single created-set entry by dispatching to
 // the resource-specific delete call for obj.kind, passing obj.name and
 // obj.uid through so every delete is UID-pinned.
+//
+// An unconfirmed entry carries no UID (no Create response ever named the
+// object), so its ownership is re-established first — resolveIntentUID either
+// returns the live object's UID after proving the object carries this run's
+// labels, or reports that there is nothing this run may delete.
 func (d *Deployer) deleteCreatedObject(ctx context.Context, obj createdObject) error {
+	if !obj.confirmed {
+		uid, ours, err := d.resolveIntentUID(ctx, obj)
+		if err != nil || !ours {
+			return err
+		}
+		obj.uid = uid
+	}
+
 	switch obj.kind {
 	case kindJob:
 		return d.deleteJob(ctx, obj.name, obj.uid)
@@ -236,17 +250,114 @@ func (d *Deployer) deleteCreatedObject(ctx context.Context, obj createdObject) e
 	}
 }
 
+// resolveIntentUID re-establishes ownership of an unconfirmed created-set
+// entry — one recordIntent added whose Create response never arrived — and
+// returns the UID to pin its delete to. ours is false when this run may not
+// delete the object, in which case the caller must issue no delete at all.
+//
+// The entry's run-scoped name is not evidence: it says what this run WOULD
+// have created, not what is standing there now. Get the live object and
+// require it to carry the label set objectLabels() stamps on everything
+// Deploy creates. That set is written at creation time by this run, so:
+//
+//   - Labels match: the Create did commit and this is our object. Delete it,
+//     pinned to the UID this Get observed. (If it is replaced again between
+//     the Get and the Delete, the precondition turns that into a Conflict,
+//     which ignoreNotFoundOrConflict treats as "already gone".)
+//   - Labels do not match: whatever holds the name was not created by this
+//     run — an operator's object, another subsystem's, or a replacement made
+//     after this run's object was deleted. Deleting it would collect an
+//     object this run never owned, so fail closed and warn instead.
+//   - NotFound: nothing to reclaim.
+//
+// Residual, and deliberately not papered over: a second run that reuses this
+// run's RunID stamps an identical label set, so the two are indistinguishable
+// here. The ADR treats a duplicate RunID as an unsupported caller error —
+// every ensure* fails closed on the AlreadyExists it normally produces (see
+// discardIntent); this path is reachable only when that response was also
+// lost.
+func (d *Deployer) resolveIntentUID(ctx context.Context, obj createdObject) (uid types.UID, ours bool, err error) {
+	live, err := d.getCreatedObject(ctx, obj.kind, obj.name)
+	if k8serrors.IsNotFound(err) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, aicrerrors.Wrap(aicrerrors.ErrCodeInternal,
+			fmt.Sprintf("failed to read %s %q to confirm this run created it before deleting it", obj.kind, obj.name), err)
+	}
+
+	// A real apiserver always assigns a UID, so an empty one here means the
+	// delete could not be pinned. Refuse rather than fall back to a
+	// bare-name delete: that is exactly the blind delete this path exists
+	// to prevent.
+	if !d.createdByThisRun(live.GetLabels()) || live.GetUID() == "" {
+		slog.Warn("cleanup left behind an object it cannot prove this run created; if it is a stale orphan of this run, remove it by hand",
+			slog.String("kind", obj.kind),
+			slog.String("name", obj.name),
+			slog.String("namespace", live.GetNamespace()),
+			slog.String("uid", string(live.GetUID())),
+			slog.String("runID", d.config.RunID),
+			slog.String("objectRunID", live.GetLabels()[labels.RunID]))
+		return "", false, nil
+	}
+	return live.GetUID(), true, nil
+}
+
+// getCreatedObject reads the live object a created-set entry names. The
+// apiserver error is returned unwrapped so callers can classify it with
+// k8serrors.IsNotFound before wrapping.
+func (d *Deployer) getCreatedObject(ctx context.Context, kind, name string) (metav1.Object, error) {
+	ns := d.config.Namespace
+	switch kind {
+	case kindJob:
+		return d.clientset.BatchV1().Jobs(ns).Get(ctx, name, metav1.GetOptions{})
+	case kindServiceAccount:
+		return d.clientset.CoreV1().ServiceAccounts(ns).Get(ctx, name, metav1.GetOptions{})
+	case kindRole:
+		return d.clientset.RbacV1().Roles(ns).Get(ctx, name, metav1.GetOptions{})
+	case kindRoleBinding:
+		return d.clientset.RbacV1().RoleBindings(ns).Get(ctx, name, metav1.GetOptions{})
+	case kindClusterRole:
+		return d.clientset.RbacV1().ClusterRoles().Get(ctx, name, metav1.GetOptions{})
+	case kindClusterRoleBinding:
+		return d.clientset.RbacV1().ClusterRoleBindings().Get(ctx, name, metav1.GetOptions{})
+	case kindConfigMap:
+		return d.clientset.CoreV1().ConfigMaps(ns).Get(ctx, name, metav1.GetOptions{})
+	default:
+		return nil, aicrerrors.New(aicrerrors.ErrCodeInternal, fmt.Sprintf("cleanup: cannot read unknown created-object kind %q", kind))
+	}
+}
+
+// createdByThisRun reports whether objLabels is the label set objectLabels()
+// stamps on every object this Deployer creates. All four keys are required:
+// aicr.run/run-id alone would also match a validator-owned object carrying
+// the same ID (`aicr validate` hands one run ID to both subsystems), and an
+// empty Config.RunID must never match a label-less object.
+func (d *Deployer) createdByThisRun(objLabels map[string]string) bool {
+	if d.config.RunID == "" {
+		return false
+	}
+	return objLabels[labels.RunID] == d.config.RunID &&
+		objLabels[labels.Name] == labels.ValueAICR &&
+		objLabels[labels.ManagedBy] == labels.ValueAICR &&
+		objLabels[labels.Component] == labels.ValueSnapshotAgent
+}
+
 // uidPreconditions returns the DeleteOptions precondition pinning a delete
 // to uid, or nil when uid is the zero UID.
 //
-// A zero UID means recordIntent entered the object before its Create and no
-// Create response ever confirmed a UID (see recordIntent). Omitting the
-// precondition entirely is required — metav1.Preconditions{UID: &""} is NOT
-// equivalent to no precondition: the apiserver compares it against the live
-// object's UID and rejects every delete with a Conflict, which
-// ignoreNotFoundOrConflict then swallows as success, leaking the object this
-// entry exists to reclaim. A bare-name delete is safe here precisely because
-// the name carries this run's ID and no other run can produce it.
+// Only a confirmed entry can reach here with the zero UID: a Create response
+// named the object — establishing this run's ownership — but carried no UID.
+// A real apiserver always assigns one, so that shape belongs to fake
+// clientsets in tests; the delete then falls back to the run-scoped name the
+// Create response confirmed. Unconfirmed entries never reach here without a
+// UID (see resolveIntentUID).
+//
+// Omitting the precondition entirely is required in that case —
+// metav1.Preconditions{UID: &""} is NOT equivalent to no precondition: the
+// apiserver compares it against the live object's UID and rejects every
+// delete with a Conflict, which ignoreNotFoundOrConflict then swallows as
+// success, leaking the object this entry exists to reclaim.
 func uidPreconditions(uid types.UID) *metav1.Preconditions {
 	if uid == "" {
 		return nil

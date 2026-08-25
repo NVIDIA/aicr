@@ -28,6 +28,7 @@ import (
 	"time"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	authv1 "k8s.io/api/authorization/v1"
@@ -912,37 +913,152 @@ func TestCleanupPassesUIDPrecondition(t *testing.T) {
 	}
 }
 
-// TestCleanupDeletesUnconfirmedCreateByBareName covers the lost-Create-response
-// path: recordIntent enters an object BEFORE its Create, so an entry can reach
-// Cleanup with the zero UID. Such a delete must omit Preconditions entirely.
+// TestCleanupResolvesUnconfirmedEntryBeforeDeleting covers the
+// lost-Create-response path: recordIntent enters an object BEFORE its Create,
+// so an entry can reach Cleanup with no UID and no Create response ever having
+// named it. The run-scoped name alone is not ownership evidence — it says what
+// this run WOULD have created, not what is standing there now — so Cleanup
+// must recover the UID from the live object and prove that object carries this
+// run's labels before deleting anything.
 //
+// The "replaced under the same name" case is the one this replaces a bare-name
+// delete for: an object at that name with a different UID and someone else's
+// labels must survive, and the operator must be told it was left behind.
+//
+// Deleting by bare name with no Preconditions would collect the replacement.
 // Passing &"" instead would be worse than useless: the apiserver would compare
 // the empty UID against the live object's real one, reject every attempt with
-// a Conflict, and ignoreNotFoundOrConflict would swallow that as success —
-// leaking the very object this entry exists to reclaim. A bare-name delete is
-// safe here because the name carries this run's ID.
-func TestCleanupDeletesUnconfirmedCreateByBareName(t *testing.T) {
+// a Conflict, and ignoreNotFoundOrConflict would swallow that as success.
+func TestCleanupResolvesUnconfirmedEntryBeforeDeleting(t *testing.T) {
+	const ns = "test-ns"
+	d := NewDeployer(fake.NewClientset(), Config{Namespace: ns, RunID: testRunID})
+	saName := d.saName()
+	ourLabels := d.objectLabels()
+
+	// A replacement created after this run's object was deleted: same name,
+	// different identity. Carries a foreign run's labels, which is what a
+	// second aicr run standing an object up at this name would stamp.
+	foreignLabels := map[string]string{
+		labels.Name:      labels.ValueAICR,
+		labels.ManagedBy: labels.ValueAICR,
+		labels.Component: labels.ValueSnapshotAgent,
+		labels.RunID:     "20260822-090000-0011223344556677",
+	}
+
+	tests := []struct {
+		name       string
+		seed       *corev1.ServiceAccount // nil: nothing at the name
+		wantDelete bool
+		wantUID    types.UID // expected Preconditions.UID when wantDelete
+		wantWarn   bool
+	}{
+		{
+			name: "this run's object is deleted pinned to the recovered UID",
+			seed: &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+				Name: saName, Namespace: ns, UID: types.UID("ours-uid"), Labels: ourLabels,
+			}},
+			wantDelete: true,
+			wantUID:    types.UID("ours-uid"),
+		},
+		{
+			name:       "nothing at the name issues no delete",
+			wantDelete: false,
+		},
+		{
+			name: "a replacement under the same name survives",
+			seed: &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+				Name: saName, Namespace: ns, UID: types.UID("replacement-uid"), Labels: foreignLabels,
+			}},
+			wantDelete: false,
+			wantWarn:   true,
+		},
+		{
+			name: "an unlabeled object under the same name survives",
+			seed: &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
+				Name: saName, Namespace: ns, UID: types.UID("operators-uid"),
+			}},
+			wantDelete: false,
+			wantWarn:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			logs := captureLogs(t)
+			client := fake.NewClientset()
+			if tt.seed != nil {
+				if _, err := client.CoreV1().ServiceAccounts(ns).Create(ctx, tt.seed, metav1.CreateOptions{}); err != nil {
+					t.Fatalf("seed: %v", err)
+				}
+			}
+			deletes := spyOnDeletes(client)
+
+			run := NewDeployer(client, Config{Namespace: ns, RunID: testRunID})
+			run.recordIntent(kindServiceAccount, saName)
+
+			if err := run.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+				t.Fatalf("Cleanup() error = %v", err)
+			}
+
+			observed := deletes()
+			if !tt.wantDelete {
+				if len(observed) != 0 {
+					t.Fatalf("Cleanup issued %d deletes, want none: %+v", len(observed), observed)
+				}
+				if tt.seed != nil {
+					live, err := client.CoreV1().ServiceAccounts(ns).Get(ctx, saName, metav1.GetOptions{})
+					if err != nil {
+						t.Fatalf("Cleanup deleted an object this run cannot prove it created: %v", err)
+					}
+					if live.UID != tt.seed.UID {
+						t.Errorf("surviving object UID = %q, want %q", live.UID, tt.seed.UID)
+					}
+				}
+			} else {
+				if len(observed) != 1 {
+					t.Fatalf("Cleanup issued %d deletes, want 1: %+v", len(observed), observed)
+				}
+				if observed[0].uid == nil || *observed[0].uid != tt.wantUID {
+					t.Errorf("delete Preconditions.UID = %v, want %q", observed[0].uid, tt.wantUID)
+				}
+			}
+
+			gotWarn := strings.Contains(logs.String(), "cannot prove this run created")
+			if gotWarn != tt.wantWarn {
+				t.Errorf("warned about an ambiguous orphan = %v, want %v; logs: %s", gotWarn, tt.wantWarn, logs.String())
+			}
+			if tt.wantWarn && !strings.Contains(logs.String(), saName) {
+				t.Errorf("warning does not name the object left behind; logs: %s", logs.String())
+			}
+		})
+	}
+}
+
+// TestCleanupSurfacesIntentResolutionGetError fails closed on an apiserver
+// error other than NotFound while resolving an unconfirmed entry: cleanup can
+// neither prove the object is ours nor prove it is gone, so it must report the
+// failure rather than delete blind or silently skip.
+func TestCleanupSurfacesIntentResolutionGetError(t *testing.T) {
 	ctx := context.Background()
 	client := fake.NewClientset()
+	client.PrependReactor("get", "serviceaccounts", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewInternalError(errors.New("apiserver exploded"))
+	})
 	deletes := spyOnDeletes(client)
 
-	d := NewDeployer(client, Config{Namespace: "test-ns"})
-	d.recordIntent(kindServiceAccount, "aicr-20260821-142233-9f3a1c0b7e2d4a55")
+	d := NewDeployer(client, Config{Namespace: "test-ns", RunID: testRunID})
+	d.recordIntent(kindServiceAccount, d.saName())
 
-	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
-		t.Fatalf("Cleanup() error = %v", err)
+	err := d.Cleanup(ctx, CleanupOptions{Enabled: true})
+	if err == nil {
+		t.Fatal("Cleanup() error = nil, want the unexpected Get error surfaced")
 	}
-
-	observed := deletes()
-	if len(observed) != 1 {
-		t.Fatalf("Cleanup issued %d deletes, want 1: %+v", len(observed), observed)
+	if !strings.Contains(err.Error(), d.saName()) {
+		t.Errorf("error %q does not name the unresolved object", err)
 	}
-	if observed[0].name != "aicr-20260821-142233-9f3a1c0b7e2d4a55" {
-		t.Errorf("delete name = %q, want the recorded run-scoped name", observed[0].name)
-	}
-	if observed[0].uid != nil {
-		t.Errorf("delete carried Preconditions.UID = %q; a zero-UID entry must delete by bare name",
-			*observed[0].uid)
+	if observed := deletes(); len(observed) != 0 {
+		t.Errorf("Cleanup issued %d deletes despite an unresolvable entry: %+v", len(observed), observed)
 	}
 }
 
@@ -953,23 +1069,33 @@ func TestCleanupDeletesUnconfirmedCreateByBareName(t *testing.T) {
 // reclaims it, so the orphan would be permanent.
 //
 // The reactor below reproduces exactly that: the object is written into the
-// tracker and THEN an error is returned, so ensureServiceAccount fails while
-// the ServiceAccount exists. Cleanup must still delete it.
+// tracker — with a UID, as a real apiserver assigns and the fake ObjectTracker
+// does not — and THEN an error is returned, so ensureServiceAccount fails while
+// the ServiceAccount exists. Cleanup must still delete it, and (since the
+// Create response never named it) must delete it pinned to the UID it
+// recovers from the live object, not by bare name.
 func TestEnsureRecordsIntentBeforeCreate(t *testing.T) {
 	ctx := context.Background()
 	const ns = "test-ns"
 	client := fake.NewClientset()
+	deletes := spyOnDeletes(client)
 
 	d := NewDeployer(client, Config{Namespace: ns, RunID: testRunID})
 	saName := d.saName()
+	committedUID := types.UID(saName + "-uid")
 
 	client.PrependReactor("create", "serviceaccounts", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		ca, ok := action.(k8stesting.CreateActionImpl)
 		if !ok {
 			return false, nil, nil
 		}
-		// Commit the object the way a real apiserver would...
-		if err := client.Tracker().Create(ca.GetResource(), ca.GetObject(), ns); err != nil {
+		sa, ok := ca.GetObject().(*corev1.ServiceAccount)
+		if !ok {
+			return false, nil, nil
+		}
+		// Commit the object the way a real apiserver would, UID and all...
+		sa.UID = committedUID
+		if err := client.Tracker().Create(ca.GetResource(), sa, ns); err != nil {
 			return true, nil, err
 		}
 		// ...then lose the response on the way back to the client.
@@ -991,6 +1117,15 @@ func TestEnsureRecordsIntentBeforeCreate(t *testing.T) {
 
 	if _, err := client.CoreV1().ServiceAccounts(ns).Get(ctx, saName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 		t.Errorf("Cleanup leaked the ServiceAccount created by the lost-response Create; Get err = %v", err)
+	}
+
+	observed := deletes()
+	if len(observed) != 1 {
+		t.Fatalf("Cleanup issued %d deletes, want 1: %+v", len(observed), observed)
+	}
+	if observed[0].uid == nil || *observed[0].uid != committedUID {
+		t.Errorf("delete Preconditions.UID = %v, want the UID recovered from the live object (%q)",
+			observed[0].uid, committedUID)
 	}
 }
 
@@ -1191,6 +1326,13 @@ func TestCleanupDeletesStagingConfigMapWhenOwned(t *testing.T) {
 // its UID, so nothing was recorded. With run-scoped naming that would leak one
 // ConfigMap per failed run, so Cleanup Gets it by its run-scoped name and
 // deletes it pinned to the UID that Get returned.
+//
+// The sweep is licensed by this run holding a CONFIRMED Job — the only thing
+// that can produce a staging ConfigMap is the in-pod agent that Job runs — so
+// the Job is recorded here as Deploy would have recorded it. The seeded
+// ConfigMap carries the label set pkg/serializer's ConfigMapWriter actually
+// stamps from inside the pod: app.kubernetes.io/name plus component and
+// version, and NO aicr.run/run-id.
 func TestCleanupSweepsUnrecordedStagingConfigMap(t *testing.T) {
 	ctx := context.Background()
 	name := StagingConfigMapName(testRunID)
@@ -1199,6 +1341,7 @@ func TestCleanupSweepsUnrecordedStagingConfigMap(t *testing.T) {
 			Name:      name,
 			Namespace: "test-namespace",
 			UID:       types.UID("staging-uid"),
+			Labels:    stagingConfigMapLabels(),
 		},
 		Data: map[string]string{"snapshot.yaml": "data"},
 	}
@@ -1224,6 +1367,7 @@ func TestCleanupSweepsUnrecordedStagingConfigMap(t *testing.T) {
 	})
 
 	// Deliberately no getSnapshotFromConfigMap call: this is the failed run.
+	d.recordCreated(kindJob, d.jobName(), types.UID("job-uid"))
 	if d.hasCreated(kindConfigMap) {
 		t.Fatal("precondition: created-set must not hold the staging ConfigMap")
 	}
@@ -1237,6 +1381,137 @@ func TestCleanupSweepsUnrecordedStagingConfigMap(t *testing.T) {
 	}
 	if !sawUIDPrecondition {
 		t.Error("staging ConfigMap delete was not pinned to the observed UID")
+	}
+}
+
+// stagingConfigMapLabels returns the label set pkg/serializer's
+// ConfigMapWriter stamps on the staging ConfigMap it writes from inside the
+// agent pod (Serialize in pkg/serializer/configmap.go). Deliberately NOT
+// objectLabels(): that object is written by the in-pod agent rather than by
+// this controller, so it carries neither aicr.run/run-id nor managed-by —
+// which is why the sweep's ownership evidence is the confirmed Job, and why
+// the check on the object itself can only be app.kubernetes.io/name.
+func stagingConfigMapLabels() map[string]string {
+	return map[string]string{
+		labels.Name:      labels.ValueAICR,
+		labels.Component: header.KindSnapshot.String(),
+	}
+}
+
+// TestCleanupDuplicateRunIDKeepsFirstRunsStagingConfigMap is the
+// duplicate-RunID failure case. Config.RunID is public SDK surface and
+// deliberately settable (pinned e2e/chainsaw runs), so a second run can
+// resolve the first run's exact staging name.
+//
+// Run B reuses run A's RunID and fails on its very first AlreadyExists, before
+// recording anything. Its deferred Cleanup still runs — Cleanup is registered
+// before Deploy — and must not sweep the staging ConfigMap run A is still
+// using: run B never created a Job, so nothing it did could have produced a
+// ConfigMap at that name.
+func TestCleanupDuplicateRunIDKeepsFirstRunsStagingConfigMap(t *testing.T) {
+	ctx := context.Background()
+	const ns = "test-namespace"
+	stagingName := StagingConfigMapName(testRunID)
+
+	client := fake.NewClientset()
+	client.PrependReactor("create", "selfsubjectaccessreviews", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &authv1.SelfSubjectAccessReview{
+			Status: authv1.SubjectAccessReviewStatus{Allowed: true, Reason: "test permissions allowed"},
+		}, nil
+	})
+
+	runA := NewDeployer(client, Config{
+		Namespace:           ns,
+		Image:               "aicr:test",
+		RunID:               testRunID,
+		Output:              "cm://" + ns + "/" + stagingName,
+		OwnsOutputConfigMap: true,
+	})
+	if err := runA.Deploy(ctx); err != nil {
+		t.Fatalf("run A Deploy() error = %v", err)
+	}
+	// Run A's in-pod agent has staged its result; Deploy() itself never
+	// writes this object, so seed it the way the agent would.
+	if _, err := client.CoreV1().ConfigMaps(ns).Create(ctx, &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      stagingName,
+			Namespace: ns,
+			UID:       types.UID("run-a-staging-uid"),
+			Labels:    stagingConfigMapLabels(),
+		},
+		Data: map[string]string{"snapshot.yaml": "run A's snapshot"},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("seed run A staging ConfigMap: %v", err)
+	}
+
+	deletes := spyOnDeletes(client)
+
+	// Run B pins the SAME run ID and therefore collides on run A's
+	// ServiceAccount, the first object Deploy creates.
+	runB := NewDeployer(client, Config{
+		Namespace:           ns,
+		Image:               "aicr:test",
+		RunID:               testRunID,
+		Output:              "cm://" + ns + "/" + stagingName,
+		OwnsOutputConfigMap: true,
+	})
+	if err := runB.Deploy(ctx); err == nil {
+		t.Fatal("run B Deploy() = nil error, want AlreadyExists on the duplicate RunID")
+	}
+	if err := runB.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+		t.Fatalf("run B Cleanup() error = %v", err)
+	}
+
+	cm, err := client.CoreV1().ConfigMaps(ns).Get(ctx, stagingName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("run B's failed Cleanup deleted run A's staging ConfigMap: %v", err)
+	}
+	if cm.UID != types.UID("run-a-staging-uid") {
+		t.Errorf("staging ConfigMap UID = %q, want run A's %q", cm.UID, "run-a-staging-uid")
+	}
+	if observed := deletes(); len(observed) != 0 {
+		t.Errorf("run B's Cleanup issued %d deletes despite creating nothing: %+v", len(observed), observed)
+	}
+}
+
+// TestCleanupSweepKeepsForeignConfigMapAtStagingName is the sweep's own
+// fail-closed check, downstream of the confirmed-Job gate: a ConfigMap parked
+// at this run's staging name that does not carry app.kubernetes.io/name=aicr
+// was not written by pkg/serializer's in-pod writer, so this run did not
+// produce it. It must survive, and the operator must hear about it.
+func TestCleanupSweepKeepsForeignConfigMapAtStagingName(t *testing.T) {
+	ctx := context.Background()
+	const ns = "test-namespace"
+	name := StagingConfigMapName(testRunID)
+	logs := captureLogs(t)
+
+	client := fake.NewClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: ns,
+			UID:       types.UID("someone-elses-uid"),
+			Labels:    map[string]string{"app.kubernetes.io/name": "not-aicr"},
+		},
+		Data: map[string]string{"unrelated": "data"},
+	})
+
+	d := NewDeployer(client, Config{
+		Namespace:           ns,
+		RunID:               testRunID,
+		Output:              "cm://" + ns + "/" + name,
+		OwnsOutputConfigMap: true,
+	})
+	d.recordCreated(kindJob, d.jobName(), types.UID("job-uid"))
+
+	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+
+	if _, err := client.CoreV1().ConfigMaps(ns).Get(ctx, name, metav1.GetOptions{}); err != nil {
+		t.Errorf("Cleanup deleted a ConfigMap this run did not write: %v", err)
+	}
+	if !strings.Contains(logs.String(), name) {
+		t.Errorf("no warning naming the ConfigMap left behind; logs: %s", logs.String())
 	}
 }
 
@@ -1285,6 +1560,7 @@ func TestCleanupSweepNoOpWhenStagingConfigMapAbsent(t *testing.T) {
 		Output:              "cm://test-namespace/" + StagingConfigMapName(testRunID),
 		OwnsOutputConfigMap: true,
 	})
+	d.recordCreated(kindJob, d.jobName(), types.UID("job-uid"))
 
 	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
 		t.Fatalf("Cleanup() error = %v, want nil when the staging ConfigMap was never written", err)
@@ -1308,6 +1584,7 @@ func TestCleanupSweepSurfacesUnexpectedGetError(t *testing.T) {
 		Output:              "cm://test-namespace/" + StagingConfigMapName(testRunID),
 		OwnsOutputConfigMap: true,
 	})
+	d.recordCreated(kindJob, d.jobName(), types.UID("job-uid"))
 
 	err := d.Cleanup(ctx, CleanupOptions{Enabled: true})
 	if err == nil {

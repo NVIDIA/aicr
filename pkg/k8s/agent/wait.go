@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -84,8 +85,24 @@ func (d *Deployer) deleteStagingConfigMap(ctx context.Context, name string, uid 
 // the in-pod agent wrote it but the controller never observed it — the run
 // failed between the agent's write and getSnapshotFromConfigMap, so there is
 // no recorded UID to pin the delete to. It Gets the ConfigMap first and pins
-// the delete to the UID it observes there, so the sweep is still
-// ownership-scoped rather than name-only.
+// the delete to the UID it observes there.
+//
+// Ownership is NOT inferred from the name. Config.RunID is caller-settable
+// (public SDK surface), so two runs can resolve the same staging name, and a
+// Get plus a UID-pinned delete would only prove the object did not change
+// between the two calls. Cleanup gates this call on a confirmed Job entry
+// (needsStagingConfigMapSweep) — this run cannot have produced a staging
+// ConfigMap without the Job whose in-pod agent writes it — and this function
+// re-checks the object it finds.
+//
+// That re-check is app.kubernetes.io/name only. The staging ConfigMap is
+// written by pkg/serializer's ConfigMapWriter from inside the pod, which
+// stamps name/component/version and — unlike objectLabels() — no
+// aicr.run/run-id and no managed-by, so createdByThisRun() does not apply to
+// it. The check still rules out an unrelated ConfigMap parked at this name, and
+// component is deliberately not required: its value is the snapshot Kind
+// written by the agent image, which may be a different aicr version than the
+// controller.
 //
 // Only called from Cleanup, and only when Config.OwnsOutputConfigMap is true.
 // That flag means Output is the run-scoped staging URI pkg/snapshotter builds
@@ -103,6 +120,14 @@ func (d *Deployer) deleteUnrecordedStagingConfigMap(ctx context.Context) error {
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal,
 			fmt.Sprintf("failed to get staging ConfigMap %s/%s", d.config.Namespace, name), err)
+	}
+	if cm.Labels[labels.Name] != labels.ValueAICR {
+		slog.Warn("cleanup left behind the ConfigMap at this run's staging name: it does not look like an aicr snapshot artifact, so this run did not write it",
+			slog.String("namespace", d.config.Namespace),
+			slog.String("name", name),
+			slog.String("uid", string(cm.UID)),
+			slog.String("runID", d.config.RunID))
+		return nil
 	}
 	return d.deleteStagingConfigMap(ctx, cm.Name, cm.UID)
 }

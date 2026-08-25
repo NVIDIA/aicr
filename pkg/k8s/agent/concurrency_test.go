@@ -299,8 +299,10 @@ func TestConcurrentRuns(t *testing.T) {
 	// discriminate created-set scoping are TestCleanupPassesUIDPrecondition
 	// (every delete carries the UID from its Create response — a value no
 	// name-derived delete list can supply) and
-	// TestCleanupDeletesUnconfirmedCreateByBareName, both in
-	// deployer_test.go.
+	// TestCleanupResolvesUnconfirmedEntryBeforeDeleting, both in
+	// deployer_test.go. The duplicate-RunID case, where name scoping cannot
+	// help because both runs compute the same names, is
+	// TestCleanupDuplicateRunIDKeepsFirstRunsStagingConfigMap.
 	t.Run("run A Cleanup leaves its own unowned staging ConfigMap intact", func(t *testing.T) {
 		if _, err := clientset.CoreV1().ConfigMaps(concurrencyTestNamespace).Get(ctx, dA.stagingConfigMapName(), metav1.GetOptions{}); err != nil {
 			t.Errorf("the ConfigMap at run A's staging name %q should survive run A's Cleanup (OwnsOutputConfigMap is false, so it is not run A's to delete), err = %v", dA.stagingConfigMapName(), err)

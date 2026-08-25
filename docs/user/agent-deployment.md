@@ -426,6 +426,34 @@ kubectl get rolebinding -n gpu-operator -l app.kubernetes.io/name=aicr,app.kuber
 kubectl get serviceaccount -n gpu-operator -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent
 ```
 
+### Cleanup Left a Resource Behind
+
+Cleanup removes only the objects the run itself created, and pins every delete
+to the UID the apiserver returned when it created them. If a create's response
+is lost in flight, the run knows the name it used but never learned the
+object's identity — so cleanup re-reads the object and deletes it only when it
+still carries that run's `aicr.run/run-id` label. When something else has taken
+the name over, cleanup keeps the object and says so:
+
+```text
+WARN cleanup left behind an object it cannot prove this run created; if it is a
+stale orphan of this run, remove it by hand kind=Role name=aicr-<run-id>
+runID=<run-id> objectRunID=<other-run-id>
+```
+
+Inspect the named object and delete it yourself if it is a stale leftover:
+
+```shell
+kubectl get role -n gpu-operator aicr-<run-id> -o yaml
+```
+
+The staging ConfigMap is warned about the same way. It is written by the in-pod
+agent rather than by the CLI, so it carries no `aicr.run/run-id` label to check
+(see [Job Completes but No Output](#job-completes-but-no-output)); cleanup
+sweeps it only when this run's Job was created successfully — the only way this
+run could have produced one — and only when the object looks like an aicr
+artifact (`app.kubernetes.io/name=aicr`).
+
 ## Security Considerations
 
 ### RBAC Permissions
