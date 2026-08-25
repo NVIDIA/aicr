@@ -41,7 +41,7 @@
 #     kubectl get ds nccl-tcpxo-installer -n kube-system \
 #       -o jsonpath='{.spec.template.spec.initContainers[?(@.name=="nccl-tcpxo-installer")].image}'
 #   then update BOTH images below to that installer's pair, per Google's
-#   release table: https://github.com/GoogleCloudPlatform/container-engine-accelerators/blob/master/gpudirect-tcpxo/README.md
+#   release notes: https://github.com/GoogleCloudPlatform/container-engine-accelerators/blob/master/gpudirect-tcpxo/README.md
 #   Updating only one half recreates the mismatch this pairing exists to avoid.
 #
 # Usage:
