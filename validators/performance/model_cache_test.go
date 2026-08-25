@@ -29,6 +29,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -310,22 +311,6 @@ func TestWrapPopulateJobError(t *testing.T) {
 	}
 }
 
-// TestEnsureModelCache_DisabledNoop verifies that with the cache disabled no PVC
-// or Job is created — the default behavior is unchanged.
-
-func TestEnsureModelCache_DisabledNoop(t *testing.T) {
-	client := fake.NewClientset()
-	ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
-	cfg := &inferenceWorkloadConfig{namespace: "ns", modelCacheSize: ""}
-	if err := ensureModelCache(ctx, cfg); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	pvcs, _ := client.CoreV1().PersistentVolumeClaims("ns").List(context.Background(), metav1.ListOptions{})
-	if len(pvcs.Items) != 0 {
-		t.Errorf("no PVC should be created when cache disabled, got %d", len(pvcs.Items))
-	}
-}
-
 // TestParseModelCacheSize verifies the on-by-default policy: unset → default
 // size (enabled), the disable sentinels → disabled, an explicit quantity passes
 // through, and garbage fails closed.
@@ -368,55 +353,218 @@ func TestParseModelCacheSize(t *testing.T) {
 	}
 }
 
-// TestClusterHasDefaultStorageClass verifies detection of a default-annotated
-// StorageClass (the cache pre-flight's signal).
-func TestClusterHasDefaultStorageClass(t *testing.T) {
-	def := &storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{
-		Name: "gp3", Annotations: map[string]string{defaultStorageClassAnnotation: "true"}}}
-	nondef := &storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "gp2"}}
+// TestDefaultStorageClass verifies detection of a default-annotated
+// StorageClass (the cache pre-flight's signal). When more than one
+// StorageClass is annotated default, Kubernetes' own admission controller
+// picks the most recently created one — the two "multiple defaults" cases
+// below list the same pair in both orders to prove selection follows
+// CreationTimestamp, not list order.
+func TestDefaultStorageClass(t *testing.T) {
+	older := metav1.NewTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+	newer := metav1.NewTime(time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC))
 
-	t.Run("has default", func(t *testing.T) {
-		ctx := &validators.Context{Ctx: context.Background(), Clientset: fake.NewClientset(def, nondef)}
-		got, err := clusterHasDefaultStorageClass(ctx)
-		if err != nil || !got {
-			t.Errorf("got (%v,%v), want (true,nil)", got, err)
-		}
-	})
-	t.Run("no default", func(t *testing.T) {
-		ctx := &validators.Context{Ctx: context.Background(), Clientset: fake.NewClientset(nondef)}
-		got, err := clusterHasDefaultStorageClass(ctx)
-		if err != nil || got {
-			t.Errorf("got (%v,%v), want (false,nil)", got, err)
-		}
-	})
-	t.Run("legacy beta annotation counts as default", func(t *testing.T) {
-		beta := &storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{
-			Name: "gp2", Annotations: map[string]string{defaultStorageClassAnnotationBeta: "true"}}}
-		ctx := &validators.Context{Ctx: context.Background(), Clientset: fake.NewClientset(beta)}
-		got, err := clusterHasDefaultStorageClass(ctx)
-		if err != nil || !got {
-			t.Errorf("got (%v,%v), want (true,nil) for beta is-default-class annotation", got, err)
-		}
-	})
+	tests := []struct {
+		name     string
+		classes  []runtime.Object
+		wantName string // "" means want nil (no default)
+	}{
+		{
+			name: "has default",
+			classes: []runtime.Object{
+				&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{
+					Name: "gp3", Annotations: map[string]string{defaultStorageClassAnnotation: "true"}}},
+				&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "gp2"}},
+			},
+			wantName: "gp3",
+		},
+		{
+			name: "no default",
+			classes: []runtime.Object{
+				&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "gp2"}},
+			},
+			wantName: "",
+		},
+		{
+			name: "legacy beta annotation counts as default",
+			classes: []runtime.Object{
+				&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{
+					Name: "gp2", Annotations: map[string]string{defaultStorageClassAnnotationBeta: "true"}}},
+			},
+			wantName: "gp2",
+		},
+		{
+			name: "multiple defaults, newer listed first: newer still wins",
+			classes: []runtime.Object{
+				&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{
+					Name: "newer", CreationTimestamp: newer, Annotations: map[string]string{defaultStorageClassAnnotation: "true"}}},
+				&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{
+					Name: "older", CreationTimestamp: older, Annotations: map[string]string{defaultStorageClassAnnotation: "true"}}},
+			},
+			wantName: "newer",
+		},
+		{
+			name: "multiple defaults, older listed first: newer still wins",
+			classes: []runtime.Object{
+				&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{
+					Name: "older", CreationTimestamp: older, Annotations: map[string]string{defaultStorageClassAnnotation: "true"}}},
+				&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{
+					Name: "newer", CreationTimestamp: newer, Annotations: map[string]string{defaultStorageClassAnnotation: "true"}}},
+			},
+			wantName: "newer",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := &validators.Context{Ctx: context.Background(), Clientset: fake.NewClientset(tt.classes...)}
+			got, err := defaultStorageClass(ctx)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			gotName := ""
+			if got != nil {
+				gotName = got.Name
+			}
+			if gotName != tt.wantName {
+				t.Errorf("got %q, want %q", gotName, tt.wantName)
+			}
+		})
+	}
 }
 
-// TestEnsureModelCache_NoDefaultStorageClassFailsFast verifies that with the
-// cache enabled, no explicit StorageClass, and no cluster default, the validator
-// fails fast (ErrCodeInvalidRequest) without creating the PVC — rather than
-// leaving it Pending until the populate-Job timeout.
-func TestEnsureModelCache_NoDefaultStorageClassFailsFast(t *testing.T) {
-	ctx := &validators.Context{Ctx: context.Background(), Clientset: fake.NewClientset()}
-	cfg := &inferenceWorkloadConfig{namespace: "ns", model: "Qwen/Qwen3-8B", modelCacheSize: defaultModelCacheSize}
-	err := ensureModelCache(ctx, cfg)
-	if err == nil {
-		t.Fatal("expected fast-fail error when cache enabled with no default StorageClass")
+// TestMachineFamily verifies the family segment extracted from a
+// node.kubernetes.io/instance-type value.
+func TestMachineFamily(t *testing.T) {
+	tests := []struct {
+		instanceType string
+		want         string
+	}{
+		{"a4x-highgpu-4g", "a4x"},
+		{"n2-standard-4", "n2"},
+		{"", ""},
 	}
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
-		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+	for _, tt := range tests {
+		if got := machineFamily(tt.instanceType); got != tt.want {
+			t.Errorf("machineFamily(%q) = %q, want %q", tt.instanceType, got, tt.want)
+		}
 	}
-	pvcs, _ := ctx.Clientset.CoreV1().PersistentVolumeClaims("ns").List(context.Background(), metav1.ListOptions{})
-	if len(pvcs.Items) != 0 {
-		t.Errorf("no PVC should be created on fast-fail, got %d", len(pvcs.Items))
+}
+
+// TestCheckStorageClassNodeCompatibility verifies the rule-table lookup: a
+// machine family listed under a rule can only attach a StorageClass whose
+// parameters.type carries that rule's compatibleTypePrefix; every other
+// family/provisioner/type combination passes.
+func TestCheckStorageClassNodeCompatibility(t *testing.T) {
+	pdBalanced := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "standard-rwo"},
+		Provisioner: "pd.csi.storage.gke.io",
+		Parameters:  map[string]string{"type": "pd-balanced"},
+	}
+	hyperdiskBalanced := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "hyperdisk-balanced"},
+		Provisioner: "pd.csi.storage.gke.io",
+		Parameters:  map[string]string{"type": "hyperdisk-balanced"},
+	}
+	dynamicSelect := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "dynamic-volume"},
+		Provisioner: "pd.csi.storage.gke.io",
+		Parameters:  map[string]string{"type": "dynamic", "pd-type": "pd-balanced", "hyperdisk-type": "hyperdisk-balanced"},
+	}
+	otherProvisioner := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "gp3"},
+		Provisioner: "ebs.csi.aws.com",
+		Parameters:  map[string]string{"type": "gp3"},
+	}
+
+	tests := []struct {
+		name         string
+		instanceType string
+		sc           *storagev1.StorageClass
+		wantErr      bool
+	}{
+		{"a4x with Persistent Disk is rejected", "a4x-highgpu-4g", pdBalanced, true},
+		{"a4x with explicit Hyperdisk selection is fine", "a4x-highgpu-4g", hyperdiskBalanced, false},
+		{"a4x with dynamic disk-type selection is fine", "a4x-highgpu-4g", dynamicSelect, false},
+		{"non-a4x family with Persistent Disk is fine", "n2-standard-4", pdBalanced, false},
+		{"non-a4x family with dynamic disk-type selection is fine", "n2-standard-4", dynamicSelect, false},
+		{"a4x with an unrelated provisioner is fine", "a4x-highgpu-4g", otherProvisioner, false},
+		{"nil StorageClass is fine (not this function's concern)", "a4x-highgpu-4g", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkStorageClassNodeCompatibility(tt.instanceType, tt.sc)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+		})
+	}
+}
+
+// TestEnsureModelCache covers the pre-flight's error paths: disabled is a
+// no-op, an enabled cache with no resolvable StorageClass errors, and an
+// enabled cache whose resolved StorageClass (cluster-default or explicit
+// override) is incompatible with the node's machine family errors too,
+// in every case before a PVC is created, rather than that surfacing later
+// as a Pending claim or FailedAttachVolume.
+func TestEnsureModelCache(t *testing.T) {
+	pdBalanced := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "standard-rwo", Annotations: map[string]string{defaultStorageClassAnnotation: "true"}},
+		Provisioner: "pd.csi.storage.gke.io",
+		Parameters:  map[string]string{"type": "pd-balanced"},
+	}
+
+	tests := []struct {
+		name    string
+		classes []runtime.Object
+		cfg     *inferenceWorkloadConfig
+		wantErr bool
+	}{
+		{
+			name: "disabled is a no-op",
+			cfg:  &inferenceWorkloadConfig{namespace: "ns", modelCacheSize: ""},
+		},
+		{
+			name:    "no default StorageClass errors",
+			cfg:     &inferenceWorkloadConfig{namespace: "ns", model: "Qwen/Qwen3-8B", modelCacheSize: defaultModelCacheSize},
+			wantErr: true,
+		},
+		{
+			name:    "incompatible cluster default is rejected",
+			classes: []runtime.Object{pdBalanced},
+			cfg: &inferenceWorkloadConfig{
+				namespace: "ns", model: "Qwen/Qwen3-8B", modelCacheSize: defaultModelCacheSize,
+				gpuNodeInstanceType: "a4x-highgpu-4g",
+			},
+			wantErr: true,
+		},
+		{
+			name:    "incompatible explicit override is rejected",
+			classes: []runtime.Object{pdBalanced},
+			cfg: &inferenceWorkloadConfig{
+				namespace: "ns", model: "Qwen/Qwen3-8B", modelCacheSize: defaultModelCacheSize,
+				gpuNodeInstanceType: "a4x-highgpu-4g", modelCacheStorageClass: "standard-rwo",
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewClientset(tt.classes...)
+			ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+			err := ensureModelCache(ctx, tt.cfg)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			pvcs, _ := client.CoreV1().PersistentVolumeClaims(tt.cfg.namespace).List(context.Background(), metav1.ListOptions{})
+			if len(pvcs.Items) != 0 {
+				t.Errorf("no PVC should be created, got %d", len(pvcs.Items))
+			}
+		})
 	}
 }
 
