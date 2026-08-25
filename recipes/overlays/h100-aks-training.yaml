@@ -25,7 +25,9 @@ spec:
   # criteria carry no machine-type axis, so they also match the smaller NCads
   # H100 shapes (Standard_NC80adis_H100_v5 = 2 GPUs, Standard_NC40ads_H100_v5 =
   # 1 GPU). Those deploy normally, but the performance floors below are fixed
-  # absolute full-node values and can false-fail on them. See #1256/#1254.
+  # absolute full-node values and can false-fail on them. Normalizing them was
+  # declined (#1256, #1254 — both closed not-planned); the qualified shape is
+  # the supported way to pass them.
   criteria:
     service: aks
     accelerator: h100

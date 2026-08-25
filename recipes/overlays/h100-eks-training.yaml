@@ -26,7 +26,9 @@ spec:
   # (e.g. p5.4xlarge). Those deploy normally — unlike the GKE leaf, no component
   # here pins node affinity to a shape — but the performance floors below are
   # fixed absolute values calibrated on the full node, so a smaller shape can
-  # false-fail a healthy run. Normalizing the gates is tracked in #1256/#1254.
+  # false-fail a healthy run. Normalizing them per GPU/fabric class was declined
+  # (#1256, #1254 — both closed not-planned); the floors are deliberately
+  # absolute, so the qualified shape is the supported way to pass them.
   criteria:
     service: eks
     accelerator: h100

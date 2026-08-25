@@ -475,41 +475,6 @@ node shape the resolved recipe targets. See
 
 > **Service / Accelerator / OS / Intent / Platform value listings above are the OSS-embedded set.** When `--data` registers additional values (e.g., undisclosed providers, proprietary platforms), the CLI admits them at runtime through the criteria registry — see [Data Extension](../integrator/data-extension.md). `--criteria-strict` restores the OSS-only set regardless of what `--data` contributes.
 
-#### Qualified machine types
-
-Each recipe is qualified against a specific node shape. Running it on another
-machine type of the same GPU model is not blocked, but it is not qualified, and
-the consequence differs by family.
-
-| Accelerator | Service | Qualified machine type | On other shapes of the same GPU |
-|---|---|---|---|
-| `h100` | `gke` | `a3-megagpu-8g` | **Components do not schedule.** The GPUDirect-TCPXO DaemonSets pin node affinity to `cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb`, so on `a3-highgpu-*` / `a3-edgegpu-8g` nothing rolls out and the deployment health check fails. GPUDirect-TCPX is not shipped — tracked in [#2290](https://github.com/NVIDIA/aicr/issues/2290). |
-| `h100` | `eks` | `p5.48xlarge` (8× H100 SXM, 32× EFA) | Deploys, but performance floors are calibrated on the full node; smaller shapes such as `p5.4xlarge` can false-fail a healthy run. |
-| `h100` | `aks` | `Standard_ND96isr_H100_v5` (8× H100 SXM) | Deploys, but as above; `Standard_NC80adis_H100_v5` (2 GPUs) and `Standard_NC40ads_H100_v5` (1 GPU) can false-fail performance gates. |
-| `gb200` | `eks` | `p6e-gb200.36xlarge` (4 GPUs per K8s node) | Deploys; floors are sized for this shape. |
-| `a100` | `gke` | `a2-highgpu-*` / `a2-ultragpu-*` | GPUDirect is not applicable; the `gke-nccl-tcpxo` component is intentionally omitted. |
-| `b200` | `gke` | A4 shapes | No separate NCCL plugin installer; multi-node NCCL comes from GPU Operator `gdrcopy` plus GKE A4 native multi-NIC. |
-
-Two distinct failure modes are worth separating:
-
-- **Component-level (hard).** Only GKE H100 pins artifacts to a machine type
-  today. On a non-matching shape the DaemonSets have nowhere to land and
-  deployment validation fails loudly rather than degrading.
-- **Performance-gate (soft).** Elsewhere the recipe deploys normally, but the
-  NCCL and inference floors are fixed absolute values calibrated on full,
-  high-bandwidth nodes. They are not normalized for GPU count or fabric class,
-  so a smaller shape can fail a gate while being perfectly healthy. See
-  [Validation › Node-shape assumption](./validation.md). Making these gates
-  fabric/transport-class aware is tracked in
-  [#1256](https://github.com/NVIDIA/aicr/issues/1256) and
-  [#1254](https://github.com/NVIDIA/aicr/issues/1254).
-
-Shapes not listed above are undocumented rather than known-broken: they have
-not been qualified, and the criteria model has no axis that distinguishes them.
-Whether AICR should gain one — finer-grained accelerator values, a machine-type
-axis, or a fabric class — is tracked in
-[#2377](https://github.com/NVIDIA/aicr/issues/2377).
-
 **Examples:**
 ```shell
 # Basic recipe for Ubuntu on EKS with H100
@@ -551,6 +516,45 @@ conflict evidence. Bundling warns that conflicts were not evaluated and
 proceeds for compatibility. Use a current snapshot before deployment when you
 need conflict detection. See
 [Conflict detection requires snapshot evidence](slinky-slurm-accounting.md#conflict-detection-requires-snapshot-evidence).
+
+#### Qualified machine types
+
+Each recipe is qualified against a specific node shape. Running it on another
+machine type of the same GPU model is not blocked, but it is not qualified, and
+the consequence differs by family.
+
+| Accelerator | Service | Qualified machine type | On other shapes of the same GPU |
+|---|---|---|---|
+| `h100` | `gke` | `a3-megagpu-8g` | **Components do not schedule.** The GPUDirect-TCPXO DaemonSets pin node affinity to `cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb`, so on `a3-highgpu-*` / `a3-edgegpu-8g` nothing rolls out and the deployment health check fails. GPUDirect-TCPX is not shipped — tracked in [#2290](https://github.com/NVIDIA/aicr/issues/2290). |
+| `h100` | `eks` | `p5.48xlarge` (8× H100 SXM, 32× EFA) | Deploys, but performance floors are calibrated on the full node; smaller shapes such as `p5.4xlarge` can false-fail a healthy run. |
+| `h100` | `aks` | `Standard_ND96isr_H100_v5` (8× H100 SXM) | Deploys, but as above; `Standard_NC80adis_H100_v5` (2 GPUs) and `Standard_NC40ads_H100_v5` (1 GPU) can false-fail performance gates. |
+| `gb200` | `eks` | `p6e-gb200.36xlarge` (4 GPUs per K8s node) | Deploys; floors are sized for this shape and are themselves provisional pending production NVL72 data. |
+| `a100` | `gke` | `a2-highgpu-*` / `a2-ultragpu-*` | GPUDirect is not applicable; the `gke-nccl-tcpxo` component is intentionally omitted. |
+| `b200` | `gke` | A4 shapes | No separate NCCL plugin installer; multi-node NCCL comes from GPU Operator `gdrcopy` plus GKE A4 native multi-NIC. |
+
+Two distinct failure modes are worth separating:
+
+- **Component-level (hard).** Only GKE H100 pins artifacts to a machine type
+  today. On a non-matching shape the DaemonSets have nowhere to land and
+  deployment validation fails loudly rather than degrading.
+- **Performance-gate (soft).** Elsewhere the recipe deploys normally, but the
+  NCCL and inference floors are fixed absolute values calibrated on full,
+  high-bandwidth nodes. They are not normalized for GPU count or fabric class,
+  so a smaller shape can fail a gate while being perfectly healthy. See
+  [Validation › Node-shape assumption](./validation.md). Normalizing these
+  floors per GPU or per fabric class was considered and declined
+  ([#1256](https://github.com/NVIDIA/aicr/issues/1256),
+  [#1254](https://github.com/NVIDIA/aicr/issues/1254), both closed as not
+  planned) — the floors are deliberately fixed absolute full-node values, so
+  running a qualified shape is the supported way to pass them.
+
+The table lists the accelerator/service pairs that have a qualified shape;
+a pair or a shape absent from it is **undocumented rather than known-broken**.
+It has not been qualified, and the criteria model has no axis that would
+distinguish it from one that has.
+Whether AICR should gain one — finer-grained accelerator values, a machine-type
+axis, or a fabric class — is tracked in
+[#2377](https://github.com/NVIDIA/aicr/issues/2377).
 
 #### Snapshot Mode
 
