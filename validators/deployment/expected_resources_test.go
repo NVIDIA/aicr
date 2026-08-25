@@ -594,6 +594,76 @@ func TestCheckExpectedResources_IgnoresUnrelatedDaemonSetInNamespace(t *testing.
 	}
 }
 
+// TestCheckExpectedResources_TerminatingExpectedNodewrightFails pins the
+// combined state the two nodewright gates could each miss on their own: the
+// expected CR is Terminating but still reports complete, while an unrelated
+// live Skyhook is complete. The component health check's assert is
+// deliberately name-agnostic, so the stale live CR satisfies it; only the
+// per-name readiness check binds liveness to the CR the recipe declared, so it
+// must reject the Terminating one rather than read status.status and pass.
+//
+// Reporting ready here would be a false PASS on state about to disappear —
+// the same direction the Chainsaw executor already guards by skipping ghosts
+// on positive assertions (#2041).
+func TestCheckExpectedResources_TerminatingExpectedNodewrightFails(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t,
+		[]runtime.Object{activeNamespace("skyhook")},
+		[]runtime.Object{
+			// The CR the recipe declared: complete, but mid-deletion.
+			nodewrightTerminatingWithStatus("no-op", "complete"),
+			// A stale/unrelated CR that is live and complete — enough to
+			// satisfy the name-agnostic assert on its own.
+			nodewrightWithStatus("some-other-skyhook", "complete"),
+		},
+		[]recipe.ComponentRef{
+			{
+				Name:      nodewrightCustomizationsComponent,
+				Namespace: "skyhook",
+				ManifestFiles: []string{
+					"components/nodewright-customizations/manifests/no-op.yaml",
+				},
+			},
+		},
+	)
+
+	err := checkExpectedResources(ctx)
+	if err == nil {
+		t.Fatal("expected error: the declared Nodewright is Terminating, so readiness must not pass on a stale live CR")
+		return
+	}
+	if !strings.Contains(err.Error(), "no-op") || !strings.Contains(err.Error(), "terminating") {
+		t.Fatalf("expected the failure to name the terminating CR, got: %v", err)
+		return
+	}
+}
+
+// TestCheckExpectedResources_LiveCompleteNodewrightPasses is the control for
+// the test above: the identical shape with no deletionTimestamp must pass, so
+// the new gate is proven to key on liveness rather than rejecting everything.
+func TestCheckExpectedResources_LiveCompleteNodewrightPasses(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t,
+		[]runtime.Object{activeNamespace("skyhook")},
+		[]runtime.Object{nodewrightWithStatus("no-op", "complete")},
+		[]recipe.ComponentRef{
+			{
+				Name:      nodewrightCustomizationsComponent,
+				Namespace: "skyhook",
+				ManifestFiles: []string{
+					"components/nodewright-customizations/manifests/no-op.yaml",
+				},
+			},
+		},
+	)
+
+	if err := checkExpectedResources(ctx); err != nil {
+		t.Fatalf("checkExpectedResources() error = %v, want nil for a live complete Nodewright", err)
+	}
+}
+
 // TestCheckExpectedResources_SurfacesMultipleNodewrightFailures pins Codex's
 // non-blocking observation #1: when a recipe declares multiple Nodewright CRs
 // and several are non-complete, all failures must surface in the error so
@@ -1337,6 +1407,18 @@ func nodeWithRuntimeRequiredTaint(name string) *corev1.Node {
 
 // nodewrightWithStatus builds a Nodewright fixture. Nodewright is a cluster-scoped CR,
 // so metadata.namespace is intentionally not set.
+// nodewrightTerminatingWithStatus builds a Skyhook that is mid-deletion
+// (deletionTimestamp set, as Nodewright's finalizer leaves it) while still
+// reporting the given status. The combination is the trap: status.status alone
+// says "ready" about a CR that is on its way out.
+func nodewrightTerminatingWithStatus(name, status string) *unstructured.Unstructured {
+	sk := nodewrightWithStatus(name, status)
+	meta, _ := sk.Object["metadata"].(map[string]interface{})
+	meta["deletionTimestamp"] = "2026-01-01T00:00:00Z"
+	meta["finalizers"] = []interface{}{"skyhook.nvidia.com/finalizer"}
+	return sk
+}
+
 func nodewrightWithStatus(name, status string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]any{

@@ -608,6 +608,19 @@ func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interf
 		}
 		return fmt.Sprintf("Nodewright %s: failed to get: %v", name, getErr)
 	}
+	// Reject a CR that is on its way out even when it still reports complete.
+	// Nodewright uses a deletion finalizer, so an expected Skyhook can sit
+	// Terminating for a while with status.status untouched. Accepting it would
+	// report readiness on the strength of state that is about to disappear —
+	// the same false-PASS direction the Chainsaw executor already guards
+	// against by skipping ghosts on positive assertions (#2041). The nameless
+	// assert in the component health check cannot cover this: it is satisfied
+	// by any live complete Skyhook, including a stale or unrelated one, so this
+	// per-name check is the only gate that binds liveness to the CR the recipe
+	// actually declared.
+	if sk.GetDeletionTimestamp() != nil {
+		return fmt.Sprintf("Nodewright %s: terminating (deletionTimestamp set)", name)
+	}
 	status, found, statusErr := unstructured.NestedString(sk.Object, "status", "status")
 	if statusErr != nil {
 		return fmt.Sprintf("Nodewright %s: failed to read status.status: %v", name, statusErr)

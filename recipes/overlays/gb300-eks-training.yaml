@@ -118,11 +118,22 @@ spec:
       # actually carried traffic, so a silent fallback to Socket or NET does
       # not masquerade as a pass.
       #
-      # Thresholds are mirrored from the GB200 EKS baseline as a conservative
-      # floor until GB300 numbers are measured. GB300 NVL72 exceeds GB200 on
-      # both NVLink and EFA bandwidth, so these floors should not false-fail a
-      # healthy run; they are deliberately loose and must be re-baselined on
-      # real GB300 hardware before they are treated as a regression gate.
+      # Measured on GB300 (2x p6e-gb300r.36xlarge, 8 GPUs, NCCL 2.27.7,
+      # 16 GiB message): net 44.04 GB/s, nvls 841.17 GB/s. Both land at ~88%
+      # of their respective line rates (a single 400 Gb/s EFA device; 18
+      # NVLink-5 links at 53.125 GB/s = ~956 GB/s per GPU).
+      #
+      # nvls is floored at 700 from that measurement, leaving ~17% margin
+      # before the evaluator's additional 10% tolerance. The GB200 value of
+      # 500 was far too loose for GB300's NVLink fabric.
+      #
+      # net stays at the GB200 value of 40 deliberately. The reference cluster
+      # advertises vpc.amazonaws.com/efa: 1, so 44.04 GB/s is capped by NIC
+      # provisioning rather than by GB300 — it is not a representative
+      # scale-out figure. Raising this floor now would make the recipe
+      # unusable on the only GB300 cluster available to test against. It must
+      # be re-baselined on a fully-provisioned rack, where a materially higher
+      # floor is expected.
       checks:
         - nccl-all-reduce-bw-net
         - nccl-all-reduce-bw-nvls
@@ -142,7 +153,7 @@ spec:
         - name: nccl-all-reduce-bw-net
           value: ">= 40"
         - name: nccl-all-reduce-bw-nvls
-          value: ">= 500"
+          value: ">= 700"
     conformance:
       checks:
         - platform-health

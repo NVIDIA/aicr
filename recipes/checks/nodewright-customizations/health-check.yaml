@@ -50,8 +50,8 @@ spec:
   steps:
     - name: validate-skyhook-cr-complete
       try:
-        # Assert a Skyhook CR in the skyhook namespace has status.status ==
-        # "complete" per the Skyhook CRD schema.
+        # Assert a Skyhook CR has status.status == "complete" per the Skyhook
+        # CRD schema. Skyhook is cluster-scoped.
         #
         # Deliberately name-agnostic. The manifests do not agree on a name —
         # tuning.yaml / tuning-gke.yaml / tuning-generic.yaml render "tuning"
@@ -65,7 +65,10 @@ spec:
         # Per-CR completeness is not weakened by this: the render-aware Go
         # readiness check (verifyNodewrightReady) derives the expected CR names
         # from the component's rendered manifests and requires every one of
-        # them to reach complete, reporting each failure by name.
+        # them to be live (not Terminating) and complete, reporting each failure
+        # by name. That per-name gate is what binds readiness to the CRs the
+        # recipe declared — this assert alone would accept a stale or unrelated
+        # complete Skyhook.
         - assert:
             resource:
               apiVersion: skyhook.nvidia.com/v1alpha1
