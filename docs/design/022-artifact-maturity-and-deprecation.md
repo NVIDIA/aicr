@@ -9,14 +9,19 @@ which already introduced kind-scoped version evolution as an amendment to ADR-01
 
 ## Problem
 
-Every AICR artifact carries an alpha `apiVersion`. ROADMAP
+Every artifact AICR generates today carries an alpha `apiVersion`. ROADMAP
 [§2](../../ROADMAP.md#2-stability) promises a frozen, diff-gated surface at v1,
 and the Kubernetes convention that `v1alpha2` invokes — may be dropped or changed
 without notice — is the opposite of that promise. Two alpha versions coexist
 (`aicr.run/v1alpha2` for most kinds, `aicr.run/v1alpha3` for the profile-bearing
 `RecipeMetadata` and `RecipeResult`), which compounds it.
 
-Three questions have no recorded answer:
+A third case exists alongside those two: artifacts predating the `apiVersion`
+field carry no value at all, and every loader tolerates that explicitly
+(`snap.APIVersion != "" && !header.IsSupportedAPIVersion(...)` and its
+equivalents in `pkg/recipe`). ADR-011 §3 made that tolerance deliberate.
+
+Four questions have no recorded answer:
 
 1. **What `apiVersion` do artifacts carry at v1 GA?**
 2. **What does a bump owe the previous version?** ADR-011 §4 says dual-accept with
@@ -26,6 +31,8 @@ Three questions have no recorded answer:
    unconditional, which is the actual gap: neither says *when* each applies.
 3. **What `apiVersion` does a newly introduced kind start at?** Nothing answers
    this, so new kinds guess.
+4. **Does the empty-`apiVersion` tolerance survive v1?** It is a deliberate
+   backward-compatibility affordance today and an unguarded hole tomorrow.
 
 ## Non-Goals
 
@@ -55,7 +62,7 @@ alongside GA in every release since.
 | Kind | Today | Target | Rationale |
 |---|---|---|---|
 | `Snapshot` | `v1alpha2` | `aicr.run/v1` | Settled shape; the first artifact an integrator reads |
-| `Recipe`, `RecipeCriteria` | `v1alpha2` | `aicr.run/v1` | 105 shipped overlays of exercise |
+| `Recipe`, `RecipeCriteria` | `v1alpha2` | `aicr.run/v1` | Schema exercised by 105 shipped catalog files (101 overlays, 4 mixins) |
 | Bundle provenance (`localformat.ProvenanceAPIVersion`) | `v1alpha2` | `aicr.run/v1` | Rides in the bundle, which is what downstream integrates against |
 | `AICRConfig` | `v1alpha2` | `aicr.run/v1beta1` | Actively growing: #2026 bound 2 of 5 spec sections, #2245 binds the rest. Do not freeze a schema mid-expansion |
 | `RecipeMetadata`, `RecipeResult` | `v1alpha3` | `aicr.run/v1beta1` | Newest (ADR-015), 2 overlays, opt-in via profiles |
@@ -78,6 +85,18 @@ carried forward. ADR-013 made this argument already: doing it before v1 "is the
 cheapest possible moment — there is no stable contract to honor yet." That
 argument expires at GA, which is why it is spent now.
 
+**This bump skips the staged rollout in §6.** §6 exists to give a consumer a
+rollback window, and a window is only owed where §4 says one is owed. Alpha owes
+none, so the alpha-to-target migration is a single-release cut: the gate stops
+accepting the old value in the same release the emitter starts writing the new
+one. §6 governs every bump *after* this one.
+
+**The empty-`apiVersion` tolerance is retired with it.** ADR-011 §3 accepted an
+empty value for artifacts predating the field. After the lockstep regeneration
+nothing legitimate is empty, and an artifact carrying no version would otherwise
+pass every gate unchallenged — the fail-open shape §8 exists to close. Empty
+becomes a rejected value, not a tolerated one.
+
 ### 4. The deprecation window is conditional on the level being retired
 
 This **replaces ADR-011 §4**, whose dual-accept rule was stated unconditionally.
@@ -87,7 +106,13 @@ The window owed is a function of the maturity of the version being removed:
 |---|---|
 | Alpha | None. May be removed in any release, no prior notice |
 | Beta | Readable for **2 releases** after deprecation |
-| GA | Not removed within a major version |
+| GA | Not removed within a major version of the **AICR release**, i.e. no earlier than the next `vMAJOR` |
+
+"Release" and "major version" here mean the **AICR release axis**
+(`vMAJOR.MINOR.PATCH` per `RELEASING.md`), not the artifact version. §1 separates
+the two axes; this window is measured on the project's, because that is the clock
+a consumer upgrades against. Concretely: an `aicr.run/v1` kind deprecated during
+`v1.x` may first be removed in `v2.0.0`.
 
 The `pkg/header` godoc gains this condition. Its hard-break language is correct
 *for alpha* and must not be read as the general rule.
@@ -105,6 +130,10 @@ may replace only alpha. This is what makes a mixed-maturity map safe: promoting
 `Snapshot` to `v1` is a one-way door for `Snapshot` and binds no other kind.
 
 ### 6. Split each bump across two releases
+
+**Applies to bumps that owe a window under §4** — beta and GA. The alpha-to-target
+migration in §3 is explicitly exempt, because a staged rollout is a dual-accept
+mechanism and §3 carries no dual-accept path.
 
 Release N adds the new version to the read gate. Release N+1 flips the emitter.
 A consumer who rolls back one release can still read what they generated.
@@ -131,9 +160,14 @@ change that introduces it.
 
 ### 8. External data must be compatible with the binary reading it, and fails closed
 
-This **extends ADR-011 §3** to the catalog loader, which today checks `kind` only
-and never `apiVersion`. ADR-015 documented the consequence: a released binary
-pointed at a newer catalog silently resolves an unspecialized recipe.
+This **extends ADR-011 §3** to the catalog loader. That loader is not blind to
+`apiVersion` — `pkg/recipe/metadata_store.go` reads it to enforce the ADR-015
+profile-kind pairing — but it applies no *general* accept-known / reject-unknown
+gate: it calls neither `IsSupportedAPIVersion` nor
+`IsSupportedRecipeResultAPIVersion`. So a value that is neither the profile
+version nor a recognized one passes through unexamined. ADR-015 documented the
+consequence: a released binary pointed at a newer catalog silently resolves an
+unspecialized recipe.
 
 Silent divergence is the dangerous direction. The accept-known / reject-unknown
 gate applies per kind at every external-data boundary, including
