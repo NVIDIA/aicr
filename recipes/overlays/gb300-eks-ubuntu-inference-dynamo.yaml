@@ -52,36 +52,52 @@ spec:
         - gpu-operator
         - kai-scheduler
 
-  # Performance validation (inference-perf) deferred — the GB300 numbers are
-  # far below the GB200 reference and the cause is NOT yet understood, so no
-  # floor set from them would be meaningful.
-  #
-  # Measured 2026-08-25 on nhensley-gb300 (p6e-gb300r.36xlarge, 4 GPU workers,
-  # Qwen/Qwen3-8B, concurrency 1024, dynamo-router/least-loaded):
-  #
-  #   vllm-runtime:1.2.1        (CUDA 12.9)  20,769 tok/s   TTFT p99 33,320 ms
-  #   vllm-runtime:1.2.1-cuda13 (CUDA 13.0)  21,100 tok/s   TTFT p99 33,362 ms
-  #   GB200 reference, same config          ~65,952 tok/s   TTFT p99  ~1,240 ms
-  #
-  # A CUDA 12 / sm_103 kernel mismatch was the leading hypothesis and was
-  # tested directly: rebuilding the worker on the CUDA 13.0.2 image of the
-  # same Dynamo version moved throughput by 1.6% and latency by 0.1%. That
-  # rules CUDA out as the cause. The cluster side is not implicated either —
-  # driver 580.173.02 reports CUDA 13.0 and compute capability 10.3.
-  #
-  # What is known: the benchmark completes (no crash-loop, unlike VR200 on
-  # sm_107a), the endpoint serves, and the ~112s run at concurrency 1024
-  # leaves most requests queued — which accounts for the TTFT but not for
-  # serving roughly a third of GB200's tokens/sec on identical settings.
-  #
-  # Enabling this check with the GB200 floors would fail; setting floors from
-  # the observed numbers would encode an unexplained deficit as the GB300
-  # baseline. Deferred until the cause is identified.
-  # Tracked in https://github.com/NVIDIA/aicr/issues/2385.
-  #
-  # Deployment and conformance are unaffected and still gate this leaf
-  # (validated 4/4 and 10/10 on this cluster).
   validation:
+    performance:
+      checks:
+        - inference-perf
+      # GB300 is gated at 128 concurrency/GPU, half the compiled default of
+      # 256. The default is tuned for GB200 and EKS H100; GB300's saturation
+      # knee sits lower in concurrency because each GPU is faster, so the
+      # single Dynamo frontend replica saturates sooner. Benchmarking above
+      # the knee does not measure the accelerator, it measures the frontend
+      # ceiling — see the per-replica frontend limit in
+      # ai-dynamo/dynamo#9466 (reproduced on B300, and independent of CUDA
+      # version) and docs/contributor/inference-perf-fluctuation.md, which
+      # recommends gating sub-knee with a generous TTFT ceiling.
+      #
+      # Measured 2026-08-25 on nhensley-gb300 (2x p6e-gb300r.36xlarge,
+      # Qwen/Qwen3-8B, 4 GPU workers, dynamo-router/least-loaded), showing
+      # what the knee costs:
+      #
+      #   256/GPU (default)  20,769 tok/s   TTFT p99 33,320 ms   FAIL
+      #   128/GPU (this)     84,788 tok/s   TTFT p99    677 ms   PASS
+      #
+      # For reference the GB200 leaf measures 65,952 tok/s / 1,240 ms at
+      # 256/GPU, so GB300 sub-knee is ~29% faster at roughly half the
+      # latency — the accelerator was never the problem.
+      #
+      # The throughput floor keeps the same headroom ratio the GB200 leaf
+      # uses (~75% of measured). The TTFT ceiling stays at the catalog-wide
+      # 2000 ms deliberately: it is generous against the 677 ms measurement
+      # but still catches the 9-45s stall signature by 5-20x, which is the
+      # trade the fluctuation doc argues for.
+      #
+      # NOTE: this throughput floor is a fixed absolute full-node value (here
+      # a 4-GPU GB300 node) and is not normalized for GPU count, so a smaller
+      # SKU of this accelerator can false-fail a healthy run. A normalized
+      # per-GPU floor is tracked in https://github.com/NVIDIA/aicr/issues/1254.
+      constraints:
+        - name: inference-model
+          value: Qwen/Qwen3-8B
+        - name: inference-concurrency-per-gpu
+          value: "128"
+        - name: inference-routing-mode
+          value: dynamo-router
+        - name: inference-throughput
+          value: ">= 60000"
+        - name: inference-ttft-p99
+          value: "<= 2000"
     conformance:
       checks:
         - platform-health
