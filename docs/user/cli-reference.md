@@ -532,11 +532,14 @@ and only the performance gates are affected.
 | `h100` | `eks` | `p5.48xlarge` (8× H100 SXM, 32× EFA) | Deploys, but performance floors are calibrated on the full node; smaller shapes such as `p5.4xlarge` can false-fail a healthy run. |
 | `h100` | `aks` | `Standard_ND96isr_H100_v5` (8× H100 SXM) | Deploys, but as above; `Standard_NC80adis_H100_v5` (2 GPUs) and `Standard_NC40ads_H100_v5` (1 GPU) can false-fail performance gates. |
 | `gb200` | `eks` | `p6e-gb200.36xlarge` (4 GPUs per K8s node) | Deploys; floors are sized for this shape and are themselves provisional pending production NVL72 data. |
-| `a100` | `gke` | `a2-highgpu-*` / `a2-ultragpu-*` | GPUDirect is not applicable; the `gke-nccl-tcpxo` component is intentionally omitted. |
-| `b200` | `gke` | A4 shapes | No separate NCCL plugin installer; multi-node NCCL comes from GPU Operator `gdrcopy` plus GKE A4 native multi-NIC. |
+| `a100` | `gke` | the whole `a2` family (`a2-highgpu-*`, `a2-ultragpu-*`) | Family-level by construction, not per-shape: GPUDirect-TCPXO targets H100 `a3-megagpu-8g`, so the `gke-nccl-tcpxo` component is inapplicable to every `a2` shape and is intentionally omitted. No shape in the family carries a machine-type-bound component. |
+| `b200` | `gke` | the `A4` family — **specific machine type not recorded** | No separate NCCL plugin installer; multi-node NCCL comes from GPU Operator `gdrcopy` plus GKE A4's GCP-managed multi-NIC, so nothing here is machine-type-bound. The overlay records a production reference cluster but no machine type, so this row cannot name one. |
 
 A row that names no intent applies to every intent for that accelerator and
-service.
+service. Where a row names a family rather than a machine type, the entry is a
+family-level statement — either because no component in that family binds to a
+machine type, or because the specific shape is not recorded in-repo. The row
+says which.
 
 Two distinct failure modes are worth separating:
 
