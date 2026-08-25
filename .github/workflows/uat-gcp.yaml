@@ -698,10 +698,9 @@ jobs:
       # Frontend cold-pulled the ~12GB vllm-runtime image on a CPU-pool node and
       # wedged in ContainerCreating past the readiness budget; phase_serve now
       # selects the GPU pool for both graph components, whose a3-megagpu-8g class
-      # pulls that image in a fraction of the budget. The first GCP inference
-      # nightly (or manual `run serve`) after this is the proving run — serving
-      # was never verified end-to-end. AWS/Azure serve steps stay commented until
-      # this lane demonstrates a served completion.
+      # pulls that image in a fraction of the budget. Proven end-to-end by
+      # gcp-h100 inference run 32837547329 (prep through serve + verify).
+      # AWS/Azure serve steps stay commented — out of scope for #1644.
       - name: UAT - serve (DynamoGraphDeployment + endpoint)
         id: serve
         if: steps.conformance.outcome == 'success' && inputs.intent == 'inference'
