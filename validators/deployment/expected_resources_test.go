@@ -594,73 +594,74 @@ func TestCheckExpectedResources_IgnoresUnrelatedDaemonSetInNamespace(t *testing.
 	}
 }
 
-// TestCheckExpectedResources_TerminatingExpectedNodewrightFails pins the
-// combined state the two nodewright gates could each miss on their own: the
-// expected CR is Terminating but still reports complete, while an unrelated
-// live Skyhook is complete. The component health check's assert is
-// deliberately name-agnostic, so the stale live CR satisfies it; only the
-// per-name readiness check binds liveness to the CR the recipe declared, so it
-// must reject the Terminating one rather than read status.status and pass.
+// TestCheckExpectedResources_NodewrightLiveness pins that readiness keys on the
+// declared CR being live, not merely on some Skyhook reporting complete.
 //
-// Reporting ready here would be a false PASS on state about to disappear —
-// the same direction the Chainsaw executor already guards by skipping ghosts
-// on positive assertions (#2041).
-func TestCheckExpectedResources_TerminatingExpectedNodewrightFails(t *testing.T) {
+// The component health check's assert is deliberately name-agnostic, so a stale
+// or unrelated live complete Skyhook satisfies it on its own. Only this
+// per-name check binds liveness to the CR the recipe actually declared, so a
+// Terminating CR must fail even while it still reports complete — Nodewright
+// uses a deletion finalizer, so that state persists. Passing there would be a
+// false PASS on state about to disappear, the same direction the Chainsaw
+// executor guards by skipping ghosts on positive assertions (#2041).
+//
+// The live row is the control: without it a gate that rejected everything would
+// still satisfy the terminating row.
+func TestCheckExpectedResources_NodewrightLiveness(t *testing.T) {
 	t.Parallel()
 
-	ctx := newDeploymentTestContext(t,
-		[]runtime.Object{activeNamespace("skyhook")},
-		[]runtime.Object{
-			// The CR the recipe declared: complete, but mid-deletion.
-			nodewrightTerminatingWithStatus("no-op", "complete"),
-			// A stale/unrelated CR that is live and complete — enough to
-			// satisfy the name-agnostic assert on its own.
-			nodewrightWithStatus("some-other-skyhook", "complete"),
-		},
-		[]recipe.ComponentRef{
-			{
-				Name:      nodewrightCustomizationsComponent,
-				Namespace: "skyhook",
-				ManifestFiles: []string{
-					"components/nodewright-customizations/manifests/no-op.yaml",
-				},
+	tests := []struct {
+		name        string
+		nodewrights []runtime.Object
+		wantErr     bool
+		wantNeedles []string
+	}{
+		{
+			name: "terminating declared CR fails despite a stale live complete CR",
+			nodewrights: []runtime.Object{
+				nodewrightTerminatingWithStatus("no-op", "complete"),
+				nodewrightWithStatus("some-other-skyhook", "complete"),
 			},
+			wantErr:     true,
+			wantNeedles: []string{"no-op", "terminating"},
 		},
-	)
-
-	err := checkExpectedResources(ctx)
-	if err == nil {
-		t.Fatal("expected error: the declared Nodewright is Terminating, so readiness must not pass on a stale live CR")
-		return
+		{
+			name:        "live complete declared CR passes",
+			nodewrights: []runtime.Object{nodewrightWithStatus("no-op", "complete")},
+			wantErr:     false,
+		},
 	}
-	if !strings.Contains(err.Error(), "no-op") || !strings.Contains(err.Error(), "terminating") {
-		t.Fatalf("expected the failure to name the terminating CR, got: %v", err)
-		return
-	}
-}
 
-// TestCheckExpectedResources_LiveCompleteNodewrightPasses is the control for
-// the test above: the identical shape with no deletionTimestamp must pass, so
-// the new gate is proven to key on liveness rather than rejecting everything.
-func TestCheckExpectedResources_LiveCompleteNodewrightPasses(t *testing.T) {
-	t.Parallel()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	ctx := newDeploymentTestContext(t,
-		[]runtime.Object{activeNamespace("skyhook")},
-		[]runtime.Object{nodewrightWithStatus("no-op", "complete")},
-		[]recipe.ComponentRef{
-			{
-				Name:      nodewrightCustomizationsComponent,
-				Namespace: "skyhook",
-				ManifestFiles: []string{
-					"components/nodewright-customizations/manifests/no-op.yaml",
+			ctx := newDeploymentTestContext(t,
+				[]runtime.Object{activeNamespace("skyhook")},
+				tt.nodewrights,
+				[]recipe.ComponentRef{
+					{
+						Name:      nodewrightCustomizationsComponent,
+						Namespace: "skyhook",
+						ManifestFiles: []string{
+							"components/nodewright-customizations/manifests/no-op.yaml",
+						},
+					},
 				},
-			},
-		},
-	)
+			)
 
-	if err := checkExpectedResources(ctx); err != nil {
-		t.Fatalf("checkExpectedResources() error = %v, want nil for a live complete Nodewright", err)
+			err := checkExpectedResources(ctx)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("checkExpectedResources() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			for _, needle := range tt.wantNeedles {
+				if !strings.Contains(err.Error(), needle) {
+					t.Fatalf("expected %q in failure, got: %v", needle, err)
+					return
+				}
+			}
+		})
 	}
 }
 
