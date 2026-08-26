@@ -45,39 +45,27 @@ normalized_candidate() {
     local -a segments
     IFS=/ read -r -a segments <<< "${after_blob}"
 
-    local version_index=-1
+    local ref_end=-1
     local i
     for i in "${!segments[@]}"; do
-        if [[ "${segments[$i]}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]]; then
-            version_index=$i
+        if [[ "${segments[$i]}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]] ||
+            [[ "${segments[$i]}" =~ ^[0-9a-f]{12,40}$ ]]; then
+            ref_end=$i
             break
         fi
     done
-    if (( version_index <= 0 )); then
-        printf '%s\n' "${url}"
-        return
-    fi
 
-    local path_index=$((version_index + 1))
-    if (( ${#segments[@]} < path_index + version_index + 1 )); then
+    local last_index=$((${#segments[@]} - 1))
+    if (( ref_end < 0 || ref_end + 2 > last_index )); then
         printf '%s\n' "${url}"
         return
     fi
-    for ((i = 0; i < version_index; i++)); do
-        if [[ "${segments[$((path_index + i))]}" != "${segments[$i]}" ]]; then
-            printf '%s\n' "${url}"
-            return
-        fi
-    done
 
     local normalized="${before_blob}/blob"
-    for ((i = 0; i <= version_index; i++)); do
+    for ((i = 0; i <= ref_end; i++)); do
         normalized+="/${segments[$i]}"
     done
-    for ((i = path_index + version_index; i < ${#segments[@]}; i++)); do
-        normalized+="/${segments[$i]}"
-    done
-    printf '%s\n' "${normalized}"
+    printf '%s/%s\n' "${normalized}" "${segments[$last_index]}"
 }
 
 TMP=$(mktemp -d)
@@ -92,11 +80,10 @@ readonly NORMALIZED_STATUS="${TMP}/normalized-status"
 while IFS=, read -r package url license; do
     [[ -z "${package}" ]] && continue
     candidate=$(normalized_candidate "${url}")
-    if [[ "${candidate}" == "${url}" ]]; then
-        continue
-    fi
     printf '%s\n' "${url}" >> "${CURRENT_URLS}"
-    printf '%s\n' "${candidate}" >> "${NORMALIZED_URLS}"
+    if [[ "${candidate}" != "${url}" ]]; then
+        printf '%s\n' "${candidate}" >> "${NORMALIZED_URLS}"
+    fi
 done < "${INPUT}"
 
 check_urls() {
@@ -115,6 +102,7 @@ check_urls() {
     if ! "${CURL_BIN}" \
         --parallel \
         --parallel-max "${PARALLEL_REQUESTS}" \
+        --head \
         --location \
         --silent \
         --connect-timeout "${CONNECT_TIMEOUT_SECONDS}" \
@@ -123,7 +111,7 @@ check_urls() {
         --retry-connrefused \
         --write-out '%{url}\t%{http_code}\n' \
         "${requests[@]}" > "${output}"; then
-        echo "ERROR: failed to check nested-module license URLs." >&2
+        echo "ERROR: failed to check license source URLs." >&2
         exit 1
     fi
 }
@@ -134,24 +122,25 @@ check_urls "${NORMALIZED_URLS}" "${NORMALIZED_STATUS}"
 while IFS=, read -r package url license; do
     [[ -z "${package}" ]] && continue
     candidate=$(normalized_candidate "${url}")
-    if [[ "${candidate}" == "${url}" ]]; then
-        printf '%s,%s,%s\n' "${package}" "${url}" "${license}"
-        continue
-    fi
-
     current_code=$(awk -F '\t' -v url="${url}" '$1 == url { print $2; exit }' "${CURRENT_STATUS}")
     if [[ "${current_code}" == "200" ]]; then
         printf '%s,%s,%s\n' "${package}" "${url}" "${license}"
         continue
     fi
-    normalized_code=$(awk -F '\t' -v url="${candidate}" '$1 == url { print $2; exit }' "${NORMALIZED_STATUS}")
-    if [[ "${normalized_code}" == "200" ]]; then
-        printf '%s,%s,%s\n' "${package}" "${candidate}" "${license}"
-        continue
+
+    normalized_code=""
+    if [[ "${candidate}" != "${url}" ]]; then
+        normalized_code=$(awk -F '\t' -v url="${candidate}" '$1 == url { print $2; exit }' "${NORMALIZED_STATUS}")
+        if [[ "${normalized_code}" == "200" ]]; then
+            printf '%s,%s,%s\n' "${package}" "${candidate}" "${license}"
+            continue
+        fi
     fi
 
-    echo "ERROR: neither nested-module license URL is reachable for ${package}:" >&2
+    echo "ERROR: no reachable license source URL for ${package}:" >&2
     echo "  emitted (${current_code:-no response}): ${url}" >&2
-    echo "  normalized (${normalized_code:-no response}): ${candidate}" >&2
+    if [[ "${candidate}" != "${url}" ]]; then
+        echo "  normalized (${normalized_code:-no response}): ${candidate}" >&2
+    fi
     exit 1
 done < "${INPUT}"

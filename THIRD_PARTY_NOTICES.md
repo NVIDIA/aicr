@@ -61,7 +61,7 @@ surfaces are covered:
 | `github.com/aws/smithy-go` | Apache-2.0 | https://github.com/aws/smithy-go/blob/v1.27.9/LICENSE |
 | `github.com/aws/smithy-go/internal/sync/singleflight` | BSD-3-Clause | https://github.com/aws/smithy-go/blob/v1.27.9/internal/sync/singleflight/LICENSE |
 | `github.com/beorn7/perks/quantile` | MIT | https://github.com/beorn7/perks/blob/v1.0.1/LICENSE |
-| `github.com/blang/semver/v4` | MIT | https://github.com/blang/semver/blob/v4.0.0/v4/LICENSE |
+| `github.com/blang/semver/v4` | MIT | https://github.com/blang/semver/blob/v4.0.0/LICENSE |
 | `github.com/cenkalti/backoff/v4` | MIT | https://github.com/cenkalti/backoff/blob/v4.3.0/LICENSE |
 | `github.com/cenkalti/backoff/v5` | MIT | https://github.com/cenkalti/backoff/blob/v5.0.3/LICENSE |
 | `github.com/cespare/xxhash/v2` | MIT | https://github.com/cespare/xxhash/blob/v2.3.0/LICENSE.txt |
@@ -74,7 +74,7 @@ surfaces are covered:
 | `github.com/digitorus/timestamp` | BSD-2-Clause | https://github.com/digitorus/timestamp/blob/c45532741eea/LICENSE |
 | `github.com/distribution/reference` | Apache-2.0 | https://github.com/distribution/reference/blob/v0.6.0/LICENSE |
 | `github.com/emicklei/go-restful/v3` | MIT | https://github.com/emicklei/go-restful/blob/v3.13.0/LICENSE |
-| `github.com/evanphx/json-patch/v5` | BSD-3-Clause | https://github.com/evanphx/json-patch/blob/v5.9.11/v5/LICENSE |
+| `github.com/evanphx/json-patch/v5` | BSD-3-Clause | https://github.com/evanphx/json-patch/blob/v5.9.11/LICENSE |
 | `github.com/fatih/color` | MIT | https://github.com/fatih/color/blob/v1.19.0/LICENSE.md |
 | `github.com/felixge/httpsnoop` | MIT | https://github.com/felixge/httpsnoop/blob/v1.1.0/LICENSE.txt |
 | `github.com/fxamacker/cbor/v2` | MIT | https://github.com/fxamacker/cbor/blob/v2.9.3/LICENSE |
@@ -116,7 +116,7 @@ surfaces are covered:
 | `github.com/google/s2a-go` | Apache-2.0 | https://github.com/google/s2a-go/blob/v0.1.9/LICENSE.md |
 | `github.com/google/uuid` | BSD-3-Clause | https://github.com/google/uuid/blob/v1.6.0/LICENSE |
 | `github.com/googleapis/enterprise-certificate-proxy/client` | Apache-2.0 | https://github.com/googleapis/enterprise-certificate-proxy/blob/v0.3.21/LICENSE |
-| `github.com/googleapis/gax-go/v2` | BSD-3-Clause | https://github.com/googleapis/gax-go/blob/v2.24.0/v2/LICENSE |
+| `github.com/googleapis/gax-go/v2` | BSD-3-Clause | https://github.com/googleapis/gax-go/blob/v2.24.0/LICENSE |
 | `github.com/gorilla/websocket` | BSD-2-Clause | https://github.com/gorilla/websocket/blob/e064f32e3674/LICENSE |
 | `github.com/grpc-ecosystem/grpc-gateway/v2` | BSD-3-Clause | https://github.com/grpc-ecosystem/grpc-gateway/blob/v2.30.0/LICENSE |
 | `github.com/hashicorp/errwrap` | MPL-2.0 | https://github.com/hashicorp/errwrap/blob/v1.1.0/LICENSE |
@@ -139,7 +139,7 @@ surfaces are covered:
 | `github.com/kylelemons/godebug` | Apache-2.0 | https://github.com/kylelemons/godebug/blob/v1.1.0/LICENSE |
 | `github.com/kyverno/chainsaw/pkg` | Apache-2.0 | https://github.com/kyverno/chainsaw/blob/v0.2.15/LICENSE |
 | `github.com/kyverno/kyverno-json/pkg` | Apache-2.0 | https://github.com/kyverno/kyverno-json/blob/b294ee72a2bf/LICENSE |
-| `github.com/kyverno/pkg/ext` | Apache-2.0 | https://github.com/kyverno/pkg/blob/48769d003e55/ext/LICENSE |
+| `github.com/kyverno/pkg/ext` | Apache-2.0 | https://github.com/kyverno/pkg/blob/48769d003e55/LICENSE |
 | `github.com/mattn/go-colorable` | MIT | https://github.com/mattn/go-colorable/blob/v0.1.15/LICENSE |
 | `github.com/mattn/go-isatty` | MIT | https://github.com/mattn/go-isatty/blob/v0.0.24/LICENSE |
 | `github.com/mitchellh/copystructure` | MIT | https://github.com/mitchellh/copystructure/blob/v1.2.0/LICENSE |
@@ -219,8 +219,8 @@ surfaces are covered:
 | `google.golang.org/api` | BSD-3-Clause | https://github.com/googleapis/google-api-go-client/blob/v0.293.0/LICENSE |
 | `google.golang.org/api/internal/third_party/uritemplates` | BSD-3-Clause | https://github.com/googleapis/google-api-go-client/blob/v0.293.0/internal/third_party/uritemplates/LICENSE |
 | `google.golang.org/genproto/googleapis` | Apache-2.0 | https://github.com/googleapis/go-genproto/blob/08b0e4226688/LICENSE |
-| `google.golang.org/genproto/googleapis/api` | Apache-2.0 | https://github.com/googleapis/go-genproto/blob/08b0e4226688/googleapis/api/LICENSE |
-| `google.golang.org/genproto/googleapis/rpc` | Apache-2.0 | https://github.com/googleapis/go-genproto/blob/08b0e4226688/googleapis/rpc/LICENSE |
+| `google.golang.org/genproto/googleapis/api` | Apache-2.0 | https://github.com/googleapis/go-genproto/blob/08b0e4226688/LICENSE |
+| `google.golang.org/genproto/googleapis/rpc` | Apache-2.0 | https://github.com/googleapis/go-genproto/blob/08b0e4226688/LICENSE |
 | `google.golang.org/grpc` | Apache-2.0 | https://github.com/grpc/grpc-go/blob/v1.83.1/LICENSE |
 | `google.golang.org/protobuf` | BSD-3-Clause | https://github.com/protocolbuffers/protobuf-go/blob/v1.36.12/LICENSE |
 | `gopkg.in/evanphx/json-patch.v4` | BSD-3-Clause | https://github.com/evanphx/json-patch/blob/v4.13.0/LICENSE |
@@ -6809,7 +6809,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ### github.com/blang/semver/v4
 
 * License: MIT
-* Source: https://github.com/blang/semver/blob/v4.0.0/v4/LICENSE
+* Source: https://github.com/blang/semver/blob/v4.0.0/LICENSE
 
 #### LICENSE
 
@@ -7819,7 +7819,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ### github.com/evanphx/json-patch/v5
 
 * License: BSD-3-Clause
-* Source: https://github.com/evanphx/json-patch/blob/v5.9.11/v5/LICENSE
+* Source: https://github.com/evanphx/json-patch/blob/v5.9.11/LICENSE
 
 #### LICENSE
 
@@ -14973,7 +14973,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### github.com/googleapis/gax-go/v2
 
 * License: BSD-3-Clause
-* Source: https://github.com/googleapis/gax-go/blob/v2.24.0/v2/LICENSE
+* Source: https://github.com/googleapis/gax-go/blob/v2.24.0/LICENSE
 
 #### LICENSE
 
@@ -19870,7 +19870,7 @@ SOFTWARE.
 ### github.com/kyverno/pkg/ext
 
 * License: Apache-2.0
-* Source: https://github.com/kyverno/pkg/blob/48769d003e55/ext/LICENSE
+* Source: https://github.com/kyverno/pkg/blob/48769d003e55/LICENSE
 
 #### LICENSE
 
@@ -29931,7 +29931,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### google.golang.org/genproto/googleapis/api
 
 * License: Apache-2.0
-* Source: https://github.com/googleapis/go-genproto/blob/08b0e4226688/googleapis/api/LICENSE
+* Source: https://github.com/googleapis/go-genproto/blob/08b0e4226688/LICENSE
 
 #### LICENSE
 
@@ -30145,7 +30145,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### google.golang.org/genproto/googleapis/rpc
 
 * License: Apache-2.0
-* Source: https://github.com/googleapis/go-genproto/blob/08b0e4226688/googleapis/rpc/LICENSE
+* Source: https://github.com/googleapis/go-genproto/blob/08b0e4226688/LICENSE
 
 #### LICENSE
 
