@@ -16,7 +16,6 @@ package agent
 
 import (
 	stderrors "errors"
-	"k8s.io/apimachinery/pkg/util/validation"
 	"reflect"
 	"strings"
 	"testing"
@@ -24,6 +23,7 @@ import (
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/yaml"
 )
 
