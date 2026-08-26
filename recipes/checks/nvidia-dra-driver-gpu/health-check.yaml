@@ -20,7 +20,10 @@
 # desiredNumberScheduled (with desiredNumberScheduled > 0 as a guard).
 # Previous check gated only on numberReady > 0, passing on partial
 # failures; see #1222 and recipes/checks/nfd/health-check.yaml for
-# the same rationale.
+# the same rationale. updatedNumberScheduled/observedGeneration
+# additionally guard against a stale rollout: a node still running the
+# previous revision's pod also reports numberReady, so that alone
+# can't distinguish it from a fully current rollout.
 #
 # Resource names: the DaemonSet name is release-derived
 # (<release>-kubelet-plugin). AICR's release name is
@@ -46,9 +49,10 @@ spec:
               metadata:
                 name: nvidia-dra-driver-gpu-kubelet-plugin
                 namespace: nvidia-dra-driver
-              status:
-                (desiredNumberScheduled > `0`): true
-                (numberReady == desiredNumberScheduled): true
+              ((status.desiredNumberScheduled || `0`) > `0`): true
+              ((status.numberReady || `0`) == status.desiredNumberScheduled): true
+              ((status.updatedNumberScheduled || `0`) == status.desiredNumberScheduled): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
     - name: validate-all-pods-healthy
       try:
         - error:
