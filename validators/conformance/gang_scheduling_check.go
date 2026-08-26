@@ -198,7 +198,7 @@ func CheckGangScheduling(ctx *validators.Context) error {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 		defer cleanupCancel()
 		nsErr := cleanupGangTestResources(cleanupCtx, ctx.Clientset, dynClient, run)
-		result := "Deleted gang test pods, PodGroup, and the gang-scheduling-test namespace."
+		result := fmt.Sprintf("Deleted gang test pods, PodGroup, and the %s namespace.", run.namespace)
 		if nsErr != nil {
 			// Report the real outcome: a failed namespace delete leaves residue,
 			// so don't record a false success (tools/cleanup is the backstop).
@@ -207,7 +207,7 @@ func CheckGangScheduling(ctx *validators.Context) error {
 				nsErr)
 		}
 		recordRawTextArtifact(ctx, "Delete test namespace",
-			"kubectl delete namespace gang-scheduling-test --ignore-not-found", result)
+			fmt.Sprintf("kubectl delete namespace %s --ignore-not-found", run.namespace), result)
 	}()
 
 	recordRawTextArtifact(ctx, "Apply test manifest",
@@ -241,7 +241,7 @@ func collectGangTestArtifacts(ctx *validators.Context, dynClient dynamic.Interfa
 		ctx.Ctx, metav1.ListOptions{})
 	if listErr != nil {
 		recordRawTextArtifact(ctx, "PodGroup status",
-			"kubectl get podgroups -n gang-scheduling-test -o wide",
+			fmt.Sprintf("kubectl get podgroups -n %s -o wide", run.namespace),
 			fmt.Sprintf("failed to list PodGroups: %v", listErr))
 	} else {
 		var pgSummary strings.Builder
@@ -250,7 +250,7 @@ func collectGangTestArtifacts(ctx *validators.Context, dynClient dynamic.Interfa
 			fmt.Fprintf(&pgSummary, "%-36s minMember=%d\n", item.GetName(), minMember)
 		}
 		recordRawTextArtifact(ctx, "PodGroup status",
-			"kubectl get podgroups -n gang-scheduling-test -o wide", pgSummary.String())
+			fmt.Sprintf("kubectl get podgroups -n %s -o wide", run.namespace), pgSummary.String())
 	}
 
 	// Pod status and scheduling timestamps.
@@ -275,21 +275,21 @@ func collectGangTestArtifacts(ctx *validators.Context, dynClient dynamic.Interfa
 		gangReport.EarliestScheduled.Format(time.RFC3339),
 		gangReport.LatestScheduled.Format(time.RFC3339))
 	recordRawTextArtifact(ctx, "Pod status",
-		"kubectl get pods -n gang-scheduling-test -o wide", gangResults.String())
+		fmt.Sprintf("kubectl get pods -n %s -o wide", run.namespace), gangResults.String())
 
 	// Worker logs.
 	for i := range gangMinMembers {
 		logBytes, logErr := ctx.Clientset.CoreV1().Pods(run.namespace).GetLogs(
 			run.pods[i], &corev1.PodLogOptions{}).DoRaw(ctx.Ctx)
-		label := fmt.Sprintf("gang-worker-%d logs", i)
+		label := fmt.Sprintf("%s logs", run.pods[i])
 		if logErr != nil {
 			recordRawTextArtifact(ctx, label,
-				fmt.Sprintf("kubectl logs gang-worker-%d -n gang-scheduling-test", i),
+				fmt.Sprintf("kubectl logs %s -n %s", run.pods[i], run.namespace),
 				fmt.Sprintf("failed to read logs: %v", logErr))
 			continue
 		}
 		recordRawTextArtifact(ctx, label,
-			fmt.Sprintf("kubectl logs gang-worker-%d -n gang-scheduling-test", i),
+			fmt.Sprintf("kubectl logs %s -n %s", run.pods[i], run.namespace),
 			string(logBytes))
 	}
 }
@@ -467,8 +467,9 @@ func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interfac
 		ctx, run.groupName, metav1.DeleteOptions{}))
 	// Delete the namespace so a cluster reset leaves no residue. Pods and the
 	// PodGroup are already gone, so this is a single bounded (background
-	// propagation) API call. tools/cleanup lists gang-scheduling-test as a
-	// backstop for interrupted runs; deleting it here is the primary path.
+	// propagation) API call. tools/cleanup sweeps the gang-scheduling-test-
+	// prefix as a backstop for interrupted runs; deleting it here is the
+	// primary path.
 	//
 	// Use a dedicated deadline rather than the shared cleanup ctx: a pod stuck
 	// on a finalizer can burn the whole budget in the waits above, and starving

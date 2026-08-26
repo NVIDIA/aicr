@@ -135,11 +135,14 @@ AICR_NAMESPACES=(
     topograph
 )
 
-# Namespaces created at runtime by AICR conformance checks (not registry
-# components). These are torn down by the check itself, but an interrupted run
-# leaves them behind, so cleanup deletes them as a backstop. See #1672.
-AICR_CHECK_NAMESPACES=(
-    gang-scheduling-test
+# Namespace prefixes created at runtime by AICR conformance checks (not
+# registry components). The gang-scheduling check derives a per-run namespace
+# (`gang-scheduling-test-<suffix>`) so concurrent validate runs do not delete
+# each other's resources, so an exact name cannot be listed here. These are
+# torn down by the check itself, but an interrupted run leaves them behind, so
+# cleanup sweeps the prefix as a backstop. See #1672 and #2395.
+AICR_CHECK_NS_PREFIXES=(
+    gang-scheduling-test-
 )
 
 # CRD API-group suffixes owned by AICR components. Matched as substrings
@@ -307,8 +310,25 @@ is_excluded_crd() {
     return 1
 }
 
+# Expand check-created namespace prefixes against the live cluster. Only
+# namespaces that actually exist are added, so the delete loops below stay
+# exact-name operations.
+expand_check_namespaces() {
+    local prefix ns
+    for prefix in "${AICR_CHECK_NS_PREFIXES[@]}"; do
+        while IFS= read -r ns; do
+            [[ -n "$ns" ]] && printf '%s\n' "$ns"
+        done < <(kubectl get ns -o name 2>/dev/null \
+            | sed 's|^namespace/||' \
+            | grep -E "^${prefix}" || true)
+    done
+}
+
 # All namespaces cleanup owns: registry components plus check-created backstops.
-ALL_NAMESPACES=("${AICR_NAMESPACES[@]}" "${AICR_CHECK_NAMESPACES[@]}")
+ALL_NAMESPACES=("${AICR_NAMESPACES[@]}")
+while IFS= read -r _ns; do
+    [[ -n "$_ns" ]] && ALL_NAMESPACES+=("$_ns")
+done < <(expand_check_namespaces)
 
 # Phase 1: Uninstall Helm releases in AICR namespaces.
 msg "Phase 1: Uninstalling Helm releases in AICR namespaces..."
