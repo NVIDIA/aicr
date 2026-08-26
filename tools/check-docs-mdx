@@ -33,12 +33,15 @@
 #
 # Code handling (applies to checks 2-6; check 1 greps the fence-stripped line
 # WITHOUT inline-span stripping): fenced code blocks in BOTH backtick
-# (```) and tilde (~~~) styles are skipped, following CommonMark fence rules —
-# a fence opens on a run of >= 3 of either character and closes only on a later
-# line whose leading run is the SAME character and at least as long. Inline
-# code spans are stripped before scanning; a span opens on a run of N backticks
-# and closes at the next run of exactly N backticks, so spans of any
-# backtick-run length are honored (not just single-backtick spans).
+# (```) and tilde (~~~) styles are skipped by a lexical fence tracker. An
+# explicit fence opens on a run of >= 3 of either character after 0-3 leading
+# spaces, and closes only on an explicit later line whose leading run is the
+# SAME character, at least as long, and followed by nothing but whitespace.
+# Thus ```yaml starts a fence when outside one and is content, not a closer,
+# when inside one. For direct top-level bullet lists and ordered lists starting
+# at 1, a nonblank outdent implicitly ends a fence with content indent <= 3.
+# Inline code spans are stripped before scanning; a span opens on a run of N
+# backticks and closes at the next run of exactly N backticks.
 #
 # NOTE: this checker is a fast, dependency-free APPROXIMATION of the MDX
 # parser, not a reimplementation of it. tools/check-docs-mdx-parse runs the
@@ -46,20 +49,26 @@
 # gate — it is what the merge-gate 'docs-mdx' job blocks on. A green run HERE
 # is not parser-level validation; it means no known hazard pattern matched.
 #
-# The rules above are deliberately a strict SUBSET of what the parser rejects.
-# Erring toward under-reporting is the correct direction: a miss is caught by
-# the blocking parse gate, whereas a false positive would force contributors to
-# mangle prose the publish step would have accepted. Known misses left to the
-# parser: a stray closing tag ('</div>'), an unclosed fragment ('<>'), a
-# placeholder sharing a line with well-formed JSX, unbalanced expression braces
-# spanning lines, and acorn-level syntax errors.
+# The hazard rules deliberately cover common failures rather than every parser
+# rejection. Outside the lexical code-handling subset documented above, this
+# line-based approximation can disagree with the parser in either direction.
+# Known misses left to the parser include a stray closing tag ('</div>'), an
+# unclosed fragment ('<>'), a placeholder sharing a line with well-formed JSX,
+# unbalanced expression braces spanning lines, and acorn-level syntax errors.
 #
-# Known code-handling limits (tracked in #2144): a fence opener indented by up
-# to three spaces is not recognized as a fence, and a code span is matched
-# within one line even though CommonMark lets spans cross lines. Both can
-# surface as a false positive here; the parse gate is the arbiter.
+# Known code-handling limits: ordered lists starting above 1, multi-digit and
+# tab-separated markers, lazy continuations, nested lists, and mixed containers
+# are parser-owned. Code spans are matched within one line; the parser handles
+# multi-line spans.
 
 set -euo pipefail
+
+# Fence tracking requires POSIX interval expressions. Fail closed when the
+# installed awk treats braces literally.
+if ! awk 'BEGIN { exit ("aaa" ~ /^a{3}$/ ? 0 : 1) }'; then
+  echo "ERROR: awk must support POSIX interval expressions" >&2
+  exit 1
+fi
 
 ERRORS=0
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -115,27 +124,90 @@ frontmatter_end() {
   echo "${end:-0}"
 }
 
+# Shared awk prologue: frontmatter skip + the fence tracker. Check 1 and
+# checks 2-6 run separate awk programs but must agree exactly on what counts
+# as code, so the tracker is defined once here and concatenated into both.
+# Keeping two hand-maintained copies in sync is what let earlier fixes land
+# in one tracker and not the other.
+readonly FENCE_AWK='
+      function indent_width(s,    i, ch, width) {
+        width = 0
+        for (i = 1; i <= length(s); i++) {
+          ch = substr(s, i, 1)
+          if (ch == " ") width++
+          else if (ch == "\t") width += 4 - (width % 4)
+          else break
+        }
+        return width
+      }
+      NR <= fm_end { next }
+      # Lexical fence rules shared by both checker passes:
+      #   indent: 0-3 leading spaces; tabs are not fence indentation
+      #   open:   a backtick in the info string makes the line prose, not a
+      #           fence (ambiguous with an inline code span); tildes are exempt
+      #   close:  same char, at least as long, nothing after but whitespace;
+      #           the optional \r admits a CRLF closer
+      #   scope:  a direct top-level bullet list or ordered list starting at 1
+      #           may own an indented fence; any nonblank outdent ends that scope
+      {
+        blank = ($0 ~ /^[ \t]*\r?$/)
+        ind = indent_width($0)
+        is_fence = match($0, /^ {0,3}(`{3,}|~{3,})/)
+        if (is_fence) {
+          m = substr($0, RSTART, RLENGTH); sub(/^ +/, "", m)
+          ch = substr(m, 1, 1); len = length(m)
+          rest = substr($0, RSTART + RLENGTH)
+        }
+
+        # Re-process a direct list boundary as prose or as a new outer fence.
+        if (in_fence && fscope > 0 && !blank && ind < fscope) {
+          in_fence = 0; fscope = 0
+        }
+
+        if (in_fence) {
+          if (is_fence && ch == fch && len >= flen && rest ~ /^[ \t]*\r?$/) { in_fence = 0; fscope = 0; next }
+          next
+        }
+
+        # Keep container tracking limited to direct top-level bullets and
+        # ordered lists starting at 1, with content indent <= 3. Recognize a
+        # one-digit later item only while that ordered-list scope remains active.
+        # Exclude thematic breaks, which otherwise resemble bullet items.
+        marker = !($0 ~ /^(-[ \t]*){3,}\r?$/ || $0 ~ /^(\*[ \t]*){3,}\r?$/) && match($0, /^([-+*]|1[.)]) +/)
+        later_marker = !marker && ordered_list && match($0, /^[2-9][.)] +/)
+        if ((marker || later_marker) && RLENGTH <= 3 && substr($0, RLENGTH + 1, 1) ~ /[^ \t\r]/) {
+          list_indent = RLENGTH
+          ordered_list = (substr($0, 1, 1) ~ /[1-9]/)
+        } else if (!blank && list_indent > 0 && ind < list_indent) {
+          list_indent = 0; ordered_list = 0
+        }
+
+        if (is_fence && (ch != "`" || index(rest, "`") == 0)) {
+          in_fence = 1; fch = ch; flen = len
+          fscope = (list_indent > 0 && ind >= list_indent) ? list_indent : 0
+          next
+        }
+      }
+'
+
 # --- Check 1: non-self-closing void HTML elements (outside fenced code blocks) ---
 # These must use <tag /> in MDX, not <tag> or <tag attr>.
 VOID_ELEMENTS='img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr'
 for file in "${FILES[@]}"; do
     FM_END="$(frontmatter_end "${file}")"
+    FENCE_STRIPPED=""
+    if ! FENCE_STRIPPED="$(awk -v fm_end="${FM_END}" "${FENCE_AWK}"'
+      { print NR": "$0 }
+    ' "${file}")"; then
+      echo "ERROR: awk failed while scanning fences for check 1: ${file}" >&2
+      ERRORS=$((ERRORS + 1))
+      continue
+    fi
     while IFS= read -r match; do
       [[ -z "${match}" ]] && continue
       echo "MDX: non-self-closing void element: ${file}:${match}"
       ERRORS=$((ERRORS + 1))
-    done < <(awk -v fm_end="${FM_END}" '
-      NR <= fm_end { next }
-      match($0, /^(`{3,}|~{3,})/) {
-        m = substr($0, RSTART, RLENGTH); ch = substr(m, 1, 1); len = length(m)
-        if (!in_fence) { in_fence = 1; fch = ch; flen = len; next }
-        else if (ch == fch && len >= flen) { in_fence = 0; next }
-        # else: fence-like line inside a fence of a different char/shorter run
-        # is content -> fall through to the in_fence guard below.
-      }
-      in_fence { next }
-      { print NR": "$0 }
-    ' "$file" | grep -E "<(${VOID_ELEMENTS})([[:space:]][^>]*)?" | grep -Ev "<(${VOID_ELEMENTS})([[:space:]][^>]*)?[[:space:]]*/>" || true)
+    done < <(printf '%s\n' "${FENCE_STRIPPED}" | grep -E "<(${VOID_ELEMENTS})([[:space:]][^>]*)?" | grep -Ev "<(${VOID_ELEMENTS})([[:space:]][^>]*)?[[:space:]]*/>" || true)
 done
 
 # --- Checks 2, 3, 4, 5, 6: bare braces, HTML comments, autolinks, bare tags,
@@ -147,16 +219,7 @@ for file in "${FILES[@]}"; do
     # awk exits 1 when it finds a hazard; keep it inside the `if` condition so
     # `set -e` does not abort the whole scan at the first offending file
     # (otherwise violations in later files are silently skipped).
-    if ! awk -v fm_end="${FM_END}" '
-      NR <= fm_end { next }
-      match($0, /^(`{3,}|~{3,})/) {
-        m = substr($0, RSTART, RLENGTH); ch = substr(m, 1, 1); len = length(m)
-        if (!in_fence) { in_fence = 1; fch = ch; flen = len; next }
-        else if (ch == fch && len >= flen) { in_fence = 0; next }
-        # else: fence-like line inside a fence of a different char/shorter run
-        # is content -> fall through to the in_fence guard below.
-      }
-      in_fence { next }
+    if ! awk -v fm_end="${FM_END}" "${FENCE_AWK}"'
       {
         line = $0
         # Strip inline code spans FIRST so backticked tokens — including a
@@ -253,8 +316,7 @@ for file in "${FILES[@]}"; do
       # valid content. Deciding whether tags actually balance needs parser
       # state, which this script does not have; the trade is that a placeholder
       # sharing a line with real JSX is caught by tools/check-docs-mdx-parse
-      # instead of here. That is the safe direction — see the strict-subset
-      # note in the header.
+      # instead of here, as described by the parser-ownership note above.
       line ~ /<[a-zA-Z]/ && line !~ /\/>/ && line !~ /<\// && line !~ /<(img|br|hr|input|source|meta|link|area|base|col|embed|param|track|wbr)([ \t>\/])/ && line !~ /<https?:\/\// {
         printf "MDX: bare <word> tag outside code fence: %s:%d: %s\n", FILENAME, NR, $0
         errors++
@@ -268,8 +330,7 @@ for file in "${FILES[@]}"; do
       # parse cleanly through @mdx-js/mdx — micromark only enters JSX-tag mode
       # when a name-ish character follows immediately, so `<` + space stays
       # literal text. Flagging them forced contributors to backtick prose the
-      # publish step accepts, which is the false-positive direction this script
-      # must avoid (see the strict-subset note in the header).
+      # publish step accepts, which this approximation must avoid.
       #
       # `</div>` and `<>` are NOT covered here: both are real MDX errors, but
       # deciding whether a tag is balanced needs parser state. They are caught
