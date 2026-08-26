@@ -116,6 +116,10 @@ jobs:
           fetch-depth: 0  # Full history for changelog generation
           persist-credentials: false
 
+      - name: Initialize release module cache
+        shell: bash
+        run: echo "GOMODCACHE=${RUNNER_TEMP}/aicr-release-modcache" >> "$GITHUB_ENV"
+
       - name: Load versions
         id: versions
         uses: ./.github/actions/load-versions
@@ -124,7 +128,83 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
-          cache: true
+          # This download is the release's proxy-coverage measurement. Restoring
+          # GOMODCACHE here would let it pass without contacting Artifactory.
+          cache: false
+
+      # This is the step that makes "release dependencies flow through
+      # Artifactory" literally true. Before #2374 it could not be: the release
+      # built from committed vendor/ and contacted no proxy at all.
+      #
+      # Placement is deliberate and is the whole ballgame. It must precede the
+      # FIRST `go` command that touches application dependencies, which is the
+      # `go run ./cmd/aicr` inside generate-slsa-predicate below — not just the
+      # goreleaser build. Configure it any later and that earlier command warms
+      # the module cache from the public proxy, the release build then finds
+      # everything cached, and a green run proves nothing about coverage. That
+      # is the same zero-fetch false pass the retired probe workflow existed to
+      # catch.
+      #
+      # The cost of ordering it here: the `go install` in install-go-licenses
+      # (inside go-build-release) now also resolves through the proxy, which
+      # inverts the usual guidance to install build tooling first. Accepted
+      # because the repository is virtual and re-fetches from upstream on a
+      # miss, so an unmirrored public module is a cache fill rather than a
+      # failure. Every other release tool — ko, syft, goreleaser, crane, helm —
+      # comes from a GitHub release over curl and never touches GOPROXY.
+      - name: Configure the DGXC Go proxy
+        uses: ./.github/actions/setup-dgxc-goproxy
+        with:
+          mode: enforced
+
+      # Carried over from the probe workflow, which #2374 deleted. It is the one
+      # assertion a real build cannot replace: if the action silently no-ops, or
+      # someone reverts it to `routed`, every build below still goes green while
+      # resolving from the public internet. GOPROXY is an ordered list consulted
+      # left to right on 404/410, so a second entry of any kind is a fallthrough.
+      - name: Assert the proxy is actually in front
+        shell: bash
+        run: |
+          set -euo pipefail
+          proxy="$(go env GOPROXY)"
+          echo "GOPROXY=${proxy}"
+          expected="https://edge.urm.nvidia.com/artifactory/api/go/dgxc-go-virtual"
+          [ "${proxy}" = "${expected}" ] \
+            || { echo "::error::GOPROXY is '${proxy}', expected exactly '${expected}'"; exit 1; }
+          case "${proxy}" in
+            *,*|*"|"*) echo "::error::GOPROXY has a fallback entry ('${proxy}'); this is not enforced"; exit 1 ;;
+          esac
+          [ "$(go env GOSUMDB)" != off ] \
+            || { echo "::error::GOSUMDB=off; modules would not be verified against the transparency log"; exit 1; }
+          echo "OK: Artifactory is the only GOPROXY entry and GOSUMDB is intact"
+
+      # Deliberately immediate, and the reason is the credential's lifetime.
+      #
+      # The OIDC-minted Artifactory token is good for ~15 minutes. This job has a
+      # 30-minute budget and does a lot between here and the goreleaser build:
+      # install cosign, run the SLSA predicate generator, download six release
+      # tools, then cross-build six binaries with cosign attestation hooks that
+      # retry with backoff. A module fetch that lands late in that sequence would
+      # meet an expired token and fail the release with a 401 — intermittently,
+      # which is the worst way to find out.
+      #
+      # Pulling the whole graph here removes the dependency on timing entirely:
+      # every later `go` command in this job resolves from a warm module cache
+      # and needs no credential at all. Everything that MUST happen inside the
+      # 15-minute window is therefore this one step.
+      #
+      # It doubles as the coverage measurement. With a single-entry GOPROXY,
+      # completing this download means every application dependency came from
+      # Artifactory — there is nowhere else it could have come from.
+      #
+      # The action logs the real `expires_in` from the exchange, so the window is
+      # observable in the run log rather than assumed.
+      - name: Warm the module cache through the proxy
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          echo "OK: application dependency graph resolved through Artifactory"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
@@ -138,6 +218,24 @@ jobs:
         uses: ./.github/actions/generate-slsa-predicate
         with:
           workflow_file: on-tag.yaml
+
+      # Re-mint rather than reuse. One straggler still needs a live credential
+      # this late: the `go install` of go-licenses inside go-build-release
+      # resolves its own module, which the warm cache above does not cover. By
+      # the time we get here the original token may be past its ~15-minute
+      # lifetime, and a 401 would fail the release intermittently.
+      #
+      # This is safe and cheap. GitHub's OIDC request credential
+      # (ACTIONS_ID_TOKEN_REQUEST_URL/_TOKEN) is available for the life of the
+      # job, so the action can exchange for a fresh Artifactory token as often as
+      # needed — no extra permission, no stored secret. Re-running it just
+      # rewrites the same GITHUB_ENV entries and overwrites the helper file, so
+      # it is idempotent; the teardown step at the end of the job still removes
+      # exactly one credential.
+      - name: Refresh the proxy credential
+        uses: ./.github/actions/setup-dgxc-goproxy
+        with:
+          mode: enforced
 
       - name: Build and Release
         id: release
@@ -207,6 +305,16 @@ jobs:
           # generated formula available for that full recovery window.
           retention-days: 30
 
+      # Required, not tidy, and deliberately last. setup-dgxc-goproxy writes a
+      # GOAUTH helper holding a live Artifactory bearer token to $RUNNER_TEMP,
+      # and composite actions get no teardown hook — so until this runs, every
+      # later step in this job can read a valid credential. `if: always()` so a
+      # failed release still cleans up.
+      - name: Remove the proxy credential
+        if: always()
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/dgxc-goauth"
+
   # =============================================================================
   # Docker Jobs: Native per-arch validator builds (parallel with GoReleaser)
   # =============================================================================
@@ -219,6 +327,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -242,20 +351,59 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Initialize release module cache
+        shell: bash
+        run: echo "GOMODCACHE=${RUNNER_TEMP}/aicr-release-modcache" >> "$GITHUB_ENV"
+
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
 
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
 
-      - name: Read Go version
-        id: go
-        shell: bash
-        run: echo "version=$(cat .go-version)" >> "$GITHUB_OUTPUT"
-
       - name: Load versions
         id: versions
         uses: ./.github/actions/load-versions
+
+      - name: Setup Go
+        if: matrix.phase != 'aiperf-bench'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          # A restored public-proxy module cache would put this release image
+          # outside the enforced Artifactory path without any visible failure.
+          cache: false
+
+      - name: Configure the DGXC Go proxy
+        if: matrix.phase != 'aiperf-bench'
+        uses: ./.github/actions/setup-dgxc-goproxy
+        with:
+          mode: enforced
+
+      - name: Assert the proxy is actually in front
+        if: matrix.phase != 'aiperf-bench'
+        shell: bash
+        run: |
+          set -euo pipefail
+          proxy="$(go env GOPROXY)"
+          expected="https://edge.urm.nvidia.com/artifactory/api/go/dgxc-go-virtual"
+          if [[ "${proxy}" != "${expected}" || "$(go env GOSUMDB)" == off ]]; then
+            echo "::error::release validator dependencies are not using the enforced proxy"
+            exit 1
+          fi
+
+      - name: Build validator binary
+        if: matrix.phase != 'aiperf-bench'
+        shell: bash
+        env:
+          VALIDATOR_ARCHES: ${{ matrix.arch }}
+          VALIDATOR_PHASES: ${{ matrix.phase }}
+        run: ./tools/build-validator-binaries
+
+      - name: Remove the proxy credential
+        if: always() && matrix.phase != 'aiperf-bench'
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/dgxc-goauth"
 
       - name: Build and push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
@@ -264,12 +412,6 @@ jobs:
           file: ${{ matrix.dockerfile || format('validators/{0}/Dockerfile', matrix.phase) }}
           platforms: ${{ matrix.platform }}
           push: true
-          # CHAINSAW_* args were dropped in #1236 — the deployment validator
-          # no longer ships /usr/local/bin/chainsaw; it executes Chainsaw
-          # Test format in-process via pkg/chainsaw/inprocess.go. #2038 did
-          # the same for the gate image, so no image passes them now.
-          build-args: |
-            GO_VERSION=${{ steps.go.outputs.version }}
           tags: ${{ env.VALIDATOR_IMAGE_PREFIX }}/${{ matrix.phase }}:${{ needs.detect.outputs.candidate_tag }}-${{ matrix.arch }}
           provenance: false
           # aiperf-bench builds without the layer cache on purpose (#2086).
@@ -302,6 +444,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -319,6 +462,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Initialize release module cache
+        shell: bash
+        run: echo "GOMODCACHE=${RUNNER_TEMP}/aicr-release-modcache" >> "$GITHUB_ENV"
+
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
 
@@ -332,6 +479,53 @@ jobs:
         id: versions
         uses: ./.github/actions/load-versions
 
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          # Compilation itself is the proxy-coverage measurement for this image.
+          cache: false
+
+      # The gate binary is compiled here rather than in a Dockerfile builder
+      # stage, because a BuildKit stage cannot reach this proxy — see the header
+      # of cmd/gate/Dockerfile for why. Compiling on the runner is what makes the
+      # gate image's dependencies actually flow through Artifactory.
+      - name: Configure the DGXC Go proxy
+        uses: ./.github/actions/setup-dgxc-goproxy
+        with:
+          mode: enforced
+
+      - name: Assert the proxy is actually in front
+        shell: bash
+        run: |
+          set -euo pipefail
+          proxy="$(go env GOPROXY)"
+          echo "GOPROXY=${proxy}"
+          expected="https://edge.urm.nvidia.com/artifactory/api/go/dgxc-go-virtual"
+          [ "${proxy}" = "${expected}" ] \
+            || { echo "::error::GOPROXY is '${proxy}', expected exactly '${expected}'"; exit 1; }
+          case "${proxy}" in
+            *,*|*"|"*) echo "::error::GOPROXY has a fallback entry ('${proxy}'); this is not enforced"; exit 1 ;;
+          esac
+          [ "$(go env GOSUMDB)" != off ] \
+            || { echo "::error::GOSUMDB=off; modules would not be verified against the transparency log"; exit 1; }
+          echo "OK: Artifactory is the only GOPROXY entry and GOSUMDB is intact"
+
+      # GOARCH is set explicitly even though each matrix leg runs on a native
+      # runner. It costs nothing and keeps the artifact correct if the runner
+      # mapping above is ever changed to cross-build.
+      - name: Build the gate binary
+        shell: bash
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          CGO_ENABLED=0 GOOS=linux GOARCH="${TARGET_ARCH}" go build -trimpath \
+            -ldflags="-s -w -extldflags '-static' -X main.version=${VERSION}" \
+            -o dist/gate ./cmd/gate
+          file dist/gate
+
       - name: Build and push
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
         with:
@@ -339,9 +533,6 @@ jobs:
           file: cmd/gate/Dockerfile
           platforms: ${{ matrix.platform }}
           push: true
-          build-args: |
-            GO_VERSION=${{ steps.versions.outputs.go }}
-            VERSION=${{ github.ref_name }}
           tags: ${{ env.GATE_IMAGE }}:${{ needs.detect.outputs.candidate_tag }}-${{ matrix.arch }}
           provenance: false
           cache-from: type=gha
@@ -352,6 +543,14 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+      # See the matching step in build-ko: the GOAUTH helper holds a live
+      # Artifactory bearer token and composite actions get no teardown hook, so
+      # this has to be explicit and last.
+      - name: Remove the proxy credential
+        if: always()
+        shell: bash
+        run: rm -f "${RUNNER_TEMP}/dgxc-goauth"
 
   # =============================================================================
   # Docker Manifest: Combine per-arch images into multi-arch manifests
@@ -827,9 +1026,10 @@ jobs:
   # separate obligation from attribution (THIRD_PARTY_NOTICES.md) and is not
   # satisfied by it.
   #
-  # Only aiperf-bench needs this. The six Go images vendor their dependencies,
-  # so the GitHub release source archive for this tag already carries the
-  # complete source of every module compiled into them.
+  # Only aiperf-bench needs a source referrer. The six Go images name every
+  # dependency at an immutable version in go.mod/go.sum in the release source
+  # archive, and those exact sources are retrievable from the public Go module
+  # proxy. The Python image installs wheels, which do not carry their source.
   #
   # A referrer rather than a layer in the image: the sdists are ~250 MB, which
   # would otherwise be paid on every benchmark pod pull forever for data nothing

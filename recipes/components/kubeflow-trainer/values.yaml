@@ -70,10 +70,13 @@ crds:
 
 # JobSet integration (required for TrainJob)
 # JobSet provides the underlying primitive for multi-replica training jobs
+# Upstream v2.2.0 dependency contract:
+# https://github.com/kubeflow/trainer/blob/v2.2.0/charts/kubeflow-trainer/Chart.yaml#L28-L31
+# https://github.com/kubeflow/trainer/blob/v2.2.0/charts/kubeflow-trainer/values.yaml#L27-L32
 jobset:
-  # Enable JobSet controller installation
-  # Set to false if JobSet is already installed in the cluster
-  enabled: true
+  # Install the JobSet dependency managed by Kubeflow Trainer
+  # Set to false if a JobSet controller/webhook is already installed in the cluster
+  install: true
 
 # Webhook configuration for TrainJob validation
 webhook:

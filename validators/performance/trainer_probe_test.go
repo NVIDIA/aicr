@@ -43,11 +43,11 @@ func webhookConfig(kind, name, webhookName string) *unstructured.Unstructured {
 // where Trainer is installed.
 func webhookConfigIn(kind, name, webhookName, namespace string) *unstructured.Unstructured {
 	obj := newTestObject("admissionregistration.k8s.io/v1", kind, "", name)
-	if err := unstructured.SetNestedSlice(obj.Object, []interface{}{
-		map[string]interface{}{
+	if err := unstructured.SetNestedSlice(obj.Object, []any{
+		map[string]any{
 			keyName: webhookName,
-			"clientConfig": map[string]interface{}{
-				"service": map[string]interface{}{
+			"clientConfig": map[string]any{
+				"service": map[string]any{
 					keyName:     trainerControllerService,
 					"namespace": namespace,
 				},
@@ -81,7 +81,7 @@ func trainerInstallIn(namespace string) []runtime.Object {
 func malformedWebhookConfig(kind, name string) *unstructured.Unstructured {
 	obj := newTestObject("admissionregistration.k8s.io/v1", kind, "", name)
 	if err := unstructured.SetNestedSlice(obj.Object,
-		[]interface{}{"not-an-object"}, "webhooks"); err != nil {
+		[]any{"not-an-object"}, "webhooks"); err != nil {
 		panic(err)
 	}
 	return obj
@@ -343,7 +343,7 @@ func TestApplyTrainerResources_RefusesForeignWebhookConfig(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("webhooks = %d entries, want 1", len(entries))
 	}
-	if name := entries[0].(map[string]interface{})[keyName]; name != "validator.other.example.com" {
+	if name := entries[0].(map[string]any)[keyName]; name != "validator.other.example.com" {
 		t.Errorf("foreign webhook config was clobbered: entry name = %v", name)
 	}
 }
@@ -402,8 +402,8 @@ func TestWaitForJobSetControllerReady_AbsentIsNotAFailure(t *testing.T) {
 // install whose JobSet controller is stuck in ImagePullBackOff must be caught here
 // rather than surfacing much later as a TrainJob whose JobSet is never created.
 //
-// Run against both layouts because the controller's name differs between them and
-// the Helm one is release-derived, so only the shared label locates it reliably.
+// Run against the in-tree layout and an externally managed chart layout with a
+// custom name, so only the shared label locates both reliably.
 func TestWaitForJobSetControllerReady_PresentButNotReady(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -416,7 +416,7 @@ func TestWaitForJobSetControllerReady_PresentButNotReady(t *testing.T) {
 			deployment: "jobset-controller-manager",
 		},
 		{
-			name:       "helm chart layout with a release-derived name",
+			name:       "externally managed chart layout with a custom name",
 			namespace:  "kubeflow",
 			deployment: "kubeflow-trainer-jobset-controller",
 		},

@@ -26,6 +26,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"path"
@@ -464,10 +465,7 @@ func pullRecipeGraphWithRetry(
 	deps recipePullDependencies,
 ) (ociv1.Descriptor, ociv1.Manifest, error) {
 
-	attempts := deps.maxAttempts
-	if attempts < 1 {
-		attempts = 1
-	}
+	attempts := max(deps.maxAttempts, 1)
 	state := recipePullState{}
 	traffic := recipeDownloadBudget{limit: deps.maxRetryTraffic}
 	backoff := deps.initialBackoff
@@ -750,8 +748,8 @@ func validateRecipePullOptions(
 		return validated, apperrors.New(apperrors.ErrCodeInvalidRequest,
 			"OCI recipe repository must be non-empty and contain no surrounding whitespace")
 	}
-	if strings.HasPrefix(input, "oci://") {
-		input = strings.TrimPrefix(input, "oci://")
+	if after, ok := strings.CutPrefix(input, "oci://"); ok {
+		input = after
 	} else if strings.Contains(input, "://") {
 		return validated, apperrors.New(apperrors.ErrCodeInvalidRequest,
 			"OCI recipe repository supports only the optional oci:// scheme")
@@ -909,9 +907,7 @@ func cloneRecipeManifest(manifest ociv1.Manifest) ociv1.Manifest {
 	}
 	if manifest.Annotations != nil {
 		clone.Annotations = make(map[string]string, len(manifest.Annotations))
-		for key, value := range manifest.Annotations {
-			clone.Annotations[key] = value
-		}
+		maps.Copy(clone.Annotations, manifest.Annotations)
 	}
 	return clone
 }
@@ -946,8 +942,7 @@ func classifyRecipeContentFailure(ctx context.Context, label string, err error) 
 }
 
 func isTransientRecipePullError(err error) bool {
-	var structured *apperrors.StructuredError
-	if stderrors.As(err, &structured) {
+	if structured, ok := stderrors.AsType[*apperrors.StructuredError](err); ok {
 		switch structured.Code {
 		case apperrors.ErrCodeTimeout, apperrors.ErrCodeUnavailable,
 			apperrors.ErrCodeRateLimitExceeded:
@@ -968,16 +963,14 @@ func classifyRecipePullFailure(err error, exhausted bool) error {
 	if err == nil {
 		return nil
 	}
-	var structured *apperrors.StructuredError
-	if stderrors.As(err, &structured) {
+	if _, ok := stderrors.AsType[*apperrors.StructuredError](err); ok {
 		if exhausted && isTransientRecipePullError(err) {
 			return apperrors.Wrap(apperrors.ErrCodeUnavailable,
 				"OCI recipe pull failed after retries", err)
 		}
 		return err
 	}
-	var response *errcode.ErrorResponse
-	if stderrors.As(err, &response) {
+	if response, ok := stderrors.AsType[*errcode.ErrorResponse](err); ok {
 		var code apperrors.ErrorCode
 		switch response.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden:
@@ -1303,7 +1296,7 @@ func validateRecipeArchivePath(name string, directory bool) (string, error) {
 		return "", apperrors.New(apperrors.ErrCodeInvalidRequest,
 			"OCI recipe layer contains a non-local archive path")
 	}
-	for _, component := range strings.Split(cleanName, "/") {
+	for component := range strings.SplitSeq(cleanName, "/") {
 		if component == "" || component == "." || component == ".." {
 			return "", apperrors.New(apperrors.ErrCodeInvalidRequest,
 				"OCI recipe layer contains an unsafe archive path component")
@@ -1325,7 +1318,7 @@ func ensureRecipeArchiveParents(
 		return nil
 	}
 	current := ""
-	for _, component := range strings.Split(filepath.ToSlash(parent), "/") {
+	for component := range strings.SplitSeq(filepath.ToSlash(parent), "/") {
 		current = filepath.Join(current, component)
 		if nodes[current] == recipeArchiveFile {
 			return archiveTypeConflict(rel)
@@ -1396,10 +1389,7 @@ func writeRecipeArchiveFile(
 		if err := recipeContextError(ctx, "OCI recipe file extraction canceled"); err != nil {
 			return written, err
 		}
-		chunk := int64(len(buffer))
-		if remaining < chunk {
-			chunk = remaining
-		}
+		chunk := min(remaining, int64(len(buffer)))
 		n, readErr := reader.Read(buffer[:chunk])
 		if n > 0 {
 			writeN, writeErr := file.Write(buffer[:n])

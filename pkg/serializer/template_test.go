@@ -30,8 +30,7 @@ import (
 
 // hasErrorCode checks if an error contains a StructuredError with the given code.
 func hasErrorCode(err error, code errors.ErrorCode) bool {
-	var structuredErr *errors.StructuredError
-	if stderrors.As(err, &structuredErr) {
+	if structuredErr, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 		return structuredErr.Code == code
 	}
 	return false

@@ -1009,10 +1009,7 @@ func TestDefaultFetchIndexYAML(t *testing.T) {
 			flusher, _ := w.(http.Flusher)
 			remaining := defaults.HelmChartIndexBodyLimit + 1
 			for remaining > 0 {
-				n := int64(chunk)
-				if remaining < n {
-					n = remaining
-				}
+				n := min(remaining, int64(chunk))
 				if _, err := w.Write(buf[:n]); err != nil {
 					return
 				}
@@ -1365,8 +1362,7 @@ func TestSelectChartURLs_DuplicateEntriesUnion(t *testing.T) {
 // codeOf extracts a StructuredError code for concise assertion messages;
 // returns "" when err is not a StructuredError.
 func codeOf(err error) errors.ErrorCode {
-	var se *errors.StructuredError
-	if stderrors.As(err, &se) {
+	if se, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 		return se.Code
 	}
 	return ""

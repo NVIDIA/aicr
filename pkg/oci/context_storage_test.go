@@ -331,11 +331,9 @@ func TestAttemptReadOnlyStorageConcurrentCloseIsCheckedAndCached(t *testing.T) {
 	results := make(chan error, callers)
 	var wg sync.WaitGroup
 	for range callers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			results <- storage.Close()
-		}()
+		})
 	}
 	wg.Wait()
 	close(results)
@@ -365,8 +363,7 @@ func TestCopyGraphStorageFetchDelegates(t *testing.T) {
 		{name: "error", wantErr: fetchErr},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
+			ctx := t.Context()
 			desc := content.NewDescriptorFromBytes("test/data", []byte("payload"))
 			desc.Annotations = map[string]string{"test": tt.name}
 			wantReader := &finiteCloseErrorReader{Reader: bytes.NewReader([]byte("payload"))}

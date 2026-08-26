@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -97,10 +98,8 @@ func TestServeGraphGPUPlacement(t *testing.T) {
 	// dropping it strands the Frontend on Azure while GKE and EKS stay green.
 	t.Run("frontend tolerates the bare nvidia.com/gpu taint", func(t *testing.T) {
 		want := toleration{Key: gpuResource, Operator: "Exists", Effect: "NoSchedule"}
-		for _, tol := range frontend.PodTemplate.Spec.Tolerations {
-			if tol == want {
-				return
-			}
+		if slices.Contains(frontend.PodTemplate.Spec.Tolerations, want) {
+			return
 		}
 		t.Errorf("Frontend is missing toleration %s; the AKS GPU pool carries only that taint\n"+
 			"have: %v", want, frontend.PodTemplate.Spec.Tolerations)
@@ -217,8 +216,7 @@ func renderServeGraph(t *testing.T, env []string) dynamoGraph {
 
 	out, err := cmd.Output()
 	if err != nil {
-		var exitErr *exec.ExitError
-		if stderrors.As(err, &exitErr) {
+		if exitErr, ok := stderrors.AsType[*exec.ExitError](err); ok {
 			t.Fatalf("serve_render_manifest exited %d: %s", exitErr.ExitCode(), exitErr.Stderr)
 		}
 		t.Fatalf("run serve_render_manifest: %v", err)
@@ -272,12 +270,7 @@ func renderServeGraph(t *testing.T, env []string) dynamoGraph {
 }
 
 func containsString(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(haystack, needle)
 }
 
 // component returns the named component, failing the test when absent so a

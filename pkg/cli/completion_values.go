@@ -15,6 +15,7 @@
 package cli
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -58,10 +59,8 @@ func findCompletableFlag(cmd *cli.Command, name string) (CompletableFlag, bool) 
 		if !ok {
 			continue
 		}
-		for _, n := range f.Names() {
-			if n == name {
-				return cf, true
-			}
+		if slices.Contains(f.Names(), name) {
+			return cf, true
 		}
 	}
 	return nil, false

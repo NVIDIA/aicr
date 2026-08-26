@@ -17,6 +17,7 @@ package measurement
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"gopkg.in/yaml.v3"
@@ -427,9 +428,7 @@ func (m *Measurement) Merge(other *Measurement) error {
 			})
 		} else {
 			// Subtype exists, merge data (other wins on conflicts)
-			for key, value := range otherSt.Data {
-				existingSt.Data[key] = value
-			}
+			maps.Copy(existingSt.Data, otherSt.Data)
 		}
 	}
 	return nil
@@ -438,9 +437,7 @@ func (m *Measurement) Merge(other *Measurement) error {
 // copyReadings creates a shallow copy of a readings map.
 func copyReadings(src map[string]Reading) map[string]Reading {
 	dst := make(map[string]Reading, len(src))
-	for k, v := range src {
-		dst[k] = v
-	}
+	maps.Copy(dst, src)
 	return dst
 }
 

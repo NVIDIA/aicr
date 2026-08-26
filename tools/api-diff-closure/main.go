@@ -28,6 +28,7 @@ import (
 	"go/token"
 	"go/types"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"sort"
@@ -35,7 +36,10 @@ import (
 	"time"
 )
 
-const goListTimeout = 2 * time.Minute
+// Building export data for the package dependency closure can take more than
+// two minutes on cold or contended CI runners. Keep enough bounded headroom for
+// that normal variance without masking a stuck go list process.
+const goListTimeout = 5 * time.Minute
 
 type rootSpecs []string
 
@@ -78,9 +82,7 @@ func newModuleMembership(modulePath string, packageModulePaths map[string]string
 		modulePath:         modulePath,
 		packageModulePaths: make(map[string]string, len(packageModulePaths)),
 	}
-	for packagePath, packageModulePath := range packageModulePaths {
-		membership.packageModulePaths[packagePath] = packageModulePath
-	}
+	maps.Copy(membership.packageModulePaths, packageModulePaths)
 	return membership
 }
 
@@ -185,7 +187,7 @@ func parseRoots(rawRoots []string) ([]rootSpec, error) {
 		if packagePath == "" {
 			return nil, fmt.Errorf("root %q has an empty package path", raw)
 		}
-		for _, name := range strings.Split(names, ",") {
+		for name := range strings.SplitSeq(names, ",") {
 			name = strings.TrimSpace(name)
 			if name == "" {
 				return nil, fmt.Errorf("root %q has an empty type name", raw)
@@ -230,8 +232,7 @@ func loadPackages(
 		if ctx.Err() != nil {
 			return nil, moduleMembership{}, fmt.Errorf("load packages: %w", ctx.Err())
 		}
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
 			return nil, moduleMembership{}, fmt.Errorf("go list failed: %s", strings.TrimSpace(string(exitErr.Stderr)))
 		}
 		return nil, moduleMembership{}, fmt.Errorf("run go list: %w", err)
@@ -475,12 +476,12 @@ func (c *typeCollector) visit(typ types.Type) {
 	case *types.Alias:
 		c.visit(types.Unalias(typ))
 		c.visitTypeParams(typ.TypeParams())
-		for i := range typ.TypeArgs().Len() {
-			c.visit(typ.TypeArgs().At(i))
+		for t := range typ.TypeArgs().Types() {
+			c.visit(t)
 		}
 	case *types.Named:
-		for i := range typ.TypeArgs().Len() {
-			c.visit(typ.TypeArgs().At(i))
+		for t := range typ.TypeArgs().Types() {
+			c.visit(t)
 		}
 		if !c.addTypeName(typ.Obj()) {
 			return
@@ -501,8 +502,7 @@ func (c *typeCollector) visit(typ types.Type) {
 	case *types.Chan:
 		c.visit(typ.Elem())
 	case *types.Struct:
-		for i := range typ.NumFields() {
-			field := typ.Field(i)
+		for field := range typ.Fields() {
 			if field.Exported() || field.Embedded() {
 				c.visit(field.Type())
 			}
@@ -513,20 +513,19 @@ func (c *typeCollector) visit(typ types.Type) {
 		c.visitTuple(typ.Results())
 	case *types.Interface:
 		typ.Complete()
-		for i := range typ.NumMethods() {
-			method := typ.Method(i)
+		for method := range typ.Methods() {
 			if method.Exported() {
 				c.visit(method.Type())
 			}
 		}
-		for i := range typ.NumEmbeddeds() {
-			c.visit(typ.EmbeddedType(i))
+		for etyp := range typ.EmbeddedTypes() {
+			c.visit(etyp)
 		}
 	case *types.TypeParam:
 		c.visit(typ.Constraint())
 	case *types.Union:
-		for i := range typ.Len() {
-			c.visit(typ.Term(i).Type())
+		for term := range typ.Terms() {
+			c.visit(term.Type())
 		}
 	}
 }
@@ -540,8 +539,8 @@ func (c *typeCollector) addTypeName(object *types.TypeName) bool {
 }
 
 func (c *typeCollector) visitMethodSet(methods *types.MethodSet) {
-	for i := range methods.Len() {
-		method, ok := methods.At(i).Obj().(*types.Func)
+	for method := range methods.Methods() {
+		method, ok := method.Obj().(*types.Func)
 		if ok && method.Exported() {
 			c.visit(method.Type())
 		}
@@ -549,13 +548,13 @@ func (c *typeCollector) visitMethodSet(methods *types.MethodSet) {
 }
 
 func (c *typeCollector) visitTypeParams(params *types.TypeParamList) {
-	for i := range params.Len() {
-		c.visit(params.At(i))
+	for tparam := range params.TypeParams() {
+		c.visit(tparam)
 	}
 }
 
 func (c *typeCollector) visitTuple(tuple *types.Tuple) {
-	for i := range tuple.Len() {
-		c.visit(tuple.At(i).Type())
+	for v := range tuple.Variables() {
+		c.visit(v.Type())
 	}
 }

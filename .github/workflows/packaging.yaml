@@ -61,7 +61,6 @@ jobs:
       - name: GoReleaser Dry Run
         env:
           GORELEASER_CURRENT_TAG: v0.0.0
-          GOFLAGS: -mod=vendor
           AICR_CANDIDATE_TAG: candidate-packaging-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail

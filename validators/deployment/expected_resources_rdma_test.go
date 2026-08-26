@@ -168,9 +168,9 @@ func TestVerifyRDMAFabricReady_Poll(t *testing.T) {
 
 			seq := tt.node1RDMA
 			clientset := k8sfake.NewClientset()
-			var lists int32
+			var lists atomic.Int32
 			clientset.PrependReactor("list", "nodes", func(clienttesting.Action) (bool, runtime.Object, error) {
-				idx := int(atomic.AddInt32(&lists, 1)) - 1
+				idx := int(lists.Add(1)) - 1
 				if idx >= len(seq) {
 					idx = len(seq) - 1
 				}
@@ -196,7 +196,7 @@ func TestVerifyRDMAFabricReady_Poll(t *testing.T) {
 			if err != nil {
 				t.Fatalf("verifyRDMAFabricReady() error = %v, want nil (should ride through the transient partial rollout)", err)
 			}
-			if got := int(atomic.LoadInt32(&lists)); got < tt.minLists {
+			if got := int(lists.Load()); got < tt.minLists {
 				t.Fatalf("expected the poll to list nodes at least %d times (through the partial rollout), got %d", tt.minLists, got)
 			}
 		})

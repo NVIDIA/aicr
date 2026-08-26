@@ -1071,7 +1071,7 @@ func TestGenerate_Reproducible(t *testing.T) {
 	// Generate twice in different directories
 	var fileContents [2]map[string]string
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		outputDir := t.TempDir()
 
 		_, err := g.Generate(ctx, outputDir)

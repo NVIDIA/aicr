@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -429,12 +430,9 @@ func effectiveOverridesForComponent(
 		}
 	}
 	merged := make(map[string]string)
-	for i := len(keys) - 1; i >= 0; i-- {
-		key := keys[i]
+	for _, key := range slices.Backward(keys) {
 		if overrides, ok := lookup[key]; ok {
-			for path, val := range overrides {
-				merged[path] = val
-			}
+			maps.Copy(merged, overrides)
 		}
 	}
 	return merged, nil

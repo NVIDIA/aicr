@@ -16,6 +16,7 @@ package recipe
 
 import (
 	"context"
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -152,9 +153,7 @@ func TestNodewrightTuningGateAcrossCatalog(t *testing.T) {
 			t.Skip("no AKS leaf resolved; covered by the catalog assertions above")
 		}
 		values := make(map[string]any, len(aksValues))
-		for k, v := range aksValues {
-			values[k] = v
-		}
+		maps.Copy(values, aksValues)
 		values["tuningEnabled"] = true
 		packages, fullDependsOn := renderNodewrightTuning(t, aksContent, values)
 		if _, ok := packages["nvidia-tuned"]; !ok {
@@ -236,18 +235,14 @@ func TestNodewrightTuningGateSinglePackageManifests(t *testing.T) {
 				}
 
 				disabled := make(map[string]any, len(values)+1)
-				for k, v := range values {
-					disabled[k] = v
-				}
+				maps.Copy(disabled, values)
 				disabled["tuningEnabled"] = false
 				if got := renderNodewrightTuningRaw(t, content, disabled); strings.Contains(got, "kind: Skyhook") {
 					t.Errorf("tuningEnabled=false must suppress the whole Skyhook CR:\n%s", got)
 				}
 
 				enabled := make(map[string]any, len(values)+1)
-				for k, v := range values {
-					enabled[k] = v
-				}
+				maps.Copy(enabled, values)
 				enabled["tuningEnabled"] = true
 				if got := renderNodewrightTuningRaw(t, content, enabled); got != defaultRender {
 					t.Errorf("tuningEnabled=true must render identically to the default (absent):\ngot:\n%s\nwant:\n%s", got, defaultRender)

@@ -298,8 +298,7 @@ func TestDiscoveryTimeout(t *testing.T) {
 }
 
 func TestCollectorContextTransport_ContextLivesThroughResponseBody(t *testing.T) {
-	collectorCtx, cancelCollector := context.WithCancel(context.Background())
-	defer cancelCollector()
+	collectorCtx := t.Context()
 
 	var requestCtx context.Context
 	transport := &collectorContextTransport{

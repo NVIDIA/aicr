@@ -760,7 +760,7 @@ func TestComponentOverrides_ParityWithHelmDeployScript(t *testing.T) {
 		t.Fatalf("could not find ASYNC_COMPONENTS=\"…\" in %s", scriptPath)
 	}
 	asyncNames := map[string]bool{}
-	for _, n := range strings.Fields(asyncMatch[1]) {
+	for n := range strings.FieldsSeq(asyncMatch[1]) {
 		asyncNames[n] = true
 	}
 

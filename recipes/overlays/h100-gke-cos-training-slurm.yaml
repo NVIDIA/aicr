@@ -25,6 +25,15 @@ spec:
   # `aicr bundle ... --set slinkyslurm:...` or a valuesFile.
   base: h100-gke-cos-training
 
+  # Machine type: qualified on a3-megagpu-8g only, same as the parent.
+  #
+  # Two different things carry over from `base`, and only one of them is
+  # inheritance: the gke-nccl-tcpxo componentRef is inherited by the base
+  # mechanism, while the machine-type qualification is a documented assumption
+  # that holds here because those same artifacts do. There is no machine-type
+  # axis in the criteria contract to inherit -- these criteria add none, so the
+  # parent's TCPXO-vs-TCPX selection gap applies unchanged. See the parent
+  # overlay's note and #2290.
   criteria:
     service: gke
     accelerator: h100

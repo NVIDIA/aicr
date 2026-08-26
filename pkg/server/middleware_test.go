@@ -501,8 +501,7 @@ func TestBodyLimitMiddleware_RejectsOversizedBody(t *testing.T) {
 	if readErr == nil {
 		t.Fatal("expected read error for oversized body")
 	}
-	var maxBytesErr *http.MaxBytesError
-	if !stderrors.As(readErr, &maxBytesErr) {
+	if _, ok := stderrors.AsType[*http.MaxBytesError](readErr); !ok {
 		t.Errorf("expected *http.MaxBytesError, got %T: %v", readErr, readErr)
 	}
 }

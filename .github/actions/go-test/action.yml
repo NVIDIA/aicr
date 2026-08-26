@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'Go Test'
-description: 'Setup Go, verify vendor, run unit tests with race detector and coverage'
+description: 'Setup Go, verify manifests are tidy, run unit tests with race detector and coverage'
 
 inputs:
   go_version:
@@ -48,32 +48,28 @@ runs:
         cache: true
         cache-dependency-path: |
           go.sum
-          vendor/modules.txt
         check-latest: true
 
-    # Two different questions, checked in dependency order.
-    #
     # `go mod tidy -diff` asks whether go.mod/go.sum are correct for the source:
     # no requirement the code does not import, none missing, no stale go.sum
     # entries. It prints the needed changes and exits non-zero without writing.
     # Nothing checked this before, so a requirement could be added to go.mod
     # that nothing imports and CI stayed green.
     #
-    # The vendor check then asks whether vendor/ matches those manifests. It
-    # cannot answer the first question: `go mod vendor` regenerates from
-    # whatever go.mod says, so a wrong manifest yields a vendor tree that
-    # matches it perfectly.
+    # This used to be paired with a `go mod vendor` + `git diff --exit-code`
+    # check. Its subject was vendor/, which #2374 removed, and it never covered
+    # for this one: `go mod vendor` regenerates from whatever go.mod says, so a
+    # wrong manifest yields a vendor tree matching it perfectly. go.mod was that
+    # check's input, not its subject.
+    #
+    # Nothing is lost on integrity either. Vendored source was never hashed
+    # against go.sum at build time; resolution from the module cache is, against
+    # go.sum and sum.golang.org, on every build.
     - name: Verify go.mod and go.sum are tidy
       shell: bash
       run: |
         go mod tidy -diff \
           || { echo "go.mod/go.sum are not tidy; run 'make tidy' and commit the result" >&2; exit 1; }
-
-    - name: Verify vendor is in sync
-      shell: bash
-      run: |
-        go mod vendor
-        git diff --exit-code vendor/ || (echo "vendor/ is out of sync with go.mod/go.sum; run 'make tidy' and commit go.mod, go.sum, and vendor/" && exit 1)
 
     # The ubuntu-latest runner image bundles Helm 3; the unit tests that
     # shell out to helm (pkg/bundler/deployer/argocdhelm live-render tests)

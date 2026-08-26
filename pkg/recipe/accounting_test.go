@@ -382,12 +382,10 @@ func TestBuilderAccountingBuildsAreIsolated(t *testing.T) {
 	errs := make([]error, len(modes))
 	var wg sync.WaitGroup
 	for i := range modes {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			results[i], errs[i] = builder.BuildFromCriteria(
 				t.Context(), criteria, WithAccountingMode(modes[i]))
-		}()
+		})
 	}
 	wg.Wait()
 

@@ -110,7 +110,6 @@ runs:
         cache: true
         cache-dependency-path: |
           go.sum
-          vendor/modules.txt
 
     - name: Setup build tools
       uses: ./.github/actions/setup-build-tools

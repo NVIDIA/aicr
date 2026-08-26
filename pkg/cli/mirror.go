@@ -20,6 +20,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/urfave/cli/v3"
@@ -134,12 +135,7 @@ func mirrorListFlags() []cli.Flag {
 
 // flagMatchesName returns true if a CLI flag has the given name among its names.
 func flagMatchesName(f cli.Flag, name string) bool {
-	for _, n := range f.Names() {
-		if n == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(f.Names(), name)
 }
 
 //nolint:gocyclo // linear option resolution
@@ -285,10 +281,5 @@ func resolveOutputWriter(cmd *cli.Command) (io.Writer, func() error, error) {
 
 // isValidMirrorFormat checks if the given format is in the supported list.
 func isValidMirrorFormat(f mirror.Format) bool {
-	for _, valid := range mirror.SupportedFormats() {
-		if string(f) == valid {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(mirror.SupportedFormats(), string(f))
 }

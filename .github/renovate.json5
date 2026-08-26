@@ -363,13 +363,20 @@
   //   workload-side daemon (tcpgpudmarxd-dev) must move together; an
   //   independent Renovate bump on this image alone would create
   //   stack version skew. See docs/integrator/gke-tcpxo-networking.md.
+  // - tcpgpudmarxd-dev: the workload-side half of the same TCPXO pair.
+  //   Pre-emptive rather than an active guard today: the kubernetes manager
+  //   above is narrowed to recipes/components/*/manifests, and the daemon
+  //   appears only in demos/ and validators/**/testdata/, so Renovate does not
+  //   extract it at present. Listed so that widening those patterns cannot
+  //   silently let the daemon move on its own — the same stack version skew as
+  //   bumping the installer alone, from the opposite direction.
   ignoreDeps: [
     "602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin",
     "us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev",
+    "us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev",
   ],
 
   // Paths Renovate should not scan.
-  // - vendor/ contains pre-resolved Go modules (managed by `go mod vendor`).
   // - **/node_modules/**, **/dist/** are build artifacts.
   // - examples/ holds illustrative recipe YAMLs without `# renovate:`
   //   annotations; Renovate would not extract anything from them today
@@ -377,7 +384,6 @@
   // - **/testdata/** is unit-test fixture data; bumping tags inside
   //   fixtures would break tests that assert exact rendered output.
   ignorePaths: [
-    "vendor/**",
     "**/node_modules/**",
     "**/dist/**",
     "examples/**",

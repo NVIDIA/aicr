@@ -77,8 +77,8 @@ var errBoom = stderrors.New("boom")
 // installed-state probe and the post-install wait both require.
 func establishedCRD(name string) *unstructured.Unstructured {
 	obj := newTestObject(apiGroupAPIExtensions+"/v1", "CustomResourceDefinition", "", name)
-	if err := unstructured.SetNestedSlice(obj.Object, []interface{}{
-		map[string]interface{}{"type": "Established", "status": "True"},
+	if err := unstructured.SetNestedSlice(obj.Object, []any{
+		map[string]any{"type": "Established", "status": "True"},
 	}, "status", "conditions"); err != nil {
 		panic(err)
 	}
@@ -102,8 +102,8 @@ func notReadyTrainerDeployment() *unstructured.Unstructured {
 }
 
 // readyTrainerDeploymentNamed builds a controller Deployment reporting one ready
-// replica under an arbitrary name, covering the Helm path where the name is
-// derived from the release rather than fixed by the overlay.
+// replica under an arbitrary name, covering an externally managed chart
+// installation with a custom name.
 func readyTrainerDeploymentNamed(namespace, name string) *unstructured.Unstructured {
 	return trainerDeploymentNamed(namespace, name, 1)
 }
@@ -123,10 +123,10 @@ func trainerDeploymentNamed(namespace, name string, readyReplicas int64) *unstru
 }
 
 func newTestObject(apiVersion, kind, namespace, name string) *unstructured.Unstructured {
-	obj := &unstructured.Unstructured{Object: map[string]interface{}{
+	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": apiVersion,
 		"kind":       kind,
-		"metadata":   map[string]interface{}{"name": name},
+		"metadata":   map[string]any{"name": name},
 	}}
 	if namespace != "" {
 		obj.SetNamespace(namespace)

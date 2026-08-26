@@ -203,7 +203,7 @@ func installTokens(rest string) []string {
 	rest = strings.TrimRight(rest, "\\ \t")
 
 	var pkgs []string
-	for _, tok := range strings.Fields(rest) {
+	for tok := range strings.FieldsSeq(rest) {
 		if strings.HasPrefix(tok, "-") {
 			continue // flag (-y, --user, ...)
 		}

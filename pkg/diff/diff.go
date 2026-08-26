@@ -477,7 +477,7 @@ func compareItems(ctx context.Context, prefix string, base, target []measurement
 	}
 
 	shared := min(len(base), len(target))
-	for i := 0; i < shared; i++ {
+	for i := range shared {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}

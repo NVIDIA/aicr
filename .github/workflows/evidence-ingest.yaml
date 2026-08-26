@@ -123,8 +123,6 @@ jobs:
           cache: false
 
       - name: Build evidence-project
-        env:
-          GOFLAGS: -mod=vendor
         run: go build -o ./bin/evidence-project ./tools/evidence-project
 
       - name: Authenticate to GHCR

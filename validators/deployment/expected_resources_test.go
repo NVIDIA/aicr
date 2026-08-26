@@ -1339,16 +1339,16 @@ func nodeWithRuntimeRequiredTaint(name string) *corev1.Node {
 // so metadata.namespace is intentionally not set.
 func nodewrightWithStatus(name, status string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "skyhook.nvidia.com/v1alpha1",
 			"kind":       "Skyhook",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name": name,
-				"labels": map[string]interface{}{
+				"labels": map[string]any{
 					testAICRCreatedByLabelKey: testAICRCreatedByLabelValue,
 				},
 			},
-			"status": map[string]interface{}{
+			"status": map[string]any{
 				"status": status,
 			},
 		},

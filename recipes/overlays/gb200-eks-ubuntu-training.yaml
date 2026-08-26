@@ -22,6 +22,11 @@ spec:
   # This overlay adds Ubuntu-specific configurations
   base: gb200-eks-training
 
+  # Machine type: qualified on p6e-gb200.36xlarge (4 GPUs per Kubernetes node).
+  # The performance floors inherited from gb200-eks-training are sized for that
+  # shape and are not normalized for GPU count, so another GB200 shape can
+  # false-fail a healthy run. Those thresholds are themselves provisional --
+  # see the parent overlay's note.
   criteria:
     service: eks
     accelerator: gb200

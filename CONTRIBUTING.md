@@ -47,9 +47,11 @@ Before contributing:
 - Ensure all tests pass and code meets quality standards
 - Write tests for new functionality
 
-#### Go dependencies (vendor)
+#### Go dependencies
 
-This project vendors Go dependencies. After changing `go.mod` or `go.sum`, run `make tidy` (which runs `go mod vendor`) and commit `go.mod`, `go.sum`, and the `vendor/` directory. CI will fail if `vendor/` is out of sync.
+Dependencies resolve through the Go module proxy; this project does not vendor them (see ADR-023). After changing imports, run `make tidy` and commit `go.mod`, `go.sum`, and the regenerated `THIRD_PARTY_NOTICES.md`. CI fails if the manifests are not tidy (`go mod tidy -diff`) or the notices are stale.
+
+Module integrity comes from `go.sum` plus `sum.golang.org`, verified by Go on every build. A first build after a dependency change needs network access to a Go proxy; afterwards it is served from your local module cache.
 
 #### Adding Validation Constraints
 

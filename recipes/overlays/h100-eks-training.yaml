@@ -21,6 +21,14 @@ spec:
   # Inherits from eks-training recipe (EKS + training settings)
   base: eks-training
 
+  # Machine type: qualified on p5.48xlarge (8x H100 SXM, 32x EFA). These
+  # criteria carry no machine-type axis, so they also match smaller H100 shapes
+  # (e.g. p5.4xlarge). Those deploy normally — unlike the GKE leaf, no component
+  # here pins node affinity to a shape — but the performance floors below are
+  # fixed absolute values calibrated on the full node, so a smaller shape can
+  # false-fail a healthy run. Normalizing them per GPU/fabric class was declined
+  # (#1256, #1254 — both closed not-planned); the floors are deliberately
+  # absolute, so the qualified shape is the supported way to pass them.
   criteria:
     service: eks
     accelerator: h100
