@@ -39,8 +39,8 @@ func gkeCriteria() *Criteria {
 // #1761 rollout PR 3): the gke-cos overlay declares gpuStack with default
 // gke-default (the only value a default-provisioned GKE cluster satisfies
 // — the opt-out label forfeits GKE's managed driver install, so
-// driver-installer requires the standalone installer) and alternative
-// driver-installer,
+// bundle-installer carries the bundle's own gcp-driver-installer) and
+// alternative bundle-installer,
 // leaves inherit it, the selection is recorded with the advertiser, and
 // the #1755 node-set constraint is carried per value with the correct
 // predicate direction.
@@ -323,11 +323,11 @@ func TestCoherenceGateRejectsExternalWithDevicePluginEnabled(t *testing.T) {
 	}
 }
 
-// TestCoherenceGateRejectsDriverInstallerIncoherentTuples pins the
-// empty-advertiser (driver-installer) side of the gate/resolver symmetry
+// TestCoherenceGateRejectsBundleInstallerIncoherentTuples pins the
+// empty-advertiser (bundle-installer) side of the gate/resolver symmetry
 // over the shared #1327 tuple rows: the artifact gate applies the full
 // tuple verdicts for EVERY closure-triggering profile, not only a declared
-// external advertiser. A forged driver-installer artifact whose overrides
+// external advertiser. A forged bundle-installer artifact whose overrides
 // enable DRA whole-GPU advertisement next to the operator's device plugin
 // (dual advertisement), or leave an inert chart-guard waiver, must fail
 // PrepareAndValidateWithContext — the same tuple rows
@@ -335,7 +335,7 @@ func TestCoherenceGateRejectsExternalWithDevicePluginEnabled(t *testing.T) {
 // output writer, because validation is not guaranteed to run before deploy.
 // (The #1685 dual-operator rejection is resolver-side only and not mirrored
 // here; it is outside the tuple rows this test covers.)
-func TestCoherenceGateRejectsDriverInstallerIncoherentTuples(t *testing.T) {
+func TestCoherenceGateRejectsBundleInstallerIncoherentTuples(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -345,7 +345,7 @@ func TestCoherenceGateRejectsDriverInstallerIncoherentTuples(t *testing.T) {
 	}{
 		{
 			// Mark Chmarny's #2044 repro: operator plugin (enabled by the
-			// driver-installer fragment) plus DRA ResourceClaims would both
+			// bundle-installer fragment) plus DRA ResourceClaims would both
 			// advertise whole GPUs.
 			name: "dual advertisement: DRA gpus enabled with waiver next to the operator plugin",
 			overrides: map[string]any{
@@ -369,7 +369,7 @@ func TestCoherenceGateRejectsDriverInstallerIncoherentTuples(t *testing.T) {
 			wantMsg: "inert waiver",
 		},
 	}
-	t.Run("stock driver-installer tuple passes the gate", func(t *testing.T) {
+	t.Run("stock bundle-installer tuple passes the gate", func(t *testing.T) {
 		t.Parallel()
 		result, err := NewBuilder().BuildFromCriteriaWithProfile(
 			t.Context(), gkeCriteria(), "gpuStack=bundle-installer")
@@ -377,7 +377,7 @@ func TestCoherenceGateRejectsDriverInstallerIncoherentTuples(t *testing.T) {
 			t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
 		}
 		if err := result.PrepareAndValidateWithContext(context.Background()); err != nil {
-			t.Fatalf("PrepareAndValidateWithContext() rejected the driver-installer happy path: %v", err)
+			t.Fatalf("PrepareAndValidateWithContext() rejected the bundle-installer happy path: %v", err)
 		}
 	})
 	for _, tt := range tests {

@@ -72,7 +72,7 @@ spec:
   # nvsentinel.dgxc.nvidia.com/driver.installed is never applied and
   # metadata-collector plus both syslog-health-monitor DaemonSets sit at zero
   # desired pods — silently, with no error and no event (#2175). Under
-  # driver-installer, Google's standalone nvidia-driver-installer DaemonSet
+  # bundle-installer, the bundle's own gcp-driver-installer DaemonSet
   # supplies a driver pod the labeler already detects, so the value is an
   # explicit false rather than left unset: assuming a preinstalled driver there
   # would label GPU nodes before the driver is actually ready.

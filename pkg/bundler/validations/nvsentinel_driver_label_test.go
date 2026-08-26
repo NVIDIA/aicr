@@ -237,7 +237,7 @@ func TestCheckNVSentinelDriverLabelDetectable(t *testing.T) {
 			wantBlocked: true,
 		},
 		{
-			name: "GKE COS driver-installer: Google installer DaemonSet supplies a driver pod → skipped",
+			name: "GKE COS bundle-installer: bundle's installer DaemonSet supplies a driver pod → skipped",
 			recipeResult: func() *recipe.RecipeResult {
 				r := profiled(result(gke, sentinelRef(nil),
 					gpuOpRef("gpu-operator", driverOff())), "gpuStack", "bundle-installer")
@@ -248,7 +248,7 @@ func TestCheckNVSentinelDriverLabelDetectable(t *testing.T) {
 		{
 			// Profile names are not reserved: an external overlay on any
 			// service can declare a gpuStack profile with a value named
-			// driver-installer — with no Google installer DaemonSet ever
+			// bundle-installer — with no installer DaemonSet ever
 			// deploying. The exemption is scoped to the GKE COS shape the
 			// embedded catalog documents; everything else fails closed.
 			name: "non-GKE recipe borrowing the bundle-installer profile name → still blocked",
@@ -267,7 +267,7 @@ func TestCheckNVSentinelDriverLabelDetectable(t *testing.T) {
 			wantBlocked: true,
 		},
 		{
-			name: "driver-installer under a different profile name → not exempt",
+			name: "bundle-installer under a different profile name → not exempt",
 			recipeResult: profiled(result(gke, sentinelRef(nil),
 				gpuOpRef("gpu-operator", driverOff())), "somethingElse", "bundle-installer"),
 			wantBlocked: true,
@@ -477,7 +477,7 @@ func TestCheckNVSentinelDriverLabelDetectable(t *testing.T) {
 			})),
 		},
 		{
-			name: "GKE COS driver-installer + --dynamic on the remedy path → not gated (observable driver pod)",
+			name: "GKE COS bundle-installer + --dynamic on the remedy path → not gated (observable driver pod)",
 			recipeResult: func() *recipe.RecipeResult {
 				r := profiled(result(recipe.CriteriaServiceGKE, sentinelRef(nil),
 					gpuOpRef("gpu-operator", driverOff())), "gpuStack", "bundle-installer")
@@ -684,7 +684,7 @@ func TestNVSentinelDriverLabelPlatformMatrix(t *testing.T) {
 			wantBlocked: false,
 		},
 		{
-			name: "GKE COS driver-installer",
+			name: "GKE COS bundle-installer",
 			criteria: &recipe.Criteria{
 				Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100,
 				OS: recipe.CriteriaOSCOS, Intent: recipe.CriteriaIntentTraining,

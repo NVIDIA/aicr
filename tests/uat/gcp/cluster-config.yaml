@@ -139,6 +139,6 @@ compute:
               # 30930940652). The pool matches the gpuStack profile's
               # gke-default default (#1761 PR 3), whose constraint requires
               # the label ABSENT on every GPU node; the label belongs only
-              # to the driver-installer value, paired with a label-surviving
-              # driver path (gpu-driver-version=disabled + Google's
-              # standalone nvidia-driver-installer DaemonSet).
+              # to the bundle-installer value, paired with a label-surviving
+              # driver path (gpu-driver-version=disabled + the bundle's
+              # gcp-driver-installer DaemonSet).

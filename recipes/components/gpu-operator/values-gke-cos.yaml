@@ -43,7 +43,7 @@ toolkit:
 
 # devicePlugin.enabled is OWNED by the gpuStack profile declared on the
 # gke-cos overlay (ADR-015): the selected value's fragment assigns it
-# authoritatively (driver-installer: true, gke-default: false) and supersedes the
+# authoritatively (bundle-installer: true, gke-default: false) and supersedes the
 # base values.yaml assignment. Only the env block below is family
 # configuration; do not assign enabled here.
 devicePlugin:
