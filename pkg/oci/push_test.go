@@ -640,7 +640,7 @@ func TestOCIReproducibleBuild(t *testing.T) {
 	}
 
 	// Build twice and compare digests
-	var digests []string
+	digests := make([]string, 0, 2)
 	for i := range 2 {
 		ociLayoutDir := t.TempDir()
 		ociStore, err := oci.New(ociLayoutDir)

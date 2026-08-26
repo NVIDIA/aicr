@@ -298,7 +298,6 @@ func TestAgentConfigMirrorsInternal(t *testing.T) {
 	fieldTypes := func(t reflect.Type) map[string]reflect.Type {
 		out := make(map[string]reflect.Type, t.NumField())
 		for f := range t.Fields() {
-			f := f
 			out[f.Name] = f.Type
 		}
 		return out

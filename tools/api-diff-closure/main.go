@@ -500,7 +500,6 @@ func (c *typeCollector) visit(typ types.Type) {
 		c.visit(typ.Elem())
 	case *types.Struct:
 		for field := range typ.Fields() {
-			field := field
 			if field.Exported() || field.Embedded() {
 				c.visit(field.Type())
 			}
@@ -512,7 +511,6 @@ func (c *typeCollector) visit(typ types.Type) {
 	case *types.Interface:
 		typ.Complete()
 		for method := range typ.Methods() {
-			method := method
 			if method.Exported() {
 				c.visit(method.Type())
 			}

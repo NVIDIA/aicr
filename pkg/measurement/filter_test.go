@@ -14,9 +14,10 @@
 
 package measurement
 
-import "slices"
-
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestFilterOut(t *testing.T) {
 	t.Parallel()

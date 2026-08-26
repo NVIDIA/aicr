@@ -798,7 +798,7 @@ func BenchmarkGetLines(b *testing.B) {
 	}
 	defer os.Remove(tmpfile.Name())
 
-	var lines []string
+	lines := make([]string, 0, 1000)
 	for i := range 1000 {
 		lines = append(lines, "This is test line number "+string(rune(i)))
 	}
@@ -826,7 +826,7 @@ func BenchmarkGetMap(b *testing.B) {
 	}
 	defer os.Remove(tmpfile.Name())
 
-	var lines []string
+	lines := make([]string, 0, 1000)
 	for i := range 1000 {
 		lines = append(lines, "key"+string(rune(i))+"=value"+string(rune(i)))
 	}

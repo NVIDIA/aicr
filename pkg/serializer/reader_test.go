@@ -1482,7 +1482,7 @@ func TestReader_LargeFile(t *testing.T) {
 		defer os.Remove(tmpfile.Name())
 
 		// Create large array (1000 items)
-		var largeData []testConfig
+		largeData := make([]testConfig, 0, 1000)
 		for i := range 1000 {
 			largeData = append(largeData, testConfig{
 				Name:  fmt.Sprintf("item%d", i),
