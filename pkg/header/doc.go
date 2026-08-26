@@ -70,7 +70,8 @@
 // authoritative. IsSupportedAPIVersion covers the stable artifact track:
 //
 //	if h.APIVersion != "" && !header.IsSupportedAPIVersion(h.APIVersion) {
-//	    return fmt.Errorf("unsupported apiVersion %q", h.APIVersion)
+//	    return errors.New(errors.ErrCodeInvalidRequest,
+//	        fmt.Sprintf("unsupported apiVersion %q", h.APIVersion))
 //	}
 //
 // # Kind Field

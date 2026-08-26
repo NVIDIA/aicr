@@ -1079,6 +1079,71 @@ func setupCatalogTestDir(t *testing.T, catalogContent string) string {
 	return tmpDir
 }
 
+func TestLayeredDataProvider_ValidatesRawExternalCatalogBeforeMerge(t *testing.T) {
+	tests := []struct {
+		name       string
+		apiVersion string
+		kind       string
+		wantField  string
+	}{
+		{
+			name:       "valid header accepted",
+			apiVersion: "validator.nvidia.com/v1alpha1",
+			kind:       "ValidatorCatalog",
+		},
+		{
+			name:      "empty apiVersion rejected",
+			kind:      "ValidatorCatalog",
+			wantField: "apiVersion",
+		},
+		{
+			name:       "unknown apiVersion rejected",
+			apiVersion: "validator.nvidia.com/v9",
+			kind:       "ValidatorCatalog",
+			wantField:  "apiVersion",
+		},
+		{
+			name:       "wrong kind rejected",
+			apiVersion: "validator.nvidia.com/v1alpha1",
+			kind:       "OtherCatalog",
+			wantField:  "kind",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			catalogContent := fmt.Sprintf(
+				"apiVersion: %q\nkind: %q\nvalidators: []\n", tt.apiVersion, tt.kind,
+			)
+			tmpDir := setupCatalogTestDir(t, catalogContent)
+			provider, err := NewLayeredDataProvider(
+				NewEmbeddedDataProvider(GetEmbeddedFS(), "."),
+				LayeredProviderConfig{ExternalDir: tmpDir},
+			)
+			if err != nil {
+				t.Fatalf("NewLayeredDataProvider() error = %v", err)
+			}
+
+			_, err = provider.ReadFile(t.Context(), catalogFileName)
+			if tt.wantField == "" {
+				if err != nil {
+					t.Fatalf("ReadFile() error = %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("ReadFile() error = nil, want raw external header rejection")
+			}
+			if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantField) {
+				t.Errorf("error %q does not name invalid %s", err, tt.wantField)
+			}
+		})
+	}
+}
+
 // TestLayeredDataProvider_MergesCatalog tests catalog merging with external data.
 func TestLayeredDataProvider_MergesCatalog(t *testing.T) {
 	tmpDir := setupCatalogTestDir(t, testExternalCatalogContent)

@@ -551,7 +551,8 @@ type fileReader interface {
 func mergeEmbeddedAndExternal[T any](
 	ctx context.Context,
 	embedded fileReader, externalDir string, maxFileSize int64, allowSymlinks bool,
-	fileName string, validateExternal func(*T) error, merge func(embedded, external *T) *T,
+	fileName string, validateExternal func(embedded, external *T) error,
+	merge func(embedded, external *T) *T,
 ) ([]byte, error) {
 
 	kind := filepath.Base(fileName)
@@ -579,7 +580,7 @@ func mergeEmbeddedAndExternal[T any](
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to parse external "+kind, unmarshalErr)
 	}
 	if validateExternal != nil {
-		if validateErr := validateExternal(&externalVal); validateErr != nil {
+		if validateErr := validateExternal(&embeddedVal, &externalVal); validateErr != nil {
 			return nil, validateErr
 		}
 	}
@@ -613,7 +614,7 @@ func (p *LayeredDataProvider) getMergedRegistry(ctx context.Context) ([]byte, er
 	p.mergedRegistryOnce.Do(func() {
 		p.mergedRegistry, p.mergedRegistryErr = mergeEmbeddedAndExternal(
 			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, registryFileName,
-			func(registry *ComponentRegistry) error {
+			func(_ *ComponentRegistry, registry *ComponentRegistry) error {
 				return validateComponentRegistryHeader(registry, "external "+registryFileName)
 			},
 			mergeRegistries,
@@ -686,6 +687,28 @@ type catalogForMerge struct {
 	Validators []map[string]any `yaml:"validators"`
 }
 
+func validateExternalCatalogHeader(embedded, external *catalogForMerge) error {
+	if external == nil {
+		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			"external "+catalogFileName+" is empty")
+	}
+	if embedded == nil {
+		return aicrerrors.New(aicrerrors.ErrCodeInternal,
+			"embedded "+catalogFileName+" is empty")
+	}
+	if external.APIVersion == "" || external.APIVersion != embedded.APIVersion {
+		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("external %s has apiVersion %q, expected %q",
+				catalogFileName, external.APIVersion, embedded.APIVersion))
+	}
+	if external.Kind != embedded.Kind {
+		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("external %s has kind %q, expected %q",
+				catalogFileName, external.Kind, embedded.Kind))
+	}
+	return nil
+}
+
 // getMergedCatalog returns the merged catalogFileName content.
 // External catalog validators are merged with embedded, with external
 // taking precedence by name.
@@ -699,7 +722,8 @@ type catalogForMerge struct {
 func (p *LayeredDataProvider) getMergedCatalog(ctx context.Context) ([]byte, error) {
 	p.mergedCatalogOnce.Do(func() {
 		p.mergedCatalog, p.mergedCatalogErr = mergeEmbeddedAndExternal(
-			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, catalogFileName, nil, mergeCatalogs,
+			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, catalogFileName,
+			validateExternalCatalogHeader, mergeCatalogs,
 		)
 	})
 
@@ -713,12 +737,6 @@ func mergeCatalogs(embedded, external *catalogForMerge) *catalogForMerge {
 	slog.Debug("starting catalog merge",
 		"embedded_count", len(embedded.Validators),
 		"external_count", len(external.Validators))
-
-	if external.APIVersion != "" && external.APIVersion != embedded.APIVersion {
-		slog.Warn("external catalog has different API version",
-			"embedded", embedded.APIVersion,
-			"external", external.APIVersion)
-	}
 
 	return &catalogForMerge{
 		APIVersion: embedded.APIVersion,
