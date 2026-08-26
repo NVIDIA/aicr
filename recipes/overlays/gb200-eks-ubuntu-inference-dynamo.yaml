@@ -86,17 +86,10 @@ spec:
         - dra-support
         - accelerator-metrics
         - ai-service-metrics
-        # Dynamo admits its frontend and decode workers as a gang through
-        # kai-scheduler. Nothing else verifies that path: the inference-perf
-        # validator's KAI Queue apply is best-effort (logs at INFO and
-        # continues), and the deployment-phase kai-scheduler health check
-        # asserts liveness only (kai-operator availableReplicas > 0, no
-        # unhealthy pods) — which a scheduler that admits no PodGroups still
-        # passes. This check fails closed on the CRDs and runs a functional
-        # two-pod co-scheduling test. Matches the h100-eks/aks/gke, b200-gke
-        # and rtx-pro-6000-eks Dynamo leaves.
-        - gang-scheduling
         - inference-gateway
+        # Dynamo admits its frontend and decode workers as a gang through
+        # kai-scheduler, and nothing else verifies that path — see #2390.
+        - gang-scheduling
         - robust-controller
         - secure-accelerator-access
         - pod-autoscaling
