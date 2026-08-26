@@ -713,7 +713,7 @@ func TestGPUNodesLabelLosslessEncodingResolvesCollision(t *testing.T) {
 
 	const runs = 50
 	verdicts := make(map[string]int)
-	for i := 0; i < runs; i++ {
+	for range runs {
 		c := &topology.Collector{
 			ClientSet: fake.NewClientset(
 				node("gpu-a", gpuLabels("true")),

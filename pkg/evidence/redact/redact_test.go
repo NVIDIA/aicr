@@ -16,6 +16,7 @@ package redact_test
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/evidence/redact"
@@ -514,13 +515,7 @@ func reportWithExtra(extra map[string]string) *ctrf.Report {
 
 func TestCTRFAppliedRulesIncludeExtraAllowlist(t *testing.T) {
 	_, rules := redact.CTRF(sampleReport())
-	found := false
-	for _, r := range rules {
-		if r == "ctrf.tests.extra.allowlist" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(rules, "ctrf.tests.extra.allowlist")
 	if !found {
 		t.Errorf("applied rules must include ctrf.tests.extra.allowlist, got %v", rules)
 	}

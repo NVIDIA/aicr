@@ -384,7 +384,7 @@ func TestRecipeEndpointConcurrency(t *testing.T) {
 	const numRequests = 10
 	done := make(chan bool, numRequests)
 
-	for i := 0; i < numRequests; i++ {
+	for range numRequests {
 		go func() {
 			req := httptest.NewRequest(http.MethodGet, "/v1/recipe?os=ubuntu", nil)
 			w := httptest.NewRecorder()
@@ -395,7 +395,7 @@ func TestRecipeEndpointConcurrency(t *testing.T) {
 
 	// Wait for all requests to complete with timeout
 	timeout := time.After(5 * time.Second)
-	for i := 0; i < numRequests; i++ {
+	for range numRequests {
 		select {
 		case <-done:
 			// Request completed

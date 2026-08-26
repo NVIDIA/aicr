@@ -765,7 +765,7 @@ func currentPoolSlices(poolSlices []*unstructured.Unstructured) ([]*unstructured
 	for _, s := range current {
 		devices, _, _ := unstructured.NestedSlice(s.Object, "spec", "devices")
 		for _, d := range devices {
-			dev, ok := d.(map[string]interface{})
+			dev, ok := d.(map[string]any)
 			if !ok {
 				continue
 			}
@@ -807,7 +807,7 @@ func collectUsableDeviceCounts(slice *unstructured.Unstructured, eligible map[st
 
 	devices, _, _ := unstructured.NestedSlice(spec, "devices")
 	for _, d := range devices {
-		dev, ok := d.(map[string]interface{})
+		dev, ok := d.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -832,8 +832,8 @@ func collectUsableDeviceCounts(slice *unstructured.Unstructured, eligible map[st
 // and v1 flattened BasicDevice onto the device itself. When a `basic` map is
 // present, descend into it; otherwise the device map itself carries the
 // fields.
-func deviceFields(dev map[string]interface{}) map[string]interface{} {
-	if basic, ok := dev["basic"].(map[string]interface{}); ok {
+func deviceFields(dev map[string]any) map[string]any {
+	if basic, ok := dev["basic"].(map[string]any); ok {
 		return basic
 	}
 	return dev
@@ -843,7 +843,7 @@ func deviceFields(dev map[string]interface{}) map[string]interface{} {
 // a device's field map when perDeviceNodeSelection is set — same field names
 // across resource.k8s.io versions; v1beta1's `basic` wrapper is unwrapped by
 // deviceFields before this is called) to the eligible node names it can reach.
-func resolveTopologyNodes(obj map[string]interface{}, eligible map[string]*corev1.Node) []string {
+func resolveTopologyNodes(obj map[string]any, eligible map[string]*corev1.Node) []string {
 	if nodeName, _, _ := unstructured.NestedString(obj, "nodeName"); nodeName != "" {
 		if _, ok := eligible[nodeName]; ok {
 			return []string{nodeName}
@@ -886,7 +886,7 @@ func resolveTopologyNodes(obj map[string]interface{}, eligible map[string]*corev
 // GPU would make the probe report DRA usable while the toleration-less test
 // claim cannot allocate; the resulting failure is noisy (pod Pending →
 // timeout), not silent.
-func deviceHasSchedulingTaint(dev map[string]interface{}) bool {
+func deviceHasSchedulingTaint(dev map[string]any) bool {
 	taints, found, err := unstructured.NestedSlice(dev, "taints")
 	if err != nil {
 		return true
@@ -895,7 +895,7 @@ func deviceHasSchedulingTaint(dev map[string]interface{}) bool {
 		return false
 	}
 	for _, t := range taints {
-		tm, ok := t.(map[string]interface{})
+		tm, ok := t.(map[string]any)
 		if !ok {
 			return true
 		}

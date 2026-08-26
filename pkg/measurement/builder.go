@@ -14,6 +14,8 @@
 
 package measurement
 
+import "maps"
+
 // SubtypeBuilder provides a fluent API for building Subtype instances.
 type SubtypeBuilder struct {
 	name    string
@@ -95,9 +97,7 @@ func (b *SubtypeBuilder) WithContextMap(ctx map[string]string) *SubtypeBuilder {
 	if b.context == nil {
 		b.context = make(map[string]string, len(ctx))
 	}
-	for k, v := range ctx {
-		b.context[k] = v
-	}
+	maps.Copy(b.context, ctx)
 	return b
 }
 

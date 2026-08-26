@@ -42,7 +42,7 @@ var kindNamespaceRE = regexp.MustCompile(`(?m)^kind:\s+Namespace\s*$`)
 // fully-conditional manifests that rendered to nothing once values were
 // applied. Mirrors the helper that lived in the old helm deployer.
 func hasYAMLObjects(content []byte) bool {
-	for _, line := range strings.Split(string(content), "\n") {
+	for line := range strings.SplitSeq(string(content), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") || trimmed == "---" {
 			continue

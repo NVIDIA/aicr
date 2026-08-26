@@ -342,8 +342,8 @@ func TestCheckDRASupport_PassesOnBetaOnlyCluster(t *testing.T) {
 	dynClient := newDRAFakeDynamicClientAt(betaVersion,
 		testResourceSliceAt(apiGroupResourceK8sIO+"/"+betaVersion,
 			"cd-1", draDriverComputeDomain, "node1", 1, 1,
-			map[string]interface{}{"nodeName": "node1"},
-			[]interface{}{plainDevice("channel-0")}),
+			map[string]any{"nodeName": "node1"},
+			[]any{plainDevice("channel-0")}),
 	)
 
 	ctx := &validators.Context{
@@ -375,8 +375,8 @@ func TestCheckDRASupport_RunsBehavioralAllocationOnBetaOnlyCluster(t *testing.T)
 	dynClient := newDRAFakeDynamicClientAt(betaVersion,
 		testDeviceClassAt(apiVersion, draDriverGPU),
 		testResourceSliceAt(apiVersion, "gpu-1", draDriverGPU, "node1", 1, 1,
-			map[string]interface{}{"nodeName": "node1"},
-			[]interface{}{plainDevice("gpu-0")}),
+			map[string]any{"nodeName": "node1"},
+			[]any{plainDevice("gpu-0")}),
 	)
 	var createdClaim *unstructured.Unstructured
 	dynClient.PrependReactor("create", "resourceclaims",
@@ -423,8 +423,8 @@ func TestCheckDRASupport_BetaOnlySlicesStillValidated(t *testing.T) {
 		// Incomplete pool: resourceSliceCount=2 but only one slice observed.
 		testResourceSliceAt(apiGroupResourceK8sIO+"/"+betaVersion,
 			"cd-1", draDriverComputeDomain, "pool-a", 1, 2,
-			map[string]interface{}{"nodeName": "node1"},
-			[]interface{}{plainDevice("channel-0")}),
+			map[string]any{"nodeName": "node1"},
+			[]any{plainDevice("channel-0")}),
 	)
 
 	ctx := &validators.Context{
@@ -591,8 +591,8 @@ func TestCheckDRASupport_PassesComputeDomainOnlyWithoutBehavioralAllocation(t *t
 		Clientset: client,
 		DynamicClient: newDRAFakeDynamicClient(
 			testResourceSlice("cd-1", draDriverComputeDomain, "node1", 1, 1,
-				map[string]interface{}{"nodeName": "node1"},
-				[]interface{}{plainDevice("channel-0")}),
+				map[string]any{"nodeName": "node1"},
+				[]any{plainDevice("channel-0")}),
 		),
 	}
 
@@ -618,22 +618,22 @@ func TestCheckDRASupport_FailsWhenNVIDIASlicesDoNotValidate(t *testing.T) {
 			name:  "incomplete pool (resourceSliceCount=2, one slice observed)",
 			nodes: []runtime.Object{testNode("node1")},
 			slice: testResourceSlice("cd-1", draDriverComputeDomain, "pool-a", 1, 2,
-				map[string]interface{}{"nodeName": "node1"},
-				[]interface{}{plainDevice("channel-0")}),
+				map[string]any{"nodeName": "node1"},
+				[]any{plainDevice("channel-0")}),
 		},
 		{
 			name:  "all devices tainted NoSchedule",
 			nodes: []runtime.Object{testNode("node1")},
 			slice: testResourceSlice("cd-1", draDriverComputeDomain, "node1", 1, 1,
-				map[string]interface{}{"nodeName": "node1"},
-				[]interface{}{taintedDevice("channel-0", "NoSchedule")}),
+				map[string]any{"nodeName": "node1"},
+				[]any{taintedDevice("channel-0", "NoSchedule")}),
 		},
 		{
 			name:  "slice resolves to no Ready, schedulable node",
 			nodes: []runtime.Object{testNode("node1", withUnschedulable())},
 			slice: testResourceSlice("cd-1", draDriverComputeDomain, "node1", 1, 1,
-				map[string]interface{}{"nodeName": "node1"},
-				[]interface{}{plainDevice("channel-0")}),
+				map[string]any{"nodeName": "node1"},
+				[]any{plainDevice("channel-0")}),
 		},
 	}
 	for _, tt := range tests {
@@ -694,8 +694,8 @@ func TestCheckDRASupport_FailsWithoutNVIDIAResourceSlices(t *testing.T) {
 		Clientset: client,
 		DynamicClient: newDRAFakeDynamicClient(
 			testResourceSlice("other-1", "other.example.com", "node1", 1, 1,
-				map[string]interface{}{"nodeName": "node1"},
-				[]interface{}{plainDevice("dev-0")}),
+				map[string]any{"nodeName": "node1"},
+				[]any{plainDevice("dev-0")}),
 		),
 	}
 
@@ -750,8 +750,8 @@ func TestCheckDRASupport_UsesResolvedComponentRefNamespace(t *testing.T) {
 				Clientset: client,
 				DynamicClient: newDRAFakeDynamicClient(
 					testResourceSlice("cd-1", draDriverComputeDomain, "node1", 1, 1,
-						map[string]interface{}{"nodeName": "node1"},
-						[]interface{}{plainDevice("channel-0")}),
+						map[string]any{"nodeName": "node1"},
+						[]any{plainDevice("channel-0")}),
 				),
 				ValidationInput: validationInputWithRefs(tt.ref),
 			}
@@ -951,8 +951,8 @@ func TestCheckDRASupport_RunsBehavioralAllocationWhenFullGPUDRAUsable(t *testing
 		DynamicClient: newDRAFakeDynamicClient(
 			testDeviceClass(draDriverGPU),
 			testResourceSlice("gpu-1", draDriverGPU, "node1", 1, 1,
-				map[string]interface{}{"nodeName": "node1"},
-				[]interface{}{plainDevice("gpu-0")}),
+				map[string]any{"nodeName": "node1"},
+				[]any{plainDevice("gpu-0")}),
 		),
 	}
 
@@ -998,8 +998,8 @@ func TestCheckDRASupport_ClaimReadErrorClassification(t *testing.T) {
 			dynClient := newDRAFakeDynamicClient(
 				testDeviceClass(draDriverGPU),
 				testResourceSlice("gpu-1", draDriverGPU, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{plainDevice("gpu-0")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{plainDevice("gpu-0")}),
 			)
 			// Fail only the claim GET (creates still succeed) so the
 			// behavioral subtest reaches its post-wait claim read.
@@ -1045,8 +1045,8 @@ func TestCheckDRASupport_BehavioralFailureStillRecordsPodLogs(t *testing.T) {
 		DynamicClient: newDRAFakeDynamicClient(
 			testDeviceClass(draDriverGPU),
 			testResourceSlice("gpu-1", draDriverGPU, "node1", 1, 1,
-				map[string]interface{}{"nodeName": "node1"},
-				[]interface{}{plainDevice("gpu-0")}),
+				map[string]any{"nodeName": "node1"},
+				[]any{plainDevice("gpu-0")}),
 		),
 	}
 

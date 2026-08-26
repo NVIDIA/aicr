@@ -15,6 +15,7 @@
 package ctrf
 
 import (
+	"maps"
 	"time"
 )
 
@@ -171,9 +172,7 @@ func (b *Builder) AddResult(r *ValidatorResult) {
 		// would let a later mutation of ValidatorResult.Extra alter the built
 		// report after AddResult returns.
 		tr.Extra = make(map[string]string, len(r.Extra))
-		for key, value := range r.Extra {
-			tr.Extra[key] = value
-		}
+		maps.Copy(tr.Extra, r.Extra)
 	}
 
 	b.tests = append(b.tests, tr)

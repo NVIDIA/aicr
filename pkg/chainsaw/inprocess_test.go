@@ -70,7 +70,7 @@ func (f *fakeFetcher) addList(apiVersion, kind, namespace string, items []map[st
 	f.lists[key] = items
 }
 
-func (f *fakeFetcher) Fetch(_ context.Context, apiVersion, kind, namespace, name string) (map[string]interface{}, error) {
+func (f *fakeFetcher) Fetch(_ context.Context, apiVersion, kind, namespace, name string) (map[string]any, error) {
 	key := apiVersion + "/" + kind + "/" + namespace + "/" + name
 	if obj, ok := f.gets[key]; ok {
 		return obj, nil
@@ -78,7 +78,7 @@ func (f *fakeFetcher) Fetch(_ context.Context, apiVersion, kind, namespace, name
 	return nil, errors.New(errors.ErrCodeNotFound, "fake: not found: "+key)
 }
 
-func (f *fakeFetcher) List(_ context.Context, apiVersion, kind, namespace string, labels map[string]string) ([]map[string]interface{}, error) {
+func (f *fakeFetcher) List(_ context.Context, apiVersion, kind, namespace string, labels map[string]string) ([]map[string]any, error) {
 	key := apiVersion + "/" + kind + "/" + namespace
 	items, ok := f.lists[key]
 	if !ok {
@@ -87,7 +87,7 @@ func (f *fakeFetcher) List(_ context.Context, apiVersion, kind, namespace string
 	if len(labels) == 0 {
 		return items, nil
 	}
-	var filtered []map[string]interface{}
+	var filtered []map[string]any
 	for _, it := range items {
 		md, _ := it["metadata"].(map[string]any)
 		objLabels, _ := md["labels"].(map[string]any)

@@ -43,11 +43,11 @@ func webhookConfig(kind, name, webhookName string) *unstructured.Unstructured {
 // where Trainer is installed.
 func webhookConfigIn(kind, name, webhookName, namespace string) *unstructured.Unstructured {
 	obj := newTestObject("admissionregistration.k8s.io/v1", kind, "", name)
-	if err := unstructured.SetNestedSlice(obj.Object, []interface{}{
-		map[string]interface{}{
+	if err := unstructured.SetNestedSlice(obj.Object, []any{
+		map[string]any{
 			keyName: webhookName,
-			"clientConfig": map[string]interface{}{
-				"service": map[string]interface{}{
+			"clientConfig": map[string]any{
+				"service": map[string]any{
 					keyName:     trainerControllerService,
 					"namespace": namespace,
 				},
@@ -81,7 +81,7 @@ func trainerInstallIn(namespace string) []runtime.Object {
 func malformedWebhookConfig(kind, name string) *unstructured.Unstructured {
 	obj := newTestObject("admissionregistration.k8s.io/v1", kind, "", name)
 	if err := unstructured.SetNestedSlice(obj.Object,
-		[]interface{}{"not-an-object"}, "webhooks"); err != nil {
+		[]any{"not-an-object"}, "webhooks"); err != nil {
 		panic(err)
 	}
 	return obj
@@ -343,7 +343,7 @@ func TestApplyTrainerResources_RefusesForeignWebhookConfig(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("webhooks = %d entries, want 1", len(entries))
 	}
-	if name := entries[0].(map[string]interface{})[keyName]; name != "validator.other.example.com" {
+	if name := entries[0].(map[string]any)[keyName]; name != "validator.other.example.com" {
 		t.Errorf("foreign webhook config was clobbered: entry name = %v", name)
 	}
 }

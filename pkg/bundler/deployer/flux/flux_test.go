@@ -1781,7 +1781,7 @@ func TestGenerate_VendorCharts_ManifestOnlyUnaffected(t *testing.T) {
 func extractSourceName(t *testing.T, yamlContent string) string {
 	t.Helper()
 	// Look for "name: <source-name>" under sourceRef.
-	for _, line := range strings.Split(yamlContent, "\n") {
+	for line := range strings.SplitSeq(yamlContent, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "name:") && !strings.Contains(trimmed, "gpu-operator") && !strings.Contains(trimmed, "network-operator") && !strings.Contains(trimmed, "cert-manager") && !strings.Contains(trimmed, "-values") {
 			return strings.TrimSpace(strings.TrimPrefix(trimmed, "name:"))

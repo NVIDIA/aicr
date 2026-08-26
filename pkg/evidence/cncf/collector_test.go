@@ -242,21 +242,21 @@ func TestFeatureDescriptionsComplete(t *testing.T) {
 // TestRunNoClusterShortCircuit verifies that --no-cluster mode returns nil
 // immediately without invoking the section runner (and thus without exec).
 func TestRunNoClusterShortCircuit(t *testing.T) {
-	var calls int32
+	var calls atomic.Int32
 	c := NewCollector(t.TempDir(),
 		WithNoCluster(true),
 		WithFeatures([]string{"dra-support", "gang-scheduling"}),
 	)
 	// Replace runner with a counter; should never be invoked.
 	c.runSectionFn = func(_ context.Context, _, _, _ string) error {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		return nil
 	}
 
 	if err := c.Run(context.Background()); err != nil {
 		t.Fatalf("Run(no-cluster) returned error: %v", err)
 	}
-	if got := atomic.LoadInt32(&calls); got != 0 {
+	if got := calls.Load(); got != 0 {
 		t.Fatalf("section runner invoked %d times in no-cluster mode; want 0", got)
 	}
 }

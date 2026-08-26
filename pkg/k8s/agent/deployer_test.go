@@ -1134,10 +1134,5 @@ func TestDeployer_Deploy_RuntimeClassNotFound(t *testing.T) {
 
 // Helper function
 func containsVerb(verbs []string, verb string) bool {
-	for _, v := range verbs {
-		if v == verb {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(verbs, verb)
 }

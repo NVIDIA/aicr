@@ -16,6 +16,7 @@ package agent
 
 import (
 	"context"
+	"maps"
 	"strconv"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -429,12 +430,8 @@ func mustParseQuantity(s string) resource.Quantity {
 // overrides without forcing the caller to specify every resource.
 func mergeResourceList(defaults, override corev1.ResourceList) corev1.ResourceList {
 	merged := make(corev1.ResourceList, len(defaults))
-	for k, v := range defaults {
-		merged[k] = v
-	}
-	for k, v := range override {
-		merged[k] = v
-	}
+	maps.Copy(merged, defaults)
+	maps.Copy(merged, override)
 	return merged
 }
 
