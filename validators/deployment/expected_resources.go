@@ -943,6 +943,17 @@ func draKubeletPluginProbe(ctx *validators.Context, namespace string) (string, e
 // advertise aksRDMASharedResource is "still converging", so verifyRDMAFabricReady
 // waits for it; when false (kind's single-node nvkind, talos' namespace-only
 // ref) there is no shared fabric to gate on and the check is skipped.
+//
+// Sibling predicate: pkg/bundler/readiness.go's
+// recipeAttachesNicClusterPolicy encodes the same "does this recipe stand
+// up an NCP?" question for the bundler's readiness-gate emission, but
+// scans manifest content across every ComponentRef's Pre+ManifestFiles
+// via line-anchored regexes rather than a filename-substring check on a
+// single ref. Package layering blocks direct reuse, so the two functions
+// have deliberately different names and must be kept in sync when a
+// future overlay changes how an NCP is attached (a new marker filename,
+// an attachment via PreManifestFiles, a differently-scoped ref). Update
+// both — and their cross-reference comments — together.
 func recipeDeclaresRDMAFabric(ref recipe.ComponentRef) bool {
 	for _, f := range ref.ManifestFiles {
 		if strings.Contains(f, nicClusterPolicyManifestMarker) {

@@ -80,7 +80,7 @@ rules:
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
     verbs: ["get", "list", "watch"]
----
+%[12]s---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -140,9 +140,30 @@ spec:
 		defaults.ReadinessGateStabilityWindow.String(),
 		defaults.ReadinessGateMaxWait.String(),
 		jobAnnotations,
-		defaults.ReadinessGateBackoffLimit)
+		defaults.ReadinessGateBackoffLimit,
+		componentClusterRoleRules(componentName))
 
 	return []byte(sb.String()), nil
+}
+
+// componentClusterRoleRules returns any component-specific ClusterRole rules
+// appended to the uniform base rules above. Emitting a rule only for the
+// component whose readiness Test actually reads its API group keeps unused
+// permissions off gate ServiceAccounts of unrelated components (PR #2337
+// review). Kept as a switch rather than a data-driven scan of testYAML so
+// the emitter's RBAC surface stays statically auditable — the trade-off is
+// that a new readiness gate for a new API group must be registered here.
+func componentClusterRoleRules(componentName string) string {
+	switch componentName { //nolint:gocritic // single case today; kept as a switch per the doc-comment rationale above (future readiness gates register a new case here).
+	case "network-operator":
+		// See recipes/components/network-operator/readiness.yaml — the
+		// gate asserts on mellanox.com/v1alpha1 NicClusterPolicy.
+		return `  - apiGroups: ["mellanox.com"]
+    resources: ["nicclusterpolicies"]
+    verbs: ["get", "list", "watch"]
+`
+	}
+	return ""
 }
 
 func jobMetadataAnnotations(deployer config.DeployerType) string {

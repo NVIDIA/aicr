@@ -19,6 +19,8 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
+	"regexp"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
@@ -31,6 +33,32 @@ import (
 // that, when present and --readiness-hooks is set, drives emission of a
 // standalone readiness gate chart. See #904.
 const readinessFileName = "readiness.yaml"
+
+// networkOperatorComponentName is the ref name of the Helm-deployed
+// network-operator component whose gate asserts a NicClusterPolicy CR.
+// The pinned upstream chart (26.4.1) does not template NCP even with
+// deployCR=true, so overlays that do not attach one explicitly (kind,
+// Talos base) have nothing to gate on — the readiness gate must skip
+// itself in that case, or it will poll to --max-wait timeout on every
+// deploy (#2337).
+const networkOperatorComponentName = "network-operator"
+
+// ncpKindRE / ncpAPIVersionRE match a NicClusterPolicy top-level manifest
+// via line-anchored regexes rather than YAML unmarshalling. Attached NCP
+// manifests are Helm templates ({{ .Release.Service }} etc.), which
+// strict YAML parsers reject; a probe just needs to detect presence.
+// Both patterns are pinned to column 0 so nested list items or comments
+// (which start with an indent or `#`) never trigger a false positive.
+// The apiVersion pattern intentionally uses a group prefix so a future
+// chart version that graduates NCP past v1alpha1 still matches without
+// a code change. TestNCPRegexNearMiss pins these invariants so a future
+// edit that drops (?m), the ^ anchor, or the AND between the two patterns
+// fails a test rather than silently re-introducing the #2337 false-emit
+// regression.
+var (
+	ncpKindRE       = regexp.MustCompile(`(?m)^kind:\s*NicClusterPolicy\s*$`)
+	ncpAPIVersionRE = regexp.MustCompile(`(?m)^apiVersion:\s*mellanox\.com/`)
+)
 
 // defaultGateImageRepo is the image (without tag) that runs the readiness
 // gate Job. It carries only the gate CLI — assertions run in-process through
@@ -68,6 +96,27 @@ func (b *DefaultBundler) gateImage() string {
 	return defaultGateImageRepo + ":" + tag
 }
 
+// wrapCtxErr renders ctx.Err() as a StructuredError whose ErrorCode and
+// message distinguish explicit cancellation from deadline expiration
+// while preserving the underlying context sentinel through Unwrap so
+// upstream callers can still branch on stderrors.Is(err, context.Canceled)
+// and stderrors.Is(err, context.DeadlineExceeded). Cancellation maps to
+// ErrCodeCanceled (operator abort), deadline expiration to ErrCodeTimeout
+// (time budget exhausted); the two are distinct exit paths in
+// pkg/errors/exitcode.go. Callers should have already confirmed
+// ctx.Err() != nil.
+func wrapCtxErr(ctx context.Context, activity string) error {
+	cause := ctx.Err()
+	code := errors.ErrCodeCanceled
+	verb := "cancelled"
+	if stderrors.Is(cause, context.DeadlineExceeded) {
+		code = errors.ErrCodeTimeout
+		verb = "deadline exceeded"
+	}
+	return errors.Wrap(code,
+		fmt.Sprintf("context %s while %s", verb, activity), cause)
+}
+
 // collectComponentReadiness gathers per-component readiness gate manifests,
 // keyed by component name then manifest path (mirroring the pre/post manifest
 // collectors so the localformat writer can treat readiness as another
@@ -92,10 +141,37 @@ func (b *DefaultBundler) collectComponentReadiness(
 	provider := recipeResult.DataProvider()
 	image := b.gateImage()
 
+	// The RDMA-fabric probe is only run when a network-operator ref is
+	// encountered; keep the result cached so multi-component recipes
+	// don't reload every ref's ManifestFiles per iteration.
+	var (
+		fabricProbed  bool
+		fabricPresent bool
+	)
+
 	for _, ref := range recipeResult.ComponentRefs {
-		if err := ctx.Err(); err != nil {
-			return nil, errors.Wrap(errors.ErrCodeTimeout,
-				"context cancelled while collecting component readiness gates", err)
+		if ctx.Err() != nil {
+			return nil, wrapCtxErr(ctx, "collecting component readiness gates")
+		}
+
+		// The network-operator gate asserts a NicClusterPolicy the
+		// pinned Helm chart does not create; skip when no ref attaches
+		// one. Otherwise the gate polls to timeout on kind + Talos-base
+		// recipes that include network-operator without an NCP (#2337).
+		if ref.Name == networkOperatorComponentName {
+			if !fabricProbed {
+				present, err := recipeAttachesNicClusterPolicy(ctx, provider, recipeResult.ComponentRefs)
+				if err != nil {
+					return nil, err
+				}
+				fabricProbed = true
+				fabricPresent = present
+			}
+			if !fabricPresent {
+				slog.Info("skipping readiness gate for network-operator: recipe attaches no NicClusterPolicy CR",
+					"component", ref.Name)
+				continue
+			}
 		}
 
 		path := fmt.Sprintf("components/%s/%s", ref.Name, readinessFileName)
@@ -120,6 +196,69 @@ func (b *DefaultBundler) collectComponentReadiness(
 	}
 
 	return result, nil
+}
+
+// recipeAttachesNicClusterPolicy reports whether any component in the
+// resolved recipe attaches a NicClusterPolicy CR via PreManifestFiles or
+// ManifestFiles. The Helm network-operator gate depends on that CR: the
+// pinned upstream chart does not template it, so a recipe that includes
+// network-operator without attaching an NCP has nothing for the gate to
+// assert on and the gate would poll to --max-wait timeout (#2337).
+//
+// Sibling predicate: validators/deployment/expected_resources.go's
+// recipeDeclaresRDMAFabric encodes the same "does this recipe stand up
+// an NCP?" question for the RDMA-fabric-readiness check, but decides via
+// a filename substring (nicClusterPolicyManifestMarker) over a single
+// ref's ManifestFiles rather than by scanning manifest content across
+// every ref. Package layering blocks direct reuse, so the two functions
+// have deliberately different names and must be kept in sync when a
+// future overlay changes how an NCP is attached (a new marker filename,
+// an attachment via PreManifestFiles, a differently-scoped ref). Update
+// both — and their cross-reference comments — together.
+//
+// Iterates every ref because the NCP is usually attached by an
+// overlay-owned ref (e.g., aks.yaml attaches
+// components/network-operator/manifests/nic-cluster-policy-aks.yaml
+// under the network-operator ref), not by a base component definition.
+// Splits on the canonical "\n---\n" separator that loadManifestFiles
+// emits; each doc is regex-scanned, so unrelated manifest content is
+// cheap. Same-doc match is best-effort: the split does not normalize
+// CRLF, a leading `---` at byte 0, or a separator with trailing
+// whitespace, in which case the two (?m) patterns fall back to
+// whole-file matching. That is safe today because every embedded NCP
+// manifest is LF-terminated and no other embedded manifest ships an
+// `apiVersion: mellanox.com/` line, but the split alone is not a
+// same-doc guarantee — the (?m)^ anchors carry that load.
+func recipeAttachesNicClusterPolicy(ctx context.Context, provider recipe.DataProvider, refs []recipe.ComponentRef) (bool, error) {
+	for _, ref := range refs {
+		paths := make([]string, 0, len(ref.PreManifestFiles)+len(ref.ManifestFiles))
+		paths = append(paths, ref.PreManifestFiles...)
+		paths = append(paths, ref.ManifestFiles...)
+		for _, path := range paths {
+			if ctx.Err() != nil {
+				return false, wrapCtxErr(ctx, "probing NicClusterPolicy manifests")
+			}
+			content, err := recipe.GetManifestContentWithContext(ctx, provider, path)
+			if err != nil {
+				return false, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+					fmt.Sprintf("failed to read manifest %s while probing NicClusterPolicy", path))
+			}
+			// Per-doc ctx check so a large multi-doc manifest cannot
+			// outlive a mid-scan cancellation before the next path
+			// iteration observes it. The strings.Split is O(bytes),
+			// the regex matches are O(bytes-per-doc), so this branch
+			// is dominated by memory access rather than CPU.
+			for _, doc := range strings.Split(string(content), "\n---\n") {
+				if ctx.Err() != nil {
+					return false, wrapCtxErr(ctx, fmt.Sprintf("scanning docs in manifest %s", path))
+				}
+				if ncpKindRE.MatchString(doc) && ncpAPIVersionRE.MatchString(doc) {
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
 }
 
 // validateReadinessTestYAML fails fast when readiness.yaml is not a chainsaw Test.
