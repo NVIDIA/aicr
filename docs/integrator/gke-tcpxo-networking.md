@@ -179,7 +179,7 @@ Running a **Kubeflow TrainJob** rather than a bare Pod? A TrainJob cannot add
 the `tcpxo-daemon` sidecar, so the wiring must live in a `TrainingRuntime` — see
 [Attaching a Training Workload to the Cluster Fabric](../user/fabric-attached-training.md).
 
-See [`demos/workloads/training/gke-nccl-test-tcpxo.yaml`](https://github.com/NVIDIA/aicr/blob/main/demos/workloads/training/gke-nccl-test-tcpxo.yaml) for a complete 2-node NCCL benchmark example. (pinned to an earlier coupled pair, plugin `v1.0.14` with daemon `v1.0.20`)
+See [`demos/workloads/training/gke-nccl-test-tcpxo.yaml`](https://github.com/NVIDIA/aicr/blob/main/demos/workloads/training/gke-nccl-test-tcpxo.yaml) for a complete 2-node NCCL benchmark example. (pinned to the same coupled pair the recipe ships, plugin `v1.0.15` with daemon `v1.0.21`)
 
 ## NCCL Plugin Version Matching
 
@@ -258,8 +258,9 @@ NRI profile (recommended, no `hostNetwork`):
 
 ```shell
 kubectl create ns nccl-test
-# Note: this manifest is pinned to the earlier v1.0.14 / v1.0.20 pair.
-# Update both images to your cluster's pair before applying.
+# Note: this manifest is pinned to the v1.0.15 / v1.0.21 pair, matching the
+# installer the recipe deploys. If your cluster runs a different installer
+# version, update both images to that cluster's pair before applying.
 kubectl apply -f demos/workloads/training/gke-nccl-test-tcpxo.yaml -n nccl-test
 
 # Wait for pods to be 2/2 Running

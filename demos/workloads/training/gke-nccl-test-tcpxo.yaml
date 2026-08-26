@@ -32,11 +32,17 @@
 #   - GPU Operator with driver.enabled=false (GKE COS manages drivers)
 #
 # Image version note:
-#   The nccl-test container image must match the cluster's installed TCPXO
-#   plugin version. Check with:
+#   Google ships the plugin installer and the tcpxo-daemon as a coupled release
+#   pair; running a mismatched pair is unsupported. This manifest is pinned to
+#   v1.0.15 (nccl-plugin-gpudirecttcpx-dev) with v1.0.21 (tcpgpudmarxd-dev),
+#   matching the installer the AICR recipe deploys.
+#
+#   If your cluster runs a different installer version, check it with:
 #     kubectl get ds nccl-tcpxo-installer -n kube-system \
-#       -o jsonpath='{.spec.template.spec.containers[?(@.name=="nccl-tcpxo-installer")].image}'
-#   Then update the nccl-plugin-gpudirecttcpx-dev tag below to match.
+#       -o jsonpath='{.spec.template.spec.initContainers[?(@.name=="nccl-tcpxo-installer")].image}'
+#   then update BOTH images below to that installer's pair, per Google's
+#   release notes: https://github.com/GoogleCloudPlatform/container-engine-accelerators/blob/master/gpudirect-tcpxo/README.md
+#   Updating only one half recreates the mismatch this pairing exists to avoid.
 #
 # Usage:
 #   kubectl create ns nccl-test
@@ -127,7 +133,7 @@ spec:
     cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb
   containers:
     - name: tcpxo-daemon
-      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.20
+      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21
       imagePullPolicy: Always
       command: ["/bin/sh", "-c"]
       args:
@@ -150,7 +156,7 @@ spec:
         - name: LD_LIBRARY_PATH
           value: /usr/local/nvidia/lib64
     - name: nccl-test
-      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.14
+      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15
       imagePullPolicy: Always
       command:
         - /bin/sh
@@ -242,7 +248,7 @@ spec:
     cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb
   containers:
     - name: tcpxo-daemon
-      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.20
+      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21
       imagePullPolicy: Always
       command: ["/bin/sh", "-c"]
       args:
@@ -265,7 +271,7 @@ spec:
         - name: LD_LIBRARY_PATH
           value: /usr/local/nvidia/lib64
     - name: nccl-test
-      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.14
+      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15
       imagePullPolicy: Always
       command:
         - /bin/sh

@@ -92,10 +92,10 @@ get_tool_metadata() {
             echo "yamllint:::yamllint --version 2>/dev/null | awk '{print \$2}':::major"
             ;;
         addlicense)
-            echo "addlicense:::echo installed:::presence"
+            echo "addlicense:::go_binary_module_version \"\$(command -v addlicense)\" github.com/google/addlicense:::strict_exact"
             ;;
         go_licenses)
-            echo "go-licenses:::go-licenses version 2>/dev/null || echo installed:::presence"
+            echo "go-licenses:::go_binary_module_version \"\$(command -v go-licenses)\" github.com/google/go-licenses/v2:::strict_exact"
             ;;
         # Security tools
         grype)
@@ -105,7 +105,7 @@ get_tool_metadata() {
             echo "syft:::syft version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}':::major_minor"
             ;;
         oras)
-            echo "oras:::oras version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}':::major_minor"
+            echo "oras:::oras version 2>/dev/null | grep -E '^Version:' | awk '{print \$2}' | sed 's/+.*$//':::strict_exact"
             ;;
         # Testing tools
         kubectl)
@@ -241,7 +241,7 @@ check_tool() {
 
     # Handle special case for docker not running
     if [[ "$installed_version" == "not running" ]]; then
-        print_row "$cmd_name" "-" "not running" "⚠"
+        print_row "$cmd_name" "$expected_version" "not running" "⚠"
         return
     fi
 
@@ -280,17 +280,10 @@ for category in $categories; do
     done
 done
 
-# Check docker separately (not in .settings.yaml but useful to show)
-if command -v docker &>/dev/null; then
-    installed=$(docker version --format '{{.Server.Version}}' 2>/dev/null | tr -d '\n' || true)
-    if [[ -z "$installed" ]]; then
-        print_row "docker" "-" "not running" "⚠"
-    else
-        print_row "docker" "-" "$installed" "✓"
-    fi
-else
-    print_row "docker" "-" "-" "✗"
-fi
+# Docker is intentionally not pinned in .settings.yaml: developers use Docker
+# Desktop while CI uses the runner's preinstalled daemon. Reuse the presence
+# metadata so the table states that any running version is acceptable.
+check_tool docker any
 
 echo ""
 echo "Legend: ✓ = installed, ⚠ = version mismatch or warning, ✗ = missing"
