@@ -34,6 +34,9 @@ inputs:
     description: 'Optional apidiff version pinned in .settings.yaml (linting.apidiff, via load-versions); leave empty to skip the SDK API compatibility check'
     required: false
     default: ''
+  setup_envtest_version:
+    description: 'setup-envtest version pinned in .settings.yaml (testing_tools.setup_envtest, via load-versions)'
+    required: true
 
 runs:
   using: 'composite'
@@ -47,6 +50,24 @@ runs:
           go.sum
           vendor/modules.txt
         check-latest: true
+
+    # Two different questions, checked in dependency order.
+    #
+    # `go mod tidy -diff` asks whether go.mod/go.sum are correct for the source:
+    # no requirement the code does not import, none missing, no stale go.sum
+    # entries. It prints the needed changes and exits non-zero without writing.
+    # Nothing checked this before, so a requirement could be added to go.mod
+    # that nothing imports and CI stayed green.
+    #
+    # The vendor check then asks whether vendor/ matches those manifests. It
+    # cannot answer the first question: `go mod vendor` regenerates from
+    # whatever go.mod says, so a wrong manifest yields a vendor tree that
+    # matches it perfectly.
+    - name: Verify go.mod and go.sum are tidy
+      shell: bash
+      run: |
+        go mod tidy -diff \
+          || { echo "go.mod/go.sum are not tidy; run 'make tidy' and commit the result" >&2; exit 1; }
 
     - name: Verify vendor is in sync
       shell: bash
@@ -65,10 +86,17 @@ runs:
         install_helm: 'true'
         helm_version: '${{ inputs.helm_version }}'
 
+    # Pinned, not @latest: this runs in the merge gate, so an unpinned install
+    # lets an upstream release change what every PR is tested against with no
+    # commit here. Kept in step with sigs.k8s.io/controller-runtime in go.mod.
     - name: Install envtest binaries
       shell: bash
+      env:
+        SETUP_ENVTEST_VERSION: ${{ inputs.setup_envtest_version }}
       run: |
-        go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+        [ -n "${SETUP_ENVTEST_VERSION}" ] \
+          || { echo "setup_envtest_version input is required" >&2; exit 1; }
+        go install "sigs.k8s.io/controller-runtime/tools/setup-envtest@${SETUP_ENVTEST_VERSION}"
         setup-envtest use --print path >/dev/null 2>&1
 
     - name: Install API-diff tool

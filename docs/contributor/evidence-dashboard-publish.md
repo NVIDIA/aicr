@@ -2,7 +2,7 @@
 
 The dashboard-publish pipeline is the repo's **first GitHub Pages** surface.
 On every merge to `main`, on demand, and after every successful
-[evidence-ingest (GP2)](evidence-ingest.md) run (its `trigger-dashboard` job
+[evidence-ingest (GP2)](evidence-ingest.md) run (its `trigger-publishes` job
 dispatches this workflow), it regenerates the interim-evidence dashboard from
 the source-keyed evidence tree in GCS and deploys the static site to GitHub
 Pages. It is the consumer end of the chain whose producer is evidence-ingest:

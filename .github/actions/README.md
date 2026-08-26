@@ -22,6 +22,7 @@ executable bits or `./script.sh` invocation.
 - `coverage_report` (optional): Whether to generate a coverage report (default: "false")
 - `coverage_threshold` (optional): Minimum coverage percentage (default: empty)
 - `helm_version` (required): Helm version from `load-versions`
+- `setup_envtest_version` (required): setup-envtest version from `load-versions`
 - `apidiff_version` (optional): apidiff version from `load-versions`; when set, installs apidiff and runs `make api-diff` (default: empty, which skips both steps)
 
 Callers that set `apidiff_version` must check out full history with
@@ -382,6 +383,7 @@ jobs:
         with:
           go_version: ${{ steps.versions.outputs.go }}
           helm_version: ${{ steps.versions.outputs.helm }}
+          setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
           coverage_report: 'true'
       - uses: ./.github/actions/go-lint
