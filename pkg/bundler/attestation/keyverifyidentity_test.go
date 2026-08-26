@@ -32,7 +32,7 @@ import (
 
 // writeTempPubPEM marshals pub to PKIX DER, PEM-encodes it under a
 // "PUBLIC KEY" block, writes it to a temp file, and returns the path.
-func writeTempPubPEM(t *testing.T, pub interface{}) string {
+func writeTempPubPEM(t *testing.T, pub any) string {
 	t.Helper()
 	der, err := x509.MarshalPKIXPublicKey(pub)
 	if err != nil {

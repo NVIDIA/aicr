@@ -5,7 +5,7 @@
 # Generate a third-party notices file aggregating the licenses of every
 # third-party dependency AICR redistributes:
 #   - Go modules statically linked into the released aicr/aicrd/validator
-#     binaries (collected here, offline, from the committed vendor/ tree).
+#     binaries (collected from the verified Go module cache).
 #   - Python packages installed into the released aiperf-bench image
 #     (collected by tools/generate-aiperf-licenses into a committed tree; read
 #     back here offline — see the "Python packages" section below).
@@ -158,12 +158,12 @@ if [[ -z "${LOCAL_MODULE}" ]]; then
     exit 1
 fi
 
-# Explicit, though redundant while vendor/ exists: with a vendor directory
-# present Go selects -mod=vendor on its own. Stated anyway so the mode this
-# script collects under is a decision rather than a side effect of the tree
-# layout — removing vendor/ would otherwise flip it silently and rewrite every
-# URL in the notices file.
-export GOFLAGS="-mod=vendor"
+# Explicit, and load-bearing. `readonly` resolves from the module cache and
+# refuses to rewrite go.mod, so this script can never quietly change the manifest
+# it is reporting on. Stated rather than left to default so the mode is a decision
+# and not a side effect of the tree layout — which is exactly how it behaved
+# before #2374, when a committed vendor/ made Go pick -mod=vendor on its own.
+export GOFLAGS="-mod=readonly"
 
 # CGO is disabled for every released binary (see .goreleaser.yaml). Disabling it
 # here lets go-licenses cross-list each target platform without a C toolchain.
@@ -319,6 +319,22 @@ for platform in "${PLATFORMS[@]}"; do
         exit 1
     fi
 
+    # Restore write permission before merging. 'go-licenses save' copies license
+    # files straight out of the module cache, which Go deliberately makes
+    # read-only (files 0444, directories 0555), and cp preserves those modes. The
+    # first platform therefore lands a read-only tree, and every later platform's
+    # merge fails with a wall of "cp: ...: Permission denied".
+    #
+    # This did not happen before #2374 because the source was vendor/ — an
+    # ordinary writable working-tree directory. Removing vendor/ is what moved
+    # the source to the module cache and exposed it.
+    #
+    # u+w only, and only on the scratch trees this script owns. The module cache
+    # itself is never touched; making it writable would defeat the protection Go
+    # applies to keep verified module content immutable.
+    chmod -R u+w "${platform_save}"
+    [[ -d "${LICENSES_DIR}" ]] && chmod -R u+w "${LICENSES_DIR}"
+
     # Merge into the shared tree. A module's license text is identical across
     # platforms, so overwriting is a no-op; modules present on only one platform
     # are preserved (union). 'cp -R src/.' copies directory contents in place.
@@ -420,10 +436,14 @@ for entry in "${LICENSE_OVERRIDES[@]}"; do
 done
 
 echo "Generating dependency index..." >&2
+# go-licenses can repeat a nested module's directory after its subdirectory
+# tag. Keep a reachable emitted URL; otherwise use the reachable tag-root URL.
+tools/normalize-go-license-urls "${COMBINED_CSV}" > "${COMBINED_CSV}.normalized"
+
 # Deduplicate by package (first CSV field) and sort deterministically. LC_ALL=C
 # pins byte-ordering so macOS (BSD sort) and Linux (GNU sort) agree — locale
 # collation is the classic source of cross-platform diff noise.
-LC_ALL=C sort -t, -k1,1 -u "${COMBINED_CSV}" > "${INDEX_FILE}"
+LC_ALL=C sort -t, -k1,1 -u "${COMBINED_CSV}.normalized" > "${INDEX_FILE}"
 
 if [[ ! -s "${INDEX_FILE}" ]]; then
     echo "ERROR: go-licenses produced no entries — refusing to write empty notices file." >&2

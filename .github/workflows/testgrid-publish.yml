@@ -239,7 +239,7 @@ jobs:
       - name: Build evidence verifier
         run: |
           set -euo pipefail
-          GOFLAGS="-mod=vendor" go build \
+          go build \
             -o /tmp/evidence-project ./tools/evidence-project
 
       - name: Verify evidence provenance
@@ -316,7 +316,7 @@ jobs:
       - name: Build testgrid-publish
         run: |
           set -euo pipefail
-          GOFLAGS="-mod=vendor" go build \
+          go build \
             -o /tmp/testgrid-publish ./tools/testgrid-publish
 
       # Pass all user-controlled values through env — never inline ${{ }}

@@ -338,7 +338,7 @@ func discoverTrainerInstall(ctx context.Context, dynamicClient dynamic.Interface
 	}
 
 	for _, e := range entries {
-		entry, ok := e.(map[string]interface{})
+		entry, ok := e.(map[string]any)
 		if !ok || entry[keyName] != webhookName {
 			continue
 		}
@@ -447,7 +447,7 @@ func hasTrainerWebhook(ctx context.Context, dynamicClient dynamic.Interface,
 			fmt.Sprintf("failed to read webhooks from %s %q", gvr.Resource, configName), err)
 	}
 	for _, e := range entries {
-		entry, ok := e.(map[string]interface{})
+		entry, ok := e.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -1173,7 +1173,7 @@ func webhookServiceNamespace(obj *unstructured.Unstructured) string {
 		return ""
 	}
 	for _, e := range entries {
-		entry, ok := e.(map[string]interface{})
+		entry, ok := e.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -1198,7 +1198,7 @@ func hasTrainerWebhookEntry(obj *unstructured.Unstructured) bool {
 		return false
 	}
 	for _, e := range entries {
-		entry, ok := e.(map[string]interface{})
+		entry, ok := e.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -1242,7 +1242,7 @@ func rollbackTrainer(dynamicClient dynamic.Interface, created []trainerResourceR
 	}
 	return aicrErrors.WrapWithContext(aicrErrors.ErrCodeInternal,
 		fmt.Sprintf("Trainer installation failed and rollback left resources behind: %v", cleanupErr),
-		cause, map[string]interface{}{"rollbackError": cleanupErr.Error()})
+		cause, map[string]any{"rollbackError": cleanupErr.Error()})
 }
 
 // rewriteJobSetStagingImage rewrites any reference to the garbage-collected JobSet
@@ -1475,7 +1475,7 @@ func waitForCRDEstablished(ctx context.Context, dynamicClient dynamic.Interface,
 func isCRDEstablished(obj *unstructured.Unstructured) bool {
 	conditions, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
 	for _, c := range conditions {
-		condition, ok := c.(map[string]interface{})
+		condition, ok := c.(map[string]any)
 		if !ok {
 			continue
 		}

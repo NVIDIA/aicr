@@ -174,7 +174,7 @@ component reaches the image.
 
 | Image | Third-party components | Where the source is |
 |-------|------------------------|---------------------|
-| `aicr`, `aicrd`, `aicr-gate`, `aicr-validators/{conformance,deployment,performance}` | Go modules compiled into the binary | The GitHub release source archive for the matching tag. Builds run with `-mod=vendor`, so `vendor/` in that archive is exactly the source that ships. |
+| `aicr`, `aicrd`, `aicr-gate`, `aicr-validators/{conformance,deployment,performance}` | Go modules compiled into the binary | The public Go module proxy, at the exact versions pinned in the `go.mod`/`go.sum` of the GitHub release source archive for the matching tag. Modules are immutable and `sum.golang.org` is append-only, so those coordinates stay fetchable and each one's content is verifiable against the `go.sum` entry. |
 | `aicr-validators/aiperf-bench` | Python packages installed from wheels | An OCI referrer on the image, retrieved with the commands below. |
 | all | base image contents | Provided by NVIDIA with `nvcr.io/nvidia/distroless/*` under that image's own approval. |
 
@@ -232,7 +232,8 @@ NVIDIA package and its source is at [ai-dynamo/aiperf](https://github.com/ai-dyn
 archive's `README.txt` records this too.
 
 Only `aiperf-bench` carries this referrer. The other six images need none: their
-dependencies are vendored, so the release source archive already contains them.
+dependencies are Go modules, named exactly by the `go.sum` in the release source
+archive and fetchable from the public module proxy at those coordinates.
 
 **Scope of the correspondence.** The archive is resolved from the same
 `requirements.txt` the image installs, so both derive from one input. Two gaps
@@ -1053,7 +1054,7 @@ git checkout --detach d4f7bef460dc8d1ef7ea0334a6935c0038de88e4
 # never from `git tag --list`: an attacker-pushed or never-signed tag present in
 # the repository would be pre-suppressed. The workflow example below shows the
 # query; run it once ahead of the monitor.
-GOFLAGS="-mod=vendor" go run ./tools/rekor-monitor \
+go run ./tools/rekor-monitor \
   --file checkpoint_v2.txt \
   --cert-subject '^https://github\.com/myorg/myrepo/\.github/workflows/release\.yaml@refs/tags/.*$' \
   --cert-issuer '^https://token\.actions\.githubusercontent\.com$' \
@@ -1215,7 +1216,7 @@ jobs:
           # Without --known-tags-file every legitimate release alerts, and the
           # tool holds the cursor on a match, so the first real release after
           # baseline would suspend the scan until triaged.
-          GOFLAGS="-mod=vendor" go run ./tools/rekor-monitor \
+          go run ./tools/rekor-monitor \
             --file checkpoint_v2.txt \
             --restore-zip checkpoint.zip \
             --cert-subject "${CERT_SUBJECT}" \

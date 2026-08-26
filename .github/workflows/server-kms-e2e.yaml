@@ -72,7 +72,6 @@ on:
       - 'cmd/aicr/**'
       - 'go.mod'
       - 'go.sum'
-      - 'vendor/**'
 
 # Least privilege at the workflow level; id-token is granted only to the job
 # that needs it (below).
@@ -151,8 +150,6 @@ jobs:
           workflow_file: server-kms-e2e.yaml
 
       - name: Build binaries
-        env:
-          GOFLAGS: -mod=vendor
         run: |
           set -euo pipefail
           # Builds aicr + aicrd for the host target. With SLSA_PREDICATE +

@@ -595,8 +595,8 @@ Follow the heading conventions in the `## Documentation Style` section above. Do
 
 **Test coverage gate (Go packages only; not YAML/docs/CI):**
 Before pushing a PR that changes Go source, check coverage on affected packages. Set `pkg` to the narrowest changed root — `$pkg/...` includes descendants (e.g. use `pkg=pkg/collector/topology`, not `pkg=pkg/collector`, unless you want a combined delta).
-1. Current: `GOFLAGS="-mod=vendor" go test -coverprofile=cover.out ./$pkg/...` on each changed package.
-2. Baseline (skip for new packages; commit changes first): `(git worktree add $TMPDIR/baseline origin/main && (cd $TMPDIR/baseline && GOFLAGS="-mod=vendor" go test -coverprofile=$TMPDIR/base.out ./$pkg/...); rc=$?; git worktree remove --force $TMPDIR/baseline; return $rc 2>/dev/null || (exit $rc))` — `$TMPDIR/base.out` survives cleanup and `rc` preserves test status. Compare with `go tool cover -func`.
+1. Current: `go test -coverprofile=cover.out ./$pkg/...` on each changed package.
+2. Baseline (skip for new packages; commit changes first): `(git worktree add $TMPDIR/baseline origin/main && (cd $TMPDIR/baseline && go test -coverprofile=$TMPDIR/base.out ./$pkg/...); rc=$?; git worktree remove --force $TMPDIR/baseline; return $rc 2>/dev/null || (exit $rc))` — `$TMPDIR/base.out` survives cleanup and `rc` preserves test status. Compare with `go tool cover -func`.
 3. **Block** if `make test-coverage` fails (enforces the 80% floor from `.settings.yaml`, excluding `validators/` — see #1752; do not use per-package profiles for this check).
 4. **Flag** any package with per-package decrease > 0.5% (step 1 vs 2).
 5. **Block** if any new exported func/method (`git diff origin/main -- $pkg/`, added uppercase `func` lines) has 0% coverage — add tests first.

@@ -150,7 +150,7 @@ func stripHooksFromDocument(doc *yaml.Node) {
 			continue
 		}
 		var kept []string
-		for _, phase := range strings.Split(annotations.Content[i+1].Value, ",") {
+		for phase := range strings.SplitSeq(annotations.Content[i+1].Value, ",") {
 			phase = strings.TrimSpace(phase)
 			if phase == "" || syncPhaseHooks[phase] {
 				continue

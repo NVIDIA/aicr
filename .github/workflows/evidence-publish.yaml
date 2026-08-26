@@ -138,8 +138,6 @@ jobs:
           cache: false
 
       - name: Build aicr
-        env:
-          GOFLAGS: -mod=vendor
         run: |
           # Verify the vendored dependency tree against go.sum before building
           # the binary that will sign with the runner's OIDC identity.

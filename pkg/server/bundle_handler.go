@@ -178,8 +178,7 @@ func (h *bundleHandler) handleBundles(w http.ResponseWriter, r *http.Request, v2
 	)
 
 	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if stderrors.As(err, &maxBytesErr) {
+		if maxBytesErr, ok := stderrors.AsType[*http.MaxBytesError](err); ok {
 			logger.Warn("bundle POST body exceeded size limit",
 				"limit", defaults.MaxBundlePOSTBytes,
 				"received", maxBytesErr.Limit,

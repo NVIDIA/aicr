@@ -19,6 +19,7 @@ import (
 	_ "embed"
 	stderrors "errors"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 
@@ -129,11 +130,9 @@ func validatePath(p string) error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"testgrid presence path "+quote(p)+" must have exactly three segments (<group>/<dashboard>/<tab>)")
 	}
-	for _, s := range segments {
-		if s == "" {
-			return errors.New(errors.ErrCodeInvalidRequest,
-				"testgrid presence path "+quote(p)+" has an empty segment")
-		}
+	if slices.Contains(segments, "") {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"testgrid presence path "+quote(p)+" has an empty segment")
 	}
 	return nil
 }

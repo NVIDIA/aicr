@@ -191,10 +191,7 @@ func checkAIServiceMetricsWithURL(ctx *validators.Context, promBaseURL string) e
 		return errors.Wrap(errors.ErrCodeInternal, "failed to parse custom metrics API response", err)
 	}
 	var resources strings.Builder
-	limit := len(customMetricsResp.Resources)
-	if limit > defaults.MetricsDisplayLimit {
-		limit = defaults.MetricsDisplayLimit
-	}
+	limit := min(len(customMetricsResp.Resources), defaults.MetricsDisplayLimit)
 	for i := 0; i < limit; i++ {
 		r := customMetricsResp.Resources[i]
 		fmt.Fprintf(&resources, "- %s (namespaced=%t)\n", r.Name, r.Namespaced)

@@ -37,10 +37,10 @@ import (
 func gkeNetworkObjects(count int) []runtime.Object {
 	objs := make([]runtime.Object, 0, count)
 	for i := range count {
-		objs = append(objs, &unstructured.Unstructured{Object: map[string]interface{}{
+		objs = append(objs, &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "networking.gke.io/v1",
 			"kind":       "Network",
-			"metadata":   map[string]interface{}{"name": fmt.Sprintf("aicr-test-gpu-nic-%d", i)},
+			"metadata":   map[string]any{"name": fmt.Sprintf("aicr-test-gpu-nic-%d", i)},
 		}})
 	}
 	return objs

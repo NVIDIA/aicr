@@ -268,14 +268,14 @@ type defaultNamespaceFetcher struct {
 	namespace string
 }
 
-func (f defaultNamespaceFetcher) Fetch(ctx context.Context, apiVersion, kind, namespace, name string) (map[string]interface{}, error) {
+func (f defaultNamespaceFetcher) Fetch(ctx context.Context, apiVersion, kind, namespace, name string) (map[string]any, error) {
 	if namespace == "" {
 		namespace = f.namespace
 	}
 	return f.inner.Fetch(ctx, apiVersion, kind, namespace, name)
 }
 
-func (f defaultNamespaceFetcher) List(ctx context.Context, apiVersion, kind, namespace string, labels map[string]string) ([]map[string]interface{}, error) {
+func (f defaultNamespaceFetcher) List(ctx context.Context, apiVersion, kind, namespace string, labels map[string]string) ([]map[string]any, error) {
 	if namespace == "" {
 		namespace = f.namespace
 	}

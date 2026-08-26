@@ -460,7 +460,7 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	// bundling everything — only an ABSENT parameter means no filter. See #1531.
 	if values, ok := query[bundleQueryBundlers]; ok {
 		for _, v := range values {
-			for _, name := range strings.Split(v, ",") {
+			for name := range strings.SplitSeq(v, ",") {
 				if name = strings.TrimSpace(name); name != "" {
 					params.bundlers = append(params.bundlers, name)
 				}

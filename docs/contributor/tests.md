@@ -148,11 +148,11 @@ descendants — pick the narrowest root that covers the diff.
 
 ```bash
 # 1. Profile the working tree (changes must be committed first).
-GOFLAGS="-mod=vendor" go test -coverprofile=cover.out ./pkg/recipe/...
+go test -coverprofile=cover.out ./pkg/recipe/...
 
 # 2. Profile origin/main from a clean worktree, outside the source tree.
 git worktree add $TMPDIR/baseline origin/main \
-  && (cd $TMPDIR/baseline && GOFLAGS="-mod=vendor" go test \
+  && (cd $TMPDIR/baseline && go test \
         -coverprofile=$TMPDIR/base.out ./pkg/recipe/...); \
   rc=$?; git worktree remove --force $TMPDIR/baseline; \
   (exit $rc)
@@ -581,20 +581,21 @@ token or a dependency on Fern's service at merge time.
   re-render comparison) is its **opt-in** blocking check, and the weekly
   BOM-refresh workflow auto-detects it and opens a PR. So run
   `make bom-docs` locally any time the change touches charts.
-- **Forgetting `make notices`** after a `go.mod`, `go.sum`, or `vendor/`
-  change. `THIRD_PARTY_NOTICES.md` is the union of every vendored
+- **Forgetting `make notices`** after a `go.mod` or `go.sum` change.
+  `THIRD_PARTY_NOTICES.md` is the union of every redistributed
   dependency's license across the released OS/arch matrix
   (linux+darwin × amd64+arm64), so a dependency-graph change can add or
-  drop entries. `make tidy` regenerates the file as its last step (right
-  after `go mod vendor`), so the normal dependency-update flow keeps it
-  fresh with nothing to remember — but if you edit `go.mod`/vendor by
-  hand, run `make notices` yourself. The `notices-freshness` merge-gate
-  job regenerates the file and fails CI if the committed copy is stale.
+  drop entries. `make tidy` regenerates the file as its last step, so the
+  normal dependency-update flow keeps it fresh with nothing to remember —
+  but if you edit `go.mod` by hand, run `make notices` yourself. The
+  `notices-freshness` merge-gate job regenerates the file and fails CI if
+  the committed copy is stale.
 - **Forgetting `make python-licenses`** after editing
   `validators/performance/requirements.txt`. The notices file also covers
   the Python closure installed into the `aiperf-bench` image, but that
-  closure is fetched from PyPI rather than vendored, so it cannot be
-  regenerated offline the way the Go half can. `make python-licenses`
+  closure is fetched from PyPI at image-build time and is not part of the
+  Go dependency graph, so `make notices` cannot regenerate it.
+  `make python-licenses`
   (needs network) refreshes the committed fragment at
   `validators/performance/licenses/python-notices.md`; `make notices`
   then folds it in. The fragment records the sha256 of the requirements

@@ -380,38 +380,38 @@ func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig, pu
 // validator already enforces) and snapshot_download fetches the full repo
 // (tokenizer included), so offline frontend/EPP components still resolve model
 // metadata.
-func injectModelCacheMounts(podSpec map[string]interface{}) {
-	vols, _ := podSpec["volumes"].([]interface{})
-	vols = append(vols, map[string]interface{}{
+func injectModelCacheMounts(podSpec map[string]any) {
+	vols, _ := podSpec["volumes"].([]any)
+	vols = append(vols, map[string]any{
 		keyName: modelCacheVolumeName,
-		"persistentVolumeClaim": map[string]interface{}{
+		"persistentVolumeClaim": map[string]any{
 			"claimName": modelCachePVCName,
 			"readOnly":  true,
 		},
 	})
 	podSpec["volumes"] = vols
 
-	containers, _ := podSpec["containers"].([]interface{})
+	containers, _ := podSpec["containers"].([]any)
 	if len(containers) == 0 {
-		containers = []interface{}{map[string]interface{}{keyName: mainContainerName}}
+		containers = []any{map[string]any{keyName: mainContainerName}}
 	}
 	for i, raw := range containers {
-		container, ok := raw.(map[string]interface{})
+		container, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		mounts, _ := container["volumeMounts"].([]interface{})
-		mounts = append(mounts, map[string]interface{}{
+		mounts, _ := container["volumeMounts"].([]any)
+		mounts = append(mounts, map[string]any{
 			keyName:     modelCacheVolumeName,
 			"mountPath": modelCacheMountPath,
 			"readOnly":  true,
 		})
 		container["volumeMounts"] = mounts
 
-		env, _ := container["env"].([]interface{})
+		env, _ := container["env"].([]any)
 		env = append(env,
-			map[string]interface{}{keyName: "HF_HOME", "value": modelCacheMountPath},
-			map[string]interface{}{keyName: "HF_HUB_OFFLINE", "value": "1"},
+			map[string]any{keyName: "HF_HOME", "value": modelCacheMountPath},
+			map[string]any{keyName: "HF_HUB_OFFLINE", "value": "1"},
 		)
 		container["env"] = env
 		containers[i] = container

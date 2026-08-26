@@ -53,11 +53,11 @@ func roceClaimCount(t *testing.T, claim *unstructured.Unstructured) int64 {
 	if err != nil || !found || len(requests) == 0 {
 		t.Fatalf("claim has no devices.requests (found=%v err=%v)", found, err)
 	}
-	req0, ok := requests[0].(map[string]interface{})
+	req0, ok := requests[0].(map[string]any)
 	if !ok {
 		t.Fatalf("requests[0] is %T, want map", requests[0])
 	}
-	exactly, ok := req0["exactly"].(map[string]interface{})
+	exactly, ok := req0["exactly"].(map[string]any)
 	if !ok {
 		t.Fatalf("requests[0].exactly is %T, want map", req0["exactly"])
 	}

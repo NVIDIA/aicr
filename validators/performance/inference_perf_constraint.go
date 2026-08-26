@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -218,10 +219,6 @@ const (
 	// workload. Passed to the template via ${DEPLOYMENT_NAME}.
 	inferenceDeploymentName = "aicr-inference-perf"
 
-	// inferenceQueueName is the KAI Queue name for the benchmark workload.
-	// Passed to the template via ${QUEUE_NAME}.
-	inferenceQueueName = "aicr-inference-perf"
-
 	// hfTokenSecretName / hfTokenSecretKey name the optional Secret that carries
 	// a Hugging Face token. The deploy template references it via an optional
 	// secretKeyRef on each container, so when the Secret is absent (no token)
@@ -348,12 +345,6 @@ var (
 		Group:    "nvidia.com",
 		Version:  versionV1beta1,
 		Resource: "dynamographdeployments",
-	}
-
-	kaiQueueGVR = schema.GroupVersionResource{
-		Group:    "scheduling.run.ai",
-		Version:  "v2",
-		Resource: "queues",
 	}
 
 	httpRouteGVR = schema.GroupVersionResource{
@@ -1276,10 +1267,7 @@ func podEffectiveGPURequest(pod *v1.Pod) int {
 	for i := range pod.Spec.Containers {
 		sum += containerGPUs(&pod.Spec.Containers[i])
 	}
-	effective := sum
-	if initMax > effective {
-		effective = initMax
-	}
+	effective := max(initMax, sum)
 	// Pod overhead (RuntimeClass) is added on top of max(steadyState, initMax),
 	// mirroring k8s.io/component-helpers resource accounting.
 	if q, ok := pod.Spec.Overhead[gpu]; ok {
@@ -1389,10 +1377,7 @@ func selectWorkerNode(candidates []v1.Node, mode *allocmode.Mode, policy string,
 		default:
 			continue // not in the probe's Ready/schedulable sets
 		}
-		f := capacity - occupancy
-		if f < 0 {
-			f = 0
-		}
+		f := max(capacity-occupancy, 0)
 		better := !ok || f > free ||
 			(f == free && dra && !draWiring) ||
 			(f == free && dra == draWiring && n.Name < chosen.Name)
@@ -1619,8 +1604,8 @@ func buildTolerations(node v1.Node) []v1.Toleration {
 	return tolerations
 }
 
-// deployInferenceWorkload deploys the KAI Queue, DynamoGraphDeployment, and
-// any routing-mode-specific Gateway API resources. Worker GPU wiring is
+// deployInferenceWorkload deploys the DynamoGraphDeployment and any
+// routing-mode-specific Gateway API resources. Worker GPU wiring is
 // MODE-DISPATCHED (config.useDRAWorkerClaims): in DRA mode a
 // ResourceClaimTemplate is applied and workers bind it via
 // podTemplate.spec.resourceClaims; in device-plugin mode no claim template is
@@ -1659,17 +1644,7 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		"ROUTER_MODE":         config.routerMode,
 		"GPU_COUNT":           strconv.Itoa(config.gpuCount),
 		"DEPLOYMENT_NAME":     inferenceDeploymentName,
-		"QUEUE_NAME":          inferenceQueueName,
 		"CLAIM_TEMPLATE_NAME": inferenceClaimTemplateName,
-	}
-
-	// Apply KAI Queue (best-effort; KAI scheduler may not be installed).
-	queuePath := filepath.Join("testdata", "inference", "queue.yaml")
-	if err := createOrUpdateFromTemplate(ctx, kaiQueueGVR,
-		config.namespace, queuePath, templateData, nil); err != nil {
-		slog.Info("Failed to apply KAI Queue (scheduler may not be installed)", "error", err)
-	} else {
-		slog.Info("Applied KAI Queue", "name", inferenceQueueName)
 	}
 
 	// DRA wiring mode: apply the ResourceClaimTemplate the worker pods bind
@@ -1743,9 +1718,7 @@ func applyWorkerClaimTemplate(ctx *validators.Context, config *inferenceWorkload
 		templateFile = "resource-claim-template-v1beta1.yaml"
 	}
 	data := make(map[string]string, len(templateData)+1)
-	for k, v := range templateData {
-		data[k] = v
-	}
+	maps.Copy(data, templateData)
 	data["CLAIM_API_VERSION"] = version
 
 	claimPath := filepath.Join("testdata", "inference", templateFile)
@@ -1774,16 +1747,16 @@ func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
 	}
 
 	// DRA wiring: bind the worker pod to the per-run ResourceClaimTemplate.
-	claimBindings := []interface{}{map[string]interface{}{
+	claimBindings := []any{map[string]any{
 		keyName:                     "gpu",
 		"resourceClaimTemplateName": inferenceClaimTemplateName,
 	}}
-	containerClaimRefs := []interface{}{map[string]interface{}{
+	containerClaimRefs := []any{map[string]any{
 		keyName: "gpu",
 	}}
 
 	for i, compRaw := range components {
-		component, ok := compRaw.(map[string]interface{})
+		component, ok := compRaw.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -1792,11 +1765,11 @@ func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
 
 		podTemplate, _, _ := unstructured.NestedMap(component, "podTemplate")
 		if podTemplate == nil {
-			podTemplate = map[string]interface{}{}
+			podTemplate = map[string]any{}
 		}
 		podSpec, _, _ := unstructured.NestedMap(podTemplate, "spec")
 		if podSpec == nil {
-			podSpec = map[string]interface{}{}
+			podSpec = map[string]any{}
 		}
 
 		// Tolerations AND nodeSelector apply to every component so all pods
@@ -1809,7 +1782,7 @@ func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
 			podSpec["tolerations"] = tolerationsToUnstructured(config.gpuTolerations)
 		}
 		if len(config.gpuNodeSelector) > 0 {
-			ns := make(map[string]interface{}, len(config.gpuNodeSelector))
+			ns := make(map[string]any, len(config.gpuNodeSelector))
 			for k, v := range config.gpuNodeSelector {
 				ns[k] = v
 			}
@@ -1846,10 +1819,10 @@ func applyInferenceWorkerScheduling(obj *unstructured.Unstructured,
 	return unstructured.SetNestedSlice(obj.Object, components, "spec", "components")
 }
 
-func tolerationsToUnstructured(tolerations []v1.Toleration) []interface{} {
-	tolList := make([]interface{}, 0, len(tolerations))
+func tolerationsToUnstructured(tolerations []v1.Toleration) []any {
+	tolList := make([]any, 0, len(tolerations))
 	for _, t := range tolerations {
-		tolMap := map[string]interface{}{
+		tolMap := map[string]any{
 			"operator": string(t.Operator),
 		}
 		if t.Key != "" {
@@ -1879,14 +1852,14 @@ func isInferenceGPUComponent(componentName, componentType string) bool {
 // main container (DRA wiring mode), appending a bare named entry when the
 // container is absent — the Dynamo operator merges its defaults into it.
 // Sidecar/auxiliary containers are left untouched.
-func ensureMainContainerResourceClaims(podSpec map[string]interface{}, claims []interface{}) {
-	containers, _ := podSpec["containers"].([]interface{})
+func ensureMainContainerResourceClaims(podSpec map[string]any, claims []any) {
+	containers, _ := podSpec["containers"].([]any)
 	if len(containers) == 0 {
-		containers = []interface{}{map[string]interface{}{keyName: mainContainerName}}
+		containers = []any{map[string]any{keyName: mainContainerName}}
 	}
 	mainIdx := -1
 	for i, raw := range containers {
-		container, ok := raw.(map[string]interface{})
+		container, ok := raw.(map[string]any)
 		if ok && container[keyName] == mainContainerName {
 			mainIdx = i
 			break
@@ -1894,16 +1867,16 @@ func ensureMainContainerResourceClaims(podSpec map[string]interface{}, claims []
 	}
 	if mainIdx == -1 {
 		mainIdx = len(containers)
-		containers = append(containers, map[string]interface{}{keyName: mainContainerName})
+		containers = append(containers, map[string]any{keyName: mainContainerName})
 	}
 
-	container, ok := containers[mainIdx].(map[string]interface{})
+	container, ok := containers[mainIdx].(map[string]any)
 	if !ok {
-		container = map[string]interface{}{keyName: mainContainerName}
+		container = map[string]any{keyName: mainContainerName}
 	}
-	resources, _ := container["resources"].(map[string]interface{})
+	resources, _ := container["resources"].(map[string]any)
 	if resources == nil {
-		resources = map[string]interface{}{}
+		resources = map[string]any{}
 	}
 	resources["claims"] = claims
 	container["resources"] = resources
@@ -1917,14 +1890,14 @@ func ensureMainContainerResourceClaims(podSpec map[string]interface{}, claims []
 // is set: for extended resources the API server defaults requests from limits
 // and rejects requests != limits, so the limit alone is the canonical
 // device-plugin GPU request. Sidecar/auxiliary containers are left untouched.
-func ensureMainContainerGPULimit(podSpec map[string]interface{}, count int) {
-	containers, _ := podSpec["containers"].([]interface{})
+func ensureMainContainerGPULimit(podSpec map[string]any, count int) {
+	containers, _ := podSpec["containers"].([]any)
 	if len(containers) == 0 {
-		containers = []interface{}{map[string]interface{}{keyName: mainContainerName}}
+		containers = []any{map[string]any{keyName: mainContainerName}}
 	}
 	mainIdx := -1
 	for i, raw := range containers {
-		container, ok := raw.(map[string]interface{})
+		container, ok := raw.(map[string]any)
 		if ok && container[keyName] == mainContainerName {
 			mainIdx = i
 			break
@@ -1932,20 +1905,20 @@ func ensureMainContainerGPULimit(podSpec map[string]interface{}, count int) {
 	}
 	if mainIdx == -1 {
 		mainIdx = len(containers)
-		containers = append(containers, map[string]interface{}{keyName: mainContainerName})
+		containers = append(containers, map[string]any{keyName: mainContainerName})
 	}
 
-	container, ok := containers[mainIdx].(map[string]interface{})
+	container, ok := containers[mainIdx].(map[string]any)
 	if !ok {
-		container = map[string]interface{}{keyName: mainContainerName}
+		container = map[string]any{keyName: mainContainerName}
 	}
-	resources, _ := container["resources"].(map[string]interface{})
+	resources, _ := container["resources"].(map[string]any)
 	if resources == nil {
-		resources = map[string]interface{}{}
+		resources = map[string]any{}
 	}
-	limits, _ := resources["limits"].(map[string]interface{})
+	limits, _ := resources["limits"].(map[string]any)
 	if limits == nil {
-		limits = map[string]interface{}{}
+		limits = map[string]any{}
 	}
 	// Quantity as a string — the canonical YAML/JSON form for resource
 	// quantities; an int would also decode, but the string matches what a
@@ -2298,7 +2271,7 @@ func isDynamoDeploymentReady(obj *unstructured.Unstructured) bool {
 		if !ok {
 			return false
 		}
-		ssvc, ok := sraw.(map[string]interface{})
+		ssvc, ok := sraw.(map[string]any)
 		if !ok {
 			return false
 		}
@@ -2317,12 +2290,12 @@ func isDynamoDeploymentReady(obj *unstructured.Unstructured) bool {
 	return true
 }
 
-func desiredDynamoComponents(obj *unstructured.Unstructured) (map[string]map[string]interface{}, bool) {
+func desiredDynamoComponents(obj *unstructured.Unstructured) (map[string]map[string]any, bool) {
 	components, found, err := unstructured.NestedSlice(obj.Object, "spec", "components")
 	if err == nil && found {
-		out := make(map[string]map[string]interface{}, len(components))
+		out := make(map[string]map[string]any, len(components))
 		for _, raw := range components {
-			component, ok := raw.(map[string]interface{})
+			component, ok := raw.(map[string]any)
 			if !ok {
 				return nil, false
 			}
@@ -2339,9 +2312,9 @@ func desiredDynamoComponents(obj *unstructured.Unstructured) (map[string]map[str
 	if err != nil || !found {
 		return nil, false
 	}
-	out := make(map[string]map[string]interface{}, len(services))
+	out := make(map[string]map[string]any, len(services))
 	for name, raw := range services {
-		service, ok := raw.(map[string]interface{})
+		service, ok := raw.(map[string]any)
 		if !ok {
 			return nil, false
 		}
@@ -2478,14 +2451,6 @@ func cleanupInferenceWorkload(ctx *validators.Context, config *inferenceWorkload
 		slog.Warn("failed to delete DynamoGraphDeployment", "error", err)
 	} else {
 		slog.Info("Deleted DynamoGraphDeployment")
-	}
-
-	// Delete KAI Queue.
-	err = ctx.DynamicClient.Resource(kaiQueueGVR).
-		Namespace(config.namespace).
-		Delete(cleanupCtx, inferenceQueueName, metav1.DeleteOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		slog.Debug("Failed to delete KAI Queue", "error", err)
 	}
 
 	// Delete namespace (cascades all remaining resources).

@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -888,11 +889,9 @@ func TestStageVerifiedBundle_Cleanup(t *testing.T) {
 	errs := make([]error, callers)
 	var wg sync.WaitGroup
 	for index := range errs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			errs[index] = cleanup()
-		}()
+		})
 	}
 	wg.Wait()
 	for index, cleanupErr := range errs {
@@ -1412,12 +1411,7 @@ func requireInventoryErrorCode(t *testing.T, err error, code errors.ErrorCode) {
 }
 
 func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func leftPadNumber(n int) string {

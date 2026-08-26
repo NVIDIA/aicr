@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	ociv1 "github.com/opencontainers/image-spec/specs-go/v1"
@@ -348,12 +349,7 @@ func validateHelmChartOptions(opts HelmChartOptions) error {
 }
 
 func containsSourceFile(files []string, expected string) bool {
-	for _, file := range files {
-		if file == expected {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(files, expected)
 }
 
 func loadChartYAML(
