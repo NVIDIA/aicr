@@ -174,12 +174,12 @@ func installReviewReactors(t *testing.T, cs *fake.Clientset, allow func(askedAcc
 
 // seedServiceAccount pre-creates the operator-provisioned ServiceAccount
 // that puts a Deployer into exact-ServiceAccount mode.
-func seedServiceAccount(t *testing.T, cs *fake.Clientset, namespace, name string) {
+func seedServiceAccount(t *testing.T, cs *fake.Clientset, name string) {
 	t.Helper()
-	if _, err := cs.CoreV1().ServiceAccounts(namespace).Create(context.Background(), &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+	if _, err := cs.CoreV1().ServiceAccounts(testNamespace).Create(context.Background(), &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
 	}, metav1.CreateOptions{}); err != nil {
-		t.Fatalf("seeding ServiceAccount %s/%s: %v", namespace, name, err)
+		t.Fatalf("seeding ServiceAccount %s/%s: %v", testNamespace, name, err)
 	}
 }
 
@@ -265,16 +265,18 @@ func TestCheckPermissions_PrefixModeRequiresRBACCreateAndDelete(t *testing.T) {
 			if !strings.Contains(err.Error(), wantLine) {
 				t.Errorf("error = %v\nwant a line containing %q", err, wantLine)
 			}
-			if !hasCheck(results, func(p permissionCheck) bool {
+			carriesDenied := func(p permissionCheck) bool {
 				return p.Resource == req.resource && p.Verb == req.verb && !p.Allowed
-			}) {
+			}
+			if !hasCheck(results, carriesDenied) {
 				t.Errorf("results do not carry the denied %s %s check", req.verb, req.resource)
 			}
 			// The gate must have resolved the mode first, which means it
 			// asked whether it may read ServiceAccounts.
-			if !rec.asked1(func(q askedAccess) bool {
+			askedSAGet := func(q askedAccess) bool {
 				return q.subject == "" && q.resource == resourceServiceAccounts && q.verb == verbGet
-			}) {
+			}
+			if !rec.asked1(askedSAGet) {
 				t.Error("gate never asked for `serviceaccounts: get`, so it cannot have resolved the mode")
 			}
 		})
@@ -297,7 +299,7 @@ func rbacGroupFor(resource string) string {
 // mode exists for.
 func TestCheckPermissions_ExactModeSkipsCallerRBACVerbs(t *testing.T) {
 	clientset := fake.NewClientset()
-	seedServiceAccount(t, clientset, testNamespace, exactSAName)
+	seedServiceAccount(t, clientset, exactSAName)
 
 	// Deny every caller-side RBAC verb outright. A correct gate never asks.
 	rec := installReviewReactors(t, clientset, func(q askedAccess) bool {
@@ -329,18 +331,20 @@ func TestCheckPermissions_ExactModeSkipsCallerRBACVerbs(t *testing.T) {
 	if hasCheck(results, isCallerRBACCheck) {
 		t.Error("gate demanded a caller RBAC verb in exact-ServiceAccount mode")
 	}
-	if rec.asked1(func(q askedAccess) bool {
+	askedCallerRBAC := func(q askedAccess) bool {
 		return q.subject == "" && q.resource == resourceClusterRoles
-	}) {
+	}
+	if rec.asked1(askedCallerRBAC) {
 		t.Error("gate asked the apiserver about clusterroles in exact-ServiceAccount mode")
 	}
 
 	// It must instead have asked the ServiceAccount's own questions, and
 	// asked them of the ServiceAccount rather than of the caller.
 	subject := serviceAccountUsername(testNamespace, exactSAName)
-	if !rec.asked1(func(q askedAccess) bool {
+	askedClusterRoles := func(q askedAccess) bool {
 		return q.subject == subject && q.resource == resourceNodes && q.verb == verbList
-	}) {
+	}
+	if !rec.asked1(askedClusterRoles) {
 		t.Errorf("gate never asked whether %s may list nodes", subject)
 	}
 }
@@ -352,7 +356,7 @@ func TestCheckPermissions_ExactModeSkipsCallerRBACVerbs(t *testing.T) {
 // account as a generated one carrying none of its cloud annotations.
 func TestCheckPermissions_ServiceAccountGetIsRequired(t *testing.T) {
 	clientset := fake.NewClientset()
-	seedServiceAccount(t, clientset, testNamespace, exactSAName)
+	seedServiceAccount(t, clientset, exactSAName)
 	rec := installReviewReactors(t, clientset, func(q askedAccess) bool {
 		return q.resource != resourceServiceAccounts || q.verb != verbGet
 	})
@@ -401,7 +405,7 @@ func TestCheckPermissions_ServiceAccountGetIsRequired(t *testing.T) {
 // far better caught here than in a pod minutes later.
 func TestCheckPermissions_ServiceAccountSubjectFailureNamesTheSubject(t *testing.T) {
 	clientset := fake.NewClientset()
-	seedServiceAccount(t, clientset, testNamespace, exactSAName)
+	seedServiceAccount(t, clientset, exactSAName)
 	installReviewReactors(t, clientset, func(q askedAccess) bool {
 		// The caller is fully privileged; the ServiceAccount is missing
 		// exactly the cluster-scoped node read the agent cannot work without.
@@ -428,9 +432,10 @@ func TestCheckPermissions_ServiceAccountSubjectFailureNamesTheSubject(t *testing
 		}
 	}
 	// A caller-scoped answer must never be substituted for the subject's.
-	if !hasCheck(results, func(p permissionCheck) bool {
+	askedSubjectNodes := func(p permissionCheck) bool {
 		return p.Subject == subject && p.Resource == resourceNodes && !p.Allowed && !p.Unverified
-	}) {
+	}
+	if !hasCheck(results, askedSubjectNodes) {
 		t.Error("results carry no denied ServiceAccount-subject check for nodes")
 	}
 }
@@ -443,7 +448,7 @@ func TestCheckPermissions_ServiceAccountSubjectFailureNamesTheSubject(t *testing
 // unverified, warns, and lets the run proceed to fail visibly in-pod.
 func TestCheckPermissions_SubjectAccessReviewForbiddenReportsAndContinues(t *testing.T) {
 	clientset := fake.NewClientset()
-	seedServiceAccount(t, clientset, testNamespace, exactSAName)
+	seedServiceAccount(t, clientset, exactSAName)
 	installReviewReactors(t, clientset, nil)
 	// Prepended after installReviewReactors, so it wins for this resource.
 	clientset.PrependReactor(verbCreate, subjectReviewResource, func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -556,7 +561,7 @@ func TestCheckPermissions_IssuesNoWriteBeforeTheGateCloses(t *testing.T) {
 			clientset := fake.NewClientset()
 			if tt.exact {
 				// Seeded through the tracker before the guard is armed.
-				seedServiceAccount(t, clientset, testNamespace, exactSAName)
+				seedServiceAccount(t, clientset, exactSAName)
 			}
 			installReviewReactors(t, clientset, tt.allow)
 
@@ -689,7 +694,7 @@ func TestCheckPermissions_AllGrantedPassesBothModes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			clientset := fake.NewClientset()
 			if tt.exact {
-				seedServiceAccount(t, clientset, testNamespace, exactSAName)
+				seedServiceAccount(t, clientset, exactSAName)
 			}
 			rec := installReviewReactors(t, clientset, nil)
 
@@ -832,9 +837,11 @@ func TestServiceAccountChecksTrackTheGrantedRules(t *testing.T) {
 				got[c] = struct{}{}
 			}
 
-			var wantAll []accessCheck
-			wantAll = append(wantAll, checksFromRules(namespacedRules(), testNamespace, subject)...)
-			wantAll = append(wantAll, checksFromRules(clusterRules(discover), "", subject)...)
+			nsChecks := checksFromRules(namespacedRules(), testNamespace, subject)
+			clusterChecks := checksFromRules(clusterRules(discover), "", subject)
+			wantAll := make([]accessCheck, 0, len(nsChecks)+len(clusterChecks))
+			wantAll = append(wantAll, nsChecks...)
+			wantAll = append(wantAll, clusterChecks...)
 			for _, c := range wantAll {
 				if _, ok := got[c]; !ok {
 					t.Errorf("granted rule not checked: %+v", c)
