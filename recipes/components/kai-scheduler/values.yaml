@@ -37,9 +37,11 @@ postCleanup:
 
 # Default queue hierarchy — pinned explicitly rather than inherited.
 #
-# The gang-scheduling conformance validator submits its test PodGroup to
-# `default-queue` by name (validators/conformance/gang_scheduling_check.go),
-# so that queue is a hard dependency of the check, not an optional extra.
+# The gang-scheduling conformance validator submits its synthetic test
+# PodGroup to `default-queue` by name
+# (validators/conformance/gang_scheduling_check.go), so that queue is a hard
+# dependency of the check, not an optional extra. Workloads are unaffected —
+# Dynamo, for instance, uses the `dynamo` queue created by its own chart.
 # These are the chart's own defaults at v0.14.1; pinning them makes the
 # dependency visible here instead of relying on an upstream default that
 # could change under a version bump.
