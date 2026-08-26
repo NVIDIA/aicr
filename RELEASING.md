@@ -13,6 +13,25 @@ Releases follow a **bi-weekly cadence**. A new release is cut every two weeks.
 | Pre-release | Before a regular release, as needed | `rc` | Any maintainer can create for testing |
 | Major | Planned | `major` | Requires team agreement and advance communication |
 
+## Artifact Compatibility and Deprecation
+
+Artifact `apiVersion` maturity is independent of the AICR release version and
+is governed by [ADR-022](docs/design/022-artifact-maturity-and-deprecation.md).
+Retiring an artifact version owes the following window on the AICR release
+axis:
+
+- Alpha: no deprecation window.
+- Beta: readable for two releases after deprecation.
+- GA: readable for the rest of the current AICR major version; removal requires
+  the next `vMAJOR` release.
+
+For beta and GA bumps, stage the new reader in Release N before switching the
+emitter in Release N+1. The initial alpha-to-target migration is the explicit
+three-release sequence in ADR-022 §3: readers first, emitters second, then alpha
+and legacy empty headers retire. Release notes must identify any deprecation,
+the last release that reads the retiring version, and the required artifact
+recapture, regeneration, or authored-header edit.
+
 ## What Goes Into a Release
 
 A release includes everything merged to `main` since the last tag. There is no cherry-picking or feature branching for releases — if it's on `main`, it ships.

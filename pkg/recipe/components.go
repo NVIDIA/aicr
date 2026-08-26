@@ -22,8 +22,12 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"gopkg.in/yaml.v3"
 )
+
+// ComponentRegistryKind is the wire kind for component registry documents.
+const ComponentRegistryKind = "ComponentRegistry"
 
 // ComponentRegistry holds the declarative configuration for all components.
 // This is loaded from embedded recipe data (recipes/registry.yaml) at startup.
@@ -415,12 +419,15 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 	defer cancel()
 	data, err := provider.ReadFile(ctx, "registry.yaml")
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read registry.yaml", err)
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to read registry.yaml")
 	}
 
 	var registry ComponentRegistry
 	if err := yaml.Unmarshal(data, &registry); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse registry.yaml", err)
+	}
+	if err := validateComponentRegistryHeader(&registry, "registry.yaml"); err != nil {
+		return nil, err
 	}
 
 	// Fail closed on the reserved deployer key for EVERY loaded registry
@@ -457,6 +464,23 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 	}
 
 	return &registry, nil
+}
+
+func validateComponentRegistryHeader(registry *ComponentRegistry, source string) error {
+	if registry == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, source+" is empty")
+	}
+	if registry.Kind != ComponentRegistryKind {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s has kind %q, expected %q; use a ComponentRegistry document compatible with this aicr release",
+				source, registry.Kind, ComponentRegistryKind))
+	}
+	if !header.IsSupportedAuthoringAPIVersion(registry.APIVersion) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s has apiVersion %q, expected %q or %q for %s; update the registry header for this aicr release",
+				source, registry.APIVersion, RecipeAPIVersion, header.GroupVersionV1Beta1, ComponentRegistryKind))
+	}
+	return nil
 }
 
 // Get returns the component configuration by name.

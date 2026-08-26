@@ -243,10 +243,13 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 			// handler retains it for compatibility, so dropping it from the
 			// enum would make previously conforming clients spec-invalid
 			// against a request-validating gateway.
-			name:        "bundle request",
-			schema:      spec.Components.Schemas["BundleRecipeRequest"],
-			apiVersions: []string{"", recipe.RecipeAPIVersion, recipe.ConfiguredRecipeResultAPIVersion},
-			kinds:       []string{"", string(header.KindRecipe), recipe.RecipeResultKind},
+			name:   "bundle request",
+			schema: spec.Components.Schemas["BundleRecipeRequest"],
+			apiVersions: []string{
+				"", recipe.RecipeAPIVersion, header.GroupVersionV1,
+				recipe.ConfiguredRecipeResultAPIVersion, header.GroupVersionV1Beta2,
+			},
+			kinds: []string{"", string(header.KindRecipe), recipe.RecipeResultKind},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -349,7 +352,7 @@ func TestOpenAPIV2BundleContract(t *testing.T) {
 	legacyAPIVersion := openAPIObjectAt(t, legacyOverlay, "properties", "apiVersion")
 	legacyAPIVersions := openAPISequence(t, legacyAPIVersion["enum"],
 		"LegacyBundleRecipeV2Request apiVersion enum")
-	for _, value := range []string{"", "aicr.run/v1alpha2"} {
+	for _, value := range []string{"", "aicr.run/v1alpha2", "aicr.run/v1"} {
 		if !openAPIHasString(legacyAPIVersions, value) {
 			t.Errorf("LegacyBundleRecipeV2Request apiVersion enum missing %q", value)
 		}
@@ -634,7 +637,10 @@ func TestOpenAPIV1BundleLegacyConfigurationContract(t *testing.T) {
 		t.Error("BundleRecipeRequest does not prohibit configuration for legacy headers")
 	}
 
-	legacyHeaders := map[string]bool{"absent": false, "": false, recipe.RecipeAPIVersion: false}
+	legacyHeaders := map[string]bool{
+		"absent": false, "": false,
+		recipe.RecipeAPIVersion: false, header.GroupVersionV1: false,
+	}
 	condition := openAPIObjectAt(t, overlay, "if")
 	branches := openAPISequence(t, condition["anyOf"], "BundleRecipeRequest if.anyOf")
 	for _, branchValue := range branches {

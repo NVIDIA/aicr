@@ -91,8 +91,17 @@ func TestDecodeRecipeResultRequestStrictForConfiguredRecipes(t *testing.T) {
 			body: `{"apiVersion":"aicr.run/v1alpha3","kind":"RecipeResult","configuration":{"slurm":{"accounting":{"mode":"disabled"}}}}`,
 		},
 		{
+			name: "Release N target configured recipe succeeds",
+			body: `{"apiVersion":"aicr.run/v1beta2","kind":"RecipeResult","configuration":{"slurm":{"accounting":{"mode":"disabled"}}}}`,
+		},
+		{
 			name:    "configured rejects unknown field",
 			body:    `{"apiVersion":"aicr.run/v1alpha3","kind":"RecipeResult","configuration":{"slurm":{"accounting":{"mode":"disabled"}}},"unknownField":true}`,
+			wantErr: true,
+		},
+		{
+			name:    "Release N target configured rejects unknown field",
+			body:    `{"apiVersion":"aicr.run/v1beta2","kind":"RecipeResult","unknownField":true}`,
 			wantErr: true,
 		},
 		{
@@ -271,6 +280,19 @@ func TestProfileAwareBundleEndpoints(t *testing.T) {
 		}
 		if w.Header().Get("Content-Type") != "application/zip" {
 			t.Fatalf("Content-Type = %q, want application/zip", w.Header().Get("Content-Type"))
+		}
+	})
+
+	t.Run("v2 accepts Release N target profile artifact", func(t *testing.T) {
+		body := bytes.Replace(
+			profileBundleBody(t),
+			[]byte(recipe.RecipeProfileAPIVersion),
+			[]byte(header.GroupVersionV1Beta2),
+			1,
+		)
+		w := post(t, true, "", body)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 		}
 	})
 
@@ -747,6 +769,12 @@ func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 		{
 			name:   "canonical headers (control)",
 			mutate: func(map[string]any) {},
+		},
+		{
+			name: "Release N target apiVersion",
+			mutate: func(body map[string]any) {
+				body["apiVersion"] = header.GroupVersionV1
+			},
 		},
 		{
 			name: "both headers absent",

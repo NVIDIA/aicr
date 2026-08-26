@@ -79,6 +79,10 @@ func TestLoadFromFile(t *testing.T) {
 			},
 		},
 		{
+			name:        "Release N target RecipeResult loads directly",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1\ncriteria:\n  service: eks\n",
+		},
+		{
 			name:        "RecipeMetadata with criteria auto-hydrates",
 			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
 			wantErr:     false,
@@ -91,6 +95,10 @@ func TestLoadFromFile(t *testing.T) {
 					t.Error("expected hydrated recipe with components")
 				}
 			},
+		},
+		{
+			name:        "Release N target RecipeMetadata auto-hydrates",
+			yamlContent: "kind: RecipeMetadata\napiVersion: aicr.run/v1beta1\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
 		},
 		{
 			name: "profile RecipeMetadata outside active catalog fails closed",
@@ -173,9 +181,35 @@ componentRefs: []
 			},
 		},
 		{
+			name: "Release N target profile RecipeResult loads strictly",
+			yamlContent: `kind: RecipeResult
+apiVersion: aicr.run/v1beta2
+metadata:
+  selectedProfile:
+    name: mode
+    value: one
+    ownedPaths: {}
+componentRefs: []
+`,
+		},
+		{
 			name: "profile RecipeResult rejects unknown field",
 			yamlContent: `kind: RecipeResult
 apiVersion: aicr.run/v1alpha3
+metadata:
+  selectedProfile:
+    name: mode
+    value: one
+    ownedPaths: {}
+profie: typo
+`,
+			wantErr:    true,
+			errContain: "field profie not found",
+		},
+		{
+			name: "Release N target profile RecipeResult rejects unknown field",
+			yamlContent: `kind: RecipeResult
+apiVersion: aicr.run/v1beta2
 metadata:
   selectedProfile:
     name: mode

@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
@@ -377,10 +378,10 @@ func (r *RecipeResult) validateAccountingConfiguration() error {
 	if !present {
 		return nil
 	}
-	if r.APIVersion != ConfiguredRecipeResultAPIVersion {
+	if !header.IsSupportedProfileAPIVersion(r.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("configuration.slurm.accounting requires apiVersion %q (got %q)",
-				ConfiguredRecipeResultAPIVersion, r.APIVersion))
+			fmt.Sprintf("configuration.slurm.accounting requires apiVersion %q or %q (got %q)",
+				ConfiguredRecipeResultAPIVersion, header.GroupVersionV1Beta2, r.APIVersion))
 	}
 	if r.Criteria == nil || r.Criteria.Platform != CriteriaPlatformSlurm {
 		return errors.New(errors.ErrCodeInvalidRequest,

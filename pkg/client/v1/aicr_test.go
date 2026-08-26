@@ -258,7 +258,7 @@ func TestNewClient_IsolatedDataProvider(t *testing.T) {
 	dirB := t.TempDir()
 	for _, dir := range []string{dirA, dirB} {
 		if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
-			[]byte("components: []\n"), 0o600); err != nil {
+			[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 			t.Fatalf("setup: write registry.yaml in %s: %v", dir, err)
 		}
 	}
@@ -306,7 +306,7 @@ func TestClient_ConcurrentResolveAndClose(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 
@@ -357,7 +357,7 @@ func TestClient_CloseIsIdempotent(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 
@@ -397,7 +397,7 @@ func TestResolveRecipeRejectsPinnedReferences(t *testing.T) {
 	// contain a registry.yaml. Write a minimal one so setup succeeds
 	// and we can exercise ResolveRecipe's pinned-rejection path.
 	tmp := t.TempDir()
-	minimalRegistry := "components: []\n"
+	minimalRegistry := "apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
 		[]byte(minimalRegistry), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
@@ -458,7 +458,7 @@ func TestBundleComponents_RequiresInternalRecipeResult(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
@@ -497,7 +497,7 @@ func TestBundleComponents_NilInputsRejected(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 
@@ -579,7 +579,7 @@ func TestResolveRecipe_RejectsNegativeNodes(t *testing.T) {
 	// never runs (negative Nodes rejection short-circuits before that),
 	// but NewClient still validates the source on construction.
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
@@ -638,7 +638,7 @@ func TestResolveRecipe_OSEnablesOSPinnedOverlays(t *testing.T) {
 	// ones) remain reachable for resolution.
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
@@ -688,7 +688,7 @@ func TestBundleAndValidate_RejectCrossClientRecipeResult(t *testing.T) {
 		t.Helper()
 		tmp := t.TempDir()
 		if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-			[]byte("components: []\n"), 0o600); err != nil {
+			[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 			t.Fatalf("setup: write registry.yaml: %v", err)
 		}
 		c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
@@ -800,7 +800,7 @@ spec:
 		t.Helper()
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
-			[]byte("components: []\n"), 0o600); err != nil {
+			[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 			t.Fatalf("setup %s: registry.yaml: %v", marker, err)
 		}
 		if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o755); err != nil {
@@ -936,7 +936,7 @@ func TestResolveRecipeWithProfile(t *testing.T) {
 		t.Fatalf("setup overlays directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup registry.yaml: %v", err)
 	}
 	overlay := []byte(`apiVersion: aicr.run/v1alpha3
@@ -1778,7 +1778,7 @@ func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 

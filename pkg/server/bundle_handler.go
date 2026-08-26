@@ -32,6 +32,7 @@ import (
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -358,16 +359,16 @@ func decodeRecipeResultRequest(body io.Reader, result *recipe.RecipeResult) erro
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
 			"failed to read request body", err)
 	}
-	var header struct {
+	var artifactHeader struct {
 		APIVersion string `json:"apiVersion"`
 	}
-	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&header); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&artifactHeader); err != nil {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
 			"failed to inspect request apiVersion", err)
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	if header.APIVersion == recipe.ConfiguredRecipeResultAPIVersion {
+	if header.IsSupportedProfileAPIVersion(artifactHeader.APIVersion) {
 		decoder.DisallowUnknownFields()
 	}
 	if err := decoder.Decode(result); err != nil {

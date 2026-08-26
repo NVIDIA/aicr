@@ -88,16 +88,10 @@ func LoadFromFileWithProviderProfile(
 
 	// Reject an artifact stamped with an apiVersion this build does not
 	// understand before an overlay can trigger provider-backed hydration.
-	// Empty is tolerated for legacy files, while v1alpha3 is the strict
-	// profile artifact version introduced by ADR-015.
-	if inputAPIVersion != "" &&
-		!header.IsSupportedAPIVersion(inputAPIVersion) &&
-		inputAPIVersion != RecipeProfileAPIVersion {
-
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("recipe file has apiVersion %q, which this aicr build does not support (expected %q or %q); "+
-				"regenerate the recipe with a matching aicr version",
-				inputAPIVersion, header.GroupVersion, RecipeProfileAPIVersion))
+	// The accepted set is selected by wire kind/schema track; an empty value
+	// remains tolerated here for pre-apiVersion recipe files through Release N.
+	if versionErr := validateRecipeInputAPIVersion(rec.Kind, inputAPIVersion); versionErr != nil {
+		return nil, versionErr
 	}
 
 	// Users often pass overlay files directly; auto-hydrate so they don't need
@@ -107,7 +101,7 @@ func LoadFromFileWithProviderProfile(
 			"file", path)
 
 		var readerOpts []serializer.ReaderOption
-		if inputAPIVersion == RecipeProfileAPIVersion {
+		if header.IsSupportedProfileAPIVersion(inputAPIVersion) {
 			readerOpts = append(readerOpts, serializer.WithStrict())
 		}
 		overlayReader, parseErr := serializer.NewReader(
@@ -160,7 +154,7 @@ func LoadFromFileWithProviderProfile(
 					"is already baked into metadata.selectedProfile; a profile selection applies "+
 					"only to overlay inputs", path))
 		}
-		if inputAPIVersion == RecipeProfileAPIVersion {
+		if header.IsSupportedProfileAPIVersion(inputAPIVersion) {
 			rec, err = DecodeRecipeResult(sourceData, sourceFormat)
 			if err != nil {
 				return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
@@ -177,10 +171,10 @@ func LoadFromFileWithProviderProfile(
 
 	// The strict profile artifact version requires its discriminator. Empty
 	// kind remains allowed only for legacy RecipeResult files that predate it.
-	if rec.Kind == "" && inputAPIVersion == RecipeProfileAPIVersion {
+	if rec.Kind == "" && header.IsSupportedProfileAPIVersion(inputAPIVersion) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("recipe file apiVersion %q requires kind %q",
-				RecipeProfileAPIVersion, RecipeResultKind))
+				inputAPIVersion, RecipeResultKind))
 	}
 	if rec.Kind != "" && rec.Kind != RecipeResultKind {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
@@ -201,6 +195,34 @@ func LoadFromFileWithProviderProfile(
 	}
 
 	return rec, nil
+}
+
+func validateRecipeInputAPIVersion(kind, apiVersion string) error {
+	if apiVersion == "" {
+		return nil
+	}
+
+	if kind == RecipeMetadataKind {
+		if header.IsSupportedAuthoringAPIVersion(apiVersion) ||
+			header.IsSupportedProfileAPIVersion(apiVersion) {
+
+			return nil
+		}
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("recipe metadata file has apiVersion %q, which this aicr build does not support (expected %q, %q, %q, or %q); "+
+				"update the catalog header for this aicr release",
+				apiVersion, RecipeAPIVersion, header.GroupVersionV1Beta1,
+				RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
+	}
+
+	if header.IsSupportedRecipeResultAPIVersion(apiVersion) {
+		return nil
+	}
+	return errors.New(errors.ErrCodeInvalidRequest,
+		fmt.Sprintf("recipe file has apiVersion %q, which this aicr build does not support (expected %q, %q, %q, or %q); "+
+			"regenerate the recipe with a matching aicr version",
+			apiVersion, RecipeAPIVersion, header.GroupVersionV1,
+			RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
 }
 
 func ensureDirectOverlayProfileApplied(

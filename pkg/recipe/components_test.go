@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	stderrors "errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -1214,6 +1215,43 @@ func TestGetComponentRegistry_PerProviderIsolation(t *testing.T) {
 	}
 	if rB.Get("alpha-only") != nil {
 		t.Errorf("registry B leaked alpha-only component")
+	}
+}
+
+func TestLoadComponentRegistry_ReleaseNHeaders(t *testing.T) {
+	tests := []struct {
+		name       string
+		apiVersion string
+		kind       string
+		wantErr    bool
+	}{
+		{name: "current alpha", apiVersion: RecipeAPIVersion, kind: ComponentRegistryKind},
+		{name: "target beta", apiVersion: "aicr.run/v1beta1", kind: ComponentRegistryKind},
+		{name: "empty version", apiVersion: "", kind: ComponentRegistryKind, wantErr: true},
+		{name: "unknown version", apiVersion: "aicr.run/v9", kind: ComponentRegistryKind, wantErr: true},
+		{name: "wrong kind", apiVersion: RecipeAPIVersion, kind: "RecipeMetadata", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dp := newInMemoryProvider("registry-header-"+tt.name, map[string][]byte{
+				"registry.yaml": fmt.Appendf(nil, "apiVersion: %s\nkind: %s\ncomponents: []\n", tt.apiVersion, tt.kind),
+			})
+			t.Cleanup(func() { EvictCachedRegistry(dp) })
+
+			_, err := GetComponentRegistryFor(dp)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("GetComponentRegistryFor() error = nil, want header rejection")
+				}
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetComponentRegistryFor() error = %v", err)
+			}
+		})
 	}
 }
 

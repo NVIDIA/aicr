@@ -577,9 +577,8 @@ func (r *RecipeResult) backfillComponentTypes() error {
 // silently emits an artifact it would not read back. (The file loader also
 // accepts RecipeMetadata, but as an overlay to hydrate rather than as a
 // RecipeResult; that input shape has no analog on this boundary.) Only Kind is
-// normalized: APIVersion is validated, never rewritten, because an artifact
-// group/version bump is a hard break with no transition window — see
-// docs/design/011-artifact-apiversion-policy.md. See issue #1953.
+// normalized: APIVersion is validated against the kind/schema-scoped read
+// window and never rewritten. See ADR-022 and issue #1953.
 func (r *RecipeResult) NormalizeKind() error {
 	if r == nil {
 		return nil

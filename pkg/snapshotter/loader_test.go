@@ -48,6 +48,11 @@ func TestLoadFromFile(t *testing.T) {
 			wantErr:     false,
 		},
 		{
+			name:        "Release N target apiVersion loads",
+			yamlContent: "kind: Snapshot\napiVersion: " + header.GroupVersionV1 + "\nmeasurements:\n  - type: K8s\n",
+			wantErr:     false,
+		},
+		{
 			name:        "empty apiVersion allowed for backward compat",
 			yamlContent: "kind: Snapshot\nmeasurements:\n  - type: K8s\n",
 			wantErr:     false,

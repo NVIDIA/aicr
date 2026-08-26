@@ -76,6 +76,15 @@ counterpart **wholesale** — to override just `helm.defaultVersion`, copy the
 full embedded entry and change that one field, or the other coordinates
 (repository, chart, scheduling paths) are silently dropped.
 
+During the ADR-022 reader-first release, `ComponentRegistry`, ordinary
+`RecipeMetadata`, and `RecipeMixin` inputs accept `aicr.run/v1alpha2` and the
+target `aicr.run/v1beta1`. Profile-bearing `RecipeMetadata` accepts
+`aicr.run/v1alpha3` and `aicr.run/v1beta2`. AICR validates the raw external
+`registry.yaml` header before merging it with the embedded registry, and checks
+metadata/mixin headers before hydration. Empty, unknown, or wrong-kind AICR
+catalog headers fail with `INVALID_REQUEST`; they are never replaced by an
+embedded header and silently continued.
+
 Overriding a component's `defaultVersion` this way takes effect for every
 embedded overlay that references the component: embedded overlays do not pin
 versions that equal the registry default, so resolution falls back to your
@@ -244,12 +253,13 @@ mechanics:
 - **A same-path replacement replaces the declaration too.** An external
   `overlays/aks.yaml` completely replaces the embedded file — including its
   `spec.profile` block. Keep the declaration in the replacement — dropping it
-  while keeping `apiVersion: aicr.run/v1alpha3` fails catalog validation
+  while keeping profile apiVersion `aicr.run/v1alpha3` or
+  `aicr.run/v1beta2` fails catalog validation
   (the version⟺declaration cross-check). That guardrail protects an
-  integrator *editing* a v1alpha3 file: de-profiling one requires BOTH
+  integrator *editing* a profile-track file: de-profiling one requires BOTH
   removing the declaration AND downgrading the overlay to the legacy
   apiVersion. It does NOT protect the upgrade path — a pre-existing legacy
-  (`aicr.run/v1alpha2`) external `overlays/aks.yaml`, authored before the
+  (`aicr.run/v1alpha2` or `aicr.run/v1beta1`) external `overlays/aks.yaml`, authored before the
   family's conversion, already satisfies both conditions. Upgrading AICR
   with such a catalog in `--data` silently preserves the unprofiled family:
   resolution succeeds with no error, no `selectedProfile` on the recipe, and

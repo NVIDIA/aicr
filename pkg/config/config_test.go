@@ -48,6 +48,16 @@ func TestValidate_HappyPath(t *testing.T) {
 	}
 }
 
+func TestValidate_AcceptsReleaseNTargetAPIVersion(t *testing.T) {
+	t.Parallel()
+
+	cfg := newValid()
+	cfg.APIVersion = header.GroupVersionV1Beta1
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() rejected Release N target apiVersion: %v", err)
+	}
+}
+
 func TestValidate_BothSpecsPopulated(t *testing.T) {
 	cfg := newValid()
 	cfg.Spec.Bundle = &config.BundleSpec{

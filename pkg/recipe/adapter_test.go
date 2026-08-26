@@ -738,7 +738,9 @@ func buildProviderWithValues(t *testing.T, valuesPath string, values map[string]
 		t.Fatalf("marshal values: %v", err)
 	}
 
-	registryYAML := []byte(`components: []
+	registryYAML := []byte(`apiVersion: aicr.run/v1alpha2
+kind: ComponentRegistry
+components: []
 `)
 	baseYAML := []byte(`kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2
