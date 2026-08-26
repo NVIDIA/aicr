@@ -144,9 +144,9 @@ func TestVerifyNodewrightReady_RidesThroughRuntimeRequiredTaint(t *testing.T) {
 				[]runtime.Object{activeNamespace("skyhook")}, dyn, []recipe.ComponentRef{ref})
 
 			taintSeq := tt.tainted
-			var lists int32
+			var lists atomic.Int32
 			ctx.Clientset.(*k8sfake.Clientset).PrependReactor("list", "nodes", func(clienttesting.Action) (bool, runtime.Object, error) {
-				idx := int(atomic.AddInt32(&lists, 1)) - 1
+				idx := int(lists.Add(1)) - 1
 				if idx >= len(taintSeq) {
 					idx = len(taintSeq) - 1
 				}
@@ -170,7 +170,7 @@ func TestVerifyNodewrightReady_RidesThroughRuntimeRequiredTaint(t *testing.T) {
 			if err != nil {
 				t.Fatalf("verifyNodewrightReady() error = %v, want nil (should ride through the lingering taint)", err)
 			}
-			if got := int(atomic.LoadInt32(&lists)); got < tt.minLists {
+			if got := int(lists.Load()); got < tt.minLists {
 				t.Fatalf("expected the poll to list nodes at least %d times (through the taint), got %d", tt.minLists, got)
 			}
 		})
@@ -235,9 +235,9 @@ func TestVerifyDRAKubeletPluginReady_Poll(t *testing.T) {
 
 			readySeq := tt.readySeq
 			clientset := k8sfake.NewClientset()
-			var calls int32
+			var calls atomic.Int32
 			clientset.PrependReactor("list", "daemonsets", func(clienttesting.Action) (bool, runtime.Object, error) {
-				idx := int(atomic.AddInt32(&calls, 1)) - 1
+				idx := int(calls.Add(1)) - 1
 				if idx >= len(readySeq) {
 					idx = len(readySeq) - 1
 				}
@@ -260,7 +260,7 @@ func TestVerifyDRAKubeletPluginReady_Poll(t *testing.T) {
 			if err != nil {
 				t.Fatalf("verifyDRAKubeletPluginReady() error = %v, want nil (should ride through transient 0/0)", err)
 			}
-			if got := int(atomic.LoadInt32(&calls)); got < tt.minLists {
+			if got := int(calls.Load()); got < tt.minLists {
 				t.Fatalf("expected the poll to list DaemonSets at least %d times (through the reboot), got %d", tt.minLists, got)
 			}
 		})
@@ -275,10 +275,10 @@ func TestVerifyDRAKubeletPluginReady_FailsFastOnAmbiguousMatch(t *testing.T) {
 	t.Parallel()
 
 	const namespace = "nvidia-dra-driver"
-	var calls int32
+	var calls atomic.Int32
 	clientset := k8sfake.NewClientset()
 	clientset.PrependReactor("list", "daemonsets", func(clienttesting.Action) (bool, runtime.Object, error) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		return true, &appsv1.DaemonSetList{Items: []appsv1.DaemonSet{
 			*readyDaemonSet(namespace, "dra-a"+draKubeletPluginSuffix, 2),
 			*readyDaemonSet(namespace, "dra-b"+draKubeletPluginSuffix, 2),
@@ -293,7 +293,7 @@ func TestVerifyDRAKubeletPluginReady_FailsFastOnAmbiguousMatch(t *testing.T) {
 	if !strings.Contains(err.Error(), "ambiguous:") {
 		t.Fatalf("expected the ambiguous-match error, got: %v", err)
 	}
-	if got := atomic.LoadInt32(&calls); got != 1 {
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 List (fail fast, no polling), got %d", got)
 	}
 }

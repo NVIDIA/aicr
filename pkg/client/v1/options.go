@@ -15,6 +15,7 @@
 package aicr
 
 import (
+	"maps"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -348,9 +349,7 @@ func cloneStringMap(m map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
+	maps.Copy(out, m)
 	return out
 }
 

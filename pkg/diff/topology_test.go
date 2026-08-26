@@ -15,6 +15,7 @@
 package diff
 
 import (
+	"maps"
 	"strings"
 	"testing"
 
@@ -87,13 +88,13 @@ func refLabelItem(key, value, dataKey string, count int) measurement.ItemEntry {
 // the vintages — the count as well as the presence of items.
 func collidingCluster() (map[string]string, []measurement.ItemEntry) {
 	return map[string]string{
-		"zone.us-west": "true|gpu-a,gpu-b",
-		"zone.us-east": "us-east|gpu-b",
-	}, []measurement.ItemEntry{
-		labelItem("zone", "us-east", "gpu-b"),
-		labelItem("zone", "us-west", "gpu-a"),
-		labelItem("zone.us-west", "true", "gpu-a,gpu-b"),
-	}
+			"zone.us-west": "true|gpu-a,gpu-b",
+			"zone.us-east": "us-east|gpu-b",
+		}, []measurement.ItemEntry{
+			labelItem("zone", "us-east", "gpu-b"),
+			labelItem("zone", "us-west", "gpu-a"),
+			labelItem("zone.us-west", "true", "gpu-a,gpu-b"),
+		}
 }
 
 // TestSnapshots_UpgradeIsNotDrift pins that capturing a baseline with an older
@@ -136,9 +137,7 @@ func TestSnapshots_RealChangeSurvivesAlignment(t *testing.T) {
 	labels, items := collidingCluster()
 
 	changedLabels := map[string]string{}
-	for k, v := range labels {
-		changedLabels[k] = v
-	}
+	maps.Copy(changedLabels, labels)
 	changedLabels["accelerator"] = "h100|gpu-a,gpu-b"
 	changedItems := append(append([]measurement.ItemEntry{}, items...),
 		labelItem("accelerator", "h100", "gpu-a,gpu-b"))
@@ -288,9 +287,7 @@ func TestSnapshots_MixedVintageCollisionWinnerIsNotDrift(t *testing.T) {
 
 	// Same cluster; the other reading won the contested zone.us-west key.
 	otherWinner := make(map[string]string, len(labels))
-	for k, v := range labels {
-		otherWinner[k] = v
-	}
+	maps.Copy(otherWinner, labels)
 	otherWinner["zone.us-west"] = "us-west|gpu-a"
 
 	for _, tt := range []struct {

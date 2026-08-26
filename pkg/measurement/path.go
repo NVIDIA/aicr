@@ -89,15 +89,15 @@ func ParsePath(path string) (*Path, error) {
 		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "constraint path cannot be empty")
 	}
 
-	typeDot := strings.Index(path, ".")
-	if typeDot < 0 {
+	before, after, ok := strings.Cut(path, ".")
+	if !ok {
 		return nil, aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 			"invalid constraint path: expected format {Type}.{Subtype}[selector].{Key}",
 			map[string]any{keyPath: path})
 	}
 
-	typeStr := path[:typeDot]
-	rest := path[typeDot+1:]
+	typeStr := before
+	rest := after
 
 	measurementType, valid := ParseType(typeStr)
 	if !valid {
@@ -206,9 +206,9 @@ func parseItemSelector(raw, fullPath string) (*itemSelector, error) {
 			"invalid constraint path: item selector is empty",
 			map[string]any{keyPath: fullPath})
 	}
-	if eq := strings.Index(raw, "="); eq >= 0 {
-		k := raw[:eq]
-		v := raw[eq+1:]
+	if before, after, ok := strings.Cut(raw, "="); ok {
+		k := before
+		v := after
 		if k == "" || v == "" {
 			return nil, aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
 				"invalid constraint path: predicate selector requires non-empty key and value",

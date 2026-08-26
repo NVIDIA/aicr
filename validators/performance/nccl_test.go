@@ -31,26 +31,26 @@ const testWorkerJobName = "node"
 
 func TestApplyNCCLWorkerScheduling_NodeSelector(t *testing.T) {
 	// Build a minimal TrainingRuntime-like unstructured object matching the real template structure.
-	workerPodSpec := map[string]interface{}{
-		"nodeSelector": map[string]interface{}{
+	workerPodSpec := map[string]any{
+		"nodeSelector": map[string]any{
 			"node.kubernetes.io/instance-type": "p5.48xlarge",
 		},
-		"tolerations": []interface{}{
-			map[string]interface{}{"operator": "Exists"},
+		"tolerations": []any{
+			map[string]any{"operator": "Exists"},
 		},
 	}
 	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"spec": map[string]interface{}{
-				"template": map[string]interface{}{
-					"spec": map[string]interface{}{
-						"replicatedJobs": []interface{}{
-							map[string]interface{}{"name": "launcher"},
-							map[string]interface{}{
+		Object: map[string]any{
+			"spec": map[string]any{
+				"template": map[string]any{
+					"spec": map[string]any{
+						"replicatedJobs": []any{
+							map[string]any{"name": "launcher"},
+							map[string]any{
 								"name": testWorkerJobName,
-								"template": map[string]interface{}{
-									"spec": map[string]interface{}{
-										"template": map[string]interface{}{
+								"template": map[string]any{
+									"spec": map[string]any{
+										"template": map[string]any{
 											"spec": workerPodSpec,
 										},
 									},
@@ -71,7 +71,7 @@ func TestApplyNCCLWorkerScheduling_NodeSelector(t *testing.T) {
 	// Verify the nodeSelector was replaced in the worker spec.
 	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
 	for _, j := range jobs {
-		jm, _ := j.(map[string]interface{})
+		jm, _ := j.(map[string]any)
 		name, _, _ := unstructured.NestedString(jm, "name")
 		if name != testWorkerJobName {
 			continue
@@ -88,23 +88,23 @@ func TestApplyNCCLWorkerScheduling_NodeSelector(t *testing.T) {
 
 func TestApplyNCCLWorkerScheduling_Tolerations(t *testing.T) {
 	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"spec": map[string]interface{}{
-				"template": map[string]interface{}{
-					"spec": map[string]interface{}{
-						"replicatedJobs": []interface{}{
-							map[string]interface{}{"name": "launcher"},
-							map[string]interface{}{
+		Object: map[string]any{
+			"spec": map[string]any{
+				"template": map[string]any{
+					"spec": map[string]any{
+						"replicatedJobs": []any{
+							map[string]any{"name": "launcher"},
+							map[string]any{
 								"name": testWorkerJobName,
-								"template": map[string]interface{}{
-									"spec": map[string]interface{}{
-										"template": map[string]interface{}{
-											"spec": map[string]interface{}{
-												"nodeSelector": map[string]interface{}{
+								"template": map[string]any{
+									"spec": map[string]any{
+										"template": map[string]any{
+											"spec": map[string]any{
+												"nodeSelector": map[string]any{
 													"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb",
 												},
-												"tolerations": []interface{}{
-													map[string]interface{}{"operator": "Exists"},
+												"tolerations": []any{
+													map[string]any{"operator": "Exists"},
 												},
 											},
 										},
@@ -128,7 +128,7 @@ func TestApplyNCCLWorkerScheduling_Tolerations(t *testing.T) {
 	// nodeSelector should be unchanged (only tolerations overridden).
 	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
 	for _, j := range jobs {
-		jm, _ := j.(map[string]interface{})
+		jm, _ := j.(map[string]any)
 		name, _, _ := unstructured.NestedString(jm, "name")
 		if name != testWorkerJobName {
 			continue
@@ -141,7 +141,7 @@ func TestApplyNCCLWorkerScheduling_Tolerations(t *testing.T) {
 		if len(tolsRaw) != 1 {
 			t.Fatalf("tolerations count = %d, want 1", len(tolsRaw))
 		}
-		tol, _ := tolsRaw[0].(map[string]interface{})
+		tol, _ := tolsRaw[0].(map[string]any)
 		if tol["key"] != "gpu-type" || tol["value"] != "h100" || tol["effect"] != "NoSchedule" {
 			t.Errorf("toleration = %v, want gpu-type=h100:NoSchedule", tol)
 		}
@@ -150,23 +150,23 @@ func TestApplyNCCLWorkerScheduling_Tolerations(t *testing.T) {
 
 func TestApplyNCCLWorkerScheduling_Both(t *testing.T) {
 	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"spec": map[string]interface{}{
-				"template": map[string]interface{}{
-					"spec": map[string]interface{}{
-						"replicatedJobs": []interface{}{
-							map[string]interface{}{"name": "launcher"},
-							map[string]interface{}{
+		Object: map[string]any{
+			"spec": map[string]any{
+				"template": map[string]any{
+					"spec": map[string]any{
+						"replicatedJobs": []any{
+							map[string]any{"name": "launcher"},
+							map[string]any{
 								"name": testWorkerJobName,
-								"template": map[string]interface{}{
-									"spec": map[string]interface{}{
-										"template": map[string]interface{}{
-											"spec": map[string]interface{}{
-												"nodeSelector": map[string]interface{}{
+								"template": map[string]any{
+									"spec": map[string]any{
+										"template": map[string]any{
+											"spec": map[string]any{
+												"nodeSelector": map[string]any{
 													"node.kubernetes.io/instance-type": "p5.48xlarge",
 												},
-												"tolerations": []interface{}{
-													map[string]interface{}{"operator": "Exists"},
+												"tolerations": []any{
+													map[string]any{"operator": "Exists"},
 												},
 											},
 										},
@@ -190,7 +190,7 @@ func TestApplyNCCLWorkerScheduling_Both(t *testing.T) {
 
 	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
 	for _, j := range jobs {
-		jm, _ := j.(map[string]interface{})
+		jm, _ := j.(map[string]any)
 		name, _, _ := unstructured.NestedString(jm, "name")
 		if name != testWorkerJobName {
 			continue
@@ -208,7 +208,7 @@ func TestApplyNCCLWorkerScheduling_Both(t *testing.T) {
 		if len(tolsRaw) != 1 {
 			t.Fatalf("tolerations count = %d, want 1", len(tolsRaw))
 		}
-		tol, _ := tolsRaw[0].(map[string]interface{})
+		tol, _ := tolsRaw[0].(map[string]any)
 		if tol["key"] != "custom-taint" || tol["value"] != "true" || tol["effect"] != "NoSchedule" {
 			t.Errorf("toleration = %v, want custom-taint=true:NoSchedule", tol)
 		}

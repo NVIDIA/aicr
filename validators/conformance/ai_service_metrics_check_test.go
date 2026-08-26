@@ -34,7 +34,7 @@ import (
 func promResponse(resultCount int) []byte {
 	type result struct {
 		Metric map[string]string `json:"metric"`
-		Value  []interface{}     `json:"value"`
+		Value  []any             `json:"value"`
 	}
 	resp := struct {
 		Status string `json:"status"`
@@ -47,7 +47,7 @@ func promResponse(resultCount int) []byte {
 	for i := range resultCount {
 		resp.Data.Result = append(resp.Data.Result, result{
 			Metric: map[string]string{"gpu": fmt.Sprintf("%d", i)},
-			Value:  []interface{}{1234567890.0, "42"},
+			Value:  []any{1234567890.0, "42"},
 		})
 	}
 	b, _ := json.Marshal(resp)

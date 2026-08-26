@@ -543,7 +543,7 @@ func TestWrite_FolderLimit_CountsEmissionsNotComponents(t *testing.T) {
 	// Helper: build n primary-only upstream-Helm components.
 	makeComponents := func(n int) []localformat.Component {
 		out := make([]localformat.Component, n)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			name := fmt.Sprintf("c%04d", i)
 			out[i] = localformat.Component{
 				Name:       name,

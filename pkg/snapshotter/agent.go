@@ -245,9 +245,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		logWG.Wait()
 	}()
 
-	logWG.Add(1)
-	go func() {
-		defer logWG.Done()
+	logWG.Go(func() {
 		if podErr := deployer.WaitForPodReady(logCtx, defaults.K8sPodReadyTimeout); podErr != nil {
 			// Only suppress logging when the parent context has been
 			// canceled (expected during cleanup). Genuine failures
@@ -267,7 +265,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 					"error", streamErr)
 			}
 		}
-	}()
+	})
 
 	if waitErr := deployer.WaitForCompletion(ctx, timeout); waitErr != nil {
 		if logs, logErr := deployer.GetPodLogs(ctx); logErr == nil && logs != "" {
@@ -629,7 +627,7 @@ func ParseResourceList(spec string) (corev1.ResourceList, error) {
 		return nil, nil
 	}
 	result := corev1.ResourceList{}
-	for _, raw := range strings.Split(spec, ",") {
+	for raw := range strings.SplitSeq(spec, ",") {
 		entry := strings.TrimSpace(raw)
 		if entry == "" {
 			continue

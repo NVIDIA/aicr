@@ -124,7 +124,7 @@ func validateBenchmarkNodeJob(obj *unstructured.Unstructured) error {
 	jobs, found, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
 	if err == nil && found {
 		for _, raw := range jobs {
-			jobMap, ok := raw.(map[string]interface{})
+			jobMap, ok := raw.(map[string]any)
 			if !ok {
 				continue
 			}

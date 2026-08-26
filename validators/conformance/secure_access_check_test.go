@@ -379,8 +379,8 @@ func TestCheckSecureAcceleratorAccess_FailurePathsStillFetchLogs(t *testing.T) {
 				dynClient = newDRAFakeDynamicClient(
 					testDeviceClass(draDriverGPU),
 					testResourceSlice("gpu-1", draDriverGPU, "node1", 1, 1,
-						map[string]interface{}{"nodeName": "node1"},
-						[]interface{}{plainDevice("gpu-0")}),
+						map[string]any{"nodeName": "node1"},
+						[]any{plainDevice("gpu-0")}),
 				)
 			}
 			clientset := k8sfake.NewClientset(node)
@@ -673,8 +673,8 @@ func TestCheckSecureAcceleratorAccess_DRAPathUnchanged(t *testing.T) {
 		DynamicClient: newDRAFakeDynamicClient(
 			testDeviceClass(draDriverGPU),
 			testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-				map[string]interface{}{"nodeName": "node1"},
-				[]interface{}{plainDevice("gpu-0")}),
+				map[string]any{"nodeName": "node1"},
+				[]any{plainDevice("gpu-0")}),
 		),
 	}
 
@@ -743,13 +743,13 @@ func TestCheckSecureAcceleratorAccess_DRAPathBetaVersions(t *testing.T) {
 
 			device := plainDevice("gpu-0")
 			if tt.version == versionV1beta1 {
-				device = basicWrappedDevice("gpu-0", map[string]interface{}{})
+				device = basicWrappedDevice("gpu-0", map[string]any{})
 			}
 			dynClient := newDRAFakeDynamicClientAt(tt.version,
 				testDeviceClassAt(apiVersion, draDriverGPU),
 				testResourceSliceAt(apiVersion, "s1", draDriverGPU, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{device}),
+					map[string]any{"nodeName": "node1"},
+					[]any{device}),
 			)
 			var createdClaim *unstructured.Unstructured
 			dynClient.PrependReactor("create", "resourceclaims",
@@ -786,12 +786,12 @@ func TestCheckSecureAcceleratorAccess_DRAPathBetaVersions(t *testing.T) {
 			if err != nil || !found || len(requests) != 1 {
 				t.Fatalf("claim requests = %v (found=%t err=%v), want exactly one request", requests, found, err)
 			}
-			request, ok := requests[0].(map[string]interface{})
+			request, ok := requests[0].(map[string]any)
 			if !ok {
 				t.Fatalf("claim request has unexpected type %T", requests[0])
 			}
 			if tt.wantExactly {
-				exactly, ok := request["exactly"].(map[string]interface{})
+				exactly, ok := request["exactly"].(map[string]any)
 				if !ok {
 					t.Fatalf("claim request = %v, want the `exactly` wrapper at %s", request, tt.version)
 				}
@@ -1127,8 +1127,8 @@ func TestCheckSecureAcceleratorAccess_AmbiguousPodCreateCleansUp(t *testing.T) {
 		dynClient := newDRAFakeDynamicClient(
 			testDeviceClass(draDriverGPU),
 			testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-				map[string]interface{}{"nodeName": "node1"},
-				[]interface{}{plainDevice("gpu-0")}),
+				map[string]any{"nodeName": "node1"},
+				[]any{plainDevice("gpu-0")}),
 		)
 		cascadeNamespaceDelete(t, clientset, dynClient)
 		ctx := &validators.Context{
@@ -1715,14 +1715,14 @@ func TestBuildResourceClaim(t *testing.T) {
 			if nestedErr != nil || !found || len(requests) != 1 {
 				t.Fatalf("requests = %v (found=%t err=%v), want exactly one", requests, found, nestedErr)
 			}
-			request, ok := requests[0].(map[string]interface{})
+			request, ok := requests[0].(map[string]any)
 			if !ok {
 				t.Fatalf("request has unexpected type %T", requests[0])
 			}
 			if request[keyName] != gpuClaimName {
 				t.Errorf("request name = %v, want %q", request[keyName], gpuClaimName)
 			}
-			exactly, hasExactly := request["exactly"].(map[string]interface{})
+			exactly, hasExactly := request["exactly"].(map[string]any)
 			if hasExactly != tt.wantExactly {
 				t.Fatalf("request `exactly` wrapper present = %t, want %t (request: %v)", hasExactly, tt.wantExactly, request)
 			}
@@ -2153,7 +2153,7 @@ func TestGrantProbePrologueBehavior(t *testing.T) {
 				if check.got != check.want {
 					t.Errorf("%s = %q, want %q", check.name, check.got, check.want)
 				}
-				for _, entry := range strings.Split(check.got, ":") {
+				for entry := range strings.SplitSeq(check.got, ":") {
 					if entry == "" {
 						t.Errorf("%s = %q contains an empty entry (implicit CWD)", check.name, check.got)
 					}

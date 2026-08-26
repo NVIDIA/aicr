@@ -1483,7 +1483,7 @@ func TestReader_LargeFile(t *testing.T) {
 
 		// Create large array (1000 items)
 		var largeData []testConfig
-		for i := 0; i < 1000; i++ {
+		for i := range 1000 {
 			largeData = append(largeData, testConfig{
 				Name:  fmt.Sprintf("item%d", i),
 				Value: i,
@@ -1729,7 +1729,7 @@ func TestReader_ConcurrentAccess(t *testing.T) {
 		jsonData := `{"name":"concurrent","value":100}`
 
 		done := make(chan bool, 10)
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			go func() {
 				reader, err := NewReader(FormatJSON, strings.NewReader(jsonData))
 				if err != nil {
@@ -1756,7 +1756,7 @@ func TestReader_ConcurrentAccess(t *testing.T) {
 		}
 
 		// Wait for all goroutines
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			if !<-done {
 				t.Fatal("At least one goroutine failed")
 			}

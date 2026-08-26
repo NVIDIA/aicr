@@ -485,14 +485,14 @@ func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interfac
 // buildPodGroup returns the unstructured PodGroup for the gang scheduling test.
 func buildPodGroup(run *gangTestRun) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			keyAPIVersion: "scheduling.run.ai/v2alpha2",
 			keyKind:       "PodGroup",
-			keyMetadata: map[string]interface{}{
+			keyMetadata: map[string]any{
 				keyName:      run.groupName,
 				keyNamespace: gangTestNamespace,
 			},
-			keySpec: map[string]interface{}{
+			keySpec: map[string]any{
 				"minMember": int64(gangMinMembers),
 				"queue":     "default-queue",
 			},

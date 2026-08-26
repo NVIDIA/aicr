@@ -354,7 +354,7 @@ func checkJobStatus(job *batchv1.Job) (bool, error) {
 			return true, nil
 		}
 		if condition.Type == batchv1.JobFailed && condition.Status == corev1.ConditionTrue {
-			return true, errors.NewWithContext(errors.ErrCodeInternal, "job failed", map[string]interface{}{
+			return true, errors.NewWithContext(errors.ErrCodeInternal, "job failed", map[string]any{
 				keyNamespace: job.Namespace,
 				keyName:      job.Name,
 				keyReason:    condition.Reason,

@@ -16,6 +16,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"sort"
 	"strings"
@@ -326,9 +327,7 @@ func (c *Config) ValueOverrides() map[string]map[string]string {
 	overrides := make(map[string]map[string]string, len(c.valueOverrides))
 	for bundler, paths := range c.valueOverrides {
 		overrides[bundler] = make(map[string]string, len(paths))
-		for path, value := range paths {
-			overrides[bundler][path] = value
-		}
+		maps.Copy(overrides[bundler], paths)
 	}
 	return overrides
 }
@@ -357,9 +356,7 @@ func (c *Config) SystemNodeSelector() map[string]string {
 		return nil
 	}
 	result := make(map[string]string, len(c.systemNodeSelector))
-	for k, v := range c.systemNodeSelector {
-		result[k] = v
-	}
+	maps.Copy(result, c.systemNodeSelector)
 	return result
 }
 
@@ -379,9 +376,7 @@ func (c *Config) AcceleratedNodeSelector() map[string]string {
 		return nil
 	}
 	result := make(map[string]string, len(c.acceleratedNodeSelector))
-	for k, v := range c.acceleratedNodeSelector {
-		result[k] = v
-	}
+	maps.Copy(result, c.acceleratedNodeSelector)
 	return result
 }
 
@@ -426,9 +421,7 @@ func (c *Config) WorkloadSelector() map[string]string {
 		return nil
 	}
 	result := make(map[string]string, len(c.workloadSelector))
-	for k, v := range c.workloadSelector {
-		result[k] = v
-	}
+	maps.Copy(result, c.workloadSelector)
 	return result
 }
 
@@ -593,9 +586,7 @@ func WithValueOverrides(overrides map[string]map[string]string) Option {
 			if c.valueOverrides[bundler] == nil {
 				c.valueOverrides[bundler] = make(map[string]string)
 			}
-			for path, value := range paths {
-				c.valueOverrides[bundler][path] = value
-			}
+			maps.Copy(c.valueOverrides[bundler], paths)
 		}
 	}
 }
@@ -607,9 +598,7 @@ func WithSystemNodeSelector(selector map[string]string) Option {
 			return
 		}
 		c.systemNodeSelector = make(map[string]string, len(selector))
-		for k, v := range selector {
-			c.systemNodeSelector[k] = v
-		}
+		maps.Copy(c.systemNodeSelector, selector)
 	}
 }
 
@@ -631,9 +620,7 @@ func WithAcceleratedNodeSelector(selector map[string]string) Option {
 			return
 		}
 		c.acceleratedNodeSelector = make(map[string]string, len(selector))
-		for k, v := range selector {
-			c.acceleratedNodeSelector[k] = v
-		}
+		maps.Copy(c.acceleratedNodeSelector, selector)
 	}
 }
 
@@ -688,9 +675,7 @@ func WithWorkloadSelector(selector map[string]string) Option {
 			return
 		}
 		c.workloadSelector = make(map[string]string, len(selector))
-		for k, v := range selector {
-			c.workloadSelector[k] = v
-		}
+		maps.Copy(c.workloadSelector, selector)
 	}
 }
 

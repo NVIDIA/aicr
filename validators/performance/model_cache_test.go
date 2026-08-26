@@ -74,16 +74,16 @@ func TestModelCacheEnabled(t *testing.T) {
 // HF_HOME/HF_HUB_OFFLINE env are added to a component pod spec while preserving
 // env the template already declares (e.g. HF_TOKEN).
 func TestInjectModelCacheMounts(t *testing.T) {
-	podSpec := map[string]interface{}{
-		"containers": []interface{}{
-			map[string]interface{}{
+	podSpec := map[string]any{
+		"containers": []any{
+			map[string]any{
 				"name":  mainContainerName,
 				"image": "img",
-				"env": []interface{}{
-					map[string]interface{}{"name": "HF_TOKEN", "value": "x"},
+				"env": []any{
+					map[string]any{"name": "HF_TOKEN", "value": "x"},
 				},
 			},
-			map[string]interface{}{
+			map[string]any{
 				"name":  "sidecar-frontend",
 				"image": "img",
 			},
@@ -91,32 +91,32 @@ func TestInjectModelCacheMounts(t *testing.T) {
 	}
 	injectModelCacheMounts(podSpec)
 
-	vols, _ := podSpec["volumes"].([]interface{})
+	vols, _ := podSpec["volumes"].([]any)
 	if len(vols) != 1 {
 		t.Fatalf("want 1 volume, got %d", len(vols))
 	}
-	pvc, _ := vols[0].(map[string]interface{})["persistentVolumeClaim"].(map[string]interface{})
+	pvc, _ := vols[0].(map[string]any)["persistentVolumeClaim"].(map[string]any)
 	if pvc["claimName"] != modelCachePVCName || pvc["readOnly"] != true {
 		t.Errorf("pvc volume = %v", pvc)
 	}
 
-	containers := podSpec["containers"].([]interface{})
+	containers := podSpec["containers"].([]any)
 	for _, raw := range containers {
-		container := raw.(map[string]interface{})
-		mounts, _ := container["volumeMounts"].([]interface{})
+		container := raw.(map[string]any)
+		mounts, _ := container["volumeMounts"].([]any)
 		if len(mounts) != 1 {
 			t.Fatalf("%s: want 1 volumeMount, got %d", container["name"], len(mounts))
 		}
-		m := mounts[0].(map[string]interface{})
+		m := mounts[0].(map[string]any)
 		if m["mountPath"] != modelCacheMountPath || m["readOnly"] != true {
 			t.Errorf("%s volumeMount = %v", container["name"], m)
 		}
 	}
 
 	got := map[string]string{}
-	mainContainer := containers[0].(map[string]interface{})
-	for _, e := range mainContainer["env"].([]interface{}) {
-		em := e.(map[string]interface{})
+	mainContainer := containers[0].(map[string]any)
+	for _, e := range mainContainer["env"].([]any) {
+		em := e.(map[string]any)
 		if v, ok := em["value"].(string); ok {
 			got[em["name"].(string)] = v
 		}

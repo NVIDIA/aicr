@@ -134,10 +134,7 @@ func writeRow(w io.Writer, cells [5]string, widths [5]int) {
 func writeSeparatorRow(w io.Writer, widths [5]int) {
 	fmt.Fprint(w, "|")
 	for _, width := range widths {
-		dashes := width + 2
-		if dashes < 3 {
-			dashes = 3
-		}
+		dashes := max(width+2, 3)
 		fmt.Fprintf(w, "%s|", strings.Repeat("-", dashes))
 	}
 	fmt.Fprintln(w)

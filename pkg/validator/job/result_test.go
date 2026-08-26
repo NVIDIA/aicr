@@ -1050,7 +1050,7 @@ func TestProcessValidatorLogs(t *testing.T) {
 	// invariant is that Extra is parsed from the full logs before truncation, so
 	// a parse-after-truncate regression would silently drop this evidence.
 	var b strings.Builder
-	for i := 0; i < defaults.ValidatorMaxStdoutLines+100; i++ {
+	for i := range defaults.ValidatorMaxStdoutLines + 100 {
 		fmt.Fprintf(&b, "log line %d\n", i)
 	}
 	b.WriteString(p + `{"nodesValidated":"1","nodesTotal":"2"}`)
