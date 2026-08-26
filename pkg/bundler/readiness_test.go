@@ -143,8 +143,8 @@ func TestCollectComponentReadiness(t *testing.T) {
 			t.Fatal("readiness manifest key missing")
 		}
 		s := string(body)
-		if !strings.Contains(s, "argocd.argoproj.io/sync-options: Replace=true") {
-			t.Errorf("missing Replace=true:\n%s", s)
+		if !strings.Contains(s, "argocd.argoproj.io/sync-options: Replace=true,Force=true") {
+			t.Errorf("missing Replace=true,Force=true:\n%s", s)
 		}
 		if !strings.Contains(s, "ghcr.io/nvidia/aicr-gate:v0.13.0") {
 			t.Errorf("missing normalized gate image tag:\n%s", s)

@@ -173,8 +173,19 @@ func jobMetadataAnnotations(deployer config.DeployerType) string {
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation`
 	case config.DeployerArgoCD, config.DeployerArgoCDHelm:
+		// The Job's spec.selector and spec.template.metadata.labels are
+		// server-generated/immutable, and the rendered manifest correctly
+		// omits them. Plain Replace=true maps to `kubectl replace`, which the
+		// API server rejects on any upgrade that changes the Job spec (e.g.
+		// an image tag bump), leaving the Application permanently
+		// OutOfSync. Force=true is ArgoCD's documented option to
+		// delete-and-recreate when a replace fails. Deliberately NOT using a
+		// Helm-style sync hook (helm.sh/hook) here: per
+		// pkg/bundler/deployer/localformat/hooks.go's stripHelmHooks doc,
+		// hook-annotated resources are excluded from ArgoCD's normal drift
+		// detection, so an image-tag-only bump could silently go undetected.
 		return `  annotations:
-    argocd.argoproj.io/sync-options: Replace=true`
+    argocd.argoproj.io/sync-options: Replace=true,Force=true`
 	case config.DeployerFlux, config.DeployerHelmfile:
 		return ""
 	default:
