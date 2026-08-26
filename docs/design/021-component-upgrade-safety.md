@@ -148,7 +148,9 @@ Records are keyed by semver ranges, not explicit version pairs, so they do not g
 
 That last clause matters for the same reason `unknown` and `unversioned` are separate verdicts. "A record exists and I could not read it" is not "no record exists", and collapsing them hides which action closes the gap. A loader that quietly skips a record it cannot parse would reproduce this ADR's own motivating failure, the silent one, inside the tool built to prevent it. The catalog loader today checks `kind` only and never `apiVersion` (see ADR-015 and [#1812](https://github.com/NVIDIA/aicr/issues/1812)), and `recipes/upgrades/*.yaml` sits in the same tree an external `--data` catalog points at, so a record loader inherits that behavior unless it opts out explicitly.
 
-**Fields are validated against the verdict.** A `manual` or `blocked` record MUST carry at least one step, since both are defined by the work they require; a `safe` record MUST carry none, and MUST NOT carry `hooks` either, since a transition needing a migration release is not one where nothing has to happen. `unknown` and `unversioned` are never authored, only computed. The well-formedness check enforces this, so the verdict table above cannot drift from what a record actually says.
+**Fields are validated against the verdict.** A `manual` or `blocked` record MUST carry at least one step, since both are defined by the work they require; a `safe` record MUST carry none.
+
+`hooks` are a deliberate exception and remain allowed on `safe`. A verdict describes what the **operator** must do, and a hook is AICR doing the work instead. A transition fully handled by a migration release requires nothing of the operator, so forbidding hooks there would force it to `manual`, failing the gate for something already automated. That is the opposite of what the verdicts are for. `unknown` and `unversioned` are never authored, only computed. The well-formedness check enforces this, so the verdict table above cannot drift from what a record actually says.
 
 `unknown` is a gap in the *data*, fixed by authoring a record. `unversioned` is a gap in the *inputs*, fixed by pinning something comparable. Collapsing them would hide which action closes the gap.
 
@@ -219,7 +221,7 @@ What it is good for is the thing an operator needs *before* upgrading rather tha
 | `.reversible`, `.reversibleNotes` | no | Advisory only; absent means no claim. Notes required when the flag is set. |
 | `.stepsByDeployer[]` | for `manual`/`blocked` | One group per deployer set, each with an ordered `steps` list. Forbidden on `safe`. Omitting `deployers` covers the deployers no explicit group claims. |
 | `.stepsByDeployer[].steps[]` | yes | `id` unique within the group, `description` required, `reason` optional. |
-| `.hooks[]` | no | Forbidden on `safe`. `file` under `manifests/migrations/`, `phase` pre- or post-upgrade. See [Decision 4](#decision-4-migration-content-ships-as-an-adjacent-generated-release). |
+| `.hooks[]` | no | Allowed on any verdict, including `safe`. `file` under `manifests/migrations/`, `phase` pre- or post-upgrade. See [Decision 4](#decision-4-migration-content-ships-as-an-adjacent-generated-release). |
 | `.affectedResources[]` | no | `group` plus `kinds`; drives the at-risk scan in [Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see). |
 | `.references[]` | no | Links to upstream migration notes. |
 
@@ -339,9 +341,9 @@ annotations:
 
 - **`version:` is the AICR version that generated the wrapper.** The wrapper's content is produced entirely by AICR's templates, so AICR's version is the honest answer to "what version is this artifact". It also matches what `recipe.yaml` already does: `pkg/recipe/builder.go:231` sets `result.Metadata.Version` from the AICR binary version, and `pkg/cli/validate.go:845` compares it against the running binary for skew detection.
 - **`aicr.run/component-version` is the payload version**, and it is the only field the matcher reads. Free-form, so a Kustomize `defaultTag` like `release-1.4` does not have to masquerade as semver.
-**Upstream charts have no annotation, and that is a live gap.** This stamps only charts AICR generates. A `KindUpstreamHelm` folder installs the upstream chart directly, so gpu-operator, cert-manager, aws-efa and most of the registry carry no `aicr.run/component-version` at all. Online mode therefore has no defined version source for them, and the claim above that the annotation is "the only field the matcher reads" holds only for generated wrappers. Closing this needs a mechanism, and it is the largest unresolved gap in this ADR.
-
 - **`appVersion` also carries the payload version.** Conventional Helm usage, and it makes plain `helm list` output readable for a human even though the matcher ignores it.
+
+**Upstream charts have no annotation, and that is a live gap.** This stamps only charts AICR generates. A `KindUpstreamHelm` folder installs the upstream chart directly, so gpu-operator, cert-manager, aws-efa and most of the registry carry no `aicr.run/component-version` at all. Online mode therefore has no defined version source for them, and the claim above that the annotation is "the only field the matcher reads" holds only for generated wrappers. Closing this needs a mechanism, and it is the largest unresolved gap in this ADR.
 
 **Dev-build fallback is mandatory.** `pkg/cli/root.go:38` sets `versionDefault = "dev"`, which is not valid SemVer 2, and Helm rejects it for `Chart.yaml` `version:`. The bundler normalizes non-release versions to `0.0.0-dev` and strips a leading `v`. Without this, `make dev-env` and Tilt break. This is an explicitly tested case, not a discovered one.
 
@@ -501,12 +503,13 @@ transitions:
               The admission webhook rejects DeploymentPolicy deletion while
               referencing Skyhooks still exist, so the order is
               load-bearing.
-    hooks:
-      - file: manifests/migrations/adopt-mirrored-crs.yaml
-        phase: pre-upgrade
     affectedResources:
       - group: skyhook.nvidia.com
         kinds: [Skyhook, DeploymentPolicy]
+    # No `hooks` here, and that is the point: the adoption manifest in
+    # Decision 4 lives under nodewright-customizations, whose content it
+    # fixes, while this record is nodewright-operator's. Linking them is
+    # exactly the cross-component coupling the schema cannot yet express.
     references:
       - https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md
 
