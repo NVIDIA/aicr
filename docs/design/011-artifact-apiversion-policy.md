@@ -1,20 +1,21 @@
 # ADR-011: Artifact apiVersion Policy and Compatibility Gate
 
-> **Amended by [ADR-022](022-artifact-maturity-and-deprecation.md).** ADR-022
-> introduces a per-kind maturity map for v1 and makes the deprecation window
-> conditional on the level being retired (alpha none, beta two releases, GA not
-> removed within a major). It **replaces §4** below, whose dual-accept rule was
-> stated unconditionally, and **extends §3** to the catalog loader while retiring
-> its empty-`apiVersion` tolerance during the initial alpha-to-target bump. §1 and
-> §2 stand unchanged.
-
+> **Proposed amendment by
+> [ADR-022](022-artifact-maturity-and-deprecation.md).** If accepted, ADR-022
+> introduces a per-kind maturity map for v1. It amends §1 so package-local
+> constants select a kind-specific version defined by `pkg/header`, amends §3 so
+> acceptance is scoped by wire kind and schema track and covers AICR catalog
+> inputs, and replaces §4 with maturity-specific windows. The current
+> empty-`apiVersion` tolerance remains in force until ADR-022's staged initial
+> migration retires it. §2 stands unchanged.
+>
 > **Amended by [ADR-015](015-recipe-configuration-profiles.md).** ADR-015
 > introduces kind-scoped version evolution: `RecipeMetadata` and
 > `RecipeResult` accept `aicr.run/v1alpha3` for profile-bearing artifacts
 > (dual-accepted alongside the legacy version), while snapshots, configs,
 > and `RecipeCriteria` stay on `aicr.run/v1alpha2`. The single-version
 > posture below is otherwise unchanged.
-
+>
 > **Amended by [ADR-013](013-aicr-run-domain-migration.md).** This ADR
 > established the single-sourced, enforced `apiVersion` contract while the
 > domain was `aicr.nvidia.com` and the version was `v1alpha1`. ADR-013 later
@@ -86,6 +87,13 @@ All package-local constants alias `header.GroupVersion` rather than redeclaring
 the literal: `snapshotter.FullAPIVersion`, `recipe.RecipeAPIVersion`,
 `recipe.RecipeCriteriaAPIVersion`, and `config.APIVersion`.
 
+> **Prospective ADR-022 change.** `pkg/header` remains the canonical home for
+> the API group, version segments, and complete group/version strings, but the
+> single `header.GroupVersion` alias requirement ends when the per-kind map
+> lands. Each package-local emitter constant selects the header-defined version
+> assigned to its wire kind and schema track. No package redeclares a version
+> literal.
+
 ### 2. Evolution rule
 
 - Schema changes within a version MUST be **additive-only** (new optional
@@ -98,16 +106,22 @@ the literal: `snapshotter.FullAPIVersion`, `recipe.RecipeAPIVersion`,
 
 ### 3. Compatibility gate (accept-known / reject-unknown)
 
-`header.IsSupportedAPIVersion(v)` reports whether a non-empty `apiVersion` is
-one this binary understands. The snapshot and recipe loaders apply it:
+The shared `pkg/header` gates report whether a non-empty `apiVersion` is one
+this binary understands for the artifact's wire kind and schema track. The
+snapshot and recipe loaders apply them:
 
-- **Empty `apiVersion`** → accepted until ADR-022's initial alpha-to-target bump
-  (older artifacts predate the field; matches the existing empty-`Kind`
-  tolerance). The bump retires this exception and rejects empty values.
-- **Known `apiVersion`** → accepted.
+- **Empty `apiVersion`** → accepted (older artifacts predate the field; matches
+  the existing empty-`Kind` tolerance).
+- **`apiVersion` supported for this wire kind and schema track** → accepted.
 - **Non-empty unknown `apiVersion`** → rejected with
   `ErrCodeInvalidRequest` and a message naming the value, the expected value,
   and the remediation (regenerate/recapture with a matching `aicr` version).
+
+> **Prospective ADR-022 change.** The initial migration makes every AICR
+> artifact gate kind/schema-scoped, extends that gate to catalog inputs, and at
+> its final release rejects empty values in the snapshot, recipe, and criteria
+> loaders that currently tolerate them. `AICRConfig` is already strict and has
+> no empty-value exception to retire.
 
 The gate lives in the shared loaders — `recipe.LoadFromFileWithProvider` (used
 by both CLI and server via `pkg/client/v1`) and the new
@@ -119,6 +133,11 @@ strengthens rather than changes this: SDK consumers hit the same gate.) This mir
 `pkg/recipe` criteria parsing.
 
 ### 4. Transition window on a future bump
+
+> **Proposed replacement by ADR-022 §4 and §6.** This section remains the
+> current policy while ADR-022 is Proposed. If ADR-022 is accepted, its
+> maturity-specific obligations and rollout sequences supersede the
+> unconditional rule below.
 
 When the schema is bumped (e.g. to `v1alpha2`), add the new value to
 `header.IsSupportedAPIVersion` **while keeping the old one**, so a transition
@@ -136,11 +155,12 @@ ADR-013 for the rationale.
 
 - An artifact stamped with an unsupported `apiVersion` now fails fast at load
   with a clear, actionable error instead of failing obscurely downstream.
-- The `apiVersion` literal exists exactly once; future bumps are a one-line
-  change plus a transition-window entry.
-- Until ADR-022's initial alpha-to-target bump, current artifacts are
-  `aicr.run/v1alpha2` (accepted) or carry an empty `apiVersion` (tolerated). The
-  bump rejects empty values. Per ADR-013's hard break, legacy
+- Version literals remain single-sourced in `pkg/header`; kind-specific emitter
+  constants and read gates select among those header-defined values.
+- Current general/default artifacts use `aicr.run/v1alpha2`; profile-bearing
+  `RecipeMetadata` and `RecipeResult` use `aicr.run/v1alpha3`. Older snapshots,
+  recipes, and criteria may carry an empty `apiVersion` and remain tolerated;
+  `AICRConfig` does not. Per ADR-013's hard break, legacy
   `aicr.nvidia.com/v1alpha1` artifacts are rejected and must be regenerated.
 - The gate is intentionally not a security control; the unsigned header can
   still be edited. Authenticated provenance remains the supply-chain workstream.
