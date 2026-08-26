@@ -74,11 +74,17 @@ pretending that the legacy `Recipe` input is distinct from the canonical
 | `Snapshot` | `v1alpha2` | `aicr.run/v1` | Settled shape; the first artifact an integrator reads |
 | `RecipeResult` (default resolved recipe) | `v1alpha2` | `aicr.run/v1` | Public resolved artifact emitted to bundles; legacy `Recipe` input normalizes to this kind |
 | `RecipeCriteria` | `v1alpha2` | `aicr.run/v1` | Public recipe-resolution input shared by the CLI, REST API, and Go client |
-| Bundle provenance (`localformat.ProvenanceAPIVersion`) | `v1alpha2` | `aicr.run/v1` | Rides in the bundle, which is what downstream integrates against |
+| `BundleProvenance` (`provenance.yaml`, `localformat.ProvenanceAPIVersion`) | `v1alpha2` | `aicr.run/v1` | Bundle-root audit document consumed by downstream tooling |
 | `AICRConfig` | `v1alpha2` | `aicr.run/v1beta1` | Actively growing: #2026 bound 2 of 5 spec sections, #2245 binds the rest. Do not freeze a schema mid-expansion |
 | `RecipeMetadata`, `RecipeMixin` (catalog) | `v1alpha2` | `aicr.run/v1beta1` | Authoring schema exercised by 105 shipped catalog files (101 overlays, 4 mixins) |
 | `RecipeMetadata`, `RecipeResult` (profile-bearing) | `v1alpha3` | `aicr.run/v1beta1` | Newest (ADR-015), 2 overlays, opt-in via profiles |
 | `ComponentUpgrades` (proposed by #2343) | `v1alpha2` | `aicr.run/v1beta1` | New, still-evolving authoring schema; its loader and records are not implemented |
+
+`BundleProvenance` here means the bundle-root `provenance.yaml` document emitted
+by deployers through `localformat.WriteProvenance`, not the in-toto provenance
+predicate excluded from this ADR's scope. The producer emits the version in its
+§2 row; a consumer gates on the `BundleProvenance` kind and `apiVersion` before
+parsing the document.
 
 The stable public production path is at `v1`: `pkg/client/v1`, the REST surface,
 `Snapshot`, the default resolved `RecipeResult`, `RecipeCriteria`, and bundle
@@ -178,6 +184,12 @@ bump, a new kind starts at `aicr.run/v1beta1` by default; it may start at
 contract is already ready for GA obligations. There is no implicit post-v1 alpha
 lane. Adding one requires an explicit policy amendment and read-gate entry. A
 new kind is never stamped with a version the tree does not already accept.
+
+The pre-bump rule is universal for new wire kinds, including kinds with
+profile-bearing fields. `v1alpha3` is not a general profile track: it is reserved
+for the existing profile-bearing `RecipeMetadata` and `RecipeResult` schemas in
+§2. A new kind may use it only through an explicit amendment that adds its own
+§2 row and read-gate entry.
 
 `aicr.run/v1alpha1` in particular has never been valid: ADR-013 moved the version
 to `v1alpha2` *at* the domain rename, so the legacy pairing was
