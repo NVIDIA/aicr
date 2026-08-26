@@ -323,6 +323,34 @@ func TestComponentRegistry_K8sAIBOMContract(t *testing.T) {
 	}
 }
 
+// TestKubeflowTrainerValues_UseJobSetInstallCondition pins AICR's values key to
+// the dependency condition exposed by the upstream Kubeflow Trainer chart.
+// Chart v2.2.0 gates its JobSet subchart on jobset.install; jobset.enabled is
+// ignored by Helm and would make the documented opt-out ineffective.
+func TestKubeflowTrainerValues_UseJobSetInstallCondition(t *testing.T) {
+	const valuesPath = "components/kubeflow-trainer/values.yaml"
+	content, err := GetEmbeddedFS().ReadFile(valuesPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", valuesPath, err)
+	}
+
+	var values map[string]any
+	if err := yaml.Unmarshal(content, &values); err != nil {
+		t.Fatalf("failed to parse %s: %v", valuesPath, err)
+	}
+	jobSet, ok := values["jobset"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s jobset = %T, want map[string]any", valuesPath, values["jobset"])
+	}
+	install, ok := jobSet["install"].(bool)
+	if !ok || !install {
+		t.Errorf("%s jobset.install = %v, want true", valuesPath, jobSet["install"])
+	}
+	if _, exists := jobSet["enabled"]; exists {
+		t.Errorf("%s must not set ignored key jobset.enabled", valuesPath)
+	}
+}
+
 func TestComponentRegistry_SlinkySlurmOperator_NodeSchedulingPaths(t *testing.T) {
 	registry, err := GetComponentRegistry()
 	if err != nil {

@@ -219,10 +219,6 @@ const (
 	// workload. Passed to the template via ${DEPLOYMENT_NAME}.
 	inferenceDeploymentName = "aicr-inference-perf"
 
-	// inferenceQueueName is the KAI Queue name for the benchmark workload.
-	// Passed to the template via ${QUEUE_NAME}.
-	inferenceQueueName = "aicr-inference-perf"
-
 	// hfTokenSecretName / hfTokenSecretKey name the optional Secret that carries
 	// a Hugging Face token. The deploy template references it via an optional
 	// secretKeyRef on each container, so when the Secret is absent (no token)
@@ -349,12 +345,6 @@ var (
 		Group:    "nvidia.com",
 		Version:  versionV1beta1,
 		Resource: "dynamographdeployments",
-	}
-
-	kaiQueueGVR = schema.GroupVersionResource{
-		Group:    "scheduling.run.ai",
-		Version:  "v2",
-		Resource: "queues",
 	}
 
 	httpRouteGVR = schema.GroupVersionResource{
@@ -1614,8 +1604,8 @@ func buildTolerations(node v1.Node) []v1.Toleration {
 	return tolerations
 }
 
-// deployInferenceWorkload deploys the KAI Queue, DynamoGraphDeployment, and
-// any routing-mode-specific Gateway API resources. Worker GPU wiring is
+// deployInferenceWorkload deploys the DynamoGraphDeployment and any
+// routing-mode-specific Gateway API resources. Worker GPU wiring is
 // MODE-DISPATCHED (config.useDRAWorkerClaims): in DRA mode a
 // ResourceClaimTemplate is applied and workers bind it via
 // podTemplate.spec.resourceClaims; in device-plugin mode no claim template is
@@ -1654,17 +1644,7 @@ func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadC
 		"ROUTER_MODE":         config.routerMode,
 		"GPU_COUNT":           strconv.Itoa(config.gpuCount),
 		"DEPLOYMENT_NAME":     inferenceDeploymentName,
-		"QUEUE_NAME":          inferenceQueueName,
 		"CLAIM_TEMPLATE_NAME": inferenceClaimTemplateName,
-	}
-
-	// Apply KAI Queue (best-effort; KAI scheduler may not be installed).
-	queuePath := filepath.Join("testdata", "inference", "queue.yaml")
-	if err := createOrUpdateFromTemplate(ctx, kaiQueueGVR,
-		config.namespace, queuePath, templateData, nil); err != nil {
-		slog.Info("Failed to apply KAI Queue (scheduler may not be installed)", "error", err)
-	} else {
-		slog.Info("Applied KAI Queue", "name", inferenceQueueName)
 	}
 
 	// DRA wiring mode: apply the ResourceClaimTemplate the worker pods bind
@@ -2471,14 +2451,6 @@ func cleanupInferenceWorkload(ctx *validators.Context, config *inferenceWorkload
 		slog.Warn("failed to delete DynamoGraphDeployment", "error", err)
 	} else {
 		slog.Info("Deleted DynamoGraphDeployment")
-	}
-
-	// Delete KAI Queue.
-	err = ctx.DynamicClient.Resource(kaiQueueGVR).
-		Namespace(config.namespace).
-		Delete(cleanupCtx, inferenceQueueName, metav1.DeleteOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
-		slog.Debug("Failed to delete KAI Queue", "error", err)
 	}
 
 	// Delete namespace (cascades all remaining resources).

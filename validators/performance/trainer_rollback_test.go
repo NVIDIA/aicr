@@ -102,8 +102,8 @@ func notReadyTrainerDeployment() *unstructured.Unstructured {
 }
 
 // readyTrainerDeploymentNamed builds a controller Deployment reporting one ready
-// replica under an arbitrary name, covering the Helm path where the name is
-// derived from the release rather than fixed by the overlay.
+// replica under an arbitrary name, covering an externally managed chart
+// installation with a custom name.
 func readyTrainerDeploymentNamed(namespace, name string) *unstructured.Unstructured {
 	return trainerDeploymentNamed(namespace, name, 1)
 }

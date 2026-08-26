@@ -120,12 +120,12 @@ const (
 	// a Trainer whose JobSet controller never becomes ready fails opaquely later.
 	jobSetCRDName = "jobsets.jobset.x-k8s.io"
 
-	// trainerManagerLabels locate the Trainer controller Deployment across both
-	// deployment paths. Neither its name nor app.kubernetes.io/name is stable: the
-	// chart derives the name from the release ({{ .Release.Name }}-controller-manager)
-	// and labels it app.kubernetes.io/name=kubeflow-trainer, while the kustomize
-	// overlay uses a fixed name and app.kubernetes.io/name=trainer. These two labels
-	// are set identically by both.
+	// The trainer component and part-of labels locate the Trainer controller
+	// Deployment across both deployment paths. The in-tree Helm values pin
+	// fullnameOverride, but a pre-existing chart installation can use
+	// release-derived naming or another override; the kustomize overlay also uses
+	// app.kubernetes.io/name=trainer instead of kubeflow-trainer. These two labels
+	// are stable across both layouts.
 	trainerComponentLabel = "app.kubernetes.io/component"
 	trainerComponentValue = "manager"
 	trainerPartOfLabel    = "app.kubernetes.io/part-of"
@@ -136,10 +136,11 @@ const (
 	installAttemptAnnotation = "aicr.nvidia.com/install-attempt"
 
 	// jobSetNameLabel/jobSetLabelValue locate the JobSet controller Deployment.
-	// A name lookup cannot work across both deployment paths: the kustomize overlay
-	// emits jobset-controller-manager, while the Helm chart's JobSet subchart derives
-	// its name from the release ({{ .Release.Name }}-jobset-controller). Both paths
-	// do set this label, so it is the only stable handle.
+	// The kustomize overlay emits jobset-controller-manager. The upstream chart
+	// defaults jobset.fullnameOverride to jobset (AICR does not override it), so
+	// the bundled Helm path renders jobset-controller regardless of release name;
+	// a separately managed chart can choose another override. Every layout sets
+	// this label, so it is the stable handle.
 	jobSetNameLabel  = "app.kubernetes.io/name"
 	jobSetLabelValue = "jobset"
 
@@ -276,9 +277,9 @@ func isTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface) (t
 		return trainerInstall{Incomplete: reason}, false, nil
 	}
 
-	// The controller Deployment is found by label: its name is release-derived on
-	// the Helm path, so a hardcoded name would misreport a non-default release as
-	// incomplete.
+	// The controller Deployment is found by label because an externally managed
+	// chart installation may use a custom name; a hardcoded in-tree name would
+	// misreport that installation as incomplete.
 	controller, found, err := findTrainerController(ctx, dynamicClient, install.Namespace)
 	if err != nil {
 		return trainerInstall{}, false, err
@@ -843,10 +844,10 @@ func installTrainerResources(ctx context.Context, dynamicClient dynamic.Interfac
 // replica so its admission webhooks have endpoints.
 //
 // deployment is the controller-manager's live name. The probe discovers it by
-// label because the Helm chart derives the name from the release, so a caller
-// that already located the installation must pass what it found rather than let
-// this fall back to the fixed self-install name. Empty means "not discovered"
-// (the post-install path, which applied the overlay's own fixed name).
+// label because an existing chart installation may customize the name, so a
+// caller that already located the installation must pass what it found rather
+// than let this fall back to the fixed self-install name. Empty means "not
+// discovered" (the post-install path, which applied the overlay's own fixed name).
 func waitForTrainerReady(ctx context.Context, dynamicClient dynamic.Interface, namespace, deployment string) error {
 	if err := waitForTrainerCRDsEstablished(ctx, dynamicClient); err != nil {
 		return aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeTimeout, "Trainer CRDs not ready after install")
@@ -882,8 +883,8 @@ func waitForJobSetControllerReady(ctx context.Context, dynamicClient dynamic.Int
 }
 
 // findJobSetController locates the JobSet controller Deployment beside Trainer by
-// label, since its name differs between deployment paths and the Helm one is
-// release-derived.
+// label, since the supported layouts use different names and chart installations
+// may customize them.
 func findJobSetController(ctx context.Context, dynamicClient dynamic.Interface,
 	namespace string) (string, bool, error) {
 
@@ -892,7 +893,7 @@ func findJobSetController(ctx context.Context, dynamicClient dynamic.Interface,
 }
 
 // findTrainerController locates the Trainer controller-manager Deployment by label
-// rather than by name, which is release-derived on the Helm path.
+// rather than assuming the in-tree Helm or self-install name.
 func findTrainerController(ctx context.Context, dynamicClient dynamic.Interface,
 	namespace string) (string, bool, error) {
 
@@ -1356,10 +1357,10 @@ func waitForTrainerCRDsEstablished(ctx context.Context, dynamicClient dynamic.In
 //
 // An empty deployment falls back to the self-install overlay's fixed name, which
 // is correct only for an installation this validator just applied. Waiting on that
-// name against a chart installation under a non-default release name would poll a
-// Deployment that does not exist: waitForDeploymentReady treats NotFound as
-// not-ready-yet, so it would burn the full timeout and report a healthy controller
-// as never ready.
+// name against an externally managed chart installation with a custom name would
+// poll a Deployment that does not exist: waitForDeploymentReady treats NotFound
+// as not-ready-yet, so it would burn the full timeout and report a healthy
+// controller as never ready.
 func waitForTrainerControllerReady(ctx context.Context, dynamicClient dynamic.Interface,
 	namespace, deployment string) error {
 

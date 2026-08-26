@@ -402,8 +402,8 @@ func TestWaitForJobSetControllerReady_AbsentIsNotAFailure(t *testing.T) {
 // install whose JobSet controller is stuck in ImagePullBackOff must be caught here
 // rather than surfacing much later as a TrainJob whose JobSet is never created.
 //
-// Run against both layouts because the controller's name differs between them and
-// the Helm one is release-derived, so only the shared label locates it reliably.
+// Run against the in-tree layout and an externally managed chart layout with a
+// custom name, so only the shared label locates both reliably.
 func TestWaitForJobSetControllerReady_PresentButNotReady(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -416,7 +416,7 @@ func TestWaitForJobSetControllerReady_PresentButNotReady(t *testing.T) {
 			deployment: "jobset-controller-manager",
 		},
 		{
-			name:       "helm chart layout with a release-derived name",
+			name:       "externally managed chart layout with a custom name",
 			namespace:  "kubeflow",
 			deployment: "kubeflow-trainer-jobset-controller",
 		},
