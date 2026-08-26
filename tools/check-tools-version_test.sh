@@ -167,7 +167,15 @@ STUB
 chmod +x "${STUB_DIR}/go" "${STUB_DIR}/yq" \
     "${STUB_DIR}/apidiff" "${STUB_DIR}/addlicense" \
     "${STUB_DIR}/go-licenses" "${STUB_DIR}/oras" "${STUB_DIR}/docker"
-export PATH="${STUB_DIR}:/usr/bin:/bin"
+
+# Keep missing-tool cases hermetic: after a stub is moved aside, PATH must not
+# fall through to a copy of that tool preinstalled on the host or CI runner.
+UTILITY_DIR="${STUB_DIR}/utilities"
+mkdir -p "${UTILITY_DIR}"
+for utility in awk bash cut dirname grep head mv rm sed tr; do
+    ln -s "$(command -v "${utility}")" "${UTILITY_DIR}/${utility}"
+done
+export PATH="${STUB_DIR}:${UTILITY_DIR}"
 
 fails=0
 pass() { echo "PASS: $1"; }
