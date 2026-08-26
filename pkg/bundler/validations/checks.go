@@ -1158,25 +1158,28 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 	// An effectively enabled gcp-driver-installer disarms it: the bundle
 	// itself provisions the driver, so the driverless snapshot is the
 	// expected pre-deployment state (a correctly provisioned
-	// bundle-installer pool must be able to generate its own bundle). A
-	// resolution failure for the installer's values fails closed as a
-	// hard error rather than degrading to the misleading driverless
-	// remediation.
-	bundleSuppliesDriver, supplyErr := BundleSuppliesGKEDriver(ctx, recipeResult, bundlerConfig)
-	if supplyErr != nil {
-		for _, msg := range msgs {
-			slog.Warn(msg, logKeyComponent, componentName)
+	// bundle-installer pool must be able to generate its own bundle). The
+	// supply check runs lazily inside the guard so its hard-fail surface
+	// exists only when Rule 1 would actually fire; there, a resolution
+	// failure for the installer's values fails closed as a hard error
+	// rather than degrading to the misleading driverless remediation.
+	if recipeResult.Metadata.GPUDriverState == recipe.GPUDriverStateAbsent && (!driverEnabled || toolkitDisabled) {
+		bundleSuppliesDriver, supplyErr := BundleSuppliesGKEDriver(ctx, recipeResult, bundlerConfig)
+		if supplyErr != nil {
+			for _, msg := range msgs {
+				slog.Warn(msg, logKeyComponent, componentName)
+			}
+			return msgs, []error{supplyErr}
 		}
-		return msgs, []error{supplyErr}
-	}
-	if recipeResult.Metadata.GPUDriverState == recipe.GPUDriverStateAbsent && (!driverEnabled || toolkitDisabled) && !bundleSuppliesDriver {
-		msgs = append(msgs, fmt.Sprintf(
-			"%s: the effective values assume a platform-preinstalled NVIDIA driver "+
-				"and container toolkit (driver.enabled=false and/or toolkit.enabled=false), "+
-				"but the snapshot that produced this recipe observed no NVIDIA kernel "+
-				"driver on the sampled GPU node. Deploying this bundle would leave GPU "+
-				"nodes driverless. %s",
-			componentName, driverAbsentRemedy(service, osCriteria, recipeResult.Metadata.SelectedProfile != nil)))
+		if !bundleSuppliesDriver {
+			msgs = append(msgs, fmt.Sprintf(
+				"%s: the effective values assume a platform-preinstalled NVIDIA driver "+
+					"and container toolkit (driver.enabled=false and/or toolkit.enabled=false), "+
+					"but the snapshot that produced this recipe observed no NVIDIA kernel "+
+					"driver on the sampled GPU node. Deploying this bundle would leave GPU "+
+					"nodes driverless. %s",
+				componentName, driverAbsentRemedy(service, osCriteria, recipeResult.Metadata.SelectedProfile != nil)))
+		}
 	}
 
 	installDir, installDirDeclared, hostPathMsgs := resolveInstallDir(values, componentName)
@@ -1386,7 +1389,7 @@ func nvsentinelAssumesDriverInstalled(values map[string]any) bool {
 // The exemption is scoped to GKE COS recipes, not to the profile
 // identifier alone: profile names are not reserved, and an external
 // --data overlay on any service can declare a gpuStack profile whose
-// value happens to be named driver-installer — with no Google installer
+// value happens to be named bundle-installer — with no installer
 // DaemonSet ever deploying. Fail closed on anything but the one shape
 // the embedded catalog documents (recipes/overlays/gke-cos.yaml); a
 // recipe without criteria stays blocked for the same reason.

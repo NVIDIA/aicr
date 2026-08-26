@@ -93,6 +93,13 @@ spec:
                 - "true"
               - key: cloud.google.com/gke-confidential-nodes-instance-type
                 operator: DoesNotExist
+              # cos-nvidia-installer:fixed is a COS-node-local image
+              # (imagePullPolicy: Never): exclude non-COS GPU pools rather
+              # than wedging their pods in ErrImageNeverPull.
+              - key: cloud.google.com/gke-os-distribution
+                operator: In
+                values:
+                - cos
       tolerations:
         {{- if $vals.acceleratedTolerations }}
         {{- toYaml $vals.acceleratedTolerations | nindent 8 }}

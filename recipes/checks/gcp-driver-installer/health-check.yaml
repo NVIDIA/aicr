@@ -42,6 +42,12 @@ spec:
               metadata:
                 name: nvidia-driver-installer
                 namespace: kube-system
+                labels:
+                  # Same DaemonSet name as the hand-applied installer this
+                  # component replaces; the label pins the assert to the
+                  # AICR-managed object so a leftover unmanaged DaemonSet
+                  # cannot false-pass a migration.
+                  app.kubernetes.io/managed-by: aicr
               status:
                 (desiredNumberScheduled > `0`): true
                 (numberReady == desiredNumberScheduled): true

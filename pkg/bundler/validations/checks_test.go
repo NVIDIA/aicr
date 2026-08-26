@@ -917,6 +917,37 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 			wantContains: []string{"driverless"},
 		},
 		{
+			// TC3: the fail-closed propagation — gpu-operator resolves but
+			// the installer's effective values do not (a --set that
+			// descends through the scalar gate). Must surface as a hard
+			// error, never degrade to the driverless remediation.
+			name:         "Rule 1: absent + installer values unresolvable → hard error, no driverless remedy",
+			recipeResult: resultBundleInstaller(true),
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"gcpdriverinstaller": {"installer.enabled.bogus": "true"},
+				}),
+			),
+			wantErrs:        1,
+			wantErrContains: []string{"bundle-supplied driver detection"},
+		},
+		{
+			// installer present as a scalar rather than a map: not a
+			// producer — Rule 1 stays armed.
+			name: "Rule 1: absent + installer as non-map scalar → still blocked",
+			recipeResult: func() *recipe.RecipeResult {
+				r := resultBundleInstaller(true)
+				for i := range r.ComponentRefs {
+					if r.ComponentRefs[i].Name == "gcp-driver-installer" {
+						r.ComponentRefs[i].Overrides = map[string]any{"installer": "on"}
+					}
+				}
+				return r
+			}(),
+			wantMsgs:     1,
+			wantContains: []string{"driverless"},
+		},
+		{
 			name: "Rule 1: absent on GKE+ubuntu → operator-managed remedy, no COS instruction",
 			recipeResult: resultOS(recipe.GPUDriverStateAbsent, recipe.CriteriaServiceGKE,
 				recipe.CriteriaOSUbuntu, gpuOpRef(driverOff())),
