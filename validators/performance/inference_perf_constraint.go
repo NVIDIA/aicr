@@ -1604,8 +1604,8 @@ func buildTolerations(node v1.Node) []v1.Toleration {
 	return tolerations
 }
 
-// deployInferenceWorkload deploys the KAI Queue, DynamoGraphDeployment, and
-// any routing-mode-specific Gateway API resources. Worker GPU wiring is
+// deployInferenceWorkload deploys the DynamoGraphDeployment and any
+// routing-mode-specific Gateway API resources. Worker GPU wiring is
 // MODE-DISPATCHED (config.useDRAWorkerClaims): in DRA mode a
 // ResourceClaimTemplate is applied and workers bind it via
 // podTemplate.spec.resourceClaims; in device-plugin mode no claim template is
