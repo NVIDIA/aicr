@@ -31,13 +31,20 @@ spec:
   # host) on the EFA scale-out fabric.
   #
   # Verified on the reference cluster: each GPU node presents 2x Amazon ENA
-  # plus 1x Amazon EFA on the PCI bus and advertises
-  # vpc.amazonaws.com/efa: 1. The instance type supports a maximum of 2 EFA
-  # interfaces, so a node can carry at most one more than this cluster does.
+  # plus 1x Amazon EFA on the PCI bus and advertises vpc.amazonaws.com/efa: 1.
+  # That is the layout AWS recommends — a primary ENA on network card 0
+  # device 0, one EFA-only interface on card 0 device 1, and one EFA per
+  # additional network card
+  # (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-acc-inst-types.html).
+  # This shape has no additional usable cards: the
+  # instance reports 9 network cards, but cards 1-8 have
+  # MaximumNetworkInterfaces: 0, so nothing can attach to them. A single EFA
+  # interface is therefore the correct and maximal EFA configuration here,
+  # not an under-provisioned one.
   #
   # Fabric selection is not modelled in the recipe criteria today — this
-  # overlay targets EFA because that is what the reference cluster presents.
-  # Fabric-aware selection is tracked in #1410.
+  # overlay targets EFA because that is what the reference cluster presents
+  # and what public AICR builds for (#1410).
   #
   # Specific constraints for GB300 on EKS training workloads.
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
@@ -135,16 +142,14 @@ spec:
       # 500 was far too loose for GB300's NVLink fabric.
       #
       # net stays at the GB200 value of 40 rather than being raised to the
-      # 44.04 GB/s measured here. That measurement is the EFA path on a node
-      # carrying a single EFA device (the instance type allows at most 2), so
-      # it reflects this cluster's NIC provisioning as much as the
-      # accelerator. Raising the floor to match would bind the recipe to this
-      # node shape and re-create the SKU-agnostic false-fail that
-      # h100-eks-training documents for p5.4xlarge — see #1256, which tracks
-      # fabric-class-aware floors.
-      #
-      # Re-baseline once a GB300 cluster with fuller scale-out provisioning
-      # is available.
+      # 44.04 GB/s measured here. The measurement is sound — the node runs the
+      # AWS-recommended EFA layout and cannot carry more EFA interfaces (see
+      # the fabric note above for the AWS reference) — but the floor is
+      # deliberately kept below it.
+      # These recipes match on service + accelerator with no fabric or node
+      # shape dimension, so a floor pinned to one shape's EFA path re-creates
+      # the SKU-agnostic false-fail that h100-eks-training documents for
+      # p5.4xlarge. See #1256, which tracks fabric-class-aware floors.
       checks:
         - nccl-all-reduce-bw-net
         - nccl-all-reduce-bw-nvls

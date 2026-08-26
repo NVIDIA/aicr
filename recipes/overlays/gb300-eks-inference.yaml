@@ -31,13 +31,20 @@ spec:
   # host) on the EFA scale-out fabric.
   #
   # Verified on the reference cluster: each GPU node presents 2x Amazon ENA
-  # plus 1x Amazon EFA on the PCI bus and advertises
-  # vpc.amazonaws.com/efa: 1. The instance type supports a maximum of 2 EFA
-  # interfaces, so a node can carry at most one more than this cluster does.
+  # plus 1x Amazon EFA on the PCI bus and advertises vpc.amazonaws.com/efa: 1.
+  # That is the layout AWS recommends — a primary ENA on network card 0
+  # device 0, one EFA-only interface on card 0 device 1, and one EFA per
+  # additional network card
+  # (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-acc-inst-types.html).
+  # This shape has no additional usable cards: the
+  # instance reports 9 network cards, but cards 1-8 have
+  # MaximumNetworkInterfaces: 0, so nothing can attach to them. A single EFA
+  # interface is therefore the correct and maximal EFA configuration here,
+  # not an under-provisioned one.
   #
   # Fabric selection is not modelled in the recipe criteria today — this
-  # overlay targets EFA because that is what the reference cluster presents.
-  # Fabric-aware selection is tracked in #1410.
+  # overlay targets EFA because that is what the reference cluster presents
+  # and what public AICR builds for (#1410).
   #
   # Specific constraints for GB300 on EKS inference workloads.
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
