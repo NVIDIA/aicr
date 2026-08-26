@@ -1,0 +1,254 @@
+name: Setup DGXC Go proxy
+description: >-
+  Route Go module resolution through the DGXC Artifactory Go proxy. Mints a short-lived
+  token via GitHub OIDC, exposes it through a runner-temp GOAUTH helper, and sets the resolver
+  environment. Intended to be dropped into any NVIDIA repo between `setup-go` and the
+  first `go` command.
+
+inputs:
+  token:
+    description: >-
+      Static Artifactory access token. Leave empty -- the default is to mint one via OIDC,
+      which requires no repository secret at all. Provided as an escape hatch for runners
+      that cannot use OIDC. When set, it takes precedence over the OIDC path.
+    required: false
+    default: ""
+
+  username:
+    description: >-
+      DEPRECATED and ignored. It was the netrc login field; the action now presents the
+      token as `Authorization: Bearer`, which carries no username. Kept so existing callers
+      do not break -- remove it from your workflow at your convenience.
+    required: false
+    default: ""
+
+  host:
+    description: >-
+      Artifactory JPD hostname. Defaults to edge, which is the only JPD reachable from
+      GitHub-hosted runners (docs/pilot/FINDINGS.md F-017) and the one carrying the
+      `nvgithub-dgxc` OIDC provider. Edge is read-only -- publishing requires the cloud JPD
+      and a self-hosted runner.
+    required: false
+    default: edge.urm.nvidia.com
+
+  repo-key:
+    description: >-
+      Artifactory Go repository key. The -cdn variants exist but Direct Download cannot
+      engage for Go on the cloud JPD -- no Go module archive approaches the 100 MB
+      threshold. See docs/pilot/FINDINGS.md F-009.
+    required: false
+    default: dgxc-go-virtual
+
+  mode:
+    description: >-
+      `routed` keeps a `direct` fallback so a coordinate Artifactory cannot serve still
+      resolves (Stage 6, advisory). `enforced` removes it, so every byte must come from
+      Artifactory (Stage 8).
+    required: false
+    default: routed
+
+  goprivate:
+    description: >-
+      Comma-separated private module prefixes, GOPRIVATE syntax. Leave empty for repos
+      with only public dependencies. Never widen this to cover a public forge -- doing so
+      removes checksum-transparency verification for modules that have it.
+    required: false
+    default: ""
+
+  gotoolchain:
+    description: >-
+      Defaults to `local`, which pins the toolchain to whatever `setup-go` installed. With
+      `auto`, Go downloads newer toolchains *through GOPROXY* as the golang.org/toolchain
+      module -- which fails under `enforced` mode unless Artifactory serves it. See
+      docs/pilot/FINDINGS.md F-003.
+    required: false
+    default: local
+
+  oidc-provider:
+    description: >-
+      JFrog OIDC provider name configured on the target JPD. `nvgithub-dgxc` is dedicated
+      to this proxy and serves every onboarded org, so this does not need setting.
+    required: false
+    default: nvgithub-dgxc
+
+  oidc-audience:
+    description: >-
+      The `aud` claim requested from GitHub. Leave empty -- the action derives `dgxc.<host>`,
+      which is what `nvgithub-dgxc` accepts. Set it only if a provider is ever provisioned
+      with an audience this action does not know about; an explicit value always wins.
+
+      Provider and audience are a matched pair. The audience is validated by the provider
+      before any identity mapping is consulted, so a mismatch is refused outright rather
+      than falling through to a weaker mapping -- override one and you must override both.
+      That is worth having: it fails closed and loudly, instead of silently minting a token
+      with less authority than the caller expects.
+    required: false
+    default: ""
+
+  verify:
+    description: Probe the endpoint after configuring and fail fast if it does not answer.
+    required: false
+    default: "true"
+
+outputs:
+  goproxy:
+    description: The GOPROXY value that was configured.
+    value: ${{ steps.configure.outputs.goproxy }}
+  auth-source:
+    description: How the credential was obtained -- `oidc` or `static`.
+    value: ${{ steps.auth.outputs.auth-source }}
+  status:
+    description: HTTP status returned by the verification probe, or `skipped`.
+    value: ${{ steps.verify.outputs.status }}
+
+runs:
+  using: composite
+  steps:
+    # Deliberately first, and free of any credential: nothing here can leak.
+    - name: Configure resolver
+      id: configure
+      shell: bash
+      env:
+        HOST: ${{ inputs.host }}
+        REPO_KEY: ${{ inputs.repo-key }}
+        MODE: ${{ inputs.mode }}
+        GOPRIVATE_IN: ${{ inputs.goprivate }}
+        GOTOOLCHAIN_IN: ${{ inputs.gotoolchain }}
+      run: |
+        set -euo pipefail
+
+        base="https://${HOST}/artifactory/api/go/${REPO_KEY}"
+
+        case "${MODE}" in
+          routed)   goproxy="${base},direct" ;;
+          enforced) goproxy="${base}" ;;
+          *) echo "::error::mode must be 'routed' or 'enforced', got '${MODE}'"; exit 1 ;;
+        esac
+
+        {
+          echo "GOPROXY=${goproxy}"
+          # Public modules stay verified against the transparency log even when fetched
+          # through a private proxy. Never disable this.
+          echo "GOSUMDB=sum.golang.org"
+          # Nothing bypasses the proxy. `none` is the documented match-nothing value, and
+          # it deliberately overrides the GONOPROXY default that GOPRIVATE would supply.
+          echo "GONOPROXY=none"
+          echo "GOPRIVATE=${GOPRIVATE_IN}"
+          echo "GONOSUMDB=${GOPRIVATE_IN}"
+          echo "GOTOOLCHAIN=${GOTOOLCHAIN_IN}"
+          # CI must never silently rewrite the manifest it is validating.
+          echo "GOFLAGS=-mod=readonly"
+        } >> "${GITHUB_ENV}"
+
+        echo "goproxy=${goproxy}" >> "${GITHUB_OUTPUT}"
+        echo "Configured GOPROXY=${goproxy} (mode: ${MODE})"
+
+    # Minting and credential storage happen in ONE step so the token exists only in this
+    # step's process memory. It is never written to GITHUB_ENV or GITHUB_OUTPUT, where a
+    # composite action's callers -- and every subsequent step -- could read it back.
+    - name: Authenticate
+      id: auth
+      shell: bash
+      env:
+        STATIC_TOKEN: ${{ inputs.token }}
+        HOST: ${{ inputs.host }}
+        REPO_KEY: ${{ inputs.repo-key }}
+        OIDC_PROVIDER: ${{ inputs.oidc-provider }}
+        OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
+      run: |
+        set -euo pipefail
+
+        if [[ -n "${STATIC_TOKEN}" ]]; then
+          echo "::add-mask::${STATIC_TOKEN}"
+          token="${STATIC_TOKEN}"
+          source=static
+          echo "Using the supplied static token."
+        else
+          export JPD_HOST="${HOST}"
+
+          # The audience is `dgxc.<host>`, derived from the host. It is a property of the
+          # OIDC provider, not of the calling org, so nothing here branches on the caller --
+          # every onboarded org sends the same value.
+          #
+          # Measured 2026-08-21 from `NVIDIA/aicr` (run 32529131604), which swept eight
+          # provider/audience pairs: this is the only combination that authenticates, and
+          # the six other spellings tried against this provider return
+          # `400 BAD_REQUEST / Invalid audience`.
+          export OIDC_AUDIENCE="${OIDC_AUDIENCE:-dgxc.${HOST}}"
+
+          token="$("${GITHUB_ACTION_PATH}/oidc-exchange.sh")"
+          source=oidc
+        fi
+
+        # The credential is presented as `Authorization: Bearer`, via a GOAUTH helper.
+        #
+        # It used to go into a netrc, which makes Go send HTTP Basic. Measured against edge
+        # on 2026-08-14: the same token returns 200 as a bearer and 401 as basic, on both
+        # repositories, on every one of seven consecutive runs. Basic simply is not accepted
+        # here, and that was invisible for as long as the WAF answered both schemes with an
+        # identical 403 (docs/pilot/FINDINGS.md F-015).
+        #
+        # GOAUTH's command form is also narrower than netrc. A netrc entry attaches the
+        # credential to every request to the HOST; the helper below attaches it only to
+        # URLs under the repository prefix, so nothing is sent to the rest of the JPD.
+        #
+        # Never in the GOPROXY URL either way -- that leaks into `go env`, build logs and
+        # Go's own error messages (F-002).
+        helper="${RUNNER_TEMP}/dgxc-goauth"
+        umask 077
+
+        # The token lives in the helper, not in the environment: GITHUB_ENV is readable by
+        # every later step, and an env var is visible in any process listing.
+        # Written line by line rather than from an indented heredoc: the de-indentation
+        # that would need is a `sed -i` whose syntax differs between GNU and BSD, and this
+        # file is copied into repositories that may run either.
+        #
+        # The output format is the one `go help goauth` specifies: a URL prefix line, a
+        # blank line, header lines, a blank line. Go may also write a 4xx response to the
+        # helper's stdin; there is nothing to renegotiate with a fixed token, so it is
+        # ignored.
+        {
+          echo '#!/usr/bin/env bash'
+          echo "cat <<'CREDENTIAL'"
+          echo "https://${HOST}/artifactory/api/go/${REPO_KEY}"
+          echo
+          echo "Authorization: Bearer ${token}"
+          echo
+          echo 'CREDENTIAL'
+        } > "${helper}"
+        chmod 700 "${helper}"
+
+        echo "GOAUTH=${helper}" >> "${GITHUB_ENV}"
+        echo "auth-source=${source}" >> "${GITHUB_OUTPUT}"
+
+    - name: Verify endpoint
+      id: verify
+      if: inputs.verify == 'true'
+      shell: bash
+      env:
+        HOST: ${{ inputs.host }}
+        REPO_KEY: ${{ inputs.repo-key }}
+      run: |
+        set -euo pipefail
+
+        # Verifies through the SAME helper `go mod download` will use, rather than with a
+        # hand-built header: what matters is that the configured credential path works, not
+        # that some credential works. The helper's header lines are replayed verbatim.
+        url="https://${HOST}/artifactory/api/go/${REPO_KEY}/github.com/spf13/cobra/@v/list"
+        auth_header="$("${GOAUTH}" < /dev/null | sed -n 's/^Authorization: //p' | head -1)"
+        status="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+          -H "Authorization: ${auth_header}" "${url}" || echo 000)"
+
+        echo "status=${status}" >> "${GITHUB_OUTPUT}"
+
+        if [[ "${status}" != "200" ]]; then
+          echo "::error::${HOST}/${REPO_KEY} did not authenticate (HTTP ${status})."
+          case "${status}" in
+            000) echo "::error::Unreachable from this runner -- no network path to ${HOST}." ;;
+            401) echo "::error::Credential rejected -- the request reached Artifactory and it did not accept the token." ;;
+            403) echo "::error::Rejected, or authenticated without read on ${REPO_KEY}. Edge returns 403 with an empty body for both -- see docs/pilot/FINDINGS.md F-018." ;;
+          esac
+          exit 1
+        fi
+
+        echo "Authenticated: HTTP 200 from ${HOST}/${REPO_KEY}"

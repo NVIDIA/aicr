@@ -52,6 +52,9 @@ outputs:
   tilt:
     description: 'Tilt version'
     value: ${{ steps.versions.outputs.tilt }}
+  setup_envtest:
+    description: 'setup-envtest version'
+    value: ${{ steps.versions.outputs.setup_envtest }}
   helm:
     description: 'Helm version'
     value: ${{ steps.versions.outputs.helm }}
@@ -191,6 +194,7 @@ runs:
         echo "nvkind=$(yq eval '.testing_tools.nvkind' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "ctlptl=$(yq eval '.testing_tools.ctlptl' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "tilt=$(yq eval '.testing_tools.tilt' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "setup_envtest=$(yq eval '.testing_tools.setup_envtest' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "helm=$(yq eval '.testing_tools.helm' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "helmfile=$(yq eval '.testing_tools.helmfile' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "helmfile_sha256_linux_amd64=$(yq eval '.testing_tools.helmfile_checksums.linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT

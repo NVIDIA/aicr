@@ -112,8 +112,12 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse bom-pinning-check check-depproxy-kit ## Lints the entire project (Go, YAML, license headers, chart-version pins, and vendored-kit digests)
 	@echo "Completed Go and YAML lints and ensured license headers"
+
+.PHONY: check-depproxy-kit
+check-depproxy-kit: ## Verifies the vendored DGXC Go proxy kit matches upstream digests
+	@./tools/check-depproxy-kit
 
 # Standalone target — NOT part of `make lint` because it requires Docker
 # (the validator runs in the same image renovatebot/github-action wraps).
@@ -202,7 +206,8 @@ LICENSE_IGNORES = \
 	-ignore 'THIRD_PARTY_NOTICES.md' \
 	-ignore 'validators/performance/licenses/**' \
 	-ignore '.licenses-cache/**' \
-	-ignore 'tools/mdx/node_modules/**'
+	-ignore 'tools/mdx/node_modules/**' \
+	-ignore '.github/actions/setup-dgxc-goproxy/**'
 
 # The two recipes/evidence patterns in LICENSE_IGNORES match exactly the
 # generated, header-less pointer shapes MarshalPointer emits — the transient
