@@ -19,6 +19,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -341,8 +342,20 @@ func waitForGangTestPods(ctx context.Context, clientset kubernetes.Interface, ru
 				pod, err := clientset.CoreV1().Pods(run.namespace).Get(
 					ctx, run.pods[i], metav1.GetOptions{})
 				if err != nil {
-					return false, errors.Wrap(errors.ErrCodeInternal,
-						fmt.Sprintf("failed to get gang test pod %s", run.pods[i]), err)
+					// A read that could not land is not a verdict. Returning a
+					// non-nil error here aborts the whole poll, so one throttled
+					// or timed-out call would fail a healthy cluster even though
+					// the next interval would have succeeded — the same defect
+					// #1513 fixed one step earlier in this function. Let the
+					// enclosing GangTestPodTimeout decide instead.
+					if isK8sTimeoutErr(err) {
+						slog.Debug("transient read while polling gang test pod; retrying",
+							"pod", run.pods[i], "error", err)
+						allDone = false
+						continue
+					}
+					return false, classifyK8sReadError(err,
+						fmt.Sprintf("gang test pod %s", run.pods[i]))
 				}
 				switch pod.Status.Phase { //nolint:exhaustive // only terminal states matter
 				case corev1.PodSucceeded, corev1.PodFailed:

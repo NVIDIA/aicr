@@ -16,6 +16,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"sync/atomic"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -25,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 // TestCleanupGangTestResourcesDeletesNamespace verifies the check tears down
@@ -154,5 +157,72 @@ func TestCleanupGangTestResourcesPreservesConcurrentRun(t *testing.T) {
 			context.Background(), runB.pods[i], metav1.GetOptions{}); err != nil {
 			t.Errorf("runA cleanup destroyed concurrent runB pod %s: %v", runB.pods[i], err)
 		}
+	}
+}
+
+// TestWaitForGangTestPodsRetriesTransientReads pins the fix for #2406: a read
+// that could not land must not decide the check. client-go's own rate limiter
+// returns "client rate limiter Wait returned an error: context deadline
+// exceeded" on a loaded cluster; before this fix that aborted the poll and
+// failed a healthy cluster, even though the test pods had been created and the
+// next interval would have succeeded.
+//
+// This mirrors the acceptance criteria of #1513, which fixed the same shape one
+// step earlier in this function (instantaneous deployment read -> bounded wait).
+func TestWaitForGangTestPodsRetriesTransientReads(t *testing.T) {
+	run, err := newGangTestRun()
+	if err != nil {
+		t.Fatalf("newGangTestRun: %v", err)
+	}
+
+	objs := make([]runtime.Object, 0, gangMinMembers)
+	for i := range gangMinMembers {
+		objs = append(objs, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: run.pods[i], Namespace: run.namespace},
+			Status:     corev1.PodStatus{Phase: corev1.PodSucceeded},
+		})
+	}
+	clientset := k8sfake.NewSimpleClientset(objs...)
+
+	// Fail the first two reads the way a throttled client-go client does, then
+	// let the real objects through.
+	var reads atomic.Int32
+	clientset.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if reads.Add(1) <= 2 {
+			return true, nil, fmt.Errorf(
+				"client rate limiter Wait returned an error: %w", context.DeadlineExceeded)
+		}
+		return false, nil, nil // fall through to the tracker
+	})
+
+	pods, err := waitForGangTestPods(context.Background(), clientset, run)
+	if err != nil {
+		t.Fatalf("waitForGangTestPods aborted on a transient read: %v", err)
+	}
+	for i := range gangMinMembers {
+		if pods[i] == nil {
+			t.Errorf("pod %d not collected after retry", i)
+		}
+	}
+	if got := reads.Load(); got < 3 {
+		t.Errorf("expected the poll to retry past the throttled reads, saw %d reads", got)
+	}
+}
+
+// TestWaitForGangTestPodsFailsClosedOnTerminalRead is the other half: a genuine
+// error (RBAC denial) must still abort rather than spin until the timeout.
+func TestWaitForGangTestPodsFailsClosedOnTerminalRead(t *testing.T) {
+	run, err := newGangTestRun()
+	if err != nil {
+		t.Fatalf("newGangTestRun: %v", err)
+	}
+	clientset := k8sfake.NewSimpleClientset()
+	clientset.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, k8serrors.NewForbidden(
+			schema.GroupResource{Resource: "pods"}, run.pods[0], fmt.Errorf("no access"))
+	})
+
+	if _, err := waitForGangTestPods(context.Background(), clientset, run); err == nil {
+		t.Fatal("expected a terminal read error to fail the check, got nil")
 	}
 }
