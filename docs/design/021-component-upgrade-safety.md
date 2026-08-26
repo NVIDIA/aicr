@@ -148,7 +148,7 @@ Records are keyed by semver ranges, not explicit version pairs, so they do not g
 
 That last clause matters for the same reason `unknown` and `unversioned` are separate verdicts. "A record exists and I could not read it" is not "no record exists", and collapsing them hides which action closes the gap. A loader that quietly skips a record it cannot parse would reproduce this ADR's own motivating failure, the silent one, inside the tool built to prevent it. The catalog loader today checks `kind` only and never `apiVersion` (see ADR-015 and [#1812](https://github.com/NVIDIA/aicr/issues/1812)), and `recipes/upgrades/*.yaml` sits in the same tree an external `--data` catalog points at, so a record loader inherits that behavior unless it opts out explicitly.
 
-**Fields are validated against the verdict.** A `manual` or `blocked` record MUST carry at least one step, since both are defined by the work they require; a `safe` record MUST carry none.
+**Fields are validated against the verdict.** A `manual` or `blocked` record MUST carry at least one step, since both are defined by the work they require; a `safe` record MUST carry none. The same rule applies to a `replaces` block, which in practice is always `manual`: a replacement that claimed to need no operator work would be a rename, and a rename is a chart-identity change on one component rather than a replacement of one by another.
 
 `hooks` are a deliberate exception and remain allowed on `safe`. A verdict describes what the **operator** must do, and a hook is AICR doing the work instead. A transition fully handled by a migration release requires nothing of the operator, so forbidding hooks there would force it to `manual`, failing the gate for something already automated. That is the opposite of what the verdicts are for. `unknown` and `unversioned` are never authored, only computed. The well-formedness check enforces this, so the verdict table above cannot drift from what a record actually says.
 
@@ -224,6 +224,7 @@ What it is good for is the thing an operator needs *before* upgrading rather tha
 | `.hooks[]` | no | Allowed on any verdict, including `safe`. `file` under `manifests/migrations/`, `phase` pre- or post-upgrade. See [Decision 4](#decision-4-migration-content-ships-as-an-adjacent-generated-release). |
 | `.affectedResources[]` | no | `group` plus `kinds`; drives the at-risk scan in [Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see). |
 | `.references[]` | no | Links to upstream migration notes. |
+| `replaces` | no | Top-level, not per-transition. Names the component this one supersedes, with `verdict`, `summary` and `stepsByDeployer` carrying the migration. Joins the removed and added rows into one. |
 
 Two things a record deliberately does not express: a component being *added or removed*, which the matcher handles rather than a record ([Decision 5](#decision-5-one-matcher-three-independent-axes)), and cross-component coupling, which is a non-goal ([Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see)).
 
@@ -277,6 +278,14 @@ Three properties follow. It is **uniform across component kinds**, because the m
 
 One caveat on uniformity: it is reasoned, not demonstrated, for Kustomize. That path is implemented (`localformat/kustomize.go`, in-process krusty) but **the registry has zero Kustomize components**, so treat that limb as a design claim until one exists.
 
+**Rollback ordering is undefined, deliberately.** The obvious question is whether the `-premigrate` release rolls back with the component and in what order. This ADR does not answer it, and that is consistent rather than an omission: AICR does not orchestrate rollback at all (`helm rollback` is the mechanism), records are directional so a forward verdict and its steps never apply in reverse, and `reversible` is advisory precisely because the project does not test the reverse direction to the standard it tests upgrades.
+
+Defining an ordering guarantee here would be the one place the ADR promised rollback behaviour it has declined to promise everywhere else.
+
+It is also frequently unanswerable. The migration this mechanism exists for writes ownership annotations onto live objects so Helm can adopt them, and that has no meaningful inverse: removing the annotations would break the release that now owns them. A migration with no inverse cannot have a correct rollback ordering, only a chosen one.
+
+What holds instead is what the layout already gives: `-premigrate` is an ordinary release, so `helm rollback` works on it exactly as on any other, and the operator decides whether that is wanted. Where the answer matters for a specific migration, the record's `reversibleNotes` is the place to say so.
+
 **The location is load-bearing.** [Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see) requires a migration Job image to be digest-pinned under ADR-006 and to appear in the BOM. A sibling `migrations/` directory would have been invisible to both: `tools/bom/main.go:355` walks only `.../manifests`, and the pin test at `recipes/manifest_images_test.go:45` skips paths without `/manifests/`. The requirement would have been stated and then quietly unenforceable.
 
 Nesting under `manifests/` closes that with no tooling change, because the BOM walk is recursive and the pin test matches `/manifests/` as a substring. It also cannot leak into a deployment: the bundler ships only files named in `manifestFiles` and `preManifestFiles`, so a migration manifest is inert until a record's `hooks` references it.
@@ -297,11 +306,59 @@ One matcher runs over a `component -> version` table per side. Three separate in
 |---|---|---|---|
 | Added | no | yes | Reports it. Nothing to do: a new component is simply installed. |
 | Removed | yes | no | Reports it, and says the component **stays installed**. AICR does not uninstall it. |
-| Replaced | as removed + added | | Surfaces as one removed row and one added row. |
+| Replaced | as removed | as added | Joined into a single row when the new component declares `replaces`. |
 
 Removal is reported rather than acted on because AICR dropping a component from a recipe is a statement about what AICR now ships, not an instruction to tear down a running workload. Uninstalling on the operator's behalf, from a signal that weak, is not a decision the tool should make. Reporting it leaves the operator to decide.
 
-**Replacement is not modelled**, for the same reason cross-component coupling is not ([Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see)). It has happened once in this registry, `kgateway` to `agentgateway` ([#871](https://github.com/NVIDIA/aicr/pull/871)), and detecting it structurally would need a link field the matcher cannot derive from the tables, since nothing distinguishes "A was replaced by B" from "A went away and B arrived". Where a replacement carries real migration work, and it usually does, that work is described in the steps of the added component's record. Revisit if a second case appears.
+**Replacement is declared by the new component.** The matcher cannot derive it: nothing in the tables distinguishes "A was replaced by B" from "A went away and B arrived". So the incoming component's record says so, and the report joins what would otherwise be two unrelated rows.
+
+```yaml
+component: agentgateway
+replaces:
+  component: kgateway
+  verdict: manual
+  summary: >-
+    kgateway is superseded by agentgateway for v2.2 inference routing.
+  stepsByDeployer:
+    - steps:
+        - id: port-route-resources
+          description: >-
+            Re-author kgateway route resources as agentgateway equivalents.
+            Field names and defaults differ; this is not a rename.
+          reason: >-
+            Nothing migrates them automatically. The old resources keep
+            working against the old controller until you remove it.
+        - id: retire-kgateway
+          description: >-
+            Once agentgateway is serving traffic, uninstall the kgateway
+            release. AICR leaves it installed and will not remove it.
+```
+
+**The report says the work is yours.** A replacement is not a version bump the tool absorbs, so it renders as one row naming both components and a verdict that stops a strict run:
+
+```text
+COMPONENT                    FROM        TO          VERDICT   NOTES
+agentgateway                 kgateway    v1.3.1      manual    replaces kgateway, 2 steps
+
+agentgateway  replaces kgateway  (manual)
+  kgateway is superseded by agentgateway for v2.2 inference routing.
+
+  STEPS
+    1. port-route-resources
+       Re-author kgateway route resources as agentgateway equivalents.
+       Field names and defaults differ; this is not a rename.
+       Why: nothing migrates them automatically. The old resources keep
+       working against the old controller until you remove it.
+    2. retire-kgateway
+       Once agentgateway is serving traffic, uninstall the kgateway
+       release. AICR leaves it installed and will not remove it.
+```
+
+The `FROM` column carries the outgoing component's name rather than a version, because there is no shared version line to compare. That is the honest rendering: the two are different software, and the operator is being told to do a migration, not to accept an upgrade.
+
+This is deliberately one-directional and names a single component, which is why it is admitted where cross-component coupling ([Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see)) is not. There is no graph to walk, nothing to infer from the 278 `dependencyRefs` edges, and no question of which side owns the verdict: the arriving component does, because it is the one whose record the operator is reading when the change lands.
+
+It reuses the transition vocabulary rather than inventing one, so `verdict`, `summary` and `stepsByDeployer` mean what they mean everywhere else. Replacement usually carries real migration work, which is why it typically resolves to `manual`. `kgateway` to `agentgateway` ([#871](https://github.com/NVIDIA/aicr/pull/871)) is the one occurrence so far, and without the declaration it would have reported as an unexplained removal beside an unexplained addition.
 
 **Deployer context.** Steps are deployer-scoped ([Decision 2](#decision-2-transition-records)), a bundle records the deployer it was built with, and a recipe does not. The check infers the deployer from `--to` when it is a bundle and otherwise **requires `--deployer`**. It does not guess, and it does not render every path: showing an Argo CD operator the imperative "delete legacy CRs" step is the failure deployer-scoping exists to prevent, so a silent default would reintroduce it. Recipe-to-recipe in CI therefore passes `--deployer` explicitly, which the pipeline already knows because it passes the same value to `aicr bundle`.
 
@@ -319,7 +376,7 @@ Rollback needs no separate command. `--from cluster --to <older-recipe>` compute
 
 Online mode reads through the Helm SDK. `.settings.yaml:84` already pins `helm: 'v4.2.4'` as a testing tool and `go.mod` has no Helm SDK at all, so `helm.sh/helm/v4` aligns AICR's read path with the CLI the project already ships and tests against.
 
-Shelling out to `helm list -A -o json` is **not** a viable alternative. [Decision 7](#decision-7-generated-wrappers-carry-two-versions) makes `aicr.run/component-version` the field the matcher reads, and `helm list` returns chart and app version but not chart annotations. Reading those needs `helm get metadata` per release, which is N+1 subprocesses and a Helm-CLI output format to track, or the SDK.
+Shelling out to `helm list -A -o json` is **not** sufficient. It returns chart and app version, which covers upstream charts, but not chart annotations, which is what [Decision 7](#decision-7-generated-wrappers-carry-two-versions) requires for generated wrappers, where the chart version describes the wrapper rather than its payload. Reading annotations needs `helm get metadata` per release, which is N+1 subprocesses and a Helm-CLI output format to track, or the SDK.
 
 Vendoring the SDK is a substantial change on its own and may land as its own PR ahead of this work; sequencing is an [open question](#open-questions).
 
@@ -358,10 +415,14 @@ annotations:
 ```
 
 - **`version:` is the AICR version that generated the wrapper.** The wrapper's content is produced entirely by AICR's templates, so AICR's version is the honest answer to "what version is this artifact". It also matches what `recipe.yaml` already does: `pkg/recipe/builder.go:231` sets `result.Metadata.Version` from the AICR binary version, and `pkg/cli/validate.go:845` compares it against the running binary for skew detection.
-- **`aicr.run/component-version` is the payload version**, and it is the only field the matcher reads. Free-form, so a Kustomize `defaultTag` like `release-1.4` does not have to masquerade as semver.
+- **`aicr.run/component-version` is the payload version**, read by the matcher for generated wrappers. Free-form, so a Kustomize `defaultTag` like `release-1.4` does not have to masquerade as semver.
 - **`appVersion` also carries the payload version.** Conventional Helm usage, and it makes plain `helm list` output readable for a human even though the matcher ignores it.
 
-**Upstream charts have no annotation, and that is a live gap.** This stamps only charts AICR generates. A `KindUpstreamHelm` folder installs the upstream chart directly, so gpu-operator, cert-manager, aws-efa and most of the registry carry no `aicr.run/component-version` at all. Online mode therefore has no defined version source for them, and the claim above that the annotation is "the only field the matcher reads" holds only for generated wrappers. Closing this needs a mechanism, and it is the largest unresolved gap in this ADR.
+**Upstream charts need no annotation: the matcher reads their own version.** A `KindUpstreamHelm` folder installs the upstream chart directly, so the release's chart version *is* the payload version, and Helm already records it. gpu-operator, cert-manager, aws-efa and the rest are read straight from the release.
+
+That is also what the annotation exists for. A generated wrapper's chart version describes the wrapper, not what it carries: today a hardcoded `0.1.0`, and the AICR version once this decision lands. Reading the release version there would be wrong, so the annotation supplies the payload version that the chart version cannot.
+
+So the rule is one sentence with two branches: **read `aicr.run/component-version` when it is present, otherwise read the release's chart version.** Presence of the annotation is exactly the signal that the chart version means something else, which is why the fallback needs no separate flag or lookup table.
 
 **Dev-build fallback is mandatory.** `pkg/cli/root.go:38` sets `versionDefault = "dev"`, which is not valid SemVer 2, and Helm rejects it for `Chart.yaml` `version:`. The bundler normalizes non-release versions to `0.0.0-dev` and strips a leading `v`. Without this, `make dev-env` and Tilt break. This is an explicitly tested case, not a discovered one.
 
