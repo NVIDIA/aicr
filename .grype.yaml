@@ -24,6 +24,14 @@ exclude:
   # go.mod files resurface already-fixed module findings. Local-only (CI
   # scans a fresh checkout, so this path never exists there).
   - './.claude/worktrees/**'
+  # `make notices` scratch tree — same failure mode, new cause. Since #2374
+  # removed vendor/, go-licenses collects from the Go module cache, and those
+  # copies carry each upstream module's OWN go.mod (vendored copies did not:
+  # `go mod vendor` prunes them). Grype catalogs those manifests and reports
+  # dependency versions this repo does not build — golang.org/x/crypto v0.17.0
+  # and v0.45.0 surfaced this way while go.mod pins v0.55.0. Gitignored and
+  # local-only, like the worktrees above.
+  - './.licenses-cache/**'
 
 # CVE suppressions for the aiperf-bench image are managed in
 # `.openvex.json` and consumed by scan-action via the `vex:` input in

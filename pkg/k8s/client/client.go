@@ -232,7 +232,7 @@ func BuildKubeClient(kubeconfig string) (*kubernetes.Clientset, *rest.Config, er
 	case kubeconfig != "":
 		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
 		if err != nil {
-			return nil, nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest, "failed to build kube config", err, map[string]interface{}{
+			return nil, nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest, "failed to build kube config", err, map[string]any{
 				kubeconfigErrContextKey: kubeconfig,
 			})
 		}
@@ -258,7 +258,7 @@ func BuildKubeClient(kubeconfig string) (*kubernetes.Clientset, *rest.Config, er
 		).ClientConfig()
 		if err != nil {
 			return nil, nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
-				"failed to build kube config from multi-file KUBECONFIG", err, map[string]interface{}{
+				"failed to build kube config from multi-file KUBECONFIG", err, map[string]any{
 					kubeconfigErrContextKey: merged,
 				})
 		}
@@ -286,7 +286,7 @@ func BuildKubeClient(kubeconfig string) (*kubernetes.Clientset, *rest.Config, er
 		if source != "" {
 			return nil, nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
 				"failed to create kubernetes client from kubeconfig", err,
-				map[string]interface{}{kubeconfigErrContextKey: source})
+				map[string]any{kubeconfigErrContextKey: source})
 		}
 		return nil, nil, errors.Wrap(errors.ErrCodeInternal, "failed to create kubernetes client", err)
 	}

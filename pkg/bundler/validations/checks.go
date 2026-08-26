@@ -19,7 +19,9 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
@@ -516,17 +518,15 @@ func componentOverrideKeys(componentName string, provider recipe.DataProvider) [
 // of the same name — see componentOverrideKeys for why it is duplicated.
 func mergeOverridesAcrossKeys[V any](allOverrides map[string]map[string]V, keys []string) map[string]V {
 	var merged map[string]V
-	for i := len(keys) - 1; i >= 0; i-- {
-		overrides, ok := allOverrides[keys[i]]
+	for _, key := range slices.Backward(keys) {
+		overrides, ok := allOverrides[key]
 		if !ok {
 			continue
 		}
 		if merged == nil {
 			merged = make(map[string]V, len(overrides))
 		}
-		for path, value := range overrides {
-			merged[path] = value
-		}
+		maps.Copy(merged, overrides)
 	}
 	return merged
 }
@@ -601,8 +601,7 @@ func effectiveComponentValues(ctx context.Context, recipeResult *recipe.RecipeRe
 		// from the outermost code. Non-coded errors default to
 		// invalid-request — the recipe content is what failed to resolve.
 		code := aicrerrors.ErrCodeInvalidRequest
-		var structured *aicrerrors.StructuredError
-		if stderrors.As(err, &structured) {
+		if structured, ok := stderrors.AsType[*aicrerrors.StructuredError](err); ok {
 			code = structured.Code
 		}
 		return nil, aicrerrors.WrapWithContext(code,

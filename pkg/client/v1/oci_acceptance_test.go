@@ -243,7 +243,7 @@ func runOCIRecipeSourceAcceptanceChild(t *testing.T) {
 		start := make(chan struct{})
 		var operations sync.WaitGroup
 		operations.Add(24)
-		for i := 0; i < 24; i++ {
+		for i := range 24 {
 			go func(index int) {
 				defer operations.Done()
 				<-start
@@ -505,10 +505,7 @@ func buildOCIRecipeArchive(t *testing.T, entries []ociArchiveEntry, expandedTail
 	}
 	zeros := make([]byte, 32*1024)
 	for expandedTail > 0 {
-		chunk := int64(len(zeros))
-		if chunk > expandedTail {
-			chunk = expandedTail
-		}
+		chunk := min(int64(len(zeros)), expandedTail)
 		if _, err := gzipWriter.Write(zeros[:chunk]); err != nil {
 			t.Fatalf("write expanded tail: %v", err)
 		}

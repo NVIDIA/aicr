@@ -111,8 +111,8 @@ func splitTab(tab string) (intent, platform string, err error) {
 		if tab == in {
 			return in, "", nil
 		}
-		if strings.HasPrefix(tab, in+"-") {
-			return in, strings.TrimPrefix(tab, in+"-"), nil
+		if after, ok := strings.CutPrefix(tab, in+"-"); ok {
+			return in, after, nil
 		}
 	}
 	if tab == "" {
@@ -137,7 +137,7 @@ func labelFor(m RunMeta, class Class) string {
 		id = id[i+len("://"):]
 	}
 	var segs []string
-	for _, p := range strings.Split(id, "/") {
+	for p := range strings.SplitSeq(id, "/") {
 		if p != "" {
 			segs = append(segs, p)
 		}

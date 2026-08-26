@@ -65,15 +65,14 @@ func resolveKMSPublicKey(ctx context.Context, keyURI string) (kmsRemoteSigner, c
 		if te := kmsTimeoutError(err, keyURI); te != nil {
 			return nil, nil, te
 		}
-		var notFound *kms.ProviderNotFoundError
-		if stderrors.As(err, &notFound) {
+		if _, ok := stderrors.AsType[*kms.ProviderNotFoundError](err); ok {
 			return nil, nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
 				"unsupported or unrecognized KMS signing-key scheme", err,
-				map[string]interface{}{ctxKeySigningKey: keyURI})
+				map[string]any{ctxKeySigningKey: keyURI})
 		}
 		return nil, nil, errors.WrapWithContext(errors.ErrCodeUnavailable,
 			"failed to initialize KMS provider for signing key", err,
-			map[string]interface{}{ctxKeySigningKey: keyURI})
+			map[string]any{ctxKeySigningKey: keyURI})
 	}
 
 	pub, err := sv.PublicKey(options.WithContext(ctx))
@@ -83,7 +82,7 @@ func resolveKMSPublicKey(ctx context.Context, keyURI string) (kmsRemoteSigner, c
 		}
 		return nil, nil, errors.WrapWithContext(errors.ErrCodeUnavailable,
 			"failed to read KMS public key", err,
-			map[string]interface{}{ctxKeySigningKey: keyURI})
+			map[string]any{ctxKeySigningKey: keyURI})
 	}
 
 	return sv, pub, nil
@@ -111,7 +110,7 @@ func kmsTimeoutError(err error, keyURI string) error {
 	if stderrors.Is(err, context.DeadlineExceeded) || stderrors.Is(err, context.Canceled) {
 		return errors.WrapWithContext(errors.ErrCodeTimeout,
 			"KMS operation timed out", err,
-			map[string]interface{}{ctxKeySigningKey: keyURI})
+			map[string]any{ctxKeySigningKey: keyURI})
 	}
 	return nil
 }

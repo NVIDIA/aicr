@@ -49,6 +49,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -263,9 +264,7 @@ func run(ctx context.Context, cfg runConfig) error {
 	}
 
 	finishedMeta := make(map[string]string, len(started.Metadata))
-	for k, v := range started.Metadata {
-		finishedMeta[k] = v
-	}
+	maps.Copy(finishedMeta, started.Metadata)
 	finished := finishedJSON{
 		Timestamp: pred.AttestedAt.Unix(),
 		Passed:    allPassed,

@@ -81,7 +81,6 @@ jobs:
               - 'cmd/aicr/**'
               - 'go.mod'
               - 'go.sum'
-              - 'vendor/**'
               - 'tests/chainsaw/chainsaw-config.yaml'
               - 'tests/chainsaw/ai-conformance/common/**'
               - 'tests/chainsaw/ai-conformance/kind-common/**'

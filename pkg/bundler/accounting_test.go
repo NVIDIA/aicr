@@ -17,6 +17,7 @@ package bundler
 import (
 	stderrors "errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -202,12 +203,7 @@ func TestAccountingOwnershipCoversAICRProvidedContract(t *testing.T) {
 }
 
 func containsExactPath(paths []string, want string) bool {
-	for _, path := range paths {
-		if path == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(paths, want)
 }
 
 func TestValidateAccountingValues(t *testing.T) {

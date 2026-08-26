@@ -311,8 +311,7 @@ func checkExpectedResources(ctx *validators.Context) error {
 					// structured errors still surface in the human-
 					// readable failures list above.
 					if firstStructuredErr == nil {
-						var se *errors.StructuredError
-						if stderrors.As(r.Error, &se) {
+						if _, ok := stderrors.AsType[*errors.StructuredError](r.Error); ok {
 							firstStructuredErr = r.Error
 						}
 					}
@@ -416,8 +415,7 @@ func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentR
 		}
 		failures = append(failures, err.Error())
 		if firstStructured == nil {
-			var se *errors.StructuredError
-			if stderrors.As(err, &se) {
+			if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 				firstStructured = err
 			}
 		}

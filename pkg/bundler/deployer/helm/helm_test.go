@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"flag"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -119,7 +120,7 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	}
 
 	// Each line should carry a 64-char SHA256 hash.
-	for _, line := range strings.Split(strings.TrimSpace(str), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(str), "\n") {
 		parts := strings.Split(line, "  ")
 		if len(parts) != 2 {
 			t.Errorf("invalid checksum format: %s", line)
@@ -439,7 +440,7 @@ func TestGenerate_Reproducible(t *testing.T) {
 
 	var fileContents [2]map[string]string
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		outputDir := t.TempDir()
 		if _, err := g.Generate(ctx, outputDir); err != nil {
 			t.Fatalf("iteration %d: Generate() error = %v", i, err)
@@ -951,9 +952,7 @@ func TestGenerate_DynamicValuesRoundTrip(t *testing.T) {
 // deepMerge recursively merges src into dst. src values take precedence.
 func deepMerge(dst, src map[string]any) map[string]any {
 	result := make(map[string]any)
-	for k, v := range dst {
-		result[k] = v
-	}
+	maps.Copy(result, dst)
 	for k, v := range src {
 		if srcMap, ok := v.(map[string]any); ok {
 			if dstMap, ok := result[k].(map[string]any); ok {

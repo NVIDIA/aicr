@@ -355,11 +355,11 @@ func mustErrorOp(t *testing.T, spec string) *v1alpha1.Error {
 // exact structured code the classification under test keys on.
 type erroringFetcher struct{ err error }
 
-func (f erroringFetcher) Fetch(context.Context, string, string, string, string) (map[string]interface{}, error) {
+func (f erroringFetcher) Fetch(context.Context, string, string, string, string) (map[string]any, error) {
 	return nil, f.err
 }
 
-func (f erroringFetcher) List(context.Context, string, string, string, map[string]string) ([]map[string]interface{}, error) {
+func (f erroringFetcher) List(context.Context, string, string, string, map[string]string) ([]map[string]any, error) {
 	return nil, f.err
 }
 

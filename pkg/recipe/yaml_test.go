@@ -395,8 +395,8 @@ func validateConstraintValue(value string) error {
 
 	// Check for operator prefix
 	for _, op := range validConstraintOperators {
-		if strings.HasPrefix(value, op) {
-			remainder := strings.TrimSpace(strings.TrimPrefix(value, op))
+		if after, ok := strings.CutPrefix(value, op); ok {
+			remainder := strings.TrimSpace(after)
 			if remainder == "" {
 				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("operator %q without value", op))
 			}

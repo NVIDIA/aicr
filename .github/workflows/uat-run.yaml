@@ -200,11 +200,9 @@ jobs:
           cache: true
           cache-dependency-path: |
             go.sum
-            vendor/modules.txt
       - name: Resolve reservation row
         id: row
         env:
-          GOFLAGS: -mod=vendor
           # Pass via env (not inline interpolation) to avoid expression
           # injection through the dispatch input.
           RESERVATION: ${{ inputs.reservation }}

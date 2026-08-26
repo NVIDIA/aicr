@@ -377,7 +377,6 @@
   ],
 
   // Paths Renovate should not scan.
-  // - vendor/ contains pre-resolved Go modules (managed by `go mod vendor`).
   // - **/node_modules/**, **/dist/** are build artifacts.
   // - examples/ holds illustrative recipe YAMLs without `# renovate:`
   //   annotations; Renovate would not extract anything from them today
@@ -385,7 +384,6 @@
   // - **/testdata/** is unit-test fixture data; bumping tags inside
   //   fixtures would break tests that assert exact rendered output.
   ignorePaths: [
-    "vendor/**",
     "**/node_modules/**",
     "**/dist/**",
     "examples/**",

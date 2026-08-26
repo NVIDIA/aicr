@@ -199,7 +199,7 @@ func TestApplyTypedOverrides_NoAliasing(t *testing.T) {
 // across many runs (Go randomizes map iteration). Run repeatedly to make a
 // regression flaky-fail loudly rather than pass intermittently.
 func TestApplyTypedOverrides_OverlappingPathsDeterministic(t *testing.T) {
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		target := map[string]any{}
 		overrides := map[string]any{
 			// Parent object also carries HTTPS_PROXY, colliding with the deeper path.

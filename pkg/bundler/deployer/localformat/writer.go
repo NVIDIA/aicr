@@ -671,7 +671,7 @@ func pruneStaleFolders(outputDir string) error {
 			continue
 		}
 		ok := true
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			if name[i] < '0' || name[i] > '9' {
 				ok = false
 				break

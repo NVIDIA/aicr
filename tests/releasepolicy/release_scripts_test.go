@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -828,9 +829,7 @@ func TestReleasePreflightFailureModesHaveNoMutations(t *testing.T) {
 			t.Parallel()
 			fixture := newReleaseFixture(t)
 			digests := make(map[string]string, len(fixture.digests))
-			for key, digest := range fixture.digests {
-				digests[key] = digest
-			}
+			maps.Copy(digests, fixture.digests)
 			extraEnv := tc.setup(t, fixture, digests)
 			mapPath := filepath.Join(fixture.dir, "digests.json")
 			writeDigestMap(t, mapPath, digests)
@@ -1132,7 +1131,7 @@ func TestReleasePromotionDefersLatestUntilEveryVersionIsVerified(t *testing.T) {
 			if result.err == nil {
 				t.Fatalf("promotion accepted a failed version phase\n%s", result.output)
 			}
-			for _, line := range strings.Split(strings.TrimSpace(readOptional(t, fixture.mutations)), "\n") {
+			for line := range strings.SplitSeq(strings.TrimSpace(readOptional(t, fixture.mutations)), "\n") {
 				if strings.HasSuffix(line, "\tlatest") {
 					t.Errorf("promotion advanced latest before every version was verified: %s", line)
 				}
@@ -1816,7 +1815,7 @@ func sortedImages() []string {
 func assertVersionAliasesBeforeLatest(t *testing.T, mutations, releaseTag string) {
 	t.Helper()
 	seenLatest := false
-	for _, line := range strings.Split(strings.TrimSpace(mutations), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(mutations), "\n") {
 		fields := strings.Split(line, "\t")
 		if len(fields) != 3 {
 			t.Fatalf("malformed registry mutation: %q", line)
@@ -1916,7 +1915,7 @@ func lookupDigestState(t *testing.T, path, reference string) string {
 	t.Helper()
 	data := readOptional(t, path)
 	value := ""
-	for _, line := range strings.Split(data, "\n") {
+	for line := range strings.SplitSeq(data, "\n") {
 		fields := strings.Split(line, "\t")
 		if len(fields) == 2 && fields[0] == reference {
 			value = fields[1]
@@ -1935,7 +1934,7 @@ func rewriteWithout(t *testing.T, path, prefix string) {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	var kept []string
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if line != "" && !strings.HasPrefix(line, prefix) {
 			kept = append(kept, line)
 		}
