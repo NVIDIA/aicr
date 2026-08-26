@@ -173,13 +173,16 @@ func installReviewReactors(t *testing.T, cs *fake.Clientset, allow func(askedAcc
 }
 
 // seedServiceAccount pre-creates the operator-provisioned ServiceAccount
-// that puts a Deployer into exact-ServiceAccount mode.
-func seedServiceAccount(t *testing.T, cs *fake.Clientset, name string) {
+// that puts a Deployer into exact-ServiceAccount mode. Its namespace and
+// name are fixed rather than parameters: every caller wants the one
+// ServiceAccount that testNamespace/exactSAName names, and passing the same
+// two constants at each call site is what unparam flags.
+func seedServiceAccount(t *testing.T, cs *fake.Clientset) {
 	t.Helper()
 	if _, err := cs.CoreV1().ServiceAccounts(testNamespace).Create(context.Background(), &corev1.ServiceAccount{
-		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: testNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: exactSAName, Namespace: testNamespace},
 	}, metav1.CreateOptions{}); err != nil {
-		t.Fatalf("seeding ServiceAccount %s/%s: %v", testNamespace, name, err)
+		t.Fatalf("seeding ServiceAccount %s/%s: %v", testNamespace, exactSAName, err)
 	}
 }
 
@@ -299,7 +302,7 @@ func rbacGroupFor(resource string) string {
 // mode exists for.
 func TestCheckPermissions_ExactModeSkipsCallerRBACVerbs(t *testing.T) {
 	clientset := fake.NewClientset()
-	seedServiceAccount(t, clientset, exactSAName)
+	seedServiceAccount(t, clientset)
 
 	// Deny every caller-side RBAC verb outright. A correct gate never asks.
 	rec := installReviewReactors(t, clientset, func(q askedAccess) bool {
@@ -356,7 +359,7 @@ func TestCheckPermissions_ExactModeSkipsCallerRBACVerbs(t *testing.T) {
 // account as a generated one carrying none of its cloud annotations.
 func TestCheckPermissions_ServiceAccountGetIsRequired(t *testing.T) {
 	clientset := fake.NewClientset()
-	seedServiceAccount(t, clientset, exactSAName)
+	seedServiceAccount(t, clientset)
 	rec := installReviewReactors(t, clientset, func(q askedAccess) bool {
 		return q.resource != resourceServiceAccounts || q.verb != verbGet
 	})
@@ -405,7 +408,7 @@ func TestCheckPermissions_ServiceAccountGetIsRequired(t *testing.T) {
 // far better caught here than in a pod minutes later.
 func TestCheckPermissions_ServiceAccountSubjectFailureNamesTheSubject(t *testing.T) {
 	clientset := fake.NewClientset()
-	seedServiceAccount(t, clientset, exactSAName)
+	seedServiceAccount(t, clientset)
 	installReviewReactors(t, clientset, func(q askedAccess) bool {
 		// The caller is fully privileged; the ServiceAccount is missing
 		// exactly the cluster-scoped node read the agent cannot work without.
@@ -448,7 +451,7 @@ func TestCheckPermissions_ServiceAccountSubjectFailureNamesTheSubject(t *testing
 // unverified, warns, and lets the run proceed to fail visibly in-pod.
 func TestCheckPermissions_SubjectAccessReviewForbiddenReportsAndContinues(t *testing.T) {
 	clientset := fake.NewClientset()
-	seedServiceAccount(t, clientset, exactSAName)
+	seedServiceAccount(t, clientset)
 	installReviewReactors(t, clientset, nil)
 	// Prepended after installReviewReactors, so it wins for this resource.
 	clientset.PrependReactor(verbCreate, subjectReviewResource, func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -561,7 +564,7 @@ func TestCheckPermissions_IssuesNoWriteBeforeTheGateCloses(t *testing.T) {
 			clientset := fake.NewClientset()
 			if tt.exact {
 				// Seeded through the tracker before the guard is armed.
-				seedServiceAccount(t, clientset, exactSAName)
+				seedServiceAccount(t, clientset)
 			}
 			installReviewReactors(t, clientset, tt.allow)
 
@@ -694,7 +697,7 @@ func TestCheckPermissions_AllGrantedPassesBothModes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			clientset := fake.NewClientset()
 			if tt.exact {
-				seedServiceAccount(t, clientset, exactSAName)
+				seedServiceAccount(t, clientset)
 			}
 			rec := installReviewReactors(t, clientset, nil)
 
