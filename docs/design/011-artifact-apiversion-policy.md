@@ -4,8 +4,9 @@
 > introduces a per-kind maturity map for v1 and makes the deprecation window
 > conditional on the level being retired (alpha none, beta two releases, GA not
 > removed within a major). It **replaces §4** below, whose dual-accept rule was
-> stated unconditionally, and **extends §3** to the catalog loader. §1 and §2
-> stand unchanged.
+> stated unconditionally, and **extends §3** to the catalog loader while retiring
+> its empty-`apiVersion` tolerance during the initial alpha-to-target bump. §1 and
+> §2 stand unchanged.
 
 > **Amended by [ADR-015](015-recipe-configuration-profiles.md).** ADR-015
 > introduces kind-scoped version evolution: `RecipeMetadata` and
@@ -100,8 +101,9 @@ the literal: `snapshotter.FullAPIVersion`, `recipe.RecipeAPIVersion`,
 `header.IsSupportedAPIVersion(v)` reports whether a non-empty `apiVersion` is
 one this binary understands. The snapshot and recipe loaders apply it:
 
-- **Empty `apiVersion`** → accepted (older artifacts predate the field; matches
-  the existing empty-`Kind` tolerance).
+- **Empty `apiVersion`** → accepted until ADR-022's initial alpha-to-target bump
+  (older artifacts predate the field; matches the existing empty-`Kind`
+  tolerance). The bump retires this exception and rejects empty values.
 - **Known `apiVersion`** → accepted.
 - **Non-empty unknown `apiVersion`** → rejected with
   `ErrCodeInvalidRequest` and a message naming the value, the expected value,
@@ -136,8 +138,9 @@ ADR-013 for the rationale.
   with a clear, actionable error instead of failing obscurely downstream.
 - The `apiVersion` literal exists exactly once; future bumps are a one-line
   change plus a transition-window entry.
-- Current artifacts are `aicr.run/v1alpha2` (accepted) or carry an empty
-  `apiVersion` (tolerated). Per ADR-013's hard break, legacy
+- Until ADR-022's initial alpha-to-target bump, current artifacts are
+  `aicr.run/v1alpha2` (accepted) or carry an empty `apiVersion` (tolerated). The
+  bump rejects empty values. Per ADR-013's hard break, legacy
   `aicr.nvidia.com/v1alpha1` artifacts are rejected and must be regenerated.
 - The gate is intentionally not a security control; the unsigned header can
   still be edited. Authenticated provenance remains the supply-chain workstream.

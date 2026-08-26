@@ -3,18 +3,21 @@
 ## Status
 
 Proposed. Amends [ADR-011](011-artifact-apiversion-policy.md): §4 (transition
-window) is replaced, §3 (compatibility gate) is extended to the catalog loader,
-and §1–§2 stand unchanged. Builds on [ADR-015](015-recipe-configuration-profiles.md),
-which already introduced kind-scoped version evolution as an amendment to ADR-011.
+window) is replaced, §3 (compatibility gate) is extended to the catalog loader
+and its empty-`apiVersion` tolerance is retired by the initial bump, and §1–§2
+stand unchanged. Coordinates with the proposed `ComponentUpgrades` artifact in
+[#2343](https://github.com/NVIDIA/aicr/pull/2343). Builds on
+[ADR-015](015-recipe-configuration-profiles.md), which already introduced
+kind-scoped version evolution as an amendment to ADR-011.
 
 ## Problem
 
 Every artifact AICR generates today carries an alpha `apiVersion`. ROADMAP
 [§2](../../ROADMAP.md#2-stability) promises a frozen, diff-gated surface at v1,
 and the Kubernetes convention that `v1alpha2` invokes — may be dropped or changed
-without notice — is the opposite of that promise. Two alpha versions coexist
-(`aicr.run/v1alpha2` for most kinds, `aicr.run/v1alpha3` for the profile-bearing
-`RecipeMetadata` and `RecipeResult`), which compounds it.
+without notice — is the opposite of that promise. Two alpha schema tracks coexist:
+`aicr.run/v1alpha2` for general kinds and default/catalog forms, and
+`aicr.run/v1alpha3` for profile-bearing `RecipeMetadata` and `RecipeResult`.
 
 A third case exists alongside those two: artifacts predating the `apiVersion`
 field carry no value at all, and every loader tolerates that explicitly
@@ -52,38 +55,56 @@ AICR reaching v1.0.0 does not require every artifact kind to reach
 `aicr.run/v1`. ROADMAP §2 asks for a committed baseline, a CI diff-gate, and a
 deprecation channel. A gate over a `v1beta1` schema is a real gate: it catches
 *unintended* breakage, which is what the freeze promises. The maturity string
-governs *intended* breakage, and it is set per kind.
+governs *intended* breakage. It is selected by wire kind and current schema
+track, because one kind may intentionally serve distinct schemas during a
+transition.
 
 This mirrors Kubernetes, which shipped 1.0 with beta APIs and serves beta
 alongside GA in every release since.
 
 ### 2. Per-kind maturity map
 
-| Kind | Today | Target | Rationale |
+Rows are keyed by wire kind and current `apiVersion` where a kind serves more
+than one schema. This makes the target deterministic for a real file without
+pretending that the legacy `Recipe` input is distinct from the canonical
+`RecipeResult` kind it normalizes to.
+
+| Wire kind or artifact | Today | Target | Rationale |
 |---|---|---|---|
 | `Snapshot` | `v1alpha2` | `aicr.run/v1` | Settled shape; the first artifact an integrator reads |
-| `Recipe`, `RecipeCriteria` | `v1alpha2` | `aicr.run/v1` | Schema exercised by 105 shipped catalog files (101 overlays, 4 mixins) |
+| `RecipeResult` (default resolved recipe) | `v1alpha2` | `aicr.run/v1` | Public resolved artifact emitted to bundles; legacy `Recipe` input normalizes to this kind |
+| `RecipeCriteria` | `v1alpha2` | `aicr.run/v1` | Public recipe-resolution input shared by the CLI, REST API, and Go client |
 | Bundle provenance (`localformat.ProvenanceAPIVersion`) | `v1alpha2` | `aicr.run/v1` | Rides in the bundle, which is what downstream integrates against |
 | `AICRConfig` | `v1alpha2` | `aicr.run/v1beta1` | Actively growing: #2026 bound 2 of 5 spec sections, #2245 binds the rest. Do not freeze a schema mid-expansion |
-| `RecipeMetadata`, `RecipeResult` | `v1alpha3` | `aicr.run/v1beta1` | Newest (ADR-015), 2 overlays, opt-in via profiles |
+| `RecipeMetadata`, `RecipeMixin` (catalog) | `v1alpha2` | `aicr.run/v1beta1` | Authoring schema exercised by 105 shipped catalog files (101 overlays, 4 mixins) |
+| `RecipeMetadata`, `RecipeResult` (profile-bearing) | `v1alpha3` | `aicr.run/v1beta1` | Newest (ADR-015), 2 overlays, opt-in via profiles |
+| `ComponentUpgrades` (proposed by #2343) | `v1alpha2` | `aicr.run/v1beta1` | New, still-evolving authoring schema; its loader and records are not implemented |
 
-The line: **whatever an integrator's code binds to must be at `v1`.** That is
-`pkg/client/v1`, the REST surface, `Snapshot`, `Recipe`, and the bundle. Local
-configuration and the profile-bearing kinds can sit at beta honestly.
+The stable public production path is at `v1`: `pkg/client/v1`, the REST surface,
+`Snapshot`, the default resolved `RecipeResult`, `RecipeCriteria`, and bundle
+provenance. Local authoring/configuration and opt-in or emerging contracts can
+sit at beta honestly.
 
-`v1alpha3` does **not** converge into the promoted version. `RecipeResult` stays
-distinct at beta, so `RecipeProfileAPIVersion` survives as the discriminator and
-the bidirectional profile/apiVersion validation in `pkg/recipe/profile.go` is
-unchanged.
+The `v1alpha3` schema does **not** converge into the promoted `v1alpha2` schema.
+The same `RecipeResult` wire kind therefore has a default `v1` contract and a
+profile-bearing `v1beta1` contract. `RecipeProfileAPIVersion` survives as the
+discriminator, and the bidirectional profile/apiVersion validation in
+`pkg/recipe/profile.go` is unchanged.
 
 ### 3. The bump happens now, as a hard break
 
-While every kind is alpha, a bump owes nothing (see §4). The 256 files carrying a
-version literal are regenerated in lockstep, exactly as
+While every kind is alpha, a bump owes nothing (see §4). All committed artifacts,
+catalog files, fixtures, examples, and docs carrying a retired version literal
+are updated or regenerated in lockstep, exactly as
 [ADR-013](013-aicr-run-domain-migration.md) did, and no dual-accept path is
 carried forward. ADR-013 made this argument already: doing it before v1 "is the
 cheapest possible moment — there is no stable contract to honor yet." That
 argument expires at GA, which is why it is spent now.
+
+Merge order with #2343 is explicit. If `ComponentUpgrades` lands first, its
+records, loader gate, examples, and tests participate in this lockstep cut to
+`aicr.run/v1beta1`. If it lands after the cut, it starts at `v1beta1`. Neither
+order introduces dual acceptance for its alpha version.
 
 **This bump skips the staged rollout in §6.** §6 exists to give a consumer a
 rollback window, and a window is only owed where §4 says one is owed. Alpha owes
@@ -143,14 +164,21 @@ this matters more here than in Kubernetes, where the apiserver converts between
 served versions.
 
 **This composes with §4 rather than duplicating it.** For a beta kind: N adds
-read support, N+1 emits the new version and deprecates the old, and the old stays
-readable through N+3. Three releases of overlap total. The two "2 releases" are
-different clocks and should not be conflated.
+read support, N+1 emits the new version and deprecates the old, and N+2 and N+3
+are the two subsequent releases in which the old remains readable. Both versions
+are readable across four releases, N through N+3; the new version is emitted
+while the old remains readable across three, N+1 through N+3. The read-support
+lead and the post-deprecation window are different clocks.
 
 ### 7. A new kind starts on the current track
 
-A kind introduced today is stamped `aicr.run/v1alpha2` (or the post-bump
-equivalent once §3 lands), never a version the tree does not already accept.
+A kind introduced before the §3 bump is stamped `aicr.run/v1alpha2`. After the
+bump, a new kind starts at `aicr.run/v1beta1` by default; it may start at
+`aicr.run/v1` only when its introducing decision establishes that its public
+contract is already ready for GA obligations. There is no implicit post-v1 alpha
+lane. Adding one requires an explicit policy amendment and read-gate entry. A
+new kind is never stamped with a version the tree does not already accept.
+
 `aicr.run/v1alpha1` in particular has never been valid: ADR-013 moved the version
 to `v1alpha2` *at* the domain rename, so the legacy pairing was
 `aicr.nvidia.com/v1alpha1`.
@@ -173,6 +201,9 @@ Silent divergence is the dangerous direction. The accept-known / reject-unknown
 gate applies per kind at every external-data boundary, including
 `--data` catalogs. An unknown `apiVersion` is an `ErrCodeInvalidRequest` naming
 the value, the expected value, and the remediation — never a silent downgrade.
+The `ComponentUpgrades` loader proposed by #2343 follows the same rule and reads
+the version selected by its §2 row and merge order, not a separately frozen
+literal.
 
 Consequence: catalog authors need a published statement of which binary versions
 accept which catalog versions. Loud breakage is the intent.
@@ -181,11 +212,13 @@ accept which catalog versions. Loud breakage is the intent.
 
 - Two version tracks exist at v1 — `aicr.run/v1` and `aicr.run/v1beta1` — instead
   of today's two alpha tracks.
-- `pkg/header` grows from two gates to roughly four, one per track, following the
-  `IsSupportedRecipeResultAPIVersion` pattern ADR-015 established.
-- A one-time regeneration touches the 256 files carrying a version literal. No
-  transition window is offered, and artifacts stamped with a prior group/version
-  must be regenerated. This is the last release in which that is free.
+- `pkg/header` grows from two broad gates to gates scoped per wire-kind/schema
+  family, following the `IsSupportedRecipeResultAPIVersion` pattern ADR-015
+  established.
+- A one-time lockstep update touches every committed artifact, catalog, fixture,
+  example, and doc carrying a retired version literal. No transition window is
+  offered, and artifacts stamped with a prior group/version must be regenerated.
+  This is the last release in which that is free.
 - `AICRConfig` and the profile-bearing kinds ship at beta and are *expected* to
   break after v1.0.0, which makes the deprecation channel (#2115) load-bearing
   rather than a documentation task.
