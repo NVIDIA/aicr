@@ -318,7 +318,7 @@ If you no longer have the directory, delete the objects by name instead:
 
 ```shell
 kubectl delete role,rolebinding aicr-agent-irsa-snapshotter-rbac -n gpu-operator
-kubectl delete clusterrole,clusterrolebinding aicr-agent-gpu-operator-irsa-snapshotter-rbac
+kubectl delete clusterrole,clusterrolebinding aicr-agent-gpu-operator.irsa-snapshotter-rbac
 ```
 
 The directory name carries a fresh run ID on every invocation, so generating
@@ -326,13 +326,10 @@ twice never overwrites a set you are still reviewing; a directory that already
 exists fails the command with `CONFLICT`. After an aicr upgrade, re-generate
 and `kubectl apply -f` the new directory to refresh the rules in place.
 
-**Check for a name collision before applying the cluster-scoped pair.** Their
-name joins the namespace and the ServiceAccount name with `-`, which is not
-injective: namespace `a-b` with ServiceAccount `c` and namespace `a` with
-ServiceAccount `b-c` both compose `aicr-agent-a-b-c-rbac`. Because nothing
-reads your cluster, applying over an existing binding of that name would
-retarget it and revoke the other ServiceAccount's grants. The generated
-`04-clusterrolebinding.yaml` says so and gives you the `kubectl get` to run.
+The cluster-scoped pair is named `aicr-agent-<namespace>.<service-account>-rbac`.
+The two segments join on `.`, which a namespace can never contain, so no other
+namespace and ServiceAccount combination can produce the same name — applying
+one grant cannot retarget another's.
 
 ### Trade-off: per-run permission isolation is waived
 

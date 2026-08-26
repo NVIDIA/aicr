@@ -461,17 +461,9 @@ func clusterRoleBindingHeader(name, namespace, serviceAccount string) string {
 # Applying this is what gives ServiceAccount %[3]q the rules in
 # %[4]s, across every namespace in the cluster.
 #
-# CHECK FOR A NAME COLLISION FIRST. This name joins the namespace and the
-# ServiceAccount name with "-", which is not injective: namespace "a-b" with
-# ServiceAccount "c" and namespace "a" with ServiceAccount "b-c" both compose
-# "aicr-agent-a-b-c-rbac". aicr contacted no cluster and could not check.
-# Applying over an existing binding of this name would retarget it and revoke
-# the other ServiceAccount's cluster permissions:
-#
-#   kubectl get clusterrolebinding %[1]s -o yaml
-#
-# If it already exists and names a different subject, rename one of the two
-# namespaces or ServiceAccounts so the generated names differ.
+# The name joins the namespace and the ServiceAccount on ".", which no
+# namespace may contain, so no other (namespace, ServiceAccount) pair can
+# compose this name.
 `, name, namespace, serviceAccount, clusterRoleFileName)
 }
 
@@ -488,12 +480,19 @@ func provisionedRoleName(serviceAccount string) string {
 // objects are cluster-scoped and the same ServiceAccount name can exist in
 // several namespaces.
 //
-// Joining two "-"-bearing segments is not injective ("a-b"/"c" and
-// "a"/"b-c" compose the same string). Nothing here can detect that — no
-// cluster is read — so the rendered ClusterRoleBinding warns about it in its
-// header and tells the operator how to check before applying.
+// The two segments join on "." rather than "-" so the composition is
+// injective. A "-" join is not: namespace "a-b" with ServiceAccount "c" and
+// namespace "a" with ServiceAccount "b-c" compose the same string, and
+// applying the second render over the first would retarget the existing
+// ClusterRoleBinding and revoke the other ServiceAccount's cluster
+// permissions. Nothing here could detect that, because no cluster is read.
+//
+// "." is safe and sufficient: a namespace is a DNS-1123 *label*, which cannot
+// contain a dot, while a ClusterRole name is a DNS-1123 *subdomain*, which
+// can. The first dot therefore always separates namespace from ServiceAccount,
+// whatever either contains.
 func provisionedClusterRoleName(namespace, serviceAccount string) string {
-	return provisionedNamePrefix + namespace + "-" + serviceAccount + provisionedNameSuffix
+	return provisionedNamePrefix + namespace + "." + serviceAccount + provisionedNameSuffix
 }
 
 // provisionedLabels is the label set stamped on every rendered object.

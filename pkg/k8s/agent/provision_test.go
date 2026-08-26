@@ -16,6 +16,7 @@ package agent
 
 import (
 	stderrors "errors"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"reflect"
 	"strings"
 	"testing"
@@ -52,6 +53,43 @@ func manifestByFile(manifests []Manifest) map[string]Manifest {
 	return byFile
 }
 
+// TestProvisionedClusterRoleNameIsInjective pins the property the "." join
+// exists for. These two (namespace, ServiceAccount) pairs compose the same
+// string under a "-" join, and the collision is not academic: the second
+// render applied over the first retargets the live ClusterRoleBinding and
+// revokes the first ServiceAccount's cluster permissions. Nothing in the
+// generator can detect it, because it reads no cluster.
+//
+// A namespace is a DNS-1123 label and cannot contain ".", so the first dot
+// always separates the two segments. Switching the join back to "-" fails
+// this test.
+func TestProvisionedClusterRoleNameIsInjective(t *testing.T) {
+	tests := []struct {
+		name      string
+		namespace string
+		sa        string
+	}{
+		{"hyphen in the namespace", "a-b", "c"},
+		{"hyphen in the ServiceAccount", "a", "b-c"},
+		{"dot in the ServiceAccount is still unambiguous", "a", "b.c"},
+	}
+
+	seen := make(map[string]string, len(tests))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := provisionedClusterRoleName(tt.namespace, tt.sa)
+			if errs := validation.IsDNS1123Subdomain(got); len(errs) > 0 {
+				t.Errorf("%q is not a valid ClusterRole name: %v", got, errs)
+			}
+			if prior, ok := seen[got]; ok {
+				t.Errorf("%s/%s collides with %s on name %q",
+					tt.namespace, tt.sa, prior, got)
+			}
+			seen[got] = tt.namespace + "/" + tt.sa
+		})
+	}
+}
+
 // TestBuildServiceAccountRoleManifests_FilesAndNames pins the file layout and
 // the naming scheme together, because both are contracts an operator's
 // commands depend on: `kubectl apply -f <dir>/` relies on one parseable
@@ -64,7 +102,7 @@ func TestBuildServiceAccountRoleManifests_FilesAndNames(t *testing.T) {
 	manifests := buildManifests(t, false)
 
 	wantRole := "aicr-agent-" + provisionSA + "-rbac"
-	wantClusterRole := "aicr-agent-" + testNamespace + "-" + provisionSA + "-rbac"
+	wantClusterRole := "aicr-agent-" + testNamespace + "." + provisionSA + "-rbac"
 
 	want := []struct {
 		file string

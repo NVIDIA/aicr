@@ -605,8 +605,8 @@ func TestWriteManifestReport(t *testing.T) {
 		Objects: []snapshotter.AgentRoleObject{
 			{Kind: "Role", Name: "aicr-agent-irsa-snapshotter-rbac", Path: dir + "/01-role.yaml"},
 			{Kind: "RoleBinding", Name: "aicr-agent-irsa-snapshotter-rbac", Path: dir + "/02-rolebinding.yaml"},
-			{Kind: "ClusterRole", Name: "aicr-agent-gpu-operator-irsa-snapshotter-rbac", Path: dir + "/03-clusterrole.yaml"},
-			{Kind: "ClusterRoleBinding", Name: "aicr-agent-gpu-operator-irsa-snapshotter-rbac", Path: dir + "/04-clusterrolebinding.yaml"},
+			{Kind: "ClusterRole", Name: "aicr-agent-gpu-operator.irsa-snapshotter-rbac", Path: dir + "/03-clusterrole.yaml"},
+			{Kind: "ClusterRoleBinding", Name: "aicr-agent-gpu-operator.irsa-snapshotter-rbac", Path: dir + "/04-clusterrolebinding.yaml"},
 		},
 	}
 
@@ -625,7 +625,7 @@ func TestWriteManifestReport(t *testing.T) {
 				"kubectl delete -f " + dir + "/",
 				"01-role.yaml",
 				"role/aicr-agent-irsa-snapshotter-rbac",
-				"clusterrolebinding/aicr-agent-gpu-operator-irsa-snapshotter-rbac",
+				"clusterrolebinding/aicr-agent-gpu-operator.irsa-snapshotter-rbac",
 				"not verified to exist",
 				"permission isolation is waived",
 				"aicr snapshot --namespace gpu-operator --service-account-name irsa-snapshotter",
