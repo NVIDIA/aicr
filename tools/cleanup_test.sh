@@ -132,6 +132,9 @@ check_contains "phase1-nonexcluded-release-uninstalled" "helm uninstall gpu-oper
 check_contains "phase4-excluded-ns-skipped" "skip (excluded ns): skyhook"
 check_absent   "phase4-excluded-ns-not-deleted" "kubectl delete ns skyhook "
 check_contains "phase4-check-backstop-deleted" "kubectl delete ns ${STUB_GANG_NS}"
+# The CNCF evidence collector creates the unsuffixed namespace, so both the
+# exact name and the per-run prefix must be swept. See #2395.
+check_contains "phase4-check-backstop-exact-deleted" "kubectl delete ns gang-scheduling-test "
 
 # 4. Phase 3: excluded CRD match is echoed under dry-run.
 check_contains "phase3-excluded-crd-echoed" "excluding CRDs matching: skyhook.nvidia.com"

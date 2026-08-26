@@ -109,14 +109,35 @@ func TestCleanupGangTestResourcesPreservesConcurrentRun(t *testing.T) {
 	}
 	clientset := k8sfake.NewSimpleClientset(objs...)
 
+	// Seed both PodGroups. Without them the production delete below only ever
+	// sees an ignored NotFound, so the isolation assertion would pass even if
+	// cleanup targeted run B.
+	scheme := runtime.NewScheme()
 	dynClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
-		runtime.NewScheme(),
+		scheme,
 		map[schema.GroupVersionResource]string{podGroupGVR: "PodGroupList"},
+		buildPodGroup(runA), buildPodGroup(runB),
 	)
+
+	for _, run := range []*gangTestRun{runA, runB} {
+		if _, err := dynClient.Resource(podGroupGVR).Namespace(run.namespace).Get(
+			context.Background(), run.groupName, metav1.GetOptions{}); err != nil {
+			t.Fatalf("seeded PodGroup %s/%s not retrievable: %v", run.namespace, run.groupName, err)
+		}
+	}
 
 	// Run A finishes first and tears itself down while run B is still live.
 	if err := cleanupGangTestResources(context.Background(), clientset, dynClient, runA); err != nil {
 		t.Fatalf("cleanupGangTestResources(runA) returned error: %v", err)
+	}
+
+	if _, err := dynClient.Resource(podGroupGVR).Namespace(runA.namespace).Get(
+		context.Background(), runA.groupName, metav1.GetOptions{}); !k8serrors.IsNotFound(err) {
+		t.Errorf("runA PodGroup %s still present after its own cleanup: err=%v", runA.groupName, err)
+	}
+	if _, err := dynClient.Resource(podGroupGVR).Namespace(runB.namespace).Get(
+		context.Background(), runB.groupName, metav1.GetOptions{}); err != nil {
+		t.Errorf("runA cleanup destroyed concurrent runB PodGroup %s: %v", runB.groupName, err)
 	}
 
 	if _, err := clientset.CoreV1().Namespaces().Get(
