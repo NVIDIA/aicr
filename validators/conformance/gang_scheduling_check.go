@@ -36,11 +36,11 @@ import (
 )
 
 const (
-	gangTestNamespace = "gang-scheduling-test"
-	gangTestPrefix    = "gang-test-"
-	gangPodPrefix     = "gang-worker-"
-	gangGroupPrefix   = "gang-group-"
-	gangMinMembers    = 2
+	gangTestNSPrefix = "gang-scheduling-test-"
+	gangTestPrefix   = "gang-test-"
+	gangPodPrefix    = "gang-worker-"
+	gangGroupPrefix  = "gang-group-"
+	gangMinMembers   = 2
 
 	// kaiSchedulerName is the KAI scheduler's canonical identifier — it is
 	// simultaneously the install namespace, the schedulerName the test pods
@@ -70,6 +70,7 @@ var podGroupGVR = schema.GroupVersionResource{
 // gangTestRun holds per-invocation resource names to avoid collisions.
 type gangTestRun struct {
 	suffix    string
+	namespace string
 	groupName string
 	pods      [gangMinMembers]string
 }
@@ -88,6 +89,7 @@ func newGangTestRun() (*gangTestRun, error) {
 	suffix := hex.EncodeToString(b)
 	run := &gangTestRun{
 		suffix:    suffix,
+		namespace: gangTestNSPrefix + suffix,
 		groupName: gangGroupPrefix + suffix,
 	}
 	for i := range gangMinMembers {
@@ -196,7 +198,7 @@ func CheckGangScheduling(ctx *validators.Context) error {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 		defer cleanupCancel()
 		nsErr := cleanupGangTestResources(cleanupCtx, ctx.Clientset, dynClient, run)
-		result := "Deleted gang test pods, PodGroup, and the gang-scheduling-test namespace."
+		result := fmt.Sprintf("Deleted gang test pods, PodGroup, and the %s namespace.", run.namespace)
 		if nsErr != nil {
 			// Report the real outcome: a failed namespace delete leaves residue,
 			// so don't record a false success (tools/cleanup is the backstop).
@@ -205,13 +207,13 @@ func CheckGangScheduling(ctx *validators.Context) error {
 				nsErr)
 		}
 		recordRawTextArtifact(ctx, "Delete test namespace",
-			"kubectl delete namespace gang-scheduling-test --ignore-not-found", result)
+			fmt.Sprintf("kubectl delete namespace %s --ignore-not-found", run.namespace), result)
 	}()
 
 	recordRawTextArtifact(ctx, "Apply test manifest",
 		"kubectl apply generated CPU-only PodGroup test resources",
 		fmt.Sprintf("Created PodGroup=%s Pods=%s,%s in namespace=%s",
-			run.groupName, run.pods[0], run.pods[1], gangTestNamespace))
+			run.groupName, run.pods[0], run.pods[1], run.namespace))
 
 	if err = deployGangTestResources(ctx.Ctx, ctx.Clientset, dynClient, run, ctx.Tolerations); err != nil {
 		return err
@@ -235,11 +237,11 @@ func collectGangTestArtifacts(ctx *validators.Context, dynClient dynamic.Interfa
 	pods [gangMinMembers]*corev1.Pod, gangReport *gangSchedulingReport, run *gangTestRun) {
 
 	// PodGroup status.
-	pgList, listErr := dynClient.Resource(podGroupGVR).Namespace(gangTestNamespace).List(
+	pgList, listErr := dynClient.Resource(podGroupGVR).Namespace(run.namespace).List(
 		ctx.Ctx, metav1.ListOptions{})
 	if listErr != nil {
 		recordRawTextArtifact(ctx, "PodGroup status",
-			"kubectl get podgroups -n gang-scheduling-test -o wide",
+			fmt.Sprintf("kubectl get podgroups -n %s -o wide", run.namespace),
 			fmt.Sprintf("failed to list PodGroups: %v", listErr))
 	} else {
 		var pgSummary strings.Builder
@@ -248,7 +250,7 @@ func collectGangTestArtifacts(ctx *validators.Context, dynClient dynamic.Interfa
 			fmt.Fprintf(&pgSummary, "%-36s minMember=%d\n", item.GetName(), minMember)
 		}
 		recordRawTextArtifact(ctx, "PodGroup status",
-			"kubectl get podgroups -n gang-scheduling-test -o wide", pgSummary.String())
+			fmt.Sprintf("kubectl get podgroups -n %s -o wide", run.namespace), pgSummary.String())
 	}
 
 	// Pod status and scheduling timestamps.
@@ -273,21 +275,21 @@ func collectGangTestArtifacts(ctx *validators.Context, dynClient dynamic.Interfa
 		gangReport.EarliestScheduled.Format(time.RFC3339),
 		gangReport.LatestScheduled.Format(time.RFC3339))
 	recordRawTextArtifact(ctx, "Pod status",
-		"kubectl get pods -n gang-scheduling-test -o wide", gangResults.String())
+		fmt.Sprintf("kubectl get pods -n %s -o wide", run.namespace), gangResults.String())
 
 	// Worker logs.
 	for i := range gangMinMembers {
-		logBytes, logErr := ctx.Clientset.CoreV1().Pods(gangTestNamespace).GetLogs(
+		logBytes, logErr := ctx.Clientset.CoreV1().Pods(run.namespace).GetLogs(
 			run.pods[i], &corev1.PodLogOptions{}).DoRaw(ctx.Ctx)
-		label := fmt.Sprintf("gang-worker-%d logs", i)
+		label := fmt.Sprintf("%s logs", run.pods[i])
 		if logErr != nil {
 			recordRawTextArtifact(ctx, label,
-				fmt.Sprintf("kubectl logs gang-worker-%d -n gang-scheduling-test", i),
+				fmt.Sprintf("kubectl logs %s -n %s", run.pods[i], run.namespace),
 				fmt.Sprintf("failed to read logs: %v", logErr))
 			continue
 		}
 		recordRawTextArtifact(ctx, label,
-			fmt.Sprintf("kubectl logs gang-worker-%d -n gang-scheduling-test", i),
+			fmt.Sprintf("kubectl logs %s -n %s", run.pods[i], run.namespace),
 			string(logBytes))
 	}
 }
@@ -297,7 +299,7 @@ func collectGangTestArtifacts(ctx *validators.Context, dynClient dynamic.Interfa
 func deployGangTestResources(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *gangTestRun, tolerations []corev1.Toleration) error {
 	// 1. Create namespace (idempotent).
 	ns := &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{Name: gangTestNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: run.namespace},
 	}
 	if _, err := clientset.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{}); k8s.IgnoreAlreadyExists(err) != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
@@ -305,7 +307,7 @@ func deployGangTestResources(ctx context.Context, clientset kubernetes.Interface
 
 	// 2. Create PodGroup.
 	podGroup := buildPodGroup(run)
-	if _, err := dynClient.Resource(podGroupGVR).Namespace(gangTestNamespace).Create(
+	if _, err := dynClient.Resource(podGroupGVR).Namespace(run.namespace).Create(
 		ctx, podGroup, metav1.CreateOptions{}); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create PodGroup", err)
 	}
@@ -313,7 +315,7 @@ func deployGangTestResources(ctx context.Context, clientset kubernetes.Interface
 	// 3. Create Pods.
 	for i := range gangMinMembers {
 		pod := buildGangTestPod(run, i, tolerations)
-		if _, err := clientset.CoreV1().Pods(gangTestNamespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+		if _, err := clientset.CoreV1().Pods(run.namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to create gang test pod %s", run.pods[i]), err)
 		}
@@ -336,7 +338,7 @@ func waitForGangTestPods(ctx context.Context, clientset kubernetes.Interface, ru
 				if result[i] != nil {
 					continue // already terminal
 				}
-				pod, err := clientset.CoreV1().Pods(gangTestNamespace).Get(
+				pod, err := clientset.CoreV1().Pods(run.namespace).Get(
 					ctx, run.pods[i], metav1.GetOptions{})
 				if err != nil {
 					return false, errors.Wrap(errors.ErrCodeInternal,
@@ -441,8 +443,6 @@ func validateGangPatterns(pods [gangMinMembers]*corev1.Pod, run *gangTestRun) (*
 	}, nil
 }
 
-// cleanupGangTestResources removes test resources. Best-effort: errors are ignored.
-// The namespace is intentionally NOT deleted — namespace deletion can hang on DRA finalizers.
 // cleanupGangTestResources tears down the gang test pods, PodGroup, and
 // namespace best-effort. It returns the namespace deletion error (nil on
 // success) so the caller can record the true outcome instead of a false
@@ -451,24 +451,25 @@ func validateGangPatterns(pods [gangMinMembers]*corev1.Pod, run *gangTestRun) (*
 func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interface, dynClient dynamic.Interface, run *gangTestRun) error {
 	// Delete pods first (releases claim reservations).
 	for i := range gangMinMembers {
-		_ = k8s.IgnoreNotFound(clientset.CoreV1().Pods(gangTestNamespace).Delete(
+		_ = k8s.IgnoreNotFound(clientset.CoreV1().Pods(run.namespace).Delete(
 			ctx, run.pods[i], metav1.DeleteOptions{}))
 	}
 	// Wait for pod deletions.
 	for i := range gangMinMembers {
 		podName := run.pods[i]
 		waitForDeletion(ctx, func() error {
-			_, err := clientset.CoreV1().Pods(gangTestNamespace).Get(ctx, podName, metav1.GetOptions{})
+			_, err := clientset.CoreV1().Pods(run.namespace).Get(ctx, podName, metav1.GetOptions{})
 			return err
 		})
 	}
 	// Delete PodGroup.
-	_ = k8s.IgnoreNotFound(dynClient.Resource(podGroupGVR).Namespace(gangTestNamespace).Delete(
+	_ = k8s.IgnoreNotFound(dynClient.Resource(podGroupGVR).Namespace(run.namespace).Delete(
 		ctx, run.groupName, metav1.DeleteOptions{}))
 	// Delete the namespace so a cluster reset leaves no residue. Pods and the
 	// PodGroup are already gone, so this is a single bounded (background
-	// propagation) API call. tools/cleanup lists gang-scheduling-test as a
-	// backstop for interrupted runs; deleting it here is the primary path.
+	// propagation) API call. tools/cleanup sweeps the gang-scheduling-test-
+	// prefix as a backstop for interrupted runs; deleting it here is the
+	// primary path.
 	//
 	// Use a dedicated deadline rather than the shared cleanup ctx: a pod stuck
 	// on a finalizer can burn the whole budget in the waits above, and starving
@@ -476,7 +477,7 @@ func cleanupGangTestResources(ctx context.Context, clientset kubernetes.Interfac
 	nsCtx, nsCancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 	defer nsCancel()
 	//nolint:contextcheck // fresh deadline so an earlier stuck wait cannot starve namespace teardown
-	if err := k8s.IgnoreNotFound(clientset.CoreV1().Namespaces().Delete(nsCtx, gangTestNamespace, metav1.DeleteOptions{})); err != nil {
+	if err := k8s.IgnoreNotFound(clientset.CoreV1().Namespaces().Delete(nsCtx, run.namespace, metav1.DeleteOptions{})); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to delete gang test namespace", err)
 	}
 	return nil
@@ -490,7 +491,7 @@ func buildPodGroup(run *gangTestRun) *unstructured.Unstructured {
 			keyKind:       "PodGroup",
 			keyMetadata: map[string]any{
 				keyName:      run.groupName,
-				keyNamespace: gangTestNamespace,
+				keyNamespace: run.namespace,
 			},
 			keySpec: map[string]any{
 				"minMember": int64(gangMinMembers),
@@ -509,7 +510,7 @@ func buildGangTestPod(run *gangTestRun, index int, tolerations []corev1.Tolerati
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      run.pods[index],
-			Namespace: gangTestNamespace,
+			Namespace: run.namespace,
 			// pod-group-name is the LOAD-BEARING association: KAI's
 			// pod-grouper skips a bare pod carrying this annotation and the
 			// scheduler joins it to the pre-created PodGroup. The labels

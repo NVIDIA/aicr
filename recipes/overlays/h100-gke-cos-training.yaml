@@ -21,6 +21,21 @@ spec:
   # Inherits from gke-cos-training recipe (GKE COS + training settings)
   base: gke-cos-training
 
+  # Machine type: this leaf is qualified on a3-megagpu-8g only.
+  #
+  # `accelerator: h100` names the GPU model, and GKE offers it on several A3
+  # machine types with different fabrics: a3-megagpu-8g uses GPUDirect-TCPXO,
+  # a3-highgpu-8g / a3-edgegpu-8g use GPUDirect-TCPX, and the smaller
+  # a3-highgpu-1g/2g/4g shapes have no GPUDirect at all. The criteria model has
+  # no axis that distinguishes them, so these criteria match all of them while
+  # the gke-nccl-tcpxo DaemonSets below pin node affinity to
+  # `cloud.google.com/gke-accelerator: nvidia-h100-mega-80gb`.
+  #
+  # On a non-mega shape nothing schedules and the deployment health check fails
+  # loudly (`desiredNumberScheduled > 0`). AICR ships no GPUDirect-TCPX
+  # component, so those shapes have no working alternative. Selection fix and a
+  # TCPX component are tracked in #2290; whether criteria should gain a
+  # machine-type or fabric axis is tracked in #2377.
   criteria:
     service: gke
     accelerator: h100

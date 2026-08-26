@@ -38,6 +38,10 @@ CLEANUP="${SCRIPT_DIR}/cleanup"
 STUB_DIR="$(mktemp -d)"
 trap 'rm -rf "${STUB_DIR}"' EXIT
 
+# A representative per-run gang-scheduling namespace, as the conformance
+# check would create it (gang-scheduling-test-<suffix>).
+export STUB_GANG_NS="gang-scheduling-test-0a1b2c3d"
+
 cat >"${STUB_DIR}/kubectl" <<'STUB'
 #!/usr/bin/env bash
 [[ -n "${KLOG:-}" ]] && printf '%s\n' "$*" >>"${KLOG}"
@@ -52,6 +56,15 @@ if [[ "$1" == "get" ]]; then
             ;;
         ns|namespace)
             for a in "$@"; do [[ "$a" == *status.phase* ]] && { echo "Terminating"; exit 0; }; done
+            # `get ns -o name` drives the check-namespace prefix sweep: the
+            # gang-scheduling check derives a per-run namespace, so cleanup
+            # discovers it at runtime rather than matching a fixed name.
+            for a in "$@"; do
+                [[ "$a" == "name" ]] && {
+                    printf '%s\n' "namespace/${STUB_GANG_NS}"
+                    exit 0
+                }
+            done
             ;;
         configmaps) echo "configmap/stub-cm" ;;
     esac
@@ -118,7 +131,10 @@ check_contains "phase1-nonexcluded-release-uninstalled" "helm uninstall gpu-oper
 #    namespace is still deleted.
 check_contains "phase4-excluded-ns-skipped" "skip (excluded ns): skyhook"
 check_absent   "phase4-excluded-ns-not-deleted" "kubectl delete ns skyhook "
-check_contains "phase4-check-backstop-deleted" "kubectl delete ns gang-scheduling-test"
+check_contains "phase4-check-backstop-deleted" "kubectl delete ns ${STUB_GANG_NS}"
+# The CNCF evidence collector creates the unsuffixed namespace, so both the
+# exact name and the per-run prefix must be swept. See #2395.
+check_contains "phase4-check-backstop-exact-deleted" "kubectl delete ns gang-scheduling-test "
 
 # 4. Phase 3: excluded CRD match is echoed under dry-run.
 check_contains "phase3-excluded-crd-echoed" "excluding CRDs matching: skyhook.nvidia.com"
@@ -142,7 +158,7 @@ check_rc_nonzero "flag-shaped-exclude-ns-arg-fails"
 # 8. No-exclusion path runs cleanly under set -u (empty arrays).
 run --dry-run
 check_rc "no-flags-dry-run-succeeds" 0
-check_contains "no-flags-backstop-present" "kubectl delete ns gang-scheduling-test"
+check_contains "no-flags-backstop-present" "kubectl delete ns ${STUB_GANG_NS}"
 
 # 9. Whitespace-padded CSV tokens are trimmed (both are protected).
 run --dry-run --exclude-ns 'skyhook, gpu-operator'
@@ -166,12 +182,50 @@ has     "live-crd-nonexcluded-deleted" "${klog}" "delete customresourcedefinitio
 has_not "live-nothing-skyhook-in-kubectl" "${klog}" "skyhook"
 # Namespace phase: backstop deleted; excluded namespace neither deleted nor
 # finalizer-patched (the has_not above already covers skyhook end-to-end).
-has     "live-backstop-ns-deleted" "${klog}" "delete ns gang-scheduling-test"
+has     "live-backstop-ns-deleted" "${klog}" "delete ns ${STUB_GANG_NS}"
 # Finalizer rescue actually engaged on a non-excluded Terminating namespace.
-has     "live-finalizer-rescue-ran" "${klog}" "patch configmap/stub-cm -n gang-scheduling-test"
+has     "live-finalizer-rescue-ran" "${klog}" "patch configmap/stub-cm -n ${STUB_GANG_NS}"
 # Helm phase: AICR-owned release uninstalled; out-of-band release left alone.
 has     "live-helm-nonexcluded-uninstalled" "${hlog}" "uninstall gpu-operator"
 has_not "live-helm-excluded-untouched" "${hlog}" "nodewright"
+
+# A failing namespace list must be reported, not silently treated as "no
+# namespaces matched". Under `set -e` a bare failing assignment would exit the
+# discovery subshell before its status could be checked, and because that
+# function's stdout feeds the namespace list, a warning printed to stdout would
+# be consumed as a namespace name. See #2395.
+FAIL_DIR="$(mktemp -d)"
+cat >"${FAIL_DIR}/kubectl" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "config" && "$2" == "current-context" ]]; then echo "stub-ctx"; exit 0; fi
+if [[ "$1" == "get" && ( "$2" == "ns" || "$2" == "namespace" ) ]]; then
+    echo "simulated API failure" >&2
+    exit 23
+fi
+exit 0
+STUB
+printf '#!/usr/bin/env bash\nexit 0\n' >"${FAIL_DIR}/helm"
+chmod +x "${FAIL_DIR}/kubectl" "${FAIL_DIR}/helm"
+
+NSFAIL_OUT="$(PATH="${FAIL_DIR}:${PATH}" "${CLEANUP}" --dry-run --yes 2>&1)"
+NSFAIL_RC=$?
+
+if [[ "${NSFAIL_RC}" == "0" ]]; then
+    pass "nsfail-exit-stays-zero"
+else
+    fail "nsfail-exit-stays-zero" "want rc=0 (best-effort), got rc=${NSFAIL_RC}"
+fi
+if [[ "${NSFAIL_OUT}" == *"Could not list namespaces"* ]]; then
+    pass "nsfail-warning-visible"
+else
+    fail "nsfail-warning-visible" "expected a 'Could not list namespaces' warning"
+fi
+if [[ "${NSFAIL_OUT}" != *"delete ns "*"Could not list"* ]]; then
+    pass "nsfail-warning-not-treated-as-namespace"
+else
+    fail "nsfail-warning-not-treated-as-namespace" "warning text leaked into the namespace list"
+fi
+rm -rf "${FAIL_DIR}"
 
 if (( fails > 0 )); then
     echo "${fails} test(s) failed"

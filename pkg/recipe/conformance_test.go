@@ -179,6 +179,52 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			wantDRAConstraint: true,
 		},
 		{
+			// gb200 EKS + OKE Dynamo leaves: pinned by name so gang-scheduling
+			// cannot silently drop out again (#2390). requiredChecks is a
+			// subset assertion, so listing it here is what makes the check
+			// asserted rather than only covered by catalog golden digests.
+			name: "gb200-eks-ubuntu-inference-dynamo",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorGB200
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentInference
+				c.Platform = CriteriaPlatformDynamo
+				return c
+			},
+			requiredComponents: []string{
+				"kai-scheduler",
+				"grove",
+				"dynamo-platform",
+			},
+			requiredChecks: []string{
+				"gang-scheduling",
+				"inference-gateway",
+			},
+		},
+		{
+			name: "gb200-oke-ubuntu-inference-dynamo",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceOKE
+				c.Accelerator = CriteriaAcceleratorGB200
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentInference
+				c.Platform = CriteriaPlatformDynamo
+				return c
+			},
+			requiredComponents: []string{
+				"kai-scheduler",
+				"grove",
+				"dynamo-platform",
+			},
+			requiredChecks: []string{
+				"gang-scheduling",
+				"inference-gateway",
+			},
+		},
+		{
 			name: "h100-eks-ubuntu-inference-dynamo",
 			criteria: func() *Criteria {
 				c := NewCriteria()
