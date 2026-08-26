@@ -332,6 +332,7 @@ func waitForGangTestPods(ctx context.Context, clientset kubernetes.Interface, ru
 	waitCtx, cancel := context.WithTimeout(ctx, defaults.GangTestPodTimeout)
 	defer cancel()
 
+	var lastReadErr error
 	err := wait.PollUntilContextCancel(waitCtx, defaults.PodPollInterval, true,
 		func(ctx context.Context) (bool, error) {
 			allDone := true
@@ -349,6 +350,7 @@ func waitForGangTestPods(ctx context.Context, clientset kubernetes.Interface, ru
 					// #1513 fixed one step earlier in this function. Let the
 					// enclosing GangTestPodTimeout decide instead.
 					if isK8sTimeoutErr(err) {
+						lastReadErr = err
 						slog.Debug("transient read while polling gang test pod; retrying",
 							"pod", run.pods[i], "error", err)
 						allDone = false
@@ -369,6 +371,12 @@ func waitForGangTestPods(ctx context.Context, clientset kubernetes.Interface, ru
 	)
 	if err != nil {
 		if ctx.Err() != nil || waitCtx.Err() != nil {
+			// Preserve the last transient read error: a sustained throttle
+			// otherwise looks identical to pods that never completed.
+			if lastReadErr != nil {
+				return result, errors.Wrap(errors.ErrCodeTimeout,
+					"gang test pods unreadable (reads kept failing)", lastReadErr)
+			}
 			return result, errors.Wrap(errors.ErrCodeTimeout, "gang test pods did not complete in time", err)
 		}
 		return result, errors.Wrap(errors.ErrCodeInternal, "gang test pod polling failed", err)

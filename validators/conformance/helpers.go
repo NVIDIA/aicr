@@ -175,6 +175,7 @@ func waitForDeploymentAvailable(ctx *validators.Context, namespace, name string,
 	defer cancel()
 
 	var last *appsv1.Deployment
+	var lastReadErr error
 	err := wait.PollUntilContextCancel(pollCtx, defaults.PodPollInterval, true,
 		func(c context.Context) (bool, error) {
 			deploy, getErr := ctx.Clientset.AppsV1().Deployments(namespace).Get(c, name, metav1.GetOptions{})
@@ -182,9 +183,20 @@ func waitForDeploymentAvailable(ctx *validators.Context, namespace, name string,
 				if k8serrors.IsNotFound(getErr) {
 					return false, nil // not created yet — keep waiting within the bound
 				}
-				return false, errors.Wrap(errors.ErrCodeInternal,
-					fmt.Sprintf("failed to get deployment %s/%s", namespace, name), getErr)
+				// A read that could not land is not a verdict. Client-go's own
+				// rate limiter fails reads under load, and aborting here failed
+				// callers on a healthy cluster (#2406). Retry within the bound;
+				// genuine errors (RBAC, malformed) still abort immediately.
+				if isK8sTimeoutErr(getErr) {
+					lastReadErr = getErr
+					slog.Debug("transient read while waiting for deployment; retrying",
+						"namespace", namespace, "deployment", name, "error", getErr)
+					return false, nil
+				}
+				return false, classifyK8sReadError(getErr,
+					fmt.Sprintf("deployment %s/%s", namespace, name))
 			}
+			lastReadErr = nil
 			last = deploy
 			return deploy.Status.AvailableReplicas >= 1, nil
 		},
@@ -214,6 +226,13 @@ func waitForDeploymentAvailable(ctx *validators.Context, namespace, name string,
 	// available in time. Surface the NotFound-shaped not-available message the
 	// caller wraps. A non-deadline error is a genuine API failure — propagate it.
 	if pollCtx.Err() != nil {
+		// A sustained throttle would otherwise be indistinguishable from "never
+		// became ready" — keep the last read error so the operator sees why.
+		if lastReadErr != nil {
+			return last, errors.Wrap(errors.ErrCodeTimeout,
+				fmt.Sprintf("deployment %s/%s unreadable for %s (reads kept failing)",
+					namespace, name, timeout), lastReadErr)
+		}
 		if last == nil {
 			return nil, errors.New(errors.ErrCodeNotFound,
 				fmt.Sprintf("deployment %s/%s not found after %s", namespace, name, timeout))

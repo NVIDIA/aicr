@@ -16,10 +16,16 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/validators"
+
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -222,7 +228,74 @@ func TestWaitForGangTestPodsFailsClosedOnTerminalRead(t *testing.T) {
 			schema.GroupResource{Resource: "pods"}, run.pods[0], fmt.Errorf("no access"))
 	})
 
-	if _, err := waitForGangTestPods(context.Background(), clientset, run); err == nil {
+	_, err = waitForGangTestPods(context.Background(), clientset, run)
+	if err == nil {
 		t.Fatal("expected a terminal read error to fail the check, got nil")
+	}
+	// Assert the code, not just non-nil: a mis-coded Forbidden would otherwise
+	// slip through this guard.
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		t.Errorf("Forbidden should classify as ErrCodeInternal, got %v", err)
+	}
+}
+
+// TestWaitForGangTestPodsNotFoundIsTerminal pins the one error-mapping change
+// this fix makes. The pods are created by deployGangTestResources immediately
+// beforehand, and a Get with unset ResourceVersion is a quorum read, so
+// NotFound means the pod genuinely went away — it must abort, not retry until
+// the bound expires.
+func TestWaitForGangTestPodsNotFoundIsTerminal(t *testing.T) {
+	run, err := newGangTestRun()
+	if err != nil {
+		t.Fatalf("newGangTestRun: %v", err)
+	}
+	clientset := k8sfake.NewSimpleClientset() // no pods seeded
+
+	start := time.Now()
+	_, err = waitForGangTestPods(context.Background(), clientset, run)
+	if err == nil {
+		t.Fatal("expected NotFound to fail the check, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		t.Errorf("want ErrCodeNotFound, got %v", err)
+	}
+	// Terminal means immediate: it must not have burned the poll budget.
+	if elapsed := time.Since(start); elapsed > 30*time.Second {
+		t.Errorf("NotFound should abort immediately, took %s", elapsed)
+	}
+}
+
+// TestWaitForDeploymentAvailableRetriesTransientReads covers the same defect at
+// the site that runs FIRST in the gang check (step 1, via
+// gang_scheduling_check.go's KAI deployment readiness loop). Fixing only the
+// pod poll would have left the check flaking a few lines earlier under the same
+// throttling. See #2406; this function is the one #1514 introduced for #1513.
+func TestWaitForDeploymentAvailableRetriesTransientReads(t *testing.T) {
+	const ns, name = "kai-scheduler", "podgroup-controller"
+	ready := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		Status:     appsv1.DeploymentStatus{AvailableReplicas: 1},
+	}
+	clientset := k8sfake.NewSimpleClientset(ready)
+
+	var reads atomic.Int32
+	clientset.PrependReactor("get", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if reads.Add(1) <= 2 {
+			return true, nil, fmt.Errorf(
+				"client rate limiter Wait returned an error: %w", context.DeadlineExceeded)
+		}
+		return false, nil, nil
+	})
+
+	vctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
+	deploy, err := waitForDeploymentAvailable(vctx, ns, name, 30*time.Second)
+	if err != nil {
+		t.Fatalf("aborted on a transient read: %v", err)
+	}
+	if deploy == nil || deploy.Status.AvailableReplicas != 1 {
+		t.Errorf("expected the ready deployment after retry, got %v", deploy)
+	}
+	if got := reads.Load(); got < 3 {
+		t.Errorf("expected retries past the throttled reads, saw %d", got)
 	}
 }
