@@ -85,7 +85,7 @@ Twelve decisions. The first four define the artifact and where it ships; the nex
 | | Decision | In one line |
 |---|---|---|
 | 1 | [Boundary](#decision-1-boundary) | Whoever authors a chart owns its migration content. The remedy for third-party charts is the record, not an upstream PR. |
-| 2 | [Transition records](#decision-2-transition-records) | Per-component YAML keyed by semver ranges, with a verdict, deployer-grouped steps, and strict directionality. |
+| 2 | [Transition records](#decision-2-transition-records) | Per-component YAML keyed by semver ranges. Directional, never forward-reaching, and a `safe` verdict must name what verified it. |
 | 3 | [Ownership classes](#decision-3-ownership-classes-and-what-aicr-can-see) | Upstream, AICR-authored, and user-authored content are versioned and migrated differently. |
 | 4 | [Adjacent migration release](#decision-4-migration-content-ships-as-an-adjacent-generated-release) | Migration content ships as a `-premigrate` release beside the component, never injected into a chart. |
 | 5 | [One matcher, three axes](#decision-5-one-matcher-three-independent-axes) | Where `from` comes from, whether a cluster scan runs, and which deployer to render are independent. |
@@ -93,7 +93,7 @@ Twelve decisions. The first four define the artifact and where it ships; the nex
 | 7 | [Wrappers carry two versions](#decision-7-generated-wrappers-carry-two-versions) | Generated charts stamp the AICR version and the payload version separately. |
 | 8 | [Close the `ownsCRDs` gap](#decision-8-close-the-ownscrds-deployer-gap) | CRDs must actually upgrade before a `safe` verdict can mean anything. |
 | 9 | [UAT covers upgrade](#decision-9-uat-covers-upgrade-and-rollback) | `safe` is tested; `manual` rests on process; hardware-specific residual falls to evidence. |
-| 10 | [Coverage gate](#decision-10-a-coverage-gate-keeps-records-current) | Every pinned version must be covered by a record, enforced in CI with a shrinking allowlist. |
+| 10 | [Coverage gate](#decision-10-a-coverage-gate-keeps-records-current) | Every pinned version must be covered by a record someone actually edited and substantiated, enforced in CI with a shrinking allowlist. |
 | 11 | [Authoring workflow](#decision-11-authoring-is-a-documented-workflow-not-adr-content) | The checklist lives in contributor docs; whoever moves the pin writes the record. |
 | 12 | [Pins, not releases](#decision-12-the-matrix-describes-aicrs-pins-not-upstreams-releases) | AICR describes transitions between versions it pinned, and cannot express hops it skipped. |
 
@@ -148,7 +148,13 @@ Records are keyed by semver ranges, not explicit version pairs, so they do not g
 
 That last clause matters for the same reason `unknown` and `unversioned` are separate verdicts. "A record exists and I could not read it" is not "no record exists", and collapsing them hides which action closes the gap. A loader that quietly skips a record it cannot parse would reproduce this ADR's own motivating failure, the silent one, inside the tool built to prevent it. The catalog loader today checks `kind` only and never `apiVersion` (see ADR-015 and [#1812](https://github.com/NVIDIA/aicr/issues/1812)), and `recipes/upgrades/*.yaml` sits in the same tree an external `--data` catalog points at, so a record loader inherits that behavior unless it opts out explicitly.
 
-**Fields are validated against the verdict.** A `manual` or `blocked` record MUST carry at least one step, since both are defined by the work they require; a `safe` record MUST carry none. The same rule applies to a `replaces` block, which in practice is always `manual`: a replacement that claimed to need no operator work would be a rename, and a rename is a chart-identity change on one component rather than a replacement of one by another.
+**Fields are validated against the verdict.** A `manual` or `blocked` record MUST carry at least one step, since both are defined by the work they require; a `safe` record MUST carry none, and MUST carry `verifiedBy`.
+
+**`safe` must name what verified it.** [Decision 9](#decision-9-uat-covers-upgrade-and-rollback) asserts that a verdict is a tested claim, but nothing in the schema made the claim point at the test. `verifiedBy` closes that: a UAT lane, a KWOK run, or an upstream release note that backs the assertion.
+
+This exists to close a hole in [Decision 10](#decision-10-a-coverage-gate-keeps-records-current)'s coverage gate. That gate asserts every pinned version falls inside some record's `to` range, and the cheapest way to satisfy it for all 34 allowlist entries is one blanket record per component: `to: ">=0.0.0"`, `verdict: safe`, no steps. It clears the gate, passes strict mode, and is well-formed by construction, because "carries no steps" is trivially true of a record that says nothing. The block-spanning backstop cannot fire either, since widening is precisely what reduces the block count.
+
+Without `verifiedBy` the gate would measure coverage rather than assessment, and apply pressure toward the one outcome this ADR calls worse than nothing. It is the same dynamic the [Testing Strategy](#testing-strategy) designs around when it refuses to pin verdicts in Go tests, arriving through a different door. Widening a range stays legal and free when it is honest; a blanket `safe` across a component's whole history now has to name what verified it, and there is nothing to name. The same rule applies to a `replaces` block, which in practice is always `manual`: a replacement that claimed to need no operator work would be a rename, and a rename is a chart-identity change on one component rather than a replacement of one by another.
 
 `hooks` are a deliberate exception and remain allowed on `safe`. A verdict describes what the **operator** must do, and a hook is AICR doing the work instead. A transition fully handled by a migration release requires nothing of the operator, so forbidding hooks there would force it to `manual`, failing the gate for something already automated. That is the opposite of what the verdicts are for. `unknown` and `unversioned` are never authored, only computed. The well-formedness check enforces this, so the verdict table above cannot drift from what a record actually says.
 
@@ -183,9 +189,21 @@ If exactly one record applies, its verdict stands. **If more than one applies, t
 
 Composing the steps of both records would be wrong, not merely cautious. Nodewright's mirror controller exists only in 0.18.x and 0.19.x. A jump straight from 0.17 to 0.20 never runs it, so the `skyhook.nvidia.com` CRD is removed with nothing ever mirrored and the objects are unrecoverable. Listing both records' steps would have implied the jump was fine. Row three is the reason the rule needs no "already migrated" special case: an operator on 0.19.0 has done the rename, and A drops out on its own because `from` stops matching.
 
-**Widening a block is an authoring act, not a flag.** To permit a wider jump, widen a block's ranges or author a record covering the full span. Because there is no `skippable` field, there is nothing an author can forget to set, and the failure mode of forgetting is a block rather than a silent data loss.
+**A record may make claims about past versions, never future ones.** A record's `to` upper bound MUST NOT exceed the version currently pinned in `registry.yaml`. Widening *backward* on `from` is free and unbounded; reaching *forward* is not permitted at all.
 
-In practice this is quiet. An ordinary component gets one broad block per major line (`from: ">=25.0 <26.0"`, `to: ">=25.0 <26.0"`, `verdict: safe`) and no jump inside that line ever spans. Blocks multiply only where real boundaries exist, which is exactly where spanning should stop you.
+The asymmetry is the whole idea. An author writing a record has read the migration notes for versions that exist, and can honestly say how far back a claim holds. They cannot have read the notes for a version nobody has released, so a range that reaches forward is asserting something its author could not have checked.
+
+This is what makes [Decision 10](#decision-10-a-coverage-gate-keeps-records-current)'s coverage gate mean something. Without it, one record per component with `to: ">=0.0.0"` satisfies coverage forever, and no later pin bump ever touches a record again. With it, every bump moves the pin past the record's ceiling, so every bump forces an author back into the record at the moment they have the migration notes open. The gate stops measuring whether a record exists and starts measuring whether someone looked.
+
+It costs nothing on the quiet path: extending a block's ceiling from `<=25.3.0` to `<=25.4.0` is a one-character edit. The point is not the edit, it is that the edit happens while the author is deciding whether the bump is safe.
+
+**Together with coverage, this forces a continuous chain.** The gate requires the current pin to be covered, and no record may reach past it, so some record must end exactly at the pin. Extending that record backward, or adding one behind it, is then the only way to keep the chain whole. A gap can only appear if an author deliberately leaves one.
+
+That is mechanically checkable inside the record file alone, with no git history and no external data: sort the transitions by `to`, and require each record's `from` to meet or overlap the previous record's `to`. A hole between them is a version range the component could be running that no record describes, which is precisely what would later surface as `unknown` to whoever is furthest behind.
+
+**Widening a block is an authoring act, not a flag.** To permit a wider jump, widen a block's `from` range backward or author a record covering the full span. Because there is no `skippable` field, there is nothing an author can forget to set, and the failure mode of forgetting is a block rather than a silent data loss.
+
+In practice this is quiet. An ordinary component gets one broad block per major line, `from: ">=25.0 <26.0"` with `to: ">=25.0 <=25.3"` when 25.3 is the pin, and no jump inside that line ever spans. The `to` ceiling tracks the pin and the `from` floor stays put, so a patch bump is a one-character edit to a record that already carries its `verifiedBy`. Blocks multiply only where real boundaries exist, which is exactly where spanning should stop you.
 
 **Steps are grouped by deployer, not filtered per step.** `stepsByDeployer` holds one entry per deployer group, each with its own ordered `steps` list; a group that omits `deployers:` applies to every deployer. This is not cosmetic. In the nodewright migration the step *list itself* differs: under GitOps the rename and the legacy deletion collapse into one atomic commit, because a separate `kubectl delete` fights auto-sync and self-heal. Under imperative Helm they are two distinct steps in a load-bearing order.
 
@@ -214,8 +232,9 @@ What it is good for is the thing an operator needs *before* upgrading rather tha
 | `apiVersion` | yes | `aicr.run/v1alpha2`. The loader fails closed on anything else. |
 | `kind`, `component` | yes | `ComponentUpgrades`; `component` must match the registry entry. |
 | `transitions[]` | yes | One or more. |
-| `.from`, `.to` | yes | Semver ranges. A record applies when the source satisfies `from` and the target is at or past `to`'s lower bound. |
+| `.from`, `.to` | yes | Semver ranges. A record applies when the source satisfies `from` and the target is at or past `to`'s lower bound. `to` MUST NOT reach past the currently pinned version; widen `from` backward instead. |
 | `.verdict` | yes | `safe`, `manual`, or `blocked`. `unknown` and `unversioned` are computed, never authored. |
+| `.verifiedBy` | for `safe` | What backs the claim: a UAT lane, a KWOK run, or an upstream release note. Required on `safe` so the gate measures assessment rather than coverage. |
 | `.summary` | yes | One sentence on what changes. |
 | `.precondition` | no | Cluster state that must hold before starting. |
 | `.reversible`, `.reversibleNotes` | no | Advisory only; absent means no claim. Notes required when the flag is set. |
@@ -299,6 +318,8 @@ One matcher runs over a `component -> version` table per side. Three separate in
 **`--to` is optional when `--from` is a bundle or recipe.** Omitting it re-resolves that artifact's own embedded criteria against the running binary's registry, synthesizing the target from AICR's current pins. This exists because it answers a different question from the one the two-argument form answers. `--from X --to Y` asks "is this specific move safe?" and presumes the operator already worked out where they are going. What an operator actually holds is an old bundle and the question **"am I behind, and does catching up hurt?"** The single-argument form asks that directly, and it is cheap because a bundle already embeds `recipe.yaml`, which embeds the criteria it was resolved from. Because every bundle embeds a deterministic `recipe.yaml`, the recipe and bundle forms share one code path.
 
 **Whether a cluster scan runs.** The at-risk scan for unmanaged resources ([Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see)) needs a cluster no matter where the `from` table came from, so it is its own axis rather than a property of `--from`. It is implied by `--from cluster` and available alongside artifact comparison via `--scan-cluster`. Comparing two bundles while scanning a live cluster for unmanaged `Skyhook` objects is a legitimate combination, and the two-mode framing had no name for it.
+
+**The report states the span a verdict covers.** A record's `to` is a range, so `safe` may cover one patch or eleven minors, and the range expression buries that. The check renders it explicitly ("safe across 11 minors"), which makes [Decision 12](#decision-12-the-matrix-describes-aicrs-pins-not-upstreams-releases)'s point that jump size scales the claim operational rather than advisory: a reviewer sees the width without decoding a semver constraint.
 
 **The component set can change, and the three cases differ.** Comparing `component -> version` tables means a component may appear on one side only, which is not a version transition at all.
 
@@ -450,6 +471,8 @@ This is the joint that makes the whole design trustworthy. Without it, every `sa
 
 The lane also rolls back and re-asserts health, but that is a smoke check that rollback does not explode, not validation of `reversible`. Reverse transitions are not held to the standard forward ones are, for the reasons in Decision 2.
 
+`verifiedBy` is where a record names which of these backed its claim ([Decision 2](#decision-2-transition-records)), so the assertion and the thing that justifies it stay attached.
+
 **`safe` transitions are the priority.** They are simultaneously the cheapest to test and the most dangerous to get wrong. Cheapest, because `safe` means no manual steps, so the transition is deploy, upgrade, assert, roll back with nothing for a human to perform. Most dangerous, because a wrong `safe` asserts nothing needs doing, so there are no steps whose absence would tip anyone off; the operator finds out at the outage. A wrong `manual` merely costs effort.
 
 Non-`safe` transitions are not covered by testing at all, and deliberately so: their correctness rests on the authoring workflow in [Decision 11](#decision-11-authoring-is-a-documented-workflow-not-adr-content). A component owner who writes manual steps is **not** expected to also contribute UAT automation for performing them. AICR automates what is free.
@@ -482,9 +505,15 @@ A static test cannot see transitions, because it has no `from` side. But `to`-ra
 
 **An explicit allowlist, not a diff.** Components without records start on an allowlist that begins at 34 entries and shrinks. Gating only on pins that changed in the current PR would be quieter, but it cannot see a record being *deleted*, since no pin moves when that happens, and it leaves pre-existing gaps invisible indefinitely. An allowlist makes the debt countable in one file and makes removing an entry a deliberate act. The repo already uses this shape for API-diff acknowledgement baselines and `.openvex.json`.
 
+**Three things make the gate measure assessment rather than coverage.** [Decision 2](#decision-2-transition-records) forbids a record's `to` from reaching past the current pin, so every bump forces an author back into the record; it requires `safe` to name what verified it; and the report states the span a verdict covers, so a wide `from` is visible in review. Any one alone is evadable. Together, the cheapest record that clears the gate is one somebody edited, substantiated, and can be seen to have overreached.
+
+**The gate measures coverage; `verifiedBy` measures assessment.** On its own, a coverage assertion is satisfiable by a blanket `safe` record spanning a component's whole history, which is why [Decision 2](#decision-2-transition-records) requires `safe` to name what verified it. The two are a pair: the gate creates the obligation to have a record, and `verifiedBy` stops the cheapest record from being a lie.
+
+Two alternatives were considered and rejected, and neither is the forward-reach ban above, which constrains *direction* rather than *size*. **Capping range width** (at most one major crossed, backward included) reads like the obvious fix but fights [Decision 12](#decision-12-the-matrix-describes-aicrs-pins-not-upstreams-releases)'s own measurement: AICR's pins really are jumpy, `v1.9.0` to `v1.20.0` in one commit, so wide records are legitimate and common. A cap would generate friction on honest cases while a dishonest author simply writes two records instead of one. **Gating the `from` side from git history**, which `tools/upgrade-matrix` already reconstructs, would turn coverage into a real transition assertion, but it makes a tool that is explicitly best-effort and wired to no gate load-bearing in CI, and it re-derives at gate time what UAT establishes directly.
+
 **Who writes the record.** The person bumping the pin. This is a translation, not new work: bumping cert-manager already means testing it and reading its migration notes, and the record is where that reading gets written down instead of discarded. This is also what makes the boundary in [Decision 1](#decision-1-boundary) hold for components AICR has no upstream leverage over.
 
-The gate creates the obligation. Making it cheap to discharge, by giving authors a checklist of what to verify before writing `verdict: safe`, is a separate and still-open question.
+The gate creates the obligation. `verifiedBy` forces an author to name what backs a `safe` verdict. Making that cheap to produce, by giving them a checklist of what to verify in the first place, is a separate and still-open question.
 
 ### Decision 11: Authoring is a documented workflow, not ADR content
 
@@ -592,9 +621,11 @@ transitions:
     references:
       - https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md
 
-  # 0.20.0 removes the legacy API group outright.
+  # 0.20.0 removes the legacy API group outright. Written when 0.20.0 is the
+  # pinned version; `to` is bounded there because a record may not claim
+  # anything about versions that do not exist yet.
   - from: "<0.20.0"
-    to:   ">=0.20.0"
+    to:   ">=0.20.0 <=0.20.0"
     verdict: manual
     reversible: false
     summary: >-
@@ -675,9 +706,11 @@ The governing discipline is a design constraint, not a test-plan detail: **no te
 |---|---|
 | Unit (Go) | Table-driven matcher tests over synthetic records: verdict selection, semver range edges, and that a forward record never matches in reverse. Never reads the real registry. |
 | Golden (Go) | Rendered table and JSON report compared byte-for-byte against checked-in goldens with an `-update` flag, not by substring match. Synthetic input. |
-| Registry well-formedness (Go) | Runs against **real** `recipes/upgrades/*.yaml`. Asserts shape only: files parse, ranges are valid semver, no record matches its own reverse, the referenced component exists. Asserts no verdict, so it survives pin bumps by construction. |
+| Registry well-formedness (Go) | Runs against **real** `recipes/upgrades/*.yaml`. Asserts files parse, ranges are valid semver, no record matches its own reverse, the referenced component exists, `safe` carries `verifiedBy`, no `to` reaches past the pin, and no gap sits between records. **Deliberately pin-sensitive**: a bump that does not touch the record fails it. |
 | KWOK (new, this ADR) | Synthetic fixture component with two trivial chart versions. Install, upgrade, roll back, and confirm the check reads the right versions back. No network chart pull, per-PR speed, unaffected when a real pin moves. |
 | UAT (new, [Decision 9](#decision-9-uat-covers-upgrade-and-rollback)) | Release-to-release against real clusters. The only layer that tests a real component's `safe` verdict, at the version pair it happens to run. The rollback leg is a smoke check, not validation of `reversible`. |
+
+The registry check is the one layer that fails on a pin bump, and that is [Decision 10](#decision-10-a-coverage-gate-keeps-records-current)'s pressure rather than churn. The discipline above still holds, because the check never asserts *what* a verdict should be, only that someone recorded one and named what backs it. "Make the test green" therefore cannot be satisfied by writing `safe`, which is precisely the failure mode the discipline guards against.
 
 The KWOK lane extends existing infrastructure rather than building new. `kwok/scripts/validate-scheduling.sh` already deploys AICR bundles through a real `helm install` path against simulated nodes, and already enumerates releases with `helm list -A -o json` (lines 367 and 571).
 
@@ -692,9 +725,12 @@ It deliberately proves nothing about real component upgrades. It proves the mech
 5. Recipe-to-recipe with no `--deployer` and no bundle to infer from exits non-zero asking for the flag, rather than defaulting or rendering every deployer's steps.
 6. Wrapper charts expose the payload version in `aicr.run/component-version`, and a `dev` build still produces a Helm-valid `Chart.yaml`.
 7. A malformed or reverse-matching record in `recipes/upgrades/*.yaml` fails `make lint` rather than being silently skipped.
-8. A record carrying an unrecognized `apiVersion` fails with `ErrCodeInvalidRequest` naming both values, and is neither skipped nor reported as `unknown`.
-9. A pinned component version with no record whose `to` range covers it fails `make test`, unless the component is on the coverage allowlist.
-10. `make qualify` passes.
+8. A `safe` record with no `verifiedBy` fails the well-formedness check, so a blanket `safe` cannot satisfy the coverage gate.
+9. A record whose `to` reaches past the currently pinned version fails the well-formedness check, so no record can make a claim about a version that does not exist yet.
+10. A record file whose transitions leave a gap, where one record's `from` does not meet or overlap the previous record's `to`, fails the well-formedness check.
+11. A record carrying an unrecognized `apiVersion` fails with `ErrCodeInvalidRequest` naming both values, and is neither skipped nor reported as `unknown`.
+12. A pinned component version with no record whose `to` range covers it fails `make test`, unless the component is on the coverage allowlist.
+13. `make qualify` passes.
 
 ## Open Questions
 
@@ -738,7 +774,7 @@ Preconditions are structured prose today, rendered and not evaluated. Making the
 **Negative and risky.**
 
 - **Vendoring `helm.sh/helm/v4`** is a large dependency for one feature and lands in `make scan`, api-diff, and the vendor tree. Licensing is probably fine but is not free: `license-check` allows only MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, and Zlib, and clears MPL-2.0 only through ten explicit per-import-path ignores, all HashiCorp. Helm is Apache-2.0 and its usual MPL-2.0 touchpoints (`errwrap`, `go-multierror`) are already among them, but the Makefile is explicit that "unrelated MPL-2.0 deps still fail closed for review" and that ignores must not be added to work around the policy. Helm v4's full dependency tree has not been resolved against that list.
-- **Coverage starts at zero.** Every transition is `unknown` until someone authors a record, and [Decision 10](#decision-10-a-coverage-gate-keeps-records-current)'s gate starts with an allowlist of 34 components. The gate creates the obligation, but nothing makes the first records appear, so the matrix is only as useful as the backlog people work through.
+- **Coverage starts at zero.** Every transition is `unknown` until someone authors a record, and [Decision 10](#decision-10-a-coverage-gate-keeps-records-current)'s gate starts with an allowlist of 34 components. The gate creates the obligation, and the forward-reach ban makes every later pin bump renew it, but nothing makes the *first* record appear for a component still on the allowlist. The matrix is only as useful as the backlog people work through.
 - **Records are human assertions.** A wrong `safe` is worse than no record, because it converts uncertainty into false confidence. Decision 9 is the mitigation, and it only mitigates what UAT actually exercises.
 - **UAT cluster time grows.** A release-to-release lane adds a second full deploy and a rollback to every cell it runs on, against an already-contended reservation pool.
 - **`helm diff` noise.** With wrapper `version:` tracking the AICR version, a release that changes nothing material still shows a chart version bump. Rendered manifests stay identical so there is no resource churn, but `helm_diff` is pinned in `.settings.yaml` and used in CI.
