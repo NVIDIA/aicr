@@ -225,7 +225,7 @@ What it is good for is the thing an operator needs *before* upgrading rather tha
 | `.affectedResources[]` | no | `group` plus `kinds`; drives the at-risk scan in [Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see). |
 | `.references[]` | no | Links to upstream migration notes. |
 
-One gap is deliberate rather than overlooked: nothing above expresses a transition for a component that is *added or removed* rather than changed, where one side has no version at all. Tracked in [Open Questions](#open-questions). Cross-component coupling is a deliberate non-goal; see [Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see).
+Two things a record deliberately does not express: a component being *added or removed*, which the matcher handles rather than a record ([Decision 5](#decision-5-one-matcher-three-independent-axes)), and cross-component coupling, which is a non-goal ([Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see)).
 
 Like `ownsCRDs`, these records are human-audited assertions. They carry the same strength and the same failure mode: a wrong record grants false confidence. [Decision 9](#decision-9-uat-covers-upgrade-and-rollback) addresses that directly.
 
