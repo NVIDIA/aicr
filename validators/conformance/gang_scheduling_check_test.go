@@ -18,6 +18,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -297,5 +298,80 @@ func TestWaitForDeploymentAvailableRetriesTransientReads(t *testing.T) {
 	}
 	if got := reads.Load(); got < 3 {
 		t.Errorf("expected retries past the throttled reads, saw %d", got)
+	}
+}
+
+// rateLimitErr reproduces x/time/rate's raw form, which carries NO deadline
+// sentinel — client-go surfaces it as a plain string. Fixtures that wrap
+// context.DeadlineExceeded only exercise isK8sTimeoutErr's errors.Is path and
+// would still pass if its plain-string branch broke.
+func rateLimitErr() error {
+	//nolint:err113 // deliberately sentinel-free: mirrors x/time/rate's raw output
+	return stderrors.New("rate: Wait(n=1) would exceed context deadline")
+}
+
+// TestWaitForDeploymentAvailableRecoveredReadNotReportedAsUnreadable pins that
+// a transient throttle which RECOVERS does not poison the eventual timeout. A
+// deployment that stays missing must be reported as not-found, not as "reads
+// kept failing" — otherwise the operator chases a throttling ghost instead of
+// the real cause.
+func TestWaitForDeploymentAvailableRecoveredReadNotReportedAsUnreadable(t *testing.T) {
+	const ns, name = "kai-scheduler", "queue-controller"
+	clientset := k8sfake.NewSimpleClientset() // deployment never exists
+
+	var reads atomic.Int32
+	clientset.PrependReactor("get", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if reads.Add(1) == 1 {
+			return true, nil, rateLimitErr() // one blip, then clean NotFound forever
+		}
+		return false, nil, nil
+	})
+
+	vctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
+	_, err := waitForDeploymentAvailable(vctx, ns, name, 2*time.Second)
+	if err == nil {
+		t.Fatal("expected a timeout error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		t.Errorf("want ErrCodeNotFound after a recovered blip, got %v", err)
+	}
+	if strings.Contains(err.Error(), "kept failing") {
+		t.Errorf("recovered throttle must not be reported as unreadable: %v", err)
+	}
+}
+
+// TestWaitForGangTestPodsRecoveredReadNotReportedAsUnreadable is the same
+// property for the pod poll: a blip that recovers, then pods that simply never
+// reach a terminal phase, must time out as "did not complete", not "unreadable".
+func TestWaitForGangTestPodsRecoveredReadNotReportedAsUnreadable(t *testing.T) {
+	run, err := newGangTestRun()
+	if err != nil {
+		t.Fatalf("newGangTestRun: %v", err)
+	}
+	objs := make([]runtime.Object, 0, gangMinMembers)
+	for i := range gangMinMembers {
+		objs = append(objs, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: run.pods[i], Namespace: run.namespace},
+			Status:     corev1.PodStatus{Phase: corev1.PodRunning}, // never terminal
+		})
+	}
+	clientset := k8sfake.NewSimpleClientset(objs...)
+
+	var reads atomic.Int32
+	clientset.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if reads.Add(1) == 1 {
+			return true, nil, rateLimitErr()
+		}
+		return false, nil, nil
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err = waitForGangTestPods(ctx, clientset, run)
+	if err == nil {
+		t.Fatal("expected a timeout error, got nil")
+	}
+	if strings.Contains(err.Error(), "kept failing") {
+		t.Errorf("recovered throttle must not be reported as unreadable: %v", err)
 	}
 }

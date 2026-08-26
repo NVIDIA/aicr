@@ -332,7 +332,10 @@ func waitForGangTestPods(ctx context.Context, clientset kubernetes.Interface, ru
 	waitCtx, cancel := context.WithTimeout(ctx, defaults.GangTestPodTimeout)
 	defer cancel()
 
-	var lastReadErr error
+	// Per-pod, not a single latch: a pod whose read recovers must clear its
+	// entry, otherwise one early blip would mislabel a genuine "never
+	// completed" timeout as "unreadable" long after reads recovered.
+	readErrs := make(map[string]error, gangMinMembers)
 	err := wait.PollUntilContextCancel(waitCtx, defaults.PodPollInterval, true,
 		func(ctx context.Context) (bool, error) {
 			allDone := true
@@ -350,7 +353,7 @@ func waitForGangTestPods(ctx context.Context, clientset kubernetes.Interface, ru
 					// #1513 fixed one step earlier in this function. Let the
 					// enclosing GangTestPodTimeout decide instead.
 					if isK8sTimeoutErr(err) {
-						lastReadErr = err
+						readErrs[run.pods[i]] = err
 						slog.Debug("transient read while polling gang test pod; retrying",
 							"pod", run.pods[i], "error", err)
 						allDone = false
@@ -359,7 +362,8 @@ func waitForGangTestPods(ctx context.Context, clientset kubernetes.Interface, ru
 					return false, classifyK8sReadError(err,
 						fmt.Sprintf("gang test pod %s", run.pods[i]))
 				}
-				switch pod.Status.Phase { //nolint:exhaustive // only terminal states matter
+				delete(readErrs, run.pods[i]) // this read landed
+				switch pod.Status.Phase {     //nolint:exhaustive // only terminal states matter
 				case corev1.PodSucceeded, corev1.PodFailed:
 					result[i] = pod
 				default:
@@ -373,9 +377,16 @@ func waitForGangTestPods(ctx context.Context, clientset kubernetes.Interface, ru
 		if ctx.Err() != nil || waitCtx.Err() != nil {
 			// Preserve the last transient read error: a sustained throttle
 			// otherwise looks identical to pods that never completed.
-			if lastReadErr != nil {
-				return result, errors.Wrap(errors.ErrCodeTimeout,
-					"gang test pods unreadable (reads kept failing)", lastReadErr)
+			// Only if a still-pending pod's most recent read failed.
+			for i := range gangMinMembers {
+				if result[i] != nil {
+					continue
+				}
+				if readErr, ok := readErrs[run.pods[i]]; ok {
+					return result, errors.Wrap(errors.ErrCodeTimeout,
+						fmt.Sprintf("gang test pod %s unreadable (reads kept failing)", run.pods[i]),
+						readErr)
+				}
 			}
 			return result, errors.Wrap(errors.ErrCodeTimeout, "gang test pods did not complete in time", err)
 		}

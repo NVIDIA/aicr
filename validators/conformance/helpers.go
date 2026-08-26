@@ -181,6 +181,10 @@ func waitForDeploymentAvailable(ctx *validators.Context, namespace, name string,
 			deploy, getErr := ctx.Clientset.AppsV1().Deployments(namespace).Get(c, name, metav1.GetOptions{})
 			if getErr != nil {
 				if k8serrors.IsNotFound(getErr) {
+					// A NotFound is a successful read: the API answered. Clear
+					// any earlier transient error so a recovered throttle does
+					// not mislabel a genuinely-missing deployment at expiry.
+					lastReadErr = nil
 					return false, nil // not created yet — keep waiting within the bound
 				}
 				// A read that could not land is not a verdict. Client-go's own
