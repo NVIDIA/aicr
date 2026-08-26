@@ -291,6 +291,18 @@ One matcher runs over a `component -> version` table per side. Three separate in
 
 **Whether a cluster scan runs.** The at-risk scan for unmanaged resources ([Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see)) needs a cluster no matter where the `from` table came from, so it is its own axis rather than a property of `--from`. It is implied by `--from cluster` and available alongside artifact comparison via `--scan-cluster`. Comparing two bundles while scanning a live cluster for unmanaged `Skyhook` objects is a legitimate combination, and the two-mode framing had no name for it.
 
+**The component set can change, and the three cases differ.** Comparing `component -> version` tables means a component may appear on one side only, which is not a version transition at all.
+
+| Case | In `from` | In `to` | What the check does |
+|---|---|---|---|
+| Added | no | yes | Reports it. Nothing to do: a new component is simply installed. |
+| Removed | yes | no | Reports it, and says the component **stays installed**. AICR does not uninstall it. |
+| Replaced | as removed + added | | Surfaces as one removed row and one added row. |
+
+Removal is reported rather than acted on because AICR dropping a component from a recipe is a statement about what AICR now ships, not an instruction to tear down a running workload. Uninstalling on the operator's behalf, from a signal that weak, is not a decision the tool should make. Reporting it leaves the operator to decide.
+
+**Replacement is not modelled**, for the same reason cross-component coupling is not ([Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see)). It has happened once in this registry, `kgateway` to `agentgateway` ([#871](https://github.com/NVIDIA/aicr/pull/871)), and detecting it structurally would need a link field the matcher cannot derive from the tables, since nothing distinguishes "A was replaced by B" from "A went away and B arrived". Where a replacement carries real migration work, and it usually does, that work is described in the steps of the added component's record. Revisit if a second case appears.
+
 **Deployer context.** Steps are deployer-scoped ([Decision 2](#decision-2-transition-records)), a bundle records the deployer it was built with, and a recipe does not. The check infers the deployer from `--to` when it is a bundle and otherwise **requires `--deployer`**. It does not guess, and it does not render every path: showing an Argo CD operator the imperative "delete legacy CRs" step is the failure deployer-scoping exists to prevent, so a silent default would reintroduce it. Recipe-to-recipe in CI therefore passes `--deployer` explicitly, which the pipeline already knows because it passes the same value to `aicr bundle`.
 
 Output:
