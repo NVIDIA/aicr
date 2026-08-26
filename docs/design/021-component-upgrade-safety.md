@@ -339,6 +339,8 @@ annotations:
 
 - **`version:` is the AICR version that generated the wrapper.** The wrapper's content is produced entirely by AICR's templates, so AICR's version is the honest answer to "what version is this artifact". It also matches what `recipe.yaml` already does: `pkg/recipe/builder.go:231` sets `result.Metadata.Version` from the AICR binary version, and `pkg/cli/validate.go:845` compares it against the running binary for skew detection.
 - **`aicr.run/component-version` is the payload version**, and it is the only field the matcher reads. Free-form, so a Kustomize `defaultTag` like `release-1.4` does not have to masquerade as semver.
+**Upstream charts have no annotation, and that is a live gap.** This stamps only charts AICR generates. A `KindUpstreamHelm` folder installs the upstream chart directly, so gpu-operator, cert-manager, aws-efa and most of the registry carry no `aicr.run/component-version` at all. Online mode therefore has no defined version source for them, and the claim above that the annotation is "the only field the matcher reads" holds only for generated wrappers. Closing this needs a mechanism, and it is the largest unresolved gap in this ADR.
+
 - **`appVersion` also carries the payload version.** Conventional Helm usage, and it makes plain `helm list` output readable for a human even though the matcher ignores it.
 
 **Dev-build fallback is mandatory.** `pkg/cli/root.go:38` sets `versionDefault = "dev"`, which is not valid SemVer 2, and Helm rejects it for `Chart.yaml` `version:`. The bundler normalizes non-release versions to `0.0.0-dev` and strips a leading `v`. Without this, `make dev-env` and Tilt break. This is an explicitly tested case, not a discovered one.
@@ -593,7 +595,7 @@ The governing discipline is a design constraint, not a test-plan detail: **no te
 | Golden (Go) | Rendered table and JSON report compared byte-for-byte against checked-in goldens with an `-update` flag, not by substring match. Synthetic input. |
 | Registry well-formedness (Go) | Runs against **real** `recipes/upgrades/*.yaml`. Asserts shape only: files parse, ranges are valid semver, no record matches its own reverse, the referenced component exists. Asserts no verdict, so it survives pin bumps by construction. |
 | KWOK (new, this ADR) | Synthetic fixture component with two trivial chart versions. Install, upgrade, roll back, and confirm the check reads the right versions back. No network chart pull, per-PR speed, unaffected when a real pin moves. |
-| UAT (new, [Decision 9](#decision-9-uat-covers-upgrade-and-rollback)) | Release-to-release against real clusters. The only layer that validates a real component's `safe` or `reversible` claim. |
+| UAT (new, [Decision 9](#decision-9-uat-covers-upgrade-and-rollback)) | Release-to-release against real clusters. The only layer that tests a real component's `safe` verdict, at the version pair it happens to run. The rollback leg is a smoke check, not validation of `reversible`. |
 
 The KWOK lane extends existing infrastructure rather than building new. `kwok/scripts/validate-scheduling.sh` already deploys AICR bundles through a real `helm install` path against simulated nodes, and already enumerates releases with `helm list -A -o json` (lines 367 and 571).
 
@@ -654,11 +656,11 @@ Preconditions are structured prose today, rendered and not evaluated. Making the
 **Negative and risky.**
 
 - **Vendoring `helm.sh/helm/v4`** is a large dependency for one feature and lands in `make scan`, api-diff, and the vendor tree. Licensing is probably fine but is not free: `license-check` allows only MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, and Zlib, and clears MPL-2.0 only through ten explicit per-import-path ignores, all HashiCorp. Helm is Apache-2.0 and its usual MPL-2.0 touchpoints (`errwrap`, `go-multierror`) are already among them, but the Makefile is explicit that "unrelated MPL-2.0 deps still fail closed for review" and that ignores must not be added to work around the policy. Helm v4's full dependency tree has not been resolved against that list.
-- **Coverage starts at zero.** Every transition is `unknown` until someone authors a record. Without a coverage ratchet the matrix may never get populated, and the feature degrades to an elaborate way of printing "unknown".
+- **Coverage starts at zero.** Every transition is `unknown` until someone authors a record, and [Decision 10](#decision-10-a-coverage-gate-keeps-records-current)'s gate starts with an allowlist of 34 components. The gate creates the obligation, but nothing makes the first records appear, so the matrix is only as useful as the backlog people work through.
 - **Records are human assertions.** A wrong `safe` is worse than no record, because it converts uncertainty into false confidence. Decision 9 is the mitigation, and it only mitigates what UAT actually exercises.
 - **UAT cluster time grows.** A release-to-release lane adds a second full deploy and a rollback to every cell it runs on, against an already-contended reservation pool.
 - **`helm diff` noise.** With wrapper `version:` tracking the AICR version, a release that changes nothing material still shows a chart version bump. Rendered manifests stay identical so there is no resource churn, but `helm_diff` is pinned in `.settings.yaml` and used in CI.
-- **Strict-by-default will surprise people.** Existing pipelines that regenerate bundles will start failing on unassessed major bumps. That is the intended behavior, and it still needs a migration path and a release note.
+- **The non-zero exit will surprise people.** A pipeline that adopts `upgrade-check` starts failing on unassessed transitions across a breaking boundary, which includes 0.x minor bumps and so fires more often than "major bumps" would suggest. That is the intended behavior, and it still needs a release note. `--fail-on-error=false` is the deliberate opt-out.
 
 ## Implementation Plan
 
