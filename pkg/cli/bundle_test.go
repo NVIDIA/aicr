@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -640,10 +641,8 @@ func TestValidateSigningKeyExclusivity_ConfigSourcedConflict(t *testing.T) {
 func TestBundleCmd_SigningKeyFlag(t *testing.T) {
 	cmd := bundleCmd()
 	for _, flag := range cmd.Flags {
-		for _, name := range flag.Names() {
-			if name == flagSigningKey {
-				return
-			}
+		if slices.Contains(flag.Names(), flagSigningKey) {
+			return
 		}
 	}
 	t.Errorf("expected flag %q to be defined", flagSigningKey)

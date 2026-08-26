@@ -268,7 +268,7 @@ build_binary() {
   msg "Building aicr binary (unattested snapshot; --attest steps will not run)"
   cd "${ROOT}"
 
-  if ! GOFLAGS=-mod=vendor goreleaser build --clean --single-target --snapshot --timeout 10m 2>&1; then
+  if ! goreleaser build --clean --single-target --snapshot --timeout 10m 2>&1; then
     err "Failed to build aicr binary"
   fi
 

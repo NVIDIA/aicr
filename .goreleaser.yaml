@@ -23,7 +23,6 @@ builds:
     dir: cmd/aicr
     env:
       - CGO_ENABLED=0
-      - GOFLAGS=-mod=vendor
     flags:
       - -trimpath
     ldflags: &build-ldflags |
@@ -99,7 +98,6 @@ builds:
     dir: cmd/aicrd
     env:
       - CGO_ENABLED=0
-      - GOFLAGS=-mod=vendor
     flags:
       - -trimpath
     ldflags: &build-ldflags |
@@ -142,6 +140,16 @@ builds:
       - arm64
 
 
+# `proxy: false` controls where goreleaser gets *this project's* source: with it
+# true, goreleaser re-downloads github.com/NVIDIA/aicr at the tag from a proxy and
+# builds that copy instead of the checkout. That is a different question from where
+# dependencies come from, and we want the checkout — it is what CI verified.
+#
+# Dependency resolution is what #2374 moved onto the proxy. With vendor/ gone and
+# the `-mod=vendor` pins dropped from both builds, deps resolve through the ambient
+# GOPROXY, which the release workflow points at Artifactory in `enforced` mode. So
+# this staying false is not "the release contacts no proxy" any more; it is only
+# "the release builds the source it checked out".
 gomod:
   proxy: false
 

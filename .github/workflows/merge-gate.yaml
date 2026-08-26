@@ -73,8 +73,8 @@ jobs:
               - '.github/actions/**'
             deps:
               # Inputs to the verify-licenses gate, which runs `make
-              # license-check` over the vendored dependency graph. Watch the
-              # dependency manifests and the vendor tree, plus every input that
+              # license-check` over the resolved dependency graph. Watch the
+              # dependency manifests, plus every input that
               # defines the check itself, so a change to the gate cannot skip
               # its own gate: the Makefile recipe is the check's contract, the
               # install-go-licenses action supplies the binary it runs (that
@@ -96,7 +96,6 @@ jobs:
               # touching only .go-version.
               - 'go.mod'
               - 'go.sum'
-              - 'vendor/**'
               - 'Makefile'
               - '.go-version'
               - '.settings.yaml'
@@ -138,10 +137,10 @@ jobs:
               - 'tools/tuning/**'
             notices:
               # Inputs to the committed THIRD_PARTY_NOTICES.md freshness check.
-              # The file is the union of every vendored dependency's license
+              # The file is the union of every redistributed dependency's license
               # across the released OS/arch matrix, so any dependency-graph
-              # change can alter it. Watch the dependency manifests, the vendor
-              # tree, and the generator itself (plus the committed file, so a
+              # change can alter it. Watch the dependency manifests and the
+              # generator itself (plus the committed file, so a
               # hand edit is re-verified). .goreleaser.yaml is included because
               # the generator asserts its PLATFORMS matrix matches the release
               # targets defined there — a new goos/goarch must re-run this check.
@@ -154,8 +153,8 @@ jobs:
               # ignore set. This is a standalone job — the full `tests` suite
               # does NOT regenerate the file.
               # The Python half of the notices file covers the aiperf-bench
-              # image, whose dependency closure is an installed venv rather
-              # than a vendored tree. It cannot be regenerated here (that needs
+              # image, whose dependency closure is an installed venv and not
+              # part of the Go module graph. It cannot be regenerated here (needs
               # docker + PyPI), so the committed fragment is watched directly,
               # alongside the requirements.txt whose sha256 the generator
               # asserts the fragment still records — editing requirements
@@ -166,7 +165,6 @@ jobs:
               - '.goreleaser.yaml'
               - 'go.mod'
               - 'go.sum'
-              - 'vendor/**'
               - 'tools/generate-notices'
               - 'tools/generate-python-licenses'
               - 'validators/performance/requirements.txt'
@@ -301,8 +299,6 @@ jobs:
         with:
           languages: go
       - run: go build ./...
-        env:
-          GOFLAGS: -mod=vendor
       - uses: github/codeql-action/analyze@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28  # v4.37.8
 
   analyze-skip:
@@ -418,13 +414,10 @@ jobs:
           cache: true
           cache-dependency-path: |
             go.sum
-            vendor/modules.txt
       - uses: ./.github/actions/install-go-licenses
         with:
           version: ${{ steps.versions.outputs.go_licenses }}
       - name: Report licenses
-        env:
-          GOFLAGS: -mod=vendor
         run: |
           echo "=== Dependency Licenses ==="
           go-licenses report ./... 2>/dev/null | sort -t',' -k3 | column -t -s','
@@ -432,8 +425,6 @@ jobs:
           echo "=== License Summary ==="
           go-licenses report ./... 2>/dev/null | cut -d',' -f3 | sort | uniq -c | sort -rn
       - name: Check licenses
-        env:
-          GOFLAGS: -mod=vendor
         run: make license-check
 
   verify-licenses-skip:
@@ -530,8 +521,6 @@ jobs:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
       - name: Verify committed BOM versions and variants match the recipes
-        env:
-          GOFLAGS: -mod=vendor
         # `go test -run <name>` exits 0 with "no tests to run" if a test is
         # renamed or removed, which would let this gate silently no-op. Assert
         # each named test actually executed by requiring its PASS line — a
@@ -581,8 +570,6 @@ jobs:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
       - name: Verify committed tuning-status table is up to date
-        env:
-          GOFLAGS: -mod=vendor
         # `make tuning-check` regenerates the table into a temp dir and splices
         # it into the doc, then fails if the working tree differs — so a stale
         # committed table (or missing splice markers) fails closed here.
@@ -598,8 +585,8 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Third-party notices freshness — ensures the committed THIRD_PARTY_NOTICES.md
-  # matches the vendored dependency graph across every released OS/arch target,
-  # on PRs touching its inputs (go.mod/go.sum/vendor + the generator).
+  # matches the resolved dependency graph across every released OS/arch target,
+  # on PRs touching its inputs (go.mod/go.sum + the generator).
   # ---------------------------------------------------------------------------
 
   notices-freshness:
@@ -619,13 +606,10 @@ jobs:
           cache: true
           cache-dependency-path: |
             go.sum
-            vendor/modules.txt
       - uses: ./.github/actions/install-go-licenses
         with:
           version: ${{ steps.versions.outputs.go_licenses }}
       - name: Verify committed THIRD_PARTY_NOTICES.md is up to date
-        env:
-          GOFLAGS: -mod=vendor
         # `make notices-check` regenerates the notices file (union across the
         # release OS/arch matrix, so it is host-independent) and fails if the
         # working tree differs — a stale committed file fails closed here.
@@ -663,8 +647,6 @@ jobs:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
       - name: Verify committed coverage matrix is up to date
-        env:
-          GOFLAGS: -mod=vendor
         # `make coverage-check` regenerates the matrix in place and fails if the
         # working tree differs. The generator itself fails closed on an
         # unresolvable UAT wiring or version axis, so a moved registry or renamed

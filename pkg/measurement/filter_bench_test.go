@@ -58,7 +58,7 @@ func BenchmarkFilterOut_NoPatterns(b *testing.B) {
 func BenchmarkFilterOut_ManyKeys(b *testing.B) {
 	// Create a large map
 	readings := make(map[string]Reading, 1000)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		readings["key_"+string(rune(i))] = Int(i)
 	}
 

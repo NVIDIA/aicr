@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -239,13 +240,7 @@ rfkill 32768 7 bluetooth,cfg80211, Live 0x0000000000000000`,
 			if len(data) != len(tt.expectedModules) {
 				t.Errorf("Expected %d modules, got %d", len(tt.expectedModules), len(data))
 				for moduleName := range data {
-					found := false
-					for _, expected := range tt.expectedModules {
-						if moduleName == expected {
-							found = true
-							break
-						}
-					}
+					found := slices.Contains(tt.expectedModules, moduleName)
 					if !found {
 						t.Errorf("Unexpected module %q found in results", moduleName)
 					}

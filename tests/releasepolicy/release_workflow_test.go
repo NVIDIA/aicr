@@ -17,10 +17,12 @@ package releasepolicy
 import (
 	"context"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -1015,12 +1017,8 @@ func TestReleaseCompositeValidationRejectsUnsafeInputsBeforeIO(t *testing.T) {
 			script := stringValue(t, validation, "run")
 			output := filepath.Join(t.TempDir(), "outputs")
 			values := make(map[string]string, len(tc.base))
-			for key, value := range tc.base {
-				values[key] = value
-			}
-			for key, value := range tc.overrides {
-				values[key] = value
-			}
+			maps.Copy(values, tc.base)
+			maps.Copy(values, tc.overrides)
 			command := exec.Command("bash", "-c", script)
 			command.Env = append(os.Environ(),
 				"GITHUB_ACTION_PATH="+filepath.Join(repositoryRoot(t), filepath.Dir(tc.path)),
@@ -1276,12 +1274,7 @@ func stringSlice(value any) []string {
 }
 
 func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func jobTransitivelyDependsOn(jobs map[string]any, jobName, dependency string) bool {
@@ -1329,10 +1322,8 @@ func containsDirectRunInput(document map[string]any) bool {
 				}
 			}
 		case []any:
-			for _, child := range typed {
-				if visit(child) {
-					return true
-				}
+			if slices.ContainsFunc(typed, visit) {
+				return true
 			}
 		}
 		return false

@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -euo pipefail
+
+readonly CONNECT_TIMEOUT_SECONDS=10
+readonly TOTAL_TIMEOUT_SECONDS=30
+readonly RETRIES=2
+readonly PARALLEL_REQUESTS=8
+
+if [[ $# -ne 1 || ! -s "$1" ]]; then
+    echo "Usage: $0 <go-licenses.csv>" >&2
+    exit 2
+fi
+
+readonly INPUT=$1
+readonly CURL_BIN=${CURL_BIN:-curl}
+
+if ! command -v "${CURL_BIN}" >/dev/null 2>&1; then
+    echo "ERROR: curl is required to verify license source URLs." >&2
+    exit 1
+fi
+
+normalized_candidate() {
+    local url=$1
+    local before_blob=${url%%/blob/*}
+    local after_blob=${url#*/blob/}
+    if [[ "${after_blob}" == "${url}" ]]; then
+        printf '%s\n' "${url}"
+        return
+    fi
+
+    local -a segments
+    IFS=/ read -r -a segments <<< "${after_blob}"
+
+    local ref_end=-1
+    local i
+    for i in "${!segments[@]}"; do
+        if [[ "${segments[$i]}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]] ||
+            [[ "${segments[$i]}" =~ ^[0-9a-f]{12,40}$ ]]; then
+            ref_end=$i
+            break
+        fi
+    done
+
+    local last_index=$((${#segments[@]} - 1))
+    if (( ref_end < 0 || ref_end + 2 > last_index )); then
+        printf '%s\n' "${url}"
+        return
+    fi
+
+    local normalized="${before_blob}/blob"
+    for ((i = 0; i <= ref_end; i++)); do
+        normalized+="/${segments[$i]}"
+    done
+    printf '%s/%s\n' "${normalized}" "${segments[$last_index]}"
+}
+
+TMP=$(mktemp -d)
+trap 'rm -rf "${TMP}"' EXIT
+readonly CURRENT_URLS="${TMP}/current-urls"
+readonly NORMALIZED_URLS="${TMP}/normalized-urls"
+readonly CURRENT_STATUS="${TMP}/current-status"
+readonly NORMALIZED_STATUS="${TMP}/normalized-status"
+
+: > "${CURRENT_URLS}"
+: > "${NORMALIZED_URLS}"
+while IFS=, read -r package url license; do
+    [[ -z "${package}" ]] && continue
+    candidate=$(normalized_candidate "${url}")
+    printf '%s\n' "${url}" >> "${CURRENT_URLS}"
+    if [[ "${candidate}" != "${url}" ]]; then
+        printf '%s\n' "${candidate}" >> "${NORMALIZED_URLS}"
+    fi
+done < "${INPUT}"
+
+check_urls() {
+    local input=$1
+    local output=$2
+    local -a requests=()
+    local url
+    while IFS= read -r url; do
+        requests+=(--output /dev/null "${url}")
+    done < <(LC_ALL=C sort -u "${input}")
+    if (( ${#requests[@]} == 0 )); then
+        : > "${output}"
+        return
+    fi
+
+    if ! "${CURL_BIN}" \
+        --parallel \
+        --parallel-max "${PARALLEL_REQUESTS}" \
+        --head \
+        --location \
+        --silent \
+        --connect-timeout "${CONNECT_TIMEOUT_SECONDS}" \
+        --max-time "${TOTAL_TIMEOUT_SECONDS}" \
+        --retry "${RETRIES}" \
+        --retry-connrefused \
+        --write-out '%{url}\t%{http_code}\n' \
+        "${requests[@]}" > "${output}"; then
+        echo "ERROR: failed to check license source URLs." >&2
+        exit 1
+    fi
+}
+
+check_urls "${CURRENT_URLS}" "${CURRENT_STATUS}"
+check_urls "${NORMALIZED_URLS}" "${NORMALIZED_STATUS}"
+
+while IFS=, read -r package url license; do
+    [[ -z "${package}" ]] && continue
+    candidate=$(normalized_candidate "${url}")
+    current_code=$(awk -F '\t' -v url="${url}" '$1 == url { print $2; exit }' "${CURRENT_STATUS}")
+    if [[ "${current_code}" == "200" ]]; then
+        printf '%s,%s,%s\n' "${package}" "${url}" "${license}"
+        continue
+    fi
+
+    normalized_code=""
+    if [[ "${candidate}" != "${url}" ]]; then
+        normalized_code=$(awk -F '\t' -v url="${candidate}" '$1 == url { print $2; exit }' "${NORMALIZED_STATUS}")
+        if [[ "${normalized_code}" == "200" ]]; then
+            printf '%s,%s,%s\n' "${package}" "${candidate}" "${license}"
+            continue
+        fi
+    fi
+
+    echo "ERROR: no reachable license source URL for ${package}:" >&2
+    echo "  emitted (${current_code:-no response}): ${url}" >&2
+    if [[ "${candidate}" != "${url}" ]]; then
+        echo "  normalized (${normalized_code:-no response}): ${candidate}" >&2
+    fi
+    exit 1
+done < "${INPUT}"

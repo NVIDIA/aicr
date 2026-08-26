@@ -248,7 +248,7 @@ func TestDiffSnapshots_MidTraversalContextCancellation(t *testing.T) {
 	client := newVerifyClient(t)
 	baselineData := make(map[string]measurement.Reading, 64)
 	targetData := make(map[string]measurement.Reading, 64)
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		key := fmt.Sprintf("reading-%02d", i)
 		baselineData[key] = measurement.Int(i)
 		targetData[key] = measurement.Int(i + 1)

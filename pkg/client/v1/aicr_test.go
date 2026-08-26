@@ -311,7 +311,7 @@ func TestClient_ConcurrentResolveAndClose(t *testing.T) {
 	}
 
 	const goroutines = 50
-	for trial := 0; trial < 5; trial++ {
+	for trial := range 5 {
 		client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
 		if err != nil {
 			t.Fatalf("trial %d: NewClient: %v", trial, err)
@@ -324,7 +324,7 @@ func TestClient_ConcurrentResolveAndClose(t *testing.T) {
 		// ResolveRecipe; correctness is "no panic, no race
 		// flagged by -race, errors are well-typed."
 		wg.Add(goroutines + 1)
-		for i := 0; i < goroutines; i++ {
+		for range goroutines {
 			go func() {
 				defer wg.Done()
 				_, _ = client.ResolveRecipe(context.Background(), aicr.RecipeRequest{
@@ -719,8 +719,7 @@ func TestBundleAndValidate_RejectCrossClientRecipeResult(t *testing.T) {
 	if _, err := clientB.BundleComponents(t.Context(), resultA); err == nil {
 		t.Error("BundleComponents: expected cross-client rejection, got nil error")
 	} else {
-		var se *aicrerrors.StructuredError
-		if !errors.As(err, &se) {
+		if se, ok := errors.AsType[*aicrerrors.StructuredError](err); !ok {
 			t.Errorf("BundleComponents: expected *aicrerrors.StructuredError, got %T: %v", err, err)
 		} else if se.Code != aicrerrors.ErrCodeInvalidRequest {
 			t.Errorf("BundleComponents: expected ErrCodeInvalidRequest, got %s", se.Code)
@@ -733,8 +732,7 @@ func TestBundleAndValidate_RejectCrossClientRecipeResult(t *testing.T) {
 	if _, err := clientB.ValidateState(t.Context(), resultA, &aicr.Snapshot{}); err == nil {
 		t.Error("ValidateState: expected cross-client rejection, got nil error")
 	} else {
-		var se *aicrerrors.StructuredError
-		if !errors.As(err, &se) {
+		if se, ok := errors.AsType[*aicrerrors.StructuredError](err); !ok {
 			t.Errorf("ValidateState: expected *aicrerrors.StructuredError, got %T: %v", err, err)
 		} else if se.Code != aicrerrors.ErrCodeInvalidRequest {
 			t.Errorf("ValidateState: expected ErrCodeInvalidRequest, got %s", se.Code)
@@ -1787,7 +1785,7 @@ func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
 	baselineStore := recipe.CachedStoreCountForTesting()
 	baselineRegistry := recipe.CachedRegistryCountForTesting()
 
-	for i := 0; i < N; i++ {
+	for i := range N {
 		c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
 		if err != nil {
 			t.Fatalf("iteration %d: NewClient: %v", i, err)

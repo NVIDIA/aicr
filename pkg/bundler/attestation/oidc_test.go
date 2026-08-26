@@ -170,7 +170,7 @@ func TestFetchAmbientOIDCToken_LargeErrorBody(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
 		// Write more than 4096 bytes
-		for i := 0; i < 500; i++ {
+		for range 500 {
 			fmt.Fprint(w, "error detail padding ")
 		}
 	}))

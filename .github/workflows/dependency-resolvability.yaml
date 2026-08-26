@@ -1,0 +1,96 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+---
+# Pre-merge signal on dependency bumps, for PRs that cannot authenticate.
+#
+# #2374 removed vendor/ and put the DGXC Go proxy in the release build path. That
+# created a gap this workflow closes. Dependabot PRs run with a read-only token,
+# no secrets, and no `id-token: write`, so they cannot mint the OIDC credential
+# setup-dgxc-goproxy needs — the same restriction fork PRs have. A check that
+# talks to Artifactory therefore *cannot* run on the PRs that change dependencies
+# most often (Dependabot authored 23 of 48 vendor-touching commits in 90 days).
+#
+# Without something here, a bump introducing a module Artifactory cannot serve
+# would pass its own PR, merge, and break the release build on main with no
+# pre-merge warning.
+#
+# ---------------------------------------------------------------------------
+# WHAT THIS CHECKS, AND WHAT IT DOES NOT
+#
+# It asserts that every module version newly added to go.sum resolves on the
+# PUBLIC proxy and is present in the PUBLIC checksum database. Both are
+# unauthenticated, so this runs identically on Dependabot, forks, and ordinary
+# PRs.
+#
+# That is a proxy for the real question rather than an answer to it. The chain:
+# `dgxc-go-virtual` is a *virtual* repository, so a module it does not already
+# hold is re-fetched from upstream on first request rather than 404'd. A version
+# that resolves publicly is therefore one Artifactory can serve on demand.
+#
+# It is deliberately NOT claimed to be equivalent. Two cases slip through:
+#
+#   - Artifactory deliberately withholds a module — pulled for a security
+#     reason. That is intended behavior upstream, and a green check here does
+#     not mean the release will resolve it.
+#   - Artifactory is down or the module is evicted mid-flight.
+#
+# Neither is detectable without a credential, which is the constraint. What this
+# does catch is the common and otherwise-silent case: a version that does not
+# exist publicly at all — a typo, a retracted tag, a bad pseudo-version, or a
+# go.sum entry whose hash disagrees with the transparency log.
+#
+# The strong check still exists; it just runs later. The release build resolves
+# through Artifactory in `enforced` mode, so an unserved module fails there
+# loudly. This workflow narrows the window, it does not replace that.
+# ---------------------------------------------------------------------------
+name: Dependency Resolvability
+
+on:
+  pull_request:
+    paths:
+      - 'go.mod'
+      - 'go.sum'
+      # A change to the gate re-runs the gate.
+      - '.github/scripts/check-dependency-resolvability.py'
+      - '.github/workflows/dependency-resolvability.yaml'
+
+# No secrets, no id-token. Everything below is an unauthenticated GET, which is
+# the entire point — adding either would reintroduce the restriction this exists
+# to work around.
+permissions:
+  contents: read
+
+jobs:
+  resolvable:
+    name: New dependencies resolve publicly
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # Both sides of the diff are needed to tell an ADDED module version
+          # from one that was already there. Without the base commit every entry
+          # in go.sum looks new and the check re-verifies the whole graph.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify newly added go.sum entries resolve
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/check-dependency-resolvability.py "${BASE_SHA}"

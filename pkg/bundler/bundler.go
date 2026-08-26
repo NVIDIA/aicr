@@ -651,13 +651,7 @@ func (b *DefaultBundler) warnLegacyAccountingOverride(provider recipe.DataProvid
 	if err != nil {
 		return err
 	}
-	dynamicPresent := false
-	for _, path := range dynamicValues["slinky-slurm"] {
-		if path == accountingEnabledPath {
-			dynamicPresent = true
-			break
-		}
-	}
+	dynamicPresent := slices.Contains(dynamicValues["slinky-slurm"], accountingEnabledPath)
 	if scalarPresent || typedPresent || dynamicPresent {
 		warning := "deprecated: bundle-time slinky-slurm:accounting.enabled on a legacy recipe " +
 			"selects only customer-managed accounting and is not recorded in recipe evidence; " +
@@ -1179,17 +1173,15 @@ func mergeOverridesAcrossKeys[V any](allOverrides map[string]map[string]V, keys 
 	var merged map[string]V
 	// Apply in reverse priority order so earlier (higher-priority) keys
 	// overwrite later ones on a path collision.
-	for i := len(keys) - 1; i >= 0; i-- {
-		overrides, ok := allOverrides[keys[i]]
+	for _, key := range slices.Backward(keys) {
+		overrides, ok := allOverrides[key]
 		if !ok {
 			continue
 		}
 		if merged == nil {
 			merged = make(map[string]V, len(overrides))
 		}
-		for path, value := range overrides {
-			merged[path] = value
-		}
+		maps.Copy(merged, overrides)
 	}
 	return merged
 }
@@ -2847,21 +2839,11 @@ var (
 )
 
 func isDRAComponent(name string) bool {
-	for _, n := range draComponentNames {
-		if name == n {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(draComponentNames, name)
 }
 
 func isGPUOperatorComponent(name string) bool {
-	for _, n := range gpuOperatorComponentNames {
-		if name == n {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(gpuOperatorComponentNames, name)
 }
 
 // injectDRAChartVersionAnnotation writes the resolved gpu-operator

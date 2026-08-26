@@ -97,7 +97,7 @@ func getConditionObservation(obj *unstructured.Unstructured, condType string) (*
 	}
 
 	for _, c := range conditions {
-		cond, ok := c.(map[string]interface{})
+		cond, ok := c.(map[string]any)
 		if !ok {
 			continue
 		}

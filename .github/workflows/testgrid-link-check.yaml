@@ -73,8 +73,6 @@ jobs:
       # JSON document — it templates no chart and touches no cluster.
 
       - name: Check Evidence deep-links and write report to step summary
-        env:
-          GOFLAGS: -mod=vendor
         # The tool exits 0 even when it finds dead links (warning-only), so the
         # job never fails the weekly run; the report is the signal.
         run: |

@@ -1,4 +1,4 @@
-# Vendored: DGXC Go proxy adoption kit
+# Vendored: Go proxy setup action
 
 `action.yml` and `oidc-exchange.sh` in this directory are **copied verbatim from
 upstream**, not authored here. Do not edit them in place — an edit breaks the

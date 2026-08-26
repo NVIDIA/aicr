@@ -1609,7 +1609,7 @@ func buildNoAllocationProbePod(run *gpuTestRun, gpuNodeName string) *corev1.Pod 
 // no `exactly` wrapper — deviceClassName/allocationMode/count are direct
 // fields on the request (see k8s.io/api/resource/v1beta1.DeviceRequest).
 func buildResourceClaim(run *gpuTestRun, version string) *unstructured.Unstructured {
-	request := map[string]interface{}{
+	request := map[string]any{
 		keyName: gpuClaimName,
 	}
 	if version == versionV1beta1 {
@@ -1617,23 +1617,23 @@ func buildResourceClaim(run *gpuTestRun, version string) *unstructured.Unstructu
 		request["allocationMode"] = allocationModeExactCount
 		request["count"] = int64(1)
 	} else {
-		request["exactly"] = map[string]interface{}{
+		request["exactly"] = map[string]any{
 			"deviceClassName": draDriverGPU,
 			"allocationMode":  allocationModeExactCount,
 			"count":           int64(1),
 		}
 	}
 	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			keyAPIVersion: apiGroupResourceK8sIO + "/" + version,
 			keyKind:       "ResourceClaim",
-			keyMetadata: map[string]interface{}{
+			keyMetadata: map[string]any{
 				keyName:      run.claimName,
 				keyNamespace: run.namespace,
 			},
-			keySpec: map[string]interface{}{
-				"devices": map[string]interface{}{
-					"requests": []interface{}{request},
+			keySpec: map[string]any{
+				"devices": map[string]any{
+					"requests": []any{request},
 				},
 			},
 		},

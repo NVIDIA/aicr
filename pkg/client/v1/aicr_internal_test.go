@@ -1371,7 +1371,7 @@ func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 
-	for i := 0; i < N; i++ {
+	for i := range N {
 		c, err := NewClient(WithRecipeSource(FilesystemSource(tmp)))
 		if err != nil {
 			t.Fatalf("iteration %d: NewClient: %v", i, err)

@@ -16,7 +16,9 @@ package bundler
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -210,19 +212,12 @@ func materializeSlinkySharedStorage(values map[string]any, supported bool) error
 	}
 
 	clear(values)
-	for key, value := range updatedValues {
-		values[key] = value
-	}
+	maps.Copy(values, updatedValues)
 	return nil
 }
 
 func hasSlinkySharedStoragePreManifest(paths []string) bool {
-	for _, path := range paths {
-		if path == slinkySharedStoragePreManifestPath {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(paths, slinkySharedStoragePreManifestPath)
 }
 
 func parseSlinkySharedVolume(

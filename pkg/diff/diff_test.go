@@ -464,7 +464,7 @@ func TestSnapshots_StructuredFieldsDeterministic(t *testing.T) {
 	if len(first.Changes) == 0 {
 		t.Fatal("expected structured field changes")
 	}
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		next := Snapshots(baseline, target)
 		if !reflect.DeepEqual(first.Changes, next.Changes) {
 			t.Fatalf("run %d changes = %#v, want %#v", i, next.Changes, first.Changes)
@@ -534,7 +534,7 @@ func TestSnapshots_ReservedDataKeysUseDistinctDeterministicPaths(t *testing.T) {
 
 			first := Snapshots(baseline, target)
 			assertChanges(t, first, tt.want)
-			for i := 0; i < 100; i++ {
+			for i := range 100 {
 				next := Snapshots(baseline, target)
 				if !reflect.DeepEqual(first.Changes, next.Changes) {
 					t.Fatalf("run %d changes = %#v, want %#v", i, next.Changes, first.Changes)
@@ -693,7 +693,7 @@ func TestSnapshots_EmptySnapshots(t *testing.T) {
 func TestSnapshotsWithContext_MidTraversalCancellation(t *testing.T) {
 	baselineData := make(map[string]measurement.Reading, 64)
 	targetData := make(map[string]measurement.Reading, 64)
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		key := fmt.Sprintf("reading-%02d", i)
 		baselineData[key] = measurement.Int(i)
 		targetData[key] = measurement.Int(i + 1)
@@ -1006,7 +1006,7 @@ func TestSnapshots_DeterministicOrder(t *testing.T) {
 		),
 	)
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		result := Snapshots(baseline, target)
 		if len(result.Changes) != 2 {
 			t.Fatalf("run %d: expected 2 changes, got %d", i, len(result.Changes))

@@ -166,11 +166,11 @@ const tagRefMarker = "@refs/tags/"
 // ok is false when the SAN has no @refs/tags/ segment OR the tag is empty — both
 // unexpected shapes the caller must NOT suppress.
 func extractTag(certSubject string) (tag string, ok bool) {
-	i := strings.Index(certSubject, tagRefMarker)
-	if i < 0 {
+	_, after, ok := strings.Cut(certSubject, tagRefMarker)
+	if !ok {
 		return "", false
 	}
-	tag = certSubject[i+len(tagRefMarker):]
+	tag = after
 	if tag == "" {
 		return "", false // empty tag ref is an unexpected shape; do not suppress
 	}

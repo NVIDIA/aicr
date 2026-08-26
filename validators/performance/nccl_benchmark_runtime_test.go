@@ -400,7 +400,7 @@ func TestBuildNCCLRuntimeObjectCustom(t *testing.T) {
 	if len(containers) == 0 {
 		t.Fatal("no containers in rendered worker pod spec")
 	}
-	c0, _ := containers[0].(map[string]interface{})
+	c0, _ := containers[0].(map[string]any)
 	gpu, _, _ := unstructured.NestedString(c0, "resources", "limits", "nvidia.com/gpu")
 	if gpu != "8" {
 		t.Errorf("nvidia.com/gpu limit = %q, want %q (\\${GPU_COUNT_PER_NODE} not substituted)", gpu, "8")
@@ -463,14 +463,14 @@ spec:
 // workerPodSpec navigates a rendered NCCL TrainingRuntime to the "node"
 // replicatedJob's worker pod spec (spec.template.spec.replicatedJobs[node]
 // .template.spec.template.spec) — the same path applyNCCLWorkerScheduling uses.
-func workerPodSpec(t *testing.T, obj *unstructured.Unstructured) map[string]interface{} {
+func workerPodSpec(t *testing.T, obj *unstructured.Unstructured) map[string]any {
 	t.Helper()
 	jobs, found, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
 	if err != nil || !found {
 		t.Fatalf("replicatedJobs not found (found=%v err=%v)", found, err)
 	}
 	for _, raw := range jobs {
-		jobMap, ok := raw.(map[string]interface{})
+		jobMap, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}

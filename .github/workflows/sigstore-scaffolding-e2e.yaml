@@ -46,7 +46,6 @@ on:
       - 'cmd/aicr/**'
       - 'go.mod'
       - 'go.sum'
-      - 'vendor/**'
       - 'tests/chainsaw/signing/bundle-attestation-private-sigstore/**'
       - '.github/workflows/sigstore-scaffolding-e2e.yaml'
       - '.github/actions/load-versions/**'
@@ -105,7 +104,7 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
-          cache: false  # vendor/ provides deps
+          cache: false  # This isolated E2E lane does not reuse Go caches
 
       - name: Install GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94  # v7.2.3
@@ -168,8 +167,6 @@ jobs:
 
       # Inline by design: a one-line goreleaser invocation, not reusable plumbing.
       - name: Build aicr binary
-        env:
-          GOFLAGS: -mod=vendor
         run: |
           set -euo pipefail
           goreleaser build --clean --single-target --snapshot --timeout 10m
