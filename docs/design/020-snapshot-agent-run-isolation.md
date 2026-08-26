@@ -172,8 +172,7 @@ because `Cleanup` runs on the `Deploy` failure path (Problem, note 1).
 `agentConfigMapTarget` reports the run does not own the user's output, carried by
 a new `agent.Config.OwnsOutputConfigMap`. This closes the leak in Problem note 3,
 which per-run naming would otherwise turn into one leaked object per run.
-`CheckPermissions` (`permissions.go:48-64`) gains the `configmaps: delete` verb
-this needs.
+The verb this needs is covered by decision 10's gate.
 
 The staging ConfigMap is created by the in-pod agent, not the controller, so its
 UID is not captured at create time. It must be recorded when the controller reads
@@ -222,11 +221,20 @@ is a prefix and the run creates `<prefix>-<runID>` as decision 2 describes.
 
 In the exact case aicr **manages no permissions for that run** — no ServiceAccount,
 Role, RoleBinding, ClusterRole or ClusterRoleBinding is created, bound or deleted.
-Permissions are granted once, out of band, by `--add-roles-to-service-account
-<name>`: a separate provision-and-exit invocation that creates generic,
-non-run-scoped RBAC bound to that ServiceAccount. What it creates is permanent —
-run cleanup never touches it, and teardown is the operator's job. Combined with
-`--discover-network` it also provisions the mutating discovery rules.
+Permissions are granted out of band by `--add-roles-to-service-account <name>`:
+a separate generate-and-exit invocation that **renders** the generic,
+non-run-scoped RBAC for that ServiceAccount into `snapshot-rbac-<runID>/` and
+applies nothing. Applying it is the operator's own `kubectl apply`, and so is
+teardown; no run's cleanup touches it. Combined with `--discover-network` it
+renders the mutating discovery rules too.
+
+Rendering rather than provisioning is the point. Under `--discover-network`
+these rules include cluster-scoped mutating permissions that outlive any run,
+and an operator consenting to that should be able to read exactly what they are
+granting first. It also means the command needs no cluster and no privileges of
+its own. The rules must be generated from the same definitions the run-scoped
+Role and ClusterRole are built from, so a rendered manifest cannot drift from
+what a run-owned grant carries.
 
 **Why this exists.** IRSA and GKE Workload Identity both pin trust to the
 ServiceAccount *name*: IRSA's trust policy conditions on
@@ -238,10 +246,40 @@ upgrading silently strips those identities' cloud credentials.
 
 **What it costs.** This is the one mode that waives per-run permission isolation:
 concurrent runs sharing an external ServiceAccount share its grants, and a
-`--discover-network`-provisioned ServiceAccount carries mutating cluster
+ServiceAccount granted the `--discover-network` rules carries mutating cluster
 permissions permanently rather than for one run's lifetime. That is the trade the
 mode exists to make, it is opt-in, and it is documented in
 `docs/user/agent-deployment.md` so an operator meets it before choosing it.
+
+### 10. One pre-flight gate for the whole run
+
+Permission checking is a single authoritative gate that runs before anything is
+created, and it fails the run when either subject is short of what the run will
+actually do. Checking a subset is what let two separate failures through: an
+identity holding `create` but not `delete` on the RBAC kinds passed, then leaked
+a full run-scoped set — cluster-scoped objects included — on every run; and an
+identity that could not read ServiceAccounts passed, then silently ran under a
+generated account instead of the annotated one it was told to use.
+
+Two subjects, because two identities matter. The **caller** must hold what the
+run itself performs. The **agent ServiceAccount** must already hold the rules
+the agent needs, which matters in decision 9's exact mode, where aicr grants
+nothing and "you rendered the manifests but never applied them" should fail at
+the gate rather than inside a pod minutes later. Answering for a subject other
+than the caller requires a `SubjectAccessReview`, which is itself a privilege —
+when the caller cannot create one, the gate must say the checks are unverified
+rather than pass over them silently.
+
+The required verb set depends on the mode, so the gate resolves the mode first.
+That resolution is a read-only lookup, which keeps the ordering compatible with
+failing before the first write. Exact mode must not demand the RBAC verbs at
+all: aicr creates and deletes nothing there, and requiring them would lock out
+precisely the operators decision 9 exists for.
+
+Implementation must remember: report every missing permission in one failure,
+naming the verb, the resource, the scope, and which of the two subjects lacked
+it. An operator fixing a constrained identity should need one run to see the
+whole list, not one run per missing verb.
 
 ## Non-Goals
 
@@ -251,8 +289,8 @@ mode exists to make, it is opt-in, and it is documented in
 - No automated sweep of cluster-scoped RBAC orphaned by a hard kill.
 - No modification to `pkg/validator`'s run isolation; this ADR consumes its
   primitives after they move to neutral packages.
-- No automatic teardown of the RBAC `--add-roles-to-service-account` provisions;
-  it is deliberately permanent (decision 9).
+- No applying, and no teardown, of the RBAC `--add-roles-to-service-account`
+  renders; both are the operator's own command (decision 9).
 
 ## Consequences
 
@@ -318,6 +356,7 @@ mode exists to make, it is opt-in, and it is documented in
 3. Created-set tracking and UID-pinned `Cleanup`, including the staging ConfigMap.
 4. Controller-UID pod selection in `wait.go`.
 5. CLI flag default removal, `AgentConfig.RunID`, godoc and config-schema updates.
+   The gate of decision 10, covering both subjects and both modes.
 6. The NetworkPolicy selector change and the call-site updates listed under
    Consequences → Neutral.
 7. Tests: an overlapping-run test with one run under `DiscoverNetwork` asserting
