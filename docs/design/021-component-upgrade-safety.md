@@ -225,7 +225,7 @@ What it is good for is the thing an operator needs *before* upgrading rather tha
 | `.affectedResources[]` | no | `group` plus `kinds`; drives the at-risk scan in [Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see). |
 | `.references[]` | no | Links to upstream migration notes. |
 
-Two gaps are deliberate rather than overlooked. Cross-component coupling is asserted by [Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see) and rendered in the Example, but has **no field here yet**; naming it, deciding which component owns the shared verdict, and handling cycles is unresolved. And nothing above expresses a transition for a component that is *added or removed* rather than changed, where one side has no version at all. Both are tracked in [Open Questions](#open-questions).
+One gap is deliberate rather than overlooked: nothing above expresses a transition for a component that is *added or removed* rather than changed, where one side has no version at all. Tracked in [Open Questions](#open-questions). Cross-component coupling is a deliberate non-goal; see [Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see).
 
 Like `ownsCRDs`, these records are human-audited assertions. They carry the same strength and the same failure mode: a wrong record grants false confidence. [Decision 9](#decision-9-uat-covers-upgrade-and-rollback) addresses that directly.
 
@@ -245,7 +245,13 @@ A single migration can span three ownership classes with different answers. The 
 
 Declarative metadata cannot reach that. `helm.sh/resource-policy: keep` and sync-wave ordering do not annotate a live object, so adoption requires writing annotations onto an existing resource, which is inherently mutating. This is the concrete case AICR must own under [Decision 1](#decision-1-boundary), shipping as an adjacent release under [Decision 4](#decision-4-migration-content-ships-as-an-adjacent-generated-release). Any such Job needs a digest-pinned image and a BOM entry like every other image.
 
-**Transitions may be cross-component.** A `nodewright-operator` version change forces a `nodewright-customizations` content change, so a record may name other components it affects and the report groups them as one migration.
+**Cross-component effects are described in steps, not modelled.** A `nodewright-operator` version change forces a `nodewright-customizations` content change, and the obvious move is a schema field naming affected components. This ADR deliberately does not do that.
+
+The coupling is real but the trigger is rare: it takes an API-group rename or equivalent to make one component's version move rewrite another's content. Modelling it would cost a record field, a rule for which side owns the shared verdict, and a way to tell genuine coupling from ordinary dependency, since `dependencyRefs` already carries 278 edges across the tree and almost none of them imply a migration. That is a lot of machinery aimed at something that happens approximately never, and it would misfire on every unrelated edge in between.
+
+A step describes it perfectly well: "the NodeWright CRs shipped by `nodewright-customizations` are rewritten in this release; regenerate your bundle to pick them up." The affected component's own record carries its own transition as usual. What is lost is the report grouping two rows as one migration, which is presentation rather than correctness.
+
+Revisit if a second unrelated case appears. One occurrence is an anecdote.
 
 **Class 3 is the highest-severity case, and only online mode can see it.** If a user authored their own `Skyhook` CRs outside AICR, the rename ships, their objects are untouched, and the 0.20.0 CRD removal cascade-deletes them. A record declares the API groups and kinds it affects (`affectedResources`, see the field table in [Decision 2](#decision-2-transition-records)), and in online mode the check lists matching objects carrying no AICR or Helm ownership and reports them as at-risk.
 
@@ -506,10 +512,10 @@ transitions:
     affectedResources:
       - group: skyhook.nvidia.com
         kinds: [Skyhook, DeploymentPolicy]
-    # No `hooks` here, and that is the point: the adoption manifest in
-    # Decision 4 lives under nodewright-customizations, whose content it
-    # fixes, while this record is nodewright-operator's. Linking them is
-    # exactly the cross-component coupling the schema cannot yet express.
+    # The adoption manifest in Decision 4 lives under
+    # nodewright-customizations, whose content it fixes, so it hangs off
+    # that component's own record rather than this one. Cross-component
+    # effects are described in steps; see Decision 3.
     references:
       - https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md
 
@@ -544,7 +550,7 @@ $ aicr upgrade-check --from ./bundles-v0.16.0 --to ./bundles-v0.17.0 --scan-clus
 
 COMPONENT                    FROM      TO        VERDICT   NOTES
 nodewright-operator          0.17.2    0.18.1    manual    1 step, reversible 24h
-nodewright-customizations    v0.16.0   v0.17.0   manual    coupled: see nodewright-operator
+nodewright-customizations    v0.16.0   v0.17.0   manual    CRs rewritten, regenerate
 
 nodewright-operator 0.17.2 -> 0.18.1  (manual, reversible: yes)
   skyhook.nvidia.com is renamed to nodewright.nvidia.com. The mirror
