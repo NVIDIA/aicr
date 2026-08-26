@@ -105,6 +105,21 @@ spec:
         - dra-support
         - accelerator-metrics
         - ai-service-metrics
+        # Dynamo admits its frontend + decode workers as a gang through
+        # kai-scheduler, and the inference-perf validator applies a KAI Queue
+        # for that workload. Without this check nothing verifies the
+        # scheduling path the leaf depends on: the queue apply is best-effort
+        # (logs at INFO and continues), so a missing or unserved
+        # scheduling.run.ai API silently degrades to ungated scheduling, and
+        # the only symptom is the performance phase timing out ~18 minutes
+        # later with "workload never became ready". This check fails closed on
+        # the CRDs and runs a functional two-pod co-scheduling test, so the
+        # failure surfaces here in ~1 minute with an accurate name.
+        #
+        # Matches h100-eks/aks/gke, b200-gke and rtx-pro-6000-eks Dynamo
+        # leaves. The gb200-eks and gb200-oke Dynamo leaves still omit it —
+        # tracked separately.
+        - gang-scheduling
         - inference-gateway
         - robust-controller
         - secure-accelerator-access
