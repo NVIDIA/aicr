@@ -147,51 +147,6 @@ reservations:
     nightly-intent-min-versions:
       inference: v0.18.0
       training: v0.18.0
-  - name: aws-gb200
-    slug: ag2
-    cloud: aws
-    # CROSS-ACCOUNT: the GB200 Capacity Block lives in a SEPARATE tenancy
-    # (dgx-cloud-runai-prod-22, account 897722687756), not the standard UAT
-    # account. The account is NOT a field here: the AWS pipeline derives the
-    # tenancy it assumes the OIDC role into from the target cluster-config's
-    # .deployment.tenancy (cluster-config-gb200.yaml sets it to 897722687756),
-    # the single source of truth. Prereq: apply infra/uat-aws-account in
-    # 897722687756 (GitHub OIDC provider + github-actions-role-aicr).
-    # GB200 reservations are Capacity Blocks (marketType: capacity-block in
-    # cluster-config-gb200.yaml), not standing on-demand CRs like the h100 rows,
-    # so a run must fall inside the block's active window or actuator apply
-    # fails to acquire capacity. This particular block (cr-0e2f3833a602809a6,
-    # CapacityBlockId cbr-0a6a5543dd5c74727) is booked long: State=active,
-    # StartDate 2025-11-15, EndDate 2029-08-22 (TotalInstanceCount 18). A 04:00
-    # UTC nightly cron therefore always falls inside the window today, which is
-    # why nightly enrollment below is safe without broker window-awareness. If
-    # the block is ever re-booked to a shorter window, add a scheduling gate to
-    # the broker (or revert to `nightly-intents: []`) before it lapses.
-    reservation-id: cr-0e2f3833a602809a6
-    accelerator: gb200
-    # 4 Blackwell GPUs per p6e-gb200.36xlarge node; the cluster-config runs 2
-    # nodes (activates the multi-node NCCL East-West fabric check).
-    gpu-count: 4
-    cluster-config-path: tests/uat/aws/cluster-config-gb200.yaml
-    test-config-dir: tests/uat/aws/tests
-    # Enrolled in the nightly batch with both intents, matching the aws-h100
-    # row. Training runs the Kubeflow TrainJob CUJ; inference stands up and
-    # validates the served inference stack (the vLLM serve run itself stays
-    # disabled repo-wide, #1644). Each (version × intent) is a full
-    # provision→CUJ→teardown cell dispatched through the shared per-reservation
-    # lease, so the two intents serialize with no contention. Safe to enroll
-    # because the Capacity Block is booked active through 2029 (see the block
-    # note above) and the GB200 EKS UAT config first shipped in v0.18.0.
-    nightly-intents: [training, inference]
-    # Gate release cells to v0.18.0: cluster-config-gb200.yaml and the GB200 EKS
-    # UAT lane first shipped in v0.18.0 (absent in v0.17.0 and earlier), so a
-    # release cell below that tag has no GB200 config to run and would fail
-    # closed. `main` always runs both intents (built from source); older
-    # releases are skipped until v0.18.0 is the oldest cell in the window. Bump
-    # if the actual first-supported tag differs.
-    nightly-intent-min-versions:
-      training: v0.18.0
-      inference: v0.18.0
   - name: kind-h100
     slug: kh1
     cloud: kind

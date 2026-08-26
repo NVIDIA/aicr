@@ -64,6 +64,7 @@ jobs:
           go_version: ${{ steps.versions.outputs.go }}
           coverage_report: ${{ inputs.coverage_report }}
           coverage_threshold: ${{ steps.versions.outputs.coverage_threshold }}
+          setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
           helm_version: ${{ steps.versions.outputs.helm }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
 

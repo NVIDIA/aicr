@@ -71,3 +71,11 @@ runs:
     - name: Ensure License Headers
       shell: bash
       run: make license
+
+    # Runs after `make license`, not before: addlicense writes in place, so
+    # this ordering also proves the LICENSE_IGNORES entry for the vendored
+    # kit is doing its job. If a header were stamped into those files, their
+    # digests would change and this step would fail.
+    - name: Verify vendored DGXC Go proxy kit
+      shell: bash
+      run: make check-depproxy-kit
