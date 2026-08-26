@@ -189,6 +189,44 @@ has     "live-finalizer-rescue-ran" "${klog}" "patch configmap/stub-cm -n ${STUB
 has     "live-helm-nonexcluded-uninstalled" "${hlog}" "uninstall gpu-operator"
 has_not "live-helm-excluded-untouched" "${hlog}" "nodewright"
 
+# A failing namespace list must be reported, not silently treated as "no
+# namespaces matched". Under `set -e` a bare failing assignment would exit the
+# discovery subshell before its status could be checked, and because that
+# function's stdout feeds the namespace list, a warning printed to stdout would
+# be consumed as a namespace name. See #2395.
+FAIL_DIR="$(mktemp -d)"
+cat >"${FAIL_DIR}/kubectl" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "config" && "$2" == "current-context" ]]; then echo "stub-ctx"; exit 0; fi
+if [[ "$1" == "get" && ( "$2" == "ns" || "$2" == "namespace" ) ]]; then
+    echo "simulated API failure" >&2
+    exit 23
+fi
+exit 0
+STUB
+printf '#!/usr/bin/env bash\nexit 0\n' >"${FAIL_DIR}/helm"
+chmod +x "${FAIL_DIR}/kubectl" "${FAIL_DIR}/helm"
+
+NSFAIL_OUT="$(PATH="${FAIL_DIR}:${PATH}" "${CLEANUP}" --dry-run --yes 2>&1)"
+NSFAIL_RC=$?
+
+if [[ "${NSFAIL_RC}" == "0" ]]; then
+    pass "nsfail-exit-stays-zero"
+else
+    fail "nsfail-exit-stays-zero" "want rc=0 (best-effort), got rc=${NSFAIL_RC}"
+fi
+if [[ "${NSFAIL_OUT}" == *"Could not list namespaces"* ]]; then
+    pass "nsfail-warning-visible"
+else
+    fail "nsfail-warning-visible" "expected a 'Could not list namespaces' warning"
+fi
+if [[ "${NSFAIL_OUT}" != *"delete ns "*"Could not list"* ]]; then
+    pass "nsfail-warning-not-treated-as-namespace"
+else
+    fail "nsfail-warning-not-treated-as-namespace" "warning text leaked into the namespace list"
+fi
+rm -rf "${FAIL_DIR}"
+
 if (( fails > 0 )); then
     echo "${fails} test(s) failed"
     exit 1

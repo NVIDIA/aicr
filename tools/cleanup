@@ -326,12 +326,15 @@ is_excluded_crd() {
 # matched": capture the list command's status separately so a transient API
 # error is reported instead of silently skipping those namespaces.
 expand_check_namespaces() {
-    local prefix ns all_ns rc
-    all_ns="$(kubectl get ns -o name --request-timeout=30s 2>&1)"
-    rc=$?
+    local prefix ns all_ns rc=0
+    # `|| rc=$?` is load-bearing: under `set -e` a bare failing assignment
+    # exits this subshell before the status can be inspected, so the caller
+    # would see an empty list and report success. Warnings go to stderr
+    # because this function's stdout is consumed as namespace names.
+    all_ns="$(kubectl get ns -o name --request-timeout=30s 2>&1)" || rc=$?
     if (( rc != 0 )); then
-        log_warning "Could not list namespaces (rc=${rc}); check-created namespaces matching ${AICR_CHECK_NS_PREFIXES[*]} were NOT swept. Re-run cleanup once the API server is reachable."
-        log_warning "  kubectl: ${all_ns}"
+        log_warning "Could not list namespaces (rc=${rc}); check-created namespaces matching ${AICR_CHECK_NS_PREFIXES[*]} were NOT swept. Re-run cleanup once the API server is reachable." >&2
+        log_warning "  kubectl: ${all_ns}" >&2
         return 0
     fi
     for prefix in "${AICR_CHECK_NS_PREFIXES[@]}"; do
