@@ -36,7 +36,10 @@ import (
 	"time"
 )
 
-const goListTimeout = 2 * time.Minute
+// Building export data for the package dependency closure can take more than
+// two minutes on cold or contended CI runners. Keep enough bounded headroom for
+// that normal variance without masking a stuck go list process.
+const goListTimeout = 5 * time.Minute
 
 type rootSpecs []string
 
