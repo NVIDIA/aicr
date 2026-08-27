@@ -2803,8 +2803,10 @@ components:
         configuration emitted by this release use aicr.run/v1alpha2;
         profile-bearing recipes and recipes carrying
         configuration.slurm.accounting use aicr.run/v1alpha3. The schema also
-        admits the ADR-022 reader-first profile target aicr.run/v1beta2 for
-        bundle request reuse; this release does not emit it.
+        admits both ADR-022 targets, aicr.run/v1 for the default track and
+        aicr.run/v1beta2 for the profile track, so a client generated from this
+        spec tolerates them a release before the emitter switch. This release
+        emits neither.
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase"
         - type: object
@@ -2812,7 +2814,13 @@ components:
           properties:
             apiVersion:
               type: string
-              enum: [aicr.run/v1alpha2, aicr.run/v1alpha3, aicr.run/v1beta2]
+              enum:
+                [
+                  aicr.run/v1alpha2,
+                  aicr.run/v1alpha3,
+                  aicr.run/v1,
+                  aicr.run/v1beta2,
+                ]
               example: aicr.run/v1alpha2
             kind:
               type: string
@@ -3147,14 +3155,17 @@ components:
       description: >
         Additive legacy recipe shape. Unknown fields remain accepted for
         compatibility, but metadata.selectedProfile is reserved for the
-        profile-bearing schema track.
+        profile-bearing schema track. Narrowed to the default track: this
+        release emits aicr.run/v1alpha2 and the ADR-022 target aicr.run/v1 is
+        admitted ahead of the emitter switch, so /v1 responses never carry a
+        profile-track version.
       allOf:
         - $ref: "#/components/schemas/RecipeResponse"
         - type: object
           properties:
             apiVersion:
               type: string
-              enum: [aicr.run/v1alpha2]
+              enum: [aicr.run/v1alpha2, aicr.run/v1]
             metadata:
               type: object
               not:

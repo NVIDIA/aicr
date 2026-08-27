@@ -227,11 +227,20 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 		kinds       []string
 	}{
 		{
-			name:        "base response",
-			schema:      spec.Components.Schemas["RecipeResponse"],
-			required:    []string{"apiVersion", "kind"},
-			apiVersions: []string{recipe.RecipeAPIVersion, recipe.ConfiguredRecipeResultAPIVersion, header.GroupVersionV1Beta2},
-			kinds:       []string{recipe.RecipeResultKind},
+			name:     "base response",
+			schema:   spec.Components.Schemas["RecipeResponse"],
+			required: []string{"apiVersion", "kind"},
+			// Both emitted alpha versions plus both ADR-022 targets. The
+			// targets are staged here a release before the emitter switch so
+			// a client generated from this spec does not reject the first
+			// response carrying one.
+			apiVersions: []string{
+				recipe.RecipeAPIVersion,
+				recipe.ConfiguredRecipeResultAPIVersion,
+				header.GroupVersionV1,
+				header.GroupVersionV1Beta2,
+			},
+			kinds: []string{recipe.RecipeResultKind},
 		},
 		{
 			name:        "profile response",
@@ -242,16 +251,26 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 			kinds:       []string{recipe.RecipeResultKind},
 		},
 		{
-			// /v1 responses are pinned to v1alpha2 by LegacyRecipeResponse,
-			// which wraps RecipeResponse and narrows the apiVersion enum.
-			// RecipeResponse itself now also admits v1alpha3 for /v2, so
-			// asserting on it directly would no longer prove v1 stays legacy.
+			// /v1 responses are narrowed to the default track by
+			// LegacyRecipeResponse, which wraps RecipeResponse and drops the
+			// profile-track versions from the apiVersion enum. RecipeResponse
+			// itself also admits v1alpha3 and v1beta2 for /v2, so asserting on
+			// it directly would no longer prove /v1 stays default-track.
 			// required and kind come from the RecipeResponse base and are
 			// checked there; this case owns the narrowing.
-			name:        "versioned response",
-			schema:      spec.Components.Schemas["LegacyRecipeResponse"],
-			baseRef:     "#/components/schemas/RecipeResponse",
-			apiVersions: []string{recipe.RecipeAPIVersion},
+			//
+			// The narrowing is by schema track, not by maturity: the ADR-022
+			// default target belongs here, because /v1 emits it at the
+			// emitter-switch release. Pinning this to v1alpha2 alone would
+			// break /v1 against its own published contract at that release,
+			// and v1alpha2 is retired one release later.
+			name:    "versioned response",
+			schema:  spec.Components.Schemas["LegacyRecipeResponse"],
+			baseRef: "#/components/schemas/RecipeResponse",
+			apiVersions: []string{
+				recipe.RecipeAPIVersion,
+				header.GroupVersionV1,
+			},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
