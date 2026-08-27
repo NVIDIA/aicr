@@ -58,7 +58,9 @@
 //
 // The agent stages YAML regardless of what the caller asked for, so
 // SnapshotDelivery.Format is where a JSON or table rendering is applied. Its
-// zero value, and FormatYAML, deliver those bytes unchanged.
+// zero value, and FormatYAML, deliver those bytes unchanged to a file or
+// stdout; a cm:// destination re-serializes the document to derive its data
+// key and labels, preserving unmodeled fields but not the exact bytes.
 //
 // Snapshot: Captured configuration data
 //

@@ -563,9 +563,11 @@ type SnapshotDelivery struct {
 	Kubeconfig string
 
 	// Format is the rendering the caller asked for. The zero value and
-	// serializer.FormatYAML both deliver the agent's bytes verbatim; JSON
-	// and table re-render the document (see renderSnapshotFormat). Ignored
-	// when TemplatePath is set, since a template supplies its own
+	// serializer.FormatYAML both deliver the agent's bytes verbatim to
+	// stdout and file destinations; JSON and table re-render the document
+	// (see renderSnapshotFormat). A cm:// destination always re-serializes,
+	// whatever the format — see the ConfigMap section on DeliverSnapshot.
+	// Ignored when TemplatePath is set, since a template supplies its own
 	// rendering.
 	Format serializer.Format
 }
@@ -576,9 +578,10 @@ type SnapshotDelivery struct {
 // file.
 //
 // data must be the RAW bytes from DeployAndCollect, not a re-serialization of
-// the parsed Snapshot — see DeployAndCollect for why. Two modes necessarily
-// parse the document instead of copying bytes: a template, which exposes
-// Snapshot fields to the template, and a non-YAML Format.
+// the parsed Snapshot — see DeployAndCollect for why. Stdout and file
+// destinations copy those bytes when Format is YAML (or unset). Three modes
+// necessarily parse the document instead: a template, which exposes Snapshot
+// fields to the template, a non-YAML Format, and any cm:// destination.
 //
 // # ConfigMap destinations
 //
@@ -589,6 +592,14 @@ type SnapshotDelivery struct {
 // default internal ConfigMap and then delivers to cm://ns/name gets the
 // artifact it asked for instead of a silent no-op. Failures surface; a
 // destination the caller named is not something to log and skip past.
+//
+// A ConfigMap is a structured resource, not a byte sink: the writer derives
+// the snapshot.<ext> data key, the format and timestamp entries, and the
+// resource labels from the parsed document. So this destination re-serializes
+// even for YAML — deterministically, via serializer.MarshalYAMLDeterministic,
+// and through a generic map so no unmodeled field is lost. Only the exact
+// bytes are not preserved. A caller that needs byte-identical YAML should
+// deliver to a file or stdout.
 func DeliverSnapshot(ctx context.Context, data []byte, dest SnapshotDelivery) error {
 	if dest.TemplatePath != "" {
 		return deliverWithTemplate(ctx, data, dest.TemplatePath, dest.Output)
