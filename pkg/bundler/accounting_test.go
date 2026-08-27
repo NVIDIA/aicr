@@ -164,7 +164,7 @@ func TestEnforceAccountingOwnershipWarnsForLegacyOverride(t *testing.T) {
 				t.Fatalf("New() error = %v", err)
 			}
 			result := accountingBundlerTestResult(recipe.AccountingModeDisabled)
-			result.APIVersion = recipe.RecipeAPIVersion
+			result.APIVersion = recipe.RecipeResultAPIVersion
 			result.Configuration = nil
 
 			if err := b.enforceAccountingOwnership(result); err != nil {
@@ -513,7 +513,7 @@ func accountingBundlerTestResult(mode recipe.AccountingMode) *recipe.RecipeResul
 	install := mode == recipe.AccountingModeAICRProvided
 	return &recipe.RecipeResult{
 		Kind:       recipe.RecipeResultKind,
-		APIVersion: recipe.RecipeAPIVersion,
+		APIVersion: recipe.RecipeResultAPIVersion,
 		Criteria:   &recipe.Criteria{Platform: recipe.CriteriaPlatformSlurm},
 		Configuration: &recipe.RecipeConfiguration{
 			Slurm: &recipe.SlurmConfiguration{

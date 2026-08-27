@@ -1225,11 +1225,11 @@ func TestLoadComponentRegistry_ReleaseNHeaders(t *testing.T) {
 		kind       string
 		wantErr    bool
 	}{
-		{name: "current alpha", apiVersion: RecipeAPIVersion, kind: ComponentRegistryKind},
+		{name: "current alpha", apiVersion: ComponentRegistryAPIVersion, kind: ComponentRegistryKind},
 		{name: "target beta", apiVersion: "aicr.run/v1beta1", kind: ComponentRegistryKind},
 		{name: "empty version", apiVersion: "", kind: ComponentRegistryKind, wantErr: true},
 		{name: "unknown version", apiVersion: "aicr.run/v9", kind: ComponentRegistryKind, wantErr: true},
-		{name: "wrong kind", apiVersion: RecipeAPIVersion, kind: "RecipeMetadata", wantErr: true},
+		{name: "wrong kind", apiVersion: ComponentRegistryAPIVersion, kind: "RecipeMetadata", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

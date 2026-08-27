@@ -82,9 +82,15 @@ This ADR establishes the durable, schema-level gate.
 - `header.APIVersionV1Alpha2` = `v1alpha2`
 - `header.GroupVersion` = `aicr.run/v1alpha2`
 
-All package-local constants alias `header.GroupVersion` rather than redeclaring
-the literal: `snapshotter.FullAPIVersion`, `recipe.RecipeAPIVersion`,
-`recipe.RecipeCriteriaAPIVersion`, and `config.APIVersion`.
+All package-local constants alias a `pkg/header` constant rather than
+redeclaring the literal: `snapshotter.FullAPIVersion`,
+`recipe.RecipeResultAPIVersion`, `recipe.RecipeMetadataAPIVersion`,
+`recipe.RecipeCriteriaAPIVersion`, `recipe.ComponentRegistryAPIVersion`,
+`recipe.RecipeProfileAPIVersion`, `recipe.ConfiguredRecipeResultAPIVersion`,
+`localformat.ProvenanceAPIVersion`, and `config.APIVersion`. Per the ADR-022 amendment below, each aliases the
+constant for its wire kind's schema track (`header.StableGroupVersion`,
+`header.AuthoringGroupVersion`, or `header.ProfileGroupVersion`) rather than
+`header.GroupVersion` directly.
 
 > **ADR-022 amendment.** `pkg/header` remains the canonical home for
 > the API group, version segments, and complete group/version strings, but the

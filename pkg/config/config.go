@@ -19,9 +19,11 @@ import "github.com/NVIDIA/aicr/pkg/header"
 // Kind is the kind value for AICRConfig documents.
 const Kind = "AICRConfig"
 
-// APIVersion is the apiVersion for AICRConfig documents. It aliases the
-// canonical header.GroupVersion (single source of truth).
-const APIVersion = header.GroupVersion
+// APIVersion is the apiVersion for AICRConfig documents. AICRConfig is on the
+// ADR-022 authoring and configuration track, so this aliases
+// header.AuthoringGroupVersion; the track's target is
+// header.GroupVersionV1Beta1.
+const APIVersion = header.AuthoringGroupVersion
 
 // AICRConfig is the top-level schema for the --config file accepted by
 // the aicr CLI's snapshot, recipe, bundle, validate, and verify commands.

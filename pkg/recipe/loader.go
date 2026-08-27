@@ -211,7 +211,7 @@ func validateRecipeInputAPIVersion(kind, apiVersion string) error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("recipe metadata file has apiVersion %q, which this aicr build does not support (expected %q, %q, %q, or %q); "+
 				"update the catalog header for this aicr release",
-				apiVersion, RecipeAPIVersion, header.GroupVersionV1Beta1,
+				apiVersion, RecipeMetadataAPIVersion, header.GroupVersionV1Beta1,
 				RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
 	}
 
@@ -221,7 +221,7 @@ func validateRecipeInputAPIVersion(kind, apiVersion string) error {
 	return errors.New(errors.ErrCodeInvalidRequest,
 		fmt.Sprintf("recipe file has apiVersion %q, which this aicr build does not support (expected %q, %q, %q, or %q); "+
 			"regenerate the recipe with a matching aicr version",
-			apiVersion, RecipeAPIVersion, header.GroupVersionV1,
+			apiVersion, RecipeResultAPIVersion, header.GroupVersionV1,
 			RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
 }
 

@@ -885,7 +885,7 @@ func TestWithResolvedValues(t *testing.T) {
 	newResult := func() *RecipeResult {
 		return &RecipeResult{
 			Kind:       "RecipeResult",
-			APIVersion: RecipeAPIVersion,
+			APIVersion: RecipeResultAPIVersion,
 			ComponentRefs: []ComponentRef{
 				{Name: "pinned", Type: ComponentTypeHelm, Overrides: map[string]any{"from": "provider"}},
 				{Name: "unpinned", Type: ComponentTypeHelm, Overrides: map[string]any{"from": "provider"}},

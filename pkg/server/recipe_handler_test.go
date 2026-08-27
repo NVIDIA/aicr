@@ -638,7 +638,7 @@ func TestHandleRecipes_SlurmAccountingModeRoutes(t *testing.T) {
 			method:      http.MethodGet,
 			target:      "/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm",
 			wantStatus:  http.StatusOK,
-			wantVersion: recipe.RecipeAPIVersion,
+			wantVersion: recipe.RecipeResultAPIVersion,
 		},
 		{
 			name:        "v2 GET accepts accounting mode",
@@ -1222,7 +1222,7 @@ func TestNormalizeLegacyRecipeResultDoesNotMutateBorrowedResult(t *testing.T) {
 
 		t.Fatal("normalizeLegacyRecipeResult() mutated borrowed result")
 	}
-	if projected.Configuration != nil || projected.APIVersion != recipe.RecipeAPIVersion {
+	if projected.Configuration != nil || projected.APIVersion != recipe.RecipeResultAPIVersion {
 		t.Errorf("legacy projection = %#v, want v1alpha2 without configuration", projected)
 	}
 	if projected.DataProvider() != provider {

@@ -413,7 +413,7 @@ func validateRecipeMixinCatalogHeader(kind, apiVersion, path string) error {
 	if !header.IsSupportedAuthoringAPIVersion(apiVersion) {
 		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("mixin file %s has apiVersion %q, expected %q or %q for %s; update the catalog header for this aicr release",
-				path, apiVersion, RecipeAPIVersion, header.GroupVersionV1Beta1, RecipeMixinKind))
+				path, apiVersion, RecipeMetadataAPIVersion, header.GroupVersionV1Beta1, RecipeMixinKind))
 	}
 	return nil
 }
@@ -439,7 +439,7 @@ func classifyRecipeMetadataCatalogHeader(
 	if !profileVersion && !header.IsSupportedAuthoringAPIVersion(metadata.APIVersion) {
 		return false, false, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("RecipeMetadata file %s has apiVersion %q, expected %q, %q, %q, or %q; update the catalog header for this aicr release",
-				path, metadata.APIVersion, RecipeAPIVersion, header.GroupVersionV1Beta1,
+				path, metadata.APIVersion, RecipeMetadataAPIVersion, header.GroupVersionV1Beta1,
 				RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
 	}
 	return true, profileVersion, nil
@@ -1017,7 +1017,7 @@ func finalizeRecipeResult(provider DataProvider, criteria *Criteria, mergedSpec 
 
 	result := &RecipeResult{
 		Kind:            RecipeResultKind,
-		APIVersion:      RecipeAPIVersion,
+		APIVersion:      RecipeResultAPIVersion,
 		Criteria:        criteria,
 		Constraints:     mergedSpec.Constraints,
 		ComponentRefs:   mergedSpec.ComponentRefs,

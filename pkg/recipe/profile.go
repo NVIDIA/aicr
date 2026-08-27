@@ -33,10 +33,12 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
-// RecipeProfileAPIVersion is the Release N emitter version for RecipeMetadata
-// and RecipeResult when a configuration profile is present. Readers also
-// accept the target profile version through header.IsSupportedProfileAPIVersion.
-const RecipeProfileAPIVersion = header.RecipeResultGroupVersion
+// RecipeProfileAPIVersion is the emitter version for RecipeMetadata and
+// RecipeResult when a configuration profile is present. These are on the
+// ADR-022 profile-bearing track, so this aliases header.ProfileGroupVersion;
+// the track's target is header.GroupVersionV1Beta2, which readers already
+// accept through header.IsSupportedProfileAPIVersion.
+const RecipeProfileAPIVersion = header.ProfileGroupVersion
 
 const (
 	profileComponentEnabledPath = "enabled"
@@ -594,7 +596,7 @@ func (r *RecipeResult) ValidateProfileContract() error {
 	default:
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("recipe has unsupported apiVersion %q; expected %q, %q, %q, or %q",
-				r.APIVersion, RecipeAPIVersion, header.GroupVersionV1,
+				r.APIVersion, RecipeResultAPIVersion, header.GroupVersionV1,
 				RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
 	}
 
