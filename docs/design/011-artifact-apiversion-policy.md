@@ -86,8 +86,8 @@ All package-local constants alias a `pkg/header` constant rather than
 redeclaring the literal: `snapshotter.FullAPIVersion`,
 `recipe.RecipeResultAPIVersion`, `recipe.RecipeMetadataAPIVersion`,
 `recipe.RecipeCriteriaAPIVersion`, `recipe.ComponentRegistryAPIVersion`,
-`recipe.RecipeProfileAPIVersion`, `localformat.ProvenanceAPIVersion`, and
-`config.APIVersion`. Per the ADR-022 amendment below, each aliases the
+`recipe.RecipeProfileAPIVersion`, `recipe.ConfiguredRecipeResultAPIVersion`,
+`localformat.ProvenanceAPIVersion`, and `config.APIVersion`. Per the ADR-022 amendment below, each aliases the
 constant for its wire kind's schema track (`header.StableGroupVersion`,
 `header.AuthoringGroupVersion`, or `header.ProfileGroupVersion`) rather than
 `header.GroupVersion` directly.

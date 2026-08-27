@@ -48,7 +48,16 @@ type adr022Row struct {
 
 // adr022Map mirrors the ADR-022 §2 per-kind maturity map. Every AICR wire kind
 // with an emitter has a row; §7 requires a new kind to add one in the same
-// change that introduces it.
+// change that introduces it. A kind emitted through more than one constant
+// gets a row per constant, or an edit to the unbound one passes unnoticed.
+//
+// Scope: this file pins the *constant* contract — that each track constant
+// routes to the right gate and target. It does not verify that an individual
+// emit site selected the right constant. A catalog emitter that referenced
+// RecipeResultAPIVersion instead of RecipeMetadataAPIVersion is invisible here
+// and stays invisible at the emitter switch, because the stable and authoring
+// constants carry the same string until then. Guarding emitter selection needs
+// a per-artifact round-trip assertion; see issue #2423.
 //
 // ComponentUpgrades (ADR-021) has a §2 row but no emitter yet, so it has no
 // row here. It starts at header.GroupVersionV1Beta1, which
@@ -101,6 +110,18 @@ func adr022Map() []adr022Row {
 		{
 			kind:    "RecipeMetadata, RecipeResult (profile-bearing)",
 			emitted: recipe.RecipeProfileAPIVersion,
+			target:  header.GroupVersionV1Beta2,
+			accepts: header.IsSupportedProfileAPIVersion,
+		},
+		{
+			// Second constant on the same track. A configuration-bearing
+			// RecipeResult is stamped through ConfiguredRecipeResultAPIVersion
+			// (accounting.go, runtimeinventory.go) rather than
+			// RecipeProfileAPIVersion (metadata_store.go), so binding only the
+			// latter would let a future edit repoint this one alone and still
+			// pass every assertion below.
+			kind:    "RecipeResult (configuration-bearing)",
+			emitted: recipe.ConfiguredRecipeResultAPIVersion,
 			target:  header.GroupVersionV1Beta2,
 			accepts: header.IsSupportedProfileAPIVersion,
 		},
