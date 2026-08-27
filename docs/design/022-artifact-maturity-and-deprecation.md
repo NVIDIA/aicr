@@ -3,8 +3,18 @@
 ## Status
 
 Accepted on 2026-08-26 by ratification in
-[#2373](https://github.com/NVIDIA/aicr/pull/2373). Amends
-[ADR-011](011-artifact-apiversion-policy.md): §1 keeps `pkg/header` as the
+[#2373](https://github.com/NVIDIA/aicr/pull/2373).
+
+Revised 2026-08-27 in [#2418](https://github.com/NVIDIA/aicr/pull/2418): §2's
+`ComponentUpgrades` row drops its pre-cut alpha branch and starts at
+`aicr.run/v1beta1` unconditionally, and §3 binds N, N+1, and N+2 to concrete
+AICR releases. Release N's reader support merged in
+[#2404](https://github.com/NVIDIA/aicr/pull/2404) and ships in v0.21, so `main`
+already accepts `aicr.run/v1beta1`; a kind introduced now can start at its
+target without violating §7's rule that a new kind is never stamped with a
+version the tree does not accept, and without a shipped alpha version to retire.
+
+Amends [ADR-011](011-artifact-apiversion-policy.md): §1 keeps `pkg/header` as the
 single source of version strings but replaces its single-version alias rule;
 §3 becomes kind/schema-scoped, covers AICR catalog inputs, and retires its
 empty-`apiVersion` tolerance through the initial migration; §4 is replaced by
@@ -85,7 +95,7 @@ pretending that the legacy `Recipe` input is distinct from the canonical
 | `RecipeMetadata`, `RecipeMixin` (catalog) | `v1alpha2` | `aicr.run/v1beta1` | Authoring schema exercised by 105 shipped catalog files (101 overlays, 4 mixins) |
 | `ComponentRegistry` | `v1alpha2` | `aicr.run/v1beta1` | Required root of an external `--data` catalog; authoring schema consumed by bundling and validation |
 | `RecipeMetadata`, `RecipeResult` (profile-bearing) | `v1alpha3` | `aicr.run/v1beta2` | Newest (ADR-015), 2 overlays, opt-in via profiles; remains distinct from ordinary `RecipeMetadata` |
-| `ComponentUpgrades` (proposed by #2343) | Not shipped; proposed `v1alpha2` before the cut | `aicr.run/v1beta1` | New, still-evolving authoring schema; its loader and records are not implemented |
+| `ComponentUpgrades` (proposed by [ADR-021](021-component-upgrade-safety.md)) | Not shipped | `aicr.run/v1beta1` | New, still-evolving authoring schema; its loader and records are not implemented. Starts at its target, with no alpha version to retire |
 
 `BundleProvenance` here means the bundle-root `provenance.yaml` document emitted
 by deployers through `localformat.WriteProvenance`, not the in-toto provenance
@@ -137,6 +147,19 @@ alpha-to-target migration therefore uses a bounded three-release sequence:
    empty-value exceptions from all in-scope read gates. This is the earliest
    release that may satisfy the artifact-version part of the v1 GA gate.
 
+The sequence is bound to concrete AICR releases:
+
+| Release | Reads | Emits | Tracking |
+|---|---|---|---|
+| N — v0.21 | alpha + target | alpha | [#2404](https://github.com/NVIDIA/aicr/pull/2404) |
+| N+1 — v0.22 | alpha + target | target | [#2416](https://github.com/NVIDIA/aicr/issues/2416) |
+| N+2 — v0.23 | target only | target | [#2417](https://github.com/NVIDIA/aicr/issues/2417) |
+
+Releases before N accept only the alpha values, so a target-stamped artifact
+does not load on v0.20 or earlier. `RELEASING.md` and
+[`docs/integrator/data-extension.md`](../integrator/data-extension.md#catalog-and-binary-compatibility)
+carry the consumer-facing form of this table.
+
 Before N+1 starts emitting target artifacts, every producer and consumer in a
 pipeline must run Release N or later. Mixed pipelines containing an older
 binary are unsupported. Artifact-bearing HTTP boundaries follow this sequence
@@ -156,10 +179,10 @@ embedded in a bundle no longer load in N+2. AICR has no conversion layer, so an
 immutable archive whose source cannot be recaptured remains readable only with
 a retained N or N+1 binary. The N-through-N+1 interval is the migration window.
 
-Merge order with #2343 is explicit. If `ComponentUpgrades` lands before N+1,
-its records, loader gate, examples, and tests participate in this sequence and
-switch to `aicr.run/v1beta1`. If it lands at or after N+1, it starts at
-`v1beta1` and has no shipped alpha version to retire.
+`ComponentUpgrades` does not participate in this sequence regardless of when it
+lands. Its records, loader gate, examples, and tests start at `aicr.run/v1beta1`
+directly, because N already accepts that value and the kind has no shipped alpha
+version to retire.
 
 **The empty-`apiVersion` tolerance retires at N+2.** ADR-011 §3 accepts an
 empty value in the snapshot, recipe, and criteria loaders for artifacts
@@ -233,7 +256,16 @@ The beta N+3 calculation never shortens that GA boundary.
 ### 7. A new kind starts on the current track
 
 A kind introduced before §3's Release N+1 emitter switch is stamped
-`aicr.run/v1alpha2` by default. At or after N+1, a new kind starts at
+`aicr.run/v1alpha2` by default, unless its §2 row selects otherwise. The row
+wins. `ComponentUpgrades` uses that override: it starts at `aicr.run/v1beta1`
+whenever it lands, because Release N already accepts that value and starting at
+the target spares the kind an emitter flip at N+1 and a retirement at N+2.
+Prefer the override for a new kind whose **beta** target track the tree already
+accepts; the alpha default exists for kinds whose target does not yet parse. A
+`v1` start is not covered by this preference and remains subject to the GA bar
+in the next paragraph.
+
+At or after N+1, a new kind starts at
 `aicr.run/v1beta1` by default; it may start at
 `aicr.run/v1` only when its introducing decision establishes that its public
 contract is already ready for GA obligations. There is no implicit post-v1 alpha
@@ -289,9 +321,9 @@ ADR-011's domain carve-out remains unchanged. `ValidatorCatalog`
 formats are separate schemas and are not gated by ADR-022. The bundle-root
 `BundleProvenance` document in §2 is an AICR artifact and remains in scope.
 
-The `ComponentUpgrades` loader proposed by #2343 follows the same pre-use rule
-and reads the version selected by its §2 row and merge order, not a separately
-frozen literal. Catalog authors need a published statement of which binary
+The `ComponentUpgrades` loader proposed by ADR-021 follows the same pre-use rule
+and reads the version selected by its §2 row, not a separately frozen literal.
+Catalog authors need a published statement of which binary
 versions accept which catalog versions. Loud, actionable breakage is the
 intent; silent downgrade is not.
 
@@ -302,10 +334,11 @@ intent; silent downgrade is not.
 - `pkg/header` remains the single source of version strings while package-local
   emitters and readers select versions by wire kind and schema family, following
   the discriminator pattern ADR-015 established.
-- The initial migration spans N through N+2. N stages readers, N+1 switches
-  emitters and committed inputs, and N+2 rejects alpha and empty values. Stored
-  artifacts must be migrated during that interval or read with a retained older
-  binary; authored configs and external catalogs require manual edits.
+- The initial migration spans N through N+2, bound to v0.21, v0.22, and v0.23.
+  N stages readers, N+1 switches emitters and committed inputs, and N+2 rejects
+  alpha and empty values. Stored artifacts must be migrated during that interval
+  or read with a retained older binary; authored configs and external catalogs
+  require manual edits.
 - `AICRConfig` and the profile-bearing kinds ship at beta and are *expected* to
   evolve after v1.0.0, which makes the deprecation channel (#2115) load-bearing.
   Shared fields reachable from a GA artifact cannot break with them.

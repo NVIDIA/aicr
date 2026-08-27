@@ -26,11 +26,23 @@ axis:
   the next `vMAJOR` release.
 
 For beta and GA bumps, stage the new reader in Release N before switching the
-emitter in Release N+1. The initial alpha-to-target migration is the explicit
-three-release sequence in ADR-022 §3: readers first, emitters second, then alpha
-and legacy empty headers retire. Release notes must identify any deprecation,
-the last release that reads the retiring version, and the required artifact
-recapture, regeneration, or authored-header edit.
+emitter in Release N+1. Release notes must identify any deprecation, the last
+release that reads the retiring version, and the required artifact recapture,
+regeneration, or authored-header edit.
+
+The initial alpha-to-target migration is the explicit three-release sequence in
+ADR-022 §3, bound to these releases:
+
+| Release | Reads | Emits | Tracking |
+|---|---|---|---|
+| v0.21 | alpha and target | alpha | [#2404](https://github.com/NVIDIA/aicr/pull/2404) |
+| v0.22 | alpha and target | target | [#2416](https://github.com/NVIDIA/aicr/issues/2416) |
+| v0.23 | target only | target | [#2417](https://github.com/NVIDIA/aicr/issues/2417) |
+
+Cutting v0.22 or v0.23 means completing the corresponding issue in that release,
+not after it. The consumer-facing form of this table, including the per-kind
+target values, is in
+[`docs/integrator/data-extension.md`](docs/integrator/data-extension.md#catalog-and-binary-compatibility).
 
 ## What Goes Into a Release
 
