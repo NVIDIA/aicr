@@ -108,6 +108,13 @@ aicr snapshot [flags]
 - **File**: Local file path (`/path/to/snapshot.yaml`)
 - **ConfigMap**: Kubernetes ConfigMap URI (`cm://namespace/configmap-name`)
 
+**Output Formats:** `--format` applies to every destination.
+- `yaml` (default) delivers the agent's document byte-for-byte, so fields emitted by a newer `--image` than the CLI survive.
+- `json` re-encodes that document with the same keys, which is what `aicr diff --target snapshot.json` and `jq` expect. Since `aicr diff` picks its decoder from the file extension, pair `--format json` with a `.json` path.
+- `table` is a flattened `FIELD`/`VALUE` rendering for humans and cannot be read back by `aicr diff`, `aicr validate --snapshot`, or `aicr recipe --snapshot`.
+- ConfigMap destinations store the rendering under the `snapshot.yaml`, `snapshot.json`, or `snapshot.txt` data key alongside a `format` key; AICR's ConfigMap readers follow that key, so `yaml` and `json` are both consumable from `cm://`.
+- `--template` supplies its own rendering and therefore requires `--format yaml` (or no `--format`).
+
 **What it captures:**
 - **SystemD Services**: containerd, docker, kubelet configurations
 - **OS Configuration**: grub, kmod, sysctl, release info

@@ -698,15 +698,23 @@ them:
 
 ```go
 err = snapshotter.DeliverSnapshot(snapCtx, snap.Raw, snapshotter.SnapshotDelivery{
-	Output:     "snapshot.yaml",                 // file; "" or "-" for stdout; cm://ns/name for a ConfigMap
+	Output:     "snapshot.json",                 // file; "" or "-" for stdout; cm://ns/name for a ConfigMap
 	Kubeconfig: "/path/to/target-kubeconfig",    // only used for a cm:// Output
+	Format:     serializer.FormatJSON,           // "" and FormatYAML both deliver the agent's bytes verbatim
 })
 ```
 
 A `cm://` destination is written, not assumed — including when it differs from
 the `AgentConfig.Output` used at collection time. Set `TemplatePath` to render
 through a Go template instead of copying bytes; `Output` then names the
-rendered report.
+rendered report, and `Format` is ignored.
+
+The agent always stages YAML, so `Format` is where a JSON or table rendering
+happens. YAML (and the zero value, for callers written before the field
+existed) is a byte copy — fields a newer agent image emits than the calling
+binary models survive. `FormatJSON` re-encodes the same keys through a generic
+map, preserving those fields; `FormatTable` renders the typed `Snapshot` and is
+therefore the one format that can drop them.
 
 `WrapResolved` turns a `*pkg/recipe.RecipeResult` — typically one taken from
 `RecipeResult.Resolved()` and then projected by the caller — back into a
