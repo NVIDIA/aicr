@@ -1566,11 +1566,18 @@ work that resolves it.
      own workload writes at runtime (the loaded driver a self-falsified
      pre-condition asserts in post-form, a label its DaemonSet applies
      after a successful install) is a legal readiness constraint as an
-     **outcome check** — unlike a rendered `.spec` readback it proves
-     the workload actually ran, and it can fail. But an outcome check
-     verifies *execution*, not *selection*: every value's own success
-     satisfies its own markers, so it cannot establish that the
-     cluster's pre-existing mode matches the selected value. A value's
+     **outcome check** — unlike a rendered `.spec` readback it can
+     fail, and it observes state some deployment actually produced. It
+     does not establish *which* deployment produced it: the readiness
+     gate compares only the snapshot value, with no deployment
+     identity, owner, or timestamp binding, so an unversioned marker
+     left by an earlier deployment satisfies a later check. A
+     workload-written marker is therefore valid only when its producer
+     owns the marker's full lifecycle — clearing or versioning it when
+     the outcome no longer holds. And an outcome check verifies
+     *execution*, not *selection*: every value's own success satisfies
+     its own markers, so it cannot establish that the cluster's
+     pre-existing mode matches the selected value. A value's
      **qualifying** constraint must rest on the bundle-independent
      state above, whichever list it is declared in.
 

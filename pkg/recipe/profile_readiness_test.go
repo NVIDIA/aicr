@@ -134,8 +134,9 @@ func TestValidateProfileDeclaration_ReadinessConstraints(t *testing.T) {
 // TestApplyEffectiveProfile_ReadinessConstraints covers resolution-time
 // routing: readiness constraints reach validation.readiness.constraints,
 // never spec.constraints, and are never evaluated at generation time —
-// they name post-deployment properties absent from any pre-deployment
-// snapshot (ADR-015 DD5).
+// they carry either kind of readiness-scoped state (deployment-outcome
+// checks or externally-grounded qualification, ADR-015), neither of which
+// generation may gate on.
 func TestApplyEffectiveProfile_ReadinessConstraints(t *testing.T) {
 	readiness := Constraint{Name: "NodeTopology.gpu-nodes.label", Value: "aicr.run/gpu-driver-owner=x"}
 

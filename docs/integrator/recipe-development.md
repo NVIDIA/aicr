@@ -476,13 +476,19 @@ externally-grounded cluster state evaluated post-deployment (provider
 properties, node labels set at provisioning), and **deployment-outcome
 checks** — properties the value's own workload creates (the post-deployment
 form of a self-falsified pre-condition, or a node label its DaemonSet applies
-after a successful install), which by construction cannot be present in the
+after a successful install), which a fresh deployment cannot find in the
 pre-deployment snapshot that generation-time constraints are checked against.
 Only the externally-grounded kind can **qualify** the value — establish that
 the cluster's pre-existing mode matches the selection. An outcome check
-verifies that the deployment executed; every value's own success satisfies
-its own markers, so it can never distinguish one value from another (ADR-015,
-"Self-rendered readings do not qualify").
+observes post-deployment state without establishing which deployment
+produced it: the readiness gate compares only the snapshot value, with no
+deployment identity, owner, or timestamp binding, so a marker left by an
+earlier deployment satisfies a later check. Declare a workload-written
+marker only when its producer owns the marker's full lifecycle — clearing
+or versioning it when the outcome no longer holds. And because every
+value's own success satisfies its own markers, an outcome check can never
+distinguish one value from another (ADR-015, "Self-rendered readings do
+not qualify").
 
 **Constraint names must be measurement paths a supported snapshot producer
 actually emits** — a collector, or a provider projection attached at the

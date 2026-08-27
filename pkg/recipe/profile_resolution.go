@@ -228,8 +228,10 @@ func applyEffectiveProfile(
 	})
 
 	// Readiness constraints are deliberately NOT evaluated here: they name
-	// post-deployment properties (ADR-015 DD5) that cannot exist in the
-	// pre-deployment snapshot generation evaluates against. They route into
+	// state that is only meaningful post-deployment (ADR-015) — a
+	// deployment-outcome check absent from a fresh pre-deployment snapshot,
+	// or externally-grounded qualification state asserted at readiness —
+	// so generation must not gate on them. They route into
 	// spec.validation.readiness.constraints, where the aicr validate
 	// pre-flight (checkReadiness) evaluates them with the same fail-closed
 	// exit as every other readiness gate. Collisions are checked against the

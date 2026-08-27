@@ -75,13 +75,14 @@ type ProfileValue struct {
 	// post-deployment (provider properties, provisioning-set node labels),
 	// and deployment-outcome checks — the post-deployment form of a
 	// self-falsified pre-condition, or a marker the value's own workload
-	// writes, which cannot exist in the pre-deployment snapshot that
-	// generation-time constraints are evaluated against. Only the first
-	// kind QUALIFIES the value (establishes the cluster's pre-existing
-	// mode matches the selection); an outcome check verifies execution,
-	// which every value's own success satisfies. Same fail-closed
-	// semantics as Constraints once the pre-flight runs; same
-	// catalog-load validation.
+	// writes, which a fresh deployment cannot find in the pre-deployment
+	// snapshot that generation-time constraints are evaluated against.
+	// Only the first kind QUALIFIES the value (establishes the cluster's
+	// pre-existing mode matches the selection). An outcome check binds no
+	// deployment identity — a stale marker from an earlier deployment
+	// satisfies it — so declare workload-written markers only when the
+	// producer owns the marker's lifecycle. Same fail-closed semantics as
+	// Constraints once the pre-flight runs; same catalog-load validation.
 	ReadinessConstraints []Constraint `json:"readinessConstraints,omitempty" yaml:"readinessConstraints,omitempty"`
 
 	ComponentRefs []ProfileComponentRef `json:"componentRefs,omitempty" yaml:"componentRefs,omitempty"`
