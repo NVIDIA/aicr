@@ -409,11 +409,12 @@ Same as `GET /v1/query` — see the [GET /v1/query error responses](#get-v1query
 
 `v2` in the route and `apiVersion` in a recipe document are independent
 version axes. The route segment versions the transient HTTP contract;
-`aicr.run/v1alpha2` and `aicr.run/v1alpha3` identify persisted recipe schemas.
-Therefore, `/v2/recipe` can return either artifact version and `/v2/bundle`
-accepts both, plus versionless legacy artifacts. Selecting a profile or resolving
-a Slurm accounting mode—not the route number—determines whether the artifact
-uses `v1alpha3`.
+`aicr.run/v1alpha2` and `aicr.run/v1alpha3` are the recipe schemas emitted by
+this reader-first release. `/v2/bundle` also accepts their ADR-022 targets:
+`aicr.run/v1` for a default recipe and `aicr.run/v1beta2` for a
+profile/configuration recipe, plus versionless legacy artifacts. Selecting a
+profile or resolving a Slurm accounting mode—not the route number—determines
+which schema track applies.
 
 `/v2/recipe`, `/v2/query`, and `/v2/bundle` expose the configured HTTP contract
 for profiles and Slurm accounting. The AKS and GKE families are the embedded
@@ -476,9 +477,9 @@ selector: metadata.selectedProfile
 **POST `/v2/bundle`.** Uses the same query parameters and ZIP response as
 `POST /v1/bundle`. It carries no profile-selection field because its body is
 an already-selected `RecipeResult`. It accepts legacy
-`aicr.run/v1alpha2` recipes, including older artifacts that omit
-`apiVersion`, and strictly decodes profiled or accounting-configured
-`aicr.run/v1alpha3` recipes. The
+`aicr.run/v1alpha2` and `aicr.run/v1` default recipes, including older
+artifacts that omit `apiVersion`, and strictly decodes profiled or
+accounting-configured `aicr.run/v1alpha3` and `aicr.run/v1beta2` recipes. The
 request requires `Content-Type: application/json` or `Content-Type:
 application/x-yaml`; missing, aliased, or unsupported media types are
 rejected.
@@ -561,8 +562,9 @@ Generate deployment bundles from a recipe.
 **Request Body:**
 
 The request body is the recipe (`RecipeResult`) directly. No wrapper object is
-needed. Current artifacts carry `apiVersion: aicr.run/v1alpha2` or
-`aicr.run/v1alpha3` and `kind: RecipeResult`. The v1alpha3 form identifies
+needed. This release emits `apiVersion: aicr.run/v1alpha2` or
+`aicr.run/v1alpha3` and `kind: RecipeResult`; its bundle readers additionally
+accept `aicr.run/v1` and `aicr.run/v1beta2`, respectively. The profile track identifies
 recipes carrying `metadata.selectedProfile`, typed
 `configuration.slurm.accounting`, or both; profile-bearing artifacts must use
 `/v2/bundle`. New clients should preserve the version emitted by recipe
@@ -590,15 +592,12 @@ CLI file loader for the same values — `aicr bundle -r` accepts a
 `RecipeResult` artifact it too accepts only `RecipeResult` or an absent kind.
 `apiVersion` is validated separately, as described next.
 
-`apiVersion` has no equivalent legacy window on purpose. An artifact
-group/version bump is a hard break with no transition period, so a recipe
-stamped with a prior group/version should be regenerated rather than sent.
-
-This one is enforced. The shared artifact gate rejects any `apiVersion` outside
-`aicr.run/v1alpha2` and `aicr.run/v1alpha3` with a 400, on this endpoint as well
-as on the CLI file-load path, so a prior group/version fails rather than being
-silently accepted. An absent or empty `apiVersion` is still admitted as the
-legacy shape.
+The shared artifact gate rejects any `apiVersion` outside
+`aicr.run/v1alpha2`, `aicr.run/v1`, `aicr.run/v1alpha3`, and
+`aicr.run/v1beta2` with a 400, on this endpoint as well as on the CLI file-load
+path. An absent or empty `apiVersion` is still admitted as the legacy shape
+during ADR-022 Release N. This is a reader-first window: generated recipes keep
+their alpha headers until the emitter-switch release.
 
 #### Components
 

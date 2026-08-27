@@ -109,7 +109,7 @@ RUN python -m py_compile /opt/aicr/aiperf_entrypoint.py
 # renovate: pinned by digest. The tag is retained for readability; the digest
 # is what actually resolves, so a retag upstream cannot silently change the
 # runtime. Bump both together.
-FROM nvcr.io/nvidia/distroless/python:3.13-v4.0.8@sha256:89574a7b9524b7166ff3e0c547ad87a203437b3afe71dfb9878e279196254b76
+FROM nvcr.io/nvidia/distroless/python:3.13-v4.1.1@sha256:6b49f6183eaec6dbd100219a43314bbf1d71b148eafcce62fdcc6472d066b5d9
 
 ARG AIPERF_VERSION
 

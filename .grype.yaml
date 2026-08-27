@@ -39,8 +39,10 @@ exclude:
 # carries the structured status + justification + per-CVE
 # reachability evidence and is self-sufficient for suppression.
 # The image builds on python:3.13-slim (Debian trixie) and ships on
-# nvcr.io/nvidia/distroless/python:3.13-v4.0.8, so suppressed findings
-# come from CPython, pillow, and Debian libraries in that runtime base.
+# nvcr.io/nvidia/distroless/python:3.13-v4.1.1, so suppressed findings
+# come from openssl, pillow, and aiohttp in that runtime base. The
+# v4.1.1 bump (from v4.0.8) moved CPython 3.13.14 -> 3.13.15 and
+# libexpat1 2.7.1-2 -> 2.8.2-1~deb13u1, which retired 24 statements.
 #
 # When scanning the aiperf-bench image locally, pass `--vex
 # .openvex.json` alongside `-c .grype.yaml`. Scans of the AICR Go

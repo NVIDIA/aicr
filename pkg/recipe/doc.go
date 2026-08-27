@@ -199,7 +199,7 @@
 //
 //	type RecipeCriteria struct {
 //	    Kind       string    // Must be "RecipeCriteria"
-//	    APIVersion string    // Must be "aicr.run/v1alpha2"
+//	    APIVersion string    // Release N accepts "aicr.run/v1alpha2" or "aicr.run/v1"
 //	    Metadata   struct {
 //	        Name string       // Optional descriptive name
 //	    }

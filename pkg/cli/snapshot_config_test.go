@@ -442,7 +442,7 @@ spec:
 
 // TestSnapshotCmd_InvalidConfig_LegacyAPIVersion confirms a legacy
 // aicr.nvidia.com apiVersion is rejected fail-closed at config-load time.
-// After the aicr.run hard-break migration, only aicr.run/v1alpha2 is valid.
+// The old aicr.nvidia.com domain remains outside the ADR-022 read window.
 func TestSnapshotCmd_InvalidConfig_LegacyAPIVersion(t *testing.T) {
 	tmp := t.TempDir()
 	cfgPath := filepath.Join(tmp, "config.yaml")

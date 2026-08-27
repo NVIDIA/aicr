@@ -87,6 +87,7 @@ func TestOpenAPIEnumsMatchGoTypes(t *testing.T) {
 type openAPIContractSchema struct {
 	Ref        string                           `yaml:"$ref"`
 	AllOf      []openAPIContractSchema          `yaml:"allOf"`
+	OneOf      []openAPIContractSchema          `yaml:"oneOf"`
 	Required   []string                         `yaml:"required"`
 	Properties map[string]openAPIContractSchema `yaml:"properties"`
 	Enum       []string                         `yaml:"enum"`
@@ -226,6 +227,21 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 		kinds       []string
 	}{
 		{
+			name:        "base response",
+			schema:      spec.Components.Schemas["RecipeResponse"],
+			required:    []string{"apiVersion", "kind"},
+			apiVersions: []string{recipe.RecipeAPIVersion, recipe.ConfiguredRecipeResultAPIVersion, header.GroupVersionV1Beta2},
+			kinds:       []string{recipe.RecipeResultKind},
+		},
+		{
+			name:        "profile response",
+			schema:      spec.Components.Schemas["ProfileRecipeResponse"],
+			baseRef:     "#/components/schemas/RecipeResponse",
+			required:    []string{"metadata", "componentRefs"},
+			apiVersions: []string{recipe.ConfiguredRecipeResultAPIVersion, header.GroupVersionV1Beta2},
+			kinds:       []string{recipe.RecipeResultKind},
+		},
+		{
 			// /v1 responses are pinned to v1alpha2 by LegacyRecipeResponse,
 			// which wraps RecipeResponse and narrows the apiVersion enum.
 			// RecipeResponse itself now also admits v1alpha3 for /v2, so
@@ -236,17 +252,6 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 			schema:      spec.Components.Schemas["LegacyRecipeResponse"],
 			baseRef:     "#/components/schemas/RecipeResponse",
 			apiVersions: []string{recipe.RecipeAPIVersion},
-		},
-		{
-			// The bundle request also admits the legacy Recipe kind: that was
-			// the value this contract published through v0.18.0, and the
-			// handler retains it for compatibility, so dropping it from the
-			// enum would make previously conforming clients spec-invalid
-			// against a request-validating gateway.
-			name:        "bundle request",
-			schema:      spec.Components.Schemas["BundleRecipeRequest"],
-			apiVersions: []string{"", recipe.RecipeAPIVersion, recipe.ConfiguredRecipeResultAPIVersion},
-			kinds:       []string{"", string(header.KindRecipe), recipe.RecipeResultKind},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -267,6 +272,42 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 				t.Errorf("kind enum = %v, want %v", gotKinds, tt.kinds)
 			}
 		})
+	}
+
+	criteriaVersions := spec.Components.Schemas["RecipeCriteria"].Properties["apiVersion"].Enum
+	wantCriteriaVersions := []string{recipe.RecipeCriteriaAPIVersion, header.GroupVersionV1}
+	if !equalStringsUnordered(criteriaVersions, wantCriteriaVersions) {
+		t.Errorf("RecipeCriteria apiVersion enum = %v, want %v", criteriaVersions, wantCriteriaVersions)
+	}
+
+	bundleRequest := spec.Components.Schemas["BundleRecipeRequest"]
+	if len(bundleRequest.OneOf) != 2 {
+		t.Fatalf("BundleRecipeRequest.oneOf has %d entries, want 2", len(bundleRequest.OneOf))
+	}
+	refs := make(map[string]bool, len(bundleRequest.OneOf))
+	for _, branch := range bundleRequest.OneOf {
+		refs[branch.Ref] = true
+	}
+	for _, ref := range []string{
+		"#/components/schemas/LegacyBundleRecipeV1Request",
+		"#/components/schemas/ConfiguredRecipeResponse",
+	} {
+		if !refs[ref] {
+			t.Errorf("BundleRecipeRequest.oneOf does not reference %s", ref)
+		}
+	}
+
+	// The v1 legacy branch retains every default-track header shape the
+	// handler normalizes, while the profile-track branch remains closed.
+	legacyBundle := spec.Components.Schemas["LegacyBundleRecipeV1Request"]
+	legacyClosure := allOfConstraint(t, legacyBundle, "#/components/schemas/RecipeResponseBase")
+	if got, want := legacyClosure.Properties["apiVersion"].Enum,
+		[]string{"", recipe.RecipeAPIVersion, header.GroupVersionV1}; !equalStringsUnordered(got, want) {
+		t.Errorf("LegacyBundleRecipeV1Request apiVersion enum = %v, want %v", got, want)
+	}
+	if got, want := legacyClosure.Properties["kind"].Enum,
+		[]string{"", string(header.KindRecipe), recipe.RecipeResultKind}; !equalStringsUnordered(got, want) {
+		t.Errorf("LegacyBundleRecipeV1Request kind enum = %v, want %v", got, want)
 	}
 
 	base := spec.Components.Schemas["RecipeResponseBase"]
@@ -349,7 +390,7 @@ func TestOpenAPIV2BundleContract(t *testing.T) {
 	legacyAPIVersion := openAPIObjectAt(t, legacyOverlay, "properties", "apiVersion")
 	legacyAPIVersions := openAPISequence(t, legacyAPIVersion["enum"],
 		"LegacyBundleRecipeV2Request apiVersion enum")
-	for _, value := range []string{"", "aicr.run/v1alpha2"} {
+	for _, value := range []string{"", "aicr.run/v1alpha2", header.GroupVersionV1} {
 		if !openAPIHasString(legacyAPIVersions, value) {
 			t.Errorf("LegacyBundleRecipeV2Request apiVersion enum missing %q", value)
 		}
@@ -619,50 +660,104 @@ func TestOpenAPIV1BundleLegacyConfigurationContract(t *testing.T) {
 		t.Fatalf("parse spec: %v", err)
 	}
 
-	bundleRequest := openAPIObjectAt(t, spec, "components", "schemas", "BundleRecipeRequest")
-	allOf := openAPISequence(t, bundleRequest["allOf"], "BundleRecipeRequest.allOf")
-	if len(allOf) != 2 {
-		t.Fatalf("BundleRecipeRequest.allOf has %d entries, want 2", len(allOf))
+	schemas := openAPIObjectAt(t, spec, "components", "schemas")
+	bundleRequest := openAPIObjectAt(t, schemas, "BundleRecipeRequest")
+	refs := map[string]bool{}
+	for _, branchValue := range openAPISequence(t, bundleRequest["oneOf"], "BundleRecipeRequest.oneOf") {
+		branch := openAPIObject(t, branchValue, "BundleRecipeRequest.oneOf item")
+		ref, _ := branch["$ref"].(string)
+		refs[ref] = true
 	}
-	overlay := openAPIObject(t, allOf[1], "BundleRecipeRequest overlay")
-	thenNot := openAPIObjectAt(t, overlay, "then", "not")
+	if len(refs) != 2 || !refs["#/components/schemas/LegacyBundleRecipeV1Request"] ||
+		!refs["#/components/schemas/ConfiguredRecipeResponse"] {
+
+		t.Fatalf("BundleRecipeRequest.oneOf refs = %v, want legacy and configured branches", refs)
+	}
+	if refs["#/components/schemas/ProfileRecipeResponse"] {
+		t.Error("BundleRecipeRequest must not admit metadata.selectedProfile on /v1/bundle")
+	}
+
+	legacy := openAPIObjectAt(t, schemas, "LegacyBundleRecipeV1Request")
+	legacyAllOf := openAPISequence(t, legacy["allOf"], "LegacyBundleRecipeV1Request.allOf")
+	if len(legacyAllOf) != 2 {
+		t.Fatalf("LegacyBundleRecipeV1Request.allOf has %d entries, want 2", len(legacyAllOf))
+	}
+	legacyOverlay := openAPIObject(t, legacyAllOf[1], "LegacyBundleRecipeV1Request overlay")
+	legacyNot := openAPIObjectAt(t, legacyOverlay, "not")
 	if !openAPIHasString(
-		openAPISequence(t, thenNot["required"], "BundleRecipeRequest then.not.required"),
+		openAPISequence(t, legacyNot["required"], "LegacyBundleRecipeV1Request not.required"),
 		"configuration",
 	) {
 
-		t.Error("BundleRecipeRequest does not prohibit configuration for legacy headers")
+		t.Error("LegacyBundleRecipeV1Request does not prohibit configuration")
+	}
+	legacyMetadataNot := openAPIObjectAt(t, legacyOverlay, "properties", "metadata", "not")
+	if !openAPIHasString(openAPISequence(t, legacyMetadataNot["required"],
+		"LegacyBundleRecipeV1Request metadata.not.required"), "selectedProfile") {
+
+		t.Error("LegacyBundleRecipeV1Request does not prohibit selectedProfile")
 	}
 
-	legacyHeaders := map[string]bool{"absent": false, "": false, recipe.RecipeAPIVersion: false}
-	condition := openAPIObjectAt(t, overlay, "if")
-	branches := openAPISequence(t, condition["anyOf"], "BundleRecipeRequest if.anyOf")
-	for _, branchValue := range branches {
-		branch := openAPIObject(t, branchValue, "BundleRecipeRequest if.anyOf item")
-		if notValue, ok := branch["not"]; ok {
-			not := openAPIObject(t, notValue, "BundleRecipeRequest absent apiVersion condition")
-			if openAPIHasString(openAPISequence(t, not["required"],
-				"BundleRecipeRequest absent apiVersion required"), "apiVersion") {
+	configured := openAPIObjectAt(t, schemas, "ConfiguredRecipeResponse")
+	configuredAllOf := openAPISequence(t, configured["allOf"], "ConfiguredRecipeResponse.allOf")
+	configuredClosure := openAPIObject(t, configuredAllOf[1], "ConfiguredRecipeResponse closure")
+	if closed, ok := configuredClosure["additionalProperties"].(bool); !ok || closed {
+		t.Errorf("ConfiguredRecipeResponse additionalProperties = %v, want false",
+			configuredClosure["additionalProperties"])
+	}
+	if !openAPIHasString(openAPISequence(t, configuredClosure["required"],
+		"ConfiguredRecipeResponse.required"), "configuration") {
 
-				legacyHeaders["absent"] = true
-			}
-		}
-		if propertiesValue, ok := branch["properties"]; ok {
-			properties := openAPIObject(t, propertiesValue,
-				"BundleRecipeRequest legacy apiVersion properties")
-			apiVersion := openAPIObjectAt(t, properties, "apiVersion")
-			for _, value := range openAPISequence(t, apiVersion["enum"],
-				"BundleRecipeRequest legacy apiVersion enum") {
-				if text, ok := value.(string); ok {
-					legacyHeaders[text] = true
-				}
-			}
+		t.Error("ConfiguredRecipeResponse does not require configuration")
+	}
+	configuredVersions := openAPISequence(t,
+		openAPIObjectAt(t, configuredClosure, "properties", "apiVersion")["enum"],
+		"ConfiguredRecipeResponse apiVersion enum")
+	for _, version := range []string{recipe.ConfiguredRecipeResultAPIVersion, header.GroupVersionV1Beta2} {
+		if !openAPIHasString(configuredVersions, version) {
+			t.Errorf("ConfiguredRecipeResponse apiVersion enum missing %q", version)
 		}
 	}
-	for header, found := range legacyHeaders {
-		if !found {
-			t.Errorf("BundleRecipeRequest legacy configuration condition does not cover apiVersion %q", header)
+	configuredMetadata := openAPIObjectAt(t, configuredClosure, "properties", "metadata")
+	configuredMetadataAllOf := openAPISequence(t, configuredMetadata["allOf"],
+		"ConfiguredRecipeResponse metadata.allOf")
+	configuredMetadataConstraint := openAPIObject(t, configuredMetadataAllOf[1],
+		"ConfiguredRecipeResponse metadata constraint")
+	configuredMetadataNot := openAPIObjectAt(t, configuredMetadataConstraint, "not")
+	if !openAPIHasString(openAPISequence(t, configuredMetadataNot["required"],
+		"ConfiguredRecipeResponse metadata.not.required"), "selectedProfile") {
+
+		t.Error("ConfiguredRecipeResponse does not prohibit selectedProfile")
+	}
+	configurationProperty := openAPIObjectAt(t, configuredClosure, "properties", "configuration")
+	configurationPropertyAllOf := openAPISequence(t, configurationProperty["allOf"],
+		"ConfiguredRecipeResponse configuration.allOf")
+	var configurationRefs, configurationConstraints []map[string]any
+	for _, value := range configurationPropertyAllOf {
+		entry := openAPIObject(t, value, "ConfiguredRecipeResponse configuration.allOf entry")
+		if entry["$ref"] == "#/components/schemas/ConfiguredRecipeConfiguration" {
+			configurationRefs = append(configurationRefs, entry)
+		} else {
+			configurationConstraints = append(configurationConstraints, entry)
 		}
+	}
+	if len(configurationRefs) != 1 || len(configurationConstraints) != 1 {
+		t.Fatalf("ConfiguredRecipeResponse configuration.allOf has %d schema refs and %d constraints, want 1 each",
+			len(configurationRefs), len(configurationConstraints))
+	}
+	if !openAPIHasString(openAPISequence(t, configurationConstraints[0]["required"],
+		"ConfiguredRecipeResponse configuration required"), "slurm") {
+
+		t.Error("ConfiguredRecipeResponse configuration does not require slurm")
+	}
+	configuration := openAPIObjectAt(t, schemas, "ConfiguredRecipeConfiguration")
+	configurationAllOf := openAPISequence(t, configuration["allOf"],
+		"ConfiguredRecipeConfiguration.allOf")
+	configurationClosure := openAPIObject(t, configurationAllOf[1],
+		"ConfiguredRecipeConfiguration closure")
+	if closed, ok := configurationClosure["additionalProperties"].(bool); !ok || closed {
+		t.Errorf("ConfiguredRecipeConfiguration additionalProperties = %v, want false",
+			configurationClosure["additionalProperties"])
 	}
 }
 

@@ -59,16 +59,19 @@
 //
 // # API Versioning
 //
-// The APIVersion field enables evolution of data formats. The current group and
-// version is GroupVersion ("aicr.run/v1alpha2"); APIGroup derives from Domain.
-// Per ADR-013 the move from the legacy aicr.nvidia.com/v1alpha1 group was a hard
-// break — the old value is rejected, not migrated.
+// The APIVersion field enables evolution of data formats. GroupVersion remains
+// the Release N alpha emitter value for general artifacts; target versions and
+// kind/schema-scoped gates are defined alongside it. APIGroup derives from
+// Domain. Per ADR-013 the move from the legacy aicr.nvidia.com/v1alpha1 group
+// was a hard break — the old value is rejected, not migrated.
 //
-// Callers should gate on IsSupportedAPIVersion rather than comparing literals,
-// so the single source of truth in this package stays authoritative:
+// Callers should select the gate for the artifact's schema track rather than
+// comparing literals, so the single source of truth in this package stays
+// authoritative. IsSupportedAPIVersion covers the stable artifact track:
 //
 //	if h.APIVersion != "" && !header.IsSupportedAPIVersion(h.APIVersion) {
-//	    return fmt.Errorf("unsupported apiVersion %q; expected %s", h.APIVersion, header.GroupVersion)
+//	    return errors.New(errors.ErrCodeInvalidRequest,
+//	        fmt.Sprintf("unsupported apiVersion %q", h.APIVersion))
 //	}
 //
 // # Kind Field

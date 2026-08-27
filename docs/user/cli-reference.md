@@ -1070,14 +1070,17 @@ Validation can be run in different phases to validate different aspects of the d
 >
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
 >
-> **apiVersion gate:** Snapshots and catalog artifacts use `aicr.run/v1alpha2`;
-> recipe results with a selected configuration profile or configured Slurm
-> accounting use `aicr.run/v1alpha3`. Loading an
-> artifact stamped with an unsupported `apiVersion` fails fast; regenerate or
-> recapture it with a matching `aicr` version. Legacy recipes without
-> profile or accounting configuration retain v1alpha2 semantics. See
+> **apiVersion gate:** During the ADR-022 reader-first release, AICR still
+> emits `aicr.run/v1alpha2` for snapshots and default recipes, and
+> `aicr.run/v1alpha3` for profile/configuration recipes. Readers additionally
+> accept `aicr.run/v1` for snapshots and default recipes,
+> `aicr.run/v1beta1` for config and ordinary catalog inputs, and
+> `aicr.run/v1beta2` for profile-bearing inputs. Unsupported artifact headers
+> fail fast; raw external catalog headers are checked before merge or
+> hydration. Recapture, regenerate, or update the authored header with a
+> version supported by the running AICR release. See
 > [ADR-011](../design/011-artifact-apiversion-policy.md) and
-> [ADR-016](../design/016-slurm-accounting-enablement.md).
+> [ADR-022](../design/022-artifact-maturity-and-deprecation.md).
 
 Phases run sequentially with `--phase all` and all phases run by default, producing results regardless of earlier failures; use `--fail-fast` to stop after the first failing phase. For what each phase actually checks (deployment-phase readiness signals, graceful-skip semantics, RBAC, Day-N re-verification, and evidence), see [Validation](validation.md).
 

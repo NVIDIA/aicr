@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -37,9 +38,10 @@ func (c *AICRConfig) Validate() error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid kind %q: expected %q", c.Kind, Kind))
 	}
-	if c.APIVersion != APIVersion {
+	if !header.IsSupportedAuthoringAPIVersion(c.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid apiVersion %q: expected %q", c.APIVersion, APIVersion))
+			fmt.Sprintf("invalid apiVersion %q: expected %q or %q; update the config header to a version accepted by this aicr release",
+				c.APIVersion, APIVersion, header.GroupVersionV1Beta1))
 	}
 	if c.Spec.Snapshot == nil && c.Spec.Recipe == nil && c.Spec.Bundle == nil &&
 		c.Spec.Validate == nil && c.Spec.Verify == nil {

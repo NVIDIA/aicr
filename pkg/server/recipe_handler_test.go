@@ -54,7 +54,7 @@ func newProfileTestHandler(t *testing.T) *recipeHandler {
 		t.Fatalf("setup overlays directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup registry.yaml: %v", err)
 	}
 	overlay := []byte(`apiVersion: aicr.run/v1alpha3

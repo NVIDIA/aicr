@@ -1271,9 +1271,10 @@ paths:
       description: >
         Uses the same query parameters and ZIP response as POST /v1/bundle.
         The body is an already-selected RecipeResult, so this route has no
-        profile-selection field. Legacy recipes stamped aicr.run/v1alpha2 or
-        omitting apiVersion are accepted; v1alpha3 profile recipes are decoded
-        strictly. Content-Type must be application/json or application/x-yaml.
+        profile-selection field. Default recipes stamped aicr.run/v1alpha2,
+        aicr.run/v1, or omitting apiVersion are accepted; profile recipes
+        stamped aicr.run/v1alpha3 or aicr.run/v1beta2 are decoded strictly.
+        Content-Type must be application/json or application/x-yaml.
         Query parameter details are documented on POST /v1/bundle.
       parameters:
         - $ref: "#/components/parameters/RequestId"
@@ -2277,7 +2278,7 @@ components:
         apiVersion:
           type: string
           description: API version
-          enum: [aicr.run/v1alpha2]
+          enum: [aicr.run/v1alpha2, aicr.run/v1]
           example: aicr.run/v1alpha2
         metadata:
           type: object
@@ -2799,8 +2800,11 @@ components:
       description: >
         Complete legacy, profile-aware, or Slurm-accounting-aware recipe
         response with metadata and component references. Recipes without typed
-        configuration use aicr.run/v1alpha2; profile-bearing recipes and
-        recipes carrying configuration.slurm.accounting use aicr.run/v1alpha3.
+        configuration emitted by this release use aicr.run/v1alpha2;
+        profile-bearing recipes and recipes carrying
+        configuration.slurm.accounting use aicr.run/v1alpha3. The schema also
+        admits the ADR-022 reader-first profile target aicr.run/v1beta2 for
+        bundle request reuse; this release does not emit it.
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase"
         - type: object
@@ -2808,7 +2812,7 @@ components:
           properties:
             apiVersion:
               type: string
-              enum: [aicr.run/v1alpha2, aicr.run/v1alpha3]
+              enum: [aicr.run/v1alpha2, aicr.run/v1alpha3, aicr.run/v1beta2]
               example: aicr.run/v1alpha2
             kind:
               type: string
@@ -2852,14 +2856,15 @@ components:
         - $ref: "#/components/schemas/RecipeResponse"
         - type: object
           description: >
-            Closed aicr.run/v1alpha3 RecipeResult shape. Unknown fields are
-            rejected at its typed object boundaries.
+            Closed profile-bearing RecipeResult shape. aicr.run/v1alpha3 is
+            emitted; aicr.run/v1beta2 is accepted during ADR-022 Release N.
+            Unknown fields are rejected at its typed object boundaries.
           required: [metadata, componentRefs]
           additionalProperties: false
           properties:
             apiVersion:
               type: string
-              enum: [aicr.run/v1alpha3]
+              enum: [aicr.run/v1alpha3, aicr.run/v1beta2]
             kind:
               type: string
               enum: [RecipeResult]
@@ -2995,14 +3000,15 @@ components:
         - $ref: "#/components/schemas/RecipeResponse"
         - type: object
           description: >
-            Closed accounting-configured aicr.run/v1alpha3 RecipeResult shape
-            without a selected profile.
+            Closed accounting-configured RecipeResult shape without a selected
+            profile. aicr.run/v1alpha3 is emitted; aicr.run/v1beta2 is
+            accepted during ADR-022 Release N.
           required: [metadata, configuration, componentRefs]
           additionalProperties: false
           properties:
             apiVersion:
               type: string
-              enum: [aicr.run/v1alpha3]
+              enum: [aicr.run/v1alpha3, aicr.run/v1beta2]
             kind:
               type: string
               enum: [RecipeResult]
@@ -3044,7 +3050,10 @@ components:
             criteria:
               $ref: "#/components/schemas/CriteriaV2"
             configuration:
-              $ref: "#/components/schemas/ConfiguredRecipeConfiguration"
+              allOf:
+                - $ref: "#/components/schemas/ConfiguredRecipeConfiguration"
+                - type: object
+                  required: [slurm]
             componentRefs:
               type: array
               minItems: 1
@@ -3137,7 +3146,8 @@ components:
     LegacyRecipeResponse:
       description: >
         Additive legacy recipe shape. Unknown fields remain accepted for
-        compatibility, but metadata.selectedProfile is reserved for v1alpha3.
+        compatibility, but metadata.selectedProfile is reserved for the
+        profile-bearing schema track.
       allOf:
         - $ref: "#/components/schemas/RecipeResponse"
         - type: object
@@ -3150,20 +3160,54 @@ components:
               not:
                 required: [selectedProfile]
 
+    LegacyBundleRecipeV1Request:
+      description: >
+        Additive default-track RecipeResult accepted by POST /v1/bundle: any
+        combination of apiVersion absent, empty, aicr.run/v1alpha2, or
+        aicr.run/v1 with kind absent, empty, Recipe, or RecipeResult. The
+        legacy Recipe kind is normalized to RecipeResult before emission.
+        metadata.selectedProfile and configuration are reserved for the
+        profile track.
+      allOf:
+        - $ref: "#/components/schemas/RecipeResponseBase"
+        - type: object
+          not:
+            required: [configuration]
+          properties:
+            apiVersion:
+              type: string
+              description: >
+                aicr.run/v1alpha2, aicr.run/v1, absent, or empty after a legacy struct
+                round trip
+              enum: ["", aicr.run/v1alpha2, aicr.run/v1]
+            kind:
+              type: string
+              description: >
+                RecipeResult, the legacy Recipe value, absent, or empty for a
+                round-tripped artifact
+              enum: ["", Recipe, RecipeResult]
+              example: RecipeResult
+            metadata:
+              type: object
+              not:
+                required: [selectedProfile]
+
     LegacyBundleRecipeV2Request:
       description: >
         Additive legacy RecipeResult accepted by POST /v2/bundle: any
-        combination of apiVersion absent, empty, or aicr.run/v1alpha2 with
+        combination of apiVersion absent, empty, aicr.run/v1alpha2, or
+        aicr.run/v1 with
         kind absent, empty, or RecipeResult. One branch covers the whole
         legacy square because DecodeRecipeResult accepts every cell of it —
-        kind is enforced only when non-empty, and only v1alpha3 requires it —
-        and /v1/bundle's BundleRecipeRequest admits the same shapes, so any
+        kind is enforced only when non-empty, and only the profile track requires it —
+        and /v1/bundle's LegacyBundleRecipeV1Request admits the same default
+        shapes, so any
         narrower branch leaves /v2/bundle stricter than its own server
         (previously true for the empty-header round trip, then again for
         apiVersion v1alpha2 with kind absent). The legacy kind Recipe is
         v1-only: the strict v2 decode path rejects it.
-        metadata.selectedProfile remains reserved for v1alpha3.
-        configuration is likewise reserved for v1alpha3; legacy request
+        metadata.selectedProfile remains reserved for v1alpha3/v1beta2.
+        configuration is likewise reserved for v1alpha3/v1beta2; default request
         headers cannot carry typed Slurm accounting configuration.
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase"
@@ -3174,9 +3218,9 @@ components:
             apiVersion:
               type: string
               description: >
-                aicr.run/v1alpha2, absent, or empty after a legacy struct
+                aicr.run/v1alpha2, aicr.run/v1, absent, or empty after a legacy struct
                 round trip
-              enum: ["", aicr.run/v1alpha2]
+              enum: ["", aicr.run/v1alpha2, aicr.run/v1]
             kind:
               type: string
               description: >
@@ -3190,12 +3234,12 @@ components:
     BundleRecipeV2Request:
       description: >
         Version-partitioned RecipeResult accepted by POST /v2/bundle.
-        Legacy input with apiVersion aicr.run/v1alpha2 or no apiVersion remains
-        additive; v1alpha3 input is closed and requires either
+        Default input with apiVersion aicr.run/v1alpha2, aicr.run/v1, or no
+        apiVersion remains additive; v1alpha3/v1beta2 input is closed and requires either
         metadata.selectedProfile or configuration.slurm.accounting. The
         branches are disjoint on apiVersion:
-        the legacy branch admits only absent/empty/v1alpha2 and prohibits
-        selectedProfile, while both configured branches require v1alpha3.
+        the default branch admits only absent/empty/v1alpha2/v1 and prohibits
+        selectedProfile, while both configured branches require the profile track.
       oneOf:
         - $ref: "#/components/schemas/LegacyBundleRecipeV2Request"
         - $ref: "#/components/schemas/ProfileRecipeResponse"
@@ -3203,70 +3247,35 @@ components:
 
     BundleRecipeRequest:
       description: >
-        RecipeResult accepted by POST /v1/bundle. Current aicr.run/v1alpha2
-        and aicr.run/v1alpha3 artifacts, plus legacy artifacts with absent or
-        empty header fields, are
-        accepted. The kind value Recipe is also accepted: it was the value this
-        contract published through v0.18.0, so clients written against that
-        spec must keep working.
+        RecipeResult accepted by POST /v1/bundle. Release N readers accept
+        aicr.run/v1alpha2 and aicr.run/v1 for default recipes, plus
+        aicr.run/v1alpha3 and aicr.run/v1beta2 for profile/configuration schema
+        shapes. Default-track legacy artifacts with absent or empty header
+        fields are accepted. The kind value Recipe is also accepted on that
+        branch: it was the value this contract published through v0.18.0, so
+        clients written against that spec must keep working.
 
-        A legacy kind is normalized on ingest rather than echoed: an absent,
-        empty, or Recipe kind is stamped as RecipeResult, so the generated
-        bundle's recipe.yaml always carries the canonical kind and reloads via
-        aicr bundle -r and aicr validate -r. Only kind is rewritten; a request
-        that omits apiVersion still yields an artifact with an empty
-        apiVersion, which every reader accepts as the legacy shape. Any kind
-        outside this enum is rejected with a 400, matching the /v2/bundle
-        decode path and the kind values the CLI file loader accepts for a
-        hydrated RecipeResult.
+        A default-track legacy kind is normalized on ingest rather than echoed:
+        an absent, empty, or Recipe kind is stamped as RecipeResult, so the
+        generated bundle's recipe.yaml always carries the canonical kind and
+        reloads via aicr bundle -r and aicr validate -r. Only kind is rewritten;
+        a request that omits apiVersion still yields an artifact with an empty
+        apiVersion, which every reader accepts as the legacy shape. The strict
+        configured branch requires the canonical RecipeResult kind.
 
-        apiVersion deliberately has no equivalent legacy window. The artifact
-        group/version bump is a hard break with no transition period (see
-        docs/design/011-artifact-apiversion-policy.md), so an artifact stamped
-        with a prior group/version must be regenerated rather than sent. This
-        rule is enforced: the shared artifact gate rejects any apiVersion
-        outside aicr.run/v1alpha2 and aicr.run/v1alpha3 with a 400, here and on
-        the CLI file-load path alike. An absent or empty apiVersion is still
-        admitted as the legacy shape.
+        The shared artifact gate rejects any apiVersion outside those four
+        values with a 400, here and on the CLI file-load path alike. An absent
+        or empty apiVersion remains admitted as the legacy shape through the
+        ADR-022 Release N reader-first window.
 
         metadata.selectedProfile remains reserved for aicr.run/v1alpha3 and
-        is rejected on this route. Typed configuration is accepted only when
-        apiVersion is aicr.run/v1alpha3. Bodies stamped aicr.run/v1alpha3 are
-        decoded strictly; unknown fields are rejected with a 400 response.
-      allOf:
-        - $ref: "#/components/schemas/RecipeResponseBase"
-        - type: object
-          if:
-            anyOf:
-              - not:
-                  required: [apiVersion]
-              - required: [apiVersion]
-                properties:
-                  apiVersion:
-                    enum: ["", aicr.run/v1alpha2]
-          then:
-            not:
-              required: [configuration]
-          properties:
-            apiVersion:
-              type: string
-              description: >
-                Supported RecipeResult API version, or empty after a legacy
-                struct round trip.
-                Prior group/versions are not accepted — see the schema
-                description for the hard-break policy.
-              enum: ["", aicr.run/v1alpha2, aicr.run/v1alpha3]
-            kind:
-              type: string
-              description: >
-                RecipeResult, the legacy Recipe value published through
-                v0.18.0, or empty for a legacy artifact. The legacy values are
-                normalized to RecipeResult in the generated bundle.
-              enum: ["", Recipe, RecipeResult]
-            metadata:
-              type: object
-              not:
-                required: [selectedProfile]
+        aicr.run/v1beta2, and is rejected on this route. Typed configuration is
+        accepted only when apiVersion is on that profile track. The configured
+        branch is closed at its typed object boundaries, so unknown profile or
+        configuration fields are rejected with a 400 response.
+      oneOf:
+        - $ref: "#/components/schemas/LegacyBundleRecipeV1Request"
+        - $ref: "#/components/schemas/ConfiguredRecipeResponse"
 
     QueryRequest:
       type: object

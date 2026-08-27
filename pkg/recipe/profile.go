@@ -33,9 +33,9 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
-// RecipeProfileAPIVersion is the RecipeMetadata and RecipeResult version used
-// when a configuration profile is present. Other AICR artifact kinds remain on
-// header.GroupVersion.
+// RecipeProfileAPIVersion is the Release N emitter version for RecipeMetadata
+// and RecipeResult when a configuration profile is present. Readers also
+// accept the target profile version through header.IsSupportedProfileAPIVersion.
 const RecipeProfileAPIVersion = header.RecipeResultGroupVersion
 
 const (
@@ -542,20 +542,21 @@ func profileSummary(decl *ProfileDeclaration) *ProfileSummary {
 
 // ValidateRecipeMetadataProfile enforces the bidirectional version/declaration
 // contract for typed RecipeMetadata callers. Byte decoders additionally use
-// strict decoding for RecipeProfileAPIVersion so unknown keys cannot vanish.
+// strict decoding for the profile schema track so unknown keys cannot vanish.
 func ValidateRecipeMetadataProfile(metadata *RecipeMetadata) error {
 	if metadata == nil {
 		return nil
 	}
+	profileVersion := header.IsSupportedProfileAPIVersion(metadata.APIVersion)
 	switch {
-	case metadata.APIVersion == RecipeProfileAPIVersion && metadata.Spec.Profile == nil:
+	case profileVersion && metadata.Spec.Profile == nil:
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("RecipeMetadata uses apiVersion %q but has no spec.profile declaration",
-				RecipeProfileAPIVersion))
-	case metadata.Spec.Profile != nil && metadata.APIVersion != RecipeProfileAPIVersion:
+				metadata.APIVersion))
+	case metadata.Spec.Profile != nil && !profileVersion:
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("RecipeMetadata declares spec.profile but uses apiVersion %q; expected %q",
-				metadata.APIVersion, RecipeProfileAPIVersion))
+			fmt.Sprintf("RecipeMetadata declares spec.profile but uses apiVersion %q; expected %q or %q",
+				metadata.APIVersion, RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
 	case metadata.Spec.Profile != nil:
 		_, err := ValidateProfileDeclaration(metadata.Spec.Profile)
 		return err
@@ -571,14 +572,14 @@ func (r *RecipeResult) ValidateProfileContract() error {
 	if r == nil {
 		return nil
 	}
-	switch r.APIVersion {
-	case "", RecipeAPIVersion:
+	switch {
+	case r.APIVersion == "" || header.IsSupportedAPIVersion(r.APIVersion):
 		if r.Metadata.SelectedProfile != nil {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("recipe apiVersion %q cannot carry metadata.selectedProfile", r.APIVersion))
 		}
 		return r.validateInlineDeepCopyCycles()
-	case RecipeProfileAPIVersion:
+	case header.IsSupportedProfileAPIVersion(r.APIVersion):
 		if err := r.validateProfileMetadataItems(); err != nil {
 			return err
 		}
@@ -588,12 +589,13 @@ func (r *RecipeResult) ValidateProfileContract() error {
 			}
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("recipe apiVersion %q requires metadata.selectedProfile or configuration.slurm.accounting",
-					RecipeProfileAPIVersion))
+					r.APIVersion))
 		}
 	default:
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("recipe has unsupported apiVersion %q; expected %q or %q",
-				r.APIVersion, RecipeAPIVersion, RecipeProfileAPIVersion))
+			fmt.Sprintf("recipe has unsupported apiVersion %q; expected %q, %q, %q, or %q",
+				r.APIVersion, RecipeAPIVersion, header.GroupVersionV1,
+				RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
 	}
 
 	selected := r.Metadata.SelectedProfile

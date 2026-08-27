@@ -56,7 +56,8 @@ const ProvenanceFileName = "provenance.yaml"
 
 // ProvenanceAPIVersion / ProvenanceKind identify the document shape using
 // AICR's K8s-style convention. Bump the apiVersion when a downstream
-// consumer would need to branch on shape (v1alpha1 → v1beta1 → v1).
+// consumer would need to branch on shape. ADR-022 assigns BundleProvenance a
+// target of aicr.run/v1 while this Release N emitter remains on v1alpha2.
 // Additive fields do not require a bump.
 // The current v1alpha2 segment tracks header.GroupVersion and reflects the
 // aicr.run domain-migration version bump (signal-only, no shape change).

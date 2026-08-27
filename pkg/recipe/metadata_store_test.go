@@ -2716,8 +2716,169 @@ spec:
 	if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
 		t.Fatalf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
-	if !strings.Contains(err.Error(), `requires kind "RecipeMetadata"`) {
+	if !strings.Contains(err.Error(), `expected "RecipeMetadata"`) {
 		t.Fatalf("error = %v, want RecipeMetadata kind requirement", err)
+	}
+}
+
+func TestLoadMetadataStore_AcceptsReleaseNTargetCatalogHeaders(t *testing.T) {
+	provider := newInMemoryProvider("target-catalog", map[string][]byte{
+		"overlays/base.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`),
+		"overlays/target.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: target
+spec:
+  criteria:
+    service: eks
+  componentRefs: []
+`),
+		"overlays/headerless.yaml": []byte(`spec:
+  criteria:
+    service: gke
+  componentRefs: []
+`),
+		"mixins/target.yaml": []byte(`kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: target-mixin
+spec: {}
+`),
+		"evidence/unrelated.yaml": []byte("signers:\n  first-party: []\n"),
+		"strict-config.yaml": []byte(`kind: AICRConfig
+apiVersion: aicr.run/v1alpha2
+spec:
+  recipe:
+    criteriaStrict: true
+`),
+	})
+	t.Cleanup(func() { EvictCachedStore(provider) })
+
+	store, err := LoadMetadataStoreFor(t.Context(), provider)
+	if err != nil {
+		t.Fatalf("LoadMetadataStoreFor() error = %v", err)
+	}
+	if _, ok := store.GetRecipeByName("target"); !ok {
+		t.Fatal("target-version RecipeMetadata was not loaded")
+	}
+	if _, ok := store.Mixins["target-mixin"]; !ok {
+		t.Fatal("target-version RecipeMixin was not loaded")
+	}
+	if _, ok := store.Overlays[""]; ok {
+		t.Fatal("unrelated headerless YAML was misclassified as RecipeMetadata")
+	}
+	if got := len(store.Overlays); got != 1 {
+		t.Fatalf("loaded %d overlays, want only the declared target overlay", got)
+	}
+}
+
+func TestLoadMetadataStore_AcceptsReleaseNProfileTarget(t *testing.T) {
+	provider := newInMemoryProvider("target-profile-catalog", map[string][]byte{
+		"overlays/base.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`),
+		"overlays/profile.yaml": []byte(`kind: RecipeMetadata
+apiVersion: aicr.run/v1beta2
+metadata:
+  name: profile
+spec:
+  criteria:
+    service: aks
+  profile:
+    name: gpuStack
+    default: driver-installed
+    values:
+      driver-installed: {}
+`),
+	})
+	t.Cleanup(func() { EvictCachedStore(provider) })
+
+	store, err := LoadMetadataStoreFor(t.Context(), provider)
+	if err != nil {
+		t.Fatalf("LoadMetadataStoreFor() error = %v", err)
+	}
+	if _, ok := store.GetRecipeByName("profile"); !ok {
+		t.Fatal("target-version profile RecipeMetadata was not loaded")
+	}
+}
+
+func TestLoadMetadataStore_RejectsInvalidCatalogHeaders(t *testing.T) {
+	validBase := []byte(`kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: base
+spec:
+  componentRefs: []
+`)
+	tests := []struct {
+		name    string
+		path    string
+		data    []byte
+		wantSub string
+	}{
+		{
+			name:    "empty RecipeMetadata version",
+			path:    "overlays/bad.yaml",
+			data:    []byte("kind: RecipeMetadata\napiVersion: \nmetadata:\n  name: bad\nspec: {}\n"),
+			wantSub: `apiVersion ""`,
+		},
+		{
+			name:    "unknown RecipeMetadata version",
+			path:    "overlays/bad.yaml",
+			data:    []byte("kind: RecipeMetadata\napiVersion: aicr.run/v9\nmetadata:\n  name: bad\nspec: {}\n"),
+			wantSub: `apiVersion "aicr.run/v9"`,
+		},
+		{
+			name:    "wrong AICR kind",
+			path:    "overlays/bad.yaml",
+			data:    []byte("kind: RecipeMetdata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: bad\nspec: {}\n"),
+			wantSub: `kind "RecipeMetdata"`,
+		},
+		{
+			name:    "empty RecipeMixin version",
+			path:    "mixins/bad.yaml",
+			data:    []byte("kind: RecipeMixin\napiVersion: \nmetadata:\n  name: bad\nspec: {}\n"),
+			wantSub: `apiVersion ""`,
+		},
+		{
+			name:    "unknown RecipeMixin version",
+			path:    "mixins/bad.yaml",
+			data:    []byte("kind: RecipeMixin\napiVersion: aicr.run/v9\nmetadata:\n  name: bad\nspec: {}\n"),
+			wantSub: `apiVersion "aicr.run/v9"`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			provider := newInMemoryProvider("invalid-catalog-"+tt.name, map[string][]byte{
+				"overlays/base.yaml": validBase,
+				tt.path:              tt.data,
+			})
+			t.Cleanup(func() { EvictCachedStore(provider) })
+
+			_, err := LoadMetadataStoreFor(t.Context(), provider)
+			if err == nil {
+				t.Fatal("LoadMetadataStoreFor() error = nil, want header rejection")
+			}
+			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
+			}
+			if got := aicrerrors.ExitCodeFromError(err); got != aicrerrors.ExitInvalidInput {
+				t.Fatalf("exit code = %d, want %d", got, aicrerrors.ExitInvalidInput)
+			}
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Errorf("error %q does not contain %q", err, tt.wantSub)
+			}
+		})
 	}
 }
 

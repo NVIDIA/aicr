@@ -26,6 +26,7 @@ import (
 	"time"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
@@ -826,10 +827,18 @@ func TestProfileArtifactContract(t *testing.T) {
 		wantErr string
 	}{
 		{name: "legacy", result: &RecipeResult{APIVersion: RecipeAPIVersion}},
+		{name: "Release N target default", result: &RecipeResult{APIVersion: header.GroupVersionV1}},
 		{
 			name: "profile",
 			result: &RecipeResult{
 				APIVersion: RecipeProfileAPIVersion,
+				Metadata:   RecipeResultMetadata{SelectedProfile: selected},
+			},
+		},
+		{
+			name: "Release N target profile",
+			result: &RecipeResult{
+				APIVersion: header.GroupVersionV1Beta2,
 				Metadata:   RecipeResultMetadata{SelectedProfile: selected},
 			},
 		},
@@ -1350,9 +1359,11 @@ spec:
 		wantErr string
 	}{
 		{name: "legacy without profile", content: overlay(RecipeAPIVersion, "")},
-		{name: "empty version without profile", content: overlay("", "")},
-		{name: "unknown version without profile", content: overlay("aicr.run/v99", "")},
+		{name: "target authoring without profile", content: overlay(header.GroupVersionV1Beta1, "")},
+		{name: "empty version without profile", content: overlay("", ""), wantErr: `apiVersion ""`},
+		{name: "unknown version without profile", content: overlay("aicr.run/v99", ""), wantErr: `apiVersion "aicr.run/v99"`},
 		{name: "profile version with declaration", content: overlay(RecipeProfileAPIVersion, validProfile)},
+		{name: "target profile version with declaration", content: overlay(header.GroupVersionV1Beta2, validProfile)},
 		{
 			name:    "profile version without declaration",
 			content: overlay(RecipeProfileAPIVersion, ""),
@@ -1364,7 +1375,7 @@ spec:
 				string(overlay(RecipeProfileAPIVersion, validProfile)),
 				"kind: RecipeMetadata", "kind: RecipeMetdata", 1,
 			)),
-			wantErr: `requires kind "RecipeMetadata", got "RecipeMetdata"`,
+			wantErr: `has kind "RecipeMetdata", expected "RecipeMetadata"`,
 		},
 		{
 			name: "profile version requires metadata name",

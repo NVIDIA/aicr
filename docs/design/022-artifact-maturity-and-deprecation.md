@@ -2,7 +2,8 @@
 
 ## Status
 
-Proposed. If accepted, amends
+Accepted on 2026-08-26 by ratification in
+[#2373](https://github.com/NVIDIA/aicr/pull/2373). Amends
 [ADR-011](011-artifact-apiversion-policy.md): §1 keeps `pkg/header` as the
 single source of version strings but replaces its single-version alias rule;
 §3 becomes kind/schema-scoped, covers AICR catalog inputs, and retires its

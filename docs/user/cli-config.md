@@ -32,7 +32,7 @@ The schema's source of truth is
 
 ```yaml
 kind: AICRConfig               # required, exactly this value
-apiVersion: aicr.run/v1alpha2  # required, exactly this value
+apiVersion: aicr.run/v1alpha2  # required; v1beta1 is also accepted in Release N
 metadata:
   name: gke-h100-training      # optional, identifying only
 spec:
@@ -45,7 +45,9 @@ spec:
 
 Each `spec.*` section is optional and each command reads only its own section,
 so a file may carry just one section or any combination. A document with none
-of the five sections is rejected.
+of the five sections is rejected. AICR still writes and documents
+`aicr.run/v1alpha2` during the ADR-022 reader-first release, but the loader also
+accepts the target `aicr.run/v1beta1`; empty and unknown values are rejected.
 
 ## Loading, Precedence, and Secrets
 
