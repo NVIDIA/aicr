@@ -510,12 +510,13 @@ test_recipe_from_snapshot() {
   # Test: View recipe constraints
   msg "--- Test: Recipe constraints ---"
   if [ -f "$snapshot_recipe" ]; then
-    if grep -q "constraints:" "$snapshot_recipe" 2>/dev/null; then
+    if yq eval -e '.constraints | (type == "!!seq" and length > 0)' \
+      "$snapshot_recipe" > /dev/null 2>&1; then
       pass "recipe/constraints"
     else
       # The resolved recipe above is valid RecipeResult, so a missing
       # constraints block is a resolution defect, not an environment difference.
-      fail "recipe/constraints" "Generated recipe carries no constraints block"
+      fail "recipe/constraints" "Generated recipe carries no top-level constraints"
     fi
   else
     skip "recipe/constraints" "No recipe file"
