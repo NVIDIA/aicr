@@ -70,12 +70,18 @@ type ProfileValue struct {
 	// ReadinessConstraints are evaluated only by the aicr validate readiness
 	// pre-flight, never at generation time: applyEffectiveProfile routes them
 	// into spec.validation.readiness.constraints instead of spec.constraints.
-	// This is the home for a value's post-deployment distinguishing signals
-	// (ADR-015 Deferred Decision 5) — properties a correct deployment CREATES,
-	// such as a node label the value's own workload applies, which therefore
-	// cannot exist in the pre-deployment snapshot that generation-time
-	// constraints are evaluated against. Same fail-closed semantics as
-	// Constraints once the pre-flight runs; same catalog-load validation.
+	// Two kinds of state legally live here (ADR-015, "Self-rendered readings
+	// do not qualify"): externally-grounded cluster state evaluated
+	// post-deployment (provider properties, provisioning-set node labels),
+	// and deployment-outcome checks — the post-deployment form of a
+	// self-falsified pre-condition, or a marker the value's own workload
+	// writes, which cannot exist in the pre-deployment snapshot that
+	// generation-time constraints are evaluated against. Only the first
+	// kind QUALIFIES the value (establishes the cluster's pre-existing
+	// mode matches the selection); an outcome check verifies execution,
+	// which every value's own success satisfies. Same fail-closed
+	// semantics as Constraints once the pre-flight runs; same
+	// catalog-load validation.
 	ReadinessConstraints []Constraint `json:"readinessConstraints,omitempty" yaml:"readinessConstraints,omitempty"`
 
 	ComponentRefs []ProfileComponentRef `json:"componentRefs,omitempty" yaml:"componentRefs,omitempty"`
@@ -238,9 +244,12 @@ func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, 
 							decl.Name, valueName, kind, constraint.Name))
 				}
 				if _, repeat := seen[constraint.Name]; repeat {
+					// Name the list: the same measurement path is legal in
+					// both constraints and readinessConstraints (the DD5
+					// pattern), so a repeat must say which list to fix.
 					return errors.New(errors.ErrCodeInvalidRequest,
-						fmt.Sprintf("profile %q value %q repeats constraint %q",
-							decl.Name, valueName, constraint.Name))
+						fmt.Sprintf("profile %q value %q repeats %s %q",
+							decl.Name, valueName, kind, constraint.Name))
 				}
 				seen[constraint.Name] = struct{}{}
 			}

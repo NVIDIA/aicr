@@ -471,11 +471,18 @@ measurement path may appear in both, carrying a pre-condition at generation
 and a post-deployment state at readiness), but
 `readinessConstraints` are never evaluated at generation time — they route
 into `spec.validation.readiness.constraints` and are evaluated fail-closed by
-the `aicr validate` readiness pre-flight. Use this for properties the value's
-own workload creates (e.g. a node label its DaemonSet applies after a
-successful install — ADR-015 Deferred Decision 5), which by construction
-cannot be present in the pre-deployment snapshot that generation-time
-constraints are checked against.
+the `aicr validate` readiness pre-flight. Two kinds of state belong here:
+externally-grounded cluster state evaluated post-deployment (provider
+properties, node labels set at provisioning), and **deployment-outcome
+checks** — properties the value's own workload creates (the post-deployment
+form of a self-falsified pre-condition, or a node label its DaemonSet applies
+after a successful install), which by construction cannot be present in the
+pre-deployment snapshot that generation-time constraints are checked against.
+Only the externally-grounded kind can **qualify** the value — establish that
+the cluster's pre-existing mode matches the selection. An outcome check
+verifies that the deployment executed; every value's own success satisfies
+its own markers, so it can never distinguish one value from another (ADR-015,
+"Self-rendered readings do not qualify").
 
 **Constraint names must be measurement paths a supported snapshot producer
 actually emits** — a collector, or a provider projection attached at the

@@ -1562,6 +1562,18 @@ work that resolves it.
      independent of the bundle's own output (provider properties, node
      labels set at provisioning, externally-owned objects).
 
+     Deployment-created markers sit between the two: state the value's
+     own workload writes at runtime (the loaded driver a self-falsified
+     pre-condition asserts in post-form, a label its DaemonSet applies
+     after a successful install) is a legal readiness constraint as an
+     **outcome check** — unlike a rendered `.spec` readback it proves
+     the workload actually ran, and it can fail. But an outcome check
+     verifies *execution*, not *selection*: every value's own success
+     satisfies its own markers, so it cannot establish that the
+     cluster's pre-existing mode matches the selected value. A value's
+     **qualifying** constraint must rest on the bundle-independent
+     state above, whichever list it is declared in.
+
    This PR resolves no GKE signal: the GKE family's DD5 question was
    settled separately by value replacement (see the adoption-step
    amendment), and its shipped values are generation-time
