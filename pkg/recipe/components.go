@@ -29,6 +29,12 @@ import (
 // ComponentRegistryKind is the wire kind for component registry documents.
 const ComponentRegistryKind = "ComponentRegistry"
 
+// ComponentRegistryAPIVersion is the apiVersion expected on a registry.yaml.
+// ComponentRegistry is on the ADR-022 authoring track, so this aliases
+// header.AuthoringGroupVersion; the track's target is
+// header.GroupVersionV1Beta1.
+const ComponentRegistryAPIVersion = header.AuthoringGroupVersion
+
 // ComponentRegistry holds the declarative configuration for all components.
 // This is loaded from embedded recipe data (recipes/registry.yaml) at startup.
 type ComponentRegistry struct {
@@ -478,7 +484,7 @@ func validateComponentRegistryHeader(registry *ComponentRegistry, source string)
 	if !header.IsSupportedAuthoringAPIVersion(registry.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("%s has apiVersion %q, expected %q or %q for %s; update the registry header for this aicr release",
-				source, registry.APIVersion, RecipeAPIVersion, header.GroupVersionV1Beta1, ComponentRegistryKind))
+				source, registry.APIVersion, ComponentRegistryAPIVersion, header.GroupVersionV1Beta1, ComponentRegistryKind))
 	}
 	return nil
 }

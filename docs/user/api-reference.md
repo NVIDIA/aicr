@@ -505,10 +505,13 @@ output.
 
 The `/v1` routes remain the legacy contract. Explicit profile and
 `slurmAccountingMode` input is rejected; Slurm recipes remain implicitly
-disabled and use the `aicr.run/v1alpha2` response shape. `/v1/recipe` and
-`/v1/query` reject a composition after it adopts a profile even when the request
-omits selection, and `/v1/bundle` rejects a profile-bearing body. Migrate a
-converted workflow to v2 as one cut-over.
+disabled and use the default-track response shape. That track is
+`aicr.run/v1alpha2` today, and the schema also admits its ADR-022 target
+`aicr.run/v1` so a client generated from this spec tolerates the value a
+release before AICR emits it. `/v1` never carries a profile-track version.
+`/v1/recipe` and `/v1/query` reject a composition after it adopts a
+profile even when the request omits selection, and `/v1/bundle` rejects a
+profile-bearing body. Migrate a converted workflow to v2 as one cut-over.
 
 **AKS/GKE cut-over:** the AKS and GKE families are the embedded adopters, so
 `/v1/recipe` and `/v1/query` requests with `service=aks` or `service=gke` now
@@ -596,8 +599,12 @@ The shared artifact gate rejects any `apiVersion` outside
 `aicr.run/v1alpha2`, `aicr.run/v1`, `aicr.run/v1alpha3`, and
 `aicr.run/v1beta2` with a 400, on this endpoint as well as on the CLI file-load
 path. An absent or empty `apiVersion` is still admitted as the legacy shape
-during ADR-022 Release N. This is a reader-first window: generated recipes keep
-their alpha headers until the emitter-switch release.
+through v0.22, and v0.23 stops admitting it along with the alpha values. The
+reader and emitter clocks are separate: v0.21 and v0.22 both read the alpha
+values, the target values, and the empty header, while generated recipes keep
+their alpha headers until v0.22 switches the emitters. See
+[Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
+for the release-by-release table.
 
 #### Components
 

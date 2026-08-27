@@ -745,6 +745,6 @@ func normalizeLegacyRecipeResult(result *recipe.RecipeResult, v2 bool) *recipe.R
 	projected := result.DeepCopy()
 	projected.BindDataProvider(result.DataProvider())
 	projected.Configuration = nil
-	projected.APIVersion = recipe.RecipeAPIVersion
+	projected.APIVersion = recipe.RecipeResultAPIVersion
 	return projected
 }

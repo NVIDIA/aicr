@@ -1731,7 +1731,7 @@ func TestMixinConstraintFailureExcludesOnlyAffectedCandidateChain(t *testing.T) 
 		Mixins: map[string]*RecipeMixin{
 			"kernel-gate": {
 				Kind:       RecipeMixinKind,
-				APIVersion: RecipeAPIVersion,
+				APIVersion: RecipeMetadataAPIVersion,
 				Metadata: struct {
 					Name string `json:"name" yaml:"name"`
 				}{
@@ -1748,7 +1748,7 @@ func TestMixinConstraintFailureExcludesOnlyAffectedCandidateChain(t *testing.T) 
 			},
 			"monitoring-gate": {
 				Kind:       RecipeMixinKind,
-				APIVersion: RecipeAPIVersion,
+				APIVersion: RecipeMetadataAPIVersion,
 				Metadata: struct {
 					Name string `json:"name" yaml:"name"`
 				}{
@@ -1918,7 +1918,7 @@ func TestMixinConstraintFailurePreservesSharedAncestorsForSurvivingLeaf(t *testi
 		Mixins: map[string]*RecipeMixin{
 			"failing-mixin": {
 				Kind:       RecipeMixinKind,
-				APIVersion: RecipeAPIVersion,
+				APIVersion: RecipeMetadataAPIVersion,
 				Metadata: struct {
 					Name string `json:"name" yaml:"name"`
 				}{Name: "failing-mixin"},
@@ -1931,7 +1931,7 @@ func TestMixinConstraintFailurePreservesSharedAncestorsForSurvivingLeaf(t *testi
 			},
 			"passing-mixin": {
 				Kind:       RecipeMixinKind,
-				APIVersion: RecipeAPIVersion,
+				APIVersion: RecipeMetadataAPIVersion,
 				Metadata: struct {
 					Name string `json:"name" yaml:"name"`
 				}{Name: "passing-mixin"},
@@ -2073,7 +2073,7 @@ func TestMixinConstraintFailureDegradesForUnstatedDimension(t *testing.T) {
 		Mixins: map[string]*RecipeMixin{
 			"monitoring-gate": {
 				Kind:       RecipeMixinKind,
-				APIVersion: RecipeAPIVersion,
+				APIVersion: RecipeMetadataAPIVersion,
 				Metadata: struct {
 					Name string `json:"name" yaml:"name"`
 				}{Name: "monitoring-gate"},
@@ -2173,7 +2173,7 @@ func TestMixinConstraintFailClosedOnInternalEvaluatorError(t *testing.T) {
 		Mixins: map[string]*RecipeMixin{
 			"os-gate": {
 				Kind:       RecipeMixinKind,
-				APIVersion: RecipeAPIVersion,
+				APIVersion: RecipeMetadataAPIVersion,
 				Metadata: struct {
 					Name string `json:"name" yaml:"name"`
 				}{Name: "os-gate"},
@@ -2238,7 +2238,7 @@ func TestMixinConstraintFailClosedOnUnstructuredEvaluatorError(t *testing.T) {
 		Mixins: map[string]*RecipeMixin{
 			"os-gate": {
 				Kind:       RecipeMixinKind,
-				APIVersion: RecipeAPIVersion,
+				APIVersion: RecipeMetadataAPIVersion,
 				Metadata: struct {
 					Name string `json:"name" yaml:"name"`
 				}{Name: "os-gate"},

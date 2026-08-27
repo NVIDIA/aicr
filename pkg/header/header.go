@@ -22,6 +22,15 @@ import (
 // truth for every AICR artifact group/version. Package-local emitters and
 // readers select a version by wire kind and schema track; see ADR-022.
 //
+// Three tracks exist. StableGroupVersion, AuthoringGroupVersion, and
+// ProfileGroupVersion name the value each track emits today; GroupVersionV1,
+// GroupVersionV1Beta1, and GroupVersionV1Beta2 name where each is headed.
+// StableGroupVersion and AuthoringGroupVersion carry the same string during
+// the reader-first release and diverge at the emitter switch, so a package
+// emitter must alias the constant for its track rather than the string it
+// happens to equal. Aliasing GroupVersion directly is what made the switch a
+// refactor instead of an edit.
+//
 // Evolution policy (see docs/design/011-artifact-apiversion-policy.md and
 // docs/design/022-artifact-maturity-and-deprecation.md): schema changes within
 // a version must be additive-only; a breaking change requires a new version
@@ -63,6 +72,21 @@ const (
 
 	// RecipeResultGroupVersion is the current configured RecipeResult schema.
 	RecipeResultGroupVersion = APIGroup + "/" + APIVersionV1Alpha3
+
+	// StableGroupVersion is the value emitted for the ADR-022 stable artifact
+	// track: Snapshot, the default RecipeResult, RecipeCriteria, and
+	// BundleProvenance. Its §2 target is GroupVersionV1.
+	StableGroupVersion = GroupVersion
+
+	// AuthoringGroupVersion is the value emitted for the ADR-022 authoring and
+	// configuration track: AICRConfig, ordinary RecipeMetadata, RecipeMixin,
+	// and ComponentRegistry. Its §2 target is GroupVersionV1Beta1.
+	AuthoringGroupVersion = GroupVersion
+
+	// ProfileGroupVersion is the value emitted for the ADR-022 profile-bearing
+	// track: profile RecipeMetadata and RecipeResult. Its §2 target is
+	// GroupVersionV1Beta2.
+	ProfileGroupVersion = RecipeResultGroupVersion
 
 	// GroupVersionV1Beta1 is the target authoring/configuration group/version.
 	GroupVersionV1Beta1 = APIGroup + "/" + APIVersionV1Beta1

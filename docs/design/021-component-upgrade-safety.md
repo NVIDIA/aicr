@@ -144,9 +144,9 @@ Records are keyed by semver ranges, not explicit version pairs, so they do not g
 
 **A transition may also carry `hooks`.** Steps describe what a human does; `hooks` reference AICR-authored migration manifests that ship as a release beside the component. The field is defined in [Decision 4](#decision-4-migration-content-ships-as-an-adjacent-generated-release), which owns its delivery; it is listed here so the transition schema is complete in one place.
 
-**The loader fails closed on an unrecognized `apiVersion`.** Records are stamped `aicr.run/v1alpha2`, the current track per [ADR-013](013-aicr-run-domain-migration.md); `aicr.run/v1alpha1` never existed. An unreadable or unrecognized record MUST return `ErrCodeInvalidRequest` naming the value found and the value expected. It MUST NOT be skipped, and it MUST NOT degrade to `unknown`.
+**The loader fails closed on an unrecognized `apiVersion`.** Records are stamped `aicr.run/v1beta1`, the target assigned to `ComponentUpgrades` by [ADR-022 §2](022-artifact-maturity-and-deprecation.md). The kind starts at its target rather than on the alpha track: ADR-022 Release N already accepts `aicr.run/v1beta1` for authoring artifacts, so there is no alpha version to emit and later retire. An unreadable or unrecognized record MUST return `ErrCodeInvalidRequest` naming the value found and the value expected. It MUST NOT be skipped, and it MUST NOT degrade to `unknown`.
 
-That last clause matters for the same reason `unknown` and `unversioned` are separate verdicts. "A record exists and I could not read it" is not "no record exists", and collapsing them hides which action closes the gap. A loader that quietly skips a record it cannot parse would reproduce this ADR's own motivating failure, the silent one, inside the tool built to prevent it. The catalog loader today checks `kind` only and never `apiVersion` (see ADR-015 and [#1812](https://github.com/NVIDIA/aicr/issues/1812)), and `recipes/upgrades/*.yaml` sits in the same tree an external `--data` catalog points at, so a record loader inherits that behavior unless it opts out explicitly.
+That last clause matters for the same reason `unknown` and `unversioned` are separate verdicts. "A record exists and I could not read it" is not "no record exists", and collapsing them hides which action closes the gap. A loader that quietly skips a record it cannot parse would reproduce this ADR's own motivating failure, the silent one, inside the tool built to prevent it. The catalog loader used to check `kind` only and never `apiVersion` (see ADR-015 and [#1812](https://github.com/NVIDIA/aicr/issues/1812)); [ADR-022 §8](022-artifact-maturity-and-deprecation.md) closed that, and `recipes/upgrades/*.yaml` sits in the same tree an external `--data` catalog points at, so a record loader must implement the ADR-022 gate rather than needing to opt out of a fail-open one. The obligation is on this still-unimplemented loader; it does not share `provider.go`'s registry gate, so "inherits" would describe the fail-closed policy default, not code reuse.
 
 **Fields are validated against the verdict.** A `manual` or `blocked` record MUST carry at least one step, since both are defined by the work they require; a `safe` record MUST carry none, and MUST carry `verifiedBy`.
 
@@ -229,7 +229,7 @@ What it is good for is the thing an operator needs *before* upgrading rather tha
 
 | Field | Required | Notes |
 |---|---|---|
-| `apiVersion` | yes | `aicr.run/v1alpha2`. The loader fails closed on anything else. |
+| `apiVersion` | yes | `aicr.run/v1beta1`, per [ADR-022 §2](022-artifact-maturity-and-deprecation.md). The loader fails closed on anything else. |
 | `kind`, `component` | yes | `ComponentUpgrades`; `component` must match the registry entry. |
 | `transitions[]` | yes | One or more. |
 | `.from`, `.to` | yes | Semver ranges. A record applies when the source satisfies `from` and the target is at or past `to`'s lower bound. `to` MUST NOT reach past the currently pinned version; widen `from` backward instead. |
@@ -559,7 +559,7 @@ The real nodewright `skyhook.nvidia.com` to `nodewright.nvidia.com` rename, draw
 
 ```yaml
 # recipes/upgrades/nodewright-operator.yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
 component: nodewright-operator
 transitions:
