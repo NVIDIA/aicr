@@ -433,15 +433,6 @@ test_snapshot() {
     return 1
   fi
 
-  # Verify ConfigMap was created
-  msg "--- Test: Snapshot ConfigMap ---"
-  if kubectl get cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" > /dev/null 2>&1; then
-    pass "snapshot/configmap-created"
-  else
-    fail "snapshot/configmap-created" "ConfigMap not found"
-    return 1
-  fi
-
   # Verify snapshot contains GPU data
   msg "--- Test: Snapshot GPU data ---"
   local snapshot_data
@@ -456,14 +447,19 @@ test_snapshot() {
   gpu_count=$(printf '%s\n' "$snapshot_data" | yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data["gpu-count"] // 0' - | head -1)
   driver_loaded=$(printf '%s\n' "$snapshot_data" | yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data["driver-loaded"] // "unknown"' - | head -1)
 
-  if [ -n "$gpu_name" ] && [ "$gpu_name" != "unknown" ]; then
+  if [ -z "$snapshot_data" ]; then
+    # The ConfigMap exists (asserted above) but carries no snapshot payload:
+    # that is a real defect, not an environment difference.
+    fail "snapshot/gpu-data" "Snapshot ConfigMap has no snapshot.yaml payload"
+  elif [ -n "$gpu_name" ] && [ "$gpu_name" != "unknown" ]; then
     detail "GPU SKU: ${gpu_name}"
     detail "Count: ${gpu_count}"
     detail "Driver loaded: ${driver_loaded}"
     pass "snapshot/gpu-data"
   else
-    warn "No GPU SKU in snapshot (may be expected without fake-gpu-operator or for an unrecognized SKU)"
-    pass "snapshot/gpu-data"
+    # skip() does not increment the pass count, so an environment that cannot
+    # produce a SKU stops being reported as verified GPU coverage.
+    skip "snapshot/gpu-data" "No GPU SKU in snapshot (fake-gpu-operator absent or SKU unrecognized)"
   fi
 }
 
@@ -517,8 +513,9 @@ test_recipe_from_snapshot() {
     if grep -q "constraints:" "$snapshot_recipe" 2>/dev/null; then
       pass "recipe/constraints"
     else
-      warn "No constraints in recipe (may be expected)"
-      pass "recipe/constraints"
+      # The resolved recipe above is valid RecipeResult, so a missing
+      # constraints block is a resolution defect, not an environment difference.
+      fail "recipe/constraints" "Generated recipe carries no constraints block"
     fi
   else
     skip "recipe/constraints" "No recipe file"
@@ -896,18 +893,24 @@ RECIPE
     --phase deployment \
     --output "$deployment_fail_result" 2>&1) || true
 
+  # Negative test: the constraint MUST report failed. Both failure modes here --
+  # the constraint passed when it should not have, and the constraint was never
+  # evaluated -- previously reported success, so this gate could not fail.
   if [ -f "$deployment_fail_result" ] && \
-     grep -q "gpu-operator-version" "$deployment_fail_result"; then
-    if grep -A1 '"gpu-operator-version"' "$deployment_fail_result" | grep -q '"status": "failed"'; then
+     jq -e 'any(.results.tests[]?; (.name // "") | contains("gpu-operator-version"))' \
+       "$deployment_fail_result" > /dev/null 2>&1; then
+    if jq -e 'any(.results.tests[]?;
+                  ((.name // "") | contains("gpu-operator-version")) and .status == "failed")' \
+         "$deployment_fail_result" > /dev/null 2>&1; then
       detail "GPU operator version constraint: FAIL (v24.6.0 < v25.0.0) - as expected"
       pass "validate/deployment-constraint-fail"
     else
-      warn "Constraint did not fail as expected"
-      pass "validate/deployment-constraint-fail"
+      fail "validate/deployment-constraint-fail" \
+        "Constraint Deployment.gpu-operator.version >= v25.0.0 did not fail against pinned v24.6.0"
     fi
   else
-    warn "Constraint not evaluated (not found in output)"
-    pass "validate/deployment-constraint-fail"
+    fail "validate/deployment-constraint-fail" \
+      "Constraint not evaluated (gpu-operator-version absent from CTRF output)"
   fi
 
   # -----------------------------------------------------------------------
@@ -961,13 +964,16 @@ RECIPE
     --image "${AICR_VALIDATOR_IMAGE}" \
     --output "$result_er_fail" 2>&1) || true
 
+  # Bind name and status to the SAME CTRF test object. Scanning the whole file
+  # for '"status": "failed"' would report success when an unrelated check is the
+  # one that failed, which is the dangerous direction for a negative test.
   if [ -f "$result_er_fail" ] && \
-     grep -q '"expected-resources"' "$result_er_fail"; then
-    if grep -A1 '"expected-resources"' "$result_er_fail" | grep -q '"status": "failed"'; then
+     jq -e 'any(.results.tests[]?; (.name // "") | contains("expected-resources"))' \
+       "$result_er_fail" > /dev/null 2>&1; then
+    if jq -e 'any(.results.tests[]?;
+                  ((.name // "") | contains("expected-resources")) and .status == "failed")' \
+         "$result_er_fail" > /dev/null 2>&1; then
       detail "Expected-resources check: FAIL (nonexistent-deployment not found) - as expected"
-      pass "validate/expected-resources-fail"
-    elif grep -q '"summary"' "$result_er_fail" && grep -q '"status": "failed"' "$result_er_fail"; then
-      detail "Expected-resources check: FAIL (from summary status) - as expected"
       pass "validate/expected-resources-fail"
     else
       fail "validate/expected-resources-fail" "Check did not fail for missing resource"
@@ -1433,7 +1439,12 @@ RECIPE
   # Create custom validation namespace
   kubectl create namespace custom-validation 2>&1 || true
 
-  # Run validation with custom namespace and cleanup enabled (tests both namespace + cleanup)
+  # --no-cleanup so the per-run RBAC outlives the call. With cleanup enabled
+  # (the default) deferClusterCleanup -> CleanupRBAC deletes the ServiceAccount
+  # before it can be observed, so asserting its presence afterwards could never
+  # hold. Cleanup is covered separately by validate/job-cleanup below, and the
+  # teardown at the end of this function removes the namespace and the labelled
+  # ClusterRoleBinding this leaves behind.
   local validation_custom="${validate_dir}/validation-custom-ns.json"
   "${AICR_BIN}" validate \
     --recipe "$recipe_file" \
@@ -1441,6 +1452,7 @@ RECIPE
     --phase deployment \
     --namespace custom-validation \
     --output "$validation_custom" \
+    --no-cleanup \
     2>&1 || true  # Keep || true here as this is just testing namespace config
 
   # Check if RBAC was created in custom namespace. Match by label since the
@@ -1451,54 +1463,84 @@ RECIPE
     detail "ServiceAccount created in custom-validation namespace: ${custom_sa_name}"
     pass "validate/job-custom-namespace"
   else
-    warn "ServiceAccount not found in custom namespace (may be expected if no checks defined)"
-    pass "validate/job-custom-namespace"
+    # $recipe_file above always declares validation.deployment.checks, so the
+    # validator is expected to create RBAC in --namespace. A missing
+    # ServiceAccount means --namespace was not honoured.
+    fail "validate/job-custom-namespace" \
+      "No ServiceAccount labelled ${rbac_label_selector} in namespace custom-validation"
   fi
 
   # Test 3: Job cleanup (verify cleanup from default namespace run with --no-cleanup)
   msg "--- Test: Validation Job cleanup ---"
   echo -e "${DIM}  \$ aicr validate${NC}"
 
-  # Count existing jobs before cleanup test
-  local jobs_before
-  jobs_before=$(kubectl get jobs -n aicr-validation --no-headers 2>/dev/null | wc -l || echo "0")
+  # Record the Job name set before the run. Names are compared rather than
+  # counted so a Job leaked by this run cannot be masked by an unrelated Job
+  # disappearing over the same window.
+  local jobs_before_file="${validate_dir}/jobs-before.txt"
+  local jobs_after_file="${validate_dir}/jobs-after.txt"
+  kubectl get jobs -n aicr-validation \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | grep -v '^$' | sort -u > "$jobs_before_file" || true
 
-  # Run validation with cleanup enabled
+  # Run validation with cleanup enabled, capturing the exit code. A Job that
+  # fails to deploy is still recorded as a CTRF result (ExitCode -1) and every
+  # result counts toward summary.tests, so neither a non-empty report nor an
+  # unchanged Job set proves a Job was created. Requiring a clean exit plus a
+  # passing expected-resources result does -- both already hold for this recipe
+  # under validate/job-success and validate/command-success above.
+  local validation_cleanup="${validate_dir}/validation-cleanup.json"
+  local cleanup_exit=0
   "${AICR_BIN}" validate \
     --recipe "$recipe_file" \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
     --phase deployment \
-    2>&1 || true  # Keep || true here as this is just testing cleanup
+    --output "$validation_cleanup" \
+    2>&1 || cleanup_exit=$?
 
   # Wait for cleanup to complete
   kubectl wait --for=delete jobs -l app.kubernetes.io/name=aicr -n aicr-validation --timeout=30s 2>/dev/null || true
 
-  # Count jobs after (should be cleaned up)
-  local jobs_after
-  jobs_after=$(kubectl get jobs -n aicr-validation --no-headers 2>/dev/null | wc -l || echo "0")
+  kubectl get jobs -n aicr-validation \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+    | grep -v '^$' | sort -u > "$jobs_after_file" || true
 
-  if [ "$jobs_after" -le "$jobs_before" ]; then
-    detail "Jobs cleaned up successfully"
-    pass "validate/job-cleanup"
+  # Jobs present after the run that were not present before it.
+  local leaked_jobs
+  leaked_jobs=$(comm -13 "$jobs_before_file" "$jobs_after_file" | tr '\n' ' ' | sed 's/[[:space:]]*$//')
+
+  if [ "$cleanup_exit" -ne 0 ]; then
+    fail "validate/job-cleanup" \
+      "Cleanup run failed (exit ${cleanup_exit}); Job cleanup was not exercised"
+  elif [ ! -f "$validation_cleanup" ] || \
+       ! jq -e 'any(.results.tests[]?;
+                    ((.name // "") | contains("expected-resources")) and .status == "passed")' \
+            "$validation_cleanup" > /dev/null 2>&1; then
+    # A failed DeployJob lands here: it reports a result but never created a Job.
+    fail "validate/job-cleanup" \
+      "Cleanup run reported no passing expected-resources check, so no validator Job ran"
+  elif [ -n "$leaked_jobs" ]; then
+    # This run had cleanup enabled, so every Job it created must be gone.
+    fail "validate/job-cleanup" "Validator Jobs not cleaned up: ${leaked_jobs}"
   else
-    warn "Jobs may not have been cleaned up (may be expected if new jobs created)"
+    detail "Jobs cleaned up successfully (no new Jobs remain in aicr-validation)"
     pass "validate/job-cleanup"
   fi
 
   # Test 4: Validation result format
   msg "--- Test: Validation result format ---"
   if [ -f "$validation_result" ]; then
-    # Check for expected CTRF JSON structure
-    if grep -q '"reportFormat"' "$validation_result" || grep -q '"reportFormat"' "$validation_result"; then
+    # Assert the CTRF envelope the same way validate/result-structure does.
+    # The previous condition OR-ed the identical grep with itself, so the
+    # second operand could never change the outcome.
+    if jq -e '.reportFormat == "CTRF"' "$validation_result" > /dev/null 2>&1; then
       detail "Validation result has correct structure"
       pass "validate/job-result-format"
     else
-      warn "Validation result may have unexpected format"
-      pass "validate/job-result-format"
+      fail "validate/job-result-format" "reportFormat is not \"CTRF\" in ${validation_result}"
     fi
   else
-    warn "Validation result file not created"
-    pass "validate/job-result-format"
+    fail "validate/job-result-format" "Validation result file not created at ${validation_result}"
   fi
 
   # Cleanup test namespaces, then any per-run validator ClusterRoleBindings.
