@@ -687,28 +687,6 @@ type catalogForMerge struct {
 	Validators []map[string]any `yaml:"validators"`
 }
 
-func validateExternalCatalogHeader(embedded, external *catalogForMerge) error {
-	if external == nil {
-		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			"external "+catalogFileName+" is empty")
-	}
-	if embedded == nil {
-		return aicrerrors.New(aicrerrors.ErrCodeInternal,
-			"embedded "+catalogFileName+" is empty")
-	}
-	if external.APIVersion == "" || external.APIVersion != embedded.APIVersion {
-		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("external %s has apiVersion %q, expected %q",
-				catalogFileName, external.APIVersion, embedded.APIVersion))
-	}
-	if external.Kind != embedded.Kind {
-		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("external %s has kind %q, expected %q",
-				catalogFileName, external.Kind, embedded.Kind))
-	}
-	return nil
-}
-
 // getMergedCatalog returns the merged catalogFileName content.
 // External catalog validators are merged with embedded, with external
 // taking precedence by name.
@@ -723,7 +701,7 @@ func (p *LayeredDataProvider) getMergedCatalog(ctx context.Context) ([]byte, err
 	p.mergedCatalogOnce.Do(func() {
 		p.mergedCatalog, p.mergedCatalogErr = mergeEmbeddedAndExternal(
 			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, catalogFileName,
-			validateExternalCatalogHeader, mergeCatalogs,
+			nil, mergeCatalogs,
 		)
 	})
 
@@ -737,6 +715,15 @@ func mergeCatalogs(embedded, external *catalogForMerge) *catalogForMerge {
 	slog.Debug("starting catalog merge",
 		"embedded_count", len(embedded.Validators),
 		"external_count", len(external.Validators))
+
+	// ValidatorCatalog uses a separate API domain and is explicitly outside
+	// ADR-022. Preserve its existing advisory mismatch behavior until that
+	// schema defines its own compatibility policy.
+	if external.APIVersion != "" && external.APIVersion != embedded.APIVersion {
+		slog.Warn("external catalog has different API version",
+			"embedded", embedded.APIVersion,
+			"external", external.APIVersion)
+	}
 
 	return &catalogForMerge{
 		APIVersion: embedded.APIVersion,

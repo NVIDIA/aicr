@@ -2278,7 +2278,7 @@ components:
         apiVersion:
           type: string
           description: API version
-          enum: [aicr.run/v1alpha2]
+          enum: [aicr.run/v1alpha2, aicr.run/v1]
           example: aicr.run/v1alpha2
         metadata:
           type: object
@@ -3050,7 +3050,10 @@ components:
             criteria:
               $ref: "#/components/schemas/CriteriaV2"
             configuration:
-              $ref: "#/components/schemas/ConfiguredRecipeConfiguration"
+              allOf:
+                - $ref: "#/components/schemas/ConfiguredRecipeConfiguration"
+                - type: object
+                  required: [slurm]
             componentRefs:
               type: array
               minItems: 1

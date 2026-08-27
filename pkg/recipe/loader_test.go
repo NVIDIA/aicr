@@ -161,6 +161,12 @@ spec:
 			errContain:  `apiVersion "aicr.nvidia.com/v1alpha1"`,
 		},
 		{
+			name:        "authoring target rejected for RecipeResult",
+			yamlContent: "kind: RecipeResult\napiVersion: aicr.run/v1beta1\ncriteria:\n  service: eks\n",
+			wantErr:     true,
+			errContain:  `apiVersion "aicr.run/v1beta1"`,
+		},
+		{
 			name: "profile RecipeResult loads strictly",
 			yamlContent: `kind: RecipeResult
 apiVersion: aicr.run/v1alpha3
@@ -223,6 +229,19 @@ profie: typo
 		{
 			name: "profile RecipeResult requires kind",
 			yamlContent: `apiVersion: aicr.run/v1alpha3
+metadata:
+  selectedProfile:
+    name: mode
+    value: one
+    ownedPaths: {}
+componentRefs: []
+`,
+			wantErr:    true,
+			errContain: `requires kind "RecipeResult"`,
+		},
+		{
+			name: "Release N target profile RecipeResult requires kind",
+			yamlContent: `apiVersion: aicr.run/v1beta2
 metadata:
   selectedProfile:
     name: mode

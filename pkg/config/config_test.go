@@ -136,9 +136,16 @@ func TestValidate_Errors(t *testing.T) {
 			wantSub: "invalid kind",
 		},
 		{
-			name: "wrong apiVersion",
+			name: "wrong stable-track apiVersion",
 			mutate: func(c *config.AICRConfig) {
-				c.APIVersion = "v1"
+				c.APIVersion = header.GroupVersionV1
+			},
+			wantSub: "invalid apiVersion",
+		},
+		{
+			name: "wrong profile-track apiVersion",
+			mutate: func(c *config.AICRConfig) {
+				c.APIVersion = header.GroupVersionV1Beta2
 			},
 			wantSub: "invalid apiVersion",
 		},

@@ -1033,6 +1033,24 @@ spec:
 			wantErr: true,
 		},
 		{
+			name:     "profile target rejected for RecipeCriteria",
+			filename: "profile_target.yaml",
+			content: `kind: RecipeCriteria
+apiVersion: aicr.run/v1beta2
+spec:
+  service: eks`,
+			wantErr: true,
+		},
+		{
+			name:     "authoring target rejected for RecipeCriteria",
+			filename: "authoring_target.yaml",
+			content: `kind: RecipeCriteria
+apiVersion: aicr.run/v1beta1
+spec:
+  service: eks`,
+			wantErr: true,
+		},
+		{
 			name:     "invalid service type",
 			filename: "invalid_service.yaml",
 			content: `kind: RecipeCriteria

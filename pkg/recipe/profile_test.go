@@ -1360,8 +1360,8 @@ spec:
 	}{
 		{name: "legacy without profile", content: overlay(RecipeAPIVersion, "")},
 		{name: "target authoring without profile", content: overlay(header.GroupVersionV1Beta1, "")},
-		{name: "empty version without profile", content: overlay("", ""), wantErr: "apiVersion"},
-		{name: "unknown version without profile", content: overlay("aicr.run/v99", ""), wantErr: "apiVersion"},
+		{name: "empty version without profile", content: overlay("", ""), wantErr: `apiVersion ""`},
+		{name: "unknown version without profile", content: overlay("aicr.run/v99", ""), wantErr: `apiVersion "aicr.run/v99"`},
 		{name: "profile version with declaration", content: overlay(RecipeProfileAPIVersion, validProfile)},
 		{name: "target profile version with declaration", content: overlay(header.GroupVersionV1Beta2, validProfile)},
 		{

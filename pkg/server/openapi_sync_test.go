@@ -227,6 +227,21 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 		kinds       []string
 	}{
 		{
+			name:        "base response",
+			schema:      spec.Components.Schemas["RecipeResponse"],
+			required:    []string{"apiVersion", "kind"},
+			apiVersions: []string{recipe.RecipeAPIVersion, recipe.ConfiguredRecipeResultAPIVersion, header.GroupVersionV1Beta2},
+			kinds:       []string{recipe.RecipeResultKind},
+		},
+		{
+			name:        "profile response",
+			schema:      spec.Components.Schemas["ProfileRecipeResponse"],
+			baseRef:     "#/components/schemas/RecipeResponse",
+			required:    []string{"metadata", "componentRefs"},
+			apiVersions: []string{recipe.ConfiguredRecipeResultAPIVersion, header.GroupVersionV1Beta2},
+			kinds:       []string{recipe.RecipeResultKind},
+		},
+		{
 			// /v1 responses are pinned to v1alpha2 by LegacyRecipeResponse,
 			// which wraps RecipeResponse and narrows the apiVersion enum.
 			// RecipeResponse itself now also admits v1alpha3 for /v2, so
@@ -257,6 +272,12 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 				t.Errorf("kind enum = %v, want %v", gotKinds, tt.kinds)
 			}
 		})
+	}
+
+	criteriaVersions := spec.Components.Schemas["RecipeCriteria"].Properties["apiVersion"].Enum
+	wantCriteriaVersions := []string{recipe.RecipeCriteriaAPIVersion, header.GroupVersionV1}
+	if !equalStringsUnordered(criteriaVersions, wantCriteriaVersions) {
+		t.Errorf("RecipeCriteria apiVersion enum = %v, want %v", criteriaVersions, wantCriteriaVersions)
 	}
 
 	bundleRequest := spec.Components.Schemas["BundleRecipeRequest"]
@@ -708,9 +729,26 @@ func TestOpenAPIV1BundleLegacyConfigurationContract(t *testing.T) {
 
 		t.Error("ConfiguredRecipeResponse does not prohibit selectedProfile")
 	}
-	configurationRef := openAPIObjectAt(t, configuredClosure, "properties", "configuration")
-	if got := configurationRef["$ref"]; got != "#/components/schemas/ConfiguredRecipeConfiguration" {
-		t.Errorf("ConfiguredRecipeResponse configuration = %v, want closed configuration schema", got)
+	configurationProperty := openAPIObjectAt(t, configuredClosure, "properties", "configuration")
+	configurationPropertyAllOf := openAPISequence(t, configurationProperty["allOf"],
+		"ConfiguredRecipeResponse configuration.allOf")
+	var configurationRefs, configurationConstraints []map[string]any
+	for _, value := range configurationPropertyAllOf {
+		entry := openAPIObject(t, value, "ConfiguredRecipeResponse configuration.allOf entry")
+		if entry["$ref"] == "#/components/schemas/ConfiguredRecipeConfiguration" {
+			configurationRefs = append(configurationRefs, entry)
+		} else {
+			configurationConstraints = append(configurationConstraints, entry)
+		}
+	}
+	if len(configurationRefs) != 1 || len(configurationConstraints) != 1 {
+		t.Fatalf("ConfiguredRecipeResponse configuration.allOf has %d schema refs and %d constraints, want 1 each",
+			len(configurationRefs), len(configurationConstraints))
+	}
+	if !openAPIHasString(openAPISequence(t, configurationConstraints[0]["required"],
+		"ConfiguredRecipeResponse configuration required"), "slurm") {
+
+		t.Error("ConfiguredRecipeResponse configuration does not require slurm")
 	}
 	configuration := openAPIObjectAt(t, schemas, "ConfiguredRecipeConfiguration")
 	configurationAllOf := openAPISequence(t, configuration["allOf"],

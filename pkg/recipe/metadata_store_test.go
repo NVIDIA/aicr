@@ -2739,6 +2739,11 @@ spec:
     service: eks
   componentRefs: []
 `),
+		"overlays/headerless.yaml": []byte(`spec:
+  criteria:
+    service: gke
+  componentRefs: []
+`),
 		"mixins/target.yaml": []byte(`kind: RecipeMixin
 apiVersion: aicr.run/v1beta1
 metadata:
@@ -2767,6 +2772,9 @@ spec:
 	}
 	if _, ok := store.Overlays[""]; ok {
 		t.Fatal("unrelated headerless YAML was misclassified as RecipeMetadata")
+	}
+	if got := len(store.Overlays); got != 1 {
+		t.Fatalf("loaded %d overlays, want only the declared target overlay", got)
 	}
 }
 
@@ -2813,34 +2821,40 @@ spec:
   componentRefs: []
 `)
 	tests := []struct {
-		name string
-		path string
-		data []byte
+		name    string
+		path    string
+		data    []byte
+		wantSub string
 	}{
 		{
-			name: "empty RecipeMetadata version",
-			path: "overlays/bad.yaml",
-			data: []byte("kind: RecipeMetadata\napiVersion: \nmetadata:\n  name: bad\nspec: {}\n"),
+			name:    "empty RecipeMetadata version",
+			path:    "overlays/bad.yaml",
+			data:    []byte("kind: RecipeMetadata\napiVersion: \nmetadata:\n  name: bad\nspec: {}\n"),
+			wantSub: `apiVersion ""`,
 		},
 		{
-			name: "unknown RecipeMetadata version",
-			path: "overlays/bad.yaml",
-			data: []byte("kind: RecipeMetadata\napiVersion: aicr.run/v9\nmetadata:\n  name: bad\nspec: {}\n"),
+			name:    "unknown RecipeMetadata version",
+			path:    "overlays/bad.yaml",
+			data:    []byte("kind: RecipeMetadata\napiVersion: aicr.run/v9\nmetadata:\n  name: bad\nspec: {}\n"),
+			wantSub: `apiVersion "aicr.run/v9"`,
 		},
 		{
-			name: "wrong AICR kind",
-			path: "overlays/bad.yaml",
-			data: []byte("kind: RecipeMetdata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: bad\nspec: {}\n"),
+			name:    "wrong AICR kind",
+			path:    "overlays/bad.yaml",
+			data:    []byte("kind: RecipeMetdata\napiVersion: aicr.run/v1alpha2\nmetadata:\n  name: bad\nspec: {}\n"),
+			wantSub: `kind "RecipeMetdata"`,
 		},
 		{
-			name: "empty RecipeMixin version",
-			path: "mixins/bad.yaml",
-			data: []byte("kind: RecipeMixin\napiVersion: \nmetadata:\n  name: bad\nspec: {}\n"),
+			name:    "empty RecipeMixin version",
+			path:    "mixins/bad.yaml",
+			data:    []byte("kind: RecipeMixin\napiVersion: \nmetadata:\n  name: bad\nspec: {}\n"),
+			wantSub: `apiVersion ""`,
 		},
 		{
-			name: "unknown RecipeMixin version",
-			path: "mixins/bad.yaml",
-			data: []byte("kind: RecipeMixin\napiVersion: aicr.run/v9\nmetadata:\n  name: bad\nspec: {}\n"),
+			name:    "unknown RecipeMixin version",
+			path:    "mixins/bad.yaml",
+			data:    []byte("kind: RecipeMixin\napiVersion: aicr.run/v9\nmetadata:\n  name: bad\nspec: {}\n"),
+			wantSub: `apiVersion "aicr.run/v9"`,
 		},
 	}
 	for _, tt := range tests {
@@ -2861,8 +2875,8 @@ spec:
 			if got := aicrerrors.ExitCodeFromError(err); got != aicrerrors.ExitInvalidInput {
 				t.Fatalf("exit code = %d, want %d", got, aicrerrors.ExitInvalidInput)
 			}
-			if !strings.Contains(err.Error(), "expected") {
-				t.Errorf("error %q does not identify expected header values", err)
+			if !strings.Contains(err.Error(), tt.wantSub) {
+				t.Errorf("error %q does not contain %q", err, tt.wantSub)
 			}
 		})
 	}
