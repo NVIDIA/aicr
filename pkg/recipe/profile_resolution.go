@@ -237,9 +237,9 @@ func applyEffectiveProfile(
 	// a generation-time pre-condition AND a readiness-time post-deployment
 	// state (the DD5 pattern), and the phases report independently.
 	if len(value.ReadinessConstraints) > 0 {
-		// Clone before mutating: mergedSpec may alias a cached overlay's
-		// ValidationConfig (same reason the fragment merge below deep-copies
-		// Overrides).
+		// Defensive clone: both callers already hand in a deep-cloned
+		// Validation (initBaseMergedSpec, RecipeMetadataSpec.Merge), so
+		// this guards future call sites rather than a live aliasing risk.
 		mergedSpec.Validation = cloneValidationConfig(mergedSpec.Validation)
 		if mergedSpec.Validation == nil {
 			mergedSpec.Validation = &ValidationConfig{}

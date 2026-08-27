@@ -15,9 +15,12 @@
 package recipe
 
 import (
+	"bytes"
 	stderrors "errors"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -93,7 +96,7 @@ func TestValidateProfileDeclaration_ReadinessConstraints(t *testing.T) {
 				{Name: "NodeTopology.gpu-nodes.label", Value: "a=b"},
 				{Name: "NodeTopology.gpu-nodes.label", Value: "c=d"},
 			},
-			wantErr: `repeats constraint "NodeTopology.gpu-nodes.label"`,
+			wantErr: `repeats readiness constraint "NodeTopology.gpu-nodes.label"`,
 		},
 		{
 			// The DD5 pattern: the same measurement path carries a
@@ -188,6 +191,59 @@ func TestApplyEffectiveProfile_ReadinessConstraints(t *testing.T) {
 		}
 	})
 
+	t.Run("same name in BOTH the value's own phases routes independently", func(t *testing.T) {
+		// The marquee DD5 invariant: one value carries the same measurement
+		// path as its own generation pre-condition AND its readiness
+		// post-form. The two collision namespaces are independent, so gen-X
+		// stays in spec.Constraints (and is evaluated) while readiness-X
+		// routes to validation.readiness (and is not) — a future refactor
+		// merging the maps fails here.
+		spec := readinessSpec()
+		post := Constraint{Name: "Driver.gpu.mode", Value: "installed"}
+		genEvaluated := 0
+		evaluator := func(c Constraint) ConstraintEvalResult {
+			if c.Name == post.Name {
+				genEvaluated++
+			}
+			return ConstraintEvalResult{Passed: true}
+		}
+		if _, err := applyEffectiveProfile(spec, readinessDecl(post), "", evaluator); err != nil {
+			t.Fatalf("applyEffectiveProfile() error = %v, want same-path-in-both-phases accepted", err)
+		}
+		if genEvaluated != 1 {
+			t.Fatalf("generation evaluations of %q = %d, want exactly 1 (the value's own pre-condition)",
+				post.Name, genEvaluated)
+		}
+		var gen *Constraint
+		for i := range spec.Constraints {
+			if spec.Constraints[i].Name == post.Name {
+				gen = &spec.Constraints[i]
+			}
+		}
+		if gen == nil || gen.Value != "preinstalled" {
+			t.Fatalf("spec.Constraints = %v, want the value's generation pre-condition %q=preinstalled",
+				spec.Constraints, post.Name)
+		}
+		got := spec.Validation.Readiness.Constraints
+		if len(got) != 1 || got[0].Name != post.Name || got[0].Value != post.Value {
+			t.Fatalf("readiness constraints = %v, want exactly the post-form %v", got, post)
+		}
+	})
+
+	t.Run("no readiness constraints leaves nil Validation untouched", func(t *testing.T) {
+		spec := readinessSpec()
+		if spec.Validation != nil {
+			t.Fatal("precondition: readinessSpec must start with nil Validation")
+			return
+		}
+		if _, err := applyEffectiveProfile(spec, readinessDecl(), "", nil); err != nil {
+			t.Fatalf("applyEffectiveProfile() error = %v", err)
+		}
+		if spec.Validation != nil {
+			t.Fatalf("Validation = %+v, want nil (no clone, no empty Readiness phase synthesized)", spec.Validation)
+		}
+	})
+
 	t.Run("collision with pre-existing readiness constraint rejected", func(t *testing.T) {
 		spec := readinessSpec()
 		spec.Validation = &ValidationConfig{Readiness: &ValidationPhase{
@@ -237,5 +293,45 @@ func TestValidateSpecConstraintPaths_ProfileReadiness(t *testing.T) {
 	err := validateSpecConstraintPaths(spec, "overlays/test.yaml")
 	if err == nil || !strings.Contains(err.Error(), "spec.profile.values.a.readinessConstraints") {
 		t.Fatalf("validateSpecConstraintPaths() error = %v, want readinessConstraints location", err)
+	}
+}
+
+// TestProfileValueReadinessConstraintsYAMLRoundTrip pins the struct tag at
+// the same strictness the catalog load path uses (KnownFields(true), see
+// metadata_store.go): a typo'd tag would turn a real readinessConstraints:
+// key into an unknown field and fail decode here.
+func TestProfileValueReadinessConstraintsYAMLRoundTrip(t *testing.T) {
+	in := []byte(`
+name: gpuStack
+default: a
+values:
+  a:
+    componentRefs:
+      - name: gpu-operator
+        overrides:
+          devicePlugin: {enabled: true}
+    constraints:
+      - name: Driver.gpu.mode
+        value: preinstalled
+    readinessConstraints:
+      - name: NodeTopology.gpu-nodes.label
+        value: aicr.run/gpu-driver-owner=x
+`)
+	var decl ProfileDeclaration
+	decoder := yaml.NewDecoder(bytes.NewReader(in))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&decl); err != nil {
+		t.Fatalf("strict decode failed: %v", err)
+	}
+	got := decl.Values["a"].ReadinessConstraints
+	if len(got) != 1 || got[0].Name != "NodeTopology.gpu-nodes.label" || got[0].Value != "aicr.run/gpu-driver-owner=x" {
+		t.Fatalf("readinessConstraints = %v, want the declared constraint", got)
+	}
+	out, err := yaml.Marshal(&decl)
+	if err != nil {
+		t.Fatalf("marshal failed: %v", err)
+	}
+	if !bytes.Contains(out, []byte("readinessConstraints:")) {
+		t.Fatalf("re-marshaled declaration lost the readinessConstraints key:\n%s", out)
 	}
 }
