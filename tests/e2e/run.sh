@@ -1413,8 +1413,32 @@ RECIPE
   msg "--- Test: Validation Job in default namespace ---"
   echo -e "${DIM}  \$ aicr validate --recipe recipe.yaml --snapshot cm://... --phase deployment${NC}"
 
-  # Create validation namespace if it doesn't exist
-  kubectl create namespace aicr-validation 2>&1 || true
+  # Start from an empty namespace so stable labels cannot match resources from
+  # an aborted prior invocation. The bounded delete also finishes any
+  # best-effort --wait=false teardown still in progress from the previous run.
+  local default_validation_namespace="aicr-validation"
+  local default_namespace_setup_exit=0
+  kubectl delete namespace "$default_validation_namespace" \
+    --ignore-not-found --wait=true --timeout=60s 2>&1 || \
+    default_namespace_setup_exit=$?
+  if [ "$default_namespace_setup_exit" -eq 0 ]; then
+    kubectl create namespace "$default_validation_namespace" 2>&1 || \
+      default_namespace_setup_exit=$?
+  fi
+
+  if [ "$default_namespace_setup_exit" -ne 0 ]; then
+    fail "validate/job-rbac-serviceaccount" \
+      "Could not reset ${default_validation_namespace} (exit ${default_namespace_setup_exit})"
+    skip "validate/job-rbac-role" "Default validation namespace reset failed"
+    skip "validate/job-creation" "Default validation namespace reset failed"
+    skip "validate/job-success" "Default validation namespace reset failed"
+    skip "validate/command-success" "Default validation namespace reset failed"
+    skip "validate/job-custom-namespace" "Default validation namespace reset failed"
+    skip "validate/job-cleanup" "Default validation namespace reset failed"
+    skip "validate/job-result-format" "Default validation namespace reset failed"
+    cleanup_fake_gpu_operator_fixture
+    return 0
+  fi
 
   # Run validation (this should create Jobs)
   local validation_result="${validate_dir}/validation-default-ns.json"
@@ -1426,27 +1450,41 @@ RECIPE
     --output "$validation_result" \
     --no-cleanup 2>&1 || validation_exit=$?
 
-  # Check if RBAC resources were created. The SA and CRB names are
-  # suffixed with the per-run runID, so look up by the stable
-  # `app.kubernetes.io/name=aicr-validator` label rather than the literal name.
+  # Check if RBAC resources were created. Locate the run-specific ServiceAccount
+  # by its stable label, then use its generated name for the exact CRB lookup.
   local rbac_label_selector="app.kubernetes.io/name=aicr-validator"
   local validation_job_label_selector="app.kubernetes.io/name=aicr"
-  local sa_name
-  sa_name=$(kubectl get sa -n aicr-validation -l "${rbac_label_selector}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-  if [ -n "${sa_name}" ]; then
+  local sa_name=""
+  local sa_query_exit=0
+  sa_name=$(kubectl get sa -n "$default_validation_namespace" \
+    -l "${rbac_label_selector}" -o jsonpath='{.items[*].metadata.name}' \
+    2>/dev/null) || sa_query_exit=$?
+  if [ "$sa_query_exit" -eq 0 ] && [ -n "${sa_name}" ]; then
     detail "ServiceAccount created: ${sa_name}"
     pass "validate/job-rbac-serviceaccount"
+  elif [ "$sa_query_exit" -ne 0 ]; then
+    fail "validate/job-rbac-serviceaccount" \
+      "Could not list validator ServiceAccounts (exit ${sa_query_exit})"
   else
     fail "validate/job-rbac-serviceaccount" "ServiceAccount not found after --no-cleanup"
   fi
 
-  local crb_name
-  crb_name=$(kubectl get clusterrolebinding -l "${rbac_label_selector}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-  if [ -n "${crb_name}" ]; then
-    local role_ref
-    role_ref=$(kubectl get clusterrolebinding "${crb_name}" -o jsonpath='{.roleRef.name}')
+  # The per-run ServiceAccount and ClusterRoleBinding have the same generated
+  # name. Querying that exact name prevents an orphaned CRB from a prior run
+  # satisfying this assertion through the stable label.
+  local crb_name="$sa_name"
+  local role_ref=""
+  local crb_query_exit=0
+  if [ -n "$crb_name" ]; then
+    role_ref=$(kubectl get clusterrolebinding "$crb_name" \
+      -o jsonpath='{.roleRef.name}' 2>/dev/null) || crb_query_exit=$?
+  fi
+  if [ "$crb_query_exit" -eq 0 ] && [ -n "$crb_name" ] && [ -n "$role_ref" ]; then
     detail "ClusterRoleBinding created: ${crb_name} → ${role_ref}"
     pass "validate/job-rbac-role"
+  elif [ "$crb_query_exit" -ne 0 ]; then
+    fail "validate/job-rbac-role" \
+      "Could not read ClusterRoleBinding ${crb_name} (exit ${crb_query_exit})"
   else
     fail "validate/job-rbac-role" "ClusterRoleBinding not found after --no-cleanup"
   fi
