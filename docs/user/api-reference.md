@@ -509,10 +509,9 @@ disabled and use the default-track response shape. That track is
 `aicr.run/v1alpha2` today, and the schema also admits its ADR-022 target
 `aicr.run/v1` so a client generated from this spec tolerates the value a
 release before AICR emits it. `/v1` never carries a profile-track version.
-`/v1/recipe` and
-`/v1/query` reject a composition after it adopts a profile even when the request
-omits selection, and `/v1/bundle` rejects a profile-bearing body. Migrate a
-converted workflow to v2 as one cut-over.
+`/v1/recipe` and `/v1/query` reject a composition after it adopts a
+profile even when the request omits selection, and `/v1/bundle` rejects a
+profile-bearing body. Migrate a converted workflow to v2 as one cut-over.
 
 **AKS/GKE cut-over:** the AKS and GKE families are the embedded adopters, so
 `/v1/recipe` and `/v1/query` requests with `service=aks` or `service=gke` now

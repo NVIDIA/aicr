@@ -2814,13 +2814,7 @@ components:
           properties:
             apiVersion:
               type: string
-              enum:
-                [
-                  aicr.run/v1alpha2,
-                  aicr.run/v1alpha3,
-                  aicr.run/v1,
-                  aicr.run/v1beta2,
-                ]
+              enum: [aicr.run/v1alpha2, aicr.run/v1alpha3, aicr.run/v1, aicr.run/v1beta2]
               example: aicr.run/v1alpha2
             kind:
               type: string
