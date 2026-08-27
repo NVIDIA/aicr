@@ -55,6 +55,10 @@ spec:
                   value: Qwen/Qwen3-0.6B
                 - name: DYN_ROUTER_MODE
                   value: kv
+                - name: DYN_REQUEST_PLANE
+                  value: tcp
+                - name: DYN_EVENT_PLANE
+                  value: zmq
     - name: VllmDecodeWorker
       type: worker
       replicas: 1
@@ -70,6 +74,11 @@ spec:
               image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.1
               workingDir: /workspace/examples/backends/vllm
               command: ["python3", "-m", "dynamo.vllm"]
+              env:
+                - name: DYN_REQUEST_PLANE
+                  value: tcp
+                - name: DYN_EVENT_PLANE
+                  value: zmq
               args:
                 - --model
                 - Qwen/Qwen3-0.6B

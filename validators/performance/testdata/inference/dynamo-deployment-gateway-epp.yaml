@@ -134,7 +134,7 @@ spec:
                       key: token
                       optional: true
             - name: sidecar-frontend
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.1
               args:
                 - -m
                 - dynamo.frontend
