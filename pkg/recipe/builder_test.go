@@ -248,8 +248,8 @@ func TestBuilder_BuildFromCriteriaWithEvaluator(t *testing.T) {
 			if result.Kind != RecipeResultKind {
 				t.Errorf("expected kind %s, got %q", RecipeResultKind, result.Kind)
 			}
-			if result.APIVersion != RecipeAPIVersion {
-				t.Errorf("expected apiVersion %s, got %q", RecipeAPIVersion, result.APIVersion)
+			if result.APIVersion != RecipeResultAPIVersion {
+				t.Errorf("expected apiVersion %s, got %q", RecipeResultAPIVersion, result.APIVersion)
 			}
 		})
 	}

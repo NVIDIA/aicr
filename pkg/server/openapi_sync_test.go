@@ -235,7 +235,7 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 			// a client generated from this spec does not reject the first
 			// response carrying one.
 			apiVersions: []string{
-				recipe.RecipeAPIVersion,
+				recipe.RecipeResultAPIVersion,
 				recipe.ConfiguredRecipeResultAPIVersion,
 				header.GroupVersionV1,
 				header.GroupVersionV1Beta2,
@@ -268,7 +268,7 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 			schema:  spec.Components.Schemas["LegacyRecipeResponse"],
 			baseRef: "#/components/schemas/RecipeResponse",
 			apiVersions: []string{
-				recipe.RecipeAPIVersion,
+				recipe.RecipeResultAPIVersion,
 				header.GroupVersionV1,
 			},
 		},
@@ -321,7 +321,7 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 	legacyBundle := spec.Components.Schemas["LegacyBundleRecipeV1Request"]
 	legacyClosure := allOfConstraint(t, legacyBundle, "#/components/schemas/RecipeResponseBase")
 	if got, want := legacyClosure.Properties["apiVersion"].Enum,
-		[]string{"", recipe.RecipeAPIVersion, header.GroupVersionV1}; !equalStringsUnordered(got, want) {
+		[]string{"", recipe.RecipeResultAPIVersion, header.GroupVersionV1}; !equalStringsUnordered(got, want) {
 		t.Errorf("LegacyBundleRecipeV1Request apiVersion enum = %v, want %v", got, want)
 	}
 	if got, want := legacyClosure.Properties["kind"].Enum,

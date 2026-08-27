@@ -116,7 +116,7 @@ func (p *mutatingValuesProvider) Source(path string) string {
 func newRecipeResultForBundleTest(owner *Client, refs []recipe.ComponentRef, facadeComponents []ComponentRef) *RecipeResult {
 	internal := &recipe.RecipeResult{
 		Kind:          "RecipeResult",
-		APIVersion:    recipe.RecipeAPIVersion,
+		APIVersion:    recipe.RecipeResultAPIVersion,
 		ComponentRefs: refs,
 	}
 	return &RecipeResult{
@@ -1146,7 +1146,7 @@ func TestAdoptRecipe_DeepCopiesForClientIsolation(t *testing.T) {
 	// One caller-owned raw recipe reused across both adopts.
 	input := &recipe.RecipeResult{
 		Kind:       recipe.RecipeResultKind,
-		APIVersion: recipe.RecipeAPIVersion,
+		APIVersion: recipe.RecipeResultAPIVersion,
 		Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "c1", Type: recipe.ComponentTypeHelm, Source: "https://charts.example.com", Chart: "c1", Version: "1.0.0"},
@@ -1425,7 +1425,7 @@ func TestAdoptRecipe_RejectsIncoherentRef(t *testing.T) {
 	base := func(refs []recipe.ComponentRef) *recipe.RecipeResult {
 		return &recipe.RecipeResult{
 			Kind:          recipe.RecipeResultKind,
-			APIVersion:    recipe.RecipeAPIVersion,
+			APIVersion:    recipe.RecipeResultAPIVersion,
 			Criteria:      &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
 			ComponentRefs: refs,
 		}
@@ -1503,7 +1503,7 @@ func TestAdoptRecipe_NormalizesKind(t *testing.T) {
 
 			input := &recipe.RecipeResult{
 				Kind:       tt.kind,
-				APIVersion: recipe.RecipeAPIVersion,
+				APIVersion: recipe.RecipeResultAPIVersion,
 				Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
 				ComponentRefs: []recipe.ComponentRef{
 					{
@@ -1623,7 +1623,7 @@ func TestAdoptRecipe_BoundsProviderIO(t *testing.T) {
 
 	_, err := c.AdoptRecipe(context.Background(), &recipe.RecipeResult{
 		Kind:       recipe.RecipeResultKind,
-		APIVersion: recipe.RecipeAPIVersion,
+		APIVersion: recipe.RecipeResultAPIVersion,
 		Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -1667,7 +1667,7 @@ func TestClient_CloseDrainsInflightAdopt(t *testing.T) {
 		defer close(adoptDone)
 		_, _ = c.adoptRecipe(context.Background(), &recipe.RecipeResult{
 			Kind:       recipe.RecipeResultKind,
-			APIVersion: recipe.RecipeAPIVersion,
+			APIVersion: recipe.RecipeResultAPIVersion,
 			Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
 			ComponentRefs: []recipe.ComponentRef{
 				{Name: "gpu-operator", Version: "v1"}, // type-less -> forces registry back-fill
@@ -1723,7 +1723,7 @@ func TestAdoptRecipe_RejectsVersionlessHelmRef(t *testing.T) {
 
 	input := &recipe.RecipeResult{
 		Kind:       recipe.RecipeResultKind,
-		APIVersion: recipe.RecipeAPIVersion,
+		APIVersion: recipe.RecipeResultAPIVersion,
 		Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
 		ComponentRefs: []recipe.ComponentRef{
 			{
@@ -1765,7 +1765,7 @@ func TestAdoptRecipe_RejectsVersionlessHelmRef(t *testing.T) {
 	// trims the argument and installs latest).
 	wsInput := &recipe.RecipeResult{
 		Kind:       recipe.RecipeResultKind,
-		APIVersion: recipe.RecipeAPIVersion,
+		APIVersion: recipe.RecipeResultAPIVersion,
 		Criteria:   &recipe.Criteria{Service: recipe.CriteriaServiceEKS},
 		ComponentRefs: []recipe.ComponentRef{
 			{

@@ -170,9 +170,9 @@ func TestLayeredDataProvider_ValidatesRawExternalRegistryBeforeMerge(t *testing.
 			if err := yaml.Unmarshal(data, &merged); err != nil {
 				t.Fatalf("unmarshal merged registry: %v", err)
 			}
-			if merged.APIVersion != RecipeAPIVersion {
+			if merged.APIVersion != ComponentRegistryAPIVersion {
 				t.Errorf("merged registry apiVersion = %q, want current emitter %q",
-					merged.APIVersion, RecipeAPIVersion)
+					merged.APIVersion, ComponentRegistryAPIVersion)
 			}
 		})
 	}

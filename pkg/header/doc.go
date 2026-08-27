@@ -59,11 +59,16 @@
 //
 // # API Versioning
 //
-// The APIVersion field enables evolution of data formats. GroupVersion remains
-// the Release N alpha emitter value for general artifacts; target versions and
-// kind/schema-scoped gates are defined alongside it. APIGroup derives from
-// Domain. Per ADR-013 the move from the legacy aicr.nvidia.com/v1alpha1 group
-// was a hard break — the old value is rejected, not migrated.
+// The APIVersion field enables evolution of data formats. APIGroup derives
+// from Domain. Per ADR-013 the move from the legacy aicr.nvidia.com/v1alpha1
+// group was a hard break — the old value is rejected, not migrated.
+//
+// ADR-022 splits artifacts across three schema tracks. An emitter aliases the
+// constant for its track — StableGroupVersion, AuthoringGroupVersion, or
+// ProfileGroupVersion — never GroupVersion directly. The first two carry the
+// same string during the reader-first release and diverge at the emitter
+// switch, so aliasing by value rather than by track compiles and passes tests
+// today while emitting the wrong version later.
 //
 // Callers should select the gate for the artifact's schema track rather than
 // comparing literals, so the single source of truth in this package stays

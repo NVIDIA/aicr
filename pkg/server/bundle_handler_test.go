@@ -758,8 +758,8 @@ func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 	if got := fixture["kind"]; got != recipe.RecipeResultKind {
 		t.Fatalf("fixture kind = %v, want %q", got, recipe.RecipeResultKind)
 	}
-	if got := fixture["apiVersion"]; got != recipe.RecipeAPIVersion {
-		t.Fatalf("fixture apiVersion = %v, want %q", got, recipe.RecipeAPIVersion)
+	if got := fixture["apiVersion"]; got != recipe.RecipeResultAPIVersion {
+		t.Fatalf("fixture apiVersion = %v, want %q", got, recipe.RecipeResultAPIVersion)
 	}
 
 	tests := []struct {

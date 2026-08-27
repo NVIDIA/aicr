@@ -795,9 +795,10 @@ func ParseCriteriaFromValues(values url.Values, reg *CriteriaRegistry) (*Criteri
 const RecipeCriteriaKind = "RecipeCriteria"
 
 // RecipeCriteriaAPIVersion is the API version for RecipeCriteria resources.
-// It aliases RecipeAPIVersion (ultimately header.GroupVersion) so every AICR
-// artifact apiVersion has a single source of truth.
-const RecipeCriteriaAPIVersion = RecipeAPIVersion
+// RecipeCriteria is on the ADR-022 stable artifact track, so this aliases
+// header.StableGroupVersion directly rather than chaining through a recipe
+// constant; the track's target is header.GroupVersionV1.
+const RecipeCriteriaAPIVersion = header.StableGroupVersion
 
 func validateRecipeCriteriaHeader(kind, apiVersion string) error {
 	if kind != "" && kind != RecipeCriteriaKind {
