@@ -38,12 +38,13 @@
 //	h.Init(header.KindRecipe, header.StableGroupVersion, "v1.0.0")
 //	// h.Metadata == map[string]string{"timestamp": "...", "version": "v1.0.0"}
 //
-// The resolved RecipeResult shown here and Snapshot are both on the stable
-// artifact track, hence StableGroupVersion. An authored catalog RecipeMetadata
-// is colloquially a "recipe" too but sits on the authoring track, and a
-// profile-bearing artifact on its own track, so those emitters pass
-// AuthoringGroupVersion or ProfileGroupVersion instead; see the API Versioning
-// section below.
+// KindRecipe shown here is the legacy input kind, distinct from
+// KindRecipeResult and normalized to it per ADR-022 §2; both sit on the stable
+// artifact track alongside Snapshot, hence StableGroupVersion. An authored
+// catalog RecipeMetadata is colloquially a "recipe" too but sits on the
+// authoring track, and a profile-bearing artifact on its own track, so those
+// emitters pass AuthoringGroupVersion or ProfileGroupVersion instead; see the
+// API Versioning section below.
 //
 // For reproducible-build callers (SLSA, signed artifacts) inject a fixed
 // timestamp via InitWithTime instead of Init:
