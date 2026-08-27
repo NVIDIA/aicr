@@ -40,6 +40,7 @@ HELM_TIMEOUT="10m"
 NO_WAIT=false
 BEST_EFFORT=false
 FAILED_COMPONENTS=""
+NEEDS_RETRY=""
 MAX_RETRIES=5
 
 while [[ $# -gt 0 ]]; do
@@ -465,11 +466,12 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
       # the operator creates the DaemonSet or labels a node.
       echo "  WARNING: gpu-operator driver.enabled=true but neither the driver DaemonSet nor the migration label is observable yet; blocking the DRA plugin restart until the driver rollout is detectable (retry the deploy)"
       SKIP_RESTART=true
+      NEEDS_RETRY="${NEEDS_RETRY} {{ .Name }}"
       {{- else }}
       echo "  gpu-operator nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"
       {{- end }}
     elif [[ "${MANAGED_NODES}" -gt 0 ]]; then
-      echo "  Waiting for gpu-operator driver migration on ${MANAGED_NODES} managed GPU node(s) to reach upgrade-done (ns=${DRIVER_DS_NS:-unknown})..."
+      echo "  Waiting for gpu-operator driver migration on ${MANAGED_NODES} managed GPU node(s) to reach upgrade-done (ns=${DRIVER_DS_NS:-<unresolved>})..."
       if ! kubectl wait --for=jsonpath='{.metadata.labels.nvidia\.com/gpu-driver-upgrade-state}=upgrade-done' \
            nodes -l nvidia.com/gpu.deploy.driver=true --timeout=15m; then
         echo "  WARNING: not all managed GPU nodes reached upgrade-done within 15m; proceeding with restart anyway"
@@ -481,6 +483,7 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
       # leave DRA pods stuck against a mid-migration driver.
       echo "  gpu-operator driver DaemonSet present (ns=${DRIVER_DS_NS}) but no nodes labeled nvidia.com/gpu.deploy.driver=true yet; skipping migration wait and DRA restart"
       SKIP_RESTART="true"
+      NEEDS_RETRY="${NEEDS_RETRY} {{ .Name }}"
     fi
     # Best-effort mitigation for kubelet DRA plugin registration drift.
     # After uninstall/reinstall, kubelet's fsnotify watcher may not detect new
@@ -513,6 +516,16 @@ if [[ -n "${FAILED_COMPONENTS}" ]]; then
 else
   _ok "All components installed successfully."
 fi
+if [[ -n "${NEEDS_RETRY}" ]]; then
+  # Distinct from FAILED_COMPONENTS/helm_failed so --best-effort semantics
+  # are unaffected: helm itself succeeded, but the DRA kubelet-plugin
+  # restart was deliberately withheld because the driver-migration gate
+  # was not yet observable when this deploy ran (see the WARNING above).
+  # Surfaced with its own non-zero exit below so automated callers (UAT,
+  # ArgoCD hooks, CI) get an actionable non-success signal instead of
+  # reading "All components installed successfully." as fully done.
+  _warn_line "DRA kubelet plugin restart blocked, retry needed for:${NEEDS_RETRY} — re-run this deploy once the operator has converged (driver DaemonSet present or a node carries nvidia.com/gpu.deploy.driver=true)."
+fi
 echo
 echo "NOTE: The above status reflects Helm install and manifest apply results,"
 echo "not whether the cluster is ready for GPU workloads. On fresh"
@@ -523,3 +536,7 @@ echo "  - GPU operator operand rollout (driver, toolkit, device-plugin DS)"
 echo "  - NVIDIA DRA kubelet plugin registration"
 echo
 echo "See: https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#deploy-script-behavior-deploysh"
+
+if [[ -n "${NEEDS_RETRY}" ]]; then
+  exit 2
+fi

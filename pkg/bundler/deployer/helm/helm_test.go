@@ -331,6 +331,7 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 
 	tests := []struct {
 		name            string
+		recipeResultOCP bool // when true, uses OCP component names throughout instead of canonical
 		componentValues map[string]map[string]any
 		wantContains    []string
 		wantNotContains []string
@@ -348,6 +349,7 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 				`blocking the DRA plugin restart until the driver rollout is detectable`,
 				`SKIP_RESTART=true`,
 				`if [[ -n "${DRA_DS}" && "${SKIP_RESTART}" != "true" ]]; then`,
+				`no nodes labeled nvidia.com/gpu.deploy.driver=true yet; skipping migration wait and DRA restart`,
 			},
 			wantNotContains: []string{
 				`nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"`,
@@ -368,6 +370,26 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 				`blocking the DRA plugin restart until the driver rollout is detectable`,
 			},
 		},
+		{
+			name:            "OCP DRA component renders its own guard and is gated by gpu-operator-ocp's driver.enabled",
+			recipeResultOCP: true,
+			componentValues: map[string]map[string]any{
+				"gpu-operator-ocp": {
+					"driver": map[string]any{"enabled": true},
+				},
+				"nvidia-dra-driver-gpu-ocp": {},
+			},
+			wantContains: []string{
+				`if [[ "${name}" == "nvidia-dra-driver-gpu-ocp" ]]; then`,
+				`SKIP_RESTART="false"`,
+				`blocking the DRA plugin restart until the driver rollout is detectable`,
+				`SKIP_RESTART=true`,
+			},
+			wantNotContains: []string{
+				`if [[ "${name}" == "nvidia-dra-driver-gpu" ]]; then`,
+				`nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"`,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -375,8 +397,39 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 			ctx := context.Background()
 			outputDir := t.TempDir()
 
+			rr := recipeResult()
+			if tt.recipeResultOCP {
+				rr = &recipe.RecipeResult{
+					Kind:       "RecipeResult",
+					APIVersion: "aicr.run/v1alpha2",
+					Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+					Criteria: &recipe.Criteria{
+						Service:     "ocp",
+						Accelerator: "h100",
+						Intent:      "training",
+					},
+					ComponentRefs: []recipe.ComponentRef{
+						{
+							Name:      "gpu-operator-ocp",
+							Namespace: "gpu-operator",
+							Chart:     "gpu-operator",
+							Version:   "",
+							Source:    "",
+						},
+						{
+							Name:      "nvidia-dra-driver-gpu-ocp",
+							Namespace: "nvidia-dra-driver",
+							Chart:     "nvidia-dra-driver-gpu",
+							Version:   "0.4.1",
+							Source:    "https://helm.ngc.nvidia.com/nvidia",
+						},
+					},
+					DeploymentOrder: []string{"gpu-operator-ocp", "nvidia-dra-driver-gpu-ocp"},
+				}
+			}
+
 			g := &Generator{
-				RecipeResult:    recipeResult(),
+				RecipeResult:    rr,
 				ComponentValues: tt.componentValues,
 				Version:         "v1.0.0",
 			}

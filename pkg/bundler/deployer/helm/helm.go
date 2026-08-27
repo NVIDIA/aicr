@@ -280,8 +280,21 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 // since only one is ever enabled in a given recipe (see
 // pkg/bundler/bundler.go's gpuOperatorComponentNames for the canonical
 // list this mirrors).
+// gpuOperatorComponentName and gpuOperatorOCPComponentName are this
+// package's copy of the canonical/OCP gpu-operator component names (a
+// 4th duplicate alongside pkg/bundler/bundler.go, pkg/bundler/validations
+// /checks.go, and their override-key constants — this package cannot
+// import pkg/bundler due to the dependency cycle noted at
+// componentOverrideKeys' godoc equivalent). Named here, rather than an
+// inline literal, so a `grep gpuOperatorOCPComponentName` across the repo
+// surfaces every copy that needs updating together.
+const (
+	gpuOperatorComponentName    = "gpu-operator"
+	gpuOperatorOCPComponentName = "gpu-operator-ocp"
+)
+
 func (g *Generator) driverOperatorManaged() bool {
-	for _, name := range []string{"gpu-operator", "gpu-operator-ocp"} {
+	for _, name := range []string{gpuOperatorComponentName, gpuOperatorOCPComponentName} {
 		values, ok := g.ComponentValues[name]
 		if !ok {
 			continue
