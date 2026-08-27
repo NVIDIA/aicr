@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Dynamo Platform Helm values (v<NEW_VERSION>)
+# Dynamo Platform Helm values (v1.4.1)
 # NVIDIA Dynamo inference serving platform operator.
 # Provides OpenAI-compatible endpoints, KV-cache-aware routing,
 # disaggregated prefill/decode, and SLA-driven autoscaling.
@@ -28,7 +28,7 @@ global:
   # global.nats.install is intentionally left unset (chart default: false).
   # Re-enable only if a workload explicitly opts into a NATS-based transport
   # (legacy DYN_REQUEST_PLANE=nats, DYN_EVENT_PLANE=nats, or a NATS
-  # request-trace sink), via `nats: install: true`.
+  # request-trace sink), via global.nats.install: true.
   #
   # Upgrade note: on an in-place `helm upgrade` of a standing cluster,
   # accepting this default removes bundled NATS and drops NATS_SERVER from
