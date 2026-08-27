@@ -35,14 +35,19 @@
 // Initialize a header for a recipe via Init:
 //
 //	var h header.Header
-//	h.Init(header.KindRecipe, header.GroupVersion, "v1.0.0")
+//	h.Init(header.KindRecipe, header.StableGroupVersion, "v1.0.0")
 //	// h.Metadata == map[string]string{"timestamp": "...", "version": "v1.0.0"}
+//
+// Recipe and Snapshot are both on the stable artifact track, hence
+// StableGroupVersion. An emitter for an authoring or profile-bearing kind
+// passes AuthoringGroupVersion or ProfileGroupVersion instead; see the API
+// Versioning section below.
 //
 // For reproducible-build callers (SLSA, signed artifacts) inject a fixed
 // timestamp via InitWithTime instead of Init:
 //
 //	var h header.Header
-//	h.InitWithTime(header.KindSnapshot, header.GroupVersion, "v1.0.0", buildTime)
+//	h.InitWithTime(header.KindSnapshot, header.StableGroupVersion, "v1.0.0", buildTime)
 //
 // # Serialization
 //
@@ -99,7 +104,7 @@
 //
 // Init writes the timestamp using RFC3339 format in UTC:
 //
-//	h.Init(header.KindRecipe, header.GroupVersion, "v1.0.0")
+//	h.Init(header.KindRecipe, header.StableGroupVersion, "v1.0.0")
 //	// h.Metadata["timestamp"] == "2025-12-30T10:30:00Z"
 //
 // # Validation
