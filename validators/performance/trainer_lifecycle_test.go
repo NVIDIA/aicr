@@ -182,6 +182,16 @@ func TestApplyControllerTolerations(t *testing.T) {
 			wantTolerations: nil,
 		},
 		{
+			name: "Deployment-kind resource in a non-apps group is left untouched",
+			obj: &unstructured.Unstructured{Object: map[string]any{
+				"apiVersion": "example.com/v1",
+				"kind":       "Deployment",
+				"metadata":   map[string]any{"name": trainerControllerDeployment},
+				"spec":       map[string]any{},
+			}},
+			wantTolerations: nil,
+		},
+		{
 			name: "missing pod spec fails closed",
 			obj: &unstructured.Unstructured{Object: map[string]any{
 				"apiVersion": "apps/v1",

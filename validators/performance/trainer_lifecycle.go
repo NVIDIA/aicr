@@ -209,7 +209,7 @@ func cloneControllerTolerateAll() []any {
 // declares tolerations. Scoped to those two names so an unrelated Deployment
 // in the manifest set never gets a blanket toleration it didn't ask for.
 func applyControllerTolerations(obj *unstructured.Unstructured) error {
-	if obj.GroupVersionKind().Kind != "Deployment" {
+	if gvk := obj.GroupVersionKind(); gvk.Kind != "Deployment" || gvk.Group != "apps" {
 		return nil
 	}
 	switch obj.GetName() {
