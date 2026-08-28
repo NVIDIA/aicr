@@ -35,7 +35,7 @@ spec:
   # A100 + OKE specific constraints (not covered by mixin)
   constraints:
     - name: K8s.server.version
-      value: ">= 1.30"
+      value: ">= 1.32"
 
   componentRefs: []
 

@@ -35,7 +35,7 @@ spec:
   # Constraints for RTX PRO 6000 on LKE with Ubuntu for inference workloads
   constraints:
     - name: K8s.server.version
-      value: ">= 1.31"
+      value: ">= 1.32"
 
   componentRefs: []
 

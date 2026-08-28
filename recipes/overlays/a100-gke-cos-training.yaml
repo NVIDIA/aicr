@@ -32,7 +32,7 @@ spec:
   # the GKE COS training baseline rather than the H100 1.32 floor.
   constraints:
     - name: K8s.server.version
-      value: ">= 1.30"
+      value: ">= 1.32"
 
   componentRefs:
     # A100-specific GPU Operator overrides (inherits valuesFile from gke-cos-training).
