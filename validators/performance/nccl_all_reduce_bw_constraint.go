@@ -65,14 +65,33 @@ const (
 	// Must stay in sync with runtime.yaml.
 	ncclTrainingRuntimeName = "nccl-all-reduce-runtime"
 
-	// ncclWorkloadNamespacePrefix is the base for the per-run benchmark
-	// namespace (see runNCCLTrainJob). Isolating each run in its own
-	// namespace, the same pattern inferenceWorkloadNamespacePrefix uses,
+	// ncclWorkloadNamespacePrefix is the base for the per-run, per-variant
+	// benchmark namespace (see ncclRunNamespace). Isolating each run in its
+	// own namespace, the same pattern inferenceWorkloadNamespacePrefix uses,
 	// means the fixed resource names below never collide across concurrent
 	// or crashed runs: uniqueness only has to hold within a namespace, and
 	// cleanup is a single namespace delete instead of per-resource tracking.
 	ncclWorkloadNamespacePrefix = "aicr-nccl-perf"
 )
+
+// ncclRunNamespace derives the per-run, per-variant benchmark namespace.
+// deriveRunID is deterministic per AICR_RUN_ID, and all three catalog checks
+// (nccl-all-reduce-bw, -net, -nvls) share one AICR_RUN_ID within a single
+// aicr validate invocation. Folding the variant into the name, rather than
+// relying on deriveRunID's suffix alone, keeps each check's namespace, and
+// the fixed resource names inside it, unique from its siblings too. That
+// only matters once those checks can run concurrently (see pkg/validator's
+// TODO(perf) to parallelize intra-phase entries). Today they run serially
+// and each fully drains its namespace before the next starts, but this is
+// free to bake in now, before a future change to that ordering would
+// otherwise let two variants adopt, and delete, each other's namespace.
+func ncclRunNamespace(variant ncclVariant) string {
+	variantLabel := string(variant)
+	if variantLabel == "" {
+		variantLabel = "default"
+	}
+	return fmt.Sprintf("%s-%s-%s", ncclWorkloadNamespacePrefix, variantLabel, deriveRunID())
+}
 
 // skipMsg* are the constraint-result strings returned when the NCCL check cannot
 // run. The "skipped " prefix is contractual: nccl_all_reduce_bw.go:78 dispatches
@@ -544,7 +563,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// non-terminating instance of it we must prove no other execution is
 	// still live under it. Otherwise we could steal or later delete a
 	// genuinely concurrent run's namespace.
-	gpuConfig.Namespace = fmt.Sprintf("%s-%s", ncclWorkloadNamespacePrefix, deriveRunID())
+	gpuConfig.Namespace = ncclRunNamespace(variant)
 	if err = verifyNCCLNamespaceNotLive(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace); err != nil {
 		return "", err
 	}

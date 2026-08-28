@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	stderrors "errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -31,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -285,6 +285,31 @@ func TestRunNCCLTrainJob_TrainerInstallFailureCleansUpNamespace(t *testing.T) {
 	}
 }
 
+// TestNCCLRunNamespace_VariesByVariant is the regression guard for the
+// finding that all three catalog checks (nccl-all-reduce-bw, -net, -nvls)
+// share one AICR_RUN_ID within a single aicr validate invocation, so
+// deriveRunID's suffix alone would give them the identical namespace name.
+// Today that is safe because the checks run serially and cleanup fully
+// drains each namespace before the next starts, but folding the variant
+// into the name removes the dependency on that ordering, which pkg/validator
+// has a TODO to parallelize.
+func TestNCCLRunNamespace_VariesByVariant(t *testing.T) {
+	t.Setenv("AICR_RUN_ID", "test-run-id")
+
+	seen := map[string]ncclVariant{}
+	for _, variant := range []ncclVariant{variantDefault, variantNET, variantNVLS} {
+		ns := ncclRunNamespace(variant)
+		if owner, ok := seen[ns]; ok {
+			t.Fatalf("variant %q and %q derived the same namespace %q", owner, variant, ns)
+		}
+		seen[ns] = variant
+
+		if errs := validation.IsDNS1123Label(ns); len(errs) > 0 {
+			t.Errorf("namespace %q for variant %q is not a valid DNS-1123 label: %v", ns, variant, errs)
+		}
+	}
+}
+
 // TestCleanupNCCLRun_DeletesNamespaceBeforeTrainer is the regression guard for
 // the reversed-defer-order finding on the self-install fallback path
 // (installedResources non-empty): deleteTrainer removes the Trainer
@@ -406,7 +431,7 @@ func TestVerifyNCCLNamespaceNotLive(t *testing.T) {
 // still-running execution owns.
 func TestRunNCCLTrainJob_RefusesLiveForeignNamespace(t *testing.T) {
 	t.Setenv("AICR_RUN_ID", "test-run-id")
-	ns := fmt.Sprintf("%s-%s", ncclWorkloadNamespacePrefix, deriveRunID())
+	ns := ncclRunNamespace(variantDefault)
 
 	clientset := fake.NewClientset(
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
