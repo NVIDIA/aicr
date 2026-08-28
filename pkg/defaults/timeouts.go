@@ -732,6 +732,10 @@ const (
 	// bound instead of the much shorter DiagnosticTimeout used for the rest of
 	// createUnstructured's calls.
 	NCCLResourceRecreateWait = 5 * time.Minute
+
+	// CREWorkloadRunTimeout is the maximum time to wait for a Cluster Readiness
+	// Engine WorkloadRun (NCCL or training/goodput) to reach a terminal condition.
+	CREWorkloadRunTimeout = 30 * time.Minute
 )
 
 // Inference performance validation timeouts.
