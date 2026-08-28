@@ -218,7 +218,9 @@ func defaultStorageClass(ctx *validators.Context) (*storagev1.StorageClass, erro
 			best = sc
 		}
 	}
-	return best, nil //nolint:nilnil // nil, nil means no default StorageClass is set, not an error
+	// nil, nil means no default StorageClass is set, not an error.
+	//nolint:nilnil
+	return best, nil
 }
 
 // machineFamily returns the leading segment of a node.kubernetes.io/instance-type
