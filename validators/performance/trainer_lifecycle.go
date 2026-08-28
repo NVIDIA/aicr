@@ -186,6 +186,24 @@ func tolerationsToAnySlice(tolerations []map[string]any) []any {
 	return result
 }
 
+// cloneControllerTolerateAll returns a fresh copy of controllerTolerateAll.
+// It is stamped onto both the Trainer and JobSet Deployments, so a per-call
+// copy keeps a future in-place edit of one controller's tolerations from
+// silently corrupting the other Deployment's live object, or the shared
+// process-wide global itself.
+func cloneControllerTolerateAll() []any {
+	cloned := make([]any, len(controllerTolerateAll))
+	for i, t := range controllerTolerateAll {
+		m, _ := t.(map[string]any)
+		clonedMap := make(map[string]any, len(m))
+		for k, v := range m {
+			clonedMap[k] = v
+		}
+		cloned[i] = clonedMap
+	}
+	return cloned
+}
+
 // applyControllerTolerations stamps controllerTolerateAll onto the Trainer and
 // JobSet controller-manager Deployments' pod template, unless one already
 // declares tolerations. Scoped to those two names so an unrelated Deployment
@@ -212,7 +230,7 @@ func applyControllerTolerations(obj *unstructured.Unstructured) error {
 		return aicrErrors.New(aicrErrors.ErrCodeInternal,
 			fmt.Sprintf("pod spec not found in Deployment %q", obj.GetName()))
 	}
-	podSpec["tolerations"] = controllerTolerateAll
+	podSpec["tolerations"] = cloneControllerTolerateAll()
 	slog.Info("Applying blanket toleration to controller Deployment", "name", obj.GetName())
 	return nil
 }

@@ -104,6 +104,35 @@ func deploymentFixture(name string, existingTolerations []any) *unstructured.Uns
 
 // TestApplyControllerTolerations covers both controller names, the two
 // mutation-failure paths, and that an unrelated Deployment is left untouched.
+// TestApplyControllerTolerations_Isolation pins that the two controllers do
+// not share a live toleration slice: mutating one Deployment's stamped
+// tolerations in place must not affect the other, or the shared
+// controllerTolerateAll package-level global.
+func TestApplyControllerTolerations_Isolation(t *testing.T) {
+	trainerObj := deploymentFixture(trainerControllerDeployment, nil)
+	jobSetObj := deploymentFixture(jobSetControllerDeployment, nil)
+
+	if err := applyControllerTolerations(trainerObj); err != nil {
+		t.Fatalf("applyControllerTolerations(trainer) error = %v", err)
+	}
+	if err := applyControllerTolerations(jobSetObj); err != nil {
+		t.Fatalf("applyControllerTolerations(jobset) error = %v", err)
+	}
+
+	trainerTols, _, _ := unstructured.NestedSlice(trainerObj.Object, "spec", "template", "spec", "tolerations")
+	trainerTol, _ := trainerTols[0].(map[string]any)
+	trainerTol["key"] = "mutated-for-trainer-only"
+
+	jobSetTols, _, _ := unstructured.NestedSlice(jobSetObj.Object, "spec", "template", "spec", "tolerations")
+	jobSetTol, _ := jobSetTols[0].(map[string]any)
+	if _, mutated := jobSetTol["key"]; mutated {
+		t.Errorf("mutating the Trainer Deployment's toleration leaked into the JobSet Deployment: %v", jobSetTol)
+	}
+	if _, mutated := controllerTolerateAll[0].(map[string]any)["key"]; mutated {
+		t.Errorf("mutating a stamped toleration leaked into the shared controllerTolerateAll global: %v", controllerTolerateAll[0])
+	}
+}
+
 func TestApplyControllerTolerations(t *testing.T) {
 	tests := []struct {
 		name    string
