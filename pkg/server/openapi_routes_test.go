@@ -93,6 +93,23 @@ func specOperations(t *testing.T) map[string][]string {
 	return ops
 }
 
+// newSpecTestServer builds a server wired exactly as Serve wires it, with rate
+// limiting effectively disabled.
+//
+// The method tests below send many requests through one server. At the default
+// limit they would start collecting 429s, and a 429 is neither the 405 nor the
+// not-405 those tests assert — the suite would report contract violations that
+// are really throttling. Raising the limit keeps the assertions about methods.
+func newSpecTestServer(t *testing.T) *Server {
+	t.Helper()
+
+	cfg := parseConfig()
+	cfg.Handlers = newRoutes(newTestHandler(t, nil), newTestBundleHandler(t))
+	cfg.RateLimit = 1e6
+	cfg.RateLimitBurst = 1e6
+	return New(withConfig(cfg))
+}
+
 // registeredPaths returns every path the server actually serves.
 //
 // It builds a real Server rather than reading newRoutes directly, because
@@ -102,7 +119,7 @@ func specOperations(t *testing.T) map[string][]string {
 func registeredPaths(t *testing.T) map[string]bool {
 	t.Helper()
 
-	s := New(WithHandler(newRoutes(newTestHandler(t, nil), newTestBundleHandler(t))))
+	s := newSpecTestServer(t)
 
 	paths := make(map[string]bool, len(s.config.Handlers)+len(systemRoutes))
 	for path := range s.config.Handlers {
@@ -112,6 +129,18 @@ func registeredPaths(t *testing.T) map[string]bool {
 		paths[path] = true
 	}
 	return paths
+}
+
+// probeMethods is every method the spec's own operation vocabulary allows, so a
+// path that quietly answers OPTIONS or HEAD cannot escape the undeclared-method
+// check by being outside a hand-picked probe list.
+func probeMethods() []string {
+	methods := make([]string, 0, len(httpMethods))
+	for m := range httpMethods {
+		methods = append(methods, strings.ToUpper(m))
+	}
+	sort.Strings(methods)
+	return methods
 }
 
 // TestOpenAPISpecPathsMatchRegisteredRoutes asserts the published contract and
@@ -161,7 +190,10 @@ func TestOpenAPISpecPathsMatchRegisteredRoutes(t *testing.T) {
 // the test a fixture-maintenance burden rather than a contract check.
 func TestOpenAPISpecMethodsAreAccepted(t *testing.T) {
 	ops := specOperations(t)
-	routes := newRoutes(newTestHandler(t, nil), newTestBundleHandler(t))
+	// Drive the assembled mux, not the bare handler map. /, /health, /ready and
+	// /metrics are registered outside newRoutes, so a handler-map loop skips the
+	// four routes most likely to be forgotten.
+	mux := newSpecTestServer(t).httpServer.Handler
 
 	paths := make([]string, 0, len(ops))
 	for path := range ops {
@@ -170,12 +202,6 @@ func TestOpenAPISpecMethodsAreAccepted(t *testing.T) {
 	sort.Strings(paths)
 
 	for _, path := range paths {
-		handler, ok := routes[path]
-		if !ok {
-			// System routes are covered by the path-set test above; they are
-			// registered outside newRoutes and need no method assertion.
-			continue
-		}
 		if len(ops[path]) == 0 {
 			t.Errorf("spec path %q declares no HTTP operations", path)
 			continue
@@ -184,10 +210,10 @@ func TestOpenAPISpecMethodsAreAccepted(t *testing.T) {
 		for _, method := range ops[path] {
 			t.Run(method+" "+path, func(t *testing.T) {
 				rec := httptest.NewRecorder()
-				handler(rec, httptest.NewRequest(method, path, nil))
+				mux.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
 
 				if rec.Code == http.StatusMethodNotAllowed {
-					t.Errorf("spec declares %s %s but the handler answers 405; "+
+					t.Errorf("spec declares %s %s but the server answers 405; "+
 						"the published contract advertises an operation the "+
 						"server rejects", method, path)
 				}
@@ -204,13 +230,14 @@ func TestOpenAPISpecMethodsAreAccepted(t *testing.T) {
 // nothing else in the tree would notice.
 func TestOpenAPIUndeclaredMethodsAreRejected(t *testing.T) {
 	ops := specOperations(t)
-	routes := newRoutes(newTestHandler(t, nil), newTestBundleHandler(t))
+	mux := newSpecTestServer(t).httpServer.Handler
 
-	// Probe the methods a REST surface could plausibly grow, not every verb.
-	probes := []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch}
-
-	paths := make([]string, 0, len(routes))
-	for path := range routes {
+	// Every public route, not just the application ones: /health, /ready and
+	// /metrics are registered straight onto the mux, and an undeclared method
+	// quietly working there is exactly as much of an ungated operation.
+	registered := registeredPaths(t)
+	paths := make([]string, 0, len(registered))
+	for path := range registered {
 		paths = append(paths, path)
 	}
 	sort.Strings(paths)
@@ -221,17 +248,17 @@ func TestOpenAPIUndeclaredMethodsAreRejected(t *testing.T) {
 			declared[m] = true
 		}
 
-		for _, method := range probes {
+		for _, method := range probeMethods() {
 			if declared[method] {
 				continue
 			}
 			t.Run(method+" "+path, func(t *testing.T) {
 				rec := httptest.NewRecorder()
-				routes[path](rec, httptest.NewRequest(method, path, nil))
+				mux.ServeHTTP(rec, httptest.NewRequest(method, path, nil))
 
 				if rec.Code != http.StatusMethodNotAllowed {
 					t.Errorf("%s %s is not declared in api/aicr/v1/server.yaml but "+
-						"the handler answered %d instead of 405; either document "+
+						"the server answered %d instead of 405; either document "+
 						"the operation or reject it", method, path, rec.Code)
 				}
 			})
