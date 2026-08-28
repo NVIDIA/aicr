@@ -568,6 +568,43 @@ func TestEnsureModelCache(t *testing.T) {
 	}
 }
 
+// TestEnsureModelCachePinsImplicitDefaultStorageClass verifies the PVC created
+// for an implicit (cluster-default) StorageClass is pinned to the exact
+// default resolved and validated above, rather than left nil. A nil
+// StorageClassName lets the apiserver re-resolve the default at admission
+// time, which could pick a different (possibly incompatible) default if it
+// changed between this pre-flight check and PVC creation.
+func TestEnsureModelCachePinsImplicitDefaultStorageClass(t *testing.T) {
+	def := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "standard-rwo", Annotations: map[string]string{defaultStorageClassAnnotation: "true"}},
+		Provisioner: "pd.csi.storage.gke.io",
+		Parameters:  map[string]string{"type": "pd-balanced"},
+	}
+	// Non-a4x family: compatible with pd-balanced, so the pre-flight check
+	// passes and execution reaches PVC creation.
+	cfg := &inferenceWorkloadConfig{
+		namespace: "ns", model: "Qwen/Qwen3-8B", modelCacheSize: defaultModelCacheSize,
+		gpuNodeInstanceType: "n2-standard-4", runID: "run1",
+	}
+	// Force the populate-Job wait to fail fast instead of hanging on the fake
+	// clientset's Job status, which never progresses to Complete.
+	t.Setenv(envModelCachePopulateTimeout, "1ms")
+
+	client := fake.NewClientset(def)
+	ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+	if err := ensureModelCache(ctx, cfg); err == nil {
+		t.Fatal("expected populate-Job wait to time out on the fake clientset")
+	}
+
+	pvc, err := client.CoreV1().PersistentVolumeClaims(cfg.namespace).Get(context.Background(), modelCachePVCName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("expected PVC to be created before the populate-Job wait, got: %v", err)
+	}
+	if pvc.Spec.StorageClassName == nil || *pvc.Spec.StorageClassName != def.Name {
+		t.Errorf("PVC StorageClassName = %v, want pinned to resolved default %q", pvc.Spec.StorageClassName, def.Name)
+	}
+}
+
 // TestCacheWorkerImageMatchesTemplate guards the cacheWorkerImage constant
 // against drifting from the worker image in the Dynamo deploy template. The
 // populate Job must download with the same vLLM runtime the workers use: the

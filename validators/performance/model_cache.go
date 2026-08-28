@@ -315,9 +315,18 @@ func ensureModelCache(ctx *validators.Context, config *inferenceWorkloadConfig) 
 		return cerr
 	}
 
+	// Pin the StorageClass we just validated onto the PVC: if we resolved an
+	// implicit cluster default above, use its name explicitly rather than
+	// leaving StorageClassName nil, so a default that changes between this
+	// check and PVC admission can't silently bind an unvalidated StorageClass.
+	pvcStorageClass := explicitSC
+	if pvcStorageClass == "" && resolvedSC != nil {
+		pvcStorageClass = resolvedSC.Name
+	}
+
 	// Bound the create calls so a slow/wedged apiserver can't burn the check
 	// budget before the (separately bounded) populate-Job wait even starts.
-	pvc := buildModelCachePVC(config.namespace, qty, strings.TrimSpace(config.modelCacheStorageClass))
+	pvc := buildModelCachePVC(config.namespace, qty, pvcStorageClass)
 	pvcCtx, pvcCancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
 	_, err = ctx.Clientset.CoreV1().PersistentVolumeClaims(config.namespace).Create(pvcCtx, pvc, metav1.CreateOptions{})
 	pvcCancel()
