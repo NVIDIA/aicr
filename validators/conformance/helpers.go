@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -35,6 +36,13 @@ import (
 	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/yaml"
 )
+
+// readFailedBecauseContextEnded reports whether an I/O error came from the
+// polling context itself ending. Such an error is the wait's terminal signal,
+// not evidence that preceding object reads were persistently failing.
+func readFailedBecauseContextEnded(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && stderrors.Is(err, ctx.Err())
+}
 
 // getDynamicClient returns the dynamic client from context, or creates one from RESTConfig.
 func getDynamicClient(ctx *validators.Context) (dynamic.Interface, error) {
@@ -192,6 +200,12 @@ func waitForDeploymentAvailable(ctx *validators.Context, namespace, name string,
 				// callers on a healthy cluster (#2406). Retry within the bound;
 				// genuine errors (RBAC, malformed) still abort immediately.
 				if isK8sTimeoutErr(getErr) {
+					// A Get interrupted by this wait's own cancellation is not a
+					// transient read failure. Do not let the final in-flight read
+					// overwrite the diagnostic from the preceding poll history.
+					if readFailedBecauseContextEnded(c, getErr) {
+						return false, nil
+					}
 					lastReadErr = getErr
 					slog.Debug("transient read while waiting for deployment; retrying",
 						"namespace", namespace, "deployment", name, "error", getErr)

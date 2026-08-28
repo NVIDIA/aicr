@@ -19,6 +19,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -177,66 +178,105 @@ func TestCleanupGangTestResourcesPreservesConcurrentRun(t *testing.T) {
 // This mirrors the acceptance criteria of #1513, which fixed the same shape one
 // step earlier in this function (instantaneous deployment read -> bounded wait).
 func TestWaitForGangTestPodsRetriesTransientReads(t *testing.T) {
-	run, err := newGangTestRun()
-	if err != nil {
-		t.Fatalf("newGangTestRun: %v", err)
+	tests := []struct {
+		name    string
+		readErr error
+	}{
+		{
+			name:    "client-go plain-string rate limit",
+			readErr: rateLimitErr(),
+		},
+		{
+			name: "apiserver ServerTimeout",
+			readErr: k8serrors.NewServerTimeout(
+				schema.GroupResource{Resource: "pods"}, "get", 1),
+		},
 	}
 
-	objs := make([]runtime.Object, 0, gangMinMembers)
-	for i := range gangMinMembers {
-		objs = append(objs, &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: run.pods[i], Namespace: run.namespace},
-			Status:     corev1.PodStatus{Phase: corev1.PodSucceeded},
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run, err := newGangTestRun()
+			if err != nil {
+				t.Fatalf("newGangTestRun: %v", err)
+			}
+
+			objs := make([]runtime.Object, 0, gangMinMembers)
+			for i := range gangMinMembers {
+				objs = append(objs, &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: run.pods[i], Namespace: run.namespace},
+					Status:     corev1.PodStatus{Phase: corev1.PodSucceeded},
+				})
+			}
+			clientset := k8sfake.NewSimpleClientset(objs...)
+
+			// Fail the first two reads, then let the real objects through.
+			var reads atomic.Int32
+			clientset.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+				if reads.Add(1) <= 2 {
+					return true, nil, tt.readErr
+				}
+				return false, nil, nil // fall through to the tracker
+			})
+
+			pods, err := waitForGangTestPods(context.Background(), clientset, run)
+			if err != nil {
+				t.Fatalf("waitForGangTestPods aborted on a transient read: %v", err)
+			}
+			for i := range gangMinMembers {
+				if pods[i] == nil {
+					t.Errorf("pod %d not collected after retry", i)
+				}
+			}
+			if got := reads.Load(); got < 3 {
+				t.Errorf("expected the poll to retry past the transient reads, saw %d reads", got)
+			}
 		})
-	}
-	clientset := k8sfake.NewSimpleClientset(objs...)
-
-	// Fail the first two reads the way a throttled client-go client does, then
-	// let the real objects through.
-	var reads atomic.Int32
-	clientset.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
-		if reads.Add(1) <= 2 {
-			return true, nil, fmt.Errorf(
-				"client rate limiter Wait returned an error: %w", context.DeadlineExceeded)
-		}
-		return false, nil, nil // fall through to the tracker
-	})
-
-	pods, err := waitForGangTestPods(context.Background(), clientset, run)
-	if err != nil {
-		t.Fatalf("waitForGangTestPods aborted on a transient read: %v", err)
-	}
-	for i := range gangMinMembers {
-		if pods[i] == nil {
-			t.Errorf("pod %d not collected after retry", i)
-		}
-	}
-	if got := reads.Load(); got < 3 {
-		t.Errorf("expected the poll to retry past the throttled reads, saw %d reads", got)
 	}
 }
 
 // TestWaitForGangTestPodsFailsClosedOnTerminalRead is the other half: a genuine
 // error (RBAC denial) must still abort rather than spin until the timeout.
 func TestWaitForGangTestPodsFailsClosedOnTerminalRead(t *testing.T) {
-	run, err := newGangTestRun()
-	if err != nil {
-		t.Fatalf("newGangTestRun: %v", err)
+	tests := []struct {
+		name    string
+		readErr func(*gangTestRun) error
+	}{
+		{
+			name: "Forbidden",
+			readErr: func(run *gangTestRun) error {
+				return k8serrors.NewForbidden(
+					schema.GroupResource{Resource: "pods"}, run.pods[0], fmt.Errorf("no access"))
+			},
+		},
+		{
+			name: "ServiceUnavailable",
+			readErr: func(*gangTestRun) error {
+				return k8serrors.NewServiceUnavailable("apiserver unavailable")
+			},
+		},
 	}
-	clientset := k8sfake.NewSimpleClientset()
-	clientset.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
-		return true, nil, k8serrors.NewForbidden(
-			schema.GroupResource{Resource: "pods"}, run.pods[0], fmt.Errorf("no access"))
-	})
 
-	_, err = waitForGangTestPods(context.Background(), clientset, run)
-	if err == nil {
-		t.Fatal("expected a terminal read error to fail the check, got nil")
-	}
-	// Assert the code, not just non-nil: a mis-coded Forbidden would otherwise
-	// slip through this guard.
-	if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
-		t.Errorf("Forbidden should classify as ErrCodeInternal, got %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run, err := newGangTestRun()
+			if err != nil {
+				t.Fatalf("newGangTestRun: %v", err)
+			}
+			clientset := k8sfake.NewSimpleClientset()
+			clientset.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, tt.readErr(run)
+			})
+
+			_, err = waitForGangTestPods(context.Background(), clientset, run)
+			if err == nil {
+				t.Fatal("expected a terminal read error to fail the check, got nil")
+			}
+			// Assert the code, not just non-nil: a terminal error accidentally
+			// routed through the retry path would otherwise burn the poll budget.
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+				t.Errorf("%s should classify as ErrCodeInternal, got %v", tt.name, err)
+			}
+		})
 	}
 }
 
@@ -260,6 +300,13 @@ func TestWaitForGangTestPodsNotFoundIsTerminal(t *testing.T) {
 	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
 		t.Errorf("want ErrCodeNotFound, got %v", err)
 	}
+	var structuredErr *errors.StructuredError
+	if !stderrors.As(err, &structuredErr) {
+		t.Fatalf("want top-level StructuredError, got %T", err)
+	}
+	if structuredErr.Code != errors.ErrCodeNotFound {
+		t.Errorf("want top-level ErrCodeNotFound, got %s", structuredErr.Code)
+	}
 	// Terminal means immediate: it must not have burned the poll budget.
 	if elapsed := time.Since(start); elapsed > 30*time.Second {
 		t.Errorf("NotFound should abort immediately, took %s", elapsed)
@@ -282,8 +329,7 @@ func TestWaitForDeploymentAvailableRetriesTransientReads(t *testing.T) {
 	var reads atomic.Int32
 	clientset.PrependReactor("get", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
 		if reads.Add(1) <= 2 {
-			return true, nil, fmt.Errorf(
-				"client rate limiter Wait returned an error: %w", context.DeadlineExceeded)
+			return true, nil, rateLimitErr()
 		}
 		return false, nil, nil
 	})
@@ -371,7 +417,111 @@ func TestWaitForGangTestPodsRecoveredReadNotReportedAsUnreadable(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a timeout error, got nil")
 	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("want ErrCodeTimeout after a recovered blip, got %v", err)
+	}
 	if strings.Contains(err.Error(), "kept failing") {
 		t.Errorf("recovered throttle must not be reported as unreadable: %v", err)
+	}
+}
+
+func TestReadFailedBecauseContextEnded(t *testing.T) {
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	expiredCtx, expiredCancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer expiredCancel()
+
+	tests := []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want bool
+	}{
+		{
+			name: "live context does not own deadline error",
+			ctx:  context.Background(),
+			err:  context.DeadlineExceeded,
+			want: false,
+		},
+		{
+			name: "expired context owns deadline error",
+			ctx:  expiredCtx,
+			err:  context.DeadlineExceeded,
+			want: true,
+		},
+		{
+			name: "canceled context owns cancellation error",
+			ctx:  canceledCtx,
+			err:  context.Canceled,
+			want: true,
+		},
+		{
+			name: "expired context does not own plain rate-limit error",
+			ctx:  expiredCtx,
+			err:  rateLimitErr(),
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := readFailedBecauseContextEnded(tt.ctx, tt.err); got != tt.want {
+				t.Errorf("readFailedBecauseContextEnded() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWaitForGangTestPodsParentCanceledDuringRead(t *testing.T) {
+	run, err := newGangTestRun()
+	if err != nil {
+		t.Fatalf("newGangTestRun: %v", err)
+	}
+	clientset := k8sfake.NewSimpleClientset()
+	parent, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	readStarted := make(chan struct{})
+	var signalOnce sync.Once
+	clientset.PrependReactor("get", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		signalOnce.Do(func() { close(readStarted) })
+		<-parent.Done()
+		return true, nil, parent.Err()
+	})
+	go func() {
+		<-readStarted
+		cancel()
+	}()
+
+	_, err = waitForGangTestPods(parent, clientset, run)
+	if err == nil {
+		t.Fatal("expected cancellation error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("want ErrCodeTimeout for caller cancellation, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "canceled") {
+		t.Errorf("want caller-canceled diagnostic, got %v", err)
+	}
+	if strings.Contains(err.Error(), "unreadable") {
+		t.Errorf("caller cancellation must not be reported as unreadable: %v", err)
+	}
+}
+
+func TestWaitForDeploymentAvailableDeadlineDuringReadNotReportedAsUnreadable(t *testing.T) {
+	const pollTimeout = 50 * time.Millisecond
+	clientset := k8sfake.NewSimpleClientset()
+	clientset.PrependReactor("get", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
+		time.Sleep(2 * pollTimeout)
+		return true, nil, context.DeadlineExceeded
+	})
+
+	vctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
+	_, err := waitForDeploymentAvailable(vctx, "kai-scheduler", "queue-controller", pollTimeout)
+	if err == nil {
+		t.Fatal("expected timeout result, got nil")
+	}
+	if strings.Contains(err.Error(), "unreadable") {
+		t.Errorf("the wait's own deadline must not be reported as failed reads: %v", err)
 	}
 }
