@@ -694,6 +694,10 @@ const (
 	// against a separate lister that lags that strongly-consistent read — a freshness the
 	// client cannot observe. This bounds how long we let the webhook cache catch up.
 	TrainJobAdmissionRetryTimeout = 1 * time.Minute
+
+	// CREWorkloadRunTimeout is the maximum time to wait for a Cluster Readiness
+	// Engine WorkloadRun (NCCL or training/goodput) to reach a terminal condition.
+	CREWorkloadRunTimeout = 30 * time.Minute
 )
 
 // Inference performance validation timeouts.
