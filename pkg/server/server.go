@@ -27,6 +27,7 @@ import (
 	"syscall"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/deprecation"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -74,6 +75,17 @@ func WithVersion(version string) Option {
 func WithHandler(handlers map[string]http.HandlerFunc) Option {
 	return func(s *Server) {
 		s.config.Handlers = handlers
+	}
+}
+
+// WithDeprecatedRoutes returns an Option marking registered routes as
+// deprecated. Keys must match the paths passed to WithHandler exactly.
+// Responses from a marked route carry the Deprecation, Sunset, and Link headers
+// defined by the deprecation policy in RELEASING.md, so a client learns the
+// endpoint is going away without having to read a release note.
+func WithDeprecatedRoutes(routes map[string]deprecation.Notice) Option {
+	return func(s *Server) {
+		s.config.DeprecatedRoutes = routes
 	}
 }
 

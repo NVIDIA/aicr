@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/deprecation"
 	"github.com/google/uuid"
 	"golang.org/x/time/rate"
 )
@@ -522,5 +523,128 @@ func TestBodyLimitMiddleware_NilBodyIsHandled(t *testing.T) {
 
 	if !called {
 		t.Fatal("handler should be invoked even when Body is nil")
+	}
+}
+
+// TestDeprecationMiddleware covers the REST arm of the deprecation channel
+// (RELEASING.md). No route is deprecated in the shipped configuration yet, so
+// the mechanism is exercised here against a route this test marks itself.
+func TestDeprecationMiddleware(t *testing.T) {
+	deprecated := time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC)
+	sunset := time.Date(2026, time.November, 11, 0, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name        string
+		routes      map[string]deprecation.Notice
+		path        string
+		wantHeaders bool
+	}{
+		{
+			name: "marked route carries the headers",
+			routes: map[string]deprecation.Notice{
+				"/v1/recipe": {
+					Subject:     "/v1/recipe",
+					Replacement: "/v2/recipe",
+					RemovedIn:   "v0.25",
+					Deprecated:  deprecated,
+					Sunset:      sunset,
+				},
+			},
+			path:        "/v1/recipe",
+			wantHeaders: true,
+		},
+		{
+			// The map is keyed by exact path: marking /v1/recipe must not leak
+			// onto the successor it points at.
+			name: "unmarked route is untouched",
+			routes: map[string]deprecation.Notice{
+				"/v1/recipe": {Subject: "/v1/recipe", RemovedIn: "v0.25"},
+			},
+			path:        "/v2/recipe",
+			wantHeaders: false,
+		},
+		{
+			name:        "no deprecated routes configured",
+			routes:      nil,
+			path:        "/v1/recipe",
+			wantHeaders: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := parseConfig()
+			cfg.DeprecatedRoutes = tt.routes
+			s := &Server{config: cfg, rateLimiter: rate.NewLimiter(100, 200)}
+
+			handler := s.deprecationMiddleware(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+
+			rec := httptest.NewRecorder()
+			handler(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+
+			got := rec.Header().Get("Deprecation") != ""
+			if got != tt.wantHeaders {
+				t.Errorf("Deprecation header present = %v, want %v", got, tt.wantHeaders)
+			}
+			if !tt.wantHeaders {
+				return
+			}
+			if rec.Header().Get("Sunset") == "" {
+				t.Error("Sunset header missing on a notice carrying a date")
+			}
+			if rec.Header().Get("Link") == "" {
+				t.Error("Link header missing")
+			}
+		})
+	}
+}
+
+// TestDeprecationHeadersSurviveRateLimitRejection is the ordering assertion.
+//
+// rateLimitMiddleware writes a 429 and returns without calling next, so any
+// header-setting layer nested inside it is skipped entirely on a throttled
+// request. A client backing off a deprecated endpoint is precisely the one that
+// needs to learn the endpoint is going away, and it may never see a 200.
+//
+// A panicking handler does not test this: the panic happens after the inner
+// layers have already run, so the headers are set either way. Rate limiting is
+// the short-circuit that actually discriminates.
+func TestDeprecationHeadersSurviveRateLimitRejection(t *testing.T) {
+	cfg := parseConfig()
+	cfg.DeprecatedRoutes = map[string]deprecation.Notice{
+		"/v1/recipe": {
+			Subject:   "/v1/recipe",
+			RemovedIn: "v0.25",
+			// A date is required for the Deprecation header to be emitted at
+			// all under RFC 9745, so the assertion below needs one to be
+			// testing ordering rather than the absence of a date.
+			Deprecated: time.Date(2026, time.September, 1, 0, 0, 0, 0, time.UTC),
+		},
+	}
+	// Zero limit and zero burst: every request is rejected.
+	s := &Server{config: cfg, rateLimiter: rate.NewLimiter(0, 0)}
+
+	var handlerRan bool
+	handler := s.withMiddleware(func(w http.ResponseWriter, _ *http.Request) {
+		handlerRan = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	rec := httptest.NewRecorder()
+	handler(rec, httptest.NewRequest(http.MethodGet, "/v1/recipe", nil))
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d — the rate limiter did not short-circuit, "+
+			"so this test is not exercising the ordering it claims to",
+			rec.Code, http.StatusTooManyRequests)
+	}
+	if handlerRan {
+		t.Fatal("handler ran despite the 429; the short-circuit did not happen")
+	}
+	if rec.Header().Get("Deprecation") == "" {
+		t.Error("Deprecation header lost on a rate-limited response; the middleware " +
+			"is ordered inside rateLimitMiddleware")
 	}
 }

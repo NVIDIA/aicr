@@ -13,6 +13,78 @@ Releases follow a **bi-weekly cadence**. A new release is cut every two weeks.
 | Pre-release | Before a regular release, as needed | `rc` | Any maintainer can create for testing |
 | Major | Planned | `major` | Requires team agreement and advance communication |
 
+## Deprecation Policy
+
+AICR freezes four public surfaces at v1 ([ROADMAP §2](ROADMAP.md#2-stability)):
+the `aicr` CLI, the REST API, the Go SDK (`pkg/client/v1`), and the bundle
+layout plus artifact schemas. This section defines what counts as a breaking
+change on each, the notice a removal owes, and how a deprecation reaches the
+people affected by it. A change that is breaking under this table and ships
+without the notice below is a release blocker, not a release note.
+
+### What counts as breaking, per surface
+
+| Surface | Breaking | Additive |
+|---|---|---|
+| **CLI** — flags, subcommands, exit codes, stdout shape | Removing or renaming a flag or subcommand; changing a default such that identical input yields different output; narrowing an accepted value set; changing what an exit code means; removing a field from `--output json`/`yaml` | New flag whose default preserves current behavior; new subcommand; new accepted enum value; new field in structured output |
+| **REST** — `api/aicr/v1/server.yaml` | Removing a path or method; removing or renaming a response field; adding a required request field; narrowing a type; removing a value from a request enum | New optional request field; new response field; new path or method; new value in a response enum |
+| **Go SDK** — `pkg/client/v1` | Removing or renaming an exported identifier; changing a signature; narrowing a parameter type; changing documented semantics without changing the name | New exported function, method, or type; new functional option; new field on a struct the caller does not construct positionally |
+| **Bundle + schemas** — layout and artifact kinds | Removing or renaming a bundle path; removing a schema field; tightening a type; adding a required field; retiring an `apiVersion` | New optional field; new file in the bundle; new artifact kind |
+
+Adding a value to a *response* enum is additive for the server and breaking for
+a client that switches exhaustively on it, so it is announced but does not owe a
+window. Adding a value to a *request* enum is always additive; removing one is
+always breaking.
+
+### Notice owed before removal
+
+- **Before `v1.0.0`:** a minimum of **two minor releases** between the
+  deprecation shipping with a working warning and the removal. At the current
+  cadence that is roughly one month.
+- **After `v1.0.0`:** a breaking removal on any of the four frozen surfaces
+  requires the next `vMAJOR`. The deprecation may be announced at any time; the
+  removal waits for the major. This is what the freeze buys and it is not
+  waivable by a release manager.
+
+Artifact `apiVersion` retirement is the one surface with a maturity-scoped
+window rather than a flat one, because an alpha version never promised
+stability in the first place. Its rules are below and take precedence for that
+surface.
+
+### How a deprecation is announced
+
+Every deprecation appears in all three places. One is not a substitute for
+another: release notes are read once, the durable page is read later by someone
+debugging, and the runtime warning reaches the user who never read either.
+
+1. A `## Deprecations` section in the release notes for the release that
+   introduces it, naming the replacement and the planned removal release.
+2. An entry on the durable page at
+   [`docs/user/deprecations.md`](docs/user/deprecations.md), which carries every
+   active deprecation and its removal release until the removal ships.
+3. A runtime warning on the affected surface, using that surface's mechanism:
+
+   | Surface | Mechanism |
+   |---|---|
+   | CLI | Warning on stderr naming the replacement and the removal release. Honors `NO_COLOR` and the existing logger conventions |
+   | REST | A `Deprecation` response header ([RFC 9745](https://www.rfc-editor.org/rfc/rfc9745.html)) carrying the deprecation date, a `Sunset` header ([RFC 8594](https://www.rfc-editor.org/rfc/rfc8594.html)) carrying the removal date, a `Link` with `rel="deprecation"`, and `deprecated: true` on the operation in `api/aicr/v1/server.yaml` |
+   | Go SDK | A `// Deprecated:` godoc marker, which `staticcheck` surfaces to consumers automatically |
+   | Bundle + schemas | The loader accepts the deprecated shape and warns, naming the file and the release that stops reading it |
+
+### Exercising the channel before `v1.0.0`
+
+ROADMAP §2 requires the channel to be exercised on a real deprecation before
+`v1.0.0`, not merely documented. The exercise of record is the retirement of the
+`/v1/*` REST path family, tracked by
+[#2112](https://github.com/NVIDIA/aicr/issues/2112): it is the only candidate
+that drives the RFC 8594 headers and the OpenAPI `deprecated` flag, which is the
+arm integrators actually consume.
+
+The ADR-022 alpha-to-target artifact migration below also runs warn-then-remove
+across v0.22 and v0.23 and is a second data point, but it cannot stand alone as
+the exercise: alpha owes no window under the table above, so it does not
+demonstrate that the channel honors an obligation it actually had.
+
 ## Artifact Compatibility and Deprecation
 
 Artifact `apiVersion` maturity is independent of the AICR release version and

@@ -105,7 +105,15 @@ order:
 3. **`**Theme Name**` blocks** — each starts with bolded title, em dash
    (` — `, with spaces), then 1–3 sentences OR a bulleted sub-list.
    Use sub-lists when enumerating 3+ concrete items (e.g. recipes added).
-4. **Closing credits line** — `***Thanks to*** @user1, @user2, …, and
+4. **`### Deprecations`** — **required whenever the release deprecates or
+   removes anything on the four frozen surfaces** (CLI, REST, Go SDK, bundle
+   and artifact schemas); omit the heading entirely when it does not. One
+   bullet per item: what is deprecated, the replacement, and the release that
+   removes it. This is a release-blocking section, not a courtesy — see the
+   [deprecation policy](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md#deprecation-policy).
+   Every bullet here must also have an entry in `docs/user/deprecations.md`;
+   if it does not, the deprecation is incomplete and the release is not ready.
+5. **Closing credits line** — `***Thanks to*** @user1, @user2, …, and
    @mchmarny.` Alphabetical (case-insensitive) by handle, with
    `@mchmarny` moved to the final position preceded by `and `.
 

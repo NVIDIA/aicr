@@ -1202,6 +1202,33 @@ Versioning][semver]:
 - **Minor** bumps may add new exported types, fields, or methods.
 - **Patch** bumps contain compatible bug fixes.
 
+### How you learn something is going away
+
+Nothing in `pkg/client/v1` is removed without first being marked deprecated for
+the notice period in
+[`RELEASING.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md#deprecation-policy)
+— two minor releases before v1.0, and after v1.0 the next major.
+
+The marker is a standard Go `// Deprecated:` godoc paragraph on the identifier:
+
+```go
+// ResolveRecipe returns a resolved recipe for the given criteria.
+//
+// Deprecated: use [Client.Resolve] instead. ResolveRecipe is removed in v0.25.
+func (c *Client) ResolveRecipe(...) { ... }
+```
+
+This is deliberately not a runtime warning. `staticcheck` reports `SA1019` for
+every use of a deprecated identifier, so the notice arrives in your build — at
+the point you can act on it — rather than in a log line from a production run.
+`go doc`, `gopls`, and every major Go IDE surface the same paragraph. If you run
+`staticcheck` (or `golangci-lint` with the `staticcheck` linter enabled) in CI,
+you get the deprecation channel for free with no AICR-specific tooling.
+
+Each marker names the replacement and the removal release. The complete list of
+active deprecations across all surfaces is in
+[Deprecations](../user/deprecations.md).
+
 ## See also
 
 - [Public API surface](./public-api.md) — stability matrix per package

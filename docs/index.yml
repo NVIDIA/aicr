@@ -36,6 +36,8 @@ navigation:
         path: user/artifact-verification.md
       - page: API Reference
         path: user/api-reference.md
+      - page: Deprecations
+        path: user/deprecations.md
       - page: Agent Deployment
         path: user/agent-deployment.md
       - page: Air-Gapped Mirroring

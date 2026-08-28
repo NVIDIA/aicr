@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/deprecation"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/google/uuid"
 )
@@ -30,6 +31,10 @@ import (
 //
 // Ordering rationale (outermost first):
 //   - metrics / version / requestID: pure setup, no failure paths to wrap.
+//   - deprecation: sets response headers, so it must sit outside every layer
+//     that can write a response. rateLimit in particular short-circuits with a
+//     429 without calling next, and a client backing off a deprecated endpoint
+//     is exactly the one that needs to learn it is going away.
 //   - timeout: sets the per-request context deadline so EVERY inner layer
 //     (including body reads inside the handler) sees the same bound.
 //   - logging: must wrap panicRecovery so the "request completed" line is
@@ -45,12 +50,14 @@ import (
 func (s *Server) withMiddleware(handler http.HandlerFunc) http.HandlerFunc {
 	return s.metricsMiddleware(
 		s.versionMiddleware(
-			s.requestIDMiddleware(
-				s.timeoutMiddleware(
-					s.loggingMiddleware(
-						s.panicRecoveryMiddleware(
-							s.rateLimitMiddleware(
-								s.bodyLimitMiddleware(handler),
+			s.deprecationMiddleware(
+				s.requestIDMiddleware(
+					s.timeoutMiddleware(
+						s.loggingMiddleware(
+							s.panicRecoveryMiddleware(
+								s.rateLimitMiddleware(
+									s.bodyLimitMiddleware(handler),
+								),
 							),
 						),
 					),
@@ -58,6 +65,22 @@ func (s *Server) withMiddleware(handler http.HandlerFunc) http.HandlerFunc {
 			),
 		),
 	)
+}
+
+// deprecationMiddleware attaches the Deprecation, Sunset, and Link headers to
+// responses from routes marked deprecated via WithDeprecatedRoutes. See the
+// deprecation policy in RELEASING.md for what the headers mean and when a route
+// earns them.
+//
+// No route is deprecated today; the /v1/* disposition is #2112, not a decision
+// made here.
+func (s *Server) deprecationMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if notice, ok := s.config.DeprecatedRoutes[r.URL.Path]; ok {
+			deprecation.SetHTTPHeaders(w.Header(), notice)
+		}
+		next.ServeHTTP(w, r)
+	}
 }
 
 // timeoutMiddleware applies a per-request context timeout per CLAUDE.md.

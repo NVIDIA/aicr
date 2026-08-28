@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/deprecation"
 	"golang.org/x/time/rate"
 )
 
@@ -34,6 +35,13 @@ type config struct {
 
 	// Additional Handlers to be added to the server
 	Handlers map[string]http.HandlerFunc
+
+	// DeprecatedRoutes marks registered routes as deprecated, keyed by the
+	// exact path in Handlers. Matching responses carry the Deprecation,
+	// Sunset, and Link headers described in RELEASING.md's deprecation
+	// policy. Empty by default: no REST path family has been deprecated yet,
+	// and the /v1/* disposition is still open (#2112).
+	DeprecatedRoutes map[string]deprecation.Notice
 
 	// Server configuration
 	Address string
