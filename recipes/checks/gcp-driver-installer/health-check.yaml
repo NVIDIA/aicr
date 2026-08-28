@@ -30,8 +30,13 @@ kind: Test
 metadata:
   name: gcp-driver-installer-health-check
 spec:
+  # 5m: below the expected-resources Job's 8m activeDeadline — a budget
+  # above it converts a never-true assert into a deadline kill with no
+  # surviving logs (the #2186 failure shape; see the nvsentinel check).
+  # The healthy path passes in seconds; the slowest legitimate path (a
+  # fresh node mid driver-install) completes in ~2m.
   timeouts:
-    assert: 10m
+    assert: 5m
   steps:
     - name: validate-nvidia-driver-installer-daemonset
       try:
