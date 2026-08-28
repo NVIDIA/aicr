@@ -599,11 +599,15 @@ CLI file loader for the same values — `aicr bundle -r` accepts a
 The shared artifact gate rejects any `apiVersion` outside
 `aicr.run/v1alpha2`, `aicr.run/v1`, `aicr.run/v1alpha3`, and
 `aicr.run/v1beta2` with a 400, on this endpoint as well as on the CLI file-load
-path. An absent or empty `apiVersion` is still admitted as the legacy shape
-through v0.22, and v0.23 stops admitting it along with the alpha values. The
-reader and emitter clocks are separate: v0.21 and v0.22 both read the alpha
-values, the target values, and the empty header, while generated recipes keep
-their alpha headers until v0.22 switches the emitters. See
+path. An absent or empty `apiVersion` is still admitted as the legacy shape on
+`RecipeResult` inputs through v0.22, and v0.23 stops admitting it along with the
+alpha values. The tolerance is scoped to `RecipeResult`, which predates the
+field: a `RecipeMetadata` overlay is a catalog document however it arrives, so
+`aicr recipe -r` and `aicr bundle -r` reject a headerless one exactly as a
+`--data` catalog scan does. The reader and emitter clocks are separate: v0.21
+and v0.22 both read the alpha values, the target values, and the empty header,
+while generated recipes keep their alpha headers until v0.22 switches the
+emitters. See
 [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
 for the release-by-release table.
 

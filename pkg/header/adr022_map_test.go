@@ -54,10 +54,10 @@ type adr022Row struct {
 // Scope: this file pins the *constant* contract — that each track constant
 // routes to the right gate and target. It does not verify that an individual
 // emit site selected the right constant. A catalog emitter that referenced
-// RecipeResultAPIVersion instead of RecipeMetadataAPIVersion is invisible here
-// and stays invisible at the emitter switch, because the stable and authoring
-// constants carry the same string until then. Guarding emitter selection needs
-// a per-artifact round-trip assertion; see issue #2423.
+// RecipeResultAPIVersion instead of RecipeMetadataAPIVersion is invisible here,
+// because the stable and authoring constants carry the same string until the
+// emitter switch. That half lives in adr022_emit_test.go, which asserts the
+// observed apiVersion on a real artifact against its track's constant.
 //
 // ComponentUpgrades (ADR-021) has a §2 row but no emitter yet, so it has no
 // row here. It starts at header.GroupVersionV1Beta1, which

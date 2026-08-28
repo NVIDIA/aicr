@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 )
 
 type unexpectedLoadProvider struct {
@@ -153,6 +154,24 @@ spec:
 					t.Errorf("kind = %q, want empty", rec.Kind)
 				}
 			},
+		},
+		{
+			// #2421: a RecipeMetadata is a catalog kind however it arrives, so
+			// the direct-input path must fail closed on an empty header exactly
+			// as the catalog scanner does. Before the fix this hydrated
+			// silently.
+			name:        "headerless RecipeMetadata rejected",
+			yamlContent: "kind: RecipeMetadata\nmetadata:\n  name: test\nspec:\n  criteria:\n    service: eks\n    accelerator: h100\n    intent: training\n",
+			wantErr:     true,
+			errContain:  `recipe metadata file has apiVersion ""`,
+		},
+		{
+			// The empty tolerance is narrowed to RecipeResult, not removed.
+			// ADR-022 §3 retires this one at Release N+2 (#2417); until then a
+			// pre-apiVersion recipe must still load.
+			name:        "headerless RecipeResult still accepted",
+			yamlContent: "kind: RecipeResult\ncriteria:\n  service: eks\n",
+			wantErr:     false,
 		},
 		{
 			name:        "unsupported apiVersion rejected",
@@ -421,5 +440,65 @@ componentRefs: []
 	}
 	if got := requests.Load(); got != 1 {
 		t.Fatalf("source requests = %d, want 1", got)
+	}
+}
+
+// TestRecipeMetadataHeaderGatesAgree pins the #2421 invariant: the same
+// RecipeMetadata header is accepted or rejected identically whether the
+// document reaches AICR through the catalog scanner (`--data`) or through the
+// direct recipe input path (`aicr recipe -r`, `aicr bundle -r`).
+//
+// The two gates live in different files and were written at different times.
+// They diverged on the empty string for the whole life of the direct loader:
+// validateRecipeInputAPIVersion short-circuited on empty before it ever looked
+// at the kind, so a headerless overlay was rejected from a --data tree and
+// silently hydrated when passed with -r. Comparing the verdicts rather than
+// re-asserting one of them is what keeps them from drifting apart again.
+func TestRecipeMetadataHeaderGatesAgree(t *testing.T) {
+	t.Parallel()
+
+	versions := []struct {
+		name       string
+		apiVersion string
+	}{
+		{"empty", ""},
+		{"alpha authoring", header.AuthoringGroupVersion},
+		{"alpha profile", header.ProfileGroupVersion},
+		{"target authoring", header.GroupVersionV1Beta1},
+		{"target profile", header.GroupVersionV1Beta2},
+		{"stable target belongs to another track", header.GroupVersionV1},
+		{"unknown", "aicr.run/v1alpha9"},
+	}
+
+	for _, tc := range versions {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			directErr := validateRecipeInputAPIVersion(RecipeMetadataKind, tc.apiVersion)
+
+			hdr := &RecipeMetadataHeader{
+				Kind:       RecipeMetadataKind,
+				APIVersion: tc.apiVersion,
+			}
+			_, _, catalogErr := classifyRecipeMetadataCatalogHeader(hdr, "overlay.yaml")
+
+			if (directErr != nil) != (catalogErr != nil) {
+				t.Fatalf("gates disagree on apiVersion %q: direct err = %v, catalog err = %v",
+					tc.apiVersion, directErr, catalogErr)
+			}
+
+			// Both gates must fail closed with the same code, or a caller
+			// translating one into an HTTP status gets a different answer per
+			// entry point for the same bytes.
+			if directErr != nil {
+				want := aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")
+				if !stderrors.Is(directErr, want) {
+					t.Errorf("direct gate error code = %v, want ErrCodeInvalidRequest", directErr)
+				}
+				if !stderrors.Is(catalogErr, want) {
+					t.Errorf("catalog gate error code = %v, want ErrCodeInvalidRequest", catalogErr)
+				}
+			}
+		})
 	}
 }

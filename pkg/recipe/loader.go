@@ -89,7 +89,8 @@ func LoadFromFileWithProviderProfile(
 	// Reject an artifact stamped with an apiVersion this build does not
 	// understand before an overlay can trigger provider-backed hydration.
 	// The accepted set is selected by wire kind/schema track; an empty value
-	// remains tolerated here for pre-apiVersion recipe files through Release N.
+	// remains tolerated for pre-apiVersion RecipeResult files only, and is
+	// rejected for RecipeMetadata so this path agrees with the catalog scanner.
 	if versionErr := validateRecipeInputAPIVersion(rec.Kind, inputAPIVersion); versionErr != nil {
 		return nil, versionErr
 	}
@@ -197,11 +198,21 @@ func LoadFromFileWithProviderProfile(
 	return rec, nil
 }
 
+// validateRecipeInputAPIVersion gates a directly supplied recipe input by wire
+// kind.
+//
+// RecipeMetadata is a catalog kind wherever it arrives from, so it is held to
+// the same fail-closed authoring gate the catalog scanner applies in
+// classifyRecipeMetadataCatalogHeader — including rejecting an empty value.
+// ADR-022 §8 requires that for in-scope catalog kinds, and §3's "existing
+// tolerances remain" clause does not reach a document the catalog path already
+// rejects; the two paths disagreeing on the same bytes was the fail-open seam
+// in #2421.
+//
+// The empty-value tolerance survives only for RecipeResult inputs, which
+// genuinely predate the apiVersion field. ADR-022 §3 retires that at Release
+// N+2 (#2417).
 func validateRecipeInputAPIVersion(kind, apiVersion string) error {
-	if apiVersion == "" {
-		return nil
-	}
-
 	if kind == RecipeMetadataKind {
 		if header.IsSupportedAuthoringAPIVersion(apiVersion) ||
 			header.IsSupportedProfileAPIVersion(apiVersion) {
@@ -213,6 +224,10 @@ func validateRecipeInputAPIVersion(kind, apiVersion string) error {
 				"update the catalog header for this aicr release",
 				apiVersion, RecipeMetadataAPIVersion, header.GroupVersionV1Beta1,
 				RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
+	}
+
+	if apiVersion == "" {
+		return nil
 	}
 
 	if header.IsSupportedRecipeResultAPIVersion(apiVersion) {

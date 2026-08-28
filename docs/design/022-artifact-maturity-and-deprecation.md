@@ -14,6 +14,11 @@ already accepts `aicr.run/v1beta1`; a kind introduced now can start at its
 target without violating §7's rule that a new kind is never stamped with a
 version the tree does not accept, and without a shipped alpha version to retire.
 
+Revised 2026-08-28 for [#2421](https://github.com/NVIDIA/aicr/issues/2421): §3
+states which clause governs a catalog kind that arrives through the direct
+recipe-input path, and scopes the surviving empty-`apiVersion` tolerance to
+`RecipeResult`.
+
 Amends [ADR-011](011-artifact-apiversion-policy.md): §1 keeps `pkg/header` as the
 single source of version strings but replaces its single-version alias rule;
 §3 becomes kind/schema-scoped, covers AICR catalog inputs, and retires its
@@ -189,6 +194,24 @@ empty value in the snapshot, recipe, and criteria loaders for artifacts
 predating the field; `AICRConfig` already rejects it. After N+1 emits only
 target versions, an unversioned artifact would otherwise pass those gates
 unchallenged — the fail-open shape §8 exists to close.
+
+**A catalog kind is governed by §8 on every path it can arrive by.** The
+tolerance above is scoped by wire kind, not by entry point. A `RecipeMetadata`
+reaching AICR as a direct recipe input (`aicr recipe -r overlay.yaml`,
+`aicr bundle -r overlay.yaml`) is the same catalog document it would be inside a
+`--data` tree, so it is held to the same fail-closed authoring gate the catalog
+scanner applies, including the rejection of an empty value. §3 step 1's
+"existing empty-value tolerances remain where they already exist" does not
+extend a tolerance to a document the catalog path already rejects; where the two
+paths disagreed, the stricter one governs.
+
+This resolves [#2421](https://github.com/NVIDIA/aicr/issues/2421), where
+`pkg/recipe/loader.go` short-circuited on an empty value before it inspected the
+kind, so a headerless overlay was rejected from a `--data` tree and silently
+hydrated when passed with `-r`. Closing it in Release N rather than deferring to
+N+1 keeps the two paths from disagreeing across the release where the emitter
+switch rewrites every committed header. The empty-value tolerance survives for
+`RecipeResult` inputs only, and retires with the rest at N+2.
 
 ### 4. The deprecation window is conditional on the level being retired
 

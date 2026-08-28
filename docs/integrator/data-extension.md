@@ -137,6 +137,16 @@ embedded one and silently carried forward. Unrelated YAML in the tree keeps its
 existing skip behavior, and `ValidatorCatalog` sits on a separate API domain
 outside this contract.
 
+This gate follows the document, not the entry point. Passing a single overlay
+directly — `aicr recipe -r overlay.yaml`, `aicr bundle -r overlay.yaml` —
+applies the same check as a `--data` catalog scan, so a `RecipeMetadata`
+with a missing or empty `apiVersion` is rejected on both paths. Through v0.20
+the direct path accepted it and hydrated silently
+([#2421](https://github.com/NVIDIA/aicr/issues/2421)); if you author overlays
+outside a catalog tree, confirm each one carries a header. The empty-value
+tolerance that remains is for hydrated `RecipeResult` inputs only, and it
+retires in v0.23.
+
 ## Adding a criteria value
 
 Criteria value validation (`service`, `accelerator`, `intent`, `os`,
