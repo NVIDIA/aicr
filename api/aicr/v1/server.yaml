@@ -1285,6 +1285,7 @@ paths:
         - $ref: "#/components/parameters/SystemNodeToleration"
         - $ref: "#/components/parameters/AcceleratedNodeSelector"
         - $ref: "#/components/parameters/AcceleratedNodeToleration"
+        - $ref: "#/components/parameters/DRAEvictionNodeLabel"
         - $ref: "#/components/parameters/BundleDeployer"
         - $ref: "#/components/parameters/BundleRepo"
         - $ref: "#/components/parameters/WorkloadGate"
@@ -1498,9 +1499,11 @@ paths:
 
             A declaration whose component is absent from the generated
             bundle is rejected with HTTP 400 (INVALID_REQUEST, "cannot
-            take effect"); no path is exempt. Certain gate-verified paths
-            on present components are also rejected — driver-ownership
-            paths, GPU allocation-policy keys, and, where the
+            take effect"); no path is exempt. Certain gate- or contract-owned
+            paths on present components are also rejected — driver-ownership
+            paths, GPU allocation-policy keys, the DRA eviction paths
+            kubeletPlugin.nodeSelector and driver.manager.env when both
+            contract components are enabled, and, where the
             corresponding NVSentinel gate applies on the recipe's
             platform and configuration, the NVSentinel
             remedy/consumer/runtime-class paths — because an install-time
@@ -1570,6 +1573,7 @@ paths:
           style: form
           explode: true
           example: ["nvidia.com/gpu=present:NoSchedule"]
+        - $ref: "#/components/parameters/DRAEvictionNodeLabel"
         - name: deployer
           in: query
           required: false
@@ -2094,11 +2098,13 @@ components:
       description: >-
         Repeatable install-time component:path declaration. Rejected with
         HTTP 400 when the component is absent from the generated bundle;
-        no path is exempt. Certain gate-verified paths on present
+        no path is exempt. Certain gate- or contract-owned paths on present
         components are also rejected (driver-ownership paths, GPU
-        allocation-policy keys, and — where the corresponding NVSentinel
-        gate applies on the recipe's platform and configuration — the
-        NVSentinel remedy/consumer/runtime-class paths).
+        allocation-policy keys, the DRA eviction paths
+        kubeletPlugin.nodeSelector and driver.manager.env when both contract
+        components are enabled, and — where the corresponding NVSentinel gate
+        applies on the recipe's platform and configuration — the NVSentinel
+        remedy/consumer/runtime-class paths).
       schema:
         type: array
         items:
@@ -2149,6 +2155,18 @@ components:
           type: string
       style: form
       explode: true
+    DRAEvictionNodeLabel:
+      name: dra-eviction-node-label
+      in: query
+      required: false
+      description: >
+        Single key=value node label coordinating NVIDIA DRA kubelet-plugin
+        eviction with GPU Operator driver upgrades. Applied only when both
+        components are enabled.
+      schema:
+        type: string
+        default: nvidia.com/dra-kubelet-plugin=true
+      example: "example.com/dra-ready=enabled"
     BundleDeployer:
       name: deployer
       in: query

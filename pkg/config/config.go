@@ -223,6 +223,7 @@ type SchedulingSpec struct {
 	SystemNodeTolerations      []string          `yaml:"systemNodeTolerations,omitempty" json:"systemNodeTolerations,omitempty"`
 	AcceleratedNodeSelector    map[string]string `yaml:"acceleratedNodeSelector,omitempty" json:"acceleratedNodeSelector,omitempty"`
 	AcceleratedNodeTolerations []string          `yaml:"acceleratedNodeTolerations,omitempty" json:"acceleratedNodeTolerations,omitempty"`
+	DRAEvictionNodeLabel       string            `yaml:"draEvictionNodeLabel,omitempty" json:"draEvictionNodeLabel,omitempty"`
 	WorkloadGate               string            `yaml:"workloadGate,omitempty" json:"workloadGate,omitempty"`
 	WorkloadSelector           map[string]string `yaml:"workloadSelector,omitempty" json:"workloadSelector,omitempty"`
 	Nodes                      int               `yaml:"nodes,omitempty" json:"nodes,omitempty"`

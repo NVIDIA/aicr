@@ -20,6 +20,7 @@ import (
 	"sort"
 	"testing"
 
+	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"gopkg.in/yaml.v3"
@@ -342,6 +343,48 @@ func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
 		if got := property.Enum; len(got) != 0 {
 			t.Errorf("RecipeResponseBase %s enum = %v, want wrapper-owned enum", name, got)
 		}
+	}
+}
+
+func TestOpenAPIDRAEvictionNodeLabelContract(t *testing.T) {
+	specPath := filepath.Join("..", "..", "api", "aicr", "v1", "server.yaml")
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatalf("read spec %q: %v", specPath, err)
+	}
+	var spec map[string]any
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse spec: %v", err)
+	}
+
+	const parameterRef = "#/components/parameters/DRAEvictionNodeLabel"
+	for _, path := range []string{"/v1/bundle", "/v2/bundle"} {
+		t.Run(path, func(t *testing.T) {
+			operation := openAPIObjectAt(t, spec, "paths", path, "post")
+			parameters := openAPISequence(t, operation["parameters"], path+" parameters")
+			refCount := 0
+			for _, value := range parameters {
+				parameter := openAPIObject(t, value, path+" parameter")
+				if parameter["$ref"] == parameterRef {
+					refCount++
+				}
+				if parameter["name"] == "dra-eviction-node-label" {
+					t.Error("dra-eviction-node-label must use the shared component parameter")
+				}
+			}
+			if refCount != 1 {
+				t.Errorf("DRA eviction parameter reference count = %d, want 1", refCount)
+			}
+		})
+	}
+
+	parameter := openAPIObjectAt(t, spec, "components", "parameters", "DRAEvictionNodeLabel")
+	if got := parameter["name"]; got != "dra-eviction-node-label" {
+		t.Errorf("component parameter name = %v, want dra-eviction-node-label", got)
+	}
+	schema := openAPIObjectAt(t, parameter, "schema")
+	if got, want := schema["default"], bundlerconfig.DefaultDRAEvictionNodeLabel().String(); got != want {
+		t.Errorf("component parameter default = %v, want %q", got, want)
 	}
 }
 

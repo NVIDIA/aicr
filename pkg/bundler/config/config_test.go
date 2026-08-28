@@ -169,6 +169,13 @@ func TestConfigValidate(t *testing.T) {
 			config:  NewConfig(),
 			wantErr: false,
 		},
+		{
+			name: "invalid DRA eviction label",
+			config: NewConfig(WithDRAEvictionNodeLabel(NodeLabel{
+				Key: "not a label key", Value: "true",
+			})),
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -178,6 +185,47 @@ func TestConfigValidate(t *testing.T) {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestDRAEvictionNodeLabel(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    NodeLabel
+		wantErr bool
+	}{
+		{
+			name: "valid qualified label",
+			raw:  "example.com/dra-ready=enabled",
+			want: NodeLabel{Key: "example.com/dra-ready", Value: "enabled"},
+		},
+		{name: "empty value is valid", raw: "example.com/dra-ready=", want: NodeLabel{Key: "example.com/dra-ready"}},
+		{name: "missing equals", raw: "example.com/dra-ready", wantErr: true},
+		{name: "invalid key", raw: "not a key=true", wantErr: true},
+		{name: "invalid value", raw: "example.com/dra-ready=not valid", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseNodeLabel(tt.raw)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ParseNodeLabel() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("ParseNodeLabel() = %+v, want %+v", got, tt.want)
+			}
+			if !tt.wantErr && got.String() != tt.raw {
+				t.Errorf("NodeLabel.String() = %q, want %q", got.String(), tt.raw)
+			}
+		})
+	}
+
+	defaultLabel := NewConfig().DRAEvictionNodeLabel()
+	if want := DefaultDRAEvictionNodeLabel(); defaultLabel != want {
+		t.Errorf("default DRA eviction label = %+v, want %+v", defaultLabel, want)
+	}
+	if got := NewConfig(WithDRAEvictionNodeLabel(NodeLabel{})).DRAEvictionNodeLabel(); got != defaultLabel {
+		t.Errorf("zero DRA eviction label should preserve default: got %+v, want %+v", got, defaultLabel)
 	}
 }
 

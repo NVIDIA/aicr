@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Masterminds/semver/v3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/NVIDIA/aicr/pkg/bom"
@@ -36,6 +37,8 @@ import (
 )
 
 const logKeyComponent = "component"
+
+var mirrorRenderFloor = semver.MustParse(defaults.MirrorDefaultKubeVersion)
 
 // Option configures a Lister.
 type Option func(*Lister)
@@ -534,11 +537,20 @@ const k8sConstraintName = "K8s.server.version"
 // the recipe's K8s.server.version constraint. The constraint value is
 // typically a semver range like ">= 1.32.4"; this function extracts the
 // version digits so it can be passed to `helm template --kube-version`.
-// Returns defaults.MirrorDefaultKubeVersion if no constraint is found.
+// Returns defaults.MirrorDefaultKubeVersion if no valid constraint is found
+// or the extracted version is below the render-safe floor.
 func KubeVersionFromConstraints(constraints []recipe.Constraint) string {
 	for _, c := range constraints {
 		if c.Name == k8sConstraintName {
-			return extractVersion(c.Value)
+			kubeVersion := extractVersion(c.Value)
+			parsedVersion, err := semver.NewVersion(kubeVersion)
+			if err != nil {
+				return defaults.MirrorDefaultKubeVersion
+			}
+			if parsedVersion.LessThan(mirrorRenderFloor) {
+				return defaults.MirrorDefaultKubeVersion
+			}
+			return kubeVersion
 		}
 	}
 	return defaults.MirrorDefaultKubeVersion

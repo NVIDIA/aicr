@@ -52,6 +52,7 @@ type bundleCmdOptions struct {
 	systemNodeTolerations      []corev1.Toleration
 	acceleratedNodeSelector    map[string]string
 	acceleratedNodeTolerations []corev1.Toleration
+	draEvictionNodeLabel       config.NodeLabel
 	workloadGateTaint          *corev1.Taint
 	workloadSelector           map[string]string
 	estimatedNodeCount         int
@@ -384,6 +385,9 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		return nil, err
 	}
 	if opts.acceleratedNodeTolerations, err = resolveTolerations(cmd, "accelerated-node-toleration", resolved.AcceleratedNodeTolerations); err != nil {
+		return nil, err
+	}
+	if opts.draEvictionNodeLabel, err = resolveDRAEvictionNodeLabel(cmd, resolved.DRAEvictionNodeLabel); err != nil {
 		return nil, err
 	}
 
@@ -781,6 +785,12 @@ Package with explicit tag (overrides CLI version):
 				Category: catScheduling,
 			},
 			&cli.StringFlag{
+				Name:     "dra-eviction-node-label",
+				Value:    config.DefaultDRAEvictionNodeLabel().String(),
+				Usage:    "Node label coordinating DRA kubelet-plugin eviction with GPU Operator driver upgrades (format: key=value; applied only when both components are enabled)",
+				Category: catScheduling,
+			},
+			&cli.StringFlag{
 				Name:     "workload-gate",
 				Usage:    "Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations.",
 				Category: catScheduling,
@@ -1074,7 +1084,7 @@ func runBundleCmdWithDependencies(
 	deps = normalizeBundleCommandDependencies(deps)
 
 	// Validate single-value flags are not duplicated
-	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "shared-storage-class", "app-name", flagFulcioURL, flagRekorURL, flagSigningKey); err != nil {
+	if err := validateSingleValueFlags(cmd, "recipe", "config", "output", "deployer", "repo", "storage-class", "shared-storage-class", "dra-eviction-node-label", "app-name", flagFulcioURL, flagRekorURL, flagSigningKey); err != nil {
 		return err
 	}
 
@@ -1161,6 +1171,7 @@ func runBundleCmdWithDependencies(
 		config.WithSystemNodeTolerations(opts.systemNodeTolerations),
 		config.WithAcceleratedNodeSelector(opts.acceleratedNodeSelector),
 		config.WithAcceleratedNodeTolerations(opts.acceleratedNodeTolerations),
+		config.WithDRAEvictionNodeLabel(opts.draEvictionNodeLabel),
 		config.WithWorkloadGateTaint(opts.workloadGateTaint),
 		config.WithWorkloadSelector(opts.workloadSelector),
 		config.WithEstimatedNodeCount(opts.estimatedNodeCount),

@@ -233,6 +233,18 @@ Merge order is base → `valuesFile` → overlay `overrides` →
 recipe default. The node-class flags (`--system-node-selector` et al.)
 write into their routed paths at bundle time, alongside `--set`.
 
+The narrow exception is a **bundler-owned derived integration value**:
+when AICR renders both sides of a cross-chart contract and allowing either
+side to drift would produce an invalid bundle, the bundler may enforce that
+contract after ordinary overrides. The DRA/GPU Operator integration is the
+worked example: AICR merges the configured DRA eviction label into
+`kubeletPlugin.nodeSelector` and writes the same label key to GPU Operator's
+`NODE_LABEL_FOR_GPU_POD_EVICTION`. This exception must remain gated on both
+components being enabled, must reject dynamic declarations that could move
+either managed path to install-time configuration, and must be covered across
+every deployer. Ordinary workload placement still uses registry paths and must
+not grow a special flag.
+
 **Deciding where a knob belongs:**
 
 | Situation | Where it goes | Why |
