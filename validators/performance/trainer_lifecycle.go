@@ -232,7 +232,7 @@ func applyControllerTolerations(obj *unstructured.Unstructured) error {
 			fmt.Sprintf("pod spec not found in Deployment %q", obj.GetName()))
 	}
 	podSpec["tolerations"] = cloneControllerTolerateAll()
-	slog.Info("Applying blanket toleration to controller Deployment", "name", obj.GetName())
+	slog.Info("Applying blanket toleration to controller Deployment", "name", obj.GetName(), "namespace", obj.GetNamespace())
 	return nil
 }
 
