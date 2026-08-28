@@ -193,7 +193,7 @@ aicr bundle --recipe recipe.yaml \
 ### Set the label at node-pool provisioning time
 
 Put the label in the **node pool definition** — an EKS managed nodegroup
-`labels` entry, a Karpenter `nodeClass`/`NodePool` label, or the equivalent for
+`labels` entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the equivalent for
 your provisioner — alongside the `nodeGroup=gpu-worker` label you already set
 there.
 
@@ -218,9 +218,15 @@ An unlabelled GPU node produces no error anywhere. `helm install`/`helm
 upgrade` reports success and the bundle's `deploy.sh` exits 0. What you get
 instead is:
 
-- the `nvidia-dra-driver-gpu-kubelet-plugin` DaemonSet at `DESIRED=0`
-- no DRA kubelet plugins on any node
-- no `ResourceSlices`, and therefore no ComputeDomain/IMEX capability
+- no DRA kubelet plugin on any unlabelled node, and no `ResourceSlices` from
+  it — so no ComputeDomain/IMEX capability there
+- the `nvidia-dra-driver-gpu-kubelet-plugin` DaemonSet at `DESIRED=0` **if no
+  GPU node carries the label at all**
+
+Partial coverage is the more dangerous shape, and the one node replacement and
+autoscaling produce: labelled nodes work normally while the rest silently lack
+DRA. A split cluster is harder to notice than uniform failure, because the
+DaemonSet looks healthy and only some workloads misbehave.
 
 Because the absence is not self-announcing, confirm the selector matches the
 nodes you expect **before** applying the bundle, and check the DaemonSet

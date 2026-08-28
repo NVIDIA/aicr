@@ -589,6 +589,33 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 			wantSubstr:  "nvidia-dra-driver-gpu-ocp schedules its kubelet plugin only on nodes labeled ",
 		},
 		{
+			// The warning must distinguish per-node absence from total absence.
+			// Partial label coverage — the shape node replacement and autoscaling
+			// produce — leaves labeled nodes working while the rest silently lack
+			// DRA; DESIRED=0 applies only when NO GPU node matches. An earlier
+			// wording described every case as DESIRED=0, which overstates the
+			// common case and understates how hard a split cluster is to notice.
+			name: "warning distinguishes per-node absence from DESIRED=0",
+			refs: []recipe.ComponentRef{
+				{Name: draComponentName},
+				{Name: gpuOperatorComponentName},
+			},
+			wantWarning: true,
+			wantSubstr:  "if no GPU node carries the label the kubelet-plugin DaemonSet sits at DESIRED=0",
+		},
+		{
+			// Arbitrary node labels live at NodePool.spec.template.metadata.labels.
+			// An EC2NodeClass has no such field, so naming nodeClass here sent
+			// operators to a resource that cannot carry the label.
+			name: "warning names the Karpenter resource that carries labels",
+			refs: []recipe.ComponentRef{
+				{Name: draComponentName},
+				{Name: gpuOperatorComponentName},
+			},
+			wantWarning: true,
+			wantSubstr:  "Karpenter NodePool spec.template.metadata.labels",
+		},
+		{
 			name:        "DRA absent does not warn",
 			refs:        []recipe.ComponentRef{{Name: gpuOperatorComponentName}},
 			wantWarning: false,
@@ -655,7 +682,7 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 				"upgrading an existing cluster",
 				"DESIRED=0",
 				"no ResourceSlices",
-				"neither Helm nor deploy.sh reports an error",
+				"Neither Helm nor deploy.sh reports an error either way",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("warning %q does not mention %q", got, want)

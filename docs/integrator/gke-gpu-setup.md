@@ -294,7 +294,7 @@ gcloud container node-pools describe POOL_NAME \
 gcloud container node-pools update POOL_NAME \
   --cluster CLUSTER_NAME \
   --location=LOCATION \
-  --node-labels="EXISTING_KEY_1=EXISTING_VALUE_1,gke-no-default-nvidia-gpu-device-plugin=true"
+  --node-labels="EXISTING_KEY_1=EXISTING_VALUE_1,gke-no-default-nvidia-gpu-device-plugin=true,nvidia.com/dra-kubelet-plugin=true"
 ```
 
 Replace `EXISTING_KEY_…=EXISTING_VALUE_…` with every label the `describe`
@@ -389,9 +389,10 @@ definition**, with the other required node labels — an ad hoc
 `kubectl label node` does not survive node replacement, recycling,
 autoscaling, or a pool scaled from zero, so later nodes arrive unlabelled.
 
-An unlabelled GPU node fails silently: the kubelet-plugin DaemonSet sits at
-`DESIRED=0`, publishes no `ResourceSlices`, and neither Helm nor the bundle's
-`deploy.sh` reports an error. This applies to existing clusters too — adding
+An unlabelled GPU node fails silently: it runs no kubelet plugin and publishes
+no `ResourceSlices`, and neither Helm nor the bundle's `deploy.sh` reports an
+error. With no labelled GPU node at all the DaemonSet sits at `DESIRED=0`; with
+only some labelled, those nodes work while the rest silently lack DRA. This applies to existing clusters too — adding
 the selector during an upgrade removes a plugin that was previously working.
 See [Prepare DRA nodes before applying upgraded bundles](../user/bundling.md#prepare-dra-nodes-before-applying-upgraded-bundles).
 

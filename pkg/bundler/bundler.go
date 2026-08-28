@@ -2982,7 +2982,7 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 func (b *DefaultBundler) warnDRAEvictionNodeLabelRequired(draNames []string, label config.NodeLabel) {
 	for _, name := range draNames {
 		msg := fmt.Sprintf(
-			"%s schedules its kubelet plugin only on nodes labeled %s=%s; apply that label to every GPU node at node-pool provisioning time (EKS managed nodegroup labels, Karpenter nodeClass, or equivalent) — including when upgrading an existing cluster — or the kubelet-plugin DaemonSet stays at DESIRED=0 and publishes no ResourceSlices, and neither Helm nor deploy.sh reports an error",
+			"%s schedules its kubelet plugin only on nodes labeled %s=%s; apply that label to every GPU node at node-pool provisioning time (EKS managed nodegroup labels, Karpenter NodePool spec.template.metadata.labels, or equivalent) — including when upgrading an existing cluster. Unlabelled GPU nodes silently run without DRA: they publish no ResourceSlices, and if no GPU node carries the label the kubelet-plugin DaemonSet sits at DESIRED=0. Neither Helm nor deploy.sh reports an error either way",
 			name,
 			label.Key,
 			label.Value,

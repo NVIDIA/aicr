@@ -132,9 +132,10 @@ definition**, with the other required node labels — an ad hoc
 `kubectl label node` does not survive node replacement, recycling,
 autoscaling, or a pool scaled from zero, so later nodes arrive unlabelled.
 
-An unlabelled GPU node fails silently: the kubelet-plugin DaemonSet sits at
-`DESIRED=0`, publishes no `ResourceSlices`, and neither Helm nor the bundle's
-`deploy.sh` reports an error. This applies to existing clusters too — adding
+An unlabelled GPU node fails silently: it runs no kubelet plugin and publishes
+no `ResourceSlices`, and neither Helm nor the bundle's `deploy.sh` reports an
+error. With no labelled GPU node at all the DaemonSet sits at `DESIRED=0`; with
+only some labelled, those nodes work while the rest silently lack DRA. This applies to existing clusters too — adding
 the selector during an upgrade removes a plugin that was previously working.
 See [Prepare DRA nodes before applying upgraded bundles](../user/bundling.md#prepare-dra-nodes-before-applying-upgraded-bundles).
 
