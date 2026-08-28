@@ -248,8 +248,8 @@ func TestBuilder_BuildFromCriteriaWithEvaluator(t *testing.T) {
 			if result.Kind != RecipeResultKind {
 				t.Errorf("expected kind %s, got %q", RecipeResultKind, result.Kind)
 			}
-			if result.APIVersion != RecipeAPIVersion {
-				t.Errorf("expected apiVersion %s, got %q", RecipeAPIVersion, result.APIVersion)
+			if result.APIVersion != RecipeResultAPIVersion {
+				t.Errorf("expected apiVersion %s, got %q", RecipeResultAPIVersion, result.APIVersion)
 			}
 		})
 	}
@@ -408,7 +408,9 @@ func TestConstraintEvalResult(t *testing.T) {
 func buildIsolationProvider(t *testing.T, overlayName string) DataProvider {
 	t.Helper()
 
-	registryYAML := []byte(`components: []
+	registryYAML := []byte(`apiVersion: aicr.run/v1alpha2
+kind: ComponentRegistry
+components: []
 `)
 	baseYAML := []byte(`kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2

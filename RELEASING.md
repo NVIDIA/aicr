@@ -13,6 +13,37 @@ Releases follow a **bi-weekly cadence**. A new release is cut every two weeks.
 | Pre-release | Before a regular release, as needed | `rc` | Any maintainer can create for testing |
 | Major | Planned | `major` | Requires team agreement and advance communication |
 
+## Artifact Compatibility and Deprecation
+
+Artifact `apiVersion` maturity is independent of the AICR release version and
+is governed by [ADR-022](docs/design/022-artifact-maturity-and-deprecation.md).
+Retiring an artifact version owes the following window on the AICR release
+axis:
+
+- Alpha: no deprecation window.
+- Beta: readable for two releases after deprecation.
+- GA: readable for the rest of the current AICR major version; removal requires
+  the next `vMAJOR` release.
+
+For beta and GA bumps, stage the new reader in Release N before switching the
+emitter in Release N+1. Release notes must identify any deprecation, the last
+release that reads the retiring version, and the required artifact recapture,
+regeneration, or authored-header edit.
+
+The initial alpha-to-target migration is the explicit three-release sequence in
+ADR-022 §3, bound to these releases:
+
+| Release | Reads | Emits | Tracking |
+|---|---|---|---|
+| v0.21 | alpha and target | alpha | [#2404](https://github.com/NVIDIA/aicr/pull/2404) |
+| v0.22 | alpha and target | target | [#2416](https://github.com/NVIDIA/aicr/issues/2416) |
+| v0.23 | target only | target | [#2417](https://github.com/NVIDIA/aicr/issues/2417) |
+
+Cutting v0.22 or v0.23 means completing the corresponding issue in that release,
+not after it. The consumer-facing form of this table, including the per-kind
+target values, is in
+[`docs/integrator/data-extension.md`](docs/integrator/data-extension.md#catalog-and-binary-compatibility).
+
 ## What Goes Into a Release
 
 A release includes everything merged to `main` since the last tag. There is no cherry-picking or feature branching for releases — if it's on `main`, it ships.
@@ -183,7 +214,7 @@ Published to GitHub Container Registry (`ghcr.io/nvidia/aicr-validators/`):
 | `deployment` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Deployment validator |
 | `performance` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Performance validator |
 | `conformance` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Conformance validator |
-| `aiperf-bench` | `nvcr.io/nvidia/distroless/python:3.13-v4.0.8` | AIPerf benchmark runner (built from `python:3.13-slim`) |
+| `aiperf-bench` | `nvcr.io/nvidia/distroless/python:3.13-v4.1.1` | AIPerf benchmark runner (built from `python:3.13-slim`) |
 
 Stable releases promote `vX.Y.Z` and `latest`; prereleases promote their
 `vX.Y.Z-rcN` version tags but never `latest`. The release workflow also retains

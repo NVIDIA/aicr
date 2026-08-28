@@ -84,6 +84,11 @@ type BundleResolved struct {
 	// AcceleratedNodeTolerations is the parsed slice.
 	AcceleratedNodeTolerations []corev1.Toleration
 
+	// DRAEvictionNodeLabel is the parsed
+	// spec.bundle.scheduling.draEvictionNodeLabel. Nil when unset so command
+	// consumers can apply the NVIDIA-documented default.
+	DRAEvictionNodeLabel *bundlercfg.NodeLabel
+
 	// WorkloadGate is the parsed spec.bundle.scheduling.workloadGate taint.
 	// Nil when config did not set it.
 	WorkloadGate *corev1.Taint
@@ -219,6 +224,11 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 		out.SystemNodeSelector = maps.Clone(b.Scheduling.SystemNodeSelector)
 		out.AcceleratedNodeSelector = maps.Clone(b.Scheduling.AcceleratedNodeSelector)
 		out.WorkloadSelector = maps.Clone(b.Scheduling.WorkloadSelector)
+		var err error
+		out.DRAEvictionNodeLabel, err = resolveDRAEvictionNodeLabel(b.Scheduling.DRAEvictionNodeLabel)
+		if err != nil {
+			return nil, err
+		}
 
 		if b.Scheduling.SystemNodeTolerations != nil {
 			tols, err := snapshotter.ParseTolerations(b.Scheduling.SystemNodeTolerations)
@@ -287,6 +297,18 @@ func validateAttestationEndpoints(a *AttestationSpec) error {
 		return err
 	}
 	return bundlercfg.ValidateHTTPSURL("spec.bundle.attestation.rekorURL", a.RekorURL)
+}
+
+func resolveDRAEvictionNodeLabel(raw string) (*bundlercfg.NodeLabel, error) {
+	if raw == "" {
+		return nil, nil //nolint:nilnil // nil means the config omitted the optional label.
+	}
+	label, err := bundlercfg.ParseNodeLabel(raw)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"invalid spec.bundle.scheduling.draEvictionNodeLabel")
+	}
+	return &label, nil
 }
 
 // ValidateResolved is the typed-domain projection of ValidateSpec produced

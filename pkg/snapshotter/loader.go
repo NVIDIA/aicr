@@ -69,9 +69,9 @@ func LoadFromFileWithKubeconfig(ctx context.Context, path, kubeconfig string) (*
 
 	if snap.APIVersion != "" && !header.IsSupportedAPIVersion(snap.APIVersion) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("snapshot file has apiVersion %q, which this aicr build does not support (expected %q); "+
+			fmt.Sprintf("snapshot file has apiVersion %q, which this aicr build does not support (expected %q or %q); "+
 				"recapture the snapshot with a matching aicr version",
-				snap.APIVersion, header.GroupVersion))
+				snap.APIVersion, header.GroupVersion, header.GroupVersionV1))
 	}
 
 	usable := 0

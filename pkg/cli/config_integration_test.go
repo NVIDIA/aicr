@@ -202,6 +202,7 @@ spec:
         role: system
       acceleratedNodeTolerations:
         - "nvidia.com/gpu=present:NoSchedule"
+      draEvictionNodeLabel: example.com/dra-ready=enabled
       nodes: 4
       storageClass: gp3
       sharedStorageClass: efs-sc
@@ -271,6 +272,9 @@ func TestBundleCmd_ConfigFlag_PopulatesAllSections(t *testing.T) {
 	if len(opts.acceleratedNodeTolerations) == 0 {
 		t.Errorf("expected acceleratedNodeTolerations to be populated")
 	}
+	if got := opts.draEvictionNodeLabel.String(); got != "example.com/dra-ready=enabled" {
+		t.Errorf("draEvictionNodeLabel = %q, want example.com/dra-ready=enabled", got)
+	}
 	if opts.estimatedNodeCount != 4 {
 		t.Errorf("estimatedNodeCount = %d, want 4", opts.estimatedNodeCount)
 	}
@@ -295,6 +299,7 @@ func TestBundleCmd_ConfigFlag_FlagOverridesScalar(t *testing.T) {
 		"--deployer", "helm",
 		"--storage-class", "premium",
 		"--shared-storage-class", "custom-rwx",
+		"--dra-eviction-node-label", "example.com/cli-dra=true",
 		"-o", t.TempDir(),
 	})
 	if got := opts.deployer.String(); got != "helm" {
@@ -305,6 +310,9 @@ func TestBundleCmd_ConfigFlag_FlagOverridesScalar(t *testing.T) {
 	}
 	if opts.sharedStorageClass != "custom-rwx" {
 		t.Errorf("sharedStorageClass = %q, want custom-rwx (CLI override)", opts.sharedStorageClass)
+	}
+	if got := opts.draEvictionNodeLabel.String(); got != "example.com/cli-dra=true" {
+		t.Errorf("draEvictionNodeLabel = %q, want example.com/cli-dra=true (CLI override)", got)
 	}
 }
 

@@ -79,7 +79,10 @@ scripts, and decoupling environment specifics (e.g., StorageClass) from recipe
 content so bundles are portable.
 
 **Versioning policy.** Document the major-bump policy for each surface in
-`RELEASING.md` and wire compatibility tests into CI.
+`RELEASING.md` and wire compatibility tests into CI. Artifact maturity and
+reader/emitter rollout follow
+[ADR-022](docs/design/022-artifact-maturity-and-deprecation.md); project v1 and
+artifact maturity are separate axes.
 
 **Acceptance:**
 

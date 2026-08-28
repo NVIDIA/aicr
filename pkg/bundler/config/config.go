@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
@@ -140,6 +141,56 @@ func ValidateHTTPSURL(label, raw string) error {
 	return nil
 }
 
+// NodeLabel is a single Kubernetes node label used as an exact-match node
+// selector. The GPU Operator DRA eviction contract needs both parts for the
+// DRA kubelet plugin selector, but passes only Key to the Driver Manager.
+type NodeLabel struct {
+	Key   string
+	Value string
+}
+
+// String returns the label in key=value form.
+func (l NodeLabel) String() string {
+	return l.Key + "=" + l.Value
+}
+
+// Validate reports whether the label has a Kubernetes-qualified key and a
+// valid label value.
+func (l NodeLabel) Validate() error {
+	if errs := validation.IsQualifiedName(l.Key); len(errs) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid node label key %q: %s", l.Key, strings.Join(errs, "; ")))
+	}
+	if errs := validation.IsValidLabelValue(l.Value); len(errs) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid node label value %q: %s", l.Value, strings.Join(errs, "; ")))
+	}
+	return nil
+}
+
+// ParseNodeLabel parses and validates a single node label in key=value form.
+func ParseNodeLabel(raw string) (NodeLabel, error) {
+	parts := strings.SplitN(raw, "=", 2)
+	if len(parts) != 2 {
+		return NodeLabel{}, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid node label %q: expected key=value", raw))
+	}
+	label := NodeLabel{Key: parts[0], Value: parts[1]}
+	if err := label.Validate(); err != nil {
+		return NodeLabel{}, err
+	}
+	return label, nil
+}
+
+// DefaultDRAEvictionNodeLabel returns the node label NVIDIA documents for
+// coordinating DRA kubelet-plugin eviction with GPU Operator driver upgrades.
+func DefaultDRAEvictionNodeLabel() NodeLabel {
+	return NodeLabel{
+		Key:   defaults.DRAEvictionNodeLabelKey,
+		Value: defaults.DRAEvictionNodeLabelValue,
+	}
+}
+
 // Config provides immutable configuration options for bundlers.
 // All fields are read-only after creation to prevent accidental modifications.
 // Use Clone() to create a modified copy or Merge() to combine configurations.
@@ -222,6 +273,11 @@ type Config struct {
 	// sharedStorageClass is the Kubernetes StorageClass name to inject into
 	// shared filesystem PVCs at bundle time.
 	sharedStorageClass string
+
+	// draEvictionNodeLabel is the shared label used to place the DRA kubelet
+	// plugin and tell GPU Operator's Driver Manager which pods to evict during
+	// driver upgrades. It is injected only when both components are enabled.
+	draEvictionNodeLabel NodeLabel
 
 	// vendorCharts pulls upstream Helm chart bytes into the bundle at bundle
 	// time so the resulting artifact is self-contained and air-gap
@@ -477,6 +533,12 @@ func (c *Config) SharedStorageClass() string {
 	return c.sharedStorageClass
 }
 
+// DRAEvictionNodeLabel returns the label shared by the DRA kubelet plugin
+// selector and GPU Operator Driver Manager eviction configuration.
+func (c *Config) DRAEvictionNodeLabel() NodeLabel {
+	return c.draEvictionNodeLabel
+}
+
 // VendorCharts reports whether upstream Helm chart bytes should be pulled
 // into the bundle at bundle time. Off by default; opt-in via
 // --vendor-charts on the CLI or vendor-charts=true on the API.
@@ -542,7 +604,7 @@ func (c *Config) Bundlers() []string {
 
 // Validate checks if the Config has valid settings.
 func (c *Config) Validate() error {
-	return nil
+	return c.draEvictionNodeLabel.Validate()
 }
 
 type Option func(*Config)
@@ -745,6 +807,17 @@ func WithSharedStorageClass(storageClass string) Option {
 	}
 }
 
+// WithDRAEvictionNodeLabel sets the node label used to coordinate DRA
+// kubelet-plugin eviction with GPU Operator driver upgrades.
+func WithDRAEvictionNodeLabel(label NodeLabel) Option {
+	return func(c *Config) {
+		if label == (NodeLabel{}) {
+			return
+		}
+		c.draEvictionNodeLabel = label
+	}
+}
+
 // WithVendorCharts enables bundle-time vendoring of upstream Helm chart
 // bytes. When set, every Helm component becomes a local chart inside the
 // generated bundle and the resulting artifact is fully air-gap
@@ -866,14 +939,15 @@ func WithBundlers(names []string) Option {
 // NewConfig returns a Config with default values.
 func NewConfig(options ...Option) *Config {
 	c := &Config{
-		deployer:            DeployerHelm,
-		includeChecksums:    true,
-		includeReadme:       true,
-		valueOverrides:      make(map[string]map[string]string),
-		valueOverridesTyped: make(map[string]map[string]any),
-		dynamicValues:       make(map[string][]string),
-		verbose:             false,
-		version:             "dev",
+		deployer:             DeployerHelm,
+		includeChecksums:     true,
+		includeReadme:        true,
+		valueOverrides:       make(map[string]map[string]string),
+		valueOverridesTyped:  make(map[string]map[string]any),
+		dynamicValues:        make(map[string][]string),
+		draEvictionNodeLabel: DefaultDRAEvictionNodeLabel(),
+		verbose:              false,
+		version:              "dev",
 	}
 	for _, opt := range options {
 		opt(c)

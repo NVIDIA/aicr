@@ -171,12 +171,14 @@ jobs:
         ${{ inputs.test_config_dir }}/${{ inputs.accelerator }}-${{ inputs.intent }}${{
           inputs.deployer != 'helmfile' && format('-{0}', inputs.deployer) || ''
         }}-config.yaml
-      # v0.4.27 — required for node-group taints in the cluster-config schema
-      # (GPU pool carries skyhook.nvidia.com=runtime-required:NoSchedule until
-      # NodeWrite finishes tuning + reboot). Earlier v0.4.x pins predate taint
-      # support; v0.2.6 read .compute.nodeGroups.* directly and failed
-      # Terraform parse with "object with 1 attribute eks".
-      EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:8bc33d14e6e5659d242aa2cdbcd69fca389cfcdb9e94f7a7a1b82fd33176befa"
+      # v0.5.1 — GPU-conditional worker taints (non-GPU worker pools stay
+      # untainted) + native GB300 (p6e-gb300/p6e-gb300r) EFA layout, on top of the
+      # node-group taint schema introduced in v0.4.27 (GPU pool carries
+      # skyhook.nvidia.com=runtime-required:NoSchedule until NodeWrite finishes
+      # tuning + reboot). Earlier v0.4.x pins predate taint support; v0.2.6 read
+      # .compute.nodeGroups.* directly and failed Terraform parse with
+      # "object with 1 attribute eks".
+      EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:91762c28d63c6f47774e86a922b84596a8daed031b225b9e7a25bd4910829f9b"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Target platform(s) for the main-cell image builds (snapshot-agent + the

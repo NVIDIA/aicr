@@ -498,7 +498,8 @@ func (p *LayeredDataProvider) WalkDir(ctx context.Context, root string, fn fs.Wa
 			return fn(relPath, d, nil)
 		})
 		if err != nil {
-			return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to walk external directory tree", err)
+			return aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal,
+				"failed to walk external directory tree")
 		}
 	}
 
@@ -542,13 +543,16 @@ type fileReader interface {
 	ReadFile(ctx context.Context, path string) ([]byte, error)
 }
 
-// mergeEmbeddedAndExternal loads a YAML file from both embedded and external sources,
-// unmarshals each into type T, merges them using the provided function, and serializes
-// the result back to YAML bytes.
+// mergeEmbeddedAndExternal loads a YAML file from both embedded and external
+// sources, unmarshals each into type T, validates the raw external value when
+// a validator is supplied, merges them, and serializes the result back to YAML
+// bytes. Validation deliberately precedes merge so an embedded header cannot
+// erase an unsupported external one.
 func mergeEmbeddedAndExternal[T any](
 	ctx context.Context,
 	embedded fileReader, externalDir string, maxFileSize int64, allowSymlinks bool,
-	fileName string, merge func(embedded, external *T) *T,
+	fileName string, validateExternal func(embedded, external *T) error,
+	merge func(embedded, external *T) *T,
 ) ([]byte, error) {
 
 	kind := filepath.Base(fileName)
@@ -574,6 +578,11 @@ func mergeEmbeddedAndExternal[T any](
 	var externalVal T
 	if unmarshalErr := yaml.Unmarshal(externalData, &externalVal); unmarshalErr != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to parse external "+kind, unmarshalErr)
+	}
+	if validateExternal != nil {
+		if validateErr := validateExternal(&embeddedVal, &externalVal); validateErr != nil {
+			return nil, validateErr
+		}
 	}
 
 	// Merge: external overrides embedded
@@ -604,7 +613,11 @@ func mergeEmbeddedAndExternal[T any](
 func (p *LayeredDataProvider) getMergedRegistry(ctx context.Context) ([]byte, error) {
 	p.mergedRegistryOnce.Do(func() {
 		p.mergedRegistry, p.mergedRegistryErr = mergeEmbeddedAndExternal(
-			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, registryFileName, mergeRegistries,
+			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, registryFileName,
+			func(_ *ComponentRegistry, registry *ComponentRegistry) error {
+				return validateComponentRegistryHeader(registry, "external "+registryFileName)
+			},
+			mergeRegistries,
 		)
 	})
 
@@ -655,12 +668,6 @@ func mergeRegistries(embedded, external *ComponentRegistry) *ComponentRegistry {
 		"embedded_count", len(embedded.Components),
 		"external_count", len(external.Components))
 
-	if external.APIVersion != "" && external.APIVersion != embedded.APIVersion {
-		slog.Warn("external registry has different API version",
-			"embedded", embedded.APIVersion,
-			"external", external.APIVersion)
-	}
-
 	return &ComponentRegistry{
 		APIVersion: embedded.APIVersion,
 		Kind:       embedded.Kind,
@@ -693,7 +700,8 @@ type catalogForMerge struct {
 func (p *LayeredDataProvider) getMergedCatalog(ctx context.Context) ([]byte, error) {
 	p.mergedCatalogOnce.Do(func() {
 		p.mergedCatalog, p.mergedCatalogErr = mergeEmbeddedAndExternal(
-			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, catalogFileName, mergeCatalogs,
+			ctx, p.embedded, p.externalDir, p.maxFileSize, p.allowSymlinks, catalogFileName,
+			nil, mergeCatalogs,
 		)
 	})
 
@@ -708,6 +716,9 @@ func mergeCatalogs(embedded, external *catalogForMerge) *catalogForMerge {
 		"embedded_count", len(embedded.Validators),
 		"external_count", len(external.Validators))
 
+	// ValidatorCatalog uses a separate API domain and is explicitly outside
+	// ADR-022. Preserve its existing advisory mismatch behavior until that
+	// schema defines its own compatibility policy.
 	if external.APIVersion != "" && external.APIVersion != embedded.APIVersion {
 		slog.Warn("external catalog has different API version",
 			"embedded", embedded.APIVersion,

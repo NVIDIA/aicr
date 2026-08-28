@@ -35,14 +35,22 @@
 // Initialize a header for a recipe via Init:
 //
 //	var h header.Header
-//	h.Init(header.KindRecipe, header.GroupVersion, "v1.0.0")
+//	h.Init(header.KindRecipe, header.StableGroupVersion, "v1.0.0")
 //	// h.Metadata == map[string]string{"timestamp": "...", "version": "v1.0.0"}
+//
+// KindRecipe shown here is the legacy input kind, distinct from
+// KindRecipeResult and normalized to it per ADR-022 §2; both sit on the stable
+// artifact track alongside Snapshot, hence StableGroupVersion. An authored
+// catalog RecipeMetadata is colloquially a "recipe" too but sits on the
+// authoring track, and a profile-bearing artifact on its own track, so those
+// emitters pass AuthoringGroupVersion or ProfileGroupVersion instead; see the
+// API Versioning section below.
 //
 // For reproducible-build callers (SLSA, signed artifacts) inject a fixed
 // timestamp via InitWithTime instead of Init:
 //
 //	var h header.Header
-//	h.InitWithTime(header.KindSnapshot, header.GroupVersion, "v1.0.0", buildTime)
+//	h.InitWithTime(header.KindSnapshot, header.StableGroupVersion, "v1.0.0", buildTime)
 //
 // # Serialization
 //
@@ -59,16 +67,24 @@
 //
 // # API Versioning
 //
-// The APIVersion field enables evolution of data formats. The current group and
-// version is GroupVersion ("aicr.run/v1alpha2"); APIGroup derives from Domain.
-// Per ADR-013 the move from the legacy aicr.nvidia.com/v1alpha1 group was a hard
-// break — the old value is rejected, not migrated.
+// The APIVersion field enables evolution of data formats. APIGroup derives
+// from Domain. Per ADR-013 the move from the legacy aicr.nvidia.com/v1alpha1
+// group was a hard break — the old value is rejected, not migrated.
 //
-// Callers should gate on IsSupportedAPIVersion rather than comparing literals,
-// so the single source of truth in this package stays authoritative:
+// ADR-022 splits artifacts across three schema tracks. An emitter aliases the
+// constant for its track — StableGroupVersion, AuthoringGroupVersion, or
+// ProfileGroupVersion — never GroupVersion directly. The first two carry the
+// same string during the reader-first release and diverge at the emitter
+// switch, so aliasing by value rather than by track compiles and passes tests
+// today while emitting the wrong version later.
+//
+// Callers should select the gate for the artifact's schema track rather than
+// comparing literals, so the single source of truth in this package stays
+// authoritative. IsSupportedAPIVersion covers the stable artifact track:
 //
 //	if h.APIVersion != "" && !header.IsSupportedAPIVersion(h.APIVersion) {
-//	    return fmt.Errorf("unsupported apiVersion %q; expected %s", h.APIVersion, header.GroupVersion)
+//	    return errors.New(errors.ErrCodeInvalidRequest,
+//	        fmt.Sprintf("unsupported apiVersion %q", h.APIVersion))
 //	}
 //
 // # Kind Field
@@ -91,7 +107,7 @@
 //
 // Init writes the timestamp using RFC3339 format in UTC:
 //
-//	h.Init(header.KindRecipe, header.GroupVersion, "v1.0.0")
+//	h.Init(header.KindRecipe, header.StableGroupVersion, "v1.0.0")
 //	// h.Metadata["timestamp"] == "2025-12-30T10:30:00Z"
 //
 // # Validation

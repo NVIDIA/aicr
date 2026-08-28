@@ -27,6 +27,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
@@ -794,9 +795,23 @@ func ParseCriteriaFromValues(values url.Values, reg *CriteriaRegistry) (*Criteri
 const RecipeCriteriaKind = "RecipeCriteria"
 
 // RecipeCriteriaAPIVersion is the API version for RecipeCriteria resources.
-// It aliases RecipeAPIVersion (ultimately header.GroupVersion) so every AICR
-// artifact apiVersion has a single source of truth.
-const RecipeCriteriaAPIVersion = RecipeAPIVersion
+// RecipeCriteria is on the ADR-022 stable artifact track, so this aliases
+// header.StableGroupVersion directly rather than chaining through a recipe
+// constant; the track's target is header.GroupVersionV1.
+const RecipeCriteriaAPIVersion = header.StableGroupVersion
+
+func validateRecipeCriteriaHeader(kind, apiVersion string) error {
+	if kind != "" && kind != RecipeCriteriaKind {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid kind %q, expected %q", kind, RecipeCriteriaKind))
+	}
+	if apiVersion != "" && !header.IsSupportedAPIVersion(apiVersion) {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid apiVersion %q for %s, expected %q or %q; regenerate the criteria with a matching aicr version",
+				apiVersion, RecipeCriteriaKind, RecipeCriteriaAPIVersion, header.GroupVersionV1))
+	}
+	return nil
+}
 
 // RecipeCriteria represents a Kubernetes-style criteria resource.
 // This is the format used in criteria files and API requests.
@@ -928,12 +943,8 @@ func LoadCriteriaFromFile(path string, reg *CriteriaRegistry) (*Criteria, error)
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to load criteria file", err)
 	}
 
-	// Validate kind and apiVersion
-	if raw.Kind != "" && raw.Kind != RecipeCriteriaKind {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid kind %q, expected %q", raw.Kind, RecipeCriteriaKind))
-	}
-	if raw.APIVersion != "" && raw.APIVersion != RecipeCriteriaAPIVersion {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid apiVersion %q, expected %q", raw.APIVersion, RecipeCriteriaAPIVersion))
+	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+		return nil, err
 	}
 
 	return validateAndConvertRawSpec(&raw.Spec, reg)
@@ -972,12 +983,8 @@ func LoadCriteriaFromFileWithContext(ctx context.Context, path string, reg *Crit
 		return nil, err
 	}
 
-	// Validate kind and apiVersion
-	if raw.Kind != "" && raw.Kind != RecipeCriteriaKind {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid kind %q, expected %q", raw.Kind, RecipeCriteriaKind))
-	}
-	if raw.APIVersion != "" && raw.APIVersion != RecipeCriteriaAPIVersion {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid apiVersion %q, expected %q", raw.APIVersion, RecipeCriteriaAPIVersion))
+	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+		return nil, err
 	}
 
 	return validateAndConvertRawSpec(&raw.Spec, reg)
@@ -1007,12 +1014,8 @@ func loadCriteriaFromHTTPWithContext(ctx context.Context, url string, reg *Crite
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "failed to deserialize criteria")
 	}
 
-	// Validate kind and apiVersion
-	if raw.Kind != "" && raw.Kind != RecipeCriteriaKind {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid kind %q, expected %q", raw.Kind, RecipeCriteriaKind))
-	}
-	if raw.APIVersion != "" && raw.APIVersion != RecipeCriteriaAPIVersion {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid apiVersion %q, expected %q", raw.APIVersion, RecipeCriteriaAPIVersion))
+	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+		return nil, err
 	}
 
 	return validateAndConvertRawSpec(&raw.Spec, reg)
@@ -1094,12 +1097,8 @@ func ParseCriteriaFromBody(body io.Reader, contentType string, reg *CriteriaRegi
 		}
 	}
 
-	// Validate kind and apiVersion
-	if raw.Kind != "" && raw.Kind != RecipeCriteriaKind {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid kind %q, expected %q", raw.Kind, RecipeCriteriaKind))
-	}
-	if raw.APIVersion != "" && raw.APIVersion != RecipeCriteriaAPIVersion {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid apiVersion %q, expected %q", raw.APIVersion, RecipeCriteriaAPIVersion))
+	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
+		return nil, err
 	}
 
 	return validateAndConvertRawSpec(&raw.Spec, reg)

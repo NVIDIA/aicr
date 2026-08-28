@@ -193,8 +193,8 @@ func TestApplyBuildConfigRejectsProfileAccountingOwnershipOverlap(t *testing.T) 
 				if result.Configuration != nil {
 					t.Fatal("applyBuildConfig() mutated configuration before rejecting ownership overlap")
 				}
-				if result.APIVersion != RecipeAPIVersion {
-					t.Fatalf("apiVersion = %q after rejection, want %q", result.APIVersion, RecipeAPIVersion)
+				if result.APIVersion != RecipeResultAPIVersion {
+					t.Fatalf("apiVersion = %q after rejection, want %q", result.APIVersion, RecipeResultAPIVersion)
 				}
 			}
 		})
@@ -515,7 +515,7 @@ func TestBuilderDeploymentOrderMatchesEnabledComponents(t *testing.T) {
 func accountingTestResult() *RecipeResult {
 	return &RecipeResult{
 		Kind:       RecipeResultKind,
-		APIVersion: RecipeAPIVersion,
+		APIVersion: RecipeResultAPIVersion,
 		Criteria:   &Criteria{Platform: CriteriaPlatformSlurm},
 		ComponentRefs: []ComponentRef{
 			{

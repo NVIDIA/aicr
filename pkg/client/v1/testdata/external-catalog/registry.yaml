@@ -4,4 +4,6 @@
 # This fixture contributes no components. It exists so the overlay beside it
 # can register a criteria value the EMBEDDED catalog does not know, which is
 # the condition that made config-driven external catalogs unusable.
+apiVersion: aicr.run/v1alpha2
+kind: ComponentRegistry
 components: []

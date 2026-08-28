@@ -17,6 +17,7 @@ package recipe
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -117,6 +118,63 @@ components:
 	}
 	if !strings.Contains(content, "gpu-operator") {
 		t.Error("merged registry should contain gpu-operator from embedded")
+	}
+}
+
+func TestLayeredDataProvider_ValidatesRawExternalRegistryBeforeMerge(t *testing.T) {
+	tests := []struct {
+		name       string
+		apiVersion string
+		wantErr    bool
+	}{
+		{name: "target accepted", apiVersion: "aicr.run/v1beta1"},
+		{name: "unknown rejected", apiVersion: "aicr.run/v9", wantErr: true},
+		{name: "empty rejected", apiVersion: "", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			registry := "apiVersion: " + tt.apiVersion + "\nkind: ComponentRegistry\ncomponents:\n" +
+				"  - name: external-only\n    displayName: External Only\n"
+			if err := os.WriteFile(filepath.Join(tmpDir, registryFileName), []byte(registry), 0o600); err != nil {
+				t.Fatalf("write registry: %v", err)
+			}
+			provider, err := NewLayeredDataProvider(
+				NewEmbeddedDataProvider(GetEmbeddedFS(), "."),
+				LayeredProviderConfig{ExternalDir: tmpDir},
+			)
+			if err != nil {
+				t.Fatalf("NewLayeredDataProvider() error = %v", err)
+			}
+
+			data, err := provider.ReadFile(t.Context(), registryFileName)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("ReadFile() error = nil, want raw external header rejection")
+				}
+				if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+					t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
+				}
+				if observed := fmt.Sprintf("apiVersion %q", tt.apiVersion); !strings.Contains(err.Error(), observed) {
+					t.Errorf("error %q does not name observed header %q", err, observed)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ReadFile() error = %v", err)
+			}
+			if !strings.Contains(string(data), "external-only") {
+				t.Fatal("merged registry omitted accepted target-version component")
+			}
+			var merged ComponentRegistry
+			if err := yaml.Unmarshal(data, &merged); err != nil {
+				t.Fatalf("unmarshal merged registry: %v", err)
+			}
+			if merged.APIVersion != ComponentRegistryAPIVersion {
+				t.Errorf("merged registry apiVersion = %q, want current emitter %q",
+					merged.APIVersion, ComponentRegistryAPIVersion)
+			}
+		})
 	}
 }
 
@@ -1019,6 +1077,50 @@ func setupCatalogTestDir(t *testing.T, catalogContent string) string {
 	}
 
 	return tmpDir
+}
+
+func TestLayeredDataProvider_ValidatorCatalogRemainsOutsideADR022Gate(t *testing.T) {
+	tests := []struct {
+		name   string
+		header string
+	}{
+		{
+			name:   "headerless catalog remains readable",
+			header: "",
+		},
+		{
+			name: "different version remains readable",
+			header: "apiVersion: validator.nvidia.com/v9\n" +
+				"kind: ValidatorCatalog\n",
+		},
+		{
+			name: "different kind remains readable",
+			header: "apiVersion: validator.nvidia.com/v1alpha1\n" +
+				"kind: OtherCatalog\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			catalogContent := tt.header + "validators:\n  - name: adr-022-scope-boundary\n"
+			tmpDir := setupCatalogTestDir(t, catalogContent)
+			provider, err := NewLayeredDataProvider(
+				NewEmbeddedDataProvider(GetEmbeddedFS(), "."),
+				LayeredProviderConfig{ExternalDir: tmpDir},
+			)
+			if err != nil {
+				t.Fatalf("NewLayeredDataProvider() error = %v", err)
+			}
+
+			data, err := provider.ReadFile(t.Context(), catalogFileName)
+			if err != nil {
+				t.Fatalf("ReadFile() error = %v", err)
+			}
+			if !strings.Contains(string(data), "adr-022-scope-boundary") {
+				t.Fatal("merged catalog omitted external validator")
+			}
+		})
+	}
 }
 
 // TestLayeredDataProvider_MergesCatalog tests catalog merging with external data.

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
@@ -586,7 +587,7 @@ func TestBuildRecipeResultWithProfile(t *testing.T) {
 
 	t.Run("selection without declaration fails", func(t *testing.T) {
 		legacy := testProfileStore(nil)
-		legacy.Overlays["aks"].APIVersion = RecipeAPIVersion
+		legacy.Overlays["aks"].APIVersion = RecipeMetadataAPIVersion
 		result, err := legacy.BuildRecipeResultWithProfile(ctx, criteria, "gpuStack=operator-managed")
 		if err == nil || result != nil {
 			t.Fatalf("BuildRecipeResultWithProfile() = (%#v, %v), want error", result, err)
@@ -595,12 +596,12 @@ func TestBuildRecipeResultWithProfile(t *testing.T) {
 
 	t.Run("composition without declaration stays legacy", func(t *testing.T) {
 		legacy := testProfileStore(nil)
-		legacy.Overlays["aks"].APIVersion = RecipeAPIVersion
+		legacy.Overlays["aks"].APIVersion = RecipeMetadataAPIVersion
 		result, err := legacy.BuildRecipeResult(ctx, criteria)
 		if err != nil {
 			t.Fatalf("BuildRecipeResult() error = %v", err)
 		}
-		if result.APIVersion != RecipeAPIVersion || result.Metadata.SelectedProfile != nil {
+		if result.APIVersion != RecipeResultAPIVersion || result.Metadata.SelectedProfile != nil {
 			t.Fatalf("legacy result apiVersion=%q selectedProfile=%#v",
 				result.APIVersion, result.Metadata.SelectedProfile)
 		}
@@ -625,7 +626,7 @@ func TestProfileResolutionGuards(t *testing.T) {
 
 	t.Run("typed declaration requires profile api version", func(t *testing.T) {
 		overlay := newOverlay("service", &Criteria{Service: CriteriaServiceAKS}, testProfileDeclaration())
-		overlay.APIVersion = RecipeAPIVersion
+		overlay.APIVersion = RecipeMetadataAPIVersion
 		store := &MetadataStore{
 			Base:     base,
 			Overlays: map[string]*RecipeMetadata{"service": overlay},
@@ -825,11 +826,19 @@ func TestProfileArtifactContract(t *testing.T) {
 		result  *RecipeResult
 		wantErr string
 	}{
-		{name: "legacy", result: &RecipeResult{APIVersion: RecipeAPIVersion}},
+		{name: "legacy", result: &RecipeResult{APIVersion: RecipeResultAPIVersion}},
+		{name: "Release N target default", result: &RecipeResult{APIVersion: header.GroupVersionV1}},
 		{
 			name: "profile",
 			result: &RecipeResult{
 				APIVersion: RecipeProfileAPIVersion,
+				Metadata:   RecipeResultMetadata{SelectedProfile: selected},
+			},
+		},
+		{
+			name: "Release N target profile",
+			result: &RecipeResult{
+				APIVersion: header.GroupVersionV1Beta2,
 				Metadata:   RecipeResultMetadata{SelectedProfile: selected},
 			},
 		},
@@ -908,7 +917,7 @@ func TestProfileArtifactContract(t *testing.T) {
 		{
 			name: "legacy with selection",
 			result: &RecipeResult{
-				APIVersion: RecipeAPIVersion,
+				APIVersion: RecipeResultAPIVersion,
 				Metadata:   RecipeResultMetadata{SelectedProfile: selected},
 			},
 			wantErr: "cannot carry",
@@ -1175,7 +1184,7 @@ componentRefs: []
 		},
 		{
 			name:    "legacy version with selected profile",
-			data:    []byte(strings.Replace(string(valid), RecipeProfileAPIVersion, RecipeAPIVersion, 1)),
+			data:    []byte(strings.Replace(string(valid), RecipeProfileAPIVersion, RecipeResultAPIVersion, 1)),
 			wantErr: "cannot carry",
 		},
 	}
@@ -1349,10 +1358,12 @@ spec:
 		content []byte
 		wantErr string
 	}{
-		{name: "legacy without profile", content: overlay(RecipeAPIVersion, "")},
-		{name: "empty version without profile", content: overlay("", "")},
-		{name: "unknown version without profile", content: overlay("aicr.run/v99", "")},
+		{name: "legacy without profile", content: overlay(RecipeMetadataAPIVersion, "")},
+		{name: "target authoring without profile", content: overlay(header.GroupVersionV1Beta1, "")},
+		{name: "empty version without profile", content: overlay("", ""), wantErr: `apiVersion ""`},
+		{name: "unknown version without profile", content: overlay("aicr.run/v99", ""), wantErr: `apiVersion "aicr.run/v99"`},
 		{name: "profile version with declaration", content: overlay(RecipeProfileAPIVersion, validProfile)},
+		{name: "target profile version with declaration", content: overlay(header.GroupVersionV1Beta2, validProfile)},
 		{
 			name:    "profile version without declaration",
 			content: overlay(RecipeProfileAPIVersion, ""),
@@ -1364,7 +1375,7 @@ spec:
 				string(overlay(RecipeProfileAPIVersion, validProfile)),
 				"kind: RecipeMetadata", "kind: RecipeMetdata", 1,
 			)),
-			wantErr: `requires kind "RecipeMetadata", got "RecipeMetdata"`,
+			wantErr: `has kind "RecipeMetdata", expected "RecipeMetadata"`,
 		},
 		{
 			name: "profile version requires metadata name",
@@ -1376,7 +1387,7 @@ spec:
 		},
 		{
 			name:    "legacy version with declaration",
-			content: overlay(RecipeAPIVersion, validProfile),
+			content: overlay(RecipeMetadataAPIVersion, validProfile),
 			wantErr: "expected \"aicr.run/v1alpha3\"",
 		},
 		{

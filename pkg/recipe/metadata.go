@@ -36,13 +36,26 @@ const RecipeMetadataKind = "RecipeMetadata"
 // RecipeResultKind is the kind value for RecipeResult resources.
 const RecipeResultKind = "RecipeResult"
 
-// RecipeAPIVersion is the API version for recipe metadata and result resources.
-// It aliases the canonical header.GroupVersion (single source of truth).
-const RecipeAPIVersion = header.GroupVersion
+// RecipeResultAPIVersion is the API version stamped on a default resolved
+// RecipeResult. RecipeResult is on the ADR-022 stable artifact track, so this
+// aliases header.StableGroupVersion; the track's target is
+// header.GroupVersionV1.
+const RecipeResultAPIVersion = header.StableGroupVersion
+
+// RecipeMetadataAPIVersion is the API version expected on an authored catalog
+// RecipeMetadata or RecipeMixin. Those are on the ADR-022 authoring track, so
+// this aliases header.AuthoringGroupVersion; the track's target is
+// header.GroupVersionV1Beta1.
+//
+// This is deliberately a separate constant from RecipeResultAPIVersion even
+// though both carry aicr.run/v1alpha2 today: ADR-022 sends the two kinds to
+// different targets, so a single shared constant could not be flipped.
+const RecipeMetadataAPIVersion = header.AuthoringGroupVersion
 
 // ConfiguredRecipeResultAPIVersion is the strict RecipeResult schema used
-// when typed desired-state configuration is present.
-const ConfiguredRecipeResultAPIVersion = header.RecipeResultGroupVersion
+// when typed desired-state configuration is present. It is on the ADR-022
+// profile-bearing track; the track's target is header.GroupVersionV1Beta2.
+const ConfiguredRecipeResultAPIVersion = header.ProfileGroupVersion
 
 // GPUDriverState values recorded in RecipeResult.Metadata.GPUDriverState
 // by snapshot-driven resolution (see pkg/client/v1 gpu_driver_state.go).
@@ -577,9 +590,8 @@ func (r *RecipeResult) backfillComponentTypes() error {
 // silently emits an artifact it would not read back. (The file loader also
 // accepts RecipeMetadata, but as an overlay to hydrate rather than as a
 // RecipeResult; that input shape has no analog on this boundary.) Only Kind is
-// normalized: APIVersion is validated, never rewritten, because an artifact
-// group/version bump is a hard break with no transition window — see
-// docs/design/011-artifact-apiversion-policy.md. See issue #1953.
+// normalized: APIVersion is validated against the kind/schema-scoped read
+// window and never rewritten. See ADR-022 and issue #1953.
 func (r *RecipeResult) NormalizeKind() error {
 	if r == nil {
 		return nil

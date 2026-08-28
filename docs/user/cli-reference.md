@@ -1070,14 +1070,24 @@ Validation can be run in different phases to validate different aspects of the d
 >
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
 >
-> **apiVersion gate:** Snapshots and catalog artifacts use `aicr.run/v1alpha2`;
-> recipe results with a selected configuration profile or configured Slurm
-> accounting use `aicr.run/v1alpha3`. Loading an
-> artifact stamped with an unsupported `apiVersion` fails fast; regenerate or
-> recapture it with a matching `aicr` version. Legacy recipes without
-> profile or accounting configuration retain v1alpha2 semantics. See
-> [ADR-011](../design/011-artifact-apiversion-policy.md) and
-> [ADR-016](../design/016-slurm-accounting-enablement.md).
+> **apiVersion gate:** During v0.21, the ADR-022 reader-first release, AICR still
+> emits `aicr.run/v1alpha2` for snapshots and default recipes, and
+> `aicr.run/v1alpha3` for profile-bearing recipes. Readers additionally
+> accept `aicr.run/v1` for snapshots and default recipes,
+> `aicr.run/v1beta1` for config and ordinary catalog inputs, and
+> `aicr.run/v1beta2` for profile-bearing inputs. Unsupported artifact headers
+> fail fast; raw external catalog headers are checked before merge or
+> hydration. Recapture, regenerate, or update the authored header with a
+> version supported by the running AICR release. See
+> [ADR-011](https://github.com/NVIDIA/aicr/blob/main/docs/design/011-artifact-apiversion-policy.md)
+> and
+> [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md). v0.22 switches
+> the emitters to the target values and v0.23 stops accepting the alpha values,
+> along with the empty header that the snapshot, recipe, and criteria readers
+> still tolerate. `AICRConfig` and external catalog headers already reject an
+> empty value, so they have no tolerance to retire.
+> [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
+> has the release-by-release table.
 
 Phases run sequentially with `--phase all` and all phases run by default, producing results regardless of earlier failures; use `--fail-fast` to stop after the first failing phase. For what each phase actually checks (deployment-phase readiness signals, graceful-skip semantics, RBAC, Day-N re-verification, and evidence), see [Validation](validation.md).
 
@@ -1464,12 +1474,13 @@ aicr bundle [flags]
 | `--set` | | string[] | Override **scalar** values in bundle files (repeatable, format: `component:path=value`). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`). Scalar-only — for list/object values use `--set-json` / `--set-file`. An override whose component is absent from the generated bundle is rejected rather than silently discarded; the scalar `enabled=false` spelling is exempt on a declared component (it is the removal mechanism). See [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). |
 | `--set-json` | | string[] | Override values with a JSON-encoded **list or object** (repeatable, format: `component:path=<json>`, e.g. `--set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'`). Object values deep-merge into existing maps; lists and scalars replace. Takes precedence over `--set` on the same path. An override whose component is absent from the generated bundle is rejected — no `enabled` exemption on the typed path (`enabled` is honored only via scalar `--set`); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). See [List and Object Value Overrides](#list-and-object-value-overrides). |
 | `--set-file` | | string[] | Override a value by reading JSON/YAML from a file (repeatable, format: `component:path=<filepath>`). For larger structures than `--set-json`; same merge and absent-component-rejection semantics (no `enabled` exemption on the typed path). |
-| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, and `helmfile` deployers. A declaration whose component is absent from the generated bundle is rejected (no path is exempt — a dynamic path is never a removal idiom); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). Certain gate-verified paths on **present** components cannot be declared dynamic either — driver-ownership paths (e.g. `gpuoperator:driver.enabled`), GPU allocation-policy keys, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths — because an install-time edit there would undo what a bundle-time gate verified; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Dynamic Install-Time Values](#dynamic-install-time-values). |
+| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, and `helmfile` deployers. A declaration whose component is absent from the generated bundle is rejected (no path is exempt — a dynamic path is never a removal idiom); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). Certain gate- or contract-owned paths on **present** components cannot be declared dynamic either — driver-ownership paths (e.g. `gpuoperator:driver.enabled`), GPU allocation-policy keys, the DRA eviction paths `kubeletPlugin.nodeSelector` and `driver.manager.env` when both contract components are enabled, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths — because an install-time edit there would undo what AICR verified or made consistent; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable) |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
 | `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable) |
 | `--accelerated-node-toleration` | | string[] | Toleration for accelerated/GPU nodes (format: key=value:effect, repeatable) |
+| `--dra-eviction-node-label` | | string | Node label coordinating DRA kubelet-plugin eviction with GPU Operator driver upgrades (format: `key=value`; default: `nvidia.com/dra-kubelet-plugin=true`). Applied only when both components are enabled. |
 | `--workload-gate` | | string | Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
 | `--workload-selector` | | string[] | Label selector for nodewright-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when nodewright-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
@@ -1541,6 +1552,7 @@ spec:
         role: system
       acceleratedNodeTolerations:
         - "nvidia.com/gpu=present:NoSchedule"
+      draEvictionNodeLabel: nvidia.com/dra-kubelet-plugin=true
       nodes: 8
       storageClass: gp3
     attestation:
@@ -1613,6 +1625,32 @@ This results in:
 - All components from the recipe are bundled automatically
 - Each component creates a subdirectory in the output directory
 - Components are deployed in the order specified by `deploymentOrder` in the recipe
+
+#### DRA Driver Upgrade Eviction
+
+When a recipe includes both `nvidia-dra-driver-gpu` and `gpu-operator`, AICR automatically coordinates kubelet-plugin eviction during GPU driver container upgrades. The same behavior applies to the corresponding `-ocp` components. AICR merges the default `nvidia.com/dra-kubelet-plugin=true` selector into `kubeletPlugin.nodeSelector` and sets the GPU Operator `driver.manager.env` entry `NODE_LABEL_FOR_GPU_POD_EVICTION` to the same label key. Existing accelerated-node selectors and unrelated Driver Manager environment variables are preserved.
+
+Nodes intended for DRA GPU allocation must carry the matching label:
+
+```bash
+kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true
+```
+
+Use `--dra-eviction-node-label` when the cluster follows a different label convention. The flag accepts exactly one Kubernetes label in `key=value` form; AICR uses the full pair for DRA placement and the key for GPU Operator:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --dra-eviction-node-label example.com/dra-ready=enabled \
+  --output bundle
+
+kubectl label node <node-name> example.com/dra-ready=enabled
+```
+
+GPU Operator's Driver Manager receives only the label key; it does not receive
+or compare the configured value. The cluster's node-labeling convention must
+therefore preserve the configured key/value pair when the label is restored.
+
+The wiring is absent when either component is disabled. Direct value overrides for the managed selector key or `NODE_LABEL_FOR_GPU_POD_EVICTION` are overwritten so the cross-chart contract cannot drift. When both components are enabled, a `--dynamic` declaration intersecting `kubeletPlugin.nodeSelector` or `driver.manager.env` is rejected because install-time editing would split the same contract. See NVIDIA's [GPU Operator DRA installation guide](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/26.3/dra-intro-install.html) for the upstream driver-upgrade requirement.
 
 #### Storage Class
 

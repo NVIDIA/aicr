@@ -40,6 +40,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
 	bundleverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/component"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -154,6 +155,15 @@ func TestNew(t *testing.T) {
 		// Should use default config when nil is passed
 		if bundler.Config == nil {
 			t.Fatal("Config should not be nil after passing nil")
+		}
+	})
+
+	t.Run("with invalid DRA eviction label", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithDRAEvictionNodeLabel(config.NodeLabel{
+			Key: "not a label key", Value: "true",
+		}))
+		if _, err := New(WithConfig(cfg)); err == nil {
+			t.Fatal("New() error = nil, want invalid configuration error")
 		}
 	})
 }
@@ -700,6 +710,25 @@ func TestMake_NilConfigFailsClosed(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "construct the bundler with New") {
 		t.Fatalf("Make() error = %v, want constructor guidance", err)
+	}
+}
+
+func TestMake_InvalidConfigFailsClosed(t *testing.T) {
+	bundler := &DefaultBundler{Config: config.NewConfig(
+		config.WithDRAEvictionNodeLabel(config.NodeLabel{
+			Key: "not a label key", Value: "true",
+		}),
+	)}
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator"}},
+	}
+
+	_, err := bundler.Make(t.Context(), recipeResult, t.TempDir())
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("Make() error = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), "invalid node label key") {
+		t.Fatalf("Make() error = %v, want invalid node label context", err)
 	}
 }
 
@@ -3649,7 +3678,8 @@ func TestMake_ArgoCDRejectsDynamic(t *testing.T) {
 // TestMake_OCP builds a real OCP inference recipe via BuildFromCriteria,
 // bundles it with --readiness-hooks, and verifies:
 //   - Numbered folder layout: 3 OLM + 3 readiness + 3 CR = 9 directories
-//   - Rendered manifest content: Subscription, OperatorGroup, ClusterPolicy, etc.
+//   - Rendered manifest content: Subscription, OperatorGroup, ClusterPolicy,
+//     and the DRA eviction contract in the ClusterPolicy driver manager
 //   - Readiness gate folders with correct gate image
 //   - Deployment ordering: OLM < readiness < CR for each operator
 func TestMake_OCP(t *testing.T) {
@@ -3772,6 +3802,28 @@ func TestMake_OCP(t *testing.T) {
 		}
 		templates := readTemplateFiles(t, dir)
 		assertKindInTemplates(t, comp, templates, kind)
+	}
+
+	// The OCP GPU Operator component is a local chart that projects its values
+	// into a ClusterPolicy CR. Assert the contract reaches the rendered resource,
+	// not merely its generated values.yaml.
+	gpuOperatorDir := findNumberedDir(t, outDir, "gpu-operator-ocp")
+	if gpuOperatorDir != "" {
+		templates := readTemplateFiles(t, gpuOperatorDir)
+		clusterPolicyYAML, ok := templates["clusterpolicy.yaml"]
+		if !ok {
+			t.Error("gpu-operator-ocp: clusterpolicy.yaml was not rendered")
+		} else {
+			var clusterPolicy map[string]any
+			if unmarshalErr := yaml.Unmarshal([]byte(clusterPolicyYAML), &clusterPolicy); unmarshalErr != nil {
+				t.Fatalf("decode rendered ClusterPolicy: %v", unmarshalErr)
+			}
+			spec, _ := clusterPolicy["spec"].(map[string]any)
+			if got := driverManagerEnvValues(spec, draEvictionEnvName); len(got) != 1 || got[0] != defaults.DRAEvictionNodeLabelKey {
+				t.Errorf("ClusterPolicy Driver Manager eviction env values = %v, want [%s]",
+					got, defaults.DRAEvictionNodeLabelKey)
+			}
+		}
 	}
 
 	// Assert readiness gate content — each readiness folder must contain the
