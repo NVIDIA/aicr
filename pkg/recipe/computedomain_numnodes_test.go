@@ -25,21 +25,41 @@ import (
 // inside a comment or a quoted error string cannot satisfy it.
 var numNodesKeyRE = regexp.MustCompile(`(?m)^[ \t]+numNodes[ \t]*:`)
 
-// hasYAMLKey reports whether content declares key as a real mapping key,
-// ignoring comment lines.
-func hasYAMLKey(content, key string) bool {
-	var b strings.Builder
-	for _, line := range strings.Split(content, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+// computeDomainDocsMissingNumNodes returns the 0-based indexes of YAML
+// documents that declare kind: ComputeDomain without a numNodes key.
+//
+// Scoped per document rather than per file. A multi-document manifest where one
+// ComputeDomain sets numNodes and a second omits it would satisfy a whole-file
+// scan while still failing admission, and so would an unrelated resource that
+// happens to carry a numNodes key. No such manifest exists in the catalog
+// today; the guard is document-scoped so that adding one cannot silently
+// bypass it.
+//
+// Comment lines are stripped first: these manifests legitimately discuss
+// "spec.numNodes: Required value" in prose, and a naive substring scan matches
+// that instead of the real key, passing even when the key is deleted.
+//
+// A full YAML parse is unavailable — the manifests are Helm templates and
+// contain {{ }} expressions that no YAML parser accepts.
+func computeDomainDocsMissingNumNodes(content string) []int {
+	var missing []int
+	for i, doc := range strings.Split(content, "\n---") {
+		if !strings.Contains(doc, "kind: ComputeDomain") {
 			continue
 		}
-		b.WriteString(line)
-		b.WriteString("\n")
+		var b strings.Builder
+		for _, line := range strings.Split(doc, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "#") {
+				continue
+			}
+			b.WriteString(line)
+			b.WriteString("\n")
+		}
+		if !numNodesKeyRE.MatchString(b.String()) {
+			missing = append(missing, i)
+		}
 	}
-	if key != "numNodes" {
-		panic("hasYAMLKey: only numNodes is supported")
-	}
-	return numNodesKeyRE.MatchString(b.String())
+	return missing
 }
 
 // TestComputeDomainManifestsSetNumNodes guards the fresh-install CRD-overlap
@@ -92,20 +112,15 @@ func TestComputeDomainManifestsSetNumNodes(t *testing.T) {
 		}
 		checked++
 
-		// The manifests are Helm templates, so a full YAML parse is not
-		// available. Strip comment lines FIRST — the surrounding prose in
-		// these files legitimately discusses "spec.numNodes: Required value",
-		// and a naive substring scan matches that instead of the real key,
-		// producing a guard that passes even when the key is deleted.
-		if !hasYAMLKey(content, "numNodes") {
-			t.Errorf("%s declares kind: ComputeDomain but does not set spec.numNodes.\n"+
+		for _, idx := range computeDomainDocsMissingNumNodes(content) {
+			t.Errorf("%s: YAML document %d declares kind: ComputeDomain but does not set spec.numNodes.\n"+
 				"  GPU Operator v26.7.0 ships a ComputeDomain CRD copy that marks numNodes\n"+
 				"  REQUIRED with no default, and it is installed before the DRA driver's\n"+
 				"  permissive copy. On a fresh cluster this CR is rejected at admission with\n"+
 				"  \"spec.numNodes: Required value\".\n"+
 				"  Set numNodes explicitly (0 is correct under IMEXDaemonsWithDNSNames=true,\n"+
 				"  the DRA driver default, where each IMEX daemon starts without waiting for\n"+
-				"  a quorum). See PR #2439.", path)
+				"  a quorum). See PR #2439.", path, idx)
 		}
 		return nil
 	})
