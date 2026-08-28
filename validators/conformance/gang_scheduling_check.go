@@ -19,6 +19,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -331,6 +332,10 @@ func waitForGangTestPods(ctx context.Context, clientset kubernetes.Interface, ru
 	waitCtx, cancel := context.WithTimeout(ctx, defaults.GangTestPodTimeout)
 	defer cancel()
 
+	// Per-pod, not a single latch: a pod whose read recovers must clear its
+	// entry, otherwise one early blip would mislabel a genuine "never
+	// completed" timeout as "unreadable" long after reads recovered.
+	readErrs := make(map[string]error, gangMinMembers)
 	err := wait.PollUntilContextCancel(waitCtx, defaults.PodPollInterval, true,
 		func(ctx context.Context) (bool, error) {
 			allDone := true
@@ -341,10 +346,30 @@ func waitForGangTestPods(ctx context.Context, clientset kubernetes.Interface, ru
 				pod, err := clientset.CoreV1().Pods(run.namespace).Get(
 					ctx, run.pods[i], metav1.GetOptions{})
 				if err != nil {
-					return false, errors.Wrap(errors.ErrCodeInternal,
-						fmt.Sprintf("failed to get gang test pod %s", run.pods[i]), err)
+					// A read that could not land is not a verdict. Returning a
+					// non-nil error here aborts the whole poll, so one throttled
+					// or timed-out call would fail a healthy cluster even though
+					// the next interval would have succeeded — the same defect
+					// #1513 fixed one step earlier in this function. Let the
+					// enclosing GangTestPodTimeout decide instead.
+					if isK8sTimeoutErr(err) {
+						// The wait context ending during this Get is the poll's
+						// terminal signal, not evidence of sustained read failures.
+						if readFailedBecauseContextEnded(ctx, err) {
+							allDone = false
+							continue
+						}
+						readErrs[run.pods[i]] = err
+						slog.Debug("transient read while polling gang test pod; retrying",
+							"pod", run.pods[i], "error", err)
+						allDone = false
+						continue
+					}
+					return false, classifyK8sReadError(err,
+						fmt.Sprintf("gang test pod %s", run.pods[i]))
 				}
-				switch pod.Status.Phase { //nolint:exhaustive // only terminal states matter
+				delete(readErrs, run.pods[i]) // this read landed
+				switch pod.Status.Phase {     //nolint:exhaustive // only terminal states matter
 				case corev1.PodSucceeded, corev1.PodFailed:
 					result[i] = pod
 				default:
@@ -355,10 +380,27 @@ func waitForGangTestPods(ctx context.Context, clientset kubernetes.Interface, ru
 		},
 	)
 	if err != nil {
-		if ctx.Err() != nil || waitCtx.Err() != nil {
+		// Caller cancellation is an external abort, not the gang timing out.
+		if ctx.Err() != nil {
+			return result, errors.Wrap(errors.ErrCodeTimeout, "waiting for gang test pods canceled", ctx.Err())
+		}
+		if waitCtx.Err() != nil {
+			// Preserve the last transient read error: a sustained throttle
+			// otherwise looks identical to pods that never completed.
+			// Only if a still-pending pod's most recent read failed.
+			for i := range gangMinMembers {
+				if result[i] != nil {
+					continue
+				}
+				if readErr, ok := readErrs[run.pods[i]]; ok {
+					return result, errors.Wrap(errors.ErrCodeTimeout,
+						fmt.Sprintf("gang test pod %s unreadable (reads kept failing)", run.pods[i]),
+						readErr)
+				}
+			}
 			return result, errors.Wrap(errors.ErrCodeTimeout, "gang test pods did not complete in time", err)
 		}
-		return result, errors.Wrap(errors.ErrCodeInternal, "gang test pod polling failed", err)
+		return result, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "gang test pod polling failed")
 	}
 
 	return result, nil
