@@ -486,7 +486,7 @@ func kindUbuntuSnapshot() *snapshotter.Snapshot {
 }
 
 // constraintFailingKindSnapshot fingerprints to service=kind on a Kubernetes
-// version below the kind overlay's `K8s.server.version >= 1.25` constraint, so
+// version below the kind overlay's `K8s.server.version >= 1.32` constraint, so
 // constraint evaluation excludes the only overlay that covers service=kind.
 func constraintFailingKindSnapshot() *snapshotter.Snapshot {
 	return &snapshotter.Snapshot{

@@ -22,26 +22,77 @@ import (
 	"testing"
 )
 
-// draChartKubeVersionMinor is the minor version floor the pinned
-// nvidia-dra-driver-gpu chart declares:
+// auditedDRAChartFloors records, per DRA component, the chart version whose
+// kubeVersion was read and the Kubernetes minor it declares.
 //
-//	kubeVersion: ">=1.32.0-0"
+// Both catalog DRA components are enrolled. OCP disables the generic
+// nvidia-dra-driver-gpu (recipes/overlays/ocp.yaml sets enabled: false) and
+// substitutes nvidia-dra-driver-gpu-ocp, so covering only the generic one would
+// leave the OCP chain unguarded.
 //
-// Helm REJECTS the install outright when the cluster is below it, so a recipe
-// declaring a lower K8s.server.version admits clusters that pass every
-// recipe-time check and then fail at `helm install`.
-//
-// Sourced from the chart, not from a running cluster. If the DRA chart pin in
-// recipes/registry.yaml moves to a version with a different kubeVersion, this
-// constant and the affected overlays must move together — that coupling is the
-// point of the guard.
-const draChartKubeVersionMinor = 32
+// Re-audit procedure when a pin moves: read `kubeVersion` from the chart at the
+// new version and update the entry. TestDRAChartFloorAuditIsCurrent fails until
+// you do, which is what couples this guard to the registry rather than letting
+// it sit green at a stale floor.
+var auditedDRAChartFloors = map[string]struct {
+	version string
+	minor   int
+}{
+	// oci://registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu
+	//   kubeVersion: ">=1.32.0-0"
+	"nvidia-dra-driver-gpu":     {version: "0.4.1", minor: 32},
+	"nvidia-dra-driver-gpu-ocp": {version: "0.4.1", minor: 32},
+}
+
+// draChartKubeVersionMinor is the highest audited floor across the enrolled DRA
+// components — the value every recipe must clear, since each recipe carries one
+// of them.
+func draChartKubeVersionMinorFn() int {
+	highest := 0
+	for _, a := range auditedDRAChartFloors {
+		if a.minor > highest {
+			highest = a.minor
+		}
+	}
+	return highest
+}
+
+// TestDRAChartFloorAuditIsCurrent fails when a DRA chart pin in registry.yaml
+// moves away from the version whose kubeVersion was audited, so a chart bump
+// cannot silently leave the floor guard asserting a stale minor.
+func TestDRAChartFloorAuditIsCurrent(t *testing.T) {
+	t.Parallel()
+
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("GetComponentRegistry: %v", err)
+	}
+
+	for name, audited := range auditedDRAChartFloors {
+		cfg := registry.Get(name)
+		if cfg == nil {
+			t.Errorf("audited DRA component %q is not in the registry; remove it from "+
+				"auditedDRAChartFloors or restore the component", name)
+			continue
+		}
+		if cfg.Helm.DefaultVersion != audited.version {
+			t.Errorf("%s is pinned at %q but its kubeVersion was audited at %q.\n"+
+				"  Read `kubeVersion` from the chart at %s, update auditedDRAChartFloors,\n"+
+				"  and raise the affected overlay floors if it moved. See #2402.",
+				name, cfg.Helm.DefaultVersion, audited.version, cfg.Helm.DefaultVersion)
+		}
+	}
+}
 
 // k8sConstraintRE captures EVERY K8s.server.version declaration in a file and
 // its raw value. FindAllStringSubmatch, not FindStringSubmatch: a file may carry
 // more than one declaration, and checking only the first would let a later,
 // lower one through.
-var k8sConstraintRE = regexp.MustCompile(`- name: K8s\.server\.version\s*\n\s*value: "([^"]*)"`)
+// The value is matched irrespective of quoting: YAML accepts double-quoted,
+// single-quoted and plain scalars, and a guard that only sees one style would
+// not merely misparse the others — it would not see the declaration at all.
+var k8sConstraintRE = regexp.MustCompile(
+	`- name: K8s\.server\.version\s*\n\s*value:[ \t]*("[^"]*"|'[^']*'|[^\n#]*)`)
 
 // geFloorRE matches the `>= 1.<minor>` form this guard can reason about.
 var geFloorRE = regexp.MustCompile(`^\s*>=\s*1\.(\d+)`)
@@ -49,8 +100,10 @@ var geFloorRE = regexp.MustCompile(`^\s*>=\s*1\.(\d+)`)
 // TestOverlayK8sFloorsClearDRAChartFloor asserts no overlay or mixin declares a
 // Kubernetes floor below the DRA chart's own kubeVersion.
 //
-// Every recipe inherits nvidia-dra-driver-gpu from base.yaml — no overlay
-// removes or disables it — so the chart's floor applies catalog-wide.
+// Every recipe carries a DRA driver: base.yaml declares nvidia-dra-driver-gpu,
+// and OCP disables that one and substitutes nvidia-dra-driver-gpu-ocp. Both
+// resolve to the same upstream chart and the same kubeVersion, so the floor
+// applies catalog-wide either way.
 //
 // Why every declaration and not just base.yaml: constraints merge by name with
 // the LATER overlay winning and no max comparison (see mergeValidation in
@@ -83,7 +136,7 @@ func TestOverlayK8sFloorsClearDRAChartFloor(t *testing.T) {
 		}
 		for _, m := range k8sConstraintRE.FindAllStringSubmatch(string(raw), -1) {
 			checked++
-			value := m[1]
+			value := strings.Trim(strings.TrimSpace(m[1]), `"'`)
 
 			g := geFloorRE.FindStringSubmatch(value)
 			if g == nil {
@@ -97,7 +150,7 @@ func TestOverlayK8sFloorsClearDRAChartFloor(t *testing.T) {
 					"  below the pinned nvidia-dra-driver-gpu chart's kubeVersion \">=1.%d.0-0\",\n"+
 					"  where Helm refuses the install. Either express it as a >= floor, or extend\n"+
 					"  this guard to understand the new form. See #2402.",
-					path, value, draChartKubeVersionMinor)
+					path, value, draChartKubeVersionMinorFn())
 				continue
 			}
 
@@ -106,7 +159,7 @@ func TestOverlayK8sFloorsClearDRAChartFloor(t *testing.T) {
 				t.Errorf("%s: could not parse K8s.server.version minor from %q: %v", path, value, convErr)
 				continue
 			}
-			if minor < draChartKubeVersionMinor {
+			if minor < draChartKubeVersionMinorFn() {
 				t.Errorf("%s declares K8s.server.version %q, below the pinned "+
 					"nvidia-dra-driver-gpu chart's kubeVersion \">=1.%d.0-0\".\n"+
 					"  Every recipe inherits the DRA driver from base.yaml, and Helm refuses the\n"+
@@ -115,7 +168,7 @@ func TestOverlayK8sFloorsClearDRAChartFloor(t *testing.T) {
 					"  Raising base.yaml alone does NOT fix a leaf: constraints merge last-wins\n"+
 					"  with no max comparison, so a lower leaf value overwrites a higher\n"+
 					"  inherited one. See #2402.",
-					path, value, draChartKubeVersionMinor, draChartKubeVersionMinor)
+					path, value, draChartKubeVersionMinorFn(), draChartKubeVersionMinorFn())
 			}
 		}
 		return nil

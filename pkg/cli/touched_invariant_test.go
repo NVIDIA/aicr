@@ -244,7 +244,7 @@ func TestRecipeCmd_Snapshot_StatedDimensionNotRelaxed(t *testing.T) {
 }
 
 // constraintFailingKindSnapshotYAML fingerprints to service=kind on a
-// Kubernetes version below the kind overlay's `K8s.server.version >= 1.25`
+// Kubernetes version below the kind overlay's `K8s.server.version >= 1.32`
 // constraint, so the only overlay covering service=kind is excluded by
 // constraint evaluation rather than absent from the catalog.
 const constraintFailingKindSnapshotYAML = `kind: Snapshot
