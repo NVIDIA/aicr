@@ -15,10 +15,13 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/kustomize/api/hasher"
+	"sigs.k8s.io/kustomize/api/resource"
 )
 
 func TestRewriteJobSetStagingImage(t *testing.T) {
@@ -264,5 +267,95 @@ func TestApplyControllerTolerations(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestDecodeTrainerObjects exercises decodeTrainerObjects end to end: the
+// toleration lands only on a controller Deployment resource, not on an
+// unrelated resource in the same manifest set, and the Kind=="" skip ordering
+// above the applyControllerTolerations call does not interfere.
+func TestDecodeTrainerObjects(t *testing.T) {
+	rf := resource.NewFactory(&hasher.Hasher{})
+
+	manifest := fmt.Sprintf(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+spec:
+  template:
+    spec:
+      containers:
+      - name: manager
+        image: example/trainer:latest
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: some-config
+data:
+  foo: bar
+`, trainerControllerDeployment)
+
+	resources, err := rf.SliceFromBytes([]byte(manifest))
+	if err != nil {
+		t.Fatalf("SliceFromBytes() error = %v", err)
+	}
+
+	objs, err := decodeTrainerObjects(resources)
+	if err != nil {
+		t.Fatalf("decodeTrainerObjects() error = %v", err)
+	}
+	if len(objs) != 2 {
+		t.Fatalf("got %d decoded object(s), want 2", len(objs))
+	}
+
+	var trainerObj, unrelatedObj *unstructured.Unstructured
+	for _, o := range objs {
+		switch o.GetName() {
+		case trainerControllerDeployment:
+			trainerObj = o
+		case "some-config":
+			unrelatedObj = o
+		}
+	}
+	if trainerObj == nil {
+		t.Fatal("Trainer controller Deployment missing from decoded objects")
+	}
+	tols, found, _ := unstructured.NestedSlice(trainerObj.Object, "spec", "template", "spec", "tolerations")
+	if !found || len(tols) != 1 {
+		t.Errorf("Trainer Deployment tolerations = %v, want a single blanket tolerate-all entry", tols)
+	}
+
+	if unrelatedObj == nil {
+		t.Fatal("unrelated ConfigMap missing from decoded objects")
+	}
+	if _, found, _ := unstructured.NestedSlice(unrelatedObj.Object, "spec", "template", "spec", "tolerations"); found {
+		t.Error("unrelated ConfigMap must not receive a toleration")
+	}
+}
+
+// TestDecodeTrainerObjects_PropagatesTolerationError verifies a malformed
+// resource that fails applyControllerTolerations aborts decoding rather than
+// leaving a partial object list.
+func TestDecodeTrainerObjects_PropagatesTolerationError(t *testing.T) {
+	rf := resource.NewFactory(&hasher.Hasher{})
+
+	manifest := fmt.Sprintf(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+spec:
+  template:
+    spec:
+      tolerations: not-a-slice
+`, trainerControllerDeployment)
+
+	resources, err := rf.SliceFromBytes([]byte(manifest))
+	if err != nil {
+		t.Fatalf("SliceFromBytes() error = %v", err)
+	}
+
+	if _, err := decodeTrainerObjects(resources); err == nil {
+		t.Fatal("decodeTrainerObjects() expected error for a malformed tolerations field, got nil")
 	}
 }
