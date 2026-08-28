@@ -211,17 +211,26 @@ func TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace(t *testing.T) {
 		return false, nil, nil
 	})
 
+	// Captured before the goroutine launches, so elapsed below can't dip
+	// under holdFinalizer merely because the goroutine's sleep started
+	// before start was assigned.
+	start := time.Now()
 	go func() {
 		time.Sleep(holdFinalizer)
 		_ = fakeClient.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
 	}()
 
-	start := time.Now()
 	if err := cleanupNCCLResources(fakeClient, ns, ""); err != nil {
 		t.Fatalf("cleanup should succeed once the finalizer clears, got: %v", err)
 	}
 	elapsed := time.Since(start)
 
+	// deleteCalls reaching 2 alone doesn't prove cleanup blocked. The
+	// goroutine above fires the second delete unconditionally at t=200ms
+	// regardless of what cleanupNCCLResources does. The elapsed-time check
+	// below is the real guard. A pre-fix early return (reporting success as
+	// soon as the first Delete call was accepted) would hit it at ~0ms,
+	// with deleteCalls still at 1.
 	if got := atomic.LoadInt32(&deleteCalls); got < 2 {
 		t.Fatalf("expected cleanup to observe the namespace still present and wait for a second delete, got %d delete call(s)", got)
 	}
