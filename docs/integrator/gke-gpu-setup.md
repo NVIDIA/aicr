@@ -329,7 +329,7 @@ the label lands, the DaemonSet controller reconciles asynchronously and evicts
 GKE's managed plugin pods from the labeled nodes, so allow a short delay (pods
 may show `Terminating` at first) before reading the checks below as failures.
 
-Verify all three parts of the result — every GPU node shows the label, GKE's
+Verify all three parts of the result — every GPU node shows both labels, GKE's
 managed plugin pods (kube-system, `k8s-app=nvidia-gpu-device-plugin`) are gone
 from those nodes, and the GPU Operator's plugin has actually taken ownership
 (its device-plugin pods are Running and every GPU node reports non-zero
@@ -337,7 +337,7 @@ allocatable `nvidia.com/gpu`):
 
 ```bash
 kubectl get nodes -l cloud.google.com/gke-accelerator \
-  -L gke-no-default-nvidia-gpu-device-plugin
+  -L gke-no-default-nvidia-gpu-device-plugin,nvidia.com/dra-kubelet-plugin
 kubectl get pods -n kube-system -l k8s-app=nvidia-gpu-device-plugin -o wide
 kubectl get pods -n gpu-operator -l app=nvidia-device-plugin-daemonset -o wide
 kubectl get nodes -l cloud.google.com/gke-accelerator \
