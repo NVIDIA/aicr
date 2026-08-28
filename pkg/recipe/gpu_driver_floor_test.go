@@ -68,9 +68,24 @@ const rtxProDriverFloor = ">= 575.57.08"
 // value for criteria under the given profile selection, and whether one was
 // declared at all. It goes through the production resolver so the assertion
 // covers wildcard contributions, mixins, and profile application.
-func resolvedDriverFloor(
-	t *testing.T, ctx context.Context, criteria *Criteria, selection string,
-) (string, bool) {
+// resolvedDeployment resolves a recipe once and returns its deployment
+// validation phase, so a caller asserting both the floor and the check that
+// evaluates it does not build the same recipe twice.
+//
+// selection is threaded through even though every current call passes "":
+// no overlay in the RTX PRO 6000 EKS or LKE chains declares a profile (only
+// aks.yaml and gke-cos.yaml do anywhere in the catalog), and selecting a
+// profile against a composition that declares none is rejected at resolution.
+// There is therefore no alternate-profile dimension to exercise for these
+// leaves rather than an untested one.
+//
+// Note also that a profile could not downgrade this floor even where one does
+// exist: ProfileValue.constraints are validated as measurement paths at catalog
+// load (constraint_paths.go), and Deployment is not a measurement Type, so a
+// profile value cannot carry a Deployment.gpu-driver.version constraint at all.
+func resolvedDeployment(
+	ctx context.Context, t *testing.T, criteria *Criteria, selection string,
+) *ValidationPhase {
 
 	t.Helper()
 
@@ -78,10 +93,19 @@ func resolvedDriverFloor(
 	if err != nil {
 		t.Fatalf("BuildFromCriteriaWithProfile(%s, %q): %v", criteria.String(), selection, err)
 	}
-	if result.Validation == nil || result.Validation.Deployment == nil {
+	if result.Validation == nil {
+		return nil
+	}
+	return result.Validation.Deployment
+}
+
+// driverFloorOf returns the declared host driver floor in a resolved deployment
+// phase, if any.
+func driverFloorOf(deployment *ValidationPhase) (string, bool) {
+	if deployment == nil {
 		return "", false
 	}
-	for _, c := range result.Validation.Deployment.Constraints {
+	for _, c := range deployment.Constraints {
 		if c.Name == gpuDriverFloorConstraint {
 			return c.Value, true
 		}
@@ -89,22 +113,13 @@ func resolvedDriverFloor(
 	return "", false
 }
 
-// hasDeploymentCheck reports whether the resolved deployment phase declares
-// the named check. A floor with no check to evaluate it is inert.
-func hasDeploymentCheck(
-	t *testing.T, ctx context.Context, criteria *Criteria, name string,
-) bool {
-
-	t.Helper()
-
-	result, err := NewBuilder().BuildFromCriteriaWithProfile(ctx, criteria, "")
-	if err != nil {
-		t.Fatalf("BuildFromCriteriaWithProfile(%s): %v", criteria.String(), err)
-	}
-	if result.Validation == nil || result.Validation.Deployment == nil {
+// deploymentHasCheck reports whether a resolved deployment phase declares the
+// named check. A floor with no check to evaluate it is inert.
+func deploymentHasCheck(deployment *ValidationPhase, name string) bool {
+	if deployment == nil {
 		return false
 	}
-	for _, c := range result.Validation.Deployment.Checks {
+	for _, c := range deployment.Checks {
 		if c == name {
 			return true
 		}
@@ -228,7 +243,8 @@ func TestGPUDriverFloorEffectiveValue(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, found := resolvedDriverFloor(t, ctx, tt.criteria, "")
+			deployment := resolvedDeployment(ctx, t, tt.criteria, "")
+			got, found := driverFloorOf(deployment)
 			if !found {
 				t.Fatalf("%s resolved with no %s constraint; want %q.\n"+
 					"A floor declared upstream was dropped, or the leaf no longer "+
@@ -245,7 +261,7 @@ func TestGPUDriverFloorEffectiveValue(t *testing.T) {
 
 			// A floor with no check to evaluate it is inert: check-nvidia-smi
 			// is the only consumer of this constraint.
-			if !hasDeploymentCheck(t, ctx, tt.criteria, "check-nvidia-smi") {
+			if !deploymentHasCheck(deployment, "check-nvidia-smi") {
 				t.Errorf("%s declares %s but the resolved deployment phase has no "+
 					"check-nvidia-smi check, so nothing evaluates the floor",
 					tt.criteria.String(), gpuDriverFloorConstraint)
