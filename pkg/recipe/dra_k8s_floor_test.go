@@ -28,6 +28,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/version"
 )
 
 // k8sServerVersionConstraint is the measurement path whose floor this guard
@@ -96,30 +97,108 @@ func TestDRAChartFloorAuditIsCurrent(t *testing.T) {
 	}
 }
 
-// subFloorProbeVersions returns the Kubernetes version strings that MUST NOT
-// satisfy any catalog floor: every minor below the DRA chart's kubeVersion,
-// rendered in each shape a real cluster reading or a recipe author's exact pin
-// can take.
+// floorMajor is the Kubernetes major version the DRA chart floors sit on. The
+// audited kubeVersion is ">=1.32.0-0", so every bound is compared as
+// (major, minor) against (floorMajor, floorMinor).
+const floorMajor = 1
+
+// termClearsFloor reports whether a single parsed term, on its own, confines
+// every version that satisfies it to at or above Kubernetes
+// floorMajor.floorMinor.0.
 //
-// Probing the production evaluator with concrete readings — rather than
-// pattern-matching the expression text — is what makes this guard independent
-// of the expression's *form*. A prefix match on ">= 1.<minor>" is defeated by a
-// compound expression (">= 1.32 || >= 1.29" begins with a safe floor and is
-// still satisfied by 1.29.7, because the shipping parser treats "||" as OR),
-// and a bare-string exact pin ("1.30") carries no operator to match at all.
-// Both are caught here because both admit a sub-floor reading.
-func subFloorProbeVersions(floorMinor int) []string {
-	probes := make([]string, 0, 2+4*floorMinor)
-	probes = append(probes, "0.99", "0.99.99")
-	for minor := range floorMinor {
-		probes = append(probes,
-			fmt.Sprintf("1.%d", minor),
-			fmt.Sprintf("1.%d.0", minor),
-			fmt.Sprintf("1.%d.99", minor),
-			fmt.Sprintf("v1.%d.0", minor),
-		)
+// Only the lower-bounding operators can do that:
+//
+//   - ">= v" admits exactly [v, inf)
+//   - "> v"  admits (v, inf); requiring v itself to clear the floor is one
+//     patch conservative and never fails open, since the patch component is
+//     unbounded (there is no "last" 1.31.x to fall back on)
+//   - "== v" and a bare exact match admit only v
+//
+// "<", "<=", and "!=" place no lower bound at all, so they return false: they
+// can narrow an alternative but can never be what lifts it above the floor.
+//
+// A value the shipping version parser cannot read, or one written with less
+// than major.minor precision (">= 1"), returns an error. Comparing "1" against
+// "1.32.0" at min-precision would report equal and wave a floorless expression
+// through, so the guard refuses to reason about it instead.
+func termClearsFloor(pc constraints.ParsedConstraint, floorMinor int) (bool, error) {
+	switch pc.Operator {
+	case constraints.OperatorLT, constraints.OperatorLTE, constraints.OperatorNE:
+		return false, nil
+	case constraints.OperatorGTE, constraints.OperatorGT, constraints.OperatorEQ, constraints.OperatorExact:
+	default:
+		return false, fmt.Errorf("unknown operator %q; the guard cannot prove a lower bound for it", pc.Operator)
 	}
-	return probes
+
+	v, err := version.ParseVersion(pc.Value)
+	if err != nil {
+		return false, fmt.Errorf("value %q is not a version the shipping parser can read: %w", pc.Value, err)
+	}
+	if v.Precision < 2 {
+		return false, fmt.Errorf("value %q has only major precision; a floor must name at least major.minor", pc.Value)
+	}
+	if v.Major > floorMajor {
+		return true, nil
+	}
+	return v.Major == floorMajor && v.Minor >= floorMinor, nil
+}
+
+// alternativeString renders one AND group for error messages.
+func alternativeString(group []constraints.ParsedConstraint) string {
+	terms := make([]string, 0, len(group))
+	for i := range group {
+		terms = append(terms, group[i].String())
+	}
+	return strings.Join(terms, " ")
+}
+
+// proveExpressionClearsFloor proves, symbolically, that no Kubernetes cluster
+// below floorMajor.floorMinor.0 can satisfy expr. It returns nil only when the
+// proof succeeds, and a describing error otherwise — including for any
+// expression it cannot reason about, so the guard fails closed.
+//
+// Why symbolic and not by probing readings: the production grammar admits
+// arbitrary OR-of-AND range expressions, so no finite list of probe versions
+// covers it. ">= 1.32 || > 1.31.0 < 1.31.2" is a supported shape that a probe
+// sweep over 1.N / 1.N.0 / 1.N.99 misses entirely while the production
+// evaluator happily accepts a 1.31.1 cluster that Helm's ">=1.32.0-0" rejects.
+//
+// The proof: an AND group's satisfying set is the intersection of its terms, so
+// the group clears the floor as soon as ANY ONE of its terms does — a single
+// ">= 1.32" makes the whole group safe no matter what the others say. A
+// compound expression's satisfying set is the union of its groups, so EVERY
+// group must clear the floor; one loose alternative admits a sub-floor cluster
+// regardless of how strict its siblings are.
+func proveExpressionClearsFloor(expr string, floorMinor int) error {
+	parsed, err := constraints.ParseCompoundConstraint(expr)
+	if err != nil {
+		return fmt.Errorf("the shipping constraint parser rejects it: %w", err)
+	}
+	if len(parsed.Alternatives) == 0 {
+		return fmt.Errorf("it parsed to zero OR alternatives, so nothing bounds it")
+	}
+
+	for i, group := range parsed.Alternatives {
+		if len(group) == 0 {
+			return fmt.Errorf("OR alternative %d has no terms, so nothing bounds it", i+1)
+		}
+		cleared := false
+		for j := range group {
+			ok, termErr := termClearsFloor(group[j], floorMinor)
+			if termErr != nil {
+				return fmt.Errorf("OR alternative %d (%q): %w", i+1, alternativeString(group), termErr)
+			}
+			if ok {
+				cleared = true
+			}
+		}
+		if !cleared {
+			return fmt.Errorf("OR alternative %d (%q) carries no lower bound at or above %d.%d.0, "+
+				"so at least one cluster below the chart floor satisfies it",
+				i+1, alternativeString(group), floorMajor, floorMinor)
+		}
+	}
+	return nil
 }
 
 // supportedProbeVersions returns readings at or above the floor, used only to
@@ -207,28 +286,32 @@ func collectK8sFloorDeclarations(file string, raw []byte) ([]k8sFloorDeclaration
 // applies catalog-wide either way.
 //
 // Why every declaration and not just base.yaml: constraints merge by name with
-// the LATER overlay winning and no max comparison (see mergeValidation in
-// validation.go). A leaf declaring ">= 1.30" silently overwrites a higher floor
-// inherited from base, so raising base alone would not hold. This is the same
+// the LATER overlay winning and no max comparison (see RecipeMetadataSpec.Merge
+// in metadata.go; validation-phase constraints merge the same way in
+// mergeValidationPhase in validation.go). A leaf declaring ">= 1.30" silently
+// overwrites a higher floor inherited from base, so raising base alone would
+// not hold. This is the same
 // last-wins hazard documented for driver floors in #2438.
 //
 // recipes/overlays/ocp.yaml already carried >= 1.32 for exactly this reason
 // before the rest of the catalog was reconciled; its comment records the
 // diagnosis.
 //
-// How it checks, and why not by reading the expression: each declaration is
-// decoded typed, parsed with the shipping parser
-// (constraints.ParseCompoundConstraint), and then EVALUATED against concrete
-// sub-floor readings with the shipping evaluator. The guard therefore asserts
-// the property that actually matters — "no supported-but-too-old cluster
-// satisfies this" — instead of asserting the expression is spelled a
-// particular way. It fails closed on any expression the parser rejects and on
-// any expression no supported reading satisfies.
+// How it checks: each declaration is decoded typed, parsed with the shipping
+// parser (constraints.ParseCompoundConstraint), and then PROVEN — symbolically,
+// over the parsed OR-of-AND structure — to carry a lower bound at or above the
+// chart floor on every alternative. See proveExpressionClearsFloor.
+//
+// Sampling the evaluator with a list of sub-floor readings was tried and is not
+// sufficient: the grammar admits arbitrary ranges, and ">= 1.32 || > 1.31.0
+// < 1.31.2" slips past any fixed probe list while admitting a 1.31.1 cluster.
+// The guard fails closed on any expression the parser rejects, on any operator
+// or value it cannot reason about, and on any expression no supported reading
+// satisfies.
 func TestOverlayK8sFloorsClearDRAChartFloor(t *testing.T) {
 	t.Parallel()
 
 	floorMinor := draChartKubeVersionMinor()
-	subFloor := subFloorProbeVersions(floorMinor)
 	supported := supportedProbeVersions(floorMinor)
 
 	efs := recipe.GetEmbeddedFS()
@@ -256,7 +339,7 @@ func TestOverlayK8sFloorsClearDRAChartFloor(t *testing.T) {
 
 		for _, decl := range decls {
 			checked++
-			verifyK8sFloorDeclaration(t, decl, floorMinor, subFloor, supported)
+			verifyK8sFloorDeclaration(t, decl, floorMinor, supported)
 		}
 		return nil
 	})
@@ -275,42 +358,29 @@ func TestOverlayK8sFloorsClearDRAChartFloor(t *testing.T) {
 
 // verifyK8sFloorDeclaration checks one declaration against the DRA chart floor
 // using the production parser and evaluator.
-func verifyK8sFloorDeclaration(t *testing.T, decl k8sFloorDeclaration, floorMinor int, subFloor, supported []string) {
+func verifyK8sFloorDeclaration(t *testing.T, decl k8sFloorDeclaration, floorMinor int, supported []string) {
 	t.Helper()
 
-	parsed, err := constraints.ParseCompoundConstraint(decl.value)
-	if err != nil {
-		t.Errorf("%s (%s) declares K8s.server.version %q, which the shipping constraint\n"+
-			"  parser rejects: %v\n"+
-			"  An expression aicr cannot parse cannot be shown to clear the pinned\n"+
-			"  nvidia-dra-driver-gpu chart's kubeVersion \">=1.%d.0-0\". See #2402.",
-			decl.file, decl.location, decl.value, err, floorMinor)
+	if err := proveExpressionClearsFloor(decl.value, floorMinor); err != nil {
+		t.Errorf("%s (%s) declares K8s.server.version %q, which this guard cannot prove\n"+
+			"  clears the pinned nvidia-dra-driver-gpu chart's kubeVersion \">=1.%d.0-0\":\n"+
+			"  %v\n"+
+			"  Every recipe inherits the DRA driver from base.yaml, and Helm refuses the\n"+
+			"  install below the chart floor — so a recipe that admits a lower cluster\n"+
+			"  validates clean and then fails at `helm install`. Raise it to \">= 1.%d\",\n"+
+			"  or, if the expression is genuinely safe in a form the guard cannot yet\n"+
+			"  prove, extend proveExpressionClearsFloor rather than loosening it.\n"+
+			"  Raising base.yaml alone does NOT fix a leaf: constraints merge last-wins\n"+
+			"  with no max comparison, so a lower leaf value overwrites a higher\n"+
+			"  inherited one. See #2402.",
+			decl.file, decl.location, decl.value, floorMinor, err, floorMinor)
 		return
 	}
 
-	for _, reading := range subFloor {
-		satisfied, evalErr := parsed.Evaluate(reading)
-		if evalErr != nil {
-			t.Errorf("%s (%s) declares K8s.server.version %q, which the shipping evaluator\n"+
-				"  could not evaluate against the Kubernetes reading %q: %v\n"+
-				"  The guard fails closed: an expression whose result is unknown may admit a\n"+
-				"  cluster below the chart floor \">=1.%d.0-0\". See #2402.",
-				decl.file, decl.location, decl.value, reading, evalErr, floorMinor)
-			return
-		}
-		if satisfied {
-			t.Errorf("%s (%s) declares K8s.server.version %q, which is SATISFIED by a\n"+
-				"  Kubernetes %s cluster — below the pinned nvidia-dra-driver-gpu chart's\n"+
-				"  kubeVersion \">=1.%d.0-0\".\n"+
-				"  Every recipe inherits the DRA driver from base.yaml, and Helm refuses the\n"+
-				"  install below the chart floor — so this recipe validates clean and then\n"+
-				"  fails at `helm install`. Raise it to \">= 1.%d\".\n"+
-				"  Raising base.yaml alone does NOT fix a leaf: constraints merge last-wins\n"+
-				"  with no max comparison, so a lower leaf value overwrites a higher\n"+
-				"  inherited one. See #2402.",
-				decl.file, decl.location, decl.value, reading, floorMinor, floorMinor)
-			return
-		}
+	parsed, err := constraints.ParseCompoundConstraint(decl.value)
+	if err != nil {
+		t.Errorf("%s (%s): %v", decl.file, decl.location, err)
+		return
 	}
 
 	for _, reading := range supported {
@@ -330,4 +400,87 @@ func verifyK8sFloorDeclaration(t *testing.T, decl k8sFloorDeclaration, floorMino
 		"  1.%d through 1.60 satisfies. It admits no cluster the catalog supports, so this\n"+
 		"  guard cannot show it is a floor rather than a typo, and fails closed. See #2402.",
 		decl.file, decl.location, decl.value, floorMinor)
+}
+
+// TestProveExpressionClearsFloor pins the prover's behavior on the shapes the
+// catalog guard has to withstand. Every "must fail" row is a permanent
+// regression control: each one is an expression a real author could write that
+// the production evaluator accepts for a sub-floor cluster.
+//
+// The last row is the shape that defeated the previous probe-sampling guard: a
+// safe first alternative followed by a narrow sub-floor range. It is kept here
+// permanently so no future rewrite can reintroduce sampling and stay green.
+func TestProveExpressionClearsFloor(t *testing.T) {
+	t.Parallel()
+
+	const floorMinor = 32
+
+	tests := []struct {
+		name    string
+		expr    string
+		wantErr bool
+	}{
+		{"simple floor at the chart minor", ">= 1.32", false},
+		{"simple floor with patch", ">= 1.32.4", false},
+		{"floor above the chart minor", ">= 1.33.0", false},
+		{"major above the floor", ">= 2.0", false},
+		{"range whose lower bound clears the floor", ">= 1.32.4 < 1.35.0", false},
+		{"every alternative clears the floor", ">= 1.34.3-gke.1318000 < 1.35.0 || >= 1.35.0-gke.2745000", false},
+		{"upper-bounded term does not lift a cleared group", ">= 1.32 < 1.33", false},
+
+		{"floor below the chart minor", ">= 1.30", true},
+		{"simple compound with a low alternative", ">= 1.32 || >= 1.29", true},
+		{"exact pin below the chart minor", "== 1.30", true},
+		{"bare exact pin below the chart minor", "1.30", true},
+		{"greater-than below the chart minor", "> 1.31", true},
+		{"only an upper bound", "< 1.40", true},
+		{"only a not-equal", "!= 1.30", true},
+		{"major-only precision", ">= 1", true},
+		{"non-version value", ">= stable", true},
+		{"empty expression", "", true},
+		{"empty OR clause", ">= 1.32 ||", true},
+		// The control: accepted by the production evaluator for a 1.31.1
+		// cluster, which Helm's ">=1.32.0-0" rejects. A probe sweep over
+		// 1.N / 1.N.0 / 1.N.99 / v1.N.0 misses it entirely.
+		{"narrow sub-floor range hidden behind a safe alternative", ">= 1.32 || > 1.31.0 < 1.31.2", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := proveExpressionClearsFloor(tt.expr, floorMinor)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("proveExpressionClearsFloor(%q, %d) error = %v, wantErr %v",
+					tt.expr, floorMinor, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestProveExpressionRejectsWhatTheEvaluatorAdmits is the adversarial control
+// for the row above: it proves independently that the production evaluator
+// really does accept a sub-floor cluster for that expression, so the "must
+// fail" verdict is grounded in behavior rather than in the prover's own
+// opinion. Without this, a prover bug that rejected everything would still
+// make the table green.
+func TestProveExpressionRejectsWhatTheEvaluatorAdmits(t *testing.T) {
+	t.Parallel()
+
+	const expr = ">= 1.32 || > 1.31.0 < 1.31.2"
+
+	parsed, err := constraints.ParseCompoundConstraint(expr)
+	if err != nil {
+		t.Fatalf("ParseCompoundConstraint(%q): %v", expr, err)
+	}
+	satisfied, err := parsed.Evaluate("1.31.1")
+	if err != nil {
+		t.Fatalf("Evaluate(1.31.1): %v", err)
+	}
+	if !satisfied {
+		t.Fatalf("expected the production evaluator to accept 1.31.1 for %q; if this "+
+			"changed, the control in TestProveExpressionClearsFloor needs rebasing", expr)
+	}
+	if err := proveExpressionClearsFloor(expr, 32); err == nil {
+		t.Fatalf("prover accepted %q even though the evaluator admits a 1.31.1 cluster", expr)
+	}
 }
