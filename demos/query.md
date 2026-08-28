@@ -53,7 +53,7 @@ enabled: true
 maxParallelUpgrades: 5
 rdma:
   enabled: false
-useOpenKernelModules: true
+kernelModuleType: auto
 version: 595.91.07
 ```
 

@@ -21,41 +21,74 @@ import (
 	"testing"
 )
 
-// numNodesKeyRE matches an indented mapping key. Anchored per line so a key
-// inside a comment or a quoted error string cannot satisfy it.
-var numNodesKeyRE = regexp.MustCompile(`(?m)^[ \t]+numNodes[ \t]*:`)
+// specKeyRE matches the document's top-level `spec:` mapping key.
+var specKeyRE = regexp.MustCompile(`^(\s*)spec\s*:\s*$`)
 
-// computeDomainDocsMissingNumNodes returns the 0-based indexes of YAML
-// documents that declare kind: ComputeDomain without a numNodes key.
+// numNodesChildRE matches `numNodes:` at a given exact indentation.
+func numNodesChildRE(indent string) *regexp.Regexp {
+	return regexp.MustCompile(`^` + regexp.QuoteMeta(indent) + `numNodes\s*:`)
+}
+
+// specHasNumNodes reports whether a single YAML document declares numNodes as a
+// DIRECT CHILD of spec.
 //
-// Scoped per document rather than per file. A multi-document manifest where one
-// ComputeDomain sets numNodes and a second omits it would satisfy a whole-file
-// scan while still failing admission, and so would an unrelated resource that
-// happens to carry a numNodes key. No such manifest exists in the catalog
-// today; the guard is document-scoped so that adding one cannot silently
-// bypass it.
+// Path-aware on purpose. An earlier version matched `numNodes:` anywhere in the
+// document, which accepted `metadata.numNodes` — a key Kubernetes ignores, while
+// the required `spec.numNodes` stays absent and admission still fails. Matching
+// the key without its parent is not a weaker check, it is the wrong check.
 //
 // Comment lines are stripped first: these manifests legitimately discuss
-// "spec.numNodes: Required value" in prose, and a naive substring scan matches
-// that instead of the real key, passing even when the key is deleted.
+// "spec.numNodes: Required value" in prose, and a scan that does not strip them
+// matches that instead of the real key, passing even when the key is deleted.
 //
-// A full YAML parse is unavailable — the manifests are Helm templates and
-// contain {{ }} expressions that no YAML parser accepts.
+// A full YAML parse is unavailable — the manifests are Helm templates containing
+// {{ }} expressions that no YAML parser accepts — so this walks indentation.
+func specHasNumNodes(doc string) bool {
+	var lines []string
+	for _, line := range strings.Split(doc, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") || strings.TrimSpace(line) == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	for i, line := range lines {
+		m := specKeyRE.FindStringSubmatch(line)
+		if m == nil {
+			continue
+		}
+		specIndent := m[1]
+		var childRE *regexp.Regexp
+		for _, sub := range lines[i+1:] {
+			subIndent := sub[:len(sub)-len(strings.TrimLeft(sub, " \t"))]
+			// Dedent to spec's level or shallower ends the spec mapping.
+			if len(subIndent) <= len(specIndent) {
+				break
+			}
+			if childRE == nil {
+				childRE = numNodesChildRE(subIndent)
+			}
+			if childRE.MatchString(sub) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// computeDomainDocsMissingNumNodes returns the 0-based indexes of YAML
+// documents that declare kind: ComputeDomain without spec.numNodes.
+//
+// Scoped per document: a multi-document manifest where one ComputeDomain sets
+// the key and a second omits it would satisfy a whole-file scan while still
+// failing admission. No such manifest exists in the catalog today; the guard is
+// document-scoped so adding one cannot silently bypass it.
 func computeDomainDocsMissingNumNodes(content string) []int {
 	var missing []int
 	for i, doc := range strings.Split(content, "\n---") {
 		if !strings.Contains(doc, "kind: ComputeDomain") {
 			continue
 		}
-		var b strings.Builder
-		for _, line := range strings.Split(doc, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "#") {
-				continue
-			}
-			b.WriteString(line)
-			b.WriteString("\n")
-		}
-		if !numNodesKeyRE.MatchString(b.String()) {
+		if !specHasNumNodes(doc) {
 			missing = append(missing, i)
 		}
 	}
@@ -136,4 +169,80 @@ func TestComputeDomainManifestsSetNumNodes(t *testing.T) {
 			"pattern no longer covers them.")
 	}
 	t.Logf("verified %d ComputeDomain manifest(s) set spec.numNodes", checked)
+}
+
+// TestComputeDomainScannerCases pins the scanner's behavior directly, so the
+// catalog guard above cannot quietly stop discriminating if the catalog changes.
+// Each case is a shape that has either fooled a previous version of this
+// scanner or must keep working.
+func TestComputeDomainScannerCases(t *testing.T) {
+	t.Parallel()
+
+	const header = "apiVersion: resource.nvidia.com/v1beta1\nkind: ComputeDomain\n"
+
+	tests := []struct {
+		name        string
+		doc         string
+		wantMissing bool
+	}{
+		{
+			name: "spec.numNodes present",
+			doc:  header + "metadata:\n  name: cd\nspec:\n  numNodes: 0\n  channel:\n    allocationMode: All\n",
+		},
+		{
+			name:        "spec.numNodes absent",
+			doc:         header + "metadata:\n  name: cd\nspec:\n  channel:\n    allocationMode: All\n",
+			wantMissing: true,
+		},
+		{
+			// Regression: an earlier scanner matched numNodes anywhere in the
+			// document, so this passed while admission would still fail.
+			name:        "numNodes under metadata, not spec",
+			doc:         header + "metadata:\n  name: cd\n  numNodes: 0\nspec:\n  channel:\n    allocationMode: All\n",
+			wantMissing: true,
+		},
+		{
+			// Regression: an earlier scanner did not strip comments, so the
+			// prose in the real manifest satisfied it even with the key gone.
+			name:        "numNodes only mentioned in a comment",
+			doc:         header + "metadata:\n  name: cd\nspec:\n  # numNodes: Required value\n  channel:\n    allocationMode: All\n",
+			wantMissing: true,
+		},
+		{
+			name: "nested numNodes does not satisfy the direct-child rule",
+			doc:  header + "metadata:\n  name: cd\nspec:\n  channel:\n    numNodes: 0\n",
+			// numNodes exists but under spec.channel, not spec.
+			wantMissing: true,
+		},
+		{
+			name: "templated value is acceptable",
+			doc:  header + "metadata:\n  name: cd\nspec:\n  numNodes: {{ .Values.numNodes }}\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := !specHasNumNodes(tt.doc)
+			if got != tt.wantMissing {
+				t.Errorf("specHasNumNodes reported missing=%v, want %v\ndoc:\n%s",
+					got, tt.wantMissing, tt.doc)
+			}
+		})
+	}
+}
+
+// TestComputeDomainMultiDocument covers the per-document scoping: a file where
+// one ComputeDomain is valid and a second is not must report only the second.
+func TestComputeDomainMultiDocument(t *testing.T) {
+	t.Parallel()
+
+	content := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: unrelated\n" +
+		"\n---\napiVersion: resource.nvidia.com/v1beta1\nkind: ComputeDomain\nmetadata:\n  name: ok\nspec:\n  numNodes: 0\n" +
+		"\n---\napiVersion: resource.nvidia.com/v1beta1\nkind: ComputeDomain\nmetadata:\n  name: bad\nspec:\n  channel:\n    allocationMode: All\n"
+
+	missing := computeDomainDocsMissingNumNodes(content)
+	if len(missing) != 1 || missing[0] != 2 {
+		t.Errorf("missing documents = %v, want [2] (only the third document lacks spec.numNodes)", missing)
+	}
 }

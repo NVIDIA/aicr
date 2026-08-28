@@ -46,7 +46,7 @@ driver:
   enabled: true
   rdma:
     enabled: false
-  useOpenKernelModules: true
+  kernelModuleType: auto
 
 # ── GDRCopy: GPU-direct memory for high-performance training ─────────
 gdrcopy:
