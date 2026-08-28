@@ -160,7 +160,23 @@ driver:
   # requirement, hold the pin ahead rather than following the chart.
   version: 595.91.07
   enabled: true
-  useOpenKernelModules: true
+  # Replaces useOpenKernelModules, which the chart deprecated and made a
+  # no-op (identical NOTE in v26.3.3 and v26.7.0 values.yaml), so the old
+  # key had already stopped having any effect before this pin moved.
+  #
+  # "auto" pins today's effective behaviour, not a change: it is the chart
+  # default both before and after this bump, and it is what the OCP
+  # ClusterPolicy template already falls back to
+  # (components/gpu-operator-ocp/manifests/clusterpolicy.yaml). Per the
+  # ClusterPolicy CRD, auto selects the recommended module type from the
+  # host's GPU devices and driver branch — which yields open modules on
+  # Blackwell/Grace, where they are required.
+  #
+  # Setting "open" instead would pin the intent the dead key expressed, but
+  # that IS a behaviour change on any hardware where auto currently selects
+  # proprietary, so it needs its own validation rather than riding a version
+  # bump.
+  kernelModuleType: auto
   maxParallelUpgrades: 5
   rdma:
     # Default off: nvidia_peermem only loads against Mellanox MOFED
