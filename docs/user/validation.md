@@ -53,14 +53,15 @@ ones) that match the target fabric:
 | `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`) | GB200 + EKS. Asserts EFA actually carried traffic — catches silent fallback to Socket when the NVIDIA driver is missing `NVreg_GrdmaPciTopoCheckOverride=1`. |
 | `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, and GB200 + OKE. Asserts the NVLS communicator actually initialized — catches silent fallback to EFA (EKS) or Socket (OKE) when the IMEX domain is misconfigured. |
 
-An opt-in Cluster Readiness Engine (CRE) NCCL check is available for EKS H100.
-It is not attached to shipped overlays while CRE remains private and the
-result has not been correlated with the TrainJob path. The check requires a
-same-named constraint:
+An opt-in Cluster Readiness Engine (CRE) pair of checks is available for EKS H100.
+They are not attached to shipped overlays while CRE remains private and the
+NCCL result has not been correlated with the TrainJob path. Each check requires
+a same-named constraint:
 
 | Check | What it measures |
 |---|---|
 | `nccl-cre-all-reduce-bw` | EFA bus bandwidth from a CRE `WorkloadRun` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs |
+| `cre-training-goodput` | Runtime goodput from a CRE-managed NeMo/Megatron training `WorkloadRun` |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
