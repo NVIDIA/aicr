@@ -1,0 +1,142 @@
+// Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strconv"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
+	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	k8spod "github.com/NVIDIA/aicr/pkg/k8s/pod"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/validators"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+func checkCRENCCLAllReduceBW(ctx *validators.Context) error {
+	constraint, found := findPerformanceConstraint(ctx, checkNameCRENCCLAllReduceBW)
+	if !found {
+		return validators.Skip(fmt.Sprintf("no %s constraint in recipe", checkNameCRENCCLAllReduceBW))
+	}
+	actual, passed, err := validateCRENcclAllReduceBw(ctx, constraint)
+	return classifyNCCLAllReduceBWResult(checkNameCRENCCLAllReduceBW, constraint, actual, passed, err)
+}
+
+func validateCRENcclAllReduceBw(ctx *validators.Context, constraint recipe.Constraint) (string, bool, error) {
+	if ctx.ValidationInput == nil {
+		return skipMsgNCCLNoInput, true, nil
+	}
+	service := ctx.ValidationInput.Criteria.Service
+	accelerator := ctx.ValidationInput.Criteria.Accelerator
+	if service != recipe.CriteriaServiceEKS || accelerator != recipe.CriteriaAcceleratorH100 {
+		return fmt.Sprintf("skipped - CRE NCCL currently supports only eks × h100, got %s × %s", service, accelerator), true, nil
+	}
+
+	threshold, err := parseThreshold(constraint.Value)
+	if err != nil {
+		return "", false, err
+	}
+
+	gpuConfig, err := determineGPUConfig(ctx, service, accelerator, ctx.NodeSelector)
+	if err != nil {
+		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to determine GPU configuration", err)
+	}
+	if gpuConfig.WorkerCount < 2 {
+		return skipMsgNCCLFewNodes, true, nil
+	}
+
+	dyn := ctx.DynamicClient
+	if dyn == nil {
+		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal, "dynamic client is required to create a WorkloadRun")
+	}
+
+	obj := buildCRENCCLWorkloadRun(ctx.Namespace, gpuConfig, ctx.NodeSelector)
+
+	if err := deleteCREWorkloadRun(ctx.Ctx, dyn, ctx.Namespace, creNCCLRunName); err != nil {
+		return "", false, err
+	}
+
+	defer func() {
+		if delErr := deleteCREWorkloadRun(context.Background(), dyn, ctx.Namespace, creNCCLRunName); delErr != nil {
+			slog.Warn("failed to delete CRE NCCL WorkloadRun", "error", delErr)
+		}
+	}()
+
+	if err := createUnstructured(ctx.Ctx, dyn, workloadRunGVR, ctx.Namespace, obj); err != nil {
+		return "", false, err
+	}
+
+	run, err := waitForWorkloadRunTerminal(ctx.Ctx, dyn, ctx.Namespace, creNCCLRunName)
+	if err != nil {
+		return "", false, err
+	}
+	if unstructuredConditionTrue(run, "Failed") {
+		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal, "CRE WorkloadRun Failed")
+	}
+
+	bw, err := listMaxBusBandwidth(ctx.Ctx, dyn, ctx.Namespace, creNCCLRunName, run.GetCreationTimestamp())
+	if err != nil {
+		return "", false, err
+	}
+
+	logs, logErr := creLauncherLogs(ctx, run.GetCreationTimestamp())
+	if logErr != nil {
+		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "CRE launcher logs required for transport assertion", logErr)
+	}
+	if err := verifyTransportFromLogs(logs, variantNET); err != nil {
+		return "", false, err
+	}
+
+	actual := strconv.FormatFloat(bw, 'f', 2, 64)
+	return actual, bw >= threshold, nil
+}
+
+func creLauncherLogs(ctx *validators.Context, createdAt metav1.Time) (string, error) {
+	listCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	pods, err := ctx.Clientset.CoreV1().Pods(ctx.Namespace).List(listCtx, metav1.ListOptions{
+		LabelSelector: "jobset.sigs.k8s.io/replicatedjob-name=launcher",
+	})
+	if err != nil {
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list CRE worker pods", err)
+	}
+	if len(pods.Items) == 0 {
+		return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "no CRE worker pods found for transport assertion")
+	}
+	pod := youngestLivePodSince(pods.Items, createdAt)
+	if pod == nil {
+		return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "no live CRE worker pods found for transport assertion")
+	}
+	return k8spod.GetPodLogs(listCtx, ctx.Clientset, ctx.Namespace, pod.Name, nodeJobName)
+}
+
+func youngestLivePodSince(pods []corev1.Pod, createdAt metav1.Time) *corev1.Pod {
+	var best *corev1.Pod
+	for i := range pods {
+		p := &pods[i]
+		if p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodFailed ||
+			p.CreationTimestamp.Time.Before(createdAt.Time) {
+			continue
+		}
+		if best == nil || p.CreationTimestamp.After(best.CreationTimestamp.Time) {
+			best = p
+		}
+	}
+	return best
+}
