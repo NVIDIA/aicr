@@ -53,6 +53,15 @@ ones) that match the target fabric:
 | `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the default fabric — see [GB200 NET preflight](#gb200-net-preflight-gpudirect-rdma-prerequisites). |
 | `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 (EKS, OKE); GB300 (generic); VR200 (RKE2). Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric when the IMEX domain is misconfigured. |
 
+An opt-in Cluster Readiness Engine (CRE) NCCL check is available for EKS H100.
+It is not attached to shipped overlays while CRE remains private and the
+result has not been correlated with the TrainJob path. The check requires a
+same-named constraint:
+
+| Check | What it measures |
+|---|---|
+| `nccl-cre-all-reduce-bw` | EFA bus bandwidth from a CRE `WorkloadRun` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs |
+
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
 benchmarks explicitly — either by
