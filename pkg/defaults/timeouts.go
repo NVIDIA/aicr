@@ -666,7 +666,14 @@ const (
 	TrainerCRDEstablishedTimeout = 2 * time.Minute
 
 	// TrainerControllerReadyTimeout is the time to wait for the Kubeflow Trainer
-	// controller-manager Deployment to have at least one ready replica after installation.
+	// controller-manager Deployment to have at least one ready replica after
+	// installation. Widened from 2m to 3m: on cold start the cert-controller
+	// sidecar's webhook-cert get-or-create can race a not-yet-synced informer
+	// cache, producing a resourceVersion conflict that the sidecar's own
+	// reconcile loop retries and self-heals from unassisted. This is expected
+	// behavior under cert-controller's optimistic-concurrency retry, not a
+	// defect in Trainer or in this validator — but each retry adds latency
+	// that could otherwise push first-ready past a tighter budget.
 	TrainerControllerReadyTimeout = 3 * time.Minute
 
 	// TrainerInstallPollInterval is the sleep between checks that a
