@@ -222,6 +222,7 @@ func applyControllerTolerations(obj *unstructured.Unstructured) error {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
 			fmt.Sprintf("failed to read tolerations from Deployment %q", obj.GetName()), err)
 	} else if found && len(existing) > 0 {
+		slog.Debug("Controller Deployment already declares tolerations; leaving untouched", "name", obj.GetName())
 		return nil
 	}
 
