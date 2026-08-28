@@ -500,7 +500,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// collide, adopt, or delete each other's resources — no lock required.
 	gpuConfig.Namespace = fmt.Sprintf("%s-%s", ncclWorkloadNamespacePrefix, deriveRunID())
 	if err = ensureNamespace(ctx, gpuConfig.Namespace); err != nil {
-		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create NCCL benchmark namespace", err)
+		return "", aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal, "failed to create NCCL benchmark namespace")
 	}
 
 	// Clean up the per-run namespace (and everything created in it) on every
@@ -2148,8 +2148,8 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string) erro
 	waitCtx, waitCancel := context.WithTimeout(context.Background(), defaults.InferenceNamespaceTerminationWait)
 	defer waitCancel()
 	if err := waitForNamespaceGone(waitCtx, nsClient, namespace); err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
-			fmt.Sprintf("NCCL benchmark namespace %q did not finish terminating", namespace), err)
+		return aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("NCCL benchmark namespace %q did not finish terminating", namespace))
 	}
 
 	slog.Info("Deleted NCCL benchmark namespace", "namespace", namespace)
