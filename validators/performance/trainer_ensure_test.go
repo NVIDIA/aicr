@@ -212,7 +212,7 @@ func TestFoldCleanupError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := foldCleanupError(tt.bench, tt.cleanup)
+			got := foldCleanupError(tt.bench, tt.cleanup, "NCCL benchmark succeeded but Kubeflow Trainer cleanup failed")
 			if tt.want == nil {
 				if got != nil {
 					t.Fatalf("got %v, want nil", got)
@@ -231,7 +231,7 @@ func TestFoldCleanupError(t *testing.T) {
 func TestFoldCleanupError_PreservesCleanupCode(t *testing.T) {
 	cleanupErr := aicrErrors.New(aicrErrors.ErrCodeUnavailable, "apiserver is down")
 
-	got := foldCleanupError(nil, cleanupErr)
+	got := foldCleanupError(nil, cleanupErr, "fallback message")
 	if !stderrors.Is(got, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "")) {
 		t.Errorf("cleanup error code was flattened: %v", got)
 	}

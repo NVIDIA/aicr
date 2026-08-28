@@ -809,15 +809,18 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 }
 
 // foldCleanupError decides the check's verdict when teardown fails. A cleanup
-// failure leaks cluster-scoped CRDs, RBAC, and webhook configurations that would
-// silently poison the next run, so it fails an otherwise-passing check — but it
-// never masks a real benchmark failure, which is always the more useful signal.
-func foldCleanupError(benchErr, cleanupErr error) error {
+// failure leaks cluster-scoped CRDs, RBAC, and webhook configurations (or, for
+// the NCCL resource cleanup caller, poisons the next run's fixed-named
+// resources) that would silently break a later run, so it fails an
+// otherwise-passing check, but it never masks a real benchmark failure,
+// which is always the more useful signal. fallbackMsg is used only when
+// cleanupErr isn't already a *StructuredError (PropagateOrWrap preserves an
+// existing one's own message/code as-is).
+func foldCleanupError(benchErr, cleanupErr error, fallbackMsg string) error {
 	if cleanupErr == nil || benchErr != nil {
 		return benchErr
 	}
-	return aicrErrors.PropagateOrWrap(cleanupErr, aicrErrors.ErrCodeInternal,
-		"NCCL benchmark succeeded but Kubeflow Trainer cleanup failed")
+	return aicrErrors.PropagateOrWrap(cleanupErr, aicrErrors.ErrCodeInternal, fallbackMsg)
 }
 
 // installTrainer downloads the Kubeflow Trainer v2.2.0 archive from GitHub, builds the

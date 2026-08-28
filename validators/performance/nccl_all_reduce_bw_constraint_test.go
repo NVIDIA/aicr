@@ -21,10 +21,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func TestEmitDiagnosticBlock(t *testing.T) {
@@ -241,5 +244,37 @@ func TestCollectNCCLWorkerDiagnostics(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRunNCCLTrainJob_TrainerInstallFailureCleansUpNamespace is the regression
+// guard for the namespace-cleanup defer's registration point: it must be
+// registered right after ensureNamespace succeeds, not after
+// ensureTrainerInstalled, or a Trainer-install failure returns before the
+// defer is ever registered and leaks the per-run namespace forever.
+func TestRunNCCLTrainJob_TrainerInstallFailureCleansUpNamespace(t *testing.T) {
+	dynamicClient := newTrainerFakeClient(completeTrainerInstall()...)
+	dynamicClient.PrependReactor("get", resourceCRDs, func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewServiceUnavailable("apiserver is down")
+	})
+
+	clientset := fake.NewClientset()
+	vctx := &validators.Context{
+		Ctx:           context.Background(),
+		Clientset:     clientset,
+		DynamicClient: dynamicClient,
+	}
+	gpuConfig := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8}
+
+	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "")
+	if err == nil {
+		t.Fatal("expected an error from the failed Trainer install probe, got nil")
+	}
+	if gpuConfig.Namespace == "" {
+		t.Fatal("gpuConfig.Namespace was never set; ensureNamespace apparently wasn't reached")
+	}
+
+	if _, getErr := clientset.CoreV1().Namespaces().Get(context.Background(), gpuConfig.Namespace, metav1.GetOptions{}); !apierrors.IsNotFound(getErr) {
+		t.Errorf("namespace %q was not cleaned up after Trainer install failure: get err = %v", gpuConfig.Namespace, getErr)
 	}
 }
