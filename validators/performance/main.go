@@ -21,6 +21,7 @@
 //	performance nccl-all-reduce-bw-net
 //	performance nccl-all-reduce-bw-nvls
 //	performance nccl-cre-all-reduce-bw
+//	performance cre-training-goodput
 package main
 
 import (
@@ -33,6 +34,7 @@ func main() {
 		"nccl-all-reduce-bw-net":    checkNCCLAllReduceBWNET,
 		"nccl-all-reduce-bw-nvls":   checkNCCLAllReduceBWNVLS,
 		checkNameCRENCCLAllReduceBW: checkCRENCCLAllReduceBW,
+		checkNameCRETrainingGoodput: checkCRETrainingGoodput,
 		"inference-perf":            checkInferencePerf,
 	})
 }

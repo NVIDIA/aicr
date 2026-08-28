@@ -65,6 +65,11 @@ const (
 	// integration is validated, and no embedded overlay enables it.
 	CRENCCLAllReduceBWCheckName = "nccl-cre-all-reduce-bw"
 
+	// CRETrainingGoodputCheckName is the catalog name of the CRE-driven
+	// NeMo/Megatron training check. It is limited to EKS H100 while CRE
+	// integration is validated, and no embedded overlay enables it.
+	CRETrainingGoodputCheckName = "cre-training-goodput"
+
 	// ncclFabricEnv selects the NET fabric (efa default | roce). Forwarded to
 	// the NET check pod so the in-Job validator can observe it. This is the
 	// orchestrator (forwarding) end; the validator-pod (reading) end defines the

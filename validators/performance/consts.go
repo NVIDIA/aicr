@@ -23,6 +23,7 @@ const (
 	keyName                     = "name"
 	checkNameNCCLAllReduceBW    = "nccl-all-reduce-bw"
 	checkNameCRENCCLAllReduceBW = "nccl-cre-all-reduce-bw"
+	checkNameCRETrainingGoodput = "cre-training-goodput"
 
 	// nodeJobName is the name of both the NCCL worker replicatedJob and its
 	// primary container in testdata/{accelerator}/{service}/runtime.yaml.

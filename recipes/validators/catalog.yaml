@@ -296,3 +296,10 @@ validators:
     timeout: 30m
     args: ["nccl-cre-all-reduce-bw"]
     env: []
+  - name: cre-training-goodput
+    phase: performance
+    description: "Verify EKS H100 NeMo training goodput via a Cluster Readiness Engine WorkloadRun"
+    image: ghcr.io/nvidia/aicr-validators/performance:latest
+    timeout: 30m
+    args: ["cre-training-goodput"]
+    env: []
