@@ -147,12 +147,17 @@ gfd:
   enabled: true
 
 driver:
-  # NVIDIA's recommended driver for the v26.7.0 chart; a single global
-  # pin covers H100/B200/GB200 EKS. Pinned rather than inherited from the
-  # chart default so a future chart bump is an explicit driver decision
-  # instead of a silent fleet-wide driver change, and so BOM/attestation
-  # inputs stay deterministic. Moves with the chart: holding an older
-  # driver against a newer chart is a combination upstream does not test.
+  # Single global pin covering H100/B200/GB200 EKS. Pinned rather than
+  # inherited from the chart default so a future chart bump is an explicit
+  # driver decision instead of a silent fleet-wide driver change, and so
+  # BOM/attestation inputs stay deterministic.
+  #
+  # History: the previous pin (580.173.02) was deliberately AHEAD of the
+  # v26.3.3 chart default (580.126.20) to clear a GB200+EFA floor. This
+  # value is the v26.7.0 chart default and is far above that floor, so the
+  # pin and the chart recommendation coincide again — but they are not the
+  # same thing. If a future chart default regresses below a GB200+EFA
+  # requirement, hold the pin ahead rather than following the chart.
   version: 595.91.07
   enabled: true
   useOpenKernelModules: true
