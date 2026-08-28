@@ -562,14 +562,21 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	}
 	namespaceUID := nsObj.UID
 
-	// Clean up the per-run namespace (and everything created in it) on every
-	// exit path from here on, including a failed Trainer install below.
-	// NotFound-tolerant, so running it after an early/partial-apply failure is
-	// safe. A cleanup failure only overrides a nil benchErr — see
-	// foldCleanupError — so it never masks a real benchmark failure.
+	// Clean up everything this run created, on every exit path from here on
+	// (including a failed Trainer install below), via a single defer
+	// registered before installedResources is even known. installedResources
+	// is read by closure once cleanupNCCLRun actually runs, so this defer
+	// covers both an early ensureTrainerInstalled failure (installedResources
+	// still nil) and the normal success path. Two separately registered
+	// defers would run in LIFO order instead, tearing down the (self-install
+	// fallback only) Trainer controller and its TrainJob/TrainingRuntime CRDs
+	// *before* the namespace's own TrainJob/TrainingRuntime CRs are deleted.
+	// That can leave those CRs' controller-serviced finalizers stuck forever
+	// and hang the namespace in Terminating. See cleanupNCCLRun for the
+	// enforced order.
+	var installedResources []trainerResourceRef
 	defer func() {
-		err = foldCleanupError(err, cleanupNCCLResources(ctx.Clientset, gpuConfig.Namespace, namespaceUID),
-			"NCCL benchmark succeeded but NCCL resource cleanup failed")
+		err = cleanupNCCLRun(ctx.Clientset, dynamicClient, gpuConfig.Namespace, namespaceUID, installedResources, err)
 	}()
 
 	// Ensure a usable Kubeflow Trainer. Whether an incomplete installation is a
@@ -579,16 +586,10 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// installs an ephemeral fixture only when nothing is. Anything we install is
 	// ours to clean up after the test completes.
 	recipeDeclaresTrainer := validators.RecipeDeclares(ctx, kubeflowTrainerComponent)
-	installedResources, err := ensureTrainerInstalled(ctx.Ctx, dynamicClient,
+	installedResources, err = ensureTrainerInstalled(ctx.Ctx, dynamicClient,
 		ctx.Clientset.Discovery(), recipeDeclaresTrainer)
 	if err != nil {
 		return "", err
-	}
-	if len(installedResources) > 0 {
-		defer func() {
-			err = foldCleanupError(err, deleteTrainer(dynamicClient, installedResources),
-				"NCCL benchmark succeeded but Kubeflow Trainer cleanup failed")
-		}()
 	}
 
 	// Apply runtime and trainjob resources. Propagate an inner code rather than
@@ -2240,4 +2241,27 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 
 	slog.Info("Deleted NCCL benchmark namespace", "namespace", namespace)
 	return nil
+}
+
+// cleanupNCCLRun tears down everything runNCCLTrainJob created for this run,
+// in a fixed order. It deletes the per-run namespace first (and the
+// TrainJob/TrainingRuntime/ComputeDomain/RoCE-claim CRs cascading through
+// it). Only on the self-install fallback path, where installedResources is
+// non-empty, does it then tear down the Kubeflow Trainer installation
+// itself. That order is required, not cosmetic. deleteTrainer removes the
+// Trainer controller and its TrainJob/TrainingRuntime CRDs, so tearing it
+// down before the namespace's own CRs are deleted would leave those CRs'
+// controller-serviced finalizers with nothing left to clear them, hanging
+// the namespace in Terminating until cleanupNCCLResources's wait times out.
+// benchErr is the check's result so far. A cleanup failure only overrides a
+// nil benchErr, so it never masks a real benchmark failure. See
+// foldCleanupError.
+func cleanupNCCLRun(clientset kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, uid types.UID, installedResources []trainerResourceRef, benchErr error) error {
+	err := foldCleanupError(benchErr, cleanupNCCLResources(clientset, namespace, uid),
+		"NCCL benchmark succeeded but NCCL resource cleanup failed")
+	if len(installedResources) > 0 {
+		err = foldCleanupError(err, deleteTrainer(dynamicClient, installedResources),
+			"NCCL benchmark succeeded but Kubeflow Trainer cleanup failed")
+	}
+	return err
 }

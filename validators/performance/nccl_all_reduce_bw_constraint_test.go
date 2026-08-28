@@ -285,6 +285,65 @@ func TestRunNCCLTrainJob_TrainerInstallFailureCleansUpNamespace(t *testing.T) {
 	}
 }
 
+// TestCleanupNCCLRun_DeletesNamespaceBeforeTrainer is the regression guard for
+// the reversed-defer-order finding on the self-install fallback path
+// (installedResources non-empty): deleteTrainer removes the Trainer
+// controller and its TrainJob/TrainingRuntime CRDs, so running it before the
+// namespace's own TrainJob/TrainingRuntime CRs are deleted can leave those
+// CRs' controller-serviced finalizers stuck forever. cleanupNCCLRun must
+// always delete the namespace first.
+func TestCleanupNCCLRun_DeletesNamespaceBeforeTrainer(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	dynamicClient := newTrainerFakeClient()
+
+	var order []string
+	clientset.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		order = append(order, "namespace")
+		return false, nil, nil // let the default reactor perform the actual delete too.
+	})
+	dynamicClient.PrependReactor("delete", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
+		order = append(order, "trainer")
+		return false, nil, nil
+	})
+
+	resources := []trainerResourceRef{
+		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
+	}
+
+	if err := cleanupNCCLRun(clientset, dynamicClient, ns, "", resources, nil); err != nil {
+		t.Fatalf("cleanupNCCLRun failed: %v", err)
+	}
+
+	if len(order) != 2 || order[0] != "namespace" || order[1] != "trainer" {
+		t.Fatalf("expected namespace delete before trainer delete, got order %v", order)
+	}
+}
+
+// TestCleanupNCCLRun_PropagatesTrainerCleanupFailure verifies a Trainer
+// teardown failure on the self-install fallback path still fails the check,
+// not just the namespace half of cleanup.
+func TestCleanupNCCLRun_PropagatesTrainerCleanupFailure(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	dynamicClient := newTrainerFakeClient()
+	dynamicClient.PrependReactor("delete", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "deployments"}, trainerControllerDeployment, nil)
+	})
+
+	resources := []trainerResourceRef{
+		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
+	}
+
+	err := cleanupNCCLRun(clientset, dynamicClient, ns, "", resources, nil)
+	if err == nil {
+		t.Fatal("expected the Trainer teardown failure to fail the check, got nil")
+	}
+	if !strings.Contains(err.Error(), trainerControllerDeployment) {
+		t.Errorf("expected error to name the failed resource %q, got: %v", trainerControllerDeployment, err)
+	}
+}
+
 // TestVerifyNCCLNamespaceNotLive covers the ownership gate that decides
 // whether an already-existing per-run namespace is safe to adopt. Regression
 // guard for the MAJOR finding that silently reusing any active namespace let
