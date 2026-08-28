@@ -138,7 +138,6 @@ An unlabelled GPU node fails silently: the kubelet-plugin DaemonSet sits at
 the selector during an upgrade removes a plugin that was previously working.
 See [Prepare DRA nodes before applying upgraded bundles](../user/bundling.md#prepare-dra-nodes-before-applying-upgraded-bundles).
 
-
 ## GPU Driver Setup
 
 AKS has two mutually exclusive GPU **ownership modes**. Each is a complete
@@ -590,7 +589,8 @@ az aks nodepool add \
   --name gpupool \
   --node-vm-size Standard_ND96isr_H100_v5 \
   --gpu-driver none \
-  --node-count 1
+  --node-count 1 \
+  --labels nvidia.com/dra-kubelet-plugin=true
 ```
 
 Then select the mode at recipe generation time with the `gpuStack`

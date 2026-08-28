@@ -106,7 +106,8 @@ gcloud container node-pools create POOL_NAME \
   --node-locations=ZONE \
   --num-nodes=1 \
   --machine-type=a3-highgpu-8g \
-  --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=default
+  --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=default \
+  --node-labels="nvidia.com/dra-kubelet-plugin=true"
 ```
 
 Two flags deserve care:
@@ -393,7 +394,6 @@ An unlabelled GPU node fails silently: the kubelet-plugin DaemonSet sits at
 `deploy.sh` reports an error. This applies to existing clusters too — adding
 the selector during an upgrade removes a plugin that was previously working.
 See [Prepare DRA nodes before applying upgraded bundles](../user/bundling.md#prepare-dra-nodes-before-applying-upgraded-bundles).
-
 
 ## Troubleshooting
 
