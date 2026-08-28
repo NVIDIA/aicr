@@ -130,13 +130,20 @@ func TestRecorderIgnoresEmptySubject(t *testing.T) {
 
 	var r Recorder
 	r.Warn(Notice{RemovedIn: "v0.25"})
+
+	// Assert on the empty-subject call in isolation, before anything else has
+	// logged. An earlier version of this test made both calls first and then
+	// looked for the malformed line "and no --real-flag line" — but the second
+	// call always logs --real-flag, so that condition was never true and the
+	// assertion could not fail. It also anchored on a newline immediately after
+	// the message, which slog's text handler never emits because the structured
+	// attributes follow on the same line.
+	if got := buf.String(); got != "" {
+		t.Errorf("empty-subject notice was logged, want it dropped; got: %s", got)
+	}
+
 	r.Warn(Notice{Subject: "--real-flag", RemovedIn: "v0.25"})
 
-	if strings.Contains(buf.String(), "is deprecated and will be removed in v0.25\n") &&
-		!strings.Contains(buf.String(), "--real-flag") {
-
-		t.Error("empty-subject notice was logged")
-	}
 	if !strings.Contains(buf.String(), "--real-flag is deprecated") {
 		t.Error("a real notice was suppressed by the empty-subject call")
 	}

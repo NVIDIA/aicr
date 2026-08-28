@@ -186,7 +186,8 @@ func TestCLISurface(t *testing.T) {
 		return
 	}
 
-	added, removed := diffLines(stripComments(string(wantBytes)), stripComments(got))
+	want := stripComments(string(wantBytes))
+	added, removed := diffLines(want, stripComments(got))
 
 	var b strings.Builder
 	b.WriteString("the aicr CLI surface no longer matches its committed baseline.\n\n")
@@ -203,9 +204,36 @@ func TestCLISurface(t *testing.T) {
 			"intentional and the window has passed, regenerate the golden.\n\n")
 	}
 
-	if len(added) > 0 {
+	// Not every addition is compatible. A newly required flag on a command that
+	// already existed invalidates invocations that were valid before, which
+	// RELEASING.md classifies as breaking — only a new flag whose default
+	// preserves behavior is additive. On a brand-new command there is no prior
+	// invocation to break, so requiredness there is additive; the split is by
+	// whether the command was already in the baseline.
+	existing := commandPaths(want)
+	var newlyRequired, compatible []string
+	for _, line := range added {
+		if isRequiredFlagLine(line) && existing[flagCommandPath(line)] {
+			newlyRequired = append(newlyRequired, line)
+			continue
+		}
+		compatible = append(compatible, line)
+	}
+
+	if len(newlyRequired) > 0 {
+		b.WriteString("BREAKING — these flags are newly required on commands that already existed:\n")
+		for _, line := range newlyRequired {
+			fmt.Fprintf(&b, "  ! %s\n", line)
+		}
+		b.WriteString("\nAdding a required flag to an existing command makes previously valid\n" +
+			"invocations fail, which RELEASING.md § Deprecation Policy classifies as\n" +
+			"breaking. Give the flag a default that preserves current behavior, or\n" +
+			"ship it through the deprecation window.\n\n")
+	}
+
+	if len(compatible) > 0 {
 		b.WriteString("Additive — these entries are new:\n")
-		for _, line := range added {
+		for _, line := range compatible {
 			fmt.Fprintf(&b, "  + %s\n", line)
 		}
 		b.WriteString("\nAdditions are compatible. Regenerate the golden and commit it in\n" +
@@ -416,6 +444,98 @@ func TestFlagFactsRendersDashPrefixByNameLength(t *testing.T) {
 			}
 			if names != tt.want {
 				t.Errorf("rendered names = %q, want %q", names, tt.want)
+			}
+		})
+	}
+}
+
+// commandPaths returns the command paths present in a baseline line set.
+func commandPaths(lines []string) map[string]bool {
+	paths := make(map[string]bool)
+	for _, line := range lines {
+		rest, ok := strings.CutPrefix(line, "command ")
+		if !ok {
+			continue
+		}
+		if path, _, found := strings.Cut(rest, "  aliases="); found {
+			paths[path] = true
+		}
+	}
+	return paths
+}
+
+// isRequiredFlagLine reports whether a rendered flag line marks the flag
+// required.
+func isRequiredFlagLine(line string) bool {
+	return strings.HasPrefix(line, "flag ") && strings.Contains(line, " required=true ")
+}
+
+// flagCommandPath extracts the command path from a rendered flag line, whose
+// shape is "flag    <path>  <names>  type=...".
+func flagCommandPath(line string) string {
+	rest, ok := strings.CutPrefix(line, "flag    ")
+	if !ok {
+		return ""
+	}
+	path, _, found := strings.Cut(rest, "  ")
+	if !found {
+		return ""
+	}
+	return path
+}
+
+// TestNewlyRequiredFlagOnExistingCommandIsBreaking pins the classification that
+// decides whether a surface change blocks or merely needs a regenerated golden.
+//
+// Every added line used to be reported as "Additions are compatible." That is
+// wrong for a flag that arrives already required on a command that already
+// shipped: invocations that were valid before now fail, which RELEASING.md
+// classifies as breaking. On a brand-new command there is no prior invocation to
+// break, so requiredness there really is additive — the distinction is the whole
+// point, and it is why this is asserted directly rather than through the golden.
+func TestNewlyRequiredFlagOnExistingCommandIsBreaking(t *testing.T) {
+	t.Parallel()
+
+	baseline := []string{
+		"command aicr  aliases= hidden=false",
+		"command aicr bundle  aliases= hidden=false",
+		`flag    aicr bundle  --recipe,-r  type=string default= required=false hidden=false env=`,
+	}
+	existing := commandPaths(baseline)
+
+	tests := []struct {
+		name       string
+		line       string
+		wantBroken bool
+	}{
+		{
+			name:       "required flag on an existing command is breaking",
+			line:       `flag    aicr bundle  --must-set  type=string default= required=true hidden=false env=`,
+			wantBroken: true,
+		},
+		{
+			name:       "optional flag on an existing command is additive",
+			line:       `flag    aicr bundle  --nice-to-have  type=string default= required=false hidden=false env=`,
+			wantBroken: false,
+		},
+		{
+			name:       "required flag on a brand-new command is additive",
+			line:       `flag    aicr brandnew  --must-set  type=string default= required=true hidden=false env=`,
+			wantBroken: false,
+		},
+		{
+			name:       "a new command line itself is additive",
+			line:       "command aicr brandnew  aliases= hidden=false",
+			wantBroken: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := isRequiredFlagLine(tt.line) && existing[flagCommandPath(tt.line)]
+			if got != tt.wantBroken {
+				t.Errorf("classified breaking=%v, want %v for %q", got, tt.wantBroken, tt.line)
 			}
 		})
 	}

@@ -73,8 +73,8 @@ empty. That tolerance retires alongside the alpha values — except for
 see below.
 
 One narrowing landed earlier than the rest: as of v0.21, a `RecipeMetadata`
-overlay passed directly (`aicr recipe -r overlay.yaml`,
-`aicr bundle -r overlay.yaml`) must carry an `apiVersion`, because the catalog
+overlay passed directly (`aicr bundle -r overlay.yaml`,
+`aicr validate -r overlay.yaml`) must carry an `apiVersion`, because the catalog
 scanner already required one and the two paths disagreed on the same bytes
 ([#2421](https://github.com/NVIDIA/aicr/issues/2421)). Hydrated `RecipeResult`
 inputs keep the tolerance until v0.23.
