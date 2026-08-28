@@ -849,6 +849,7 @@ func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, discov
 // before the first apply so a malformed manifest cannot leave a partial install.
 func decodeTrainerObjects(resources []*resource.Resource) ([]*unstructured.Unstructured, error) {
 	objs := make([]*unstructured.Unstructured, 0, len(resources))
+	seenControllers := make(map[string]bool, 2)
 	for _, res := range resources {
 		// Convert to unstructured via YAML round-trip (guarantees plain Go types).
 		yamlBytes, err := res.AsYAML()
@@ -868,7 +869,23 @@ func decodeTrainerObjects(resources []*resource.Resource) ([]*unstructured.Unstr
 		if tolErr := applyControllerTolerations(obj); tolErr != nil {
 			return nil, tolErr
 		}
+		if obj.GroupVersionKind().Kind == "Deployment" {
+			seenControllers[obj.GetName()] = true
+		}
 		objs = append(objs, obj)
+	}
+
+	// A future Trainer archive bump (or a JobSet overlay variant) that renames
+	// either controller Deployment makes applyControllerTolerations's name
+	// switch miss it silently, reverting that controller to unschedulable on
+	// an all-tainted cluster. Surface the mismatch here instead of letting it
+	// resurface only as a bare readiness timeout downstream.
+	for _, name := range []string{trainerControllerDeployment, jobSetControllerDeployment} {
+		if !seenControllers[name] {
+			slog.Warn("Expected controller Deployment not found in Trainer manifest set; "+
+				"it will not receive the blanket toleration and may be unschedulable on all-tainted clusters",
+				"deployment", name)
+		}
 	}
 	return objs, nil
 }
