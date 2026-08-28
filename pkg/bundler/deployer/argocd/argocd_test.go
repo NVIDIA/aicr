@@ -2343,3 +2343,128 @@ func TestGenerate_ChildNameLimits(t *testing.T) {
 		})
 	}
 }
+
+// TestBuildApplicationData_ApplyOutOfSyncOnly is the regression-proofing
+// test for the SCOPING of ApplicationData.ApplyOutOfSyncOnly, not just its
+// presence: it exercises all four folder kinds for the same parent
+// component so a test that only checked the readiness case could not pass
+// if the predicate degenerated to unconditionally true. Paired with the
+// Job-level Replace=true,Force=true annotation in
+// pkg/bundler/gatemanifest/manifest.go, ApplyOutOfSyncOnly (set only for
+// the readiness Application) stops ArgoCD from delete-and-recreating the
+// readiness-gate Job on every no-op resync. See #2367.
+func TestBuildApplicationData_ApplyOutOfSyncOnly(t *testing.T) {
+	comp := recipe.ComponentRef{
+		Name:    "gpu-operator",
+		Source:  "https://helm.ngc.nvidia.com/nvidia",
+		Chart:   "gpu-operator",
+		Version: "v25.3.3",
+	}
+
+	tests := []struct {
+		name   string
+		folder localformat.Folder
+		want   bool
+	}{
+		{
+			name:   "primary folder",
+			folder: localformat.Folder{Name: "gpu-operator", Dir: "001-gpu-operator", Kind: localformat.KindUpstreamHelm, Parent: "gpu-operator"},
+			want:   false,
+		},
+		{
+			name:   "-pre folder",
+			folder: localformat.Folder{Name: "gpu-operator-pre", Dir: "001-gpu-operator-pre", Kind: localformat.KindLocalHelm, Parent: "gpu-operator"},
+			want:   false,
+		},
+		{
+			name:   "-post folder",
+			folder: localformat.Folder{Name: "gpu-operator-post", Dir: "003-gpu-operator-post", Kind: localformat.KindLocalHelm, Parent: "gpu-operator"},
+			want:   false,
+		},
+		{
+			name:   "-readiness folder",
+			folder: localformat.Folder{Name: "gpu-operator-readiness", Dir: "004-gpu-operator-readiness", Kind: localformat.KindLocalHelm, Parent: "gpu-operator"},
+			want:   true,
+		},
+		{
+			// Adversarial: a primary folder whose NAME merely contains
+			// "-readiness" (not the synthetic suffix pattern relative to
+			// its own Parent) must not be scoped in. f.Parent+"-readiness"
+			// = "foo-readiness-readiness" != "foo-readiness", so the
+			// predicate correctly evaluates false.
+			name:   "primary folder whose name happens to contain -readiness",
+			folder: localformat.Folder{Name: "foo-readiness", Dir: "005-foo-readiness", Kind: localformat.KindUpstreamHelm, Parent: "foo-readiness"},
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := buildApplicationData(comp, tt.folder, 0, "https://github.com/example/repo.git", "main", nil, false)
+			if err != nil {
+				t.Fatalf("buildApplicationData() error = %v", err)
+			}
+			if data.ApplyOutOfSyncOnly != tt.want {
+				t.Errorf("ApplyOutOfSyncOnly = %v, want %v (folder=%+v)", data.ApplyOutOfSyncOnly, tt.want, tt.folder)
+			}
+		})
+	}
+}
+
+// TestGenerate_ApplyOutOfSyncOnlySyncOptions asserts the rendered
+// application.yaml for a -readiness folder carries the exact
+// "- ApplyOutOfSyncOnly=true" syncOptions entry, and that a non-readiness
+// folder's rendered application.yaml does not mention ApplyOutOfSyncOnly
+// anywhere. See #2367.
+func TestGenerate_ApplyOutOfSyncOnlySyncOptions(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+		Version:         "v0.0.0-test",
+		RepoURL:         "https://github.com/example/aicr-bundles.git",
+		TargetRevision:  "main",
+		ComponentReadiness: map[string]map[string][]byte{
+			"gpu-operator": {
+				"readiness.yaml": []byte("apiVersion: batch/v1\nkind: Job\nmetadata:\n" +
+					"  name: gpu-operator-readiness-gate\n  namespace: {{ .Release.Namespace }}\n"),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	primary, err := os.ReadFile(filepath.Join(outputDir, "001-gpu-operator", "application.yaml"))
+	if err != nil {
+		t.Fatalf("read primary application.yaml: %v", err)
+	}
+	if strings.Contains(string(primary), "ApplyOutOfSyncOnly") {
+		t.Errorf("primary Application must not mention ApplyOutOfSyncOnly:\n%s", primary)
+	}
+
+	readiness, err := os.ReadFile(filepath.Join(outputDir, "002-gpu-operator-readiness", "application.yaml"))
+	if err != nil {
+		t.Fatalf("read readiness application.yaml: %v", err)
+	}
+	if !strings.Contains(string(readiness), "- ApplyOutOfSyncOnly=true") {
+		t.Errorf("readiness Application must contain \"- ApplyOutOfSyncOnly=true\":\n%s", readiness)
+	}
+}

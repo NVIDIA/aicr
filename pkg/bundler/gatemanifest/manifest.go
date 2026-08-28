@@ -179,8 +179,19 @@ func jobMetadataAnnotations(deployer config.DeployerType) string {
 		// API server rejects on any upgrade that changes the Job spec (e.g.
 		// an image tag bump), leaving the Application permanently
 		// OutOfSync. Force=true is ArgoCD's documented option to
-		// delete-and-recreate when a replace fails. Deliberately NOT using a
-		// Helm-style sync hook (helm.sh/hook) here: per
+		// delete-and-recreate when a replace fails. This alone would
+		// delete-and-recreate the Job on EVERY sync, including no-op
+		// resyncs where nothing changed — see the ApplyOutOfSyncOnly=true
+		// entry this deployer adds to the readiness folder's
+		// Application-level spec.syncPolicy.syncOptions
+		// (pkg/bundler/deployer/argocd/argocd.go's buildApplicationData),
+		// which excludes already-in-sync resources from a sync operation
+		// and stops the needless rerun. The two mechanisms are
+		// complementary: Job-level Replace+Force handles genuine spec
+		// diffs (e.g. an image tag bump); Application-level
+		// ApplyOutOfSyncOnly prevents unnecessary reruns when there is no
+		// diff at all. Deliberately NOT using a Helm-style sync hook
+		// (helm.sh/hook) here: per
 		// pkg/bundler/deployer/localformat/hooks.go's stripHelmHooks doc,
 		// hook-annotated resources are excluded from ArgoCD's normal drift
 		// detection, so an image-tag-only bump could silently go undetected.

@@ -118,6 +118,12 @@ func TestRender_ArgoCDSyncOptions(t *testing.T) {
 	// Application permanently OutOfSync (#2367). Force=true makes ArgoCD
 	// delete-and-recreate on replace failure instead. Both ArgoCD deployer
 	// branches (native and Helm-rendered) must emit the same annotation.
+	// This Job-level annotation is only half the fix: see
+	// TestBuildApplicationData_ApplyOutOfSyncOnly and
+	// TestGenerate_ApplyOutOfSyncOnlySyncOptions in
+	// pkg/bundler/deployer/argocd for the Application-level
+	// ApplyOutOfSyncOnly=true entry that stops Force=true from
+	// delete-and-recreating the Job on every no-op resync.
 	tests := []struct {
 		name     string
 		deployer config.DeployerType
