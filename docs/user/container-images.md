@@ -157,7 +157,7 @@ _No images extracted._
 - `nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4`
 - `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.5`
 - `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.0`
-- `nvcr.io/nvidia/driver:595.91.07`
+- `nvcr.io/nvidia/driver:580.173.02`
 - `nvcr.io/nvidia/gpu-operator:v26.7.0`
 - `nvcr.io/nvidia/k8s-device-plugin:v0.20.0`
 - `nvcr.io/nvidia/k8s/container-toolkit:v1.20.0`

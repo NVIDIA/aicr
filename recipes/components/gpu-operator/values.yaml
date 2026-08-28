@@ -147,18 +147,37 @@ gfd:
   enabled: true
 
 driver:
-  # Single global pin covering H100/B200/GB200 EKS. Pinned rather than
-  # inherited from the chart default so a future chart bump is an explicit
-  # driver decision instead of a silent fleet-wide driver change, and so
-  # BOM/attestation inputs stay deterministic.
+  # HELD at 580.173.02 — deliberately BEHIND the v26.7.0 chart default of
+  # 595.91.07. Do not advance without EFA validation on P6e hardware.
   #
-  # History: the previous pin (580.173.02) was deliberately AHEAD of the
-  # v26.3.3 chart default (580.126.20) to clear a GB200+EFA floor. This
-  # value is the v26.7.0 chart default and is far above that floor, so the
-  # pin and the chart recommendation coincide again — but they are not the
-  # same thing. If a future chart default regresses below a GB200+EFA
-  # requirement, hold the pin ahead rather than following the chart.
-  version: 595.91.07
+  # NVIDIA documents R595 as backward incompatible with P6e-GB200 EFA. R595
+  # drops NVreg_GrdmaPciTopoCheckOverride (the R580-era escape hatch) and
+  # substitutes a topology check: EFA must sit in an IOMMU group, or GPU and
+  # EFA must share a root port. p6e-gb200/gb300 satisfies neither — measured
+  # on p6e-gb300r.36xlarge, where EFA (0000:97:00.0) has no iommu_group and
+  # sits under pci0000:84 while the GPU (0000:9d:00.0) is in group 0 under
+  # pci0000:98.
+  #
+  # The failure is proven, not inferred. Running the NCCL NET workload under
+  # 595 with the preflight bypassed, both nodes selected aws-ofi-nccl/EFA/RDMA
+  # and then aborted, with the kernel logging:
+  #   NVRM: dma-buf attach failed: topology not supported for mapping type FORCE_PCIE
+  # Under 580.173.02 on the same two nodes, NCCL NET passed at 43.16 GB/s.
+  #
+  # Scope: the AWS P6e Grace-Blackwell + EFA GPUDirect path specifically. NVLS
+  # passed under 595 (840 GB/s), as did deployment and conformance; NVLink
+  # never touches EFA.
+  #
+  # Holding here is a supported combination, not an untested one: GPU Operator
+  # v26.7.0 lists 580.173.02 as supported (595.91.07 is merely its default),
+  # and DRA driver 0.5.0 requires >= 580. Pinned rather than inherited so a
+  # chart bump is an explicit driver decision, and so BOM/attestation inputs
+  # stay deterministic.
+  #
+  # Do not substitute a newer R580 patch without re-validating EFA —
+  # 580.173.02 is the exact measured baseline. Per-family overrides, so
+  # non-P6e families can advance independently, are tracked separately.
+  version: 580.173.02
   enabled: true
   # Replaces useOpenKernelModules, which the chart deprecated and made a
   # no-op (identical NOTE in v26.3.3 and v26.7.0 values.yaml), so the old
