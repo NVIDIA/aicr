@@ -172,6 +172,17 @@ func TestApplyControllerTolerations(t *testing.T) {
 			wantTolerations: nil,
 		},
 		{
+			// found && len(existing) > 0 is the guard: an explicit empty slice is
+			// "present but empty," which must fall through to being stamped, not
+			// be treated the same as "already tolerated." Pins this boundary
+			// against a future refactor that flips the guard to `found` alone.
+			name: "Deployment with present-but-empty tolerations gets tolerate-all",
+			obj:  deploymentFixture(trainerControllerDeployment, []any{}),
+			wantTolerations: []any{
+				map[string]any{"operator": "Exists"},
+			},
+		},
+		{
 			name: "non-Deployment resource is left untouched",
 			obj: &unstructured.Unstructured{Object: map[string]any{
 				"apiVersion": "v1",
