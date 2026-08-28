@@ -32,7 +32,7 @@ The schema's source of truth is
 
 ```yaml
 kind: AICRConfig               # required, exactly this value
-apiVersion: aicr.run/v1alpha2  # required, exactly this value
+apiVersion: aicr.run/v1alpha2  # required; v1beta1 also accepted, see below
 metadata:
   name: gke-h100-training      # optional, identifying only
 spec:
@@ -46,6 +46,16 @@ spec:
 Each `spec.*` section is optional and each command reads only its own section,
 so a file may carry just one section or any combination. A document with none
 of the five sections is rejected.
+
+`AICRConfig` is an authored file, so its `apiVersion` is yours to set. v0.21
+writes and documents `aicr.run/v1alpha2` and the loader also accepts the
+target `aicr.run/v1beta1`; empty and unknown values are rejected. v0.22 switches
+the documented value to the target and v0.23 stops accepting `aicr.run/v1alpha2`,
+so edit your config before upgrading to v0.23. The full release-by-release table
+is in
+[Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility);
+the policy behind it is
+[ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md).
 
 ## Loading, Precedence, and Secrets
 
@@ -146,6 +156,7 @@ spec:
         nodeGroup: gpu-worker
       acceleratedNodeTolerations:
         - nvidia.com/gpu=present:NoSchedule
+      draEvictionNodeLabel: nvidia.com/dra-kubelet-plugin=true
       workloadGate: ""
       workloadSelector: {}
       nodes: 2
@@ -255,7 +266,7 @@ Inputs to `aicr bundle`.
 | `deployment.set` / `.dynamic` | []string | Value overrides, `key:path=value` |
 | `deployment.vendorCharts` | bool | Vendor charts into the bundle |
 | `deployment.appName` | string | Argo CD parent `Application` name override (multi-bundle installs sharing a namespace) |
-| `scheduling.*` | object | `systemNodeSelector`/`Tolerations`, `acceleratedNodeSelector`/`Tolerations`, `workloadGate`, `workloadSelector`, `nodes`, `storageClass`, `sharedStorageClass`. Selectors are YAML maps; tolerations use the CLI's `key=value:effect` strings |
+| `scheduling.*` | object | `systemNodeSelector`/`Tolerations`, `acceleratedNodeSelector`/`Tolerations`, `draEvictionNodeLabel`, `workloadGate`, `workloadSelector`, `nodes`, `storageClass`, `sharedStorageClass`. Selectors are YAML maps; tolerations use the CLI's `key=value:effect` strings. `draEvictionNodeLabel` accepts one `key=value` label and defaults to `nvidia.com/dra-kubelet-plugin=true`; AICR applies it only when DRA and GPU Operator are both enabled. |
 | `attestation.enabled` | bool | Enable bundle attestation (signing); keyless OIDC by default, KMS-backed when `signingKey` is set |
 | `attestation.certificateIdentityRegexp` | string | Expected signer identity |
 | `attestation.oidcDeviceFlow` | bool | Device-code flow for headless signing |

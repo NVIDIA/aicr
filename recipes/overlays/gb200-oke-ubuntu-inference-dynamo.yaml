@@ -83,6 +83,14 @@ spec:
         - accelerator-metrics
         - ai-service-metrics
         - inference-gateway
+        # Dynamo admits its frontend and decode workers as a gang through
+        # kai-scheduler. This check validates the scheduler generically —
+        # CRDs served, and a synthetic two-pod PodGroup co-scheduled in
+        # `default-queue` — not Dynamo's own objects, which use the
+        # `dynamo` queue its chart creates. Nothing else covers even the
+        # generic path: the deployment-phase check asserts liveness only.
+        # See #2390.
+        - gang-scheduling
         - robust-controller
         - secure-accelerator-access
         - pod-autoscaling

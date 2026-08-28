@@ -311,8 +311,7 @@ func checkExpectedResources(ctx *validators.Context) error {
 					// structured errors still surface in the human-
 					// readable failures list above.
 					if firstStructuredErr == nil {
-						var se *errors.StructuredError
-						if stderrors.As(r.Error, &se) {
+						if _, ok := stderrors.AsType[*errors.StructuredError](r.Error); ok {
 							firstStructuredErr = r.Error
 						}
 					}
@@ -416,8 +415,7 @@ func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentR
 		}
 		failures = append(failures, err.Error())
 		if firstStructured == nil {
-			var se *errors.StructuredError
-			if stderrors.As(err, &se) {
+			if _, ok := stderrors.AsType[*errors.StructuredError](err); ok {
 				firstStructured = err
 			}
 		}
@@ -609,6 +607,19 @@ func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interf
 			return fmt.Sprintf("Nodewright %s: not found (recipe declared it but the cluster has no such CR)", name)
 		}
 		return fmt.Sprintf("Nodewright %s: failed to get: %v", name, getErr)
+	}
+	// Reject a CR that is on its way out even when it still reports complete.
+	// Nodewright uses a deletion finalizer, so an expected Skyhook can sit
+	// Terminating for a while with status.status untouched. Accepting it would
+	// report readiness on the strength of state that is about to disappear —
+	// the same false-PASS direction the Chainsaw executor already guards
+	// against by skipping ghosts on positive assertions (#2041). The nameless
+	// assert in the component health check cannot cover this: it is satisfied
+	// by any live complete Skyhook, including a stale or unrelated one, so this
+	// per-name check is the only gate that binds liveness to the CR the recipe
+	// actually declared.
+	if sk.GetDeletionTimestamp() != nil {
+		return fmt.Sprintf("Nodewright %s: terminating (deletionTimestamp set)", name)
 	}
 	status, found, statusErr := unstructured.NestedString(sk.Object, "status", "status")
 	if statusErr != nil {
@@ -945,6 +956,17 @@ func draKubeletPluginProbe(ctx *validators.Context, namespace string) (string, e
 // advertise aksRDMASharedResource is "still converging", so verifyRDMAFabricReady
 // waits for it; when false (kind's single-node nvkind, talos' namespace-only
 // ref) there is no shared fabric to gate on and the check is skipped.
+//
+// Sibling predicate: pkg/bundler/readiness.go's
+// recipeAttachesNicClusterPolicy encodes the same "does this recipe stand
+// up an NCP?" question for the bundler's readiness-gate emission, but
+// scans manifest content across every ComponentRef's Pre+ManifestFiles
+// via line-anchored regexes rather than a filename-substring check on a
+// single ref. Package layering blocks direct reuse, so the two functions
+// have deliberately different names and must be kept in sync when a
+// future overlay changes how an NCP is attached (a new marker filename,
+// an attachment via PreManifestFiles, a differently-scoped ref). Update
+// both — and their cross-reference comments — together.
 func recipeDeclaresRDMAFabric(ref recipe.ComponentRef) bool {
 	for _, f := range ref.ManifestFiles {
 		if strings.Contains(f, nicClusterPolicyManifestMarker) {

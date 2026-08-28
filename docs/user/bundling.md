@@ -179,6 +179,49 @@ aicr bundle --recipe recipe.yaml \
   --output ./bundles
 ```
 
+## Prepare DRA nodes before applying upgraded bundles
+
+> **Upgrade requirement:** A bundle containing both `gpu-operator` and
+> `nvidia-dra-driver-gpu` now selects DRA kubelet-plugin nodes with
+> `nvidia.com/dra-kubelet-plugin=true` by default. The same applies to the
+> corresponding `-ocp` components. Before applying the first newly generated
+> bundle to an existing deployment, label every GPU node that must run the DRA
+> kubelet plugin. Applying the bundle first can reduce the DaemonSet to zero
+> eligible nodes, interrupting ComputeDomain/IMEX and any whole-GPU resources
+> advertised through DRA.
+
+Label the intended nodes, confirm the selector matches at least one node, and
+then apply the bundle:
+
+```bash
+kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true
+kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
+```
+
+If the cluster uses a different convention, generate the bundle with
+`--dra-eviction-node-label key=value` and apply that exact pair to the nodes.
+AICR gives the full pair to the DRA node selector, but GPU Operator's Driver
+Manager receives only the label key because its eviction contract matches and
+temporarily removes the label by key.
+
+After installation and after every GPU driver upgrade, monitor the kubelet
+plugin DaemonSet until all desired pods are ready. This also catches a Driver
+Manager rollout that did not restore the eviction label:
+
+```bash
+kubectl -n nvidia-dra-driver get daemonset \
+  nvidia-dra-driver-gpu-kubelet-plugin
+```
+
+The integration is not rendered when either component is absent. A dynamic
+declaration intersecting `kubeletPlugin.nodeSelector` or `driver.manager.env`
+is rejected because moving either path to install-time configuration would let
+the two halves drift independently. See
+[DRA Driver Upgrade Eviction](cli-reference.md#dra-driver-upgrade-eviction) for
+configuration details and NVIDIA's
+[GPU Operator DRA installation guide](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/26.3/dra-intro-install.html)
+for the upstream contract.
+
 ## Produce an offline (vendored) bundle
 
 `--vendor-charts` pulls upstream Helm chart bytes into the bundle at bundle

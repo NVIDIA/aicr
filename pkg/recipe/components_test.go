@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	stderrors "errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -320,6 +321,34 @@ func TestComponentRegistry_K8sAIBOMContract(t *testing.T) {
 				t.Errorf("got %v, want %v", tt.got, tt.want)
 			}
 		})
+	}
+}
+
+// TestKubeflowTrainerValues_UseJobSetInstallCondition pins AICR's values key to
+// the dependency condition exposed by the upstream Kubeflow Trainer chart.
+// Chart v2.2.0 gates its JobSet subchart on jobset.install; jobset.enabled is
+// ignored by Helm and would make the documented opt-out ineffective.
+func TestKubeflowTrainerValues_UseJobSetInstallCondition(t *testing.T) {
+	const valuesPath = "components/kubeflow-trainer/values.yaml"
+	content, err := GetEmbeddedFS().ReadFile(valuesPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", valuesPath, err)
+	}
+
+	var values map[string]any
+	if err := yaml.Unmarshal(content, &values); err != nil {
+		t.Fatalf("failed to parse %s: %v", valuesPath, err)
+	}
+	jobSet, ok := values["jobset"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s jobset = %T, want map[string]any", valuesPath, values["jobset"])
+	}
+	install, ok := jobSet["install"].(bool)
+	if !ok || !install {
+		t.Errorf("%s jobset.install = %v, want true", valuesPath, jobSet["install"])
+	}
+	if _, exists := jobSet["enabled"]; exists {
+		t.Errorf("%s must not set ignored key jobset.enabled", valuesPath)
 	}
 }
 
@@ -1186,6 +1215,43 @@ func TestGetComponentRegistry_PerProviderIsolation(t *testing.T) {
 	}
 	if rB.Get("alpha-only") != nil {
 		t.Errorf("registry B leaked alpha-only component")
+	}
+}
+
+func TestLoadComponentRegistry_ReleaseNHeaders(t *testing.T) {
+	tests := []struct {
+		name       string
+		apiVersion string
+		kind       string
+		wantErr    bool
+	}{
+		{name: "current alpha", apiVersion: ComponentRegistryAPIVersion, kind: ComponentRegistryKind},
+		{name: "target beta", apiVersion: "aicr.run/v1beta1", kind: ComponentRegistryKind},
+		{name: "empty version", apiVersion: "", kind: ComponentRegistryKind, wantErr: true},
+		{name: "unknown version", apiVersion: "aicr.run/v9", kind: ComponentRegistryKind, wantErr: true},
+		{name: "wrong kind", apiVersion: ComponentRegistryAPIVersion, kind: "RecipeMetadata", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dp := newInMemoryProvider("registry-header-"+tt.name, map[string][]byte{
+				"registry.yaml": fmt.Appendf(nil, "apiVersion: %s\nkind: %s\ncomponents: []\n", tt.apiVersion, tt.kind),
+			})
+			t.Cleanup(func() { EvictCachedRegistry(dp) })
+
+			_, err := GetComponentRegistryFor(dp)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("GetComponentRegistryFor() error = nil, want header rejection")
+				}
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetComponentRegistryFor() error = %v", err)
+			}
+		})
 	}
 }
 

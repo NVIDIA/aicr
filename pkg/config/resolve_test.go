@@ -238,6 +238,7 @@ func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 			SystemNodeTolerations:      []string{"sys-only=yes:NoSchedule"},
 			AcceleratedNodeSelector:    map[string]string{"gpu": "true"},
 			AcceleratedNodeTolerations: []string{"gpu-only=yes:NoSchedule"},
+			DRAEvictionNodeLabel:       "example.com/dra-ready=enabled",
 			WorkloadGate:               "k=v:NoSchedule",
 			WorkloadSelector:           map[string]string{"workload": "true"},
 			Nodes:                      8,
@@ -290,6 +291,9 @@ func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 	}
 	if len(got.AcceleratedNodeTolerations) != 1 {
 		t.Errorf("AcceleratedNodeTolerations count: got %d", len(got.AcceleratedNodeTolerations))
+	}
+	if got.DRAEvictionNodeLabel == nil || got.DRAEvictionNodeLabel.String() != "example.com/dra-ready=enabled" {
+		t.Errorf("DRAEvictionNodeLabel: got %+v", got.DRAEvictionNodeLabel)
 	}
 	if got.WorkloadGate == nil || got.WorkloadGate.Key != "k" {
 		t.Errorf("WorkloadGate: got %+v", got.WorkloadGate)
@@ -508,6 +512,13 @@ func TestBundleResolve_InvalidValues(t *testing.T) {
 				Scheduling: &config.SchedulingSpec{WorkloadGate: "no-effect"},
 			},
 			wantSub: "spec.bundle.scheduling.workloadGate",
+		},
+		{
+			name: "invalid DRA eviction node label",
+			spec: &config.BundleSpec{
+				Scheduling: &config.SchedulingSpec{DRAEvictionNodeLabel: "not-a-key-value-label"},
+			},
+			wantSub: "invalid node label",
 		},
 		{
 			name: "invalid output target",

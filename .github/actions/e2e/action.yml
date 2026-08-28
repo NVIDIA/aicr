@@ -45,8 +45,6 @@ runs:
 
     - name: Create Kind cluster and deploy aicrd
       shell: bash
-      env:
-        GOFLAGS: -mod=vendor
       run: |
         # If any `wait` below fails, `set -e` (GitHub's default shell flags)
         # exits this script immediately - any background job not yet reached
@@ -210,7 +208,6 @@ runs:
       id: e2e-tests
       shell: bash
       env:
-        GOFLAGS: -mod=vendor
         AICR_BIN: ${{ github.workspace }}/dist/e2e/aicr
         AICR_IMAGE: localhost:5001/aicr:local
         AICR_VALIDATOR_IMAGE_REGISTRY: localhost:5001

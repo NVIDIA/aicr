@@ -107,12 +107,7 @@ func IsValidFeature(name string) bool {
 		return true
 	}
 	resolved := ResolveFeature(name)
-	for _, f := range ValidFeatures {
-		if f == resolved {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ValidFeatures, resolved)
 }
 
 // ScriptSection returns the script section name for a feature.

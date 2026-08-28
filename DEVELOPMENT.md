@@ -135,7 +135,7 @@ Edit `.settings.yaml` to update versions; changes propagate everywhere automatic
 After installing tools:
 
 ```bash
-# Format, tidy, and vendor dependencies; regenerate THIRD_PARTY_NOTICES.md
+# Format, tidy dependencies; regenerate THIRD_PARTY_NOTICES.md
 make tidy
 
 # Run full qualification to ensure setup is correct
@@ -534,7 +534,7 @@ Verify a bundle with `aicr verify <dir>`. Update the trusted root cache with
 
 | Target | Description |
 |--------|-------------|
-| `make tidy` | Format, tidy, and vendor dependencies; regenerate THIRD_PARTY_NOTICES.md |
+| `make tidy` | Format, tidy dependencies; regenerate THIRD_PARTY_NOTICES.md |
 | `make fmt-check` | Check code formatting (CI-friendly) |
 | `make upgrade` | Upgrade all dependencies |
 | `make generate` | Run go generate |

@@ -92,8 +92,6 @@ jobs:
           cache: false
 
       - name: Build corroborate generator
-        env:
-          GOFLAGS: -mod=vendor
         run: go build -o ./bin/corroborate ./tools/corroborate
 
       - name: Authenticate to GCP (read-only)

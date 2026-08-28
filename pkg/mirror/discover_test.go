@@ -677,32 +677,60 @@ func TestKubeVersionFromConstraints(t *testing.T) {
 			want: defaults.MirrorDefaultKubeVersion,
 		},
 		{
-			name: "semver range >= 1.32.4",
+			name: "version below render floor returns default",
 			constraints: []recipe.Constraint{
 				{Name: "K8s.server.version", Value: ">= 1.32.4"},
 			},
-			want: "1.32.4",
+			want: defaults.MirrorDefaultKubeVersion,
 		},
 		{
-			name: "semver range >= 1.25",
+			name: "major minor version below render floor returns default",
 			constraints: []recipe.Constraint{
 				{Name: "K8s.server.version", Value: ">= 1.25"},
 			},
-			want: "1.25",
+			want: defaults.MirrorDefaultKubeVersion,
 		},
 		{
-			name: "exact version",
+			name: "major only version below render floor returns default",
 			constraints: []recipe.Constraint{
-				{Name: "K8s.server.version", Value: "1.34.0"},
+				{Name: "K8s.server.version", Value: ">= 1"},
+			},
+			want: defaults.MirrorDefaultKubeVersion,
+		},
+		{
+			name: "prerelease below render floor returns default",
+			constraints: []recipe.Constraint{
+				{Name: "K8s.server.version", Value: ">= 1.33.0-0"},
+			},
+			want: defaults.MirrorDefaultKubeVersion,
+		},
+		{
+			name: "version equal to render floor",
+			constraints: []recipe.Constraint{
+				{Name: "K8s.server.version", Value: defaults.MirrorDefaultKubeVersion},
+			},
+			want: defaults.MirrorDefaultKubeVersion,
+		},
+		{
+			name: "version above render floor",
+			constraints: []recipe.Constraint{
+				{Name: "K8s.server.version", Value: ">= 1.34.0"},
 			},
 			want: "1.34.0",
 		},
 		{
-			name: "version with v prefix",
+			name: "version above render floor with v prefix",
 			constraints: []recipe.Constraint{
-				{Name: "K8s.server.version", Value: ">= v1.32.0"},
+				{Name: "K8s.server.version", Value: ">= v1.34.1"},
 			},
-			want: "1.32.0",
+			want: "1.34.1",
+		},
+		{
+			name: "invalid version returns default",
+			constraints: []recipe.Constraint{
+				{Name: "K8s.server.version", Value: "not-a-version"},
+			},
+			want: defaults.MirrorDefaultKubeVersion,
 		},
 	}
 

@@ -244,7 +244,7 @@ jobs:
         run: |
           set -uo pipefail
           set +e
-          GOFLAGS="-mod=vendor" go run ./tools/rekor-monitor \
+          go run ./tools/rekor-monitor \
             --file "${CHECKPOINT_FILE}" \
             --restore-zip checkpoint.zip \
             --cert-subject "${CERT_SUBJECT}" \

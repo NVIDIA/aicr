@@ -2299,6 +2299,8 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"h100-gke-cos-inference", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentInference, ""}, true},
 		{"gb200-eks-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, "", CriteriaIntentTraining, ""}, true},
 		{"gb200-eks-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, "", CriteriaIntentInference, ""}, true},
+		{"gb300-eks-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, "", CriteriaIntentTraining, ""}, true},
+		{"gb300-eks-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, "", CriteriaIntentInference, ""}, true},
 		{"gb200-oke-training", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, CriteriaOSOracleLinux, CriteriaIntentTraining, ""}, true},
 		{"gb200-oke-inference", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, CriteriaOSOracleLinux, CriteriaIntentInference, ""}, true},
 		{"l40s-oke-training", criteria{CriteriaServiceOKE, CriteriaAcceleratorL40S, CriteriaOSOracleLinux, CriteriaIntentTraining, ""}, true},
@@ -2331,6 +2333,11 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"gb200-eks-ubuntu-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},
 		{"gb200-eks-ubuntu-training-kubeflow", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
 		{"gb200-eks-ubuntu-inference-dynamo", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
+		// GB300 EKS Ubuntu variants
+		{"gb300-eks-ubuntu-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
+		{"gb300-eks-ubuntu-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},
+		{"gb300-eks-ubuntu-training-kubeflow", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
+		{"gb300-eks-ubuntu-inference-dynamo", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		// GB200 OKE Ubuntu variants
 		{"gb200-oke-ubuntu-training", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
 		{"gb200-oke-ubuntu-inference", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},

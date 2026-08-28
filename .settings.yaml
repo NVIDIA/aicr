@@ -19,7 +19,7 @@
 # Build Tools
 build_tools:
   # renovate: datasource=github-releases depName=goreleaser/goreleaser depType=build_tools
-  goreleaser: 'v2.17.1'
+  goreleaser: 'v2.18.0'
   # renovate: datasource=github-releases depName=ko-build/ko depType=build_tools
   ko: 'v0.19.1'
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
@@ -30,9 +30,9 @@ build_tools:
 # Linting
 linting:
   # renovate: datasource=go depName=golang.org/x/exp depType=linting
-  apidiff: 'v0.0.0-20260813180055-c1d0aacb2297'
+  apidiff: 'v0.0.0-20260824195058-e88cd73687aa'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
-  golangci_lint: 'v2.12.2'
+  golangci_lint: 'v2.13.1'
   # renovate: datasource=pypi depName=yamllint depType=linting
   yamllint: '1.38.0'
   # renovate: datasource=github-releases depName=google/addlicense depType=linting
@@ -61,13 +61,13 @@ security_tools:
   #
   # Stored WITHOUT the leading 'v', unlike cosign/syft/grype above:
   # oras-project/setup-oras looks the version up against bare release keys and
-  # throws on 'v1.3.0'. tools/setup-tools re-adds the prefix for the download URL.
-  oras: '1.3.0'
+  # throws on 'v1.3.3'. tools/setup-tools re-adds the prefix for the download URL.
+  oras: '1.3.3'
 
 # E2E Testing Tools
 testing_tools:
   # renovate: datasource=github-releases depName=kubernetes/kubernetes depType=testing_tools
-  kubectl: 'v1.36.3'
+  kubectl: 'v1.36.4'
   # kubelogin: Entra exec-plugin for AKS kubeconfigs, installed by uat-azure.yaml
   # via `az aks install-cli` (which defaults to latest without an explicit pin).
   # renovate: datasource=github-releases depName=Azure/kubelogin depType=testing_tools
@@ -80,6 +80,12 @@ testing_tools:
   ctlptl: '0.9.4'
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
   tilt: '0.37.7'
+  # Keep in step with sigs.k8s.io/controller-runtime in go.mod: setup-envtest is
+  # released from that repo under the tools/setup-envtest/vX.Y.Z tag series, and
+  # the envtest control-plane binaries it fetches are matched to the
+  # controller-runtime the tests link against.
+  # renovate: datasource=go depName=sigs.k8s.io/controller-runtime/tools/setup-envtest depType=testing_tools
+  setup_envtest: 'v0.24.1'
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
   helm: 'v4.2.4'
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
@@ -114,7 +120,7 @@ testing_tools:
     darwin_amd64: 'ddb56002ff8c6265f55ec40c82eb0ef0dddec5127dd12d4fc5e7953453481f4b'
     darwin_arm64: '502bef17dd822217e82590e9ccf01c1e26a56b3fa34a835789b9af73e82a169a'
   # renovate: datasource=github-releases depName=mikefarah/yq depType=testing_tools
-  yq: 'v4.53.3'
+  yq: 'v4.53.6'
   # AWS CLI used by the KMS e2e to provision keys against the MiniStack emulator.
   # renovate: datasource=pypi depName=awscli depType=testing_tools
   awscli: '1.46.0'
@@ -124,14 +130,14 @@ testing_tools:
   # Run with USE_SSL=1: sigstore's awskms signer hardcodes https://, so the e2e
   # serves TLS with a mkcert cert (see mkcert below).
   # renovate: datasource=docker depName=ministackorg/ministack depType=testing_tools
-  ministack_image: 'ministackorg/ministack:1.4.19'
+  ministack_image: 'ministackorg/ministack:1.5.0'
   # OpenBAO: the Linux Foundation Apache-2.0 fork of HashiCorp Vault, used by the
   # Vault KMS e2e to exercise the hashivault:// signing/verification path against
   # a real Transit secrets engine. API-identical to Vault; the sigstore hashivault
   # provider drives it over plain HTTP in dev mode (no TLS needed). Pinned (never
   # :latest) for reproducibility.
   # renovate: datasource=docker depName=openbao/openbao depType=testing_tools
-  openbao_image: 'openbao/openbao:2.6.1'
+  openbao_image: 'openbao/openbao:2.6.2'
   # mkcert issues a trusted localhost cert for MiniStack's TLS and installs its CA
   # into the system trust store, so the Go AWS SDK accepts the awskms:// endpoint.
   # renovate: datasource=github-releases depName=FiloSottile/mkcert depType=testing_tools
@@ -142,7 +148,7 @@ testing_tools:
     linux_amd64: '6d31c65b03972c6dc4a14ab429f2928300518b26503f58723e532d1b0a3bbb52'
     linux_arm64: 'b98f2cc69fd9147fe4d405d859c57504571adec0d3611c3eefd04107c7ac00d0'
   # renovate: datasource=github-releases depName=kubernetes-sigs/karpenter depType=testing_tools
-  karpenter: 'v1.14.0'
+  karpenter: 'v1.14.1'
   # In-cluster OCI registry for KWOK deployer-matrix CI (issue #843).
   # Pulled from ECR Public (AWS's first-party mirror of Docker official
   # images): anonymous Docker Hub pulls rate-limit on shared CI runners
@@ -172,11 +178,11 @@ testing_tools:
   # Docker Hub pulls rate-limit on shared CI runners. Do not regress to a
   # Docker Hub pin on bump.
   # renovate: datasource=docker depName=docker.gitea.com/gitea depType=testing_tools
-  gitea_image: 'docker.gitea.com/gitea:1.26.4-rootless'
+  gitea_image: 'docker.gitea.com/gitea:1.27.0-rootless'
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
   hauler: 'v2.0.3'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
-  zarf: 'v0.83.0'
+  zarf: 'v0.84.0'
 # Quality Thresholds
 quality:
   coverage_threshold: '80'

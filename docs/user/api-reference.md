@@ -409,11 +409,12 @@ Same as `GET /v1/query` — see the [GET /v1/query error responses](#get-v1query
 
 `v2` in the route and `apiVersion` in a recipe document are independent
 version axes. The route segment versions the transient HTTP contract;
-`aicr.run/v1alpha2` and `aicr.run/v1alpha3` identify persisted recipe schemas.
-Therefore, `/v2/recipe` can return either artifact version and `/v2/bundle`
-accepts both, plus versionless legacy artifacts. Selecting a profile or resolving
-a Slurm accounting mode—not the route number—determines whether the artifact
-uses `v1alpha3`.
+`aicr.run/v1alpha2` and `aicr.run/v1alpha3` are the recipe schemas emitted by
+this reader-first release. `/v2/bundle` also accepts their ADR-022 targets:
+`aicr.run/v1` for a default recipe and `aicr.run/v1beta2` for a
+profile/configuration recipe, plus versionless legacy artifacts. Selecting a
+profile or resolving a Slurm accounting mode—not the route number—determines
+which schema track applies.
 
 `/v2/recipe`, `/v2/query`, and `/v2/bundle` expose the configured HTTP contract
 for profiles and Slurm accounting. The AKS and GKE families are the embedded
@@ -476,9 +477,9 @@ selector: metadata.selectedProfile
 **POST `/v2/bundle`.** Uses the same query parameters and ZIP response as
 `POST /v1/bundle`. It carries no profile-selection field because its body is
 an already-selected `RecipeResult`. It accepts legacy
-`aicr.run/v1alpha2` recipes, including older artifacts that omit
-`apiVersion`, and strictly decodes profiled or accounting-configured
-`aicr.run/v1alpha3` recipes. The
+`aicr.run/v1alpha2` and `aicr.run/v1` default recipes, including older
+artifacts that omit `apiVersion`, and strictly decodes profiled or
+accounting-configured `aicr.run/v1alpha3` and `aicr.run/v1beta2` recipes. The
 request requires `Content-Type: application/json` or `Content-Type:
 application/x-yaml`; missing, aliased, or unsupported media types are
 rejected.
@@ -504,10 +505,13 @@ output.
 
 The `/v1` routes remain the legacy contract. Explicit profile and
 `slurmAccountingMode` input is rejected; Slurm recipes remain implicitly
-disabled and use the `aicr.run/v1alpha2` response shape. `/v1/recipe` and
-`/v1/query` reject a composition after it adopts a profile even when the request
-omits selection, and `/v1/bundle` rejects a profile-bearing body. Migrate a
-converted workflow to v2 as one cut-over.
+disabled and use the default-track response shape. That track is
+`aicr.run/v1alpha2` today, and the schema also admits its ADR-022 target
+`aicr.run/v1` so a client generated from this spec tolerates the value a
+release before AICR emits it. `/v1` never carries a profile-track version.
+`/v1/recipe` and `/v1/query` reject a composition after it adopts a
+profile even when the request omits selection, and `/v1/bundle` rejects a
+profile-bearing body. Migrate a converted workflow to v2 as one cut-over.
 
 **AKS/GKE cut-over:** the AKS and GKE families are the embedded adopters, so
 `/v1/recipe` and `/v1/query` requests with `service=aks` or `service=gke` now
@@ -545,11 +549,12 @@ Generate deployment bundles from a recipe.
 |-----------|------|---------|-------------|
 | `bundlers` | string | (all) | Comma-delimited list of recipe component names to bundle (e.g. `gpu-operator,network-operator`). Whitespace around names is trimmed. Components not listed are skipped as if disabled (their dependency edges are treated as satisfied externally). A name the recipe does not declare, or one that is disabled (by the recipe or a `set` `enabled=false` override), is rejected with HTTP 400. |
 | `set` | string[] | | Value overrides (format: `bundler:path.to.field=value`). Repeat for multiple. The reserved prefix `deployer:` carries Argo CD Application options for `deployer=argocd` and `deployer=argocd-helm` (`namePrefix`, `destinationServer`, `project`, `cascadeDelete`), e.g. `set=deployer:namePrefix=tenant-a-`. Unknown `deployer:` keys — or the prefix with any other deployer — are rejected with HTTP 400. An override whose component is absent from the generated bundle is rejected with HTTP 400 (`INVALID_REQUEST`, "cannot take effect") rather than silently discarded; the scalar `enabled=false` spelling is exempt on a declared component. See [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected) and the CLI reference's [Argo CD Deployer Options](cli-reference.md#argo-cd-deployer-options) for full semantics. |
-| `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm`, `deployer=argocd-helm`, `deployer=flux`, and `deployer=helmfile`. A declaration whose component is absent from the generated bundle is rejected with HTTP 400 (`INVALID_REQUEST`, "cannot take effect"); no path is exempt. Certain gate-verified paths on **present** components are also rejected — driver-ownership paths, GPU allocation-policy keys, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). |
+| `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm`, `deployer=argocd-helm`, `deployer=flux`, and `deployer=helmfile`. A declaration whose component is absent from the generated bundle is rejected with HTTP 400 (`INVALID_REQUEST`, "cannot take effect"); no path is exempt. Certain gate- or contract-owned paths on **present** components are also rejected — driver-ownership paths, GPU allocation-policy keys, the DRA eviction paths `kubeletPlugin.nodeSelector` and `driver.manager.env` when both contract components are enabled, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). |
 | `system-node-selector` | string[] | | Node selectors for system components (format: `key=value`). Repeat for multiple. |
 | `system-node-toleration` | string[] | | Tolerations for system components (format: `key=value:effect`). Repeat for multiple. |
 | `accelerated-node-selector` | string[] | | Node selectors for GPU nodes (format: `key=value`). Repeat for multiple. |
 | `accelerated-node-toleration` | string[] | | Tolerations for GPU nodes (format: `key=value:effect`). Repeat for multiple. |
+| `dra-eviction-node-label` | string | `nvidia.com/dra-kubelet-plugin=true` | Single node label coordinating DRA kubelet-plugin eviction with GPU Operator driver upgrades (format: `key=value`). Applied only when both components are enabled. Nodes used for DRA GPU allocation must carry the same label. |
 | `nodes` | int | 0 | Estimated number of GPU nodes (0 = unset). Written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 | `vendor-charts` | bool | false | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Each vendored chart is recorded in `provenance.yaml` with name, version, source URL, and SHA256. Trades the upstream CVE-yank fail-loud signal for offline deployability — see the CLI reference's "Vendoring Charts for Air-Gap" section for the full tradeoff. Requires the `helm` binary on the API server's `$PATH`. **The server-side vendor path is opt-in and off by default** — the operator must set `AICR_ALLOW_VENDOR_CHARTS=true`, otherwise `vendor-charts=true` returns `400 vendor-charts is not enabled on this server`. Even when enabled, repository hosts that resolve to loopback, link-local, private, or cloud-metadata IPs are rejected with `400 INVALID_REQUEST`, and vendored artifacts are capped at 64 MiB. **Private HTTP(S) repository credentials:** the aicrd pre-check sends `HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` (as HTTP Basic auth) ONLY when `AICR_HELM_REPOSITORY_HOST` is set to that repository's exact host, the request scheme is `https`, and the request host matches (case-insensitive). All three conditions must hold — an operator setting only the username/password env vars will get no credentials attached, preventing a caller-supplied `Repository` URL from harvesting the operator's helm credentials. (Note: the upstream `helm pull --repo` subprocess does not itself read these env vars — private HTTP repos require a prior `helm repo add --username --password` in the aicrd image or an SDK-based puller.) OCI credentials flow through the standard docker config (`~/.docker/config.json` or `$DOCKER_CONFIG`), exactly like `helm pull oci://...`. If prerequisites are missing the request fails with a structured error code (`SERVICE_UNAVAILABLE` / HTTP 503 for missing helm). The index pre-check surfaces upstream HTTP status by class: `404` → `NOT_FOUND` / HTTP 404, `401`/`403` → `UNAUTHORIZED` / HTTP 401, `408`/`429` → `SERVICE_UNAVAILABLE` / HTTP 503 (retryable), other `4xx` → `INVALID_REQUEST` / HTTP 400, `5xx` → `SERVICE_UNAVAILABLE` / HTTP 503. |
 | `serial` | bool | false | Sequence components strictly one at a time in deployment order, disabling the parallel rollout of independent components. Affects `deployer=argocd`, `argocd-helm`, `flux`, and `helmfile` (`helm` is already serial): argocd falls back to a linear sync-wave per folder, flux chains each `HelmRelease` `dependsOn` to the previous component, and helmfile chains every release via `needs:` into one linear apply order. An escape hatch for reproducing the pre-parallelism ordering or bisecting a rollout. |
@@ -561,8 +566,9 @@ Generate deployment bundles from a recipe.
 **Request Body:**
 
 The request body is the recipe (`RecipeResult`) directly. No wrapper object is
-needed. Current artifacts carry `apiVersion: aicr.run/v1alpha2` or
-`aicr.run/v1alpha3` and `kind: RecipeResult`. The v1alpha3 form identifies
+needed. This release emits `apiVersion: aicr.run/v1alpha2` or
+`aicr.run/v1alpha3` and `kind: RecipeResult`; its bundle readers additionally
+accept `aicr.run/v1` and `aicr.run/v1beta2`, respectively. The profile track identifies
 recipes carrying `metadata.selectedProfile`, typed
 `configuration.slurm.accounting`, or both; profile-bearing artifacts must use
 `/v2/bundle`. New clients should preserve the version emitted by recipe
@@ -590,15 +596,16 @@ CLI file loader for the same values — `aicr bundle -r` accepts a
 `RecipeResult` artifact it too accepts only `RecipeResult` or an absent kind.
 `apiVersion` is validated separately, as described next.
 
-`apiVersion` has no equivalent legacy window on purpose. An artifact
-group/version bump is a hard break with no transition period, so a recipe
-stamped with a prior group/version should be regenerated rather than sent.
-
-This one is enforced. The shared artifact gate rejects any `apiVersion` outside
-`aicr.run/v1alpha2` and `aicr.run/v1alpha3` with a 400, on this endpoint as well
-as on the CLI file-load path, so a prior group/version fails rather than being
-silently accepted. An absent or empty `apiVersion` is still admitted as the
-legacy shape.
+The shared artifact gate rejects any `apiVersion` outside
+`aicr.run/v1alpha2`, `aicr.run/v1`, `aicr.run/v1alpha3`, and
+`aicr.run/v1beta2` with a 400, on this endpoint as well as on the CLI file-load
+path. An absent or empty `apiVersion` is still admitted as the legacy shape
+through v0.22, and v0.23 stops admitting it along with the alpha values. The
+reader and emitter clocks are separate: v0.21 and v0.22 both read the alpha
+values, the target values, and the empty header, while generated recipes keep
+their alpha headers until v0.22 switches the emitters. See
+[Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
+for the release-by-release table.
 
 #### Components
 
@@ -703,6 +710,12 @@ curl -s "http://localhost:8080/v1/recipe?accelerator=h100&service=eks" | \
 # With node scheduling for system and GPU nodes
 # (recipe.json must be a fully-hydrated RecipeResult, e.g. from GET /v1/recipe)
 curl -X POST "http://localhost:8080/v1/bundle?system-node-selector=nodeGroup=system&system-node-toleration=dedicated=system:NoSchedule&accelerated-node-selector=nvidia.com/gpu.present=true&accelerated-node-toleration=nvidia.com/gpu=present:NoSchedule" \
+  -H "Content-Type: application/json" \
+  -d @recipe.json \
+  -o bundles.zip
+
+# Override the shared DRA eviction label when bundling DRA with GPU Operator
+curl -X POST "http://localhost:8080/v1/bundle?dra-eviction-node-label=example.com%2Fdra-ready%3Denabled" \
   -H "Content-Type: application/json" \
   -d @recipe.json \
   -o bundles.zip

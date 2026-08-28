@@ -109,7 +109,7 @@ type ValidationInput struct {
 	ComponentRefs []recipe.ComponentRef `json:"componentRefs,omitempty" yaml:"componentRefs,omitempty"`
 
 	// Criteria specifies the cluster characteristics (optional).
-	Criteria recipe.Criteria `json:"criteria,omitempty" yaml:"criteria,omitempty"`
+	Criteria recipe.Criteria `json:"criteria" yaml:"criteria,omitempty"`
 
 	// Constraints are top-level readiness constraints evaluated before validation phases (optional).
 	Constraints []recipe.Constraint `json:"constraints,omitempty" yaml:"constraints,omitempty"`

@@ -1012,7 +1012,7 @@ func applyTrainJobWithRetry(ctx context.Context, dynamicClient dynamic.Interface
 		if retryCtx.Err() != nil {
 			return aicrErrors.WrapWithContext(aicrErrors.ErrCodeTimeout,
 				"timed out applying NCCL TrainJob: Trainer webhook did not admit it within the retry budget",
-				createErr, map[string]interface{}{"attempts": attempt})
+				createErr, map[string]any{"attempts": attempt})
 		}
 		if !isTrainingRuntimeNotYetVisible(createErr) {
 			// A real failure (or a genuinely missing runtime) — do not mask it.
@@ -1024,7 +1024,7 @@ func applyTrainJobWithRetry(ctx context.Context, dynamicClient dynamic.Interface
 		case <-retryCtx.Done():
 			return aicrErrors.WrapWithContext(aicrErrors.ErrCodeTimeout,
 				"timed out applying NCCL TrainJob: Trainer webhook did not admit it within the retry budget",
-				createErr, map[string]interface{}{"attempts": attempt})
+				createErr, map[string]any{"attempts": attempt})
 		case <-time.After(defaults.TrainJobAdmissionRetryInterval):
 		}
 	}
@@ -1064,18 +1064,18 @@ func isTrainingRuntimeNotYetVisible(err error) bool {
 //   - channel.resourceClaimTemplate.name is stable and matches what
 //     runtime-nvls.yaml expects to reference.
 func buildComputeDomain(namespace string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{Object: map[string]interface{}{
+	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "resource.nvidia.com/v1beta1",
 		"kind":       "ComputeDomain",
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			keyName:     ncclComputeDomainName,
 			"namespace": namespace,
 		},
-		"spec": map[string]interface{}{
+		"spec": map[string]any{
 			"numNodes": int64(0),
-			"channel": map[string]interface{}{
+			"channel": map[string]any{
 				"allocationMode": "Single",
-				"resourceClaimTemplate": map[string]interface{}{
+				"resourceClaimTemplate": map[string]any{
 					"name": ncclIMEXClaimTemplateName,
 				},
 			},
@@ -1422,7 +1422,7 @@ func applyNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector map[
 
 	nodeJobFound := false
 	for i, jobRaw := range replicatedJobs {
-		jobMap, ok := jobRaw.(map[string]interface{})
+		jobMap, ok := jobRaw.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -1439,7 +1439,7 @@ func applyNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector map[
 		}
 
 		if len(nodeSelector) > 0 {
-			ns := make(map[string]interface{}, len(nodeSelector))
+			ns := make(map[string]any, len(nodeSelector))
 			for k, v := range nodeSelector {
 				ns[k] = v
 			}
@@ -1448,9 +1448,9 @@ func applyNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector map[
 		}
 
 		if len(tolerations) > 0 {
-			tolList := make([]interface{}, 0, len(tolerations))
+			tolList := make([]any, 0, len(tolerations))
 			for _, t := range tolerations {
-				tolMap := map[string]interface{}{
+				tolMap := map[string]any{
 					"operator": string(t.Operator),
 				}
 				if t.Key != "" {
@@ -1481,14 +1481,14 @@ func applyNCCLWorkerScheduling(obj *unstructured.Unstructured, nodeSelector map[
 
 // nestedMap navigates a chain of string keys through nested map[string]interface{} values.
 // Returns the target map and true if found, nil and false otherwise.
-func nestedMap(m map[string]interface{}, keys ...string) (map[string]interface{}, bool) {
+func nestedMap(m map[string]any, keys ...string) (map[string]any, bool) {
 	current := m
 	for _, key := range keys {
 		next, ok := current[key]
 		if !ok {
 			return nil, false
 		}
-		nextMap, ok := next.(map[string]interface{})
+		nextMap, ok := next.(map[string]any)
 		if !ok {
 			return nil, false
 		}
@@ -1696,7 +1696,7 @@ func emitDiagnosticBlock(label, block string) {
 		slog.Error("diagnostics", "section", label, "line", "(empty)")
 		return
 	}
-	for _, line := range strings.Split(trimmed, "\n") {
+	for line := range strings.SplitSeq(trimmed, "\n") {
 		slog.Error("diagnostics", "section", label, "line", line)
 	}
 }

@@ -123,6 +123,7 @@ func TestBundleCmd_FlagsAloneStillWork(t *testing.T) {
 		"--repo", "https://example.git",
 		"--system-node-selector", "role=system",
 		"--accelerated-node-toleration", "nvidia.com/gpu=present:NoSchedule",
+		"--dra-eviction-node-label", "example.com/dra-ready=enabled",
 		"--nodes", "16",
 		"--storage-class", "gp3",
 		"-o", tmp,
@@ -141,6 +142,9 @@ func TestBundleCmd_FlagsAloneStillWork(t *testing.T) {
 	}
 	if len(captured.acceleratedNodeTolerations) == 0 {
 		t.Errorf("expected toleration, got none")
+	}
+	if got := captured.draEvictionNodeLabel.String(); got != "example.com/dra-ready=enabled" {
+		t.Errorf("draEvictionNodeLabel = %q, want example.com/dra-ready=enabled", got)
 	}
 	if captured.storageClass != "gp3" {
 		t.Errorf("storageClass = %q, want gp3", captured.storageClass)
@@ -225,6 +229,7 @@ spec:
         nodeGroup: gpu-nodes
       acceleratedNodeTolerations:
         - "nvidia.com/gpu=present:NoSchedule"
+      draEvictionNodeLabel: example.com/dra-ready=enabled
       workloadGate: "nvidia.com/training=true:NoSchedule"
       workloadSelector:
         workload: training
@@ -264,6 +269,7 @@ spec:
 		{"acceleratedNodeSelector nodeGroup", opts.acceleratedNodeSelector["nodeGroup"], "gpu-nodes"},
 		{"systemNodeTolerations count", len(opts.systemNodeTolerations), 1},
 		{"acceleratedNodeTolerations count", len(opts.acceleratedNodeTolerations), 1},
+		{"draEvictionNodeLabel", opts.draEvictionNodeLabel.String(), "example.com/dra-ready=enabled"},
 		{"workloadSelector", opts.workloadSelector["workload"], "training"},
 		{"estimatedNodeCount", opts.estimatedNodeCount, 12},
 		{"storageClass", opts.storageClass, "gp3"},
@@ -413,6 +419,7 @@ spec:
       deployer: argocd
       repo: https://config.example.git
     scheduling:
+      draEvictionNodeLabel: example.com/config-dra=enabled
       nodes: 4
       storageClass: standard
     attestation:
@@ -432,6 +439,7 @@ spec:
 		"--repo", "https://flag.example.git",
 		"--nodes", "16",
 		"--storage-class", "premium",
+		"--dra-eviction-node-label", "example.com/cli-dra=true",
 		"--insecure-tls",
 		"--plain-http",
 		"-o", tmp,
@@ -451,6 +459,9 @@ spec:
 	}
 	if opts.storageClass != "premium" {
 		t.Errorf("--storage-class should override: got %q", opts.storageClass)
+	}
+	if got := opts.draEvictionNodeLabel.String(); got != "example.com/cli-dra=true" {
+		t.Errorf("--dra-eviction-node-label should override: got %q", got)
 	}
 	if !opts.insecureTLS {
 		t.Errorf("--insecure-tls should override config false")

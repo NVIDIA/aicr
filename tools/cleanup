@@ -138,8 +138,19 @@ AICR_NAMESPACES=(
 # Namespaces created at runtime by AICR conformance checks (not registry
 # components). These are torn down by the check itself, but an interrupted run
 # leaves them behind, so cleanup deletes them as a backstop. See #1672.
+#
+# The CNCF evidence collector (pkg/evidence/cncf/scripts/collect-evidence.sh)
+# creates the unsuffixed name, so it stays listed here as an exact match.
 AICR_CHECK_NAMESPACES=(
     gang-scheduling-test
+)
+
+# Namespace prefixes created at runtime. The gang-scheduling conformance check
+# derives a per-run namespace (`gang-scheduling-test-<suffix>`) so concurrent
+# validate runs do not delete each other's resources, so its namespace cannot
+# be listed as an exact name. See #2395.
+AICR_CHECK_NS_PREFIXES=(
+    gang-scheduling-test-
 )
 
 # CRD API-group suffixes owned by AICR components. Matched as substrings
@@ -307,8 +318,40 @@ is_excluded_crd() {
     return 1
 }
 
-# All namespaces cleanup owns: registry components plus check-created backstops.
+# Expand check-created namespace prefixes against the live cluster. Only
+# namespaces that actually exist are added, so the delete loops below stay
+# exact-name operations.
+#
+# Best-effort by design, but a failed list must not masquerade as "nothing
+# matched": capture the list command's status separately so a transient API
+# error is reported instead of silently skipping those namespaces.
+expand_check_namespaces() {
+    local prefix ns all_ns rc=0
+    # `|| rc=$?` is load-bearing: under `set -e` a bare failing assignment
+    # exits this subshell before the status can be inspected, so the caller
+    # would see an empty list and report success. Warnings go to stderr
+    # because this function's stdout is consumed as namespace names.
+    all_ns="$(kubectl get ns -o name --request-timeout=30s 2>&1)" || rc=$?
+    if (( rc != 0 )); then
+        log_warning "Could not list namespaces (rc=${rc}); check-created namespaces matching ${AICR_CHECK_NS_PREFIXES[*]} were NOT swept. Re-run cleanup once the API server is reachable." >&2
+        log_warning "  kubectl: ${all_ns}" >&2
+        return 0
+    fi
+    for prefix in "${AICR_CHECK_NS_PREFIXES[@]}"; do
+        while IFS= read -r ns; do
+            [[ -n "$ns" ]] && printf '%s\n' "$ns"
+        done < <(printf '%s\n' "${all_ns}" \
+            | sed 's|^namespace/||' \
+            | grep -E "^${prefix}" || true)
+    done
+}
+
+# All namespaces cleanup owns: registry components, check-created backstops,
+# and any per-run check namespaces discovered on the cluster.
 ALL_NAMESPACES=("${AICR_NAMESPACES[@]}" "${AICR_CHECK_NAMESPACES[@]}")
+while IFS= read -r _ns; do
+    [[ -n "$_ns" ]] && ALL_NAMESPACES+=("$_ns")
+done < <(expand_check_namespaces)
 
 # Phase 1: Uninstall Helm releases in AICR namespaces.
 msg "Phase 1: Uninstalling Helm releases in AICR namespaces..."

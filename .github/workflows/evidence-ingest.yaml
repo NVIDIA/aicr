@@ -123,8 +123,6 @@ jobs:
           cache: false
 
       - name: Build evidence-project
-        env:
-          GOFLAGS: -mod=vendor
         run: go build -o ./bin/evidence-project ./tools/evidence-project
 
       - name: Authenticate to GHCR
@@ -233,42 +231,33 @@ jobs:
             done
 
   # ---------------------------------------------------------------------
-  # Job 3: refresh the published dashboard. Every successful ingest lands
-  # new evidence in GCS, so the GP5 dashboard (evidence-dashboard-publish)
-  # must re-render to surface it — otherwise the site is stale until the
-  # next unrelated push to main. The push-to-main ingest path already
-  # re-triggers the dashboard via its own `push:` trigger, but the
-  # first-party UAT path is a NESTED workflow_call (up to four levels deep:
-  # uat-run -> uat-{aws,gcp,azure} -> evidence-ingest), which emits no
-  # top-level run event and cannot nest a fifth reusable workflow. A
-  # workflow_dispatch decouples cleanly: it starts a fresh top-level run
-  # regardless of how deep this ingest was invoked.
+  # Job 3: trigger downstream evidence consumers. Every successful ingest lands
+  # verified evidence in GCS, so the static dashboard must re-render and the
+  # live TestGrid publisher must receive the same digest-pinned bundle ref.
   #
-  # Held in a SEPARATE job so the GCS-credentialed publish job never also
-  # carries actions:write. `needs: publish` inherits the produced gate — a
-  # skipped/failed publish skips this too, so the dashboard only re-renders
-  # after evidence is actually in the bucket. The dashboard's own
-  # concurrency group ("pages", cancel-in-progress:false) coalesces the
-  # flurry from a multi-cell nightly batch into a single queued rebuild
-  # that the newest dispatch supersedes.
+  # The first-party UAT path is a nested workflow_call (uat-run -> cloud UAT ->
+  # evidence-ingest), where workflow_run chaining is suppressed for nightly runs
+  # initiated by GITHUB_TOKEN. Explicit workflow_dispatch starts fresh top-level
+  # runs regardless of nesting depth or the original UAT actor.
   #
-  # The refresh is BEST-EFFORT: the evidence is already in the bucket and the
-  # dashboard self-heals on the next ingest or push to main, so a transient
-  # dispatch failure must never fail this workflow_call chain — otherwise the
-  # nightly controller would record a fully-successful, multi-hour UAT cell as
-  # a failed leg. The dispatch step retries, then warns (never fails), so
-  # staleness is surfaced but not fatal — the same not-cry-wolf posture as
-  # uat-superseded-notice.yaml.
+  # Held in a separate job so the GCS-credentialed publish job never also
+  # carries actions:write. `needs: publish` ensures downstream consumers are
+  # triggered only after verified evidence is persisted.
+  #
+  # Dispatch is best-effort: evidence is already durable, and a transient
+  # dispatch failure must not turn a successful multi-hour UAT cell red. Each
+  # dispatch retries and emits a visible warning on exhaustion. The dashboard
+  # self-heals on the next ingest; TestGrid can be backfilled by bundle ref.
   # ---------------------------------------------------------------------
-  trigger-dashboard:
-    name: Trigger dashboard publish
+  trigger-publishes:
+    name: Trigger evidence publishes
     needs: publish
     if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       contents: read
-      actions: write  # dispatch evidence-dashboard-publish.yaml
+      actions: write  # dispatch dashboard and TestGrid workflows
     steps:
       - name: Dispatch dashboard publish
         env:
@@ -293,3 +282,26 @@ jobs:
             sleep 5
           done
           echo "::warning::could not dispatch Evidence: Dashboard Publish after 3 attempts; the dashboard will refresh on the next ingest or push to main"
+
+      - name: Dispatch TestGrid publish
+        if: >-
+          inputs.bundle_ref != '' &&
+          (github.ref_name == 'main' || startsWith(github.ref_name, 'release/'))
+        env:
+          BUNDLE_REF: ${{ inputs.bundle_ref }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if gh workflow run testgrid-publish.yml \
+              --repo "${REPO}" --ref main \
+              -f bundle_ref="${BUNDLE_REF}" \
+              -f environment=prod; then
+              echo "dispatched TestGrid Publish on main"
+              exit 0
+            fi
+            echo "dispatch attempt ${attempt} failed; retrying in 5s..."
+            sleep 5
+          done
+          echo "::warning::could not dispatch TestGrid Publish after 3 attempts; backfill bundle ${BUNDLE_REF} manually"

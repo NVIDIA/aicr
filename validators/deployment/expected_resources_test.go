@@ -594,6 +594,77 @@ func TestCheckExpectedResources_IgnoresUnrelatedDaemonSetInNamespace(t *testing.
 	}
 }
 
+// TestCheckExpectedResources_NodewrightLiveness pins that readiness keys on the
+// declared CR being live, not merely on some Skyhook reporting complete.
+//
+// The component health check's assert is deliberately name-agnostic, so a stale
+// or unrelated live complete Skyhook satisfies it on its own. Only this
+// per-name check binds liveness to the CR the recipe actually declared, so a
+// Terminating CR must fail even while it still reports complete — Nodewright
+// uses a deletion finalizer, so that state persists. Passing there would be a
+// false PASS on state about to disappear, the same direction the Chainsaw
+// executor guards by skipping ghosts on positive assertions (#2041).
+//
+// The live row is the control: without it a gate that rejected everything would
+// still satisfy the terminating row.
+func TestCheckExpectedResources_NodewrightLiveness(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		nodewrights []runtime.Object
+		wantErr     bool
+		wantNeedles []string
+	}{
+		{
+			name: "terminating declared CR fails despite a stale live complete CR",
+			nodewrights: []runtime.Object{
+				nodewrightTerminatingWithStatus("no-op", "complete"),
+				nodewrightWithStatus("some-other-skyhook", "complete"),
+			},
+			wantErr:     true,
+			wantNeedles: []string{"no-op", "terminating"},
+		},
+		{
+			name:        "live complete declared CR passes",
+			nodewrights: []runtime.Object{nodewrightWithStatus("no-op", "complete")},
+			wantErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := newDeploymentTestContext(t,
+				[]runtime.Object{activeNamespace("skyhook")},
+				tt.nodewrights,
+				[]recipe.ComponentRef{
+					{
+						Name:      nodewrightCustomizationsComponent,
+						Namespace: "skyhook",
+						ManifestFiles: []string{
+							"components/nodewright-customizations/manifests/no-op.yaml",
+						},
+					},
+				},
+			)
+
+			err := checkExpectedResources(ctx)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("checkExpectedResources() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			for _, needle := range tt.wantNeedles {
+				if !strings.Contains(err.Error(), needle) {
+					t.Fatalf("expected %q in failure, got: %v", needle, err)
+					return
+				}
+			}
+		})
+	}
+}
+
 // TestCheckExpectedResources_SurfacesMultipleNodewrightFailures pins Codex's
 // non-blocking observation #1: when a recipe declares multiple Nodewright CRs
 // and several are non-complete, all failures must surface in the error so
@@ -1337,18 +1408,30 @@ func nodeWithRuntimeRequiredTaint(name string) *corev1.Node {
 
 // nodewrightWithStatus builds a Nodewright fixture. Nodewright is a cluster-scoped CR,
 // so metadata.namespace is intentionally not set.
+// nodewrightTerminatingWithStatus builds a Skyhook that is mid-deletion
+// (deletionTimestamp set, as Nodewright's finalizer leaves it) while still
+// reporting the given status. The combination is the trap: status.status alone
+// says "ready" about a CR that is on its way out.
+func nodewrightTerminatingWithStatus(name, status string) *unstructured.Unstructured {
+	sk := nodewrightWithStatus(name, status)
+	meta, _ := sk.Object["metadata"].(map[string]interface{})
+	meta["deletionTimestamp"] = "2026-01-01T00:00:00Z"
+	meta["finalizers"] = []interface{}{"skyhook.nvidia.com/finalizer"}
+	return sk
+}
+
 func nodewrightWithStatus(name, status string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "skyhook.nvidia.com/v1alpha1",
 			"kind":       "Skyhook",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name": name,
-				"labels": map[string]interface{}{
+				"labels": map[string]any{
 					testAICRCreatedByLabelKey: testAICRCreatedByLabelValue,
 				},
 			},
-			"status": map[string]interface{}{
+			"status": map[string]any{
 				"status": status,
 			},
 		},

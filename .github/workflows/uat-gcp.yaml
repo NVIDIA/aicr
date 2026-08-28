@@ -243,7 +243,6 @@ jobs:
           cache: true
           cache-dependency-path: |
             go.sum
-            vendor/modules.txt
 
       # Main cell (aicr_version empty): build the aicr binary from the
       # checked-out source (tip). Release cells install the released binary
@@ -252,7 +251,6 @@ jobs:
       - name: Build aicr binary
         if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
-          GOFLAGS: -mod=vendor
           # github.sha via env (never inline ${{ }} in a shell run — expression
           # injection). It is a 40-hex commit, so no real risk, but env is the
           # repo norm and keeps zizmor/CodeRabbit quiet.
@@ -302,7 +300,9 @@ jobs:
       - name: Build and push validator images
         if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         run: |
-          GO_VERSION="$(cat .go-version)"
+          set -euo pipefail
+          VALIDATOR_ARCH="$(go env GOARCH)"
+          VALIDATOR_ARCHES="${VALIDATOR_ARCH}" ./tools/build-validator-binaries
           # CHAINSAW_* args dropped in #1236 — the deployment validator
           # no longer ships /usr/local/bin/chainsaw; it executes Chainsaw
           # Test format in-process via pkg/chainsaw/inprocess.go.
@@ -312,8 +312,8 @@ jobs:
           # through the same AICR_VALIDATOR_IMAGE_TAG=uat-<run_id> override as
           # the Go validators. It MUST be built+pushed here too, or the AIPerf
           # pod ImagePullBackOffs on a nonexistent uat-<run_id> tag and hangs
-          # until the job timeout (#1636). It uses a different Dockerfile path
-          # and takes no GO_VERSION build-arg. Keep the phase set in sync with
+          # until the job timeout (#1636). It uses a different Dockerfile and
+          # does not consume a prebuilt Go binary. Keep the phase set in sync with
           # VALIDATOR_PHASES in on-push.yaml / on-tag.yaml.
           for phase in deployment performance conformance aiperf-bench; do
             IMAGE="${VALIDATOR_IMAGE_PREFIX}/${phase}:${VALIDATOR_TAG}"
@@ -324,7 +324,7 @@ jobs:
                 ;;
               *)
                 docker build -f "validators/${phase}/Dockerfile" \
-                  --build-arg "GO_VERSION=${GO_VERSION}" \
+                  --build-arg "TARGETARCH=${VALIDATOR_ARCH}" \
                   -t "${IMAGE}" .
                 ;;
             esac
@@ -511,7 +511,6 @@ jobs:
       - name: Build and push snapshot-agent image
         if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
-          GOFLAGS: -mod=vendor
           KO_DOCKER_REPO: ghcr.io/nvidia/aicr-validators/agent
         run: |
           set -euo pipefail
@@ -694,31 +693,25 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/gcp/run train "${TEST_CONFIG}"
 
-      # TEMPORARILY DISABLED (step commented out below). The vLLM workload run is
-      # excluded from UAT for now because the Frontend component pulls the full
-      # ~12GB vllm-runtime image on a fresh (non-GPU) node and never finishes
-      # within the 30m readiness budget: the decode worker reuses the GPU node's
-      # cached image (`already present on machine`), but the Frontend lands on a
-      # different node and pulls from scratch, wedging in ContainerCreating until
-      # the phase times out. The inference STACK (dynamo + KAI scheduler + DRA
-      # driver) is still stood up and validated by prep/install/conformance/verify;
-      # only the served-workload run is skipped (the Serve summary row is a static
-      # `disabled`). Re-enable by uncommenting the step once the pull is addressed
-      # (pre-pull/image cache, or pin the Frontend to the GPU node so it reuses
-      # the cached image).
-      #
-      # - name: UAT - serve (DynamoGraphDeployment + endpoint)
-      #   id: serve
-      #   if: steps.conformance.outcome == 'success' && inputs.intent == 'inference'
-      #   # Larger budget than train: a cold pull of the multi-GB vllm-runtime
-      #   # image + model download + engine warmup precedes the first served
-      #   # token (phase_serve's SERVE_READY_TIMEOUT_SECONDS is 30m).
-      #   timeout-minutes: 40
-      #   shell: bash
-      #   env:
-      #     AICR_BIN: ${{ github.workspace }}/aicr
-      #     RUN_ID: ${{ github.run_id }}
-      #   run: ./tests/uat/gcp/run serve "${TEST_CONFIG}"
+      # Live in the GCP inference phase chain (#1644). Was disabled because the
+      # Frontend cold-pulled the ~12GB vllm-runtime image on a CPU-pool node and
+      # wedged in ContainerCreating past the readiness budget; phase_serve now
+      # selects the GPU pool for both graph components, whose a3-megagpu-8g class
+      # pulls that image in a fraction of the budget. Proven end-to-end by
+      # gcp-h100 inference run 32837547329 (prep through serve + verify).
+      # AWS/Azure serve steps stay commented — out of scope for #1644.
+      - name: UAT - serve (DynamoGraphDeployment + endpoint)
+        id: serve
+        if: steps.conformance.outcome == 'success' && inputs.intent == 'inference'
+        # Larger budget than train: a cold pull of the multi-GB vllm-runtime
+        # image + model download + engine warmup precedes the first served
+        # token (phase_serve's SERVE_READY_TIMEOUT_SECONDS is 30m).
+        timeout-minutes: 40
+        shell: bash
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/gcp/run serve "${TEST_CONFIG}"
 
       - name: UAT - verify (evidence verify)
         id: verify
@@ -840,7 +833,7 @@ jobs:
             echo "| Install | ${{ steps.install.outcome }} |"
             echo "| Validate (all phases) | ${{ steps.conformance.outcome }} |"
             echo "| Train | ${{ steps.train.outcome }} |"
-            echo "| Serve | disabled (vLLM excluded from UAT) |"
+            echo "| Serve | ${{ steps.serve.outcome }} |"
             echo "| Verify | ${{ steps.verify.outcome }} |"
             if [[ -n "${{ steps.evidence_ref.outputs.ref }}" ]]; then
               echo ""

@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -828,9 +829,7 @@ func TestReleasePreflightFailureModesHaveNoMutations(t *testing.T) {
 			t.Parallel()
 			fixture := newReleaseFixture(t)
 			digests := make(map[string]string, len(fixture.digests))
-			for key, digest := range fixture.digests {
-				digests[key] = digest
-			}
+			maps.Copy(digests, fixture.digests)
 			extraEnv := tc.setup(t, fixture, digests)
 			mapPath := filepath.Join(fixture.dir, "digests.json")
 			writeDigestMap(t, mapPath, digests)
@@ -1132,7 +1131,7 @@ func TestReleasePromotionDefersLatestUntilEveryVersionIsVerified(t *testing.T) {
 			if result.err == nil {
 				t.Fatalf("promotion accepted a failed version phase\n%s", result.output)
 			}
-			for _, line := range strings.Split(strings.TrimSpace(readOptional(t, fixture.mutations)), "\n") {
+			for line := range strings.SplitSeq(strings.TrimSpace(readOptional(t, fixture.mutations)), "\n") {
 				if strings.HasSuffix(line, "\tlatest") {
 					t.Errorf("promotion advanced latest before every version was verified: %s", line)
 				}
@@ -1343,7 +1342,7 @@ func TestReleaseHomebrewBehavior(t *testing.T) {
 				"PATH="+bin+":"+os.Getenv("PATH"),
 				"RELEASE_TAG=v1.2.3",
 				"FAKE_CHECKSUMS="+checksumPath,
-				"AICR_NETWORK_TIMEOUT_SECONDS=5",
+				fmt.Sprintf("AICR_NETWORK_TIMEOUT_SECONDS=%d", networkTimeoutSeconds(scriptBudget(t))),
 			)
 			result := runScript(t, environment, ".github/scripts/publish-homebrew.sh", candidatePath, tap)
 			if (result.err != nil) != tc.wantErr {
@@ -1526,6 +1525,7 @@ func expectedReleaseAssets(tag string) []map[string]any {
 }
 
 type releaseFixture struct {
+	t             *testing.T
 	dir           string
 	bin           string
 	digestState   string
@@ -1552,6 +1552,7 @@ func newReleaseFixture(t *testing.T) releaseFixture {
 		t.Fatalf("create fake bin: %v", err)
 	}
 	fixture := releaseFixture{
+		t:             t,
 		dir:           dir,
 		bin:           bin,
 		digestState:   filepath.Join(dir, "digests.tsv"),
@@ -1715,7 +1716,7 @@ func (f releaseFixture) environment() []string {
 		"IS_PRERELEASE="+isPrerelease,
 		"GITHUB_SHA="+f.revision,
 		"GH_TOKEN=test-token",
-		"AICR_NETWORK_TIMEOUT_SECONDS=5",
+		fmt.Sprintf("AICR_NETWORK_TIMEOUT_SECONDS=%d", networkTimeoutSeconds(scriptBudget(f.t))),
 	)
 }
 
@@ -1764,6 +1765,48 @@ func scriptBudgetFor(remaining time.Duration) time.Duration {
 		budget = scriptHangCap
 	}
 	return budget
+}
+
+// networkTimeoutSeconds derives the AICR_NETWORK_TIMEOUT_SECONDS a script
+// invocation gets from that invocation's own external per-script deadline
+// (scriptBudget), instead of a fixed constant. A fixed value can't be safe in
+// both directions at once: long enough that scheduling jitter under a
+// parallel -race run doesn't false-trip the script's internal
+// `timeout --foreground` around a fake network command that should return
+// instantly (the identical_formula_is_a_no-op flake), yet short enough that,
+// on a tight -timeout targeted run, runScript's own context can't cancel the
+// whole process before that internal timeout gets a chance to fire and
+// report its own clean "failed to fetch..." error instead. Deriving it as
+// half the live budget keeps the internal timeout strictly under the
+// external one regardless of how tight or generous that budget is.
+func networkTimeoutSeconds(budget time.Duration) int {
+	seconds := int(budget / (2 * time.Second))
+	if seconds < 1 {
+		seconds = 1
+	}
+	return seconds
+}
+
+func TestNetworkTimeoutSeconds(t *testing.T) {
+	tests := []struct {
+		name     string
+		budget   time.Duration
+		expected int
+	}{
+		{"ample budget", 10 * time.Minute, 300},
+		{"hang-cap budget", scriptHangCap, 45},
+		{"tight targeted run", 12500 * time.Millisecond, 6},
+		{"near zero floors at one second", 1500 * time.Millisecond, 1},
+		{"non-positive budget floors at one second", 0, 1},
+		{"expired deadline floors at one second", -5 * time.Second, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := networkTimeoutSeconds(tt.budget); got != tt.expected {
+				t.Errorf("networkTimeoutSeconds(%v) = %d, want %d", tt.budget, got, tt.expected)
+			}
+		})
+	}
 }
 
 func TestScriptBudgetFor(t *testing.T) {
@@ -1816,7 +1859,7 @@ func sortedImages() []string {
 func assertVersionAliasesBeforeLatest(t *testing.T, mutations, releaseTag string) {
 	t.Helper()
 	seenLatest := false
-	for _, line := range strings.Split(strings.TrimSpace(mutations), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(mutations), "\n") {
 		fields := strings.Split(line, "\t")
 		if len(fields) != 3 {
 			t.Fatalf("malformed registry mutation: %q", line)
@@ -1916,7 +1959,7 @@ func lookupDigestState(t *testing.T, path, reference string) string {
 	t.Helper()
 	data := readOptional(t, path)
 	value := ""
-	for _, line := range strings.Split(data, "\n") {
+	for line := range strings.SplitSeq(data, "\n") {
 		fields := strings.Split(line, "\t")
 		if len(fields) == 2 && fields[0] == reference {
 			value = fields[1]
@@ -1935,7 +1978,7 @@ func rewriteWithout(t *testing.T, path, prefix string) {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	var kept []string
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if line != "" && !strings.HasPrefix(line, prefix) {
 			kept = append(kept, line)
 		}

@@ -942,6 +942,21 @@ spec:
 			wantErr: false,
 		},
 		{
+			name:     "Release N target apiVersion",
+			filename: "target.yaml",
+			content: `kind: RecipeCriteria
+apiVersion: aicr.run/v1
+spec:
+  service: eks`,
+			want: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorAny,
+				Intent:      CriteriaIntentAny,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
+			},
+		},
+		{
 			name:     "partial fields - only spec.service",
 			filename: "partial.yaml",
 			content: `kind: RecipeCriteria
@@ -1013,6 +1028,24 @@ spec:
 			filename: "invalid_api.yaml",
 			content: `kind: RecipeCriteria
 apiVersion: wrong/v1
+spec:
+  service: eks`,
+			wantErr: true,
+		},
+		{
+			name:     "profile target rejected for RecipeCriteria",
+			filename: "profile_target.yaml",
+			content: `kind: RecipeCriteria
+apiVersion: aicr.run/v1beta2
+spec:
+  service: eks`,
+			wantErr: true,
+		},
+		{
+			name:     "authoring target rejected for RecipeCriteria",
+			filename: "authoring_target.yaml",
+			content: `kind: RecipeCriteria
+apiVersion: aicr.run/v1beta1
 spec:
   service: eks`,
 			wantErr: true,
@@ -1150,7 +1183,7 @@ func TestLoadCriteriaFromFileWithContext(t *testing.T) {
 	t.Run("local file", func(t *testing.T) {
 		// Create a temporary file with criteria
 		content := `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   name: test-criteria
 spec:
@@ -1276,6 +1309,18 @@ func TestParseCriteriaFromBody(t *testing.T) {
 				Nodes:       0,
 			},
 			wantErr: false,
+		},
+		{
+			name:        "JSON body with Release N target apiVersion",
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1","spec":{"service":"eks"}}`,
+			contentType: "application/json",
+			want: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorAny,
+				Intent:      CriteriaIntentAny,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
+			},
 		},
 		{
 			name: "YAML body with application/x-yaml",

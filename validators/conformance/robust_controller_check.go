@@ -222,15 +222,15 @@ func validateKubeflowWebhookRejects(ctx *validators.Context) (*webhookRejectionR
 	// because the referenced ClusterTrainingRuntime does not exist. This proves
 	// the webhook is actively validating, not just schema validation.
 	tj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			keyAPIVersion: "trainer.kubeflow.org/v1alpha1",
 			keyKind:       "TrainJob",
-			keyMetadata: map[string]interface{}{
+			keyMetadata: map[string]any{
 				keyName:      name,
 				keyNamespace: "default",
 			},
-			keySpec: map[string]interface{}{
-				"runtimeRef": map[string]interface{}{
+			keySpec: map[string]any{
+				"runtimeRef": map[string]any{
 					keyName:    robustTestPrefix + "nonexistent-runtime",
 					"apiGroup": "trainer.kubeflow.org",
 					keyKind:    "ClusterTrainingRuntime",
@@ -257,8 +257,7 @@ func validateKubeflowWebhookRejects(ctx *validators.Context) (*webhookRejectionR
 	}
 
 	if k8serrors.IsForbidden(createErr) || k8serrors.IsInvalid(createErr) {
-		var statusErr *k8serrors.StatusError
-		if stderrors.As(createErr, &statusErr) {
+		if statusErr, ok := stderrors.AsType[*k8serrors.StatusError](createErr); ok {
 			status := statusErr.Status()
 			report.StatusCode = status.Code
 			report.Reason = string(status.Reason)
@@ -450,15 +449,15 @@ func validateDynamoWebhookRejects(ctx *validators.Context) (*webhookRejectionRep
 	name := robustTestPrefix + hex.EncodeToString(b)
 
 	dgd := &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			keyAPIVersion: "nvidia.com/v1beta1",
 			keyKind:       "DynamoGraphDeployment",
-			keyMetadata: map[string]interface{}{
+			keyMetadata: map[string]any{
 				keyName:      name,
 				keyNamespace: namespaceDynamoSystem,
 			},
-			keySpec: map[string]interface{}{
-				"components": []interface{}{},
+			keySpec: map[string]any{
+				"components": []any{},
 			},
 		},
 	}
@@ -481,8 +480,7 @@ func validateDynamoWebhookRejects(ctx *validators.Context) (*webhookRejectionRep
 	}
 
 	if k8serrors.IsForbidden(createErr) || k8serrors.IsInvalid(createErr) {
-		var statusErr *k8serrors.StatusError
-		if stderrors.As(createErr, &statusErr) {
+		if statusErr, ok := stderrors.AsType[*k8serrors.StatusError](createErr); ok {
 			status := statusErr.Status()
 			report.StatusCode = status.Code
 			report.Reason = string(status.Reason)

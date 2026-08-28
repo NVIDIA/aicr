@@ -17,6 +17,6 @@ package snapshotter
 import "github.com/NVIDIA/aicr/pkg/header"
 
 // FullAPIVersion is the complete API version string stamped into snapshot
-// headers. It aliases the canonical header.GroupVersion so the artifact
-// apiVersion has a single source of truth across packages.
-const FullAPIVersion = header.GroupVersion
+// headers. Snapshot is on the ADR-022 stable artifact track, so this aliases
+// header.StableGroupVersion; the track's target is header.GroupVersionV1.
+const FullAPIVersion = header.StableGroupVersion

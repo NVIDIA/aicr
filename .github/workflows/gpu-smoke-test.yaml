@@ -71,7 +71,6 @@ jobs:
               # must still trigger this gate.
               - 'go.mod'
               - 'go.sum'
-              - 'vendor/**'
               - 'pkg/defaults/timeouts.go'
               - 'validators/conformance/**'
               # Markdown/MDX under the runtime globs is documentation — never a

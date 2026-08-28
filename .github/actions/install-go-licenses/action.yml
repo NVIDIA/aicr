@@ -26,8 +26,9 @@ description: 'Install the pinned go-licenses with GOFLAGS cleared so the binary 
 #     absolute path matches, and the ENTIRE dependency graph is reported as
 #     stdlib — the tool then writes nothing and exits 0. `make license-check`
 #     passes while inspecting zero packages; `make notices` emits nothing.
-#   * -mod=vendor makes the install resolve against this repo's vendor tree,
-#     which does not contain go-licenses.
+#   * Any -mod pin the caller happens to be carrying applies to the install too,
+#     resolving go-licenses against this module's graph rather than its own. It
+#     is not a dependency here, so the install fails or picks a wrong version.
 #
 # Mirrors the `GOFLAGS= go install` convention in tools/setup-tools, which
 # tools/setup-tools_test.sh asserts for every versioned Go tool install.

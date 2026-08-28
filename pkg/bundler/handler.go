@@ -46,6 +46,7 @@ const (
 	bundleQueryAppName                   = "app-name"
 	bundleQueryBundlers                  = "bundlers"
 	bundleQueryDeployer                  = "deployer"
+	bundleQueryDRAEvictionNodeLabel      = "dra-eviction-node-label"
 	bundleQueryDynamic                   = "dynamic"
 	bundleQueryNodes                     = "nodes"
 	bundleQueryRepo                      = "repo"
@@ -66,6 +67,7 @@ var supportedBundleQueryParameters = map[string]struct{}{
 	bundleQueryAppName:                   {},
 	bundleQueryBundlers:                  {},
 	bundleQueryDeployer:                  {},
+	bundleQueryDRAEvictionNodeLabel:      {},
 	bundleQueryDynamic:                   {},
 	bundleQueryNodes:                     {},
 	bundleQueryRepo:                      {},
@@ -110,6 +112,7 @@ func bundleConfigFromParams(params *bundleParams) *config.Config {
 		config.WithSystemNodeTolerations(params.systemNodeTolerations),
 		config.WithAcceleratedNodeSelector(params.acceleratedNodeSelector),
 		config.WithAcceleratedNodeTolerations(params.acceleratedNodeTolerations),
+		config.WithDRAEvictionNodeLabel(params.draEvictionNodeLabel),
 		config.WithWorkloadGateTaint(params.workloadGateTaint),
 		config.WithWorkloadSelector(params.workloadSelector),
 		config.WithEstimatedNodeCount(params.estimatedNodeCount),
@@ -325,6 +328,7 @@ type bundleParams struct {
 	systemNodeTolerations      []corev1.Toleration
 	acceleratedNodeSelector    map[string]string
 	acceleratedNodeTolerations []corev1.Toleration
+	draEvictionNodeLabel       config.NodeLabel
 	workloadGateTaint          *corev1.Taint
 	workloadSelector           map[string]string
 	estimatedNodeCount         int
@@ -377,6 +381,15 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	params.acceleratedNodeTolerations, err = snapshotter.ParseTolerations(query[bundleQueryAcceleratedNodeToleration])
 	if err != nil {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "Invalid accelerated-node-toleration", err)
+	}
+
+	params.draEvictionNodeLabel = config.DefaultDRAEvictionNodeLabel()
+	if query.Has(bundleQueryDRAEvictionNodeLabel) {
+		params.draEvictionNodeLabel, err = config.ParseNodeLabel(query.Get(bundleQueryDRAEvictionNodeLabel))
+		if err != nil {
+			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInvalidRequest,
+				"Invalid dra-eviction-node-label parameter")
+		}
 	}
 
 	// Parse deployer type (helm, argocd)
@@ -460,7 +473,7 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 	// bundling everything — only an ABSENT parameter means no filter. See #1531.
 	if values, ok := query[bundleQueryBundlers]; ok {
 		for _, v := range values {
-			for _, name := range strings.Split(v, ",") {
+			for name := range strings.SplitSeq(v, ",") {
 				if name = strings.TrimSpace(name); name != "" {
 					params.bundlers = append(params.bundlers, name)
 				}

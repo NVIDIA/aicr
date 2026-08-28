@@ -17,6 +17,8 @@ package recipe
 import (
 	"context"
 	stderrors "errors"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -135,13 +137,7 @@ func TestGKEGpuStackHappyPathThroughHydrationGate(t *testing.T) {
 	}
 	wantLocked := []string{"enabled", allocpolicy.PathDRAGPUsEnabledOverride, allocpolicy.PathDRAGPUsEnabled}
 	for _, want := range wantLocked {
-		found := false
-		for _, got := range draPaths {
-			if got == want {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(draPaths, want)
 		if !found {
 			t.Errorf("closure-locked paths %v missing %q", draPaths, want)
 		}
@@ -392,9 +388,7 @@ func TestCoherenceGateRejectsDriverInstallerIncoherentTuples(t *testing.T) {
 			if ref.Overrides == nil {
 				ref.Overrides = map[string]any{}
 			}
-			for key, value := range tt.overrides {
-				ref.Overrides[key] = value
-			}
+			maps.Copy(ref.Overrides, tt.overrides)
 
 			err = result.PrepareAndValidateWithContext(context.Background())
 			if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {

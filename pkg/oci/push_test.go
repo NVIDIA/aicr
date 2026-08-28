@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -440,7 +441,7 @@ func TestOCIPackagingIntegration(t *testing.T) {
 	// (RecipeResult is required because bundlers use GetComponentRef)
 	rec := &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: recipe.RecipeAPIVersion,
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:       "cert-manager",
@@ -527,13 +528,7 @@ func TestOCIPackagingIntegration(t *testing.T) {
 	sort.Strings(expectedFiles)
 
 	for _, expected := range expectedFiles {
-		found := false
-		for _, actual := range fileNames {
-			if actual == expected {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(fileNames, expected)
 		if !found {
 			t.Errorf("Expected file %q not found in OCI artifact. Got files: %v", expected, fileNames)
 		}
@@ -645,8 +640,8 @@ func TestOCIReproducibleBuild(t *testing.T) {
 	}
 
 	// Build twice and compare digests
-	var digests []string
-	for i := 0; i < 2; i++ {
+	digests := make([]string, 0, 2)
+	for i := range 2 {
 		ociLayoutDir := t.TempDir()
 		ociStore, err := oci.New(ociLayoutDir)
 		if err != nil {
@@ -1267,7 +1262,7 @@ func TestJitterDuration(t *testing.T) {
 		minD := time.Duration(float64(base) * 0.75)
 		maxD := time.Duration(float64(base) * 1.25)
 		// Sample several times to guard against single unlucky draws.
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			got := jitterDuration(base)
 			if got < minD || got >= maxD {
 				t.Fatalf("jitterDuration(%v) = %v, want in [%v, %v)", base, got, minD, maxD)

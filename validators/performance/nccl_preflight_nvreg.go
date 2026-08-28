@@ -238,7 +238,7 @@ func waitForPreflightPodPhase(ctx context.Context, clientset kubernetes.Interfac
 		case <-waitCtx.Done():
 			return "", aicrErrors.WrapWithContext(aicrErrors.ErrCodeTimeout,
 				"NVreg preflight pod did not terminate in time", waitCtx.Err(),
-				map[string]interface{}{"pod": name})
+				map[string]any{"pod": name})
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
 				if ctxErr := waitCtx.Err(); ctxErr != nil {

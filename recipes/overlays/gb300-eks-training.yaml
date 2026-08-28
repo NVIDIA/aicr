@@ -1,0 +1,182 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: gb300-eks-training
+
+spec:
+  # Inherits from eks-training recipe (EKS + training settings)
+  base: eks-training
+
+  criteria:
+    service: eks
+    accelerator: gb300
+    intent: training
+
+  # Targets p6e-gb300r.36xlarge (GB300 NVL72, 4 GPUs per node, Grace ARM64
+  # host) on the EFA scale-out fabric.
+  #
+  # Verified on the reference cluster: each GPU node presents 2x Amazon ENA
+  # plus 1x Amazon EFA on the PCI bus and advertises vpc.amazonaws.com/efa: 1.
+  # That is the layout AWS recommends — a primary ENA on network card 0
+  # device 0, one EFA-only interface on card 0 device 1, and one EFA per
+  # additional network card
+  # (https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-acc-inst-types.html).
+  # This shape has no additional usable cards: the
+  # instance reports 9 network cards, but cards 1-8 have
+  # MaximumNetworkInterfaces: 0, so nothing can attach to them. A single EFA
+  # interface is therefore the correct and maximal EFA configuration here,
+  # not an under-provisioned one.
+  #
+  # Fabric selection is not modelled in the recipe criteria today — this
+  # overlay targets EFA because that is what the reference cluster presents
+  # and what public AICR builds for (#1410).
+  #
+  # Specific constraints for GB300 on EKS training workloads.
+  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
+  constraints:
+    # GB300 NVLS performance validation provisions the IMEX channel through a
+    # DRA ComputeDomain that requires the GA resource.k8s.io/v1 API, which
+    # ships in Kubernetes 1.34+. Floor the recipe there so a DRA-incapable
+    # cluster is rejected up front instead of failing the performance phase
+    # at runtime when the v1 ResourceClaimTemplate never reconciles.
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs:
+    # GB300+EKS GPU Operator prerequisites. Keep in sync with the same block
+    # in gb300-eks-inference.yaml — the mixin system can't extend componentRefs
+    # already declared in the inheritance chain (gpu-operator comes from
+    # eks-training / eks-inference), so this lives per-leaf for now.
+    - name: gpu-operator
+      type: Helm
+      preManifestFiles:
+        # Ships a ConfigMap with options nvidia NVreg_GrdmaPciTopoCheckOverride=1.
+        # driver.kernelModuleConfig.name (below) points the ClusterPolicy at it,
+        # so the driver DaemonSet mounts nvidia.conf and the kernel loads with
+        # the flag set — required on Grace-Blackwell + EFA for EFA dma-buf
+        # attach to the Grace PCI topology. Without it, NCCL silently falls
+        # back to Socket.
+        #
+        # Must be preManifestFiles (applied before the chart): the chart's
+        # ClusterPolicy reconcile reads this ConfigMap during `helm install --wait`,
+        # so a post-install pass would deadlock until the chart times out (#859).
+        - components/gpu-operator/manifests/kernel-module-params.yaml
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+        - nodewright-customizations
+      overrides:
+        cdi:
+          enabled: true
+        gdrcopy:
+          enabled: true
+        driver:
+          kernelModuleConfig:
+            name: nvidia-kernel-module-params
+
+    # GB300 node tuning is deferred: nodewright ships no gb300 profile, and the
+    # gb200 profile's baseline has not been validated against GB300's Grace
+    # ARM64 64KB-page kernel (enabling it there would also require
+    # kernelAllowNewer: true). Until a GB300 profile exists, wire the documented
+    # no-op placeholder — it establishes the Skyhook CR (autoTaint, tolerations,
+    # node selectors from the --accelerated-node-* flags) while applying no
+    # tuning packages.
+    #
+    # To turn training tuning on later, swap the manifest for tuning.yaml and
+    # set the profile overrides (service/accelerator/intent).
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/no-op.yaml
+      dependencyRefs:
+        - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+
+  # Validation checks for GB300 on EKS training workloads.
+  # Defined at the intent layer (not OS-specific) so all OS variants inherit them.
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        # GB300 support shipped in gpu-operator v25.10 (same release as GB200).
+        - name: Deployment.gpu-operator.version
+          value: ">= v25.10.0"
+    performance:
+      # NET exercises EFA (the external interconnect) and NVLS exercises MNNVL
+      # across the NVL72 IMEX domain — each variant asserts its transport
+      # actually carried traffic, so a silent fallback to Socket or NET does
+      # not masquerade as a pass.
+      #
+      # Measured on GB300 (2x p6e-gb300r.36xlarge, 8 GPUs, NCCL 2.27.7,
+      # 16 GiB message): net 44.04 GB/s, nvls 841.17 GB/s. Both land at ~88%
+      # of their respective line rates (a single 400 Gb/s EFA device; 18
+      # NVLink-5 links at 53.125 GB/s = ~956 GB/s per GPU).
+      #
+      # nvls is floored at 700 from that measurement, leaving ~17% margin
+      # before the evaluator's additional 10% tolerance. The GB200 value of
+      # 500 was far too loose for GB300's NVLink fabric.
+      #
+      # net stays at the GB200 value of 40 rather than being raised to the
+      # 44.04 GB/s measured here. The measurement is sound — the node runs the
+      # AWS-recommended EFA layout and cannot carry more EFA interfaces (see
+      # the fabric note above for the AWS reference) — but the floor is
+      # deliberately kept below it.
+      # These recipes match on service + accelerator with no fabric or node
+      # shape dimension, so a floor pinned to one shape's EFA path re-creates
+      # the SKU-agnostic false-fail that h100-eks-training documents for
+      # p5.4xlarge. See #1256, which tracks fabric-class-aware floors.
+      checks:
+        - nccl-all-reduce-bw-net
+        - nccl-all-reduce-bw-nvls
+      constraints:
+        # Without this, both checks SKIP rather than run: the validator's
+        # applicability matrix registers only gb200 for EKS on the net and nvls
+        # variants, and an unsupported combination returns Skip — the
+        # thresholds below would be inert and the phase would report a vacuous
+        # pass. gb200/eks is the documented "existing service, new accelerator"
+        # borrow (see docs/user/validation.md), and it is the right template
+        # here because GB300 on EKS runs the same EFA scale-out fabric and the
+        # same NVL72 MNNVL/IMEX topology the gb200/eks profile was built for.
+        # Replace with a native gb300 matrix entry once GB300 runtime templates
+        # exist.
+        - name: nccl-benchmark-profile
+          value: gb200/eks
+        - name: nccl-all-reduce-bw-net
+          value: ">= 40"
+        - name: nccl-all-reduce-bw-nvls
+          value: ">= 700"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling

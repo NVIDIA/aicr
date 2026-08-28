@@ -507,7 +507,7 @@ func TestGenerate_ProfileLockTemplate(t *testing.T) {
 			t.Fatalf("profile guard stat error = %v", err)
 		}
 
-		result.APIVersion = recipe.RecipeAPIVersion
+		result.APIVersion = recipe.RecipeResultAPIVersion
 		result.Metadata.SelectedProfile = nil
 		if _, err := g.Generate(t.Context(), outputDir); err != nil {
 			t.Fatalf("unprofiled regeneration error = %v", err)

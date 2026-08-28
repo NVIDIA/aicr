@@ -21,6 +21,26 @@ spec:
   # Inherits from aks-training recipe (AKS + training settings)
   base: aks-training
 
+  # Machine type: qualified on Standard_ND96isr_H100_v5 (8x H100 SXM). These
+  # criteria carry no machine-type axis, so they also match the smaller NCads
+  # H100 shapes (Standard_NC80adis_H100_v5 = 2 GPUs, Standard_NC40ads_H100_v5 =
+  # 1 GPU). Those do NOT merely under-perform: the aks base wires
+  # network-operator with a NicClusterPolicy unconditionally, so the
+  # deployment-phase expected-resources check runs verifyRDMAFabricReady, which
+  # fails closed when no node advertises the shared RDMA resource. NCads are
+  # PCIe H100 with no InfiniBand, so deployment fails before the performance
+  # floors below are ever evaluated.
+  #
+  # To run on such a shape, disable the component in the recipe: set
+  # overrides.enabled: false on the network-operator componentRef, which is what
+  # enabledComponentRefs/IsEnabled honour before recipeDeclaresRDMAFabric arms
+  # the gate. A bundle-time `--set` does not work here -- `aicr validate` has no
+  # --set flag, and the gate reads the recipe's componentRefs rather than the
+  # bundle's Helm values.
+  #
+  # On the qualified shape the floors still apply, and they are fixed absolute
+  # full-node values. Normalizing them was declined (#1256, #1254 — both closed
+  # not-planned); the qualified shape is the supported way to pass them.
   criteria:
     service: aks
     accelerator: h100

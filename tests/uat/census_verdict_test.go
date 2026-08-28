@@ -171,8 +171,7 @@ func runCensusVerdict(t *testing.T, phasesScript, json, expected string) (string
 	out, err := cmd.Output()
 	exitCode := 0
 	if err != nil {
-		var exitErr *exec.ExitError
-		if stderrors.As(err, &exitErr) {
+		if exitErr, ok := stderrors.AsType[*exec.ExitError](err); ok {
 			exitCode = exitErr.ExitCode()
 		} else {
 			t.Fatalf("run gpu_census_verdict: %v (stderr may hold detail)", err)

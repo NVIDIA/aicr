@@ -37,7 +37,7 @@ BOM_OUT_DIR=/tmp/aicr-bom make bom
 Direct invocation:
 
 ```bash
-GOFLAGS="-mod=vendor" go run ./tools/bom -repo-root . -out-dir /tmp/bom
+go run ./tools/bom -repo-root . -out-dir /tmp/bom
 ```
 
 Flags:

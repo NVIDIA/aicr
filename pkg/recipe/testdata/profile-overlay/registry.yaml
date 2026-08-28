@@ -4,4 +4,6 @@
 # This fixture contributes no components — it exists so the profiled overlay
 # beside it can layer over the embedded catalog. Every component the overlay
 # references resolves from the embedded registry.
+apiVersion: aicr.run/v1alpha2
+kind: ComponentRegistry
 components: []

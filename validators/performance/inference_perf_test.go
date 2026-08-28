@@ -375,21 +375,21 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 	// status.components entries (each entry is a field->count map, e.g.
 	// {"replicas": 8, "readyReplicas": 8}).
 	dgd := func(state string, spec map[string]int64, status map[string]map[string]int64) *unstructured.Unstructured {
-		specComponents := make([]interface{}, 0, len(spec))
+		specComponents := make([]any, 0, len(spec))
 		for name, r := range spec {
-			specComponents = append(specComponents, map[string]interface{}{keyName: name, "replicas": r})
+			specComponents = append(specComponents, map[string]any{keyName: name, "replicas": r})
 		}
-		statusComponents := map[string]interface{}{}
+		statusComponents := map[string]any{}
 		for name, fields := range status {
-			m := map[string]interface{}{}
+			m := map[string]any{}
 			for k, v := range fields {
 				m[k] = v
 			}
 			statusComponents[name] = m
 		}
-		return &unstructured.Unstructured{Object: map[string]interface{}{
-			"spec":   map[string]interface{}{"components": specComponents},
-			"status": map[string]interface{}{"state": state, "components": statusComponents},
+		return &unstructured.Unstructured{Object: map[string]any{
+			"spec":   map[string]any{"components": specComponents},
+			"status": map[string]any{"state": state, "components": statusComponents},
 		}}
 	}
 	tests := []struct {
@@ -400,7 +400,7 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 		{name: "nil object", input: nil, want: false},
 		{
 			name:  "no status",
-			input: &unstructured.Unstructured{Object: map[string]interface{}{"spec": map[string]interface{}{}}},
+			input: &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{}}},
 			want:  false,
 		},
 		{
@@ -445,14 +445,14 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 		{
 			// spec replicas omitted → defaults to 1; one ready replica satisfies it.
 			name: "spec replicas omitted defaults to 1",
-			input: &unstructured.Unstructured{Object: map[string]interface{}{
-				"spec": map[string]interface{}{"components": []interface{}{
-					map[string]interface{}{keyName: "VllmDecodeWorker"}, // no replicas field
+			input: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{"components": []any{
+					map[string]any{keyName: "VllmDecodeWorker"}, // no replicas field
 				}},
-				"status": map[string]interface{}{
+				"status": map[string]any{
 					"state": "successful",
-					"components": map[string]interface{}{
-						"VllmDecodeWorker": map[string]interface{}{"replicas": int64(1), "readyReplicas": int64(1)},
+					"components": map[string]any{
+						"VllmDecodeWorker": map[string]any{"replicas": int64(1), "readyReplicas": int64(1)},
 					},
 				},
 			}},
@@ -461,14 +461,14 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 		{
 			// Present-but-wrong-typed spec replicas must fail closed, not default to 1.
 			name: "spec replicas wrong type fails closed",
-			input: &unstructured.Unstructured{Object: map[string]interface{}{
-				"spec": map[string]interface{}{"components": []interface{}{
-					map[string]interface{}{keyName: "VllmDecodeWorker", "replicas": "eight"},
+			input: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{"components": []any{
+					map[string]any{keyName: "VllmDecodeWorker", "replicas": "eight"},
 				}},
-				"status": map[string]interface{}{
+				"status": map[string]any{
 					"state": "successful",
-					"components": map[string]interface{}{
-						"VllmDecodeWorker": map[string]interface{}{"replicas": int64(8), "readyReplicas": int64(8)},
+					"components": map[string]any{
+						"VllmDecodeWorker": map[string]any{"replicas": int64(8), "readyReplicas": int64(8)},
 					},
 				},
 			}},
@@ -487,28 +487,28 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 func TestApplyInferenceWorkerScheduling(t *testing.T) {
 	// Minimal DynamoGraphDeployment skeleton matching testdata/inference/dynamo-deployment.yaml structure.
 	newObj := func() *unstructured.Unstructured {
-		return &unstructured.Unstructured{Object: map[string]interface{}{
+		return &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "nvidia.com/v1beta1",
 			"kind":       "DynamoGraphDeployment",
-			"spec": map[string]interface{}{
-				"components": []interface{}{
-					map[string]interface{}{
+			"spec": map[string]any{
+				"components": []any{
+					map[string]any{
 						keyName:    "Frontend",
 						"type":     "frontend",
 						"replicas": int64(1),
-						"podTemplate": map[string]interface{}{
-							"spec": map[string]interface{}{
-								"containers": []interface{}{map[string]interface{}{keyName: mainContainerName}},
+						"podTemplate": map[string]any{
+							"spec": map[string]any{
+								"containers": []any{map[string]any{keyName: mainContainerName}},
 							},
 						},
 					},
-					map[string]interface{}{
+					map[string]any{
 						keyName:    "VllmDecodeWorker",
 						"type":     "worker",
 						"replicas": int64(4),
-						"podTemplate": map[string]interface{}{
-							"spec": map[string]interface{}{
-								"containers": []interface{}{map[string]interface{}{keyName: mainContainerName}},
+						"podTemplate": map[string]any{
+							"spec": map[string]any{
+								"containers": []any{map[string]any{keyName: mainContainerName}},
 							},
 						},
 					},
@@ -587,7 +587,7 @@ func TestApplyInferenceWorkerScheduling(t *testing.T) {
 			if len(tols) != 1 {
 				t.Fatalf("worker tolerations count = %d, want 1", len(tols))
 			}
-			tol := tols[0].(map[string]interface{})
+			tol := tols[0].(map[string]any)
 			if tol["key"] != "dedicated" || tol["value"] != "worker-workload" || tol["effect"] != "NoSchedule" {
 				t.Errorf("worker toleration = %v, unexpected fields", tol)
 			}
@@ -600,7 +600,7 @@ func TestApplyInferenceWorkerScheduling(t *testing.T) {
 				if !claimsFound || len(claims) != 1 {
 					t.Fatalf("worker resourceClaims = %v (found=%t), want exactly one DRA claim binding", claims, claimsFound)
 				}
-				binding := claims[0].(map[string]interface{})
+				binding := claims[0].(map[string]any)
 				if binding["resourceClaimTemplateName"] != inferenceClaimTemplateName {
 					t.Errorf("claim binding template = %v, want %s", binding["resourceClaimTemplateName"], inferenceClaimTemplateName)
 				}
@@ -651,11 +651,11 @@ func TestApplyInferenceWorkerScheduling(t *testing.T) {
 
 // mainContainerResourceClaims returns the main container's resources.claims
 // entries (nil when absent).
-func mainContainerResourceClaims(t *testing.T, podSpec map[string]interface{}) []interface{} {
+func mainContainerResourceClaims(t *testing.T, podSpec map[string]any) []any {
 	t.Helper()
 	containers, _, _ := unstructured.NestedSlice(podSpec, "containers")
 	for _, raw := range containers {
-		container, ok := raw.(map[string]interface{})
+		container, ok := raw.(map[string]any)
 		if !ok || container[keyName] != mainContainerName {
 			continue
 		}
@@ -666,8 +666,8 @@ func mainContainerResourceClaims(t *testing.T, podSpec map[string]interface{}) [
 }
 
 func TestApplyInferenceWorkerScheduling_MissingServices(t *testing.T) {
-	obj := &unstructured.Unstructured{Object: map[string]interface{}{
-		"spec": map[string]interface{}{},
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"spec": map[string]any{},
 	}}
 	err := applyInferenceWorkerScheduling(obj, &inferenceWorkloadConfig{})
 	if err == nil {
@@ -676,9 +676,9 @@ func TestApplyInferenceWorkerScheduling_MissingServices(t *testing.T) {
 }
 
 func TestEnsureMainContainerGPULimit_AppendsMainWhenMissing(t *testing.T) {
-	podSpec := map[string]interface{}{
-		"containers": []interface{}{
-			map[string]interface{}{keyName: "sidecar-frontend"},
+	podSpec := map[string]any{
+		"containers": []any{
+			map[string]any{keyName: "sidecar-frontend"},
 		},
 	}
 	ensureMainContainerGPULimit(podSpec, 1)
@@ -690,14 +690,14 @@ func TestEnsureMainContainerGPULimit_AppendsMainWhenMissing(t *testing.T) {
 	if len(containers) != 2 {
 		t.Fatalf("containers count = %d, want 2: %v", len(containers), containers)
 	}
-	sidecar := containers[0].(map[string]interface{})
+	sidecar := containers[0].(map[string]any)
 	if sidecar[keyName] != "sidecar-frontend" {
 		t.Fatalf("first container = %v, want original sidecar preserved", sidecar)
 	}
 	if _, found, _ := unstructured.NestedString(sidecar, "resources", "limits", gpuResourceName); found {
 		t.Fatal("sidecar unexpectedly received a GPU limit")
 	}
-	main := containers[1].(map[string]interface{})
+	main := containers[1].(map[string]any)
 	if main[keyName] != mainContainerName {
 		t.Fatalf("appended container name = %v, want %s", main[keyName], mainContainerName)
 	}
@@ -714,12 +714,12 @@ func TestEnsureMainContainerGPULimit_AppendsMainWhenMissing(t *testing.T) {
 // limit is merged into an existing resources block (e.g. a template-supplied
 // memory limit) rather than replacing it.
 func TestEnsureMainContainerGPULimit_PreservesExistingResources(t *testing.T) {
-	podSpec := map[string]interface{}{
-		"containers": []interface{}{
-			map[string]interface{}{
+	podSpec := map[string]any{
+		"containers": []any{
+			map[string]any{
 				keyName: mainContainerName,
-				"resources": map[string]interface{}{
-					"limits": map[string]interface{}{"memory": "2Gi"},
+				"resources": map[string]any{
+					"limits": map[string]any{"memory": "2Gi"},
 				},
 			},
 		},
@@ -730,7 +730,7 @@ func TestEnsureMainContainerGPULimit_PreservesExistingResources(t *testing.T) {
 	if err != nil || len(containers) != 1 {
 		t.Fatalf("read containers: err=%v count=%d", err, len(containers))
 	}
-	main := containers[0].(map[string]interface{})
+	main := containers[0].(map[string]any)
 	mem, found, err := unstructured.NestedString(main, "resources", "limits", "memory")
 	if err != nil || !found || mem != "2Gi" {
 		t.Errorf("existing memory limit lost: %q found=%v err=%v", mem, found, err)
@@ -741,14 +741,14 @@ func TestEnsureMainContainerGPULimit_PreservesExistingResources(t *testing.T) {
 	}
 }
 
-func componentPodSpec(t *testing.T, obj *unstructured.Unstructured, name string) map[string]interface{} {
+func componentPodSpec(t *testing.T, obj *unstructured.Unstructured, name string) map[string]any {
 	t.Helper()
 	components, _, err := unstructured.NestedSlice(obj.Object, "spec", "components")
 	if err != nil {
 		t.Fatalf("read spec.components: %v", err)
 	}
 	for _, raw := range components {
-		component, ok := raw.(map[string]interface{})
+		component, ok := raw.(map[string]any)
 		if !ok || component[keyName] != name {
 			continue
 		}
@@ -765,14 +765,14 @@ func componentPodSpec(t *testing.T, obj *unstructured.Unstructured, name string)
 // mainContainerGPULimit returns the main container's
 // resources.limits["nvidia.com/gpu"] value, or nil when the limit (or the
 // main container's resources block) is absent.
-func mainContainerGPULimit(t *testing.T, podSpec map[string]interface{}) interface{} {
+func mainContainerGPULimit(t *testing.T, podSpec map[string]any) any {
 	t.Helper()
 	containers, _, err := unstructured.NestedSlice(podSpec, "containers")
 	if err != nil {
 		t.Fatalf("read containers: %v", err)
 	}
 	for _, raw := range containers {
-		container, ok := raw.(map[string]interface{})
+		container, ok := raw.(map[string]any)
 		if !ok || container[keyName] != mainContainerName {
 			continue
 		}
@@ -816,10 +816,10 @@ func TestParseDynamoTemplate_ScalarModelStaysString(t *testing.T) {
 				t.Fatalf("parseYAMLTemplate() error: %v", err)
 			}
 			envs := componentContainerEnv(t, obj, "Frontend", mainContainerName)
-			var got interface{}
+			var got any
 			var found bool
 			for _, e := range envs {
-				m, ok := e.(map[string]interface{})
+				m, ok := e.(map[string]any)
 				if ok && m["name"] == "SERVED_MODEL_NAME" {
 					got, found = m["value"], true
 					break
@@ -857,7 +857,7 @@ func TestParseDynamoTemplate_RouterModeSubstituted(t *testing.T) {
 	}
 	envs := componentContainerEnv(t, obj, "Frontend", mainContainerName)
 	for _, e := range envs {
-		m, ok := e.(map[string]interface{})
+		m, ok := e.(map[string]any)
 		if ok && m["name"] == "DYN_ROUTER_MODE" {
 			if got := m["value"]; got != "kv" {
 				t.Errorf("DYN_ROUTER_MODE = %v, want %q", got, "kv")
@@ -904,7 +904,7 @@ func TestParseDynamoTemplate_WorkerDriverLibPathAppend(t *testing.T) {
 				t.Fatalf("read VllmDecodeWorker containers: %v", err)
 			}
 			for _, raw := range containers {
-				container, ok := raw.(map[string]interface{})
+				container, ok := raw.(map[string]any)
 				if !ok || container[keyName] != mainContainerName {
 					continue
 				}
@@ -929,7 +929,7 @@ func TestParseDynamoTemplate_WorkerDriverLibPathAppend(t *testing.T) {
 	}
 }
 
-func componentContainerEnv(t *testing.T, obj *unstructured.Unstructured, componentName, containerName string) []interface{} {
+func componentContainerEnv(t *testing.T, obj *unstructured.Unstructured, componentName, containerName string) []any {
 	t.Helper()
 	podSpec := componentPodSpec(t, obj, componentName)
 	containers, _, err := unstructured.NestedSlice(podSpec, "containers")
@@ -937,7 +937,7 @@ func componentContainerEnv(t *testing.T, obj *unstructured.Unstructured, compone
 		t.Fatalf("read %s containers: %v", componentName, err)
 	}
 	for _, raw := range containers {
-		container, ok := raw.(map[string]interface{})
+		container, ok := raw.(map[string]any)
 		if !ok || container[keyName] != containerName {
 			continue
 		}
@@ -3153,14 +3153,14 @@ func TestApplyWorkerClaimTemplate_VersionDispatch(t *testing.T) {
 			if !found || len(requests) != 1 {
 				t.Fatalf("spec.spec.devices.requests = %v (found=%t), want exactly one request", requests, found)
 			}
-			req := requests[0].(map[string]interface{})
+			req := requests[0].(map[string]any)
 			_, hasExactly := req["exactly"]
 			if hasExactly != tt.wantExactly {
 				t.Errorf("request has exactly wrapper = %t, want %t (version %s)", hasExactly, tt.wantExactly, effective)
 			}
 			fields := req
 			if tt.wantExactly {
-				fields = req["exactly"].(map[string]interface{})
+				fields = req["exactly"].(map[string]any)
 			}
 			if fields["deviceClassName"] != "gpu.nvidia.com" {
 				t.Errorf("deviceClassName = %v, want gpu.nvidia.com", fields["deviceClassName"])

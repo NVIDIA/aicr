@@ -19,16 +19,25 @@ import (
 )
 
 // AICR artifact API versioning. These constants are the single source of
-// truth for the group/version stamped into every AICR artifact header
-// (snapshot, recipe, config). Package-local aliases (e.g.
-// snapshotter.FullAPIVersion, recipe.RecipeAPIVersion, config.APIVersion)
-// must reference GroupVersion rather than redeclaring the literal.
+// truth for every AICR artifact group/version. Package-local emitters and
+// readers select a version by wire kind and schema track; see ADR-022.
 //
-// Evolution policy (see docs/design/011-artifact-apiversion-policy.md):
-// schema changes within a version must be additive-only; a breaking change
-// requires a new version segment. This is a hard break: the old value is NOT
-// accepted alongside the new one — there is no transition window. Artifacts
-// stamped with a prior group/version must be regenerated.
+// Three tracks exist. StableGroupVersion, AuthoringGroupVersion, and
+// ProfileGroupVersion name the value each track emits today; GroupVersionV1,
+// GroupVersionV1Beta1, and GroupVersionV1Beta2 name where each is headed.
+// StableGroupVersion and AuthoringGroupVersion carry the same string during
+// the reader-first release and diverge at the emitter switch, so a package
+// emitter must alias the constant for its track rather than the string it
+// happens to equal. Aliasing GroupVersion directly is what made the switch a
+// refactor instead of an edit.
+//
+// Evolution policy (see docs/design/011-artifact-apiversion-policy.md and
+// docs/design/022-artifact-maturity-and-deprecation.md): schema changes within
+// a version must be additive-only; a breaking change requires a new version
+// segment. Alpha versions owe no deprecation window. Beta versions remain
+// readable for two AICR releases after deprecation, and GA versions remain
+// readable through the current AICR major version. Version bumps that owe a
+// window stage readers before emitters.
 const (
 	// Domain is the single source of truth for the AICR API domain. Every
 	// role (apiVersion group, K8s label/annotation keys, attestation and
@@ -45,11 +54,48 @@ const (
 	// desired-state configuration. Other artifact kinds remain on v1alpha2.
 	APIVersionV1Alpha3 = "v1alpha3"
 
+	// APIVersionV1Beta1 is the ADR-022 target for authoring and configuration
+	// artifacts: AICRConfig, ordinary RecipeMetadata, RecipeMixin, and
+	// ComponentRegistry.
+	APIVersionV1Beta1 = "v1beta1"
+
+	// APIVersionV1Beta2 is the ADR-022 target for profile-bearing
+	// RecipeMetadata and RecipeResult artifacts.
+	APIVersionV1Beta2 = "v1beta2"
+
+	// APIVersionV1 is the ADR-022 target for stable public artifacts:
+	// Snapshot, default RecipeResult, RecipeCriteria, and BundleProvenance.
+	APIVersionV1 = "v1"
+
 	// GroupVersion is the canonical "group/version" string for AICR artifacts.
 	GroupVersion = APIGroup + "/" + APIVersionV1Alpha2
 
 	// RecipeResultGroupVersion is the current configured RecipeResult schema.
 	RecipeResultGroupVersion = APIGroup + "/" + APIVersionV1Alpha3
+
+	// StableGroupVersion is the value emitted for the ADR-022 stable artifact
+	// track: Snapshot, the default RecipeResult, RecipeCriteria, and
+	// BundleProvenance. Its §2 target is GroupVersionV1.
+	StableGroupVersion = GroupVersion
+
+	// AuthoringGroupVersion is the value emitted for the ADR-022 authoring and
+	// configuration track: AICRConfig, ordinary RecipeMetadata, RecipeMixin,
+	// and ComponentRegistry. Its §2 target is GroupVersionV1Beta1.
+	AuthoringGroupVersion = GroupVersion
+
+	// ProfileGroupVersion is the value emitted for the ADR-022 profile-bearing
+	// track: profile RecipeMetadata and RecipeResult. Its §2 target is
+	// GroupVersionV1Beta2.
+	ProfileGroupVersion = RecipeResultGroupVersion
+
+	// GroupVersionV1Beta1 is the target authoring/configuration group/version.
+	GroupVersionV1Beta1 = APIGroup + "/" + APIVersionV1Beta1
+
+	// GroupVersionV1Beta2 is the target profile-bearing group/version.
+	GroupVersionV1Beta2 = APIGroup + "/" + APIVersionV1Beta2
+
+	// GroupVersionV1 is the target stable public artifact group/version.
+	GroupVersionV1 = APIGroup + "/" + APIVersionV1
 )
 
 // IsSupportedAPIVersion reports whether v is an artifact apiVersion this binary
@@ -57,12 +103,36 @@ const (
 // that tolerate a missing apiVersion for backward compatibility with older
 // artifacts must special-case "" before calling this.
 //
-// Bumping the artifact schema is a hard break: replace GroupVersion with the
-// new value rather than accepting both. The prior value is rejected — artifacts
-// stamped with an older group/version must be regenerated, not migrated.
+// This compatibility helper covers the stable artifact track only. Callers
+// reading authoring or profile-bearing artifacts must use the corresponding
+// schema-track helper instead of treating versions as globally interchangeable.
 func IsSupportedAPIVersion(v string) bool {
 	switch v {
-	case GroupVersion:
+	case GroupVersion, GroupVersionV1:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsSupportedAuthoringAPIVersion reports whether v is accepted for an
+// ADR-022 authoring/configuration artifact during the Release N reader-first
+// window.
+func IsSupportedAuthoringAPIVersion(v string) bool {
+	switch v {
+	case GroupVersion, GroupVersionV1Beta1:
+		return true
+	default:
+		return false
+	}
+}
+
+// IsSupportedProfileAPIVersion reports whether v is accepted for a
+// profile-bearing RecipeMetadata or RecipeResult during the Release N
+// reader-first window.
+func IsSupportedProfileAPIVersion(v string) bool {
+	switch v {
+	case RecipeResultGroupVersion, GroupVersionV1Beta2:
 		return true
 	default:
 		return false
@@ -70,15 +140,11 @@ func IsSupportedAPIVersion(v string) bool {
 }
 
 // IsSupportedRecipeResultAPIVersion reports whether v is a RecipeResult
-// version understood by this binary. v1alpha2 remains readable for legacy
-// recipes; newly configured Slurm recipes use v1alpha3.
+// version understood by this binary. The gate is the union of the default and
+// profile-bearing schema tracks; callers must still enforce the bidirectional
+// version/profile discriminator contract.
 func IsSupportedRecipeResultAPIVersion(v string) bool {
-	switch v {
-	case GroupVersion, RecipeResultGroupVersion:
-		return true
-	default:
-		return false
-	}
+	return IsSupportedAPIVersion(v) || IsSupportedProfileAPIVersion(v)
 }
 
 // Kind represents the type of AICR resource.

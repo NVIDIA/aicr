@@ -145,8 +145,7 @@ func (h *recipeHandler) handleRecipes(w http.ResponseWriter, r *http.Request, v2
 		}()
 		bodyData, readErr := io.ReadAll(bounded)
 		if readErr != nil {
-			var maxBytesErr *http.MaxBytesError
-			if stderrors.As(readErr, &maxBytesErr) {
+			if maxBytesErr, ok := stderrors.AsType[*http.MaxBytesError](readErr); ok {
 				logger.Warn("recipe POST body exceeded size limit",
 					"limit", defaults.MaxRecipePOSTBytes,
 					"received", maxBytesErr.Limit,
@@ -293,8 +292,7 @@ func (h *recipeHandler) parseQueryPOSTBody(
 
 	bodyData, err := io.ReadAll(bounded)
 	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if stderrors.As(err, &maxBytesErr) {
+		if maxBytesErr, ok := stderrors.AsType[*http.MaxBytesError](err); ok {
 			logger.Warn("query POST body exceeded size limit",
 				"limit", defaults.MaxRecipePOSTBytes,
 				"received", maxBytesErr.Limit,
@@ -747,6 +745,6 @@ func normalizeLegacyRecipeResult(result *recipe.RecipeResult, v2 bool) *recipe.R
 	projected := result.DeepCopy()
 	projected.BindDataProvider(result.DataProvider())
 	projected.Configuration = nil
-	projected.APIVersion = recipe.RecipeAPIVersion
+	projected.APIVersion = recipe.RecipeResultAPIVersion
 	return projected
 }

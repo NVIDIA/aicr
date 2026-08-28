@@ -3,33 +3,10 @@
   "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
   "author": "NVIDIA AICR maintainers",
   "role": "document creator",
-  "timestamp": "2026-08-06T00:00:00Z",
-  "version": 13,
-  "tooling": "manual; aiperf-bench statements verified against aiperf v0.11.0 source (which pins pillow~=12.2.0); the aiperf-bench runtime base moved from python:3.13-slim to nvcr.io/nvidia/distroless/python:3.13-v4.0.8, adding 21 libexpat1 2.7.1-2 statements (4 High, 16 Medium, 1 Low) whose unreachability was verified by reading ELF DT_NEEDED across the built image (no binary links libexpat) and by confirming CPython's pyexpat statically bundles expat 2.8.1; aicr statement reachability verified by source inspection (CGO-free ko build, no libssl linkage); v11 added aiperf-bench CVE-2026-11940 and CVE-2026-11972 (CPython 3.13.14 tarfile), justified vulnerable_code_not_in_execute_path after confirming aiperf 0.11.0 has zero tarfile references and that AICR's fixed `aiperf profile` argv lands in the synthetic-dataset branch of aiperf/dataset/dataset_manager.py, never downloading or extracting an archive; v12 removed ALL 47 pkg:oci/aicr-gate statements: #2038 deleted the embedded upstream kyverno/chainsaw binary from cmd/gate/Dockerfile (the gate now evaluates Chainsaw Test assertions in-process via pkg/chainsaw), so every package those statements scoped to that binary — including GO-2026-5942 (golang.org/x/net) and GO-2026-5970 (golang.org/x/text), the two HIGH findings the weekly scan reported on aicr-gate — is component_not_present rather than suppressed. The aicr-gate image now ships only the statically linked Go gate binary built from this module's pins, so a future finding on it must be fixed by a dependency bump, not re-suppressed. Confirmation is the first Weekly Image Vulnerability Scan run after merge: aicr-gate must report 0 HIGH+ and 0 VEX-suppressed. v13 added aiperf-bench GHSA-cq5v-8q36-5273 (aiohttp 3.13.5 C-parser out-of-bounds read) and is the first statement in this document justified vulnerable_code_cannot_be_controlled_by_adversary rather than vulnerable_code_not_in_execute_path: the compiled C parser does parse every benchmark response, so the claim rests on every aiohttp peer being a cluster-internal workload discovered through the Kubernetes API. The v13 stale audit re-scanned ghcr.io/nvidia/aicr-validators/aiperf-bench:scan-90ef73c8 with the pinned grype 0.110.0 and found all 34 pre-existing statements still applied (declared and applied sets identical, zero stale). aiperf-bench is now the only product in this document, so no other image needs auditing.",
+  "timestamp": "2026-08-27T00:00:00Z",
+  "version": 14,
+  "tooling": "manual; aiperf-bench statements verified against aiperf v0.11.0 source (which pins pillow~=12.2.0); the aiperf-bench runtime base moved from python:3.13-slim to nvcr.io/nvidia/distroless/python:3.13-v4.0.8, adding 21 libexpat1 2.7.1-2 statements (4 High, 16 Medium, 1 Low) whose unreachability was verified by reading ELF DT_NEEDED across the built image (no binary links libexpat) and by confirming CPython's pyexpat statically bundles expat 2.8.1; aicr statement reachability verified by source inspection (CGO-free ko build, no libssl linkage); v11 added aiperf-bench CVE-2026-11940 and CVE-2026-11972 (CPython 3.13.14 tarfile), justified vulnerable_code_not_in_execute_path after confirming aiperf 0.11.0 has zero tarfile references and that AICR's fixed `aiperf profile` argv lands in the synthetic-dataset branch of aiperf/dataset/dataset_manager.py, never downloading or extracting an archive; v12 removed ALL 47 pkg:oci/aicr-gate statements: #2038 deleted the embedded upstream kyverno/chainsaw binary from cmd/gate/Dockerfile (the gate now evaluates Chainsaw Test assertions in-process via pkg/chainsaw), so every package those statements scoped to that binary — including GO-2026-5942 (golang.org/x/net) and GO-2026-5970 (golang.org/x/text), the two HIGH findings the weekly scan reported on aicr-gate — is component_not_present rather than suppressed. The aicr-gate image now ships only the statically linked Go gate binary built from this module's pins, so a future finding on it must be fixed by a dependency bump, not re-suppressed. Confirmation is the first Weekly Image Vulnerability Scan run after merge: aicr-gate must report 0 HIGH+ and 0 VEX-suppressed. v13 added aiperf-bench GHSA-cq5v-8q36-5273 (aiohttp 3.13.5 C-parser out-of-bounds read) and is the first statement in this document justified vulnerable_code_cannot_be_controlled_by_adversary rather than vulnerable_code_not_in_execute_path: the compiled C parser does parse every benchmark response, so the claim rests on every aiohttp peer being a cluster-internal workload discovered through the Kubernetes API. The v13 stale audit re-scanned ghcr.io/nvidia/aicr-validators/aiperf-bench:scan-90ef73c8 with the pinned grype 0.110.0 and found all 34 pre-existing statements still applied (declared and applied sets identical, zero stale). aiperf-bench is now the only product in this document, so no other image needs auditing. v14 has two halves. First, it added seven aiperf-bench statements for the openssl 3.5.6-1~deb13u2 HIGH findings the 2026-08-27 scan reported on libssl3t64 and openssl-provider-fips (CVE-2026-14456, CVE-2026-14457, CVE-2026-18798, CVE-2026-54874, CVE-2026-63072, CVE-2026-63075, CVE-2026-63076: 7 CVEs x 2 packages = the 14 rows). A bump was checked first and is not available for these: Debian fixes at 3.5.7-1~deb13u2, but every NGC distroless python 3.13 tag through v4.1.1 still ships 3.5.6-1~deb13u2 on a byte-identical openssl layer (sha256:72956fd1eb37d6802c3518bac58a3d138be3386834967797df1a3b851c0fc3db), verified by scanning v4.0.8, v4.0.9 and v4.1.1. All seven fall in subsystems the image cannot enter: QUIC (14456, 14457, 18798, 63075), DTLS (54874), CMS (63072) and CMP (63076), none of which CPython's _ssl/_hashlib bind and none of which the 130-package aiperf 0.11.0 closure implements (no aioquic/h3, no cryptography/pyOpenSSL). The openssl CLI package is absent (no bin/openssl in any base layer) and the runtime is shell-less, so there is no command-line path either; the openssl-provider-fips half is doubly inert because the image sets OPENSSL_CONF=/etc/ssl/openssl-nofips.cnf, activating default_sect only, so fips.so is never loaded. Second, v14 bumped the runtime base from 3.13-v4.0.8 to 3.13-v4.1.1@sha256:6b49f6183eaec6dbd100219a43314bbf1d71b148eafcce62fdcc6472d066b5d9, moving CPython 3.13.14 -> 3.13.15 and libexpat1 2.7.1-2 -> 2.8.2-1~deb13u1. That is remediation rather than suppression, and it retired 24 statements outright: the 21 libexpat1 ones (CVE-2025-59375, CVE-2026-24515, CVE-2026-25210, CVE-2026-32776, CVE-2026-32777, CVE-2026-32778, CVE-2026-41080, CVE-2026-45186, CVE-2026-50219, CVE-2026-56131, CVE-2026-56132 and CVE-2026-56403 through CVE-2026-56412) and the three CPython ones (CVE-2026-11940, CVE-2026-11972, CVE-2026-15308). Diffing full grype runs of the two bases shows the bump clears 32 findings including 7 HIGH and introduces no new HIGH; the only two rows that move forward are CVE-2026-72522 (libexpat1) and CVE-2025-15367 (CPython), both Medium and both already present on the older versions, so neither is newly suppressed. Image config is unchanged across the bump (same nvs uid/gid 1000, same /usr/local/bin CPython 3.13 and cp313 ABI for the copied venv, same OPENSSL_CONF, same entrypoint, both linux/amd64 and linux/arm64 present). Statement count goes 35 -> 42 -> 18: 11 pillow/aiohttp GHSAs plus the 7 openssl CVEs. One caveat on evidence: no local Docker was available to rebuild the image, so the 24 deletions were validated against a scan of the v4.1.1 base itself unioned with the venv-contributed python-type findings carried over from the scan-c94cf7e6 run, not against rebuilt bytes. The first Weekly Image Vulnerability Scan after merge is the confirmation and must report aiperf-bench with 0 HIGH+ and 25 VEX-suppressed. Note the workflow counts suppressed ROWS, not statements: the 18 statements yield 25 rows because each openssl CVE matches twice, once on libssl3t64 and once on openssl-provider-fips (7 x 2 = 14), plus 11 single-row pillow/aiohttp GHSAs. A separate libexpat1 row, CVE-2026-66046 (High), is deliberately NOT suppressed: Debian marks it wont-fix, so --only-fixed already withholds it from the reported counts, and pre-suppressing a wont-fix finding would hide it the moment a fix ships.",
   "statements": [
-    {
-      "vulnerability": {
-        "name": "CVE-2026-15308",
-        "description": "cpython CPU-exhaustion DoS in html.parser.HTMLParser incremental feed() via repeated unterminated markup declarations (PSF-2026-33, CWE-407, High CVSS 7.5/8.7). Fix merged to the cpython 3.13 branch on 2026-07-04 (PR #153040) but as of 2026-07-13 no released CPython contains it — v3.13.14 (2026-06-10), v3.14.6, and v3.15.0b3 all predate the fix, so no base-image bump can remediate yet."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The trigger requires incrementally feeding attacker-controlled HTML containing repeated unterminated markup declarations into html.parser.HTMLParser.feed(). aiperf 0.11.0 source contains zero references to html.parser, HTMLParser, or any html stdlib import (verified with `grep -rn -E 'html\\.parser|HTMLParser|^(import|from) html'` against the aiperf 0.11.0 wheel — no hits). AICR invokes aiperf-bench exclusively as `aiperf profile <text-LLM> --url <endpoint>` (validators/performance/inference_perf_constraint.go); the workload exchanges only JSON over HTTP via aiohttp + msgspec/orjson and never parses HTML documents from the inference endpoint or any other source. No attacker-controlled markup can reach the vulnerable parser, so the quadratic-complexity code path is unreachable."
-    },
     {
       "vulnerability": {
         "name": "GHSA-vjc4-5qp5-m44j",
@@ -262,535 +239,6 @@
     },
     {
       "vulnerability": {
-        "name": "CVE-2025-59375",
-        "description": "libexpat before 2.7.2 allows attackers to trigger large dynamic memory allocations via a small document submitted for parsing (CVSS 3.1 AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H). Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Reaching the allocation amplification requires feeding a crafted XML document to expat's parser. The aiperf-bench runtime base moved to nvcr.io/nvidia/distroless/python:3.13-v4.0.8, which ships Debian libexpat1 2.7.1-2 (fixed upstream in 2.8.2-1~deb13u1). The package cannot be bumped from this repo: it comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, so no base-image bump remediates it today. Two independent facts make the vulnerable build unreachable. (1) Nothing in the image links it: reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 (2.7.1-2) is never loaded. (2) The one XML path that does execute does not use it: CPython routes xml.parsers.expat through lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled at EXPAT_VERSION 2.8.1. So the 14 venv packages that import xml.* (PIL, matplotlib, pandas, fontTools, pyarrow, datasets, ...) exercise that bundled build, not the flagged 2.7.1-2 package. Whether 2.8.1 is itself patched varies by CVE and is stated per statement below. aiperf itself imports no XML module at all: scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits. AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP; no XML document from any source reaches a parser. The statically bundled expat is 2.8.1, above this CVE's 2.7.2 fix threshold, so even the reachable XML path is already patched."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-45186",
-        "description": "libexpat before 2.8.1: the computational complexity of attribute name collision checks allows denial of service via moderately sized crafted XML input (CVSS 3.1 AV:L/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L). Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The trigger requires parsing crafted XML with colliding attribute names. The aiperf-bench runtime base moved to nvcr.io/nvidia/distroless/python:3.13-v4.0.8, which ships Debian libexpat1 2.7.1-2 (fixed upstream in 2.8.2-1~deb13u1). The package cannot be bumped from this repo: it comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, so no base-image bump remediates it today. Two independent facts make the vulnerable build unreachable. (1) Nothing in the image links it: reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 (2.7.1-2) is never loaded. (2) The one XML path that does execute does not use it: CPython routes xml.parsers.expat through lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled at EXPAT_VERSION 2.8.1. So the 14 venv packages that import xml.* (PIL, matplotlib, pandas, fontTools, pyarrow, datasets, ...) exercise that bundled build, not the flagged 2.7.1-2 package. Whether 2.8.1 is itself patched varies by CVE and is stated per statement below. aiperf itself imports no XML module at all: scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits. AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP; no XML document from any source reaches a parser. The statically bundled expat is exactly 2.8.1, this CVE's fix threshold, so the reachable XML path is already patched."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-41080",
-        "description": "libexpat before 2.8.0 uses insufficient entropy, allowing hash flooding via a crafted XML document (CVSS 3.1 AV:L/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L). Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Hash flooding requires the attacker to supply a crafted XML document to the parser. The aiperf-bench runtime base moved to nvcr.io/nvidia/distroless/python:3.13-v4.0.8, which ships Debian libexpat1 2.7.1-2 (fixed upstream in 2.8.2-1~deb13u1). The package cannot be bumped from this repo: it comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, so no base-image bump remediates it today. Two independent facts make the vulnerable build unreachable. (1) Nothing in the image links it: reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 (2.7.1-2) is never loaded. (2) The one XML path that does execute does not use it: CPython routes xml.parsers.expat through lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled at EXPAT_VERSION 2.8.1. So the 14 venv packages that import xml.* (PIL, matplotlib, pandas, fontTools, pyarrow, datasets, ...) exercise that bundled build, not the flagged 2.7.1-2 package. Whether 2.8.1 is itself patched varies by CVE and is stated per statement below. aiperf itself imports no XML module at all: scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits. AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP; no XML document from any source reaches a parser. The statically bundled expat is 2.8.1, above this CVE's 2.8.0 fix threshold, so even the reachable XML path is already patched."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-25210",
-        "description": "libexpat before 2.7.4: doContent does not correctly determine bufSize because the tag buffer reallocation lacks an integer overflow check (CVSS 3.1 AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L). Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Overflowing the tag buffer requires driving expat's doContent with crafted XML element content. The aiperf-bench runtime base moved to nvcr.io/nvidia/distroless/python:3.13-v4.0.8, which ships Debian libexpat1 2.7.1-2 (fixed upstream in 2.8.2-1~deb13u1). The package cannot be bumped from this repo: it comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, so no base-image bump remediates it today. Two independent facts make the vulnerable build unreachable. (1) Nothing in the image links it: reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 (2.7.1-2) is never loaded. (2) The one XML path that does execute does not use it: CPython routes xml.parsers.expat through lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled at EXPAT_VERSION 2.8.1. So the 14 venv packages that import xml.* (PIL, matplotlib, pandas, fontTools, pyarrow, datasets, ...) exercise that bundled build, not the flagged 2.7.1-2 package. Whether 2.8.1 is itself patched varies by CVE and is stated per statement below. aiperf itself imports no XML module at all: scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits. AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP; no XML document from any source reaches a parser. The statically bundled expat is 2.8.1, above this CVE's 2.7.4 fix threshold, so even the reachable XML path is already patched."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-24515",
-        "description": "In libexpat before 2.7.4, XML_ExternalEntityParserCreate does not copy unknown encoding handler user data. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Independently, the statically bundled expat is EXPAT_VERSION 2.8.1, at or above this CVE's 2.7.4 fix threshold, so even the XML path that does execute is already patched."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-32776",
-        "description": "libexpat before 2.7.5 allows a NULL pointer dereference with empty external parameter entity content. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Independently, the statically bundled expat is EXPAT_VERSION 2.8.1, at or above this CVE's 2.7.5 fix threshold, so even the XML path that does execute is already patched."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-32777",
-        "description": "libexpat before 2.7.5 allows an infinite loop while parsing DTD content. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Independently, the statically bundled expat is EXPAT_VERSION 2.8.1, at or above this CVE's 2.7.5 fix threshold, so even the XML path that does execute is already patched."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-32778",
-        "description": "libexpat before 2.7.5 allows a NULL pointer dereference in the function setContext on retry after an earlier ouf-of-memory condition. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:N/I:N/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Independently, the statically bundled expat is EXPAT_VERSION 2.8.1, at or above this CVE's 2.7.5 fix threshold, so even the XML path that does execute is already patched."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-50219",
-        "description": "libexpat before 2.8.2 lacks handler call depth tracking for calls to XML_GetBuffer, XML_Parse, XML_ParseBuffer, XML_ParserFree, or XML_ParserReset from within handlers in cases of a policy violation. Thus, a use-after-free can occur, Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-56131",
-        "description": "libexpat before 2.8.2 lacks handler call depth tracking for calls to XML_ResumeParser from within handlers in cases of a policy violation. Thus, a use-after-free can occur (similar to the CVE-2026-50219 situation). Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-56132",
-        "description": "In libexpat before 2.8.2, there is a heap-based buffer overflow in doProlog in xmlparse.c because scaffold backing array reallocation is mishandled when there is data-structure sharing across parsers. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-56403",
-        "description": "libexpat before 2.8.2 has an integer overflow in storeAtts. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-56404",
-        "description": "libexpat before 2.8.2 has an integer overflow in addBinding. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-56405",
-        "description": "libexpat before 2.8.2 has an integer overflow in getAttributeId. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-56406",
-        "description": "libexpat before 2.8.2 has an integer overflow in XML_ParseBuffer because it lacked a check that was present in XML_Parse. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-56407",
-        "description": "libexpat before 2.8.2 has an integer overflow in doProlog that is related to storeEntityValue and entity textLen. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-56408",
-        "description": "libexpat before 2.8.2 has an integer overflow in copyString. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-56409",
-        "description": "xmlwf in libexpat before 2.8.2 has an integer overflow for the output filename when -d outputDir is used. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:R/S:U/C:H/I:H/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-56410",
-        "description": "xmlwf in libexpat before 2.8.2 has an integer overflow in resolveSystemId. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-56411",
-        "description": "xmlwf in libexpat before 2.8.2 has an integer overflow in endDoctypeDecl via NOTATION declarations. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-56412",
-        "description": "libexpat before 2.8.2 does not consider XML_TOK_DATA_CHARS in doCdataSection and thus lacks handler call depth tracking for various calls from within handlers in cases of a policy violation. Thus, a use-after-free can occur. NOTE: this issue exists because of an incomplete fix for CVE-2026-50219. Present via Debian libexpat1 2.7.1-2 in the distroless runtime base; fixed in 2.8.2-1~deb13u1. CVSS: CVSS:3.1/AV:L/AC:H/PR:N/UI:N/S:U/C:L/I:L/A:L."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "The flagged package is Debian libexpat1 2.7.1-2, shipped by the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base and fixed upstream in 2.8.2-1~deb13u1. It cannot be bumped from this repo: the package comes from NVIDIA's published distroless image and 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io. The vulnerable build is never executed because nothing in the image links it -- reading ELF DT_NEEDED entries for every binary under /usr/local/lib, /usr/lib, /lib, /opt/venv/lib, /usr/local/bin, and /usr/bin returns zero references to libexpat, so /usr/lib/x86_64-linux-gnu/libexpat.so.1 is dead weight on disk. CPython does not use it either: xml.parsers.expat resolves to lib-dynload/pyexpat.cpython-313-x86_64-linux-gnu.so, whose DT_NEEDED is ['libc.so.6'] only because expat is statically bundled. aiperf itself imports no XML module -- scanning its 682 .py files for '^(import|from) (xml|pyexpat|xmlrpc)' returns zero hits -- and AICR invokes the image only as `aiperf profile <text-LLM> --url <endpoint>` (buildAIPerfJob in validators/performance/inference_perf_constraint.go), exchanging JSON over HTTP. No XML document from any source reaches a parser. Note: CPython's statically bundled expat is 2.8.1 and this CVE is fixed in 2.8.2, so the bundled copy is not itself patched. That copy is invisible to package scanners and is not what this finding reports; the finding is scoped to the unused Debian libexpat1 package above. The bundled parser is unreachable for the separate reason that neither aiperf nor the benchmark workload parses XML from any source."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-11940",
-        "description": "cpython: tarfile.extractall() under the 'data' or 'tar' filter can be bypassed by a crafted archive in which a hardlink references a symlink stored at a deeper name than the hardlink itself, letting the recreated symlink escape the destination directory (GHSA-9mc4-rqmq-h467, High; incomplete fix of CVE-2025-4330). Present via CPython 3.13.14 in the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base. No bump remediates: 3.13.14 is the newest CPython 3.13 release, 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, grype's only known fixed version is 3.15.0b4 (an unreleased beta), and scanning the newest 3.14-line tag (3.14-v4.0.9, CPython 3.14.6) reports this same finding, so no minor-version move escapes it either."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Triggering this requires extracting an attacker-supplied tar archive with tarfile.extractall(). aiperf 0.11.0 never touches tarfile: grepping the installed package at /opt/venv/lib/python3.13/site-packages/aiperf for 'tarfile|extractall' returns zero hits. Across the entire venv (297 installed distributions) exactly one tar extraction exists -- datasets/utils/extract.py:130-131, TarExtractor.extract, which does `tarfile.open(input_path)` then `tar_file.extractall(output_path, members=TarExtractor.safemembers(tar_file, output_path))` -- inside the HuggingFace `datasets` package. aiperf declares that dependency (Requires-Dist: datasets>=3.0) but imports it from only two regions: the HuggingFace dataset loaders (aiperf/dataset/loader/base_hf_dataset.py, aiperf/dataset/loader/hf_asr.py) and the accuracy benchmark suites (aiperf/accuracy/benchmarks/{mmlu,gsm8k,aime,aime24,aime25,hellaswag,gpqa_diamond,math_500}.py). AICR reaches neither. buildAIPerfJob (validators/performance/inference_perf_constraint.go) launches the image with a fixed argv -- `aiperf profile --model <model> --url <endpoint> --endpoint-type chat --streaming --concurrency N --request-count N --warmup-request-count N --prompt-input-tokens-mean 128 --prompt-input-tokens-stddev 0 --prompt-output-tokens-mean 128 --prompt-output-tokens-stddev 0 --num-dataset-entries 100 --random-seed 100 --extra-inputs temperature:0 --output-artifact-dir /tmp/aiperf --export-level summary` -- with no --input-file, no public-dataset selector, and no accuracy flag. aiperf's dataset dispatch (aiperf/dataset/dataset_manager.py:444-456) therefore falls past the accuracy-enabled, PublicDataset, and FileDataset branches into _load_synthetic_dataset(), which generates prompts in-process from --random-seed and --num-dataset-entries. No archive is fetched and no tar is opened anywhere in the benchmark run. Note on the CVE's precondition: it describes a bypass of the 'data'/'tar' extraction filter, and that single call site passes no filter= argument at all (it screens members itself via safemembers), so the filter the CVE defeats is not the mechanism in use there -- but the operative reason this image is unaffected is that the call site is never executed by AICR's workload."
-    },
-    {
-      "vulnerability": {
-        "name": "CVE-2026-11972",
-        "description": "cpython: when the tarfile module is used with a file opened in streaming mode (mode='r|'), tarfile does not properly handle EOF, so a crafted archive can be parsed in an infinite loop (GHSA-wqxf-pjxh-hh4h, High). Present via CPython 3.13.14 in the nvcr.io/nvidia/distroless/python:3.13-v4.0.8 runtime base. No bump remediates: 3.13.14 is the newest CPython 3.13 release, 3.13-v4.0.8 is the newest 3.13 tag on nvcr.io, grype's only known fixed version is 3.15.0b4 (an unreleased beta), and the newest 3.14-line tag (3.14-v4.0.9, CPython 3.14.6) reports this same finding."
-      },
-      "products": [
-        {
-          "@id": "pkg:oci/aicr-aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aicr-aiperf-bench"
-          }
-        },
-        {
-          "@id": "pkg:oci/aiperf-bench",
-          "identifiers": {
-            "purl": "pkg:oci/aiperf-bench"
-          }
-        }
-      ],
-      "status": "not_affected",
-      "justification": "vulnerable_code_not_in_execute_path",
-      "impact_statement": "Triggering this requires feeding a crafted archive to tarfile with the file opened in streaming mode (mode='r|' / 'r|*'). aiperf 0.11.0 contains no tarfile usage at all: grepping the installed package at /opt/venv/lib/python3.13/site-packages/aiperf for 'tarfile|extractall' returns zero hits. Across the entire venv (297 installed distributions) exactly two streaming-mode opens exist, and neither is reachable from the benchmark. The first is datasets/utils/file_utils.py:1360, `tarfile.open(fileobj=f, mode='r|*')`, on the HuggingFace `datasets` streaming-download path; aiperf declares datasets as a dependency (Requires-Dist: datasets>=3.0) but imports it only from the HuggingFace dataset loaders (aiperf/dataset/loader/base_hf_dataset.py, aiperf/dataset/loader/hf_asr.py) and the accuracy benchmark suites (aiperf/accuracy/benchmarks/*.py). AICR invokes neither: buildAIPerfJob (validators/performance/inference_perf_constraint.go) runs a fixed argv -- `aiperf profile --model <model> --url <endpoint> --endpoint-type chat --streaming --num-dataset-entries 100 --random-seed 100 --prompt-input-tokens-mean 128 --output-artifact-dir /tmp/aiperf --export-level summary` and the remaining concurrency/token-count flags -- with no --input-file, no public-dataset selector, and no accuracy flag, so aiperf's dataset dispatch (aiperf/dataset/dataset_manager.py:444-456) falls through to _load_synthetic_dataset() and generates prompts in-process from --random-seed. Note that the --streaming flag here is an HTTP/SSE response-streaming option for the inference endpoint and has nothing to do with tarfile stream mode. The second call site is setuptools/_vendor/jaraco/context/__init__.py:79, a build-time helper in vendored setuptools; the runtime stage is distroless with no shell, no compiler, and no pip invocation -- the venv is copied in fully installed from the builder stage (validators/performance/aiperf-bench.Dockerfile), so setuptools is never executed. No tar stream from any source is parsed during a benchmark run."
-    },
-    {
-      "vulnerability": {
         "name": "GHSA-cq5v-8q36-5273",
         "description": "aiohttp: out-of-bounds heap read in the C HTTP parser while building the error message for a malformed response, which an attacker-controlled server (or an accidentally malformed response) can turn into a client-side DoS (CVE-2026-69244, CWE-125, High CVSS 7.1). Present via aiohttp 3.13.5. Fixed only in aiohttp 3.14.3, which no bump can reach: aiperf pins `aiohttp~=3.13.3` (>=3.13.3,<3.14) in pyproject.toml at both v0.11.0 (the version installed here) and v0.12.0 (newest upstream release, 2026-08-06), so requiring 3.14.3 in validators/performance/requirements.txt would make pip resolution fail outright rather than produce a fixed image. Unlike the other statements in this document the vulnerable code IS on the execute path -- aiohttp is the benchmark's request transport -- so the claim rests on adversary control of the response bytes, not on unreachability."
       },
@@ -811,6 +259,167 @@
       "status": "not_affected",
       "justification": "vulnerable_code_cannot_be_controlled_by_adversary",
       "impact_statement": "The defect is in HttpParser.feed_data's error path at aiohttp/_http_parser.pyx:588-590 of 3.13.5: `after = cparser.llhttp_get_error_pos(self._cparser)` yields a raw `const char*` into the fed buffer, and the following `after.split(b\"\\r\\n\", 1)` forces an implicit char*-to-bytes conversion whose strlen() scans past the end of that buffer looking for a NUL. aio-libs/aiohttp PR #13222 (commit 49f65d5, released in 3.14.3) fixes it by slicing the snippet out of the bounded `data` object instead. This code is genuinely live in the image -- the compiled parser ships at /opt/venv/lib/python3.13/site-packages/aiohttp/_http_parser.cpython-313-x86_64-linux-gnu.so and the image config sets no AIOHTTP_NO_EXTENSIONS (verified with `crane config`), so the C parser, not the unaffected Python one, parses every benchmark response. What makes the image not_affected is that the parser only enters this branch when a peer emits a malformed HTTP message, and no peer aiperf-bench talks to is attacker-influenced. The installed aiperf 0.11.0 constructs exactly four aiohttp.ClientSession objects. (1) transports/aiohttp_client.py:139 is the benchmark request transport, shared by common/readiness_probe.py; its only target is the --url value, which buildAIPerfJob (validators/performance/inference_perf_constraint.go:2964) fills from resolveInferenceEndpoint -- a cluster-internal Service URL of the form http://<svc>.<ns>.svc:<port> discovered through the Kubernetes API by resolveFrontendEndpoint/resolveGatewayEndpoint in the same file, pointing at the Dynamo frontend or inference gateway that this same validator deployed. No recipe, snapshot, CLI flag, or environment variable can redirect it; the file's only os.Getenv bindings cover timeouts, model, router mode, cache sizing, and image resolution. (2) and (3) common/mixins/base_metrics_collector_mixin.py:294 and :413 are the GPU-telemetry and server-metrics scrapers; GpuTelemetryConfig defaults the DCGM collector to a local exporter (http://localhost:9400/metrics) and ServerMetricsDiscoveryConfig defaults to mode=auto, which enumerates eligible in-cluster inference-server pods via the Kubernetes API -- both address only workloads inside the cluster under test. (4) dataset/dataset_manager.py:269 downloads media URLs carried in the dataset and is the one session that could reach an arbitrary internet host; it is unreachable under AICR's fixed argv, which passes synthetic-prompt flags (--prompt-input-tokens-mean, --num-dataset-entries, --random-seed) with no --input-file and no public-dataset selector, so the dataset holds only generated text and the media-URL map stays empty. The same gating keeps dataset/loader/base_public_dataset.py, which fetches remote dataset archives over AioHttpClient, out of the run. Residual risk if a cluster-internal inference server were somehow made to emit malformed chunked framing is bounded: the flaw is an out-of-bounds read with no write primitive, and the process that would crash is a single-shot benchmark Job pod -- BackoffLimit 0, RestartPolicy Never, TTLSecondsAfterFinished 3600 in buildAIPerfJob -- running as non-root nvs (uid 1000) on a distroless base with no shell and no package manager. The outcome is a failed inference-perf validation, not a crossed security boundary."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14456",
+        "description": "openssl 3.5.6-1~deb13u2: unbounded resource consumption in the QUIC server listener. Per the OpenSSL advisory, \"when an OpenSSL QUIC server (Listener SSL object) processes valid QUIC Initial packets for unknown destination connection IDs, it can allocate and queue new incoming channels without enforcing any limit\". OpenSSL rates this LOW; Debian/NVD score it High, which is why grype surfaces it. Fixed in Debian at 3.5.7-1~deb13u2."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The trigger requires the image to run an OpenSSL QUIC server, i.e. to create a Listener SSL object via SSL_new_listener on a context built with OSSL_QUIC_server_method and then accept QUIC Initial packets from peers. The aiperf-bench image runs no server of any kind: its entrypoint is the aiperf CLI acting purely as an HTTP client against an inference endpoint, and it listens on no port. OpenSSL's QUIC support is reached only through the dedicated QUIC API (OSSL_QUIC_client_method, OSSL_QUIC_server_method, SSL_new_listener and friends). Within the shipped image the only libssl/libcrypto consumers on the workload's path are CPython's _ssl.cpython-313-x86_64-linux-gnu.so and _hashlib.cpython-313-x86_64-linux-gnu.so, and CPython binds none of the affected subsystems: dir(ssl) and dir(_ssl) expose no symbol containing QUIC, DTLS, CMS or CMP, and the only protocol constants are PROTOCOL_SSLv23, PROTOCOL_TLS, PROTOCOL_TLS_CLIENT, PROTOCOL_TLS_SERVER, PROTOCOL_TLSv1, PROTOCOL_TLSv1_1 and PROTOCOL_TLSv1_2. The 130-package Python closure installed from validators/performance/requirements.txt (aiperf==0.11.0) contains no QUIC or HTTP/3 implementation (no aioquic, no h3) and no binding to OpenSSL's CMS or CMP APIs (neither cryptography nor pyOpenSSL is present); the transports are aiohttp 3.13.5, httpx 0.28.1, requests 2.34.2 and urllib3 2.7.0, all HTTP over TCP. Nothing in the image can therefore construct a QUIC object, so the defect is unreachable. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go, and every endpoint is a cluster-internal plain-HTTP Service URL of the form http://<svc>.<ns>.svc:<port> built by resolveFrontendEndpoint / resolveGatewayEndpoint (lines 2348, 2351, 2395 and 2399), so the benchmark path negotiates no TLS at all. There is also no command-line entry point into any OpenSSL subsystem: the `openssl` binary package is not installed (enumerating every path across all 48 base layers found no bin/openssl), and the distroless runtime ships no shell. The openssl-provider-fips rows are a source-version match on a module the process never maps. The image config sets OPENSSL_CONF=/etc/ssl/openssl-nofips.cnf, whose [provider_sect] activates default_sect only; there is no /etc/ssl/openssl.cnf and no /usr/lib/ssl (OPENSSLDIR is absent entirely), so /usr/lib/x86_64-linux-gnu/ossl-modules/fips.so is never loaded. Independently, the FIPS provider implements only cryptographic primitives (digests, ciphers, KDFs, DRBGs, signature algorithms); the QUIC and DTLS record layers live in libssl and the CMS and CMP implementations live in libcrypto, so none of this code is inside fips.so to begin with. Both flagged binary packages (libssl3t64 and openssl-provider-fips, both 3.5.6-1~deb13u2) enter only through the runtime base nvcr.io/nvidia/distroless/python:3.13-v4.1.1@sha256:6b49f6183eaec6dbd100219a43314bbf1d71b148eafcce62fdcc6472d066b5d9; scanning that base alone with the pinned grype 0.110.0 reproduces all 14 HIGH rows, so no AICR-authored layer contributes them, and syft places both packages in base layer sha256:72956fd1eb37d6802c3518bac58a3d138be3386834967797df1a3b851c0fc3db (/var/lib/dpkg/status.d/libssl3t64). No bump remediates: Debian fixes at 3.5.7-1~deb13u2, and v4.1.1 is already the newest NGC distroless python 3.13 tag. Every tag from the v4.0.8 this image shipped on before 2026-08-27 forward (v4.0.8, v4.0.9, v4.1.1) still carries 3.5.6-1~deb13u2 on a byte-identical openssl layer, the same layer digest quoted above, verified by scanning all three on 2026-08-27. So this is a VEX case rather than a base-image bump until NGC rebuilds on patched trixie."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-14457",
+        "description": "openssl 3.5.6-1~deb13u2: NULL pointer dereference in QUIC TLS when RFC 7250 Raw Public Keys are in use. Per the OpenSSL advisory, \"in a server or client configuration with RFC7250 Raw Public Keys (RPKs) enabled, and only the private key (with no associated certificate) configured locally, a NULL pointer dereference may occur when the remote peer solicits raw public keys and also sends the typically omitted 'signature_algorithms_cert' TLS extension\". OpenSSL rates this LOW; Debian/NVD score it High. Fixed in Debian at 3.5.7-1~deb13u2."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The trigger needs three conditions to hold at once: the QUIC TLS stack in use, RFC 7250 Raw Public Keys enabled, and a local private key configured with no associated certificate. None is satisfiable here. CPython exposes no RPK configuration surface at all (no SSL_CTX_set1_client_cert_type / server_cert_type equivalent is bound by the ssl module), so raw public keys can never be negotiated, and the QUIC code path is unreachable for the separate reason below. OpenSSL's QUIC support is reached only through the dedicated QUIC API (OSSL_QUIC_client_method, OSSL_QUIC_server_method, SSL_new_listener and friends). Within the shipped image the only libssl/libcrypto consumers on the workload's path are CPython's _ssl.cpython-313-x86_64-linux-gnu.so and _hashlib.cpython-313-x86_64-linux-gnu.so, and CPython binds none of the affected subsystems: dir(ssl) and dir(_ssl) expose no symbol containing QUIC, DTLS, CMS or CMP, and the only protocol constants are PROTOCOL_SSLv23, PROTOCOL_TLS, PROTOCOL_TLS_CLIENT, PROTOCOL_TLS_SERVER, PROTOCOL_TLSv1, PROTOCOL_TLSv1_1 and PROTOCOL_TLSv1_2. The 130-package Python closure installed from validators/performance/requirements.txt (aiperf==0.11.0) contains no QUIC or HTTP/3 implementation (no aioquic, no h3) and no binding to OpenSSL's CMS or CMP APIs (neither cryptography nor pyOpenSSL is present); the transports are aiohttp 3.13.5, httpx 0.28.1, requests 2.34.2 and urllib3 2.7.0, all HTTP over TCP. Nothing in the image can therefore construct a QUIC object, so the defect is unreachable. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go, and every endpoint is a cluster-internal plain-HTTP Service URL of the form http://<svc>.<ns>.svc:<port> built by resolveFrontendEndpoint / resolveGatewayEndpoint (lines 2348, 2351, 2395 and 2399), so the benchmark path negotiates no TLS at all. There is also no command-line entry point into any OpenSSL subsystem: the `openssl` binary package is not installed (enumerating every path across all 48 base layers found no bin/openssl), and the distroless runtime ships no shell. The openssl-provider-fips rows are a source-version match on a module the process never maps. The image config sets OPENSSL_CONF=/etc/ssl/openssl-nofips.cnf, whose [provider_sect] activates default_sect only; there is no /etc/ssl/openssl.cnf and no /usr/lib/ssl (OPENSSLDIR is absent entirely), so /usr/lib/x86_64-linux-gnu/ossl-modules/fips.so is never loaded. Independently, the FIPS provider implements only cryptographic primitives (digests, ciphers, KDFs, DRBGs, signature algorithms); the QUIC and DTLS record layers live in libssl and the CMS and CMP implementations live in libcrypto, so none of this code is inside fips.so to begin with. Both flagged binary packages (libssl3t64 and openssl-provider-fips, both 3.5.6-1~deb13u2) enter only through the runtime base nvcr.io/nvidia/distroless/python:3.13-v4.1.1@sha256:6b49f6183eaec6dbd100219a43314bbf1d71b148eafcce62fdcc6472d066b5d9; scanning that base alone with the pinned grype 0.110.0 reproduces all 14 HIGH rows, so no AICR-authored layer contributes them, and syft places both packages in base layer sha256:72956fd1eb37d6802c3518bac58a3d138be3386834967797df1a3b851c0fc3db (/var/lib/dpkg/status.d/libssl3t64). No bump remediates: Debian fixes at 3.5.7-1~deb13u2, and v4.1.1 is already the newest NGC distroless python 3.13 tag. Every tag from the v4.0.8 this image shipped on before 2026-08-27 forward (v4.0.8, v4.0.9, v4.1.1) still carries 3.5.6-1~deb13u2 on a byte-identical openssl layer, the same layer digest quoted above, verified by scanning all three on 2026-08-27. So this is a VEX case rather than a base-image bump until NGC rebuilds on patched trixie."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-18798",
+        "description": "openssl 3.5.6-1~deb13u2: double free in the QUIC record layer. Per the OpenSSL advisory, a \"QUIC server may double free QRX (QUIC record layer RX) object when channel creation fails for initial packet\". OpenSSL rates this MODERATE; Debian/NVD score it High. Fixed in Debian at 3.5.7-1~deb13u2."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The trigger is server-side QUIC specifically: an OpenSSL QUIC server must receive an Initial packet and then fail channel creation for it, at which point the QRX object is released twice. The aiperf-bench image runs no server and listens on no port; its entrypoint is the aiperf CLI acting purely as an HTTP client. OpenSSL's QUIC support is reached only through the dedicated QUIC API (OSSL_QUIC_client_method, OSSL_QUIC_server_method, SSL_new_listener and friends). Within the shipped image the only libssl/libcrypto consumers on the workload's path are CPython's _ssl.cpython-313-x86_64-linux-gnu.so and _hashlib.cpython-313-x86_64-linux-gnu.so, and CPython binds none of the affected subsystems: dir(ssl) and dir(_ssl) expose no symbol containing QUIC, DTLS, CMS or CMP, and the only protocol constants are PROTOCOL_SSLv23, PROTOCOL_TLS, PROTOCOL_TLS_CLIENT, PROTOCOL_TLS_SERVER, PROTOCOL_TLSv1, PROTOCOL_TLSv1_1 and PROTOCOL_TLSv1_2. The 130-package Python closure installed from validators/performance/requirements.txt (aiperf==0.11.0) contains no QUIC or HTTP/3 implementation (no aioquic, no h3) and no binding to OpenSSL's CMS or CMP APIs (neither cryptography nor pyOpenSSL is present); the transports are aiohttp 3.13.5, httpx 0.28.1, requests 2.34.2 and urllib3 2.7.0, all HTTP over TCP. Nothing in the image can therefore construct a QUIC object, so the defect is unreachable. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go, and every endpoint is a cluster-internal plain-HTTP Service URL of the form http://<svc>.<ns>.svc:<port> built by resolveFrontendEndpoint / resolveGatewayEndpoint (lines 2348, 2351, 2395 and 2399), so the benchmark path negotiates no TLS at all. There is also no command-line entry point into any OpenSSL subsystem: the `openssl` binary package is not installed (enumerating every path across all 48 base layers found no bin/openssl), and the distroless runtime ships no shell. The openssl-provider-fips rows are a source-version match on a module the process never maps. The image config sets OPENSSL_CONF=/etc/ssl/openssl-nofips.cnf, whose [provider_sect] activates default_sect only; there is no /etc/ssl/openssl.cnf and no /usr/lib/ssl (OPENSSLDIR is absent entirely), so /usr/lib/x86_64-linux-gnu/ossl-modules/fips.so is never loaded. Independently, the FIPS provider implements only cryptographic primitives (digests, ciphers, KDFs, DRBGs, signature algorithms); the QUIC and DTLS record layers live in libssl and the CMS and CMP implementations live in libcrypto, so none of this code is inside fips.so to begin with. Both flagged binary packages (libssl3t64 and openssl-provider-fips, both 3.5.6-1~deb13u2) enter only through the runtime base nvcr.io/nvidia/distroless/python:3.13-v4.1.1@sha256:6b49f6183eaec6dbd100219a43314bbf1d71b148eafcce62fdcc6472d066b5d9; scanning that base alone with the pinned grype 0.110.0 reproduces all 14 HIGH rows, so no AICR-authored layer contributes them, and syft places both packages in base layer sha256:72956fd1eb37d6802c3518bac58a3d138be3386834967797df1a3b851c0fc3db (/var/lib/dpkg/status.d/libssl3t64). No bump remediates: Debian fixes at 3.5.7-1~deb13u2, and v4.1.1 is already the newest NGC distroless python 3.13 tag. Every tag from the v4.0.8 this image shipped on before 2026-08-27 forward (v4.0.8, v4.0.9, v4.1.1) still carries 3.5.6-1~deb13u2 on a byte-identical openssl layer, the same layer digest quoted above, verified by scanning all three on 2026-08-27. So this is a VEX case rather than a base-image bump until NGC rebuilds on patched trixie."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-54874",
+        "description": "openssl 3.5.6-1~deb13u2: excessive memory buffering in the DTLS record layer. Per the OpenSSL advisory, \"receiving a DTLS record for a future epoch while a handshake is in progress causes OpenSSL to buffer far more memory than the record itself requires\". OpenSSL rates this LOW; Debian/NVD score it High. Fixed in Debian at 3.5.7-1~deb13u2."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The trigger requires an in-progress DTLS handshake, which requires a DTLS method (DTLS_method / DTLSv1_2_method) and a datagram transport. CPython has no DTLS support whatsoever: the ssl module defines no PROTOCOL_DTLS* constant and dir(ssl) and dir(_ssl) expose no symbol containing DTLS, so no Python caller in this image can instantiate a DTLS context. The only protocol constants CPython offers are PROTOCOL_SSLv23, PROTOCOL_TLS, PROTOCOL_TLS_CLIENT, PROTOCOL_TLS_SERVER, PROTOCOL_TLSv1, PROTOCOL_TLSv1_1 and PROTOCOL_TLSv1_2, all stream-oriented TLS over TCP. The 130-package Python closure installed from validators/performance/requirements.txt (aiperf==0.11.0) contains no QUIC or HTTP/3 implementation (no aioquic, no h3) and no binding to OpenSSL's CMS or CMP APIs (neither cryptography nor pyOpenSSL is present); the transports are aiohttp 3.13.5, httpx 0.28.1, requests 2.34.2 and urllib3 2.7.0, all HTTP over TCP. No package in that closure implements DTLS either, and the workload uses no datagram sockets. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go, and every endpoint is a cluster-internal plain-HTTP Service URL of the form http://<svc>.<ns>.svc:<port> built by resolveFrontendEndpoint / resolveGatewayEndpoint (lines 2348, 2351, 2395 and 2399), so the benchmark path negotiates no TLS at all. There is also no command-line entry point into any OpenSSL subsystem: the `openssl` binary package is not installed (enumerating every path across all 48 base layers found no bin/openssl), and the distroless runtime ships no shell. The openssl-provider-fips rows are a source-version match on a module the process never maps. The image config sets OPENSSL_CONF=/etc/ssl/openssl-nofips.cnf, whose [provider_sect] activates default_sect only; there is no /etc/ssl/openssl.cnf and no /usr/lib/ssl (OPENSSLDIR is absent entirely), so /usr/lib/x86_64-linux-gnu/ossl-modules/fips.so is never loaded. Independently, the FIPS provider implements only cryptographic primitives (digests, ciphers, KDFs, DRBGs, signature algorithms); the QUIC and DTLS record layers live in libssl and the CMS and CMP implementations live in libcrypto, so none of this code is inside fips.so to begin with. Both flagged binary packages (libssl3t64 and openssl-provider-fips, both 3.5.6-1~deb13u2) enter only through the runtime base nvcr.io/nvidia/distroless/python:3.13-v4.1.1@sha256:6b49f6183eaec6dbd100219a43314bbf1d71b148eafcce62fdcc6472d066b5d9; scanning that base alone with the pinned grype 0.110.0 reproduces all 14 HIGH rows, so no AICR-authored layer contributes them, and syft places both packages in base layer sha256:72956fd1eb37d6802c3518bac58a3d138be3386834967797df1a3b851c0fc3db (/var/lib/dpkg/status.d/libssl3t64). No bump remediates: Debian fixes at 3.5.7-1~deb13u2, and v4.1.1 is already the newest NGC distroless python 3.13 tag. Every tag from the v4.0.8 this image shipped on before 2026-08-27 forward (v4.0.8, v4.0.9, v4.1.1) still carries 3.5.6-1~deb13u2 on a byte-identical openssl layer, the same layer digest quoted above, verified by scanning all three on 2026-08-27. So this is a VEX case rather than a base-image bump until NGC rebuilds on patched trixie."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-63072",
+        "description": "openssl 3.5.6-1~deb13u2: buffer overflow during CMS key unwrapping. Per the OpenSSL advisory, \"OpenSSL CMS decryption sizes the key-unwrap output buffer based on querying the unwrapped key size, but the AES-WRAP-PAD unwrap primitive can write and cleanse more bytes than that query reports\". OpenSSL rates this MODERATE; Debian/NVD score it High. Fixed in Debian at 3.5.7-1~deb13u2."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The trigger requires the process to perform CMS (RFC 5652) decryption, i.e. to call CMS_decrypt or an equivalent OSSL CMS API on an attacker-supplied enveloped-data structure using a key-encryption algorithm that resolves to AES-WRAP-PAD. Nothing in the image can make that call. Within the shipped image the only libssl/libcrypto consumers on the workload's path are CPython's _ssl.cpython-313-x86_64-linux-gnu.so and _hashlib.cpython-313-x86_64-linux-gnu.so, and CPython binds none of the affected subsystems: dir(ssl) and dir(_ssl) expose no symbol containing QUIC, DTLS, CMS or CMP, and the only protocol constants are PROTOCOL_SSLv23, PROTOCOL_TLS, PROTOCOL_TLS_CLIENT, PROTOCOL_TLS_SERVER, PROTOCOL_TLSv1, PROTOCOL_TLSv1_1 and PROTOCOL_TLSv1_2. CPython binds no CMS API at any layer: the ssl module is a TLS-only wrapper and _hashlib exposes only EVP digest and HMAC entry points. The 130-package Python closure installed from validators/performance/requirements.txt (aiperf==0.11.0) contains no QUIC or HTTP/3 implementation (no aioquic, no h3) and no binding to OpenSSL's CMS or CMP APIs (neither cryptography nor pyOpenSSL is present); the transports are aiohttp 3.13.5, httpx 0.28.1, requests 2.34.2 and urllib3 2.7.0, all HTTP over TCP. The two Python packages that do bind OpenSSL's CMS/PKCS#7 surface, cryptography and pyOpenSSL, are both absent from the closure, so there is no Python-reachable path to CMS_decrypt. There is also no command-line entry point into any OpenSSL subsystem: the `openssl` binary package is not installed (enumerating every path across all 48 base layers found no bin/openssl), and the distroless runtime ships no shell. That matters here specifically because `openssl cms` is the usual non-library way to reach this code, and that subcommand ships in the openssl binary package, which is not installed. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go, and every endpoint is a cluster-internal plain-HTTP Service URL of the form http://<svc>.<ns>.svc:<port> built by resolveFrontendEndpoint / resolveGatewayEndpoint (lines 2348, 2351, 2395 and 2399), so the benchmark path negotiates no TLS at all. The workload exchanges only JSON chat-completion payloads and never parses CMS, S/MIME or enveloped-data structures. The openssl-provider-fips rows are a source-version match on a module the process never maps. The image config sets OPENSSL_CONF=/etc/ssl/openssl-nofips.cnf, whose [provider_sect] activates default_sect only; there is no /etc/ssl/openssl.cnf and no /usr/lib/ssl (OPENSSLDIR is absent entirely), so /usr/lib/x86_64-linux-gnu/ossl-modules/fips.so is never loaded. Independently, the FIPS provider implements only cryptographic primitives (digests, ciphers, KDFs, DRBGs, signature algorithms); the QUIC and DTLS record layers live in libssl and the CMS and CMP implementations live in libcrypto, so none of this code is inside fips.so to begin with. Both flagged binary packages (libssl3t64 and openssl-provider-fips, both 3.5.6-1~deb13u2) enter only through the runtime base nvcr.io/nvidia/distroless/python:3.13-v4.1.1@sha256:6b49f6183eaec6dbd100219a43314bbf1d71b148eafcce62fdcc6472d066b5d9; scanning that base alone with the pinned grype 0.110.0 reproduces all 14 HIGH rows, so no AICR-authored layer contributes them, and syft places both packages in base layer sha256:72956fd1eb37d6802c3518bac58a3d138be3386834967797df1a3b851c0fc3db (/var/lib/dpkg/status.d/libssl3t64). No bump remediates: Debian fixes at 3.5.7-1~deb13u2, and v4.1.1 is already the newest NGC distroless python 3.13 tag. Every tag from the v4.0.8 this image shipped on before 2026-08-27 forward (v4.0.8, v4.0.9, v4.1.1) still carries 3.5.6-1~deb13u2 on a byte-identical openssl layer, the same layer digest quoted above, verified by scanning all three on 2026-08-27. So this is a VEX case rather than a base-image bump until NGC rebuilds on patched trixie."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-63075",
+        "description": "openssl 3.5.6-1~deb13u2: unbounded memory growth in QUIC packet history. Per the OpenSSL advisory, \"when OpenSSL processes QUIC traffic from a peer that repeatedly sends ack-eliciting packets while not acknowledging ACK-only responses, the QUIC stack can retain ACK-only packet metadata for the lifetime of the connection\". OpenSSL rates this LOW; Debian/NVD score it High. Fixed in Debian at 3.5.7-1~deb13u2."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The trigger requires an established QUIC connection whose peer drives an adversarial ack-eliciting pattern over the connection's lifetime, so the vulnerable accounting lives entirely inside OpenSSL's QUIC packet-history bookkeeping. No QUIC connection is ever established in this image, in either direction. OpenSSL's QUIC support is reached only through the dedicated QUIC API (OSSL_QUIC_client_method, OSSL_QUIC_server_method, SSL_new_listener and friends). Within the shipped image the only libssl/libcrypto consumers on the workload's path are CPython's _ssl.cpython-313-x86_64-linux-gnu.so and _hashlib.cpython-313-x86_64-linux-gnu.so, and CPython binds none of the affected subsystems: dir(ssl) and dir(_ssl) expose no symbol containing QUIC, DTLS, CMS or CMP, and the only protocol constants are PROTOCOL_SSLv23, PROTOCOL_TLS, PROTOCOL_TLS_CLIENT, PROTOCOL_TLS_SERVER, PROTOCOL_TLSv1, PROTOCOL_TLSv1_1 and PROTOCOL_TLSv1_2. The 130-package Python closure installed from validators/performance/requirements.txt (aiperf==0.11.0) contains no QUIC or HTTP/3 implementation (no aioquic, no h3) and no binding to OpenSSL's CMS or CMP APIs (neither cryptography nor pyOpenSSL is present); the transports are aiohttp 3.13.5, httpx 0.28.1, requests 2.34.2 and urllib3 2.7.0, all HTTP over TCP. Nothing in the image can therefore construct a QUIC object, so the defect is unreachable. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go, and every endpoint is a cluster-internal plain-HTTP Service URL of the form http://<svc>.<ns>.svc:<port> built by resolveFrontendEndpoint / resolveGatewayEndpoint (lines 2348, 2351, 2395 and 2399), so the benchmark path negotiates no TLS at all. There is also no command-line entry point into any OpenSSL subsystem: the `openssl` binary package is not installed (enumerating every path across all 48 base layers found no bin/openssl), and the distroless runtime ships no shell. The openssl-provider-fips rows are a source-version match on a module the process never maps. The image config sets OPENSSL_CONF=/etc/ssl/openssl-nofips.cnf, whose [provider_sect] activates default_sect only; there is no /etc/ssl/openssl.cnf and no /usr/lib/ssl (OPENSSLDIR is absent entirely), so /usr/lib/x86_64-linux-gnu/ossl-modules/fips.so is never loaded. Independently, the FIPS provider implements only cryptographic primitives (digests, ciphers, KDFs, DRBGs, signature algorithms); the QUIC and DTLS record layers live in libssl and the CMS and CMP implementations live in libcrypto, so none of this code is inside fips.so to begin with. Both flagged binary packages (libssl3t64 and openssl-provider-fips, both 3.5.6-1~deb13u2) enter only through the runtime base nvcr.io/nvidia/distroless/python:3.13-v4.1.1@sha256:6b49f6183eaec6dbd100219a43314bbf1d71b148eafcce62fdcc6472d066b5d9; scanning that base alone with the pinned grype 0.110.0 reproduces all 14 HIGH rows, so no AICR-authored layer contributes them, and syft places both packages in base layer sha256:72956fd1eb37d6802c3518bac58a3d138be3386834967797df1a3b851c0fc3db (/var/lib/dpkg/status.d/libssl3t64). No bump remediates: Debian fixes at 3.5.7-1~deb13u2, and v4.1.1 is already the newest NGC distroless python 3.13 tag. Every tag from the v4.0.8 this image shipped on before 2026-08-27 forward (v4.0.8, v4.0.9, v4.1.1) still carries 3.5.6-1~deb13u2 on a byte-identical openssl layer, the same layer digest quoted above, verified by scanning all three on 2026-08-27. So this is a VEX case rather than a base-image bump until NGC rebuilds on patched trixie."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-63076",
+        "description": "openssl 3.5.6-1~deb13u2: type-confusion in CMP password-based message protection. Per the OpenSSL advisory, \"OpenSSL CMP password based protection verification only checks whether the protectionAlg parameter was not NULL and not its ASN.1 type, before treating it as a PBMParameter\". OpenSSL rates this MODERATE; Debian/NVD score it High. Fixed in Debian at 3.5.7-1~deb13u2."
+      },
+      "products": [
+        {
+          "@id": "pkg:oci/aicr-aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aicr-aiperf-bench"
+          }
+        },
+        {
+          "@id": "pkg:oci/aiperf-bench",
+          "identifiers": {
+            "purl": "pkg:oci/aiperf-bench"
+          }
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The trigger requires the process to verify a CMP (RFC 4210 Certificate Management Protocol) message that uses password-based MAC protection, reaching the OSSL_CMP_* validation path in libcrypto with an attacker-supplied protectionAlg. The image has no path to that code. Within the shipped image the only libssl/libcrypto consumers on the workload's path are CPython's _ssl.cpython-313-x86_64-linux-gnu.so and _hashlib.cpython-313-x86_64-linux-gnu.so, and CPython binds none of the affected subsystems: dir(ssl) and dir(_ssl) expose no symbol containing QUIC, DTLS, CMS or CMP, and the only protocol constants are PROTOCOL_SSLv23, PROTOCOL_TLS, PROTOCOL_TLS_CLIENT, PROTOCOL_TLS_SERVER, PROTOCOL_TLSv1, PROTOCOL_TLSv1_1 and PROTOCOL_TLSv1_2. CMP is the narrowest of the affected subsystems in binding terms: CPython binds none of it, and unlike CMS it is not exposed even by the cryptography package, which is in any case absent from the closure. The 130-package Python closure installed from validators/performance/requirements.txt (aiperf==0.11.0) contains no QUIC or HTTP/3 implementation (no aioquic, no h3) and no binding to OpenSSL's CMS or CMP APIs (neither cryptography nor pyOpenSSL is present); the transports are aiohttp 3.13.5, httpx 0.28.1, requests 2.34.2 and urllib3 2.7.0, all HTTP over TCP. There is also no command-line entry point into any OpenSSL subsystem: the `openssl` binary package is not installed (enumerating every path across all 48 base layers found no bin/openssl), and the distroless runtime ships no shell. That matters here specifically because `openssl cmp` is the usual non-library way to reach this code, and that subcommand ships in the openssl binary package, which is not installed. AICR runs the image only as `aiperf profile --model <text-LLM> --url <endpoint> --endpoint-type chat ...` from buildAIPerfJob in validators/performance/inference_perf_constraint.go, and every endpoint is a cluster-internal plain-HTTP Service URL of the form http://<svc>.<ns>.svc:<port> built by resolveFrontendEndpoint / resolveGatewayEndpoint (lines 2348, 2351, 2395 and 2399), so the benchmark path negotiates no TLS at all. AICR never enrolls, renews or validates certificates from the benchmark pod, and the pod holds no CMP shared secret. The openssl-provider-fips rows are a source-version match on a module the process never maps. The image config sets OPENSSL_CONF=/etc/ssl/openssl-nofips.cnf, whose [provider_sect] activates default_sect only; there is no /etc/ssl/openssl.cnf and no /usr/lib/ssl (OPENSSLDIR is absent entirely), so /usr/lib/x86_64-linux-gnu/ossl-modules/fips.so is never loaded. Independently, the FIPS provider implements only cryptographic primitives (digests, ciphers, KDFs, DRBGs, signature algorithms); the QUIC and DTLS record layers live in libssl and the CMS and CMP implementations live in libcrypto, so none of this code is inside fips.so to begin with. Both flagged binary packages (libssl3t64 and openssl-provider-fips, both 3.5.6-1~deb13u2) enter only through the runtime base nvcr.io/nvidia/distroless/python:3.13-v4.1.1@sha256:6b49f6183eaec6dbd100219a43314bbf1d71b148eafcce62fdcc6472d066b5d9; scanning that base alone with the pinned grype 0.110.0 reproduces all 14 HIGH rows, so no AICR-authored layer contributes them, and syft places both packages in base layer sha256:72956fd1eb37d6802c3518bac58a3d138be3386834967797df1a3b851c0fc3db (/var/lib/dpkg/status.d/libssl3t64). No bump remediates: Debian fixes at 3.5.7-1~deb13u2, and v4.1.1 is already the newest NGC distroless python 3.13 tag. Every tag from the v4.0.8 this image shipped on before 2026-08-27 forward (v4.0.8, v4.0.9, v4.1.1) still carries 3.5.6-1~deb13u2 on a byte-identical openssl layer, the same layer digest quoted above, verified by scanning all three on 2026-08-27. So this is a VEX case rather than a base-image bump until NGC rebuilds on patched trixie."
     }
   ]
 }

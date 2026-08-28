@@ -1,0 +1,127 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: gb300-eks-ubuntu-inference-dynamo
+
+spec:
+  # Inherits from gb300-eks-ubuntu-inference (GB300 + Ubuntu inference settings)
+  # Adds Dynamo inference platform components.
+  base: gb300-eks-ubuntu-inference
+
+  criteria:
+    service: eks
+    accelerator: gb300
+    os: ubuntu
+    intent: inference
+    platform: dynamo
+
+  # DRA requires Kubernetes 1.34+ (GA)
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs:
+    - name: grove
+      type: Helm
+      source: oci://ghcr.io/ai-dynamo/grove
+      valuesFile: components/grove/values.yaml
+
+    - name: dynamo-platform
+      type: Helm
+      source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+      valuesFile: components/dynamo-platform/values.yaml
+      dependencyRefs:
+        - grove
+        - cert-manager
+        - kube-prometheus-stack
+        - gpu-operator
+        - kai-scheduler
+
+  validation:
+    performance:
+      checks:
+        - inference-perf
+      # GB300 is gated at 128 concurrency/GPU, half the compiled default of
+      # 256. The default is tuned for GB200 and EKS H100; GB300's saturation
+      # knee sits lower in concurrency because each GPU is faster, so the
+      # single Dynamo frontend replica saturates sooner. Benchmarking above
+      # the knee does not measure the accelerator, it measures the frontend
+      # ceiling — see the per-replica frontend limit in
+      # ai-dynamo/dynamo#9466 (reproduced on B300, and independent of CUDA
+      # version) and docs/contributor/inference-perf-fluctuation.md, which
+      # recommends gating sub-knee with a generous TTFT ceiling.
+      #
+      # Measured 2026-08-25 on nhensley-gb300 (2x p6e-gb300r.36xlarge,
+      # Qwen/Qwen3-8B, 4 GPU workers, dynamo-router/least-loaded), showing
+      # what the knee costs:
+      #
+      #   256/GPU (default)  20,769 tok/s   TTFT p99 33,320 ms   FAIL
+      #   128/GPU (this)     84,788 tok/s   TTFT p99    677 ms   PASS
+      #
+      # For reference the GB200 leaf measures 65,952 tok/s / 1,240 ms at
+      # 256/GPU, so GB300 sub-knee is ~29% faster at roughly half the
+      # latency — the accelerator was never the problem.
+      #
+      # The throughput floor keeps the same headroom ratio the GB200 leaf
+      # uses (~75% of measured). The TTFT ceiling stays at the catalog-wide
+      # 2000 ms deliberately: it is generous against the 677 ms measurement
+      # but still catches the 9-45s stall signature by 5-20x, which is the
+      # trade the fluctuation doc argues for.
+      #
+      # NOTE: this throughput floor is a fixed absolute full-node value (here
+      # a 4-GPU GB300 node) and is not normalized for GPU count, so a smaller
+      # SKU of this accelerator can false-fail a healthy run. A normalized
+      # per-GPU floor is tracked in https://github.com/NVIDIA/aicr/issues/1254.
+      constraints:
+        - name: inference-model
+          value: Qwen/Qwen3-8B
+        - name: inference-concurrency-per-gpu
+          value: "128"
+        - name: inference-routing-mode
+          value: dynamo-router
+        - name: inference-throughput
+          value: ">= 60000"
+        - name: inference-ttft-p99
+          value: "<= 2000"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        # Dynamo admits its frontend + decode workers as a gang through
+        # kai-scheduler, and the inference-perf validator applies a KAI Queue
+        # for that workload. Without this check nothing verifies the
+        # scheduling path the leaf depends on: the queue apply is best-effort
+        # (logs at INFO and continues), so a missing or unserved
+        # scheduling.run.ai API silently degrades to ungated scheduling, and
+        # the only symptom is the performance phase timing out ~18 minutes
+        # later with "workload never became ready". This check fails closed on
+        # the CRDs and runs a functional two-pod co-scheduling test, so the
+        # failure surfaces here in ~1 minute with an accurate name.
+        #
+        # Matches h100-eks/aks/gke, b200-gke and rtx-pro-6000-eks Dynamo
+        # leaves. The gb200-eks and gb200-oke Dynamo leaves still omit it —
+        # tracked separately.
+        - gang-scheduling
+        - inference-gateway
+        - robust-controller
+        - secure-accelerator-access
+        - pod-autoscaling
+        - cluster-autoscaling

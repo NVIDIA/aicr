@@ -65,7 +65,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nodewright-operator | helm | nodewright | v0.17.1 | 3 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.1 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.4.1 | 1 |
-| nvsentinel | helm | nvsentinel | v1.9.0 | 6 |
+| nvsentinel | helm | nvsentinel | v1.20.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
@@ -282,12 +282,12 @@ _No images extracted._
 
 ### nvsentinel
 
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.9.0-dcgm-3.x`
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.9.0-dcgm-4.x`
-- `ghcr.io/nvidia/nvsentinel/labeler:v1.9.0`
-- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.9.0`
-- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.9.0`
-- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.9.0`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.20.0-dcgm-3.x`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.20.0-dcgm-4.x`
+- `ghcr.io/nvidia/nvsentinel/labeler:v1.20.0`
+- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.20.0`
+- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.20.0`
+- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.20.0`
 
 ### prometheus-adapter
 

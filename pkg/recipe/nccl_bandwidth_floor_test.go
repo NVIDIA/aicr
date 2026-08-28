@@ -24,6 +24,7 @@ package recipe
 
 import (
 	"context"
+	"slices"
 	"testing"
 )
 
@@ -47,12 +48,7 @@ func performanceCheckPresent(v *ValidationConfig, name string) bool {
 	if v == nil || v.Performance == nil {
 		return false
 	}
-	for _, ch := range v.Performance.Checks {
-		if ch == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(v.Performance.Checks, name)
 }
 
 // TestH100GKENCCLBandwidthFloor asserts the production resolver yields the

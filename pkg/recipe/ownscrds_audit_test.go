@@ -42,7 +42,7 @@ import "testing"
 var auditedOwnsCRDs = map[string]string{
 	"gatekeeper": "3.22.2",
 	"k8s-aibom":  "1.3.0",
-	"nvsentinel": "v1.9.0",
+	"nvsentinel": "v1.20.0",
 }
 
 func TestOwnsCRDsPinsMatchAuditedVersions(t *testing.T) {

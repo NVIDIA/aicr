@@ -41,7 +41,6 @@ runs:
         cache: true
         cache-dependency-path: |
           go.sum
-          vendor/modules.txt
         check-latest: true
 
     - name: Lint Go
@@ -50,8 +49,6 @@ runs:
       with:
         version: ${{ inputs.golangci_lint_version }}
         args: --timeout=${{ inputs.lint_timeout || '5m' }}
-      env:
-        GOFLAGS: -mod=vendor
 
     - name: Lint YAML
       if: hashFiles('.yamllint.yaml') != ''
@@ -71,3 +68,11 @@ runs:
     - name: Ensure License Headers
       shell: bash
       run: make license
+
+    # Runs after `make license`, not before: addlicense writes in place, so
+    # this ordering also proves the LICENSE_IGNORES entry for the vendored
+    # vendoring is doing its job. If a header were stamped into those files, their
+    # digests would change and this step would fail.
+    - name: Verify vendored Go proxy action
+      shell: bash
+      run: make check-depproxy-kit

@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -149,9 +150,7 @@ func (k *Collector) collectClusterPolicies(
 	// Ordered merge so overlapping keys resolve deterministically by GVR order.
 	policyData := make(map[string]measurement.Reading)
 	for _, m := range results {
-		for k, v := range m {
-			policyData[k] = v
-		}
+		maps.Copy(policyData, m)
 	}
 
 	slog.Debug("collected cluster policies", slog.Int("count", len(policyData)))

@@ -35,4 +35,14 @@ const (
 	// single JSON/YAML value override; 1 MiB is far above any legitimate
 	// value snippet and bounds the read against a corrupted or hostile path.
 	MaxSetFileBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
+	// DRAEvictionNodeLabelKey is the node-label key shared by the NVIDIA
+	// DRA kubelet plugin selector and GPU Operator Driver Manager eviction
+	// configuration. Keeping the key in one default prevents the two chart
+	// values from drifting apart during driver upgrades.
+	DRAEvictionNodeLabelKey = "nvidia.com/dra-kubelet-plugin"
+
+	// DRAEvictionNodeLabelValue is the default value nodes must carry for the
+	// DRA kubelet plugin and Driver Manager eviction contract.
+	DRAEvictionNodeLabelValue = "true"
 )

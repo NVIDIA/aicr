@@ -35,6 +35,7 @@ const (
 	helmTemplatePlaceholder = "_aicr_helm_template_"
 	imageRepositoryKey      = "repository"
 	imageTagKey             = "tag"
+	imageDigestKey          = "digest"
 )
 
 var helmTemplateRE = regexp.MustCompile(`\{\{[^{}]*\}\}`)
@@ -72,10 +73,12 @@ func stripHelmTemplates(data []byte) []byte {
 // mappings. Empty or null scalar `image:` values and values still containing an
 // unrendered Go template directive are skipped. A recognized structured
 // descriptor returns an invalid-request error when a present name or
-// repository field is null, empty, or non-scalar, when a tag field is
-// non-scalar, or when a registry or digest member is present (dropping either
-// would emit a wrong or un-pinned reference). A null or empty tag follows the
-// Helm appVersion idiom and is treated as absent.
+// repository field is null, empty, or non-scalar, when a tag or digest field
+// is non-scalar, or when a registry member is present (which cannot be folded
+// into the reference without losing information). A null or empty tag or digest
+// follows the Helm appVersion/unpinned idiom and is treated as absent. A
+// non-empty digest is validated as sha256:<64 lowercase hex chars> and folded
+// in as an @<digest> suffix.
 //
 // Helm template directives ({{ ... }}) are replaced with a placeholder before
 // parsing, so files mixing YAML with Helm templates (those under
@@ -206,23 +209,32 @@ func isStructuredImageKey(key string) bool {
 //	  repository: ghcr.io/kai-scheduler/kai-scheduler
 //	  tag: v0.14.1
 //
+// It also handles the digest-pinned form used by Helm charts that separate
+// repository, tag, and digest into sibling fields (e.g., Bitnami-style):
+//
+//	image:
+//	  repository: docker.io/library/postgres
+//	  tag: "17.4"
+//	  digest: sha256:304ab813518754228f9f792f79d6da36359b82d8ecf418096c636725f8c930ad
+//
 // Some charts omit name because repository already carries the full image
 // path. In that form, repository becomes the image name before tag is
 // appended. A present name or repository must be a non-null, non-empty
 // scalar. A null or empty tag is the Helm idiom for "default to the chart
-// appVersion" and is treated like an absent tag. Only name, repository, and
-// tag are combined; a present registry or digest member is rejected because
-// dropping it would emit a reference that resolves to the wrong registry or
-// silently un-pins a digest. Other members (pullPolicy, pullSecrets, ...)
-// do not affect the reference identity and are ignored.
+// appVersion" and is treated like an absent tag. A present digest is appended
+// as @<digest> so the extracted reference is fully pinned. A present registry
+// member is rejected because dropping it would resolve to the wrong registry.
+// Other members (pullPolicy, pullSecrets, ...) do not affect reference
+// identity and are ignored.
 func imageReferenceFromMapping(n *yaml.Node) (string, error) {
-	var name, repository, tag string
+	var name, repository, tag, digest string
 	var namePresent bool
+	var digestNode *yaml.Node
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		key, value := n.Content[i], n.Content[i+1]
 		switch key.Value {
-		case "name", imageRepositoryKey, imageTagKey:
-		case "registry", "digest":
+		case "name", imageRepositoryKey, imageTagKey, imageDigestKey:
+		case "registry":
 			return "", errors.Wrap(
 				errors.ErrCodeInvalidRequest,
 				"invalid image descriptor member",
@@ -230,7 +242,7 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 					field:  key.Value,
 					line:   key.Line,
 					column: key.Column,
-					reason: "is not combined into the extracted reference; fold it into repository or tag",
+					reason: "is not combined into the extracted reference; fold it into repository",
 				},
 			)
 		default:
@@ -239,10 +251,11 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 
 		scalar, ok := nonNullImageMappingScalar(value)
 		if !ok {
-			if key.Value == imageTagKey && isNullOrEmptyScalar(value) {
-				// tag: "" / tag: null — the Helm "use appVersion"
-				// idiom. Treat like an absent tag instead of failing
-				// the whole survey.
+			if (key.Value == imageTagKey || key.Value == imageDigestKey) && isNullOrEmptyScalar(value) {
+				// tag: "" / tag: null — the Helm "use appVersion" idiom.
+				// digest: "" / digest: null — unpinned default in charts
+				// that optionally carry a digest pin.
+				// Treat both as absent rather than failing the whole survey.
 				continue
 			}
 			return "", errors.Wrap(
@@ -264,6 +277,9 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 			repository = scalar
 		case imageTagKey:
 			tag = scalar
+		case imageDigestKey:
+			digest = scalar
+			digestNode = value
 		}
 	}
 	if !namePresent {
@@ -276,7 +292,23 @@ func imageReferenceFromMapping(n *yaml.Node) (string, error) {
 	if name == "" {
 		return "", nil
 	}
-	return combineCRDTriplet(name, repository, tag), nil
+	ref := combineCRDTriplet(name, repository, tag)
+	if digest == "" || strings.Contains(ref, "@") {
+		return ref, nil
+	}
+	if !containerSHARE.MatchString(digest) {
+		return "", errors.Wrap(
+			errors.ErrCodeInvalidRequest,
+			"invalid image descriptor member",
+			&invalidStructuredImageDescriptorError{
+				field:  imageDigestKey,
+				line:   digestNode.Line,
+				column: digestNode.Column,
+				reason: fmt.Sprintf("must match sha256:<64 lowercase hex chars>, got %q", digest),
+			},
+		)
+	}
+	return ref + "@" + digest, nil
 }
 
 func nonNullImageMappingScalar(n *yaml.Node) (string, bool) {

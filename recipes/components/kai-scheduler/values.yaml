@@ -34,3 +34,24 @@ admission:
 # Helm uninstall already removes the deployments this hook would delete.
 postCleanup:
   enabled: false
+
+# Default queue hierarchy — pinned explicitly rather than inherited.
+#
+# The gang-scheduling conformance validator submits its synthetic test
+# PodGroup to `default-queue` by name
+# (validators/conformance/gang_scheduling_check.go), so that queue is a hard
+# dependency of the check, not an optional extra. Workloads are unaffected —
+# Dynamo, for instance, uses the `dynamo` queue created by its own chart.
+# These are the chart's own defaults at v0.14.1; pinning them makes the
+# dependency visible here instead of relying on an upstream default that
+# could change under a version bump.
+#
+# Note the chart renders these only on first install:
+#   {{- if and .Values.defaultQueue.createDefaultQueue .Release.IsInstall }}
+# and annotates them `helm.sh/resource-policy: keep`. So a `helm upgrade`
+# will NOT recreate them if they are deleted — on a cluster where that has
+# happened, the queues must be restored manually or the release reinstalled.
+defaultQueue:
+  createDefaultQueue: true
+  parentName: default-parent-queue
+  childName: default-queue

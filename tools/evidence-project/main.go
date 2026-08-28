@@ -305,7 +305,7 @@ func resolveRef(form verifier.InputForm, ociInput, bundleOverride string, pointe
 // trimming whitespace and dropping empties.
 func parseTrusted(csv string) []string {
 	var out []string
-	for _, p := range strings.Split(csv, ",") {
+	for p := range strings.SplitSeq(csv, ",") {
 		if p = strings.TrimSpace(p); p != "" {
 			out = append(out, p)
 		}

@@ -20,6 +20,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -96,65 +97,63 @@ func testDeviceClass(name string) *unstructured.Unstructured {
 // testDeviceClassAt builds a DeviceClass at an explicit apiVersion
 // (e.g. resource.k8s.io/v1beta2 for beta-only cluster tests).
 func testDeviceClassAt(apiVersion, name string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{Object: map[string]interface{}{
+	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": apiVersion,
 		"kind":       "DeviceClass",
-		"metadata":   map[string]interface{}{"name": name},
+		"metadata":   map[string]any{"name": name},
 	}}
 }
 
 // testDeviceClassWithExtendedResource builds a DeviceClass carrying a
 // KEP-5004 spec.extendedResourceName mapping.
 func testDeviceClassWithExtendedResource(name, extendedResourceName string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{Object: map[string]interface{}{
+	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": draAPIGroupVersion,
 		"kind":       "DeviceClass",
-		"metadata":   map[string]interface{}{"name": name},
-		"spec":       map[string]interface{}{"extendedResourceName": extendedResourceName},
+		"metadata":   map[string]any{"name": name},
+		"spec":       map[string]any{"extendedResourceName": extendedResourceName},
 	}}
 }
 
 // testResourceSlice builds a resource.k8s.io/v1 ResourceSlice. topo carries
 // the slice-level topology fields (nodeName / allNodes / nodeSelector /
 // perDeviceNodeSelection).
-func testResourceSlice(name, driver, pool string, gen, count int64, topo map[string]interface{}, devices []interface{}) *unstructured.Unstructured {
+func testResourceSlice(name, driver, pool string, gen, count int64, topo map[string]any, devices []any) *unstructured.Unstructured {
 	return testResourceSliceAt(draAPIGroupVersion, name, driver, pool, gen, count, topo, devices)
 }
 
 // testResourceSliceAt builds a ResourceSlice at an explicit apiVersion
 // (e.g. resource.k8s.io/v1beta2 for beta-only cluster tests). The validated
 // spec fields are structurally identical across v1beta1/v1beta2/v1.
-func testResourceSliceAt(apiVersion, name, driver, pool string, gen, count int64, topo map[string]interface{}, devices []interface{}) *unstructured.Unstructured {
-	spec := map[string]interface{}{
+func testResourceSliceAt(apiVersion, name, driver, pool string, gen, count int64, topo map[string]any, devices []any) *unstructured.Unstructured {
+	spec := map[string]any{
 		"driver": driver,
-		"pool": map[string]interface{}{
+		"pool": map[string]any{
 			"name":               pool,
 			"generation":         gen,
 			"resourceSliceCount": count,
 		},
 		"devices": devices,
 	}
-	for k, v := range topo {
-		spec[k] = v
-	}
-	return &unstructured.Unstructured{Object: map[string]interface{}{
+	maps.Copy(spec, topo)
+	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": apiVersion,
 		"kind":       "ResourceSlice",
-		"metadata":   map[string]interface{}{"name": name},
+		"metadata":   map[string]any{"name": name},
 		"spec":       spec,
 	}}
 }
 
-func plainDevice(name string) map[string]interface{} {
-	return map[string]interface{}{"name": name}
+func plainDevice(name string) map[string]any {
+	return map[string]any{"name": name}
 }
 
 //nolint:unparam // signature kept in sync with the conformance fixtures copy
-func taintedDevice(name, effect string) map[string]interface{} {
-	return map[string]interface{}{
+func taintedDevice(name, effect string) map[string]any {
+	return map[string]any{
 		"name": name,
-		"taints": []interface{}{
-			map[string]interface{}{"key": "nvidia.com/gpu", "effect": effect},
+		"taints": []any{
+			map[string]any{"key": "nvidia.com/gpu", "effect": effect},
 		},
 	}
 }
@@ -162,8 +161,8 @@ func taintedDevice(name, effect string) map[string]interface{} {
 // basicWrappedDevice builds a schema-accurate resource.k8s.io/v1beta1 device:
 // the Device type there is a `{name, basic}` union, so every detail field
 // (taints, per-device nodeName/nodeSelector/allNodes) nests under `basic`.
-func basicWrappedDevice(name string, fields map[string]interface{}) map[string]interface{} {
-	return map[string]interface{}{"name": name, "basic": fields}
+func basicWrappedDevice(name string, fields map[string]any) map[string]any {
+	return map[string]any{"name": name, "basic": fields}
 }
 
 type nodeOpt func(*corev1.Node)
@@ -228,8 +227,8 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 			dynObjects: []runtime.Object{
 				testDeviceClass(draDriverGPU),
 				testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{plainDevice("gpu-0")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{plainDevice("gpu-0")}),
 			},
 			wantDRA:     true,
 			wantPlugin:  false,
@@ -240,8 +239,8 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 			nodes: []runtime.Object{testNode("node1", withGPUAllocatable("8"))},
 			dynObjects: []runtime.Object{
 				testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{plainDevice("gpu-0")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{plainDevice("gpu-0")}),
 			},
 			wantDRA:    false,
 			wantPlugin: true,
@@ -252,8 +251,8 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 			dynObjects: []runtime.Object{
 				testDeviceClass(draDriverComputeDomain),
 				testResourceSlice("s1", draDriverComputeDomain, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{plainDevice("channel-0")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{plainDevice("channel-0")}),
 			},
 			wantDRA:    false,
 			wantPlugin: true,
@@ -269,11 +268,11 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 				// Stale gen-1 slice points at a healthy node; current gen-2
 				// slice points at a cordoned node. Only gen 2 counts.
 				testResourceSlice("s1-old", draDriverGPU, "pool-a", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{plainDevice("gpu-0")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{plainDevice("gpu-0")}),
 				testResourceSlice("s1-new", draDriverGPU, "pool-a", 2, 1,
-					map[string]interface{}{"nodeName": "node2"},
-					[]interface{}{plainDevice("gpu-0")}),
+					map[string]any{"nodeName": "node2"},
+					[]any{plainDevice("gpu-0")}),
 			},
 			wantDRA:    false,
 			wantPlugin: false,
@@ -285,8 +284,8 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 				testDeviceClass(draDriverGPU),
 				// resourceSliceCount says 2 but only 1 slice observed.
 				testResourceSlice("s1", draDriverGPU, "pool-a", 1, 2,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{plainDevice("gpu-0")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{plainDevice("gpu-0")}),
 			},
 			wantDRA:    false,
 			wantPlugin: false,
@@ -297,11 +296,11 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 			dynObjects: []runtime.Object{
 				testDeviceClass(draDriverGPU),
 				testResourceSlice("s1", draDriverGPU, "pool-a", 1, 2,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{plainDevice("gpu-0")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{plainDevice("gpu-0")}),
 				testResourceSlice("s2", draDriverGPU, "pool-a", 1, 3,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{plainDevice("gpu-1")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{plainDevice("gpu-1")}),
 			},
 			wantDRA:    false,
 			wantPlugin: false,
@@ -314,8 +313,8 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 			dynObjects: []runtime.Object{
 				testDeviceClass(draDriverGPU),
 				testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{plainDevice("gpu-0"), plainDevice("gpu-0")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{plainDevice("gpu-0"), plainDevice("gpu-0")}),
 			},
 			wantDRA:    false,
 			wantPlugin: false,
@@ -326,11 +325,11 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 			dynObjects: []runtime.Object{
 				testDeviceClass(draDriverGPU),
 				testResourceSlice("s1", draDriverGPU, "pool-a", 1, 2,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{plainDevice("gpu-0")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{plainDevice("gpu-0")}),
 				testResourceSlice("s2", draDriverGPU, "pool-a", 1, 2,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{plainDevice("gpu-0")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{plainDevice("gpu-0")}),
 			},
 			wantDRA:    false,
 			wantPlugin: false,
@@ -341,8 +340,8 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 			dynObjects: []runtime.Object{
 				testDeviceClass(draDriverGPU),
 				testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{taintedDevice("gpu-0", "NoSchedule")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{taintedDevice("gpu-0", "NoSchedule")}),
 			},
 			wantDRA:    false,
 			wantPlugin: false,
@@ -353,8 +352,8 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 			dynObjects: []runtime.Object{
 				testDeviceClass(draDriverGPU),
 				testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{taintedDevice("gpu-0", "NoExecute")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{taintedDevice("gpu-0", "NoExecute")}),
 			},
 			wantDRA:    false,
 			wantPlugin: false,
@@ -365,8 +364,8 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 			dynObjects: []runtime.Object{
 				testDeviceClass(draDriverGPU),
 				testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{taintedDevice("gpu-0", "NoSchedule"), plainDevice("gpu-1")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{taintedDevice("gpu-0", "NoSchedule"), plainDevice("gpu-1")}),
 			},
 			wantDRA:     true,
 			wantPlugin:  false,
@@ -378,8 +377,8 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 			dynObjects: []runtime.Object{
 				testDeviceClass(draDriverGPU),
 				testResourceSlice("s1", draDriverGPU, "pool-a", 1, 1,
-					map[string]interface{}{"allNodes": true},
-					[]interface{}{plainDevice("gpu-0")}),
+					map[string]any{"allNodes": true},
+					[]any{plainDevice("gpu-0")}),
 			},
 			wantDRA:     true,
 			wantPlugin:  false,
@@ -394,20 +393,20 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 			dynObjects: []runtime.Object{
 				testDeviceClass(draDriverGPU),
 				testResourceSlice("s1", draDriverGPU, "pool-a", 1, 1,
-					map[string]interface{}{"nodeSelector": map[string]interface{}{
-						"nodeSelectorTerms": []interface{}{
-							map[string]interface{}{
-								"matchExpressions": []interface{}{
-									map[string]interface{}{
+					map[string]any{"nodeSelector": map[string]any{
+						"nodeSelectorTerms": []any{
+							map[string]any{
+								"matchExpressions": []any{
+									map[string]any{
 										"key":      "accel",
 										"operator": "In",
-										"values":   []interface{}{"gpu"},
+										"values":   []any{"gpu"},
 									},
 								},
 							},
 						},
 					}},
-					[]interface{}{plainDevice("gpu-0")}),
+					[]any{plainDevice("gpu-0")}),
 			},
 			wantDRA:     true,
 			wantPlugin:  false,
@@ -419,20 +418,20 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 			dynObjects: []runtime.Object{
 				testDeviceClass(draDriverGPU),
 				testResourceSlice("s1", draDriverGPU, "pool-a", 1, 1,
-					map[string]interface{}{"nodeSelector": map[string]interface{}{
-						"nodeSelectorTerms": []interface{}{
-							map[string]interface{}{
-								"matchExpressions": []interface{}{
-									map[string]interface{}{
+					map[string]any{"nodeSelector": map[string]any{
+						"nodeSelectorTerms": []any{
+							map[string]any{
+								"matchExpressions": []any{
+									map[string]any{
 										"key":      "accel",
 										"operator": "In",
-										"values":   []interface{}{"gpu"},
+										"values":   []any{"gpu"},
 									},
 								},
 							},
 						},
 					}},
-					[]interface{}{plainDevice("gpu-0")}),
+					[]any{plainDevice("gpu-0")}),
 			},
 			wantDRA:    false,
 			wantPlugin: false,
@@ -443,8 +442,8 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 			dynObjects: []runtime.Object{
 				testDeviceClass(draDriverGPU),
 				testResourceSlice("s1", draDriverGPU, "pool-a", 1, 1,
-					map[string]interface{}{"perDeviceNodeSelection": true},
-					[]interface{}{map[string]interface{}{
+					map[string]any{"perDeviceNodeSelection": true},
+					[]any{map[string]any{
 						"name":     "gpu-0",
 						"nodeName": "node1",
 					}}),
@@ -461,8 +460,8 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 				testDeviceClassAt(apiGroupResourceK8sIO+"/v1beta2", draDriverGPU),
 				testResourceSliceAt(apiGroupResourceK8sIO+"/v1beta2",
 					"s1", draDriverGPU, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{plainDevice("gpu-0")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{plainDevice("gpu-0")}),
 			},
 			wantDRA:     true,
 			wantPlugin:  false,
@@ -476,8 +475,8 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 				testDeviceClassAt(apiGroupResourceK8sIO+"/"+versionV1beta1, draDriverGPU),
 				testResourceSliceAt(apiGroupResourceK8sIO+"/"+versionV1beta1,
 					"s1", draDriverGPU, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{basicWrappedDevice("gpu-0", map[string]interface{}{})}),
+					map[string]any{"nodeName": "node1"},
+					[]any{basicWrappedDevice("gpu-0", map[string]any{})}),
 			},
 			wantDRA:     true,
 			wantPlugin:  false,
@@ -493,10 +492,10 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 				testDeviceClassAt(apiGroupResourceK8sIO+"/"+versionV1beta1, draDriverGPU),
 				testResourceSliceAt(apiGroupResourceK8sIO+"/"+versionV1beta1,
 					"s1", draDriverGPU, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{basicWrappedDevice("gpu-0", map[string]interface{}{
-						"taints": []interface{}{
-							map[string]interface{}{"key": "nvidia.com/gpu", "effect": "NoSchedule"},
+					map[string]any{"nodeName": "node1"},
+					[]any{basicWrappedDevice("gpu-0", map[string]any{
+						"taints": []any{
+							map[string]any{"key": "nvidia.com/gpu", "effect": "NoSchedule"},
 						},
 					})}),
 			},
@@ -513,8 +512,8 @@ func TestDetectGPUAllocationMode(t *testing.T) {
 				testDeviceClassAt(apiGroupResourceK8sIO+"/"+versionV1beta1, draDriverGPU),
 				testResourceSliceAt(apiGroupResourceK8sIO+"/"+versionV1beta1,
 					"s1", draDriverGPU, "pool-a", 1, 1,
-					map[string]interface{}{"perDeviceNodeSelection": true},
-					[]interface{}{basicWrappedDevice("gpu-1", map[string]interface{}{
+					map[string]any{"perDeviceNodeSelection": true},
+					[]any{basicWrappedDevice("gpu-1", map[string]any{
 						"nodeName": "node1",
 					})}),
 			},
@@ -616,8 +615,8 @@ func TestDetectGPUAllocationMode_DualAdvertisementWarns(t *testing.T) {
 			dynClient := newDRAFakeDynamicClientAt(version,
 				testDeviceClassAt(apiVersion, draDriverGPU),
 				testResourceSliceAt(apiVersion, "s1", draDriverGPU, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{plainDevice("gpu-0")}),
+					map[string]any{"nodeName": "node1"},
+					[]any{plainDevice("gpu-0")}),
 			)
 
 			mode, err := Detect(context.Background(), clientset, dynClient)
@@ -704,8 +703,8 @@ func TestDetectGPUAllocationMode_ExtendedResourceDualAdvertisementWarns(t *testi
 		testDeviceClass(draDriverGPU),
 		testDeviceClassWithExtendedResource("gpu-er.nvidia.com", resourceNVIDIAGPU),
 		testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-			map[string]interface{}{"nodeName": "node1"},
-			[]interface{}{plainDevice("gpu-0")}),
+			map[string]any{"nodeName": "node1"},
+			[]any{plainDevice("gpu-0")}),
 	)
 
 	mode, err := Detect(context.Background(), clientset, dynClient)
@@ -1033,38 +1032,38 @@ func TestScanGPUSliceTopology(t *testing.T) {
 	items := []unstructured.Unstructured{
 		// Node-local, tainted device, incomplete pool: counted raw anyway.
 		*testResourceSlice("bad-pool", draDriverGPU, "pool-x", 1, 2,
-			map[string]interface{}{"nodeName": "node-a"},
-			[]interface{}{taintedDevice("gpu-0", "NoSchedule"), plainDevice("gpu-1")}),
+			map[string]any{"nodeName": "node-a"},
+			[]any{taintedDevice("gpu-0", "NoSchedule"), plainDevice("gpu-1")}),
 		// Node-local, healthy: counted.
 		*testResourceSlice("good", draDriverGPU, "node-b", 1, 1,
-			map[string]interface{}{"nodeName": "node-b"},
-			[]interface{}{plainDevice("gpu-0")}),
+			map[string]any{"nodeName": "node-b"},
+			[]any{plainDevice("gpu-0")}),
 		// nodeSelector topology: non-node-local — surfaced for fail-fast.
 		*testResourceSlice("selector-topo", draDriverGPU, "pool-s", 1, 1,
-			map[string]interface{}{"nodeSelector": map[string]interface{}{}},
-			[]interface{}{plainDevice("gpu-0")}),
+			map[string]any{"nodeSelector": map[string]any{}},
+			[]any{plainDevice("gpu-0")}),
 		// allNodes topology: non-node-local — surfaced for fail-fast.
 		*testResourceSlice("allnodes-topo", draDriverGPU, "pool-a", 1, 1,
-			map[string]interface{}{"allNodes": true},
-			[]interface{}{plainDevice("gpu-0")}),
+			map[string]any{"allNodes": true},
+			[]any{plainDevice("gpu-0")}),
 		// ComputeDomain driver: no "gpu" substring — ignored entirely.
 		*testResourceSlice("cd", draDriverComputeDomain, "node-a", 1, 1,
-			map[string]interface{}{"nodeName": "node-a"},
-			[]interface{}{plainDevice("ch-0")}),
+			map[string]any{"nodeName": "node-a"},
+			[]any{plainDevice("ch-0")}),
 		// Non-NVIDIA "gpu"-named driver: surfaced for the mixed-driver
 		// fail-fast, never counted into the node-local map.
 		*testResourceSlice("amd", "gpu.amd.com", "node-c", 1, 1,
-			map[string]interface{}{"nodeName": "node-c"},
-			[]interface{}{plainDevice("gpu-0"), plainDevice("gpu-1"), plainDevice("gpu-2")}),
+			map[string]any{"nodeName": "node-c"},
+			[]any{plainDevice("gpu-0"), plainDevice("gpu-1"), plainDevice("gpu-2")}),
 		// Two node-local slices publishing the SAME pool from different
 		// nodes: attribution ambiguous — excluded from the pool map and
 		// surfaced for fail-fast. Devices still count raw per node.
 		*testResourceSlice("dup-d", draDriverGPU, "pool-dup", 1, 2,
-			map[string]interface{}{"nodeName": "node-d"},
-			[]interface{}{plainDevice("gpu-0")}),
+			map[string]any{"nodeName": "node-d"},
+			[]any{plainDevice("gpu-0")}),
 		*testResourceSlice("dup-e", draDriverGPU, "pool-dup", 1, 2,
-			map[string]interface{}{"nodeName": "node-e"},
-			[]interface{}{plainDevice("gpu-0")}),
+			map[string]any{"nodeName": "node-e"},
+			[]any{plainDevice("gpu-0")}),
 		// All-zero-device node-local slice (upstream dra-driver-nvidia-gpu
 		// #1008, seen on GKE/COS): kai sets HasDRAGPUs only for a POSITIVE
 		// aggregate device count, so the node must NOT enter the raw
@@ -1072,8 +1071,8 @@ func TestScanGPUSliceTopology(t *testing.T) {
 		// kai-rejection evidence in Mode.Summary. Pool attribution is kept
 		// (the slice still names the pool's home node).
 		*testResourceSlice("empty", draDriverGPU, "pool-z", 1, 1,
-			map[string]interface{}{"nodeName": "node-z"},
-			[]interface{}{}),
+			map[string]any{"nodeName": "node-z"},
+			[]any{}),
 	}
 	nodeLocal, poolNodes, foreign, nonLocal, ambiguous := scanGPUSliceTopology(items)
 
@@ -1122,8 +1121,8 @@ func TestDetect_KaiRawSetPopulatedWithoutDeviceClass(t *testing.T) {
 	// Slices exist, but NO DeviceClass object.
 	dynClient := newDRAFakeDynamicClient(
 		testResourceSlice("s1", draDriverGPU, "node-a", 1, 2,
-			map[string]interface{}{"nodeName": "node-a"},
-			[]interface{}{taintedDevice("gpu-0", "NoSchedule"), plainDevice("gpu-1")}),
+			map[string]any{"nodeName": "node-a"},
+			[]any{taintedDevice("gpu-0", "NoSchedule"), plainDevice("gpu-1")}),
 	)
 
 	mode, err := Detect(context.Background(), clientset, dynClient)
@@ -1180,8 +1179,8 @@ func TestDetect_ProbeReadErrorClassification(t *testing.T) {
 				dynClient := newDRAFakeDynamicClient(
 					testDeviceClass(draDriverGPU),
 					testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-						map[string]interface{}{"nodeName": "node1"},
-						[]interface{}{plainDevice("gpu-0")}),
+						map[string]any{"nodeName": "node1"},
+						[]any{plainDevice("gpu-0")}),
 				)
 				reactor := func(k8stesting.Action) (bool, runtime.Object, error) {
 					return true, nil, tc.inject
@@ -1215,17 +1214,17 @@ func TestUsableDriverSliceNodes_Direct(t *testing.T) {
 		// Valid: complete current-generation pool, untainted device,
 		// Ready node → node-a is usable.
 		*testResourceSlice("good", draDriverGPU, "node-a", 1, 1,
-			map[string]interface{}{"nodeName": "node-a"},
-			[]interface{}{plainDevice("gpu-0")}),
+			map[string]any{"nodeName": "node-a"},
+			[]any{plainDevice("gpu-0")}),
 		// Foreign driver: not counted for gpu.nvidia.com.
 		*testResourceSlice("foreign", "other.example.com", "node-a", 1, 1,
-			map[string]interface{}{"nodeName": "node-a"},
-			[]interface{}{plainDevice("x-0")}),
+			map[string]any{"nodeName": "node-a"},
+			[]any{plainDevice("x-0")}),
 		// Incomplete pool (resourceSliceCount 2, one slice present): the
 		// driver's slice is SEEN but not usable.
 		*testResourceSlice("incomplete", draDriverGPU, "pool-i", 1, 2,
-			map[string]interface{}{"nodeName": "node-a"},
-			[]interface{}{plainDevice("gpu-9")}),
+			map[string]any{"nodeName": "node-a"},
+			[]any{plainDevice("gpu-9")}),
 	}
 	nodes, seen, err := UsableDriverSliceNodes(context.Background(), items, draDriverGPU, eligible)
 	if err != nil {
@@ -1269,8 +1268,8 @@ func TestDetect_HalfInstalledDRASurfacedInDetail(t *testing.T) {
 	// Validated slice, NO gpu.nvidia.com DeviceClass.
 	dynClient := newDRAFakeDynamicClient(
 		testResourceSlice("s1", draDriverGPU, "node-a", 1, 1,
-			map[string]interface{}{"nodeName": "node-a"},
-			[]interface{}{plainDevice("gpu-0")}),
+			map[string]any{"nodeName": "node-a"},
+			[]any{plainDevice("gpu-0")}),
 	)
 
 	mode, err := Detect(context.Background(), clientset, dynClient)

@@ -29,6 +29,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"gopkg.in/yaml.v3"
 )
 
@@ -220,15 +221,21 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 			if readErr != nil {
 				return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, fmt.Sprintf("failed to read mixin %s", path), readErr)
 			}
+			var mixinHeader RecipeMetadataHeader
+			if parseErr := yaml.Unmarshal(content, &mixinHeader); parseErr != nil {
+				return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("failed to parse mixin header %s", path), parseErr)
+			}
+			if headerErr := validateRecipeMixinCatalogHeader(
+				mixinHeader.Kind, mixinHeader.APIVersion, path,
+			); headerErr != nil {
+				return headerErr
+			}
 			var mixin RecipeMixin
 			decoder := yaml.NewDecoder(bytes.NewReader(content))
 			decoder.KnownFields(true)
 			if parseErr := decoder.Decode(&mixin); parseErr != nil {
 				return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("failed to parse mixin %s (unknown fields are not allowed)", path), parseErr)
-			}
-			if mixin.Kind != RecipeMixinKind {
-				return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-					fmt.Sprintf("mixin file %s has wrong kind %q, expected %q", path, mixin.Kind, RecipeMixinKind))
 			}
 			if _, exists := store.Mixins[mixin.Metadata.Name]; exists {
 				return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
@@ -274,28 +281,24 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 		if parseErr := yaml.Unmarshal(content, &metadataHeader); parseErr != nil {
 			return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf("failed to parse header for %s", path), parseErr)
 		}
-		if metadataHeader.APIVersion == RecipeProfileAPIVersion &&
-			metadataHeader.Kind != RecipeMetadataKind {
-
-			return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-				fmt.Sprintf("profile catalog file %s requires kind %q, got %q",
-					path, RecipeMetadataKind, metadataHeader.Kind))
+		isRecipeMetadata, profileVersion, headerErr := classifyRecipeMetadataCatalogHeader(
+			&metadataHeader, path,
+		)
+		if headerErr != nil {
+			return headerErr
 		}
-		// Skip files with a different kind (e.g., ValidatorCatalog) only
-		// after the profile apiVersion has been gated. A misspelled kind on a
-		// v1alpha3 profile overlay must not silently remove the declaration.
-		if metadataHeader.Kind != "" && metadataHeader.Kind != RecipeMetadataKind {
+		if !isRecipeMetadata {
 			slog.Debug("skipping non-recipe YAML", "path", path, "kind", metadataHeader.Kind)
 			return nil
 		}
 
 		var metadata RecipeMetadata
-		if metadataHeader.APIVersion == RecipeProfileAPIVersion {
+		if profileVersion {
 			decoder := yaml.NewDecoder(bytes.NewReader(content))
 			decoder.KnownFields(true)
 			if parseErr := decoder.Decode(&metadata); parseErr != nil {
 				return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
-					fmt.Sprintf("failed to parse %s as strict %s RecipeMetadata", path, RecipeProfileAPIVersion),
+					fmt.Sprintf("failed to parse %s as strict %s RecipeMetadata", path, metadataHeader.APIVersion),
 					parseErr)
 			}
 			var trailing any
@@ -315,7 +318,7 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 			return aicrerrors.PropagateOrWrap(profileErr, aicrerrors.ErrCodeInvalidRequest,
 				fmt.Sprintf("invalid profile declaration in %s", path))
 		}
-		if metadata.APIVersion == RecipeProfileAPIVersion && metadata.Metadata.Name == "" {
+		if profileVersion && metadata.Metadata.Name == "" {
 			return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 				fmt.Sprintf("profile RecipeMetadata %s requires metadata.name", path))
 		}
@@ -399,6 +402,59 @@ func buildMetadataStore(ctx context.Context, provider DataProvider) (*MetadataSt
 	}
 
 	return store, nil
+}
+
+func validateRecipeMixinCatalogHeader(kind, apiVersion, path string) error {
+	if kind != RecipeMixinKind {
+		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("mixin file %s has kind %q, expected %q; use a RecipeMixin document compatible with this aicr release",
+				path, kind, RecipeMixinKind))
+	}
+	if !header.IsSupportedAuthoringAPIVersion(apiVersion) {
+		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("mixin file %s has apiVersion %q, expected %q or %q for %s; update the catalog header for this aicr release",
+				path, apiVersion, RecipeMetadataAPIVersion, header.GroupVersionV1Beta1, RecipeMixinKind))
+	}
+	return nil
+}
+
+func classifyRecipeMetadataCatalogHeader(
+	metadata *RecipeMetadataHeader,
+	path string,
+) (bool, bool, error) {
+
+	if metadata.Kind != RecipeMetadataKind {
+		if isKnownNonMetadataAICRKind(metadata.Kind) {
+			return false, false, nil
+		}
+		if strings.HasPrefix(metadata.APIVersion, header.APIGroup+"/") {
+			return false, false, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("AICR catalog file %s has kind %q, expected %q; fix the wire kind or move the unrelated document outside the recipe catalog",
+					path, metadata.Kind, RecipeMetadataKind))
+		}
+		return false, false, nil
+	}
+
+	profileVersion := header.IsSupportedProfileAPIVersion(metadata.APIVersion)
+	if !profileVersion && !header.IsSupportedAuthoringAPIVersion(metadata.APIVersion) {
+		return false, false, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("RecipeMetadata file %s has apiVersion %q, expected %q, %q, %q, or %q; update the catalog header for this aicr release",
+				path, metadata.APIVersion, RecipeMetadataAPIVersion, header.GroupVersionV1Beta1,
+				RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
+	}
+	return true, profileVersion, nil
+}
+
+func isKnownNonMetadataAICRKind(kind string) bool {
+	switch kind {
+	case "AICRConfig", "BundleProvenance", ComponentRegistryKind,
+		RecipeCriteriaKind, RecipeMixinKind, RecipeResultKind,
+		string(header.KindRecipe), string(header.KindSnapshot):
+
+		return true
+	default:
+		return false
+	}
 }
 
 // EvictCachedStore drops the cached MetadataStore for the supplied provider.
@@ -961,7 +1017,7 @@ func finalizeRecipeResult(provider DataProvider, criteria *Criteria, mergedSpec 
 
 	result := &RecipeResult{
 		Kind:            RecipeResultKind,
-		APIVersion:      RecipeAPIVersion,
+		APIVersion:      RecipeResultAPIVersion,
 		Criteria:        criteria,
 		Constraints:     mergedSpec.Constraints,
 		ComponentRefs:   mergedSpec.ComponentRefs,

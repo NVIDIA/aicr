@@ -992,8 +992,7 @@ func TestWorkspaceCloseCheckedIdempotentAndSwapSafe(t *testing.T) {
 		results := make(chan error, callers)
 		var wg sync.WaitGroup
 		for range callers {
-			wg.Add(1)
-			go func() { defer wg.Done(); results <- workspace.Close() }()
+			wg.Go(func() { ; results <- workspace.Close() })
 		}
 		wg.Wait()
 		close(results)
