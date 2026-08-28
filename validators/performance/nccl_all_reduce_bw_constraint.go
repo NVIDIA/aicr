@@ -40,6 +40,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -484,6 +485,47 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	return actualValue, passed, nil
 }
 
+// verifyNCCLNamespaceNotLive fails closed if the per-run NCCL namespace
+// already exists, is not terminating, and still has a non-terminal
+// (Pending/Running/Unknown) pod in it. deriveRunID is deterministic per
+// AICR_RUN_ID, so an existing, non-terminating instance is expected on a
+// same-run retry after a hard kill, but only once the prior execution has
+// actually stopped. A live pod means some other execution (a genuinely
+// concurrent run of the same AICR_RUN_ID, or the rare random-suffix
+// collision) still owns this namespace, so adopting it would let this run
+// create fixed-name resources into, and its cleanup later delete, a
+// namespace another run is actively using. NotFound is not an error here:
+// ensureNamespace creates it fresh in that case.
+func verifyNCCLNamespaceNotLive(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
+	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+	switch {
+	case apierrors.IsNotFound(err):
+		return nil
+	case err != nil:
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to check NCCL benchmark namespace", err)
+	case ns.DeletionTimestamp != nil:
+		// Already terminating from a prior cleanup; ensureNamespace waits
+		// for it to fully disappear before recreating it.
+		return nil
+	}
+
+	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	pods, err := clientset.CoreV1().Pods(namespace).List(listCtx, metav1.ListOptions{})
+	if err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+			"failed to check NCCL benchmark namespace for a live execution", err)
+	}
+	for _, pod := range pods.Items {
+		if pod.Status.Phase != v1.PodSucceeded && pod.Status.Phase != v1.PodFailed {
+			return aicrErrors.New(aicrErrors.ErrCodeConflict,
+				fmt.Sprintf("NCCL benchmark namespace %q already exists with a live pod %q from another execution; refusing to adopt it",
+					namespace, pod.Name))
+		}
+	}
+	return nil
+}
+
 // runNCCLTrainJob runs the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
 // It applies the per-platform TrainingRuntime and shared TrainJob, waits for the launcher
 // pod to complete, and returns the benchmark logs.
@@ -495,13 +537,30 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 
 	// Isolate this run in its own namespace, the same pattern
 	// inferenceWorkloadConfig uses (see deriveRunID/ensureNamespace): every
-	// fixed resource name below only has to be unique within it, so two
-	// concurrent (or one crashed, one retried) aicr validate runs can never
-	// collide, adopt, or delete each other's resources — no lock required.
+	// fixed resource name below only has to be unique within it, so a
+	// crashed-then-retried aicr validate run (same AICR_RUN_ID, same derived
+	// name) reclaims its own leftovers instead of colliding. That name is
+	// deterministic, though, so before adopting an already-existing,
+	// non-terminating instance of it we must prove no other execution is
+	// still live under it. Otherwise we could steal or later delete a
+	// genuinely concurrent run's namespace.
 	gpuConfig.Namespace = fmt.Sprintf("%s-%s", ncclWorkloadNamespacePrefix, deriveRunID())
+	if err = verifyNCCLNamespaceNotLive(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace); err != nil {
+		return "", err
+	}
 	if err = ensureNamespace(ctx, gpuConfig.Namespace); err != nil {
 		return "", aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal, "failed to create NCCL benchmark namespace")
 	}
+
+	// Pin the namespace instance we just created/reclaimed by UID so the
+	// deferred delete below can never remove a different namespace object
+	// that came to exist under this same name afterward (e.g. deleted and
+	// recreated by an unrelated run while this one was in flight).
+	nsObj, getErr := ctx.Clientset.CoreV1().Namespaces().Get(ctx.Ctx, gpuConfig.Namespace, metav1.GetOptions{})
+	if getErr != nil {
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read NCCL benchmark namespace after creation", getErr)
+	}
+	namespaceUID := nsObj.UID
 
 	// Clean up the per-run namespace (and everything created in it) on every
 	// exit path from here on, including a failed Trainer install below.
@@ -509,7 +568,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// safe. A cleanup failure only overrides a nil benchErr — see
 	// foldCleanupError — so it never masks a real benchmark failure.
 	defer func() {
-		err = foldCleanupError(err, cleanupNCCLResources(ctx.Clientset, gpuConfig.Namespace),
+		err = foldCleanupError(err, cleanupNCCLResources(ctx.Clientset, gpuConfig.Namespace, namespaceUID),
 			"NCCL benchmark succeeded but NCCL resource cleanup failed")
 	}()
 
@@ -1332,11 +1391,31 @@ func renderYAMLTemplate(content string, data map[string]string) (*unstructured.U
 
 // createUnstructured creates a namespaced resource from an unstructured object
 // with a timeout.
+// createUnstructured creates obj. If a fixed-name resource with that
+// GVR/name already exists, it reclaims it by updating it in place. Both
+// callers (TrainingRuntime, TrainJob) use fixed names inside the caller's
+// per-run namespace, so an AlreadyExists here only happens on a same-run
+// retry after a hard kill left it behind; reclaiming it, the same way
+// applyNCCLComputeDomain already does for ComputeDomain, lets that retry
+// recover instead of failing.
 func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) error {
 	applyCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
-	if _, err := dynamicClient.Resource(gvr).Namespace(namespace).Create(applyCtx, obj, metav1.CreateOptions{}); err != nil {
+
+	client := dynamicClient.Resource(gvr).Namespace(namespace)
+	if _, err := client.Create(applyCtx, obj, metav1.CreateOptions{}); err == nil {
+		return nil
+	} else if !apierrors.IsAlreadyExists(err) {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create resource", err)
+	}
+
+	existing, err := client.Get(applyCtx, obj.GetName(), metav1.GetOptions{})
+	if err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get existing resource for update", err)
+	}
+	obj.SetResourceVersion(existing.GetResourceVersion())
+	if _, err := client.Update(applyCtx, obj, metav1.UpdateOptions{}); err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to update resource", err)
 	}
 	return nil
 }
@@ -2125,14 +2204,21 @@ func verifyTransportFromLogs(logs string, variant ncclVariant) error {
 // Unlike cleanupInferenceWorkload, a delete failure here is returned rather
 // than only logged, so foldCleanupError can still fail an otherwise-passing
 // check on it. NotFound is tolerated (nothing to clean up).
-func cleanupNCCLResources(clientset kubernetes.Interface, namespace string) error {
+//
+// uid pins the delete to the exact namespace instance runNCCLTrainJob
+// created or reclaimed: if that instance was deleted and a different one
+// recreated under the same name in the meantime, the UID precondition makes
+// this delete fail instead of silently removing the new (not ours) instance.
+func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid types.UID) error {
 	slog.Info("Cleaning up NCCL test resources...", "namespace", namespace)
 
 	deleteCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)
 	defer cancel()
 
 	nsClient := clientset.CoreV1().Namespaces()
-	err := nsClient.Delete(deleteCtx, namespace, metav1.DeleteOptions{})
+	err := nsClient.Delete(deleteCtx, namespace, metav1.DeleteOptions{
+		Preconditions: &metav1.Preconditions{UID: &uid},
+	})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			slog.Info("NCCL benchmark namespace already gone", "namespace", namespace)

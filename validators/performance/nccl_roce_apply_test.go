@@ -128,7 +128,7 @@ func TestCreateOrUpdateFromTemplate_RoCEClaimIdempotent(t *testing.T) {
 func TestCleanupNCCLResources_ToleratesMissing(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	fakeClient := fake.NewClientset()
-	if err := cleanupNCCLResources(fakeClient, ns); err != nil {
+	if err := cleanupNCCLResources(fakeClient, ns, ""); err != nil {
 		t.Fatalf("cleanup of a namespace that was never created should not error, got: %v", err)
 	}
 }
@@ -142,7 +142,7 @@ func TestCleanupNCCLResources_DeletesNamespace(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
 
-	if err := cleanupNCCLResources(fakeClient, ns); err != nil {
+	if err := cleanupNCCLResources(fakeClient, ns, ""); err != nil {
 		t.Fatalf("cleanup should not error, got: %v", err)
 	}
 
@@ -162,7 +162,7 @@ func TestCleanupNCCLResources_ReturnsErrorOnDeleteFailure(t *testing.T) {
 		return true, nil, apierrors.NewServiceUnavailable("apiserver is down")
 	})
 
-	err := cleanupNCCLResources(fakeClient, ns)
+	err := cleanupNCCLResources(fakeClient, ns, "")
 	if err == nil {
 		t.Fatal("expected an error from a non-NotFound namespace delete failure, got nil")
 	}
@@ -217,7 +217,7 @@ func TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace(t *testing.T) {
 	}()
 
 	start := time.Now()
-	if err := cleanupNCCLResources(fakeClient, ns); err != nil {
+	if err := cleanupNCCLResources(fakeClient, ns, ""); err != nil {
 		t.Fatalf("cleanup should succeed once the finalizer clears, got: %v", err)
 	}
 	elapsed := time.Since(start)

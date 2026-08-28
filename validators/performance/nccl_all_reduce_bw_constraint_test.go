@@ -17,15 +17,21 @@ package main
 import (
 	"bytes"
 	"context"
+	stderrors "errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
 
+	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -276,5 +282,141 @@ func TestRunNCCLTrainJob_TrainerInstallFailureCleansUpNamespace(t *testing.T) {
 
 	if _, getErr := clientset.CoreV1().Namespaces().Get(context.Background(), gpuConfig.Namespace, metav1.GetOptions{}); !apierrors.IsNotFound(getErr) {
 		t.Errorf("namespace %q was not cleaned up after Trainer install failure: get err = %v", gpuConfig.Namespace, getErr)
+	}
+}
+
+// TestVerifyNCCLNamespaceNotLive covers the ownership gate that decides
+// whether an already-existing per-run namespace is safe to adopt. Regression
+// guard for the MAJOR finding that silently reusing any active namespace let
+// a retry collide with (and later delete) a still-live execution's
+// resources.
+func TestVerifyNCCLNamespaceNotLive(t *testing.T) {
+	const ns = "aicr-nccl-bench-deadbeef"
+	terminatingNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:              ns,
+		DeletionTimestamp: &metav1.Time{Time: metav1.Now().Time},
+		Finalizers:        []string{"kubernetes"},
+	}}
+	activeNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+	livePod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "launcher-0", Namespace: ns},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	terminalPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "launcher-0", Namespace: ns},
+		Status:     corev1.PodStatus{Phase: corev1.PodSucceeded},
+	}
+
+	tests := []struct {
+		name    string
+		objs    []runtime.Object
+		wantErr bool
+	}{
+		{name: "namespace does not exist yet", objs: nil, wantErr: false},
+		{name: "namespace terminating from a prior cleanup", objs: []runtime.Object{terminatingNS}, wantErr: false},
+		{name: "namespace active with no pods (empty stale leftover)", objs: []runtime.Object{activeNS}, wantErr: false},
+		{
+			name:    "namespace active with only terminal pods (stale same-run resources)",
+			objs:    []runtime.Object{activeNS, terminalPod},
+			wantErr: false,
+		},
+		{
+			name:    "namespace active with a live pod (foreign/concurrent execution)",
+			objs:    []runtime.Object{activeNS, livePod},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := fake.NewClientset(tt.objs...)
+			err := verifyNCCLNamespaceNotLive(context.Background(), client, ns)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("verifyNCCLNamespaceNotLive() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err != nil && !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+				t.Errorf("expected ErrCodeConflict, got %v", err)
+			}
+		})
+	}
+}
+
+// TestRunNCCLTrainJob_RefusesLiveForeignNamespace is the end-to-end
+// regression guard for the same MAJOR finding: a retry with the same
+// AICR_RUN_ID (or a rare random-suffix collision) must not silently adopt,
+// and must never let its deferred cleanup delete, a namespace a different,
+// still-running execution owns.
+func TestRunNCCLTrainJob_RefusesLiveForeignNamespace(t *testing.T) {
+	t.Setenv("AICR_RUN_ID", "test-run-id")
+	ns := fmt.Sprintf("%s-%s", ncclWorkloadNamespacePrefix, deriveRunID())
+
+	clientset := fake.NewClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "launcher-0", Namespace: ns},
+			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+		},
+	)
+	vctx := &validators.Context{
+		Ctx:           context.Background(),
+		Clientset:     clientset,
+		DynamicClient: newTrainerFakeClient(),
+	}
+	gpuConfig := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8}
+
+	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "")
+	if err == nil {
+		t.Fatal("expected a conflict error for a live foreign namespace, got nil")
+	}
+	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+		t.Errorf("expected ErrCodeConflict, got %v", err)
+	}
+
+	nsAfter, getErr := clientset.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{})
+	if getErr != nil {
+		t.Fatalf("foreign namespace was removed (or errored reading it back) instead of left alone: %v", getErr)
+	}
+	if nsAfter.DeletionTimestamp != nil {
+		t.Error("foreign namespace was marked for deletion; cleanup must never touch a namespace it doesn't own")
+	}
+	if _, getErr := clientset.CoreV1().Pods(ns).Get(context.Background(), "launcher-0", metav1.GetOptions{}); getErr != nil {
+		t.Errorf("foreign execution's live pod was removed: %v", getErr)
+	}
+}
+
+// TestCreateUnstructured_ReclaimsStaleResource is the regression guard for
+// the MAJOR finding that a same-run retry could hit AlreadyExists on stale
+// fixed-name TrainingRuntime/TrainJob resources instead of recovering.
+func TestCreateUnstructured_ReclaimsStaleResource(t *testing.T) {
+	const ns = "aicr-nccl-bench-deadbeef"
+	listKinds := map[schema.GroupVersionResource]string{trainJobGVR: "TrainJobList"}
+
+	stale := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": trainJobGVR.GroupVersion().String(),
+		"kind":       "TrainJob",
+		"metadata": map[string]interface{}{
+			"name":            ncclTrainJobName,
+			"namespace":       ns,
+			"resourceVersion": "1",
+		},
+		"spec": map[string]interface{}{"stale": true},
+	}}
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, stale)
+
+	fresh := stale.DeepCopy()
+	fresh.SetResourceVersion("")
+	if err := unstructured.SetNestedField(fresh.Object, false, "spec", "stale"); err != nil {
+		t.Fatalf("SetNestedField: %v", err)
+	}
+
+	if err := createUnstructured(context.Background(), dynamicClient, trainJobGVR, ns, fresh); err != nil {
+		t.Fatalf("createUnstructured() on an AlreadyExists fixed-name resource = %v, want reclaim via update", err)
+	}
+
+	got, err := dynamicClient.Resource(trainJobGVR).Namespace(ns).Get(context.Background(), ncclTrainJobName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get() after reclaim: %v", err)
+	}
+	if staleVal, _, _ := unstructured.NestedBool(got.Object, "spec", "stale"); staleVal {
+		t.Error("reclaimed resource still has the stale prior-run spec; update did not apply")
 	}
 }
