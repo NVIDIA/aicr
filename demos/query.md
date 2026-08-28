@@ -38,7 +38,7 @@ aicr query \
   --selector components.gpu-operator.values.driver.version
 ```
 
-> `580.173.02`
+> `595.91.07`
 
 Subtree — full driver block:
 
@@ -54,7 +54,7 @@ maxParallelUpgrades: 5
 rdma:
   enabled: false
 useOpenKernelModules: true
-version: 580.173.02
+version: 595.91.07
 ```
 
 ## Differentiation: Same Selector, Different Criteria
