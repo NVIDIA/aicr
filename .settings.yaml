@@ -30,7 +30,7 @@ build_tools:
 # Linting
 linting:
   # renovate: datasource=go depName=golang.org/x/exp depType=linting
-  apidiff: 'v0.0.0-20260820142414-ca536658362e'
+  apidiff: 'v0.0.0-20260824195058-e88cd73687aa'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.13.1'
   # renovate: datasource=pypi depName=yamllint depType=linting
@@ -120,7 +120,7 @@ testing_tools:
     darwin_amd64: 'ddb56002ff8c6265f55ec40c82eb0ef0dddec5127dd12d4fc5e7953453481f4b'
     darwin_arm64: '502bef17dd822217e82590e9ccf01c1e26a56b3fa34a835789b9af73e82a169a'
   # renovate: datasource=github-releases depName=mikefarah/yq depType=testing_tools
-  yq: 'v4.53.4'
+  yq: 'v4.53.6'
   # AWS CLI used by the KMS e2e to provision keys against the MiniStack emulator.
   # renovate: datasource=pypi depName=awscli depType=testing_tools
   awscli: '1.46.0'
