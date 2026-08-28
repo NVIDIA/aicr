@@ -24,6 +24,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Masterminds/semver/v3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/NVIDIA/aicr/pkg/bom"
@@ -33,12 +34,11 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/helm"
 	"github.com/NVIDIA/aicr/pkg/recipe"
-	"github.com/NVIDIA/aicr/pkg/version"
 )
 
 const logKeyComponent = "component"
 
-var mirrorRenderFloor = version.MustParseVersion(defaults.MirrorDefaultKubeVersion)
+var mirrorRenderFloor = semver.MustParse(defaults.MirrorDefaultKubeVersion)
 
 // Option configures a Lister.
 type Option func(*Lister)
@@ -543,11 +543,11 @@ func KubeVersionFromConstraints(constraints []recipe.Constraint) string {
 	for _, c := range constraints {
 		if c.Name == k8sConstraintName {
 			kubeVersion := extractVersion(c.Value)
-			parsedVersion, err := version.ParseVersion(kubeVersion)
+			parsedVersion, err := semver.NewVersion(kubeVersion)
 			if err != nil {
 				return defaults.MirrorDefaultKubeVersion
 			}
-			if parsedVersion.Compare(mirrorRenderFloor) < 0 {
+			if parsedVersion.LessThan(mirrorRenderFloor) {
 				return defaults.MirrorDefaultKubeVersion
 			}
 			return kubeVersion

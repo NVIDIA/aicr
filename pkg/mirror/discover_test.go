@@ -691,6 +691,20 @@ func TestKubeVersionFromConstraints(t *testing.T) {
 			want: defaults.MirrorDefaultKubeVersion,
 		},
 		{
+			name: "major only version below render floor returns default",
+			constraints: []recipe.Constraint{
+				{Name: "K8s.server.version", Value: ">= 1"},
+			},
+			want: defaults.MirrorDefaultKubeVersion,
+		},
+		{
+			name: "prerelease below render floor returns default",
+			constraints: []recipe.Constraint{
+				{Name: "K8s.server.version", Value: ">= 1.33.0-0"},
+			},
+			want: defaults.MirrorDefaultKubeVersion,
+		},
+		{
 			name: "version equal to render floor",
 			constraints: []recipe.Constraint{
 				{Name: "K8s.server.version", Value: defaults.MirrorDefaultKubeVersion},
