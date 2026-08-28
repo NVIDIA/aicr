@@ -42,7 +42,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.3.3 | 15 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.7.0 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
 | grove | helm | grove-charts | v0.1.0-alpha.12 | 1 |
@@ -64,8 +64,8 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nfd-ocp-olm | manifest | — | — | 0 |
 | nodewright-customizations | manifest | — | — | 5 |
 | nodewright-operator | helm | nodewright | v0.17.1 | 3 |
-| nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.1 | 1 |
-| nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.4.1 | 1 |
+| nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
+| nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
 | nvsentinel | helm | nvsentinel | v1.20.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
@@ -149,20 +149,20 @@ _No images extracted._
 ### gpu-operator
 
 - `docker.io/library/busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616`
-- `nvcr.io/nvidia/cloud-native/dcgm:4.5.2-1-ubuntu22.04`
-- `nvcr.io/nvidia/cloud-native/gdrdrv:v2.5.2`
-- `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.0`
-- `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.11.0`
-- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.14.2`
-- `nvcr.io/nvidia/cloud-native/nvidia-fs:2.27.3`
-- `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.3`
-- `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.4.2`
-- `nvcr.io/nvidia/driver:580.173.02`
-- `nvcr.io/nvidia/gpu-operator:v26.3.3`
-- `nvcr.io/nvidia/k8s-device-plugin:v0.19.3`
-- `nvcr.io/nvidia/k8s/container-toolkit:v1.19.1`
-- `nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless`
-- `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.5.0`
+- `nvcr.io/nvidia/cloud-native/dcgm:4.6.0-1-ubuntu24.04`
+- `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6`
+- `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.3`
+- `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.12.0`
+- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.15.0`
+- `nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4`
+- `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.5`
+- `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.0`
+- `nvcr.io/nvidia/driver:595.91.07`
+- `nvcr.io/nvidia/gpu-operator:v26.7.0`
+- `nvcr.io/nvidia/k8s-device-plugin:v0.20.0`
+- `nvcr.io/nvidia/k8s/container-toolkit:v1.20.0`
+- `nvcr.io/nvidia/k8s/dcgm-exporter:4.6.0-4.8.3-distroless`
+- `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.6.0`
 
 ### gpu-operator-ocp
 
@@ -279,11 +279,11 @@ _No images extracted._
 
 ### nvidia-dra-driver-gpu
 
-- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1`
+- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.5.0`
 
 ### nvidia-dra-driver-gpu-ocp
 
-- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1`
+- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.5.0`
 
 ### nvsentinel
 
