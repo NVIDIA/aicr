@@ -369,6 +369,38 @@ Rules:
   (`config_helpers_test.go`, `bundle_resolve_helpers_test.go`) are
   the template.
 
+## The CLI Surface Baseline
+
+The CLI is one of the four surfaces frozen at v1
+([ROADMAP §2](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#2-stability)). `pkg/cli/testdata/cli-surface.golden`
+is its committed inventory — every command, flag, alias, type, default,
+`required`/`hidden` state, and environment variable — and `TestCLISurface`
+(`pkg/cli/surface_test.go`) fails when the live tree stops matching it. It runs
+under `make test`, so it is already inside the merge gate; no separate workflow
+is involved.
+
+**If you added a command or flag,** the addition is compatible. Regenerate and
+commit the result in the same PR:
+
+```bash
+go test ./pkg/cli/ -run TestCLISurface -update
+```
+
+Scope the `-update` flag to `./pkg/cli/` — it is registered only by this test,
+so `go test ./... -update` fails in every other package.
+
+**If you removed or renamed a command, flag, or alias, or changed a default,**
+the test reports it as `BREAKING` rather than telling you to regenerate. That is
+a breaking change to a frozen surface and it owes the notice period in
+[`RELEASING.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md#deprecation-policy): ship the deprecation
+with a warning first, remove it only after the window, and add an entry to
+[`docs/user/deprecations.md`](../user/deprecations.md). Regenerate the golden
+only once the removal is actually due.
+
+Usage strings are deliberately not pinned. They are prose, they change for good
+reasons, and including them would make the gate fail on every wording fix — the
+fastest way to train everyone to run `-update` without reading the diff.
+
 ## Anti-Patterns
 
 | Don't | Do |
