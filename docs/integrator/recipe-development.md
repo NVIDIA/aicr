@@ -464,6 +464,32 @@ identical to a sibling's — does not support the "validated against deployed
 config" claim and must not be declared. The snippet above shows the declaration
 shape only; it is not a declaration you should copy into an overlay.
 
+**When the distinguishing signal only exists after deployment**, declare it
+under the value's `readinessConstraints` instead of `constraints`. Both lists
+get the same catalog-load validation (names deduplicate per list; the same
+measurement path may appear in both, carrying a pre-condition at generation
+and a post-deployment state at readiness), but
+`readinessConstraints` are never evaluated at generation time — they route
+into `spec.validation.readiness.constraints` and are evaluated fail-closed by
+the `aicr validate` readiness pre-flight. Two kinds of state belong here:
+externally-grounded cluster state evaluated post-deployment (provider
+properties, node labels set at provisioning), and **deployment-outcome
+checks** — properties the value's own workload creates (the post-deployment
+form of a self-falsified pre-condition, or a node label its DaemonSet applies
+after a successful install), which a fresh deployment cannot find in the
+pre-deployment snapshot that generation-time constraints are checked against.
+Only the externally-grounded kind can **qualify** the value — establish that
+the cluster's pre-existing mode matches the selection. An outcome check
+observes post-deployment state without establishing which deployment
+produced it: the readiness gate compares only the snapshot value, with no
+deployment identity, owner, or timestamp binding, so a marker left by an
+earlier deployment satisfies a later check. Declare a workload-written
+marker only when its producer owns the marker's full lifecycle — clearing
+or versioning it when the outcome no longer holds. And because every
+value's own success satisfies its own markers, an outcome check can never
+distinguish one value from another (ADR-015, "Self-rendered readings do
+not qualify").
+
 **Constraint names must be measurement paths a supported snapshot producer
 actually emits** — a collector, or a provider projection attached at the
 snapshot orchestration layer (e.g. `K8s.aks-gpu-pools.gpu-driver` from
@@ -473,7 +499,8 @@ snapshot orchestration layer (e.g. `K8s.aks-gpu-pools.gpu-driver` from
 
 **Paths are validated when recipe data is loaded, not when a snapshot is
 evaluated.** Every constraint name in `spec.constraints`,
-`spec.validation.readiness.constraints`, and `spec.profile.values.*.constraints`
+`spec.validation.readiness.constraints`, `spec.profile.values.*.constraints`,
+and `spec.profile.values.*.readinessConstraints`
 is checked against the measurement catalog (`pkg/measurement/catalog.go`) as the
 overlay, mixin, or base file is read. A path the catalog cannot address fails
 the load with the file, the field, and — where there is a near match — a

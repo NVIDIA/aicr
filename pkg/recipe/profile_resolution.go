@@ -227,6 +227,45 @@ func applyEffectiveProfile(
 		return mergedSpec.Constraints[i].Name < mergedSpec.Constraints[j].Name
 	})
 
+	// Readiness constraints are deliberately NOT evaluated here: they name
+	// state that is only meaningful post-deployment (ADR-015) — a
+	// deployment-outcome check absent from a fresh pre-deployment snapshot,
+	// or externally-grounded qualification state asserted at readiness —
+	// so generation must not gate on them. They route into
+	// spec.validation.readiness.constraints, where the aicr validate
+	// pre-flight (checkReadiness) evaluates them with the same fail-closed
+	// exit as every other readiness gate. Collisions are checked against the
+	// readiness phase only: the same measurement path may legitimately carry
+	// a generation-time pre-condition AND a readiness-time post-deployment
+	// state (the DD5 pattern), and the phases report independently.
+	if len(value.ReadinessConstraints) > 0 {
+		// Defensive clone: both callers already hand in a deep-cloned
+		// Validation (initBaseMergedSpec, RecipeMetadataSpec.Merge), so
+		// this guards future call sites rather than a live aliasing risk.
+		mergedSpec.Validation = cloneValidationConfig(mergedSpec.Validation)
+		if mergedSpec.Validation == nil {
+			mergedSpec.Validation = &ValidationConfig{}
+		}
+		if mergedSpec.Validation.Readiness == nil {
+			mergedSpec.Validation.Readiness = &ValidationPhase{}
+		}
+		readinessNames := make(map[string]struct{},
+			len(mergedSpec.Validation.Readiness.Constraints)+len(value.ReadinessConstraints))
+		for _, existing := range mergedSpec.Validation.Readiness.Constraints {
+			readinessNames[existing.Name] = struct{}{}
+		}
+		for _, constraint := range value.ReadinessConstraints {
+			if _, collision := readinessNames[constraint.Name]; collision {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("profile %q value %q readiness constraint %q collides with the composed recipe's readiness constraints",
+						effective.Declaration.Name, valueName, constraint.Name))
+			}
+			readinessNames[constraint.Name] = struct{}{}
+			mergedSpec.Validation.Readiness.Constraints =
+				append(mergedSpec.Validation.Readiness.Constraints, constraint)
+		}
+	}
+
 	for _, profileRef := range value.ComponentRefs {
 		index := componentIndex[profileRef.Name]
 		if mergedSpec.ComponentRefs[index].Overrides == nil {

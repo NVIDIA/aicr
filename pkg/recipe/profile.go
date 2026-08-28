@@ -66,8 +66,27 @@ type ProfileDeclaration struct {
 // metadata.selectedProfile.advertiser and extends the dual-advertisement
 // gates fail-closed. Any other value is rejected.
 type ProfileValue struct {
-	Advertiser    string                `json:"advertiser,omitempty" yaml:"advertiser,omitempty"`
-	Constraints   []Constraint          `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+	Advertiser  string       `json:"advertiser,omitempty" yaml:"advertiser,omitempty"`
+	Constraints []Constraint `json:"constraints,omitempty" yaml:"constraints,omitempty"`
+
+	// ReadinessConstraints are evaluated only by the aicr validate readiness
+	// pre-flight, never at generation time: applyEffectiveProfile routes them
+	// into spec.validation.readiness.constraints instead of spec.constraints.
+	// Two kinds of state legally live here (ADR-015, "Self-rendered readings
+	// do not qualify"): externally-grounded cluster state evaluated
+	// post-deployment (provider properties, provisioning-set node labels),
+	// and deployment-outcome checks — the post-deployment form of a
+	// self-falsified pre-condition, or a marker the value's own workload
+	// writes, which a fresh deployment cannot find in the pre-deployment
+	// snapshot that generation-time constraints are evaluated against.
+	// Only the first kind QUALIFIES the value (establishes the cluster's
+	// pre-existing mode matches the selection). An outcome check binds no
+	// deployment identity — a stale marker from an earlier deployment
+	// satisfies it — so declare workload-written markers only when the
+	// producer owns the marker's lifecycle. Same fail-closed semantics as
+	// Constraints once the pre-flight runs; same catalog-load validation.
+	ReadinessConstraints []Constraint `json:"readinessConstraints,omitempty" yaml:"readinessConstraints,omitempty"`
+
 	ComponentRefs []ProfileComponentRef `json:"componentRefs,omitempty" yaml:"componentRefs,omitempty"`
 }
 
@@ -207,23 +226,43 @@ func ValidateProfileDeclaration(decl *ProfileDeclaration) (map[string][]string, 
 		// constraints already fail closed on an empty name or value
 		// (validateConstraintWarningSource); catalog load is the equivalent
 		// boundary for profile-contributed ones.
-		seenConstraints := make(map[string]struct{}, len(value.Constraints))
-		for _, constraint := range value.Constraints {
-			if constraint.Name == "" {
-				return nil, errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("profile %q value %q declares a constraint with no name", decl.Name, valueName))
+		// Each list deduplicates independently: constraint names are
+		// measurement paths, and the same reading legitimately appears in
+		// both lists of one value with different expected states — the DD5
+		// pattern reads NodeTopology.gpu-nodes.label at generation (a pool
+		// pre-condition) AND at readiness (a post-deployment marker). The
+		// two lists evaluate in different phases with per-phase diagnostics,
+		// so cross-list reuse is unambiguous; a repeat WITHIN a list is two
+		// gates with one identity and stays rejected.
+		checkConstraints := func(constraints []Constraint, kind string) error {
+			seen := make(map[string]struct{}, len(constraints))
+			for _, constraint := range constraints {
+				if constraint.Name == "" {
+					return errors.New(errors.ErrCodeInvalidRequest,
+						fmt.Sprintf("profile %q value %q declares a %s with no name", decl.Name, valueName, kind))
+				}
+				if constraint.Value == "" {
+					return errors.New(errors.ErrCodeInvalidRequest,
+						fmt.Sprintf("profile %q value %q %s %q has no value",
+							decl.Name, valueName, kind, constraint.Name))
+				}
+				if _, repeat := seen[constraint.Name]; repeat {
+					// Name the list: the same measurement path is legal in
+					// both constraints and readinessConstraints (the DD5
+					// pattern), so a repeat must say which list to fix.
+					return errors.New(errors.ErrCodeInvalidRequest,
+						fmt.Sprintf("profile %q value %q repeats %s %q",
+							decl.Name, valueName, kind, constraint.Name))
+				}
+				seen[constraint.Name] = struct{}{}
 			}
-			if constraint.Value == "" {
-				return nil, errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("profile %q value %q constraint %q has no value",
-						decl.Name, valueName, constraint.Name))
-			}
-			if _, repeat := seenConstraints[constraint.Name]; repeat {
-				return nil, errors.New(errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("profile %q value %q repeats constraint %q",
-						decl.Name, valueName, constraint.Name))
-			}
-			seenConstraints[constraint.Name] = struct{}{}
+			return nil
+		}
+		if err := checkConstraints(value.Constraints, "constraint"); err != nil {
+			return nil, err
+		}
+		if err := checkConstraints(value.ReadinessConstraints, "readiness constraint"); err != nil {
+			return nil, err
 		}
 
 		seenComponents := make(map[string]struct{}, len(value.ComponentRefs))

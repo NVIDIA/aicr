@@ -246,7 +246,9 @@ spec:
         componentRefs:
           - name: gcp-driver-installer
             overrides:
-              installer: {enabled: false}   # every value assigns every union path
+              # every value assigns every union path; nested gate — see the
+              # amendment on operator-selfdriver below.
+              installer: {enabled: false}
           - name: gpu-operator
             overrides:
               devicePlugin: {enabled: true}
@@ -276,8 +278,13 @@ spec:
         componentRefs:
           - name: gcp-driver-installer
             overrides:
-              # Shipped as nested installer.enabled — top-level install is a
-              # component-presence gate and deadlocks profile resolution.
+              # Amended 2026-08-22: the gate is the nested installer.enabled,
+              # not the top-level `install` originally drawn here — top-level
+              # `install`/`enabled` are component-PRESENCE gates (IsEnabled),
+              # so a false default would make the component "not enabled in
+              # the surviving composition" and deadlock resolution for every
+              # value; root `overrides.enabled` is separately rejected in
+              # fragments. A nested key is an ordinary owned value path.
               installer: {enabled: true}
           - name: gpu-operator
             overrides:
@@ -1455,9 +1462,10 @@ recurrence — the shape the Problem section expects.
    distinguishing signal is identified (Deferred Decision 5). The other
    two values do not wait on it. The dormant component and the third value
    land **together**, in one event: declaring the value later is an
-   ownership-surface expansion (`install` joins the union and the
-   installer's synthetic `enabled` joins `ownedPaths`), which is a
-   family-wide re-qualification and evidence re-signing event.
+   ownership-surface expansion (`installer.enabled` joins the union, so
+   every existing value gains an assignment for it — the sketch above
+   draws that end state), which is a family-wide re-qualification and
+   evidence re-signing event.
 
    *Amended 2026-08-24 (#1716):* shipped as `bundle-installer`, replacing
    `driver-installer` (breaking; same pool shape — see Deferred Decision 5).
@@ -1528,7 +1536,56 @@ work that resolves it.
    **Proposed: identify a durable signal during the value's adoption;
    the `operator` and `csp-managed` values do not wait on it.**
 
-   *Resolved 2026-08-24 (#1716): no signal was needed* — the value shipped
-   as `bundle-installer`, replacing `operator` (shipped `driver-installer`);
-   with the same-shaped sibling gone, the family is distinguishable at
-   generation time by the opt-out pool label alone.
+   *Amended 2026-08-24: mechanism only.* `ProfileValue` gains
+   `readinessConstraints` — same catalog-load validation as `constraints`
+   with per-phase name deduplication (the same measurement path may carry
+   a generation-time pre-condition and a readiness-time post-deployment
+   state), routed into `spec.validation.readiness.constraints` at
+   resolution and **never evaluated at generation time**. The
+   `aicr validate` readiness pre-flight evaluates them with the same
+   fail-closed exit as every other readiness gate.
+
+   The mechanism exists for values whose distinguishers are
+   deployment-created — where no generation-time reading can hold. Two
+   rules govern its use:
+
+   - **The self-falsifying pre-condition trap.** Generation-time
+     constraints are re-evaluated by the validate pre-flight, so a
+     pre-condition that the value's own success erases (e.g. "no NVIDIA
+     driver loaded" on a value whose operator installs the driver) must
+     never be declared as a generation constraint — it fails every
+     post-deployment validate on a correctly working cluster. Such state
+     belongs in `readinessConstraints`, asserted in its post-deployment
+     form.
+   - **Self-rendered readings do not qualify.** A reading the selected
+     bundle itself renders (e.g. deployed ClusterPolicy fields) is
+     satisfied by construction under every value — it is a useful
+     rendered-policy **drift check**, but it cannot serve as a value's
+     distinguishing constraint. Qualification requires cluster state
+     independent of the bundle's own output (provider properties, node
+     labels set at provisioning, externally-owned objects).
+
+     Deployment-created markers sit between the two: state the value's
+     own workload writes at runtime (the loaded driver a self-falsified
+     pre-condition asserts in post-form, a label its DaemonSet applies
+     after a successful install) is a legal readiness constraint as an
+     **outcome check** — unlike a rendered `.spec` readback it can
+     fail, and it observes state some deployment actually produced. It
+     does not establish *which* deployment produced it: the readiness
+     gate compares only the snapshot value, with no deployment
+     identity, owner, or timestamp binding, so an unversioned marker
+     left by an earlier deployment satisfies a later check. A
+     workload-written marker is therefore valid only when its producer
+     owns the marker's full lifecycle — clearing or versioning it when
+     the outcome no longer holds. And an outcome check verifies
+     *execution*, not *selection*: every value's own success satisfies
+     its own markers, so it cannot establish that the cluster's
+     pre-existing mode matches the selected value. A value's
+     **qualifying** constraint must rest on the bundle-independent
+     state above, whichever list it is declared in.
+
+   This PR resolves no GKE signal: the GKE family's DD5 question was
+   settled separately by value replacement (see the adoption-step
+   amendment), and its shipped values are generation-time
+   distinguishable. The mechanism's consumers are families whose values
+   are distinct cluster shapes with deployment-created distinguishers.

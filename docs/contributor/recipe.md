@@ -215,7 +215,7 @@ rejected. Profile-version metadata and recipe artifacts are strictly decoded
 so an unknown field cannot silently disappear.
 
 The core `ProfileValue` contract is closed to `advertiser`, `constraints`,
-and `componentRefs{name,overrides}`. It rejects `valuesFile`, component
+`readinessConstraints`, and `componentRefs{name,overrides}`. It rejects `valuesFile`, component
 identity/deployment fields, root `overrides.enabled`, literal dotted keys,
 and nested empty maps. The `advertiser` field accepts exactly one non-empty
 value, `external` (validated against `pkg/allocpolicy`, the canonical
@@ -252,6 +252,12 @@ Resolution enforces these invariants:
    collisions.
 5. Evaluate selected profile constraints fail closed. A missing reading has a
    distinct invalid-request diagnostic; other evaluator failures propagate.
+   A value's `readinessConstraints` are exempt from this step by design:
+   they name post-deployment properties (ADR-015 DD5) and route into
+   `spec.validation.readiness.constraints`, where the `aicr validate`
+   readiness pre-flight evaluates them fail closed. Names deduplicate
+   per phase — the same measurement path may carry a generation-time
+   pre-condition and a readiness-time post-deployment state.
 6. Stamp the result `aicr.run/v1alpha3` and persist
    `metadata.selectedProfile`. Its sorted `ownedPaths` is the
    declaration-wide path union plus synthetic `enabled` for each referenced
