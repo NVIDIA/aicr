@@ -2198,13 +2198,17 @@ func verifyTransportFromLogs(logs string, variant ncclVariant) error {
 // ComputeDomain/ResourceClaimTemplate/TrainJob finalizers cascading through
 // it) is actually gone. Waiting here for the deletion to finish, via the
 // same waitForNamespaceGone helper ensureNamespace already uses on the
-// create side for exactly this reason (see its doc comment), means a
-// successful benchmark can't report clean teardown while resources are
-// still leaking.
+// create side for exactly this reason (see its doc comment), gives teardown
+// observability in the common case. But the wait itself only ever logs on
+// timeout (see below). Once Delete is accepted, cascading GC completes
+// server-side regardless of whether we wait for it here, and NVLS runs'
+// ComputeDomain/ResourceClaimTemplate DRA/IMEX finalizers can legitimately
+// outlast the wait bound on the dual-fabric GB200 path.
 //
-// Unlike cleanupInferenceWorkload, a delete failure here is returned rather
-// than only logged, so foldCleanupError can still fail an otherwise-passing
-// check on it. NotFound is tolerated (nothing to clean up).
+// Unlike cleanupInferenceWorkload, a Delete call failure itself is returned
+// rather than only logged, so foldCleanupError can still fail an
+// otherwise-passing check on it. That is the actual "did cleanup happen"
+// signal. NotFound is tolerated (nothing to clean up).
 //
 // uid pins the delete to the exact namespace instance runNCCLTrainJob
 // created or reclaimed: if that instance was deleted and a different one
@@ -2231,12 +2235,18 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 
 	// Same bound as ensureNamespace's wait on the create side (see
 	// defaults.InferenceNamespaceTerminationWait doc comment). This cascade
-	// is the same finalizer chain, just observed from the delete side.
+	// is the same finalizer chain, just observed from the delete side. Only
+	// logged on timeout, not returned: the Delete call above already
+	// succeeded, so a slow-but-real teardown (e.g. NVLS's DRA/IMEX
+	// finalizers) must not fail an otherwise-passing benchmark just because
+	// this observability wait ran out first.
 	waitCtx, waitCancel := context.WithTimeout(context.Background(), defaults.InferenceNamespaceTerminationWait)
 	defer waitCancel()
 	if err := waitForNamespaceGone(waitCtx, nsClient, namespace); err != nil {
-		return aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal,
-			fmt.Sprintf("NCCL benchmark namespace %q did not finish terminating", namespace))
+		slog.Warn("NCCL benchmark namespace did not finish terminating within the wait bound, "+
+			"deletion was accepted and its cascading GC continues in the background",
+			"namespace", namespace, "error", err)
+		return nil
 	}
 
 	slog.Info("Deleted NCCL benchmark namespace", "namespace", namespace)
