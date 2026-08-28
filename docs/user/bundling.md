@@ -238,8 +238,10 @@ for an existing deployment, not only when building a new cluster.
 
 `aicr bundle` emits a non-blocking warning describing this requirement whenever
 both components are enabled. See
-[Bundle Warnings](cli-reference.md#storage-class) for the other cluster-state
-dependency reported the same way.
+[Storage Class](cli-reference.md#storage-class), where that warning is
+described alongside the other cluster-state dependency reported the same way.
+
+### Custom label conventions and post-install checks
 
 If the cluster uses a different convention, generate the bundle with
 `--dra-eviction-node-label key=value` and apply that exact pair to the nodes.
