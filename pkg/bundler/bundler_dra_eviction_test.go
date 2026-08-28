@@ -558,6 +558,7 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 		configured  config.NodeLabel
 		wantWarning bool
 		wantSubstr  string
+		alsoWant    []string
 	}{
 		{
 			name: "both components enabled warns",
@@ -601,7 +602,13 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 				{Name: gpuOperatorComponentName},
 			},
 			wantWarning: true,
-			wantSubstr:  "if no GPU node carries the label the kubelet-plugin DaemonSet sits at DESIRED=0",
+			// Both halves of the distinction are asserted. Pinning only the
+			// zero-match clause would let a regression delete the per-node
+			// clause — the more common case — and still pass.
+			wantSubstr: "Unlabeled GPU nodes silently run without DRA",
+			alsoWant: []string{
+				"if no GPU node carries the label the kubelet-plugin DaemonSet sits at DESIRED=0",
+			},
 		},
 		{
 			// Arbitrary node labels live at NodePool.spec.template.metadata.labels.
@@ -677,6 +684,12 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 			if !strings.Contains(got, tt.wantSubstr) {
 				t.Errorf("warning %q does not contain %q", got, tt.wantSubstr)
 			}
+			for _, want := range tt.alsoWant {
+				if !strings.Contains(got, want) {
+					t.Errorf("warning %q does not mention %q", got, want)
+				}
+			}
+
 			for _, want := range []string{
 				"node-pool provisioning time",
 				"upgrading an existing cluster",

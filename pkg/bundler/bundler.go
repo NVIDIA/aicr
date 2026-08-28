@@ -2977,12 +2977,21 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 // for the DRA eviction node label, mirroring warnMissingStorageClassForPVCs:
 // both describe a rendered dependency on cluster state AICR cannot verify or
 // own. The kubelet-plugin nodeSelector is load-bearing for the Driver Manager
-// blank/restore contract, so an unlabelled GPU node yields a DaemonSet at
-// DESIRED=0 with no error from Helm or deploy.sh (see issue #2456).
+// blank/restore contract, so an unlabeled GPU node runs no kubelet plugin and
+// publishes no ResourceSlices for itself, with no error from Helm or deploy.sh
+// (see issue #2456).
+//
+// Partial coverage is the ordinary case, not an edge one: node replacement,
+// recycling, autoscaling and scale-from-zero all add unlabeled nodes to a
+// cluster whose existing nodes are labeled. Those nodes keep advertising
+// nvidia.com/gpu through the device plugin, so they look healthy while
+// silently lacking DRA — measured on an EKS GB300 cluster, where unlabeling
+// one of two nodes moved the DaemonSet to DESIRED=1, not 0. DESIRED=0 applies
+// only when no GPU node carries the label at all.
 func (b *DefaultBundler) warnDRAEvictionNodeLabelRequired(draNames []string, label config.NodeLabel) {
 	for _, name := range draNames {
 		msg := fmt.Sprintf(
-			"%s schedules its kubelet plugin only on nodes labeled %s=%s; apply that label to every GPU node at node-pool provisioning time (EKS managed nodegroup labels, Karpenter NodePool spec.template.metadata.labels, or equivalent) — including when upgrading an existing cluster. Unlabelled GPU nodes silently run without DRA: they publish no ResourceSlices, and if no GPU node carries the label the kubelet-plugin DaemonSet sits at DESIRED=0. Neither Helm nor deploy.sh reports an error either way",
+			"%s schedules its kubelet plugin only on nodes labeled %s=%s; apply that label to every GPU node at node-pool provisioning time (EKS managed nodegroup labels, Karpenter NodePool spec.template.metadata.labels, or equivalent) — including when upgrading an existing cluster. Unlabeled GPU nodes silently run without DRA: they publish no ResourceSlices, and if no GPU node carries the label the kubelet-plugin DaemonSet sits at DESIRED=0. Neither Helm nor deploy.sh reports an error either way",
 			name,
 			label.Key,
 			label.Value,

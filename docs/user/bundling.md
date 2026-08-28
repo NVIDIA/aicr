@@ -199,7 +199,7 @@ there.
 
 A one-off `kubectl label node` is a repair, not a configuration. It does not
 survive node replacement or recycling, cluster autoscaling adding GPU nodes, or
-a nodegroup scaled from zero. Any GPU node added afterwards arrives unlabelled
+a nodegroup scaled from zero. Any GPU node added afterwards arrives unlabeled
 and silently runs without the DRA kubelet plugin, leaving the cluster
 **partially DRA-enabled** — worse than uniform failure, because it is
 intermittent and node-dependent.
@@ -214,17 +214,17 @@ kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 
 ### The failure mode is silent
 
-An unlabelled GPU node produces no error anywhere. `helm install`/`helm
+An unlabeled GPU node produces no error anywhere. `helm install`/`helm
 upgrade` reports success and the bundle's `deploy.sh` exits 0. What you get
 instead is:
 
-- no DRA kubelet plugin on any unlabelled node, and no `ResourceSlices` from
+- no DRA kubelet plugin on any unlabeled node, and no `ResourceSlices` from
   it — so no ComputeDomain/IMEX capability there
 - the `nvidia-dra-driver-gpu-kubelet-plugin` DaemonSet at `DESIRED=0` **if no
   GPU node carries the label at all**
 
 Partial coverage is the more dangerous shape, and the one node replacement and
-autoscaling produce: labelled nodes work normally while the rest silently lack
+autoscaling produce: labeled nodes work normally while the rest silently lack
 DRA. A split cluster is harder to notice than uniform failure, because the
 DaemonSet looks healthy and only some workloads misbehave.
 
