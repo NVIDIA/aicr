@@ -448,7 +448,7 @@ Y = artifact attached, - = artifact absent, ? = could not probe.
 
   Image                                                           Sig  SBOM  Prov  Notes
   --------------------------------------------------------------  ---  ----  ----  -----
-  registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1  Y    -     -
+  registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.5.0  Y    -     -
 
 Summary: 1/1 signed · 0/1 SBOM · 0/1 provenance
 ```

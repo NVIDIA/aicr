@@ -55,7 +55,7 @@
 #     device-request path open — the same posture as GPU-Operator-managed mode,
 #     not a regression — so full multi-tenant isolation additionally requires
 #     an admission policy restricting a /dev/null-backed mount whose destination
-#     is under /var/run/nvidia-container-devices (the pinned toolkit v1.19.1
+#     is under /var/run/nvidia-container-devices (the pinned toolkit v1.20.0
 #     accepts the volume-mount device request only when the mount SOURCE is
 #     /dev/null). secure-accelerator-access does not
 #     exercise the volume-mounts path, so a green result is not proof of

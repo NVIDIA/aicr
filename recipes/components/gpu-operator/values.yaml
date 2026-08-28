@@ -198,8 +198,9 @@ validator:
 nfd:
   enabled: false
 
-# Confidential Compute Manager defaults to enabled in chart v26.3.x; keep
-# it off until AICR has explicit CC-capable hardware support.
+# Confidential Compute Manager defaults to enabled in the upstream chart
+# (verified still true in v26.7.0); keep it off until AICR has explicit
+# CC-capable hardware support.
 ccManager:
   enabled: false
 
