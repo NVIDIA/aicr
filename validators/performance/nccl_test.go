@@ -142,8 +142,8 @@ func TestApplyNCCLWorkerScheduling_Tolerations(t *testing.T) {
 			t.Fatalf("tolerations count = %d, want 1", len(tolsRaw))
 		}
 		tol, _ := tolsRaw[0].(map[string]any)
-		if tol["key"] != "gpu-type" || tol["value"] != "h100" || tol["effect"] != "NoSchedule" {
-			t.Errorf("toleration = %v, want gpu-type=h100:NoSchedule", tol)
+		if tol["key"] != "gpu-type" || tol["value"] != "h100" || tol["effect"] != "NoSchedule" || tol["operator"] != "Equal" {
+			t.Errorf("toleration = %v, want gpu-type=h100:NoSchedule operator=Equal", tol)
 		}
 	}
 }
@@ -209,8 +209,8 @@ func TestApplyNCCLWorkerScheduling_Both(t *testing.T) {
 			t.Fatalf("tolerations count = %d, want 1", len(tolsRaw))
 		}
 		tol, _ := tolsRaw[0].(map[string]any)
-		if tol["key"] != "custom-taint" || tol["value"] != "true" || tol["effect"] != "NoSchedule" {
-			t.Errorf("toleration = %v, want custom-taint=true:NoSchedule", tol)
+		if tol["key"] != "custom-taint" || tol["value"] != "true" || tol["effect"] != "NoSchedule" || tol["operator"] != "Equal" {
+			t.Errorf("toleration = %v, want custom-taint=true:NoSchedule operator=Equal", tol)
 		}
 	}
 }
