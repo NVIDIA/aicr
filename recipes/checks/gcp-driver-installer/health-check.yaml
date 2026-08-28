@@ -30,11 +30,14 @@ kind: Test
 metadata:
   name: gcp-driver-installer-health-check
 spec:
-  # 5m: below the expected-resources Job's 8m activeDeadline — a budget
-  # above it converts a never-true assert into a deadline kill with no
-  # surviving logs (the #2186 failure shape; see the nvsentinel check).
-  # The healthy path passes in seconds; the slowest legitimate path (a
-  # fresh node mid driver-install) completes in ~2m.
+  # 5m: the in-process executor clamps any authored budget to its caller's
+  # 6m (pkg/chainsaw/inprocess.go), so the previous 10m never applied as
+  # written — but a never-true assert still burns the full clamped budget,
+  # and that pushed the expected-resources Job's aggregate run past its 8m
+  # activeDeadline (the #2186 failure shape, observed live). 5m keeps the
+  # worst case inside both bounds and fails with the real assert diff; the
+  # healthy path passes in seconds and a fresh node mid driver-install
+  # completes in ~2m.
   timeouts:
     assert: 5m
   steps:

@@ -19,6 +19,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/NVIDIA/aicr/pkg/manifest"
 )
 
@@ -119,4 +121,87 @@ func excerpt(s, marker string) string {
 		lines = lines[:10]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// TestGCPDriverInstallerLabelContract pins both sides of the health-check
+// label contract that only live GKE validation could catch (#2444): Helm 4
+// server-side apply rewrites app.kubernetes.io/managed-by to "Helm" at
+// install, so the health check must key on a label SSA leaves alone. The
+// rendered DaemonSet must carry part-of: aicr, and the health check must
+// assert exactly that key — never managed-by, which silently regresses to
+// the never-match stall this contract exists to prevent.
+func TestGCPDriverInstallerLabelContract(t *testing.T) {
+	t.Parallel()
+	content, err := os.ReadFile("components/gcp-driver-installer/manifests/nvidia-driver-installer.yaml")
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	out, err := manifest.Render(content, manifest.RenderInput{
+		ComponentName: "gcp-driver-installer",
+		Namespace:     "kube-system",
+		Values: map[string]any{
+			"installer":     map[string]any{"enabled": true},
+			"driverVersion": "580.173.02",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() failed: %v", err)
+	}
+	var ds struct {
+		Kind     string `yaml:"kind"`
+		Metadata struct {
+			Labels map[string]string `yaml:"labels"`
+		} `yaml:"metadata"`
+	}
+	if unmarshalErr := yaml.Unmarshal(out, &ds); unmarshalErr != nil {
+		t.Fatalf("parse rendered DaemonSet: %v", unmarshalErr)
+	}
+	if ds.Kind != "DaemonSet" {
+		t.Fatalf("rendered kind = %q, want DaemonSet", ds.Kind)
+	}
+	if got := ds.Metadata.Labels["app.kubernetes.io/part-of"]; got != "aicr" {
+		t.Errorf("manifest label app.kubernetes.io/part-of = %q, want %q "+
+			"(the health check keys on it; managed-by is rewritten by Helm 4 SSA)", got, "aicr")
+	}
+
+	check, err := os.ReadFile("checks/gcp-driver-installer/health-check.yaml")
+	if err != nil {
+		t.Fatalf("read health check: %v", err)
+	}
+	var test struct {
+		Spec struct {
+			Steps []struct {
+				Try []struct {
+					Assert *struct {
+						Resource struct {
+							Metadata struct {
+								Labels map[string]string `yaml:"labels"`
+							} `yaml:"metadata"`
+						} `yaml:"resource"`
+					} `yaml:"assert"`
+				} `yaml:"try"`
+			} `yaml:"steps"`
+		} `yaml:"spec"`
+	}
+	if unmarshalErr := yaml.Unmarshal(check, &test); unmarshalErr != nil {
+		t.Fatalf("parse health check: %v", unmarshalErr)
+	}
+	asserted := map[string]string{}
+	for _, step := range test.Spec.Steps {
+		for _, tr := range step.Try {
+			if tr.Assert != nil {
+				for k, v := range tr.Assert.Resource.Metadata.Labels {
+					asserted[k] = v
+				}
+			}
+		}
+	}
+	if got := asserted["app.kubernetes.io/part-of"]; got != "aicr" {
+		t.Errorf("health check asserts part-of = %q, want %q", got, "aicr")
+	}
+	if _, bad := asserted["app.kubernetes.io/managed-by"]; bad {
+		t.Errorf("health check asserts managed-by — Helm 4 SSA rewrites that " +
+			"label to \"Helm\" at install, so this assert can never match a " +
+			"deployed bundle (the stall #2444 fixed)")
+	}
 }
