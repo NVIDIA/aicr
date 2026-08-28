@@ -120,7 +120,7 @@ testing_tools:
     darwin_amd64: 'ddb56002ff8c6265f55ec40c82eb0ef0dddec5127dd12d4fc5e7953453481f4b'
     darwin_arm64: '502bef17dd822217e82590e9ccf01c1e26a56b3fa34a835789b9af73e82a169a'
   # renovate: datasource=github-releases depName=mikefarah/yq depType=testing_tools
-  yq: 'v4.53.4'
+  yq: 'v4.53.6'
   # AWS CLI used by the KMS e2e to provision keys against the MiniStack emulator.
   # renovate: datasource=pypi depName=awscli depType=testing_tools
   awscli: '1.46.0'
