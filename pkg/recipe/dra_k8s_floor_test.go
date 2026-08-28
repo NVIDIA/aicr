@@ -37,10 +37,14 @@ import (
 // point of the guard.
 const draChartKubeVersionMinor = 32
 
-// k8sFloorRE captures the minor version from a K8s.server.version constraint
-// expressed as a floor. Only `>=` forms are checked: an exact pin or a range is
-// a deliberate statement that should be reviewed on its own terms.
-var k8sFloorRE = regexp.MustCompile(`(?s)- name: K8s\.server\.version\s*\n\s*value: "\s*>=\s*1\.(\d+)`)
+// k8sConstraintRE captures EVERY K8s.server.version declaration in a file and
+// its raw value. FindAllStringSubmatch, not FindStringSubmatch: a file may carry
+// more than one declaration, and checking only the first would let a later,
+// lower one through.
+var k8sConstraintRE = regexp.MustCompile(`- name: K8s\.server\.version\s*\n\s*value: "([^"]*)"`)
+
+// geFloorRE matches the `>= 1.<minor>` form this guard can reason about.
+var geFloorRE = regexp.MustCompile(`^\s*>=\s*1\.(\d+)`)
 
 // TestOverlayK8sFloorsClearDRAChartFloor asserts no overlay or mixin declares a
 // Kubernetes floor below the DRA chart's own kubeVersion.
@@ -77,26 +81,42 @@ func TestOverlayK8sFloorsClearDRAChartFloor(t *testing.T) {
 		if readErr != nil {
 			return readErr
 		}
-		m := k8sFloorRE.FindStringSubmatch(string(raw))
-		if m == nil {
-			return nil
-		}
-		checked++
-		minor, convErr := strconv.Atoi(m[1])
-		if convErr != nil {
-			t.Errorf("%s: could not parse K8s.server.version minor %q: %v", path, m[1], convErr)
-			return nil
-		}
-		if minor < draChartKubeVersionMinor {
-			t.Errorf("%s declares K8s.server.version \">= 1.%d\", below the pinned "+
-				"nvidia-dra-driver-gpu chart's kubeVersion \">=1.%d.0-0\".\n"+
-				"  Every recipe inherits the DRA driver from base.yaml, and Helm refuses the\n"+
-				"  install below the chart floor — so this recipe validates clean and then\n"+
-				"  fails at `helm install`. Raise it to \">= 1.%d\".\n"+
-				"  Raising base.yaml alone does NOT fix a leaf: constraints merge last-wins\n"+
-				"  with no max comparison, so a lower leaf value overwrites a higher\n"+
-				"  inherited one. See #2402.",
-				path, minor, draChartKubeVersionMinor, draChartKubeVersionMinor)
+		for _, m := range k8sConstraintRE.FindAllStringSubmatch(string(raw), -1) {
+			checked++
+			value := m[1]
+
+			g := geFloorRE.FindStringSubmatch(value)
+			if g == nil {
+				// Fail closed on any form this guard cannot interpret — an exact
+				// pin (== 1.30), a range, or a bare version would each be just as
+				// capable of admitting a sub-floor cluster, and silently skipping
+				// them would make the guard weakest exactly where a future author
+				// deviates from the established shape.
+				t.Errorf("%s declares K8s.server.version %q, a form this guard cannot verify.\n"+
+					"  It can only reason about \">= 1.<minor>\". Any other form may admit clusters\n"+
+					"  below the pinned nvidia-dra-driver-gpu chart's kubeVersion \">=1.%d.0-0\",\n"+
+					"  where Helm refuses the install. Either express it as a >= floor, or extend\n"+
+					"  this guard to understand the new form. See #2402.",
+					path, value, draChartKubeVersionMinor)
+				continue
+			}
+
+			minor, convErr := strconv.Atoi(g[1])
+			if convErr != nil {
+				t.Errorf("%s: could not parse K8s.server.version minor from %q: %v", path, value, convErr)
+				continue
+			}
+			if minor < draChartKubeVersionMinor {
+				t.Errorf("%s declares K8s.server.version %q, below the pinned "+
+					"nvidia-dra-driver-gpu chart's kubeVersion \">=1.%d.0-0\".\n"+
+					"  Every recipe inherits the DRA driver from base.yaml, and Helm refuses the\n"+
+					"  install below the chart floor — so this recipe validates clean and then\n"+
+					"  fails at `helm install`. Raise it to \">= 1.%d\".\n"+
+					"  Raising base.yaml alone does NOT fix a leaf: constraints merge last-wins\n"+
+					"  with no max comparison, so a lower leaf value overwrites a higher\n"+
+					"  inherited one. See #2402.",
+					path, value, draChartKubeVersionMinor, draChartKubeVersionMinor)
+			}
 		}
 		return nil
 	})
