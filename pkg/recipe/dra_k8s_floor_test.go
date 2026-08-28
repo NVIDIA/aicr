@@ -207,6 +207,26 @@ func proveExpressionClearsFloor(expr string, floorMinor int) error {
 // also rejects every cluster the catalog claims to support — a typo, not a
 // floor. Failing on it keeps the guard closed against expressions it cannot
 // show are meaningful.
+// probeReadings returns the Kubernetes readings used to show that a
+// declaration admits at least one cluster. Minor-precision probes alone are
+// not enough: a patch-precision range such as ">= 1.34.3 < 1.35.0" is
+// satisfied by no "1.N.0" reading, so a correct floor would be reported as
+// admitting nothing. The declared bounds are therefore probed as well.
+//
+// The result is a fresh slice. Appending to `supported` in place would write
+// into a backing array shared by every declaration under test whenever it has
+// spare capacity.
+func probeReadings(supported []string, parsed *constraints.CompoundConstraint) []string {
+	readings := make([]string, 0, len(supported))
+	readings = append(readings, supported...)
+	for _, group := range parsed.Alternatives {
+		for i := range group {
+			readings = append(readings, group[i].Value)
+		}
+	}
+	return readings
+}
+
 func supportedProbeVersions(floorMinor int) []string {
 	var probes []string
 	for minor := floorMinor; minor <= 60; minor++ {
@@ -383,7 +403,7 @@ func verifyK8sFloorDeclaration(t *testing.T, decl k8sFloorDeclaration, floorMino
 		return
 	}
 
-	for _, reading := range supported {
+	for _, reading := range probeReadings(supported, parsed) {
 		satisfied, evalErr := parsed.Evaluate(reading)
 		if evalErr != nil {
 			t.Errorf("%s (%s) declares K8s.server.version %q, which the shipping evaluator\n"+
@@ -482,5 +502,48 @@ func TestProveExpressionRejectsWhatTheEvaluatorAdmits(t *testing.T) {
 	}
 	if err := proveExpressionClearsFloor(expr, 32); err == nil {
 		t.Fatalf("prover accepted %q even though the evaluator admits a 1.31.1 cluster", expr)
+	}
+}
+
+// TestProbeSetAdmitsPatchPrecisionRange is the regression control for the
+// probe sweep in assertDeclarationIsSatisfiable. The sweep used to try only
+// "1.N.0" readings, which no patch-precision range can satisfy: ">= 1.34.3
+// < 1.35.0" clears proveExpressionClearsFloor, yet 1.34.0 is below its lower
+// bound and 1.35.0 is excluded by its upper one. A correct floor was therefore
+// reported as admitting no supported release.
+//
+// Reverting probeReadings to return `supported` unchanged makes this test
+// fail, which is the point: the catalog currently declares no patch-precision
+// range, so the defect is latent and nothing else would catch a regression.
+func TestProbeSetAdmitsPatchPrecisionRange(t *testing.T) {
+	const expr = ">= 1.34.3 < 1.35.0"
+
+	parsed, err := constraints.ParseCompoundConstraint(expr)
+	if err != nil {
+		t.Fatalf("parsing %q: %v", expr, err)
+	}
+
+	for _, reading := range supportedProbeVersions(32) {
+		satisfied, evalErr := parsed.Evaluate(reading)
+		if evalErr != nil {
+			t.Fatalf("evaluating %q against %q: %v", expr, reading, evalErr)
+		}
+		if satisfied {
+			t.Fatalf("expected no minor-precision reading to satisfy %q, but %q did;\n"+
+				"  this test no longer proves the bound-probing loop is required", expr, reading)
+		}
+	}
+
+	var admitted bool
+	for _, reading := range probeReadings(supportedProbeVersions(32), parsed) {
+		satisfied, evalErr := parsed.Evaluate(reading)
+		if evalErr != nil {
+			t.Fatalf("evaluating %q against probe %q: %v", expr, reading, evalErr)
+		}
+		admitted = admitted || satisfied
+	}
+	if !admitted {
+		t.Errorf("no declared bound of %q satisfies it, so the probe sweep would still\n"+
+			"  fail a correct floor. See #2402.", expr)
 	}
 }
