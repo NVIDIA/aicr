@@ -67,7 +67,7 @@ func hasYAMLKey(content, key string) bool {
 // spec.numNodes explicitly, so it is valid under BOTH CRD copies regardless of
 // which chart installed the CRD first.
 //
-// See PR #2439 and issue #1087 for the driver-root analogue of this
+// See PR #2439 and issue #1087 for the driver-root analog of this
 // cross-component coupling problem.
 func TestComputeDomainManifestsSetNumNodes(t *testing.T) {
 	t.Parallel()

@@ -116,7 +116,7 @@ Three quick checks, the same ones the chainsaw suite enforces:
 
 ```shell
 # a) gone from the baked values.yaml (no match)
-grep -c 'version: 580' ./bundle/010-gpu-operator/values.yaml
+grep -c 'version: 595' ./bundle/010-gpu-operator/values.yaml
 # 0
 
 # b) present in cluster-values.yaml

@@ -75,7 +75,7 @@ import (
 // falls through to the upstream chart's bundled default, which the test
 // cannot read — and per-component defaults differ (GPU Operator chart
 // 26.7.0 defaults driverInstallDir to /run/nvidia/driver, but DRA chart
-// 25.12.0 defaults nvidiaDriverRoot to /). Relying on chart defaults is
+// 0.5.0 defaults nvidiaDriverRoot to /). Relying on chart defaults is
 // itself drift waiting to happen on the next chart bump, so when the
 // lockstep applies the test treats "not explicitly set on both" as a
 // failure.
