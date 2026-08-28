@@ -190,13 +190,56 @@ aicr bundle --recipe recipe.yaml \
 > eligible nodes, interrupting ComputeDomain/IMEX and any whole-GPU resources
 > advertised through DRA.
 
-Label the intended nodes, confirm the selector matches at least one node, and
-then apply the bundle:
+### Set the label at node-pool provisioning time
+
+Put the label in the **node pool definition** — an EKS managed nodegroup
+`labels` entry, a Karpenter `nodeClass`/`NodePool` label, or the equivalent for
+your provisioner — alongside the `nodeGroup=gpu-worker` label you already set
+there.
+
+A one-off `kubectl label node` is a repair, not a configuration. It does not
+survive node replacement or recycling, cluster autoscaling adding GPU nodes, or
+a nodegroup scaled from zero. Any GPU node added afterwards arrives unlabelled
+and silently runs without the DRA kubelet plugin, leaving the cluster
+**partially DRA-enabled** — worse than uniform failure, because it is
+intermittent and node-dependent.
+
+Use `kubectl label` only to repair nodes that already exist, and fix the node
+pool definition in the same change so replacements inherit it:
 
 ```bash
 kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true
 kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 ```
+
+### The failure mode is silent
+
+An unlabelled GPU node produces no error anywhere. `helm install`/`helm
+upgrade` reports success and the bundle's `deploy.sh` exits 0. What you get
+instead is:
+
+- the `nvidia-dra-driver-gpu-kubelet-plugin` DaemonSet at `DESIRED=0`
+- no DRA kubelet plugins on any node
+- no `ResourceSlices`, and therefore no ComputeDomain/IMEX capability
+
+Because the absence is not self-announcing, confirm the selector matches the
+nodes you expect **before** applying the bundle, and check the DaemonSet
+afterwards.
+
+### This applies to existing clusters, not just fresh installs
+
+The requirement is easy to read as a fresh-install prerequisite, but the
+upgrade path is where it bites hardest. A cluster whose bundle was generated
+before this selector existed has a working kubelet-plugin DaemonSet selecting
+on `nodeGroup=gpu-worker` alone. Regenerating the bundle and running `helm
+upgrade` adds the second selector, and working functionality **disappears** —
+still with no error. Revisit the node labels whenever you regenerate a bundle
+for an existing deployment, not only when building a new cluster.
+
+`aicr bundle` emits a non-blocking warning describing this requirement whenever
+both components are enabled. See
+[Bundle Warnings](cli-reference.md#storage-class) for the other cluster-state
+dependency reported the same way.
 
 If the cluster uses a different convention, generate the bundle with
 `--dra-eviction-node-label key=value` and apply that exact pair to the nodes.

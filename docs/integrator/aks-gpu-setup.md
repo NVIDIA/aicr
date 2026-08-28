@@ -122,6 +122,23 @@ spec:
           enabled: false
 ```
 
+### Label GPU nodes for the DRA kubelet plugin
+
+A bundle that enables both `gpu-operator` and `nvidia-dra-driver-gpu` schedules
+the DRA kubelet plugin only on nodes labeled
+`nvidia.com/dra-kubelet-plugin=true` (or the pair given to
+`aicr bundle --dra-eviction-node-label`). Set it **in the node pool
+definition**, with the other required node labels — an ad hoc
+`kubectl label node` does not survive node replacement, recycling,
+autoscaling, or a pool scaled from zero, so later nodes arrive unlabelled.
+
+An unlabelled GPU node fails silently: the kubelet-plugin DaemonSet sits at
+`DESIRED=0`, publishes no `ResourceSlices`, and neither Helm nor the bundle's
+`deploy.sh` reports an error. This applies to existing clusters too — adding
+the selector during an upgrade removes a plugin that was previously working.
+See [Prepare DRA nodes before applying upgraded bundles](../user/bundling.md#prepare-dra-nodes-before-applying-upgraded-bundles).
+
+
 ## GPU Driver Setup
 
 AKS has two mutually exclusive GPU **ownership modes**. Each is a complete
@@ -240,7 +257,8 @@ az aks nodepool add \
   --resource-group <rg> \
   --name gpupool \
   --node-vm-size Standard_ND96isr_H100_v5 \
-  --node-count 1
+  --node-count 1 \
+  --labels nvidia.com/dra-kubelet-plugin=true
 ```
 
 No changes to AICR recipes are needed — this is the AKS family's `gpuStack`

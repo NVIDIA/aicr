@@ -2967,7 +2967,32 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 			return err
 		}
 	}
+
+	b.warnDRAEvictionNodeLabelRequired(draNames, label)
+
 	return nil
+}
+
+// warnDRAEvictionNodeLabelRequired emits the non-blocking bundle-time warning
+// for the DRA eviction node label, mirroring warnMissingStorageClassForPVCs:
+// both describe a rendered dependency on cluster state AICR cannot verify or
+// own. The kubelet-plugin nodeSelector is load-bearing for the Driver Manager
+// blank/restore contract, so an unlabelled GPU node yields a DaemonSet at
+// DESIRED=0 with no error from Helm or deploy.sh (see issue #2456).
+func (b *DefaultBundler) warnDRAEvictionNodeLabelRequired(draNames []string, label config.NodeLabel) {
+	for _, name := range draNames {
+		msg := fmt.Sprintf(
+			"%s schedules its kubelet plugin only on nodes labeled %s=%s; apply that label to every GPU node at node-pool provisioning time (EKS managed nodegroup labels, Karpenter nodeClass, or equivalent) — including when upgrading an existing cluster — or the kubelet-plugin DaemonSet stays at DESIRED=0 and publishes no ResourceSlices, and neither Helm nor deploy.sh reports an error",
+			name,
+			label.Key,
+			label.Value,
+		)
+		b.appendWarning(msg)
+		slog.Warn("DRA kubelet plugin requires a node label",
+			"component", name,
+			"label", label.String(),
+		)
+	}
 }
 
 func mergeDRAEvictionNodeSelector(componentName string, values map[string]any, label config.NodeLabel) error {

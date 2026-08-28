@@ -230,7 +230,7 @@ gcloud container node-pools create POOL_NAME \
   --num-nodes=1 \
   --machine-type=a3-highgpu-8g \
   --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=disabled \
-  --node-labels="gke-no-default-nvidia-gpu-device-plugin=true"
+  --node-labels="gke-no-default-nvidia-gpu-device-plugin=true,nvidia.com/dra-kubelet-plugin=true"
 ```
 
 The `--machine-type` and `--num-nodes` cautions from the default-profile
@@ -377,6 +377,23 @@ pre-existing object. To migrate: delete the hand-applied DaemonSet,
 regenerate with `--profile gpuStack=bundle-installer`, and deploy the
 bundle. Nodes with a loaded driver are untouched (the installer's fast path
 skips them); the bundle takes over provisioning for new and rebooted nodes.
+
+## Label GPU nodes for the DRA kubelet plugin
+
+A bundle that enables both `gpu-operator` and `nvidia-dra-driver-gpu` schedules
+the DRA kubelet plugin only on nodes labeled
+`nvidia.com/dra-kubelet-plugin=true` (or the pair given to
+`aicr bundle --dra-eviction-node-label`). Set it **in the node pool
+definition**, with the other required node labels — an ad hoc
+`kubectl label node` does not survive node replacement, recycling,
+autoscaling, or a pool scaled from zero, so later nodes arrive unlabelled.
+
+An unlabelled GPU node fails silently: the kubelet-plugin DaemonSet sits at
+`DESIRED=0`, publishes no `ResourceSlices`, and neither Helm nor the bundle's
+`deploy.sh` reports an error. This applies to existing clusters too — adding
+the selector during an upgrade removes a plugin that was previously working.
+See [Prepare DRA nodes before applying upgraded bundles](../user/bundling.md#prepare-dra-nodes-before-applying-upgraded-bundles).
+
 
 ## Troubleshooting
 
