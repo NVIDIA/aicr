@@ -26,7 +26,7 @@ import (
 	"github.com/urfave/cli/v3"
 )
 
-// The CLI is one of the four surfaces ROADMAP §2 freezes at v1. This file is
+// The CLI is one of the four surfaces ROADMAP §1 freezes at v1. This file is
 // its baseline and diff gate: `cli-surface.golden` is the committed inventory
 // of every command, flag, alias, type, default, and env var, and the test below
 // fails when the live tree stops matching it.

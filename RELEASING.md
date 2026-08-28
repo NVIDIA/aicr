@@ -15,7 +15,8 @@ Releases follow a **bi-weekly cadence**. A new release is cut every two weeks.
 
 ## Deprecation Policy
 
-AICR freezes four public surfaces at v1 ([ROADMAP §2](ROADMAP.md#2-stability)):
+AICR freezes four public surfaces at v1
+([ROADMAP §1](ROADMAP.md#1-defensible-api-stability)):
 the `aicr` CLI, the REST API, the Go SDK (`pkg/client/v1`), and the bundle
 layout plus artifact schemas. This section defines what counts as a breaking
 change on each, the notice a removal owes, and how a deprecation reaches the
@@ -73,17 +74,24 @@ debugging, and the runtime warning reaches the user who never read either.
 
 ### Exercising the channel before `v1.0.0`
 
-ROADMAP §2 requires the channel to be exercised on a real deprecation before
-`v1.0.0`, not merely documented. The exercise of record is the retirement of the
-`/v1/*` REST path family, tracked by
-[#2112](https://github.com/NVIDIA/aicr/issues/2112): it is the only candidate
-that drives the RFC 8594 headers and the OpenAPI `deprecated` flag, which is the
-arm integrators actually consume.
+ROADMAP [§1](ROADMAP.md#1-defensible-api-stability) requires this file to define
+breaking changes and the deprecation policy for every surface; it does not
+require a rehearsal. Manufacturing a deprecation to prove the channel works
+would prove only that we can manufacture one.
 
-The ADR-022 alpha-to-target artifact migration below also runs warn-then-remove
-across v0.22 and v0.23 and is a second data point, but it cannot stand alone as
-the exercise: alpha owes no window under the table above, so it does not
-demonstrate that the channel honors an obligation it actually had.
+Two real ones are already scheduled, and they are the exercise:
+
+- The `/v1/*` REST path family retirement ([#2112](https://github.com/NVIDIA/aicr/issues/2112))
+  is the one that drives the RFC 9745 `Deprecation` header, the RFC 8594
+  `Sunset` header, and the OpenAPI `deprecated` flag — the arm integrators
+  actually consume.
+- The ADR-022 alpha-to-target artifact migration runs warn-then-remove across
+  v0.22 and v0.23. It is a genuine warn-then-remove cycle, but a weaker
+  demonstration on its own: alpha owes no window under the table above, so it
+  does not show the channel honoring an obligation it actually had.
+
+If either turns up a gap in the mechanism, fix it then. That is cheaper and
+more honest than gating the release on a dry run.
 
 ## Artifact Compatibility and Deprecation
 

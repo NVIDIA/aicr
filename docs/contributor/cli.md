@@ -372,7 +372,8 @@ Rules:
 ## The CLI Surface Baseline
 
 The CLI is one of the four surfaces frozen at v1
-([ROADMAP §2](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#2-stability)). `pkg/cli/testdata/cli-surface.golden`
+([ROADMAP §1](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#1-defensible-api-stability)).
+`pkg/cli/testdata/cli-surface.golden`
 is its committed inventory — every command, flag, alias, type, default,
 `required`/`hidden` state, and environment variable — and `TestCLISurface`
 (`pkg/cli/surface_test.go`) fails when the live tree stops matching it. It runs
