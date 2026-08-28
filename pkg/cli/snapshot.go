@@ -156,6 +156,20 @@ func (o *snapshotCmdOptions) toAgentConfig() *aicr.AgentConfig {
 	}
 }
 
+// toSnapshotDelivery projects the resolved output options onto the delivery
+// descriptor that Job mode writes through. It exists as a named projection —
+// like toAgentConfig — because delivery is where the user's --format is
+// applied: the agent Job always stages YAML in a ConfigMap, so a format
+// dropped here is a format silently ignored (issue #2398).
+func (o *snapshotCmdOptions) toSnapshotDelivery() snapshotter.SnapshotDelivery {
+	return snapshotter.SnapshotDelivery{
+		Output:       o.tmplOpts.outputPath,
+		TemplatePath: o.tmplOpts.templatePath,
+		Kubeconfig:   o.kubeconfig,
+		Format:       o.tmplOpts.format,
+	}
+}
+
 // parseSnapshotCmdOptions resolves snapshot command inputs by merging CLI
 // flags with the optional --config (AICRConfig) source. CLI flags always win
 // over config values. Returns a fully-typed snapshotCmdOptions that callers
@@ -590,12 +604,9 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			// Deliver the RAW agent bytes, never a re-serialization of the
 			// parsed snapshot: a newer agent image can emit fields this
 			// binary's Snapshot type does not model, and a typed round trip
-			// would silently drop them.
-			return snapshotter.DeliverSnapshot(ctx, snap.Raw, snapshotter.SnapshotDelivery{
-				Output:       agentCfg.Output,
-				TemplatePath: agentCfg.TemplatePath,
-				Kubeconfig:   agentCfg.Kubeconfig,
-			})
+			// would silently drop them. YAML delivery is a byte copy for
+			// that reason; json and table necessarily re-render.
+			return snapshotter.DeliverSnapshot(ctx, snap.Raw, opts.toSnapshotDelivery())
 		},
 	}
 }
