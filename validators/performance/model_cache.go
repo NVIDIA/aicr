@@ -248,10 +248,14 @@ func checkStorageClassNodeCompatibility(instanceType string, sc *storagev1.Stora
 		if strings.HasPrefix(typ, rule.compatibleTypePrefix) || (rule.autoSelectType != "" && typ == rule.autoSelectType) {
 			continue
 		}
+		typeGuidance := fmt.Sprintf("parameters.type starts with %q", rule.compatibleTypePrefix)
+		if rule.autoSelectType != "" {
+			typeGuidance += fmt.Sprintf(" (or is %q)", rule.autoSelectType)
+		}
 		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 			"model-weights cache PVC would bind to StorageClass %q (provisioner %s), which node machine family %q can't attach; "+
-				"set %s to a StorageClass whose parameters.type starts with %q, or disable the cache with %s=off; see %s",
-			sc.Name, sc.Provisioner, family, envModelCacheStorageClass, rule.compatibleTypePrefix, envModelCacheSize, rule.docsRef))
+				"set %s to a StorageClass whose %s, or disable the cache with %s=off; see %s",
+			sc.Name, sc.Provisioner, family, envModelCacheStorageClass, typeGuidance, envModelCacheSize, rule.docsRef))
 	}
 	return nil
 }
