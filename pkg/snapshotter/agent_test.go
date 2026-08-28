@@ -15,8 +15,10 @@
 package snapshotter
 
 import (
+	"bytes"
 	"encoding/json"
 	stderrors "errors"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -735,6 +737,118 @@ func TestDeliverSnapshot_UnsetFormatStaysByteIdentical(t *testing.T) {
 		if string(got) != snapshotFixture {
 			t.Errorf("format %q altered the agent's bytes\n got:\n%s\nwant:\n%s", format, got, snapshotFixture)
 		}
+	}
+}
+
+// captureStdout redirects os.Stdout for the duration of fn and returns what
+// was written. The pipe is drained concurrently: a snapshot is larger than the
+// OS pipe buffer, so reading only after fn returns would deadlock on write.
+func captureStdout(t *testing.T, fn func()) []byte {
+	t.Helper()
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe(): %v", err)
+	}
+	saved := os.Stdout
+	os.Stdout = writer
+	t.Cleanup(func() { os.Stdout = saved })
+
+	drained := make(chan []byte, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, copyErr := io.Copy(&buf, reader)
+		if copyErr != nil {
+			t.Errorf("drain stdout: %v", copyErr)
+		}
+		drained <- buf.Bytes()
+	}()
+
+	fn()
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stdout pipe: %v", err)
+	}
+	out := <-drained
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close stdout reader: %v", err)
+	}
+	return out
+}
+
+// TestDeliverSnapshot_StdoutMatchesFile pins stdout as a delivery destination
+// like any other: `aicr snapshot > snapshot.yaml` has to produce the same
+// artifact as `-o snapshot.yaml`, for every format. Stdout used to append a
+// newline the file path did not, so the two differed by a byte and a piped
+// hash could not reproduce the file.
+func TestDeliverSnapshot_StdoutMatchesFile(t *testing.T) {
+	for _, format := range []serializer.Format{"", serializer.FormatYAML, serializer.FormatJSON, serializer.FormatTable} {
+		t.Run(string(format), func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), "snapshot.out")
+			if err := DeliverSnapshot(t.Context(), []byte(snapshotFixture), SnapshotDelivery{
+				Output: file,
+				Format: format,
+			}); err != nil {
+				t.Fatalf("DeliverSnapshot(file, %q): %v", format, err)
+			}
+			wantBytes, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("read delivered snapshot: %v", err)
+			}
+
+			var deliverErr error
+			got := captureStdout(t, func() {
+				deliverErr = DeliverSnapshot(t.Context(), []byte(snapshotFixture), SnapshotDelivery{
+					Output: "-",
+					Format: format,
+				})
+			})
+			if deliverErr != nil {
+				t.Fatalf("DeliverSnapshot(stdout, %q): %v", format, deliverErr)
+			}
+
+			if !bytes.Equal(got, wantBytes) {
+				t.Errorf("stdout and file delivery differ for format %q\n stdout (%d bytes):\n%s\n file (%d bytes):\n%s",
+					format, len(got), got, len(wantBytes), wantBytes)
+			}
+			// Every rendering terminates itself, which is what lets
+			// stdout add nothing without gluing the next shell prompt
+			// to the output.
+			if len(wantBytes) > 0 && wantBytes[len(wantBytes)-1] != '\n' {
+				t.Errorf("format %q rendering is not newline-terminated; stdout would leave a "+
+					"dangling prompt:\n%s", format, wantBytes)
+			}
+		})
+	}
+}
+
+// TestDeliverSnapshot_StdoutPreservesTrailingNewline is the byte-identity
+// guarantee on the stdout path. The agent's document always ends in a newline
+// (MarshalYAMLDeterministic), and appending another gave it a trailing blank
+// line; an SDK caller can also hand over bytes with no terminator, and stdout
+// must not invent one. Neither input may be rewritten.
+func TestDeliverSnapshot_StdoutPreservesTrailingNewline(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{"trailing newline", snapshotFixture},
+		{"no trailing newline", strings.TrimSuffix(snapshotFixture, "\n")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var deliverErr error
+			got := captureStdout(t, func() {
+				deliverErr = DeliverSnapshot(t.Context(), []byte(tt.data), SnapshotDelivery{Output: "-"})
+			})
+			if deliverErr != nil {
+				t.Fatalf("DeliverSnapshot(stdout): %v", deliverErr)
+			}
+			if string(got) != tt.data {
+				t.Errorf("stdout altered the agent's bytes\n got  (%d bytes): %q\n want (%d bytes): %q",
+					len(got), got, len(tt.data), tt.data)
+			}
+		})
 	}
 }
 

@@ -635,12 +635,15 @@ func DeliverSnapshot(ctx context.Context, data []byte, dest SnapshotDelivery) er
 	}
 
 	if dest.Output == "" || dest.Output == "-" || dest.Output == serializer.StdoutURI {
-		// Output snapshot data to stdout for consumption by caller. A short write
+		// Exactly the rendered bytes, no added terminator: stdout is a
+		// delivery destination like any other, so `aicr snapshot >
+		// snapshot.yaml` has to hash the same as `-o snapshot.yaml`.
+		// Every rendering already ends in a newline — the agent's
+		// document because it comes from MarshalYAMLDeterministic, JSON
+		// and table because renderSnapshotFormat terminates them — so
+		// this does not leave a terminal prompt dangling. A short write
 		// or broken pipe must surface, not silently drop the snapshot.
 		if _, err := os.Stdout.Write(rendered); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to write snapshot to stdout", err)
-		}
-		if _, err := os.Stdout.Write([]byte("\n")); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "failed to write snapshot to stdout", err)
 		}
 		return nil
