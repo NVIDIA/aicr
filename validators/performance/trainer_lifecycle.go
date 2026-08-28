@@ -209,7 +209,7 @@ func cloneControllerTolerateAll() []any {
 // declares tolerations. Scoped to those two names so an unrelated Deployment
 // in the manifest set never gets a blanket toleration it didn't ask for.
 func applyControllerTolerations(obj *unstructured.Unstructured) error {
-	if gvk := obj.GroupVersionKind(); gvk.Kind != "Deployment" || gvk.Group != "apps" {
+	if gvk := obj.GroupVersionKind(); gvk.Kind != "Deployment" || gvk.Group != apiGroupApps {
 		return nil
 	}
 	switch obj.GetName() {
@@ -242,7 +242,7 @@ var (
 		Group: apiGroupAPIExtensions, Version: "v1", Resource: resourceCRDs,
 	}
 	trainerDeploymentGVR = schema.GroupVersionResource{
-		Group: "apps", Version: "v1", Resource: "deployments",
+		Group: apiGroupApps, Version: "v1", Resource: "deployments",
 	}
 	trainerServiceGVR = schema.GroupVersionResource{
 		Group: "", Version: "v1", Resource: "services",
@@ -888,7 +888,12 @@ func decodeTrainerObjects(resources []*resource.Resource) ([]*unstructured.Unstr
 		if tolErr := applyControllerTolerations(obj); tolErr != nil {
 			return nil, tolErr
 		}
-		if obj.GroupVersionKind().Kind == "Deployment" {
+		// Gated the same way as applyControllerTolerations above: a
+		// Deployment-kind resource in a non-apps group must not mark a
+		// controller name "seen" without actually receiving the toleration,
+		// or it would suppress the warning for the exact silent-miss below
+		// that the warning exists to catch.
+		if gvk := obj.GroupVersionKind(); gvk.Kind == "Deployment" && gvk.Group == apiGroupApps {
 			seenControllers[obj.GetName()] = true
 		}
 		objs = append(objs, obj)
