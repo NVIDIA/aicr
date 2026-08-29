@@ -540,11 +540,14 @@ func TestDeprecationMiddleware(t *testing.T) {
 		wantHeaders bool
 	}{
 		{
+			// The subject/replacement pair is synthetic. Nothing is deprecated
+			// in the shipped configuration, so this marks a real route against
+			// a stand-in successor purely to drive the middleware.
 			name: "marked route carries the headers",
 			routes: map[string]deprecation.Notice{
 				"/v1/recipe": {
 					Subject:     "/v1/recipe",
-					Replacement: "/v2/recipe",
+					Replacement: "/v1/recipe with an explicit profile",
 					RemovedIn:   "v0.25",
 					Deprecated:  deprecated,
 					Sunset:      sunset,
@@ -554,13 +557,20 @@ func TestDeprecationMiddleware(t *testing.T) {
 			wantHeaders: true,
 		},
 		{
-			// The map is keyed by exact path: marking /v1/recipe must not leak
-			// onto the successor it points at.
+			// The map is keyed by exact path, so a marked route must not leak
+			// onto a sibling. The notice carries a full set of dates: without
+			// them the absence of headers would be explained by the zero
+			// Deprecated time rather than by the path not matching.
 			name: "unmarked route is untouched",
 			routes: map[string]deprecation.Notice{
-				"/v1/recipe": {Subject: "/v1/recipe", RemovedIn: "v0.25"},
+				"/v1/recipe": {
+					Subject:    "/v1/recipe",
+					RemovedIn:  "v0.25",
+					Deprecated: deprecated,
+					Sunset:     sunset,
+				},
 			},
-			path:        "/v2/recipe",
+			path:        "/v1/bundle",
 			wantHeaders: false,
 		},
 		{

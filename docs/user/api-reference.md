@@ -26,10 +26,10 @@ The AICR API Server provides HTTP REST access to recipe generation and bundle cr
 
 | Feature | API | CLI |
 |---------|-----|-----|
-| Recipe generation | ✅ GET/POST `/v1/recipe`; profile- and Slurm-accounting-aware GET/POST `/v2/recipe` | ✅ `aicr recipe` |
-| Value query | ✅ GET/POST `/v1/query`; profile- and Slurm-accounting-aware GET/POST `/v2/query` | ✅ `aicr query` |
-| Bundle creation | ✅ POST `/v1/bundle`; profile- and Slurm-accounting-aware POST `/v2/bundle` | ✅ `aicr bundle` |
-| Bundle attestation | ✅ POST `/v1/bundle?attest=true`; profile- and Slurm-accounting-aware POST `/v2/bundle?attest=true` (server signs as itself) | ✅ `aicr bundle --attest` (interactive or ambient OIDC) |
+| Recipe generation | ✅ profile- and Slurm-accounting-aware GET/POST `/v1/recipe` | ✅ `aicr recipe` |
+| Value query | ✅ profile- and Slurm-accounting-aware GET/POST `/v1/query` | ✅ `aicr query` |
+| Bundle creation | ✅ profile- and Slurm-accounting-aware POST `/v1/bundle` | ✅ `aicr bundle` |
+| Bundle attestation | ✅ POST `/v1/bundle?attest=true` (server signs as itself) | ✅ `aicr bundle --attest` (interactive or ambient OIDC) |
 | Snapshot capture | ❌ Use CLI | ✅ `aicr snapshot` |
 | ConfigMap I/O | ❌ Use CLI | ✅ `cm://` URIs |
 | Agent deployment | ❌ Use CLI | ✅ `aicr snapshot` |
@@ -60,14 +60,10 @@ curl "http://localhost:8080/v1/recipe?accelerator=h100&service=eks"
 # GET: Training workload on Ubuntu
 curl "http://localhost:8080/v1/recipe?accelerator=h100&service=eks&intent=training&os=ubuntu"
 
-# POST: Recipe from criteria file (YAML body)
+# POST: Recipe from a criteria envelope (YAML body)
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
-  -d 'kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: my-config
-spec:
+  -d 'criteria:
   service: eks
   accelerator: h100
   intent: training'
@@ -111,8 +107,7 @@ curl "http://localhost:8080/"
   "service": "aicrd",
   "version": "v0.14.0",
   "routes": [
-    "/v1/recipe", "/v1/query", "/v1/bundle",
-    "/v2/recipe", "/v2/query", "/v2/bundle"
+    "/v1/recipe", "/v1/query", "/v1/bundle"
   ]
 }
 ```
@@ -147,9 +142,7 @@ curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100"
 # Full specification
 curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&nodes=8"
 
-# Using gpu alias. Note: the profiled families (service=aks, service=gke)
-# are rejected on /v1 — use /v2/recipe for those (see the AKS/GKE
-# cut-over note below).
+# Using gpu alias
 curl "http://localhost:8080/v1/recipe?gpu=gb200&service=eks&os=ubuntu"
 
 # Pretty print with jq
@@ -160,29 +153,32 @@ curl -s "http://localhost:8080/v1/recipe?accelerator=h100" | jq '.'
 
 ### POST /v1/recipe
 
-Generate an optimized configuration recipe from a criteria file body. This endpoint provides an alternative to query parameters, accepting a Kubernetes-style `RecipeCriteria` resource in the request body.
+Generate an optimized configuration recipe from a criteria body. This endpoint provides an alternative to query parameters.
 
 **Content Types:**
 - `application/json` - JSON format
 - `application/x-yaml` - YAML format
 
+An explicit, supported `Content-Type` is required; a missing, aliased, or unsupported media type is rejected.
+
 **Request Body:**
 
-The request body must be a `RecipeCriteria` resource:
+The request body is a strict envelope. Unknown fields are rejected, so a typo fails loudly instead of being silently ignored:
 
 ```yaml
-kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: my-criteria
-spec:
+criteria:
   service: eks
   accelerator: gb200
   os: ubuntu
   intent: training
   platform: kubeflow
   nodes: 8
+profile: gpuStack=operator-managed  # optional
 ```
+
+`profile` is optional; omit it to take the composition's declared default. If you also pass `profile=` as a query parameter, the two must agree.
+
+The Kubernetes-style `RecipeCriteria` resource body that this endpoint accepted before v0.21 is no longer supported and returns `400`.
 
 **Examples:**
 
@@ -190,11 +186,7 @@ spec:
 # POST with YAML body
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
-  -d 'kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: training-config
-spec:
+  -d 'criteria:
   service: eks
   accelerator: h100
   intent: training'
@@ -203,10 +195,7 @@ spec:
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/json" \
   -d '{
-    "kind": "RecipeCriteria",
-    "apiVersion": "aicr.run/v1alpha2",
-    "metadata": {"name": "training-config"},
-    "spec": {
+    "criteria": {
       "service": "eks",
       "accelerator": "h100",
       "intent": "training"
@@ -215,13 +204,13 @@ curl -X POST "http://localhost:8080/v1/recipe" \
 
 # POST with criteria file
 curl -X POST "http://localhost:8080/v1/recipe" \
-  -H "Content-Type: application/yaml" \
+  -H "Content-Type: application/x-yaml" \
   -d @criteria.yaml
 
 # Pretty print response
 curl -s -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/json" \
-  -d '{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100"}}' \
+  -d '{"criteria":{"service":"eks","accelerator":"h100"}}' \
   | jq '.'
 ```
 
@@ -370,7 +359,7 @@ curl -s "http://localhost:8080/v1/query?service=eks&accelerator=h100&selector=co
 
 ### POST /v1/query
 
-Alternative to `GET /v1/query` that accepts the criteria and selector in the request body. The body is a `QueryRequest` with a `criteria` object (same fields as the `RecipeCriteria` spec) and a `selector` string.
+Alternative to `GET /v1/query` that accepts the criteria and selector in the request body. The body is a strict envelope with a `criteria` object (the same dimensions accepted as query parameters on `GET /v1/query`), a required `selector` string, and an optional `profile`. Unknown fields are rejected.
 
 **Content Types:**
 - `application/json` - JSON format
@@ -401,46 +390,43 @@ The response format matches `GET /v1/query`: scalar values are returned as plain
 
 **Error Responses:**
 
-Same as `GET /v1/query` — see the [GET /v1/query error responses](#get-v1query) section above. The no-criteria and uncovered-dimension 400 cases apply. Note: unlike `GET /v1/query`, omitting `selector` from the POST body returns the entire hydrated recipe rather than a 400 (use `/v2/query` if you need the selector to be required).
+Same as `GET /v1/query` — see the [GET /v1/query error responses](#get-v1query) section above. The no-criteria and uncovered-dimension 400 cases apply. `selector` must be present on both GET and POST; omitting it is a 400. Passing it explicitly empty (`selector=` on GET, `"selector": ""` in a POST envelope) is the documented way to ask for the entire hydrated recipe.
 
 ---
 
-### Configured v2 endpoints
+### Profile and Slurm-accounting endpoints
 
-`v2` in the route and `apiVersion` in a recipe document are independent
-version axes. The route segment versions the transient HTTP contract;
+The `v1` in the route and the `apiVersion` in a recipe document are
+independent version axes. The route segment versions the HTTP contract;
 `aicr.run/v1alpha2` and `aicr.run/v1alpha3` are the recipe schemas emitted by
-this reader-first release. `/v2/bundle` also accepts their ADR-022 targets:
+this reader-first release. `/v1/bundle` also accepts their ADR-022 targets:
 `aicr.run/v1` for a default recipe and `aicr.run/v1beta2` for a
 profile/configuration recipe, plus versionless legacy artifacts. Selecting a
-profile or resolving a Slurm accounting mode—not the route number—determines
-which schema track applies.
+profile or resolving a Slurm accounting mode determines which schema track
+applies.
 
-`/v2/recipe`, `/v2/query`, and `/v2/bundle` expose the configured HTTP contract
-for profiles and Slurm accounting. The AKS and GKE families are the embedded
-profile adopters (`gpuStack`), so **`/v1/recipe` and `/v1/query` requests with
-`service=aks` or `service=gke` now reject and must move to `/v2`**;
-`/v1/bundle` rejects only profile-bearing recipe bodies, so legacy unprofiled
-AKS/GKE recipes still bundle there (see the cut-over note below). `/v1`
-remains unchanged for families without a profile.
+There is a single route family. `/v1/recipe`, `/v1/query`, and `/v1/bundle`
+serve every composition — profiled and unprofiled alike — with one contract.
+The AKS and GKE families are the embedded profile adopters (`gpuStack`) and
+need no special routing.
 
-**GET `/v2/recipe`.** Accepts the `/v1/recipe` criteria parameters plus
+**GET `/v1/recipe`.** Accepts the `/v1/recipe` criteria parameters plus
 optional `profile=name=value` and `slurmAccountingMode`. Profile omission
 applies the resolved declaration's required default. Slurm accounting accepts
 `disabled`, `customer-managed`, or `aicr-provided`; omission defaults a Slurm
 recipe to `disabled`. The setting is recorded at
 `configuration.slurm.accounting.mode` in an `aicr.run/v1alpha3` RecipeResult.
-The v2 route rejects unknown query parameters and conflicting repeated values.
+The route rejects unknown query parameters and conflicting repeated values.
 
 ```shell
 # AKS, non-default value (omit profile= for the azure-managed default):
-curl "http://localhost:8080/v2/recipe?service=aks&accelerator=h100&os=ubuntu&intent=training&profile=gpuStack=operator-managed"
+curl "http://localhost:8080/v1/recipe?service=aks&accelerator=h100&os=ubuntu&intent=training&profile=gpuStack=operator-managed"
 
 # Slurm with AICR-provided accounting
-curl "http://localhost:8080/v2/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=aicr-provided"
+curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=aicr-provided"
 ```
 
-**POST `/v2/recipe`.** Accepts a strict JSON or YAML envelope. `criteria` is
+**POST `/v1/recipe`.** Accepts a strict JSON or YAML envelope. `criteria` is
 the plain criteria object, not a `RecipeCriteria` resource. Profile selection
 may be supplied in the envelope, as the `profile` query parameter, or in both
 places when the values agree. `slurmAccountingMode` is supplied as the same
@@ -460,11 +446,11 @@ INVALID_REQUEST`. POST envelopes require `Content-Type: application/json` or
 `Content-Type: application/x-yaml`; missing, aliased, or unsupported media
 types are rejected.
 
-**GET and POST `/v2/query`.** GET accepts the v2 recipe parameters, including
+**GET and POST `/v1/query`.** GET accepts the recipe parameters, including
 `slurmAccountingMode`, plus
 `selector`. POST accepts the same strict envelope with a required selector.
 POST profile selection follows the same query/envelope agreement rule as
-`/v2/recipe`:
+`/v1/recipe`:
 
 ```yaml
 criteria:
@@ -474,7 +460,7 @@ profile: gpuStack=azure-managed
 selector: metadata.selectedProfile
 ```
 
-**POST `/v2/bundle`.** Uses the same query parameters and ZIP response as
+**POST `/v1/bundle`.** Uses the same query parameters and ZIP response as
 `POST /v1/bundle`. It carries no profile-selection field because its body is
 an already-selected `RecipeResult`. It accepts legacy
 `aicr.run/v1alpha2` and `aicr.run/v1` default recipes, including older
@@ -491,8 +477,8 @@ rejected.
 # the commands are sequential (no pipeline), so pipefail is not needed.
 set -eu
 curl -fsS -o recipe.json \
-  "http://localhost:8080/v2/recipe?service=aks&accelerator=h100&os=ubuntu&intent=training&profile=gpuStack=operator-managed"
-curl -fsS -X POST "http://localhost:8080/v2/bundle" \
+  "http://localhost:8080/v1/recipe?service=aks&accelerator=h100&os=ubuntu&intent=training&profile=gpuStack=operator-managed"
+curl -fsS -X POST "http://localhost:8080/v1/bundle" \
   -H "Content-Type: application/json" -d @recipe.json -o bundles.zip
 ```
 
@@ -503,37 +489,26 @@ override surfaces: divergent static values, intersecting dynamic paths,
 owned-component removal, and argocd-helm install-time values fail closed before
 output.
 
-The `/v1` routes remain the legacy contract. Explicit profile and
-`slurmAccountingMode` input is rejected; Slurm recipes remain implicitly
-disabled and use the default-track response shape. That track is
-`aicr.run/v1alpha2` today, and the schema also admits its ADR-022 target
-`aicr.run/v1` so a client generated from this spec tolerates the value a
-release before AICR emits it. `/v1` never carries a profile-track version.
-`/v1/recipe` and `/v1/query` reject a composition after it adopts a
-profile even when the request omits selection, and `/v1/bundle` rejects a
-profile-bearing body. Migrate a converted workflow to v2 as one cut-over.
+A recipe resolved without an explicit profile or `slurmAccountingMode` uses
+the default-track response shape. That track is `aicr.run/v1alpha2` today, and
+the schema also admits its ADR-022 target `aicr.run/v1` so a client generated
+from this spec tolerates the value a release before AICR emits it. Profile and
+Slurm-accounting selection are available on every endpoint; no composition
+needs special routing.
 
-**AKS/GKE cut-over:** the AKS and GKE families are the embedded adopters, so
-`/v1/recipe` and `/v1/query` requests with `service=aks` or `service=gke` now
-reject. Move GET clients to `GET /v2/recipe` / `GET /v2/query` (identical
-query parameters, plus optional `profile=gpuStack=azure-managed` or
-`profile=gpuStack=operator-managed` on AKS, and `profile=gpuStack=gke-default`
-or `profile=gpuStack=bundle-installer` on GKE); move POST
-clients to `POST /v2/recipe` / `POST /v2/query`, converting the body to the
-strict envelope described above (a plain `criteria` object with an explicit
-`Content-Type`, not the v1 `RecipeCriteria` resource). Then POST the
-resulting `aicr.run/v1alpha3` recipes to `/v2/bundle`. Other families are
-unaffected on `/v1` until they adopt a profile.
+The AKS and GKE families are the embedded profile adopters (`gpuStack`). Their
+compositions resolve like any other: omit `profile=` to take the declared
+default, or select one explicitly.
 
 ```shell
-# GKE migration: /v2/recipe (omit profile= for the gke-default default,
-# or select gpuStack=bundle-installer explicitly), then POST to /v2/bundle.
+# GKE: omit profile= for the gke-default default, or select
+# gpuStack=bundle-installer explicitly, then POST to /v1/bundle.
 # -f stops on an HTTP error so a 4xx/5xx recipe body is never staged and
 # an error response is never written to bundles.zip.
 set -euo pipefail
 curl -fsS -o recipe.json \
-  "http://localhost:8080/v2/recipe?service=gke&accelerator=h100&os=cos&intent=training&profile=gpuStack=bundle-installer"
-curl -fsS -X POST "http://localhost:8080/v2/bundle" \
+  "http://localhost:8080/v1/recipe?service=gke&accelerator=h100&os=cos&intent=training&profile=gpuStack=bundle-installer"
+curl -fsS -X POST "http://localhost:8080/v1/bundle" \
   -H "Content-Type: application/json" -d @recipe.json -o bundles.zip
 ```
 
@@ -571,7 +546,7 @@ needed. This release emits `apiVersion: aicr.run/v1alpha2` or
 accept `aicr.run/v1` and `aicr.run/v1beta2`, respectively. The profile track identifies
 recipes carrying `metadata.selectedProfile`, typed
 `configuration.slurm.accounting`, or both; profile-bearing artifacts must use
-`/v2/bundle`. New clients should preserve the version emitted by recipe
+`/v1/bundle`. New clients should preserve the version emitted by recipe
 resolution.
 
 For backward compatibility, the endpoint also accepts:
@@ -590,7 +565,7 @@ rewritten — a request that omits `apiVersion` still produces an artifact with
 an empty `apiVersion`, which every reader accepts as the legacy shape.
 
 Any other `kind` is rejected with a 400, so the endpoint never emits an artifact
-it would refuse to read back. This matches the `/v2/bundle` decode path, and the
+it would refuse to read back. This matches the `/v1/bundle` decode path, and the
 CLI file loader for the same values — `aicr bundle -r` accepts a
 `RecipeMetadata` file as an *overlay* to hydrate, but as a hydrated
 `RecipeResult` artifact it too accepts only `RecipeResult` or an absent kind.
@@ -1038,9 +1013,7 @@ Allowlists are configured via environment variables when starting the server:
 - If an environment variable is **not set**, all values for that criteria are allowed
 - If an environment variable is **set**, only the specified values are permitted
 - The `any` value is always allowed regardless of allowlist configuration
-- Allowlists apply to the recipe, query, and bundle endpoints on both routes —
-  `/v1/recipe`, `/v1/query`, `/v1/bundle`, `/v2/recipe`, `/v2/query`, and
-  `/v2/bundle`
+- Allowlists apply to `/v1/recipe`, `/v1/query`, and `/v1/bundle`
 
 ### Example Configuration
 
@@ -1193,9 +1166,7 @@ main();
 #!/bin/bash
 # Generate recipes for multiple environments
 
-# /v2/recipe accepts every family (profiled and unprofiled); the aks and
-# gke entries below would be rejected on /v1 because those families carry
-# the gpuStack profile (see the AKS/GKE cut-over note).
+# /v1/recipe accepts every family, profiled and unprofiled alike.
 environments=(
   "os=ubuntu&accelerator=h100&service=eks"
   "os=cos&accelerator=h100&service=gke"
@@ -1205,7 +1176,7 @@ environments=(
 for env in "${environments[@]}"; do
   echo "Fetching recipe for: $env"
 
-  curl -s "http://localhost:8080/v2/recipe?${env}" \
+  curl -s "http://localhost:8080/v1/recipe?${env}" \
     | jq -r '.componentRefs[] | "\(.name): \(.version)"'
 
   echo ""

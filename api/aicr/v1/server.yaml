@@ -40,10 +40,9 @@ info:
     - **Interactive Sigstore attestation** (`aicr bundle --attest` with browser-based OIDC):
       the interactive, user-authenticated signing flow is CLI-only. The API server instead
       offers non-interactive server-side attestation: `POST /v1/bundle?attest=true`
-      or `POST /v2/bundle?attest=true` returns a
-      signed bundle, with the server signing as itself using its operator-configured KMS key or
-      private-Sigstore keyless identity. No signing identity is ever taken from the request.
-      See the `attest` query parameter on POST /v1/bundle and POST /v2/bundle.
+      returns a signed bundle, with the server signing as itself using its operator-configured
+      KMS key or private-Sigstore keyless identity. No signing identity is ever taken from the
+      request. See the `attest` query parameter on POST /v1/bundle.
 
     - **OCI registry push** (`aicr bundle --output oci://...`) — pushes bundle artifacts to
       a container registry.
@@ -96,797 +95,12 @@ paths:
                       - /v1/recipe
                       - /v1/query
                       - /v1/bundle
-                      - /v2/recipe
-                      - /v2/query
-                      - /v2/bundle
 
   /v1/recipe:
     get:
       tags: [Recipes]
-      summary: Get optimized system configuration recipe
-      operationId: getRecipe
-      description: >
-        Returns a recipe containing measurements and configuration recommendations
-        based on the provided query parameters. Uses rule-based overlay matching
-        to combine base measurements with environment-specific configurations.
-      parameters:
-        - name: X-Request-Id
-          in: header
-          required: false
-          schema:
-            type: string
-            format: uuid
-          description: Client-provided request ID for tracing
-        - name: service
-          in: query
-          required: false
-          description: Kubernetes service/environment type. If omitted, treated as "any" (wildcard).
-          schema:
-            type: string
-            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, any]
-            default: any
-        - name: accelerator
-          in: query
-          required: false
-          description: GPU/accelerator type. If omitted, treated as "any" (wildcard).
-          schema:
-            type: string
-            enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
-            default: any
-        - name: gpu
-          in: query
-          required: false
-          description: Alias for accelerator parameter (backwards compatibility).
-          schema:
-            type: string
-            enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
-            default: any
-        - name: intent
-          in: query
-          required: false
-          description: Workload intent. If omitted, treated as "any" (wildcard).
-          schema:
-            type: string
-            enum: [training, inference, any]
-            default: any
-        - name: os
-          in: query
-          required: false
-          description: >-
-            GPU node operating system. If omitted, treated as "any" (wildcard) and
-            OS-agnostic recipe is returned. Some service+accelerator combinations
-            (e.g. OKE with L40S) have no OS-agnostic recipe; omitting os for those
-            returns 400.
-          schema:
-            type: string
-            enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
-            default: any
-        - name: platform
-          in: query
-          required: false
-          description: Platform/framework type. If omitted, treated as "any" (wildcard).
-          schema:
-            type: string
-            enum: [dynamo, kubeflow, nim, runai, slurm, any]
-            default: any
-        - name: nodes
-          in: query
-          required: false
-          description: Number of GPU nodes (0 = any/unspecified).
-          schema:
-            type: integer
-            minimum: 0
-            default: 0
-      responses:
-        "200":
-          description: Recipe payload for the requested parameter combination
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-            Cache-Control:
-              $ref: "#/components/headers/CacheControl"
-            X-RateLimit-Limit:
-              $ref: "#/components/headers/RateLimitLimit"
-            X-RateLimit-Remaining:
-              $ref: "#/components/headers/RateLimitRemaining"
-            X-RateLimit-Reset:
-              $ref: "#/components/headers/RateLimitReset"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LegacyRecipeResponse"
-              examples:
-                basic:
-                  summary: Basic recipe request
-                  value:
-                    apiVersion: aicr.run/v1alpha2
-                    kind: RecipeResult
-                    metadata:
-                      version: v1.0.0
-                      appliedOverlays:
-                        - base
-                        - eks
-                        - eks-training
-                        - gb200-eks-training
-                      excludedOverlays:
-                        - name: h100-eks-ubuntu-training
-                          reason: mixin-constraint-failed
-                      constraintWarnings:
-                        - overlay: h100-eks-ubuntu-training
-                          constraint: OS.sysctl./proc/sys/kernel/osrelease
-                          expected: ">= 6.8"
-                          actual: "5.15.0"
-                          reason: "mixin-constraint-failed: expected >= 6.8, got 5.15.0"
-                    criteria:
-                      service: eks
-                      accelerator: gb200
-                      intent: training
-                      os: any
-                    componentRefs:
-                      - name: gpu-operator
-                        type: Helm
-                        version: v25.3.3
-                        source: https://helm.ngc.nvidia.com/nvidia
-                        chart: gpu-operator
-                      - name: network-operator
-                        type: Helm
-                        version: v25.4.0
-                        source: https://helm.ngc.nvidia.com/nvidia
-                        chart: network-operator
-                    constraints:
-                      - name: GPU.driver.version
-                        value: "580.82.07"
-                      - name: GPU.driver.cudaVersion
-                        value: "13.1"
-        "400":
-          description: >
-            Invalid request. Common causes: (1) no criteria provided — all
-            criteria parameters omitted or defaulting to `any`; returns code
-            `INVALID_REQUEST` with message `"no criteria provided: specify at
-            least one of service, accelerator, intent, os, platform, nodes"`.
-            (2) Malformed criteria or allowlist violation. (3) A resolved
-            profile (which requires `/v2/recipe`). (4) A stated criteria
-            dimension not honored by any applicable recipe overlay (uncovered
-            dimension); uncovered-dimension errors carry a machine-readable
-            `details.uncovered` array (dimension, requestedValue,
-            validCompletions). Snapshot-driven resolution (CLI `--snapshot` / Go
-            SDK) may additionally attach `excludedOverlays` /
-            `constraintWarnings`; this HTTP API resolves from criteria only and
-            never emits those fields.
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              examples:
-                invalidParameter:
-                  summary: Invalid query parameter
-                  value:
-                    code: INVALID_REQUEST
-                    message: "Invalid recipe query"
-                    details:
-                      error: "invalid os family: windows"
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-                uncoveredDimension:
-                  summary: Stated criteria dimension not honored by any overlay
-                  value:
-                    code: INVALID_REQUEST
-                    message: >-
-                      platform 'kubeflow' for criteria(service=eks,
-                      accelerator=h100, intent=training, platform=kubeflow)
-                      requires os (valid: ubuntu)
-                    details:
-                      uncovered:
-                        - dimension: platform
-                          requestedValue: kubeflow
-                          validCompletions:
-                            - os: ubuntu
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-        "429":
-          description: Rate limit exceeded
-          headers:
-            Retry-After:
-              schema:
-                type: integer
-              description: Seconds until retry allowed
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-            X-RateLimit-Limit:
-              $ref: "#/components/headers/RateLimitLimit"
-            X-RateLimit-Remaining:
-              $ref: "#/components/headers/RateLimitRemaining"
-            X-RateLimit-Reset:
-              $ref: "#/components/headers/RateLimitReset"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "500":
-          description: Internal server error
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              examples:
-                internalError:
-                  summary: Server error during recipe build
-                  value:
-                    code: INTERNAL_ERROR
-                    message: "Failed to build recipe"
-                    details:
-                      error: "failed to load recipe store"
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: true
-        "503":
-          description: Service temporarily unavailable
-          headers:
-            Retry-After:
-              schema:
-                type: integer
-              description: Seconds until retry allowed
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-    post:
-      tags: [Recipes]
-      summary: Generate recipe from criteria body
-      operationId: createRecipe
-      description: >
-        Alternative to GET with query parameters. Accepts criteria as JSON or YAML
-        in the request body. Useful for programmatic access or when criteria is
-        stored in configuration files.
-      parameters:
-        - name: X-Request-Id
-          in: header
-          required: false
-          schema:
-            type: string
-            format: uuid
-          description: Client-provided request ID for tracing
-      requestBody:
-        required: true
-        description: Recipe criteria in Kubernetes-style resource format
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/RecipeCriteria"
-            examples:
-              minimal:
-                summary: Minimal criteria (single field)
-                value:
-                  kind: RecipeCriteria
-                  apiVersion: aicr.run/v1alpha2
-                  metadata:
-                    name: eks-minimal
-                  spec:
-                    service: eks
-              full:
-                summary: Full criteria specification
-                value:
-                  kind: RecipeCriteria
-                  apiVersion: aicr.run/v1alpha2
-                  metadata:
-                    name: gb200-eks-ubuntu-training
-                  spec:
-                    service: eks
-                    accelerator: gb200
-                    intent: training
-                    os: ubuntu
-                    nodes: 4
-          application/x-yaml:
-            schema:
-              $ref: "#/components/schemas/RecipeCriteria"
-            examples:
-              minimal:
-                summary: Minimal criteria (single field)
-                value: |
-                  kind: RecipeCriteria
-                  apiVersion: aicr.run/v1alpha2
-                  metadata:
-                    name: eks-minimal
-                  spec:
-                    service: eks
-              full:
-                summary: Full criteria specification
-                value: |
-                  kind: RecipeCriteria
-                  apiVersion: aicr.run/v1alpha2
-                  metadata:
-                    name: gb200-eks-ubuntu-training
-                  spec:
-                    service: eks
-                    accelerator: gb200
-                    intent: training
-                    os: ubuntu
-                    nodes: 4
-      responses:
-        "200":
-          description: Recipe payload for the provided criteria
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-            Cache-Control:
-              $ref: "#/components/headers/CacheControl"
-            X-RateLimit-Limit:
-              $ref: "#/components/headers/RateLimitLimit"
-            X-RateLimit-Remaining:
-              $ref: "#/components/headers/RateLimitRemaining"
-            X-RateLimit-Reset:
-              $ref: "#/components/headers/RateLimitReset"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LegacyRecipeResponse"
-        "400":
-          description: >
-            Invalid request. Common causes: (1) no criteria provided — all
-            criteria fields omitted or defaulting to `any`; returns code
-            `INVALID_REQUEST` with message `"no criteria provided: specify at
-            least one of service, accelerator, intent, os, platform, nodes"`.
-            (2) Malformed criteria or allowlist violation. (3) A resolved
-            profile (which requires `/v2/recipe`). (4) A stated criteria
-            dimension not honored by any applicable recipe overlay (uncovered
-            dimension); uncovered-dimension errors carry a machine-readable
-            `details.uncovered` array (dimension, requestedValue,
-            validCompletions). Snapshot-driven resolution (CLI `--snapshot` / Go
-            SDK) may additionally attach `excludedOverlays` /
-            `constraintWarnings`; this HTTP API resolves from criteria only and
-            never emits those fields.
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              examples:
-                invalidCriteria:
-                  summary: Invalid criteria value
-                  value:
-                    code: INVALID_REQUEST
-                    message: "Invalid recipe criteria"
-                    details:
-                      error: "invalid service type: windows"
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-                uncoveredDimension:
-                  summary: Stated criteria dimension not honored by any overlay
-                  value:
-                    code: INVALID_REQUEST
-                    message: >-
-                      platform 'kubeflow' for criteria(service=eks,
-                      accelerator=h100, intent=training, platform=kubeflow)
-                      requires os (valid: ubuntu)
-                    details:
-                      uncovered:
-                        - dimension: platform
-                          requestedValue: kubeflow
-                          validCompletions:
-                            - os: ubuntu
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-                emptyBody:
-                  summary: Empty request body
-                  value:
-                    code: INVALID_REQUEST
-                    message: "Invalid recipe criteria"
-                    details:
-                      error: "request body is empty"
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-        "429":
-          description: Rate limit exceeded
-          headers:
-            Retry-After:
-              schema:
-                type: integer
-              description: Seconds until retry allowed
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-            X-RateLimit-Limit:
-              $ref: "#/components/headers/RateLimitLimit"
-            X-RateLimit-Remaining:
-              $ref: "#/components/headers/RateLimitRemaining"
-            X-RateLimit-Reset:
-              $ref: "#/components/headers/RateLimitReset"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "500":
-          description: Internal server error
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "503":
-          description: Service temporarily unavailable
-          headers:
-            Retry-After:
-              schema:
-                type: integer
-              description: Seconds until retry allowed
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /v1/query:
-    get:
-      tags: [Recipes]
-      summary: Query a specific value from a hydrated recipe
-      operationId: getQuery
-      description: >
-        Resolves a recipe from criteria, hydrates all component values (merging
-        base, overlay, and inline overrides), and returns the value at the given
-        selector path. Scalar values are returned as plain JSON values; complex
-        values are returned as JSON objects/arrays.
-      parameters:
-        - name: X-Request-Id
-          in: header
-          required: false
-          schema:
-            type: string
-            format: uuid
-          description: Client-provided request ID for tracing
-        - name: service
-          in: query
-          required: false
-          description: Kubernetes service/environment type. If omitted, treated as "any" (wildcard).
-          schema:
-            type: string
-            enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, any]
-            default: any
-        - name: accelerator
-          in: query
-          required: false
-          description: GPU/accelerator type. If omitted, treated as "any" (wildcard).
-          schema:
-            type: string
-            enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
-            default: any
-        - name: gpu
-          in: query
-          required: false
-          description: Alias for accelerator parameter (backwards compatibility).
-          schema:
-            type: string
-            enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
-            default: any
-        - name: intent
-          in: query
-          required: false
-          description: Workload intent. If omitted, treated as "any" (wildcard).
-          schema:
-            type: string
-            enum: [training, inference, any]
-            default: any
-        - name: os
-          in: query
-          required: false
-          description: >-
-            GPU node operating system. If omitted, treated as "any" (wildcard) and
-            OS-agnostic recipe is returned. Some service+accelerator combinations
-            (e.g. OKE with L40S) have no OS-agnostic recipe; omitting os for those
-            returns 400.
-          schema:
-            type: string
-            enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
-            default: any
-        - name: platform
-          in: query
-          required: false
-          description: Platform/framework type. If omitted, treated as "any" (wildcard).
-          schema:
-            type: string
-            enum: [dynamo, kubeflow, nim, runai, slurm, any]
-            default: any
-        - name: nodes
-          in: query
-          required: false
-          description: Number of GPU nodes (0 = any/unspecified).
-          schema:
-            type: integer
-            minimum: 0
-            default: 0
-        - name: selector
-          in: query
-          required: true
-          description: >
-            Dot-delimited path to the value to extract. Uses the same notation as
-            Helm --set (e.g. components.gpu-operator.values.driver.version).
-            An empty string returns the entire hydrated recipe.
-          schema:
-            type: string
-          examples:
-            scalarValue:
-              summary: Query a specific Helm value
-              value: "components.gpu-operator.values.driver.version"
-            subtree:
-              summary: Query a component subtree
-              value: "components.gpu-operator.values.driver"
-            deploymentOrder:
-              summary: Query deployment order
-              value: "deploymentOrder"
-      responses:
-        "200":
-          description: The selected value from the hydrated recipe
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-            Cache-Control:
-              $ref: "#/components/headers/CacheControl"
-          content:
-            application/json:
-              schema:
-                description: The value at the selector path (scalar, object, or array)
-              examples:
-                scalar:
-                  summary: Scalar value (driver version)
-                  value: "580.105.08"
-                object:
-                  summary: Object value (driver config)
-                  value:
-                    version: "580.105.08"
-                    enabled: true
-                    useOpenKernelModules: true
-        "400":
-          description: >
-            Invalid request. Common causes: (1) no criteria provided — all
-            criteria parameters omitted or defaulting to `any`; returns code
-            `INVALID_REQUEST` with message `"no criteria provided: specify at
-            least one of service, accelerator, intent, os, platform, nodes"`.
-            (2) An omitted selector. (3) Malformed criteria or allowlist
-            violation. (4) A resolved profile (which requires `/v2/query`). (5)
-            A stated criteria dimension not honored by any applicable recipe
-            overlay (uncovered dimension); uncovered-dimension errors carry a
-            machine-readable `details.uncovered` array (dimension,
-            requestedValue, validCompletions). Snapshot-driven resolution (CLI
-            `--snapshot` / Go SDK) may additionally attach `excludedOverlays` /
-            `constraintWarnings`; this HTTP API resolves from criteria only and
-            never emits those fields.
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              examples:
-                missingSelector:
-                  summary: Required selector omitted
-                  value:
-                    code: INVALID_REQUEST
-                    message: "Invalid query criteria"
-                    details:
-                      error: "[INVALID_REQUEST] selector is required on /v1/query"
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-                invalidParameter:
-                  summary: Invalid query parameter
-                  value:
-                    code: INVALID_REQUEST
-                    message: "Invalid recipe query"
-                    details:
-                      error: "invalid os family: windows"
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-                uncoveredDimension:
-                  summary: Stated criteria dimension not honored by any overlay
-                  value:
-                    code: INVALID_REQUEST
-                    message: >-
-                      platform 'kubeflow' for criteria(service=eks,
-                      accelerator=h100, intent=training, platform=kubeflow)
-                      requires os (valid: ubuntu)
-                    details:
-                      uncovered:
-                        - dimension: platform
-                          requestedValue: kubeflow
-                          validCompletions:
-                            - os: ubuntu
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-        "404":
-          description: Selector path not found in hydrated recipe
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              examples:
-                notFound:
-                  summary: Selector path not found
-                  value:
-                    code: NOT_FOUND
-                    message: "Selector path not found"
-                    details:
-                      selector: "components.gpu-operator.values.invalid.path"
-                      error: "key 'invalid' not found"
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-        "429":
-          description: Rate limit exceeded
-          headers:
-            Retry-After:
-              schema:
-                type: integer
-              description: Seconds until retry allowed
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "500":
-          description: Internal server error
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-    post:
-      tags: [Recipes]
-      summary: Query a hydrated recipe value from criteria body
-      operationId: createQuery
-      description: >
-        Alternative to GET with query parameters. Accepts criteria and selector
-        as JSON or YAML in the request body.
-      parameters:
-        - name: X-Request-Id
-          in: header
-          required: false
-          schema:
-            type: string
-            format: uuid
-          description: Client-provided request ID for tracing
-      requestBody:
-        required: true
-        description: Query request with criteria and selector
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/QueryRequest"
-            examples:
-              simple:
-                summary: Query driver version
-                value:
-                  criteria:
-                    service: eks
-                    accelerator: h100
-                    intent: training
-                  selector: "components.gpu-operator.values.driver.version"
-          application/x-yaml:
-            schema:
-              $ref: "#/components/schemas/QueryRequest"
-      responses:
-        "200":
-          description: The selected value from the hydrated recipe
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-            Cache-Control:
-              $ref: "#/components/headers/CacheControl"
-          content:
-            application/json:
-              schema:
-                description: The value at the selector path (scalar, object, or array)
-        "400":
-          description: >
-            Invalid request. Common causes: (1) no criteria provided — all
-            criteria fields omitted or defaulting to `any`; returns code
-            `INVALID_REQUEST` with message `"no criteria provided: specify at
-            least one of service, accelerator, intent, os, platform, nodes"`.
-            (2) Malformed criteria or allowlist violation. (3) A resolved
-            profile (which requires `/v2/query`). (4) A stated criteria
-            dimension not honored by any applicable recipe overlay (uncovered
-            dimension); uncovered-dimension errors carry a machine-readable
-            `details.uncovered` array (dimension, requestedValue,
-            validCompletions). Snapshot-driven resolution (CLI `--snapshot` / Go
-            SDK) may additionally attach `excludedOverlays` /
-            `constraintWarnings`; this HTTP API resolves from criteria only and
-            never emits those fields.
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              examples:
-                invalidCriteria:
-                  summary: Invalid criteria value
-                  value:
-                    code: INVALID_REQUEST
-                    message: "Invalid recipe criteria"
-                    details:
-                      error: "invalid service type: windows"
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-                uncoveredDimension:
-                  summary: Stated criteria dimension not honored by any overlay
-                  value:
-                    code: INVALID_REQUEST
-                    message: >-
-                      platform 'kubeflow' for criteria(service=eks,
-                      accelerator=h100, intent=training, platform=kubeflow)
-                      requires os (valid: ubuntu)
-                    details:
-                      uncovered:
-                        - dimension: platform
-                          requestedValue: kubeflow
-                          validCompletions:
-                            - os: ubuntu
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-        "404":
-          description: Selector path not found in hydrated recipe
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "429":
-          description: Rate limit exceeded
-          headers:
-            Retry-After:
-              schema:
-                type: integer
-              description: Seconds until retry allowed
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "500":
-          description: Internal server error
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /v2/recipe:
-    get:
-      tags: [Recipes]
       summary: Resolve a configured recipe
-      operationId: getRecipeV2
+      operationId: getRecipe
       description: >
         Resolves criteria with optional profile and Slurm accounting selections.
         An omitted profile applies the declaration's required default; an
@@ -970,7 +184,7 @@ paths:
     post:
       tags: [Recipes]
       summary: Resolve a configured recipe from a strict envelope
-      operationId: createRecipeV2
+      operationId: createRecipe
       description: >
         Accepts a strict criteria/profile envelope and an optional profile
         query parameter. Matching query and envelope selections are accepted;
@@ -986,10 +200,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/RecipeV2Request"
+              $ref: "#/components/schemas/RecipeRequest"
           application/x-yaml:
             schema:
-              $ref: "#/components/schemas/RecipeV2Request"
+              $ref: "#/components/schemas/RecipeRequest"
       responses:
         "200":
           description: Resolved legacy or profile-bearing recipe
@@ -1064,11 +278,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v2/query:
+  /v1/query:
     get:
       tags: [Recipes]
       summary: Query a configured hydrated recipe
-      operationId: getQueryV2
+      operationId: getQuery
       description: >
         Resolves criteria and an optional profile, hydrates the recipe, and
         returns the value at selector. Unknown query parameters are rejected.
@@ -1160,7 +374,7 @@ paths:
     post:
       tags: [Recipes]
       summary: Query a configured recipe from a strict envelope
-      operationId: createQueryV2
+      operationId: createQuery
       description: >
         Accepts a strict criteria/profile/selector envelope and an optional
         profile query parameter. Matching query and envelope selections are
@@ -1176,10 +390,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/QueryV2Request"
+              $ref: "#/components/schemas/QueryRequest"
           application/x-yaml:
             schema:
-              $ref: "#/components/schemas/QueryV2Request"
+              $ref: "#/components/schemas/QueryRequest"
       responses:
         "200":
           description: Selected scalar, object, or array
@@ -1263,11 +477,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
 
-  /v2/bundle:
+  /v1/bundle:
     post:
       tags: [Bundles]
       summary: Generate a bundle from a legacy or profiled recipe
-      operationId: createBundleV2
+      operationId: createBundle
       description: >
         Uses the same query parameters and ZIP response as POST /v1/bundle.
         The body is an already-selected RecipeResult, so this route has no
@@ -1300,10 +514,10 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/BundleRecipeV2Request"
+              $ref: "#/components/schemas/BundleRecipeRequest"
           application/x-yaml:
             schema:
-              $ref: "#/components/schemas/BundleRecipeV2Request"
+              $ref: "#/components/schemas/BundleRecipeRequest"
       responses:
         "200":
           description: ZIP archive containing generated bundle artifacts
@@ -1411,449 +625,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-
-  /v1/bundle:
-    post:
-      tags: [Bundles]
-      summary: Generate deployment bundles from recipe
-      operationId: createBundle
-      description: >
-        Generates deployment bundles (Helm values, Kubernetes manifests, installation scripts)
-        from a recipe and returns them as a compressed zip archive.
-
-        The request body contains the recipe (RecipeResult) directly. Configuration options
-        can be specified via query parameters. All query parameters support multiple values
-        by repeating the parameter name (e.g., ?set=a:x=1&set=b:y=2).
-
-        This design enables a simple workflow: pipe the output from GET /v1/recipe directly
-        to POST /v1/bundle.
-
-        Current recipes carry apiVersion aicr.run/v1alpha2 or
-        aicr.run/v1alpha3 and kind RecipeResult.
-        For backward compatibility, legacy artifacts may omit either header field,
-        carry it as an empty string after a decode/remarshal round trip, or carry
-        the kind Recipe published by this contract through v0.18.0.
-
-        The response is a binary zip file containing all generated bundle artifacts
-        organized by bundler type (e.g., gpu-operator/, network-operator/).
-      parameters:
-        - name: bundlers
-          in: query
-          required: false
-          description: >
-            Comma-delimited list of recipe component names to bundle.
-            If not specified, all enabled components are bundled.
-            Components not listed are skipped as if disabled (their
-            dependency edges are treated as satisfied externally).
-            A name the recipe does not declare, or one that is disabled
-            (by the recipe or by a "set" parameter enabled=false
-            override), is rejected with HTTP 400.
-          schema:
-            type: string
-          examples:
-            single:
-              summary: Single bundler
-              value: "gpu-operator"
-            multiple:
-              summary: Multiple bundlers
-              value: "gpu-operator,network-operator"
-        - name: set
-          in: query
-          required: false
-          description: >
-            Override values in generated bundle files (format: bundler:path.to.field=value).
-            Can be repeated for multiple overrides.
-
-            The reserved prefix "deployer:" carries Argo CD Application
-            options for the argocd and argocd-helm deployers
-            (namePrefix, destinationServer, project, cascadeDelete),
-            e.g. deployer:namePrefix=tenant-a-. Unknown deployer keys
-            are rejected.
-
-            An override whose component is absent from the generated
-            bundle is rejected with HTTP 400 (INVALID_REQUEST, "cannot
-            take effect") rather than silently discarded. The scalar
-            enabled=false spelling is exempt on a declared component
-            (it is the removal mechanism); "enabled" is never honored
-            from typed overrides.
-          schema:
-            type: array
-            items:
-              type: string
-          style: form
-          explode: true
-          examples:
-            single:
-              summary: Single override
-              value: ["gpuoperator:gds.enabled=true"]
-            multiple:
-              summary: Multiple overrides
-              value: ["gpuoperator:gds.enabled=true", "gpuoperator:driver.version=570.86.16"]
-        - name: dynamic
-          in: query
-          required: false
-          description: >
-            Declare value paths as install-time parameters (format: component:path.to.field).
-            Can be repeated. Dynamic paths are removed from values.yaml and placed
-            in cluster-values.yaml for the user to fill in at install time.
-
-            A declaration whose component is absent from the generated
-            bundle is rejected with HTTP 400 (INVALID_REQUEST, "cannot
-            take effect"); no path is exempt. Certain gate- or contract-owned
-            paths on present components are also rejected — driver-ownership
-            paths, GPU allocation-policy keys, the DRA eviction paths
-            kubeletPlugin.nodeSelector and driver.manager.env when both
-            contract components are enabled, and, where the
-            corresponding NVSentinel gate applies on the recipe's
-            platform and configuration, the NVSentinel
-            remedy/consumer/runtime-class paths — because an install-time
-            edit there would undo what a bundle-time gate verified.
-          schema:
-            type: array
-            items:
-              type: string
-          style: form
-          explode: true
-          examples:
-            single:
-              summary: Single declaration
-              value: ["gpuoperator:driver.version"]
-            multiple:
-              summary: Multiple declarations
-              value: ["gpuoperator:driver.version", "gpuoperator:mig.strategy"]
-        - name: system-node-selector
-          in: query
-          required: false
-          description: >
-            Node selector for system components (format: key=value).
-            Can be repeated for multiple selectors.
-          schema:
-            type: array
-            items:
-              type: string
-          style: form
-          explode: true
-          example: ["nodeGroup=system-pool"]
-        - name: system-node-toleration
-          in: query
-          required: false
-          description: >
-            Toleration for system components (format: key=value:effect or key:effect).
-            Can be repeated for multiple tolerations.
-          schema:
-            type: array
-            items:
-              type: string
-          style: form
-          explode: true
-          example: ["dedicated=system:NoSchedule"]
-        - name: accelerated-node-selector
-          in: query
-          required: false
-          description: >
-            Node selector for accelerated/GPU nodes (format: key=value).
-            Can be repeated for multiple selectors.
-          schema:
-            type: array
-            items:
-              type: string
-          style: form
-          explode: true
-          example: ["nvidia.com/gpu.present=true"]
-        - name: accelerated-node-toleration
-          in: query
-          required: false
-          description: >
-            Toleration for accelerated/GPU nodes (format: key=value:effect or key:effect).
-            Can be repeated for multiple tolerations.
-          schema:
-            type: array
-            items:
-              type: string
-          style: form
-          explode: true
-          example: ["nvidia.com/gpu=present:NoSchedule"]
-        - $ref: "#/components/parameters/DRAEvictionNodeLabel"
-        - name: deployer
-          in: query
-          required: false
-          description: >
-            Deployment method for generated components.
-            Supported values: helm (default), argocd, argocd-helm, flux, helmfile.
-          schema:
-            type: string
-            enum: [helm, argocd, argocd-helm, flux, helmfile]
-            default: helm
-        - name: repo
-          in: query
-          required: false
-          description: >
-            Git repository URL for GitOps deployments (used with deployer=argocd and deployer=flux).
-            Sets the repository URL in the generated app-of-apps.yaml or GitRepository source manifests.
-            If not provided, a placeholder URL is used that must be updated manually.
-          schema:
-            type: string
-            format: uri
-          example: "https://github.com/my-org/my-gitops-repo.git"
-        - name: workload-gate
-          in: query
-          required: false
-          description: >
-            Taint for nodewright-operator workload gating (format: key=value:effect or key:effect).
-            Configures a day-2 scaling gate that prevents workloads from scheduling on new
-            nodes until the runtime stack is ready.
-          schema:
-            type: string
-          example: "skyhook.nvidia.com/runtime=required:NoSchedule"
-        - name: workload-selector
-          in: query
-          required: false
-          description: >
-            Label selector for nodewright-customizations (format: key=value).
-            Can be repeated for multiple selectors.
-          schema:
-            type: array
-            items:
-              type: string
-          style: form
-          explode: true
-          example: ["skyhook.nvidia.com/managed=true"]
-        - name: nodes
-          in: query
-          required: false
-          description: >
-            Estimated number of GPU nodes in the cluster (0 = unset).
-            Used to configure node-count-aware components such as nodewright-operator.
-          schema:
-            type: integer
-            minimum: 0
-            default: 0
-        - name: vendor-charts
-          in: query
-          required: false
-          description: >
-            Pull upstream Helm chart bytes into the bundle at bundle time so
-            the resulting artifact is fully self-contained and air-gap deployable.
-            Each vendored chart is recorded in provenance.yaml with name, version,
-            source URL, and SHA256. Trades the upstream CVE-yank fail-loud signal
-            for offline deployability — vendored bundles silently install a
-            frozen chart version even after upstream yank.
-            Requires the `helm` binary on the API server's PATH and valid
-            registry credentials for any private upstream repos (Helm
-            `HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` env vars for
-            HTTP(S); docker config for OCI). When either prerequisite is
-            missing the request fails with 500 and a structured error code
-            (`UNAVAILABLE` for missing helm, `UNAUTHORIZED` for credentials).
-          schema:
-            type: boolean
-            default: false
-        - name: serial
-          in: query
-          required: false
-          description: >
-            Sequence components strictly one at a time in deployment order,
-            disabling the parallel rollout of independent components. Affects
-            the `argocd`, `argocd-helm`, `flux`, and `helmfile` deployers
-            (`helm` is already serial): argocd falls back to a linear
-            sync-wave per folder, flux chains each HelmRelease `dependsOn` to
-            the previous component, and helmfile chains every release via
-            `needs:` into one linear apply order. An escape hatch for
-            reproducing the pre-parallelism ordering or bisecting a
-            misbehaving rollout.
-          schema:
-            type: boolean
-            default: false
-        - name: app-name
-          in: query
-          required: false
-          description: >
-            Parent Argo Application name for `deployer=argocd` and
-            `deployer=argocd-helm`. Defaults: `aicr-stack` for argocd-helm,
-            `nvidia-stack` for argocd. Required for multi-bundle installs that
-            share an Argo CD namespace — distinct names prevent the parent
-            Applications from overwriting each other. For `argocd-helm`, the
-            value is the chart default and can still be overridden at install
-            time via `helm install --set appName=...`. Must be a DNS-1123
-            subdomain; rejected on other deployers with 400.
-          schema:
-            type: string
-            pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$'
-            maxLength: 253
-          example: gpu-runtime
-        - name: attest
-          in: query
-          required: false
-          description: >
-            Return a cryptographically signed bundle. When true, the server
-            signs the bundle as itself using its operator-configured signing
-            identity; no signing key, token, or identity is ever taken from the
-            request (the trust boundary). Parsed with Go strconv.ParseBool
-            semantics (accepts 1/t/T/TRUE/true/True and 0/f/F/FALSE/false/False);
-            a present-but-unparseable value is rejected with HTTP 400. Absent or
-            false returns an unsigned bundle, as before. If attestation is
-            requested but the server has no signing identity configured, the
-            request is rejected with HTTP 400 ("Server is not configured for
-            attestation"). A signed bundle additionally carries
-            attestation/bundle-attestation.sigstore.json and
-            attestation/aicr-attestation.sigstore.json inside the returned zip;
-            the response format is otherwise unchanged.
-          schema:
-            type: boolean
-            default: false
-      requestBody:
-        required: true
-        description: The recipe (RecipeResult) to generate bundles from
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/BundleRecipeRequest"
-            examples:
-              simpleRecipe:
-                summary: Simple recipe with GPU operator
-                value:
-                  apiVersion: aicr.run/v1alpha2
-                  kind: RecipeResult
-                  componentRefs:
-                    - name: gpu-operator
-                      type: Helm
-                      version: v25.3.3
-                      source: https://helm.ngc.nvidia.com/nvidia
-                      chart: gpu-operator
-              fullRecipe:
-                summary: Full recipe with metadata
-                value:
-                  apiVersion: aicr.run/v1alpha2
-                  kind: RecipeResult
-                  metadata:
-                    version: v1.0.0
-                    appliedOverlays:
-                      - base
-                      - eks
-                      - eks-training
-                      - gb200-eks-training
-                    excludedOverlays:
-                      - name: h100-eks-ubuntu-training
-                        reason: mixin-constraint-failed
-                    constraintWarnings:
-                      - overlay: h100-eks-ubuntu-training
-                        constraint: OS.sysctl./proc/sys/kernel/osrelease
-                        expected: ">= 6.8"
-                        actual: "5.15.0"
-                        reason: "mixin-constraint-failed: expected >= 6.8, got 5.15.0"
-                  criteria:
-                    service: eks
-                    accelerator: gb200
-                    intent: training
-                    os: any
-                  componentRefs:
-                    - name: gpu-operator
-                      type: Helm
-                      version: v25.3.3
-                      source: https://helm.ngc.nvidia.com/nvidia
-                      chart: gpu-operator
-                  deploymentOrder:
-                    - gpu-operator
-      responses:
-        "200":
-          description: Zip archive containing generated bundles
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-            Content-Disposition:
-              schema:
-                type: string
-                example: 'attachment; filename="bundles.zip"'
-              description: Indicates the response should be downloaded as a file
-            X-Bundle-Files:
-              schema:
-                type: integer
-              description: Total number of files in the bundle
-              example: 12
-            X-Bundle-Size:
-              schema:
-                type: integer
-              description: Total size of all files in bytes (uncompressed)
-              example: 45678
-            X-Bundle-Duration:
-              schema:
-                type: string
-              description: Time taken to generate bundles
-              example: "1.234s"
-          content:
-            application/zip:
-              schema:
-                type: string
-                format: binary
-        "400":
-          description: Invalid request (invalid recipe or bundlers filter)
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              examples:
-                emptyRecipe:
-                  summary: Recipe must have components
-                  value:
-                    code: INVALID_REQUEST
-                    message: "Recipe must contain at least one component reference"
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-                unknownBundler:
-                  summary: Bundlers filter names an undeclared component
-                  value:
-                    code: INVALID_REQUEST
-                    message: 'unknown component "invalid-bundler" in bundlers filter; recipe declares: gpu-operator, network-operator, cert-manager'
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-                disabledBundler:
-                  summary: Bundlers filter names a disabled component
-                  value:
-                    code: INVALID_REQUEST
-                    message: 'component "cert-manager" is disabled and cannot be selected via the bundlers filter'
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: false
-        "429":
-          description: Rate limit exceeded
-          headers:
-            Retry-After:
-              schema:
-                type: integer
-              description: Seconds until retry allowed
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-        "500":
-          description: Bundle generation failed
-          headers:
-            X-Request-Id:
-              $ref: "#/components/headers/RequestIdResponse"
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              examples:
-                bundlerError:
-                  summary: Some bundlers failed
-                  value:
-                    code: INTERNAL_ERROR
-                    message: "Some bundlers failed"
-                    details:
-                      errors:
-                        - bundler: gpu-operator
-                          error: "template rendering failed"
-                      success_count: 2
-                    requestId: "550e8400-e29b-41d4-a716-446655440000"
-                    timestamp: "2025-01-15T10:30:00Z"
-                    retryable: true
 
   /health:
     get:
@@ -2294,68 +1065,7 @@ components:
           description: Whether client should retry this request
           example: false
 
-    RecipeCriteria:
-      type: object
-      description: Kubernetes-style recipe criteria resource
-      required: [kind, apiVersion, spec]
-      properties:
-        kind:
-          type: string
-          description: Resource kind (always "RecipeCriteria")
-          enum: [RecipeCriteria]
-          example: RecipeCriteria
-        apiVersion:
-          type: string
-          description: API version
-          enum: [aicr.run/v1alpha2, aicr.run/v1]
-          example: aicr.run/v1alpha2
-        metadata:
-          type: object
-          description: Resource metadata
-          properties:
-            name:
-              type: string
-              description: Unique identifier for this criteria set
-              example: gb200-eks-ubuntu-training
-        spec:
-          $ref: "#/components/schemas/Criteria"
-
     Criteria:
-      type: object
-      description: Recipe criteria specification
-      properties:
-        service:
-          type: string
-          description: Kubernetes service type
-          enum: [eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, any]
-          example: eks
-        accelerator:
-          type: string
-          description: GPU/accelerator type
-          enum: [h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any]
-          example: h100
-        intent:
-          type: string
-          description: Workload intent
-          enum: [training, inference, any]
-          example: training
-        os:
-          type: string
-          description: Operating system family
-          enum: [ubuntu, rhel, cos, amazonlinux, ol, talos, any]
-          example: ubuntu
-        platform:
-          type: string
-          description: Platform/framework type
-          enum: [dynamo, kubeflow, nim, runai, slurm, any]
-          example: kubeflow
-        nodes:
-          type: integer
-          description: Number of GPU nodes (0 = any)
-          minimum: 0
-          default: 0
-
-    CriteriaV2:
       type: object
       description: Strict recipe criteria specification for v2 request bodies
       additionalProperties: false
@@ -2391,93 +1101,7 @@ components:
           minimum: 0
           default: 0
 
-    Reading:
-      type: object
-      description: A single measurement reading with value and optional unit
-      required: [value]
-      properties:
-        value:
-          oneOf:
-            - type: string
-            - type: number
-            - type: boolean
-          description: The measurement value
-        unit:
-          type: string
-          description: Optional unit of measurement
-          example: "MB"
-
-    ItemEntry:
-      type: object
-      description: |
-        One ordered element of a Subtype.items list. Mirrors Subtype's
-        scalar-value contract: data holds Reading scalars; context holds
-        string-typed descriptive metadata. Used when a subtype carries a
-        homogeneous array of structured records (e.g. one entry per PF).
-      properties:
-        data:
-          type: object
-          additionalProperties:
-            $ref: "#/components/schemas/Reading"
-          description: Key-value pairs of scalar measurements for this item.
-        context:
-          type: object
-          additionalProperties:
-            type: string
-          description: Optional descriptive metadata for this item (string-typed).
-
-    Subtype:
-      type: object
-      description: |
-        A subtype within a measurement. A subtype must carry at least one
-        entry in `data` or `items`. `items` is used when the subtype payload
-        is naturally a list of structured records (e.g. per-PF entries under
-        a NetworkTopology `pfs` subtype).
-      required: [subtype]
-      properties:
-        subtype:
-          type: string
-          description: Subtype identifier (e.g., service name, configuration category)
-          example: containerd.service
-        data:
-          type: object
-          additionalProperties:
-            $ref: "#/components/schemas/Reading"
-          description: Key-value pairs of configuration settings
-        context:
-          type: object
-          additionalProperties: true
-          description: Optional metadata about the source and collection method
-          nullable: true
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/ItemEntry"
-          description: |
-            Optional ordered list of structured records. Independent of `data` —
-            a subtype may carry either or both.
-
-    Measurement:
-      type: object
-      description: |
-        A measurement grouping related configuration subtypes. Most types
-        appear at most once per snapshot; `NetworkTopology` is currently
-        emitted at most once but is the planned multi-instance exception
-        (one Measurement per discovered hardware group).
-      required: [type, subtypes]
-      properties:
-        type:
-          type: string
-          description: Measurement type category
-          enum: [K8s, GPU, OS, SystemD, NodeTopology, NetworkTopology]
-          example: SystemD
-        subtypes:
-          type: array
-          items:
-            $ref: "#/components/schemas/Subtype"
-          description: List of configuration subtypes within this measurement
-
-    RecipeV2Request:
+    RecipeRequest:
       type: object
       description: >
         Strict profile-aware recipe-resolution envelope. Unknown fields are
@@ -2486,13 +1110,13 @@ components:
       additionalProperties: false
       properties:
         criteria:
-          $ref: "#/components/schemas/CriteriaV2"
+          $ref: "#/components/schemas/Criteria"
         profile:
           type: string
           description: Optional configuration profile selection in name=value form
           pattern: "^$|^[A-Za-z0-9._-]+=[A-Za-z0-9._-]+$"
 
-    QueryV2Request:
+    QueryRequest:
       type: object
       description: >
         Strict profile-aware query envelope. Unknown fields are rejected both
@@ -2501,7 +1125,7 @@ components:
       additionalProperties: false
       properties:
         criteria:
-          $ref: "#/components/schemas/CriteriaV2"
+          $ref: "#/components/schemas/Criteria"
         profile:
           type: string
           description: Optional configuration profile selection in name=value form
@@ -2932,7 +1556,7 @@ components:
                 selectedProfile:
                   type: object
             criteria:
-              $ref: "#/components/schemas/CriteriaV2"
+              $ref: "#/components/schemas/Criteria"
             configuration:
               $ref: "#/components/schemas/ConfiguredRecipeConfiguration"
             constraints:
@@ -3079,7 +1703,7 @@ components:
                     selectedProfile:
                       type: object
             criteria:
-              $ref: "#/components/schemas/CriteriaV2"
+              $ref: "#/components/schemas/Criteria"
             configuration:
               allOf:
                 - $ref: "#/components/schemas/ConfiguredRecipeConfiguration"
@@ -3174,72 +1798,16 @@ components:
                   infrastructure:
                     type: string
 
-    LegacyRecipeResponse:
+    LegacyBundleRecipeRequest:
       description: >
-        Additive legacy recipe shape. Unknown fields remain accepted for
-        compatibility, but metadata.selectedProfile is reserved for the
-        profile-bearing schema track. Narrowed to the default track: this
-        release emits aicr.run/v1alpha2 and the ADR-022 target aicr.run/v1 is
-        admitted ahead of the emitter switch, so /v1 responses never carry a
-        profile-track version.
-      allOf:
-        - $ref: "#/components/schemas/RecipeResponse"
-        - type: object
-          properties:
-            apiVersion:
-              type: string
-              enum: [aicr.run/v1alpha2, aicr.run/v1]
-            metadata:
-              type: object
-              not:
-                required: [selectedProfile]
-
-    LegacyBundleRecipeV1Request:
-      description: >
-        Additive default-track RecipeResult accepted by POST /v1/bundle: any
+        Additive legacy RecipeResult accepted by POST /v1/bundle: any
         combination of apiVersion absent, empty, aicr.run/v1alpha2, or
-        aicr.run/v1 with kind absent, empty, Recipe, or RecipeResult. The
-        legacy Recipe kind is normalized to RecipeResult before emission.
-        metadata.selectedProfile and configuration are reserved for the
-        profile track.
-      allOf:
-        - $ref: "#/components/schemas/RecipeResponseBase"
-        - type: object
-          not:
-            required: [configuration]
-          properties:
-            apiVersion:
-              type: string
-              description: >
-                aicr.run/v1alpha2, aicr.run/v1, absent, or empty after a legacy struct
-                round trip
-              enum: ["", aicr.run/v1alpha2, aicr.run/v1]
-            kind:
-              type: string
-              description: >
-                RecipeResult, the legacy Recipe value, absent, or empty for a
-                round-tripped artifact
-              enum: ["", Recipe, RecipeResult]
-              example: RecipeResult
-            metadata:
-              type: object
-              not:
-                required: [selectedProfile]
-
-    LegacyBundleRecipeV2Request:
-      description: >
-        Additive legacy RecipeResult accepted by POST /v2/bundle: any
-        combination of apiVersion absent, empty, aicr.run/v1alpha2, or
-        aicr.run/v1 with
-        kind absent, empty, or RecipeResult. One branch covers the whole
-        legacy square because DecodeRecipeResult accepts every cell of it —
-        kind is enforced only when non-empty, and only the profile track requires it —
-        and /v1/bundle's LegacyBundleRecipeV1Request admits the same default
-        shapes, so any
-        narrower branch leaves /v2/bundle stricter than its own server
-        (previously true for the empty-header round trip, then again for
-        apiVersion v1alpha2 with kind absent). The legacy kind Recipe is
-        v1-only: the strict v2 decode path rejects it.
+        aicr.run/v1 with kind absent, empty, or RecipeResult. One branch
+        covers the whole legacy square because DecodeRecipeResult accepts
+        every cell of it — kind is enforced only when non-empty, and only the
+        profile track requires it.
+        The legacy kind Recipe, published through v0.18.0, is no longer
+        accepted on any path.
         metadata.selectedProfile remains reserved for v1alpha3/v1beta2.
         configuration is likewise reserved for v1alpha3/v1beta2; default request
         headers cannot carry typed Slurm accounting configuration.
@@ -3265,9 +1833,9 @@ components:
               type: object
               not:
                 required: [selectedProfile]
-    BundleRecipeV2Request:
+    BundleRecipeRequest:
       description: >
-        Version-partitioned RecipeResult accepted by POST /v2/bundle.
+        Version-partitioned RecipeResult accepted by POST /v1/bundle.
         Default input with apiVersion aicr.run/v1alpha2, aicr.run/v1, or no
         apiVersion remains additive; v1alpha3/v1beta2 input is closed and requires either
         metadata.selectedProfile or configuration.slurm.accounting. The
@@ -3275,78 +1843,6 @@ components:
         the default branch admits only absent/empty/v1alpha2/v1 and prohibits
         selectedProfile, while both configured branches require the profile track.
       oneOf:
-        - $ref: "#/components/schemas/LegacyBundleRecipeV2Request"
+        - $ref: "#/components/schemas/LegacyBundleRecipeRequest"
         - $ref: "#/components/schemas/ProfileRecipeResponse"
         - $ref: "#/components/schemas/ConfiguredRecipeResponse"
-
-    BundleRecipeRequest:
-      description: >
-        RecipeResult accepted by POST /v1/bundle. Release N readers accept
-        aicr.run/v1alpha2 and aicr.run/v1 for default recipes, plus
-        aicr.run/v1alpha3 and aicr.run/v1beta2 for profile/configuration schema
-        shapes. Default-track legacy artifacts with absent or empty header
-        fields are accepted. The kind value Recipe is also accepted on that
-        branch: it was the value this contract published through v0.18.0, so
-        clients written against that spec must keep working.
-
-        A default-track legacy kind is normalized on ingest rather than echoed:
-        an absent, empty, or Recipe kind is stamped as RecipeResult, so the
-        generated bundle's recipe.yaml always carries the canonical kind and
-        reloads via aicr bundle -r and aicr validate -r. Only kind is rewritten;
-        a request that omits apiVersion still yields an artifact with an empty
-        apiVersion, which every reader accepts as the legacy shape. The strict
-        configured branch requires the canonical RecipeResult kind.
-
-        The shared artifact gate rejects any apiVersion outside those four
-        values with a 400, here and on the CLI file-load path alike. An absent
-        or empty apiVersion remains admitted as the legacy shape through the
-        ADR-022 Release N reader-first window.
-
-        metadata.selectedProfile remains reserved for aicr.run/v1alpha3 and
-        aicr.run/v1beta2, and is rejected on this route. Typed configuration is
-        accepted only when apiVersion is on that profile track. The configured
-        branch is closed at its typed object boundaries, so unknown profile or
-        configuration fields are rejected with a 400 response.
-      oneOf:
-        - $ref: "#/components/schemas/LegacyBundleRecipeV1Request"
-        - $ref: "#/components/schemas/ConfiguredRecipeResponse"
-
-    QueryRequest:
-      type: object
-      description: Query request with criteria and dot-path selector
-      required: [selector]
-      properties:
-        criteria:
-          $ref: "#/components/schemas/Criteria"
-          description: Recipe criteria for resolution
-        selector:
-          type: string
-          description: >
-            Dot-delimited path to the value to extract
-            (e.g. components.gpu-operator.values.driver.version).
-            An empty string returns the entire hydrated recipe.
-          example: "components.gpu-operator.values.driver.version"
-
-    BundleRequest:
-      type: object
-      description: Request body for bundle generation
-      deprecated: true
-      x-deprecation-reason: >
-        Use a RecipeResult directly as the request body and specify bundlers
-        via the "bundlers" query parameter (comma-delimited).
-      required: [recipe]
-      properties:
-        recipe:
-          $ref: "#/components/schemas/BundleRecipeRequest"
-          description: The recipe to generate bundles from
-        bundlers:
-          type: array
-          items:
-            type: string
-          description: >
-            Optional list of recipe component names to bundle.
-            If not specified, all enabled components are bundled.
-            Superseded by the "bundlers" query parameter, which accepts
-            enabled component names the recipe declares; unknown or
-            disabled names are rejected with HTTP 400.
-          example: [gpu-operator, network-operator]

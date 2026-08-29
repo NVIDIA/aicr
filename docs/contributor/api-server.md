@@ -29,12 +29,12 @@ All server code lives in [`pkg/server`](https://github.com/NVIDIA/aicr/tree/main
 
 | File | Responsibility |
 |------|----------------|
-| `serve.go` | Entry point. Parses env allowlists, constructs `aicr.Client`, wires the v1 and v2 recipe, query, and bundle routes, runs `Server.Run` |
+| `serve.go` | Entry point. Parses env allowlists, constructs `aicr.Client`, wires the recipe, query, and bundle routes, runs `Server.Run` |
 | `server.go` | `Server` struct, options, route mux, lifecycle (`Start`, `Shutdown`, `Run`) |
 | `config.go` | `config` struct and env-var overrides (`PORT`, `SHUTDOWN_TIMEOUT_SECONDS`) |
 | `middleware.go` | 8-layer middleware chain; ordering rationale lives in source comments |
-| `recipe_handler.go` | `GET\|POST /v1/recipe`, `/v1/query`, `/v2/recipe`, and `/v2/query` adapter over the profile-aware `Client` resolution methods |
-| `bundle_handler.go` | `POST /v1/bundle` and `/v2/bundle` adapter over `Client.AdoptRecipe` + `Client.MakeBundle` |
+| `recipe_handler.go` | `GET\|POST /v1/recipe` and `/v1/query` adapter over the profile-aware `Client` resolution methods |
+| `bundle_handler.go` | `POST /v1/bundle` adapter over `Client.AdoptRecipe` + `Client.MakeBundle` |
 | `health.go` | `GET /health` and `GET /ready` |
 | `metrics.go` | Prometheus collectors (requests, duration, in-flight, rate-limit rejects, panic recoveries) |
 | `version.go` | `X-API-Version` header negotiation from `Accept: application/vnd.nvidia.aicr.v1+json` |
@@ -155,9 +155,6 @@ field is wired in one place.
 | `/v1/recipe` | GET, POST | Resolve recipe from criteria → `RecipeResult` JSON |
 | `/v1/query` | GET, POST | Resolve recipe, hydrate values, return value at `?selector=path` |
 | `/v1/bundle` | POST | Adopt `RecipeResult` body, generate bundle, stream zip |
-| `/v2/recipe` | GET, POST | Resolve a profile-aware recipe from criteria → strict `RecipeResult` JSON |
-| `/v2/query` | GET, POST | Resolve a profile-aware recipe, hydrate values, and return the required selector path |
-| `/v2/bundle` | POST | Strictly decode a profile-aware `RecipeResult`, generate a bundle, and stream zip |
 
 Schemas, query parameters, and example payloads live in
 [docs/user/api-reference.md](../user/api-reference.md) and
