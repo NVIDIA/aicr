@@ -137,6 +137,7 @@ One-liner per field:
 | `kustomize.defaultTag` | Git ref / OCI tag |
 | `nodeScheduling.system` | Helm value paths that receive the **control-plane** node selector / tolerations / taints |
 | `nodeScheduling.accelerated` | Helm value paths that receive the **GPU node** selector / tolerations / taints |
+| `nodeScheduling.system.requireNodeSelector`, `nodeScheduling.accelerated.requireNodeSelector` | Fail the bundle instead of silently skipping injection when the corresponding `--system-node-selector`/`--accelerated-node-selector` flag is omitted and no overlay opts the paths out (see [below](#nodeschedulingsystem-vs-accelerated)) |
 | `nodeScheduling.nodeCountPaths` | Where `--nodes` is written |
 | `podScheduling.workload.workloadSelectorPaths` | Workload-pod placement |
 | `storageClassPaths` | Where `--storage-class` is written |
@@ -182,6 +183,20 @@ Wrong column = workloads land on the wrong node class. A DaemonSet
 placed under `system` will miss GPU nodes; an operator under
 `accelerated` will refuse to schedule on a cluster with tainted GPU
 nodes only.
+
+**`requireNodeSelector`.** By default, a component with `nodeSelectorPaths`
+declared silently skips injection when its CLI flag is omitted — many valid
+clusters have no distinct node pools, so an unset selector is often
+intentional. Set `nodeScheduling.system.requireNodeSelector: true` (or the
+`accelerated` counterpart) only when landing on the wrong node class silently
+breaks the component, e.g. a StatefulSet whose PVC pins it to a node's zone
+and strands it there on a later reschedule (see `slinky-slurm` and
+`slurm-accounting-mariadb` in `registry.yaml`). An overlay can still opt a
+component's paths out of the requirement with an explicit empty
+`nodeSelector: {}` override, same as it opts out of toleration injection.
+`--dynamic` is not an equivalent escape hatch: it is rejected on a required
+path outright, since deferring the value to install time is the same
+unpinned state the requirement exists to reject.
 
 ## `valueOverrideKeys`
 

@@ -1099,6 +1099,15 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 		// so operators can supply the toleration at install time without
 		// rebuilding the bundle. See #1371.
 		if dynPaths := b.dynamicPathSetFor(ref.Name, provider); len(dynPaths) > 0 {
+			// A requireNodeSelector path left --dynamic would otherwise
+			// pass validateRequiredNodeSelectors for the wrong reason.
+			// That check treats an opted-out path as satisfied, but a
+			// dynamic path is not opted out. It is deferred to an
+			// install-time value the bundle cannot verify. Reject it
+			// here, before it reaches optOut.
+			if err := b.rejectDynamicRequiredNodeSelectorPaths(ref.Name, provider, dynPaths); err != nil {
+				return nil, err
+			}
 			for path := range dynPaths {
 				policy.optOut[path] = struct{}{}
 			}
@@ -1135,6 +1144,12 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 					applyErr,
 					map[string]any{errCtxKeyComponent: ref.Name})
 			}
+		}
+
+		// Requires every override, including --set-json/--set-file, to have
+		// already been applied; see validateRequiredNodeSelectors.
+		if err := b.validateRequiredNodeSelectors(ref.Name, values, provider, policy); err != nil {
+			return nil, err
 		}
 
 		if ref.Name == slinkySlurmComponentName {
@@ -1730,6 +1745,21 @@ func isEmptyOverlayValue(v any) bool {
 	}
 }
 
+// isNonEmptyMap reports whether v is a map with at least one entry. Accepts
+// both map[string]any and the map[any]any shape a generic YAML/JSON decode
+// produces for a nested object, so a selector an SDK caller places directly
+// as an override without first normalizing its key type still counts.
+func isNonEmptyMap(v any) bool {
+	switch x := v.(type) {
+	case map[string]any:
+		return len(x) > 0
+	case map[any]any:
+		return len(x) > 0
+	default:
+		return false
+	}
+}
+
 // filterPaths returns paths not present in skip.
 func filterPaths(paths []string, skip map[string]struct{}) []string {
 	if len(paths) == 0 || len(skip) == 0 {
@@ -1769,6 +1799,10 @@ func splitPaths(paths []string, appendMode map[string]struct{}) (appendPaths, re
 // coexist with --system-node-toleration); other paths use REPLACE semantics
 // so the documented system → accelerated overwrite for shared paths like
 // NFD's worker.tolerations still produces "accelerated wins".
+//
+// Does not enforce requireNodeSelector: a later --set-json/--set-file
+// override can null out an injected selector, so validateRequiredNodeSelectors
+// checks the final value instead.
 func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, values map[string]any, provider recipe.DataProvider, policy schedulingPathPolicy) {
 	if b.Config == nil {
 		return
@@ -1792,9 +1826,10 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 	// Apply system node selector. NodeSelector uses REPLACE semantics even
 	// for overlay-set non-empty values — no current overlay sets selector
 	// paths, and the cuj1-training contract assumes CLI replaces.
-	if nodeSelector := b.Config.SystemNodeSelector(); len(nodeSelector) > 0 {
-		if paths := filterPaths(comp.GetSystemNodeSelectorPaths(), policy.optOut); len(paths) > 0 {
-			component.ApplyNodeSelectorOverrides(values, nodeSelector, paths...)
+	nodeSelector := b.Config.SystemNodeSelector()
+	if systemPaths := filterPaths(comp.GetSystemNodeSelectorPaths(), policy.optOut); len(systemPaths) > 0 {
+		if len(nodeSelector) > 0 {
+			component.ApplyNodeSelectorOverrides(values, nodeSelector, systemPaths...)
 		}
 	}
 
@@ -1813,9 +1848,10 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 	}
 
 	// Apply accelerated node selector
-	if nodeSelector := b.Config.AcceleratedNodeSelector(); len(nodeSelector) > 0 {
-		if paths := filterPaths(comp.GetAcceleratedNodeSelectorPaths(), policy.optOut); len(paths) > 0 {
-			component.ApplyNodeSelectorOverrides(values, nodeSelector, paths...)
+	acceleratedSelector := b.Config.AcceleratedNodeSelector()
+	if acceleratedPaths := filterPaths(comp.GetAcceleratedNodeSelectorPaths(), policy.optOut); len(acceleratedPaths) > 0 {
+		if len(acceleratedSelector) > 0 {
+			component.ApplyNodeSelectorOverrides(values, acceleratedSelector, acceleratedPaths...)
 		}
 	}
 
@@ -1897,6 +1933,67 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 			}
 		}
 	}
+}
+
+// validateRequiredNodeSelectors returns an error if a component's registry
+// entry sets requireNodeSelector (SchedulingPaths) but the resolved value at
+// one of its non-opted-out node-selector paths is empty or missing.
+//
+// Must run after every override in extractComponentValues, including
+// --set-json/--set-file, which can null out a selector that
+// applyNodeSchedulingOverrides already injected.
+func (b *DefaultBundler) validateRequiredNodeSelectors(componentName string, values map[string]any, provider recipe.DataProvider, policy schedulingPathPolicy) error {
+	registry, err := recipe.GetComponentRegistryFor(provider)
+	if err != nil {
+		// Unlike applyNodeSchedulingOverrides' best-effort injection, a
+		// registry that fails to load leaves requireNodeSelector
+		// unconfirmed either way. Fail closed instead of silently
+		// skipping enforcement.
+		return errors.WrapWithContext(errors.ErrCodeInternal,
+			"failed to load component registry for required node selector validation",
+			err,
+			map[string]any{errCtxKeyComponent: componentName})
+	}
+	comp := registry.Get(componentName)
+	if comp == nil {
+		return nil
+	}
+
+	if comp.RequireSystemNodeSelector() {
+		if err := requireNonEmptyNodeSelectors(componentName, values,
+			filterPaths(comp.GetSystemNodeSelectorPaths(), policy.optOut),
+			"--system-node-selector"); err != nil {
+			return err
+		}
+	}
+	if comp.RequireAcceleratedNodeSelector() {
+		if err := requireNonEmptyNodeSelectors(componentName, values,
+			filterPaths(comp.GetAcceleratedNodeSelectorPaths(), policy.optOut),
+			"--accelerated-node-selector"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// requireNonEmptyNodeSelectors returns an error naming every path in paths
+// whose value in values is empty or not a map. Returns nil if paths is empty.
+func requireNonEmptyNodeSelectors(componentName string, values map[string]any, paths []string, flagName string) error {
+	var empty []string
+	for _, path := range paths {
+		val, ok := component.GetValueByPath(values, path)
+		if !ok || !isNonEmptyMap(val) {
+			empty = append(empty, path)
+		}
+	}
+	if len(empty) == 0 {
+		return nil
+	}
+	return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+		"component %q requires %s to be set (paths: %s); "+
+			"pass a selector, opt this component's paths out with an explicit empty overlay "+
+			"override, or check whether a later --set-json/--set-file override cleared it",
+		componentName, flagName, strings.Join(empty, ", ")))
 }
 
 // applySharedStorageClassOverride injects the dedicated RWX StorageClass
@@ -1985,6 +2082,65 @@ func (b *DefaultBundler) dynamicPathSetFor(componentName string, provider recipe
 	}
 	return pathSet
 }
+
+// rejectDynamicRequiredNodeSelectorPaths returns an error if a path in
+// dynPaths is also one of componentName's requireNodeSelector paths.
+// --dynamic leaves a path out of the bundle for an operator to supply
+// later, the same unpinned state requireNodeSelector exists to reject.
+func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName string, provider recipe.DataProvider, dynPaths map[string]struct{}) error {
+	registry, err := recipe.GetComponentRegistryFor(provider)
+	if err != nil {
+		return errors.WrapWithContext(errors.ErrCodeInternal,
+			"failed to load component registry for dynamic node selector validation",
+			err,
+			map[string]any{errCtxKeyComponent: componentName})
+	}
+	comp := registry.Get(componentName)
+	if comp == nil {
+		return nil
+	}
+
+	var conflicts []string
+	seen := make(map[string]struct{})
+	addConflicts := func(paths []string) {
+		for _, p := range intersectingPaths(paths, dynPaths) {
+			if _, ok := seen[p]; ok {
+				continue
+			}
+			seen[p] = struct{}{}
+			conflicts = append(conflicts, p)
+		}
+	}
+	if comp.RequireSystemNodeSelector() {
+		addConflicts(comp.GetSystemNodeSelectorPaths())
+	}
+	if comp.RequireAcceleratedNodeSelector() {
+		addConflicts(comp.GetAcceleratedNodeSelectorPaths())
+	}
+	if len(conflicts) == 0 {
+		return nil
+	}
+	return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+		"component %q cannot use --dynamic on %s. This component requires a real "+
+			"node selector at bundle time, not one deferred to install time",
+		componentName, strings.Join(conflicts, ", ")))
+}
+
+// intersectingPaths returns the paths present in both paths and set,
+// preserving paths' order. Returns nil if either is empty.
+func intersectingPaths(paths []string, set map[string]struct{}) []string {
+	if len(paths) == 0 || len(set) == 0 {
+		return nil
+	}
+	var out []string
+	for _, p := range paths {
+		if _, ok := set[p]; ok {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func (b *DefaultBundler) warnMissingStorageClassForPVCs(ctx context.Context, recipeResult *recipe.RecipeResult, componentValues map[string]map[string]any) error {
 	if b.Config == nil {
 		return nil

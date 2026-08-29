@@ -19,6 +19,7 @@ import (
 	"context"
 	stderrors "errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -2502,6 +2503,286 @@ func TestApplyNodeSchedulingOverrides_RespectsRecipeSetPaths(t *testing.T) {
 			}
 		})
 	}
+}
+
+// requireNodeSelectorFixtureComponent is a synthetic registry component
+// (merged in via a LayeredDataProvider, never a real catalog entry) that
+// isolates TestApplyNodeSchedulingOverrides_RequireNodeSelector from
+// whichever real components happen to opt into requireNodeSelector.
+const requireNodeSelectorFixtureComponent = "require-node-selector-fixture"
+
+// requireNodeSelectorFixtureProvider returns a DataProvider whose merged
+// registry.yaml adds requireNodeSelectorFixtureComponent on top of the
+// embedded catalog, so callers get a component with a real, addressable
+// registry entry that never drifts with the real catalog's opt-ins.
+func requireNodeSelectorFixtureProvider(t *testing.T) recipe.DataProvider {
+	t.Helper()
+
+	tmpData := t.TempDir()
+	registryYAML := []byte(`apiVersion: aicr.run/v1alpha2
+kind: ComponentRegistry
+components:
+  - name: ` + requireNodeSelectorFixtureComponent + `
+    displayName: Require Node Selector Fixture
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - controller.podSpec.nodeSelector
+        requireNodeSelector: true
+`)
+	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
+	if err != nil {
+		t.Fatalf("NewLayeredDataProvider: %v", err)
+	}
+	recipe.EvictCachedRegistry(layered)
+	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
+	return layered
+}
+
+// failingRegistryProvider is a recipe.DataProvider whose ReadFile always
+// errors. It exercises the registry load failure path of functions that
+// call recipe.GetComponentRegistryFor, such as validateRequiredNodeSelectors.
+type failingRegistryProvider struct{}
+
+func (failingRegistryProvider) ReadFile(_ context.Context, path string) ([]byte, error) {
+	return nil, fmt.Errorf("simulated read failure for %s", path)
+}
+
+func (failingRegistryProvider) WalkDir(_ context.Context, _ string, _ fs.WalkDirFunc) error {
+	return fmt.Errorf("simulated walk failure")
+}
+
+func (failingRegistryProvider) Source(path string) string {
+	return "failing-provider:" + path
+}
+
+// TestApplyNodeSchedulingOverrides_RequireNodeSelector covers the
+// requireNodeSelector opt-in (registry.yaml): a component can set it on
+// nodeScheduling.system/.accelerated so an unpinned pod can never silently
+// land on the wrong node class and strand a later reschedule behind a
+// zone-pinned PVC. Real opt-ins (e.g. slinky-slurm) are covered by their own
+// component-specific tests; this exercises the mechanism in isolation.
+func TestApplyNodeSchedulingOverrides_RequireNodeSelector(t *testing.T) {
+	provider := requireNodeSelectorFixtureProvider(t)
+
+	t.Run("missing selector fails closed", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{})
+		err = b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err == nil {
+			t.Fatal("expected an error bundling the fixture component with no --system-node-selector, got nil")
+		}
+		if !strings.Contains(err.Error(), "system-node-selector") {
+			t.Errorf("error should name the missing flag, got: %v", err)
+		}
+	})
+
+	t.Run("CLI selector satisfies the requirement", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithSystemNodeSelector(map[string]string{"nodeGroup": "system-cpu"}))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("unexpected error with --system-node-selector set: %v", err)
+		}
+		got, ok := component.GetValueByPath(values, "controller.podSpec.nodeSelector")
+		if !ok {
+			t.Fatal("controller.podSpec.nodeSelector not injected")
+		}
+		if !reflect.DeepEqual(got, map[string]any{"nodeGroup": "system-cpu"}) {
+			t.Errorf("controller.podSpec.nodeSelector = %#v, want {nodeGroup: system-cpu}", got)
+		}
+	})
+
+	t.Run("overlay opt-out on every declared path satisfies the requirement", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		policy := schedulingPathPolicy{optOut: map[string]struct{}{
+			"controller.podSpec.nodeSelector": {},
+		}}
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorFixtureComponent, values, provider, policy)
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, provider, policy); err != nil {
+			t.Fatalf("unexpected error when every declared path is opted out: %v", err)
+		}
+	})
+
+	t.Run("overlay-hardcoded selector satisfies the requirement without a CLI flag", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		// Simulates a recipe overlay/default values file that already sets a
+		// real (non-empty) selector at the declared path, with no
+		// --system-node-selector flag. applyNodeSchedulingOverrides is a
+		// no-op here since the CLI selector is empty, so this exercises
+		// validateRequiredNodeSelectors reading a pre-existing value rather
+		// than one it injected.
+		values := map[string]any{
+			"controller": map[string]any{
+				"podSpec": map[string]any{
+					"nodeSelector": map[string]any{"nodeGroup": "hardcoded-pool"},
+				},
+			},
+		}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("unexpected error: overlay already set a non-empty selector: %v", err)
+		}
+	})
+
+	t.Run("a map[any]any override value satisfies the requirement", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		// A generic YAML/JSON decode into `any` can produce map[any]any
+		// for a nested object instead of map[string]any. An SDK caller
+		// building ComponentRef.Overrides from such a decode without
+		// normalizing key types should not have a real selector rejected
+		// as missing.
+		values := map[string]any{
+			"controller": map[string]any{
+				"podSpec": map[string]any{
+					"nodeSelector": map[any]any{"nodeGroup": "hardcoded-pool"},
+				},
+			},
+		}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("unexpected error: map[any]any selector should count as set: %v", err)
+		}
+	})
+
+	t.Run("components without requireNodeSelector stay a silent no-op", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides("gpu-operator", values, nil, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors("gpu-operator", values, nil, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("gpu-operator does not set requireNodeSelector; expected no error, got: %v", err)
+		}
+	})
+
+	// Regression for the bypass: --set-json/--set-file apply AFTER node-
+	// scheduling injection in extractComponentValues and deep-merge with
+	// "null deletes the key" semantics, so a CLI selector that satisfied
+	// injection can still be nulled back out before validation runs.
+	t.Run("a later --set-json null on the injected key is still caught", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithSystemNodeSelector(map[string]string{"nodeGroup": "system-cpu"}))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := component.ApplyTypedOverrides(values, map[string]any{
+			"controller.podSpec.nodeSelector": map[string]any{"nodeGroup": nil},
+		}); err != nil {
+			t.Fatalf("ApplyTypedOverrides: %v", err)
+		}
+
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, provider, schedulingPathPolicy{}); err == nil {
+			t.Fatal("expected an error: --set-json nulled the CLI-injected selector back to empty")
+		}
+	})
+
+	// Regression for a second bypass: --dynamic leaves a path out of the
+	// bundle entirely for an operator to supply at install time, the same
+	// unpinned state requireNodeSelector exists to reject. Without this
+	// check, a --dynamic path was merged into policy.optOut, and
+	// validateRequiredNodeSelectors treats an opted-out path as satisfied.
+	t.Run("dynamic override on a required selector path is rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.podSpec.nodeSelector": {}}
+		err = b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorFixtureComponent, provider, dynPaths)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted a requireNodeSelector path")
+		}
+		if !strings.Contains(err.Error(), "controller.podSpec.nodeSelector") {
+			t.Errorf("error should name the conflicting path, got: %v", err)
+		}
+	})
+
+	t.Run("dynamic override on an unrelated path is allowed", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.podSpec.tolerations": {}}
+		if err := b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorFixtureComponent, provider, dynPaths); err != nil {
+			t.Fatalf("unexpected error, the dynamic path is not one of the fixture's requireNodeSelector paths, got: %v", err)
+		}
+	})
+
+	// extractComponentValues rejects a --dynamic path that conflicts with
+	// a requireNodeSelector path.
+	t.Run("extractComponentValues rejects a dynamic required selector path", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithDynamicValues(map[string][]string{
+			requireNodeSelectorFixtureComponent: {"controller.podSpec.nodeSelector"},
+		}))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{Name: requireNodeSelectorFixtureComponent, Type: "helm"}},
+		}
+		recipeResult.BindDataProvider(provider)
+
+		_, err = b.extractComponentValues(context.Background(), recipeResult)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted a requireNodeSelector path")
+		}
+		if !strings.Contains(err.Error(), "controller.podSpec.nodeSelector") {
+			t.Errorf("error should name the conflicting path, got: %v", err)
+		}
+	})
+
+	// Regression for a third gap: a registry that fails to load used to
+	// make validateRequiredNodeSelectors a silent no-op, the same as a
+	// missing component. A load failure means requireNodeSelector cannot
+	// be confirmed either way, so it must fail closed instead.
+	t.Run("registry load failure fails closed", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, failingRegistryProvider{}, schedulingPathPolicy{}); err == nil {
+			t.Fatal("expected an error, the component registry failed to load")
+		}
+	})
 }
 
 // TestClassifySchedulingPaths covers the helper that splits scheduling

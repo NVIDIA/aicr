@@ -883,6 +883,65 @@ func TestComponentRegistry_Validate_EdgeCases(t *testing.T) {
 		}
 	})
 
+	t.Run("requireNodeSelector without nodeSelectorPaths is invalid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:        "comp1",
+					DisplayName: "Comp 1",
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{RequireNodeSelector: true},
+					},
+				},
+				{
+					Name:        "comp2",
+					DisplayName: "Comp 2",
+					NodeScheduling: NodeSchedulingConfig{
+						Accelerated: SchedulingPaths{RequireNodeSelector: true},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		wantSubstrings := []string{
+			`component "comp1": nodeScheduling.system.requireNodeSelector is true but nodeSelectorPaths is empty`,
+			`component "comp2": nodeScheduling.accelerated.requireNodeSelector is true but nodeSelectorPaths is empty`,
+		}
+		for _, want := range wantSubstrings {
+			found := false
+			for _, e := range errs {
+				if strings.Contains(e.Error(), want) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected an error containing %q, got: %v", want, errs)
+			}
+		}
+	})
+
+	t.Run("requireNodeSelector with nodeSelectorPaths is valid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:        "comp1",
+					DisplayName: "Comp 1",
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{
+							RequireNodeSelector: true,
+							NodeSelectorPaths:   []string{"controller.podSpec.nodeSelector"},
+						},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		if len(errs) != 0 {
+			t.Errorf("expected no validation errors, got: %v", errs)
+		}
+	})
+
 	t.Run("valid registry passes", func(t *testing.T) {
 		registry := &ComponentRegistry{
 			Components: []ComponentConfig{
