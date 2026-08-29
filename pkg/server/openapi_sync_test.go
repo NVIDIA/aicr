@@ -434,6 +434,64 @@ func TestOpenAPIBundleContract(t *testing.T) {
 	}
 }
 
+// TestOpenAPIProfileTrackParametersAreUniversal asserts the profile-track query
+// parameters are declared on both methods of every recipe-resolving endpoint.
+//
+// This replaces TestOpenAPISlurmAccountingModeIsV2Only, whose whole assertion
+// was that slurmAccountingMode appeared on /v2 and not on /v1. Collapsing the
+// families deleted the distinction that test measured, and deleting it with its
+// premise would have left the parameter with no spec coverage at all — a
+// silent drop from the frozen v1 surface would not fail anything.
+//
+// profile is included for the same reason: it is the other half of what the
+// collapse made universal, and it was previously covered only as part of the
+// v1-versus-v2 split.
+func TestOpenAPIProfileTrackParametersAreUniversal(t *testing.T) {
+	specPath := filepath.Join("..", "..", "api", "aicr", "v1", "server.yaml")
+	data, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatalf("read spec %q: %v", specPath, err)
+	}
+	var spec map[string]any
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse spec: %v", err)
+	}
+
+	parameters := []struct {
+		name string
+		ref  string
+	}{
+		{name: "slurmAccountingMode", ref: "#/components/parameters/SlurmAccountingMode"},
+		{name: "profile", ref: "#/components/parameters/ProfileSelection"},
+	}
+
+	for _, path := range []string{"/v1/recipe", "/v1/query"} {
+		for _, method := range []string{"get", "post"} {
+			for _, want := range parameters {
+				t.Run(want.name+" "+method+" "+path, func(t *testing.T) {
+					operation := openAPIObjectAt(t, spec, "paths", path, method)
+					declared := openAPISequence(t, operation["parameters"],
+						"operation.parameters")
+					if len(declared) == 0 {
+						t.Fatalf("%s %s declares no parameters; the parse shape is "+
+							"wrong and this assertion would pass vacuously",
+							method, path)
+					}
+
+					for _, value := range declared {
+						parameter := openAPIObject(t, value, "operation parameter")
+						if parameter["name"] == want.name || parameter["$ref"] == want.ref {
+							return
+						}
+					}
+					t.Errorf("%s %s does not declare %q; it is part of the frozen v1 "+
+						"surface and the handler reads it", method, path, want.name)
+				})
+			}
+		}
+	}
+}
+
 func openAPIObjectAt(t *testing.T, root map[string]any, path ...string) map[string]any {
 	t.Helper()
 	current := root
