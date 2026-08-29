@@ -36,25 +36,23 @@ import (
 // authoritatively, so a doc claiming a flag that is not in it is mechanically
 // detectable. This turns that class of error into a merge-gate failure.
 
-// docsClaimPattern matches an `aicr` invocation with at least one flag, taking
-// up to two command words so `aicr evidence digest --recipe` resolves to the
-// subcommand rather than to `aicr evidence`.
-var docsClaimPattern = regexp.MustCompile(
-	`\baicr((?: [a-z][a-z-]*){1,2})((?: --?[a-zA-Z][a-zA-Z0-9-]*)+)`)
-
-// docsRootClaimPattern catches root-level invocations like `aicr --debug`,
-// which docsClaimPattern cannot: requiring a subcommand word is what makes that
-// pattern safe to run mid-sentence.
+// docsInvocation matches `aicr` followed by a run of space-separated tokens,
+// each either a flag or a lowercase word. The tokens are walked positionally
+// rather than split into "command part" and "flag part", because urfave/cli
+// allows root flags and subcommands to interleave: in
+// `aicr --debug recipe --service eks` the first flag belongs to the root and
+// the second to `recipe`.
 //
-// It is anchored to the start of the line because the bare word `aicr` appears
-// constantly as an argument to other tools — `kubectl describe job aicr -n
-// gpu-operator`, `kubectl describe pod -n aicr -l app=aicrd` — where the
-// following flags belong to kubectl, not to us. An unanchored root pattern
-// reports every one of those, and a gate that cries wolf is a gate someone
-// deletes. Real root invocations in docs are line-initial, optionally behind a
-// shell prompt or an opening backtick.
-var docsRootClaimPattern = regexp.MustCompile(
-	"^[\\s>]*[`$]?\\s*aicr((?: --?[a-zA-Z][a-zA-Z0-9-]*)+)")
+// An earlier two-pattern version could not express that. One pattern required a
+// command word immediately after `aicr`, the other matched root flags only up
+// to the first non-flag, so `--recipie` in `aicr --debug recipe --recipie` was
+// attributed to nothing and never checked.
+var docsInvocation = regexp.MustCompile(
+	`\baicr((?: (?:--?[A-Za-z][A-Za-z0-9-]*|[a-z][a-z-]*))+)`)
+
+// docsLinePrefix reports whether everything before the match on its line is
+// blank or shell-prompt decoration, i.e. the invocation starts the line.
+var docsLinePrefix = regexp.MustCompile("^[\\s>]*[`$]?\\s*$")
 
 // frameworkFlags are injected by urfave/cli during setup rather than declared
 // in the command tree, so the golden does not contain them (see #2451). They
@@ -196,47 +194,45 @@ func TestDocsNameOnlyRealCLIFlags(t *testing.T) {
 		}
 
 		for lineNo, line := range strings.Split(string(data), "\n") {
-			matches := docsClaimPattern.FindAllStringSubmatch(line, -1)
-			// Root-level invocations carry no command word, so synthesize the
-			// same shape: empty command suffix, flags in group 2.
-			for _, rm := range docsRootClaimPattern.FindAllStringSubmatch(line, -1) {
-				matches = append(matches, []string{rm[0], "", rm[1]})
-			}
-
-			for _, m := range matches {
-				words := strings.Fields(m[1])
-
-				// Prefer the longest command path that exists, so
-				// `aicr evidence digest --recipe` checks digest's flags
-				// rather than evidence's. Depth 0 is the root command, which
-				// carries --debug and --log-json.
-				cmdPath := ""
-				for depth := len(words); depth >= 0; depth-- {
-					candidate := "aicr"
-					if depth > 0 {
-						candidate += " " + strings.Join(words[:depth], " ")
-					}
-					if commands[candidate] {
-						cmdPath = candidate
-						break
-					}
-				}
-				if cmdPath == "" {
-					// Not a command this CLI has. Prose like "aicr recipes
-					// --data" is not an invocation worth policing here;
-					// TestCLISurface owns the command set itself.
+			for _, loc := range docsInvocation.FindAllStringSubmatchIndex(line, -1) {
+				tokens := strings.Fields(line[loc[2]:loc[3]])
+				if len(tokens) == 0 {
 					continue
 				}
 
-				scanned++
-				for _, flagName := range strings.Fields(m[2]) {
-					if frameworkFlags[flagName] || flags[cmdPath][flagName] {
+				// Entry rule. A line-initial invocation may begin with a root
+				// flag. Anywhere else, the first token must be a real
+				// subcommand — that requirement is what keeps the bare word
+				// `aicr` appearing as an argument to another tool
+				// (`kubectl describe job aicr -n gpu-operator`) from being read
+				// as one of ours, with kubectl's flags attributed to us.
+				if !docsLinePrefix.MatchString(line[:loc[0]]) &&
+					!commands["aicr "+tokens[0]] {
+
+					continue
+				}
+
+				// Walk left to right, attributing each flag to the deepest
+				// command resolved so far.
+				cmdPath := "aicr"
+				for _, tok := range tokens {
+					if !strings.HasPrefix(tok, "-") {
+						if next := cmdPath + " " + tok; commands[next] {
+							cmdPath = next
+						}
+						// A non-command word is a flag value or prose; it
+						// neither extends the path nor ends the invocation.
+						continue
+					}
+
+					scanned++
+					if frameworkFlags[tok] || flags[cmdPath][tok] {
 						continue
 					}
 					t.Errorf("%s:%d: docs tell the user to run %q, but %q has no %s flag.\n"+
 						"        Accepted flags for that command are pinned in %s.\n"+
 						"        Either correct the documentation or add the flag.",
-						rel, lineNo+1, cmdPath+" "+flagName, cmdPath, flagName, goldenPath)
+						rel, lineNo+1, cmdPath+" "+tok, cmdPath, tok, goldenPath)
 				}
 			}
 		}
@@ -266,5 +262,89 @@ func docsRepoRoot(t *testing.T) string {
 			t.Fatal("could not locate go.mod walking up from the test working directory")
 		}
 		dir = parent
+	}
+}
+
+// TestDocsClaimWalkAttributesFlagsToTheRightCommand pins the attribution rules
+// directly, instead of relying on the corpus scan to exercise them.
+//
+// The corpus is all-valid by construction — it is the docs, and they pass — so
+// a scan over it cannot show that a *bad* flag would be caught. Two earlier
+// revisions were verified only that way and both were wrong: one never checked
+// root flags at all, and the two-pattern version that replaced it silently
+// skipped every flag after an interleaved root flag, so `aicr --debug recipe
+// --totallyfake` passed. These cases assert the failing direction.
+func TestDocsClaimWalkAttributesFlagsToTheRightCommand(t *testing.T) {
+	t.Parallel()
+
+	commands, flags := surfaceFromGolden(t)
+
+	// check mirrors the walk in TestDocsNameOnlyRealCLIFlags and returns the
+	// flags it would report.
+	check := func(line string) []string {
+		var bad []string
+		for _, loc := range docsInvocation.FindAllStringSubmatchIndex(line, -1) {
+			tokens := strings.Fields(line[loc[2]:loc[3]])
+			if len(tokens) == 0 {
+				continue
+			}
+			if !docsLinePrefix.MatchString(line[:loc[0]]) && !commands["aicr "+tokens[0]] {
+				continue
+			}
+			cmdPath := "aicr"
+			for _, tok := range tokens {
+				if !strings.HasPrefix(tok, "-") {
+					if next := cmdPath + " " + tok; commands[next] {
+						cmdPath = next
+					}
+					continue
+				}
+				if !frameworkFlags[tok] && !flags[cmdPath][tok] {
+					bad = append(bad, cmdPath+" "+tok)
+				}
+			}
+		}
+		return bad
+	}
+
+	tests := []struct {
+		name    string
+		line    string
+		wantBad bool
+	}{
+		// The bug that started this: a flag on a command that has no such flag.
+		{"unknown flag on a subcommand", "aicr recipe -r overlay.yaml", true},
+		{"typo on a real subcommand flag", "aicr bundle --recipie r.yaml", true},
+		{"unknown flag on a nested subcommand", "aicr evidence digest --nope", true},
+
+		// Root flags, which the first revision could not see at all.
+		{"unknown root flag", "aicr --recipie", true},
+		{"real root flag", "aicr --debug", false},
+
+		// Interleaving, which the second revision could not see.
+		{"bad flag after an interleaved root flag", "aicr --debug recipe --totallyfake", true},
+		{"good flag after an interleaved root flag", "aicr --debug recipe --service eks", false},
+
+		// Real invocations must stay quiet.
+		{"subcommand with real flags", "aicr recipe --snapshot s.yaml --output r.yaml", false},
+		{"nested subcommand with a real flag", "aicr evidence digest --recipe r.yaml", false},
+		{"short alias", "aicr bundle -r r.yaml --deployer argocd", false},
+		{"framework flag", "aicr bundle --help", false},
+
+		// `aicr` as another tool's argument: the flags belong to that tool.
+		// Only line-initial invocations may lead with a flag, which is what
+		// keeps these quiet.
+		{"aicr as a kubectl job name", "kubectl describe job aicr -n gpu-operator", false},
+		{"aicr as a kubectl namespace", "kubectl describe pod -n aicr -l app=aicrd", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			bad := check(tt.line)
+			if got := len(bad) > 0; got != tt.wantBad {
+				t.Errorf("line %q reported %v; wantBad=%v", tt.line, bad, tt.wantBad)
+			}
+		})
 	}
 }
