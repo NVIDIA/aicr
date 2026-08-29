@@ -356,7 +356,11 @@ func curlSegment(tokens []string) []string {
 			return tokens[start:end]
 		}
 	}
-	return tokens
+	// No curl stage. Returning every token here would let `wget "http://...”`
+	// or a URL whose fragment happens to read "#curl" be replayed as a GET,
+	// inflating the request count and reporting coverage for text that is not
+	// a request at all.
+	return nil
 }
 
 // normalizeCurlTokens rewrites the option spellings curl accepts into the
@@ -405,23 +409,25 @@ func normalizeCurlTokens(tokens []string) []string {
 // faithfully. Skipping is deliberate and reported rather than silent: a request
 // this gate cannot model is not a request it should claim to cover.
 func parseCurlRequest(command string) (req docsRequest, ok bool, reason string) {
+	// A cheap reject before tokenizing. The authoritative check is the curl
+	// token below: this substring alone also matches prose and other commands
+	// that merely mention curl.
 	if !strings.Contains(command, "curl") {
 		return req, false, ""
-	}
-	// A pipeline's later stages consume the previous command's output rather
-	// than being standalone requests.
-	if idx := strings.Index(command, "curl"); idx > 0 {
-		before := strings.TrimSpace(command[:idx])
-		if strings.HasSuffix(before, "|") {
-			return req, false, "piped input"
-		}
 	}
 
 	tokens, err := tokenizeShell(command)
 	if err != nil {
 		return req, false, "unparseable: " + err.Error()
 	}
-	tokens = normalizeCurlTokens(curlSegment(tokens))
+
+	segment := curlSegment(tokens)
+	if len(segment) == 0 {
+		// No curl stage. The command mentions curl in a URL fragment, a
+		// comment, or an argument to something else.
+		return req, false, ""
+	}
+	tokens = normalizeCurlTokens(segment)
 
 	req.method = http.MethodGet
 	var rawURL string
@@ -575,6 +581,19 @@ func tokenizeShell(command string) ([]string, error) {
 			// Unquoted, so it is substitution or grouping syntax, never part of
 			// a URL. Quoted parens never reach here.
 			flush()
+		case '#':
+			// An unquoted # that starts a word begins a comment. Without this,
+			// the word "curl" in a trailing comment made any command look like
+			// a curl stage — `wget "http://..." # like curl` was replayed as a
+			// GET. Mid-word # is literal in shell (and is a URL fragment here).
+			if !inWord {
+				for i < len(runes) && runes[i] != '\n' {
+					i++
+				}
+				continue
+			}
+			current.WriteRune(c)
+			inWord = true
 		case '|', ';':
 			// Unquoted pipeline separator. Emitted as its own token so the
 			// caller can stop reading arguments at the end of this command.
@@ -789,6 +808,27 @@ func TestParseCurlRequest(t *testing.T) {
 			name:    "placeholder URL is skipped",
 			command: `curl "http://localhost:8080/v1/recipe?service=<service>"`,
 			wantOK:  false,
+		},
+		{
+			// Without a curl stage the segment is empty. Returning every token
+			// instead would replay this as a GET and count it as covered.
+			name:    "url fragment mentioning curl is not a request",
+			command: `echo "http://localhost:8080/v1/recipe#curl"`,
+			wantOK:  false,
+		},
+		{
+			name:    "another command with curl in a trailing comment",
+			command: `wget "http://localhost:8080/v1/recipe?service=eks" # like curl`,
+			wantOK:  false,
+		},
+		{
+			// The comment rule must not eat a quoted #, which is a URL
+			// fragment rather than the start of a comment.
+			name:       "quoted fragment survives comment stripping",
+			command:    `curl "http://localhost:8080/v1/recipe?service=eks#frag"`,
+			wantOK:     true,
+			wantMethod: http.MethodGet,
+			wantTarget: "/v1/recipe?service=eks#frag",
 		},
 		{
 			name:    "other host is skipped",
