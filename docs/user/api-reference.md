@@ -143,7 +143,7 @@ curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100"
 curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&nodes=8"
 
 # Using gpu alias
-curl "http://localhost:8080/v1/recipe?gpu=gb200&service=eks&os=ubuntu"
+curl "http://localhost:8080/v1/recipe?gpu=gb200&service=eks&os=ubuntu&intent=training"
 
 # Pretty print with jq
 curl -s "http://localhost:8080/v1/recipe?accelerator=h100" | jq '.'
@@ -966,8 +966,10 @@ ls -la
 ### Handling Rate Limits
 
 ```shell
-# Check rate limit headers
-curl -I "http://localhost:8080/v1/recipe?accelerator=h100"
+# Check rate limit headers. The recipe endpoints accept GET and POST, not
+# HEAD, so dump the headers from a GET and discard the body rather than
+# using curl -I.
+curl -sD - -o /dev/null "http://localhost:8080/v1/recipe?accelerator=h100"
 
 # Response headers:
 # X-RateLimit-Limit: 100
@@ -981,7 +983,7 @@ When rate limited (HTTP 429), use the `Retry-After` header:
 # Retry with backoff
 response=$(curl -s -w "%{http_code}" "http://localhost:8080/v1/recipe?accelerator=h100")
 if [ "${response: -3}" = "429" ]; then
-  retry_after=$(curl -sI "http://localhost:8080/v1/recipe" | grep -i "Retry-After" | awk '{print $2}')
+  retry_after=$(curl -sD - -o /dev/null "http://localhost:8080/v1/recipe?accelerator=h100" | grep -i "Retry-After" | awk '{print $2}')
   echo "Rate limited. Retrying after ${retry_after}s..."
   sleep "$retry_after"
 fi

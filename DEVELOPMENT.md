@@ -334,7 +334,7 @@ curl http://localhost:8080/health
 curl http://localhost:8080/ready
 
 # Generate a recipe
-curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=h100"
+curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=h100&intent=training"
 
 # View metrics
 curl http://localhost:9090/metrics
@@ -398,7 +398,7 @@ make server
 # In another terminal, test endpoints
 curl http://localhost:8080/health
 curl http://localhost:8080/ready
-curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks"
+curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=h100&intent=training"
 ```
 
 ### Tilt Architecture
