@@ -200,16 +200,31 @@ func TestCompletionCommandIsPublic(t *testing.T) {
 		t.Error("completion has no category; root.go assigns one so it groups in help")
 	}
 
-	// The four shell subcommands are the surface users actually invoke.
+	// The four shell subcommands are the surface users actually invoke. The
+	// comparison runs both ways: a missing one breaks a documented command, and
+	// an unexpected one is public surface nothing covers, since the golden
+	// cannot see this tree either. A urfave upgrade adding a fifth shell should
+	// be a conscious decision, not a silent one.
 	want := map[string]bool{"bash": true, "zsh": true, "fish": true, "pwsh": true}
 	got := make(map[string]bool, len(completion.Commands))
 	for _, sub := range completion.Commands {
 		got[sub.Name] = true
 	}
+
 	for shell := range want {
 		if !got[shell] {
 			t.Errorf("completion has no %q subcommand; `aicr completion %s` is "+
 				"documented surface", shell, shell)
 		}
+	}
+	for shell := range got {
+		if !want[shell] {
+			t.Errorf("completion has an unexpected %q subcommand. It is public "+
+				"surface that neither this test nor cli-surface.golden covers. "+
+				"Add it here and to docs/user/cli-reference.md, or remove it.", shell)
+		}
+	}
+	if len(got) != len(want) {
+		t.Errorf("completion has %d subcommands, want %d", len(got), len(want))
 	}
 }
