@@ -111,9 +111,8 @@ func docsClaimOffenders(
 	strict bool,
 	commands map[string]bool,
 	flags map[string]map[string]bool,
-) []string {
+) (bad []string, attributed int) {
 
-	var bad []string
 	for _, loc := range docsAicrToken.FindAllStringIndex(line, -1) {
 		// Skip hyphenated identifiers that merely begin with "aicr":
 		// aicr-evidence, aicr-attestation.sigstore.json, aicr-demo2-gpu-nic-0.
@@ -146,6 +145,7 @@ func docsClaimOffenders(
 			continue
 		}
 
+		attributed++
 		cmdPath := "aicr"
 		for _, tok := range tokens {
 			if !strings.HasPrefix(tok, "-") {
@@ -168,7 +168,7 @@ func docsClaimOffenders(
 			bad = append(bad, cmdPath+"\x00"+name)
 		}
 	}
-	return bad
+	return bad, attributed
 }
 
 // frameworkFlags are injected by urfave/cli during setup rather than declared
@@ -321,22 +321,28 @@ func TestDocsNameOnlyRealCLIFlags(t *testing.T) {
 			// this, `# ... \`aicr recipe\` has no --namespace flag` is read
 			// as an invocation of a flag it exists to say does not exist.
 			strict := !inFence || strings.HasPrefix(strings.TrimSpace(ll.Text), "#")
-			for _, offender := range docsClaimOffenders(ll.Text, strict, commands, flags) {
+			offenders, n := docsClaimOffenders(ll.Text, strict, commands, flags)
+			scanned += n
+			for _, offender := range offenders {
 				cmdPath, flagName, _ := strings.Cut(offender, "\x00")
 				t.Errorf("%s:%d: docs tell the user to run %q, but %q has no %s flag.\n"+
 					"        Accepted flags for that command are pinned in %s.\n"+
 					"        Either correct the documentation or add the flag.",
 					rel, ll.Line, cmdPath+" "+flagName, cmdPath, flagName, goldenPath)
 			}
-			scanned += strings.Count(ll.Text, "aicr")
 		}
 	}
 
+	// scanned counts invocations the walk actually attributed to a command, not
+	// raw "aicr" substrings. A substring count stays high even when attribution
+	// resolves nothing — after a regression in the entry rule or in
+	// surfaceFromGolden — so it could not detect the inert gate it guards
+	// against.
 	if scanned == 0 {
-		t.Fatal("matched no aicr invocations in any scanned file; the pattern is " +
-			"wrong and this gate is inert")
+		t.Fatal("resolved no aicr invocations to a command in any scanned file; " +
+			"attribution is broken and this gate is inert")
 	}
-	t.Logf("checked %d documented aicr invocations across %d files", scanned, len(files))
+	t.Logf("attributed %d documented aicr invocations across %d files", scanned, len(files))
 }
 
 // docsRepoRoot walks up to the module root.
@@ -376,7 +382,8 @@ func TestDocsClaimWalkAttributesFlagsToTheRightCommand(t *testing.T) {
 	check := func(line string, strict bool) []string {
 		bad := make([]string, 0, 4)
 		for _, ll := range docsLogicalLines(line) {
-			bad = append(bad, docsClaimOffenders(ll.Text, strict, commands, flags)...)
+			offenders, _ := docsClaimOffenders(ll.Text, strict, commands, flags)
+			bad = append(bad, offenders...)
 		}
 		return bad
 	}
