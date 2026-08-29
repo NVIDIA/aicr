@@ -369,10 +369,9 @@ are not time-bounded and persist until `Client.Close()` is called.
 > `profile=gpuStack=gke-default` or `profile=gpuStack=bundle-installer`
 > on GKE
 > (see [GKE GPU Setup](gke-gpu-setup.md#gpu-device-plugin-ownership)).
-> `/v1/recipe` still works for unprofiled compositions but rejects any
-> composition that resolves with a profile — the embedded AKS and GKE
-> families both carry `gpuStack`, so requests for them reject, while
-> unprofiled external AKS/GKE overlays keep `/v1` access. See
+> `/v1/recipe` serves profiled and unprofiled compositions alike: omit
+> `profile=` to take the composition's declared default, or select one
+> explicitly. See
 > [API Reference › Profile and Slurm-accounting endpoints](../user/api-reference.md#profile-and-slurm-accounting-endpoints).
 
 ```python

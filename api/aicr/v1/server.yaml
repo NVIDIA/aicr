@@ -40,10 +40,9 @@ info:
     - **Interactive Sigstore attestation** (`aicr bundle --attest` with browser-based OIDC):
       the interactive, user-authenticated signing flow is CLI-only. The API server instead
       offers non-interactive server-side attestation: `POST /v1/bundle?attest=true`
-      or `POST /v2/bundle?attest=true` returns a
-      signed bundle, with the server signing as itself using its operator-configured KMS key or
-      private-Sigstore keyless identity. No signing identity is ever taken from the request.
-      See the `attest` query parameter on POST /v1/bundle and POST /v2/bundle.
+      returns a signed bundle, with the server signing as itself using its operator-configured
+      KMS key or private-Sigstore keyless identity. No signing identity is ever taken from the
+      request. See the `attest` query parameter on POST /v1/bundle.
 
     - **OCI registry push** (`aicr bundle --output oci://...`) — pushes bundle artifacts to
       a container registry.
@@ -96,9 +95,6 @@ paths:
                       - /v1/recipe
                       - /v1/query
                       - /v1/bundle
-                      - /v2/recipe
-                      - /v2/query
-                      - /v2/bundle
 
   /v1/recipe:
     get:
@@ -1804,18 +1800,14 @@ components:
 
     LegacyBundleRecipeRequest:
       description: >
-        Additive legacy RecipeResult accepted by POST /v2/bundle: any
+        Additive legacy RecipeResult accepted by POST /v1/bundle: any
         combination of apiVersion absent, empty, aicr.run/v1alpha2, or
-        aicr.run/v1 with
-        kind absent, empty, or RecipeResult. One branch covers the whole
-        legacy square because DecodeRecipeResult accepts every cell of it —
-        kind is enforced only when non-empty, and only the profile track requires it —
-        and /v1/bundle's LegacyBundleRecipeV1Request admits the same default
-        shapes, so any
-        narrower branch leaves /v2/bundle stricter than its own server
-        (previously true for the empty-header round trip, then again for
-        apiVersion v1alpha2 with kind absent). The legacy kind Recipe is
-        v1-only: the strict v2 decode path rejects it.
+        aicr.run/v1 with kind absent, empty, or RecipeResult. One branch
+        covers the whole legacy square because DecodeRecipeResult accepts
+        every cell of it — kind is enforced only when non-empty, and only the
+        profile track requires it.
+        The legacy kind Recipe, published through v0.18.0, is no longer
+        accepted on any path.
         metadata.selectedProfile remains reserved for v1alpha3/v1beta2.
         configuration is likewise reserved for v1alpha3/v1beta2; default request
         headers cannot carry typed Slurm accounting configuration.
@@ -1843,7 +1835,7 @@ components:
                 required: [selectedProfile]
     BundleRecipeRequest:
       description: >
-        Version-partitioned RecipeResult accepted by POST /v2/bundle.
+        Version-partitioned RecipeResult accepted by POST /v1/bundle.
         Default input with apiVersion aicr.run/v1alpha2, aicr.run/v1, or no
         apiVersion remains additive; v1alpha3/v1beta2 input is closed and requires either
         metadata.selectedProfile or configuration.slurm.accounting. The

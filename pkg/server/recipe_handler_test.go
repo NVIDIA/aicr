@@ -46,7 +46,8 @@ func newTestHandler(t *testing.T, allowLists *aicr.AllowLists) *recipeHandler {
 }
 
 // TestHandleRecipes_Success verifies GET and POST resolve a recipe with a 200
-// status and a Cache-Control header.
+// status and a Cache-Control header, and that both methods return the same
+// resolved recipe for equivalent criteria.
 func TestHandleRecipes_Success(t *testing.T) {
 	h := newTestHandler(t, nil)
 
@@ -56,7 +57,20 @@ func TestHandleRecipes_Success(t *testing.T) {
 		target      string
 		body        string
 		contentType string
-	}{}
+	}{
+		{
+			name:   "GET with criteria query parameters",
+			method: http.MethodGet,
+			target: "/v1/recipe?service=eks&accelerator=h100&intent=training",
+		},
+		{
+			name:        "POST with strict criteria envelope",
+			method:      http.MethodPost,
+			target:      "/v1/recipe",
+			body:        `{"criteria":{"service":"eks","accelerator":"h100","intent":"training"}}`,
+			contentType: "application/json",
+		},
+	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -69,7 +83,7 @@ func TestHandleRecipes_Success(t *testing.T) {
 			}
 			w := httptest.NewRecorder()
 
-			h.HandleQuery(w, req)
+			h.HandleRecipes(w, req)
 
 			if w.Code != http.StatusOK {
 				t.Fatalf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
@@ -77,14 +91,16 @@ func TestHandleRecipes_Success(t *testing.T) {
 			if cc := w.Header().Get("Cache-Control"); cc == "" {
 				t.Error("expected Cache-Control header to be set")
 			}
-			// The selected value should be a non-empty JSON scalar (the
-			// driver version string).
-			var selected any
-			if err := json.Unmarshal(w.Body.Bytes(), &selected); err != nil {
-				t.Fatalf("failed to decode selected value: %v; body: %s", err, w.Body.String())
+
+			var got recipe.RecipeResult
+			if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+				t.Fatalf("failed to decode recipe result: %v; body: %s", err, w.Body.String())
 			}
-			if s, ok := selected.(string); !ok || s == "" {
-				t.Errorf("expected non-empty string selected value, got %v (%T)", selected, selected)
+			if got.Kind != recipe.RecipeResultKind {
+				t.Errorf("kind = %q, want %q", got.Kind, recipe.RecipeResultKind)
+			}
+			if len(got.ComponentRefs) == 0 {
+				t.Error("expected resolved recipe to carry at least one component")
 			}
 		})
 	}
@@ -181,8 +197,6 @@ func TestHandleQuery_SelectorPresence(t *testing.T) {
 	}
 }
 
-// TestHandleQuery_MethodNotAllowed verifies non GET/POST returns 405 with an
-// Allow header.
 // TestHandleRecipes_EmptyCriteriaRejected verifies that GET and POST /v1/recipe
 // with no criteria dimensions (Specificity()==0) return 400 "no criteria provided"
 // rather than silently resolving to the base recipe.
@@ -278,6 +292,8 @@ func TestHandleQuery_EmptyCriteriaRejected(t *testing.T) {
 	}
 }
 
+// TestHandleQuery_MethodNotAllowed verifies non GET/POST returns 405 with an
+// Allow header.
 func TestHandleQuery_MethodNotAllowed(t *testing.T) {
 	h := newTestHandler(t, nil)
 

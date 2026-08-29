@@ -29,7 +29,7 @@ All server code lives in [`pkg/server`](https://github.com/NVIDIA/aicr/tree/main
 
 | File | Responsibility |
 |------|----------------|
-| `serve.go` | Entry point. Parses env allowlists, constructs `aicr.Client`, wires the v1 and v2 recipe, query, and bundle routes, runs `Server.Run` |
+| `serve.go` | Entry point. Parses env allowlists, constructs `aicr.Client`, wires the recipe, query, and bundle routes, runs `Server.Run` |
 | `server.go` | `Server` struct, options, route mux, lifecycle (`Start`, `Shutdown`, `Run`) |
 | `config.go` | `config` struct and env-var overrides (`PORT`, `SHUTDOWN_TIMEOUT_SECONDS`) |
 | `middleware.go` | 8-layer middleware chain; ordering rationale lives in source comments |

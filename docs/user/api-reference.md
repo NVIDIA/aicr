@@ -111,7 +111,6 @@ curl "http://localhost:8080/"
   "service": "aicrd",
   "version": "v0.14.0",
   "routes": [
-    "/v1/recipe", "/v1/query", "/v1/bundle",
     "/v1/recipe", "/v1/query", "/v1/bundle"
   ]
 }
@@ -399,7 +398,7 @@ The response format matches `GET /v1/query`: scalar values are returned as plain
 
 **Error Responses:**
 
-Same as `GET /v1/query` — see the [GET /v1/query error responses](#get-v1query) section above. The no-criteria and uncovered-dimension 400 cases apply. Note: unlike `GET /v1/query`, omitting `selector` from the POST body returns the entire hydrated recipe rather than a 400 (use `/v1/query` if you need the selector to be required).
+Same as `GET /v1/query` — see the [GET /v1/query error responses](#get-v1query) section above. The no-criteria and uncovered-dimension 400 cases apply. `selector` must be present on both GET and POST; omitting it is a 400. Passing it explicitly empty (`selector=` on GET, `"selector": ""` in a POST envelope) is the documented way to ask for the entire hydrated recipe.
 
 ---
 
@@ -498,13 +497,12 @@ override surfaces: divergent static values, intersecting dynamic paths,
 owned-component removal, and argocd-helm install-time values fail closed before
 output.
 
-The `/v1` routes remain the legacy contract. Explicit profile and
-`slurmAccountingMode` input is rejected; Slurm recipes remain implicitly
-disabled and use the default-track response shape. That track is
-`aicr.run/v1alpha2` today, and the schema also admits its ADR-022 target
-`aicr.run/v1` so a client generated from this spec tolerates the value a
-release before AICR emits it. Profile and Slurm-accounting selection are available on every
-endpoint; no composition needs special routing.
+A recipe resolved without an explicit profile or `slurmAccountingMode` uses
+the default-track response shape. That track is `aicr.run/v1alpha2` today, and
+the schema also admits its ADR-022 target `aicr.run/v1` so a client generated
+from this spec tolerates the value a release before AICR emits it. Profile and
+Slurm-accounting selection are available on every endpoint; no composition
+needs special routing.
 
 The AKS and GKE families are the embedded profile adopters (`gpuStack`). Their
 compositions resolve like any other: omit `profile=` to take the declared

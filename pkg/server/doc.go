@@ -50,13 +50,16 @@
 //
 // # Endpoints
 //
-// POST/GET /v1/recipe — resolve a Recipe from criteria. Query parameters or a
-// JSON/YAML RecipeCriteria body select service, accelerator, intent, os,
-// platform, and version.
+// POST/GET /v1/recipe — resolve a Recipe from criteria. GET takes the criteria
+// as query parameters. POST takes a strict envelope ({criteria, profile}) and
+// requires Content-Type: application/json or application/x-yaml; unknown
+// fields and unsupported media types are rejected. slurmAccountingMode is a
+// query parameter on both methods, not an envelope field.
 //
 // POST/GET /v1/query — resolve a hydrated value from a recipe by JSON-path
 // selector. GET takes criteria + selector via query string; POST takes a
-// QueryRequest body ({criteria, selector}).
+// strict envelope ({criteria, profile, selector}). selector must be present on
+// both methods; pass it explicitly empty to get the entire hydrated recipe.
 //
 // POST /v1/bundle — generate a deployment bundle (zip) from a hydrated
 // RecipeResult body. Query parameters control deployer, value overrides
