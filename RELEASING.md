@@ -52,6 +52,24 @@ window rather than a flat one, because an alpha version never promised
 stability in the first place. Its rules are below and take precedence for that
 surface.
 
+**Closing a fail-open gate is not a deprecation.** When two enforcement paths
+disagree about the same document and one of them already rejected it, aligning
+the permissive path to the strict one owes no notice window. The permissive
+behavior was a defect, not a contract: it accepted input the project had
+already decided was invalid, and continuing to honor it for two releases would
+mean knowingly shipping the fail-open seam the stricter path exists to close.
+Such a change must still be recorded in
+[`docs/user/deprecations.md`](docs/user/deprecations.md) with its real release,
+and its rationale written down in the governing ADR.
+
+Exercised exactly once so far, in v0.21: a `RecipeMetadata` overlay with an
+empty `apiVersion` was rejected by the catalog scanner but silently hydrated on
+the direct-input path. ADR-022 §3 records the decision and
+[#2421](https://github.com/NVIDIA/aicr/issues/2421) the analysis; no committed
+artifact in the tree was affected. This clause is deliberately narrow — it does
+not cover tightening validation that both paths previously accepted, which is an
+ordinary breaking change and owes the full window.
+
 ### How a deprecation is announced
 
 Every deprecation appears in all three places. One is not a substitute for
