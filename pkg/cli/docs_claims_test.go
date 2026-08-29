@@ -36,23 +36,140 @@ import (
 // authoritatively, so a doc claiming a flag that is not in it is mechanically
 // detectable. This turns that class of error into a merge-gate failure.
 
-// docsInvocation matches `aicr` followed by a run of space-separated tokens,
-// each either a flag or a lowercase word. The tokens are walked positionally
-// rather than split into "command part" and "flag part", because urfave/cli
-// allows root flags and subcommands to interleave: in
-// `aicr --debug recipe --service eks` the first flag belongs to the root and
-// the second to `recipe`.
+// docsAicrToken locates `aicr` as a standalone word.
 //
-// An earlier two-pattern version could not express that. One pattern required a
-// command word immediately after `aicr`, the other matched root flags only up
-// to the first non-flag, so `--recipie` in `aicr --debug recipe --recipie` was
-// attributed to nothing and never checked.
-var docsInvocation = regexp.MustCompile(
-	`\baicr((?: (?:--?[A-Za-z][A-Za-z0-9-]*|[a-z][a-z-]*))+)`)
+// \b treats a following hyphen as a boundary, so this also matches inside
+// identifiers like `aicr-evidence` and `aicr-corroboration-meta/v1`. Those are
+// filtered by docsIsHyphenatedIdent below rather than by the pattern, because
+// RE2 has no lookahead.
+var docsAicrToken = regexp.MustCompile(`\baicr\b`)
 
-// docsLinePrefix reports whether everything before the match on its line is
-// blank or shell-prompt decoration, i.e. the invocation starts the line.
+// docsFlagName extracts the flag name from a token, discarding the markdown
+// that surrounds it in prose: "--attest`):" and
+// "--relocate`](../user/cli-reference.md#aicr-evidence-sign))," both yield the
+// flag alone. Trimming a fixed punctuation set from the right cannot do this,
+// because the junk is not always trailing.
+var docsFlagName = regexp.MustCompile(`^--?[A-Za-z][A-Za-z0-9-]*`)
+
+// docsLinePrefix reports whether everything before the match is blank or shell
+// prompt decoration, i.e. the invocation starts the (logical) line.
 var docsLinePrefix = regexp.MustCompile("^[\\s>]*[`$]?\\s*$")
+
+// docsShellSeparators end an invocation. Without them, `aicr recipe --service
+// eks && kubectl apply -f x.yaml` would attribute kubectl's -f to aicr.
+var docsShellSeparators = map[string]bool{
+	"|": true, "||": true, "&&": true, ";": true, "&": true,
+	">": true, ">>": true, "<": true,
+}
+
+// docsLogicalLines joins backslash-continued lines, returning each logical line
+// with the 1-based number of the physical line it started on.
+//
+// Docs wrap long invocations, and a physical-line scan attributes nothing to
+// the continuation because it contains no `aicr` token — so every flag on the
+// wrapped portion went unchecked.
+type docsLine struct {
+	Text string
+	Line int
+}
+
+func docsLogicalLines(content string) []docsLine {
+	physical := strings.Split(content, "\n")
+	out := make([]docsLine, 0, len(physical))
+	for i := 0; i < len(physical); i++ {
+		text, start := physical[i], i+1
+		for strings.HasSuffix(strings.TrimRight(text, " \t"), "\\") && i+1 < len(physical) {
+			trimmed := strings.TrimRight(text, " \t")
+			text = trimmed[:len(trimmed)-1] + " " + strings.TrimSpace(physical[i+1])
+			i++
+		}
+		out = append(out, docsLine{Text: text, Line: start})
+	}
+	return out
+}
+
+// docsClaimOffenders returns every flag in one logical line that the command it
+// is attached to does not accept.
+//
+// This is the single implementation. The corpus scan and the table test both
+// call it, so a case pinned in the table cannot diverge from what actually runs
+// over the documentation — an earlier revision had the table re-implement the
+// walk, and the two drifted.
+// strict controls how far an invocation extends. In a fenced code block the
+// whole line is the command, so the walk continues past positional values
+// (`--snapshot s.yaml --output r.yaml`). In prose it must stop at the first
+// token that is neither a flag nor a command word, because prose legitimately
+// discusses flags that do not exist:
+//
+//	`aicr validate` has no `--set` flag
+//	`aicr recipe` has no --namespace flag
+//
+// A greedy walk reads those as invocations and reports the documentation for
+// being accurate. Adjacency is what tells an instruction from a discussion.
+func docsClaimOffenders(
+	line string,
+	strict bool,
+	commands map[string]bool,
+	flags map[string]map[string]bool,
+) []string {
+
+	var bad []string
+	for _, loc := range docsAicrToken.FindAllStringIndex(line, -1) {
+		// Skip hyphenated identifiers that merely begin with "aicr":
+		// aicr-evidence, aicr-attestation.sigstore.json, aicr-demo2-gpu-nic-0.
+		// Their suffix looks like a flag and belongs to no command.
+		if loc[1] < len(line) {
+			switch line[loc[1]] {
+			case '-', '/', '.', ':', '_':
+				continue
+			}
+		}
+		rest := strings.Fields(line[loc[1]:])
+
+		// Consume up to the first shell separator; beyond it the flags belong
+		// to another command.
+		tokens := make([]string, 0, len(rest))
+		for _, tok := range rest {
+			if docsShellSeparators[tok] {
+				break
+			}
+			tokens = append(tokens, strings.Trim(tok, "`\"'"))
+		}
+		if len(tokens) == 0 {
+			continue
+		}
+
+		// Entry rule: a line-initial invocation may lead with a root flag.
+		// Anywhere else the first token must be a real subcommand, which keeps
+		// `kubectl describe job aicr -n gpu-operator` from being read as ours.
+		if !docsLinePrefix.MatchString(line[:loc[0]]) && !commands["aicr "+tokens[0]] {
+			continue
+		}
+
+		cmdPath := "aicr"
+		for _, tok := range tokens {
+			if !strings.HasPrefix(tok, "-") {
+				if next := cmdPath + " " + tok; commands[next] {
+					cmdPath = next
+					continue
+				}
+				if strict {
+					break // prose: the invocation ended at this word
+				}
+				continue // code block: a positional value
+			}
+			name := docsFlagName.FindString(tok) // strips trailing markdown
+			if name == "" {
+				continue
+			}
+			if frameworkFlags[name] || flags[cmdPath][name] {
+				continue
+			}
+			bad = append(bad, cmdPath+"\x00"+name)
+		}
+	}
+	return bad
+}
 
 // frameworkFlags are injected by urfave/cli during setup rather than declared
 // in the command tree, so the golden does not contain them (see #2451). They
@@ -193,48 +310,25 @@ func TestDocsNameOnlyRealCLIFlags(t *testing.T) {
 			rel = path
 		}
 
-		for lineNo, line := range strings.Split(string(data), "\n") {
-			for _, loc := range docsInvocation.FindAllStringSubmatchIndex(line, -1) {
-				tokens := strings.Fields(line[loc[2]:loc[3]])
-				if len(tokens) == 0 {
-					continue
-				}
-
-				// Entry rule. A line-initial invocation may begin with a root
-				// flag. Anywhere else, the first token must be a real
-				// subcommand — that requirement is what keeps the bare word
-				// `aicr` appearing as an argument to another tool
-				// (`kubectl describe job aicr -n gpu-operator`) from being read
-				// as one of ours, with kubectl's flags attributed to us.
-				if !docsLinePrefix.MatchString(line[:loc[0]]) &&
-					!commands["aicr "+tokens[0]] {
-
-					continue
-				}
-
-				// Walk left to right, attributing each flag to the deepest
-				// command resolved so far.
-				cmdPath := "aicr"
-				for _, tok := range tokens {
-					if !strings.HasPrefix(tok, "-") {
-						if next := cmdPath + " " + tok; commands[next] {
-							cmdPath = next
-						}
-						// A non-command word is a flag value or prose; it
-						// neither extends the path nor ends the invocation.
-						continue
-					}
-
-					scanned++
-					if frameworkFlags[tok] || flags[cmdPath][tok] {
-						continue
-					}
-					t.Errorf("%s:%d: docs tell the user to run %q, but %q has no %s flag.\n"+
-						"        Accepted flags for that command are pinned in %s.\n"+
-						"        Either correct the documentation or add the flag.",
-						rel, lineNo+1, cmdPath+" "+tok, cmdPath, tok, goldenPath)
-				}
+		inFence := false
+		for _, ll := range docsLogicalLines(string(data)) {
+			if strings.HasPrefix(strings.TrimSpace(ll.Text), "```") {
+				inFence = !inFence
+				continue
 			}
+			// A shell comment inside a fence is prose, not a command: the
+			// fence says "code", the leading # says "discussion". Without
+			// this, `# ... \`aicr recipe\` has no --namespace flag` is read
+			// as an invocation of a flag it exists to say does not exist.
+			strict := !inFence || strings.HasPrefix(strings.TrimSpace(ll.Text), "#")
+			for _, offender := range docsClaimOffenders(ll.Text, strict, commands, flags) {
+				cmdPath, flagName, _ := strings.Cut(offender, "\x00")
+				t.Errorf("%s:%d: docs tell the user to run %q, but %q has no %s flag.\n"+
+					"        Accepted flags for that command are pinned in %s.\n"+
+					"        Either correct the documentation or add the flag.",
+					rel, ll.Line, cmdPath+" "+flagName, cmdPath, flagName, goldenPath)
+			}
+			scanned += strings.Count(ll.Text, "aicr")
 		}
 	}
 
@@ -279,30 +373,10 @@ func TestDocsClaimWalkAttributesFlagsToTheRightCommand(t *testing.T) {
 
 	commands, flags := surfaceFromGolden(t)
 
-	// check mirrors the walk in TestDocsNameOnlyRealCLIFlags and returns the
-	// flags it would report.
-	check := func(line string) []string {
-		var bad []string
-		for _, loc := range docsInvocation.FindAllStringSubmatchIndex(line, -1) {
-			tokens := strings.Fields(line[loc[2]:loc[3]])
-			if len(tokens) == 0 {
-				continue
-			}
-			if !docsLinePrefix.MatchString(line[:loc[0]]) && !commands["aicr "+tokens[0]] {
-				continue
-			}
-			cmdPath := "aicr"
-			for _, tok := range tokens {
-				if !strings.HasPrefix(tok, "-") {
-					if next := cmdPath + " " + tok; commands[next] {
-						cmdPath = next
-					}
-					continue
-				}
-				if !frameworkFlags[tok] && !flags[cmdPath][tok] {
-					bad = append(bad, cmdPath+" "+tok)
-				}
-			}
+	check := func(line string, strict bool) []string {
+		bad := make([]string, 0, 4)
+		for _, ll := range docsLogicalLines(line) {
+			bad = append(bad, docsClaimOffenders(ll.Text, strict, commands, flags)...)
 		}
 		return bad
 	}
@@ -310,38 +384,72 @@ func TestDocsClaimWalkAttributesFlagsToTheRightCommand(t *testing.T) {
 	tests := []struct {
 		name    string
 		line    string
+		strict  bool // true = prose, false = fenced code block
 		wantBad bool
 	}{
-		// The bug that started this: a flag on a command that has no such flag.
-		{"unknown flag on a subcommand", "aicr recipe -r overlay.yaml", true},
-		{"typo on a real subcommand flag", "aicr bundle --recipie r.yaml", true},
-		{"unknown flag on a nested subcommand", "aicr evidence digest --nope", true},
+		// --- Fenced code blocks: the whole line is the command. ---
 
-		// Root flags, which the first revision could not see at all.
-		{"unknown root flag", "aicr --recipie", true},
-		{"real root flag", "aicr --debug", false},
+		// The bug that started this.
+		{name: "unknown flag on a subcommand", line: "aicr recipe -r overlay.yaml", wantBad: true},
+		{name: "typo on a real subcommand flag", line: "aicr bundle --recipie r.yaml", wantBad: true},
+		{name: "unknown flag on a nested subcommand", line: "aicr evidence digest --nope", wantBad: true},
 
-		// Interleaving, which the second revision could not see.
-		{"bad flag after an interleaved root flag", "aicr --debug recipe --totallyfake", true},
-		{"good flag after an interleaved root flag", "aicr --debug recipe --service eks", false},
+		// Root flags, invisible to the first revision.
+		{name: "unknown root flag", line: "aicr --recipie", wantBad: true},
+		{name: "real root flag", line: "aicr --debug", wantBad: false},
 
-		// Real invocations must stay quiet.
-		{"subcommand with real flags", "aicr recipe --snapshot s.yaml --output r.yaml", false},
-		{"nested subcommand with a real flag", "aicr evidence digest --recipe r.yaml", false},
-		{"short alias", "aicr bundle -r r.yaml --deployer argocd", false},
-		{"framework flag", "aicr bundle --help", false},
+		// Interleaving, invisible to the second revision.
+		{name: "bad flag after an interleaved root flag", line: "aicr --debug recipe --totallyfake", wantBad: true},
+		{name: "good flag after an interleaved root flag", line: "aicr --debug recipe --service eks", wantBad: false},
 
-		// `aicr` as another tool's argument: the flags belong to that tool.
-		// Only line-initial invocations may lead with a flag, which is what
-		// keeps these quiet.
-		{"aicr as a kubectl job name", "kubectl describe job aicr -n gpu-operator", false},
-		{"aicr as a kubectl namespace", "kubectl describe pod -n aicr -l app=aicrd", false},
+		// Flags after a positional value, invisible to the third.
+		{name: "bad flag after a value", line: "aicr recipe --snapshot s.yaml --not-real", wantBad: true},
+		{name: "good flag after a value", line: "aicr recipe --snapshot s.yaml --output r.yaml", wantBad: false},
+
+		// Backslash continuation: docs wrap long invocations.
+		{name: "bad flag on a continued line", line: "aicr bundle \\\n  --not-real-either r.yaml", wantBad: true},
+		{name: "good flag on a continued line", line: "aicr bundle \\\n  --deployer argocd", wantBad: false},
+
+		// A following command's flags are not ours.
+		{name: "flags after a shell separator", line: "aicr recipe --service eks && kubectl apply -f x.yaml", wantBad: false},
+
+		// Real invocations stay quiet.
+		{name: "subcommand with real flags", line: "aicr recipe --snapshot s.yaml --output r.yaml", wantBad: false},
+		{name: "nested subcommand with a real flag", line: "aicr evidence digest --recipe r.yaml", wantBad: false},
+		{name: "short alias", line: "aicr bundle -r r.yaml --deployer argocd", wantBad: false},
+		{name: "framework flag", line: "aicr bundle --help", wantBad: false},
+
+		// `aicr` as another tool's argument.
+		{name: "aicr as a kubectl job name", line: "kubectl describe job aicr -n gpu-operator", wantBad: false},
+		{name: "aicr as a kubectl namespace", line: "kubectl describe pod -n aicr -l app=aicrd", wantBad: false},
+
+		// --- Prose: adjacency separates an instruction from a discussion. ---
+
+		// The #2421 bug lived in prose with inline code, not a fence, so prose
+		// coverage is not optional.
+		{name: "prose inline invocation with a bad flag", strict: true,
+			line: "an overlay passed directly (`aicr recipe -r overlay.yaml`) must carry one", wantBad: true},
+		{name: "prose inline invocation with a good flag", strict: true,
+			line: "run `aicr bundle -r recipe.yaml` to build the bundle", wantBad: false},
+
+		// Prose that documents a flag's *absence* is correct and must not be
+		// reported. A greedy walk reads these as invocations.
+		{name: "prose stating a flag does not exist", strict: true,
+			line: "`aicr validate` has no `--set` flag and never persists it", wantBad: false},
+		{name: "prose stating absence without backticks", strict: true,
+			line: "(the cm:// URI carries the namespace; `aicr recipe` has no --namespace flag)", wantBad: false},
+		// A shell comment inside a fence is prose. The corpus contains exactly
+		// this line, and a fence-only rule reports it.
+		{name: "shell comment inside a fence", strict: true,
+			line: "# (the cm:// URI carries the namespace; `aicr recipe` has no --namespace flag)", wantBad: false},
+		{name: "prose with an ellipsis placeholder", strict: true,
+			line: "`aicr … --rekor-url …` in the same job auto-picks it up", wantBad: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			bad := check(tt.line)
+			bad := check(tt.line, tt.strict)
 			if got := len(bad) > 0; got != tt.wantBad {
 				t.Errorf("line %q reported %v; wantBad=%v", tt.line, bad, tt.wantBad)
 			}
