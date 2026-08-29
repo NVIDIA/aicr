@@ -983,7 +983,9 @@ When rate limited (HTTP 429), use the `Retry-After` header:
 # Retry with backoff
 response=$(curl -s -w "%{http_code}" "http://localhost:8080/v1/recipe?accelerator=h100")
 if [ "${response: -3}" = "429" ]; then
-  retry_after=$(curl -sD - -o /dev/null "http://localhost:8080/v1/recipe?accelerator=h100" | grep -i "Retry-After" | awk '{print $2}')
+  # HTTP headers end in CRLF, so strip the carriage return before sleep reads
+  # the value.
+  retry_after=$(curl -sD - -o /dev/null "http://localhost:8080/v1/recipe?accelerator=h100" | grep -i "Retry-After" | awk '{print $2}' | tr -d '\r')
   echo "Rate limited. Retrying after ${retry_after}s..."
   sleep "$retry_after"
 fi
