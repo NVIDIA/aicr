@@ -44,6 +44,7 @@ make qualify        # Full check: test-coverage + lint + tuning-check + e2e + sc
 | Tool | Purpose |
 |------|---------|
 | golangci-lint | Go linting |
+| oasdiff | REST contract breaking-change detection (`make openapi-diff`) |
 | yamllint | YAML linting (requires Python/pip) |
 | addlicense | License header management |
 | grype | Vulnerability scanning |

@@ -94,16 +94,19 @@ func TestOpenAPIHasNoOrphanedComponents(t *testing.T) {
 		t.Fatal("spec declares no components object")
 	}
 
+	// Every group the document declares, not a hand-picked subset: an orphaned
+	// header is the same residue class as an orphaned schema, and omitting
+	// headers meant the check could not see one.
 	var checked int
-	for _, kind := range []string{"schemas", "parameters", "responses"} {
-		group, groupOK := components[kind].(map[string]any)
+	for kind, raw := range components {
+		group, groupOK := raw.(map[string]any)
 		if !groupOK {
 			continue
 		}
 		for name := range group {
 			checked++
 			ref := fmt.Sprintf("#/components/%s/%s", kind, name)
-			if !refs[ref] {
+			if !isReferenced(refs, ref) {
 				t.Errorf("component %s is declared but never referenced; delete it "+
 					"or wire it up", ref)
 			}
@@ -210,6 +213,25 @@ func TestOpenAPIBaselineIsAWholeDocument(t *testing.T) {
 			"suggests truncation rather than additive drift",
 			len(basePaths), len(specPaths))
 	}
+}
+
+// isReferenced reports whether a component is reached by any $ref.
+//
+// Exact string equality is not enough: the spec points into subschemas, e.g.
+// #/components/schemas/RecipeResponseBase/properties/configuration. A component
+// reached only through such a pointer is live, and comparing whole strings
+// would report it as an orphan. Matching on the pointer prefix at a path
+// boundary avoids that without letting a similarly-named component match.
+func isReferenced(refs map[string]bool, ref string) bool {
+	if refs[ref] {
+		return true
+	}
+	for candidate := range refs {
+		if strings.HasPrefix(candidate, ref+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // loadOpenAPIDocument parses an OpenAPI document into a generic tree.

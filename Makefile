@@ -377,13 +377,16 @@ openapi-baseline: ## Accepts the current REST spec as the frozen contract (regen
 # spec's own license header is dropped because the baseline carries its own.
 	@awk '/^[^#]/ && NF {exit} {print}' api/aicr/v1/server.baseline.yaml \
 		> api/aicr/v1/server.baseline.yaml.tmp
-	@awk 'p {print} /^openapi:/ {if (!p) {p=1; print}}' api/aicr/v1/server.yaml \
-		>> api/aicr/v1/server.baseline.yaml.tmp
+	@awk 'p {print} /^openapi:/ && !p {p=1; print} END {exit !p}' api/aicr/v1/server.yaml \
+		>> api/aicr/v1/server.baseline.yaml.tmp \
+		|| { rm -f api/aicr/v1/server.baseline.yaml.tmp; \
+		     echo "ERROR: no 'openapi:' key in api/aicr/v1/server.yaml; refusing to write a header-only baseline" >&2; \
+		     exit 1; }
 	@mv api/aicr/v1/server.baseline.yaml.tmp api/aicr/v1/server.baseline.yaml
 	@echo "Baseline updated."
 
 .PHONY: qualify
-qualify: test-coverage lint tuning-check coverage-check e2e scan license-check api-diff openapi-diff ## Qualifies the codebase (test-coverage, lint, tuning-check, coverage-check, e2e, scan, API compatibility)
+qualify: test-coverage lint tuning-check coverage-check e2e scan license-check api-diff openapi-diff ## Qualifies the codebase (test-coverage, lint, tuning-check, coverage-check, e2e, scan, SDK and REST API compatibility)
 	@echo "Codebase qualification completed"
 
 .PHONY: bom

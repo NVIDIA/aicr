@@ -55,6 +55,7 @@ readonly EXIT_BREAKING=1
 readonly EXIT_MISSING_INPUT=10
 readonly EXIT_EXCEPTIONS_MALFORMED=11
 readonly EXIT_STALE_ACKNOWLEDGEMENT=12
+readonly EXIT_UNREADABLE_REPORT=13
 
 for required in "${SPEC}" "${BASELINE}" "${EXCEPTIONS}"; do
     [[ -f "${required}" ]] || {
@@ -86,8 +87,10 @@ fi
 [[ -n "${report}" ]] || report='[]'
 
 if ! echo "${report}" | yq -p json '.' >/dev/null 2>&1; then
+    # Distinct from EXIT_EXCEPTIONS_MALFORMED: sharing that code would point a
+    # reader at the exceptions file for a fault in the tool's output.
     log_error "oasdiff produced output that is not valid JSON; refusing to guess."
-    exit "${EXIT_EXCEPTIONS_MALFORMED}"
+    exit "${EXIT_UNREADABLE_REPORT}"
 fi
 
 # `yq '.acknowledgements'` returns null without error on a scalar document, so
@@ -99,11 +102,17 @@ if [[ "${ack_kind}" != "!!seq" ]]; then
     exit "${EXIT_EXCEPTIONS_MALFORMED}"
 fi
 
-breaking_count="$(echo "${report}" | yq -p json '[.[] | select(.level == 3)] | length')"
+breaking_count="$(echo "${report}" | yq -p json '[.[] | select(.level >= 2)] | length')"
 ack_count="$(yq '.acknowledgements | length' "${EXCEPTIONS}")"
 
 log_info "oasdiff reported ${breaking_count} breaking change(s); ${ack_count} acknowledged exception(s) on file"
 
+# `oasdiff breaking` reports only breaking changes, but grades them: ERR is
+# level 3 and WARN is level 2. Filtering to level 3 alone silently dropped
+# whole rule classes -- request-parameter-removed and request-property-removed
+# are level 2, so removing a query parameter from an endpoint passed the gate
+# reporting zero breaking changes. Both levels are breaking here.
+#
 # Each acknowledgement is matched by rule id, optionally narrowed by operation
 # path. Matching by id alone would let an acknowledgement for one endpoint
 # silently cover the same class of break on another.
@@ -128,7 +137,7 @@ if [[ "${breaking_count}" != "0" ]]; then
         fi
     done < <(
         echo "${report}" |
-            yq -p json -r '.[] | select(.level == 3) | [.id, (.path // ""), .text] | @tsv'
+            yq -p json -r '.[] | select(.level >= 2) | [.id, (.path // ""), .text] | @tsv'
     )
 fi
 
@@ -141,7 +150,7 @@ if [[ "${ack_count}" != "0" ]]; then
         hits="$(
             echo "${report}" |
                 RULE_ID="${rule_id}" ACK_PATH="${ack_path}" yq -p json \
-                    '[.[] | select(.level == 3) | select(.id == strenv(RULE_ID)) | select(strenv(ACK_PATH) == "" or (.path // "") == strenv(ACK_PATH))] | length'
+                    '[.[] | select(.level >= 2) | select(.id == strenv(RULE_ID)) | select(strenv(ACK_PATH) == "" or (.path // "") == strenv(ACK_PATH))] | length'
         )"
         if [[ "${hits}" == "0" ]]; then
             log_error "Stale acknowledgement [${rule_id}] ${ack_path:-(any path)}: ${reason}"

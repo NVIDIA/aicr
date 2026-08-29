@@ -483,13 +483,14 @@ paths:
       summary: Generate a bundle from a legacy or profiled recipe
       operationId: createBundle
       description: >
-        Uses the same query parameters and ZIP response as POST /v1/bundle.
-        The body is an already-selected RecipeResult, so this route has no
-        profile-selection field. Default recipes stamped aicr.run/v1alpha2,
-        aicr.run/v1, or omitting apiVersion are accepted; profile recipes
-        stamped aicr.run/v1alpha3 or aicr.run/v1beta2 are decoded strictly.
-        Content-Type must be application/json or application/x-yaml.
-        Query parameter details are documented on POST /v1/bundle.
+        Renders a deployment bundle and returns it as a ZIP archive. The body is
+        an already-selected RecipeResult, so this route has no profile-selection
+        field; select the profile when resolving the recipe. Default recipes
+        stamped aicr.run/v1alpha2, aicr.run/v1, or omitting apiVersion are
+        accepted; profile recipes stamped aicr.run/v1alpha3 or aicr.run/v1beta2
+        are decoded strictly. Content-Type must be application/json or
+        application/x-yaml. The query parameters below control deployer, value
+        overrides, node scheduling, workload gating and attestation.
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - $ref: "#/components/parameters/BundleComponents"
@@ -1048,10 +1049,12 @@ components:
           description: Human-readable error message
           example: "Invalid recipe query"
         details:
-          type: object
+          # OpenAPI 3.1 has no `nullable` keyword; it is JSON Schema, where null
+          # is expressed in the type. With `type: object` alone a null details
+          # field would not validate against the document the server emits.
+          type: [object, "null"]
           additionalProperties: true
           description: Additional context-specific error details
-          nullable: true
         requestId:
           type: string
           format: uuid

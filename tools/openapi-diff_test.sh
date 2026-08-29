@@ -70,6 +70,22 @@ fail() {
     fails=$((fails + 1))
 }
 
+# require_fixture_edit fails loudly when a fixture edit did not change the spec.
+# Without it a moved anchor turns a case into a no-op that reports PASS.
+require_fixture_edit() {
+    # Must be the first statement: any command here, including `local name=`,
+    # overwrites $? and would make the script-failure branch below unreachable.
+    local status=$?
+    local name="$1"
+    if [[ ${status} -ne 0 ]]; then
+        fail "${name}" "fixture edit script failed"
+        return
+    fi
+    if cmp -s "${WORK}/spec.yaml" "${WORK}/baseline.yaml"; then
+        fail "${name}" "fixture edit produced no change; the case would pass vacuously"
+    fi
+}
+
 check_rc() {
     local name="$1" want="$2" got="$3"
     if [[ "${got}" == "${want}" ]]; then
@@ -109,6 +125,9 @@ check_rc "identical-spec-passes" 0 "$?"
 
 # 2. Removing an endpoint is the canonical break. Without this the gate could be
 #    passing case 1 by never running oasdiff at all.
+# A failed fixture edit leaves spec.yaml identical to the baseline, so the gate
+# would pass and the case would report success without testing anything. set -e
+# is intentionally off in this file, so the status is checked explicitly.
 python3 - "${WORK}/spec.yaml" <<'PY'
 import sys
 path = sys.argv[1]
@@ -117,6 +136,7 @@ start = text.index("  /v1/query:")
 end = text.index("  /v1/bundle:")
 open(path, "w").write(text[:start] + text[end:])
 PY
+require_fixture_edit "remove-endpoint"
 run_gate
 check_rc "unacknowledged-break-fails" 1 "$?"
 if grep -q "api-path-removed-without-deprecation" "${WORK}/out.txt"; then
@@ -185,8 +205,35 @@ addition = (
 assert text.count(anchor) == 1
 open(path, "w").write(text.replace(anchor, addition + anchor))
 PY
+require_fixture_edit "add-optional-parameter"
 run_gate
 check_rc "additive-change-passes" 0 "$?"
+
+# 9. A removed request parameter is reported at WARN (level 2), not ERR. An
+#    ERR-only filter reported zero breaking changes here and passed, dropping a
+#    whole rule class the gate exists to cover.
+cp "${BASE_SPEC}" "${WORK}/spec.yaml"
+write_exceptions " []"
+python3 - "${WORK}/spec.yaml" <<'PY'
+import sys
+path = sys.argv[1]
+lines = open(path).read().split("\n")
+for i, line in enumerate(lines):
+    if "parameters/Nodes" in line:
+        del lines[i]
+        break
+else:
+    raise SystemExit("no Nodes parameter reference to remove")
+open(path, "w").write("\n".join(lines))
+PY
+require_fixture_edit "remove-request-parameter"
+run_gate
+check_rc "warn-level-break-fails" 1 "$?"
+if grep -q "request-parameter-removed" "${WORK}/out.txt"; then
+    pass "warn-level-break-names-the-rule"
+else
+    fail "warn-level-break-names-the-rule" "rule id absent from output"
+fi
 
 if (( fails > 0 )); then
     echo "${fails} test(s) failed"
