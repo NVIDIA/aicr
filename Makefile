@@ -363,8 +363,27 @@ scan: ## Scans for vulnerabilities with grype
 api-diff: ## Checks pkg/client/v1 and transparent-alias target compatibility against the latest stable release
 	@bash tools/api-diff
 
+.PHONY: openapi-diff
+openapi-diff: ## Checks the REST contract in api/aicr/v1/server.yaml against its committed baseline
+	@bash tools/openapi-diff
+
+.PHONY: openapi-baseline
+openapi-baseline: ## Accepts the current REST spec as the frozen contract (regenerates the baseline)
+	@printf '%s\n' "Regenerating api/aicr/v1/server.baseline.yaml from api/aicr/v1/server.yaml." \
+		"This accepts every current difference into the frozen contract, so the" \
+		"resulting diff is the change under review -- read it before committing."
+# The header is taken from the existing baseline rather than a hardcoded line
+# count, so editing the explanatory comment cannot make regeneration lossy. The
+# spec's own license header is dropped because the baseline carries its own.
+	@awk '/^[^#]/ && NF {exit} {print}' api/aicr/v1/server.baseline.yaml \
+		> api/aicr/v1/server.baseline.yaml.tmp
+	@awk 'p {print} /^openapi:/ {if (!p) {p=1; print}}' api/aicr/v1/server.yaml \
+		>> api/aicr/v1/server.baseline.yaml.tmp
+	@mv api/aicr/v1/server.baseline.yaml.tmp api/aicr/v1/server.baseline.yaml
+	@echo "Baseline updated."
+
 .PHONY: qualify
-qualify: test-coverage lint tuning-check coverage-check e2e scan license-check api-diff ## Qualifies the codebase (test-coverage, lint, tuning-check, coverage-check, e2e, scan, API compatibility)
+qualify: test-coverage lint tuning-check coverage-check e2e scan license-check api-diff openapi-diff ## Qualifies the codebase (test-coverage, lint, tuning-check, coverage-check, e2e, scan, API compatibility)
 	@echo "Codebase qualification completed"
 
 .PHONY: bom

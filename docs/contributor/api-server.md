@@ -284,19 +284,21 @@ contains two contract gates:
   `api/aicr/v1/server.yaml` matches the corresponding
   `pkg/recipe.GetCriteria*Types()` function. It scans both query-parameter enums
   and `components.schemas.Criteria` properties.
-- `TestOpenAPIV1BundleRecipeContract` asserts that `/v1/bundle` and its
-  deprecated wrapper share the request schema, that both `/v1/recipe` success
-  responses still point at the strict `RecipeResponse`, and that the header
-  enums on both sides stay synchronized with the Go constants. It matches the
-  `allOf` branches by content rather than position, since `allOf` is
-  semantically unordered.
+- `TestOpenAPIBundleContract` asserts that `POST /v1/bundle` points at
+  `BundleRecipeRequest`, that the union's branches stay wired to the legacy and
+  configured schemas, and that the header enums stay synchronized with the Go
+  constants. It matches the `allOf` branches by content rather than position,
+  since `allOf` is semantically unordered.
 
   Runtime acceptance of the legacy header shapes is pinned separately by
   `TestBundleHandler_LegacyRecipeHeaders`, which posts absent, empty, and
-  `kind: Recipe` bodies to the handler, asserts 200, and round-trips the
+  target-`apiVersion` bodies to the handler, asserts 200, and round-trips the
   emitted `recipe.yaml` back through the file loader to prove the ingest
   normalization holds. The spec gate alone would only be checking the spec
-  against itself.
+  against itself. The one legacy shape that is *not* accepted, `kind: Recipe`
+  (published through v0.18.0 and removed by the v1 collapse), is pinned by
+  `TestBundleHandler_RejectsLegacyRecipeKind` so the rejection stays a decision
+  rather than becoming an accident of a later refactor.
 
 Drift is a contract bug: clients conforming to the spec will reject
 inputs the server actually accepts, or generate types that reject
@@ -305,6 +307,49 @@ the spec — or the reverse — fails CI here.
 
 The wildcard `"any"` is allowed in the spec but not the Go list; the
 test strips it before comparison.
+
+## REST Contract Gate
+
+REST is one of the four surfaces [ROADMAP](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md)
+section 1 freezes at v1. Two gates guard it, and they fail for different
+reasons.
+
+**`make openapi-diff`** ([`tools/openapi-diff`](https://github.com/NVIDIA/aicr/blob/main/tools/openapi-diff))
+compares `api/aicr/v1/server.yaml` against the committed snapshot
+`api/aicr/v1/server.baseline.yaml` using the pinned `oasdiff`, and fails on
+breaking changes: a removed endpoint, a removed or narrowed field, a new
+required request field, a removed enum value. Additive change passes. It runs
+in `make qualify`, next to `api-diff`, which guards the Go SDK the same way.
+
+Three ways to resolve a failure, in order of preference:
+
+1. Make the change additive instead.
+2. Record it in `api/aicr/v1/openapi-diff-exceptions.yaml` with the oasdiff
+   rule id, the operation path, and a reason. **Scheduled ADR-022 apiVersion
+   removals belong here** — that is what the issue means by representing a
+   transition explicitly rather than disabling the gate.
+3. Accept it into the contract with `make openapi-baseline`, which rewrites the
+   baseline. That diff is the change under review; read it.
+
+An acknowledgement that stops matching a real breaking change **fails the
+gate**. A stale entry silently pre-approves the break returning later, which is
+the failure the file exists to prevent — the same contract as
+`pkg/client/v1/api-diff-exceptions.yaml`. `tools/openapi-diff_test.sh` pins each
+branch of that verdict to an exact exit code.
+
+**`pkg/server/openapi_validity_test.go`** answers a different question: not
+"did this change break the contract" but "is the contract coherent". A dangling
+`$ref`, an orphaned component, or a duplicate `operationId` is present in both
+baseline and spec, so the diff sees no change and passes while every generated
+client is wrong. It also guards the baseline against silent truncation, which
+would make the diff gate report no breaking changes for anything the truncated
+file omits.
+
+The baseline is a committed snapshot rather than the previous release, unlike
+`api-diff`. The v1 collapse (#2464) is unreleased, so comparing against v0.20.0
+reports 28 breaking changes that are all one already-merged decision — the gate
+would ship pre-loaded with noise that clears itself at v0.21 and teaches
+everyone to skim it in the meantime.
 
 ## Adding an Endpoint
 

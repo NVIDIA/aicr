@@ -274,6 +274,7 @@ cd "${REPO_ROOT}"
 GO_VERSION=$(yq '.languages.go' .settings.yaml)
 GOLANGCI_LINT_VERSION=$(yq '.linting.golangci_lint' .settings.yaml)
 APIDIFF_VERSION=$(yq '.linting.apidiff' .settings.yaml)
+OASDIFF_VERSION=$(yq '.linting.oasdiff' .settings.yaml)
 YAMLLINT_VERSION=$(yq '.linting.yamllint' .settings.yaml)
 ADDLICENSE_VERSION=$(yq '.linting.addlicense' .settings.yaml)
 GO_LICENSES_VERSION=$(yq '.linting.go_licenses' .settings.yaml)
@@ -303,6 +304,7 @@ log_info "Target Versions:"
 echo "  Go:              ${GO_VERSION}"
 echo "  golangci-lint:   ${GOLANGCI_LINT_VERSION}"
 echo "  apidiff:         ${APIDIFF_VERSION}"
+echo "  oasdiff:         ${OASDIFF_VERSION}"
 echo "  grype:           ${GRYPE_VERSION}"
 echo "  cosign:          ${COSIGN_VERSION}"
 echo "  syft:            ${SYFT_VERSION}"
@@ -1021,6 +1023,17 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
         if prompt_continue; then
             GOFLAGS= go install golang.org/x/exp/cmd/apidiff@"${APIDIFF_VERSION}"
             log_success "apidiff ${APIDIFF_VERSION} installed"
+        fi
+    fi
+
+    # oasdiff
+    if command_exists oasdiff && [[ "${UPGRADE}" != "true" ]]; then
+        log_success "oasdiff already installed"
+    else
+        log_info "Installing oasdiff ${OASDIFF_VERSION}..."
+        if prompt_continue; then
+            GOFLAGS= go install github.com/oasdiff/oasdiff@"${OASDIFF_VERSION}"
+            log_success "oasdiff ${OASDIFF_VERSION} installed"
         fi
     fi
 
