@@ -42,6 +42,20 @@ import (
 var docsClaimPattern = regexp.MustCompile(
 	`\baicr((?: [a-z][a-z-]*){1,2})((?: --?[a-zA-Z][a-zA-Z0-9-]*)+)`)
 
+// docsRootClaimPattern catches root-level invocations like `aicr --debug`,
+// which docsClaimPattern cannot: requiring a subcommand word is what makes that
+// pattern safe to run mid-sentence.
+//
+// It is anchored to the start of the line because the bare word `aicr` appears
+// constantly as an argument to other tools — `kubectl describe job aicr -n
+// gpu-operator`, `kubectl describe pod -n aicr -l app=aicrd` — where the
+// following flags belong to kubectl, not to us. An unanchored root pattern
+// reports every one of those, and a gate that cries wolf is a gate someone
+// deletes. Real root invocations in docs are line-initial, optionally behind a
+// shell prompt or an opening backtick.
+var docsRootClaimPattern = regexp.MustCompile(
+	"^[\\s>]*[`$]?\\s*aicr((?: --?[a-zA-Z][a-zA-Z0-9-]*)+)")
+
 // frameworkFlags are injected by urfave/cli during setup rather than declared
 // in the command tree, so the golden does not contain them (see #2451). They
 // are genuinely invokable, so documenting them is correct.
@@ -182,15 +196,26 @@ func TestDocsNameOnlyRealCLIFlags(t *testing.T) {
 		}
 
 		for lineNo, line := range strings.Split(string(data), "\n") {
-			for _, m := range docsClaimPattern.FindAllStringSubmatch(line, -1) {
+			matches := docsClaimPattern.FindAllStringSubmatch(line, -1)
+			// Root-level invocations carry no command word, so synthesize the
+			// same shape: empty command suffix, flags in group 2.
+			for _, rm := range docsRootClaimPattern.FindAllStringSubmatch(line, -1) {
+				matches = append(matches, []string{rm[0], "", rm[1]})
+			}
+
+			for _, m := range matches {
 				words := strings.Fields(m[1])
 
 				// Prefer the longest command path that exists, so
 				// `aicr evidence digest --recipe` checks digest's flags
-				// rather than evidence's.
+				// rather than evidence's. Depth 0 is the root command, which
+				// carries --debug and --log-json.
 				cmdPath := ""
-				for depth := len(words); depth >= 1; depth-- {
-					candidate := "aicr " + strings.Join(words[:depth], " ")
+				for depth := len(words); depth >= 0; depth-- {
+					candidate := "aicr"
+					if depth > 0 {
+						candidate += " " + strings.Join(words[:depth], " ")
+					}
 					if commands[candidate] {
 						cmdPath = candidate
 						break
