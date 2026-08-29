@@ -268,6 +268,15 @@ func TestRunNCCLTrainJob_TrainerInstallFailureCleansUpNamespace(t *testing.T) {
 	})
 
 	clientset := fake.NewClientset()
+	// A real apiserver always stamps a UID on create. The fake tracker
+	// doesn't, so mimic it here since cleanupNCCLResources now requires one
+	// to authorize its delete (see testNamespaceUID).
+	clientset.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if ns, ok := action.(k8stesting.CreateAction).GetObject().(*corev1.Namespace); ok && ns.UID == "" {
+			ns.UID = testNamespaceUID
+		}
+		return false, nil, nil
+	})
 	vctx := &validators.Context{
 		Ctx:           context.Background(),
 		Clientset:     clientset,
@@ -434,7 +443,7 @@ func TestWaitForPodByLabelSelector_IgnoresStaleDeletedLauncher(t *testing.T) {
 // always delete the namespace first.
 func TestCleanupNCCLRun_DeletesNamespaceBeforeTrainer(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
-	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
 	dynamicClient := newTrainerFakeClient()
 
 	var order []string
@@ -451,7 +460,7 @@ func TestCleanupNCCLRun_DeletesNamespaceBeforeTrainer(t *testing.T) {
 		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
 	}
 
-	if err := cleanupNCCLRun(clientset, dynamicClient, ns, "", resources, nil); err != nil {
+	if err := cleanupNCCLRun(clientset, dynamicClient, ns, testNamespaceUID, resources, nil); err != nil {
 		t.Fatalf("cleanupNCCLRun failed: %v", err)
 	}
 
@@ -465,7 +474,7 @@ func TestCleanupNCCLRun_DeletesNamespaceBeforeTrainer(t *testing.T) {
 // not just the namespace half of cleanup.
 func TestCleanupNCCLRun_PropagatesTrainerCleanupFailure(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
-	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
 	dynamicClient := newTrainerFakeClient()
 	dynamicClient.PrependReactor("delete", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "deployments"}, trainerControllerDeployment, nil)
@@ -475,7 +484,7 @@ func TestCleanupNCCLRun_PropagatesTrainerCleanupFailure(t *testing.T) {
 		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
 	}
 
-	err := cleanupNCCLRun(clientset, dynamicClient, ns, "", resources, nil)
+	err := cleanupNCCLRun(clientset, dynamicClient, ns, testNamespaceUID, resources, nil)
 	if err == nil {
 		t.Fatal("expected the Trainer teardown failure to fail the check, got nil")
 	}

@@ -2321,7 +2321,18 @@ func verifyTransportFromLogs(logs string, variant ncclVariant) error {
 // created or reclaimed: if that instance was deleted and a different one
 // recreated under the same name in the meantime, the UID precondition makes
 // this delete fail instead of silently removing the new (not ours) instance.
+// uid must be non-empty. An empty Preconditions.UID is still an exact-match
+// precondition against the real namespace's (never-empty) UID, so it would
+// only ever fail the delete outright on a real apiserver, but the fake
+// client used in tests ignores delete preconditions entirely and would
+// silently proceed. Reject it explicitly rather than depend on that
+// difference to catch a caller bug.
 func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid types.UID) error {
+	if uid == "" {
+		return aicrErrors.New(aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("refusing to delete NCCL benchmark namespace %q without an owning UID", namespace))
+	}
+
 	slog.Info("Cleaning up NCCL test resources...", "namespace", namespace)
 
 	deleteCtx, cancel := context.WithTimeout(context.Background(), defaults.K8sCleanupTimeout)

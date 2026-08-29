@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
@@ -121,6 +122,12 @@ func TestCreateOrUpdateFromTemplate_RoCEClaimIdempotent(t *testing.T) {
 	}
 }
 
+// testNamespaceUID is the owning UID used across cleanupNCCLResources tests
+// that seed a namespace. A real namespace always has one, and
+// cleanupNCCLResources now refuses to delete without one (see
+// TestCleanupNCCLResources_RejectsEmptyUID).
+const testNamespaceUID = types.UID("test-owner-uid")
+
 // TestCleanupNCCLResources_ToleratesMissing verifies the deferred cleanup is
 // safe to run after an early/partial-apply failure: with no namespace ever
 // created, deleting it must be treated as success (NotFound-tolerant), not
@@ -128,7 +135,7 @@ func TestCreateOrUpdateFromTemplate_RoCEClaimIdempotent(t *testing.T) {
 func TestCleanupNCCLResources_ToleratesMissing(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	fakeClient := fake.NewClientset()
-	if err := cleanupNCCLResources(fakeClient, ns, ""); err != nil {
+	if err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID); err != nil {
 		t.Fatalf("cleanup of a namespace that was never created should not error, got: %v", err)
 	}
 }
@@ -140,9 +147,9 @@ func TestCleanupNCCLResources_ToleratesMissing(t *testing.T) {
 // tracking required since nothing else ever shares this namespace.
 func TestCleanupNCCLResources_DeletesNamespace(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
-	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
 
-	if err := cleanupNCCLResources(fakeClient, ns, ""); err != nil {
+	if err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID); err != nil {
 		t.Fatalf("cleanup should not error, got: %v", err)
 	}
 
@@ -157,17 +164,72 @@ func TestCleanupNCCLResources_DeletesNamespace(t *testing.T) {
 // still fail an otherwise-passing check on it.
 func TestCleanupNCCLResources_ReturnsErrorOnDeleteFailure(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
-	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
 	fakeClient.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewServiceUnavailable("apiserver is down")
 	})
 
-	err := cleanupNCCLResources(fakeClient, ns, "")
+	err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID)
 	if err == nil {
 		t.Fatal("expected an error from a non-NotFound namespace delete failure, got nil")
 	}
 	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeInternal, "")) {
 		t.Errorf("got %v, want an ErrCodeInternal-wrapped delete failure", err)
+	}
+}
+
+// TestCleanupNCCLResources_RejectsEmptyUID is the regression guard for the
+// hardening finding that an empty owning UID must be rejected outright.
+// Against a real apiserver an empty Preconditions.UID would fail the delete
+// anyway (it is still an exact-match check, and a real namespace's UID is
+// never empty), but the fake client used in the other tests here ignores
+// delete preconditions entirely and would silently proceed, masking a
+// caller bug that drops the UID.
+func TestCleanupNCCLResources_RejectsEmptyUID(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
+
+	err := cleanupNCCLResources(fakeClient, ns, "")
+	if err == nil {
+		t.Fatal("expected an error for an empty owning UID, got nil")
+	}
+	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeInternal, "")) {
+		t.Errorf("got %v, want an ErrCodeInternal error", err)
+	}
+	if _, getErr := fakeClient.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{}); getErr != nil {
+		t.Errorf("namespace should be left alone when the UID check is rejected, got err=%v", getErr)
+	}
+}
+
+// TestCleanupNCCLResources_UIDMismatchPreventsDelete verifies the ownership
+// precondition against a UID mismatch. client-go's fake ObjectTracker
+// ignores Delete preconditions entirely, so this reactor emulates the real
+// apiserver's UID precondition check (see cleanupNCCLResources's doc
+// comment) to prove a mismatch actually surfaces as an error instead of the
+// namespace being deleted regardless.
+func TestCleanupNCCLResources_UIDMismatchPreventsDelete(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	const actualUID = types.UID("actual-owner-uid")
+	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: actualUID}})
+	fakeClient.PrependReactor("delete", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		deleteAction, ok := action.(k8stesting.DeleteAction)
+		if !ok {
+			return false, nil, nil
+		}
+		preconditions := deleteAction.GetDeleteOptions().Preconditions
+		if preconditions == nil || preconditions.UID == nil || *preconditions.UID == actualUID {
+			return false, nil, nil
+		}
+		return true, nil, apierrors.NewConflict(v1.Resource("namespaces"), ns,
+			stderrors.New("uid in precondition does not match uid in record"))
+	})
+
+	err := cleanupNCCLResources(fakeClient, ns, "wrong-uid")
+	if err == nil {
+		t.Fatal("expected a conflict error for a mismatched owning UID, got nil")
+	}
+	if _, getErr := fakeClient.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{}); getErr != nil {
+		t.Errorf("namespace should be left alone on a UID mismatch, got err=%v", getErr)
 	}
 }
 
@@ -182,7 +244,7 @@ func TestCleanupNCCLResources_ReturnsErrorOnDeleteFailure(t *testing.T) {
 func TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	const holdFinalizer = 200 * time.Millisecond
-	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
+	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
 	nsGVR := v1.SchemeGroupVersion.WithResource("namespaces")
 
 	var deleteCalls int32
@@ -196,6 +258,7 @@ func TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace(t *testing.T) {
 			now := metav1.Now()
 			held := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
 				Name:              ns,
+				UID:               testNamespaceUID,
 				Finalizers:        []string{"kubernetes"},
 				DeletionTimestamp: &now,
 			}}
@@ -220,7 +283,7 @@ func TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace(t *testing.T) {
 		_ = fakeClient.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
 	}()
 
-	if err := cleanupNCCLResources(fakeClient, ns, ""); err != nil {
+	if err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID); err != nil {
 		t.Fatalf("cleanup should succeed once the finalizer clears, got: %v", err)
 	}
 	elapsed := time.Since(start)
