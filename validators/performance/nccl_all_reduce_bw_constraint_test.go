@@ -575,10 +575,53 @@ func TestRunNCCLTrainJob_RefusesLiveForeignNamespace(t *testing.T) {
 	}
 }
 
-// TestCreateUnstructured_ReclaimsStaleResource is the regression guard for
-// the MAJOR finding that a same-run retry could hit AlreadyExists on stale
-// fixed-name TrainingRuntime/TrainJob resources instead of recovering.
-func TestCreateUnstructured_ReclaimsStaleResource(t *testing.T) {
+// TestCreateUnstructured_ReclaimsStaleResource_UpdatesInPlace is the
+// regression guard for the MAJOR finding that a same-run retry could hit
+// AlreadyExists on a stale fixed-name TrainingRuntime instead of recovering.
+func TestCreateUnstructured_ReclaimsStaleResource_UpdatesInPlace(t *testing.T) {
+	const ns = "aicr-nccl-bench-deadbeef"
+	listKinds := map[schema.GroupVersionResource]string{trainingRuntimeGVR: "TrainingRuntimeList"}
+
+	stale := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": trainingRuntimeGVR.GroupVersion().String(),
+		"kind":       "TrainingRuntime",
+		"metadata": map[string]interface{}{
+			"name":            ncclTrainingRuntimeName,
+			"namespace":       ns,
+			"resourceVersion": "1",
+		},
+		"spec": map[string]interface{}{"stale": true},
+	}}
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, stale)
+
+	fresh := stale.DeepCopy()
+	fresh.SetResourceVersion("")
+	if err := unstructured.SetNestedField(fresh.Object, false, "spec", "stale"); err != nil {
+		t.Fatalf("SetNestedField: %v", err)
+	}
+
+	if err := createUnstructured(context.Background(), dynamicClient, trainingRuntimeGVR, ns, fresh); err != nil {
+		t.Fatalf("createUnstructured() on an AlreadyExists fixed-name resource = %v, want reclaim via update", err)
+	}
+
+	got, err := dynamicClient.Resource(trainingRuntimeGVR).Namespace(ns).Get(context.Background(), ncclTrainingRuntimeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Get() after reclaim: %v", err)
+	}
+	if staleVal, _, _ := unstructured.NestedBool(got.Object, "spec", "stale"); staleVal {
+		t.Error("reclaimed resource still has the stale prior-run spec, update did not apply")
+	}
+}
+
+// TestCreateUnstructured_ReclaimsStaleTrainJob_DeletesAndRecreates is the
+// regression guard for the finding that reclaiming a stale TrainJob by
+// updating it in place does not actually recover a same-run retry. Kubeflow
+// Trainer treats most of the TrainJob spec as immutable once created and
+// rejects an in-place update to those fields, and even a permitted update
+// would not make the controller recreate the underlying JobSet/pods a
+// hard-killed run left behind. TrainJob must be reclaimed by delete then
+// recreate instead.
+func TestCreateUnstructured_ReclaimsStaleTrainJob_DeletesAndRecreates(t *testing.T) {
 	const ns = "aicr-nccl-bench-deadbeef"
 	listKinds := map[schema.GroupVersionResource]string{trainJobGVR: "TrainJobList"}
 
@@ -594,6 +637,16 @@ func TestCreateUnstructured_ReclaimsStaleResource(t *testing.T) {
 	}}
 	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, stale)
 
+	var order []string
+	dynamicClient.PrependReactor("delete", "trainjobs", func(k8stesting.Action) (bool, runtime.Object, error) {
+		order = append(order, "delete")
+		return false, nil, nil // let the default reactor perform the real delete too.
+	})
+	dynamicClient.PrependReactor("create", "trainjobs", func(k8stesting.Action) (bool, runtime.Object, error) {
+		order = append(order, "create")
+		return false, nil, nil
+	})
+
 	fresh := stale.DeepCopy()
 	fresh.SetResourceVersion("")
 	if err := unstructured.SetNestedField(fresh.Object, false, "spec", "stale"); err != nil {
@@ -601,7 +654,13 @@ func TestCreateUnstructured_ReclaimsStaleResource(t *testing.T) {
 	}
 
 	if err := createUnstructured(context.Background(), dynamicClient, trainJobGVR, ns, fresh); err != nil {
-		t.Fatalf("createUnstructured() on an AlreadyExists fixed-name resource = %v, want reclaim via update", err)
+		t.Fatalf("createUnstructured() on an AlreadyExists TrainJob = %v, want reclaim via delete-then-recreate", err)
+	}
+
+	// The first "create" is createUnstructured's own initial attempt, which
+	// hits AlreadyExists and triggers the delete-then-recreate path below.
+	if want := []string{"create", "delete", "create"}; len(order) != len(want) || order[0] != want[0] || order[1] != want[1] || order[2] != want[2] {
+		t.Fatalf("expected the stale TrainJob to be deleted then recreated, got call order %v, want %v", order, want)
 	}
 
 	got, err := dynamicClient.Resource(trainJobGVR).Namespace(ns).Get(context.Background(), ncclTrainJobName, metav1.GetOptions{})
@@ -609,6 +668,6 @@ func TestCreateUnstructured_ReclaimsStaleResource(t *testing.T) {
 		t.Fatalf("Get() after reclaim: %v", err)
 	}
 	if staleVal, _, _ := unstructured.NestedBool(got.Object, "spec", "stale"); staleVal {
-		t.Error("reclaimed resource still has the stale prior-run spec; update did not apply")
+		t.Error("reclaimed TrainJob still has the stale prior-run spec, recreate did not apply")
 	}
 }

@@ -1459,12 +1459,16 @@ func renderYAMLTemplate(content string, data map[string]string) (*unstructured.U
 // createUnstructured creates a namespaced resource from an unstructured object
 // with a timeout.
 // createUnstructured creates obj. If a fixed-name resource with that
-// GVR/name already exists, it reclaims it by updating it in place. Both
-// callers (TrainingRuntime, TrainJob) use fixed names inside the caller's
-// per-run namespace, so an AlreadyExists here only happens on a same-run
-// retry after a hard kill left it behind; reclaiming it, the same way
-// applyNCCLComputeDomain already does for ComputeDomain, lets that retry
-// recover instead of failing.
+// GVR/name already exists, it reclaims it so a same-run retry after a hard
+// kill can recover instead of failing on AlreadyExists.
+//
+// TrainJob reclaims by delete-then-recreate rather than update. Kubeflow
+// Trainer treats most of its spec as immutable once created and rejects an
+// in-place update to those fields, and even a permitted update would not
+// make the controller recreate the underlying JobSet/pods, which is what a
+// stale TrainJob left behind by a hard kill actually needs. Every other
+// caller (TrainingRuntime) reclaims by updating in place, the same way
+// applyNCCLComputeDomain already does for ComputeDomain.
 func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) error {
 	applyCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
@@ -1474,6 +1478,17 @@ func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gv
 		return nil
 	} else if !apierrors.IsAlreadyExists(err) {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to create resource", err)
+	}
+
+	if gvr == trainJobGVR {
+		if err := client.Delete(applyCtx, obj.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to delete stale resource for recreate", err)
+		}
+		obj.SetResourceVersion("")
+		if _, err := client.Create(applyCtx, obj, metav1.CreateOptions{}); err != nil {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to recreate resource", err)
+		}
+		return nil
 	}
 
 	existing, err := client.Get(applyCtx, obj.GetName(), metav1.GetOptions{})
