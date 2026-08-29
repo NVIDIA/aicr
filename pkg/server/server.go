@@ -44,6 +44,13 @@ type Server struct {
 	rateLimiter *rate.Limiter
 	mu          sync.RWMutex
 	ready       bool
+
+	// routePaths records every pattern registered on the mux, in registration
+	// order. http.ServeMux exposes no way to enumerate its patterns, so without
+	// this the OpenAPI conformance tests would have to re-derive the route set
+	// from a hand-maintained list -- and a route added directly here, which is
+	// exactly where the system endpoints live, would be invisible to them.
+	routePaths []string
 }
 
 // Option is a functional option for configuring Server instances.
@@ -112,16 +119,16 @@ func New(opts ...Option) *Server {
 	mux := http.NewServeMux()
 
 	// System endpoints (no rate limiting)
-	mux.HandleFunc("/health", s.handleHealth)
-	mux.HandleFunc("/ready", s.handleReady)
-	mux.Handle("/metrics", getOnly(promhttp.Handler()))
+	s.handle(mux, "/health", http.HandlerFunc(s.handleHealth))
+	s.handle(mux, "/ready", http.HandlerFunc(s.handleReady))
+	s.handle(mux, "/metrics", readOnly(promhttp.Handler()))
 
 	// setup root handler
 	s.configureRootHandler()
 
 	// setup application routes
 	for path, handler := range s.config.Handlers {
-		mux.HandleFunc(path, s.withMiddleware(handler))
+		s.handle(mux, path, s.withMiddleware(handler))
 	}
 
 	s.httpServer = &http.Server{
@@ -135,6 +142,14 @@ func New(opts ...Option) *Server {
 	}
 
 	return s
+}
+
+// handle registers a pattern on the mux and records it, so the set of served
+// routes has one source of truth rather than a list someone must remember to
+// update.
+func (s *Server) handle(mux *http.ServeMux, pattern string, h http.Handler) {
+	mux.Handle(pattern, h)
+	s.routePaths = append(s.routePaths, pattern)
 }
 
 // SetReady marks the server as ready to serve traffic or not.
@@ -272,22 +287,28 @@ func (s *Server) configureRootHandler() {
 	}
 }
 
-// getOnly restricts a handler to GET, answering 405 otherwise.
+// readOnly restricts a handler to GET and HEAD, answering 405 otherwise.
 //
 // promhttp.Handler does no method filtering, so /metrics answered 200 to
-// DELETE, PUT, POST, PATCH, HEAD, OPTIONS and TRACE alike. That contradicted
-// api/aicr/v1/server.yaml, which declares GET and nothing else, and left seven
-// undocumented operations on a public endpoint. Prometheus scrapes with GET.
+// DELETE, PUT, POST, PATCH, OPTIONS and TRACE alike. That contradicted
+// api/aicr/v1/server.yaml and left undocumented operations on a public
+// endpoint.
 //
-// HEAD is rejected rather than accepted: the spec does not declare it, and
-// widening the surface to match an implementation detail is the wrong direction
-// when the point is to make the published contract true. Adding it later is a
-// deliberate change to both the spec and this guard.
-func getOnly(next http.Handler) http.Handler {
+// HEAD is allowed, not rejected. RFC 9110 §9.1 makes GET and HEAD mandatory for
+// a general-purpose server, and an earlier revision of this guard narrowed
+// /metrics to GET alone — a behavior change against a monitoring endpoint some
+// probes reach with HEAD. The spec declares head: alongside get: so the
+// contract and the server agree.
+//
+// The 405 body is the structured envelope WriteError produces, matching
+// handleHealth and handleReady above. A client parsing the error for one system
+// endpoint should not get a bare string from another for the same condition.
+func readOnly(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			w.Header().Set("Allow", http.MethodGet)
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			w.Header().Set("Allow", http.MethodGet+", "+http.MethodHead)
+			WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
+				"Method not allowed", false, map[string]any{keyMethod: r.Method})
 			return
 		}
 		next.ServeHTTP(w, r)

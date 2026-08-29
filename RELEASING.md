@@ -52,6 +52,24 @@ window rather than a flat one, because an alpha version never promised
 stability in the first place. Its rules are below and take precedence for that
 surface.
 
+**Closing a fail-open gate is not a deprecation.** When two enforcement paths
+disagree about the same document and one of them already rejected it, aligning
+the permissive path to the strict one owes no notice window. The permissive
+behavior was a defect, not a contract: it accepted input the project had
+already decided was invalid, and continuing to honor it for two releases would
+mean knowingly shipping the fail-open seam the stricter path exists to close.
+Such a change must still be recorded in
+[`docs/user/deprecations.md`](docs/user/deprecations.md) with its real release,
+and its rationale written down in the governing ADR.
+
+Exercised exactly once so far, in v0.21: a `RecipeMetadata` overlay with an
+empty `apiVersion` was rejected by the catalog scanner but silently hydrated on
+the direct-input path. ADR-022 §3 records the decision and
+[#2421](https://github.com/NVIDIA/aicr/issues/2421) the analysis; no committed
+artifact in the tree was affected. This clause is deliberately narrow — it does
+not cover tightening validation that both paths previously accepted, which is an
+ordinary breaking change and owes the full window.
+
 ### How a deprecation is announced
 
 Every deprecation appears in all three places. One is not a substitute for
@@ -81,19 +99,37 @@ breaking changes and the deprecation policy for every surface; it does not
 require a rehearsal. Manufacturing a deprecation to prove the channel works
 would prove only that we can manufacture one.
 
-Two real ones are already scheduled, and they are the exercise:
+**The channel will most likely reach `v1.0.0` mechanically tested but never
+exercised on an obligation it actually owed.** That is a deliberate, accepted
+position at this stage of the project, recorded here so it is a choice rather
+than something discovered later.
 
-- The `/v1/*` REST path family retirement ([#2112](https://github.com/NVIDIA/aicr/issues/2112))
-  is the one that drives the RFC 9745 `Deprecation` header, the RFC 8594
-  `Sunset` header, and the OpenAPI `deprecated` flag — the arm integrators
-  actually consume.
-- The ADR-022 alpha-to-target artifact migration runs warn-then-remove across
-  v0.22 and v0.23. It is a genuine warn-then-remove cycle, but a weaker
-  demonstration on its own: alpha owes no window under the table above, so it
-  does not show the channel honoring an obligation it actually had.
+Two candidates existed and neither turns out to be a real exercise:
 
-If either turns up a gap in the mechanism, fix it then. That is cheaper and
-more honest than gating the release on a dry run.
+- **The `/v1/*` REST family is being collapsed, not deprecated.**
+  [#2112](https://github.com/NVIDIA/aicr/issues/2112) folds the profile-aware
+  `/v2` contract into `/v1` and removes the `/v2` paths. With no REST consumers
+  yet, that owes no notice window — it is a pre-adoption restructure. Spending
+  two releases deprecating an endpoint nobody calls would buy a worse end state
+  (two frozen path families instead of one) for the sake of a dry run.
+- **The ADR-022 alpha migration runs warn-then-remove across v0.22 and v0.23**
+  and will be the first end-to-end use of the loader-warning arm — once
+  [#2416](https://github.com/NVIDIA/aicr/issues/2416) wires `deprecation.Warn`
+  into the artifact loaders, which is still outstanding. Even then, alpha owes
+  no window under the table above, so it demonstrates the mechanism working
+  rather than the policy being honored.
+
+What that leaves untested is the *obligation*, not the machinery. The
+per-surface mechanisms have unit coverage in `pkg/deprecation` and `pkg/server`.
+The REST arm — the RFC 9745 `Deprecation` and RFC 8594 `Sunset` headers and the
+OpenAPI `deprecated` flag, which is what an integrator would actually consume —
+has no route marked deprecated and will not be driven by a shipped deprecation.
+The CLI arm has no deprecated flag or subcommand to warn about.
+
+The first surface change that genuinely owes a window is the real exercise, and
+it will most likely land after `v1.0.0`, when the notice owed is a `vMAJOR`
+rather than two minors. Treat the first such change as the moment to verify the
+channel end to end, and fix whatever it exposes then.
 
 ## Artifact Compatibility and Deprecation
 

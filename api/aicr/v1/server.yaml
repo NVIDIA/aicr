@@ -1928,6 +1928,17 @@ paths:
                     type: string
                     example: "service is initializing"
   /metrics:
+    head:
+      tags: [Health]
+      summary: Prometheus metrics endpoint (headers only)
+      operationId: headMetrics
+      description: >-
+        Same as GET but returns headers only. Declared because RFC 9110
+        section 9.1 makes GET and HEAD mandatory for a general-purpose
+        server, and some monitoring probes reach /metrics with HEAD.
+      responses:
+        "200":
+          description: Headers for the Prometheus metrics response
     get:
       tags: [Health]
       summary: Prometheus metrics endpoint
