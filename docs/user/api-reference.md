@@ -60,14 +60,10 @@ curl "http://localhost:8080/v1/recipe?accelerator=h100&service=eks"
 # GET: Training workload on Ubuntu
 curl "http://localhost:8080/v1/recipe?accelerator=h100&service=eks&intent=training&os=ubuntu"
 
-# POST: Recipe from criteria file (YAML body)
+# POST: Recipe from a criteria envelope (YAML body)
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
-  -d 'kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: my-config
-spec:
+  -d 'criteria:
   service: eks
   accelerator: h100
   intent: training'
@@ -157,29 +153,32 @@ curl -s "http://localhost:8080/v1/recipe?accelerator=h100" | jq '.'
 
 ### POST /v1/recipe
 
-Generate an optimized configuration recipe from a criteria file body. This endpoint provides an alternative to query parameters, accepting a Kubernetes-style `RecipeCriteria` resource in the request body.
+Generate an optimized configuration recipe from a criteria body. This endpoint provides an alternative to query parameters.
 
 **Content Types:**
 - `application/json` - JSON format
 - `application/x-yaml` - YAML format
 
+An explicit, supported `Content-Type` is required; a missing, aliased, or unsupported media type is rejected.
+
 **Request Body:**
 
-The request body must be a `RecipeCriteria` resource:
+The request body is a strict envelope. Unknown fields are rejected, so a typo fails loudly instead of being silently ignored:
 
 ```yaml
-kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: my-criteria
-spec:
+criteria:
   service: eks
   accelerator: gb200
   os: ubuntu
   intent: training
   platform: kubeflow
   nodes: 8
+profile: gpuStack=operator-managed  # optional
 ```
+
+`profile` is optional; omit it to take the composition's declared default. If you also pass `profile=` as a query parameter, the two must agree.
+
+The Kubernetes-style `RecipeCriteria` resource body that this endpoint accepted before v0.21 is no longer supported and returns `400`.
 
 **Examples:**
 
@@ -187,11 +186,7 @@ spec:
 # POST with YAML body
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
-  -d 'kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: training-config
-spec:
+  -d 'criteria:
   service: eks
   accelerator: h100
   intent: training'
@@ -200,10 +195,7 @@ spec:
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/json" \
   -d '{
-    "kind": "RecipeCriteria",
-    "apiVersion": "aicr.run/v1alpha2",
-    "metadata": {"name": "training-config"},
-    "spec": {
+    "criteria": {
       "service": "eks",
       "accelerator": "h100",
       "intent": "training"
@@ -212,13 +204,13 @@ curl -X POST "http://localhost:8080/v1/recipe" \
 
 # POST with criteria file
 curl -X POST "http://localhost:8080/v1/recipe" \
-  -H "Content-Type: application/yaml" \
+  -H "Content-Type: application/x-yaml" \
   -d @criteria.yaml
 
 # Pretty print response
 curl -s -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/json" \
-  -d '{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100"}}' \
+  -d '{"criteria":{"service":"eks","accelerator":"h100"}}' \
   | jq '.'
 ```
 
@@ -367,7 +359,7 @@ curl -s "http://localhost:8080/v1/query?service=eks&accelerator=h100&selector=co
 
 ### POST /v1/query
 
-Alternative to `GET /v1/query` that accepts the criteria and selector in the request body. The body is a `QueryRequest` with a `criteria` object (same fields as the `RecipeCriteria` spec) and a `selector` string.
+Alternative to `GET /v1/query` that accepts the criteria and selector in the request body. The body is a strict envelope with a `criteria` object (the same dimensions accepted as query parameters on `GET /v1/query`), a required `selector` string, and an optional `profile`. Unknown fields are rejected.
 
 **Content Types:**
 - `application/json` - JSON format
