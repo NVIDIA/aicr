@@ -559,6 +559,9 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 		wantWarning bool
 		wantSubstr  string
 		alsoWant    []string
+		// wantCount is the exact number of node-label warnings expected.
+		// Zero means one, the single-DRA-component default.
+		wantCount int
 	}{
 		{
 			name: "both components enabled warns",
@@ -579,6 +582,23 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 			configured:  config.NodeLabel{Key: "example.com/dra-ready", Value: "enabled"},
 			wantWarning: true,
 			wantSubstr:  "nodes labeled example.com/dra-ready=enabled",
+		},
+		{
+			// draEvictionComponentNames collects every matching ref rather
+			// than stopping at the first, so a recipe carrying both DRA
+			// variants yields one warning per component. Nothing else in the
+			// table supplies more than one DRA ref, which left the loop in
+			// warnDRAEvictionNodeLabelRequired unexercised for len > 1 and a
+			// double-emit regression undetectable.
+			name: "both DRA variants warn once each",
+			refs: []recipe.ComponentRef{
+				{Name: draComponentName},
+				{Name: "nvidia-dra-driver-gpu-ocp"},
+				{Name: gpuOperatorComponentName},
+			},
+			wantWarning: true,
+			wantSubstr:  draComponentName + " schedules its kubelet plugin only on nodes labeled ",
+			wantCount:   2,
 		},
 		{
 			name: "OpenShift components warn under their own names",
@@ -660,12 +680,18 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 				t.Fatalf("injectDRAEvictionLabel() error = %v", err)
 			}
 
-			var got string
+			// Collect every matching warning rather than the first: taking
+			// one and breaking cannot tell a correct single emission from a
+			// regression that emits the same warning twice.
+			var matched []string
 			for _, w := range b.warnings {
 				if strings.Contains(w, "kubelet plugin only on nodes labeled") {
-					got = w
-					break
+					matched = append(matched, w)
 				}
+			}
+			var got string
+			if len(matched) > 0 {
+				got = matched[0]
 			}
 
 			if !tt.wantWarning {
@@ -677,6 +703,14 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 
 			if got == "" {
 				t.Fatalf("missing DRA node-label warning; warnings = %v", b.warnings)
+			}
+			wantCount := tt.wantCount
+			if wantCount == 0 {
+				wantCount = 1
+			}
+			if len(matched) != wantCount {
+				t.Errorf("emitted %d node-label warnings, want %d; warnings = %v",
+					len(matched), wantCount, matched)
 			}
 			if !strings.HasPrefix(got, "Warning: ") {
 				t.Errorf("warning %q lacks the %q prefix used by other bundle warnings", got, "Warning: ")
