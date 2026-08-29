@@ -166,6 +166,7 @@ func renderLeafDigest(ctx context.Context, t *testing.T, rr *recipe.RecipeResult
 		// Suppresses wall-clock timestamps and derives attestation
 		// invocation IDs, without which two runs never agree.
 		config.WithDeterministic(true),
+		config.WithSystemNodeSelector(map[string]string{"nodeGroup": "system"}),
 		config.WithAcceleratedNodeSelector(map[string]string{"nvidia.com/gpu.present": "true"}),
 		config.WithAcceleratedNodeTolerations([]corev1.Toleration{{
 			Key:      "nvidia.com/gpu",

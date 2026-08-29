@@ -477,10 +477,25 @@ func TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths(t *testing.T) {
 		}
 	}
 
+	// Regression guard: an unpinned controller/restapi/login/accounting pod
+	// can land on a GPU node, whose zone then pins the StatefulSet's PVC and
+	// strands a later reschedule onto the correct system-node pool. This
+	// must stay a bundle-time failure, not a silent no-op, if
+	// requireNodeSelector is ever dropped from the registry entry.
+	if !slurmCluster.RequireSystemNodeSelector() {
+		t.Error("slinky-slurm nodeScheduling.system.requireNodeSelector must stay true (see registry.yaml comment)")
+	}
+
 	gotAccelSelector := slurmCluster.GetAcceleratedNodeSelectorPaths()
 	if !slices.Contains(gotAccelSelector, "nodesets.slinky.podSpec.nodeSelector") {
 		t.Errorf("slinky-slurm accelerated node selector paths missing %q (got %v)",
 			"nodesets.slinky.podSpec.nodeSelector", gotAccelSelector)
+	}
+	// Regression guard: an unpinned NodeSet/worker pod can land on a
+	// non-GPU node and strand a later reschedule onto the accelerated pool
+	// the same way.
+	if !slurmCluster.RequireAcceleratedNodeSelector() {
+		t.Error("slinky-slurm nodeScheduling.accelerated.requireNodeSelector must stay true (see registry.yaml comment)")
 	}
 	gotAccelToleration := slurmCluster.GetAcceleratedTolerationPaths()
 	if !slices.Contains(gotAccelToleration, "nodesets.slinky.podSpec.tolerations") {

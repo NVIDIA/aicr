@@ -898,6 +898,13 @@ components:
           - restapi.podSpec.nodeSelector
           - loginsets.slinky.podSpec.nodeSelector
           - accounting.podSpec.nodeSelector
+        # An unpinned controller/restapi/login/accounting pod can land on a
+        # GPU node and inherit its zone; the StatefulSet's PVC then binds to
+        # that zone, and a later reschedule onto the (correct) system-node
+        # pool in a different zone gets stuck forever waiting on a PVC it
+        # can't attach to. requireNodeSelector fails the bundle instead of
+        # shipping this misconfiguration silently.
+        requireNodeSelector: true
         tolerationPaths:
           - controller.podSpec.tolerations
           - restapi.podSpec.tolerations
@@ -906,6 +913,12 @@ components:
       accelerated:
         nodeSelectorPaths:
           - nodesets.slinky.podSpec.nodeSelector
+        # An unpinned NodeSet/worker pod can land on a system (non-GPU) node
+        # and inherit its zone; the StatefulSet's PVC then binds to that
+        # zone, and a later correction onto the accelerated pool in a
+        # different zone gets stuck the same way. requireNodeSelector fails
+        # the bundle instead of shipping this misconfiguration silently.
+        requireNodeSelector: true
         tolerationPaths:
           - nodesets.slinky.podSpec.tolerations
 
