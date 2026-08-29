@@ -472,6 +472,12 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Check if bandwidth meets threshold (within 10% tolerance)
 	passed := bandwidth >= (threshold * 0.9)
 	actualValue := fmt.Sprintf("%.2f GB/s", bandwidth)
+	// Surface the resolved workload image in the structured evidence, not just
+	// slog output — issue #1751 criterion (c) asks for both. Omitted when the
+	// override wasn't set (the common case) to avoid noising every result.
+	if runtimeImage != "" {
+		actualValue = fmt.Sprintf("%.2f GB/s (runtime image: %s)", bandwidth, runtimeImage)
+	}
 
 	if passed {
 		slog.Info("Bandwidth validation passed", "bandwidth", bandwidth, "threshold", threshold*0.9, "tolerance", "10%")

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"sort"
 	"strings"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -170,11 +171,14 @@ func setWorkloadImages(podSpec map[string]interface{}, listKey, image string) (i
 	return count, nil
 }
 
-// containerNameList returns ncclWorkloadContainerNames' keys for error messages.
+// containerNameList returns ncclWorkloadContainerNames' keys, sorted, for
+// error messages — map iteration order is randomized, and an unsorted list
+// would make the drift error's container names flap across runs.
 func containerNameList() []string {
 	names := make([]string, 0, len(ncclWorkloadContainerNames))
 	for n := range ncclWorkloadContainerNames {
 		names = append(names, n)
 	}
+	sort.Strings(names)
 	return names
 }
