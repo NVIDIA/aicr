@@ -547,3 +547,160 @@ func driverManagerEnvValues(values map[string]any, name string) []string {
 	}
 	return result
 }
+
+// TestWarnDRAEvictionNodeLabelRequired asserts the non-blocking bundle-time
+// warning fires exactly when both halves of the eviction contract are enabled,
+// mirroring the StorageClass warning precedent (issue #2456).
+func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
+	tests := []struct {
+		name        string
+		refs        []recipe.ComponentRef
+		configured  config.NodeLabel
+		wantWarning bool
+		wantSubstr  string
+		alsoWant    []string
+	}{
+		{
+			name: "both components enabled warns",
+			refs: []recipe.ComponentRef{
+				{Name: draComponentName},
+				{Name: gpuOperatorComponentName},
+			},
+			wantWarning: true,
+			wantSubstr: draComponentName + " schedules its kubelet plugin only on nodes labeled " +
+				defaults.DRAEvictionNodeLabelKey + "=" + defaults.DRAEvictionNodeLabelValue,
+		},
+		{
+			name: "configured label appears in the warning",
+			refs: []recipe.ComponentRef{
+				{Name: draComponentName},
+				{Name: gpuOperatorComponentName},
+			},
+			configured:  config.NodeLabel{Key: "example.com/dra-ready", Value: "enabled"},
+			wantWarning: true,
+			wantSubstr:  "nodes labeled example.com/dra-ready=enabled",
+		},
+		{
+			name: "OpenShift components warn under their own names",
+			refs: []recipe.ComponentRef{
+				{Name: "nvidia-dra-driver-gpu-ocp"},
+				{Name: "gpu-operator-ocp"},
+			},
+			wantWarning: true,
+			wantSubstr:  "nvidia-dra-driver-gpu-ocp schedules its kubelet plugin only on nodes labeled ",
+		},
+		{
+			// The warning must distinguish per-node absence from total absence.
+			// Partial label coverage — the shape node replacement and autoscaling
+			// produce — leaves labeled nodes working while the rest silently lack
+			// DRA; DESIRED=0 applies only when NO GPU node matches. An earlier
+			// wording described every case as DESIRED=0, which overstates the
+			// common case and understates how hard a split cluster is to notice.
+			name: "warning distinguishes per-node absence from DESIRED=0",
+			refs: []recipe.ComponentRef{
+				{Name: draComponentName},
+				{Name: gpuOperatorComponentName},
+			},
+			wantWarning: true,
+			// Both halves of the distinction are asserted. Pinning only the
+			// zero-match clause would let a regression delete the per-node
+			// clause — the more common case — and still pass.
+			wantSubstr: "Unlabeled GPU nodes silently run without DRA",
+			alsoWant: []string{
+				"if no GPU node carries the label the kubelet-plugin DaemonSet sits at DESIRED=0",
+			},
+		},
+		{
+			// Arbitrary node labels live at NodePool.spec.template.metadata.labels.
+			// An EC2NodeClass has no such field, so naming nodeClass here sent
+			// operators to a resource that cannot carry the label.
+			name: "warning names the Karpenter resource that carries labels",
+			refs: []recipe.ComponentRef{
+				{Name: draComponentName},
+				{Name: gpuOperatorComponentName},
+			},
+			wantWarning: true,
+			wantSubstr:  "Karpenter NodePool spec.template.metadata.labels",
+		},
+		{
+			name:        "DRA absent does not warn",
+			refs:        []recipe.ComponentRef{{Name: gpuOperatorComponentName}},
+			wantWarning: false,
+		},
+		{
+			name:        "GPU Operator absent does not warn",
+			refs:        []recipe.ComponentRef{{Name: draComponentName}},
+			wantWarning: false,
+		},
+		{
+			name:        "neither component present does not warn",
+			refs:        []recipe.ComponentRef{{Name: "some-other-component"}},
+			wantWarning: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := []Option{}
+			if tt.configured.Key != "" {
+				opts = append(opts, WithConfig(config.NewConfig(
+					config.WithDRAEvictionNodeLabel(tt.configured))))
+			}
+			b, err := New(opts...)
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			values := make(map[string]map[string]any, len(tt.refs))
+			for _, ref := range tt.refs {
+				values[ref.Name] = map[string]any{}
+			}
+
+			if err := b.injectDRAEvictionLabel(values, &recipe.RecipeResult{ComponentRefs: tt.refs}); err != nil {
+				t.Fatalf("injectDRAEvictionLabel() error = %v", err)
+			}
+
+			var got string
+			for _, w := range b.warnings {
+				if strings.Contains(w, "kubelet plugin only on nodes labeled") {
+					got = w
+					break
+				}
+			}
+
+			if !tt.wantWarning {
+				if got != "" {
+					t.Fatalf("unexpected DRA node-label warning: %q", got)
+				}
+				return
+			}
+
+			if got == "" {
+				t.Fatalf("missing DRA node-label warning; warnings = %v", b.warnings)
+			}
+			if !strings.HasPrefix(got, "Warning: ") {
+				t.Errorf("warning %q lacks the %q prefix used by other bundle warnings", got, "Warning: ")
+			}
+			if !strings.Contains(got, tt.wantSubstr) {
+				t.Errorf("warning %q does not contain %q", got, tt.wantSubstr)
+			}
+			for _, want := range tt.alsoWant {
+				if !strings.Contains(got, want) {
+					t.Errorf("warning %q does not mention %q", got, want)
+				}
+			}
+
+			for _, want := range []string{
+				"node-pool provisioning time",
+				"upgrading an existing cluster",
+				"DESIRED=0",
+				"no ResourceSlices",
+				"Neither Helm nor deploy.sh reports an error either way",
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("warning %q does not mention %q", got, want)
+				}
+			}
+		})
+	}
+}
