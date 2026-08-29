@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -491,14 +492,24 @@ func parseCurlRequest(command string) (req docsRequest, ok bool, reason string) 
 		return req, false, "body contains a placeholder"
 	}
 
-	_, after, found := strings.Cut(rawURL, docsExampleHost)
-	if !found {
-		return req, false, "could not split host"
+	// Build the target the way curl would put it on the wire. Splitting on the
+	// host string instead would carry a fragment into the request line, and a
+	// fragment is never sent — the replayed target would differ from the one
+	// the documented command actually issues.
+	parsed, parseErr := url.Parse(rawURL)
+	if parseErr != nil {
+		return req, false, "unparseable URL: " + parseErr.Error()
 	}
-	if after == "" {
-		after = "/"
+	if parsed.Host != docsExampleHost {
+		return req, false, ""
 	}
-	req.target = after
+	req.target = parsed.EscapedPath()
+	if req.target == "" {
+		req.target = "/"
+	}
+	if parsed.RawQuery != "" {
+		req.target += "?" + parsed.RawQuery
+	}
 	req.source = strings.Join(strings.Fields(command), " ")
 	if len(req.source) > 200 {
 		req.source = req.source[:200] + "…"
@@ -822,13 +833,16 @@ func TestParseCurlRequest(t *testing.T) {
 			wantOK:  false,
 		},
 		{
-			// The comment rule must not eat a quoted #, which is a URL
-			// fragment rather than the start of a comment.
-			name:       "quoted fragment survives comment stripping",
+			// Two rules meet here. A quoted # is a URL fragment, not the
+			// start of a comment, so the command still parses. But a fragment
+			// is never sent on the wire, so it must not reach the replayed
+			// target — the first version of this case asserted otherwise and
+			// pinned the wrong behavior.
+			name:       "quoted fragment parses but is not replayed",
 			command:    `curl "http://localhost:8080/v1/recipe?service=eks#frag"`,
 			wantOK:     true,
 			wantMethod: http.MethodGet,
-			wantTarget: "/v1/recipe?service=eks#frag",
+			wantTarget: "/v1/recipe?service=eks",
 		},
 		{
 			name:    "other host is skipped",
