@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -204,21 +205,7 @@ func TestCLISurface(t *testing.T) {
 			"intentional and the window has passed, regenerate the golden.\n\n")
 	}
 
-	// Not every addition is compatible. A newly required flag on a command that
-	// already existed invalidates invocations that were valid before, which
-	// RELEASING.md classifies as breaking — only a new flag whose default
-	// preserves behavior is additive. On a brand-new command there is no prior
-	// invocation to break, so requiredness there is additive; the split is by
-	// whether the command was already in the baseline.
-	existing := commandPaths(want)
-	var newlyRequired, compatible []string
-	for _, line := range added {
-		if isRequiredFlagLine(line) && existing[flagCommandPath(line)] {
-			newlyRequired = append(newlyRequired, line)
-			continue
-		}
-		compatible = append(compatible, line)
-	}
+	newlyRequired, compatible := classifyAdded(want, added)
 
 	if len(newlyRequired) > 0 {
 		b.WriteString("BREAKING — these flags are newly required on commands that already existed:\n")
@@ -449,6 +436,32 @@ func TestFlagFactsRendersDashPrefixByNameLength(t *testing.T) {
 	}
 }
 
+// classifyAdded splits new baseline lines into the ones that break the CLI
+// contract and the ones that do not.
+//
+// Not every addition is compatible. A flag arriving already required on a
+// command that already existed invalidates invocations that were valid before,
+// which RELEASING.md classifies as breaking — only a new flag whose default
+// preserves behavior is additive. On a brand-new command there is no prior
+// invocation to break, so requiredness there is additive; the split is by
+// whether the command was already in the baseline.
+//
+// This is a named function rather than a loop inside TestCLISurface because the
+// reporting block around it runs only on the failure path, which a green CI run
+// never reaches. Asserting on this directly is what keeps the classification
+// itself covered.
+func classifyAdded(want, added []string) (newlyRequired, compatible []string) {
+	existing := commandPaths(want)
+	for _, line := range added {
+		if isRequiredFlagLine(line) && existing[flagCommandPath(line)] {
+			newlyRequired = append(newlyRequired, line)
+			continue
+		}
+		compatible = append(compatible, line)
+	}
+	return newlyRequired, compatible
+}
+
 // commandPaths returns the command paths present in a baseline line set.
 func commandPaths(lines []string) map[string]bool {
 	paths := make(map[string]bool)
@@ -484,59 +497,44 @@ func flagCommandPath(line string) string {
 	return path
 }
 
-// TestNewlyRequiredFlagOnExistingCommandIsBreaking pins the classification that
-// decides whether a surface change blocks or merely needs a regenerated golden.
+// TestClassifyAddedSplitsBreakingFromAdditive drives the real classification
+// used by TestCLISurface's failure report.
 //
-// Every added line used to be reported as "Additions are compatible." That is
-// wrong for a flag that arrives already required on a command that already
-// shipped: invocations that were valid before now fail, which RELEASING.md
-// classifies as breaking. On a brand-new command there is no prior invocation to
-// break, so requiredness there really is additive — the distinction is the whole
-// point, and it is why this is asserted directly rather than through the golden.
-func TestNewlyRequiredFlagOnExistingCommandIsBreaking(t *testing.T) {
+// Two things make this worth asserting directly. The classify-and-report block
+// runs only when the live tree diverges from the golden, so a normal green run
+// never executes it — a swapped bucket would mislabel a newly required flag as
+// "Additive — Regenerate the golden", which is precisely the reflexive -update
+// this file exists to prevent. And the lines are produced by real flagFacts
+// calls rather than hand-written literals, so if its render format ever drifts,
+// flagCommandPath stops matching and this test fails instead of silently
+// fail-opening a breaking flag into the compatible bucket.
+func TestClassifyAddedSplitsBreakingFromAdditive(t *testing.T) {
 	t.Parallel()
 
 	baseline := []string{
 		"command aicr  aliases= hidden=false",
 		"command aicr bundle  aliases= hidden=false",
-		`flag    aicr bundle  --recipe,-r  type=string default= required=false hidden=false env=`,
-	}
-	existing := commandPaths(baseline)
-
-	tests := []struct {
-		name       string
-		line       string
-		wantBroken bool
-	}{
-		{
-			name:       "required flag on an existing command is breaking",
-			line:       `flag    aicr bundle  --must-set  type=string default= required=true hidden=false env=`,
-			wantBroken: true,
-		},
-		{
-			name:       "optional flag on an existing command is additive",
-			line:       `flag    aicr bundle  --nice-to-have  type=string default= required=false hidden=false env=`,
-			wantBroken: false,
-		},
-		{
-			name:       "required flag on a brand-new command is additive",
-			line:       `flag    aicr brandnew  --must-set  type=string default= required=true hidden=false env=`,
-			wantBroken: false,
-		},
-		{
-			name:       "a new command line itself is additive",
-			line:       "command aicr brandnew  aliases= hidden=false",
-			wantBroken: false,
-		},
+		flagFacts("aicr bundle", &cli.StringFlag{Name: "recipe", Aliases: []string{"r"}}),
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			got := isRequiredFlagLine(tt.line) && existing[flagCommandPath(tt.line)]
-			if got != tt.wantBroken {
-				t.Errorf("classified breaking=%v, want %v for %q", got, tt.wantBroken, tt.line)
-			}
-		})
+	requiredOnExisting := flagFacts("aicr bundle",
+		&cli.StringFlag{Name: "must-set", Required: true})
+	optionalOnExisting := flagFacts("aicr bundle",
+		&cli.StringFlag{Name: "nice-to-have"})
+	requiredOnNew := flagFacts("aicr brandnew",
+		&cli.StringFlag{Name: "must-set", Required: true})
+	newCommand := "command aicr brandnew  aliases= hidden=false"
+
+	newlyRequired, compatible := classifyAdded(baseline, []string{
+		requiredOnExisting, optionalOnExisting, requiredOnNew, newCommand,
+	})
+
+	if len(newlyRequired) != 1 || newlyRequired[0] != requiredOnExisting {
+		t.Errorf("newlyRequired = %q, want exactly [%q]", newlyRequired, requiredOnExisting)
+	}
+
+	wantCompatible := []string{optionalOnExisting, requiredOnNew, newCommand}
+	if !slices.Equal(compatible, wantCompatible) {
+		t.Errorf("compatible = %q, want %q", compatible, wantCompatible)
 	}
 }
