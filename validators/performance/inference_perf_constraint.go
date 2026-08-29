@@ -405,6 +405,7 @@ type inferenceWorkloadConfig struct {
 	deployedByUs           bool   // true if we (or a prior run we own) created the workload
 	modelCacheSize         string // PVC size (e.g. "100Gi") enabling the model-weights cache; empty = disabled
 	modelCacheStorageClass string // StorageClass for the cache PVC; empty = cluster default
+	gpuNodeInstanceType    string // chosen node's node.kubernetes.io/instance-type; empty if unlabeled
 	routingMode            inferenceRoutingMode
 	routerMode             string // Dynamo frontend DYN_ROUTER_MODE (dynamo-router path only); env > default (see resolveRouterMode)
 
@@ -770,6 +771,7 @@ func buildInferenceConfig(ctx *validators.Context, mode *allocmode.Mode) (*infer
 		model:                  model,
 		modelCacheSize:         cacheSize,
 		modelCacheStorageClass: strings.TrimSpace(os.Getenv(envModelCacheStorageClass)),
+		gpuNodeInstanceType:    chosen.Labels[instanceTypeLabel],
 		routingMode:            routingMode,
 		routerMode:             routerMode,
 		gpuAllocMode:           mode,
