@@ -16,8 +16,8 @@
 # Deploys a vLLM aggregated backend with a small model for smoke testing.
 # Worker replicas scale to match available GPUs (1 GPU per replica).
 # Frontend-to-worker traffic uses Dynamo's request plane default (TCP). The
-# local vLLM ZMQ KV-event publisher feeds the worker runtime, which relays
-# KV-cache events onto the NATS-backed Dynamo event plane.
+# local vLLM ZMQ KV-event publisher feeds the KV router directly;
+# no NATS relay in the 1.4+ default path.
 #
 # Worker GPU wiring is MODE-DISPATCHED (capability-driven, issue #1327): on
 # nodes with usable full-GPU DRA the workers bind a DRA ResourceClaimTemplate

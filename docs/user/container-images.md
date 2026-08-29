@@ -19,11 +19,17 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
+<<<<<<< HEAD
 - Components: **44**
 - Unique images: **100**
 - Distinct registries: **11**
+=======
+- Components: **37**
+- Unique images: **88**
+- Distinct registries: **10**
+>>>>>>> 89db3978 (fix: address F1-F13 review findings — remove NATS test guards, bump UAT image, update NATS to ZMQ wording across docs and code, regenerate BOM)
 
-Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
+Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
 
 _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recipes/components/<name>/values.yaml; per-recipe overlay overrides are not applied`
 
@@ -33,12 +39,16 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 |-----------|------|-------|----------------|--------|
 | agentgateway | helm | agentgateway | v1.3.1 | 1 |
 | agentgateway-crds | helm | agentgateway-crds | v1.3.1 | 0 |
-| aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 6 |
+| aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 0 |
 | aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.29 | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
+<<<<<<< HEAD
 | cert-manager-ocp | manifest | — | — | 0 |
 | cert-manager-ocp-olm | manifest | — | — | 0 |
 | dynamo-platform | helm | dynamo-platform | 1.2.1 | 3 |
+=======
+| dynamo-platform | helm | dynamo-platform | 1.4.1 | 1 |
+>>>>>>> 89db3978 (fix: address F1-F13 review findings — remove NATS test guards, bump UAT image, update NATS to ZMQ wording across docs and code, regenerate BOM)
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
@@ -65,10 +75,15 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nodewright-customizations | manifest | — | — | 5 |
 | nodewright-operator | helm | nodewright | v0.17.1 | 3 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.1 | 1 |
+<<<<<<< HEAD
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.4.1 | 1 |
 | nvsentinel | helm | nvsentinel | v1.20.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
+=======
+| nvsentinel | helm | nvsentinel | v1.9.0 | 6 |
+| prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 0 |
+>>>>>>> 89db3978 (fix: address F1-F13 review findings — remove NATS test guards, bump UAT image, update NATS to ZMQ wording across docs and code, regenerate BOM)
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
 | slinky-slurm | helm | slurm | 1.2.0 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
@@ -97,12 +112,9 @@ _No images extracted._
 
 ### aws-ebs-csi-driver
 
-- `public.ecr.aws/csi-components/csi-attacher:v4.11.0-eksbuild.4`
-- `public.ecr.aws/csi-components/csi-node-driver-registrar:v2.16.0-eksbuild.4`
-- `public.ecr.aws/csi-components/csi-provisioner:v6.2.0-eksbuild.3`
-- `public.ecr.aws/csi-components/csi-resizer:v2.1.0-eksbuild.4`
-- `public.ecr.aws/csi-components/livenessprobe:v2.18.0-eksbuild.4`
-- `public.ecr.aws/ebs-csi-driver/aws-ebs-csi-driver:v1.59.0`
+> Warning: [INTERNAL] helm template failed: signal: killed
+
+_No images extracted._
 
 ### aws-efa
 
@@ -125,9 +137,7 @@ _No images extracted._
 
 ### dynamo-platform
 
-- `nats:2.10.21-alpine`
-- `natsio/nats-server-config-reloader:0.16.0`
-- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.2.1`
+- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.4.1`
 
 ### gatekeeper
 
@@ -298,7 +308,9 @@ _No images extracted._
 
 ### prometheus-adapter
 
-- `registry.k8s.io/prometheus-adapter/prometheus-adapter:v0.12.0`
+> Warning: [INTERNAL] helm template failed: signal: killed
+
+_No images extracted._
 
 ### prometheus-adapter-ocp
 

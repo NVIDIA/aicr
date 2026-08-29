@@ -15,8 +15,8 @@
 # Dynamo inference workload for performance benchmarking through GAIE/EPP.
 # EPP performs KV-cache-aware endpoint selection and worker frontend sidecars
 # run in direct mode so they honor EPP's routing headers. Direct mode is not
-# the local ZMQ-to-NATS relay; the Dynamo worker runtime relays vLLM KV-cache
-# events from the local ZMQ publisher onto the NATS-backed event plane.
+# workers publish KV-cache events over ZMQ directly to the KV router;
+# no NATS relay in the 1.4+ default path.
 #
 # Worker GPU wiring is MODE-DISPATCHED (capability-driven, issue #1327): DRA
 # ResourceClaimTemplate on nodes with usable full-GPU DRA, device-plugin

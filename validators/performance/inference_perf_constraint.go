@@ -2748,7 +2748,7 @@ func resolveModel(ctx *validators.Context) string {
 // `gateway-epp` switches to Gateway API Inference Extension: EPP
 // performs KV-aware endpoint selection and worker frontend sidecars run in
 // direct mode so they honor EPP's routing headers. The sidecars do not relay
-// local vLLM ZMQ KV events onto NATS; that relay is handled by the worker
+// KV events; workers publish ZMQ KV events directly to the KV router.
 // runtime.
 func resolveRoutingMode(ctx *validators.Context) (inferenceRoutingMode, error) {
 	if c, ok := findPerformanceConstraint(ctx, perfConstraintRoutingMode); ok {
