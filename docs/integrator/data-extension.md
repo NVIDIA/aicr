@@ -138,7 +138,7 @@ existing skip behavior, and `ValidatorCatalog` sits on a separate API domain
 outside this contract.
 
 This gate follows the document, not the entry point. Passing a single overlay
-directly — `aicr recipe -r overlay.yaml`, `aicr bundle -r overlay.yaml` —
+directly — `aicr bundle -r overlay.yaml`, `aicr validate -r overlay.yaml` —
 applies the same check as a `--data` catalog scan, so a `RecipeMetadata`
 with a missing or empty `apiVersion` is rejected on both paths. Through v0.20
 the direct path accepted it and hydrated silently

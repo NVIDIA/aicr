@@ -222,11 +222,7 @@ test_api_recipe() {
   http_code=$(curl -s -w "%{http_code}" -o "$post_recipe" \
     -X POST "${aicrd_URL}/v1/recipe" \
     -H "Content-Type: application/x-yaml" \
-    -d 'kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: h100-training
-spec:
+    -d 'criteria:
   service: eks
   accelerator: h100
   intent: training')

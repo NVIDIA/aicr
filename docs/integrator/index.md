@@ -40,7 +40,7 @@ See [Kubernetes Deployment](kubernetes-deployment.md) for full manifests. After 
 
 ```shell
 # Generate recipe via API
-curl "http://aicrd.aicr.svc/v2/recipe?service=eks&accelerator=h100"
+curl "http://aicrd.aicr.svc/v1/recipe?service=eks&accelerator=h100"
 ```
 
 ### CI/CD Integration
