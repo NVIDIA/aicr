@@ -893,9 +893,10 @@ curl "http://localhost:8080/ready"
 
 ---
 
-### GET /metrics
+### GET and HEAD /metrics
 
-Prometheus metrics endpoint.
+Prometheus metrics endpoint. `HEAD` returns the same headers with no body;
+every other method is rejected with `405` and an `Allow: GET, HEAD` header.
 
 ```shell
 curl "http://localhost:8080/metrics"

@@ -15,6 +15,10 @@
 package server
 
 import (
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -107,8 +111,10 @@ func newSpecTestServer(t *testing.T) *Server {
 
 // registeredPaths returns every path the server actually serves.
 //
-// The set comes from Server.routePaths, recorded as New registers each pattern,
-// so it cannot drift from what the mux actually serves. Two earlier revisions of
+// The set comes from Server.routePaths, recorded as New registers each pattern
+// via s.handle. That covers cooperating registrations only — a raw
+// mux.HandleFunc would be served and never recorded — so the invariant is
+// enforced separately at the source by TestMuxRegistrationsGoThroughHandle. Two earlier revisions of
 // this helper were wrong in exactly that way: reading newRoutes alone missed the
 // root "/" handler installed by configureRootHandler, and the hand-maintained
 // systemRoutes list that replaced it would have missed any future route wired
@@ -304,5 +310,73 @@ func TestMetricsMethodRejectionIsStructured(t *testing.T) {
 	mux.ServeHTTP(headRec, httptest.NewRequest(http.MethodHead, "/metrics", nil))
 	if headRec.Code != http.StatusOK {
 		t.Errorf("HEAD /metrics = %d, want 200", headRec.Code)
+	}
+}
+
+// TestMuxRegistrationsGoThroughHandle is what actually closes the gap that
+// Server.routePaths only appears to close.
+//
+// routePaths records a pattern when it is registered *via s.handle*. A raw
+// mux.HandleFunc("/debug", ...) written directly in New bypasses the recording,
+// so the route is served, absent from routePaths, and therefore invisible to
+// all three conformance tests above — the exact scenario those tests exist to
+// catch. An earlier revision of this file claimed the route set "cannot drift";
+// that claim was only true for registrations that already cooperated, and the
+// mutation used to check it went through s.handle, so it proved the recording
+// path worked rather than that the bypass was caught.
+//
+// Go's http.ServeMux exposes no way to enumerate its patterns, so the invariant
+// cannot be verified at runtime. It is enforced at the source instead: every
+// mux.Handle / mux.HandleFunc call site must live inside the handle helper.
+func TestMuxRegistrationsGoThroughHandle(t *testing.T) {
+	t.Parallel()
+
+	const src = "server.go"
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, src, nil, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", src, err)
+	}
+
+	// Locate the helper's body so call sites inside it can be excluded.
+	var helperStart, helperEnd token.Pos
+	ast.Inspect(file, func(n ast.Node) bool {
+		fn, ok := n.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "handle" || fn.Recv == nil {
+			return true
+		}
+		helperStart, helperEnd = fn.Pos(), fn.End()
+		return false
+	})
+	if !helperStart.IsValid() {
+		t.Fatal("could not find func (s *Server) handle; this test cannot enforce its invariant")
+	}
+
+	var offenders []string
+	ast.Inspect(file, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || (sel.Sel.Name != "Handle" && sel.Sel.Name != "HandleFunc") {
+			return true
+		}
+		recv, ok := sel.X.(*ast.Ident)
+		if !ok || recv.Name != "mux" {
+			return true
+		}
+		if call.Pos() >= helperStart && call.Pos() < helperEnd {
+			return true // the one legitimate site
+		}
+		offenders = append(offenders,
+			fmt.Sprintf("%s: mux.%s", fset.Position(call.Pos()), sel.Sel.Name))
+		return true
+	})
+
+	for _, o := range offenders {
+		t.Errorf("%s registers a route without going through s.handle, so it is "+
+			"absent from Server.routePaths and invisible to the OpenAPI route "+
+			"conformance tests; use s.handle(mux, pattern, handler) instead", o)
 	}
 }

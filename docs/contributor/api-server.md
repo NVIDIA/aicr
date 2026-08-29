@@ -151,7 +151,7 @@ field is wired in one place.
 | `/` | GET | Lists registered routes (unmatched paths route here via `ServeMux`) |
 | `/health` | GET | Liveness — always 200 if the process is running |
 | `/ready` | GET | Readiness — 503 with `reason` until `setReady(true)`, 200 after |
-| `/metrics` | GET | Prometheus exposition (`promhttp.Handler()`) |
+| `/metrics` | GET, HEAD | Prometheus exposition (`promhttp.Handler()` behind `readOnly`, which rejects other methods with a structured 405) |
 | `/v1/recipe` | GET, POST | Resolve recipe from criteria → `RecipeResult` JSON |
 | `/v1/query` | GET, POST | Resolve recipe, hydrate values, return value at `?selector=path` |
 | `/v1/bundle` | POST | Adopt `RecipeResult` body, generate bundle, stream zip |
