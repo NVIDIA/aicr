@@ -18,6 +18,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -170,11 +171,15 @@ func TestGCPDriverInstallerLabelContract(t *testing.T) {
 	}
 	var test struct {
 		Spec struct {
+			Timeouts struct {
+				Assert string `yaml:"assert"`
+			} `yaml:"timeouts"`
 			Steps []struct {
 				Try []struct {
 					Assert *struct {
 						Resource struct {
 							Metadata struct {
+								Name   string            `yaml:"name"`
 								Labels map[string]string `yaml:"labels"`
 							} `yaml:"metadata"`
 						} `yaml:"resource"`
@@ -186,22 +191,42 @@ func TestGCPDriverInstallerLabelContract(t *testing.T) {
 	if unmarshalErr := yaml.Unmarshal(check, &test); unmarshalErr != nil {
 		t.Fatalf("parse health check: %v", unmarshalErr)
 	}
+
+	// The assert budget must stay at or below 5m: the in-process executor
+	// clamps authored budgets to its 6m caller budget, and the one-minute
+	// margin keeps a never-true assert from pushing the expected-resources
+	// Job's aggregate run toward its 8m activeDeadline (the #2186 shape).
+	budget, parseErr := time.ParseDuration(test.Spec.Timeouts.Assert)
+	if parseErr != nil {
+		t.Fatalf("parse spec.timeouts.assert %q: %v", test.Spec.Timeouts.Assert, parseErr)
+	}
+	if budget > 5*time.Minute {
+		t.Errorf("spec.timeouts.assert = %v, want <= 5m (margin below the 6m executor clamp)", budget)
+	}
+
+	// Scope the label contract to the installer DaemonSet's own assertion —
+	// a part-of label on some other asserted resource must not satisfy it.
 	asserted := map[string]string{}
+	found := false
 	for _, step := range test.Spec.Steps {
 		for _, tr := range step.Try {
-			if tr.Assert != nil {
+			if tr.Assert != nil && tr.Assert.Resource.Metadata.Name == "nvidia-driver-installer" {
+				found = true
 				for k, v := range tr.Assert.Resource.Metadata.Labels {
 					asserted[k] = v
 				}
 			}
 		}
 	}
+	if !found {
+		t.Fatal("health check has no assertion for the nvidia-driver-installer DaemonSet")
+	}
 	if got := asserted["app.kubernetes.io/part-of"]; got != "aicr" {
-		t.Errorf("health check asserts part-of = %q, want %q", got, "aicr")
+		t.Errorf("installer assertion part-of = %q, want %q", got, "aicr")
 	}
 	if _, bad := asserted["app.kubernetes.io/managed-by"]; bad {
-		t.Errorf("health check asserts managed-by — Helm 4 SSA rewrites that " +
-			"label to \"Helm\" at install, so this assert can never match a " +
+		t.Errorf("installer assertion keys on managed-by — Helm 4 SSA rewrites " +
+			"that label to \"Helm\" at install, so it can never match a " +
 			"deployed bundle (the stall #2444 fixed)")
 	}
 }
