@@ -382,6 +382,15 @@ openapi-baseline: ## Accepts the current REST spec as the frozen contract (regen
 		|| { rm -f api/aicr/v1/server.baseline.yaml.tmp; \
 		     echo "ERROR: no 'openapi:' key in api/aicr/v1/server.yaml; refusing to write a header-only baseline" >&2; \
 		     exit 1; }
+# The openapi: guard above proves a marker exists, not that the result is a
+# document oasdiff can read. Validate with the actual consumer -- a self-diff
+# loads and parses the file -- so a spec that is malformed below that line
+# cannot replace the committed baseline.
+	@oasdiff breaking api/aicr/v1/server.baseline.yaml.tmp \
+		api/aicr/v1/server.baseline.yaml.tmp >/dev/null 2>&1 \
+		|| { rm -f api/aicr/v1/server.baseline.yaml.tmp; \
+		     echo "ERROR: generated baseline is not a document oasdiff can load; refusing to replace the committed baseline" >&2; \
+		     exit 1; }
 	@mv api/aicr/v1/server.baseline.yaml.tmp api/aicr/v1/server.baseline.yaml
 	@echo "Baseline updated."
 

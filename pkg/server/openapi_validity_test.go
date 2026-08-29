@@ -101,6 +101,11 @@ func TestOpenAPIHasNoOrphanedComponents(t *testing.T) {
 	for kind, raw := range components {
 		group, groupOK := raw.(map[string]any)
 		if !groupOK {
+			// Skipping silently would let a document with one valid group and
+			// one malformed group pass this check while half of it was never
+			// inspected.
+			t.Errorf("components.%s is %T, want an object; its entries cannot be "+
+				"checked for orphans", kind, raw)
 			continue
 		}
 		for name := range group {
