@@ -691,6 +691,12 @@ const (
 	// NCCLTrainJobTimeout is the maximum time to wait for the NCCL all-reduce TrainJob to complete.
 	NCCLTrainJobTimeout = 30 * time.Minute
 
+	// NCCLStaleNamespacePruneAge is how old a leftover aicr-nccl-perf-* namespace
+	// must be before the best-effort prune in runNCCLTrainJob deletes it. Sized
+	// well past NCCLTrainJobTimeout so a namespace still owned by an in-progress
+	// sibling variant, or a run that is simply slow, is never touched.
+	NCCLStaleNamespacePruneAge = 2 * NCCLTrainJobTimeout
+
 	// NCCLLauncherPodTimeout is the maximum time to wait for the NCCL launcher pod to be created.
 	NCCLLauncherPodTimeout = 5 * time.Minute
 

@@ -21,7 +21,9 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
@@ -306,6 +308,55 @@ func TestNCCLRunNamespace_VariesByVariant(t *testing.T) {
 
 		if errs := validation.IsDNS1123Label(ns); len(errs) > 0 {
 			t.Errorf("namespace %q for variant %q is not a valid DNS-1123 label: %v", ns, variant, errs)
+		}
+	}
+}
+
+// TestPruneStaleNCCLNamespaces is the regression guard for the low-priority
+// orphan-namespace nit: a standalone run killed before its own deferred
+// cleanup leaves an aicr-nccl-perf-* namespace under a random suffix nothing
+// else will ever reclaim. The prune must delete only namespaces that are all
+// of: name-matching, old enough to rule out an in-progress sibling variant,
+// not already terminating, and not the namespace this run is about to use.
+func TestPruneStaleNCCLNamespaces(t *testing.T) {
+	old := metav1.NewTime(time.Now().Add(-2 * defaults.NCCLStaleNamespacePruneAge))
+	young := metav1.NewTime(time.Now().Add(-1 * time.Minute))
+
+	staleNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-deadbeef", CreationTimestamp: old,
+	}}
+	youngNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-abad1dea", CreationTimestamp: young,
+	}}
+	currentNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-currentrun", CreationTimestamp: old,
+	}}
+	terminatingNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-cafef00d", CreationTimestamp: old,
+		DeletionTimestamp: &metav1.Time{Time: time.Now()}, Finalizers: []string{"kubernetes"},
+	}}
+	unrelatedNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "some-other-namespace", CreationTimestamp: old,
+	}}
+
+	client := fake.NewClientset(staleNS, youngNS, currentNS, terminatingNS, unrelatedNS)
+	pruneStaleNCCLNamespaces(context.Background(), client, currentNS.Name)
+
+	remaining, err := client.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("failed to list namespaces after sweep: %v", err)
+	}
+	names := map[string]bool{}
+	for _, ns := range remaining.Items {
+		names[ns.Name] = true
+	}
+
+	if names[staleNS.Name] {
+		t.Errorf("expected stale namespace %q to be deleted", staleNS.Name)
+	}
+	for _, keep := range []string{youngNS.Name, currentNS.Name, terminatingNS.Name, unrelatedNS.Name} {
+		if !names[keep] {
+			t.Errorf("expected namespace %q to be left alone, but it was deleted", keep)
 		}
 	}
 }

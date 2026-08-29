@@ -545,6 +545,52 @@ func verifyNCCLNamespaceNotLive(ctx context.Context, clientset kubernetes.Interf
 	return nil
 }
 
+// pruneStaleNCCLNamespaces best-effort deletes aicr-nccl-perf-* namespaces
+// left behind by a standalone (no AICR_RUN_ID) aicr validate process killed
+// before its own deferred cleanup ran. The Job path does not need this: its
+// run ID is deterministic, so ensureNamespace/verifyNCCLNamespaceNotLive
+// already reclaim a stale instance of the SAME namespace on the next run. A
+// killed standalone run instead orphans a namespace under a different random
+// suffix that no future run will ever name again, so nothing else reclaims it.
+//
+// Deletion is fire-and-forget: this only issues the Delete call and moves on,
+// it never waits for the namespace to fully terminate, so it adds no
+// wall-clock cost to the run in progress. currentNamespace and anything
+// younger than defaults.NCCLStaleNamespacePruneAge are left alone, so a
+// namespace still owned by an in-progress sibling variant is never touched.
+// Listing or deleting failures are logged and otherwise ignored: this is
+// opportunistic cleanup, not something a benchmark run should ever fail for.
+func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interface, currentNamespace string) {
+	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	namespaces, err := clientset.CoreV1().Namespaces().List(listCtx, metav1.ListOptions{})
+	if err != nil {
+		slog.Warn("Failed to list namespaces for stale NCCL benchmark namespace prune", "error", err)
+		return
+	}
+
+	staleNamePrefix := ncclWorkloadNamespacePrefix + "-"
+	for _, ns := range namespaces.Items {
+		if ns.Name == currentNamespace || !strings.HasPrefix(ns.Name, staleNamePrefix) {
+			continue
+		}
+		if ns.DeletionTimestamp != nil || time.Since(ns.CreationTimestamp.Time) < defaults.NCCLStaleNamespacePruneAge {
+			continue
+		}
+
+		delCtx, delCancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+		delErr := clientset.CoreV1().Namespaces().Delete(delCtx, ns.Name, metav1.DeleteOptions{})
+		delCancel()
+		if delErr != nil && !apierrors.IsNotFound(delErr) {
+			slog.Warn("Failed to delete stale NCCL benchmark namespace", "namespace", ns.Name, "error", delErr)
+			continue
+		}
+		slog.Info("Deleted stale NCCL benchmark namespace left behind by an interrupted run",
+			"namespace", ns.Name, "age", time.Since(ns.CreationTimestamp.Time).Round(time.Minute))
+	}
+}
+
 // runNCCLTrainJob runs the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
 // It applies the per-platform TrainingRuntime and shared TrainJob, waits for the launcher
 // pod to complete, and returns the benchmark logs.
@@ -564,6 +610,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// still live under it. Otherwise we could steal or later delete a
 	// genuinely concurrent run's namespace.
 	gpuConfig.Namespace = ncclRunNamespace(variant)
+	pruneStaleNCCLNamespaces(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
 	if err = verifyNCCLNamespaceNotLive(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace); err != nil {
 		return "", err
 	}
