@@ -339,8 +339,15 @@ func TestPruneStaleNCCLNamespaces(t *testing.T) {
 	unrelatedNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name: "some-other-namespace", CreationTimestamp: old,
 	}}
+	liveAgedNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-livebeef", CreationTimestamp: old,
+	}}
+	liveAgedPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "launcher-0", Namespace: liveAgedNS.Name},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
 
-	client := fake.NewClientset(staleNS, youngNS, currentNS, terminatingNS, unrelatedNS)
+	client := fake.NewClientset(staleNS, youngNS, currentNS, terminatingNS, unrelatedNS, liveAgedNS, liveAgedPod)
 	pruneStaleNCCLNamespaces(context.Background(), client, currentNS.Name)
 
 	remaining, err := client.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
@@ -355,7 +362,7 @@ func TestPruneStaleNCCLNamespaces(t *testing.T) {
 	if names[staleNS.Name] {
 		t.Errorf("expected stale namespace %q to be deleted", staleNS.Name)
 	}
-	for _, keep := range []string{youngNS.Name, currentNS.Name, terminatingNS.Name, unrelatedNS.Name} {
+	for _, keep := range []string{youngNS.Name, currentNS.Name, terminatingNS.Name, unrelatedNS.Name, liveAgedNS.Name} {
 		if !names[keep] {
 			t.Errorf("expected namespace %q to be left alone, but it was deleted", keep)
 		}

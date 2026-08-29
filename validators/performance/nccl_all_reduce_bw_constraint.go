@@ -558,8 +558,11 @@ func verifyNCCLNamespaceNotLive(ctx context.Context, clientset kubernetes.Interf
 // wall-clock cost to the run in progress. currentNamespace and anything
 // younger than defaults.NCCLStaleNamespacePruneAge are left alone, so a
 // namespace still owned by an in-progress sibling variant is never touched.
-// Listing or deleting failures are logged and otherwise ignored: this is
-// opportunistic cleanup, not something a benchmark run should ever fail for.
+// An aged namespace that still has a live pod is also left alone, using the
+// same verifyNCCLNamespaceNotLive occupancy check the adoption gate uses, in
+// case some other execution has simply run long. Listing or deleting
+// failures are logged and otherwise ignored. This is opportunistic cleanup,
+// not something a benchmark run should ever fail for.
 func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interface, currentNamespace string) {
 	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
@@ -576,6 +579,14 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 			continue
 		}
 		if ns.DeletionTimestamp != nil || time.Since(ns.CreationTimestamp.Time) < defaults.NCCLStaleNamespacePruneAge {
+			continue
+		}
+		// An aged namespace can still belong to a live execution that has
+		// simply run long. Reuse the same occupancy check the adoption gate
+		// uses rather than deleting on age alone.
+		if liveErr := verifyNCCLNamespaceNotLive(ctx, clientset, ns.Name); liveErr != nil {
+			slog.Info("Skipping stale NCCL benchmark namespace prune: namespace still has a live pod",
+				"namespace", ns.Name, "reason", liveErr)
 			continue
 		}
 
