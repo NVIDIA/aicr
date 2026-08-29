@@ -302,14 +302,14 @@ func TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace(t *testing.T) {
 	}
 }
 
-// TestWaitForNamespaceGone_TimesOutWhenNeverDeleted is the regression guard
-// for the "wait boundedly, then fail" half of the fix: if a namespace's
-// finalizers never clear within the caller's deadline, the wait must return
-// a timeout error rather than either hang indefinitely or (the pre-fix
-// cleanupNCCLResources behavior this mirrors) silently report success while
-// the namespace is still there. Calls waitForNamespaceGone directly with a
-// short local context so the test doesn't have to wait out
-// cleanupNCCLResources's real 5-minute production timeout.
+// TestWaitForNamespaceGone_TimesOutWhenNeverDeleted guards the bounded-wait
+// contract of waitForNamespaceGone itself. If a namespace's finalizers never
+// clear within the caller's deadline, the wait must return an ErrCodeTimeout
+// error rather than hang indefinitely. cleanupNCCLResources deliberately
+// only logs this timeout and returns nil, so a slow-but-real teardown does
+// not fail an otherwise-passing benchmark. Calls waitForNamespaceGone
+// directly with a short local context so the test doesn't have to wait out
+// the real 5-minute production bound.
 func TestWaitForNamespaceGone_TimesOutWhenNeverDeleted(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	now := metav1.Now()
