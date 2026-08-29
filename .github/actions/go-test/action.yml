@@ -34,6 +34,12 @@ inputs:
     description: 'Optional apidiff version pinned in .settings.yaml (linting.apidiff, via load-versions); leave empty to skip the SDK API compatibility check'
     required: false
     default: ''
+  oasdiff_version:
+    # Required rather than optional: make test runs tools/openapi-diff_test.sh,
+    # which fails in CI when oasdiff is absent rather than skipping, so the REST
+    # contract gate cannot be left silently unverified.
+    description: 'oasdiff version pinned in .settings.yaml (linting.oasdiff, via load-versions)'
+    required: true
   setup_envtest_version:
     description: 'setup-envtest version pinned in .settings.yaml (testing_tools.setup_envtest, via load-versions)'
     required: true
@@ -104,6 +110,19 @@ runs:
         set -euo pipefail
         GOFLAGS= go install "golang.org/x/exp/cmd/apidiff@${APIDIFF_VERSION}"
 
+    # Installed before `make test`, not after: test-shell runs
+    # tools/openapi-diff_test.sh, which exercises the real oasdiff rather than a
+    # stub and fails in CI when it is missing.
+    - name: Install OpenAPI-diff tool
+      shell: bash
+      env:
+        OASDIFF_VERSION: ${{ inputs.oasdiff_version }}
+      run: |
+        set -euo pipefail
+        [ -n "${OASDIFF_VERSION}" ] \
+          || { echo "oasdiff_version input is required" >&2; exit 1; }
+        GOFLAGS= go install "github.com/oasdiff/oasdiff@${OASDIFF_VERSION}"
+
     - name: Run Tests with Coverage
       shell: bash
       run: make test
@@ -119,3 +138,7 @@ runs:
       if: inputs.apidiff_version != ''
       shell: bash
       run: make api-diff
+
+    - name: Check REST contract compatibility
+      shell: bash
+      run: make openapi-diff
