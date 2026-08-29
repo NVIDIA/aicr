@@ -234,7 +234,7 @@ afterwards.
 ### This applies to existing clusters, not just fresh installs
 
 The requirement is easy to read as a fresh-install prerequisite, but the
-upgrade path is where it most often arises. A cluster whose bundle was generated
+upgrade path is especially easy to miss. A cluster whose bundle was generated
 before this selector existed has a working kubelet-plugin DaemonSet selecting
 on `nodeGroup=gpu-worker` alone. Regenerating the bundle and running `helm
 upgrade` adds the second selector, and working functionality **disappears** —

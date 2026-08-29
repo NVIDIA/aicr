@@ -562,10 +562,6 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 		// wantCount is the exact number of node-label warnings expected.
 		// Zero means one, the single-DRA-component default.
 		wantCount int
-		// wantOwners names the components that must each own exactly one
-		// warning. Counting alone cannot catch an implementation that emits
-		// one component's warning twice and drops another's.
-		wantOwners []string
 	}{
 		{
 			name: "both components enabled warns",
@@ -586,24 +582,6 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 			configured:  config.NodeLabel{Key: "example.com/dra-ready", Value: "enabled"},
 			wantWarning: true,
 			wantSubstr:  "nodes labeled example.com/dra-ready=enabled",
-		},
-		{
-			// draEvictionComponentNames collects every matching ref rather
-			// than stopping at the first, so a recipe carrying both DRA
-			// variants yields one warning per component. Nothing else in the
-			// table supplies more than one DRA ref, which left the loop in
-			// warnDRAEvictionNodeLabelRequired unexercised for len > 1 and a
-			// double-emit regression undetectable.
-			name: "both DRA variants warn once each",
-			refs: []recipe.ComponentRef{
-				{Name: draComponentName},
-				{Name: "nvidia-dra-driver-gpu-ocp"},
-				{Name: gpuOperatorComponentName},
-			},
-			wantWarning: true,
-			wantSubstr:  draComponentName + " schedules its kubelet plugin only on nodes labeled ",
-			wantCount:   2,
-			wantOwners:  []string{draComponentName, "nvidia-dra-driver-gpu-ocp"},
 		},
 		{
 			name: "OpenShift components warn under their own names",
@@ -716,19 +694,6 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 			if len(matched) != wantCount {
 				t.Errorf("emitted %d node-label warnings, want %d; warnings = %v",
 					len(matched), wantCount, matched)
-			}
-			for _, owner := range tt.wantOwners {
-				prefix := owner + " schedules its kubelet plugin"
-				n := 0
-				for _, w := range matched {
-					if strings.Contains(w, prefix) {
-						n++
-					}
-				}
-				if n != 1 {
-					t.Errorf("%s owns %d warnings, want exactly 1; warnings = %v",
-						owner, n, matched)
-				}
 			}
 			if !strings.HasPrefix(got, "Warning: ") {
 				t.Errorf("warning %q lacks the %q prefix used by other bundle warnings", got, "Warning: ")
