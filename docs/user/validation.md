@@ -73,6 +73,32 @@ interim — snapshot-based fabric auto-detection (and removing the runtime
 package install once a CUDA-13 image ships sshd) is tracked in
 [NVIDIA/aicr#1413](https://github.com/NVIDIA/aicr/issues/1413).
 
+**Overriding the NCCL workload image with `AICR_NCCL_RUNTIME_IMAGE`.** Each
+embedded `nccl-all-reduce-bw` / `-net` / `-nvls` template pins a specific
+launcher/worker workload image — the CUDA/NCCL/MPI/SSH/transport runtime that
+`all_reduce_perf` actually runs in, distinct per platform (e.g. GKE H100/TCPXO
+ships a CUDA 12.9 image today). To qualify a different CUDA/NCCL combination —
+for example CUDA 13 on GKE TCPXO with an R580-or-newer driver — set
+`AICR_NCCL_RUNTIME_IMAGE=<image ref>` in the `aicr validate` environment. The
+resolved image is rendered into every container that carries the workload
+(the launcher's SSH-setup init container and both the launcher's and worker's
+main containers), so a run can never end up on a mixed image set; a
+platform-specific sidecar unrelated to the NCCL workload itself (e.g. GKE's
+`tcpxo-daemon` transport daemon) is left untouched. A malformed image
+reference fails the check immediately, before any cluster resources are
+created, rather than silently falling back to the compiled default.
+
+This is a different setting from `aicr validate --image` /
+`AICR_VALIDATOR_IMAGE_*` (see [Validator image
+tags](../contributor/validator.md#validator-image-tags)): those control the
+**validator's own** container image (the snapshot/orchestration binary),
+never the inner NCCL workload. `AICR_NCCL_RUNTIME_IMAGE` only applies to the
+three NCCL all-reduce checks, and only to their embedded templates — it has
+no effect when a recipe [supplies its own benchmark
+runtime](#supplying-a-benchmark-runtime-for-a-private-service), since that
+runtime already owns its image end to end. For reproducible qualification
+runs, prefer pinning by digest (`name@sha256:...`) over a mutable tag.
+
 GB200/EKS recipes (both `training` and `inference` intents) enable `-net` and
 `-nvls` together rather than the auto-detect variant, because those nodes
 expose two inter-node fabrics simultaneously and a single auto-detect test
