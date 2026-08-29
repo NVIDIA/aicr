@@ -544,7 +544,7 @@ func TestDeprecationMiddleware(t *testing.T) {
 			routes: map[string]deprecation.Notice{
 				"/v1/recipe": {
 					Subject:     "/v1/recipe",
-					Replacement: "/v2/recipe",
+					Replacement: "/v1/recipe",
 					RemovedIn:   "v0.25",
 					Deprecated:  deprecated,
 					Sunset:      sunset,
@@ -560,7 +560,7 @@ func TestDeprecationMiddleware(t *testing.T) {
 			routes: map[string]deprecation.Notice{
 				"/v1/recipe": {Subject: "/v1/recipe", RemovedIn: "v0.25"},
 			},
-			path:        "/v2/recipe",
+			path:        "/v1/recipe",
 			wantHeaders: false,
 		},
 		{

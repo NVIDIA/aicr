@@ -17,7 +17,7 @@
 //
 // This package is the binary's home, not a reusable framework. cmd/aicrd/main.go
 // calls Serve() and exits. The package owns the HTTP entry point, the
-// middleware chain, the v1 and v2 recipe/query/bundle handlers, and the
+// middleware chain, the recipe/query/bundle handlers, and the
 // health/readiness probes.
 //
 // # Architecture
@@ -44,7 +44,7 @@
 //   - bodyLimitMiddleware — defaults.ServerMaxBodyBytes (8 MiB) via
 //     http.MaxBytesReader; handlers install tighter caps where appropriate
 //     (MaxRecipePOSTBytes for recipe/query routes and MaxBundlePOSTBytes for
-//     bundle routes, in both v1 and v2).
+//     bundle routes).
 //
 // Graceful shutdown is wired via signal.NotifyContext on SIGINT/SIGTERM.
 //
@@ -62,11 +62,6 @@
 // RecipeResult body. Query parameters control deployer, value overrides
 // (set=), dynamic declarations (dynamic=), node selectors/tolerations, and
 // workload gating.
-//
-// The corresponding /v2/recipe, /v2/query, and /v2/bundle routes add strict,
-// profile-aware request and artifact contracts. The v1 routes preserve their
-// legacy input behavior and reject explicit profile selection or profiled
-// artifacts.
 //
 // GET /health — liveness probe; always 200.
 // GET /ready — readiness probe; 200 when ready, 503 otherwise.
