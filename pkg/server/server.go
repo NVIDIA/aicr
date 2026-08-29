@@ -114,7 +114,7 @@ func New(opts ...Option) *Server {
 	// System endpoints (no rate limiting)
 	mux.HandleFunc("/health", s.handleHealth)
 	mux.HandleFunc("/ready", s.handleReady)
-	mux.Handle("/metrics", promhttp.Handler())
+	mux.Handle("/metrics", getOnly(promhttp.Handler()))
 
 	// setup root handler
 	s.configureRootHandler()
@@ -270,4 +270,26 @@ func (s *Server) configureRootHandler() {
 			serializer.RespondJSON(w, http.StatusOK, response)
 		}
 	}
+}
+
+// getOnly restricts a handler to GET, answering 405 otherwise.
+//
+// promhttp.Handler does no method filtering, so /metrics answered 200 to
+// DELETE, PUT, POST, PATCH, HEAD, OPTIONS and TRACE alike. That contradicted
+// api/aicr/v1/server.yaml, which declares GET and nothing else, and left seven
+// undocumented operations on a public endpoint. Prometheus scrapes with GET.
+//
+// HEAD is rejected rather than accepted: the spec does not declare it, and
+// widening the surface to match an implementation detail is the wrong direction
+// when the point is to make the published contract true. Adding it later is a
+// deliberate change to both the spec and this guard.
+func getOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

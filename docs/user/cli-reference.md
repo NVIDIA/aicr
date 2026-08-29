@@ -1637,11 +1637,18 @@ This results in:
 
 When a recipe includes both `nvidia-dra-driver-gpu` and `gpu-operator`, AICR automatically coordinates kubelet-plugin eviction during GPU driver container upgrades. The same behavior applies to the corresponding `-ocp` components. AICR merges the default `nvidia.com/dra-kubelet-plugin=true` selector into `kubeletPlugin.nodeSelector` and sets the GPU Operator `driver.manager.env` entry `NODE_LABEL_FOR_GPU_POD_EVICTION` to the same label key. Existing accelerated-node selectors and unrelated Driver Manager environment variables are preserved.
 
-Nodes intended for DRA GPU allocation must carry the matching label:
+Nodes intended for DRA GPU allocation must carry the matching label. Set it in the **node pool definition** — an EKS managed nodegroup `labels` entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the equivalent for your provisioner — alongside the `nodeGroup=gpu-worker` label already set there. An ad hoc `kubectl label node` is a repair, not a configuration: it does not survive node replacement, recycling, autoscaling, or a nodegroup scaled from zero, so later GPU nodes arrive unlabeled and the cluster ends up partially DRA-enabled.
+
+Use `kubectl label` only to repair nodes that already exist, and fix the node pool definition in the same change:
 
 ```bash
 kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true
+kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 ```
+
+**The failure mode is silent, and partial coverage is the dangerous shape.** An unlabeled GPU node runs no DRA kubelet plugin and publishes no `ResourceSlices` for itself. If *no* GPU node carries the label, the `nvidia-dra-driver-gpu-kubelet-plugin` DaemonSet sits at `DESIRED=0`. If *some* do, those nodes work normally while the rest silently lack DRA — a split cluster, which is harder to notice than uniform failure and is exactly what node replacement or autoscaling produces. Helm and the bundle's `deploy.sh` report success in every case, so verify the selector matches the node count you expect before applying, and check the DaemonSet afterwards.
+
+**This is not only a fresh-install prerequisite.** On an existing cluster whose bundle predates this selector, the kubelet-plugin DaemonSet selects on `nodeGroup=gpu-worker` alone and works. Regenerating the bundle and running `helm upgrade` adds the second selector, and working functionality disappears — still silently. Revisit node labels whenever you regenerate a bundle for an existing deployment.
 
 Use `--dra-eviction-node-label` when the cluster follows a different label convention. The flag accepts exactly one Kubernetes label in `key=value` form; AICR uses the full pair for DRA placement and the key for GPU Operator:
 
@@ -1682,6 +1689,8 @@ aicr bundle --recipe recipe.yaml \
 When `--storage-class` is not set, any `storageClassName` values already defined in the recipe overlays are preserved as defaults. When it is set, `--set <component>:<path>=<value>` on the same path still wins — `--storage-class` only fills in paths that were not explicitly overridden.
 
 If a rendered component creates a PVC at a registry-declared `storageClassPaths` entry and no usable `storageClassName` is set after overlay, `--storage-class`, and `--set` precedence is resolved, `aicr bundle` emits a non-blocking warning. The bundle still relies on the target cluster's default StorageClass in that case.
+
+`aicr bundle` reports cluster-state dependencies it cannot verify as non-blocking warnings of this kind. The other one is the DRA eviction node label: when a recipe enables both `nvidia-dra-driver-gpu` and `gpu-operator`, the bundle warns that every GPU node must carry `nvidia.com/dra-kubelet-plugin=true` (or the pair given to `--dra-eviction-node-label`), that the label belongs in the node pool definition rather than an ad hoc `kubectl label`, and that unlabeled nodes silently run without DRA — no `ResourceSlices`, and `DESIRED=0` if no GPU node matches at all — with no error either way. Both warnings describe state AICR deliberately does not own — StorageClasses and node labels are cluster infrastructure. See [DRA Driver Upgrade Eviction](#dra-driver-upgrade-eviction).
 
 `--shared-storage-class` is a separate input for registry-declared
 `sharedStorageClassPaths`. It is used by opt-in Slinky Slurm PVCs mounted at
