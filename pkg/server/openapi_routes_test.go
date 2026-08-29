@@ -15,6 +15,7 @@
 package server
 
 import (
+	"encoding/json"
 	"fmt"
 	"go/ast"
 	"go/parser"
@@ -381,15 +382,76 @@ func TestMuxRegistrationsGoThroughHandle(t *testing.T) {
 	}
 }
 
-// TestOpenAPIRootRoutesExampleIsDeclared asserts every path in the GET / root
-// discovery example is a path the spec actually declares, and that none repeats.
+// TestOpenAPIRootRoutesExampleMatchesDiscovery asserts the GET / root discovery
+// example lists exactly the routes the running handler advertises.
 //
 // That example is rendered into the generated client docs as the advertised
-// route list, but nothing derived it from the contract, so it silently outlived
-// the /v2 family it used to name. Route conformance above compares the spec's
-// paths to the mux and never looks inside an example, which is why a stale
-// example survived the change that deleted those endpoints.
-func TestOpenAPIRootRoutesExampleIsDeclared(t *testing.T) {
+// route list, but nothing derived it from anything, so it silently outlived the
+// /v2 family it used to name and — after the mechanical rewrite that removed
+// that family — listed each surviving route twice. Route conformance above
+// compares the spec's paths to the mux and never looks inside an example.
+//
+// The comparison is against the handler's own output rather than against the
+// spec's declared paths, because those two sets are legitimately different:
+// /health, /ready and /metrics are declared operations but are registered
+// straight onto the mux and deliberately absent from config.Handlers, so the
+// discovery response does not advertise them. Asserting "every declared path
+// appears" would demand they be listed and fail on correct code.
+func TestOpenAPIRootRoutesExampleMatchesDiscovery(t *testing.T) {
+	example := rootRoutesExample(t)
+	if len(example) == 0 {
+		t.Fatal("GET / routes example is empty or did not parse; it should " +
+			"advertise the application routes a client can call, and an empty " +
+			"result would make every assertion below pass vacuously")
+	}
+
+	seen := make(map[string]bool, len(example))
+	for _, path := range example {
+		if seen[path] {
+			t.Errorf("GET / routes example lists %q more than once; the handler "+
+				"builds the list from a map of registered paths, so it can "+
+				"never repeat a route", path)
+		}
+		seen[path] = true
+	}
+
+	// Every advertised route must also be a documented operation. Discovery
+	// pointing at an endpoint the contract omits would route clients to a
+	// surface the breaking-change gate cannot protect.
+	declared := specOperations(t)
+	for path := range seen {
+		if _, ok := declared[path]; !ok {
+			t.Errorf("GET / routes example advertises %q, which "+
+				"api/aicr/v1/server.yaml does not declare as a path", path)
+		}
+	}
+
+	actual := discoveryRoutes(t)
+	if len(actual) == 0 {
+		t.Fatal("GET / advertised no routes; the response shape changed and " +
+			"the comparison below would be meaningless")
+	}
+
+	for path := range actual {
+		if !seen[path] {
+			t.Errorf("GET / serves %q but the spec's routes example omits it; a "+
+				"client reading the generated docs would not know the route "+
+				"exists", path)
+		}
+	}
+	for path := range seen {
+		if !actual[path] {
+			t.Errorf("GET / routes example advertises %q but the handler does "+
+				"not return it; the generated docs promise a route discovery "+
+				"never mentions", path)
+		}
+	}
+}
+
+// rootRoutesExample returns the routes example the spec publishes for GET /.
+func rootRoutesExample(t *testing.T) []string {
+	t.Helper()
+
 	data, err := os.ReadFile(filepath.Clean(specRelPath))
 	if err != nil {
 		t.Fatalf("read spec %q: %v", specRelPath, err)
@@ -418,37 +480,39 @@ func TestOpenAPIRootRoutesExampleIsDeclared(t *testing.T) {
 
 	root, ok := spec.Paths["/"]
 	if !ok {
-		t.Fatal(`spec declares no "/" path; the root discovery endpoint is ` +
-			"part of the frozen REST surface")
+		t.Fatal(`spec declares no "/" path; the root discovery endpoint is part ` +
+			"of the frozen REST surface")
 	}
-	ok200, ok := root.Get.Responses["200"]
+	res, ok := root.Get.Responses["200"]
 	if !ok {
-		t.Fatal(`spec declares no 200 response for GET /`)
+		t.Fatal("spec declares no 200 response for GET /")
 	}
-	example := ok200.Content["application/json"].Schema.Properties.Routes.Example
-	if len(example) == 0 {
-		t.Fatal("GET / routes example is empty or did not parse; it should " +
-			"advertise the application routes a client can call, and an empty " +
-			"result would make every assertion below pass vacuously")
+	return res.Content["application/json"].Schema.Properties.Routes.Example
+}
+
+// discoveryRoutes returns the route set GET / actually advertises at runtime.
+func discoveryRoutes(t *testing.T) map[string]bool {
+	t.Helper()
+
+	mux := newSpecTestServer(t).httpServer.Handler
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET / status = %d, want %d; body: %s",
+			rec.Code, http.StatusOK, rec.Body.String())
 	}
 
-	declared := make(map[string]bool, len(spec.Paths))
-	for path := range spec.Paths {
-		declared[path] = true
+	var body struct {
+		Routes []string `json:"routes"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode GET / body: %v; body: %s", err, rec.Body.String())
 	}
 
-	seen := make(map[string]bool, len(example))
-	for _, path := range example {
-		if !declared[path] {
-			t.Errorf("GET / routes example advertises %q, which "+
-				"api/aicr/v1/server.yaml does not declare; a client reading the "+
-				"generated docs would call a route that 404s", path)
-		}
-		if seen[path] {
-			t.Errorf("GET / routes example lists %q more than once; the handler "+
-				"builds the list from a set of registered paths, so it can "+
-				"never repeat a route", path)
-		}
-		seen[path] = true
+	routes := make(map[string]bool, len(body.Routes))
+	for _, path := range body.Routes {
+		routes[path] = true
 	}
+	return routes
 }

@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -72,6 +73,8 @@ func TestHandleRecipes_Success(t *testing.T) {
 		},
 	}
 
+	bodies := make(map[string]string, len(tests))
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var req *http.Request
@@ -102,8 +105,73 @@ func TestHandleRecipes_Success(t *testing.T) {
 			if len(got.ComponentRefs) == 0 {
 				t.Error("expected resolved recipe to carry at least one component")
 			}
+
+			bodies[tt.method] = w.Body.String()
 		})
 	}
+
+	// Asserting each response in isolation would still pass if POST resolved
+	// different criteria than GET, which is the regression the two transports
+	// exist to rule out. RecipeResult carries no timestamp or request ID, so
+	// two equivalent requests must resolve to the same document.
+	if len(bodies) != len(tests) {
+		t.Fatalf("collected %d responses from %d cases; a subtest failed before "+
+			"recording, so the cross-method comparison below is meaningless",
+			len(bodies), len(tests))
+	}
+
+	get := normalizeCriteriaEcho(t, bodies[http.MethodGet])
+	post := normalizeCriteriaEcho(t, bodies[http.MethodPost])
+	if !reflect.DeepEqual(get, post) {
+		t.Errorf("GET and POST resolved different recipes for equivalent criteria\nGET:  %s\nPOST: %s",
+			bodies[http.MethodGet], bodies[http.MethodPost])
+	}
+}
+
+// normalizeCriteriaEcho decodes a recipe response and drops "any" from the
+// echoed criteria so the two transports can be compared.
+//
+// The responses are byte-identical except for that echo: GET seeds every
+// dimension from recipe.NewCriteria (which defaults to "any") before applying
+// query parameters, while a POST envelope decodes into a zero value and leaves
+// unspecified dimensions empty. Resolution is unaffected because Criteria.Matches
+// treats "any" and "" identically, so both requests apply the same overlays --
+// only the echo differs. Normalizing here keeps this test on the guarantee that
+// holds (same resolved recipe) instead of encoding the asymmetry as expected.
+func normalizeCriteriaEcho(t *testing.T, body string) map[string]any {
+	t.Helper()
+
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(body), &doc); err != nil {
+		t.Fatalf("failed to decode response: %v; body: %s", err, body)
+	}
+
+	criteria, ok := doc["criteria"].(map[string]any)
+	if !ok {
+		t.Fatalf("response has no criteria object to normalize; body: %s", body)
+	}
+
+	// Each dimension has its own sentinel type. They all spell "any" today, so
+	// a map literal of them would not compile (duplicate keys) — hence the
+	// runtime build. Listing all five keeps this correct if one ever diverges,
+	// rather than keying every field off whichever constant was handy.
+	unset := make(map[string]bool, 5)
+	for _, sentinel := range []string{
+		string(recipe.CriteriaServiceAny),
+		string(recipe.CriteriaAcceleratorAny),
+		string(recipe.CriteriaIntentAny),
+		string(recipe.CriteriaOSAny),
+		string(recipe.CriteriaPlatformAny),
+	} {
+		unset[sentinel] = true
+	}
+
+	for key, value := range criteria {
+		if s, isString := value.(string); isString && unset[s] {
+			delete(criteria, key)
+		}
+	}
+	return doc
 }
 
 // TestHandleQuery_POSTCriteriaTakesEffect proves the facade-backed query POST
