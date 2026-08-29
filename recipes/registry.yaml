@@ -836,6 +836,14 @@ components:
       system:
         nodeSelectorPaths:
           - mariadb.nodeSelector
+        # An unpinned mariadb pod can land on a GPU node and inherit its
+        # zone; its PVC then binds to that zone, and a later reschedule onto
+        # the correct system-node pool in a different zone gets stuck
+        # forever waiting on a PVC it can't attach to. This component is
+        # deployed alongside slinky-slurm in every training-slurm leaf, so
+        # requireNodeSelector fails the bundle instead of shipping this
+        # misconfiguration silently.
+        requireNodeSelector: true
         tolerationPaths:
           - mariadb.tolerations
 

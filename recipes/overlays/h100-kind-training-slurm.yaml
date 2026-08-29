@@ -63,6 +63,11 @@ spec:
       dependencyRefs:
         - mariadb-operator
         - mariadb-operator-crds
+      overrides:
+        # Kind is a single node with no distinct system/accelerated pools to
+        # select between (see the matching slinky-slurm override below).
+        mariadb:
+          nodeSelector: {}
 
     - name: slinky-slurm-operator-crds
       type: Helm

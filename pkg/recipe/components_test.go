@@ -543,6 +543,13 @@ func TestComponentRegistry_SlurmAccountingMariaDB_NodeSchedulingPaths(t *testing
 		t.Errorf("slurm-accounting-mariadb system toleration paths missing %q (got %v)",
 			"mariadb.tolerations", got)
 	}
+	// Regression guard: an unpinned mariadb pod can land on a GPU node and
+	// strand a later reschedule the same way slinky-slurm's pods can. This
+	// must stay a bundle-time failure, not a silent no-op, if
+	// requireNodeSelector is ever dropped from the registry entry.
+	if !mariaDB.RequireSystemNodeSelector() {
+		t.Error("slurm-accounting-mariadb nodeScheduling.system.requireNodeSelector must stay true (see registry.yaml comment)")
+	}
 }
 
 func TestComponentRegistry_TaintStrPaths(t *testing.T) {
