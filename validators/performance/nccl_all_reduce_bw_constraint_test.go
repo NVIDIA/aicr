@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -358,6 +359,62 @@ func TestPruneStaleNCCLNamespaces(t *testing.T) {
 		if !names[keep] {
 			t.Errorf("expected namespace %q to be left alone, but it was deleted", keep)
 		}
+	}
+}
+
+// TestWaitForPodByLabelSelector_IgnoresStaleDeletedLauncher is the regression
+// guard for the finding that any watch event, including a Deleted event for a
+// stale pod, was returned as-is. applyNCCLResources's TrainJob admission
+// retry (see TrainJobAdmissionRetryTimeout) can recreate the launcher under
+// the same label selector: the stale launcher's Deleted event must be
+// skipped so the wait continues until the replacement's Added event arrives.
+func TestWaitForPodByLabelSelector_IgnoresStaleDeletedLauncher(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	const selector = "jobset.sigs.k8s.io/jobset-name=nccl-all-reduce-tj,jobset.sigs.k8s.io/replicatedjob-name=launcher"
+
+	clientset := fake.NewClientset()
+	fakeWatch := watch.NewFake()
+	clientset.PrependWatchReactor("pods", k8stesting.DefaultWatchReactor(fakeWatch, nil))
+
+	staleLauncher := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "nccl-all-reduce-tj-launcher-0", Namespace: ns,
+			DeletionTimestamp: &metav1.Time{Time: time.Now()},
+			Finalizers:        []string{"kubernetes"},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	replacementLauncher := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "nccl-all-reduce-tj-launcher-1", Namespace: ns},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}
+
+	type waitResult struct {
+		pod *corev1.Pod
+		err error
+	}
+	resultCh := make(chan waitResult, 1)
+	go func() {
+		pod, err := waitForPodByLabelSelector(context.Background(), clientset, ns, selector, 5*time.Second)
+		resultCh <- waitResult{pod, err}
+	}()
+
+	// Give the goroutine above time to establish its watch before pushing
+	// events into it.
+	time.Sleep(50 * time.Millisecond)
+	fakeWatch.Delete(staleLauncher)
+	fakeWatch.Add(replacementLauncher)
+
+	select {
+	case res := <-resultCh:
+		if res.err != nil {
+			t.Fatalf("waitForPodByLabelSelector failed: %v", res.err)
+		}
+		if res.pod.Name != replacementLauncher.Name {
+			t.Fatalf("expected the replacement launcher %q, got %q", replacementLauncher.Name, res.pod.Name)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitForPodByLabelSelector did not return after the replacement launcher appeared")
 	}
 }
 

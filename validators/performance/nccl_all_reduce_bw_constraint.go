@@ -2105,8 +2105,11 @@ func waitForTrainingRuntime(ctx context.Context, dynamicClient dynamic.Interface
 	}
 }
 
-// waitForPodByLabelSelector waits for a pod matching the label selector to be created.
-// Uses the Watch API for efficiency instead of polling.
+// waitForPodByLabelSelector waits for a pod matching the label selector to be
+// created. Uses the Watch API for efficiency instead of polling. Skips
+// Deleted events and pods that are already terminating or terminal, so a
+// retry that recreates the workload under the same label selector doesn't
+// return a stale pod that no longer exists.
 func waitForPodByLabelSelector(ctx context.Context, clientset kubernetes.Interface, namespace, labelSelector string, timeout time.Duration) (*v1.Pod, error) {
 	slog.Info("Watching for pod with selector", "selector", labelSelector)
 
@@ -2144,6 +2147,18 @@ func waitForPodByLabelSelector(ctx context.Context, clientset kubernetes.Interfa
 			}
 			pod, ok := event.Object.(*v1.Pod)
 			if !ok {
+				continue
+			}
+			// A Deleted event, or a pod already terminating/terminal, is not
+			// a match: a retry that recreates the workload under the same
+			// label selector (e.g. TrainJob admission retry) can fire a
+			// Deleted event for the stale pod before the replacement's
+			// Added event arrives. Returning it here would hand the caller
+			// a pod that is already gone. Keep waiting for the replacement
+			// instead, matching the same non-terminal, non-deleting filter
+			// newestRunnablePod uses on the re-List recovery path below.
+			isTerminal := pod.Status.Phase == v1.PodFailed || pod.Status.Phase == v1.PodSucceeded
+			if event.Type == watch.Deleted || pod.DeletionTimestamp != nil || isTerminal {
 				continue
 			}
 			slog.Info("Found launcher pod", "name", pod.Name)
