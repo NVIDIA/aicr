@@ -1658,15 +1658,13 @@ kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 
 **The opt-in failure mode is silent, and partial coverage is the dangerous shape.** An unlabeled GPU node then runs no DRA kubelet plugin and publishes no `ResourceSlices` for itself. If *no* GPU node carries the label, the `nvidia-dra-driver-gpu-kubelet-plugin` DaemonSet sits at `DESIRED=0`. If *some* do, those nodes work normally while the rest silently lack DRA. Helm and the bundle's `deploy.sh` report success in every case, so check the DaemonSet after applying.
 
-**Recovering from the two opt-out failures.** Both are recoverable; the procedure differs by which one you hit.
+**Recovering from the two opt-out failures.** Both are recoverable, and the procedures are different — only the first needs the plugin suppressed.
 
-*Driver upgrade stopped with `failed to uninstall nvidia driver components`.* The plugin still holds the driver, so the replacement is not installed and the old driver may be partially torn down. In both cases, terminate the node's DRA claim holders **before** removing the plugin and confirm none remain — the kubelet needs the plugin to complete `NodeUnprepareResources`, so taking the plugin away first deadlocks them.
+*Driver upgrade stopped with `failed to uninstall nvidia driver components`.* The plugin still holds the driver, so the replacement is not installed and the old driver may be partially torn down. Recovery means removing the plugin before retrying the driver, and that is cluster-wide.
 
 **`kubectl cordon` does not keep the plugin off the node.** The DaemonSet controller adds a `node.kubernetes.io/unschedulable:NoSchedule` toleration to its pods, so a cordoned node still gets one and deleting the pod simply recreates it. Suspending a GitOps controller does not help either; the DaemonSet controller is what recreates the pod.
 
-**There is no node-scoped way to suppress the plugin, so recovery is cluster-wide.** Two properties of the shipped DaemonSet rule out per-node tricks: its affinity is five OR-ed `nodeSelectorTerms`, so excluding a node requires editing every term rather than one; and it uses `RollingUpdate` with `maxUnavailable: 100%`, so *any* change to `.spec.template` rolls pods on every node it covers — and reverting the change rolls them again. A node-scoped-looking patch is therefore cluster-wide in effect.
-
-Plan for that. The sequence is:
+**There is no node-scoped way to suppress the plugin.** Two properties of the shipped DaemonSet rule out per-node tricks: its affinity is five OR-ed `nodeSelectorTerms`, so excluding a node requires editing every term rather than one; and it uses `RollingUpdate` with `maxUnavailable: 100%`, so *any* change to `.spec.template` rolls pods on every node it covers — and reverting the change rolls them again. A node-scoped-looking patch is therefore cluster-wide in effect. Plan for that:
 
 1. Clear DRA claim holders on **every** node the DaemonSet covers, not only the failed one, and confirm none remain. The kubelet needs the plugin to complete `NodeUnprepareResources`, so any claim holder still terminating when the plugin goes away will hang.
 2. Suppress the DaemonSet — delete it, or scale it to zero eligible nodes.
@@ -1675,6 +1673,8 @@ Plan for that. The sequence is:
 5. Restore the DaemonSet, then the workloads.
 
 If a GitOps controller reconciles the DaemonSet, suspend it for the duration and resume afterwards.
+
+*Claim preparation failing after a restart with unchanged driver configuration.* The stale rootfs was unmounted underneath a plugin that kept running, so it can no longer build CDI specs. This one needs no DaemonSet suppression and no claim-holder clearing: once the replacement driver pod is `Ready`, restart the plugin pod on the affected node and the recreated pod binds the new rootfs.
 
 **Known limitation of the opt-in.** Under `k8s-driver-manager` v0.12 the configured label is paused in the same batch as other GPU operands, and no wait covers the standalone DRA kubelet plugin, so ordering against DRA claim holders and completion of plugin teardown are not guaranteed. The mechanism is the one NVIDIA documents, but it is best-effort here. See [NVIDIA/k8s-driver-manager#250](https://github.com/NVIDIA/k8s-driver-manager/issues/250).
 
