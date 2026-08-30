@@ -371,8 +371,8 @@ fails for a different reason:
   *type*; this proves the type matches what is actually on disk.
 - **`TestArtifactSchemasAreCompatible`** — the generated schemas are compared to
   the frozen snapshot in `api/aicr/v1/schemas/baseline/`, failing on a removed
-  field, a newly required field, a changed type, or a removed enum value.
-  Additive change passes.
+  field, a newly required field, a changed type, a removed enum value, or a
+  previously free-form field becoming an enum. Additive change passes.
 
 Intentional breaks go in `api/aicr/v1/schemas/schema-diff-exceptions.yaml` with
 a rule, kind, path and reason. **An acknowledgement that matches no reported
@@ -384,6 +384,18 @@ planned and dated.
 
 `make schema-baseline` accepts the current schemas as the frozen contract. That
 diff is the change under review.
+
+**`required` means different things for authored and emitted artifacts.**
+`RecipeResult` and `Snapshot` are emitted, so a field without `omitempty` is
+always written and a consumer may rely on it. `RecipeMetadata`, `RecipeMixin`
+and `RecipeCriteria` are authored by hand, where the encoder's behavior says
+nothing about what a human must supply — `ComponentRef.Source` is written on
+every emit but set by only 17 of the 110 committed overlays. Authored artifacts
+therefore declare nothing required; marking them published a schema that
+rejected the project's own catalog.
+
+The criteria enums add the `any` wildcard that `GetCriteria*Types()` omits, for
+the same reason the OpenAPI parity test strips it before comparing.
 
 **The generator uses reflection rather than a schema library on purpose.** It
 must compile against the types, so it cannot be a pinned binary the way

@@ -51,6 +51,10 @@ type Artifact struct {
 	// Description tells an integrator what the artifact is for, since the
 	// schema file is read without the Go source at hand.
 	Description string
+
+	// Authored marks an artifact a human writes (a catalog overlay) rather than
+	// one AICR emits. See schema.Options.Authored.
+	Authored bool
 }
 
 // Artifacts is the covered set, matching the kinds named in issue #2113.
@@ -76,20 +80,23 @@ func Artifacts() []Artifact {
 				"API returns and the bundler consumes.",
 		},
 		{
-			Kind: "RecipeMetadata",
-			Type: reflect.TypeOf(recipe.RecipeMetadata{}),
+			Kind:     "RecipeMetadata",
+			Authored: true,
+			Type:     reflect.TypeOf(recipe.RecipeMetadata{}),
 			Description: "An authored recipe overlay, as found in an external " +
 				"--data catalog.",
 		},
 		{
-			Kind: "RecipeMixin",
-			Type: reflect.TypeOf(recipe.RecipeMixin{}),
+			Kind:     "RecipeMixin",
+			Authored: true,
+			Type:     reflect.TypeOf(recipe.RecipeMixin{}),
 			Description: "A composable fragment of shared overlay content. Carries " +
 				"only constraints and component references.",
 		},
 		{
-			Kind: "RecipeCriteria",
-			Type: reflect.TypeOf(recipe.RecipeCriteria{}),
+			Kind:     "RecipeCriteria",
+			Authored: true,
+			Type:     reflect.TypeOf(recipe.RecipeCriteria{}),
 			Description: "The criteria that select a recipe: service, accelerator, " +
 				"intent, os, platform and node count.",
 		},
@@ -104,12 +111,19 @@ func Artifacts() []Artifact {
 // it here. Hardcoding the lists would create a third place to update and a new
 // way for the published contract to be wrong.
 func criteriaEnums() map[string][]string {
+	// GetCriteria*Types deliberately omits the "any" wildcard -- the OpenAPI
+	// spec adds it back, and docs/contributor/api-server.md records that the
+	// parity test strips it before comparing. Publishing the raw lists produced
+	// schemas that rejected every overlay written with `service: any`.
+	withAny := func(values []string) []string {
+		return append(append([]string(nil), values...), "any")
+	}
 	return map[string][]string{
-		"recipe.CriteriaServiceType":     recipe.GetCriteriaServiceTypes(),
-		"recipe.CriteriaAcceleratorType": recipe.GetCriteriaAcceleratorTypes(),
-		"recipe.CriteriaIntentType":      recipe.GetCriteriaIntentTypes(),
-		"recipe.CriteriaOSType":          recipe.GetCriteriaOSTypes(),
-		"recipe.CriteriaPlatformType":    recipe.GetCriteriaPlatformTypes(),
+		"recipe.CriteriaServiceType":     withAny(recipe.GetCriteriaServiceTypes()),
+		"recipe.CriteriaAcceleratorType": withAny(recipe.GetCriteriaAcceleratorTypes()),
+		"recipe.CriteriaIntentType":      withAny(recipe.GetCriteriaIntentTypes()),
+		"recipe.CriteriaOSType":          withAny(recipe.GetCriteriaOSTypes()),
+		"recipe.CriteriaPlatformType":    withAny(recipe.GetCriteriaPlatformTypes()),
 	}
 }
 
@@ -125,6 +139,7 @@ func Render(artifact Artifact) ([]byte, error) {
 		Description: artifact.Description,
 		ID:          fmt.Sprintf("%s/%s.schema.json", SchemaBaseURI, artifact.Kind),
 		Enums:       criteriaEnums(),
+		Authored:    artifact.Authored,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("generate %s: %w", artifact.Kind, err)

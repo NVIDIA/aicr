@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The generated schemas become a committed baseline that a merge gate diffs, so
@@ -37,6 +38,19 @@ type embedded struct {
 type named struct {
 	Inner string `json:"inner"`
 }
+
+// customJSON controls its own wire form, which reflection over its fields
+// cannot predict.
+type customJSON struct {
+	Hidden string
+}
+
+// MarshalJSON satisfies json.Marshaler. The error is always nil; the signature
+// is what matters, since the reflector detects the interface rather than
+// calling it.
+//
+//nolint:unparam // interface signature, not a real error path
+func (c customJSON) MarshalJSON() ([]byte, error) { return []byte(`"custom"`), nil }
 
 type sample struct {
 	embedded `json:",inline"`
@@ -256,11 +270,23 @@ func TestGenerateFailsClosed(t *testing.T) {
 		E error `json:"e"`
 	}
 
+	type withTime struct {
+		At time.Time `json:"at"`
+	}
+	type withMarshaler struct {
+		Custom customJSON `json:"custom"`
+	}
+
 	tests := []struct {
 		name    string
 		typ     reflect.Type
 		wantErr string
 	}{
+		// time.Time has no exported fields, so reflecting over it produced
+		// {"type":"object"} while the encoder writes an RFC 3339 string --
+		// a schema that rejects every document it describes.
+		{"time.Time", reflect.TypeOf(withTime{}), "defines its own JSON encoding"},
+		{"custom marshaler", reflect.TypeOf(withMarshaler{}), "defines its own JSON encoding"},
 		{"channel", reflect.TypeOf(withChannel{}), "unsupported kind"},
 		{"func", reflect.TypeOf(withFunc{}), "unsupported kind"},
 		{"non-string map key", reflect.TypeOf(withIntMap{}), "non-string key"},
@@ -332,4 +358,64 @@ func keyDiff(encoded map[string]any, properties map[string]*Schema) string {
 			strings.Join(extra, ", ") + "\n")
 	}
 	return report.String()
+}
+
+// TestGenerateDescribesByteSlicesAsBase64 pins the one custom encoding that is
+// fully defined, so it is described rather than rejected.
+//
+// encoding/json writes a []byte as a base64 string. Describing it as an array
+// of integers -- which reflection over its element type produces -- would
+// publish a schema no real document satisfies.
+func TestGenerateDescribesByteSlicesAsBase64(t *testing.T) {
+	type withBytes struct {
+		Data []byte `json:"data"`
+	}
+
+	got, err := Generate(reflect.TypeOf(withBytes{}), Options{Title: "WithBytes"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	node := got.Properties["data"]
+	if node.Type != typeString || node.ContentEncoding != "base64" {
+		t.Errorf("[]byte described as type=%q contentEncoding=%q, want string/base64",
+			node.Type, node.ContentEncoding)
+	}
+
+	// Confirm against the encoder rather than against the expectation above.
+	encoded, err := json.Marshal(withBytes{Data: []byte("hi")})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"data":"`) {
+		t.Errorf("encoder wrote %s; the schema assumes a JSON string", encoded)
+	}
+}
+
+// TestGenerateAuthoredArtifactsDeclareNothingRequired covers the input/output
+// distinction.
+//
+// A field without omitempty is always written by the encoder, but that says
+// nothing about what a human must put in a hand-authored overlay.
+// ComponentRef.Source is exactly that case: always emitted, set by only 17 of
+// the 110 committed overlays.
+func TestGenerateAuthoredArtifactsDeclareNothingRequired(t *testing.T) {
+	emitted, err := Generate(reflect.TypeOf(named{}), Options{Title: "Named"})
+	if err != nil {
+		t.Fatalf("Generate emitted: %v", err)
+	}
+	if len(emitted.Required) == 0 {
+		t.Error("an emitted artifact should declare required fields; the encoder " +
+			"always writes them")
+	}
+
+	authored, err := Generate(reflect.TypeOf(named{}), Options{Title: "Named", Authored: true})
+	if err != nil {
+		t.Fatalf("Generate authored: %v", err)
+	}
+	if len(authored.Required) != 0 {
+		t.Errorf("an authored artifact declared %v required; a schema that "+
+			"demands fields real overlays omit rejects the project's own catalog",
+			authored.Required)
+	}
 }

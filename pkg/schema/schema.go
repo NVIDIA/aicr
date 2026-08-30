@@ -37,10 +37,20 @@
 package schema
 
 import (
+	"encoding"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
 	"strings"
+)
+
+// marshalerType and textMarshalerType detect types that define their own wire
+// form, whose shape reflection over the Go fields cannot predict.
+var (
+	marshalerType     = reflect.TypeOf((*json.Marshaler)(nil)).Elem()
+	textMarshalerType = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
+	byteSliceType     = reflect.TypeOf([]byte(nil))
 )
 
 // Draft is the JSON Schema dialect the generated documents declare.
@@ -71,6 +81,10 @@ type Schema struct {
 	Required    []string           `json:"required,omitempty"`
 	Items       *Schema            `json:"items,omitempty"`
 
+	// ContentEncoding describes a string that carries encoded bytes, which is
+	// how encoding/json writes a []byte.
+	ContentEncoding string `json:"contentEncoding,omitempty"`
+
 	// AdditionalProperties is a *bool so that "false" is emitted and "unset"
 	// is not. A plain bool would make every closed object indistinguishable
 	// from one that never declared the constraint.
@@ -96,6 +110,16 @@ type Options struct {
 	// package-qualified name (e.g. "recipe.CriteriaServiceType"). A type with
 	// no entry is described only by its kind.
 	Enums map[string][]string
+
+	// Authored marks an artifact a human writes rather than one AICR emits,
+	// which changes what "required" means.
+	//
+	// For an emitted artifact the encoder's behavior is the contract: a field
+	// without omitempty is always written, so a consumer may rely on it. For an
+	// authored one it is not. ComponentRef.Source carries no omitempty, so the
+	// encoder always writes it -- but only 17 of the 110 committed overlays set
+	// it, and marking it required published a schema that rejected the other 93.
+	Authored bool
 }
 
 // Generate derives a JSON Schema from a Go type.
@@ -120,6 +144,27 @@ func Generate(target reflect.Type, opts Options) (*Schema, error) {
 func describe(target reflect.Type, opts Options, seen map[reflect.Type]bool) (*Schema, error) {
 	for target.Kind() == reflect.Pointer {
 		target = target.Elem()
+	}
+
+	// encoding/json writes a []byte as a base64 string, not an array of
+	// numbers. This is the one custom form whose output is fully defined, so it
+	// is described rather than rejected.
+	if target == byteSliceType {
+		return &Schema{Type: typeString, ContentEncoding: "base64"}, nil
+	}
+
+	// A type with its own marshaler emits whatever it likes, and reflecting
+	// over its Go fields describes something else entirely: time.Time has no
+	// exported fields, so it would be published as an empty object while the
+	// encoder writes an RFC 3339 string. Every document would fail validation
+	// against its own schema. Reject rather than guess -- the caller extends
+	// this package deliberately, which is the point of the fail-closed rule in
+	// the package comment.
+	if hasCustomMarshaler(target) {
+		return nil, fmt.Errorf("type %s defines its own JSON encoding; "+
+			"reflection over its fields would describe a different shape than it "+
+			"emits. Add explicit support in pkg/schema before using it in a "+
+			"published artifact", typeKey(target))
 	}
 
 	if enum, ok := opts.Enums[typeKey(target)]; ok && target.Kind() == reflect.String {
@@ -249,12 +294,30 @@ func collectFields(target reflect.Type, opts Options, seen map[reflect.Type]bool
 		node.Properties[name] = child
 
 		// A field is required when it has no omitempty and is not a pointer:
-		// that is exactly the set the encoder always writes.
-		if !omitempty && field.Type.Kind() != reflect.Pointer {
+		// that is exactly the set the encoder always writes. Authored artifacts
+		// declare nothing required, because what a writer emits says nothing
+		// about what an author must supply.
+		if !opts.Authored && !omitempty && field.Type.Kind() != reflect.Pointer {
 			node.Required = append(node.Required, name)
 		}
 	}
 	return nil
+}
+
+// hasCustomMarshaler reports whether a type controls its own JSON encoding.
+//
+// Both the value and pointer forms are checked: a marshaler declared on a
+// pointer receiver still governs the encoding of a field of that type once the
+// encoder can address it, and missing that case would silently reopen the very
+// hole this guards.
+func hasCustomMarshaler(target reflect.Type) bool {
+	pointer := reflect.PointerTo(target)
+	for _, candidate := range []reflect.Type{target, pointer} {
+		if candidate.Implements(marshalerType) || candidate.Implements(textMarshalerType) {
+			return true
+		}
+	}
+	return false
 }
 
 // structBehind returns the struct type a field denotes, following pointers, or

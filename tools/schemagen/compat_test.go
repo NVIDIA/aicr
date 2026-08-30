@@ -45,6 +45,7 @@ const (
 	breakNowRequired  = "field-became-required"
 	breakTypeChanged  = "type-changed"
 	breakEnumRemoved  = "enum-value-removed"
+	breakEnumAdded    = "enum-restriction-added"
 )
 
 // schemaBreak is one detected incompatibility.
@@ -144,6 +145,18 @@ func compareNodes(kind, path string, base, current *schemaNode) []schemaBreak {
 				Note: fmt.Sprintf("enum value %q removed", value),
 			})
 		}
+	}
+
+	// Constraining a previously free-form field is a narrowing, and the loop
+	// above cannot see it: with no baseline values there is nothing to find
+	// missing. Every document carrying a value outside the new set starts
+	// failing, so it is a break even though nothing was removed.
+	if len(base.Enum) == 0 && len(current.Enum) > 0 {
+		breaks = append(breaks, schemaBreak{
+			Rule: breakEnumAdded, Kind: kind, Path: displayPath(path),
+			Note: fmt.Sprintf("field was unconstrained and now permits only %d value(s): %s",
+				len(current.Enum), strings.Join(current.Enum, ", ")),
+		})
 	}
 
 	// A newly required field rejects documents that omitted it.

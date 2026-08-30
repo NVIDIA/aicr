@@ -365,7 +365,7 @@ api-diff: ## Checks pkg/client/v1 and transparent-alias target compatibility aga
 
 .PHONY: schemas
 schemas: ## Regenerates the committed artifact JSON Schemas from the Go types
-	@go run ./tools/schemagen
+	@GOFLAGS="-mod=readonly" go run ./tools/schemagen
 	@echo "Artifact schemas regenerated. Review the diff before committing."
 
 .PHONY: schema-baseline

@@ -174,6 +174,7 @@
           "type": "string",
           "enum": [
             "a100",
+            "any",
             "b200",
             "gb200",
             "gb300",
@@ -187,6 +188,7 @@
         "intent": {
           "type": "string",
           "enum": [
+            "any",
             "inference",
             "training"
           ]
@@ -198,6 +200,7 @@
           "type": "string",
           "enum": [
             "amazonlinux",
+            "any",
             "cos",
             "ol",
             "rhel",
@@ -208,6 +211,7 @@
         "platform": {
           "type": "string",
           "enum": [
+            "any",
             "dynamo",
             "kubeflow",
             "nim",
@@ -219,6 +223,7 @@
           "type": "string",
           "enum": [
             "aks",
+            "any",
             "bcm",
             "eks",
             "gke",

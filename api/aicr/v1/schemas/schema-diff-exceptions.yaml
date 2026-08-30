@@ -17,7 +17,7 @@
 #
 # Each entry needs:
 #   rule    one of: field-removed, field-became-required, type-changed,
-#           enum-value-removed
+#           enum-value-removed, enum-restriction-added
 #   kind    artifact kind, e.g. RecipeResult. Omit only when the break genuinely
 #           applies to every kind.
 #   path    dotted field path, e.g. metadata.selectedProfile, or "(root)".

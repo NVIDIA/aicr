@@ -17,6 +17,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -192,8 +193,12 @@ func loadSchema(t *testing.T, kind string) *schemaNode {
 	return &node
 }
 
-// checkDocument walks a document against a schema node, reporting undeclared
-// fields and missing required fields.
+// checkDocument walks a document against a schema node.
+//
+// Presence checks alone let a wrong-typed scalar or an out-of-enum value pass
+// while the published JSON Schema rejects the same document, so the gate would
+// report a validity it does not have. Types, enums and array elements are
+// checked too.
 func checkDocument(t *testing.T, file string, document map[string]any, node *schemaNode) {
 	t.Helper()
 
@@ -218,10 +223,90 @@ func checkDocument(t *testing.T, file string, document map[string]any, node *sch
 				file, key)
 			continue
 		}
-		if nested, ok := document[key].(map[string]any); ok && child.Type == "object" &&
-			len(child.Properties) > 0 {
+		checkValue(t, file+"."+key, document[key], child)
+	}
+}
 
-			checkDocument(t, file+"."+key, nested, child)
+// checkValue validates one value against a schema node.
+func checkValue(t *testing.T, path string, value any, node *schemaNode) {
+	t.Helper()
+
+	// A nil value is an explicitly empty YAML key; the encoder treats it as
+	// unset, so there is nothing to constrain.
+	if value == nil {
+		return
+	}
+
+	if node.Type != "" && !matchesType(value, node.Type) {
+		t.Errorf("%s: document holds %T but the schema declares type %q; the "+
+			"published schema would reject this artifact", path, value, node.Type)
+		return
+	}
+
+	if len(node.Enum) > 0 {
+		if text, ok := value.(string); ok && !containsString(node.Enum, text) {
+			t.Errorf("%s: value %q is not among the %d values the schema permits "+
+				"(%s)", path, text, len(node.Enum), strings.Join(node.Enum, ", "))
 		}
 	}
+
+	switch typed := value.(type) {
+	case map[string]any:
+		// A map-typed field (propertyNames, no properties) accepts any keys, so
+		// only descend when the schema actually describes fields.
+		if len(node.Properties) > 0 {
+			checkDocument(t, path, typed, node)
+		}
+	case []any:
+		if node.Items == nil {
+			return
+		}
+		for i, item := range typed {
+			checkValue(t, fmt.Sprintf("%s[%d]", path, i), item, node.Items)
+		}
+	}
+}
+
+// matchesType reports whether a decoded YAML value fits a JSON Schema type.
+func matchesType(value any, want string) bool {
+	switch want {
+	case "string":
+		_, ok := value.(string)
+		return ok
+	case "boolean":
+		_, ok := value.(bool)
+		return ok
+	case "integer":
+		switch value.(type) {
+		case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+			return true
+		default:
+			return false
+		}
+	case "number":
+		switch value.(type) {
+		case float32, float64, int, int64:
+			return true
+		default:
+			return false
+		}
+	case "array":
+		_, ok := value.([]any)
+		return ok
+	case "object":
+		_, ok := value.(map[string]any)
+		return ok
+	default:
+		// An empty type is an open value, which anything satisfies.
+		return true
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

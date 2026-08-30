@@ -17,10 +17,7 @@
         "name": {
           "type": "string"
         }
-      },
-      "required": [
-        "name"
-      ]
+      }
     },
     "spec": {
       "type": "object",
@@ -56,11 +53,7 @@
                     "namespace": {
                       "type": "string"
                     }
-                  },
-                  "required": [
-                    "kind",
-                    "name"
-                  ]
+                  }
                 }
               },
               "healthCheckAsserts": {
@@ -117,12 +110,7 @@
               "version": {
                 "type": "string"
               }
-            },
-            "required": [
-              "name",
-              "source",
-              "type"
-            ]
+            }
           }
         },
         "constraints": {
@@ -145,20 +133,10 @@
               "value": {
                 "type": "string"
               }
-            },
-            "required": [
-              "name",
-              "value"
-            ]
+            }
           }
         }
       }
     }
-  },
-  "required": [
-    "apiVersion",
-    "kind",
-    "metadata",
-    "spec"
-  ]
+  }
 }
