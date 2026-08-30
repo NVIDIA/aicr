@@ -1664,21 +1664,17 @@ kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 
 **`kubectl cordon` does not keep the plugin off the node.** The DaemonSet controller adds a `node.kubernetes.io/unschedulable:NoSchedule` toleration to its pods, so a cordoned node still gets one and deleting the pod simply recreates it. Suspending a GitOps controller does not help either; the DaemonSet controller is what recreates the pod.
 
-**Do not use the accelerated-node selector label as the lever.** `--accelerated-node-selector` is written to GPU Operator's `daemonsets.nodeSelector` as well as to `kubeletPlugin.nodeSelector`, so removing it from a node also removes the driver pod you are trying to retry — and restoring it to bring the driver back makes the plugin eligible again. There is no node label that suppresses only the DRA plugin.
+**There is no node-scoped way to suppress the plugin, so recovery is cluster-wide.** Two properties of the shipped DaemonSet rule out per-node tricks: its affinity is five OR-ed `nodeSelectorTerms`, so excluding a node requires editing every term rather than one; and it uses `RollingUpdate` with `maxUnavailable: 100%`, so *any* change to `.spec.template` rolls pods on every node it covers — and reverting the change rolls them again. A node-scoped-looking patch is therefore cluster-wide in effect.
 
-*The node-scoped operation is a temporary anti-affinity on the plugin DaemonSet.* Add a term excluding the affected node by hostname, which leaves every other node untouched and does not affect the driver:
+Plan for that. The sequence is:
 
-```bash
-kubectl patch daemonset nvidia-dra-driver-gpu-kubelet-plugin -n nvidia-dra-driver --type=json \
-  -p '[{"op":"add","path":"/spec/template/spec/affinity/nodeAffinity/requiredDuringSchedulingIgnoredDuringExecution/nodeSelectorTerms/0/matchExpressions/-",
-        "value":{"key":"kubernetes.io/hostname","operator":"NotIn","values":["<node-name>"]}}]'
-```
+1. Clear DRA claim holders on **every** node the DaemonSet covers, not only the failed one, and confirm none remain. The kubelet needs the plugin to complete `NodeUnprepareResources`, so any claim holder still terminating when the plugin goes away will hang.
+2. Suppress the DaemonSet — delete it, or scale it to zero eligible nodes.
+3. Confirm every plugin pod has terminated. Pod-object deletion is not proof the container is gone; check the nodes.
+4. Retry the driver pod on the affected node.
+5. Restore the DaemonSet, then the workloads.
 
-Confirm the pod is gone from that node, retry the driver pod, then revert the patch. Add the same expression to every term if the rendered affinity has more than one, since `nodeSelectorTerms` are OR-ed. If a GitOps controller reconciles the DaemonSet, suspend it for the duration.
-
-*Cluster-wide fallback.* If you would rather not patch the DaemonSet per node, suppressing it entirely also works — but because that removes the plugin everywhere, clear DRA claim holders on **every** node it covers first, not just the failed one.
-
-*Claim preparation failing after a restart with unchanged driver configuration.* The stale rootfs was unmounted underneath a plugin that kept running, so it can no longer build CDI specs. Once the replacement driver pod is `Ready`, restart the plugin pod — the recreated pod binds the new rootfs. Deleting the pod is sufficient here; no DaemonSet suppression is needed.
+If a GitOps controller reconciles the DaemonSet, suspend it for the duration and resume afterwards.
 
 **Known limitation of the opt-in.** Under `k8s-driver-manager` v0.12 the configured label is paused in the same batch as other GPU operands, and no wait covers the standalone DRA kubelet plugin, so ordering against DRA claim holders and completion of plugin teardown are not guaranteed. The mechanism is the one NVIDIA documents, but it is best-effort here. See [NVIDIA/k8s-driver-manager#250](https://github.com/NVIDIA/k8s-driver-manager/issues/250).
 
