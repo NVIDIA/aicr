@@ -100,6 +100,15 @@
 #                                         reachable. Same caveat as
 #                                         KWOK_REGISTRY_HOST_PORT: must match
 #                                         the Kind extraPortMappings hostPort.
+#   KWOK_CLUSTER             (optional, default "aicr-kwok-test") - Kind cluster
+#                                         name used only to side-load the
+#                                         registry and Gitea images before
+#                                         their Deployments are applied. Ignored
+#                                         when KUBECTL_CONTEXT is set, since the
+#                                         cluster is then read from the context
+#                                         ("kind-<cluster>"). Preloading is best
+#                                         effort: a wrong or missing value falls
+#                                         back to the kubelet pulling the image.
 #   KWOK_GITEA_USER          (optional, default "aicr") - Gitea admin user the
 #                                         flux-git / argocd-git lanes push as.
 #   KWOK_GITEA_PASSWORD      (optional, default "aicr-kwok-ci") - Password for
@@ -140,6 +149,12 @@ log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 log_debug() { echo -e "${BLUE}[DEBUG]${NC} $*"; }
+
+# preload_image() — side-loads the registry / Gitea images into the Kind node
+# before their Deployments are applied. Sourced after the log_* helpers it
+# calls. Resolved SCRIPT_DIR-relative so a deployed copy is never picked up.
+# shellcheck source=lib/preload-image.sh
+source "${SCRIPT_DIR}/lib/preload-image.sh"
 
 # Configuration
 REGISTRY_NAMESPACE="aicr-registry"
@@ -260,6 +275,10 @@ install_registry() {
     local image="$1"
 
     log_info "Installing in-cluster OCI registry (${image}) in namespace ${REGISTRY_NAMESPACE}..."
+
+    # Before the Deployment exists, so the 120s rollout budget below is spent
+    # waiting on the container starting rather than on an upstream pull.
+    preload_image "${image}"
 
     # Namespace — apply, not create, so re-runs upsert cleanly.
     kc apply -f - <<EOF
@@ -578,6 +597,10 @@ install_gitea() {
     local image="$1"
 
     log_info "Installing in-cluster Gitea (${image}) in namespace ${REGISTRY_NAMESPACE}..."
+
+    # Same exposure as the registry: a public pull inside a fixed rollout
+    # budget. See preload_image.
+    preload_image "${image}"
 
     # Namespace may not exist yet if install order ever changes; apply is
     # idempotent either way.
