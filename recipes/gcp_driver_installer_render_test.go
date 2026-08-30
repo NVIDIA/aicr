@@ -200,8 +200,12 @@ func TestGCPDriverInstallerLabelContract(t *testing.T) {
 	if parseErr != nil {
 		t.Fatalf("parse spec.timeouts.assert %q: %v", test.Spec.Timeouts.Assert, parseErr)
 	}
-	if budget > 5*time.Minute {
-		t.Errorf("spec.timeouts.assert = %v, want <= 5m (margin below the 6m executor clamp)", budget)
+	if budget <= 0 || budget > 5*time.Minute {
+		// Non-positive values are not a tighter budget: the in-process
+		// executor applies an authored duration only when positive and
+		// otherwise falls back to its 6m caller budget — so "0s" would
+		// silently bypass this cap.
+		t.Errorf("spec.timeouts.assert = %v, want 0 < budget <= 5m (margin below the 6m executor clamp)", budget)
 	}
 
 	// Scope the label contract to the installer DaemonSet's own assertion —
