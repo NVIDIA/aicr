@@ -1660,7 +1660,11 @@ kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 
 **Recovering from the two opt-out failures.** Both are recoverable; the procedure differs by which one you hit.
 
-*Driver upgrade stopped with `failed to uninstall nvidia driver components`.* The plugin still holds the driver, so the replacement is not installed and the old driver may be partially torn down. Suppress the DRA kubelet plugin on that node — suspend reconciliation and patch or delete its DaemonSet — wait for the pod to terminate, retry the driver pod, then restore the DaemonSet. Draining the plugin *before* its DRA claim holders deadlocks them, because the kubelet needs the plugin to complete `NodeUnprepareResources`; terminate claim holders first and confirm none remain on the node.
+*Driver upgrade stopped with `failed to uninstall nvidia driver components`.* The plugin still holds the driver, so the replacement is not installed and the old driver may be partially torn down. Recover **one node at a time**, and keep the operation node-scoped — the kubelet plugin is a DaemonSet, so deleting it or editing its selector removes the plugin from every node, which can strand claim holders on nodes you were not repairing.
+
+On the failed node: terminate its DRA claim holders first and confirm none remain (the kubelet needs the plugin to complete `NodeUnprepareResources`, so removing the plugin ahead of them deadlocks them). Then cordon the node and delete only that node's plugin pod, so the DaemonSet does not immediately reschedule it while the driver reinstalls. Retry the driver pod, then uncordon. If your GitOps controller reconciles the DaemonSet, suspend it for the duration and resume afterwards.
+
+If you must edit the DaemonSet itself rather than work per node, treat it as cluster-wide: clear DRA claim holders on **every** node it covers before changing it.
 
 *Claim preparation failing after a restart with unchanged driver configuration.* The stale rootfs was unmounted underneath a plugin that kept running, so it can no longer build CDI specs. Once the replacement driver pod is `Ready`, restart the plugin pod — the recreated pod binds the new rootfs. Deleting the pod is sufficient here; no DaemonSet suppression is needed.
 

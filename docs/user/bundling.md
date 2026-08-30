@@ -342,7 +342,9 @@ still with no error. Revisit the node labels whenever you regenerate a bundle
 for an existing deployment, not only when building a new cluster.
 
 `aicr bundle` emits a non-blocking warning describing this requirement whenever
-both components are enabled. See
+both components are enabled and an eviction label is configured. The
+complementary opt-out warning fires only where GPU Operator manages the driver
+(`driver.enabled=true`). See
 [Storage Class](cli-reference.md#storage-class), where that warning is
 described alongside the other cluster-state dependency reported the same way.
 

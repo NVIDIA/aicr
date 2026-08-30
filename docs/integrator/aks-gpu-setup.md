@@ -603,18 +603,13 @@ node label and the flag value must be the **same `key=value` pair** — the flag
 selects the convention, and AICR renders exactly what you pass:
 
 ```shell
-# opt in at bundle time ...
-aicr bundle --recipe recipe.yaml \
-  --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
-  --output bundle
-
-# ... and provision the matching pair on the pool
 az aks nodepool update \
   --cluster-name <cluster> --resource-group <rg> --name gpupool \
   --labels nvidia.com/dra-kubelet-plugin=true
 ```
 
-See [Label GPU nodes for the DRA kubelet plugin (opt-in only)](#label-gpu-nodes-for-the-dra-kubelet-plugin-opt-in-only).
+Then pass the same pair to `aicr bundle` in the generation step below. See
+[Label GPU nodes for the DRA kubelet plugin (opt-in only)](#label-gpu-nodes-for-the-dra-kubelet-plugin-opt-in-only).
 
 Then select the mode at recipe generation time with the `gpuStack`
 configuration profile — one flag flips every ownership path together:
@@ -623,6 +618,10 @@ configuration profile — one flag flips every ownership path together:
 aicr recipe --service aks --accelerator h100 --os ubuntu --intent training \
   --profile gpuStack=operator-managed -o recipe.yaml
 aicr bundle -r recipe.yaml -o ./bundles
+
+# add --dra-eviction-node-label to opt in, using the pair you labelled the pool with:
+aicr bundle -r recipe.yaml -o ./bundles \
+  --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true
 ```
 
 The `operator-managed` value sets `driver.enabled=true`, `toolkit.enabled=true`,
