@@ -44,22 +44,21 @@ func TestMirrorInventory_RejectsUnresolvedRecipe(t *testing.T) {
 	}
 }
 
-// TestMirrorInventory_OptionsAreApplied asserts the options reach the lister.
+// TestMirrorInventory_ToleratesNilOptions covers option-slice hygiene.
 //
-// Both change the discovered set: overrides can disable a sub-component and
-// remove its images, and the Kubernetes version changes how charts branch. An
-// option that silently did nothing would produce a plausible-looking inventory
-// that mirrors the wrong artifacts.
-func TestMirrorInventory_OptionsAreApplied(t *testing.T) {
+// Callers build option slices conditionally, so a nil entry must not panic.
+// This deliberately does NOT claim to test that options are applied: with a nil
+// recipe the method returns before evaluating them. Whether the options reach
+// discovery is asserted in the internal test, where the resolved option struct
+// is visible without rendering charts.
+func TestMirrorInventory_ToleratesNilOptions(t *testing.T) {
 	client := newSnapshotCriteriaClient(t)
 
-	// nil options must be tolerated rather than panic: callers build option
-	// slices conditionally.
 	_, err := client.MirrorInventory(t.Context(), nil, nil,
 		aicr.WithMirrorKubeVersion("1.31.0"),
 		aicr.WithMirrorValueOverrides(nil))
 	if err == nil {
-		t.Fatal("expected the nil-recipe error to still win over option handling")
+		t.Fatal("expected the nil-recipe error")
 	}
 	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 		t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
