@@ -519,9 +519,8 @@ curl -v "http://localhost:8080/v1/recipe?service=eks&os=ubuntu&accelerator=h100&
 curl -w "\nTime: %{time_total}s\n" \
   "http://localhost:8080/v1/recipe?service=eks&os=ubuntu&accelerator=h100&intent=training"
 
-# Check headers. The recipe endpoints accept GET and POST, not HEAD, so
-# dump headers from a GET and discard the body.
-curl -sD - -o /dev/null "http://localhost:8080/v1/recipe?service=eks&os=ubuntu&accelerator=h100&intent=training"
+# Check headers. HEAD returns the same headers as GET without the body.
+curl -I "http://localhost:8080/v1/recipe?service=eks&os=ubuntu&accelerator=h100&intent=training"
 ```
 
 ### Validate Snapshots

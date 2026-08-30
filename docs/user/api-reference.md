@@ -161,6 +161,8 @@ Generate an optimized configuration recipe from a criteria body. This endpoint p
 
 An explicit, supported `Content-Type` is required; a missing, aliased, or unsupported media type is rejected.
 
+`GET` and `POST` return **identical documents** for equivalent criteria, including the `criteria` object echoed in the response: unspecified dimensions are reported as `any` on both. `HEAD` is accepted wherever `GET` is and returns the same headers without a body — it resolves the recipe to produce them, so it costs what `GET` costs rather than serving as a cheap probe. Use `/health` or `/ready` for liveness.
+
 **Request Body:**
 
 The request body is a strict envelope. Unknown fields are rejected, so a typo fails loudly instead of being silently ignored:
@@ -966,10 +968,9 @@ ls -la
 ### Handling Rate Limits
 
 ```shell
-# Check rate limit headers. The recipe endpoints accept GET and POST, not
-# HEAD, so dump the headers from a GET and discard the body rather than
-# using curl -I.
-curl -sD - -o /dev/null "http://localhost:8080/v1/recipe?accelerator=h100"
+# Check rate limit headers. HEAD resolves the recipe exactly as GET does and
+# returns the same headers without the body -- it is not a cheap probe.
+curl -I "http://localhost:8080/v1/recipe?accelerator=h100"
 
 # Response headers:
 # X-RateLimit-Limit: 100
@@ -985,7 +986,7 @@ response=$(curl -s -w "%{http_code}" "http://localhost:8080/v1/recipe?accelerato
 if [ "${response: -3}" = "429" ]; then
   # HTTP headers end in CRLF, so strip the carriage return before sleep reads
   # the value.
-  retry_after=$(curl -sD - -o /dev/null "http://localhost:8080/v1/recipe?accelerator=h100" | grep -i "Retry-After" | awk '{print $2}' | tr -d '\r')
+  retry_after=$(curl -sI "http://localhost:8080/v1/recipe?accelerator=h100" | grep -i "Retry-After" | awk '{print $2}' | tr -d '\r')
   echo "Rate limited. Retrying after ${retry_after}s..."
   sleep "$retry_after"
 fi

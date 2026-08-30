@@ -97,6 +97,36 @@ paths:
                       - /v1/bundle
 
   /v1/recipe:
+    head:
+      tags: [Recipes]
+      summary: Resolve a configured recipe (headers only)
+      operationId: headRecipe
+      description: >
+        Same as GET but returns headers only. Declared because RFC 9110 section
+        9.1 makes GET and HEAD mandatory for a general-purpose server, and
+        rejecting HEAD while accepting GET contradicted /metrics, which has
+        allowed the pair since it was introduced.
+
+        Not a cheap probe: the recipe is resolved to produce the headers, so it
+        costs what GET costs. Use /health or /ready for liveness.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Service"
+        - $ref: "#/components/parameters/Accelerator"
+        - $ref: "#/components/parameters/GPUAlias"
+        - $ref: "#/components/parameters/Intent"
+        - $ref: "#/components/parameters/OS"
+        - $ref: "#/components/parameters/Platform"
+        - $ref: "#/components/parameters/Nodes"
+        - $ref: "#/components/parameters/ProfileSelection"
+        - $ref: "#/components/parameters/SlurmAccountingMode"
+      responses:
+        "200":
+          description: Headers for the response GET would return
+        "400":
+          description: Invalid or uncovered criteria
+        "429":
+          description: Rate limit exceeded
     get:
       tags: [Recipes]
       summary: Resolve a configured recipe
@@ -279,6 +309,37 @@ paths:
                 $ref: "#/components/schemas/Error"
 
   /v1/query:
+    head:
+      tags: [Recipes]
+      summary: Resolve a hydrated value (headers only)
+      operationId: headQuery
+      description: >
+        Same as GET but returns headers only. Declared because RFC 9110 section
+        9.1 makes GET and HEAD mandatory for a general-purpose server, and
+        rejecting HEAD while accepting GET contradicted /metrics, which has
+        allowed the pair since it was introduced.
+
+        Not a cheap probe: the recipe is resolved to produce the headers, so it
+        costs what GET costs. Use /health or /ready for liveness.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Service"
+        - $ref: "#/components/parameters/Accelerator"
+        - $ref: "#/components/parameters/GPUAlias"
+        - $ref: "#/components/parameters/Intent"
+        - $ref: "#/components/parameters/OS"
+        - $ref: "#/components/parameters/Platform"
+        - $ref: "#/components/parameters/Nodes"
+        - $ref: "#/components/parameters/ProfileSelection"
+        - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/Selector"
+      responses:
+        "200":
+          description: Headers for the response GET would return
+        "400":
+          description: Invalid or uncovered criteria
+        "429":
+          description: Rate limit exceeded
     get:
       tags: [Recipes]
       summary: Query a configured hydrated recipe
