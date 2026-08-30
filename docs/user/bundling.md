@@ -237,16 +237,24 @@ aicr bundle --recipe recipe.yaml \
   --output ./bundles
 ```
 
-## Prepare DRA nodes before applying upgraded bundles
+## Prepare DRA nodes when opting in to eviction coordination
 
-> **Upgrade requirement:** A bundle containing both `gpu-operator` and
-> `nvidia-dra-driver-gpu` now selects DRA kubelet-plugin nodes with
-> `nvidia.com/dra-kubelet-plugin=true` by default. The same applies to the
-> corresponding `-ocp` components. Before applying the first newly generated
-> bundle to an existing deployment, label every GPU node that must run the DRA
-> kubelet plugin. Applying the bundle first can reduce the DaemonSet to zero
-> eligible nodes, interrupting ComputeDomain/IMEX and any whole-GPU resources
-> advertised through DRA.
+DRA eviction coordination is **opt-in**. By default a bundle containing both
+`gpu-operator` and `nvidia-dra-driver-gpu` adds no eviction node label, and the
+DRA kubelet plugin runs on every accelerated node with no extra labeling. The
+trade-off is that the plugin is not descheduled ahead of a GPU driver container
+restart; `aicr bundle` warns about this where GPU Operator manages the driver,
+and [DRA Driver Upgrade Eviction](cli-reference.md#dra-driver-upgrade-eviction)
+describes what can go wrong.
+
+Generate with `--dra-eviction-node-label key=value` to opt in. The rest of this
+section applies only then. The same applies to the corresponding `-ocp`
+components.
+
+> **Opt-in requirement:** label every GPU node that must run the DRA kubelet
+> plugin *before* applying the bundle. Applying it first can reduce the
+> DaemonSet to zero eligible nodes, interrupting ComputeDomain/IMEX and any
+> whole-GPU resources advertised through DRA.
 
 ### Set the label at node-pool provisioning time
 
@@ -306,7 +314,7 @@ described alongside the other cluster-state dependency reported the same way.
 
 ### Custom label conventions and post-install checks
 
-If the cluster uses a different convention, generate the bundle with
+The flag both opts in and selects the convention: generate the bundle with
 `--dra-eviction-node-label key=value` and apply that exact pair to the nodes.
 AICR gives the full pair to the DRA node selector, but GPU Operator's Driver
 Manager receives only the label key because its eviction contract matches and

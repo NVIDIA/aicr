@@ -237,7 +237,7 @@ The narrow exception is a **bundler-owned derived integration value**:
 when AICR renders both sides of a cross-chart contract and allowing either
 side to drift would produce an invalid bundle, the bundler may enforce that
 contract after ordinary overrides. The DRA/GPU Operator integration is the
-worked example: AICR merges the configured DRA eviction label into
+worked example: when opted in, AICR merges the configured DRA eviction label into
 `kubeletPlugin.nodeSelector` and writes the same label key to GPU Operator's
 `NODE_LABEL_FOR_GPU_POD_EVICTION`. This exception must remain gated on both
 components being enabled, must reject dynamic declarations that could move

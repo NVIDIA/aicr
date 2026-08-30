@@ -786,8 +786,7 @@ Package with explicit tag (overrides CLI version):
 			},
 			&cli.StringFlag{
 				Name:     "dra-eviction-node-label",
-				Value:    config.DefaultDRAEvictionNodeLabel().String(),
-				Usage:    "Node label coordinating DRA kubelet-plugin eviction with GPU Operator driver upgrades (format: key=value; applied only when both components are enabled)",
+				Usage:    "Opt in to DRA kubelet-plugin eviction coordination with GPU Operator driver upgrades (format: key=value; applied only when both components are enabled). Unset means AICR injects nothing and the plugin needs no extra node label; when set, every GPU node must carry it",
 				Category: catScheduling,
 			},
 			&cli.StringFlag{
