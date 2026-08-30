@@ -85,6 +85,32 @@ func TestStability_RecipeResolution(t *testing.T) {
 	// so pinning it is what keeps the workflow completable through this package
 	// alone (#2437).
 	requireSignature[func(*aicr.Client, *aicr.Snapshot) (*aicr.Criteria, error)]((*aicr.Client).CriteriaFromSnapshot)
+
+	// Mirror inventory: air-gap tooling depends on this shape, and rendering
+	// deliberately stays out of the SDK (#2025).
+	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, ...aicr.MirrorInventoryOption) (*aicr.MirrorInventory, error)]((*aicr.Client).MirrorInventory)
+	requireSignature[func([]bundlerconfig.ComponentPath) aicr.MirrorInventoryOption](aicr.WithMirrorValueOverrides)
+	requireSignature[func(string) aicr.MirrorInventoryOption](aicr.WithMirrorKubeVersion)
+
+	var inventory aicr.MirrorInventory
+	_ = inventory.Images
+	_ = inventory.Charts
+	_ = inventory.Components
+	_ = inventory.RecipeVersion
+	_ = inventory.Criteria
+
+	var chart aicr.MirrorChart
+	_ = chart.Name
+	_ = chart.Repository
+	_ = chart.Chart
+	_ = chart.Version
+	_ = chart.Namespace
+
+	var component aicr.MirrorComponent
+	_ = component.Component
+	_ = component.Type
+	_ = component.Images
+	_ = component.Warnings
 	requireSignature[func(string) aicr.RecipeResolveOption](aicr.WithProfile)
 	requireSignature[func(string) aicr.RecipeResolveOption](aicr.WithAccountingMode)
 	requireSignature[func(...aicr.CriteriaDimension) aicr.RecipeResolveOption](aicr.WithSnapshotCriteriaRelaxation)

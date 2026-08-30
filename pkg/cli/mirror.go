@@ -183,25 +183,24 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 		}
 	}
 
-	// Discover images and charts.
-	kubeVersion := mirror.KubeVersionFromConstraints(rec.Constraints)
-	lister := mirror.NewLister(
-		mirror.WithVersion(version),
-		mirror.WithValueOverrides(valueOverrides),
-		mirror.WithKubeVersion(kubeVersion),
-	)
-
+	// Discovery runs through the facade (#2025); this command stays a thin
+	// adapter that renders what it returns.
 	slog.Info("discovering images and charts", "components", len(rec.ComponentRefs))
 
-	result, err := lister.Discover(ctx, rec)
+	inventory, err := client.MirrorInventory(ctx, aicr.WrapResolved(rec),
+		aicr.WithMirrorValueOverrides(valueOverrides))
 	if err != nil {
 		return err
 	}
 
 	slog.Info("discovery complete",
-		"images", len(result.Images),
-		"charts", len(result.Charts),
-		"components", len(result.Components))
+		"images", len(inventory.Images),
+		"charts", len(inventory.Charts),
+		"components", len(inventory.Components))
+
+	// Rendering stays here on purpose: Hauler and Zarf are third-party schemas,
+	// and the SDK does not freeze them as contract.
+	result := mirrorListFromInventory(inventory)
 
 	// Resolve output writer.
 	w, cleanup, resolveErr := resolveOutputWriter(cmd)
@@ -282,4 +281,43 @@ func resolveOutputWriter(cmd *cli.Command) (io.Writer, func() error, error) {
 // isValidMirrorFormat checks if the given format is in the supported list.
 func isValidMirrorFormat(f mirror.Format) bool {
 	return slices.Contains(mirror.SupportedFormats(), string(f))
+}
+
+// mirrorListFromInventory projects the facade inventory back onto the
+// renderer's input shape.
+//
+// The projection lives here rather than in the facade because the JSON and YAML
+// tags on pkg/mirror.MirrorList define this command's published output. Moving
+// them into pkg/client/v1 would make the CLI's serialization an SDK contract,
+// which is the opposite of the split #2025 chose.
+func mirrorListFromInventory(inventory *aicr.MirrorInventory) *mirror.MirrorList {
+	if inventory == nil {
+		return nil
+	}
+
+	list := &mirror.MirrorList{
+		Images: inventory.Images,
+		Metadata: mirror.MirrorListMetadata{
+			RecipeVersion: inventory.RecipeVersion,
+			Criteria:      inventory.Criteria,
+		},
+	}
+	for _, chart := range inventory.Charts {
+		list.Charts = append(list.Charts, mirror.ChartRef{
+			Name:       chart.Name,
+			Repository: chart.Repository,
+			Chart:      chart.Chart,
+			Version:    chart.Version,
+			Namespace:  chart.Namespace,
+		})
+	}
+	for _, component := range inventory.Components {
+		list.Components = append(list.Components, mirror.ComponentImages{
+			Component: component.Component,
+			Type:      component.Type,
+			Images:    component.Images,
+			Warnings:  component.Warnings,
+		})
+	}
+	return list
 }
