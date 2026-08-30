@@ -45,18 +45,22 @@ type customJSON struct {
 	Hidden string
 }
 
-// MarshalJSON satisfies json.Marshaler. The error is always nil; the signature
-// is what matters, since the reflector detects the interface rather than
-// calling it.
+// MarshalJSON satisfies json.Marshaler. The error is always nil: the signature
+// is the whole point, since the reflector detects the interface rather than
+// calling it. unparam flags the constant nil, which is inherent to the
+// interface and not a real error path.
 //
-//nolint:unparam // interface signature, not a real error path
+//nolint:unparam
 func (c customJSON) MarshalJSON() ([]byte, error) { return []byte(`"custom"`), nil }
 
 // customBytes is a byte slice whose marshaler emits an object, not base64 --
 // the shape the ordering fix exists to protect.
 type customBytes []byte
 
-//nolint:unparam // interface signature, not a real error path
+// MarshalJSON emits an object rather than base64, which is what makes this type
+// useful here. The error is always nil for the same reason as customJSON above.
+//
+//nolint:unparam
 func (c customBytes) MarshalJSON() ([]byte, error) { return []byte(`{"a":1}`), nil }
 
 type sample struct {
