@@ -164,20 +164,11 @@ Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kuber
 
 ### Enabling Remediation
 
-There is no supported opt-in mechanism in AICR yet — [#1014](https://github.com/NVIDIA/aicr/issues/1014) tracks adding one. Until it lands, enabling remediation means setting the chart's own values, and the configuration is yours to validate:
+**AICR does not support enabling remediation today, and this page does not carry a recipe for it.** [#1014](https://github.com/NVIDIA/aicr/issues/1014) tracks adding a qualified opt-in path.
 
-```shell
-aicr bundle -r recipe.yaml \
-  --set nv-sentinel:global.mongodbStore.enabled=true \
-  --set nv-sentinel:global.faultQuarantine.enabled=true \
-  --set nv-sentinel:global.nodeDrainer.enabled=true \
-  --set nv-sentinel:global.faultRemediation.enabled=true \
-  --set nv-sentinel:global.janitor.enabled=true \
-  --set nv-sentinel:global.janitorProvider.enabled=true \
-  -o ./bundles
-```
+Turning the components on is not a matter of flipping the six `enabled` flags. Those flags start the pipeline but leave `fault-remediation.maintenance.actions` at the subchart defaults, where `COMPONENT_RESET` maps to `kind: RebootNode` — so a recoverable GPU fault cordons, drains and reboots the whole node. Upstream's own remediation configuration maps that same action to `kind: GPUReset`, scoped to the affected GPU UUID, and resets in place instead. A partial enablement is therefore not a milder version of remediation; it is a more destructive one.
 
-Three things to know before you do:
+If you need remediation before #1014 lands, start from the chart's self-contained `values-remediation.yaml` (shipped inside the `nvsentinel` chart, pinned at the version in `recipes/registry.yaml`) rather than composing `--set` flags, and qualify the result on a cluster you can afford to have rebooted. Three further things apply whatever path you take:
 
 - **The reboot path is privileged.** AICR pins `janitor-provider.csp.provider: generic`, so remediation reboots run as a privileged Job executing `chroot /host /sbin/reboot` on the target node. That avoids requiring cloud IAM credentials, but it is a broad grant. Cloud providers are selectable instead, and need the corresponding credentials.
 - **The datastore is a real dependency.** `mongodbStore` deploys an in-cluster database. The chart also supports an external datastore and a `postgresql` provider; see the `global.datastore` block in the chart's values.
