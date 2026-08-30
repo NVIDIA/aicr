@@ -30,8 +30,16 @@ kind: Test
 metadata:
   name: gcp-driver-installer-health-check
 spec:
+  # 5m: the in-process executor clamps any authored budget to its caller's
+  # 6m (pkg/chainsaw/inprocess.go), so the previous 10m never applied as
+  # written — but a never-true assert still burns the full clamped budget,
+  # and that pushed the expected-resources Job's aggregate run past its 8m
+  # activeDeadline (the #2186 failure shape, observed live). 5m keeps the
+  # worst case inside both bounds and fails with the real assert diff; the
+  # healthy path passes in seconds and a fresh node mid driver-install
+  # completes in ~2m.
   timeouts:
-    assert: 10m
+    assert: 5m
   steps:
     - name: validate-nvidia-driver-installer-daemonset
       try:
@@ -46,8 +54,11 @@ spec:
                   # Same DaemonSet name as the hand-applied installer this
                   # component replaces; the label pins the assert to the
                   # AICR-managed object so a leftover unmanaged DaemonSet
-                  # cannot false-pass a migration.
-                  app.kubernetes.io/managed-by: aicr
+                  # cannot false-pass a migration. part-of, not managed-by:
+                  # Helm 4 server-side apply rewrites managed-by to "Helm",
+                  # so that key can never match on a deployed bundle
+                  # (verified live on GKE, 2026-08-28).
+                  app.kubernetes.io/part-of: aicr
               status:
                 (desiredNumberScheduled > `0`): true
                 (numberReady == desiredNumberScheduled): true

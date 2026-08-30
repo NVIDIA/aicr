@@ -18,6 +18,9 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/manifest"
 )
@@ -119,4 +122,115 @@ func excerpt(s, marker string) string {
 		lines = lines[:10]
 	}
 	return strings.Join(lines, "\n")
+}
+
+// TestGCPDriverInstallerLabelContract pins both sides of the health-check
+// label contract that only live GKE validation could catch (#2444): Helm 4
+// server-side apply rewrites app.kubernetes.io/managed-by to "Helm" at
+// install, so the health check must key on a label SSA leaves alone. The
+// rendered DaemonSet must carry part-of: aicr, and the health check must
+// assert exactly that key — never managed-by, which silently regresses to
+// the never-match stall this contract exists to prevent.
+func TestGCPDriverInstallerLabelContract(t *testing.T) {
+	t.Parallel()
+	content, err := os.ReadFile("components/gcp-driver-installer/manifests/nvidia-driver-installer.yaml")
+	if err != nil {
+		t.Fatalf("read manifest: %v", err)
+	}
+	out, err := manifest.Render(content, manifest.RenderInput{
+		ComponentName: "gcp-driver-installer",
+		Namespace:     "kube-system",
+		Values: map[string]any{
+			"installer":     map[string]any{"enabled": true},
+			"driverVersion": "580.173.02",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Render() failed: %v", err)
+	}
+	var ds struct {
+		Kind     string `yaml:"kind"`
+		Metadata struct {
+			Labels map[string]string `yaml:"labels"`
+		} `yaml:"metadata"`
+	}
+	if unmarshalErr := yaml.Unmarshal(out, &ds); unmarshalErr != nil {
+		t.Fatalf("parse rendered DaemonSet: %v", unmarshalErr)
+	}
+	if ds.Kind != "DaemonSet" {
+		t.Fatalf("rendered kind = %q, want DaemonSet", ds.Kind)
+	}
+	if got := ds.Metadata.Labels["app.kubernetes.io/part-of"]; got != "aicr" {
+		t.Errorf("manifest label app.kubernetes.io/part-of = %q, want %q "+
+			"(the health check keys on it; managed-by is rewritten by Helm 4 SSA)", got, "aicr")
+	}
+
+	check, err := os.ReadFile("checks/gcp-driver-installer/health-check.yaml")
+	if err != nil {
+		t.Fatalf("read health check: %v", err)
+	}
+	var test struct {
+		Spec struct {
+			Timeouts struct {
+				Assert string `yaml:"assert"`
+			} `yaml:"timeouts"`
+			Steps []struct {
+				Try []struct {
+					Assert *struct {
+						Resource struct {
+							Metadata struct {
+								Name   string            `yaml:"name"`
+								Labels map[string]string `yaml:"labels"`
+							} `yaml:"metadata"`
+						} `yaml:"resource"`
+					} `yaml:"assert"`
+				} `yaml:"try"`
+			} `yaml:"steps"`
+		} `yaml:"spec"`
+	}
+	if unmarshalErr := yaml.Unmarshal(check, &test); unmarshalErr != nil {
+		t.Fatalf("parse health check: %v", unmarshalErr)
+	}
+
+	// The assert budget must stay at or below 5m: the in-process executor
+	// clamps authored budgets to its 6m caller budget, and the one-minute
+	// margin keeps a never-true assert from pushing the expected-resources
+	// Job's aggregate run toward its 8m activeDeadline (the #2186 shape).
+	budget, parseErr := time.ParseDuration(test.Spec.Timeouts.Assert)
+	if parseErr != nil {
+		t.Fatalf("parse spec.timeouts.assert %q: %v", test.Spec.Timeouts.Assert, parseErr)
+	}
+	if budget <= 0 || budget > 5*time.Minute {
+		// Non-positive values are not a tighter budget: the in-process
+		// executor applies an authored duration only when positive and
+		// otherwise falls back to its 6m caller budget — so "0s" would
+		// silently bypass this cap.
+		t.Errorf("spec.timeouts.assert = %v, want 0 < budget <= 5m (margin below the 6m executor clamp)", budget)
+	}
+
+	// Scope the label contract to the installer DaemonSet's own assertion —
+	// a part-of label on some other asserted resource must not satisfy it.
+	asserted := map[string]string{}
+	found := false
+	for _, step := range test.Spec.Steps {
+		for _, tr := range step.Try {
+			if tr.Assert != nil && tr.Assert.Resource.Metadata.Name == "nvidia-driver-installer" {
+				found = true
+				for k, v := range tr.Assert.Resource.Metadata.Labels {
+					asserted[k] = v
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("health check has no assertion for the nvidia-driver-installer DaemonSet")
+	}
+	if got := asserted["app.kubernetes.io/part-of"]; got != "aicr" {
+		t.Errorf("installer assertion part-of = %q, want %q", got, "aicr")
+	}
+	if _, bad := asserted["app.kubernetes.io/managed-by"]; bad {
+		t.Errorf("installer assertion keys on managed-by — Helm 4 SSA rewrites " +
+			"that label to \"Helm\" at install, so it can never match a " +
+			"deployed bundle (the stall #2444 fixed)")
+	}
 }
