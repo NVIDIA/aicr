@@ -371,14 +371,24 @@ bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the 
 # files only after all five deployers succeed. Writing them in place meant a
 # failure partway left a mixed old/new baseline set, which is worse than no
 # refresh: the manifests would disagree with each other and with the bundler.
+#
+# The enumeration is deliberately not a pipeline. A shell pipeline exits with
+# the status of its LAST stage, so `find ... | sed | sort` reports success even
+# when find fails, and set -e never fires -- the target would commit a
+# truncated manifest. That fails open in the worst direction: paths missing
+# from a manifest read as additions, which this gate allows, so those paths
+# silently lose removal protection. pipefail would fix it but is not portable
+# to /bin/sh (dash lacks it), so each stage is a separate simple command that
+# set -e can catch.
 	@set -e; tmp=$$(mktemp -d); \
 	  trap 'rm -rf "$$tmp"' EXIT; \
 	  for d in helm argocd argocd-helm flux helmfile; do \
 	    GOFLAGS="-mod=readonly" go run ./cmd/aicr bundle \
 	      -r pkg/bundler/testdata/layout/recipe.yaml \
 	      --deployer "$$d" -o "$$tmp/bundle-$$d" >/dev/null; \
-	    ( cd "$$tmp/bundle-$$d" && find . -type f | sed 's|^\./||' | LC_ALL=C sort ) \
-	      > "$$tmp/$$d.txt"; \
+	    ( cd "$$tmp/bundle-$$d" && find . -type f > "$$tmp/raw-$$d.txt" ); \
+	    sed 's|^\./||' "$$tmp/raw-$$d.txt" > "$$tmp/rel-$$d.txt"; \
+	    LC_ALL=C sort "$$tmp/rel-$$d.txt" > "$$tmp/$$d.txt"; \
 	  done; \
 	  for d in helm argocd argocd-helm flux helmfile; do \
 	    cp "$$tmp/$$d.txt" pkg/bundler/testdata/layout/manifests/"$$d".txt; \
