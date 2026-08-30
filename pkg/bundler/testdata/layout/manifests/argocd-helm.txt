@@ -1,0 +1,12 @@
+001-cert-manager/values.yaml
+002-nfd/values.yaml
+Chart.yaml
+README.md
+checksums.txt
+static/cert-manager.yaml
+static/nfd.yaml
+templates/aicr-stack.yaml
+templates/cert-manager.yaml
+templates/nfd.yaml
+values.schema.json
+values.yaml

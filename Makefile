@@ -363,6 +363,21 @@ scan: ## Scans for vulnerabilities with grype
 api-diff: ## Checks pkg/client/v1 and transparent-alias target compatibility against the latest stable release
 	@bash tools/api-diff
 
+.PHONY: bundle-layout-baseline
+bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the frozen layout
+	@printf '%s\n' "Regenerating pkg/bundler/testdata/layout/manifests/ from the fixture recipe." \
+		"A removed path is a broken promise to integrator automation -- read the diff."
+	@set -e; tmp=$$(mktemp -d); \
+	  for d in helm argocd argocd-helm flux helmfile; do \
+	    GOFLAGS="-mod=readonly" go run ./cmd/aicr bundle \
+	      -r pkg/bundler/testdata/layout/recipe.yaml \
+	      --deployer "$$d" -o "$$tmp/$$d" >/dev/null; \
+	    ( cd "$$tmp/$$d" && find . -type f | sed 's|^\./||' | LC_ALL=C sort ) \
+	      > pkg/bundler/testdata/layout/manifests/"$$d".txt; \
+	  done; \
+	  rm -rf "$$tmp"
+	@echo "Bundle layout manifests updated."
+
 .PHONY: schemas
 schemas: ## Regenerates the committed artifact JSON Schemas from the Go types
 	@GOFLAGS="-mod=readonly" go run ./tools/schemagen

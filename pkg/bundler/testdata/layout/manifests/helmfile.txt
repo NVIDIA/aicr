@@ -1,0 +1,11 @@
+001-cert-manager/cluster-values.yaml
+001-cert-manager/install.sh
+001-cert-manager/upstream.env
+001-cert-manager/values.yaml
+002-nfd/cluster-values.yaml
+002-nfd/install.sh
+002-nfd/upstream.env
+002-nfd/values.yaml
+README.md
+checksums.txt
+helmfile.yaml
