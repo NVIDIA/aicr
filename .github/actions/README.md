@@ -24,6 +24,7 @@ executable bits or `./script.sh` invocation.
 - `helm_version` (required): Helm version from `load-versions`
 - `setup_envtest_version` (required): setup-envtest version from `load-versions`
 - `apidiff_version` (optional): apidiff version from `load-versions`; when set, installs apidiff and runs `make api-diff` (default: empty, which skips both steps)
+- `oasdiff_version` (**required**): oasdiff version from `load-versions`; installs oasdiff before `make test` and runs `make openapi-diff` after. Not optional, because `make test` runs `tools/openapi-diff_test.sh`, which fails in CI when oasdiff is absent rather than skipping — the REST contract gate cannot be silently unverified
 
 Callers that set `apidiff_version` must check out full history with
 `fetch-depth: 0` so `make api-diff` can resolve a reachable stable release tag.
@@ -385,6 +386,7 @@ jobs:
           helm_version: ${{ steps.versions.outputs.helm }}
           setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
+          oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
           coverage_report: 'true'
       - uses: ./.github/actions/go-lint
         with:
@@ -409,6 +411,7 @@ jobs:
           go_version: ${{ steps.versions.outputs.go }}
           helm_version: ${{ steps.versions.outputs.helm }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
+          oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
       - uses: ./.github/actions/go-build-release
         id: release
         with:

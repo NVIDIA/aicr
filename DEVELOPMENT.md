@@ -24,7 +24,7 @@ make lint           # Run linters
 make build          # Build binaries
 
 # 3. Before submitting PR
-make qualify        # Full check: test-coverage + lint + tuning-check + e2e + scan + license-check + api-diff
+make qualify        # Full check: test-coverage + lint + tuning-check + e2e + scan + license-check + api-diff + openapi-diff
 ```
 
 ## Prerequisites
@@ -44,6 +44,7 @@ make qualify        # Full check: test-coverage + lint + tuning-check + e2e + sc
 | Tool | Purpose |
 |------|---------|
 | golangci-lint | Go linting |
+| oasdiff | REST contract breaking-change detection (`make openapi-diff`) |
 | yamllint | YAML linting (requires Python/pip) |
 | addlicense | License header management |
 | grype | Vulnerability scanning |
@@ -262,7 +263,7 @@ Before submitting a PR, run everything:
 make qualify
 ```
 
-This runs: `test-coverage` → `lint` → `tuning-check` → `e2e` → `scan` → `license-check` → `api-diff`
+This runs: `test-coverage` → `lint` → `tuning-check` → `e2e` → `scan` → `license-check` → `api-diff` → `openapi-diff`
 
 ## Local Kubernetes Development
 
@@ -334,7 +335,7 @@ curl http://localhost:8080/health
 curl http://localhost:8080/ready
 
 # Generate a recipe
-curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=h100"
+curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=h100&intent=training"
 
 # View metrics
 curl http://localhost:9090/metrics
@@ -398,7 +399,7 @@ make server
 # In another terminal, test endpoints
 curl http://localhost:8080/health
 curl http://localhost:8080/ready
-curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks"
+curl "http://localhost:8080/v1/recipe?os=ubuntu&service=eks&accelerator=h100&intent=training"
 ```
 
 ### Tilt Architecture
@@ -465,7 +466,7 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 
 | Target | Description |
 |--------|-------------|
-| `make qualify` | Full qualification (test-coverage, lint, tuning-check, e2e, scan, license-check, api-diff) |
+| `make qualify` | Full qualification (test-coverage, lint, tuning-check, e2e, scan, license-check, api-diff, openapi-diff) |
 | `make test` | Unit tests with race detector and coverage |
 | `make test-coverage` | Tests with coverage threshold (from `.settings.yaml` `quality.coverage_threshold`) |
 | `make lint` | Lint Go and YAML; verify license headers, agents sync, docs filename/MDX gates, and chart-version pins |

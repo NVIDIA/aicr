@@ -201,8 +201,8 @@ A one-off `kubectl label node` is a repair, not a configuration. It does not
 survive node replacement or recycling, cluster autoscaling adding GPU nodes, or
 a nodegroup scaled from zero. Any GPU node added afterwards arrives unlabeled
 and silently runs without the DRA kubelet plugin, leaving the cluster
-**partially DRA-enabled** — worse than uniform failure, because it is
-intermittent and node-dependent.
+**partially DRA-enabled**. This is harder to detect than uniform failure,
+because it is intermittent and node-dependent.
 
 Use `kubectl label` only to repair nodes that already exist, and fix the node
 pool definition in the same change so replacements inherit it:
@@ -223,8 +223,7 @@ instead is:
 - the `nvidia-dra-driver-gpu-kubelet-plugin` DaemonSet at `DESIRED=0` **if no
   GPU node carries the label at all**
 
-Partial coverage is the more dangerous shape, and the one node replacement and
-autoscaling produce: labeled nodes work normally while the rest silently lack
+Partial coverage is the shape node replacement and autoscaling produce: labeled nodes work normally while the rest silently lack
 DRA. A split cluster is harder to notice than uniform failure, because the
 DaemonSet looks healthy and only some workloads misbehave.
 
@@ -235,7 +234,7 @@ afterwards.
 ### This applies to existing clusters, not just fresh installs
 
 The requirement is easy to read as a fresh-install prerequisite, but the
-upgrade path is where it bites hardest. A cluster whose bundle was generated
+upgrade path is especially easy to miss. A cluster whose bundle was generated
 before this selector existed has a working kubelet-plugin DaemonSet selecting
 on `nodeGroup=gpu-worker` alone. Regenerating the bundle and running `helm
 upgrade` adds the second selector, and working functionality **disappears** —

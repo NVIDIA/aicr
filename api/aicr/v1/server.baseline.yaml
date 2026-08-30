@@ -12,6 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
+# GENERATED SNAPSHOT -- DO NOT EDIT BY HAND.
+#
+# The frozen REST contract that `make openapi-diff` compares against (issue
+# #2112, ROADMAP section 1). Regenerate with `make openapi-baseline` only when
+# accepting the current spec as the new contract, and expect the resulting diff
+# to be read in review: moving this file is how a change becomes part of the
+# frozen surface.
+#
+# Additive changes do not require a refresh -- the gate passes and the baseline
+# may lag until the next release. A breaking change fails the gate and needs
+# either an entry in openapi-diff-exceptions.yaml (for a scheduled ADR-022
+# transition) or a deliberate refresh here.
 openapi: 3.1.0
 info:
   title: AICR API Server - AICR Recipe API
