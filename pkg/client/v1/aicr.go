@@ -159,6 +159,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/recipe/ocisource"
@@ -612,6 +613,47 @@ func (c *Client) ListCatalog(ctx context.Context, filter *Criteria) ([]CatalogEn
 // nil-checking, matching the existing lenient accessor behavior.
 func (c *Client) CriteriaRegistry() *CriteriaRegistry {
 	return c.criteriaRegistry(recipe.GetCriteriaRegistryFor)
+}
+
+// CriteriaFromSnapshot derives recipe criteria from a snapshot's measurements.
+//
+// This is the snapshot-to-recipe entry point. Without it the workflow could not
+// be completed through pkg/client/v1 alone: the CLI reached into
+// pkg/fingerprint and pkg/recipe to do this, and the integrator guide had to
+// document that escape hatch, which contradicts this package's promise to be
+// the whole integration surface (#2437, #2016).
+//
+// Criteria are parsed against this Client's provider-scoped registry, so an
+// external --data catalog that registers its own accelerator or service values
+// resolves them the same way the Client will when it resolves the recipe. A
+// package-level helper could not do that.
+//
+// The returned criteria are a starting point, not a verdict: callers layer
+// config and flag overrides on top before resolving. Every dimension the
+// snapshot could not determine is left as the "any" wildcard rather than
+// guessed.
+//
+// Returns ErrCodeInvalidRequest for a nil snapshot, since a caller asking for
+// criteria from nothing has a bug rather than an empty result.
+func (c *Client) CriteriaFromSnapshot(snap *Snapshot) (*Criteria, error) {
+	if snap == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"snapshot is required to derive criteria")
+	}
+
+	internal := snap.Unwrap()
+	if internal == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"snapshot could not be read")
+	}
+
+	// A snapshot with no measurements yields the all-"any" criteria rather than
+	// an error: that is a legitimate result for a cluster the collectors could
+	// not characterize, and the caller's own minimum-specificity check is what
+	// decides whether it is usable.
+	derived := fingerprint.FromMeasurements(internal.Measurements).
+		ToCriteria(c.CriteriaRegistry())
+	return WrapCriteria(derived), nil
 }
 
 // criteriaRegistry isolates the cache getter so the Close lifecycle can be

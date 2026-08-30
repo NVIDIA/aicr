@@ -81,6 +81,10 @@ func TestStability_RecipeResolution(t *testing.T) {
 	requireSignature[func(*aicr.Client, context.Context, string, string) (*aicr.RecipeResult, error)]((*aicr.Client).LoadRecipe)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.AgentConfig) (*aicr.Snapshot, error)]((*aicr.Client).CollectSnapshot)
 	requireSignature[func(*aicr.Client, context.Context, string, string) (*aicr.Snapshot, error)]((*aicr.Client).LoadSnapshot)
+	// Snapshot-to-criteria is the step that used to require pkg/fingerprint,
+	// so pinning it is what keeps the workflow completable through this package
+	// alone (#2437).
+	requireSignature[func(*aicr.Client, *aicr.Snapshot) (*aicr.Criteria, error)]((*aicr.Client).CriteriaFromSnapshot)
 	requireSignature[func(string) aicr.RecipeResolveOption](aicr.WithProfile)
 	requireSignature[func(string) aicr.RecipeResolveOption](aicr.WithAccountingMode)
 	requireSignature[func(...aicr.CriteriaDimension) aicr.RecipeResolveOption](aicr.WithSnapshotCriteriaRelaxation)
