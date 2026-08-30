@@ -1038,11 +1038,10 @@ Rekor are. The result is content-identical to the one-shot path.
 Client's catalog and returning the serialized Sigstore bundle.
 
 **`SignCatalog` rejects the signing modes it can tell `VerifyCatalog`
-will not verify** — with one documented exception, below. Verification
-checks against the public-good Sigstore root, requires a
-transparency-log entry, and accepts keyless GitHub OIDC certificates
-only, so these four `OIDCResolve` settings are rejected with
-`ErrCodeInvalidRequest` before any signing work runs:
+will not verify.** Verification checks against the public-good Sigstore
+root, requires a transparency-log entry, and accepts keyless GitHub OIDC
+certificates only, so these four `OIDCResolve` settings are rejected
+with `ErrCodeInvalidRequest` before any signing work runs:
 
 | Setting | Why it is rejected |
 |---|---|
@@ -1055,16 +1054,20 @@ The point of the guard is that you should not be able to sign a catalog
 successfully and then discover the documented counterpart refuses it;
 if private catalog signing is ever needed, both halves move together.
 
-**The exception: `SigningConfigPath` is not validated.** It passes
-through because the release path requires it, and a Sigstore signing
-config can itself name a private Fulcio or Rekor — so a signing config
-*can* still produce a catalog `VerifyCatalog` rejects. Treat the guard
-as covering the four settings above, not as a guarantee about every
-input. Each rejected setting exists *only* to depart from the
-public-good defaults, which is what makes rejecting it unambiguous; a
-signing config does not, and rejecting it would break the release.
-Validating the loaded config against the public-good endpoints is the
-principled fix if this exception ever bites.
+**`SigningConfigPath` is checked rather than rejected.** It passes
+through because the release path requires it — naming the public-good
+Rekor v2 target is its normal use — but a Sigstore signing config can
+itself name a private Fulcio or Rekor, which would have made the four
+rejections above bypassable by moving the same endpoints into a file. So
+the config is loaded and every Fulcio, Rekor, OIDC provider, and
+timestamp-authority URL in it must sit under the `sigstore.dev` domain;
+anything else fails with `ErrCodeInvalidRequest` naming the offending
+endpoint. The check is on the domain, not a list of exact URLs, because
+the public-good Rekor shards carry the year in their hostname
+(`log2025-1.rekor.sigstore.dev`) and an exact-URL allowlist would start
+rejecting legitimate signing at the next rotation. Matching is on a
+label boundary, so a lookalike domain such as `evilsigstore.dev` is
+rejected.
 
 Neither signing method imposes a facade timeout, unlike their
 verification counterparts: keyless OIDC can block on a human completing

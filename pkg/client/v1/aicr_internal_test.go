@@ -1999,8 +1999,14 @@ func TestRejectUnverifiableCatalogSigning(t *testing.T) {
 		// signing config, so neither may be swept up by the rejection.
 		{name: "zero value", resolve: OIDCResolveOptions{}},
 		{
-			name:    "signing config selects a public-good target",
-			resolve: OIDCResolveOptions{SigningConfigPath: "/etc/aicr/signing-config.json"},
+			// A real fixture, not a placeholder path: the guard now reads the
+			// file, so a nonexistent path would exercise the open error rather
+			// than the public-good check this case is named for. This is the
+			// config shape the release hook passes.
+			name: "signing config selects a public-good target",
+			resolve: OIDCResolveOptions{
+				SigningConfigPath: "../../bundler/attestation/testdata/signing_config_v2.json",
+			},
 		},
 		{
 			name:    "token sources are orthogonal to verifiability",

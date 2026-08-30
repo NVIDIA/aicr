@@ -265,5 +265,21 @@ func rejectUnverifiableCatalogSigning(resolve OIDCResolveOptions) error {
 			"catalog signing without a transparency-log entry is not supported: VerifyCatalog requires one",
 			map[string]any{settingKey: "OIDCResolve.DisableTLogUpload"})
 	}
+
+	// SigningConfigPath is not rejected outright -- it is the normal way to name
+	// the public-good Rekor v2 target, and the release hook depends on it -- but
+	// a signing config can itself name a private Fulcio or Rekor. Without this,
+	// the four rejections above were bypassable by putting the same endpoints in
+	// a file, and the catalog signed successfully while remaining unverifiable
+	// by its documented counterpart.
+	if resolve.SigningConfigPath != "" {
+		sc, err := bundleattest.LoadSigningConfigForValidation(resolve.SigningConfigPath)
+		if err != nil {
+			return err
+		}
+		if err := bundleattest.ValidateSigningConfigIsPublicGood(sc); err != nil {
+			return err
+		}
+	}
 	return nil
 }
