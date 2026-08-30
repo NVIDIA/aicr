@@ -52,6 +52,13 @@ type customJSON struct {
 //nolint:unparam // interface signature, not a real error path
 func (c customJSON) MarshalJSON() ([]byte, error) { return []byte(`"custom"`), nil }
 
+// customBytes is a byte slice whose marshaler emits an object, not base64 --
+// the shape the ordering fix exists to protect.
+type customBytes []byte
+
+//nolint:unparam // interface signature, not a real error path
+func (c customBytes) MarshalJSON() ([]byte, error) { return []byte(`{"a":1}`), nil }
+
 type sample struct {
 	embedded `json:",inline"`
 
@@ -314,6 +321,12 @@ func TestGenerateFailsClosed(t *testing.T) {
 	type withTime struct {
 		At time.Time `json:"at"`
 	}
+	type withRawMessage struct {
+		Raw json.RawMessage `json:"raw"`
+	}
+	type withCustomBytes struct {
+		Custom customBytes `json:"custom"`
+	}
 	type withMarshaler struct {
 		Custom customJSON `json:"custom"`
 	}
@@ -327,6 +340,12 @@ func TestGenerateFailsClosed(t *testing.T) {
 		// {"type":"object"} while the encoder writes an RFC 3339 string --
 		// a schema that rejects every document it describes.
 		{"time.Time", reflect.TypeOf(withTime{}), "defines its own JSON encoding"},
+		// Byte slices whose marshaler emits arbitrary JSON. The base64 branch
+		// runs after the marshaler check for exactly these: classifying them
+		// as byte slices first described `[1,2]` and `{"a":1}` as base64
+		// strings.
+		{"json.RawMessage", reflect.TypeOf(withRawMessage{}), "defines its own JSON encoding"},
+		{"named byte slice with marshaler", reflect.TypeOf(withCustomBytes{}), "defines its own JSON encoding"},
 		{"custom marshaler", reflect.TypeOf(withMarshaler{}), "defines its own JSON encoding"},
 		{"channel", reflect.TypeOf(withChannel{}), "unsupported kind"},
 		{"func", reflect.TypeOf(withFunc{}), "unsupported kind"},

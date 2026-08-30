@@ -187,14 +187,6 @@ func describe(target reflect.Type, opts Options, seen map[reflect.Type]bool) (*S
 		target = target.Elem()
 	}
 
-	// encoding/json writes any byte slice as a base64 string, not an array of
-	// numbers -- including a defined type such as `type Digest []byte`, which
-	// an exact []byte comparison misses. This is the one custom form whose
-	// output is fully defined, so it is described rather than rejected.
-	if target.Kind() == reflect.Slice && target.Elem().Kind() == reflect.Uint8 {
-		return &Schema{Type: typeString, ContentEncoding: "base64"}, nil
-	}
-
 	// A type with its own marshaler emits whatever it likes, and reflecting
 	// over its Go fields describes something else entirely: time.Time has no
 	// exported fields, so it would be published as an empty object while the
@@ -207,6 +199,20 @@ func describe(target reflect.Type, opts Options, seen map[reflect.Type]bool) (*S
 			"reflection over its fields would describe a different shape than it "+
 			"emits. Add explicit support in pkg/schema before using it in a "+
 			"published artifact", typeKey(target))
+	}
+
+	// Reached only after the marshaler check above, and the order matters:
+	// json.RawMessage and any named []byte carrying a MarshalJSON are byte
+	// slices whose wire form is arbitrary JSON, not base64. Classifying them
+	// here first described `[1,2]` and `{"a":1}` as base64 strings.
+	//
+	// A plain byte slice has no marshaler, so it still lands here: it is the
+	// one custom encoding whose output is fully defined, and encoding/json
+	// writes it as a base64 string rather than an array of numbers --
+	// including a defined type such as `type Digest []byte`, which an exact
+	// []byte comparison would miss.
+	if target.Kind() == reflect.Slice && target.Elem().Kind() == reflect.Uint8 {
+		return &Schema{Type: typeString, ContentEncoding: "base64"}, nil
 	}
 
 	if enum, ok := opts.Enums[typeKey(target)]; ok && target.Kind() == reflect.String {
