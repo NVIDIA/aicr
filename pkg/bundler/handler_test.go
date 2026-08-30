@@ -184,9 +184,11 @@ func TestParseBundleConfig_DRAEvictionNodeLabel(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:   "absent uses default",
+			// Opt-in (issue #2469): an omitted parameter must leave the label
+			// unset so the bundler injects neither half of the contract.
+			name:   "absent opts out",
 			target: "/v1/bundle",
-			want:   config.DefaultDRAEvictionNodeLabel(),
+			want:   config.NodeLabel{},
 		},
 		{
 			name:   "custom label",

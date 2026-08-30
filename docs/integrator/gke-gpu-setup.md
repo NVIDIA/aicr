@@ -380,8 +380,8 @@ skips them); the bundle takes over provisioning for new and rebooted nodes.
 
 ## DRA kubelet plugin node labels are not required on GKE
 
-DRA eviction coordination is opt-in, and it does nothing on any supported GKE
-recipe. Every GKE overlay is COS, and both the default and
+DRA eviction coordination is opt-in, and by default it does nothing on
+supported GKE recipes. Every GKE overlay is COS, and both the default and
 `gpuStack=bundle-installer` profiles keep GPU Operator's `driver.enabled=false`
 — `bundle-installer` provisions the driver through a separate
 `gcp-driver-installer` DaemonSet, not a GPU Operator driver pod. With no GPU
@@ -391,10 +391,19 @@ So bundles generated for GKE add no eviction node selector, and the DRA kubelet
 plugin runs on every accelerated node with no extra label. Nothing in the node
 pool commands below needs `nvidia.com/dra-kubelet-plugin`.
 
-If you generate a bundle with `aicr bundle --dra-eviction-node-label` anyway,
-AICR renders the selector and every GPU node must then carry that exact label,
-set in the node pool definition. See
-[DRA Driver Upgrade Eviction](../user/cli-reference.md#dra-driver-upgrade-eviction).
+If you opt in anyway, AICR renders the selector and every GPU node must carry
+the **same `key=value` pair** you passed, set in the node pool definition:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
+  --output bundle
+
+gcloud container node-pools create <pool> --cluster <cluster> \
+  --node-labels="nvidia.com/dra-kubelet-plugin=true"
+```
+
+See [DRA Driver Upgrade Eviction](../user/cli-reference.md#dra-driver-upgrade-eviction).
 This applies to existing clusters too — adding the selector during an
 upgrade removes a plugin that was previously working.
 See [Prepare DRA nodes when opting in to eviction coordination](../user/bundling.md#prepare-dra-nodes-when-opting-in-to-eviction-coordination).

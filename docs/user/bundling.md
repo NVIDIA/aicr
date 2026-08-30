@@ -251,6 +251,38 @@ Generate with `--dra-eviction-node-label key=value` to opt in. The rest of this
 section applies only then. The same applies to the corresponding `-ocp`
 components.
 
+### Choosing whether to opt in
+
+The label is how GPU Operator's Driver Manager finds the plugin: it deschedules
+the plugin by rewriting the label's value and restores it afterwards, so the
+plugin's `nodeSelector` has to match the label for the mechanism to work at all.
+That is what makes it a placement requirement, and why an unlabeled node ends up
+with no plugin rather than with an uncoordinated one.
+
+| | Not opted in (default) | Opted in |
+|---|---|---|
+| Node labeling | none needed | every GPU node, in the node pool definition |
+| Plugin placement | every accelerated node | only nodes carrying the label |
+| Driver restart | plugin is not descheduled first | plugin is descheduled and restored |
+| If a node is missed | n/a | that node silently runs without DRA |
+
+Opt in when GPU Operator manages the driver (`driver.enabled=true`) and you can
+guarantee the label is set at provisioning time for every GPU node, including
+ones added later by autoscaling or node replacement. Otherwise the default is
+the safer choice: a plugin that always runs, with a documented risk at driver
+restarts, beats a plugin that silently does not run on some nodes.
+
+There is nothing to opt in to where the driver is provider-installed
+(`driver.enabled=false` — AKS `azure-managed`, GKE COS, OKE). GPU Operator
+deploys no driver pod and therefore no Driver Manager, so no restart can occur
+under the plugin and no warning is emitted.
+
+Also note the mechanism is best-effort under `k8s-driver-manager` v0.12: the
+configured label is paused in the same batch as other GPU operands and no wait
+covers the standalone DRA kubelet plugin, so ordering against DRA claim holders
+and completion of plugin teardown are not guaranteed. See
+[NVIDIA/k8s-driver-manager#250](https://github.com/NVIDIA/k8s-driver-manager/issues/250).
+
 > **Opt-in requirement:** label every GPU node that must run the DRA kubelet
 > plugin *before* applying the bundle. Applying it first can reduce the
 > DaemonSet to zero eligible nodes, interrupting ComputeDomain/IMEX and any
@@ -271,7 +303,9 @@ and silently runs without the DRA kubelet plugin, leaving the cluster
 because it is intermittent and node-dependent.
 
 Use `kubectl label` only to repair nodes that already exist, and fix the node
-pool definition in the same change so replacements inherit it:
+pool definition in the same change so replacements inherit it. Substitute the
+same `key=value` pair you passed to `--dra-eviction-node-label` — the examples
+below use the documented default:
 
 ```bash
 kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true

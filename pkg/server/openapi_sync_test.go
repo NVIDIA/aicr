@@ -20,7 +20,6 @@ import (
 	"sort"
 	"testing"
 
-	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"gopkg.in/yaml.v3"
@@ -122,8 +121,10 @@ func TestOpenAPIDRAEvictionNodeLabelContract(t *testing.T) {
 		t.Errorf("component parameter name = %v, want dra-eviction-node-label", got)
 	}
 	schema := openAPIObjectAt(t, parameter, "schema")
-	if got, want := schema["default"], bundlerconfig.DefaultDRAEvictionNodeLabel().String(); got != want {
-		t.Errorf("component parameter default = %v, want %q", got, want)
+	// The eviction contract is opt-in (issue #2469): the parameter must carry
+	// no default, so an omitted parameter injects neither half.
+	if got, ok := schema["default"]; ok {
+		t.Errorf("component parameter default = %v, want none (opt-in)", got)
 	}
 }
 

@@ -866,3 +866,82 @@ func TestRejectDRAEvictionDynamicPaths_AllowedWhenNotOptedIn(t *testing.T) {
 		t.Error("rejectDRAEvictionDynamicPaths() = nil, want error when opted in")
 	}
 }
+
+// TestWarnDRAEvictionNotConfigured_OCPAndMixedOperators covers the two shapes
+// the single-operator table cannot: the -ocp component pair, and a recipe
+// carrying two GPU Operator components where only one manages the driver. The
+// warning is an OR across operators, because one operator-managed driver is
+// enough to make a restart possible.
+func TestWarnDRAEvictionNotConfigured_OCPAndMixedOperators(t *testing.T) {
+	tests := []struct {
+		name        string
+		components  map[string]map[string]any
+		refs        []recipe.ComponentRef
+		wantWarning bool
+	}{
+		{
+			name: "ocp pair with operator-managed driver warns",
+			components: map[string]map[string]any{
+				"nvidia-dra-driver-gpu-ocp": {},
+				"gpu-operator-ocp":          {"driver": map[string]any{"enabled": true}},
+			},
+			refs: []recipe.ComponentRef{
+				{Name: "gpu-operator-ocp"}, {Name: "nvidia-dra-driver-gpu-ocp"},
+			},
+			wantWarning: true,
+		},
+		{
+			name: "ocp pair with provider-installed driver stays quiet",
+			components: map[string]map[string]any{
+				"nvidia-dra-driver-gpu-ocp": {},
+				"gpu-operator-ocp":          {"driver": map[string]any{"enabled": false}},
+			},
+			refs: []recipe.ComponentRef{
+				{Name: "gpu-operator-ocp"}, {Name: "nvidia-dra-driver-gpu-ocp"},
+			},
+			wantWarning: false,
+		},
+		{
+			name: "one of two operators manages the driver warns",
+			components: map[string]map[string]any{
+				draComponentName:         {},
+				gpuOperatorComponentName: {"driver": map[string]any{"enabled": false}},
+				"gpu-operator-ocp":       {"driver": map[string]any{"enabled": true}},
+			},
+			refs: []recipe.ComponentRef{
+				{Name: gpuOperatorComponentName}, {Name: "gpu-operator-ocp"}, {Name: draComponentName},
+			},
+			wantWarning: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := New()
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if err := b.injectDRAEvictionLabel(tt.components, &recipe.RecipeResult{ComponentRefs: tt.refs}); err != nil {
+				t.Fatalf("injectDRAEvictionLabel() error = %v", err)
+			}
+
+			var optOut, placement bool
+			for _, w := range b.warnings {
+				if strings.Contains(w, "did not configure automatic eviction") {
+					optOut = true
+				}
+				if strings.Contains(w, "schedules its kubelet plugin only on nodes labeled") {
+					placement = true
+				}
+			}
+			if optOut != tt.wantWarning {
+				t.Errorf("opt-out warning = %v, want %v; warnings = %v", optOut, tt.wantWarning, b.warnings)
+			}
+			// The placement warning belongs to the opt-in path only; it must
+			// never accompany the opt-out warning.
+			if placement {
+				t.Errorf("placement warning emitted without opt-in; warnings = %v", b.warnings)
+			}
+		})
+	}
+}

@@ -1096,12 +1096,14 @@ components:
       in: query
       required: false
       description: >
-        Single key=value node label coordinating NVIDIA DRA kubelet-plugin
-        eviction with GPU Operator driver upgrades. Applied only when both
-        components are enabled.
+        Opt in to NVIDIA DRA kubelet-plugin eviction coordination with GPU
+        Operator driver upgrades, as a single key=value node label. Omit the
+        parameter to inject nothing: the kubelet plugin then needs no extra
+        node label. When set, and both components are enabled, every GPU node
+        must carry this label or the kubelet-plugin DaemonSet reaches
+        DESIRED=0.
       schema:
         type: string
-        default: nvidia.com/dra-kubelet-plugin=true
       example: "example.com/dra-ready=enabled"
     BundleDeployer:
       name: deployer

@@ -598,9 +598,23 @@ az aks nodepool add \
   --node-count 1
 ```
 
-Add `--labels nvidia.com/dra-kubelet-plugin=true` to this pool only if you also
-generate bundles with `aicr bundle --dra-eviction-node-label` — see
-[Label GPU nodes for the DRA kubelet plugin (opt-in only)](#label-gpu-nodes-for-the-dra-kubelet-plugin-opt-in-only).
+Add the eviction label to this pool only if you also opt in at bundle time. The
+node label and the flag value must be the **same `key=value` pair** — the flag
+selects the convention, and AICR renders exactly what you pass:
+
+```shell
+# opt in at bundle time ...
+aicr bundle --recipe recipe.yaml \
+  --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
+  --output bundle
+
+# ... and provision the matching pair on the pool
+az aks nodepool update \
+  --cluster-name <cluster> --resource-group <rg> --name gpupool \
+  --labels nvidia.com/dra-kubelet-plugin=true
+```
+
+See [Label GPU nodes for the DRA kubelet plugin (opt-in only)](#label-gpu-nodes-for-the-dra-kubelet-plugin-opt-in-only).
 
 Then select the mode at recipe generation time with the `gpuStack`
 configuration profile — one flag flips every ownership path together:
