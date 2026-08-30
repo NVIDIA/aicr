@@ -20,7 +20,10 @@
       }
     },
     "spec": {
-      "type": "object",
+      "type": [
+        "object",
+        "null"
+      ],
       "properties": {
         "accelerator": {
           "type": "string",

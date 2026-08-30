@@ -112,6 +112,42 @@ func TestGenerateMatchesEncodingJSON(t *testing.T) {
 	}
 }
 
+// TestGenerateMatchesEncodingJSONForZeroValue is the nil-side companion to the
+// anchor test.
+//
+// The populated-value comparison cannot see nullability: every pointer and
+// slice is set, so nothing is written as null. A zero value is where the
+// encoder emits "field":null, and where a schema describing a non-null type
+// rejects the encoder's own output.
+func TestGenerateMatchesEncodingJSONForZeroValue(t *testing.T) {
+	raw, err := json.Marshal(sample{})
+	if err != nil {
+		t.Fatalf("marshal zero sample: %v", err)
+	}
+	var encoded map[string]any
+	if unmarshalErr := json.Unmarshal(raw, &encoded); unmarshalErr != nil {
+		t.Fatalf("unmarshal zero sample: %v", unmarshalErr)
+	}
+
+	got, err := Generate(reflect.TypeOf(sample{}), Options{Title: "Sample"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	for key, value := range encoded {
+		node, declared := got.Properties[key]
+		if !declared {
+			t.Errorf("encoder emits %q on a zero value but the schema omits it", key)
+			continue
+		}
+		if value == nil && node.Type != "" && !node.Nullable {
+			t.Errorf("encoder writes %q as null on a zero value, but the schema "+
+				"declares type %q without null; the schema rejects the encoder's "+
+				"own output", key, node.Type)
+		}
+	}
+}
+
 // TestGenerateEmbeddedIsFlattened pins the case that would silently break every
 // snapshot: Snapshot embeds header.Header, so kind and apiVersion must appear at
 // the top level rather than under a nested object.
@@ -145,7 +181,12 @@ func TestGenerateRequiredMatchesAlwaysEmittedFields(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 
-	want := []string{"count", "flag", "nested", "nestedList", "open", "required", "slice", "Untagged"}
+	// "pointer" belongs here: without omitempty the encoder writes
+	// "pointer":null rather than omitting the key. An earlier version of this
+	// test asserted the opposite, which is how the schema came to describe a
+	// non-null string for a field the encoder can emit as null.
+	want := []string{"count", "flag", "nested", "nestedList", "open", "pointer",
+		"required", "slice", "Untagged"}
 	sort.Strings(want)
 
 	gotRequired := append([]string(nil), got.Required...)
@@ -155,7 +196,7 @@ func TestGenerateRequiredMatchesAlwaysEmittedFields(t *testing.T) {
 		t.Errorf("required = %v, want %v", gotRequired, want)
 	}
 
-	for _, notRequired := range []string{"optional", "pointer", "kind", "apiVersion", "metadata"} {
+	for _, notRequired := range []string{"optional", "kind", "apiVersion", "metadata"} {
 		for _, req := range got.Required {
 			if req == notRequired {
 				t.Errorf("%q is required, but the encoder omits it (omitempty or "+
@@ -417,5 +458,35 @@ func TestGenerateAuthoredArtifactsDeclareNothingRequired(t *testing.T) {
 		t.Errorf("an authored artifact declared %v required; a schema that "+
 			"demands fields real overlays omit rejects the project's own catalog",
 			authored.Required)
+	}
+}
+
+// TestGenerateDescribesDefinedByteSlices covers a named type whose underlying
+// type is []byte.
+//
+// encoding/json base64-encodes it exactly like []byte, but an exact type
+// comparison misses it and the array branch would describe a list of integers.
+func TestGenerateDescribesDefinedByteSlices(t *testing.T) {
+	type Digest []byte
+	type holder struct {
+		D Digest `json:"d,omitempty"`
+	}
+
+	got, err := Generate(reflect.TypeOf(holder{}), Options{Title: "Holder"})
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	node := got.Properties["d"]
+	if node.Type != typeString || node.ContentEncoding != "base64" {
+		t.Errorf("defined byte slice described as type=%q contentEncoding=%q, "+
+			"want string/base64", node.Type, node.ContentEncoding)
+	}
+
+	encoded, err := json.Marshal(holder{D: Digest("hi")})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"d":"aGk="`) {
+		t.Errorf("encoder wrote %s; the schema assumes a base64 string", encoded)
 	}
 }

@@ -227,7 +227,10 @@
               "type": "string"
             },
             "values": {
-              "type": "object",
+              "type": [
+                "object",
+                "null"
+              ],
               "propertyNames": {
                 "type": "string"
               }

@@ -168,11 +168,52 @@ func TestSchemasDescribeRealArtifacts(t *testing.T) {
 
 // schemaNode is the subset of the generated document this test reads.
 type schemaNode struct {
-	Type       string                 `json:"type"`
+	Type       string                 `json:"-"`
+	Nullable   bool                   `json:"-"`
 	Properties map[string]*schemaNode `json:"properties"`
 	Required   []string               `json:"required"`
 	Items      *schemaNode            `json:"items"`
 	Enum       []string               `json:"enum"`
+}
+
+// UnmarshalJSON reads `type` in either form the dialect allows: a bare string,
+// or an array pairing the type with "null".
+//
+// Reading it as a string alone silently left Type empty for every nullable
+// field, which matchesType treats as "anything goes" -- the checks below would
+// have quietly stopped constraining exactly the fields this round made
+// nullable.
+func (n *schemaNode) UnmarshalJSON(data []byte) error {
+	type alias schemaNode
+	var raw struct {
+		alias
+		Type json.RawMessage `json:"type"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*n = schemaNode(raw.alias)
+
+	if len(raw.Type) == 0 {
+		return nil
+	}
+	var single string
+	if err := json.Unmarshal(raw.Type, &single); err == nil {
+		n.Type = single
+		return nil
+	}
+	var many []string
+	if err := json.Unmarshal(raw.Type, &many); err != nil {
+		return fmt.Errorf("type is neither a string nor an array: %s", raw.Type)
+	}
+	for _, entry := range many {
+		if entry == "null" {
+			n.Nullable = true
+			continue
+		}
+		n.Type = entry
+	}
+	return nil
 }
 
 func loadSchema(t *testing.T, kind string) *schemaNode {
@@ -231,9 +272,15 @@ func checkDocument(t *testing.T, file string, document map[string]any, node *sch
 func checkValue(t *testing.T, path string, value any, node *schemaNode) {
 	t.Helper()
 
-	// A nil value is an explicitly empty YAML key; the encoder treats it as
-	// unset, so there is nothing to constrain.
+	// An explicitly empty YAML key is present with a nil value. Waving it
+	// through meant a document could carry null where the published schema
+	// permits only a string, and this gate would still call it valid.
 	if value == nil {
+		if node.Type != "" && !node.Nullable {
+			t.Errorf("%s: document holds null but the schema declares type %q "+
+				"without null; the published schema would reject this artifact",
+				path, node.Type)
+		}
 		return
 	}
 

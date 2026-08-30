@@ -50,7 +50,6 @@ import (
 var (
 	marshalerType     = reflect.TypeOf((*json.Marshaler)(nil)).Elem()
 	textMarshalerType = reflect.TypeOf((*encoding.TextMarshaler)(nil)).Elem()
-	byteSliceType     = reflect.TypeOf([]byte(nil))
 )
 
 // Draft is the JSON Schema dialect the generated documents declare.
@@ -75,7 +74,7 @@ type Schema struct {
 	ID          string             `json:"$id,omitempty"`
 	Title       string             `json:"title,omitempty"`
 	Description string             `json:"description,omitempty"`
-	Type        string             `json:"type,omitempty"`
+	Type        string             `json:"-"`
 	Enum        []string           `json:"enum,omitempty"`
 	Properties  map[string]*Schema `json:"properties,omitempty"`
 	Required    []string           `json:"required,omitempty"`
@@ -92,6 +91,48 @@ type Schema struct {
 
 	// PropertyNames constrains map keys; nil for objects with fixed fields.
 	PropertyNames *Schema `json:"propertyNames,omitempty"`
+
+	// Nullable records that the encoder can write JSON null here, which
+	// happens for any nil-able Go type whose tag lacks omitempty.
+	Nullable bool `json:"-"`
+}
+
+// MarshalJSON writes the node, expressing nullability the JSON Schema 2020-12
+// way: as a type array rather than the OpenAPI 3.0 `nullable` keyword, which
+// this dialect does not define.
+//
+// Field order is explicit rather than inherited from struct order, because
+// these documents are committed and compared byte-for-byte.
+func (s Schema) MarshalJSON() ([]byte, error) {
+	out := struct {
+		Schema               string             `json:"$schema,omitempty"`
+		ID                   string             `json:"$id,omitempty"`
+		Title                string             `json:"title,omitempty"`
+		Description          string             `json:"description,omitempty"`
+		Type                 any                `json:"type,omitempty"`
+		Enum                 []string           `json:"enum,omitempty"`
+		Properties           map[string]*Schema `json:"properties,omitempty"`
+		Required             []string           `json:"required,omitempty"`
+		Items                *Schema            `json:"items,omitempty"`
+		AdditionalProperties *bool              `json:"additionalProperties,omitempty"`
+		PropertyNames        *Schema            `json:"propertyNames,omitempty"`
+		ContentEncoding      string             `json:"contentEncoding,omitempty"`
+	}{
+		Schema: s.Schema, ID: s.ID, Title: s.Title, Description: s.Description,
+		Enum: s.Enum, Properties: s.Properties, Required: s.Required,
+		Items: s.Items, AdditionalProperties: s.AdditionalProperties,
+		PropertyNames: s.PropertyNames, ContentEncoding: s.ContentEncoding,
+	}
+
+	switch {
+	case s.Type == "":
+		// An open value: no constraint, so null is already permitted.
+	case s.Nullable:
+		out.Type = []string{s.Type, "null"}
+	default:
+		out.Type = s.Type
+	}
+	return json.Marshal(out)
 }
 
 // Options controls generation for one artifact kind.
@@ -146,10 +187,11 @@ func describe(target reflect.Type, opts Options, seen map[reflect.Type]bool) (*S
 		target = target.Elem()
 	}
 
-	// encoding/json writes a []byte as a base64 string, not an array of
-	// numbers. This is the one custom form whose output is fully defined, so it
-	// is described rather than rejected.
-	if target == byteSliceType {
+	// encoding/json writes any byte slice as a base64 string, not an array of
+	// numbers -- including a defined type such as `type Digest []byte`, which
+	// an exact []byte comparison misses. This is the one custom form whose
+	// output is fully defined, so it is described rather than rejected.
+	if target.Kind() == reflect.Slice && target.Elem().Kind() == reflect.Uint8 {
 		return &Schema{Type: typeString, ContentEncoding: "base64"}, nil
 	}
 
@@ -291,17 +333,40 @@ func collectFields(target reflect.Type, opts Options, seen map[reflect.Type]bool
 			return fmt.Errorf("field %s.%s: %w", target.Name(), field.Name, err)
 		}
 		child.Description = strings.TrimSpace(child.Description)
+
+		// Without omitempty the encoder always writes the key -- and writes
+		// null when the value is a nil pointer, slice, map or interface. The
+		// earlier shape excluded pointers from required and described them as
+		// non-null, so a document carrying the null the encoder itself produces
+		// failed against its own schema.
+		writesNull := !omitempty && isNilable(field.Type)
+		if writesNull {
+			child.Nullable = true
+		}
 		node.Properties[name] = child
 
-		// A field is required when it has no omitempty and is not a pointer:
-		// that is exactly the set the encoder always writes. Authored artifacts
-		// declare nothing required, because what a writer emits says nothing
-		// about what an author must supply.
-		if !opts.Authored && !omitempty && field.Type.Kind() != reflect.Pointer {
+		// Required is exactly the set the encoder always writes, null included.
+		// Authored artifacts declare nothing required, because what a writer
+		// emits says nothing about what an author must supply.
+		if !opts.Authored && !omitempty {
 			node.Required = append(node.Required, name)
 		}
 	}
 	return nil
+}
+
+// isNilable reports whether a type can hold nil, and therefore whether the
+// encoder can write JSON null for it.
+func isNilable(target reflect.Type) bool {
+	// Only the nil-able kinds are listed; everything else is a value type that
+	// the encoder never writes as null.
+	//nolint:exhaustive // default arm covers every non-nil-able kind
+	switch target.Kind() {
+	case reflect.Pointer, reflect.Slice, reflect.Map, reflect.Interface:
+		return true
+	default:
+		return false
+	}
 }
 
 // hasCustomMarshaler reports whether a type controls its own JSON encoding.

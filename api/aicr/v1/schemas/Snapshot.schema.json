@@ -157,7 +157,10 @@
       "type": "string"
     },
     "measurements": {
-      "type": "array",
+      "type": [
+        "array",
+        "null"
+      ],
       "items": {
         "type": "object",
         "properties": {
