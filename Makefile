@@ -367,15 +367,22 @@ api-diff: ## Checks pkg/client/v1 and transparent-alias target compatibility aga
 bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the frozen layout
 	@printf '%s\n' "Regenerating pkg/bundler/testdata/layout/manifests/ from the fixture recipe." \
 		"A removed path is a broken promise to integrator automation -- read the diff."
+# Every manifest is rendered under $$tmp first and copied over the committed
+# files only after all five deployers succeed. Writing them in place meant a
+# failure partway left a mixed old/new baseline set, which is worse than no
+# refresh: the manifests would disagree with each other and with the bundler.
 	@set -e; tmp=$$(mktemp -d); \
+	  trap 'rm -rf "$$tmp"' EXIT; \
 	  for d in helm argocd argocd-helm flux helmfile; do \
 	    GOFLAGS="-mod=readonly" go run ./cmd/aicr bundle \
 	      -r pkg/bundler/testdata/layout/recipe.yaml \
-	      --deployer "$$d" -o "$$tmp/$$d" >/dev/null; \
-	    ( cd "$$tmp/$$d" && find . -type f | sed 's|^\./||' | LC_ALL=C sort ) \
-	      > pkg/bundler/testdata/layout/manifests/"$$d".txt; \
+	      --deployer "$$d" -o "$$tmp/bundle-$$d" >/dev/null; \
+	    ( cd "$$tmp/bundle-$$d" && find . -type f | sed 's|^\./||' | LC_ALL=C sort ) \
+	      > "$$tmp/$$d.txt"; \
 	  done; \
-	  rm -rf "$$tmp"
+	  for d in helm argocd argocd-helm flux helmfile; do \
+	    cp "$$tmp/$$d.txt" pkg/bundler/testdata/layout/manifests/"$$d".txt; \
+	  done
 	@echo "Bundle layout manifests updated."
 
 .PHONY: schemas

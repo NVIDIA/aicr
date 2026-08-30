@@ -59,10 +59,23 @@ helm/                          argocd/                     flux/
   README.md
 ```
 
-`helmfile` matches the `helm` layout and adds `helmfile.yaml` plus one
-`level-N.yaml` per dependency depth. `argocd-helm` renders a Helm chart at the
-root — `Chart.yaml`, `values.yaml`, `values.schema.json` — with one template
-per component.
+`helmfile` shares Helm's per-component files but not its root: it writes
+`helmfile.yaml` instead of `deploy.sh`, and does not emit `recipe.yaml`. A
+recipe with dependencies also produces one `level-N.yaml` per dependency depth,
+which is derived from the recipe rather than fixed by the layout.
+
+```text
+helmfile/
+  001-cert-manager/            same four files as helm
+  002-nfd/
+  helmfile.yaml
+  level-N.yaml                 one per dependency depth; absent when flat
+  checksums.txt
+  README.md
+```
+
+`argocd-helm` renders a Helm chart at the root — `Chart.yaml`, `values.yaml`,
+`values.schema.json` — with one template per component.
 
 Two kinds of name appear in these trees, and only one is a promise:
 
