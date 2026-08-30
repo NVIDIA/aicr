@@ -61,7 +61,17 @@ func TestStability_Client(t *testing.T) {
 	requireSignature[func(*aicr.Client) error]((*aicr.Client).Close)
 	requireSignature[func(*aicr.Client, context.Context) error]((*aicr.Client).LoadCatalog)
 	requireSignature[func(*aicr.Client) *aicr.CriteriaRegistry]((*aicr.Client).CriteriaRegistry)
+
+	// Client must stay comparable. Adding an unexported func, map, or slice
+	// field silently takes that away, which api-diff reports as "old is
+	// comparable, new is not" — a breaking change to a frozen v1 type, caught
+	// here at compile time instead of at the release gate. Any injectable
+	// dependency therefore has to be held behind a pointer.
+	requireComparable[aicr.Client]()
 }
+
+// requireComparable fails to compile when T stops satisfying comparable.
+func requireComparable[T comparable]() {}
 
 // TestStability_RecipeResolution pins the resolution surface: the
 // RecipeRequest input shape and the three Resolve* entry points.

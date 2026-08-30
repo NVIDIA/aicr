@@ -392,13 +392,10 @@ func ExampleClient_LoadRecipe() {
 // snapshotter Job, for callers that do not already have a snapshot file.
 // Requires a reachable cluster and RBAC to create the Job.
 //
-// # Image, JobName, and ServiceAccountName are required here
-//
-// DeployAndCollect validates only Namespace; the rest are copied straight into
-// the Job and RBAC objects. The CLI supplies defaults from its own flags,
-// which the facade does not share — so leaving these empty produces an empty
-// ServiceAccount name and an empty container image, and the API server rejects
-// the ServiceAccount before the Job is ever created. Set all three.
+// Namespace is the only field that must be set. Image, JobName, and
+// ServiceAccountName are defaulted when empty — the image to the tag matching
+// the Client's WithVersion. This example pins the image anyway, which is what an
+// air-gapped or version-skew-sensitive deployment wants.
 func ExampleClient_CollectSnapshot() {
 	ctx := context.Background()
 

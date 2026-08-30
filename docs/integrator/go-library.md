@@ -248,11 +248,13 @@ snapCtx, cancelSnap := context.WithTimeout(context.Background(), 10*time.Minute)
 defer cancelSnap()
 snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	Kubeconfig: "/path/to/target-kubeconfig",
-	// Namespace, Image, JobName, and ServiceAccountName are all required on
-	// the SDK path. Only Namespace is validated; the rest are copied straight
-	// into the Job and RBAC objects, so an empty value becomes an empty
-	// metadata.name or container image that the API server rejects. The CLI
-	// defaults them from its own flags, which the facade does not share.
+	// Namespace is the only required field: the Job, its RBAC, and the result
+	// ConfigMap are created there, and an empty value is rejected with
+	// ErrCodeInvalidRequest before any cluster access. Image, JobName, and
+	// ServiceAccountName are defaulted when empty — the names to "aicr" and
+	// the image to the tag matching the Client's WithVersion. They are set
+	// explicitly here because pinning the agent generation is what a
+	// version-skew-sensitive or air-gapped deployment wants.
 	Namespace:          "aicr-snapshot",
 	Image:              "ghcr.io/nvidia/aicr:v0.19.0",
 	JobName:            "aicr-snapshot",
