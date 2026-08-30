@@ -1645,7 +1645,7 @@ aicr bundle --recipe recipe.yaml \
   --output bundle
 ```
 
-**What you give up by not opting in.** The plugin is not descheduled before a driver container restart. On a driver upgrade the module unload can fail with `failed to uninstall nvidia driver components`, leaving the replacement uninstalled and the old driver possibly partially torn down. On a restart with unchanged driver configuration the stale driver rootfs is unmounted underneath the running plugin, and `NodePrepareResources` later fails to build CDI specs — with no error at restart time. `aicr bundle` warns about this when GPU Operator manages the driver.
+**What you give up by not opting in.** The plugin is not descheduled before a driver container restart. On a driver upgrade the module unload can fail with `failed to uninstall nvidia driver components`, leaving the replacement uninstalled and the old driver possibly partially torn down. On a restart with unchanged driver configuration the stale driver rootfs is unmounted underneath the running plugin; upstream documents this as leaving `NodePrepareResources` unable to build CDI specs, with no error at restart time. That second shape concerns the **full-GPU allocation** path, and we have not observed it in AICR's default configuration — see the note below. `aicr bundle` warns about this when GPU Operator manages the driver.
 
 This does not apply where the driver is provider-installed (`driver.enabled=false` — AKS `azure-managed`, GKE COS, OKE). Those deploy no GPU Operator driver pod and therefore no Driver Manager, so there is nothing to coordinate with and no warning is emitted.
 
@@ -1674,7 +1674,11 @@ kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 
 If a GitOps controller reconciles the DaemonSet, suspend it for the duration and resume afterwards.
 
-*Claim preparation failing after a restart with unchanged driver configuration.* The stale rootfs was unmounted underneath a plugin that kept running, so it can no longer build CDI specs. This one needs no DaemonSet suppression and no claim-holder clearing: once the replacement driver pod is `Ready`, restart the plugin pod on the affected node and the recreated pod binds the new rootfs.
+*Claim preparation failing after a restart with unchanged driver configuration.* The stale rootfs was unmounted underneath a plugin that kept running, so upstream's comment describes it as no longer able to build CDI specs. This one needs no DaemonSet suppression and no claim-holder clearing: once the replacement driver pod is `Ready`, restart the plugin pod on the affected node and the recreated pod binds the new rootfs.
+
+**Not reproduced in AICR's default configuration.** An attempt on an EKS GB300 cluster running the default ComputeDomain-only DRA setup (`resources.gpus.enabled: false`) reached the exact conditions — driver-manager logged `skipping the uninstallation` and `Unmounting NVIDIA driver rootfs` while the kubelet plugin was never evicted — and then a fresh ComputeDomain claim still prepared successfully, with the plugin not restarted. An existing claim holder also terminated cleanly, so `NodeUnprepareResources` was still being serviced.
+
+The degradation upstream describes is about CDI specs, which is the full-GPU allocation path that AICR disables by default, so this shape may be unreachable in the default configuration. Treat that as one negative result in one configuration, not proof: full-GPU DRA was not tested, and only the unchanged-config restart path was exercised. The procedure above is retained because it is the correct response if the degradation does occur.
 
 **Known limitation of the opt-in.** Under `k8s-driver-manager` v0.12 the configured label is paused in the same batch as other GPU operands, and no wait covers the standalone DRA kubelet plugin, so ordering against DRA claim holders and completion of plugin teardown are not guaranteed. The mechanism is the one NVIDIA documents, but it is best-effort here. See [NVIDIA/k8s-driver-manager#250](https://github.com/NVIDIA/k8s-driver-manager/issues/250).
 
