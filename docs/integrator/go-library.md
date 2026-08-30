@@ -1141,7 +1141,19 @@ Per-operation caps:
   completion budget you asked for.
 - `ValidateState`: `defaults.ValidationOperationTimeout`
 - `VerifyBundle` / `VerifyEvidence` / `VerifyCatalog` / `RecipeDigest`:
-  `defaults.VerifyOperationTimeout`
+  `defaults.VerifyOperationTimeout` by default, overridable per call via the
+  `Timeout` field on each options struct. `nil` (the zero value) keeps the
+  default cap; a pointer to `0` imposes **no** facade cap and runs under the
+  caller's context unchanged; a positive value sets an explicit cap.
+
+  The pointer is what makes `0` mean uncapped here, matching
+  `WithValidationTimeout(0)`, while leaving the zero value as today's
+  behavior. Reach for it when a registry is slow rather than broken:
+  `VerifyEvidence` pulls from the network, and a cap breach arrives as an
+  **error** rather than the `EvidenceExitIncomplete` verdict a CI gate
+  branches on — so a slow pull, which is exactly what that verdict describes,
+  otherwise reports through the wrong channel. The override can only relax
+  the facade ceiling; the caller's own deadline still applies.
 - `PublishEvidence` / `SignCatalog`: **no facade cap** — the caller's
   context governs unchanged. Keyless OIDC can block on a human
   completing a browser or device-code flow, so a fixed cap would cut

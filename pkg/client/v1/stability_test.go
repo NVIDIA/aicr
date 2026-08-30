@@ -378,6 +378,16 @@ func TestStability_Verification(t *testing.T) {
 	requireSignature[func(*aicr.EvidenceVerification) ([]byte, error)](aicr.RenderEvidenceJSON)
 	requireSignature[func(*aicr.EvidenceVerification) string](aicr.RenderEvidenceMarkdown)
 
+	// The per-call cap override is part of the contract: without it the facade
+	// ceiling is unconditional and a slow-registry verification cannot finish
+	// (#2225). Nil must keep the default, so the field's presence and its
+	// pointer-ness both matter.
+	var timeoutOverride *time.Duration
+	_ = aicr.BundleVerifyOptions{Timeout: timeoutOverride}
+	_ = aicr.EvidenceVerifyOptions{Timeout: timeoutOverride}
+	_ = aicr.CatalogVerifyOptions{Timeout: timeoutOverride}
+	_ = aicr.RecipeDigestOptions{Timeout: timeoutOverride}
+
 	var bv aicr.BundleVerifyOptions
 	_ = bv.CertificateIdentityRegexp
 	_ = bv.Key
