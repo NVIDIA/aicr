@@ -261,29 +261,16 @@ func readManifest(t *testing.T, deployer string) []string {
 	return paths
 }
 
-// requiredPaths are the entries a manifest must contain for its deployer.
+// requiredRootPaths are the root entries a manifest must contain, per deployer.
 //
-// These are structural, not recipe-derived: every bundle carries checksums.txt
-// and README.md, each deployer has its own entry point, and the per-component
-// files are what the fixture's two components always produce.
-var requiredPaths = map[string][]string{
-	"helm": {
-		"checksums.txt", "README.md", "deploy.sh", "recipe.yaml",
-		"001-cert-manager/values.yaml", "002-nfd/values.yaml",
-	},
-	"argocd": {
-		"checksums.txt", "README.md", "app-of-apps.yaml",
-		"001-cert-manager/application.yaml",
-	},
+// These are structural: every bundle carries checksums.txt and README.md, and
+// each deployer has its own entry point that integrator automation invokes.
+var requiredRootPaths = map[string][]string{
+	"helm":        {"checksums.txt", "README.md", "deploy.sh", "recipe.yaml"},
+	"argocd":      {"checksums.txt", "README.md", "app-of-apps.yaml"},
 	"argocd-helm": {"checksums.txt", "README.md", "Chart.yaml", "values.yaml"},
-	"flux": {
-		"checksums.txt", "README.md", "kustomization.yaml",
-		"cert-manager/helmrelease.yaml",
-	},
-	"helmfile": {
-		"checksums.txt", "README.md", "helmfile.yaml",
-		"001-cert-manager/values.yaml",
-	},
+	"flux":        {"checksums.txt", "README.md", "kustomization.yaml"},
+	"helmfile":    {"checksums.txt", "README.md", "helmfile.yaml"},
 }
 
 // TestBundleLayoutManifestsAreComplete rejects a truncated manifest.
@@ -297,30 +284,89 @@ var requiredPaths = map[string][]string{
 // but a hand-edited or badly merged manifest can, and the emptiness check in
 // TestBundleLayoutMatchesManifest only catches total loss.
 //
-// Asserting a structural floor per deployer means a truncated manifest fails
-// here rather than quietly narrowing what the other test protects.
+// The per-component half of the floor is DERIVED from the fixture rather than
+// hand-listed. An earlier version listed a second-component path for helm and
+// forgot the other four deployers, so a manifest that dropped every nfd entry
+// still passed everywhere but helm -- the same omission the floor exists to
+// prevent, reintroduced by maintaining it by hand. Deriving it means adding a
+// component to the fixture cannot leave a deployer uncovered.
 func TestBundleLayoutManifestsAreComplete(t *testing.T) {
+	components := fixtureComponents(t)
+	if len(components) < 2 {
+		t.Fatalf("fixture declares %d component(s); the per-component floor needs "+
+			"at least two to be meaningful", len(components))
+	}
+
 	for _, deployer := range layoutDeployers {
 		t.Run(deployer, func(t *testing.T) {
-			required, declared := requiredPaths[deployer]
-			if !declared || len(required) == 0 {
-				t.Fatalf("no required paths declared for %s; this deployer's "+
+			roots, declared := requiredRootPaths[deployer]
+			if !declared || len(roots) == 0 {
+				t.Fatalf("no required root paths declared for %s; this deployer's "+
 					"manifest could be truncated to nothing and still pass", deployer)
 			}
 
-			present := make(map[string]bool)
-			for _, path := range readManifest(t, deployer) {
+			manifest := readManifest(t, deployer)
+			present := make(map[string]bool, len(manifest))
+			for _, path := range manifest {
 				present[path] = true
 			}
 
-			for _, path := range required {
+			for _, path := range roots {
 				if !present[path] {
-					t.Errorf("manifest for %s is missing %q, which every bundle of "+
-						"this shape contains; the manifest is truncated and the "+
-						"paths it omits have silently lost removal protection",
+					t.Errorf("manifest for %s is missing root entry %q, which every "+
+						"bundle of this shape contains; the manifest is truncated and "+
+						"the paths it omits have silently lost removal protection",
 						deployer, path)
+				}
+			}
+
+			// Every fixture component must appear somewhere in the manifest.
+			// Which file it appears as differs by deployer -- application.yaml,
+			// helmrelease.yaml, values.yaml -- so match on the component name
+			// rather than on a per-deployer filename that would need the same
+			// hand-maintenance that failed before.
+			for _, component := range components {
+				var found bool
+				for _, path := range manifest {
+					if strings.Contains(path, component) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("manifest for %s contains no path mentioning fixture "+
+						"component %q; its entries were dropped and now read as "+
+						"allowed additions rather than removals", deployer, component)
 				}
 			}
 		})
 	}
+}
+
+// fixtureComponents returns the component names the layout fixture declares.
+func fixtureComponents(t *testing.T) []string {
+	t.Helper()
+
+	data, err := os.ReadFile(filepath.Clean(layoutFixture))
+	if err != nil {
+		t.Fatalf("read %s: %v", layoutFixture, err)
+	}
+
+	var recipe struct {
+		ComponentRefs []struct {
+			Name string `yaml:"name"`
+		} `yaml:"componentRefs"`
+	}
+	if err := yaml.Unmarshal(data, &recipe); err != nil {
+		t.Fatalf("parse %s: %v", layoutFixture, err)
+	}
+
+	var names []string
+	for _, ref := range recipe.ComponentRefs {
+		if ref.Name != "" {
+			names = append(names, ref.Name)
+		}
+	}
+	sort.Strings(names)
+	return names
 }
