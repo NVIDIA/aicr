@@ -134,12 +134,49 @@ paths:
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
       responses:
-        "200":
+        '200':
           description: Headers for the response GET would return
-        "400":
-          description: Invalid or uncovered criteria
-        "429":
-          description: Rate limit exceeded
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '400':
+          description: Invalid criteria, profile selection, or query parameter (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '429':
+          description: Rate limit exceeded (headers only)
+          headers:
+            Retry-After:
+              description: Seconds until retry allowed
+              schema:
+                type: integer
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '500':
+          description: Internal server error (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '504':
+          description: Recipe resolution or an upstream operation timed out (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
     get:
       tags: [Recipes]
       summary: Resolve a configured recipe
@@ -347,12 +384,54 @@ paths:
         - $ref: "#/components/parameters/SlurmAccountingMode"
         - $ref: "#/components/parameters/Selector"
       responses:
-        "200":
+        '200':
           description: Headers for the response GET would return
-        "400":
-          description: Invalid or uncovered criteria
-        "429":
-          description: Rate limit exceeded
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '400':
+          description: Invalid criteria, profile selection, or query parameter (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '404':
+          description: Selector path not found (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '429':
+          description: Rate limit exceeded (headers only)
+          headers:
+            Retry-After:
+              description: Seconds until retry allowed
+              schema:
+                type: integer
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '500':
+          description: Internal server error (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '504':
+          description: Recipe resolution or an upstream operation timed out (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
     get:
       tags: [Recipes]
       summary: Query a configured hydrated recipe

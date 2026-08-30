@@ -516,3 +516,67 @@ func discoveryRoutes(t *testing.T) map[string]bool {
 	}
 	return routes
 }
+
+// TestOpenAPIHeadMirrorsGetResponses asserts each HEAD operation declares the
+// same statuses and headers as the GET it shadows.
+//
+// The handlers route HEAD through the GET resolution path, so every status GET
+// can produce, HEAD can produce: a missing selector still yields 404 on
+// /v1/query, and both endpoints can still time out. Declaring a narrower set
+// leaves a generated client unable to model responses the server really sends,
+// and the two lists drift apart the first time a status is added to GET alone.
+func TestOpenAPIHeadMirrorsGetResponses(t *testing.T) {
+	data, err := os.ReadFile(filepath.Clean(specRelPath))
+	if err != nil {
+		t.Fatalf("read spec %q: %v", specRelPath, err)
+	}
+
+	var spec struct {
+		Paths map[string]map[string]struct {
+			Responses map[string]struct {
+				Headers map[string]yaml.Node `yaml:"headers"`
+				Content map[string]yaml.Node `yaml:"content"`
+			} `yaml:"responses"`
+		} `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse spec: %v", err)
+	}
+
+	var checked int
+	for path, item := range spec.Paths {
+		head, hasHead := item["head"]
+		get, hasGet := item["get"]
+		if !hasHead || !hasGet {
+			continue
+		}
+		checked++
+
+		for status, getResponse := range get.Responses {
+			headResponse, declared := head.Responses[status]
+			if !declared {
+				t.Errorf("GET %s declares response %s but HEAD does not; the "+
+					"handlers share a resolution path, so HEAD can return it too",
+					path, status)
+				continue
+			}
+			if len(getResponse.Headers) > 0 && len(headResponse.Headers) == 0 {
+				t.Errorf("GET %s response %s declares headers but HEAD does not, "+
+					"while HEAD exists precisely to return them", path, status)
+			}
+		}
+
+		// A HEAD response carrying content contradicts the method.
+		for status, headResponse := range head.Responses {
+			if len(headResponse.Content) > 0 {
+				t.Errorf("HEAD %s response %s declares content; HEAD returns no "+
+					"body", path, status)
+			}
+		}
+	}
+
+	if checked == 0 {
+		t.Fatal("no path declares both GET and HEAD; this assertion would pass " +
+			"vacuously")
+	}
+}
