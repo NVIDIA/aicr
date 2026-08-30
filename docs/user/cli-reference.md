@@ -1664,9 +1664,19 @@ kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 
 **`kubectl cordon` does not keep the plugin off the node.** The DaemonSet controller adds a `node.kubernetes.io/unschedulable:NoSchedule` toleration to its pods, so a cordoned node still gets one and deleting the pod simply recreates it. Suspending a GitOps controller does not help either; the DaemonSet controller is what recreates the pod.
 
-*Node-scoped, when the plugin has a `nodeSelector`.* If you generated the bundle with `--accelerated-node-selector` (recommended), the rendered `kubeletPlugin.nodeSelector` carries that key. Temporarily remove that label from the affected node — the DaemonSet then has no eligible pod there and removes it from that node alone. Retry the driver pod, then restore the label. Note this also removes any other DaemonSet selecting on the same label from that node.
+**Do not use the accelerated-node selector label as the lever.** `--accelerated-node-selector` is written to GPU Operator's `daemonsets.nodeSelector` as well as to `kubeletPlugin.nodeSelector`, so removing it from a node also removes the driver pod you are trying to retry — and restoring it to bring the driver back makes the plugin eligible again. There is no node label that suppresses only the DRA plugin.
 
-*Cluster-wide, when it has none.* Without an accelerated-node selector the plugin has no per-node lever, since the chart's default affinity keys on NFD and GPU Operator labels that those components re-apply. Then the only option is to suppress the DaemonSet itself — and because that removes the plugin everywhere, clear DRA claim holders on **every** node it covers first, not just the failed one.
+*The node-scoped operation is a temporary anti-affinity on the plugin DaemonSet.* Add a term excluding the affected node by hostname, which leaves every other node untouched and does not affect the driver:
+
+```bash
+kubectl patch daemonset nvidia-dra-driver-gpu-kubelet-plugin -n nvidia-dra-driver --type=json \
+  -p '[{"op":"add","path":"/spec/template/spec/affinity/nodeAffinity/requiredDuringSchedulingIgnoredDuringExecution/nodeSelectorTerms/0/matchExpressions/-",
+        "value":{"key":"kubernetes.io/hostname","operator":"NotIn","values":["<node-name>"]}}]'
+```
+
+Confirm the pod is gone from that node, retry the driver pod, then revert the patch. Add the same expression to every term if the rendered affinity has more than one, since `nodeSelectorTerms` are OR-ed. If a GitOps controller reconciles the DaemonSet, suspend it for the duration.
+
+*Cluster-wide fallback.* If you would rather not patch the DaemonSet per node, suppressing it entirely also works — but because that removes the plugin everywhere, clear DRA claim holders on **every** node it covers first, not just the failed one.
 
 *Claim preparation failing after a restart with unchanged driver configuration.* The stale rootfs was unmounted underneath a plugin that kept running, so it can no longer build CDI specs. Once the replacement driver pod is `Ready`, restart the plugin pod — the recreated pod binds the new rootfs. Deleting the pod is sufficient here; no DaemonSet suppression is needed.
 

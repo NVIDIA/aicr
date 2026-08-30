@@ -624,10 +624,10 @@ configuration profile — one flag flips every ownership path together:
 ```shell
 aicr recipe --service aks --accelerator h100 --os ubuntu --intent training \
   --profile gpuStack=operator-managed -o recipe.yaml
-aicr bundle -r recipe.yaml -o ./bundles
-
-# add --dra-eviction-node-label to opt in, using the pair you labelled the pool with:
+# AKS requires a keyed accelerated-node toleration; add
+# --dra-eviction-node-label only if you opted in and labelled the pool.
 aicr bundle -r recipe.yaml -o ./bundles \
+  --accelerated-node-toleration nvidia.com/gpu:NoSchedule \
   --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true
 ```
 
