@@ -328,7 +328,7 @@ func TestBundleLayoutManifestsAreComplete(t *testing.T) {
 			for _, component := range components {
 				var found bool
 				for _, path := range manifest {
-					if strings.Contains(path, component) {
+					if pathMentionsComponent(path, component) {
 						found = true
 						break
 					}
@@ -338,6 +338,79 @@ func TestBundleLayoutManifestsAreComplete(t *testing.T) {
 						"component %q; its entries were dropped and now read as "+
 						"allowed additions rather than removals", deployer, component)
 				}
+			}
+		})
+	}
+}
+
+// pathMentionsComponent reports whether a manifest path belongs to a component.
+//
+// Matching on a bare substring would let one component stand in for another
+// whose name it contains: with components "foo" and "foobar", dropping every
+// "foo" path still matches "foobar/values.yaml", and the completeness floor
+// would report coverage it does not have. That is latent with today's fixture
+// and would arrive silently with the first overlapping pair.
+//
+// Comparison is per path segment, after stripping the NNN- ordering prefix that
+// four of the five deployers use and any file extension, so it matches
+// "002-nfd/values.yaml", "nfd/helmrelease.yaml" and "templates/nfd.yaml"
+// without matching "nfd-extras/values.yaml".
+func pathMentionsComponent(path, component string) bool {
+	for _, segment := range strings.Split(path, "/") {
+		if index := strings.Index(segment, "-"); index > 0 {
+			if isAllDigits(segment[:index]) {
+				segment = segment[index+1:]
+			}
+		}
+		segment = strings.TrimSuffix(segment, filepath.Ext(segment))
+		if segment == component {
+			return true
+		}
+	}
+	return false
+}
+
+func isAllDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// TestPathMentionsComponent pins the boundary rule, including the overlapping
+// names that a bare substring match would confuse.
+func TestPathMentionsComponent(t *testing.T) {
+	tests := []struct {
+		path      string
+		component string
+		want      bool
+	}{
+		{"002-nfd/values.yaml", "nfd", true},
+		{"nfd/helmrelease.yaml", "nfd", true},
+		{"templates/nfd.yaml", "nfd", true},
+		{"static/nfd.yaml", "nfd", true},
+		{"001-cert-manager/values.yaml", "cert-manager", true},
+
+		// The reported defect: a longer name must not satisfy a shorter one.
+		{"002-nfd-extras/values.yaml", "nfd", false},
+		{"foobar/values.yaml", "foo", false},
+		{"templates/foobar.yaml", "foo", false},
+
+		// Nor the reverse.
+		{"002-nfd/values.yaml", "nfd-extras", false},
+		{"checksums.txt", "nfd", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path+"~"+tt.component, func(t *testing.T) {
+			if got := pathMentionsComponent(tt.path, tt.component); got != tt.want {
+				t.Errorf("pathMentionsComponent(%q, %q) = %v, want %v",
+					tt.path, tt.component, got, tt.want)
 			}
 		})
 	}
