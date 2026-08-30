@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicr.run/schemas/v1/RecipeMixin.schema.json",
+  "title": "RecipeMixin",
+  "description": "A composable fragment of shared overlay content. Carries only constraints and component references.",
+  "type": "object",
+  "properties": {
+    "apiVersion": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "componentRefs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "chart": {
+                "type": "string"
+              },
+              "cleanup": {
+                "type": "boolean"
+              },
+              "dependencyRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "expectedResources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "namespace": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "healthCheckAsserts": {
+                "type": "string"
+              },
+              "healthCheckSkip": {
+                "type": "boolean"
+              },
+              "manifestFiles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "overrides": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                }
+              },
+              "patches": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "path": {
+                "type": "string"
+              },
+              "preManifestFiles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "source": {
+                "type": "string"
+              },
+              "tag": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "valuesFile": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "remediation": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string"
+              },
+              "unit": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -363,6 +363,20 @@ scan: ## Scans for vulnerabilities with grype
 api-diff: ## Checks pkg/client/v1 and transparent-alias target compatibility against the latest stable release
 	@bash tools/api-diff
 
+.PHONY: schemas
+schemas: ## Regenerates the committed artifact JSON Schemas from the Go types
+	@GOFLAGS="-mod=readonly" go run ./tools/schemagen
+	@echo "Artifact schemas regenerated. Review the diff before committing."
+
+.PHONY: schema-baseline
+schema-baseline: schemas ## Accepts the current artifact schemas as the frozen contract
+	@printf '%s\n' "Accepting the current artifact schemas as the frozen contract." \
+		"Every difference below becomes part of the v1 surface -- read the diff."
+	@rm -rf api/aicr/v1/schemas/baseline
+	@mkdir -p api/aicr/v1/schemas/baseline
+	@cp api/aicr/v1/schemas/*.schema.json api/aicr/v1/schemas/baseline/
+	@echo "Schema baseline updated."
+
 .PHONY: openapi-diff
 openapi-diff: ## Checks the REST contract in api/aicr/v1/server.yaml against its committed baseline
 	@bash tools/openapi-diff

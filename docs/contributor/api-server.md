@@ -351,6 +351,60 @@ reports 28 breaking changes that are all one already-merged decision — the gat
 would ship pre-loaded with noise that clears itself at v0.21 and teaches
 everyone to skim it in the meantime.
 
+## Artifact Schema Gate
+
+Artifact schemas are the second of the four surfaces ROADMAP section 1 freezes
+at v1 (issue #2113). `api/aicr/v1/schemas/*.schema.json` are JSON Schema
+documents for `Snapshot`, `RecipeResult`, `RecipeMetadata`, `RecipeMixin` and
+`RecipeCriteria`, generated from the Go types by
+[`tools/schemagen`](https://github.com/NVIDIA/aicr/tree/main/tools/schemagen)
+and regenerated with `make schemas`.
+
+They are derived rather than authored, so three tests keep them honest and each
+fails for a different reason:
+
+- **`TestCommittedSchemasAreFresh`** — the committed files match the current Go
+  types. Without it the schemas would drift into a snapshot of whatever the
+  types looked like when someone last remembered to run the generator.
+- **`TestSchemasDescribeRealArtifacts`** — the 110 committed overlays and 4
+  mixins validate against their schema. Freshness proves the schema matches the
+  *type*; this proves the type matches what is actually on disk.
+- **`TestArtifactSchemasAreCompatible`** — the generated schemas are compared to
+  the frozen snapshot in `api/aicr/v1/schemas/baseline/`, failing on a removed
+  field, a newly required field, a changed type, a removed enum value, or a
+  previously free-form field becoming an enum. Additive change passes.
+
+Intentional breaks go in `api/aicr/v1/schemas/schema-diff-exceptions.yaml` with
+a rule, kind, path and reason. **An acknowledgement that matches no reported
+break fails the gate** — a stale entry silently pre-approves the break
+returning. Same contract as `openapi-diff-exceptions.yaml` and
+`api-diff-exceptions.yaml`. Scheduled ADR-022 apiVersion removals are the
+expected occupants: retiring an alpha value is an `enum-value-removed` break,
+planned and dated.
+
+`make schema-baseline` accepts the current schemas as the frozen contract. That
+diff is the change under review.
+
+**`required` means different things for authored and emitted artifacts.**
+`RecipeResult` and `Snapshot` are emitted, so a field without `omitempty` is
+always written and a consumer may rely on it. `RecipeMetadata`, `RecipeMixin`
+and `RecipeCriteria` are authored by hand, where the encoder's behavior says
+nothing about what a human must supply — `ComponentRef.Source` is written on
+every emit but set by only 17 of the 110 committed overlays. Authored artifacts
+therefore declare nothing required; marking them published a schema that
+rejected the project's own catalog.
+
+The criteria enums add the `any` wildcard that `GetCriteria*Types()` omits, for
+the same reason the OpenAPI parity test strips it before comparing.
+
+**The generator uses reflection rather than a schema library on purpose.** It
+must compile against the types, so it cannot be a pinned binary the way
+`oasdiff` is; importing a schema library would put it in the module graph, and
+therefore in the SBOM and vulnerability surface of the shipped binaries, for
+something that only runs at build time. The cost is that `pkg/schema` is
+hand-written, so it covers only the shapes the artifacts use and **fails on
+anything else** rather than emitting a plausible guess.
+
 ## Adding an Endpoint
 
 1. **Edit `api/aicr/v1/server.yaml`.** Add the operation under `paths:`, request and response schemas under `components.schemas`. If the operation accepts criteria, reference `#/components/schemas/Criteria` so the parity test covers it.

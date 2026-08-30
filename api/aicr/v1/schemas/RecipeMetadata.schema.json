@@ -1,0 +1,488 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicr.run/schemas/v1/RecipeMetadata.schema.json",
+  "title": "RecipeMetadata",
+  "description": "An authored recipe overlay, as found in an external --data catalog.",
+  "type": "object",
+  "properties": {
+    "apiVersion": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "base": {
+          "type": "string"
+        },
+        "componentRefs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "chart": {
+                "type": "string"
+              },
+              "cleanup": {
+                "type": "boolean"
+              },
+              "dependencyRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "expectedResources": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "namespace": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "healthCheckAsserts": {
+                "type": "string"
+              },
+              "healthCheckSkip": {
+                "type": "boolean"
+              },
+              "manifestFiles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "overrides": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                }
+              },
+              "patches": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "path": {
+                "type": "string"
+              },
+              "preManifestFiles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "source": {
+                "type": "string"
+              },
+              "tag": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "valuesFile": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "constraints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "remediation": {
+                "type": "string"
+              },
+              "severity": {
+                "type": "string"
+              },
+              "unit": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "criteria": {
+          "type": "object",
+          "properties": {
+            "accelerator": {
+              "type": "string",
+              "enum": [
+                "a100",
+                "any",
+                "b200",
+                "gb200",
+                "gb300",
+                "h100",
+                "h200",
+                "l40",
+                "l40s",
+                "rtx-pro-6000"
+              ]
+            },
+            "intent": {
+              "type": "string",
+              "enum": [
+                "any",
+                "inference",
+                "training"
+              ]
+            },
+            "nodes": {
+              "type": "integer"
+            },
+            "os": {
+              "type": "string",
+              "enum": [
+                "amazonlinux",
+                "any",
+                "cos",
+                "ol",
+                "rhel",
+                "talos",
+                "ubuntu"
+              ]
+            },
+            "platform": {
+              "type": "string",
+              "enum": [
+                "any",
+                "dynamo",
+                "kubeflow",
+                "nim",
+                "runai",
+                "slurm"
+              ]
+            },
+            "service": {
+              "type": "string",
+              "enum": [
+                "aks",
+                "any",
+                "bcm",
+                "eks",
+                "gke",
+                "kind",
+                "lke",
+                "metal3",
+                "ocp",
+                "oke"
+              ]
+            }
+          }
+        },
+        "mixins": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "profile": {
+          "type": "object",
+          "properties": {
+            "default": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "values": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "propertyNames": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "validation": {
+          "type": "object",
+          "properties": {
+            "conformance": {
+              "type": "object",
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "constraints": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "remediation": {
+                        "type": "string"
+                      },
+                      "severity": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "infrastructure": {
+                  "type": "string"
+                },
+                "nodeSelection": {
+                  "type": "object",
+                  "properties": {
+                    "excludeNodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "maxNodes": {
+                      "type": "integer"
+                    },
+                    "selector": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "timeout": {
+                  "type": "string"
+                }
+              }
+            },
+            "deployment": {
+              "type": "object",
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "constraints": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "remediation": {
+                        "type": "string"
+                      },
+                      "severity": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "infrastructure": {
+                  "type": "string"
+                },
+                "nodeSelection": {
+                  "type": "object",
+                  "properties": {
+                    "excludeNodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "maxNodes": {
+                      "type": "integer"
+                    },
+                    "selector": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "timeout": {
+                  "type": "string"
+                }
+              }
+            },
+            "performance": {
+              "type": "object",
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "constraints": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "remediation": {
+                        "type": "string"
+                      },
+                      "severity": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "infrastructure": {
+                  "type": "string"
+                },
+                "nodeSelection": {
+                  "type": "object",
+                  "properties": {
+                    "excludeNodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "maxNodes": {
+                      "type": "integer"
+                    },
+                    "selector": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "timeout": {
+                  "type": "string"
+                }
+              }
+            },
+            "readiness": {
+              "type": "object",
+              "properties": {
+                "checks": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "constraints": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "remediation": {
+                        "type": "string"
+                      },
+                      "severity": {
+                        "type": "string"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "value": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "infrastructure": {
+                  "type": "string"
+                },
+                "nodeSelection": {
+                  "type": "object",
+                  "properties": {
+                    "excludeNodes": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "maxNodes": {
+                      "type": "integer"
+                    },
+                    "selector": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "timeout": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
