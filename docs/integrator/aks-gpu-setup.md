@@ -602,11 +602,18 @@ Add the eviction label to this pool only if you also opt in at bundle time. The
 node label and the flag value must be the **same `key=value` pair** — the flag
 selects the convention, and AICR renders exactly what you pass:
 
+`az aks nodepool update --labels` **replaces** the pool's entire user-label map
+rather than merging, so repeat every label the pool already carries or they are
+dropped — including the accelerated-node selector the bundle relies on:
+
 ```shell
 az aks nodepool update \
   --cluster-name <cluster> --resource-group <rg> --name gpupool \
-  --labels nvidia.com/dra-kubelet-plugin=true
+  --labels nodeGroup=gpu-worker nvidia.com/dra-kubelet-plugin=true
 ```
+
+Prefer setting both at pool creation time (`az aks nodepool add --labels ...`)
+so there is no map to preserve.
 
 Then pass the same pair to `aicr bundle` in the generation step below. See
 [Label GPU nodes for the DRA kubelet plugin (opt-in only)](#label-gpu-nodes-for-the-dra-kubelet-plugin-opt-in-only).

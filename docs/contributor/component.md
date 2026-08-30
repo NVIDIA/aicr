@@ -248,8 +248,9 @@ not grow a special flag.
 **A bundler-owned contract that imposes cluster state must be opt-in.** The DRA
 eviction contract also illustrates the limit of the exception. Its selector is
 an exact-match `nodeSelector`, so rendering it unconditionally made a node label
-a precondition for the kubelet plugin to run at all — and an unlabeled node then
-fails silently, with `DESIRED=0` and a successful `helm upgrade`. AICR does not
+a precondition for the kubelet plugin to run at all — and an unlabeled node is
+then silently excluded, with `DESIRED=0` only when no node carries the label,
+and a successful `helm upgrade` either way. AICR does not
 own node labels, cannot verify them at bundle time, and generation is offline,
 so it cannot even warn accurately about what a given cluster carries.
 

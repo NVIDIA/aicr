@@ -1660,11 +1660,13 @@ kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 
 **Recovering from the two opt-out failures.** Both are recoverable; the procedure differs by which one you hit.
 
-*Driver upgrade stopped with `failed to uninstall nvidia driver components`.* The plugin still holds the driver, so the replacement is not installed and the old driver may be partially torn down. Recover **one node at a time**, and keep the operation node-scoped — the kubelet plugin is a DaemonSet, so deleting it or editing its selector removes the plugin from every node, which can strand claim holders on nodes you were not repairing.
+*Driver upgrade stopped with `failed to uninstall nvidia driver components`.* The plugin still holds the driver, so the replacement is not installed and the old driver may be partially torn down. In both cases, terminate the node's DRA claim holders **before** removing the plugin and confirm none remain — the kubelet needs the plugin to complete `NodeUnprepareResources`, so taking the plugin away first deadlocks them.
 
-On the failed node: terminate its DRA claim holders first and confirm none remain (the kubelet needs the plugin to complete `NodeUnprepareResources`, so removing the plugin ahead of them deadlocks them). Then cordon the node and delete only that node's plugin pod, so the DaemonSet does not immediately reschedule it while the driver reinstalls. Retry the driver pod, then uncordon. If your GitOps controller reconciles the DaemonSet, suspend it for the duration and resume afterwards.
+**`kubectl cordon` does not keep the plugin off the node.** The DaemonSet controller adds a `node.kubernetes.io/unschedulable:NoSchedule` toleration to its pods, so a cordoned node still gets one and deleting the pod simply recreates it. Suspending a GitOps controller does not help either; the DaemonSet controller is what recreates the pod.
 
-If you must edit the DaemonSet itself rather than work per node, treat it as cluster-wide: clear DRA claim holders on **every** node it covers before changing it.
+*Node-scoped, when the plugin has a `nodeSelector`.* If you generated the bundle with `--accelerated-node-selector` (recommended), the rendered `kubeletPlugin.nodeSelector` carries that key. Temporarily remove that label from the affected node — the DaemonSet then has no eligible pod there and removes it from that node alone. Retry the driver pod, then restore the label. Note this also removes any other DaemonSet selecting on the same label from that node.
+
+*Cluster-wide, when it has none.* Without an accelerated-node selector the plugin has no per-node lever, since the chart's default affinity keys on NFD and GPU Operator labels that those components re-apply. Then the only option is to suppress the DaemonSet itself — and because that removes the plugin everywhere, clear DRA claim holders on **every** node it covers first, not just the failed one.
 
 *Claim preparation failing after a restart with unchanged driver configuration.* The stale rootfs was unmounted underneath a plugin that kept running, so it can no longer build CDI specs. Once the replacement driver pod is `Ready`, restart the plugin pod — the recreated pod binds the new rootfs. Deleting the pod is sufficient here; no DaemonSet suppression is needed.
 
