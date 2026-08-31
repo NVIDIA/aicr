@@ -18,7 +18,6 @@ import (
 	"context"
 	stderrors "errors"
 	"path/filepath"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -247,36 +246,33 @@ func TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace(t *testing.T) {
 	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
 	nsGVR := v1.SchemeGroupVersion.WithResource("namespaces")
 
-	var deleteCalls int32
 	fakeClient.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
-		if atomic.AddInt32(&deleteCalls, 1) == 1 {
-			// First delete: simulate a still-cascading finalizer by stamping
-			// DeletionTimestamp via the tracker directly instead of actually
-			// removing the object, then tell the caller the delete request
-			// was accepted (handled=true, err=nil), matching what a real
-			// apiserver does for a namespace with finalizers.
+		// Branch on the DeletionTimestamp, not a counter, matching how a
+		// real apiserver decides.
+		existing, getErr := fakeClient.Tracker().Get(nsGVR, "", ns)
+		obj, ok := existing.(*v1.Namespace)
+		if getErr == nil && ok && obj.DeletionTimestamp == nil {
+			// On the first delete, simulate a still-cascading finalizer by
+			// stamping DeletionTimestamp instead of removing the object,
+			// then accept the request as a real apiserver would.
+			held := obj.DeepCopy()
+			held.Finalizers = []string{"kubernetes"}
 			now := metav1.Now()
-			held := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
-				Name:              ns,
-				UID:               testNamespaceUID,
-				Finalizers:        []string{"kubernetes"},
-				DeletionTimestamp: &now,
-			}}
+			held.DeletionTimestamp = &now
 			if err := fakeClient.Tracker().Update(nsGVR, held, ""); err != nil {
 				return true, nil, err
 			}
 			return true, nil, nil
 		}
-		// Second delete (fired by the goroutine below once the "finalizer"
-		// clears): let the default reactor perform the real delete, which
-		// also emits the watch.Deleted event waitForNamespaceGone is
+		// Already marked for deletion. The goroutine below fires this once
+		// the "finalizer" clears, so let the default reactor delete it for
+		// real, emitting the watch.Deleted event waitForNamespaceGone is
 		// blocked on.
 		return false, nil, nil
 	})
 
-	// Captured before the goroutine launches, so elapsed below can't dip
-	// under holdFinalizer merely because the goroutine's sleep started
-	// before start was assigned.
+	// Captured before the goroutine launches so elapsed can't dip under
+	// holdFinalizer from a head start.
 	start := time.Now()
 	go func() {
 		time.Sleep(holdFinalizer)
@@ -288,13 +284,11 @@ func TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace(t *testing.T) {
 	}
 	elapsed := time.Since(start)
 
-	// deleteCalls reaching 2 alone doesn't prove cleanup blocked. The
-	// goroutine above fires the second delete unconditionally at t=200ms
-	// regardless of what cleanupNCCLResources does. The elapsed-time check
-	// below is the real guard. A pre-fix early return (reporting success as
-	// soon as the first Delete call was accepted) would hit it at ~0ms,
-	// with deleteCalls still at 1.
-	if got := atomic.LoadInt32(&deleteCalls); got < 2 {
+	// A delete count of 2 alone doesn't prove cleanup blocked. The
+	// goroutine fires the second delete unconditionally at t=200ms. The
+	// elapsed-time check below is the real guard. A pre-fix early return
+	// would hit it at ~0ms with the count still at 1.
+	if got := countDeleteActions(fakeClient.Actions(), "namespaces"); got < 2 {
 		t.Fatalf("expected cleanup to observe the namespace still present and wait for a second delete, got %d delete call(s)", got)
 	}
 	if elapsed < holdFinalizer {
