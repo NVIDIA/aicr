@@ -22,7 +22,8 @@
 #
 # A per-operation timeout would not be enough: three stalled pulls plus a stalled
 # load still multiply out. The budget is checked before each operation and passed
-# to `timeout`, so the function cannot outlive it no matter how many steps run.
+# to `timeout`, and the retry backoff is clamped to it as well, so the function
+# cannot outlive it by more than scheduling noise no matter how many steps run.
 # 180s is generous for two small images and leaves the 20-minute KWOK job budget
 # essentially intact even if both preloads time out completely.
 #
@@ -134,7 +135,17 @@ preload_image() {
             break
         fi
         if (( attempt < 3 )); then
-            sleep $(( attempt * 5 ))
+            # Clamp the backoff to the budget. Sleeping past the deadline is
+            # pure dead time: it cannot buy another attempt, and it delays the
+            # kubelet fallback by exactly as long as it oversleeps. Without this
+            # the function's real ceiling is the budget PLUS the whole backoff
+            # schedule, not the budget.
+            local backoff=$(( attempt * 5 ))
+            remaining=$(preload_remaining "${deadline}") || break
+            if (( backoff > remaining )); then
+                backoff="${remaining}"
+            fi
+            sleep "${backoff}"
         fi
     done
 

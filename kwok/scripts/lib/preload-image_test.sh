@@ -50,6 +50,24 @@ check() { # <name> <want_rc> <got_rc> [<must_contain> ...]
     (( ok == 1 )) && echo "PASS: ${name}" || fails=$((fails + 1))
 }
 
+# check_bounded asserts the call finished within its CONFIGURED budget rather
+# than some loose ceiling. A generous threshold would let a retry-backoff or
+# extra-operation regression push the real ceiling well past the budget and
+# still pass, which is the thing being tested.
+#
+# The margin covers process spawn and scheduling only.
+BOUND_MARGIN_SECONDS=3
+check_bounded() { # <name> <budget> <elapsed>
+    local name="$1" budget="$2" elapsed="$3"
+    local ceiling=$(( budget + BOUND_MARGIN_SECONDS ))
+    if (( elapsed <= ceiling )); then
+        echo "PASS: ${name} (${elapsed}s, budget ${budget}s)"
+    else
+        echo "FAIL: ${name} (took ${elapsed}s, budget ${budget}s + ${BOUND_MARGIN_SECONDS}s margin)"
+        fails=$((fails + 1))
+    fi
+}
+
 check_absent() { # <name> <must_not_contain>
     local name="$1" needle="$2"
     if grep -q -- "${needle}" "${TRACE}"; then
@@ -251,14 +269,10 @@ started=$(date +%s)
 preload_image "${IMG}" >/dev/null; rc=$?
 elapsed=$(( $(date +%s) - started ))
 check "hanging-pull-does-not-fail-the-lane" 0 "${rc}"
-# Generous ceiling: the budget plus the retry backoff, well under any job
-# budget. A missing bound would sit here for an hour.
-if (( elapsed <= 30 )); then
-    echo "PASS: hanging-pull-is-bounded (${elapsed}s)"
-else
-    echo "FAIL: hanging-pull-is-bounded (took ${elapsed}s; the pull is unbounded)"
-    fails=$((fails + 1))
-fi
+# Against the configured budget, not a loose ceiling. This also pins the
+# backoff clamp: without it the first attempt's timeout would be followed by a
+# full 5s sleep, overshooting the budget.
+check_bounded "hanging-pull-is-bounded" "${KWOK_PRELOAD_BUDGET_SECONDS}" "${elapsed}"
 check_absent "hanging-pull-skips-load" "kind load"
 unset STUB_PULL_HANGS KWOK_PRELOAD_BUDGET_SECONDS
 
@@ -273,12 +287,7 @@ started=$(date +%s)
 preload_image "${IMG}" >/dev/null; rc=$?
 elapsed=$(( $(date +%s) - started ))
 check "hanging-inspect-does-not-fail-the-lane" 0 "${rc}"
-if (( elapsed <= 30 )); then
-    echo "PASS: hanging-inspect-is-bounded (${elapsed}s)"
-else
-    echo "FAIL: hanging-inspect-is-bounded (took ${elapsed}s; the inspect is unbounded)"
-    fails=$((fails + 1))
-fi
+check_bounded "hanging-inspect-is-bounded" "${KWOK_PRELOAD_BUDGET_SECONDS}" "${elapsed}"
 check_absent "hanging-inspect-skips-load" "kind load"
 unset STUB_INSPECT_HANGS KWOK_PRELOAD_BUDGET_SECONDS
 
