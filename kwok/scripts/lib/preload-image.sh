@@ -17,6 +17,19 @@
 # Callers must provide log_info / log_warn / log_debug; install-infra.sh
 # defines them before sourcing this file.
 
+# Total wall-clock budget for preloading ONE image, across every retry and the
+# side-load. Overridable for tests.
+#
+# A per-operation timeout would not be enough: three stalled pulls plus a stalled
+# load still multiply out. The budget is checked before each operation and passed
+# to `timeout`, so the function cannot outlive it no matter how many steps run.
+# 180s is generous for two small images and leaves the 20-minute KWOK job budget
+# essentially intact even if both preloads time out completely.
+#
+# Read at CALL time, not source time, so a caller (or a test) can change it
+# between invocations.
+KWOK_PRELOAD_BUDGET_DEFAULT=180
+
 # Side-load an image into the Kind node so the kubelet never pulls it.
 #
 # The registry and Gitea Deployments are the only two workloads in the KWOK
@@ -37,13 +50,34 @@
 # become a new way for the lane to fail: it removes a failure mode or it does
 # nothing. That is why it never propagates an error, even when docker or kind
 # is missing entirely (a non-Kind cluster, or a dev box driving a remote one).
+# preload_remaining prints the seconds left before the deadline, and returns 1
+# when the budget is spent so callers can bail instead of starting an operation
+# they cannot finish.
+preload_remaining() {
+    local deadline="$1" left
+    left=$(( deadline - $(date +%s) ))
+    if (( left <= 0 )); then
+        return 1
+    fi
+    echo "${left}"
+}
+
 preload_image() {
     local image="$1"
 
-    if ! command -v docker &>/dev/null || ! command -v kind &>/dev/null; then
-        log_debug "docker or kind unavailable — leaving ${image} to the kubelet"
+    # `timeout` is required, not optional. Without it every docker/kind call is
+    # unbounded, and a stalled pull would hold the lane for the whole job — the
+    # precise failure this function exists to prevent, in a new place. If it is
+    # missing, skip preloading rather than risk that.
+    if ! command -v docker &>/dev/null || ! command -v kind &>/dev/null ||
+        ! command -v timeout &>/dev/null; then
+        log_debug "docker, kind, or timeout unavailable — leaving ${image} to the kubelet"
         return 0
     fi
+
+    # One deadline for the whole function; every operation below draws from it.
+    local budget="${KWOK_PRELOAD_BUDGET_SECONDS:-${KWOK_PRELOAD_BUDGET_DEFAULT}}"
+    local deadline=$(( $(date +%s) + budget ))
 
     # Kind names the context "kind-<cluster>", so the cluster name is the
     # context with that prefix stripped. Fall back to the same default
@@ -57,7 +91,12 @@ preload_image() {
         cluster="${KUBECTL_CONTEXT#kind-}"
     fi
 
-    if ! kind get clusters 2>/dev/null | grep -qx "${cluster}"; then
+    if ! preload_remaining "${deadline}" >/dev/null; then
+        log_warn "Preload budget exhausted before resolving the cluster; the kubelet will pull ${image}"
+        return 0
+    fi
+
+    if ! timeout "$(preload_remaining "${deadline}")" kind get clusters 2>/dev/null | grep -qx "${cluster}"; then
         log_debug "Kind cluster ${cluster} not found — leaving ${image} to the kubelet"
         return 0
     fi
@@ -65,13 +104,17 @@ preload_image() {
     # Three attempts with linear backoff. The upstream failures seen in CI are
     # transient resets and timeouts, which a second attempt seconds later
     # clears; a longer schedule would just delay the kubelet fallback.
-    local attempt
+    local attempt remaining
     for attempt in 1 2 3; do
         if docker image inspect "${image}" &>/dev/null; then
             break
         fi
-        log_info "Pulling ${image} on the host (attempt ${attempt}/3)..."
-        if docker pull --quiet "${image}" >/dev/null 2>&1; then
+        if ! remaining=$(preload_remaining "${deadline}"); then
+            log_warn "Preload budget exhausted pulling ${image}; the kubelet will retry in-cluster"
+            return 0
+        fi
+        log_info "Pulling ${image} on the host (attempt ${attempt}/3, ${remaining}s left)..."
+        if timeout "${remaining}" docker pull --quiet "${image}" >/dev/null 2>&1; then
             break
         fi
         if (( attempt < 3 )); then
@@ -84,7 +127,12 @@ preload_image() {
         return 0
     fi
 
-    if kind load docker-image "${image}" --name "${cluster}" >/dev/null 2>&1; then
+    if ! remaining=$(preload_remaining "${deadline}"); then
+        log_warn "Preload budget exhausted before side-loading ${image}; the kubelet will pull it"
+        return 0
+    fi
+
+    if timeout "${remaining}" kind load docker-image "${image}" --name "${cluster}" >/dev/null 2>&1; then
         log_info "Preloaded ${image} into Kind cluster ${cluster}"
     else
         log_warn "Could not side-load ${image} into ${cluster}; the kubelet will pull it"

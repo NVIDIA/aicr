@@ -72,6 +72,7 @@ PATH="${STUB_DIR}:${PATH}"
 # over the wrong scenario.
 #   STUB_INSPECT_RC   docker image inspect exit code (1 = not cached locally)
 #   STUB_PULL_FAILS   number of leading `docker pull` attempts that fail
+#   STUB_PULL_HANGS   non-empty makes every `docker pull` hang forever
 #   STUB_KIND_LOAD_RC `kind load` exit code
 #   STUB_CLUSTERS     newline-separated `kind get clusters` output
 write_stubs() {
@@ -89,6 +90,9 @@ esac
 if [[ "$1" == "pull" ]]; then
     n=$(( $(cat "${STUB_DIR}/pulls" 2>/dev/null || echo 0) + 1 ))
     echo "${n}" > "${STUB_DIR}/pulls"
+    # A pull that never returns — the registry accepts the connection and then
+    # goes quiet. Only `timeout` ends this.
+    if [[ -n "${STUB_PULL_HANGS:-}" ]]; then sleep 3600; fi
     if (( n <= ${STUB_PULL_FAILS:-0} )); then exit 1; fi
     touch "${STUB_DIR}/pulled"
     exit 0
@@ -114,7 +118,8 @@ EOF
 reset() {
     : > "${TRACE}"
     rm -f "${STUB_DIR}/pulls" "${STUB_DIR}/pulled"
-    unset STUB_INSPECT_RC STUB_PULL_FAILS STUB_KIND_LOAD_RC STUB_CLUSTERS
+    unset STUB_INSPECT_RC STUB_PULL_FAILS STUB_KIND_LOAD_RC STUB_CLUSTERS STUB_PULL_HANGS
+    unset KWOK_PRELOAD_BUDGET_SECONDS
     unset KUBECTL_CONTEXT KWOK_CLUSTER
     export STUB_DIR TRACE
     write_stubs
@@ -204,11 +209,54 @@ check "kwok-cluster-env-selects-the-cluster" 0 "${rc}" "--name custom-kwok"
 
 # 10. Neither docker nor kind on PATH (a dev box driving a remote cluster).
 #     Must be a silent no-op rather than an error.
+#
+#     Removing the stubs is NOT enough: the host running this harness usually
+#     HAS docker and kind, so command lookup falls through to the real binaries
+#     and the case passes having exercised a live pull instead of the branch it
+#     names. Point PATH at an empty directory so the lookup genuinely fails, and
+#     assert the log line so the branch is proven to have run rather than
+#     inferred from rc=0.
 reset
-rm -f "${STUB_DIR}/docker" "${STUB_DIR}/kind"
-preload_image "${IMG}" >/dev/null; rc=$?
+mkdir -p "${STUB_DIR}/no-tools"
+saved_path="${PATH}"
+# shellcheck disable=SC2123  # Replacing PATH is the point: it is what makes
+# `command -v docker` fail. Restored two lines down.
+PATH="${STUB_DIR}/no-tools"
+out=$(preload_image "${IMG}" 2>&1); rc=$?
+PATH="${saved_path}"
 check "missing-tooling-is-a-noop" 0 "${rc}"
-write_stubs
+if [[ "${out}" == *"unavailable"* ]]; then
+    echo "PASS: missing-tooling-takes-the-unavailable-branch"
+else
+    echo "FAIL: missing-tooling-takes-the-unavailable-branch (got: ${out})"
+    fails=$((fails + 1))
+fi
+check_absent "missing-tooling-runs-nothing" "docker"
+
+# 11. A pull that never returns. This is the failure mode the whole change
+#     exists to prevent, reintroduced in a new place: without a bound, three
+#     stalled pulls plus a stalled side-load hold the lane for the entire
+#     20-minute KWOK job, and the kubelet fallback never gets to run.
+#
+#     The budget is squeezed to 3s so the assertion is about the bound existing,
+#     not about its production value.
+reset
+export STUB_PULL_HANGS=1
+export KWOK_PRELOAD_BUDGET_SECONDS=3
+started=$(date +%s)
+preload_image "${IMG}" >/dev/null; rc=$?
+elapsed=$(( $(date +%s) - started ))
+check "hanging-pull-does-not-fail-the-lane" 0 "${rc}"
+# Generous ceiling: the budget plus the retry backoff, well under any job
+# budget. A missing bound would sit here for an hour.
+if (( elapsed <= 30 )); then
+    echo "PASS: hanging-pull-is-bounded (${elapsed}s)"
+else
+    echo "FAIL: hanging-pull-is-bounded (took ${elapsed}s; the pull is unbounded)"
+    fails=$((fails + 1))
+fi
+check_absent "hanging-pull-skips-load" "kind load"
+unset STUB_PULL_HANGS KWOK_PRELOAD_BUDGET_SECONDS
 
 if (( fails > 0 )); then
     echo "FAILED: ${fails} case(s)"
