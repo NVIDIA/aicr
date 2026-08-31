@@ -198,11 +198,10 @@ func TestCleanupNCCLResources_RejectsEmptyUID(t *testing.T) {
 	}
 }
 
-// TestCleanupNCCLResources_UIDMismatchPreventsDelete verifies the ownership
-// precondition against a UID mismatch. client-go's fake ObjectTracker
-// ignores Delete preconditions, so this reactor emulates the real
-// apiserver's check to prove a mismatch surfaces as an error instead of
-// deleting the namespace regardless.
+// TestCleanupNCCLResources_UIDMismatchPreventsDelete verifies a UID
+// mismatch is treated like NotFound, not a cleanup failure. client-go's
+// fake ObjectTracker ignores Delete preconditions, so this reactor emulates
+// the real apiserver's check.
 func TestCleanupNCCLResources_UIDMismatchPreventsDelete(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	const actualUID = types.UID("actual-owner-uid")
@@ -220,9 +219,8 @@ func TestCleanupNCCLResources_UIDMismatchPreventsDelete(t *testing.T) {
 			stderrors.New("uid in precondition does not match uid in record"))
 	})
 
-	err := cleanupNCCLResources(fakeClient, ns, "wrong-uid")
-	if err == nil {
-		t.Fatal("expected a conflict error for a mismatched owning UID, got nil")
+	if err := cleanupNCCLResources(fakeClient, ns, "wrong-uid"); err != nil {
+		t.Fatalf("expected a UID mismatch to be treated as already-replaced, got err=%v", err)
 	}
 	if _, getErr := fakeClient.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{}); getErr != nil {
 		t.Errorf("namespace should be left alone on a UID mismatch, got err=%v", getErr)

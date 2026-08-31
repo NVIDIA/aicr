@@ -2380,6 +2380,13 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 			slog.Info("NCCL benchmark namespace already gone", "namespace", namespace)
 			return nil
 		}
+		if apierrors.IsConflict(err) {
+			// UID precondition mismatch. The namespace we created is
+			// already gone and a different one holds the name, so
+			// nothing this run owns leaked.
+			slog.Info("NCCL benchmark namespace was already replaced", "namespace", namespace)
+			return nil
+		}
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
 			fmt.Sprintf("failed to delete NCCL benchmark namespace %q", namespace), err)
 	}
