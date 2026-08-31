@@ -348,6 +348,38 @@ complementary opt-out warning fires only where GPU Operator manages the driver
 [Storage Class](cli-reference.md#storage-class), where that warning is
 described alongside the other cluster-state dependency reported the same way.
 
+### Upgrading from a build that applied the label implicitly
+
+For a window on unreleased `main`, the eviction label was applied
+automatically rather than requested. Bundles generated in that window — via the
+CLI, the REST API, config, or a Go caller — received the
+`nvidia.com/dra-kubelet-plugin=true` selector and the matching Driver Manager
+environment entry without asking for them. No tagged release contains that
+behavior, so only clusters built from `main` in that interval are affected.
+
+At this head the same inputs produce the opposite result: omitting
+`--dra-eviction-node-label` removes both the selector and the Driver Manager
+entry. Regenerating and upgrading such a cluster therefore *drops* eviction
+coordination silently — the reverse of the direction described above, and the
+case the preceding subsection does not cover.
+
+Decide deliberately, and only two answers are defensible:
+
+- **Keep coordination.** Confirm the nodes still carry the label
+  (`kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true`), confirm the count
+  matches the GPU nodes you expect, then pass
+  `--dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true` explicitly on
+  every subsequent generation. Verify node labels *before* upgrading: passing
+  the flag against unlabeled nodes takes the DaemonSet to `DESIRED=0`.
+- **Accept the opt-out.** Regenerate without the flag and accept the documented
+  risks in [DRA Driver Upgrade
+  Eviction](cli-reference.md#dra-driver-upgrade-eviction). The node labels
+  become inert and can be removed at leisure.
+
+The opt-out warning `aicr bundle` prints bounds the blast radius at generation
+time, but it is not upgrade guidance: it fires on every unlabeled generation and
+cannot know the cluster previously had coordination.
+
 ### Custom label conventions and post-install checks
 
 The flag both opts in and selects the convention: generate the bundle with
