@@ -22,11 +22,16 @@ import (
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
-// TestApplyAgentDefaults covers the fields an SDK caller used to have to know
-// were required (#2256): Image, JobName, and ServiceAccountName are copied
-// verbatim into the Job and RBAC objects, so omitting one surfaced as an
-// apiserver rejection from inside Deploy rather than anything the caller could
-// act on.
+// TestApplyAgentDefaults covers the field an SDK caller used to have to know
+// was required (#2256): Image is copied verbatim into the Job's container, so
+// omitting it surfaced as an apiserver rejection from inside Deploy rather than
+// anything the caller could act on.
+//
+// It also pins the two fields that are deliberately left alone. JobName and
+// ServiceAccountName are naming prefixes that pkg/k8s/agent defaults from
+// Config.NameBase, and filling ServiceAccountName in particular would route
+// every caller who omitted it into exact-ServiceAccount mode — see
+// TestApplyAgentDefaults_LeavesNamesForRunScoping.
 func TestApplyAgentDefaults(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -35,14 +40,14 @@ func TestApplyAgentDefaults(t *testing.T) {
 		want    snapshotter.AgentConfig
 	}{
 		{
-			name:    "minimal config gets every agent field",
+			// Only Image is filled. The two names stay empty so
+			// pkg/k8s/agent derives "<NameBase>-<RunID>" for them.
+			name:    "minimal config gets the image and keeps the names empty",
 			version: "0.21.0",
 			in:      snapshotter.AgentConfig{Namespace: "aicr-system"},
 			want: snapshotter.AgentConfig{
-				Namespace:          "aicr-system",
-				Image:              defaults.AgentImageRepository + ":v0.21.0",
-				JobName:            defaults.AgentName,
-				ServiceAccountName: defaults.AgentName,
+				Namespace: "aicr-system",
+				Image:     defaults.AgentImageRepository + ":v0.21.0",
 			},
 		},
 		{
@@ -53,10 +58,8 @@ func TestApplyAgentDefaults(t *testing.T) {
 			version: "",
 			in:      snapshotter.AgentConfig{Namespace: "aicr-system"},
 			want: snapshotter.AgentConfig{
-				Namespace:          "aicr-system",
-				Image:              defaults.AgentImageRepository + ":latest",
-				JobName:            defaults.AgentName,
-				ServiceAccountName: defaults.AgentName,
+				Namespace: "aicr-system",
+				Image:     defaults.AgentImageRepository + ":latest",
 			},
 		},
 		{
@@ -76,9 +79,13 @@ func TestApplyAgentDefaults(t *testing.T) {
 			},
 		},
 		{
-			// Whitespace cannot be a valid Kubernetes name or image
-			// reference, so it is a typo'd omission, not a choice.
-			name:    "whitespace-only counts as unset",
+			// Whitespace cannot be a valid image reference, so it is a
+			// typo'd omission, not a choice. The names are forwarded as
+			// given: agent.Deployer.validateNames rejects the object name
+			// they resolve to with a coded error naming the field, before
+			// any cluster call, which beats silently substituting a name
+			// the caller did not ask for.
+			name:    "whitespace-only image counts as unset; names pass through",
 			version: "0.21.0",
 			in: snapshotter.AgentConfig{
 				Namespace:          "aicr-system",
@@ -89,8 +96,8 @@ func TestApplyAgentDefaults(t *testing.T) {
 			want: snapshotter.AgentConfig{
 				Namespace:          "aicr-system",
 				Image:              defaults.AgentImageRepository + ":v0.21.0",
-				JobName:            defaults.AgentName,
-				ServiceAccountName: defaults.AgentName,
+				JobName:            "\t",
+				ServiceAccountName: " ",
 			},
 		},
 		{
@@ -101,10 +108,8 @@ func TestApplyAgentDefaults(t *testing.T) {
 			version: "0.21.0",
 			in:      snapshotter.AgentConfig{},
 			want: snapshotter.AgentConfig{
-				Namespace:          "",
-				Image:              defaults.AgentImageRepository + ":v0.21.0",
-				JobName:            defaults.AgentName,
-				ServiceAccountName: defaults.AgentName,
+				Namespace: "",
+				Image:     defaults.AgentImageRepository + ":v0.21.0",
 			},
 		},
 	}
@@ -146,10 +151,14 @@ func TestApplyAgentDefaults_NilIsSafe(t *testing.T) {
 }
 
 // TestCollectSnapshot_DefaultsReachTheDeployedJob is the Client-boundary
-// counterfactual. TestApplyAgentDefaults proves the helper fills the fields;
-// this proves CollectSnapshot calls it, by capturing the exact AgentConfig
-// handed to the deployment entry point. Delete the applyAgentDefaults call from
-// CollectSnapshot and every assertion below fails.
+// counterfactual. TestApplyAgentDefaults proves the helper fills Image; this
+// proves CollectSnapshot calls it, by capturing the exact AgentConfig handed to
+// the deployment entry point. Delete the applyAgentDefaults call from
+// CollectSnapshot and the Image assertion below fails.
+//
+// The two name assertions run the other way: they prove nothing on this path
+// re-introduces a defaulted ServiceAccountName, which is what would put an SDK
+// caller who omitted it into exact-ServiceAccount mode.
 //
 // It substitutes deps.deployAndCollect because the alternative is a live
 // apiserver — which is precisely why the original defect could reach a release.
@@ -194,13 +203,16 @@ func TestCollectSnapshot_DefaultsReachTheDeployedJob(t *testing.T) {
 			"caller omitting Image would get an apiserver rejection",
 			deployed.Image)
 	}
-	if deployed.ServiceAccountName != defaults.AgentName {
-		t.Errorf("deployed ServiceAccountName = %q, want %q; Deploy creates the "+
-			"ServiceAccount before the Job, so an empty name fails first",
+	if deployed.ServiceAccountName != "" {
+		t.Errorf("deployed ServiceAccountName = %q, want empty; a defaulted name "+
+			"is probed by agent.Deployer.resolveServiceAccount, so a leftover "+
+			"%q ServiceAccount on the cluster would silently run this caller in "+
+			"exact-ServiceAccount mode with no RBAC managed at all",
 			deployed.ServiceAccountName, defaults.AgentName)
 	}
-	if deployed.JobName != defaults.AgentName {
-		t.Errorf("deployed JobName = %q, want %q", deployed.JobName, defaults.AgentName)
+	if deployed.JobName != "" {
+		t.Errorf("deployed JobName = %q, want empty; Config.NameBase supplies the "+
+			"prefix and the run ID is appended to it", deployed.JobName)
 	}
 }
 
@@ -240,36 +252,59 @@ func TestCollectSnapshot_DoesNotMutateCallerConfig(t *testing.T) {
 	}
 }
 
-// TestApplyAgentDefaults_SharesNamesAcrossCallers pins the fact the
-// CollectSnapshot godoc's Concurrency section warns about.
+// TestApplyAgentDefaults_LeavesNamesForRunScoping is the inverse of the test
+// that used to live here.
 //
-// Defaulting the names to a constant means two callers who both omit them
-// address the SAME Job and ServiceAccount. That is deliberate — it matches the
-// CLI, and per-run names would not fix concurrent collection anyway, because
-// the ClusterRoleBinding has a fixed name and carries the ServiceAccount as its
-// subject. This test exists so the warning cannot quietly stop being true: if
-// the defaults ever become per-run, this fails and the doc gets revisited.
-func TestApplyAgentDefaults_SharesNamesAcrossCallers(t *testing.T) {
-	first := snapshotter.AgentConfig{Namespace: "aicr-system"}
-	second := snapshotter.AgentConfig{Namespace: "aicr-system"}
-	applyAgentDefaults(&first, "0.21.0")
-	applyAgentDefaults(&second, "0.21.0")
+// Its predecessor, TestApplyAgentDefaults_SharesNamesAcrossCallers, pinned the
+// opposite property: that two callers who both omitted the names addressed the
+// SAME Job and ServiceAccount, matching the CollectSnapshot godoc's old
+// one-run-at-a-time Concurrency warning. Run isolation (ADR-020, #2120) made
+// that property wrong — every run now owns its objects — so the assertion is
+// inverted rather than deleted, and this test is what keeps the new guarantee
+// from quietly regressing.
+//
+// It deliberately does NOT assert "both are empty and therefore equal": that
+// would pass vacuously for exactly the bug it exists to catch. It asserts the
+// two properties that matter — an omitted name is left for pkg/k8s/agent to
+// run-scope, and an explicitly supplied one is preserved byte-for-byte.
+//
+// ServiceAccountName is the one with teeth. It is exact-if-exists: any
+// non-empty value is probed against the cluster by
+// agent.Deployer.resolveServiceAccount, and a hit runs the agent under that
+// account and manages no RBAC for the run. Re-introducing a default here would
+// make every caller who omits the field probe "aicr", so one leftover "aicr"
+// ServiceAccount from a pre-ADR-020 install would silently disable RBAC
+// management cluster-wide.
+func TestApplyAgentDefaults_LeavesNamesForRunScoping(t *testing.T) {
+	omitted := snapshotter.AgentConfig{Namespace: "aicr-system"}
+	applyAgentDefaults(&omitted, "0.21.0")
 
-	if first.JobName != second.JobName {
-		t.Errorf("JobName defaults differ (%q vs %q); if this is now per-run, "+
-			"CollectSnapshot's Concurrency godoc needs updating",
-			first.JobName, second.JobName)
+	if omitted.ServiceAccountName != "" {
+		t.Errorf("ServiceAccountName = %q, want empty: a non-empty value is "+
+			"probed for existence, so defaulting it routes every caller who "+
+			"omitted the field into exact-ServiceAccount mode",
+			omitted.ServiceAccountName)
 	}
-	if first.ServiceAccountName != second.ServiceAccountName {
-		t.Errorf("ServiceAccountName defaults differ (%q vs %q); see above",
-			first.ServiceAccountName, second.ServiceAccountName)
+	if omitted.JobName != "" {
+		t.Errorf("JobName = %q, want empty: Config.NameBase supplies the prefix "+
+			"and the run ID is appended to it", omitted.JobName)
 	}
 
-	// An explicit name is the documented way to separate two runs' Job and
-	// namespaced RBAC — necessary but, per the godoc, not sufficient.
-	custom := snapshotter.AgentConfig{Namespace: "aicr-system", JobName: "run-b"}
-	applyAgentDefaults(&custom, "0.21.0")
-	if custom.JobName != "run-b" {
-		t.Errorf("JobName = %q, want the caller's %q", custom.JobName, "run-b")
+	// Guard against the vacuous pass: an explicit name must survive untouched,
+	// because that is the only way a caller reaches exact-ServiceAccount mode
+	// (and the documented way to pin an IRSA / Workload Identity account).
+	explicit := snapshotter.AgentConfig{
+		Namespace:          "aicr-system",
+		JobName:            "run-b",
+		ServiceAccountName: "irsa-snapshotter",
+	}
+	applyAgentDefaults(&explicit, "0.21.0")
+
+	if explicit.JobName != "run-b" {
+		t.Errorf("JobName = %q, want the caller's %q", explicit.JobName, "run-b")
+	}
+	if explicit.ServiceAccountName != "irsa-snapshotter" {
+		t.Errorf("ServiceAccountName = %q, want the caller's %q",
+			explicit.ServiceAccountName, "irsa-snapshotter")
 	}
 }

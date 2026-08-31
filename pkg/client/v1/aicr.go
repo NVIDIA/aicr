@@ -1974,38 +1974,46 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 	return out, nil
 }
 
-// applyAgentDefaults fills the agent fields the CLI has always supplied as flag
-// defaults and the facade did not.
+// applyAgentDefaults fills Image, the one agent field the CLI has always
+// supplied as a flag default and the facade did not.
 //
-// Image, JobName, and ServiceAccountName are copied verbatim into the Job and
-// RBAC objects and nothing under pkg/k8s/agent defaults them, so omitting any of
-// the three surfaced as a raw apiserver rejection from inside Deploy — after
-// the ServiceAccount had already been created, which with Cleanup false leaves
-// it behind (#2256). The CLI never hit it because pkg/cli/snapshot.go supplies
-// all three as flag defaults; sharing the definitions through pkg/defaults is
-// what keeps the two paths deploying the same image.
+// Image is copied verbatim into the Job's container and nothing under
+// pkg/k8s/agent defaults it, so omitting it surfaced as a raw apiserver
+// rejection from inside Deploy — after the ServiceAccount had already been
+// created, which with Cleanup false leaves it behind (#2256). The CLI never hit
+// it because pkg/cli/snapshot.go supplies it as a flag default; sharing the
+// definition through pkg/defaults is what keeps the two paths deploying the
+// same image.
 //
-// Namespace is deliberately NOT defaulted. pkg/snapshotter already rejects an
-// empty one with a coded error naming the field, and quietly deploying a
-// privileged, cluster-reading Job into "default" is a worse outcome than being
-// told to choose. The CLI defaults it because a person is watching a flag they
-// can see; an SDK caller is not.
+// JobName and ServiceAccountName are deliberately NOT defaulted, though #2256
+// originally set both to defaults.AgentName here. Under run isolation
+// (ADR-020) they are naming PREFIXES that pkg/k8s/agent already defaults from
+// Config.NameBase before appending the run ID, so filling them adds nothing —
+// and for ServiceAccountName it actively harms. That field is exact-if-exists:
+// agent.Deployer.resolveServiceAccount probes for a ServiceAccount of exactly
+// the given name and, on a hit, runs under it and manages no RBAC for the run
+// at all. Defaulting it means every SDK caller who omits it probes "aicr", so
+// on any cluster carrying a leftover "aicr" ServiceAccount from a
+// pre-ADR-020 install every run would silently enter that mode. An unset name
+// is never probed, so exact mode stays reachable only from a name the caller
+// actually chose. See CollectSnapshot's godoc, which documents both as
+// optional prefixes.
 //
-// A whitespace-only value counts as unset: it cannot be a valid Kubernetes name
-// or image reference, so treating it as a typo'd omission beats forwarding it to
-// the apiserver. This mirrors how pkg/snapshotter reads Namespace.
+// Namespace is deliberately NOT defaulted either. pkg/snapshotter already
+// rejects an empty one with a coded error naming the field, and quietly
+// deploying a privileged, cluster-reading Job into "default" is a worse outcome
+// than being told to choose. The CLI defaults it because a person is watching a
+// flag they can see; an SDK caller is not.
+//
+// A whitespace-only Image counts as unset: it cannot be a valid image
+// reference, so treating it as a typo'd omission beats forwarding it to the
+// apiserver. This mirrors how pkg/snapshotter reads Namespace.
 func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
 	if cfg == nil {
 		return
 	}
 	if strings.TrimSpace(cfg.Image) == "" {
 		cfg.Image = defaults.AgentImageForVersion(version)
-	}
-	if strings.TrimSpace(cfg.JobName) == "" {
-		cfg.JobName = defaults.AgentName
-	}
-	if strings.TrimSpace(cfg.ServiceAccountName) == "" {
-		cfg.ServiceAccountName = defaults.AgentName
 	}
 }
 
