@@ -1675,21 +1675,29 @@ kubectl -n nvidia-dra-driver get ds nvidia-dra-driver-gpu-kubelet-plugin \
 
 **Expect a wildcard, because that is AICR's default.** When `--accelerated-node-toleration` is not passed, AICR applies a keyless `{operator: Exists}` toleration, which accepts every taint and leaves no key to exclude a node with. A default bundle therefore has no node-scoped option and must use the cluster-wide sequence below. This was the deployed state on an EKS GB300 cluster whose bundle was generated without toleration flags.
 
-**A taint works only when the deployed list is narrow** — a bundle built with explicit `--accelerated-node-toleration` flags, or the upstream chart default of `nvidia.com/gpu` alone. Then a taint whose key appears nowhere in that list suppresses the plugin on exactly that node. Fence the node with the taint *first*, but do not delete the running plugin until every claim holder has completed `NodeUnprepareResources` — the kubelet routes that call through the plugin, so a holder still terminating after it is gone will hang.
+**A taint works only when the deployed list is narrow** — a bundle built with explicit `--accelerated-node-toleration` flags, or the upstream chart default of `nvidia.com/gpu` alone. Then a taint whose key appears nowhere in that list excludes the plugin from exactly that node.
 
-1. **Fence the node first. This is the very first operation — before touching any workload.**
+**"Node-scoped" describes the plugin suppression, not the blast radius of the whole procedure.** The taint affects one node, and the DaemonSet keeps running everywhere else. But step 2 quiesces the *controllers* that own claim holders, and a controller is rarely node-scoped: scaling a Deployment, StatefulSet or multi-replica `NodeSet` to zero terminates its Pods on **every** node it runs on, not just the failed one. Scope that step as narrowly as your workloads allow — suspending a single Job, or cordoning and draining only what holds claims here — and treat wider quiescing as a maintenance window, not a node-local repair.
+
+Three invariants govern the order, and every step below exists to preserve one of them:
+
+- **Fence before you drain.** Terminating a claim holder while a controller can still schedule onto the node re-fills what you just cleared.
+- **The plugin outlives its claim holders.** The kubelet routes `NodeUnprepareResources` through the plugin, so a holder still terminating after the plugin is gone will hang.
+- **The driver recovers before the plugin returns.** A plugin that comes back early reopens the driver mid-recovery, reintroducing the original failure.
+
+1. **Fence the node. This is the very first operation — before touching any workload.**
 
    ```bash
    kubectl taint node <node-name> aicr.nvidia.com/dra-recovery=true:NoSchedule
    ```
 
-   `NoSchedule` blocks *new* pods while leaving running ones alone, so the taint fences the node without disturbing the plugin that is still needed to service `NodeUnprepareResources`. Every later step assumes this fence is already up.
+   `NoSchedule` blocks *new* pods while leaving running ones alone, so the taint fences the node without disturbing the plugin, which is still needed. Every later step assumes this fence is up.
 
-2. **Now quiesce the controllers that own claim holders on that node.** The invariant is that *no owning controller can create a replacement Pod*; confirm reconciliation is actually quiesced before relying on it. The action is workload-specific — set `.spec.suspend: true` on Jobs, scale Deployments, StatefulSets and ReplicaSets to zero, scale operator-owned workloads (a Slinky Slurm `NodeSet`, for instance) to zero replicas. **`kubectl rollout pause` is not sufficient**: it halts rollout progression while the ReplicaSet keeps reconciling replicas, so a deleted claim holder is recreated immediately.
+2. **Quiesce the controllers that own claim holders on that node.** The invariant is that *no owning controller can create a replacement Pod*; confirm reconciliation is actually quiesced before relying on it. The action is workload-specific — set `.spec.suspend: true` on Jobs, scale Deployments, StatefulSets and **standalone** ReplicaSets to zero, scale operator-owned workloads (a Slinky Slurm `NodeSet`, for instance) to zero replicas. A Deployment-owned ReplicaSet must be controlled through its Deployment, which will otherwise recreate it. **`kubectl rollout pause` is not sufficient**: it halts rollout progression while the ReplicaSet keeps reconciling replicas, so a deleted claim holder is recreated immediately.
 
-   Note that these actions *terminate* Pods — Job suspension deletes active Pods, and scaling to zero removes them. That is why the taint goes on first: with the fence already up, the terminations cannot be undone by a controller rescheduling onto this node. Quiescing before fencing would drain and re-fill in the same breath.
+   These actions *terminate* Pods — Job suspension deletes active Pods, scaling to zero removes them — and, as noted above, they do so wherever that controller runs. That is why the fence goes up first: the terminations on this node cannot then be undone by a controller rescheduling onto it.
 
-3. **Confirm every claim holder on that node has completed `NodeUnprepareResources`.** The kubelet routes that call through the plugin, so a holder still terminating after the plugin is gone will hang. Allocated ComputeDomain claims can legitimately persist cluster-wide, so a cluster-wide claim listing does not establish that *this* node is clear — resolve holders to the node before proceeding. This is stated as an invariant rather than a command because the holder-to-node mapping depends on your workload shape and no single command was verified here. The kubelet routes that call through the plugin, so a holder still terminating after the plugin is gone will hang. Allocated ComputeDomain claims can legitimately persist cluster-wide, so a cluster-wide claim listing does not establish that *this* node is clear — resolve holders to the node before proceeding. This is stated as an invariant rather than a command because the holder-to-node mapping depends on your workload shape and no single command was verified here.
+3. **Confirm every claim holder on that node has completed `NodeUnprepareResources`.** Allocated ComputeDomain claims can legitimately persist cluster-wide, so a cluster-wide claim listing does not establish that *this* node is clear — resolve holders to the node before proceeding. This is stated as an invariant rather than a command because the holder-to-node mapping depends on your workload shape and no single command was verified here.
 
 4. **Only then delete the plugin on that node.**
 
@@ -1705,7 +1713,7 @@ kubectl -n nvidia-dra-driver get ds nvidia-dra-driver-gpu-kubelet-plugin \
 
 6. **Retry the driver, and wait for it to finish.** Driver Manager must report success and the driver Pod must reach `Ready`. Do not proceed while it is still retrying.
 
-7. **Only now remove the taint.** Releasing it earlier makes the node eligible again, so the plugin can be recreated and reopen the driver before recovery completes — reintroducing the failure.
+7. **Only now remove the taint.**
 
    ```bash
    kubectl taint node <node-name> aicr.nvidia.com/dra-recovery-
@@ -1713,7 +1721,7 @@ kubectl -n nvidia-dra-driver get ds nvidia-dra-driver-gpu-kubelet-plugin \
 
 8. **Confirm the plugin returns `Ready` on that node and its `ResourceSlices` are republished**, then restore the controllers quiesced in step 2. Until the slices are back the node cannot serve DRA allocations, even though the pod is running.
 
-`NoSchedule` does not evict running pods, so the driver pod stays put and its driver-manager init container keeps retrying while the plugin is gone. Claim holders on other nodes are untouched.
+`NoSchedule` does not evict running pods, so the driver pod stays put and its driver-manager init container keeps retrying while the plugin is gone. The DRA plugin on other nodes is untouched; whether their *workloads* are depends entirely on how wide step 2 had to reach.
 
 The *suppression* mechanism in steps 1, 7 and 8 was verified on a two-GPU-node AKS cluster built with explicit tolerations, whose plugin tolerated only `nvidia.com/gpu=present:NoSchedule`: tainting one node took the DaemonSet from `DESIRED=2` to `DESIRED=1` with no replacement pod on the tainted node, while the second node's pod kept its original start time — no roll. Removing the taint returned it to `DESIRED=2 READY=2` with both `ResourceSlices` restored. That cluster uses a host-installed driver with no GPU Operator Driver Manager, so steps 3, 5 and 6 — the driver-recovery half — were not exercised there.
 
