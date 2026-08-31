@@ -35,6 +35,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
@@ -1996,6 +1997,10 @@ func ensureHFTokenSecret(ctx *validators.Context, namespace string) error {
 // AlreadyExists, but subsequent resource creates inside it fail with
 // "... forbidden: ... because it is being terminated". Waiting here until the
 // prior Terminating instance is fully gone avoids that race.
+//
+// Stamps labels.ManagedBy so pruneStaleNCCLNamespaces can later scope its
+// sweep to namespaces this package actually created, not just ones that
+// match its naming convention.
 func ensureNamespace(ctx *validators.Context, namespace string) error {
 	nsCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.InferenceNamespaceTerminationWait)
 	defer cancel()
@@ -2019,7 +2024,10 @@ func ensureNamespace(ctx *validators.Context, namespace string) error {
 		return nil
 	}
 
-	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
+	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:   namespace,
+		Labels: map[string]string{labels.ManagedBy: labels.ValueValidator},
+	}}
 	_, err = clients.Create(nsCtx, ns, metav1.CreateOptions{})
 	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)

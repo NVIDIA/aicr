@@ -32,6 +32,7 @@ import (
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	k8spod "github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
 	"github.com/NVIDIA/aicr/validators/internal/gkenet"
@@ -553,21 +554,30 @@ func verifyNCCLNamespaceNotLive(ctx context.Context, clientset kubernetes.Interf
 // killed standalone run instead orphans a namespace under a different random
 // suffix that no future run will ever name again, so nothing else reclaims it.
 //
+// Scoped server-side to labels.ManagedBy=aicr-validator, the label
+// ensureNamespace stamps on creation, so name shape and age alone never
+// qualify an unrelated namespace for deletion.
+//
 // Deletion is fire-and-forget: this only issues the Delete call and moves on,
 // it never waits for the namespace to fully terminate, so it adds no
-// wall-clock cost to the run in progress. currentNamespace and anything
-// younger than defaults.NCCLStaleNamespacePruneAge are left alone, so a
-// namespace still owned by an in-progress sibling variant is never touched.
-// An aged namespace that still has a live pod is also left alone, using the
-// same verifyNCCLNamespaceNotLive occupancy check the adoption gate uses, in
-// case some other execution has simply run long. Listing or deleting
-// failures are logged and otherwise ignored. This is opportunistic cleanup,
-// not something a benchmark run should ever fail for.
+// wall-clock cost to the run in progress. The delete carries a UID
+// precondition pinned to the instance this List observed, so a same-named
+// namespace recreated by someone else in between is left alone.
+// currentNamespace and anything younger than
+// defaults.NCCLStaleNamespacePruneAge are left alone, so a namespace still
+// owned by an in-progress sibling variant is never touched. An aged
+// namespace that still has a live pod is also left alone, using the same
+// verifyNCCLNamespaceNotLive occupancy check the adoption gate uses, in case
+// some other execution has simply run long. Listing or deleting failures are
+// logged and otherwise ignored. This is opportunistic cleanup, not something
+// a benchmark run should ever fail for.
 func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interface, currentNamespace string) {
 	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
 
-	namespaces, err := clientset.CoreV1().Namespaces().List(listCtx, metav1.ListOptions{})
+	namespaces, err := clientset.CoreV1().Namespaces().List(listCtx, metav1.ListOptions{
+		LabelSelector: labels.ManagedBy + "=" + labels.ValueValidator,
+	})
 	if err != nil {
 		slog.Warn("Failed to list namespaces for stale NCCL benchmark namespace prune", "error", err)
 		return
@@ -591,7 +601,10 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 		}
 
 		delCtx, delCancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
-		delErr := clientset.CoreV1().Namespaces().Delete(delCtx, ns.Name, metav1.DeleteOptions{})
+		uid := ns.UID
+		delErr := clientset.CoreV1().Namespaces().Delete(delCtx, ns.Name, metav1.DeleteOptions{
+			Preconditions: &metav1.Preconditions{UID: &uid},
+		})
 		delCancel()
 		if delErr != nil && !apierrors.IsNotFound(delErr) {
 			slog.Warn("Failed to delete stale NCCL benchmark namespace", "namespace", ns.Name, "error", delErr)

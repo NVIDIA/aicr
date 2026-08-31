@@ -25,6 +25,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -322,41 +323,50 @@ func TestNCCLRunNamespace_VariesByVariant(t *testing.T) {
 	}
 }
 
-// TestPruneStaleNCCLNamespaces is the regression guard for the low-priority
-// orphan-namespace nit: a standalone run killed before its own deferred
-// cleanup leaves an aicr-nccl-perf-* namespace under a random suffix nothing
-// else will ever reclaim. The prune must delete only namespaces that are all
-// of: name-matching, old enough to rule out an in-progress sibling variant,
-// not already terminating, and not the namespace this run is about to use.
+// TestPruneStaleNCCLNamespaces is the regression guard for the ownership
+// finding. Name, age, and pod occupancy alone must never qualify a namespace
+// for deletion. The prune must delete only namespaces that are all of:
+// labeled as ours (see ensureNamespace's labels.ManagedBy stamp),
+// name-matching, old enough to rule out an in-progress sibling variant, not
+// already terminating, and not the namespace this run is about to use.
+// unlabeledMatchingNS is the case that would have been wrongly deleted
+// before the fix.
 func TestPruneStaleNCCLNamespaces(t *testing.T) {
 	old := metav1.NewTime(time.Now().Add(-2 * defaults.NCCLStaleNamespacePruneAge))
 	young := metav1.NewTime(time.Now().Add(-1 * time.Minute))
+	ownedLabels := map[string]string{labels.ManagedBy: labels.ValueValidator}
 
 	staleNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name: "aicr-nccl-perf-default-deadbeef", CreationTimestamp: old,
+		Name: "aicr-nccl-perf-default-deadbeef", CreationTimestamp: old, Labels: ownedLabels,
 	}}
 	youngNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name: "aicr-nccl-perf-default-abad1dea", CreationTimestamp: young,
+		Name: "aicr-nccl-perf-default-abad1dea", CreationTimestamp: young, Labels: ownedLabels,
 	}}
 	currentNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name: "aicr-nccl-perf-default-currentrun", CreationTimestamp: old,
+		Name: "aicr-nccl-perf-default-currentrun", CreationTimestamp: old, Labels: ownedLabels,
 	}}
 	terminatingNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name: "aicr-nccl-perf-default-cafef00d", CreationTimestamp: old,
+		Name: "aicr-nccl-perf-default-cafef00d", CreationTimestamp: old, Labels: ownedLabels,
 		DeletionTimestamp: &metav1.Time{Time: time.Now()}, Finalizers: []string{"kubernetes"},
 	}}
 	unrelatedNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name: "some-other-namespace", CreationTimestamp: old,
 	}}
+	// Matches the name prefix, is old enough, and has no live pod. Without
+	// the ownership label check, the pre-fix prune would have deleted it.
+	unlabeledMatchingNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-notours", CreationTimestamp: old,
+	}}
 	liveAgedNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
-		Name: "aicr-nccl-perf-default-livebeef", CreationTimestamp: old,
+		Name: "aicr-nccl-perf-default-livebeef", CreationTimestamp: old, Labels: ownedLabels,
 	}}
 	liveAgedPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "launcher-0", Namespace: liveAgedNS.Name},
 		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
 	}
 
-	client := fake.NewClientset(staleNS, youngNS, currentNS, terminatingNS, unrelatedNS, liveAgedNS, liveAgedPod)
+	client := fake.NewClientset(staleNS, youngNS, currentNS, terminatingNS, unrelatedNS,
+		unlabeledMatchingNS, liveAgedNS, liveAgedPod)
 	pruneStaleNCCLNamespaces(context.Background(), client, currentNS.Name)
 
 	remaining, err := client.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
@@ -371,7 +381,8 @@ func TestPruneStaleNCCLNamespaces(t *testing.T) {
 	if names[staleNS.Name] {
 		t.Errorf("expected stale namespace %q to be deleted", staleNS.Name)
 	}
-	for _, keep := range []string{youngNS.Name, currentNS.Name, terminatingNS.Name, unrelatedNS.Name, liveAgedNS.Name} {
+	for _, keep := range []string{youngNS.Name, currentNS.Name, terminatingNS.Name, unrelatedNS.Name,
+		unlabeledMatchingNS.Name, liveAgedNS.Name} {
 		if !names[keep] {
 			t.Errorf("expected namespace %q to be left alone, but it was deleted", keep)
 		}
