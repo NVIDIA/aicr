@@ -85,60 +85,32 @@ preload_have_image() {
     timeout "${remaining}" docker image inspect "${image}" &>/dev/null
 }
 
-preload_image() {
-    local image="$1"
+# preload_pull_retry gets IMAGE into the host's Docker cache before DEADLINE,
+# retrying a failed pull until the budget is spent. Returns 0 when the image is
+# cached on return, 1 when it is not — and logs the reason in that case.
+#
+# Split out from preload_image so the CI image-cache priming step
+# (kwok/scripts/lib/image-cache.sh) reuses this exact retry schedule instead of
+# growing a second one. The two callers differ only in what a failure means:
+# preload_image degrades to the kubelet pull, priming fails its job.
+#
+# Retry until the BUDGET is spent, not for a fixed number of attempts.
+#
+# The fixed three-attempt schedule this replaces gave up in ~17s while holding a
+# 180s budget (#2483): each pull failed in about a second, the backoff was 5s
+# then 10s, and ~163s went unused. Against a per-IP registry throttle that is
+# close to the worst possible schedule — it retries fast enough to stay inside
+# the same throttle window, then stops long before the window would reset.
+#
+# Evidence it is a throttle and not an outage: in the run that motivated this,
+# 125 of 127 concurrent matrix jobs pulled the same image successfully at the
+# same moment. The pull is not broken; a few callers are being shed.
+#
+# Backoff doubles from PRELOAD_BACKOFF_START and is capped, so a long budget
+# spends most of its time waiting rather than hammering.
+preload_pull_retry() {
+    local image="$1" deadline="$2"
 
-    # `timeout` is required, not optional. Without it every docker/kind call is
-    # unbounded, and a stalled pull would hold the lane for the whole job — the
-    # precise failure this function exists to prevent, in a new place. If it is
-    # missing, skip preloading rather than risk that.
-    if ! command -v docker &>/dev/null || ! command -v kind &>/dev/null ||
-        ! command -v timeout &>/dev/null; then
-        log_debug "docker, kind, or timeout unavailable — leaving ${image} to the kubelet"
-        return 0
-    fi
-
-    # One deadline for the whole function; every operation below draws from it.
-    local budget="${KWOK_PRELOAD_BUDGET_SECONDS:-${KWOK_PRELOAD_BUDGET_DEFAULT}}"
-    local deadline=$(( $(date +%s) + budget ))
-
-    # Kind names the context "kind-<cluster>", so the cluster name is the
-    # context with that prefix stripped. Fall back to the same default
-    # run-all-recipes.sh uses when no context is pinned.
-    local cluster="${KWOK_CLUSTER:-aicr-kwok-test}"
-    if [[ -n "${KUBECTL_CONTEXT:-}" ]]; then
-        if [[ "${KUBECTL_CONTEXT}" != kind-* ]]; then
-            log_debug "context ${KUBECTL_CONTEXT} is not a Kind cluster — leaving ${image} to the kubelet"
-            return 0
-        fi
-        cluster="${KUBECTL_CONTEXT#kind-}"
-    fi
-
-    if ! preload_remaining "${deadline}" >/dev/null; then
-        log_warn "Preload budget exhausted before resolving the cluster; the kubelet will pull ${image}"
-        return 0
-    fi
-
-    if ! timeout "$(preload_remaining "${deadline}")" kind get clusters 2>/dev/null | grep -qx "${cluster}"; then
-        log_debug "Kind cluster ${cluster} not found — leaving ${image} to the kubelet"
-        return 0
-    fi
-
-    # Retry until the BUDGET is spent, not for a fixed number of attempts.
-    #
-    # The fixed three-attempt schedule this replaces gave up in ~17s while
-    # holding a 180s budget (#2483): each pull failed in about a second, the
-    # backoff was 5s then 10s, and ~163s went unused. Against a per-IP registry
-    # throttle that is close to the worst possible schedule — it retries fast
-    # enough to stay inside the same throttle window, then stops long before the
-    # window would reset.
-    #
-    # Evidence it is a throttle and not an outage: in the run that motivated
-    # this, 125 of 127 concurrent matrix jobs pulled the same image successfully
-    # at the same moment. The pull is not broken; a few callers are being shed.
-    #
-    # Backoff doubles from PRELOAD_BACKOFF_START and is capped, so a long budget
-    # spends most of its time waiting rather than hammering.
     local attempt=0 remaining backoff="${PRELOAD_BACKOFF_START}" pull_err last_err=""
     pull_err="$(mktemp)"
     while :; do
@@ -182,12 +154,60 @@ preload_image() {
     # consumed the last of the budget lost its own error message. Reporting
     # here, from a variable captured at failure time, is what makes that
     # impossible rather than merely fixed.
-    if ! preload_have_image "${image}" "${deadline}"; then
-        if [[ -n "${last_err}" ]]; then
-            log_warn "${image} is not cached after ${attempt} attempt(s); last error: ${last_err}"
-        else
-            log_warn "${image} is not cached and no pull was attempted (the budget ran out first)"
+    if preload_have_image "${image}" "${deadline}"; then
+        return 0
+    fi
+    if [[ -n "${last_err}" ]]; then
+        log_warn "${image} is not cached after ${attempt} attempt(s); last error: ${last_err}"
+    else
+        log_warn "${image} is not cached and no pull was attempted (the budget ran out first)"
+    fi
+    return 1
+}
+
+preload_image() {
+    local image="$1"
+
+    # `timeout` is required, not optional. Without it every docker/kind call is
+    # unbounded, and a stalled pull would hold the lane for the whole job — the
+    # precise failure this function exists to prevent, in a new place. If it is
+    # missing, skip preloading rather than risk that.
+    if ! command -v docker &>/dev/null || ! command -v kind &>/dev/null ||
+        ! command -v timeout &>/dev/null; then
+        log_debug "docker, kind, or timeout unavailable — leaving ${image} to the kubelet"
+        return 0
+    fi
+
+    # One deadline for the whole function; every operation below draws from it.
+    local budget="${KWOK_PRELOAD_BUDGET_SECONDS:-${KWOK_PRELOAD_BUDGET_DEFAULT}}"
+    local deadline=$(( $(date +%s) + budget ))
+
+    # Kind names the context "kind-<cluster>", so the cluster name is the
+    # context with that prefix stripped. Fall back to the same default
+    # run-all-recipes.sh uses when no context is pinned.
+    local cluster="${KWOK_CLUSTER:-aicr-kwok-test}"
+    if [[ -n "${KUBECTL_CONTEXT:-}" ]]; then
+        if [[ "${KUBECTL_CONTEXT}" != kind-* ]]; then
+            log_debug "context ${KUBECTL_CONTEXT} is not a Kind cluster — leaving ${image} to the kubelet"
+            return 0
         fi
+        cluster="${KUBECTL_CONTEXT#kind-}"
+    fi
+
+    if ! preload_remaining "${deadline}" >/dev/null; then
+        log_warn "Preload budget exhausted before resolving the cluster; the kubelet will pull ${image}"
+        return 0
+    fi
+
+    if ! timeout "$(preload_remaining "${deadline}")" kind get clusters 2>/dev/null | grep -qx "${cluster}"; then
+        log_debug "Kind cluster ${cluster} not found — leaving ${image} to the kubelet"
+        return 0
+    fi
+
+    # The retry schedule lives in preload_pull_retry, which also owns the single
+    # reporting site for a pull that never lands. Here a failure is not fatal:
+    # the kubelet pull is still the fallback, exactly as before.
+    if ! preload_pull_retry "${image}" "${deadline}"; then
         log_warn "The kubelet will retry ${image} in-cluster"
         return 0
     fi

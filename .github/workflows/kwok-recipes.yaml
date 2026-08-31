@@ -76,7 +76,13 @@ jobs:
     name: Discover Recipes
     if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Raised from 5→10 when image-cache_test.sh joined the script unit tests
+    # below. Those suites are deliberately wall-clock bound — they assert that
+    # a hanging pull or an exhausted budget stays inside its deadline, which
+    # costs real seconds — and the block now runs ~90s locally before this job
+    # even starts classifying recipes. A discovery job that times out would be
+    # exactly the kind of self-inflicted red this change exists to remove.
+    timeout-minutes: 10
     outputs:
       tier1_pairs: ${{ steps.classify.outputs.tier1_pairs }}
       tier2_pairs: ${{ steps.classify.outputs.tier2_pairs }}
@@ -98,6 +104,7 @@ jobs:
           bash kwok/scripts/lib/sync-budget_test.sh
           bash kwok/scripts/lib/profile-select_test.sh
           bash kwok/scripts/lib/preload-image_test.sh
+          bash kwok/scripts/lib/image-cache_test.sh
           bash kwok/scripts/run-all-recipes_test.sh
 
       - name: Classify recipes into tiers
@@ -375,12 +382,75 @@ jobs:
           if (( dropped_count > 0 )); then
             echo "Filtered from matrix: ${dropped_count} recipe(s) with no matching KWOK profile — $(echo "$dropped" | jq -r 'join(", ")')"
           fi
+  # ── Image cache priming: one pull per run, not one per matrix job (#2483) ──
+  #
+  # The KWOK lanes need two public images — an in-cluster OCI registry, and
+  # Gitea for the *-git deployers. Every matrix job used to pull them itself.
+  # In run 33350102144, 127 jobs pulled registry:3.1.1 at the same moment from
+  # the shared GitHub-runner egress IPs; 125 succeeded and the one that was
+  # shed reddened main. That is a per-IP throttle, not an outage, so retrying
+  # harder cannot fix it — #2496 narrowed the window, it did not close it. The
+  # fix is to stop making 127 requests.
+  #
+  # This job makes one, saves a tarball, and lets actions/cache carry it to the
+  # matrix, which loads it from disk (see .github/actions/kwok-test). On a warm
+  # cache not even this job pulls.
+  #
+  # HARD GATE by design, unlike the best-effort preload it feeds: if an image is
+  # genuinely unreachable, failing one job in a minute beats 127 jobs each
+  # burning a rollout timeout. The summary job fails with it — without that, a
+  # failed prime would skip the tiers and the run would report green.
+  #
+  # One job per image (rather than one job for both) so a Gitea failure cannot
+  # discard a registry pull that already succeeded: actions/cache saves at the
+  # end of a job only when that job succeeds.
+  prime-images:
+    name: 'Prime Image Cache (${{ matrix.image }})'
+    if: github.event_name != 'schedule' || github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Must match IMAGE_CACHE_IMAGES in kwok/scripts/lib/image-cache.sh.
+        image: [registry, gitea]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      # .settings.yaml stays the single source of truth for the pins; the key
+      # derivation is shared with the consuming side through image-cache.sh, so
+      # the two cannot drift into never agreeing on a key.
+      - name: Resolve image pins and cache keys
+        id: images
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash kwok/scripts/lib/image-cache.sh settings .settings.yaml | tee -a "$GITHUB_OUTPUT"
+
+      - name: Cache image tarball
+        uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+        with:
+          path: /tmp/kwok-image-cache/${{ matrix.image }}
+          key: ${{ steps.images.outputs[format('{0}_key', matrix.image)] }}
+
+      - name: Prime image
+        shell: bash
+        env:
+          IMAGE: ${{ steps.images.outputs[format('{0}_image', matrix.image)] }}
+          CACHE_DIR: /tmp/kwok-image-cache/${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          bash kwok/scripts/lib/image-cache.sh save "${CACHE_DIR}" "${IMAGE}"
+
   # Thin caller of the shared kwok-test-run.yaml reusable workflow (#1172).
   # tier1_pairs is well under 256 entries, so it's passed in a single call —
   # no batching needed.
   test-tier1:
     name: 'Tier 1'
-    needs: discover
+    needs: [discover, prime-images]
     if: >-
       github.event_name != 'schedule' &&
       needs.discover.outputs.tier1_pairs != '[]' &&
@@ -393,7 +463,7 @@ jobs:
   # Helm-only by deliberate policy — see ADR-003 "Tier 2 deployer coverage".
   test-tier2:
     name: 'Tier 2'
-    needs: discover
+    needs: [discover, prime-images]
     if: >-
       github.event_name == 'pull_request' &&
       needs.discover.outputs.tier2_pairs != '[]' &&
@@ -411,7 +481,7 @@ jobs:
   # single run in its own group so they all run in parallel.
   test-tier3:
     name: 'Tier 3'
-    needs: discover
+    needs: [discover, prime-images]
     concurrency:
       group: kwok-tier3-${{ github.sha }}-${{ matrix.batch.id }}
       cancel-in-progress: false
@@ -430,7 +500,7 @@ jobs:
   # ── Summary: aggregate all tiers ──
   summary:
     name: KWOK Test Summary
-    needs: [test-tier1, test-tier2, test-tier3]
+    needs: [prime-images, test-tier1, test-tier2, test-tier3]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: always()
@@ -440,18 +510,30 @@ jobs:
           echo "## KWOK Cluster Validation Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
+          prime="${{ needs.prime-images.result }}"
           tier1="${{ needs.test-tier1.result }}"
           tier2="${{ needs.test-tier2.result }}"
           tier3="${{ needs.test-tier3.result }}"
 
-          echo "| Tier | Result |" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage | Result |" >> $GITHUB_STEP_SUMMARY
           echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image cache priming | ${prime} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tier 1 (generic) | ${tier1} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tier 2 (diff-aware) | ${tier2} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tier 3 (full matrix) | ${tier3} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
 
           failed=false
+
+          # Priming gates every tier, so its failure must be checked HERE and
+          # not inferred from the tiers. A failed prime leaves them "skipped",
+          # and the tier checks below deliberately tolerate "skipped" — so
+          # without this the whole run would report green having validated
+          # nothing.
+          if [[ "$prime" == "failure" || "$prime" == "cancelled" ]]; then
+            echo "Image cache priming failed or was cancelled — no tier ran" >> $GITHUB_STEP_SUMMARY
+            failed=true
+          fi
 
           # Tier 1 must pass (unless skipped on schedule-only with no recipes)
           if [[ "$tier1" == "failure" || "$tier1" == "cancelled" ]]; then
