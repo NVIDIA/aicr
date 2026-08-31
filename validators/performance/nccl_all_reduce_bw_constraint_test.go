@@ -335,7 +335,7 @@ func TestNCCLRunNamespace_VariesByVariant(t *testing.T) {
 func TestPruneStaleNCCLNamespaces(t *testing.T) {
 	old := metav1.NewTime(time.Now().Add(-2 * defaults.NCCLStaleNamespacePruneAge))
 	young := metav1.NewTime(time.Now().Add(-1 * time.Minute))
-	ownedLabels := map[string]string{labels.ManagedBy: labels.ValueValidator}
+	ownedLabels := map[string]string{labels.ManagedBy: labels.ValueValidator, labels.Component: labels.ValueNCCLPerf}
 
 	staleNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name: "aicr-nccl-perf-default-deadbeef", CreationTimestamp: old, Labels: ownedLabels,
@@ -358,6 +358,13 @@ func TestPruneStaleNCCLNamespaces(t *testing.T) {
 	unlabeledMatchingNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name: "aicr-nccl-perf-default-notours", CreationTimestamp: old,
 	}}
+	// Also matches the name prefix and is AICR-managed, but for a different
+	// component. Proves the List selector, not name shape, decides scope:
+	// the Go-side loop no longer filters by prefix at all.
+	otherComponentNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-notmine", CreationTimestamp: old,
+		Labels: map[string]string{labels.ManagedBy: labels.ValueValidator, labels.Component: labels.ValueInferencePerf},
+	}}
 	liveAgedNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name: "aicr-nccl-perf-default-livebeef", CreationTimestamp: old, Labels: ownedLabels,
 	}}
@@ -367,7 +374,7 @@ func TestPruneStaleNCCLNamespaces(t *testing.T) {
 	}
 
 	client := fake.NewClientset(staleNS, youngNS, currentNS, terminatingNS, unrelatedNS,
-		unlabeledMatchingNS, liveAgedNS, liveAgedPod)
+		unlabeledMatchingNS, otherComponentNS, liveAgedNS, liveAgedPod)
 	pruneStaleNCCLNamespaces(context.Background(), client, currentNS.Name)
 
 	remaining, err := client.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
@@ -383,7 +390,7 @@ func TestPruneStaleNCCLNamespaces(t *testing.T) {
 		t.Errorf("expected stale namespace %q to be deleted", staleNS.Name)
 	}
 	for _, keep := range []string{youngNS.Name, currentNS.Name, terminatingNS.Name, unrelatedNS.Name,
-		unlabeledMatchingNS.Name, liveAgedNS.Name} {
+		unlabeledMatchingNS.Name, otherComponentNS.Name, liveAgedNS.Name} {
 		if !names[keep] {
 			t.Errorf("expected namespace %q to be left alone, but it was deleted", keep)
 		}

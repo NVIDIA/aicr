@@ -549,9 +549,13 @@ func verifyNCCLNamespaceNotLive(ctx context.Context, clientset kubernetes.Interf
 // killed standalone run instead orphans a namespace under a different random
 // suffix that no future run will ever name again, so nothing else reclaims it.
 //
-// Scoped server-side to labels.ManagedBy=aicr-validator, the label
-// ensureNamespace stamps on creation, so name shape and age alone never
-// qualify an unrelated namespace for deletion.
+// Scoped server-side to labels.ManagedBy=aicr-validator plus
+// labels.Component=nccl-perf, the labels ensureNamespace stamps on creation,
+// so this only ever sees namespaces this package itself created. That also
+// means the match no longer depends on ncclWorkloadNamespacePrefix staying
+// in sync with the namespace-naming logic: a label tied to what created the
+// object can't drift out of sync with itself the way a name-prefix constant
+// duplicated at two call sites could.
 //
 // Deletion is fire-and-forget: this only issues the Delete call and moves on,
 // it never waits for the namespace to fully terminate, so it adds no
@@ -571,16 +575,16 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 	defer cancel()
 
 	namespaces, err := clientset.CoreV1().Namespaces().List(listCtx, metav1.ListOptions{
-		LabelSelector: labels.ManagedBy + "=" + labels.ValueValidator,
+		LabelSelector: fmt.Sprintf("%s=%s,%s=%s",
+			labels.ManagedBy, labels.ValueValidator, labels.Component, labels.ValueNCCLPerf),
 	})
 	if err != nil {
 		slog.Warn("Failed to list namespaces for stale NCCL benchmark namespace prune", "error", err)
 		return
 	}
 
-	staleNamePrefix := ncclWorkloadNamespacePrefix + "-"
 	for _, ns := range namespaces.Items {
-		if ns.Name == currentNamespace || !strings.HasPrefix(ns.Name, staleNamePrefix) {
+		if ns.Name == currentNamespace {
 			continue
 		}
 		if ns.DeletionTimestamp != nil || time.Since(ns.CreationTimestamp.Time) < defaults.NCCLStaleNamespacePruneAge {
@@ -632,7 +636,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// can run on the object it returns rather than needing its own fetch.
 	gpuConfig.Namespace = ncclRunNamespace(variant)
 	pruneStaleNCCLNamespaces(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
-	nsObj, err := ensureNamespace(ctx, gpuConfig.Namespace)
+	nsObj, err := ensureNamespace(ctx, gpuConfig.Namespace, labels.ValueNCCLPerf)
 	if err != nil {
 		return "", aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal, "failed to create NCCL benchmark namespace")
 	}
