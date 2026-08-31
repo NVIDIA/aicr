@@ -2024,8 +2024,13 @@ func ensureNamespace(ctx *validators.Context, namespace, component string) (*v1.
 		if waitErr := waitForNamespaceGone(nsCtx, clients, namespace); waitErr != nil {
 			return nil, waitErr
 		}
+	case !namespaceOwnedBy(existing, component):
+		// Don't adopt a namespace we didn't create.
+		return nil, errors.New(errors.ErrCodeConflict, fmt.Sprintf(
+			"namespace %q already exists without the expected %s=%s,%s=%s labels; refusing to adopt a namespace this package did not create",
+			namespace, labels.ManagedBy, labels.ValueValidator, labels.Component, component))
 	default:
-		// Already exists and is usable — nothing to do.
+		// Already exists, owned by us, and usable. Nothing to do.
 		return existing, nil
 	}
 
@@ -2050,7 +2055,18 @@ func ensureNamespace(ctx *validators.Context, namespace, component string) (*v1.
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read namespace created by a concurrent caller", err)
 	}
+	if !namespaceOwnedBy(winner, component) {
+		return nil, errors.New(errors.ErrCodeConflict, fmt.Sprintf(
+			"namespace %q was created by a concurrent caller without the expected %s=%s,%s=%s labels; refusing to adopt it",
+			namespace, labels.ManagedBy, labels.ValueValidator, labels.Component, component))
+	}
 	return winner, nil
+}
+
+// namespaceOwnedBy reports whether ns carries the labels ensureNamespace
+// stamps on create for the given component.
+func namespaceOwnedBy(ns *v1.Namespace, component string) bool {
+	return ns.Labels[labels.ManagedBy] == labels.ValueValidator && ns.Labels[labels.Component] == component
 }
 
 // waitForNamespaceGone watches the given namespace until it is removed.
