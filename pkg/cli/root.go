@@ -28,30 +28,27 @@ import (
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/config"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/logging"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 const (
-	name                   = "aicr"
-	versionDefault         = "dev"
+	name                   = defaults.AgentName
+	versionDefault         = defaults.DevVersion
 	functionalCategoryName = "Functional"
-	agentImageBase         = "ghcr.io/nvidia/aicr"
 	shellCompletionFlag    = "--generate-shell-completion"
 )
 
 // defaultAgentImage returns the agent container image reference matching the
 // CLI version. Release builds (e.g. "0.8.10") produce "ghcr.io/…:v0.8.10".
 // Dev builds ("dev") and snapshot builds ("v0.8.10-next") use ":latest".
+//
+// The rule lives in pkg/defaults because Client.CollectSnapshot applies the
+// same one — the SDK deploys the same Job, and two copies would drift.
 func defaultAgentImage() string {
-	if version == versionDefault || strings.Contains(version, "-next") {
-		return agentImageBase + ":latest"
-	}
-	if strings.HasPrefix(version, "v") {
-		return agentImageBase + ":" + version
-	}
-	return agentImageBase + ":v" + version
+	return defaults.AgentImageForVersion(version)
 }
 
 var (

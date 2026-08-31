@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicr.run/schemas/v1/RecipeCriteria.schema.json",
+  "title": "RecipeCriteria",
+  "description": "The criteria that select a recipe: service, accelerator, intent, os, platform and node count.",
+  "type": "object",
+  "properties": {
+    "apiVersion": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        }
+      }
+    },
+    "spec": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "accelerator": {
+          "type": "string",
+          "enum": [
+            "a100",
+            "any",
+            "b200",
+            "gb200",
+            "gb300",
+            "h100",
+            "h200",
+            "l40",
+            "l40s",
+            "rtx-pro-6000"
+          ]
+        },
+        "intent": {
+          "type": "string",
+          "enum": [
+            "any",
+            "inference",
+            "training"
+          ]
+        },
+        "nodes": {
+          "type": "integer"
+        },
+        "os": {
+          "type": "string",
+          "enum": [
+            "amazonlinux",
+            "any",
+            "cos",
+            "ol",
+            "rhel",
+            "talos",
+            "ubuntu"
+          ]
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "any",
+            "dynamo",
+            "kubeflow",
+            "nim",
+            "runai",
+            "slurm"
+          ]
+        },
+        "service": {
+          "type": "string",
+          "enum": [
+            "aks",
+            "any",
+            "bcm",
+            "eks",
+            "gke",
+            "kind",
+            "lke",
+            "metal3",
+            "ocp",
+            "oke"
+          ]
+        }
+      }
+    }
+  }
+}

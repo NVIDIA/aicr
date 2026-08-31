@@ -363,8 +363,85 @@ scan: ## Scans for vulnerabilities with grype
 api-diff: ## Checks pkg/client/v1 and transparent-alias target compatibility against the latest stable release
 	@bash tools/api-diff
 
+.PHONY: bundle-layout-baseline
+bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the frozen layout
+	@printf '%s\n' "Regenerating pkg/bundler/testdata/layout/manifests/ from the fixture recipe." \
+		"A removed path is a broken promise to integrator automation -- read the diff."
+# Every manifest is rendered under $$tmp first and copied over the committed
+# files only after all five deployers succeed. Writing them in place meant a
+# failure partway left a mixed old/new baseline set, which is worse than no
+# refresh: the manifests would disagree with each other and with the bundler.
+#
+# The enumeration is deliberately not a pipeline. A shell pipeline exits with
+# the status of its LAST stage, so `find ... | sed | sort` reports success even
+# when find fails, and set -e never fires -- the target would commit a
+# truncated manifest. That fails open in the worst direction: paths missing
+# from a manifest read as additions, which this gate allows, so those paths
+# silently lose removal protection. pipefail would fix it but is not portable
+# to /bin/sh (dash lacks it), so each stage is a separate simple command that
+# set -e can catch.
+	@set -e; tmp=$$(mktemp -d); \
+	  trap 'rm -rf "$$tmp"' EXIT; \
+	  for d in helm argocd argocd-helm flux helmfile; do \
+	    GOFLAGS="-mod=readonly" go run ./cmd/aicr bundle \
+	      -r pkg/bundler/testdata/layout/recipe.yaml \
+	      --deployer "$$d" -o "$$tmp/bundle-$$d" >/dev/null; \
+	    ( cd "$$tmp/bundle-$$d" && find . -type f > "$$tmp/raw-$$d.txt" ); \
+	    sed 's|^\./||' "$$tmp/raw-$$d.txt" > "$$tmp/rel-$$d.txt"; \
+	    LC_ALL=C sort "$$tmp/rel-$$d.txt" > "$$tmp/$$d.txt"; \
+	  done; \
+	  for d in helm argocd argocd-helm flux helmfile; do \
+	    cp "$$tmp/$$d.txt" pkg/bundler/testdata/layout/manifests/"$$d".txt; \
+	  done
+	@echo "Bundle layout manifests updated."
+
+.PHONY: schemas
+schemas: ## Regenerates the committed artifact JSON Schemas from the Go types
+	@GOFLAGS="-mod=readonly" go run ./tools/schemagen
+	@echo "Artifact schemas regenerated. Review the diff before committing."
+
+.PHONY: schema-baseline
+schema-baseline: schemas ## Accepts the current artifact schemas as the frozen contract
+	@printf '%s\n' "Accepting the current artifact schemas as the frozen contract." \
+		"Every difference below becomes part of the v1 surface -- read the diff."
+	@rm -rf api/aicr/v1/schemas/baseline
+	@mkdir -p api/aicr/v1/schemas/baseline
+	@cp api/aicr/v1/schemas/*.schema.json api/aicr/v1/schemas/baseline/
+	@echo "Schema baseline updated."
+
+.PHONY: openapi-diff
+openapi-diff: ## Checks the REST contract in api/aicr/v1/server.yaml against its committed baseline
+	@bash tools/openapi-diff
+
+.PHONY: openapi-baseline
+openapi-baseline: ## Accepts the current REST spec as the frozen contract (regenerates the baseline)
+	@printf '%s\n' "Regenerating api/aicr/v1/server.baseline.yaml from api/aicr/v1/server.yaml." \
+		"This accepts every current difference into the frozen contract, so the" \
+		"resulting diff is the change under review -- read it before committing."
+# The header is taken from the existing baseline rather than a hardcoded line
+# count, so editing the explanatory comment cannot make regeneration lossy. The
+# spec's own license header is dropped because the baseline carries its own.
+	@awk '/^[^#]/ && NF {exit} {print}' api/aicr/v1/server.baseline.yaml \
+		> api/aicr/v1/server.baseline.yaml.tmp
+	@awk 'p {print} /^openapi:/ && !p {p=1; print} END {exit !p}' api/aicr/v1/server.yaml \
+		>> api/aicr/v1/server.baseline.yaml.tmp \
+		|| { rm -f api/aicr/v1/server.baseline.yaml.tmp; \
+		     echo "ERROR: no 'openapi:' key in api/aicr/v1/server.yaml; refusing to write a header-only baseline" >&2; \
+		     exit 1; }
+# The openapi: guard above proves a marker exists, not that the result is a
+# document oasdiff can read. Validate with the actual consumer -- a self-diff
+# loads and parses the file -- so a spec that is malformed below that line
+# cannot replace the committed baseline.
+	@oasdiff breaking api/aicr/v1/server.baseline.yaml.tmp \
+		api/aicr/v1/server.baseline.yaml.tmp >/dev/null 2>&1 \
+		|| { rm -f api/aicr/v1/server.baseline.yaml.tmp; \
+		     echo "ERROR: generated baseline is not a document oasdiff can load; refusing to replace the committed baseline" >&2; \
+		     exit 1; }
+	@mv api/aicr/v1/server.baseline.yaml.tmp api/aicr/v1/server.baseline.yaml
+	@echo "Baseline updated."
+
 .PHONY: qualify
-qualify: test-coverage lint tuning-check coverage-check e2e scan license-check api-diff ## Qualifies the codebase (test-coverage, lint, tuning-check, coverage-check, e2e, scan, API compatibility)
+qualify: test-coverage lint tuning-check coverage-check e2e scan license-check api-diff openapi-diff ## Qualifies the codebase (test-coverage, lint, tuning-check, coverage-check, e2e, scan, SDK and REST API compatibility)
 	@echo "Codebase qualification completed"
 
 .PHONY: bom

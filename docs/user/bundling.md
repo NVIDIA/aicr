@@ -32,6 +32,64 @@ aicr bundle --recipe recipe.yaml --deployer argocd \
   --output ./bundles
 ```
 
+## Bundle layout
+
+This is the canonical description of what a bundle contains. The trees below
+are frozen at v1 and gated by `TestBundleLayoutMatchesManifest`, so a path
+shown here will not disappear or be renamed without a deliberate, reviewed
+change. Automation may read these paths.
+
+Every deployer writes `checksums.txt` and `README.md` at the bundle root. Four
+of the five group components into ordered `NNN-<component>` directories; Flux
+is the exception and uses a plain `<component>` directory with shared
+`sources/`.
+
+```text
+helm/                          argocd/                     flux/
+  001-cert-manager/              001-cert-manager/            cert-manager/
+    values.yaml                    application.yaml             helmrelease.yaml
+    cluster-values.yaml            values.yaml                nfd/
+    install.sh                   002-nfd/                     helmrelease.yaml
+    upstream.env                   application.yaml           sources/
+  002-nfd/                         values.yaml                  helmrepo-<host>.yaml
+    ...                          app-of-apps.yaml             gitrepo-<host>.yaml
+  deploy.sh                      checksums.txt              kustomization.yaml
+  recipe.yaml                    README.md                  checksums.txt
+  checksums.txt                                             README.md
+  README.md
+```
+
+`helmfile` shares Helm's per-component files but not its root: it writes
+`helmfile.yaml` instead of `deploy.sh`, and does not emit `recipe.yaml`. A
+recipe with dependencies also produces one `level-N.yaml` per dependency depth,
+which is derived from the recipe rather than fixed by the layout.
+
+```text
+helmfile/
+  001-cert-manager/            same four files as helm
+  002-nfd/
+  helmfile.yaml
+  level-N.yaml                 one per dependency depth; absent when flat
+  checksums.txt
+  README.md
+```
+
+`argocd-helm` renders a Helm chart at the root — `Chart.yaml`, `values.yaml`,
+`values.schema.json` — with one template per component.
+
+Two kinds of name appear in these trees, and only one is a promise:
+
+- **Fixed names are contract.** `deploy.sh`, `app-of-apps.yaml`,
+  `kustomization.yaml`, `checksums.txt`, `values.yaml`, `helmrelease.yaml`,
+  and the `NNN-<component>` convention itself.
+- **Derived names are not.** Flux writes one `helmrepo-<host>.yaml` per chart
+  repository and helmfile one `level-N.yaml` per dependency depth, so both sets
+  change with the recipe. Discover them by listing the directory rather than
+  hardcoding a name.
+
+Verify a bundle you received with `aicr verify` — see
+[Artifact verification](artifact-verification.md).
+
 ## Override values
 
 Use `--set` for scalar overrides, scoped per component as

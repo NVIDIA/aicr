@@ -1999,8 +1999,14 @@ func TestRejectUnverifiableCatalogSigning(t *testing.T) {
 		// signing config, so neither may be swept up by the rejection.
 		{name: "zero value", resolve: OIDCResolveOptions{}},
 		{
-			name:    "signing config selects a public-good target",
-			resolve: OIDCResolveOptions{SigningConfigPath: "/etc/aicr/signing-config.json"},
+			// A real fixture, not a placeholder path: the guard now reads the
+			// file, so a nonexistent path would exercise the open error rather
+			// than the public-good check this case is named for. This is the
+			// config shape the release hook passes.
+			name: "signing config selects a public-good target",
+			resolve: OIDCResolveOptions{
+				SigningConfigPath: "../../bundler/attestation/testdata/signing_config_v2.json",
+			},
 		},
 		{
 			name:    "token sources are orthogonal to verifiability",
@@ -2010,12 +2016,24 @@ func TestRejectUnverifiableCatalogSigning(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			err := rejectUnverifiableCatalogSigning(tt.resolve)
+			sc, err := rejectUnverifiableCatalogSigning(tt.resolve)
 			if tt.wantReject && err == nil {
 				t.Fatal("setting was accepted, but VerifyCatalog cannot verify what it produces")
 			}
 			if !tt.wantReject && err != nil {
 				t.Fatalf("setting was rejected, but it is symmetric with VerifyCatalog: %v", err)
+			}
+
+			// The parsed config must come back whenever a path was supplied:
+			// SignCatalog passes it to the signing path so the validated bytes
+			// are the signed bytes. Returning nil here would silently restore
+			// the check-then-reload gap.
+			if err == nil && tt.resolve.SigningConfigPath != "" && sc == nil {
+				t.Error("accepted a SigningConfigPath but returned no parsed config; " +
+					"the signing path would re-read the file instead of using the validated one")
+			}
+			if tt.resolve.SigningConfigPath == "" && sc != nil {
+				t.Error("returned a config for a request that named no signing config")
 			}
 		})
 	}

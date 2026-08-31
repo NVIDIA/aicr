@@ -248,11 +248,19 @@ snapCtx, cancelSnap := context.WithTimeout(context.Background(), 10*time.Minute)
 defer cancelSnap()
 snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	Kubeconfig: "/path/to/target-kubeconfig",
-	// Namespace, Image, JobName, and ServiceAccountName are all required on
-	// the SDK path. Only Namespace is validated; the rest are copied straight
-	// into the Job and RBAC objects, so an empty value becomes an empty
-	// metadata.name or container image that the API server rejects. The CLI
-	// defaults them from its own flags, which the facade does not share.
+	// Namespace is the only required field: the Job, its RBAC, and the result
+	// ConfigMap are created there, and an empty value is rejected with
+	// ErrCodeInvalidRequest before any cluster access. Image, JobName, and
+	// ServiceAccountName are defaulted when empty — the names to "aicr" and
+	// the image to the tag matching the Client's WithVersion. They are set
+	// explicitly here because pinning the agent generation is what a
+	// version-skew-sensitive or air-gapped deployment wants.
+	//
+	// Collect against one cluster at a time. The default names are shared, the
+	// Job is delete-then-created, and the ClusterRoleBinding has a fixed name
+	// carrying the ServiceAccount as its subject — so two concurrent runs
+	// interfere even with distinct JobName values. See CollectSnapshot's
+	// Concurrency godoc.
 	Namespace:          "aicr-snapshot",
 	Image:              "ghcr.io/nvidia/aicr:v0.19.0",
 	JobName:            "aicr-snapshot",
@@ -1038,11 +1046,10 @@ Rekor are. The result is content-identical to the one-shot path.
 Client's catalog and returning the serialized Sigstore bundle.
 
 **`SignCatalog` rejects the signing modes it can tell `VerifyCatalog`
-will not verify** — with one documented exception, below. Verification
-checks against the public-good Sigstore root, requires a
-transparency-log entry, and accepts keyless GitHub OIDC certificates
-only, so these four `OIDCResolve` settings are rejected with
-`ErrCodeInvalidRequest` before any signing work runs:
+will not verify.** Verification checks against the public-good Sigstore
+root, requires a transparency-log entry, and accepts keyless GitHub OIDC
+certificates only, so these four `OIDCResolve` settings are rejected
+with `ErrCodeInvalidRequest` before any signing work runs:
 
 | Setting | Why it is rejected |
 |---|---|
@@ -1055,16 +1062,28 @@ The point of the guard is that you should not be able to sign a catalog
 successfully and then discover the documented counterpart refuses it;
 if private catalog signing is ever needed, both halves move together.
 
-**The exception: `SigningConfigPath` is not validated.** It passes
-through because the release path requires it, and a Sigstore signing
-config can itself name a private Fulcio or Rekor — so a signing config
-*can* still produce a catalog `VerifyCatalog` rejects. Treat the guard
-as covering the four settings above, not as a guarantee about every
-input. Each rejected setting exists *only* to depart from the
-public-good defaults, which is what makes rejecting it unambiguous; a
-signing config does not, and rejecting it would break the release.
-Validating the loaded config against the public-good endpoints is the
-principled fix if this exception ever bites.
+**`SigningConfigPath` is checked rather than rejected.** It passes
+through because the release path requires it — naming the public-good
+Rekor v2 target is its normal use — but a Sigstore signing config can
+itself name a private Fulcio or Rekor, which would have made the four
+rejections above bypassable by moving the same endpoints into a file. So
+the config is loaded and every Fulcio, Rekor, OIDC provider, and
+timestamp-authority URL in it must sit under the `sigstore.dev` domain;
+anything else fails with `ErrCodeInvalidRequest` naming the offending
+endpoint. The check is on the domain, not a list of exact URLs, because
+the public-good Rekor shards carry the year in their hostname
+(`log2025-1.rekor.sigstore.dev`) and an exact-URL allowlist would start
+rejecting legitimate signing at the next rotation. Matching is on a
+label boundary, so a lookalike domain such as `evilsigstore.dev` is
+rejected, and every URL must be HTTPS — the public-good services are
+HTTPS-only, and these URLs are handed to the Rekor and timestamp
+clients as-is, so `http://rekor.sigstore.dev` would pass a
+hostname-only check while sending signing traffic in the clear.
+
+The config that passes this check is the config signed with. `SignCatalog`
+hands the parsed value to the signing path rather than letting it re-read
+the file, so there is no window in which the file changes between the
+check and the use.
 
 Neither signing method imposes a facade timeout, unlike their
 verification counterparts: keyless OIDC can block on a human completing
@@ -1141,7 +1160,19 @@ Per-operation caps:
   completion budget you asked for.
 - `ValidateState`: `defaults.ValidationOperationTimeout`
 - `VerifyBundle` / `VerifyEvidence` / `VerifyCatalog` / `RecipeDigest`:
-  `defaults.VerifyOperationTimeout`
+  `defaults.VerifyOperationTimeout` by default, overridable per call via the
+  `Timeout` field on each options struct. `nil` (the zero value) keeps the
+  default cap; a pointer to `0` imposes **no** facade cap and runs under the
+  caller's context unchanged; a positive value sets an explicit cap.
+
+  The pointer is what makes `0` mean uncapped here, matching
+  `WithValidationTimeout(0)`, while leaving the zero value as today's
+  behavior. Reach for it when a registry is slow rather than broken:
+  `VerifyEvidence` pulls from the network, and a cap breach arrives as an
+  **error** rather than the `EvidenceExitIncomplete` verdict a CI gate
+  branches on — so a slow pull, which is exactly what that verdict describes,
+  otherwise reports through the wrong channel. The override can only relax
+  the facade ceiling; the caller's own deadline still applies.
 - `PublishEvidence` / `SignCatalog`: **no facade cap** — the caller's
   context governs unchanged. Keyless OIDC can block on a human
   completing a browser or device-code flow, so a fixed cap would cut

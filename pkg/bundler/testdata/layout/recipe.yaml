@@ -1,0 +1,38 @@
+apiVersion: aicr.run/v1alpha2
+componentRefs:
+- chart: cert-manager
+  name: cert-manager
+  namespace: cert-manager
+  source: https://charts.jetstack.io
+  type: Helm
+  valuesFile: components/cert-manager/values.yaml
+  version: v1.20.2
+- chart: node-feature-discovery
+  name: nfd
+  namespace: node-feature-discovery
+  overrides:
+    topologyUpdater:
+      enable: true
+  source: https://kubernetes-sigs.github.io/node-feature-discovery/charts
+  type: Helm
+  valuesFile: components/nfd/values.yaml
+  version: 0.19.0
+criteria:
+  accelerator: h100
+  intent: training
+  os: any
+  platform: any
+  service: eks
+deploymentOrder:
+- cert-manager
+- nfd
+kind: RecipeResult
+metadata:
+  appliedOverlays:
+  - base
+  - monitoring-hpa
+  - h100-any
+  - eks
+  - eks-training
+  - h100-eks-training
+  version: layout-fixture

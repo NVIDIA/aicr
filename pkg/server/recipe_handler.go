@@ -108,7 +108,14 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	switch r.Method {
-	case http.MethodGet:
+	// HEAD resolves exactly as GET does; net/http discards the body on the way
+	// out, so the client gets the real status and headers. Rejecting it while
+	// accepting GET contradicted both HTTP semantics and /metrics, which has
+	// allowed the pair since readOnly() was introduced.
+	//
+	// It costs the same as GET: the recipe is resolved to produce the headers.
+	// Use /health or /ready for a cheap probe.
+	case http.MethodGet, http.MethodHead:
 		if err = validateStrictQueryParameters(r, criteriaQueryParameters); err != nil {
 			break
 		}
@@ -151,7 +158,11 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 			err = validateEnvelopeProfile(
 				bodyData, r.Header.Get("Content-Type"), envelope.Profile)
 			if err == nil {
-				criteria = envelope.Criteria
+				// Match what GET echoes. GET seeds every dimension from
+				// NewCriteria before applying query parameters; a decoded body
+				// leaves unspecified ones empty, so the two transports returned
+				// criteria objects that differed for identical requests.
+				criteria = envelope.Criteria.FillUnsetWithAny()
 				profile, err = resolvePOSTProfileSelection(r, envelope.Profile)
 			}
 			if err == nil {
@@ -159,11 +170,11 @@ func (h *recipeHandler) HandleRecipes(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	default:
-		w.Header().Set("Allow", "GET, POST")
+		w.Header().Set("Allow", "GET, HEAD, POST")
 		WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
 			"Method not allowed", false, map[string]any{
 				keyMethod:  r.Method,
-				keyAllowed: []string{"GET", "POST"},
+				keyAllowed: []string{"GET", "HEAD", "POST"},
 			})
 		return
 	}
@@ -278,7 +289,10 @@ func (h *recipeHandler) parseQueryPOSTBody(
 				err = aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 					"selector is required on /v1/query")
 			} else {
-				req = &recipe.QueryRequest{Criteria: envelope.Criteria, Selector: *envelope.Selector}
+				req = &recipe.QueryRequest{
+					Criteria: envelope.Criteria.FillUnsetWithAny(),
+					Selector: *envelope.Selector,
+				}
 				profile = envelope.Profile
 			}
 		}
@@ -318,7 +332,8 @@ func (h *recipeHandler) handleQuery(w http.ResponseWriter, r *http.Request) {
 	var err error
 
 	switch r.Method {
-	case http.MethodGet:
+	// HEAD resolves as GET; see the note on HandleRecipes.
+	case http.MethodGet, http.MethodHead:
 		{
 			allowed := maps.Clone(criteriaQueryParameters)
 			allowed["selector"] = struct{}{}
@@ -349,11 +364,11 @@ func (h *recipeHandler) handleQuery(w http.ResponseWriter, r *http.Request) {
 		criteria = req.Criteria
 		selector = req.Selector
 	default:
-		w.Header().Set("Allow", "GET, POST")
+		w.Header().Set("Allow", "GET, HEAD, POST")
 		WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
 			"Method not allowed", false, map[string]any{
 				keyMethod:  r.Method,
-				keyAllowed: []string{"GET", "POST"},
+				keyAllowed: []string{"GET", "HEAD", "POST"},
 			})
 		return
 	}

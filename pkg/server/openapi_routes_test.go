@@ -516,3 +516,99 @@ func discoveryRoutes(t *testing.T) map[string]bool {
 	}
 	return routes
 }
+
+// missingKeys returns the keys present in want but absent from got, sorted.
+func missingKeys(want, got map[string]yaml.Node) []string {
+	var missing []string
+	for name := range want {
+		if _, ok := got[name]; !ok {
+			missing = append(missing, name)
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+// TestOpenAPIHeadMirrorsGetResponses asserts each HEAD operation declares the
+// same statuses and headers as the GET it shadows.
+//
+// The handlers route HEAD through the GET resolution path, so every status GET
+// can produce, HEAD can produce: a missing selector still yields 404 on
+// /v1/query, and both endpoints can still time out. Declaring a narrower set
+// leaves a generated client unable to model responses the server really sends,
+// and the two lists drift apart the first time a status is added to GET alone.
+func TestOpenAPIHeadMirrorsGetResponses(t *testing.T) {
+	data, err := os.ReadFile(filepath.Clean(specRelPath))
+	if err != nil {
+		t.Fatalf("read spec %q: %v", specRelPath, err)
+	}
+
+	var spec struct {
+		Paths map[string]map[string]struct {
+			Responses map[string]struct {
+				Headers map[string]yaml.Node `yaml:"headers"`
+				Content map[string]yaml.Node `yaml:"content"`
+			} `yaml:"responses"`
+		} `yaml:"paths"`
+	}
+	if err := yaml.Unmarshal(data, &spec); err != nil {
+		t.Fatalf("parse spec: %v", err)
+	}
+
+	var checked int
+	for path, item := range spec.Paths {
+		head, hasHead := item["head"]
+		get, hasGet := item["get"]
+		if !hasHead || !hasGet {
+			continue
+		}
+		checked++
+
+		for status, getResponse := range get.Responses {
+			headResponse, declared := head.Responses[status]
+			if !declared {
+				t.Errorf("GET %s declares response %s but HEAD does not; the "+
+					"handlers share a resolution path, so HEAD can return it too",
+					path, status)
+				continue
+			}
+
+			// Comparing the full header-name sets, not just "HEAD declares
+			// some headers". A HEAD 200 carrying only X-Request-Id would have
+			// passed an emptiness check while omitting Cache-Control and the
+			// rate-limit headers -- the ones a caller issues HEAD to read.
+			if missing := missingKeys(getResponse.Headers, headResponse.Headers); len(missing) > 0 {
+				t.Errorf("HEAD %s response %s omits header(s) %s that GET declares; "+
+					"HEAD exists to return exactly these", path, status,
+					strings.Join(missing, ", "))
+			}
+			if extra := missingKeys(headResponse.Headers, getResponse.Headers); len(extra) > 0 {
+				t.Errorf("HEAD %s response %s declares header(s) %s that GET does "+
+					"not; the two describe one resolution path", path, status,
+					strings.Join(extra, ", "))
+			}
+		}
+
+		// The reverse direction: a status only HEAD declares describes a
+		// response the shared handler cannot produce.
+		for status := range head.Responses {
+			if _, declared := get.Responses[status]; !declared {
+				t.Errorf("HEAD %s declares response %s but GET does not; both run "+
+					"the same resolution path", path, status)
+			}
+		}
+
+		// A HEAD response carrying content contradicts the method.
+		for status, headResponse := range head.Responses {
+			if len(headResponse.Content) > 0 {
+				t.Errorf("HEAD %s response %s declares content; HEAD returns no "+
+					"body", path, status)
+			}
+		}
+	}
+
+	if checked == 0 {
+		t.Fatal("no path declares both GET and HEAD; this assertion would pass " +
+			"vacuously")
+	}
+}

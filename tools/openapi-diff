@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# openapi-diff compares api/aicr/v1/server.yaml against the committed baseline
+# and fails on breaking changes that are not explicitly acknowledged.
+#
+# REST is one of the four surfaces ROADMAP section 1 freezes at v1 (issue
+# #2112). This is the REST counterpart of tools/api-diff, which guards the Go
+# SDK, and it follows that script's contract deliberately: an exceptions file
+# records intentional breaks, and a stale acknowledgement fails rather than
+# lingering. A list of permanent exceptions that nothing ever revisits is how a
+# gate stops meaning anything.
+#
+# The baseline is a committed snapshot rather than the previous release, unlike
+# api-diff. The v1 collapse (#2464) is unreleased, so comparing against v0.20.0
+# reports 28 breaking changes that are all one already-merged decision; the gate
+# would ship pre-loaded with noise that clears itself at v0.21 and teaches
+# everyone to skim it in the meantime.
+
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=tools/common
+. "${DIR}/common"
+
+if command -v go >/dev/null 2>&1; then
+    if ! go_path="$(go env GOPATH)" || [[ -z "${go_path}" ]]; then
+        err "Could not determine GOPATH with 'go env GOPATH'."
+    fi
+    export PATH="${go_path}/bin:${PATH}"
+fi
+
+has_tools oasdiff yq
+
+cd "${REPO_ROOT}"
+
+# Overridable so tools/openapi-diff_test.sh can drive the verdict logic against
+# fixtures instead of mutating the real contract.
+readonly SPEC="${OPENAPI_DIFF_SPEC_FILE:-api/aicr/v1/server.yaml}"
+readonly BASELINE="${OPENAPI_DIFF_BASELINE_FILE:-api/aicr/v1/server.baseline.yaml}"
+readonly EXCEPTIONS="${OPENAPI_DIFF_EXCEPTIONS_FILE:-api/aicr/v1/openapi-diff-exceptions.yaml}"
+readonly EXIT_BREAKING=1
+readonly EXIT_MISSING_INPUT=10
+readonly EXIT_EXCEPTIONS_MALFORMED=11
+readonly EXIT_STALE_ACKNOWLEDGEMENT=12
+readonly EXIT_UNREADABLE_REPORT=13
+
+for required in "${SPEC}" "${BASELINE}" "${EXCEPTIONS}"; do
+    [[ -f "${required}" ]] || {
+        log_error "Required file not found: ${required}"
+        exit "${EXIT_MISSING_INPUT}"
+    }
+done
+
+log_info "Comparing ${SPEC} against ${BASELINE}"
+
+# --fail-on is deliberately omitted: this script decides the verdict after
+# applying acknowledgements, so oasdiff must report rather than exit non-zero.
+# `|| true` would mask a crash, so the status is captured and inspected.
+stderr_file="$(mktemp "${TMPDIR:-/tmp}/openapi-diff-err.XXXXXX")"
+trap 'rm -f "${stderr_file}"' EXIT
+
+set +e
+report="$(oasdiff breaking "${BASELINE}" "${SPEC}" --format json 2>"${stderr_file}")"
+oasdiff_status=$?
+set -e
+
+if [[ ${oasdiff_status} -gt 1 ]]; then
+    log_error "oasdiff failed (exit ${oasdiff_status}):"
+    cat "${stderr_file}" >&2 || true
+    exit "${oasdiff_status}"
+fi
+
+# An empty report is emitted as `[]` or as nothing at all depending on version.
+[[ -n "${report}" ]] || report='[]'
+
+if ! echo "${report}" | yq -p json '.' >/dev/null 2>&1; then
+    # Distinct from EXIT_EXCEPTIONS_MALFORMED: sharing that code would point a
+    # reader at the exceptions file for a fault in the tool's output.
+    log_error "oasdiff produced output that is not valid JSON; refusing to guess."
+    exit "${EXIT_UNREADABLE_REPORT}"
+fi
+
+# `yq '.acknowledgements'` returns null without error on a scalar document, so
+# a malformed file would be read as "no exceptions" and silently change the
+# verdict. The type must be asserted, not just the lookup.
+ack_kind="$(yq 'select(document_index == 0) | .acknowledgements | tag' "${EXCEPTIONS}" 2>/dev/null || echo '!!missing')"
+if [[ "${ack_kind}" != "!!seq" ]]; then
+    log_error "${EXCEPTIONS} is malformed: 'acknowledgements' must be a list (found ${ack_kind})."
+    exit "${EXIT_EXCEPTIONS_MALFORMED}"
+fi
+
+breaking_count="$(echo "${report}" | yq -p json '[.[] | select(.level >= 2)] | length')"
+ack_count="$(yq '.acknowledgements | length' "${EXCEPTIONS}")"
+
+log_info "oasdiff reported ${breaking_count} breaking change(s); ${ack_count} acknowledged exception(s) on file"
+
+# `oasdiff breaking` reports only breaking changes, but grades them: ERR is
+# level 3 and WARN is level 2. Filtering to level 3 alone silently dropped
+# whole rule classes -- request-parameter-removed and request-property-removed
+# are level 2, so removing a query parameter from an endpoint passed the gate
+# reporting zero breaking changes. Both levels are breaking here.
+#
+# Each acknowledgement is matched by rule id, optionally narrowed by operation
+# path. Matching by id alone would let an acknowledgement for one endpoint
+# silently cover the same class of break on another.
+unmatched_errors=0
+stale_acks=0
+
+if [[ "${breaking_count}" != "0" ]]; then
+    while IFS=$'\t' read -r rule_id op_path text; do
+        [[ -n "${rule_id}" ]] || continue
+        covered="$(
+            RULE_ID="${rule_id}" OP_PATH="${op_path}" \
+                yq -o=json '.acknowledgements // []' "${EXCEPTIONS}" |
+                RULE_ID="${rule_id}" OP_PATH="${op_path}" yq -p json \
+                    '[.[] | select(.id == strenv(RULE_ID)) | select((.path // "") == "" or .path == strenv(OP_PATH))] | length'
+        )"
+        if [[ "${covered}" == "0" ]]; then
+            log_error "Unacknowledged breaking change [${rule_id}] ${op_path}"
+            echo "    ${text}" >&2
+            unmatched_errors=$((unmatched_errors + 1))
+        else
+            log_warning "Acknowledged breaking change [${rule_id}] ${op_path}"
+        fi
+    done < <(
+        echo "${report}" |
+            yq -p json -r '.[] | select(.level >= 2) | [.id, (.path // ""), .text] | @tsv'
+    )
+fi
+
+# Staleness: an acknowledgement that matches nothing is describing a break that
+# no longer happens. Left in place it would silently pre-approve that break
+# returning later, which is exactly the failure this check exists to prevent.
+if [[ "${ack_count}" != "0" ]]; then
+    while IFS=$'\t' read -r rule_id ack_path reason; do
+        [[ -n "${rule_id}" ]] || continue
+        hits="$(
+            echo "${report}" |
+                RULE_ID="${rule_id}" ACK_PATH="${ack_path}" yq -p json \
+                    '[.[] | select(.level >= 2) | select(.id == strenv(RULE_ID)) | select(strenv(ACK_PATH) == "" or (.path // "") == strenv(ACK_PATH))] | length'
+        )"
+        if [[ "${hits}" == "0" ]]; then
+            log_error "Stale acknowledgement [${rule_id}] ${ack_path:-(any path)}: ${reason}"
+            echo "    No such breaking change is reported. Remove this entry." >&2
+            stale_acks=$((stale_acks + 1))
+        fi
+    done < <(
+        yq -o=json '.acknowledgements // []' "${EXCEPTIONS}" |
+            yq -p json -r '.[] | [.id, (.path // ""), (.reason // "")] | @tsv'
+    )
+fi
+
+# Both conditions are reported before exiting. Returning on staleness first hid
+# the unacknowledged break behind it, which is the more urgent of the two and
+# the one that actually blocks the merge -- an acknowledgement narrowed to the
+# wrong path produces exactly that pair.
+if [[ ${stale_acks} -gt 0 ]]; then
+    log_error "${stale_acks} stale acknowledgement(s) in ${EXCEPTIONS}"
+    if [[ ${unmatched_errors} -eq 0 ]]; then
+        exit "${EXIT_STALE_ACKNOWLEDGEMENT}"
+    fi
+fi
+
+if [[ ${unmatched_errors} -gt 0 ]]; then
+    log_error "${unmatched_errors} unacknowledged breaking change(s) to the frozen REST contract"
+    cat >&2 <<EOF
+
+To resolve, choose one:
+  * Make the change non-breaking (add rather than remove or narrow).
+  * Record it in ${EXCEPTIONS} with an id, an optional path, and a reason.
+    Scheduled ADR-022 transitions belong here.
+  * Accept it into the contract with 'make openapi-baseline', which moves
+    ${BASELINE}. Expect that diff to be read in review.
+EOF
+    exit "${EXIT_BREAKING}"
+fi
+
+log_success "No unacknowledged breaking changes to the REST contract"

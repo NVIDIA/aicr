@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -120,58 +119,14 @@ func TestHandleRecipes_Success(t *testing.T) {
 			len(bodies), len(tests))
 	}
 
-	get := normalizeCriteriaEcho(t, bodies[http.MethodGet])
-	post := normalizeCriteriaEcho(t, bodies[http.MethodPost])
-	if !reflect.DeepEqual(get, post) {
-		t.Errorf("GET and POST resolved different recipes for equivalent criteria\nGET:  %s\nPOST: %s",
+	// Compared byte-for-byte. This used to route through a helper that stripped
+	// "any" from the echoed criteria, because GET emitted those dimensions and
+	// POST omitted them. That asymmetry is gone, so the crutch is too -- and
+	// its removal is the assertion that it stayed gone.
+	if bodies[http.MethodGet] != bodies[http.MethodPost] {
+		t.Errorf("GET and POST returned different documents for equivalent criteria\nGET:  %s\nPOST: %s",
 			bodies[http.MethodGet], bodies[http.MethodPost])
 	}
-}
-
-// normalizeCriteriaEcho decodes a recipe response and drops "any" from the
-// echoed criteria so the two transports can be compared.
-//
-// The responses are byte-identical except for that echo: GET seeds every
-// dimension from recipe.NewCriteria (which defaults to "any") before applying
-// query parameters, while a POST envelope decodes into a zero value and leaves
-// unspecified dimensions empty. Resolution is unaffected because Criteria.Matches
-// treats "any" and "" identically, so both requests apply the same overlays --
-// only the echo differs. Normalizing here keeps this test on the guarantee that
-// holds (same resolved recipe) instead of encoding the asymmetry as expected.
-func normalizeCriteriaEcho(t *testing.T, body string) map[string]any {
-	t.Helper()
-
-	var doc map[string]any
-	if err := json.Unmarshal([]byte(body), &doc); err != nil {
-		t.Fatalf("failed to decode response: %v; body: %s", err, body)
-	}
-
-	criteria, ok := doc["criteria"].(map[string]any)
-	if !ok {
-		t.Fatalf("response has no criteria object to normalize; body: %s", body)
-	}
-
-	// Each dimension has its own sentinel type. They all spell "any" today, so
-	// a map literal of them would not compile (duplicate keys) — hence the
-	// runtime build. Listing all five keeps this correct if one ever diverges,
-	// rather than keying every field off whichever constant was handy.
-	unset := make(map[string]bool, 5)
-	for _, sentinel := range []string{
-		string(recipe.CriteriaServiceAny),
-		string(recipe.CriteriaAcceleratorAny),
-		string(recipe.CriteriaIntentAny),
-		string(recipe.CriteriaOSAny),
-		string(recipe.CriteriaPlatformAny),
-	} {
-		unset[sentinel] = true
-	}
-
-	for key, value := range criteria {
-		if s, isString := value.(string); isString && unset[s] {
-			delete(criteria, key)
-		}
-	}
-	return doc
 }
 
 // TestHandleQuery_POSTCriteriaTakesEffect proves the facade-backed query POST
@@ -375,8 +330,8 @@ func TestHandleQuery_MethodNotAllowed(t *testing.T) {
 			if w.Code != http.StatusMethodNotAllowed {
 				t.Fatalf("status = %d, want %d", w.Code, http.StatusMethodNotAllowed)
 			}
-			if allow := w.Header().Get("Allow"); allow != "GET, POST" {
-				t.Errorf("Allow header = %q, want %q", allow, "GET, POST")
+			if allow := w.Header().Get("Allow"); allow != "GET, HEAD, POST" {
+				t.Errorf("Allow header = %q, want %q", allow, "GET, HEAD, POST")
 			}
 		})
 	}
@@ -428,4 +383,75 @@ func keysOf(m map[string]any) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestHandleRecipes_HeadMatchesGet asserts HEAD is accepted and produces the
+// same status and headers as GET.
+//
+// Rejecting HEAD while accepting GET contradicted RFC 9110 section 9.1 and
+// /metrics, which has allowed the pair since readOnly() was introduced. It also
+// made two documented `curl -I` examples return 405, which is how it was found.
+func TestHandleRecipes_HeadMatchesGet(t *testing.T) {
+	h := newTestHandler(t, nil)
+	const target = "/v1/recipe?service=eks&accelerator=h100&intent=training"
+
+	responses := map[string]*httptest.ResponseRecorder{}
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		w := httptest.NewRecorder()
+		h.HandleRecipes(w, httptest.NewRequest(method, target, nil))
+		responses[method] = w
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want %d; body: %s",
+				method, w.Code, http.StatusOK, w.Body.String())
+		}
+	}
+
+	for _, header := range []string{"Content-Type", "Cache-Control"} {
+		get := responses[http.MethodGet].Header().Get(header)
+		head := responses[http.MethodHead].Header().Get(header)
+		if get != head {
+			t.Errorf("%s header: GET=%q HEAD=%q; HEAD must describe the response "+
+				"GET would return", header, get, head)
+		}
+	}
+}
+
+// TestHandleQuery_HeadIsAccepted covers the same for the query endpoint.
+func TestHandleQuery_HeadIsAccepted(t *testing.T) {
+	h := newTestHandler(t, nil)
+	const target = "/v1/query?service=eks&accelerator=h100&intent=training" +
+		"&selector=components.gpu-operator.values.driver.version"
+
+	w := httptest.NewRecorder()
+	h.HandleQuery(w, httptest.NewRequest(http.MethodHead, target, nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("HEAD status = %d, want %d; body: %s",
+			w.Code, http.StatusOK, w.Body.String())
+	}
+}
+
+// TestRecipeHandlers_AllowHeaderNamesHead asserts a rejected method advertises
+// HEAD, so a client reading Allow is not told to use a method the server now
+// accepts.
+func TestRecipeHandlers_AllowHeaderNamesHead(t *testing.T) {
+	h := newTestHandler(t, nil)
+
+	for name, handler := range map[string]http.HandlerFunc{
+		"/v1/recipe": h.HandleRecipes,
+		"/v1/query":  h.HandleQuery,
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			handler(w, httptest.NewRequest(http.MethodDelete, name, nil))
+
+			if w.Code != http.StatusMethodNotAllowed {
+				t.Fatalf("status = %d, want %d", w.Code, http.StatusMethodNotAllowed)
+			}
+			if allow := w.Header().Get("Allow"); allow != "GET, HEAD, POST" {
+				t.Errorf("Allow = %q, want %q", allow, "GET, HEAD, POST")
+			}
+		})
+	}
 }

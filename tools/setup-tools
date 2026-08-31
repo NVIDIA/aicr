@@ -274,6 +274,7 @@ cd "${REPO_ROOT}"
 GO_VERSION=$(yq '.languages.go' .settings.yaml)
 GOLANGCI_LINT_VERSION=$(yq '.linting.golangci_lint' .settings.yaml)
 APIDIFF_VERSION=$(yq '.linting.apidiff' .settings.yaml)
+OASDIFF_VERSION=$(yq '.linting.oasdiff' .settings.yaml)
 YAMLLINT_VERSION=$(yq '.linting.yamllint' .settings.yaml)
 ADDLICENSE_VERSION=$(yq '.linting.addlicense' .settings.yaml)
 GO_LICENSES_VERSION=$(yq '.linting.go_licenses' .settings.yaml)
@@ -303,6 +304,7 @@ log_info "Target Versions:"
 echo "  Go:              ${GO_VERSION}"
 echo "  golangci-lint:   ${GOLANGCI_LINT_VERSION}"
 echo "  apidiff:         ${APIDIFF_VERSION}"
+echo "  oasdiff:         ${OASDIFF_VERSION}"
 echo "  grype:           ${GRYPE_VERSION}"
 echo "  cosign:          ${COSIGN_VERSION}"
 echo "  syft:            ${SYFT_VERSION}"
@@ -1021,6 +1023,27 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
         if prompt_continue; then
             GOFLAGS= go install golang.org/x/exp/cmd/apidiff@"${APIDIFF_VERSION}"
             log_success "apidiff ${APIDIFF_VERSION} installed"
+        fi
+    fi
+
+    # oasdiff. Existence is not enough: tools/check-tools requires an exact
+    # module-version match, so an older binary already on PATH would leave
+    # setup reporting success while the gate runs on a different version.
+    oasdiff_current=""
+    if command_exists oasdiff; then
+        oasdiff_current="$(go version -m "$(command -v oasdiff)" 2>/dev/null |
+            awk '$1 == "mod" && $2 == "github.com/oasdiff/oasdiff" {print $3; exit}')"
+    fi
+    if [[ "${oasdiff_current}" == "${OASDIFF_VERSION}" && "${UPGRADE}" != "true" ]]; then
+        log_success "oasdiff ${OASDIFF_VERSION} already installed"
+    else
+        if [[ -n "${oasdiff_current}" && "${oasdiff_current}" != "${OASDIFF_VERSION}" ]]; then
+            log_warning "oasdiff ${oasdiff_current} found; replacing with the pinned ${OASDIFF_VERSION}"
+        fi
+        log_info "Installing oasdiff ${OASDIFF_VERSION}..."
+        if prompt_continue; then
+            GOFLAGS= go install github.com/oasdiff/oasdiff@"${OASDIFF_VERSION}"
+            log_success "oasdiff ${OASDIFF_VERSION} installed"
         fi
     fi
 

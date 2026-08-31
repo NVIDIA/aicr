@@ -97,6 +97,73 @@ paths:
                       - /v1/bundle
 
   /v1/recipe:
+    head:
+      tags: [Recipes]
+      summary: Resolve a configured recipe (headers only)
+      operationId: headRecipe
+      description: >
+        Same as GET but returns headers only. Declared because RFC 9110 section
+        9.1 makes GET and HEAD mandatory for a general-purpose server, and
+        rejecting HEAD while accepting GET contradicted /metrics, which has
+        allowed the pair since it was introduced.
+
+        Not a cheap probe: the recipe is resolved to produce the headers, so it
+        costs what GET costs. Use /health or /ready for liveness.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Service"
+        - $ref: "#/components/parameters/Accelerator"
+        - $ref: "#/components/parameters/GPUAlias"
+        - $ref: "#/components/parameters/Intent"
+        - $ref: "#/components/parameters/OS"
+        - $ref: "#/components/parameters/Platform"
+        - $ref: "#/components/parameters/Nodes"
+        - $ref: "#/components/parameters/ProfileSelection"
+        - $ref: "#/components/parameters/SlurmAccountingMode"
+      responses:
+        '200':
+          description: Headers for the response GET would return
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '400':
+          description: Invalid criteria, profile selection, or query parameter (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '429':
+          description: Rate limit exceeded (headers only)
+          headers:
+            Retry-After:
+              description: Seconds until retry allowed
+              schema:
+                type: integer
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '500':
+          description: Internal server error (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '504':
+          description: Recipe resolution or an upstream operation timed out (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
     get:
       tags: [Recipes]
       summary: Resolve a configured recipe
@@ -279,6 +346,79 @@ paths:
                 $ref: "#/components/schemas/Error"
 
   /v1/query:
+    head:
+      tags: [Recipes]
+      summary: Resolve a hydrated value (headers only)
+      operationId: headQuery
+      description: >
+        Same as GET but returns headers only. Declared because RFC 9110 section
+        9.1 makes GET and HEAD mandatory for a general-purpose server, and
+        rejecting HEAD while accepting GET contradicted /metrics, which has
+        allowed the pair since it was introduced.
+
+        Not a cheap probe: the recipe is resolved to produce the headers, so it
+        costs what GET costs. Use /health or /ready for liveness.
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
+        - $ref: "#/components/parameters/Service"
+        - $ref: "#/components/parameters/Accelerator"
+        - $ref: "#/components/parameters/GPUAlias"
+        - $ref: "#/components/parameters/Intent"
+        - $ref: "#/components/parameters/OS"
+        - $ref: "#/components/parameters/Platform"
+        - $ref: "#/components/parameters/Nodes"
+        - $ref: "#/components/parameters/ProfileSelection"
+        - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/Selector"
+      responses:
+        '200':
+          description: Headers for the response GET would return
+          headers:
+            Cache-Control:
+              $ref: '#/components/headers/CacheControl'
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '400':
+          description: Invalid criteria, profile selection, or query parameter (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '404':
+          description: Selector path not found (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '429':
+          description: Rate limit exceeded (headers only)
+          headers:
+            Retry-After:
+              description: Seconds until retry allowed
+              schema:
+                type: integer
+            X-RateLimit-Limit:
+              $ref: '#/components/headers/RateLimitLimit'
+            X-RateLimit-Remaining:
+              $ref: '#/components/headers/RateLimitRemaining'
+            X-RateLimit-Reset:
+              $ref: '#/components/headers/RateLimitReset'
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '500':
+          description: Internal server error (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
+        '504':
+          description: Recipe resolution or an upstream operation timed out (headers only)
+          headers:
+            X-Request-Id:
+              $ref: '#/components/headers/RequestIdResponse'
     get:
       tags: [Recipes]
       summary: Query a configured hydrated recipe
@@ -483,13 +623,14 @@ paths:
       summary: Generate a bundle from a legacy or profiled recipe
       operationId: createBundle
       description: >
-        Uses the same query parameters and ZIP response as POST /v1/bundle.
-        The body is an already-selected RecipeResult, so this route has no
-        profile-selection field. Default recipes stamped aicr.run/v1alpha2,
-        aicr.run/v1, or omitting apiVersion are accepted; profile recipes
-        stamped aicr.run/v1alpha3 or aicr.run/v1beta2 are decoded strictly.
-        Content-Type must be application/json or application/x-yaml.
-        Query parameter details are documented on POST /v1/bundle.
+        Renders a deployment bundle and returns it as a ZIP archive. The body is
+        an already-selected RecipeResult, so this route has no profile-selection
+        field; select the profile when resolving the recipe. Default recipes
+        stamped aicr.run/v1alpha2, aicr.run/v1, or omitting apiVersion are
+        accepted; profile recipes stamped aicr.run/v1alpha3 or aicr.run/v1beta2
+        are decoded strictly. Content-Type must be application/json or
+        application/x-yaml. The query parameters below control deployer, value
+        overrides, node scheduling, workload gating and attestation.
       parameters:
         - $ref: "#/components/parameters/RequestId"
         - $ref: "#/components/parameters/BundleComponents"
@@ -1048,10 +1189,12 @@ components:
           description: Human-readable error message
           example: "Invalid recipe query"
         details:
-          type: object
+          # OpenAPI 3.1 has no `nullable` keyword; it is JSON Schema, where null
+          # is expressed in the type. With `type: object` alone a null details
+          # field would not validate against the document the server emits.
+          type: [object, "null"]
           additionalProperties: true
           description: Additional context-specific error details
-          nullable: true
         requestId:
           type: string
           format: uuid

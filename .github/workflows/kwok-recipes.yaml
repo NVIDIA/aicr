@@ -97,6 +97,7 @@ jobs:
           command -v yq >/dev/null || { echo "::error::yq is required for kwok/scripts/lib tests"; exit 1; }
           bash kwok/scripts/lib/sync-budget_test.sh
           bash kwok/scripts/lib/profile-select_test.sh
+          bash kwok/scripts/lib/preload-image_test.sh
           bash kwok/scripts/run-all-recipes_test.sh
 
       - name: Classify recipes into tiers

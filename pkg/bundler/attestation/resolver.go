@@ -19,6 +19,8 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+
+	"github.com/sigstore/sigstore-go/pkg/root"
 )
 
 // ResolveOptions selects an OIDC token source for keyless signing. Callers
@@ -67,6 +69,15 @@ type ResolveOptions struct {
 	// way to target Rekor v2. Honored by both keyless and KMS signing. See issue
 	// #1650.
 	UseTUFSigningConfig bool
+
+	// SigningConfig is an already-parsed signing config that takes precedence
+	// over SigningConfigPath, UseTUFSigningConfig, and RekorURL.
+	//
+	// Set it when the config had to be inspected before use: re-loading from
+	// SigningConfigPath after validating it would sign against whatever the file
+	// holds at that later moment. Client.SignCatalog populates this after
+	// checking the config targets public-good Sigstore. See SignOptions.SigningConfig.
+	SigningConfig *root.SigningConfig
 
 	// SigningKey selects KMS-backed (key-based) signing instead of keyless OIDC.
 	// When non-empty it is a cosign-style KMS URI (awskms:// | gcpkms:// |
@@ -189,7 +200,7 @@ func ResolveAttester(ctx context.Context, opts ResolveOptions) (Attester, error)
 	if err != nil {
 		return nil, err
 	}
-	return NewKeylessAttester(token, opts.FulcioURL, opts.RekorURL, opts.SigningConfigPath, opts.UseTUFSigningConfig), nil
+	return NewKeylessAttesterFromOptions(token, opts), nil
 }
 
 // ResolveAttesterLazy is the deferred-token variant of ResolveAttester.
@@ -255,7 +266,7 @@ func (l *LazyKeylessAttester) Attest(ctx context.Context, subject AttestSubject)
 			l.mu.Unlock()
 			return nil, err
 		}
-		l.inner = NewKeylessAttester(token, l.opts.FulcioURL, l.opts.RekorURL, l.opts.SigningConfigPath, l.opts.UseTUFSigningConfig)
+		l.inner = NewKeylessAttesterFromOptions(token, l.opts)
 	}
 	inner := l.inner
 	l.mu.Unlock()
