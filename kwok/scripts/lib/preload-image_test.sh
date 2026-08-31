@@ -114,7 +114,11 @@ if [[ "$1" == "pull" ]]; then
     # A pull that never returns — the registry accepts the connection and then
     # goes quiet. Only `timeout` ends this.
     if [[ -n "${STUB_PULL_HANGS:-}" ]]; then sleep 3600; fi
-    if (( n <= ${STUB_PULL_FAILS:-0} )); then exit 1; fi
+    if (( n <= ${STUB_PULL_FAILS:-0} )); then
+        # Real docker writes the cause here; the subject must forward it.
+        echo "toomanyrequests: Rate exceeded" >&2
+        exit 1
+    fi
     touch "${STUB_DIR}/pulled"
     exit 0
 fi
@@ -172,16 +176,49 @@ if [[ "$(cat "${STUB_DIR}/pulls" 2>/dev/null || echo 0)" != "3" ]]; then
     echo "FAIL: retries-transient-pull-failure (want 3 pull attempts, got $(cat "${STUB_DIR}/pulls" 2>/dev/null || echo 0))"
     fails=$((fails + 1))
 else
-    echo "PASS: retries-exactly-three-times"
+    echo "PASS: retries-until-the-pull-succeeds"
 fi
+
+# 3b. Retries are driven by the BUDGET, not a fixed attempt count. The schedule
+#     this replaced gave up after 3 tries in ~17s while holding a 180s budget
+#     (#2483), which is why a throttled pull never recovered. With a budget that
+#     allows more attempts, more attempts must happen.
+reset
+# Three failures then success: the old fixed-3 schedule would give up before
+# the fourth attempt and never load.
+export STUB_PULL_FAILS=3
+export KWOK_PRELOAD_BUDGET_SECONDS=40
+preload_image "${IMG}" >/dev/null; rc=$?
+attempts=$(cat "${STUB_DIR}/pulls" 2>/dev/null || echo 0)
+check "budget-allows-more-than-three-attempts" 0 "${rc}" "kind load docker-image ${IMG}"
+if (( attempts >= 4 )); then
+    echo "PASS: retry-count-follows-the-budget (${attempts} attempts)"
+else
+    echo "FAIL: retry-count-follows-the-budget (only ${attempts} attempts; a fixed 3-attempt cap is back)"
+    fails=$((fails + 1))
+fi
+unset KWOK_PRELOAD_BUDGET_SECONDS
 
 # 4. Every pull fails -> rc still 0 and NO side-load attempted. The kubelet
 #    fallback must remain, and a missing image must not be "loaded".
 reset
 export STUB_PULL_FAILS=99
-preload_image "${IMG}" >/dev/null; rc=$?
+# Small budget: exhaustion now means "spent the budget", so the default 180s
+# would make this case dominate the suite's runtime.
+export KWOK_PRELOAD_BUDGET_SECONDS=5
+out=$(preload_image "${IMG}" 2>&1); rc=$?
 check "pull-exhausted-does-not-fail-the-lane" 0 "${rc}"
 check_absent "pull-exhausted-skips-load" "kind load"
+# The failure REASON must reach the log, not merely the "last error:" label.
+# Asserting the label alone passes even when the captured stderr is empty --
+# which is exactly the discard-the-cause bug this guards against (#2483).
+if [[ "${out}" == *"toomanyrequests"* ]]; then
+    echo "PASS: pull-exhausted-reports-the-error"
+else
+    echo "FAIL: pull-exhausted-reports-the-error (docker's stderr was not forwarded: ${out})"
+    fails=$((fails + 1))
+fi
+unset KWOK_PRELOAD_BUDGET_SECONDS
 
 # 5. Side-load itself fails -> rc still 0. Same reason.
 reset
