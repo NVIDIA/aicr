@@ -139,22 +139,14 @@ preload_image() {
     #
     # Backoff doubles from PRELOAD_BACKOFF_START and is capped, so a long budget
     # spends most of its time waiting rather than hammering.
-    local attempt=0 remaining backoff="${PRELOAD_BACKOFF_START}" pull_err
+    local attempt=0 remaining backoff="${PRELOAD_BACKOFF_START}" pull_err last_err=""
     pull_err="$(mktemp)"
     while :; do
         if preload_have_image "${image}" "${deadline}"; then
             break
         fi
         if ! remaining=$(preload_remaining "${deadline}"); then
-            # Report WHY the last attempt failed. Discarding this is what made
-            # the original failure need manual investigation: the retry landed
-            # in #2480 but the diagnosis did not.
-            if (( attempt > 0 )); then
-                log_warn "Preload budget spent after ${attempt} attempt(s) pulling ${image}; last error: $(tr '\n' ' ' < "${pull_err}" | tail -c 300)"
-            fi
-            log_warn "The kubelet will retry ${image} in-cluster"
-            rm -f "${pull_err}"
-            return 0
+            break
         fi
 
         attempt=$(( attempt + 1 ))
@@ -162,6 +154,10 @@ preload_image() {
         if timeout "${remaining}" docker pull --quiet "${image}" >/dev/null 2>"${pull_err}"; then
             break
         fi
+        # Capture the cause the moment it happens, so it survives every later
+        # exit from this loop. Reading the file at the reporting site instead
+        # would lose it on any path that breaks out and deletes the file first.
+        last_err="$(tr '\n' ' ' < "${pull_err}" | tail -c 300)"
 
         # Clamp the backoff to the budget. Sleeping past the deadline is pure
         # dead time: it cannot buy another attempt, and it delays the kubelet
@@ -179,8 +175,20 @@ preload_image() {
     done
     rm -f "${pull_err}"
 
+    # ONE reporting site for every way the pull can end unsuccessfully. The
+    # loop has four exits (image already cached, budget spent before an
+    # attempt, pull succeeded, budget spent after a failed attempt) and an
+    # earlier version reported the cause on only one of them -- so a pull that
+    # consumed the last of the budget lost its own error message. Reporting
+    # here, from a variable captured at failure time, is what makes that
+    # impossible rather than merely fixed.
     if ! preload_have_image "${image}" "${deadline}"; then
-        log_warn "${image} is not cached after pulling (failed, or the budget ran out); the kubelet will retry in-cluster"
+        if [[ -n "${last_err}" ]]; then
+            log_warn "${image} is not cached after ${attempt} attempt(s); last error: ${last_err}"
+        else
+            log_warn "${image} is not cached and no pull was attempted (the budget ran out first)"
+        fi
+        log_warn "The kubelet will retry ${image} in-cluster"
         return 0
     fi
 
