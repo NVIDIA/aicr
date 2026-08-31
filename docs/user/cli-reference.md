@@ -1660,42 +1660,55 @@ kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 
 **Recovering from the two opt-out failures.** Both are recoverable, and the procedures are different — only the first needs the plugin suppressed.
 
-*Driver upgrade stopped with `failed to uninstall nvidia driver components`.* The plugin still holds the driver, so the replacement is not installed and the old driver may be partially torn down. Recovery means removing the plugin before retrying the driver, and that is cluster-wide.
+*Driver upgrade stopped with `failed to uninstall nvidia driver components`.* The plugin still holds the driver, so the replacement is not installed and the old driver may be partially torn down. Recovery means clearing the node's DRA claim holders and then removing the plugin before retrying the driver. Whether the removal can be confined to the failed node depends on the deployed tolerations, below.
 
 **`kubectl cordon` does not keep the plugin off the node.** The DaemonSet controller adds a `node.kubernetes.io/unschedulable:NoSchedule` toleration to its pods, so a cordoned node still gets one and deleting the pod simply recreates it. Suspending a GitOps controller does not help either; the DaemonSet controller is what recreates the pod.
 
 **Do not patch the DaemonSet to exclude a node.** Two properties of the shipped DaemonSet rule out per-node *template* edits: its affinity is five OR-ed `nodeSelectorTerms`, so excluding a node requires editing every term rather than one; and it uses `RollingUpdate` with `maxUnavailable: 100%`, so *any* change to `.spec.template` rolls pods on every node it covers — and reverting the change rolls them again. A node-scoped-looking patch is therefore cluster-wide in effect.
 
-**A node taint is the exception, and it is the procedure to prefer.** A taint acts on the node, not the DaemonSet template, so it rolls nothing. Whether it works depends on the tolerations of your *deployed* DaemonSet, which vary by how the bundle was generated — check before choosing a procedure:
+**A node taint is the exception, and it is worth checking for.** A taint acts on the node, not the DaemonSet template, so it rolls nothing. Whether it can work depends on the tolerations of your *deployed* DaemonSet — read them before choosing a procedure:
 
 ```bash
 kubectl -n nvidia-dra-driver get ds nvidia-dra-driver-gpu-kubelet-plugin \
   -o jsonpath='{.spec.template.spec.tolerations}'
 ```
 
-If the list is narrow — the upstream chart default is `nvidia.com/gpu` only, and a bundle built with explicit `--accelerated-node-toleration` flags is similarly narrow — a taint whose key appears nowhere in it suppresses the plugin on exactly that node:
+**Expect a wildcard, because that is AICR's default.** When `--accelerated-node-toleration` is not passed, AICR applies a keyless `{operator: Exists}` toleration, which accepts every taint and leaves no key to exclude a node with. A default bundle therefore has no node-scoped option and must use the cluster-wide sequence below. This was the deployed state on an EKS GB300 cluster.
+
+**A taint works only when the deployed list is narrow** — a bundle built with explicit `--accelerated-node-toleration` flags, or the upstream chart default of `nvidia.com/gpu` alone. Then a taint whose key appears nowhere in that list suppresses the plugin on exactly that node. Clear the node's claim holders *first*: the kubelet needs the plugin to complete `NodeUnprepareResources`, so any claim holder still terminating after the plugin is gone will hang.
 
 ```bash
-# 1. Suppress on the failed node only
+# 1. Drain DRA claim holders on the failed node and confirm none remain
+kubectl get resourceclaims -A \
+  -o jsonpath='{range .items[?(@.status.allocation)]}{.metadata.namespace}{"\t"}{.metadata.name}{"\n"}{end}'
+
+# 2. Only then suppress the plugin on that node
 kubectl taint node <node-name> aicr.nvidia.com/dra-recovery=true:NoSchedule
-kubectl -n nvidia-dra-driver delete pod -l app.kubernetes.io/name=dra-driver-nvidia-gpu \
+kubectl -n nvidia-dra-driver delete pod \
+  -l nvidia-dra-driver-gpu-component=kubelet-plugin \
   --field-selector spec.nodeName=<node-name>
 
-# 2. Confirm the node left the DaemonSet's scope and no pod returned
-kubectl -n nvidia-dra-driver get ds nvidia-dra-driver-gpu-kubelet-plugin
+# 3. Confirm no plugin pod remains on that node specifically
+kubectl -n nvidia-dra-driver get pods \
+  -l nvidia-dra-driver-gpu-component=kubelet-plugin \
+  --field-selector spec.nodeName=<node-name>
 
-# 3. Retry the driver pod on that node, then release
+# 4. Retry the driver pod on that node, then release
 kubectl taint node <node-name> aicr.nvidia.com/dra-recovery-
 ```
 
-`NoSchedule` does not evict running pods, so the driver pod stays put and its driver-manager init container keeps retrying while the plugin is gone. Claim holders on other nodes are untouched — clear only the failed node's.
+Select on `nvidia-dra-driver-gpu-component=kubelet-plugin`, the DaemonSet's own selector. The chart-wide `app.kubernetes.io/name=nvidia-dra-driver-gpu` label also matches the DRA *controller*, which can be colocated on a GPU node.
 
-Verified on a two-GPU-node AKS cluster whose plugin tolerated only `nvidia.com/gpu=present:NoSchedule`: tainting one node took the DaemonSet from `DESIRED=2` to `DESIRED=1` with no replacement pod on the tainted node, while the second node's pod kept its original start time — no roll. Removing the taint returned it to `DESIRED=2 READY=2` with both `ResourceSlices` restored.
+Step 3 must be node-specific. Aggregate `kubectl get ds` counts do not prove the affected pod is gone, and pod-object deletion is not proof the container sandbox terminated — a stuck `FailedKillPod` leaves the driver still held.
 
-**If the deployed tolerations are wildcard, no taint works and recovery is cluster-wide.** A DaemonSet tolerating `{operator: Exists}` accepts every taint, so there is no key left to exclude it with — observed on an EKS GB300 cluster. Fall back to the cluster-wide sequence:
+`NoSchedule` does not evict running pods, so the driver pod stays put and its driver-manager init container keeps retrying while the plugin is gone. Claim holders on other nodes are untouched.
+
+Verified on a two-GPU-node AKS cluster built with explicit tolerations, whose plugin tolerated only `nvidia.com/gpu=present:NoSchedule`: tainting one node took the DaemonSet from `DESIRED=2` to `DESIRED=1` with no replacement pod on the tainted node, while the second node's pod kept its original start time — no roll. Removing the taint returned it to `DESIRED=2 READY=2` with both `ResourceSlices` restored.
+
+**Cluster-wide sequence** — required for the default wildcard-toleration bundle, and for any cluster where the check above shows no usable taint key:
 
 1. Clear DRA claim holders on **every** node the DaemonSet covers, not only the failed one, and confirm none remain. The kubelet needs the plugin to complete `NodeUnprepareResources`, so any claim holder still terminating when the plugin goes away will hang.
-2. Suppress the DaemonSet — delete it, or scale it to zero eligible nodes.
+2. Suppress the DaemonSet by deleting it. A DaemonSet has no replica count to scale, and editing its `nodeSelector` to match nothing is itself the cluster-wide template rollout — acceptable here only because this sequence has already accepted cluster-wide impact. Suspend any GitOps reconciliation first, or it will recreate the object underneath you.
 3. Confirm every plugin pod has terminated. Pod-object deletion is not proof the container is gone; check the nodes.
 4. Retry the driver pod on the affected node.
 5. Restore the DaemonSet, then the workloads.
