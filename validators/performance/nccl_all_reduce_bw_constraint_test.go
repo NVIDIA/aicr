@@ -528,19 +528,22 @@ func TestVerifyNCCLNamespaceNotLive(t *testing.T) {
 
 	tests := []struct {
 		name    string
+		nsArg   *corev1.Namespace
 		objs    []runtime.Object
 		wantErr bool
 	}{
-		{name: "namespace does not exist yet", objs: nil, wantErr: false},
-		{name: "namespace terminating from a prior cleanup", objs: []runtime.Object{terminatingNS}, wantErr: false},
-		{name: "namespace active with no pods (empty stale leftover)", objs: []runtime.Object{activeNS}, wantErr: false},
+		{name: "namespace does not exist yet", nsArg: nil, objs: nil, wantErr: false},
+		{name: "namespace terminating from a prior cleanup", nsArg: terminatingNS, objs: []runtime.Object{terminatingNS}, wantErr: false},
+		{name: "namespace active with no pods (empty stale leftover)", nsArg: activeNS, objs: []runtime.Object{activeNS}, wantErr: false},
 		{
 			name:    "namespace active with only terminal pods (stale same-run resources)",
+			nsArg:   activeNS,
 			objs:    []runtime.Object{activeNS, terminalPod},
 			wantErr: false,
 		},
 		{
 			name:    "namespace active with a live pod (foreign/concurrent execution)",
+			nsArg:   activeNS,
 			objs:    []runtime.Object{activeNS, livePod},
 			wantErr: true,
 		},
@@ -548,7 +551,7 @@ func TestVerifyNCCLNamespaceNotLive(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client := fake.NewClientset(tt.objs...)
-			err := verifyNCCLNamespaceNotLive(context.Background(), client, ns)
+			err := verifyNCCLNamespaceNotLive(context.Background(), client, tt.nsArg)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("verifyNCCLNamespaceNotLive() error = %v, wantErr %v", err, tt.wantErr)
 			}

@@ -1618,7 +1618,7 @@ func buildTolerations(node v1.Node) []v1.Toleration {
 // deferred cleanup in the caller always runs — even if later steps fail.
 func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadConfig) error {
 	// Create namespace (idempotent).
-	if err := ensureNamespace(ctx, config.namespace); err != nil {
+	if _, err := ensureNamespace(ctx, config.namespace); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
 	}
 
@@ -2001,7 +2001,11 @@ func ensureHFTokenSecret(ctx *validators.Context, namespace string) error {
 // Stamps labels.ManagedBy so pruneStaleNCCLNamespaces can later scope its
 // sweep to namespaces this package actually created, not just ones that
 // match its naming convention.
-func ensureNamespace(ctx *validators.Context, namespace string) error {
+//
+// Returns the resulting namespace object (its UID included) so callers that
+// need one, such as an owning-UID delete precondition, don't have to issue a
+// further Get for it.
+func ensureNamespace(ctx *validators.Context, namespace string) (*v1.Namespace, error) {
 	nsCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.InferenceNamespaceTerminationWait)
 	defer cancel()
 
@@ -2012,27 +2016,37 @@ func ensureNamespace(ctx *validators.Context, namespace string) error {
 	case apierrors.IsNotFound(err):
 		// Namespace doesn't exist — Create below will succeed.
 	case err != nil:
-		return errors.Wrap(errors.ErrCodeInternal, "failed to check namespace", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to check namespace", err)
 	case existing.DeletionTimestamp != nil:
 		slog.Info("Namespace is terminating from a prior run; waiting for full deletion",
 			"namespace", namespace)
 		if waitErr := waitForNamespaceGone(nsCtx, clients, namespace); waitErr != nil {
-			return waitErr
+			return nil, waitErr
 		}
 	default:
 		// Already exists and is usable — nothing to do.
-		return nil
+		return existing, nil
 	}
 
 	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
 		Name:   namespace,
 		Labels: map[string]string{labels.ManagedBy: labels.ValueValidator},
 	}}
-	_, err = clients.Create(nsCtx, ns, metav1.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+	created, err := clients.Create(nsCtx, ns, metav1.CreateOptions{})
+	if err == nil {
+		return created, nil
 	}
-	return nil
+	if !apierrors.IsAlreadyExists(err) {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+	}
+	// Lost a create race to a concurrent caller. Fetch the winning object
+	// rather than returning nil, so a UID-precondition caller still gets
+	// something to pin its later delete to.
+	winner, err := clients.Get(nsCtx, namespace, metav1.GetOptions{})
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read namespace created by a concurrent caller", err)
+	}
+	return winner, nil
 }
 
 // waitForNamespaceGone watches the given namespace until it is removed.

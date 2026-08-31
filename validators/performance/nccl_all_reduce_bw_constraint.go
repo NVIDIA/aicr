@@ -505,8 +505,8 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	return actualValue, passed, nil
 }
 
-// verifyNCCLNamespaceNotLive fails closed if the per-run NCCL namespace
-// already exists, is not terminating, and still has a non-terminal
+// verifyNCCLNamespaceNotLive fails closed if the given, already-fetched NCCL
+// namespace is not terminating and still has a non-terminal
 // (Pending/Running/Unknown) pod in it. deriveRunID is deterministic per
 // AICR_RUN_ID, so an existing, non-terminating instance is expected on a
 // same-run retry after a hard kill, but only once the prior execution has
@@ -514,24 +514,19 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 // concurrent run of the same AICR_RUN_ID, or the rare random-suffix
 // collision) still owns this namespace, so adopting it would let this run
 // create fixed-name resources into, and its cleanup later delete, a
-// namespace another run is actively using. NotFound is not an error here:
-// ensureNamespace creates it fresh in that case.
-func verifyNCCLNamespaceNotLive(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
-	ns, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
-	switch {
-	case apierrors.IsNotFound(err):
-		return nil
-	case err != nil:
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to check NCCL benchmark namespace", err)
-	case ns.DeletionTimestamp != nil:
-		// Already terminating from a prior cleanup; ensureNamespace waits
-		// for it to fully disappear before recreating it.
+// namespace another run is actively using. A nil ns (namespace doesn't exist,
+// or ensureNamespace just created it fresh) is not an error here.
+func verifyNCCLNamespaceNotLive(ctx context.Context, clientset kubernetes.Interface, ns *v1.Namespace) error {
+	if ns == nil || ns.DeletionTimestamp != nil {
+		// Doesn't exist, or already terminating from a prior cleanup;
+		// ensureNamespace creates it fresh / waits for it to fully
+		// disappear before recreating it. Either way, nothing to check yet.
 		return nil
 	}
 
 	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
-	pods, err := clientset.CoreV1().Pods(namespace).List(listCtx, metav1.ListOptions{})
+	pods, err := clientset.CoreV1().Pods(ns.Name).List(listCtx, metav1.ListOptions{})
 	if err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
 			"failed to check NCCL benchmark namespace for a live execution", err)
@@ -540,7 +535,7 @@ func verifyNCCLNamespaceNotLive(ctx context.Context, clientset kubernetes.Interf
 		if pod.Status.Phase != v1.PodSucceeded && pod.Status.Phase != v1.PodFailed {
 			return aicrErrors.New(aicrErrors.ErrCodeConflict,
 				fmt.Sprintf("NCCL benchmark namespace %q already exists with a live pod %q from another execution; refusing to adopt it",
-					namespace, pod.Name))
+					ns.Name, pod.Name))
 		}
 	}
 	return nil
@@ -594,7 +589,7 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 		// An aged namespace can still belong to a live execution that has
 		// simply run long. Reuse the same occupancy check the adoption gate
 		// uses rather than deleting on age alone.
-		if liveErr := verifyNCCLNamespaceNotLive(ctx, clientset, ns.Name); liveErr != nil {
+		if liveErr := verifyNCCLNamespaceNotLive(ctx, clientset, &ns); liveErr != nil {
 			slog.Info("Skipping stale NCCL benchmark namespace prune: namespace still has a live pod",
 				"namespace", ns.Name, "reason", liveErr)
 			continue
@@ -629,27 +624,27 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// fixed resource name below only has to be unique within it, so a
 	// crashed-then-retried aicr validate run (same AICR_RUN_ID, same derived
 	// name) reclaims its own leftovers instead of colliding. That name is
-	// deterministic, though, so before adopting an already-existing,
+	// deterministic, though, so before proceeding into an already-existing,
 	// non-terminating instance of it we must prove no other execution is
 	// still live under it. Otherwise we could steal or later delete a
-	// genuinely concurrent run's namespace.
+	// genuinely concurrent run's namespace. ensureNamespace's own decision to
+	// reuse an existing namespace isn't itself unsafe, so the liveness check
+	// can run on the object it returns rather than needing its own fetch.
 	gpuConfig.Namespace = ncclRunNamespace(variant)
 	pruneStaleNCCLNamespaces(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
-	if err = verifyNCCLNamespaceNotLive(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace); err != nil {
-		return "", err
-	}
-	if err = ensureNamespace(ctx, gpuConfig.Namespace); err != nil {
+	nsObj, err := ensureNamespace(ctx, gpuConfig.Namespace)
+	if err != nil {
 		return "", aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal, "failed to create NCCL benchmark namespace")
 	}
-
-	// Pin the namespace instance we just created/reclaimed by UID so the
-	// deferred delete below can never remove a different namespace object
-	// that came to exist under this same name afterward (e.g. deleted and
-	// recreated by an unrelated run while this one was in flight).
-	nsObj, getErr := ctx.Clientset.CoreV1().Namespaces().Get(ctx.Ctx, gpuConfig.Namespace, metav1.GetOptions{})
-	if getErr != nil {
-		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read NCCL benchmark namespace after creation", getErr)
+	if err = verifyNCCLNamespaceNotLive(ctx.Ctx, ctx.Clientset, nsObj); err != nil {
+		return "", err
 	}
+
+	// Pin the namespace instance ensureNamespace just created or reclaimed by
+	// UID so the deferred delete below can never remove a different
+	// namespace object that came to exist under this same name afterward
+	// (e.g. deleted and recreated by an unrelated run while this one was in
+	// flight).
 	namespaceUID := nsObj.UID
 
 	// Clean up everything this run created, on every exit path from here on
