@@ -255,6 +255,12 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	// the image to the tag matching the Client's WithVersion. They are set
 	// explicitly here because pinning the agent generation is what a
 	// version-skew-sensitive or air-gapped deployment wants.
+	//
+	// Collect against one cluster at a time. The default names are shared, the
+	// Job is delete-then-created, and the ClusterRoleBinding has a fixed name
+	// carrying the ServiceAccount as its subject — so two concurrent runs
+	// interfere even with distinct JobName values. See CollectSnapshot's
+	// Concurrency godoc.
 	Namespace:          "aicr-snapshot",
 	Image:              "ghcr.io/nvidia/aicr:v0.19.0",
 	JobName:            "aicr-snapshot",

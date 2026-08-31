@@ -105,7 +105,10 @@ func requirePublicGoodURL(label, raw string) error {
 			map[string]any{endpointKey: raw, "scheme": parsed.Scheme})
 	}
 
-	host := parsed.Hostname()
+	// Lowercased: DNS names are case-insensitive, so "FULCIO.SIGSTORE.DEV" is
+	// the public-good host. url.Hostname() does not normalize case, and a
+	// case-sensitive comparison would reject a legitimate config.
+	host := strings.ToLower(parsed.Hostname())
 	if host == "" {
 		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("signing config %s URL has no host", label),

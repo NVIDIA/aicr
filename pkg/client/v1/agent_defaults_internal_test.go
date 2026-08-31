@@ -239,3 +239,37 @@ func TestCollectSnapshot_DoesNotMutateCallerConfig(t *testing.T) {
 			cfg.Image, cfg.JobName, cfg.ServiceAccountName)
 	}
 }
+
+// TestApplyAgentDefaults_SharesNamesAcrossCallers pins the fact the
+// CollectSnapshot godoc's Concurrency section warns about.
+//
+// Defaulting the names to a constant means two callers who both omit them
+// address the SAME Job and ServiceAccount. That is deliberate — it matches the
+// CLI, and per-run names would not fix concurrent collection anyway, because
+// the ClusterRoleBinding has a fixed name and carries the ServiceAccount as its
+// subject. This test exists so the warning cannot quietly stop being true: if
+// the defaults ever become per-run, this fails and the doc gets revisited.
+func TestApplyAgentDefaults_SharesNamesAcrossCallers(t *testing.T) {
+	first := snapshotter.AgentConfig{Namespace: "aicr-system"}
+	second := snapshotter.AgentConfig{Namespace: "aicr-system"}
+	applyAgentDefaults(&first, "0.21.0")
+	applyAgentDefaults(&second, "0.21.0")
+
+	if first.JobName != second.JobName {
+		t.Errorf("JobName defaults differ (%q vs %q); if this is now per-run, "+
+			"CollectSnapshot's Concurrency godoc needs updating",
+			first.JobName, second.JobName)
+	}
+	if first.ServiceAccountName != second.ServiceAccountName {
+		t.Errorf("ServiceAccountName defaults differ (%q vs %q); see above",
+			first.ServiceAccountName, second.ServiceAccountName)
+	}
+
+	// An explicit name is the documented way to separate two runs' Job and
+	// namespaced RBAC — necessary but, per the godoc, not sufficient.
+	custom := snapshotter.AgentConfig{Namespace: "aicr-system", JobName: "run-b"}
+	applyAgentDefaults(&custom, "0.21.0")
+	if custom.JobName != "run-b" {
+		t.Errorf("JobName = %q, want the caller's %q", custom.JobName, "run-b")
+	}
+}

@@ -1820,6 +1820,7 @@ func resolveHelmComponentValues(
 //
 // cfg.Image, cfg.JobName, and cfg.ServiceAccountName are defaulted when empty,
 // to the same values the CLI's flags use — defaults.AgentName for the two names,
+// which are therefore SHARED across callers that omit them (see Concurrency),
 // and for the image the tag matching this Client's WithVersion (a Client with no
 // version, like a development build, gets :latest). Set cfg.Image explicitly to
 // pin a different agent generation or a mirrored registry. Other fields fall
@@ -1880,8 +1881,26 @@ func resolveHelmComponentValues(
 //     carry the appropriate pkg/errors codes (ErrCodeInternal for
 //     deployment failures, ErrCodeTimeout for context expiry, etc.).
 //
-// Concurrent CollectSnapshot calls are safe; each call constructs an
-// independent run.
+// # Concurrency
+//
+// Concurrent CollectSnapshot calls are safe at the Client level — each call
+// constructs an independent run and shares no in-process state.
+//
+// They are NOT safe against the same cluster. The agent deployment is
+// name-addressed and partly cluster-scoped, so two runs collide in three ways
+// regardless of what this method defaults:
+//
+//   - The Job is delete-then-created, so a second run destroys a first run's
+//     in-flight Job even when Cleanup is false.
+//   - The ServiceAccount, Role, and RoleBinding are named from
+//     cfg.ServiceAccountName in cfg.Namespace.
+//   - The ClusterRoleBinding has a FIXED name and carries the ServiceAccount as
+//     its subject, so a second run repoints it and the first run's pod loses its
+//     node-read permission mid-collection. Distinct JobName and
+//     ServiceAccountName values do not avoid this one.
+//
+// Collect against one cluster at a time. Concurrent collection needs per-run
+// ownership down in pkg/k8s/agent, tracked in #2481.
 func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapshot, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")

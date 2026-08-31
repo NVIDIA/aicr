@@ -176,11 +176,17 @@ type CatalogSignResult struct {
 // the failure is immediate and explains itself rather than surfacing later as
 // an unverifiable artifact.
 //
-// This is a guard, not a decision procedure, and the residual gap is worth
-// stating: SigningConfigPath passes through because the release path requires
-// it, and a signing config can itself name a private Fulcio or Rekor. Every
-// rejected setting above exists ONLY to depart from the public-good defaults,
-// which is what makes rejecting them unambiguous; a signing config does not.
+// SigningConfigPath is checked rather than rejected. It passes through because
+// the release path requires it — naming the public-good Rekor v2 target is its
+// normal use — but a signing config can itself name a private Fulcio or Rekor,
+// which would otherwise make the four rejections above bypassable by moving the
+// same endpoints into a file. Every Fulcio, Rekor, OIDC-provider, and
+// timestamp-authority URL in it must therefore be HTTPS under the sigstore.dev
+// domain, matched on a label boundary so a lookalike host is rejected.
+//
+// The config that passes that check is the config signed with: the parsed value
+// is handed to the signing path rather than re-read from the path, so the file
+// cannot change between the check and the use.
 //
 // If private catalog signing is ever needed, both halves have to move
 // together — widening this without widening VerifyCatalog is what this guard

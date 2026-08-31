@@ -109,6 +109,35 @@ func TestValidateSigningConfigIsPublicGood_RejectsPrivateEndpoints(t *testing.T)
 	}
 }
 
+// TestValidateSigningConfigIsPublicGood_AcceptsCaseVariantHosts covers the
+// other direction from the rejection table: DNS is case-insensitive, so an
+// uppercase spelling of a public-good host names the same service and must not
+// be rejected. A case-sensitive comparison would fail a legitimate config.
+func TestValidateSigningConfigIsPublicGood_AcceptsCaseVariantHosts(t *testing.T) {
+	base, err := os.ReadFile(filepath.Clean("testdata/signing_config_v2.json"))
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+
+	mutated := strings.ReplaceAll(string(base), "fulcio.sigstore.dev", "FULCIO.SIGSTORE.DEV")
+	if mutated == string(base) {
+		t.Fatal("fixture does not contain the host under test; this would pass vacuously")
+	}
+
+	path := filepath.Join(t.TempDir(), "config.json")
+	if writeErr := os.WriteFile(path, []byte(mutated), 0o600); writeErr != nil {
+		t.Fatalf("write: %v", writeErr)
+	}
+
+	sc, err := LoadSigningConfigForValidation(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if err := ValidateSigningConfigIsPublicGood(sc); err != nil {
+		t.Errorf("rejected an uppercase spelling of a public-good host: %v", err)
+	}
+}
+
 // TestValidateSigningConfigIsPublicGood_NilIsAccepted pins the default path.
 //
 // "No config supplied" is not a departure from the public-good defaults, so it
