@@ -1508,6 +1508,14 @@ func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gv
 		if err := client.Delete(applyCtx, obj.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to delete stale resource for recreate", err)
 		}
+		// Delete only stamps DeletionTimestamp while a controller-serviced
+		// finalizer (Trainer v2 / JobSet ownership) is still clearing.
+		// Recreating immediately would race it and hit AlreadyExists again,
+		// defeating the same-run retry-after-hard-kill path this exists for.
+		if err := waitForResourceGone(applyCtx, client, obj.GetName()); err != nil {
+			return aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal,
+				"failed waiting for stale resource to finish deleting before recreate")
+		}
 		obj.SetResourceVersion("")
 		if _, err := client.Create(applyCtx, obj, metav1.CreateOptions{}); err != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to recreate resource", err)
@@ -1524,6 +1532,49 @@ func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gv
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to update resource", err)
 	}
 	return nil
+}
+
+// waitForResourceGone watches a namespaced resource by name until it's
+// removed, mirroring waitForNamespaceGone for the dynamic client. Used by
+// createUnstructured to wait out a finalizer-held delete before recreating.
+func waitForResourceGone(ctx context.Context, client dynamic.ResourceInterface, name string) error {
+	watcher, err := client.Watch(ctx, metav1.ListOptions{
+		FieldSelector: "metadata.name=" + name,
+	})
+	if err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to watch resource deletion", err)
+	}
+	defer watcher.Stop()
+
+	if _, getErr := client.Get(ctx, name, metav1.GetOptions{}); apierrors.IsNotFound(getErr) {
+		return nil
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+				"timed out waiting for resource to be fully deleted", ctx.Err())
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+						"timed out waiting for resource to be fully deleted", ctxErr)
+				}
+				// Watch channel closed without cancellation. Re-Get before
+				// failing, since the resource may have been deleted during
+				// the closure window (apiserver hiccup, rolling restart).
+				if _, getErr := client.Get(ctx, name, metav1.GetOptions{}); apierrors.IsNotFound(getErr) {
+					return nil
+				}
+				return aicrErrors.New(aicrErrors.ErrCodeUnavailable,
+					"resource watch channel closed before deletion observed")
+			}
+			if event.Type == watch.Deleted {
+				return nil
+			}
+		}
+	}
 }
 
 // platformWorkerScheduling returns the default nodeSelector and tolerations

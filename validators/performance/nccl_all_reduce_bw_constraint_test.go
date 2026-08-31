@@ -698,3 +698,102 @@ func TestCreateUnstructured_ReclaimsStaleTrainJob_DeletesAndRecreates(t *testing
 		t.Error("reclaimed TrainJob still has the stale prior-run spec, recreate did not apply")
 	}
 }
+
+// countDeleteActions counts "delete" actions recorded for the given
+// resource. Actions() is the fake client's own call history, so this reads
+// real counts without a separate counter.
+func countDeleteActions(actions []k8stesting.Action, resource string) int {
+	n := 0
+	for _, a := range actions {
+		if a.GetVerb() == "delete" && a.GetResource().Resource == resource {
+			n++
+		}
+	}
+	return n
+}
+
+// TestCreateUnstructured_WaitsForFinalizerHeldTrainJobBeforeRecreate is the
+// regression guard for the finalizer-race finding. Delete only stamps
+// DeletionTimestamp while a Trainer v2 / JobSet ownership finalizer is still
+// clearing, so an immediate Create would hit AlreadyExists again. Before the
+// fix, createUnstructured issued Create immediately after Delete with no
+// wait in between.
+func TestCreateUnstructured_WaitsForFinalizerHeldTrainJobBeforeRecreate(t *testing.T) {
+	const ns = "aicr-nccl-bench-deadbeef"
+	const holdFinalizer = 200 * time.Millisecond
+	listKinds := map[schema.GroupVersionResource]string{trainJobGVR: "TrainJobList"}
+
+	stale := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": trainJobGVR.GroupVersion().String(),
+		"kind":       "TrainJob",
+		"metadata": map[string]interface{}{
+			"name":            ncclTrainJobName,
+			"namespace":       ns,
+			"resourceVersion": "1",
+		},
+		"spec": map[string]interface{}{"stale": true},
+	}}
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, stale)
+
+	dynamicClient.PrependReactor("delete", "trainjobs", func(k8stesting.Action) (bool, runtime.Object, error) {
+		// Branch on the object's own DeletionTimestamp, not an invocation
+		// counter, matching how a real apiserver decides. This also avoids
+		// calling Actions() from inside a reactor, which deadlocks. Invokes
+		// holds the Fake's write lock for the whole reactor chain, and
+		// Actions() takes that same lock to read.
+		existing, getErr := dynamicClient.Tracker().Get(trainJobGVR, ns, ncclTrainJobName)
+		obj, ok := existing.(*unstructured.Unstructured)
+		if getErr == nil && ok && obj.GetDeletionTimestamp() == nil {
+			// On the first delete, simulate a still-cascading finalizer by
+			// stamping DeletionTimestamp via the tracker instead of
+			// actually removing the object, then accept the request
+			// (handled=true, err=nil) as a real apiserver would.
+			held := obj.DeepCopy()
+			held.SetFinalizers([]string{"trainer.kubeflow.org/finalizer"})
+			now := metav1.Now()
+			held.SetDeletionTimestamp(&now)
+			if err := dynamicClient.Tracker().Update(trainJobGVR, held, ns); err != nil {
+				return true, nil, err
+			}
+			return true, nil, nil
+		}
+		// Already marked for deletion. The goroutine below fires this once
+		// the "finalizer" clears, so let the default reactor delete it for
+		// real, which emits the watch.Deleted event waitForResourceGone is
+		// blocked on.
+		return false, nil, nil
+	})
+
+	// Captured before the goroutine launches, so elapsed below can't dip
+	// under holdFinalizer merely because the goroutine's sleep started
+	// first.
+	start := time.Now()
+	go func() {
+		time.Sleep(holdFinalizer)
+		_ = dynamicClient.Resource(trainJobGVR).Namespace(ns).Delete(context.Background(), ncclTrainJobName, metav1.DeleteOptions{})
+	}()
+
+	fresh := stale.DeepCopy()
+	fresh.SetResourceVersion("")
+	if err := unstructured.SetNestedField(fresh.Object, false, "spec", "stale"); err != nil {
+		t.Fatalf("SetNestedField: %v", err)
+	}
+
+	if err := createUnstructured(context.Background(), dynamicClient, trainJobGVR, ns, fresh); err != nil {
+		t.Fatalf("createUnstructured() should succeed once the finalizer clears, got: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	// A delete count of 2 alone doesn't prove the wait blocked. The
+	// goroutine above fires the second delete unconditionally at
+	// t=holdFinalizer regardless of what createUnstructured does. The
+	// elapsed-time check below is the real guard. A pre-fix immediate
+	// recreate would hit AlreadyExists and fail before that goroutine ever
+	// ran, with the delete count still at 1.
+	if got := countDeleteActions(dynamicClient.Actions(), "trainjobs"); got < 2 {
+		t.Fatalf("expected createUnstructured to observe the stale TrainJob still present and wait for a second delete, got %d delete call(s)", got)
+	}
+	if elapsed < holdFinalizer {
+		t.Errorf("createUnstructured recreated after %v, want it to have blocked at least %v for the finalizer to clear", elapsed, holdFinalizer)
+	}
+}
