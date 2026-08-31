@@ -94,6 +94,17 @@ func requirePublicGoodURL(label, raw string) error {
 			map[string]any{endpointKey: raw})
 	}
 
+	// Scheme before host. The public-good services are HTTPS-only, and these
+	// URLs are handed to sign.NewRekor / sign.NewTimestampAuthority as-is, so
+	// an "http://rekor.sigstore.dev" would pass a host-only check while sending
+	// signing traffic in the clear — a downgrade wearing the right hostname.
+	if !strings.EqualFold(parsed.Scheme, "https") {
+		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("signing config %s URL is not HTTPS (%s); the public-good "+
+				"Sigstore services are HTTPS-only", label, raw),
+			map[string]any{endpointKey: raw, "scheme": parsed.Scheme})
+	}
+
 	host := parsed.Hostname()
 	if host == "" {
 		return errors.NewWithContext(errors.ErrCodeInvalidRequest,

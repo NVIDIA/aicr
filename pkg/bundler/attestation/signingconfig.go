@@ -71,6 +71,20 @@ func NewSigningConfigPolicyFromPath(path string) (TransparencyPolicy, error) {
 	return newSigningConfigPolicy(sc, time.Now(), false)
 }
 
+// NewSigningConfigPolicy returns a TransparencyPolicy for an already-parsed
+// SigningConfig.
+//
+// This exists so a caller that has to INSPECT a config before signing with it
+// can pass the very bytes it inspected. Re-loading from the path instead leaves
+// a window in which the file changes between the check and the use, which for a
+// signing target means signing against endpoints nobody validated.
+//
+// A caller-supplied config may legitimately be v1, so a v1 selection here is not
+// a downgrade — no warning, matching NewSigningConfigPolicyFromPath.
+func NewSigningConfigPolicy(sc *root.SigningConfig) (TransparencyPolicy, error) {
+	return newSigningConfigPolicy(sc, time.Now(), false)
+}
+
 // NewSigningConfigPolicyFromTUF returns a TransparencyPolicy built from the
 // Rekor v2 signing config distributed via TUF — AICR's default signing target.
 // The endpoint set is Sigstore-maintained and rotation-safe (shard URLs carry

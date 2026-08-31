@@ -15,6 +15,7 @@
 package attestation
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,6 +74,14 @@ func TestValidateSigningConfigIsPublicGood_RejectsPrivateEndpoints(t *testing.T)
 		// The domain check must match on a label boundary. A bare suffix test
 		// would accept this, which is the whole point of checking.
 		"lookalike domain": {"fulcio.sigstore.dev", "fulcio.evilsigstore.dev"},
+
+		// A host-only check would accept these: the hostname is genuinely
+		// public-good, but the URL is handed to sign.NewRekor /
+		// sign.NewTimestampAuthority as-is, so signing traffic would go out in
+		// the clear.
+		"plaintext transparency log":      {"https://rekor.sigstore.dev", "http://rekor.sigstore.dev"},
+		"plaintext timestamp authority":   {"https://timestamp.sigstore.dev", "http://timestamp.sigstore.dev"},
+		"plaintext certificate authority": {"https://fulcio.sigstore.dev", "http://fulcio.sigstore.dev"},
 	}
 
 	for name, tt := range tests {
@@ -107,5 +116,84 @@ func TestValidateSigningConfigIsPublicGood_RejectsPrivateEndpoints(t *testing.T)
 func TestValidateSigningConfigIsPublicGood_NilIsAccepted(t *testing.T) {
 	if err := ValidateSigningConfigIsPublicGood(nil); err != nil {
 		t.Errorf("nil config rejected: %v", err)
+	}
+}
+
+// TestTransparencyPrecedence_ValidatedConfigWinsOverPath is the regression test
+// for the check-then-reload gap.
+//
+// Client.SignCatalog validates a signing config before signing with it. If the
+// signing path re-read SigningConfigPath afterwards, it would sign against
+// whatever the file held at that later moment -- the validated read and the used
+// read would be different reads. SignOptions.SigningConfig closes that, and this
+// pins the precedence: given BOTH a parsed config and a path, the parsed config
+// must win.
+//
+// The path here points at a file that does not exist, so a policy built from the
+// path could not succeed. Success therefore proves the parsed config was used.
+func TestTransparencyPrecedence_ValidatedConfigWinsOverPath(t *testing.T) {
+	sc, err := LoadSigningConfigForValidation("testdata/signing_config_v2.json")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	policy, err := transparencyForOptions(context.Background(), SignOptions{
+		SigningConfig:     sc,
+		SigningConfigPath: filepath.Join(t.TempDir(), "does-not-exist.json"),
+	})
+	if err != nil {
+		t.Fatalf("transparencyForOptions fell back to the path instead of using "+
+			"the validated config: %v", err)
+	}
+	if policy == nil {
+		t.Fatal("no transparency policy returned")
+	}
+}
+
+// TestTransparencyPrecedence_PathStillWorks guards the other direction: the
+// precedence change must not break the release path, which supplies only a path.
+func TestTransparencyPrecedence_PathStillWorks(t *testing.T) {
+	policy, err := transparencyForOptions(context.Background(), SignOptions{
+		SigningConfigPath: "testdata/signing_config_v2.json",
+	})
+	if err != nil {
+		t.Fatalf("path-only signing config rejected: %v", err)
+	}
+	if policy == nil {
+		t.Fatal("no transparency policy returned")
+	}
+}
+
+// TestKeylessAttesterCarriesValidatedSigningConfig covers the resolve -> sign
+// hop, which is the one place the validated config can be silently dropped.
+//
+// Client.SignCatalog sets ResolveOptions.SigningConfig, the resolver builds a
+// KeylessAttester from those options, and the attester rebuilds a ResolveOptions
+// to sign with. A field missed at either step reverts to re-reading
+// SigningConfigPath with no compile error and no test failure anywhere else --
+// signing would just quietly go back to using bytes nobody validated.
+func TestKeylessAttesterCarriesValidatedSigningConfig(t *testing.T) {
+	sc, err := LoadSigningConfigForValidation("testdata/signing_config_v2.json")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	attester := NewKeylessAttesterFromOptions("token", ResolveOptions{
+		SigningConfigPath: "testdata/signing_config_v2.json",
+		SigningConfig:     sc,
+	})
+
+	// Step 1: options -> attester.
+	if attester.signingConfig != sc {
+		t.Fatal("NewKeylessAttesterFromOptions dropped SigningConfig; signing would " +
+			"re-read SigningConfigPath instead of using the validated config")
+	}
+
+	// Step 2: attester -> ResolveOptions -> SignOptions, the exact chain Attest
+	// runs.
+	signOpts := SignOptionsFromResolve("token", attester.resolveOptions())
+	if signOpts.SigningConfig != sc {
+		t.Error("the validated SigningConfig did not survive the resolve -> sign " +
+			"projection; transparencyForOptions would fall back to the path")
 	}
 }

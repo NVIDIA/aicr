@@ -20,6 +20,8 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+
+	"github.com/sigstore/sigstore-go/pkg/root"
 )
 
 // KeylessAttester signs bundle content using Sigstore keyless OIDC signing
@@ -30,6 +32,7 @@ type KeylessAttester struct {
 	rekorURL            string
 	signingConfigPath   string
 	useTUFSigningConfig bool
+	signingConfig       *root.SigningConfig
 	identity            string
 }
 
@@ -61,6 +64,37 @@ func NewKeylessAttester(oidcToken, fulcioURL, rekorURL, signingConfigPath string
 	}
 }
 
+// NewKeylessAttesterFromOptions builds a KeylessAttester from a ResolveOptions.
+//
+// Preferred over NewKeylessAttester for anything driven by a ResolveOptions:
+// the positional form cannot carry ResolveOptions.SigningConfig, so a caller
+// that validated a config before signing would silently fall back to re-reading
+// SigningConfigPath — the exact check-then-reload gap that field exists to
+// close. Adding a signing field here also cannot be dropped by one call site,
+// matching the SignOptionsFromResolve contract.
+func NewKeylessAttesterFromOptions(oidcToken string, o ResolveOptions) *KeylessAttester {
+	a := NewKeylessAttester(oidcToken, o.FulcioURL, o.RekorURL, o.SigningConfigPath, o.UseTUFSigningConfig)
+	a.signingConfig = o.SigningConfig
+	return a
+}
+
+// resolveOptions projects the attester's signing target back into a
+// ResolveOptions for SignOptionsFromResolve.
+//
+// Split out of Attest so the round trip is reachable from a test without
+// signing anything. Every field dropped here is a field the attester silently
+// stops honoring — SigningConfig in particular, whose whole purpose is that the
+// config validated before signing is the one signed with.
+func (k *KeylessAttester) resolveOptions() ResolveOptions {
+	return ResolveOptions{
+		FulcioURL:           k.fulcioURL,
+		RekorURL:            k.rekorURL,
+		SigningConfigPath:   k.signingConfigPath,
+		UseTUFSigningConfig: k.useTUFSigningConfig,
+		SigningConfig:       k.signingConfig,
+	}
+}
+
 // Attest creates a DSSE-signed in-toto SLSA provenance statement for the
 // given subject using keyless OIDC signing via Fulcio and Rekor.
 // Returns the Sigstore bundle as serialized JSON.
@@ -77,12 +111,7 @@ func (k *KeylessAttester) Attest(ctx context.Context, subject AttestSubject) ([]
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to build attestation statement", err)
 	}
 
-	res, err := SignStatement(ctx, statementJSON, SignOptionsFromResolve(k.oidcToken, ResolveOptions{
-		FulcioURL:           k.fulcioURL,
-		RekorURL:            k.rekorURL,
-		SigningConfigPath:   k.signingConfigPath,
-		UseTUFSigningConfig: k.useTUFSigningConfig,
-	}))
+	res, err := SignStatement(ctx, statementJSON, SignOptionsFromResolve(k.oidcToken, k.resolveOptions()))
 	if err != nil {
 		return nil, err
 	}

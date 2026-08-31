@@ -1069,7 +1069,15 @@ the public-good Rekor shards carry the year in their hostname
 (`log2025-1.rekor.sigstore.dev`) and an exact-URL allowlist would start
 rejecting legitimate signing at the next rotation. Matching is on a
 label boundary, so a lookalike domain such as `evilsigstore.dev` is
-rejected.
+rejected, and every URL must be HTTPS — the public-good services are
+HTTPS-only, and these URLs are handed to the Rekor and timestamp
+clients as-is, so `http://rekor.sigstore.dev` would pass a
+hostname-only check while sending signing traffic in the clear.
+
+The config that passes this check is the config signed with. `SignCatalog`
+hands the parsed value to the signing path rather than letting it re-read
+the file, so there is no window in which the file changes between the
+check and the use.
 
 Neither signing method imposes a facade timeout, unlike their
 verification counterparts: keyless OIDC can block on a human completing
