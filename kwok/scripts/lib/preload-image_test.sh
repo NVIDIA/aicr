@@ -73,6 +73,7 @@ PATH="${STUB_DIR}:${PATH}"
 #   STUB_INSPECT_RC   docker image inspect exit code (1 = not cached locally)
 #   STUB_PULL_FAILS   number of leading `docker pull` attempts that fail
 #   STUB_PULL_HANGS   non-empty makes every `docker pull` hang forever
+#   STUB_INSPECT_HANGS non-empty makes every `docker image inspect` hang forever
 #   STUB_KIND_LOAD_RC `kind load` exit code
 #   STUB_CLUSTERS     newline-separated `kind get clusters` output
 write_stubs() {
@@ -81,6 +82,8 @@ write_stubs() {
 echo "docker $*" >> "${TRACE}"
 case "$1 $2" in
     "image inspect")
+        # A wedged Docker Engine: the request is accepted and never answered.
+        if [[ -n "${STUB_INSPECT_HANGS:-}" ]]; then sleep 3600; fi
         # Once a pull has succeeded the image is cached, so later inspects
         # must succeed too — otherwise the retry loop could not terminate.
         if [[ -f "${STUB_DIR}/pulled" ]]; then exit 0; fi
@@ -119,6 +122,7 @@ reset() {
     : > "${TRACE}"
     rm -f "${STUB_DIR}/pulls" "${STUB_DIR}/pulled"
     unset STUB_INSPECT_RC STUB_PULL_FAILS STUB_KIND_LOAD_RC STUB_CLUSTERS STUB_PULL_HANGS
+    unset STUB_INSPECT_HANGS
     unset KWOK_PRELOAD_BUDGET_SECONDS
     unset KUBECTL_CONTEXT KWOK_CLUSTER
     export STUB_DIR TRACE
@@ -257,6 +261,26 @@ else
 fi
 check_absent "hanging-pull-skips-load" "kind load"
 unset STUB_PULL_HANGS KWOK_PRELOAD_BUDGET_SECONDS
+
+# 12. A wedged Docker Engine: `docker image inspect` never returns. It is the
+#     first call in the retry loop, so an unbounded inspect stalls once per
+#     attempt before the kubelet fallback can run — the same failure class as a
+#     hanging pull, in the call that is easiest to assume is local and cheap.
+reset
+export STUB_INSPECT_HANGS=1
+export KWOK_PRELOAD_BUDGET_SECONDS=3
+started=$(date +%s)
+preload_image "${IMG}" >/dev/null; rc=$?
+elapsed=$(( $(date +%s) - started ))
+check "hanging-inspect-does-not-fail-the-lane" 0 "${rc}"
+if (( elapsed <= 30 )); then
+    echo "PASS: hanging-inspect-is-bounded (${elapsed}s)"
+else
+    echo "FAIL: hanging-inspect-is-bounded (took ${elapsed}s; the inspect is unbounded)"
+    fails=$((fails + 1))
+fi
+check_absent "hanging-inspect-skips-load" "kind load"
+unset STUB_INSPECT_HANGS KWOK_PRELOAD_BUDGET_SECONDS
 
 if (( fails > 0 )); then
     echo "FAILED: ${fails} case(s)"

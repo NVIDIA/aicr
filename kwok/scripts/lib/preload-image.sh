@@ -62,6 +62,22 @@ preload_remaining() {
     echo "${left}"
 }
 
+# preload_have_image reports whether the image is already in the host's Docker
+# cache, bounded by the remaining budget.
+#
+# Bounded because `docker image inspect` is a request to the Docker Engine, not
+# a local file read: a wedged daemon stalls it like any other call. Inside the
+# retry loop it would stall once per attempt before the kubelet fallback could
+# run — the same unbounded-wait failure this function exists to remove.
+#
+# A spent budget reports "not cached", which is the safe reading: the caller
+# then either bails on its own budget check or reports the pull as unsuccessful.
+preload_have_image() {
+    local image="$1" deadline="$2" remaining
+    remaining=$(preload_remaining "${deadline}") || return 1
+    timeout "${remaining}" docker image inspect "${image}" &>/dev/null
+}
+
 preload_image() {
     local image="$1"
 
@@ -106,7 +122,7 @@ preload_image() {
     # clears; a longer schedule would just delay the kubelet fallback.
     local attempt remaining
     for attempt in 1 2 3; do
-        if docker image inspect "${image}" &>/dev/null; then
+        if preload_have_image "${image}" "${deadline}"; then
             break
         fi
         if ! remaining=$(preload_remaining "${deadline}"); then
@@ -122,8 +138,8 @@ preload_image() {
         fi
     done
 
-    if ! docker image inspect "${image}" &>/dev/null; then
-        log_warn "Could not pull ${image} on the host; the kubelet will retry in-cluster"
+    if ! preload_have_image "${image}" "${deadline}"; then
+        log_warn "${image} is not cached after pulling (failed, or the budget ran out); the kubelet will retry in-cluster"
         return 0
     fi
 
