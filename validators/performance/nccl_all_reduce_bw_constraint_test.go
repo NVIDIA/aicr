@@ -259,7 +259,7 @@ func TestCollectNCCLWorkerDiagnostics(t *testing.T) {
 }
 
 // TestRunNCCLTrainJob_TrainerInstallFailureCleansUpNamespace is the regression
-// guard for the namespace-cleanup defer's registration point: it must be
+// guard for the namespace-cleanup defer's registration point. It must be
 // registered right after ensureNamespace succeeds, not after
 // ensureTrainerInstalled, or a Trainer-install failure returns before the
 // defer is ever registered and leaks the per-run namespace forever.
@@ -300,13 +300,9 @@ func TestRunNCCLTrainJob_TrainerInstallFailureCleansUpNamespace(t *testing.T) {
 }
 
 // TestNCCLRunNamespace_VariesByVariant is the regression guard for the
-// finding that all three catalog checks (nccl-all-reduce-bw, -net, -nvls)
-// share one AICR_RUN_ID within a single aicr validate invocation, so
-// deriveRunID's suffix alone would give them the identical namespace name.
-// Today that is safe because the checks run serially and cleanup fully
-// drains each namespace before the next starts, but folding the variant
-// into the name removes the dependency on that ordering, which pkg/validator
-// has a TODO to parallelize.
+// finding that all three catalog checks share one AICR_RUN_ID per
+// invocation, so deriveRunID's suffix alone would give them the identical
+// namespace name. Folding the variant into the name keeps them distinct.
 func TestNCCLRunNamespace_VariesByVariant(t *testing.T) {
 	t.Setenv("AICR_RUN_ID", "test-run-id")
 
@@ -325,12 +321,10 @@ func TestNCCLRunNamespace_VariesByVariant(t *testing.T) {
 }
 
 // TestPruneStaleNCCLNamespaces is the regression guard for the ownership
-// finding. Name, age, and pod occupancy alone must never qualify a namespace
-// for deletion. The prune must delete only namespaces that are all of:
-// labeled as ours (see ensureNamespace's labels.ManagedBy stamp),
-// name-matching, old enough to rule out an in-progress sibling variant, not
-// already terminating, and not the namespace this run is about to use.
-// unlabeledMatchingNS is the case that would have been wrongly deleted
+// finding. Only a namespace labeled ours, old enough to rule out an
+// in-progress sibling variant, not already terminating, and not the one
+// this run is about to use may be deleted. unlabeledMatchingNS and
+// otherComponentNS are the cases that would have been wrongly deleted
 // before the fix.
 func TestPruneStaleNCCLNamespaces(t *testing.T) {
 	old := metav1.NewTime(time.Now().Add(-2 * defaults.NCCLStaleNamespacePruneAge))
@@ -401,7 +395,7 @@ func TestPruneStaleNCCLNamespaces(t *testing.T) {
 // guard for the finding that any watch event, including a Deleted event for a
 // stale pod, was returned as-is. applyNCCLResources's TrainJob admission
 // retry (see TrainJobAdmissionRetryTimeout) can recreate the launcher under
-// the same label selector: the stale launcher's Deleted event must be
+// the same label selector, and the stale launcher's Deleted event must be
 // skipped so the wait continues until the replacement's Added event arrives.
 func TestWaitForPodByLabelSelector_IgnoresStaleDeletedLauncher(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
@@ -571,7 +565,7 @@ func TestVerifyNCCLNamespaceNotLive(t *testing.T) {
 }
 
 // TestRunNCCLTrainJob_RefusesLiveForeignNamespace is the end-to-end
-// regression guard for the same MAJOR finding: a retry with the same
+// regression guard for the same MAJOR finding. A retry with the same
 // AICR_RUN_ID (or a rare random-suffix collision) must not silently adopt,
 // and must never let its deferred cleanup delete, a namespace a different,
 // still-running execution owns.
@@ -653,12 +647,9 @@ func TestCreateUnstructured_ReclaimsStaleResource_UpdatesInPlace(t *testing.T) {
 
 // TestCreateUnstructured_ReclaimsStaleTrainJob_DeletesAndRecreates is the
 // regression guard for the finding that reclaiming a stale TrainJob by
-// updating it in place does not actually recover a same-run retry. Kubeflow
-// Trainer treats most of the TrainJob spec as immutable once created and
-// rejects an in-place update to those fields, and even a permitted update
-// would not make the controller recreate the underlying JobSet/pods a
-// hard-killed run left behind. TrainJob must be reclaimed by delete then
-// recreate instead.
+// updating it in place does not recover a same-run retry (see
+// createUnstructured's doc comment for why). It must be reclaimed by
+// delete then recreate instead.
 func TestCreateUnstructured_ReclaimsStaleTrainJob_DeletesAndRecreates(t *testing.T) {
 	const ns = "aicr-nccl-bench-deadbeef"
 	listKinds := map[schema.GroupVersionResource]string{trainJobGVR: "TrainJobList"}
@@ -712,15 +703,12 @@ func TestCreateUnstructured_ReclaimsStaleTrainJob_DeletesAndRecreates(t *testing
 
 // TestCreateUnstructured_TrainJobUIDMismatchPreventsDelete verifies the
 // reclaim delete is pinned to the TrainJob actually observed, not just its
-// name. It simulates the race the precondition guards against: a concurrent
-// execution deletes and recreates the same-named TrainJob (a new UID) in the
-// gap between createUnstructured's own Get and its Delete call. A "get"
-// reactor hands back that now-stale, already-observed UID exactly once, so
-// the Delete's precondition no longer matches what the tracker actually
-// holds. client-go's fake ObjectTracker ignores Delete preconditions
-// entirely, so a second reactor emulates the real apiserver's precondition
-// check to prove the mismatch surfaces as an error instead of deleting the
-// replacement regardless.
+// name. A "get" reactor hands back a stale, already-observed UID once,
+// simulating a concurrent delete-and-recreate in the gap between
+// createUnstructured's own Get and Delete. client-go's fake ObjectTracker
+// ignores Delete preconditions, so a second reactor emulates the real
+// apiserver's precondition check to prove the UID mismatch surfaces as an
+// error instead of deleting the replacement regardless.
 func TestCreateUnstructured_TrainJobUIDMismatchPreventsDelete(t *testing.T) {
 	const ns = "aicr-nccl-bench-deadbeef"
 	const observedUID = types.UID("observed-before-replace")

@@ -128,7 +128,7 @@ func TestCreateOrUpdateFromTemplate_RoCEClaimIdempotent(t *testing.T) {
 const testNamespaceUID = types.UID("test-owner-uid")
 
 // TestCleanupNCCLResources_ToleratesMissing verifies the deferred cleanup is
-// safe to run after an early/partial-apply failure: with no namespace ever
+// safe to run after an early/partial-apply failure. With no namespace ever
 // created, deleting it must be treated as success (NotFound-tolerant), not
 // an error.
 func TestCleanupNCCLResources_ToleratesMissing(t *testing.T) {
@@ -139,7 +139,7 @@ func TestCleanupNCCLResources_ToleratesMissing(t *testing.T) {
 	}
 }
 
-// TestCleanupNCCLResources_DeletesNamespace verifies the happy path: the
+// TestCleanupNCCLResources_DeletesNamespace verifies the happy path. The
 // per-run namespace this run created is deleted, cascading away everything
 // created in it (TrainJob, TrainingRuntime, ComputeDomain, RoCE claim) via
 // ordinary Kubernetes namespace garbage collection, with no per-resource
@@ -178,12 +178,10 @@ func TestCleanupNCCLResources_ReturnsErrorOnDeleteFailure(t *testing.T) {
 }
 
 // TestCleanupNCCLResources_RejectsEmptyUID is the regression guard for the
-// hardening finding that an empty owning UID must be rejected outright.
-// Against a real apiserver an empty Preconditions.UID would fail the delete
-// anyway (it is still an exact-match check, and a real namespace's UID is
-// never empty), but the fake client used in the other tests here ignores
-// delete preconditions entirely and would silently proceed, masking a
-// caller bug that drops the UID.
+// hardening finding that an empty owning UID must be rejected outright,
+// since the fake client used in the other tests here ignores Delete
+// preconditions entirely and would silently proceed on a caller bug that
+// drops the UID.
 func TestCleanupNCCLResources_RejectsEmptyUID(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
@@ -202,10 +200,9 @@ func TestCleanupNCCLResources_RejectsEmptyUID(t *testing.T) {
 
 // TestCleanupNCCLResources_UIDMismatchPreventsDelete verifies the ownership
 // precondition against a UID mismatch. client-go's fake ObjectTracker
-// ignores Delete preconditions entirely, so this reactor emulates the real
-// apiserver's UID precondition check (see cleanupNCCLResources's doc
-// comment) to prove a mismatch actually surfaces as an error instead of the
-// namespace being deleted regardless.
+// ignores Delete preconditions, so this reactor emulates the real
+// apiserver's check to prove a mismatch surfaces as an error instead of
+// deleting the namespace regardless.
 func TestCleanupNCCLResources_UIDMismatchPreventsDelete(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	const actualUID = types.UID("actual-owner-uid")
@@ -233,13 +230,11 @@ func TestCleanupNCCLResources_UIDMismatchPreventsDelete(t *testing.T) {
 }
 
 // TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace is the regression
-// guard for the wait-for-termination fix: a namespace whose first delete
-// only stamps a DeletionTimestamp (finalizers still cascading, as the
-// ComputeDomain/ResourceClaimTemplate CRs this namespace can hold commonly
-// do) must not be reported as cleaned up until it actually disappears.
-// Before this fix, cleanupNCCLResources returned nil as soon as the first
-// Delete call was accepted, even though the namespace, and everything
-// still finalizing inside it, was still there.
+// guard for the wait-for-termination fix. A namespace whose first delete
+// only stamps a DeletionTimestamp (finalizers still cascading) must not be
+// reported as cleaned up until it actually disappears. Before this fix,
+// cleanupNCCLResources returned nil as soon as the first Delete call was
+// accepted.
 func TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	const holdFinalizer = 200 * time.Millisecond
@@ -297,13 +292,11 @@ func TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace(t *testing.T) {
 }
 
 // TestWaitForNamespaceGone_TimesOutWhenNeverDeleted guards the bounded-wait
-// contract of waitForNamespaceGone itself. If a namespace's finalizers never
-// clear within the caller's deadline, the wait must return an ErrCodeTimeout
-// error rather than hang indefinitely. cleanupNCCLResources deliberately
-// only logs this timeout and returns nil, so a slow-but-real teardown does
-// not fail an otherwise-passing benchmark. Calls waitForNamespaceGone
-// directly with a short local context so the test doesn't have to wait out
-// the real 5-minute production bound.
+// contract of waitForNamespaceGone itself. If finalizers never clear within
+// the deadline, it must return ErrCodeTimeout rather than hang indefinitely
+// (cleanupNCCLResources itself only logs this and returns nil). Calls it
+// directly with a short local context to avoid the real 5-minute
+// production bound.
 func TestWaitForNamespaceGone_TimesOutWhenNeverDeleted(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	now := metav1.Now()

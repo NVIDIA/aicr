@@ -67,25 +67,18 @@ const (
 	ncclTrainingRuntimeName = "nccl-all-reduce-runtime"
 
 	// ncclWorkloadNamespacePrefix is the base for the per-run, per-variant
-	// benchmark namespace (see ncclRunNamespace). Isolating each run in its
-	// own namespace, the same pattern inferenceWorkloadNamespacePrefix uses,
-	// means the fixed resource names below never collide across concurrent
-	// or crashed runs: uniqueness only has to hold within a namespace, and
-	// cleanup is a single namespace delete instead of per-resource tracking.
+	// benchmark namespace (see ncclRunNamespace), the same isolation pattern
+	// inferenceWorkloadNamespacePrefix uses so fixed resource names never
+	// collide across concurrent or crashed runs, and cleanup is one
+	// namespace delete instead of per-resource tracking.
 	ncclWorkloadNamespacePrefix = "aicr-nccl-perf"
 )
 
 // ncclRunNamespace derives the per-run, per-variant benchmark namespace.
-// deriveRunID is deterministic per AICR_RUN_ID, and all three catalog checks
-// (nccl-all-reduce-bw, -net, -nvls) share one AICR_RUN_ID within a single
-// aicr validate invocation. Folding the variant into the name, rather than
-// relying on deriveRunID's suffix alone, keeps each check's namespace, and
-// the fixed resource names inside it, unique from its siblings too. That
-// only matters once those checks can run concurrently (see pkg/validator's
-// TODO(perf) to parallelize intra-phase entries). Today they run serially
-// and each fully drains its namespace before the next starts, but this is
-// free to bake in now, before a future change to that ordering would
-// otherwise let two variants adopt, and delete, each other's namespace.
+// All three catalog checks share one AICR_RUN_ID per invocation, so folding
+// the variant into the name keeps each check's namespace, and its fixed
+// resource names, unique from its siblings once they can run concurrently
+// (see pkg/validator's TODO(perf)).
 func ncclRunNamespace(variant ncclVariant) string {
 	variantLabel := string(variant)
 	if variantLabel == "" {
@@ -507,15 +500,11 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 
 // verifyNCCLNamespaceNotLive fails closed if the given, already-fetched NCCL
 // namespace is not terminating and still has a non-terminal
-// (Pending/Running/Unknown) pod in it. deriveRunID is deterministic per
-// AICR_RUN_ID, so an existing, non-terminating instance is expected on a
-// same-run retry after a hard kill, but only once the prior execution has
-// actually stopped. A live pod means some other execution (a genuinely
-// concurrent run of the same AICR_RUN_ID, or the rare random-suffix
-// collision) still owns this namespace, so adopting it would let this run
-// create fixed-name resources into, and its cleanup later delete, a
-// namespace another run is actively using. A nil ns (namespace doesn't exist,
-// or ensureNamespace just created it fresh) is not an error here.
+// (Pending/Running/Unknown) pod in it. A live pod means some other
+// execution (a genuinely concurrent run, or a rare random-suffix collision)
+// still owns this namespace, so adopting it would let this run's
+// fixed-name resources collide with a namespace another run is actively
+// using. A nil ns (doesn't exist, or just created fresh) is not an error.
 func verifyNCCLNamespaceNotLive(ctx context.Context, clientset kubernetes.Interface, ns *v1.Namespace) error {
 	if ns == nil || ns.DeletionTimestamp != nil {
 		// Doesn't exist, or already terminating from a prior cleanup;
@@ -542,34 +531,25 @@ func verifyNCCLNamespaceNotLive(ctx context.Context, clientset kubernetes.Interf
 }
 
 // pruneStaleNCCLNamespaces best-effort deletes aicr-nccl-perf-* namespaces
-// left behind by a standalone (no AICR_RUN_ID) aicr validate process killed
-// before its own deferred cleanup ran. The Job path does not need this: its
-// run ID is deterministic, so ensureNamespace/verifyNCCLNamespaceNotLive
-// already reclaim a stale instance of the SAME namespace on the next run. A
-// killed standalone run instead orphans a namespace under a different random
-// suffix that no future run will ever name again, so nothing else reclaims it.
+// left behind by a standalone (no AICR_RUN_ID) run killed before its own
+// deferred cleanup ran. The Job path doesn't need this. Its deterministic
+// run ID lets ensureNamespace/verifyNCCLNamespaceNotLive reclaim a stale
+// namespace on the next run, but a killed standalone run orphans one under
+// a random suffix no future run will ever name again.
 //
 // Scoped server-side to labels.ManagedBy=aicr-validator plus
-// labels.Component=nccl-perf, the labels ensureNamespace stamps on creation,
-// so this only ever sees namespaces this package itself created. That also
-// means the match no longer depends on ncclWorkloadNamespacePrefix staying
-// in sync with the namespace-naming logic: a label tied to what created the
-// object can't drift out of sync with itself the way a name-prefix constant
-// duplicated at two call sites could.
+// labels.Component=nccl-perf, so this only sees namespaces this package
+// created, decoupled from ncclWorkloadNamespacePrefix staying in sync with
+// the naming logic.
 //
-// Deletion is fire-and-forget: this only issues the Delete call and moves on,
-// it never waits for the namespace to fully terminate, so it adds no
-// wall-clock cost to the run in progress. The delete carries a UID
-// precondition pinned to the instance this List observed, so a same-named
-// namespace recreated by someone else in between is left alone.
-// currentNamespace and anything younger than
-// defaults.NCCLStaleNamespacePruneAge are left alone, so a namespace still
-// owned by an in-progress sibling variant is never touched. An aged
-// namespace that still has a live pod is also left alone, using the same
-// verifyNCCLNamespaceNotLive occupancy check the adoption gate uses, in case
-// some other execution has simply run long. Listing or deleting failures are
-// logged and otherwise ignored. This is opportunistic cleanup, not something
-// a benchmark run should ever fail for.
+// Fire-and-forget. It deletes and moves on without waiting for
+// termination, pinning a UID precondition to the instance this List
+// observed so a same-named namespace recreated in between is left alone.
+// currentNamespace, anything younger than
+// defaults.NCCLStaleNamespacePruneAge, and any aged namespace still holding
+// a live pod (via verifyNCCLNamespaceNotLive) are left alone too. Failures
+// are logged and ignored, since this is opportunistic cleanup a benchmark
+// run should never fail for.
 func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interface, currentNamespace string) {
 	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
@@ -624,16 +604,13 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	dynamicClient := ctx.DynamicClient
 
 	// Isolate this run in its own namespace, the same pattern
-	// inferenceWorkloadConfig uses (see deriveRunID/ensureNamespace): every
-	// fixed resource name below only has to be unique within it, so a
-	// crashed-then-retried aicr validate run (same AICR_RUN_ID, same derived
-	// name) reclaims its own leftovers instead of colliding. That name is
-	// deterministic, though, so before proceeding into an already-existing,
-	// non-terminating instance of it we must prove no other execution is
-	// still live under it. Otherwise we could steal or later delete a
-	// genuinely concurrent run's namespace. ensureNamespace's own decision to
-	// reuse an existing namespace isn't itself unsafe, so the liveness check
-	// can run on the object it returns rather than needing its own fetch.
+	// inferenceWorkloadConfig uses (see deriveRunID/ensureNamespace). Fixed
+	// resource names only need to be unique within it, so a crashed-then-
+	// retried run reclaims its own leftovers instead of colliding. The name
+	// is deterministic, so before reusing an existing, non-terminating
+	// instance, verifyNCCLNamespaceNotLive confirms no other execution is
+	// still live under it (running on the object ensureNamespace already
+	// returned, needing no separate fetch).
 	gpuConfig.Namespace = ncclRunNamespace(variant)
 	pruneStaleNCCLNamespaces(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
 	nsObj, err := ensureNamespace(ctx, gpuConfig.Namespace, labels.ValueNCCLPerf)
@@ -651,18 +628,13 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// flight).
 	namespaceUID := nsObj.UID
 
-	// Clean up everything this run created, on every exit path from here on
-	// (including a failed Trainer install below), via a single defer
-	// registered before installedResources is even known. installedResources
-	// is read by closure once cleanupNCCLRun actually runs, so this defer
-	// covers both an early ensureTrainerInstalled failure (installedResources
-	// still nil) and the normal success path. Two separately registered
-	// defers would run in LIFO order instead, tearing down the (self-install
-	// fallback only) Trainer controller and its TrainJob/TrainingRuntime CRDs
-	// *before* the namespace's own TrainJob/TrainingRuntime CRs are deleted.
-	// That can leave those CRs' controller-serviced finalizers stuck forever
-	// and hang the namespace in Terminating. See cleanupNCCLRun for the
-	// enforced order.
+	// Clean up everything this run created on every exit path, via a single
+	// defer registered before installedResources is even known (it's read
+	// by closure once cleanupNCCLRun runs). Two separate defers would
+	// instead run LIFO, tearing down the Trainer controller and its CRDs
+	// before the namespace's own TrainJob/TrainingRuntime CRs, leaving
+	// their finalizers stuck and the namespace hung in Terminating. See
+	// cleanupNCCLRun for the enforced order.
 	var installedResources []trainerResourceRef
 	defer func() {
 		err = cleanupNCCLRun(ctx.Clientset, dynamicClient, gpuConfig.Namespace, namespaceUID, installedResources, err)
@@ -707,9 +679,9 @@ type gpuConfiguration struct {
 	WorkerCount     int
 	GPUCountPerNode int
 	TotalGPUCount   int
-	// Namespace is the per-run benchmark namespace; unset by determineGPUConfig
-	// and filled in by runNCCLTrainJob once it derives one (see
-	// ncclWorkloadNamespacePrefix).
+	// Namespace is the per-run benchmark namespace. Unset by
+	// determineGPUConfig, and filled in by runNCCLTrainJob once it derives
+	// one (see ncclWorkloadNamespacePrefix).
 	Namespace string
 	Nodes     []v1.Node
 }
@@ -1282,11 +1254,11 @@ func applyNCCLComputeDomain(ctx context.Context, dynamicClient dynamic.Interface
 	}
 
 	// AlreadyExists: fetch the current resourceVersion and Update in place.
-	// Required because Update rejects an empty resourceVersion to prevent
-	// lost updates. Adopting an existing ComputeDomain here is intentional:
-	// it's how a stale one left by a prior run under this same per-run
-	// namespace (e.g. a retry reusing AICR_RUN_ID after a hard kill before
-	// cleanup ran) gets reclaimed instead of failing with AlreadyExists.
+	// Required because Update rejects an empty resourceVersion. Adopting an
+	// existing ComputeDomain here is intentional, since it's how a stale
+	// one left by a prior run (e.g. a retry reusing AICR_RUN_ID after a
+	// hard kill before cleanup ran) gets reclaimed instead of failing with
+	// AlreadyExists.
 	existing, err := client.Get(applyCtx, ncclComputeDomainName, metav1.GetOptions{})
 	if err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get existing ComputeDomain", err)
@@ -1479,19 +1451,17 @@ func renderYAMLTemplate(content string, data map[string]string) (*unstructured.U
 	return obj, nil
 }
 
-// createUnstructured creates a namespaced resource from an unstructured object
-// with a timeout.
-// createUnstructured creates obj. If a fixed-name resource with that
-// GVR/name already exists, it reclaims it so a same-run retry after a hard
-// kill can recover instead of failing on AlreadyExists.
+// createUnstructured creates obj, a namespaced resource, with a timeout. If
+// a fixed-name resource with that GVR/name already exists, it reclaims it
+// so a same-run retry after a hard kill can recover instead of failing on
+// AlreadyExists.
 //
-// TrainJob reclaims by delete-then-recreate rather than update. Kubeflow
-// Trainer treats most of its spec as immutable once created and rejects an
-// in-place update to those fields, and even a permitted update would not
-// make the controller recreate the underlying JobSet/pods, which is what a
-// stale TrainJob left behind by a hard kill actually needs. Every other
-// caller (TrainingRuntime) reclaims by updating in place, the same way
-// applyNCCLComputeDomain already does for ComputeDomain.
+// TrainJob reclaims by delete-then-recreate rather than update, since
+// Kubeflow Trainer treats most of its spec as immutable and an update
+// wouldn't make the controller recreate the underlying JobSet/pods anyway,
+// which is what a stale TrainJob actually needs. Every other caller
+// (TrainingRuntime) reclaims by updating in place, like
+// applyNCCLComputeDomain does for ComputeDomain.
 func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gvr schema.GroupVersionResource, namespace string, obj *unstructured.Unstructured) error {
 	applyCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
@@ -1506,13 +1476,13 @@ func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gv
 	if gvr == trainJobGVR {
 		// Pin the delete to the object actually observed here, not just its
 		// name. Create's AlreadyExists above only proves something existed
-		// at that instant; without a UID precondition a delete-by-name in
+		// at that instant. Without a UID precondition, a delete-by-name in
 		// the gap since could remove a same-named TrainJob that a distinct
 		// execution created in between, rather than failing the delete.
 		stale, err := client.Get(applyCtx, obj.GetName(), metav1.GetOptions{})
 		switch {
 		case apierrors.IsNotFound(err):
-			// Already gone since the AlreadyExists above; nothing to delete.
+			// Already gone since the AlreadyExists above. Nothing to delete.
 		case err != nil:
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get stale resource for recreate", err)
 		default:
@@ -2254,14 +2224,12 @@ func waitForPodByLabelSelector(ctx context.Context, clientset kubernetes.Interfa
 			if !ok {
 				continue
 			}
-			// A Deleted event, or a pod already terminating/terminal, is not
-			// a match: a retry that recreates the workload under the same
-			// label selector (e.g. TrainJob admission retry) can fire a
-			// Deleted event for the stale pod before the replacement's
-			// Added event arrives. Returning it here would hand the caller
-			// a pod that is already gone. Keep waiting for the replacement
-			// instead, matching the same non-terminal, non-deleting filter
-			// newestRunnablePod uses on the re-List recovery path below.
+			// A Deleted event, or a pod already terminating/terminal, isn't
+			// a match. A recreated workload (e.g. a TrainJob admission
+			// retry) can fire a Deleted event for the stale pod before the
+			// replacement's Added event arrives, so keep waiting for the
+			// replacement, matching the filter newestRunnablePod uses on
+			// its re-List recovery path.
 			isTerminal := pod.Status.Phase == v1.PodFailed || pod.Status.Phase == v1.PodSucceeded
 			if event.Type == watch.Deleted || pod.DeletionTimestamp != nil || isTerminal {
 				continue
@@ -2373,39 +2341,25 @@ func verifyTransportFromLogs(logs string, variant ncclVariant) error {
 
 // cleanupNCCLResources deletes the per-run benchmark namespace, cascading
 // away the trainjob, runtime, and (if present) the ComputeDomain and RoCE
-// ResourceClaimTemplate CRs this run created in it, mirroring
-// cleanupInferenceWorkload's pattern for the sibling inference-perf check.
-// Since runNCCLTrainJob gives every run its own namespace (see
-// ncclWorkloadNamespacePrefix), there is no shared state to pin deletes
-// against: nothing else ever lives in this namespace.
+// ResourceClaimTemplate CRs it created, mirroring cleanupInferenceWorkload's
+// pattern. Nothing else ever shares this namespace, so there's no shared
+// state to pin deletes against.
 //
-// Namespaces().Delete only starts asynchronous deletion. It returns as soon
-// as the delete is accepted, not once the namespace (and the
-// ComputeDomain/ResourceClaimTemplate/TrainJob finalizers cascading through
-// it) is actually gone. Waiting here for the deletion to finish, via the
-// same waitForNamespaceGone helper ensureNamespace already uses on the
-// create side for exactly this reason (see its doc comment), gives teardown
-// observability in the common case. But the wait itself only ever logs on
-// timeout (see below). Once Delete is accepted, cascading GC completes
-// server-side regardless of whether we wait for it here, and NVLS runs'
-// ComputeDomain/ResourceClaimTemplate DRA/IMEX finalizers can legitimately
-// outlast the wait bound on the dual-fabric GB200 path.
+// Delete only starts asynchronous deletion, so this waits via
+// waitForNamespaceGone for teardown observability, but only logs on
+// timeout rather than failing. Cascading GC completes server-side
+// regardless, and NVLS's DRA/IMEX finalizers can legitimately outlast the
+// wait bound on the dual-fabric GB200 path.
 //
-// Unlike cleanupInferenceWorkload, a Delete call failure itself is returned
-// rather than only logged, so foldCleanupError can still fail an
-// otherwise-passing check on it. That is the actual "did cleanup happen"
-// signal. NotFound is tolerated (nothing to clean up).
+// Unlike cleanupInferenceWorkload, a Delete failure is itself returned, not
+// just logged, so foldCleanupError can still fail an otherwise-passing
+// check on it, the real "did cleanup happen" signal. NotFound is tolerated.
 //
 // uid pins the delete to the exact namespace instance runNCCLTrainJob
-// created or reclaimed: if that instance was deleted and a different one
-// recreated under the same name in the meantime, the UID precondition makes
-// this delete fail instead of silently removing the new (not ours) instance.
-// uid must be non-empty. An empty Preconditions.UID is still an exact-match
-// precondition against the real namespace's (never-empty) UID, so it would
-// only ever fail the delete outright on a real apiserver, but the fake
-// client used in tests ignores delete preconditions entirely and would
-// silently proceed. Reject it explicitly rather than depend on that
-// difference to catch a caller bug.
+// created or reclaimed, so a recreated same-named namespace is left alone
+// instead of silently deleted. It must be non-empty, since the fake client
+// used in tests ignores delete preconditions and would otherwise silently
+// proceed on a caller bug that drops the UID.
 func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid types.UID) error {
 	if uid == "" {
 		return aicrErrors.New(aicrErrors.ErrCodeInternal,
@@ -2430,10 +2384,8 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 			fmt.Sprintf("failed to delete NCCL benchmark namespace %q", namespace), err)
 	}
 
-	// Same bound as ensureNamespace's wait on the create side (see
-	// defaults.InferenceNamespaceTerminationWait doc comment). This cascade
-	// is the same finalizer chain, just observed from the delete side. Only
-	// logged on timeout, not returned: the Delete call above already
+	// Same bound as ensureNamespace's wait on the create side. Only logged
+	// on timeout, not returned, since the Delete call above already
 	// succeeded, so a slow-but-real teardown (e.g. NVLS's DRA/IMEX
 	// finalizers) must not fail an otherwise-passing benchmark just because
 	// this observability wait ran out first.
@@ -2450,19 +2402,17 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 	return nil
 }
 
-// cleanupNCCLRun tears down everything runNCCLTrainJob created for this run,
-// in a fixed order. It deletes the per-run namespace first (and the
-// TrainJob/TrainingRuntime/ComputeDomain/RoCE-claim CRs cascading through
-// it). Only on the self-install fallback path, where installedResources is
-// non-empty, does it then tear down the Kubeflow Trainer installation
-// itself. That order is required, not cosmetic. deleteTrainer removes the
-// Trainer controller and its TrainJob/TrainingRuntime CRDs, so tearing it
-// down before the namespace's own CRs are deleted would leave those CRs'
-// controller-serviced finalizers with nothing left to clear them, hanging
-// the namespace in Terminating until cleanupNCCLResources's wait times out.
-// benchErr is the check's result so far. A cleanup failure only overrides a
-// nil benchErr, so it never masks a real benchmark failure. See
-// foldCleanupError.
+// cleanupNCCLRun tears down everything runNCCLTrainJob created, in a fixed
+// order. It deletes the per-run namespace first (cascading its
+// TrainJob/TrainingRuntime/ComputeDomain/RoCE-claim CRs), then, only on the
+// self-install fallback path, the Kubeflow Trainer installation itself.
+// The order matters. deleteTrainer removes the Trainer controller and its
+// CRDs, and doing that first would strand the namespace's own CRs'
+// controller-serviced finalizers, hanging the namespace in Terminating.
+//
+// benchErr is the check's result so far. A cleanup failure only overrides
+// a nil benchErr, never masking a real benchmark failure (see
+// foldCleanupError).
 func cleanupNCCLRun(clientset kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, uid types.UID, installedResources []trainerResourceRef, benchErr error) error {
 	err := foldCleanupError(benchErr, cleanupNCCLResources(clientset, namespace, uid),
 		"NCCL benchmark succeeded but NCCL resource cleanup failed")

@@ -46,10 +46,10 @@ const (
 	ValueValidator  = "aicr-validator"
 )
 
-// Component label values for per-run benchmark namespaces, stamped alongside
-// ManagedBy so a stale-namespace prune can scope its List to exactly one
-// benchmark's namespaces server-side, instead of matching on a name prefix
-// that has to be kept in sync with the namespace-naming logic by hand.
+// Component label values for per-run benchmark namespaces, stamped
+// alongside ManagedBy so a stale-namespace prune can scope its List to
+// exactly one benchmark server-side, instead of matching a hand-maintained
+// name prefix.
 const (
 	ValueNCCLPerf      = "nccl-perf"
 	ValueInferencePerf = "inference-perf"
