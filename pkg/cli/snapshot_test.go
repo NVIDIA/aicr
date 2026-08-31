@@ -662,3 +662,97 @@ func TestWriteManifestReport(t *testing.T) {
 		})
 	}
 }
+
+// stringFlagValue returns the declared Value: default of a string flag on cmd.
+// It is the same fact testdata/cli-surface.golden pins, read from the live
+// command so the two cannot drift apart silently.
+func stringFlagValue(t *testing.T, cmd *cli.Command, flagName string) string {
+	t.Helper()
+	for _, f := range cmd.Flags {
+		sf, ok := f.(*cli.StringFlag)
+		if !ok || sf.Name != flagName {
+			continue
+		}
+		return sf.Value
+	}
+	t.Fatalf("%s command must define --%s", cmd.Name, flagName)
+	return ""
+}
+
+// TestSnapshotCmd_DeclaredNameDefaultsNeverReachTheDeployer is the regression
+// guard for the two-sided requirement on --job-name and
+// --service-account-name: the released v1 defaults stay declared, and neither
+// is ever mistaken for something the operator typed.
+//
+// The declared half is a compatibility contract. "aicr" is what `--help`
+// prints and what integrations read; dropping it is a breaking change to a
+// frozen v1 surface that owes the deprecation window in RELEASING.md.
+//
+// The delivered half is a security property, and it is the one worth the
+// test. Config.ServiceAccountName is exact-if-exists: agent.Deployer's
+// resolveServiceAccount probes for a ServiceAccount of exactly that name and,
+// on a hit, runs the agent under it and creates and deletes NO RBAC for the
+// run. It returns early on an empty name precisely so aicr's own default
+// cannot trigger that. If an unset flag resolved to "aicr" here instead, then
+// on any cluster still carrying a leftover "aicr" ServiceAccount from a
+// pre-ADR-020 install EVERY run would silently enter exact mode and manage no
+// permissions at all. Exact mode must be reachable only from a name the
+// operator actually supplied.
+func TestSnapshotCmd_DeclaredNameDefaultsNeverReachTheDeployer(t *testing.T) {
+	cmd := snapshotCmd()
+	for _, flagName := range []string{"job-name", "service-account-name"} {
+		if got := stringFlagValue(t, cmd, flagName); got != name {
+			t.Errorf("--%s declared default = %q, want the released %q; removing it "+
+				"breaks the frozen v1 CLI surface", flagName, got, name)
+		}
+	}
+
+	// No name flags passed: both must arrive empty, so pkg/k8s/agent derives
+	// "<NameBase>-<RunID>" and probes nothing.
+	opts := captureSnapshotOpts(t, []string{"-o", "-"})
+	if opts.serviceAccountName != "" {
+		t.Errorf("serviceAccountName = %q for an unset flag, want empty; a "+
+			"non-empty value is probed for existence and a hit disables RBAC "+
+			"management for the whole run", opts.serviceAccountName)
+	}
+	if opts.jobName != "" {
+		t.Errorf("jobName = %q for an unset flag, want empty", opts.jobName)
+	}
+
+	// The names the deployer actually builds from are unchanged: NameBase
+	// carries the same "aicr" prefix the declared defaults used to supply.
+	agentCfg := opts.toAgentConfig()
+	if agentCfg.ServiceAccountName != "" || agentCfg.JobName != "" {
+		t.Errorf("AgentConfig names = (job %q, sa %q), want both empty",
+			agentCfg.JobName, agentCfg.ServiceAccountName)
+	}
+	if agentCfg.NameBase != name {
+		t.Errorf("AgentConfig.NameBase = %q, want %q — without it the run-scoped "+
+			"names would lose the prefix the released defaults produced",
+			agentCfg.NameBase, name)
+	}
+
+	// Guard against the vacuous pass: a name the operator DID type must
+	// survive, since that is the only route into exact-ServiceAccount mode.
+	explicit := captureSnapshotOpts(t, []string{
+		"-o", "-",
+		"--job-name", "snapshot-gpu-nodes",
+		"--service-account-name", "irsa-snapshotter",
+	})
+	if explicit.serviceAccountName != "irsa-snapshotter" {
+		t.Errorf("serviceAccountName = %q, want the operator's %q",
+			explicit.serviceAccountName, "irsa-snapshotter")
+	}
+	if explicit.jobName != "snapshot-gpu-nodes" {
+		t.Errorf("jobName = %q, want the operator's %q",
+			explicit.jobName, "snapshot-gpu-nodes")
+	}
+
+	// Passing the default explicitly is still explicit input: the operator
+	// typed it, so it is probed like any other name.
+	typedDefault := captureSnapshotOpts(t, []string{"-o", "-", "--service-account-name", name})
+	if typedDefault.serviceAccountName != name {
+		t.Errorf("serviceAccountName = %q for an explicitly passed %q, want it "+
+			"preserved", typedDefault.serviceAccountName, name)
+	}
+}

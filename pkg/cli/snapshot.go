@@ -131,6 +131,12 @@ type snapshotCmdOptions struct {
 // by SDK consumers. Job mode is its only consumer: local (in-pod) collection
 // deploys no Job and builds a collector.Factory and serializer.Serializer from
 // opts directly, so it never needs an AgentConfig.
+//
+// NameBase carries the "aicr" prefix that --job-name and
+// --service-account-name declare as their default. Routing it through this
+// field rather than through JobName/ServiceAccountName is what lets an unset
+// flag stay empty (see explicitStringFlagOrConfig) while the deployed objects
+// keep the names the released defaults produced.
 func (o *snapshotCmdOptions) toAgentConfig() *aicr.AgentConfig {
 	return &aicr.AgentConfig{
 		Kubeconfig:         o.kubeconfig,
@@ -246,13 +252,18 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --limits")
 	}
 
+	// jobName and serviceAccountName resolve through
+	// explicitStringFlagOrConfig, not stringFlagOrConfig: the flags keep
+	// their released "aicr" default for --help, but only a name the operator
+	// actually supplied (flag or --config) may travel downstream. See
+	// toAgentConfig's NameBase for what supplies the prefix instead.
 	return &snapshotCmdOptions{
 		kubeconfig:         cmd.String("kubeconfig"),
 		namespace:          stringFlagOrConfig(cmd, "namespace", resolved.Namespace),
 		image:              stringFlagOrConfig(cmd, "image", resolved.Image),
 		imagePullSecrets:   stringSliceFlagOrConfig(cmd, "image-pull-secret", resolved.ImagePullSecrets),
-		jobName:            stringFlagOrConfig(cmd, "job-name", resolved.JobName),
-		serviceAccountName: stringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
+		jobName:            explicitStringFlagOrConfig(cmd, "job-name", resolved.JobName),
+		serviceAccountName: explicitStringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
 		nodeSelector:       nodeSelector,
 		tolerations:        tolerations,
 		timeout:            durationFlagOrConfig(cmd, "timeout", resolved.Timeout),
@@ -440,14 +451,22 @@ func snapshotCmdFlags() []cli.Flag {
 			Usage:    "Secret name for pulling images from private registries (can be repeated)",
 			Category: catAgentDeployment,
 		},
+		// Value stays "aicr" on both name flags: it is the released v1
+		// default `--help` prints and testdata/cli-surface.golden pins.
+		// parseSnapshotCmdOptions reads them with
+		// explicitStringFlagOrConfig, so an unset flag reaches the deployer
+		// as "" rather than as this default — see that helper for why the
+		// two must not be conflated.
 		&cli.StringFlag{
 			Name:     "job-name",
-			Usage:    "Job name prefix (default: \"aicr\"); the run ID is always appended",
+			Usage:    "Job name prefix; the run ID is always appended",
+			Value:    name,
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
-			Usage:    "ServiceAccount to run the agent as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and aicr creates and deletes no RBAC for the run (generate its RBAC manifests with --add-roles-to-service-account, then apply them yourself). Otherwise it is a name prefix (default: \"aicr\") and the run ID is appended.",
+			Usage:    "ServiceAccount to run the agent as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and aicr creates and deletes no RBAC for the run (generate its RBAC manifests with --add-roles-to-service-account, then apply them yourself). Otherwise it is a name prefix and the run ID is appended. Leaving the flag unset is not the same as passing the default shown: an unset value is never probed for existence, so a stray ServiceAccount cannot capture the run.",
+			Value:    name,
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{

@@ -45,6 +45,11 @@ import (
 // `aicr snapshot`'s (which use the package-level "aicr" base). RunID is
 // always appended, so the deployed names are run-scoped regardless of
 // whether this base is used.
+//
+// It doubles as --job-name's declared Value: default so the released v1
+// help output is unchanged. That default is never read as a value — see
+// explicitStringFlagOrConfig — which is why the constant, not the flag,
+// is what actually supplies the prefix.
 const validateNameBase = "aicr-validate"
 
 // validateAgentConfig holds parsed agent configuration for validate command.
@@ -90,13 +95,18 @@ func parseValidateAgentConfig(
 	runID string,
 ) *validateAgentConfig {
 
+	// jobName and serviceAccountName resolve through
+	// explicitStringFlagOrConfig, not stringFlagOrConfig: the flags keep
+	// their released defaults for --help, but only a name the operator
+	// actually supplied (flag or --config) may travel downstream. An unset
+	// flag stays "" so validateNameBase governs — see toAgentConfig.
 	return &validateAgentConfig{
 		kubeconfig:         cmd.String("kubeconfig"),
 		namespace:          shared.namespace,
 		image:              stringFlagOrConfig(cmd, "image", resolved.Image),
 		imagePullSecrets:   shared.imagePullSecrets,
-		jobName:            stringFlagOrConfig(cmd, "job-name", resolved.JobName),
-		serviceAccountName: stringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
+		jobName:            explicitStringFlagOrConfig(cmd, "job-name", resolved.JobName),
+		serviceAccountName: explicitStringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
 		nodeSelector:       shared.nodeSelector,
 		tolerations:        shared.tolerations,
 		timeout:            durationFlagOrConfig(cmd, "timeout", resolved.Timeout),
@@ -491,14 +501,21 @@ func validateCmdFlags() []cli.Flag {
 			Usage:    "Secret name for pulling images from private registries (can be repeated)",
 			Category: catAgentDeployment,
 		},
+		// Value stays at the released v1 defaults ("aicr-validate" and
+		// "aicr"): they are what `--help` prints and what
+		// testdata/cli-surface.golden pins. parseValidateAgentConfig reads
+		// both with explicitStringFlagOrConfig, so an unset flag reaches the
+		// agent as "" and validateNameBase supplies the prefix instead.
 		&cli.StringFlag{
 			Name:     "job-name",
-			Usage:    "Job name prefix (default: \"aicr-validate\"); the run ID is always appended",
+			Usage:    "Job name prefix; the run ID is always appended",
+			Value:    validateNameBase,
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
-			Usage:    "ServiceAccount the live snapshot-capture agent runs as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and the agent creates and deletes no RBAC for the run (generate its RBAC manifests with 'aicr snapshot --add-roles-to-service-account', then apply them yourself). Otherwise it is a name prefix (default: \"aicr-validate\") and the run ID is appended.",
+			Usage:    "ServiceAccount the live snapshot-capture agent runs as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and the agent creates and deletes no RBAC for the run (generate its RBAC manifests with 'aicr snapshot --add-roles-to-service-account', then apply them yourself). Otherwise it is a name prefix and the run ID is appended. Leaving the flag unset is not the same as passing the default shown: an unset value is never probed for existence, and the agent's run-scoped names are derived from the \"aicr-validate\" base instead.",
+			Value:    name,
 			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{

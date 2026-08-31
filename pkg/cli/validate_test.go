@@ -545,6 +545,79 @@ func TestParseValidateAgentConfig_ForwardsCallerRunID(t *testing.T) {
 	}
 }
 
+// TestValidateCmd_DeclaredNameDefaultsNeverReachTheAgent is the validate-side
+// half of TestSnapshotCmd_DeclaredNameDefaultsNeverReachTheDeployer; see that
+// test for why an unset --service-account-name must not resolve to a name aicr
+// chose. The released v1 defaults here are "aicr-validate" for --job-name and
+// "aicr" for --service-account-name, and both stay declared for `--help` and
+// testdata/cli-surface.golden while neither is delivered as a value.
+//
+// The prefix the agent's objects actually get comes from
+// AgentConfig.NameBase (validateNameBase) instead, which is what keeps this
+// command's agent resources distinguishable from `aicr snapshot`'s.
+func TestValidateCmd_DeclaredNameDefaultsNeverReachTheAgent(t *testing.T) {
+	cmd := validateCmd()
+	if got := stringFlagValue(t, cmd, "job-name"); got != validateNameBase {
+		t.Errorf("--job-name declared default = %q, want the released %q",
+			got, validateNameBase)
+	}
+	if got := stringFlagValue(t, cmd, "service-account-name"); got != name {
+		t.Errorf("--service-account-name declared default = %q, want the released %q",
+			got, name)
+	}
+
+	capture := func(t *testing.T, args ...string) *validateAgentConfig {
+		t.Helper()
+		var captured *validateAgentConfig
+		c := validateCmd()
+		c.Action = func(ctx context.Context, cc *cli.Command) error {
+			cfg, err := loadCmdConfig(ctx, cc)
+			if err != nil {
+				return err
+			}
+			resolved, err := cfg.Validation().Resolve()
+			if err != nil {
+				return err
+			}
+			shared := validateSharedResolved{namespace: "aicr-validation-test"}
+			captured = parseValidateAgentConfig(cc, resolved, shared, "20260821-142233-9f3a1c0b7e2d4a55")
+			return nil
+		}
+		if err := c.Run(t.Context(), append([]string{"validate", "--no-cluster"}, args...)); err != nil {
+			t.Fatalf("validate run: %v", err)
+		}
+		return captured
+	}
+
+	unset := capture(t)
+	if unset.serviceAccountName != "" {
+		t.Errorf("serviceAccountName = %q for an unset flag, want empty; a "+
+			"non-empty value is probed for existence and a hit disables RBAC "+
+			"management for the whole run", unset.serviceAccountName)
+	}
+	if unset.jobName != "" {
+		t.Errorf("jobName = %q for an unset flag, want empty", unset.jobName)
+	}
+	if base := unset.toAgentConfig().NameBase; base != validateNameBase {
+		t.Errorf("AgentConfig.NameBase = %q, want %q — it is what supplies the "+
+			"prefix once the declared defaults stop being delivered",
+			base, validateNameBase)
+	}
+
+	// Guard against the vacuous pass: an operator-supplied name must survive,
+	// since that is the only route into exact-ServiceAccount mode.
+	explicit := capture(t, "--job-name", "validate-gpu-nodes",
+		"--service-account-name", "irsa-snapshotter")
+	if explicit.serviceAccountName != "irsa-snapshotter" {
+		t.Errorf("serviceAccountName = %q, want the operator's %q",
+			explicit.serviceAccountName, "irsa-snapshotter")
+	}
+	if explicit.jobName != "validate-gpu-nodes" {
+		t.Errorf("jobName = %q, want the operator's %q",
+			explicit.jobName, "validate-gpu-nodes")
+	}
+}
+
 // TestClassifyIgnoredAKSGPUPools pins the provenance matrix of the
 // ignored-projection note: explicit CLI presence (either flag form) always
 // warns; a purely ambient env source is demoted to debug; nothing logs

@@ -165,6 +165,7 @@ flag    aicr recipe verify-catalog  --identity-pattern  type=string default= req
 flag    aicr skill  --agent  type=string default= required=true hidden=false env=
 flag    aicr skill  --force  type=bool default=false required=false hidden=false env=
 flag    aicr skill  --stdout  type=bool default=false required=false hidden=false env=
+flag    aicr snapshot  --add-roles-to-service-account  type=string default= required=false hidden=false env=
 flag    aicr snapshot  --aks-gpu-pools  type=string default= required=false hidden=false env=AICR_AKS_GPU_POOLS_PATH
 flag    aicr snapshot  --cluster-config  type=string default= required=false hidden=false env=AICR_CLUSTER_CONFIG_PATH
 flag    aicr snapshot  --config  type=string default= required=false hidden=false env=

@@ -225,8 +225,11 @@ spec:
       namespace: aicr-validation
       image: ""                    # default: ghcr.io/nvidia/aicr:latest
       imagePullSecrets: []
-      # jobName / serviceAccountName are optional PREFIXES, not names — the
-      # run ID is always appended. Omit them to take the defaults.
+      # jobName is an optional PREFIX, not a name — the run ID is always
+      # appended. serviceAccountName is exact-if-exists: an existing
+      # ServiceAccount of exactly that name is used verbatim and the run
+      # then creates and deletes NO RBAC; otherwise it is a prefix too.
+      # Omit both to take the run-scoped defaults.
       nodeSelector:
         nodeGroup: gpu-worker
       tolerations:
@@ -1049,7 +1052,7 @@ aicr validate [flags]
 | `--image` | | string | ghcr.io/nvidia/aicr:latest | Container image for validation Job |
 | `--image-pull-secret` | | string[] | | Image pull secrets for private registries (repeatable) |
 | `--job-name` | | string | aicr-validate | Prefix for the **live snapshot-capture agent's** Job name; the run ID is always appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied — no agent is deployed. Does not name the validator Jobs (`aicr-<validator>-<hash>`) |
-| `--service-account-name` | | string | aicr-validate | ServiceAccount the **live snapshot-capture agent** runs as. **Exact-if-exists:** an existing ServiceAccount of exactly this name in `--namespace` is used verbatim and the agent creates no RBAC for the run; otherwise the value is a prefix for the agent's ServiceAccount, Role, and RoleBinding and the run ID is appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied. Does not name the validator Jobs' ServiceAccount (`aicr-validator-<run-id>`), whose RBAC is always run-scoped. Generate that ServiceAccount's RBAC manifests with `aicr snapshot --namespace <validate-namespace> --add-roles-to-service-account <name>` (matching this command's `--namespace`) and apply them yourself — that command applies nothing |
+| `--service-account-name` | | string | aicr | ServiceAccount the **live snapshot-capture agent** runs as. Leaving the flag unset is not the same as passing that default: an unset value is never probed, and the agent's run-scoped names are derived from the `aicr-validate` base instead. **Exact-if-exists:** an existing ServiceAccount of exactly this name in `--namespace` is used verbatim and the agent creates no RBAC for the run; otherwise the value is a prefix for the agent's ServiceAccount, Role, and RoleBinding and the run ID is appended (`<prefix>-<run-id>`). Inert when `--snapshot` is supplied. Does not name the validator Jobs' ServiceAccount (`aicr-validator-<run-id>`), whose RBAC is always run-scoped. Generate that ServiceAccount's RBAC manifests with `aicr snapshot --namespace <validate-namespace> --add-roles-to-service-account <name>` (matching this command's `--namespace`) and apply them yourself — that command applies nothing |
 | `--node-selector` | | string[] | | Override GPU node selection for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. Replaces platform-specific selectors (e.g., `cloud.google.com/gke-accelerator`, `node.kubernetes.io/instance-type`) on inner workloads like NCCL benchmark pods. Use when GPU nodes have non-standard labels. Does not affect the validator orchestrator Job. (format: key=value, repeatable) |
 | `--toleration` | | string[] | | Override tolerations for the live snapshot agent (when `--snapshot` is omitted) and inner validation workloads. When omitted, the snapshot agent tolerates all taints. Does not affect the validator orchestrator Job. (format: key=value:effect, repeatable) |
 | `--timeout` | | duration | 5m | Timeout for validation Job completion |
