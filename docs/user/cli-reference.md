@@ -1677,12 +1677,19 @@ kubectl -n nvidia-dra-driver get ds nvidia-dra-driver-gpu-kubelet-plugin \
 
 **A taint works only when the deployed list is narrow** — a bundle built with explicit `--accelerated-node-toleration` flags, or the upstream chart default of `nvidia.com/gpu` alone. Then a taint whose key appears nowhere in that list suppresses the plugin on exactly that node. Clear the node's claim holders *first*: the kubelet needs the plugin to complete `NodeUnprepareResources`, so any claim holder still terminating after the plugin is gone will hang.
 
-1. **Terminate the workloads holding DRA claims on the failed node, and confirm `NodeUnprepareResources` completed for each.** The kubelet routes that call through the plugin, so a claim holder still terminating after the plugin is gone will hang. Allocated ComputeDomain claims can legitimately persist cluster-wide, so a cluster-wide claim listing does not establish that *this* node is clear — resolve holders to the node before proceeding. This step is stated as an invariant rather than a command because the holder-to-node mapping depends on your workload shape and no single command was verified here.
-
-2. **Only then suppress the plugin on that node.**
+1. **Quiesce whatever creates DRA claim holders on that node, and apply the taint — before draining anything.** Suspend the Jobs, Deployments or workload controllers that schedule claim-holding pods there. Then:
 
    ```bash
    kubectl taint node <node-name> aicr.nvidia.com/dra-recovery=true:NoSchedule
+   ```
+
+   Order matters. `NoSchedule` blocks *new* pods while leaving running ones alone, so the taint fences the node without disturbing the plugin that is still needed to service `NodeUnprepareResources`. Draining first would leave a window in which a controller reschedules a holder onto the node you just cleared.
+
+2. **Now terminate the claim holders on that node, and confirm `NodeUnprepareResources` completed for each.** The kubelet routes that call through the plugin, so a holder still terminating after the plugin is gone will hang. Allocated ComputeDomain claims can legitimately persist cluster-wide, so a cluster-wide claim listing does not establish that *this* node is clear — resolve holders to the node before proceeding. This is stated as an invariant rather than a command because the holder-to-node mapping depends on your workload shape and no single command was verified here.
+
+3. **Only then delete the plugin on that node.**
+
+   ```bash
    kubectl -n nvidia-dra-driver delete pod \
      -l nvidia-dra-driver-gpu-component=kubelet-plugin \
      --field-selector spec.nodeName=<node-name>
@@ -1690,29 +1697,31 @@ kubectl -n nvidia-dra-driver get ds nvidia-dra-driver-gpu-kubelet-plugin \
 
    Select on `nvidia-dra-driver-gpu-component=kubelet-plugin`, the DaemonSet's own selector. The chart-wide `app.kubernetes.io/name=nvidia-dra-driver-gpu` label also matches the DRA *controller*, which can be colocated on a GPU node.
 
-3. **Confirm at the node's runtime that the plugin container is actually gone**, not merely that the Pod object was deleted. Aggregate `kubectl get ds` counts prove nothing about this node, and a stuck `FailedKillPod` leaves the container — and the driver handle — alive after the API object disappears.
+4. **Confirm at the node's runtime that the plugin container is actually gone**, not merely that the Pod object was deleted. Aggregate `kubectl get ds` counts prove nothing about this node, and a stuck `FailedKillPod` leaves the container — and the driver handle — alive after the API object disappears.
 
-4. **Retry the driver, and wait for it to finish.** Driver Manager must report success and the driver Pod must reach `Ready`. Do not proceed while it is still retrying.
+5. **Retry the driver, and wait for it to finish.** Driver Manager must report success and the driver Pod must reach `Ready`. Do not proceed while it is still retrying.
 
-5. **Only now remove the taint.** Releasing it earlier makes the node eligible again, so the plugin can be recreated and reopen the driver before recovery completes — reintroducing the failure.
+6. **Only now remove the taint.** Releasing it earlier makes the node eligible again, so the plugin can be recreated and reopen the driver before recovery completes — reintroducing the failure.
 
    ```bash
    kubectl taint node <node-name> aicr.nvidia.com/dra-recovery-
    ```
 
-6. **Confirm the plugin returns `Ready` on that node and its `ResourceSlices` are republished.** Until the slices are back the node cannot serve DRA allocations, even though the pod is running.
+7. **Confirm the plugin returns `Ready` on that node and its `ResourceSlices` are republished**, then resume the controllers suspended in step 1. Until the slices are back the node cannot serve DRA allocations, even though the pod is running.
 
 `NoSchedule` does not evict running pods, so the driver pod stays put and its driver-manager init container keeps retrying while the plugin is gone. Claim holders on other nodes are untouched.
 
-The *suppression* mechanism in steps 2, 5 and 6 was verified on a two-GPU-node AKS cluster built with explicit tolerations, whose plugin tolerated only `nvidia.com/gpu=present:NoSchedule`: tainting one node took the DaemonSet from `DESIRED=2` to `DESIRED=1` with no replacement pod on the tainted node, while the second node's pod kept its original start time — no roll. Removing the taint returned it to `DESIRED=2 READY=2` with both `ResourceSlices` restored. That cluster uses a host-installed driver with no GPU Operator Driver Manager, so steps 1, 3 and 4 — the driver-recovery half — were not exercised there.
+The *suppression* mechanism in steps 1, 6 and 7 was verified on a two-GPU-node AKS cluster built with explicit tolerations, whose plugin tolerated only `nvidia.com/gpu=present:NoSchedule`: tainting one node took the DaemonSet from `DESIRED=2` to `DESIRED=1` with no replacement pod on the tainted node, while the second node's pod kept its original start time — no roll. Removing the taint returned it to `DESIRED=2 READY=2` with both `ResourceSlices` restored. That cluster uses a host-installed driver with no GPU Operator Driver Manager, so steps 2, 4 and 5 — the driver-recovery half — were not exercised there.
 
 **Cluster-wide sequence** — required for the default wildcard-toleration bundle, and for any cluster where the check above shows no usable taint key:
 
-1. Clear DRA claim holders on **every** node the DaemonSet covers, not only the failed one, and confirm none remain. The kubelet needs the plugin to complete `NodeUnprepareResources`, so any claim holder still terminating when the plugin goes away will hang.
-2. Suppress the DaemonSet by deleting it. A DaemonSet has no replica count to scale, and editing its `nodeSelector` to match nothing is itself the cluster-wide template rollout — acceptable here only because this sequence has already accepted cluster-wide impact. Suspend any GitOps reconciliation first, or it will recreate the object underneath you.
-3. Confirm every plugin pod has terminated. Pod-object deletion is not proof the container is gone; check the nodes.
-4. Retry the driver pod on the affected node.
-5. Restore the DaemonSet, then the workloads.
+1. Stop workload reconciliation across every node the DaemonSet covers — suspend the controllers that create claim-holding pods. Do this *before* clearing holders, for the same reason as the node-scoped path: otherwise a controller repopulates what you just drained. There is no taint to fence with here, so suspension is the only lever.
+2. Clear DRA claim holders on **every** node the DaemonSet covers, not only the failed one, and confirm none remain. The kubelet needs the plugin to complete `NodeUnprepareResources`, so any claim holder still terminating when the plugin goes away will hang.
+3. Suppress the DaemonSet by deleting it. A DaemonSet has no replica count to scale, and editing its `nodeSelector` to match nothing is itself the cluster-wide template rollout — acceptable here only because this sequence has already accepted cluster-wide impact. Suspend any GitOps reconciliation first, or it will recreate the object underneath you.
+4. Confirm every plugin pod has terminated. Pod-object deletion is not proof the container is gone; check the nodes.
+5. Retry the driver on the affected node and **wait for it to finish** — Driver Manager reporting success and the driver Pod `Ready`. Restoring the DaemonSet while the driver is still retrying recreates the plugin and lets it reopen the driver mid-recovery, which is the same race the node-scoped path guards against.
+6. Only then restore the DaemonSet, and confirm the plugin reaches `Ready` with its `ResourceSlices` republished.
+7. Finally resume the workload controllers suspended in step 1.
 
 If a GitOps controller reconciles the DaemonSet, suspend it for the duration and resume afterwards.
 
