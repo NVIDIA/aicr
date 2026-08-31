@@ -131,6 +131,30 @@ skip() {
   echo -e "${YELLOW}[SKIP]${NC} $name: $reason"
 }
 
+# run_stage invokes one suite stage and always returns 0, so a stage that
+# reports failure by returning nonzero cannot trip this script's `set -e` and
+# unwind main before cleanup_e2e runs. That unwind is the bug it guards: the
+# stages run inside the fake-GPU block create Jobs, RBAC and fixtures on a
+# cluster shared with other CI runs, and cleanup_e2e is the only thing that
+# sweeps them -- a stage's own local cleanup removes only what that stage made.
+#
+# Swallowing the status does not make the suite more forgiving. Stages report
+# their assertions through fail(), which has already counted them by the time
+# one returns; when a stage returns nonzero WITHOUT having recorded a [FAIL] --
+# an unexpected error rather than a failed assertion -- one is recorded here
+# under the stage's own name. Either way FAILED_TESTS ends up nonzero,
+# print_summary returns 1, and main exits nonzero.
+run_stage() {
+  local stage=$1
+  local before=$FAILED_TESTS
+  local rc=0
+  "$stage" || rc=$?
+  if [ "$rc" -ne 0 ] && [ "$FAILED_TESTS" -eq "$before" ]; then
+    fail "$stage" "returned ${rc} without recording a failure"
+  fi
+  return 0
+}
+
 check_command() {
   if ! command -v "$1" &> /dev/null; then
     err "$1 is required but not installed"
@@ -2230,7 +2254,10 @@ main() {
   # Setup fake GPU environment and run snapshot tests
   if setup_fake_gpu; then
     test_snapshot
-    test_snapshot_run_isolation
+    # Guarded: this stage returns its assertion status, which `set -e` would
+    # otherwise take as the script's exit status -- skipping every stage below
+    # AND cleanup_e2e, and stranding this run's resources on a shared cluster.
+    run_stage test_snapshot_run_isolation
     test_recipe_from_snapshot
     test_validate
     test_validate_deployment_checks
@@ -2250,4 +2277,9 @@ main() {
   fi
 }
 
-main "$@"
+# Run main only when executed directly; sourcing exposes the pure helpers
+# (pass, fail, run_stage, print_summary) without contacting a cluster.
+# tools/e2e-run_test.sh drives them via `make test` (test-shell target).
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi
