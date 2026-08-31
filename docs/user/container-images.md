@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **44**
-- Unique images: **100**
+- Components: **45**
+- Unique images: **101**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -54,6 +54,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
 | kueue | helm | kueue | 0.18.2 | 1 |
+| lws | helm | lws | v0.8.0 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.6.0 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.6.0 | 0 |
 | network-operator | helm | nvidia/network-operator | 26.4.1 | 5 |
@@ -228,6 +229,10 @@ _No images extracted._
 ### kueue
 
 - `registry.k8s.io/kueue/kueue:v0.18.2`
+
+### lws
+
+- `registry.k8s.io/lws/lws:v0.8.0`
 
 ### mariadb-operator
 
