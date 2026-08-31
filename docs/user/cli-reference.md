@@ -1675,7 +1675,7 @@ kubectl -n nvidia-dra-driver get ds nvidia-dra-driver-gpu-kubelet-plugin \
 
 **Expect a wildcard, because that is AICR's default.** When `--accelerated-node-toleration` is not passed, AICR applies a keyless `{operator: Exists}` toleration, which accepts every taint and leaves no key to exclude a node with. A default bundle therefore has no node-scoped option and must use the cluster-wide sequence below. This was the deployed state on an EKS GB300 cluster whose bundle was generated without toleration flags.
 
-**A taint works only when the deployed list is narrow** — a bundle built with explicit `--accelerated-node-toleration` flags, or the upstream chart default of `nvidia.com/gpu` alone. Then a taint whose key appears nowhere in that list suppresses the plugin on exactly that node. Clear the node's claim holders *first*: the kubelet needs the plugin to complete `NodeUnprepareResources`, so any claim holder still terminating after the plugin is gone will hang.
+**A taint works only when the deployed list is narrow** — a bundle built with explicit `--accelerated-node-toleration` flags, or the upstream chart default of `nvidia.com/gpu` alone. Then a taint whose key appears nowhere in that list suppresses the plugin on exactly that node. Fence the node with the taint *first*, but do not delete the running plugin until every claim holder has completed `NodeUnprepareResources` — the kubelet routes that call through the plugin, so a holder still terminating after it is gone will hang.
 
 1. **Quiesce whatever creates DRA claim holders on that node, and apply the taint — before draining anything.** Suspend the Jobs, Deployments or workload controllers that schedule claim-holding pods there. Then:
 
