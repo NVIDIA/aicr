@@ -98,8 +98,11 @@ spec:
       namespace: aicr-validation
       image: ""                      # default: ghcr.io/nvidia/aicr:latest
       imagePullSecrets: []
-      # jobName / serviceAccountName are optional PREFIXES, not names — the
-      # run ID is always appended. Omit them to take the defaults.
+      # jobName is an optional PREFIX, not a name — the run ID is always
+      # appended. serviceAccountName is exact-if-exists: an existing
+      # ServiceAccount of exactly that name is used verbatim and the run
+      # then creates and deletes NO RBAC; otherwise it is a prefix too.
+      # Omit both to take the run-scoped defaults.
       nodeSelector:
         nodeGroup: gpu-worker
       tolerations:
@@ -181,8 +184,10 @@ spec:
       namespace: aicr-validation
       image: ""
       imagePullSecrets: []
-      # Optional prefixes; omitted here so the defaults apply
-      # (jobName and serviceAccountName both default to aicr-validate).
+      # Optional; omitted here so the defaults apply (both aicr-validate).
+      # jobName is always a prefix with the run ID appended;
+      # serviceAccountName is exact-if-exists — an existing ServiceAccount
+      # of exactly that name is used verbatim and the run creates no RBAC.
       nodeSelector:
         nodeGroup: gpu-worker
       tolerations:
@@ -229,7 +234,9 @@ produced from the live cluster.
 | `output.path` | string | Output file path (same as `-o`) |
 | `output.format` | string | `yaml` \| `json` \| `table` |
 | `output.template` | string | Optional Go template path |
-| `agent.*` | object | In-cluster capture Job pod: `namespace`, `image`, `imagePullSecrets`, `jobName`, `serviceAccountName`, `nodeSelector`, `tolerations`, `requireGpu`, `runtimeClassName` (mutually exclusive with `requireGpu`), `os`, `requests`, `limits`. `jobName` and `serviceAccountName` are optional **prefixes**, not exact names — the run ID is appended (`<prefix>-<run-id>`), so omit them unless you need a custom prefix. Mirrors `spec.validate.agent` so one file pins matching placement for both |
+| `agent.*` | object | In-cluster capture Job pod: `namespace`, `image`, `imagePullSecrets`, `jobName`, `serviceAccountName`, `nodeSelector`, `tolerations`, `requireGpu`, `runtimeClassName` (mutually exclusive with `requireGpu`), `os`, `requests`, `limits`. Mirrors `spec.validate.agent` so one file pins matching placement for both |
+| `agent.jobName` | string | Optional **prefix**, never an exact name — the run ID is always appended (`<prefix>-<run-id>`). Omit it unless you need a custom prefix (default: `aicr`) |
+| `agent.serviceAccountName` | string | Optional and **exact-if-exists**, so unlike `jobName` it is not always a prefix. When a ServiceAccount of exactly this name already exists in `agent.namespace`, the pod runs as it verbatim, the run creates and deletes **no** ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding, and per-run permission isolation is waived — concurrent runs share that identity's persistent grants. When it does not exist, the value is a prefix, the run ID is appended (`<prefix>-<run-id>`), and the run owns a full run-scoped RBAC set it deletes at cleanup. Omitting the field is not the same as writing `aicr` into it: an omitted name is never probed, so the run always takes the run-scoped `aicr-<run-id>`. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) |
 | `execution.timeout` | duration string | e.g. `5m` |
 | `execution.noCleanup` | bool | Keep the capture Job after completion |
 | `execution.privileged` | bool (tri-state) | Set `false` for PSS-restricted namespaces |
@@ -289,7 +296,9 @@ Inputs to `aicr validate`.
 | Field | Type | Notes |
 |-------|------|-------|
 | `input.recipe` / `.snapshot` | string | Recipe + snapshot to validate |
-| `agent.*` | object | The **live snapshot-capture** Job pod `aicr validate` deploys when `input.snapshot` is empty; same fields and nil-vs-empty semantics as `spec.snapshot.agent` (minus `runtimeClassName`/`os`/`requests`/`limits`). `jobName` and `serviceAccountName` are optional prefixes with the run ID appended (defaults: both `aicr-validate`); they do not name the validator Jobs |
+| `agent.*` | object | The **live snapshot-capture** Job pod `aicr validate` deploys when `input.snapshot` is empty; same fields and nil-vs-empty semantics as `spec.snapshot.agent` (minus `runtimeClassName`/`os`/`requests`/`limits`). Neither `jobName` nor `serviceAccountName` names the validator Jobs, whose RBAC is always run-scoped |
+| `agent.jobName` | string | Optional **prefix**, never an exact name — the run ID is always appended (`<prefix>-<run-id>`). Omit it to take the default (`aicr-validate`) |
+| `agent.serviceAccountName` | string | Optional and **exact-if-exists**, with the same two branches as `spec.snapshot.agent.serviceAccountName`: an existing ServiceAccount of exactly this name in `agent.namespace` is used verbatim, the run creates and deletes **no** RBAC, and per-run permission isolation is waived — concurrent runs share that identity's persistent grants; when it does not exist the value is a prefix with the run ID appended (`<prefix>-<run-id>`) and the run owns a full run-scoped RBAC set. Omitting the field is not the same as writing `aicr-validate` into it: an omitted name is never probed, so the run always takes the run-scoped `aicr-validate-<run-id>`. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) |
 | `execution.phases` | []string | e.g. `[deployment, conformance, performance]` |
 | `execution.failOnError` | bool (tri-state) | Absent = CLI default (`true`); explicit `false` opts out |
 | `execution.failFast` | bool (tri-state) | Stop after the first failed phase |
