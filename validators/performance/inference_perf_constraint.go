@@ -2055,6 +2055,22 @@ func ensureNamespace(ctx *validators.Context, namespace, component string) (*v1.
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to read namespace created by a concurrent caller", err)
 	}
+	if winner.DeletionTimestamp != nil {
+		// Wait for the terminating winner to fully disappear, then create
+		// ours, instead of handing back a namespace that would reject
+		// resource creation.
+		slog.Info("Namespace from a concurrent create race is terminating; waiting for full deletion",
+			"namespace", namespace)
+		if waitErr := waitForNamespaceGone(nsCtx, clients, namespace); waitErr != nil {
+			return nil, waitErr
+		}
+		created, createErr := clients.Create(nsCtx, ns, metav1.CreateOptions{})
+		if createErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				"failed to create namespace after a concurrent owner finished terminating", createErr)
+		}
+		return created, nil
+	}
 	if !namespaceOwnedBy(winner, component) {
 		return nil, errors.New(errors.ErrCodeConflict, fmt.Sprintf(
 			"namespace %q was created by a concurrent caller without the expected %s=%s,%s=%s labels; refusing to adopt it",

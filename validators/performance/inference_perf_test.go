@@ -1846,7 +1846,8 @@ func TestEnsureHFTokenSecret(t *testing.T) {
 // TestEnsureNamespace covers namespace adoption: a fresh namespace is
 // created and labeled, an existing one is reused only if it carries our
 // ownership labels, and a create-race winner (AlreadyExists) is read back
-// and held to the same ownership check.
+// and held to the same ownership check, including waiting out a winner
+// that's already terminating.
 func TestEnsureNamespace(t *testing.T) {
 	const ns = "aicr-inference-perf-deadbeef"
 	const component = labels.ValueInferencePerf
@@ -1905,6 +1906,40 @@ func TestEnsureNamespace(t *testing.T) {
 		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
 		if _, err := ensureNamespace(ctx, ns, component); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
 			t.Errorf("got %v, want ErrCodeConflict", err)
+		}
+	})
+
+	t.Run("waits for a terminating create-race winner then creates its own", func(t *testing.T) {
+		client := fake.NewClientset()
+		var seeded bool
+		client.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			createAction, ok := action.(k8stesting.CreateAction)
+			obj, objOK := createAction.GetObject().(*v1.Namespace)
+			if !ok || !objOK || obj.Name != ns || seeded {
+				return false, nil, nil // seeded: the winner is gone, let the retry Create through.
+			}
+			seeded = true
+			now := metav1.Now()
+			winner := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name: ns, DeletionTimestamp: &now, Finalizers: []string{"kubernetes"},
+			}}
+			if err := client.Tracker().Add(winner); err != nil {
+				return true, nil, err
+			}
+			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
+		})
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			_ = client.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
+		}()
+
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("expected the retry to succeed once the winner finished terminating, got: %v", err)
+		}
+		if got.DeletionTimestamp != nil {
+			t.Error("returned namespace is still terminating")
 		}
 	})
 }
