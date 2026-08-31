@@ -1673,37 +1673,38 @@ kubectl -n nvidia-dra-driver get ds nvidia-dra-driver-gpu-kubelet-plugin \
   -o jsonpath='{.spec.template.spec.tolerations}'
 ```
 
-**Expect a wildcard, because that is AICR's default.** When `--accelerated-node-toleration` is not passed, AICR applies a keyless `{operator: Exists}` toleration, which accepts every taint and leaves no key to exclude a node with. A default bundle therefore has no node-scoped option and must use the cluster-wide sequence below. This was the deployed state on an EKS GB300 cluster.
+**Expect a wildcard, because that is AICR's default.** When `--accelerated-node-toleration` is not passed, AICR applies a keyless `{operator: Exists}` toleration, which accepts every taint and leaves no key to exclude a node with. A default bundle therefore has no node-scoped option and must use the cluster-wide sequence below. This was the deployed state on an EKS GB300 cluster whose bundle was generated without toleration flags.
 
 **A taint works only when the deployed list is narrow** — a bundle built with explicit `--accelerated-node-toleration` flags, or the upstream chart default of `nvidia.com/gpu` alone. Then a taint whose key appears nowhere in that list suppresses the plugin on exactly that node. Clear the node's claim holders *first*: the kubelet needs the plugin to complete `NodeUnprepareResources`, so any claim holder still terminating after the plugin is gone will hang.
 
-```bash
-# 1. Drain DRA claim holders on the failed node and confirm none remain
-kubectl get resourceclaims -A \
-  -o jsonpath='{range .items[?(@.status.allocation)]}{.metadata.namespace}{"\t"}{.metadata.name}{"\n"}{end}'
+1. **Terminate the workloads holding DRA claims on the failed node, and confirm `NodeUnprepareResources` completed for each.** The kubelet routes that call through the plugin, so a claim holder still terminating after the plugin is gone will hang. Allocated ComputeDomain claims can legitimately persist cluster-wide, so a cluster-wide claim listing does not establish that *this* node is clear — resolve holders to the node before proceeding. This step is stated as an invariant rather than a command because the holder-to-node mapping depends on your workload shape and no single command was verified here.
 
-# 2. Only then suppress the plugin on that node
-kubectl taint node <node-name> aicr.nvidia.com/dra-recovery=true:NoSchedule
-kubectl -n nvidia-dra-driver delete pod \
-  -l nvidia-dra-driver-gpu-component=kubelet-plugin \
-  --field-selector spec.nodeName=<node-name>
+2. **Only then suppress the plugin on that node.**
 
-# 3. Confirm no plugin pod remains on that node specifically
-kubectl -n nvidia-dra-driver get pods \
-  -l nvidia-dra-driver-gpu-component=kubelet-plugin \
-  --field-selector spec.nodeName=<node-name>
+   ```bash
+   kubectl taint node <node-name> aicr.nvidia.com/dra-recovery=true:NoSchedule
+   kubectl -n nvidia-dra-driver delete pod \
+     -l nvidia-dra-driver-gpu-component=kubelet-plugin \
+     --field-selector spec.nodeName=<node-name>
+   ```
 
-# 4. Retry the driver pod on that node, then release
-kubectl taint node <node-name> aicr.nvidia.com/dra-recovery-
-```
+   Select on `nvidia-dra-driver-gpu-component=kubelet-plugin`, the DaemonSet's own selector. The chart-wide `app.kubernetes.io/name=nvidia-dra-driver-gpu` label also matches the DRA *controller*, which can be colocated on a GPU node.
 
-Select on `nvidia-dra-driver-gpu-component=kubelet-plugin`, the DaemonSet's own selector. The chart-wide `app.kubernetes.io/name=nvidia-dra-driver-gpu` label also matches the DRA *controller*, which can be colocated on a GPU node.
+3. **Confirm at the node's runtime that the plugin container is actually gone**, not merely that the Pod object was deleted. Aggregate `kubectl get ds` counts prove nothing about this node, and a stuck `FailedKillPod` leaves the container — and the driver handle — alive after the API object disappears.
 
-Step 3 must be node-specific. Aggregate `kubectl get ds` counts do not prove the affected pod is gone, and pod-object deletion is not proof the container sandbox terminated — a stuck `FailedKillPod` leaves the driver still held.
+4. **Retry the driver, and wait for it to finish.** Driver Manager must report success and the driver Pod must reach `Ready`. Do not proceed while it is still retrying.
+
+5. **Only now remove the taint.** Releasing it earlier makes the node eligible again, so the plugin can be recreated and reopen the driver before recovery completes — reintroducing the failure.
+
+   ```bash
+   kubectl taint node <node-name> aicr.nvidia.com/dra-recovery-
+   ```
+
+6. **Confirm the plugin returns `Ready` on that node and its `ResourceSlices` are republished.** Until the slices are back the node cannot serve DRA allocations, even though the pod is running.
 
 `NoSchedule` does not evict running pods, so the driver pod stays put and its driver-manager init container keeps retrying while the plugin is gone. Claim holders on other nodes are untouched.
 
-Verified on a two-GPU-node AKS cluster built with explicit tolerations, whose plugin tolerated only `nvidia.com/gpu=present:NoSchedule`: tainting one node took the DaemonSet from `DESIRED=2` to `DESIRED=1` with no replacement pod on the tainted node, while the second node's pod kept its original start time — no roll. Removing the taint returned it to `DESIRED=2 READY=2` with both `ResourceSlices` restored.
+The *suppression* mechanism in steps 2, 5 and 6 was verified on a two-GPU-node AKS cluster built with explicit tolerations, whose plugin tolerated only `nvidia.com/gpu=present:NoSchedule`: tainting one node took the DaemonSet from `DESIRED=2` to `DESIRED=1` with no replacement pod on the tainted node, while the second node's pod kept its original start time — no roll. Removing the taint returned it to `DESIRED=2 READY=2` with both `ResourceSlices` restored. That cluster uses a host-installed driver with no GPU Operator Driver Manager, so steps 1, 3 and 4 — the driver-recovery half — were not exercised there.
 
 **Cluster-wide sequence** — required for the default wildcard-toleration bundle, and for any cluster where the check above shows no usable taint key:
 
