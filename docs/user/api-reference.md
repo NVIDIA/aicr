@@ -628,7 +628,7 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `nodewright-operator` | OS-level node tuning and kernel configuration |
 | `nvidia-dra-driver-gpu` | Dynamic Resource Allocation driver for GPUs |
 | `nvidia-dra-driver-gpu-ocp` | DRA GPU driver variant for OpenShift (OCP) |
-| `nvsentinel` | GPU health monitoring and automated remediation |
+| `nvsentinel` | GPU health monitoring; remediation components off by default |
 | `prometheus-adapter` | Custom metrics for HPA scaling |
 | `prometheus-adapter-ocp` | Prometheus Adapter variant for OpenShift (OCP) |
 | `prometheus-operator-crds` | CRDs for the prometheus-operator (`Alertmanager`, `Prometheus`, `ServiceMonitor`, etc.) |
