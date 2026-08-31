@@ -1500,8 +1500,24 @@ func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gv
 	}
 
 	if gvr == trainJobGVR {
-		if err := client.Delete(applyCtx, obj.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to delete stale resource for recreate", err)
+		// Pin the delete to the object actually observed here, not just its
+		// name. Create's AlreadyExists above only proves something existed
+		// at that instant; without a UID precondition a delete-by-name in
+		// the gap since could remove a same-named TrainJob that a distinct
+		// execution created in between, rather than failing the delete.
+		stale, err := client.Get(applyCtx, obj.GetName(), metav1.GetOptions{})
+		switch {
+		case apierrors.IsNotFound(err):
+			// Already gone since the AlreadyExists above; nothing to delete.
+		case err != nil:
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get stale resource for recreate", err)
+		default:
+			uid := stale.GetUID()
+			if err := client.Delete(applyCtx, obj.GetName(), metav1.DeleteOptions{
+				Preconditions: &metav1.Preconditions{UID: &uid},
+			}); err != nil && !apierrors.IsNotFound(err) {
+				return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to delete stale resource for recreate", err)
+			}
 		}
 		// Delete only stamps DeletionTimestamp while a controller-serviced
 		// finalizer (Trainer v2 / JobSet ownership) is still clearing.

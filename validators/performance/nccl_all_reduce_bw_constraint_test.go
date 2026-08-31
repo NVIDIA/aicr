@@ -33,6 +33,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
@@ -699,6 +700,80 @@ func TestCreateUnstructured_ReclaimsStaleTrainJob_DeletesAndRecreates(t *testing
 	}
 	if staleVal, _, _ := unstructured.NestedBool(got.Object, "spec", "stale"); staleVal {
 		t.Error("reclaimed TrainJob still has the stale prior-run spec, recreate did not apply")
+	}
+}
+
+// TestCreateUnstructured_TrainJobUIDMismatchPreventsDelete verifies the
+// reclaim delete is pinned to the TrainJob actually observed, not just its
+// name. It simulates the race the precondition guards against: a concurrent
+// execution deletes and recreates the same-named TrainJob (a new UID) in the
+// gap between createUnstructured's own Get and its Delete call. A "get"
+// reactor hands back that now-stale, already-observed UID exactly once, so
+// the Delete's precondition no longer matches what the tracker actually
+// holds. client-go's fake ObjectTracker ignores Delete preconditions
+// entirely, so a second reactor emulates the real apiserver's precondition
+// check to prove the mismatch surfaces as an error instead of deleting the
+// replacement regardless.
+func TestCreateUnstructured_TrainJobUIDMismatchPreventsDelete(t *testing.T) {
+	const ns = "aicr-nccl-bench-deadbeef"
+	const observedUID = types.UID("observed-before-replace")
+	const actualUID = types.UID("actual-owner-after-replace")
+	listKinds := map[schema.GroupVersionResource]string{trainJobGVR: "TrainJobList"}
+
+	stale := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": trainJobGVR.GroupVersion().String(),
+		"kind":       "TrainJob",
+		"metadata": map[string]interface{}{
+			"name":            ncclTrainJobName,
+			"namespace":       ns,
+			"uid":             string(actualUID),
+			"resourceVersion": "1",
+		},
+		"spec": map[string]interface{}{"stale": true},
+	}}
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, stale)
+
+	getObservedStaleUID := true
+	dynamicClient.PrependReactor("get", "trainjobs", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if !getObservedStaleUID {
+			return false, nil, nil
+		}
+		getObservedStaleUID = false
+		observed := stale.DeepCopy()
+		observed.SetUID(observedUID)
+		return true, observed, nil
+	})
+	dynamicClient.PrependReactor("delete", "trainjobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		deleteAction, ok := action.(k8stesting.DeleteAction)
+		if !ok {
+			return false, nil, nil
+		}
+		preconditions := deleteAction.GetDeleteOptions().Preconditions
+		if preconditions == nil || preconditions.UID == nil || *preconditions.UID == actualUID {
+			return false, nil, nil
+		}
+		return true, nil, apierrors.NewConflict(trainJobGVR.GroupResource(), ncclTrainJobName,
+			stderrors.New("uid in precondition does not match uid in record"))
+	})
+
+	fresh := stale.DeepCopy()
+	fresh.SetUID("")
+	fresh.SetResourceVersion("")
+	if err := unstructured.SetNestedField(fresh.Object, false, "spec", "stale"); err != nil {
+		t.Fatalf("SetNestedField: %v", err)
+	}
+
+	err := createUnstructured(context.Background(), dynamicClient, trainJobGVR, ns, fresh)
+	if err == nil {
+		t.Fatal("expected a conflict error for a mismatched owning UID, got nil")
+	}
+
+	got, getErr := dynamicClient.Resource(trainJobGVR).Namespace(ns).Get(context.Background(), ncclTrainJobName, metav1.GetOptions{})
+	if getErr != nil {
+		t.Fatalf("TrainJob should be left alone on a UID mismatch, got err=%v", getErr)
+	}
+	if staleVal, _, _ := unstructured.NestedBool(got.Object, "spec", "stale"); !staleVal {
+		t.Error("TrainJob was replaced despite the UID mismatch")
 	}
 }
 
