@@ -69,17 +69,17 @@ security_tools:
 # E2E Testing Tools
 testing_tools:
   # renovate: datasource=github-releases depName=kubernetes/kubernetes depType=testing_tools
-  kubectl: 'v1.36.4'
+  kubectl: 'v1.37.0'
   # kubelogin: Entra exec-plugin for AKS kubeconfigs, installed by uat-azure.yaml
   # via `az aks install-cli` (which defaults to latest without an explicit pin).
   # renovate: datasource=github-releases depName=Azure/kubelogin depType=testing_tools
   kubelogin: 'v0.2.19'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kind depType=testing_tools
-  kind: '0.32.0'
+  kind: '0.33.0'
   # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools
   nvkind: 'c57050497cffee36f10c8b918d2727c4f26d886e'
   # renovate: datasource=github-releases depName=tilt-dev/ctlptl depType=testing_tools
-  ctlptl: '0.9.4'
+  ctlptl: '0.9.5'
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
   tilt: '0.37.7'
   # Keep in step with sigs.k8s.io/controller-runtime in go.mod: setup-envtest is
@@ -125,14 +125,14 @@ testing_tools:
   yq: 'v4.53.6'
   # AWS CLI used by the KMS e2e to provision keys against the MiniStack emulator.
   # renovate: datasource=pypi depName=awscli depType=testing_tools
-  awscli: '1.46.0'
+  awscli: '1.46.1'
   # MiniStack: MIT-licensed, token-free AWS emulator (https://ministack.org) used
   # by the KMS e2e in place of LocalStack, whose latest/stable images now refuse
   # to boot without a paid license token. Pinned (never :latest) for reproducibility.
   # Run with USE_SSL=1: sigstore's awskms signer hardcodes https://, so the e2e
   # serves TLS with a mkcert cert (see mkcert below).
   # renovate: datasource=docker depName=ministackorg/ministack depType=testing_tools
-  ministack_image: 'ministackorg/ministack:1.5.0'
+  ministack_image: 'ministackorg/ministack:1.5.2'
   # OpenBAO: the Linux Foundation Apache-2.0 fork of HashiCorp Vault, used by the
   # Vault KMS e2e to exercise the hashivault:// signing/verification path against
   # a real Transit secrets engine. API-identical to Vault; the sigstore hashivault
