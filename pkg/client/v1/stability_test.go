@@ -61,7 +61,23 @@ func TestStability_Client(t *testing.T) {
 	requireSignature[func(*aicr.Client) error]((*aicr.Client).Close)
 	requireSignature[func(*aicr.Client, context.Context) error]((*aicr.Client).LoadCatalog)
 	requireSignature[func(*aicr.Client) *aicr.CriteriaRegistry]((*aicr.Client).CriteriaRegistry)
+
+	// Client must stay comparable. Adding an unexported func, map, or slice
+	// field silently takes that away, which api-diff reports as "old is
+	// comparable, new is not" — a breaking change to a frozen v1 type, caught
+	// here at compile time instead of at the release gate. Any injectable
+	// dependency therefore has to be held behind a pointer.
+	requireComparable[aicr.Client]()
 }
+
+// requireComparable fails to compile when T stops satisfying comparable.
+func requireComparable[T comparable]() {}
+
+// requireType fails to compile when its argument is not exactly T.
+//
+// Used where a composite literal alone would not pin the field type: assigning
+// a *time.Duration into a field still compiles if that field is `any`.
+func requireType[T any](T) {}
 
 // TestStability_RecipeResolution pins the resolution surface: the
 // RecipeRequest input shape and the three Resolve* entry points.
@@ -81,6 +97,41 @@ func TestStability_RecipeResolution(t *testing.T) {
 	requireSignature[func(*aicr.Client, context.Context, string, string) (*aicr.RecipeResult, error)]((*aicr.Client).LoadRecipe)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.AgentConfig) (*aicr.Snapshot, error)]((*aicr.Client).CollectSnapshot)
 	requireSignature[func(*aicr.Client, context.Context, string, string) (*aicr.Snapshot, error)]((*aicr.Client).LoadSnapshot)
+	// Snapshot-to-criteria is the step that used to require pkg/fingerprint,
+	// so pinning it is what keeps the workflow completable through this package
+	// alone (#2437).
+	requireSignature[func(*aicr.Client, *aicr.Snapshot) (*aicr.Criteria, error)]((*aicr.Client).CriteriaFromSnapshot)
+
+	// Mirror inventory: air-gap tooling depends on this shape, and rendering
+	// deliberately stays out of the SDK (#2025).
+	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, ...aicr.MirrorInventoryOption) (*aicr.MirrorInventory, error)]((*aicr.Client).MirrorInventory)
+	requireSignature[func([]aicr.MirrorValueOverride) aicr.MirrorInventoryOption](aicr.WithMirrorValueOverrides)
+
+	var override aicr.MirrorValueOverride
+	_ = override.Component
+	_ = override.Path
+	_ = override.Value
+	requireSignature[func(string) aicr.MirrorInventoryOption](aicr.WithMirrorKubeVersion)
+
+	var inventory aicr.MirrorInventory
+	_ = inventory.Images
+	_ = inventory.Charts
+	_ = inventory.Components
+	_ = inventory.RecipeVersion
+	_ = inventory.Criteria
+
+	var chart aicr.MirrorChart
+	_ = chart.Name
+	_ = chart.Repository
+	_ = chart.Chart
+	_ = chart.Version
+	_ = chart.Namespace
+
+	var component aicr.MirrorComponent
+	_ = component.Component
+	_ = component.Type
+	_ = component.Images
+	_ = component.Warnings
 	requireSignature[func(string) aicr.RecipeResolveOption](aicr.WithProfile)
 	requireSignature[func(string) aicr.RecipeResolveOption](aicr.WithAccountingMode)
 	requireSignature[func(...aicr.CriteriaDimension) aicr.RecipeResolveOption](aicr.WithSnapshotCriteriaRelaxation)
@@ -342,6 +393,24 @@ func TestStability_Verification(t *testing.T) {
 	requireSignature[func() []string](aicr.TrustLevels)
 	requireSignature[func(*aicr.EvidenceVerification) ([]byte, error)](aicr.RenderEvidenceJSON)
 	requireSignature[func(*aicr.EvidenceVerification) string](aicr.RenderEvidenceMarkdown)
+
+	// The per-call cap override is part of the contract: without it the facade
+	// ceiling is unconditional and a slow-registry verification cannot finish
+	// (#2225). Nil must keep the default, so the field's presence and its
+	// pointer-ness both matter.
+	var timeoutOverride *time.Duration
+	_ = aicr.BundleVerifyOptions{Timeout: timeoutOverride}
+	_ = aicr.EvidenceVerifyOptions{Timeout: timeoutOverride}
+	_ = aicr.CatalogVerifyOptions{Timeout: timeoutOverride}
+	_ = aicr.RecipeDigestOptions{Timeout: timeoutOverride}
+
+	// Read the field back AS a *time.Duration too. The literals above still
+	// compile if the field widens to `any`, which would silently drop the
+	// nil-vs-zero distinction the whole design rests on.
+	requireType[*time.Duration](aicr.BundleVerifyOptions{}.Timeout)
+	requireType[*time.Duration](aicr.EvidenceVerifyOptions{}.Timeout)
+	requireType[*time.Duration](aicr.CatalogVerifyOptions{}.Timeout)
+	requireType[*time.Duration](aicr.RecipeDigestOptions{}.Timeout)
 
 	var bv aicr.BundleVerifyOptions
 	_ = bv.CertificateIdentityRegexp

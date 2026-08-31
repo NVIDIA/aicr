@@ -378,6 +378,40 @@ type Criteria struct {
 	Nodes int `json:"nodes,omitempty" yaml:"nodes,omitempty"`
 }
 
+// FillUnsetWithAny replaces empty criteria dimensions with the "any" sentinel,
+// producing the same shape NewCriteria yields.
+//
+// "any" and "" are already equivalent to Matches, so this changes no resolution
+// outcome. It exists because the two request transports disagreed on what they
+// echoed back: a GET seeds every dimension from NewCriteria before applying
+// query parameters, while a decoded POST body leaves unspecified dimensions
+// empty. Identical requests therefore returned criteria objects that differed
+// by transport, which is a wart to freeze into a v1 contract.
+//
+// A nil receiver is returned unchanged so callers can apply it before their own
+// nil checks.
+func (c *Criteria) FillUnsetWithAny() *Criteria {
+	if c == nil {
+		return nil
+	}
+	if c.Service == "" {
+		c.Service = CriteriaServiceAny
+	}
+	if c.Accelerator == "" {
+		c.Accelerator = CriteriaAcceleratorAny
+	}
+	if c.Intent == "" {
+		c.Intent = CriteriaIntentAny
+	}
+	if c.OS == "" {
+		c.OS = CriteriaOSAny
+	}
+	if c.Platform == "" {
+		c.Platform = CriteriaPlatformAny
+	}
+	return c
+}
+
 // NewCriteria creates a new Criteria with all fields set to "any".
 func NewCriteria() *Criteria {
 	return &Criteria{

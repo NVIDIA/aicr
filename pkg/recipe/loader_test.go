@@ -446,7 +446,7 @@ componentRefs: []
 // TestRecipeMetadataHeaderGatesAgree pins the #2421 invariant: the same
 // RecipeMetadata header is accepted or rejected identically whether the
 // document reaches AICR through the catalog scanner (`--data`) or through the
-// direct recipe input path (`aicr recipe -r`, `aicr bundle -r`).
+// direct recipe input path (`aicr bundle -r`, `aicr validate -r`).
 //
 // The two gates live in different files and were written at different times.
 // They diverged on the empty string for the whole life of the direct loader:

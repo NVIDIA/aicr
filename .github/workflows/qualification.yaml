@@ -67,6 +67,7 @@ jobs:
           setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
           helm_version: ${{ steps.versions.outputs.helm }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
+          oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
 
   lint:
     name: Lint

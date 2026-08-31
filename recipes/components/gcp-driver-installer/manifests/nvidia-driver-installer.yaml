@@ -65,6 +65,10 @@ metadata:
   labels:
     k8s-app: nvidia-driver-installer
     app.kubernetes.io/managed-by: aicr
+    # Helm 4 server-side apply rewrites managed-by to "Helm" at install;
+    # part-of survives, so it is the label the health check asserts to
+    # distinguish this object from a hand-applied installer DaemonSet.
+    app.kubernetes.io/part-of: aicr
 spec:
   selector:
     matchLabels:

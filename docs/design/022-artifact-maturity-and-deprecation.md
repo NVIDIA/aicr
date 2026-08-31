@@ -197,8 +197,8 @@ unchallenged — the fail-open shape §8 exists to close.
 
 **A catalog kind is governed by §8 on every path it can arrive by.** The
 tolerance above is scoped by wire kind, not by entry point. A `RecipeMetadata`
-reaching AICR as a direct recipe input (`aicr recipe -r overlay.yaml`,
-`aicr bundle -r overlay.yaml`) is the same catalog document it would be inside a
+reaching AICR as a direct recipe input (`aicr bundle -r overlay.yaml`,
+`aicr validate -r overlay.yaml`) is the same catalog document it would be inside a
 `--data` tree, so it is held to the same fail-closed authoring gate the catalog
 scanner applies, including the rejection of an empty value. §3 step 1's
 "existing empty-value tolerances remain where they already exist" does not

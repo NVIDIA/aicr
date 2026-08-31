@@ -32,6 +32,64 @@ aicr bundle --recipe recipe.yaml --deployer argocd \
   --output ./bundles
 ```
 
+## Bundle layout
+
+This is the canonical description of what a bundle contains. The trees below
+are frozen at v1 and gated by `TestBundleLayoutMatchesManifest`, so a path
+shown here will not disappear or be renamed without a deliberate, reviewed
+change. Automation may read these paths.
+
+Every deployer writes `checksums.txt` and `README.md` at the bundle root. Four
+of the five group components into ordered `NNN-<component>` directories; Flux
+is the exception and uses a plain `<component>` directory with shared
+`sources/`.
+
+```text
+helm/                          argocd/                     flux/
+  001-cert-manager/              001-cert-manager/            cert-manager/
+    values.yaml                    application.yaml             helmrelease.yaml
+    cluster-values.yaml            values.yaml                nfd/
+    install.sh                   002-nfd/                     helmrelease.yaml
+    upstream.env                   application.yaml           sources/
+  002-nfd/                         values.yaml                  helmrepo-<host>.yaml
+    ...                          app-of-apps.yaml             gitrepo-<host>.yaml
+  deploy.sh                      checksums.txt              kustomization.yaml
+  recipe.yaml                    README.md                  checksums.txt
+  checksums.txt                                             README.md
+  README.md
+```
+
+`helmfile` shares Helm's per-component files but not its root: it writes
+`helmfile.yaml` instead of `deploy.sh`, and does not emit `recipe.yaml`. A
+recipe with dependencies also produces one `level-N.yaml` per dependency depth,
+which is derived from the recipe rather than fixed by the layout.
+
+```text
+helmfile/
+  001-cert-manager/            same four files as helm
+  002-nfd/
+  helmfile.yaml
+  level-N.yaml                 one per dependency depth; absent when flat
+  checksums.txt
+  README.md
+```
+
+`argocd-helm` renders a Helm chart at the root — `Chart.yaml`, `values.yaml`,
+`values.schema.json` — with one template per component.
+
+Two kinds of name appear in these trees, and only one is a promise:
+
+- **Fixed names are contract.** `deploy.sh`, `app-of-apps.yaml`,
+  `kustomization.yaml`, `checksums.txt`, `values.yaml`, `helmrelease.yaml`,
+  and the `NNN-<component>` convention itself.
+- **Derived names are not.** Flux writes one `helmrepo-<host>.yaml` per chart
+  repository and helmfile one `level-N.yaml` per dependency depth, so both sets
+  change with the recipe. Discover them by listing the directory rather than
+  hardcoding a name.
+
+Verify a bundle you received with `aicr verify` — see
+[Artifact verification](artifact-verification.md).
+
 ## Override values
 
 Use `--set` for scalar overrides, scoped per component as
@@ -201,8 +259,8 @@ A one-off `kubectl label node` is a repair, not a configuration. It does not
 survive node replacement or recycling, cluster autoscaling adding GPU nodes, or
 a nodegroup scaled from zero. Any GPU node added afterwards arrives unlabeled
 and silently runs without the DRA kubelet plugin, leaving the cluster
-**partially DRA-enabled** — worse than uniform failure, because it is
-intermittent and node-dependent.
+**partially DRA-enabled**. This is harder to detect than uniform failure,
+because it is intermittent and node-dependent.
 
 Use `kubectl label` only to repair nodes that already exist, and fix the node
 pool definition in the same change so replacements inherit it:
@@ -223,8 +281,7 @@ instead is:
 - the `nvidia-dra-driver-gpu-kubelet-plugin` DaemonSet at `DESIRED=0` **if no
   GPU node carries the label at all**
 
-Partial coverage is the more dangerous shape, and the one node replacement and
-autoscaling produce: labeled nodes work normally while the rest silently lack
+Partial coverage is the shape node replacement and autoscaling produce: labeled nodes work normally while the rest silently lack
 DRA. A split cluster is harder to notice than uniform failure, because the
 DaemonSet looks healthy and only some workloads misbehave.
 
@@ -235,7 +292,7 @@ afterwards.
 ### This applies to existing clusters, not just fresh installs
 
 The requirement is easy to read as a fresh-install prerequisite, but the
-upgrade path is where it bites hardest. A cluster whose bundle was generated
+upgrade path is especially easy to miss. A cluster whose bundle was generated
 before this selector existed has a working kubelet-plugin DaemonSet selecting
 on `nodeGroup=gpu-worker` alone. Regenerating the bundle and running `helm
 upgrade` adds the second selector, and working functionality **disappears** —

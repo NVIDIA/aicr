@@ -1,0 +1,621 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://aicr.run/schemas/v1/RecipeResult.schema.json",
+  "title": "RecipeResult",
+  "description": "A fully resolved recipe: merged constraints, component references and deployment order. This is the artifact the REST API returns and the bundler consumes.",
+  "type": "object",
+  "properties": {
+    "apiVersion": {
+      "type": "string"
+    },
+    "componentRefs": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "chart": {
+            "type": "string"
+          },
+          "cleanup": {
+            "type": "boolean"
+          },
+          "dependencyRefs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "expectedResources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "namespace": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "kind",
+                "name"
+              ]
+            }
+          },
+          "healthCheckAsserts": {
+            "type": "string"
+          },
+          "healthCheckSkip": {
+            "type": "boolean"
+          },
+          "manifestFiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string"
+          },
+          "namespace": {
+            "type": "string"
+          },
+          "overrides": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "patches": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "path": {
+            "type": "string"
+          },
+          "preManifestFiles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "source": {
+            "type": "string"
+          },
+          "tag": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "valuesFile": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "source",
+          "type"
+        ]
+      }
+    },
+    "configuration": {
+      "type": "object",
+      "properties": {
+        "runtimeInventory": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "mode"
+          ]
+        },
+        "slurm": {
+          "type": "object",
+          "properties": {
+            "accounting": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "mode"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "constraints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "remediation": {
+            "type": "string"
+          },
+          "severity": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value"
+        ]
+      }
+    },
+    "criteria": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "accelerator": {
+          "type": "string",
+          "enum": [
+            "a100",
+            "any",
+            "b200",
+            "gb200",
+            "gb300",
+            "h100",
+            "h200",
+            "l40",
+            "l40s",
+            "rtx-pro-6000"
+          ]
+        },
+        "intent": {
+          "type": "string",
+          "enum": [
+            "any",
+            "inference",
+            "training"
+          ]
+        },
+        "nodes": {
+          "type": "integer"
+        },
+        "os": {
+          "type": "string",
+          "enum": [
+            "amazonlinux",
+            "any",
+            "cos",
+            "ol",
+            "rhel",
+            "talos",
+            "ubuntu"
+          ]
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "any",
+            "dynamo",
+            "kubeflow",
+            "nim",
+            "runai",
+            "slurm"
+          ]
+        },
+        "service": {
+          "type": "string",
+          "enum": [
+            "aks",
+            "any",
+            "bcm",
+            "eks",
+            "gke",
+            "kind",
+            "lke",
+            "metal3",
+            "ocp",
+            "oke"
+          ]
+        }
+      }
+    },
+    "deploymentOrder": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
+    "kind": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": "object",
+      "properties": {
+        "appliedOverlays": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "constraintWarnings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "actual": {
+                "type": "string"
+              },
+              "constraint": {
+                "type": "string"
+              },
+              "expected": {
+                "type": "string"
+              },
+              "overlay": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "constraint",
+              "expected",
+              "overlay",
+              "reason"
+            ]
+          }
+        },
+        "excludedOverlays": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        },
+        "gpuDriverState": {
+          "type": "string"
+        },
+        "mariaDBOperatorState": {
+          "type": "string"
+        },
+        "selectedProfile": {
+          "type": "object",
+          "properties": {
+            "advertiser": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "ownedPaths": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "propertyNames": {
+                "type": "string"
+              }
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "ownedPaths",
+            "value"
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "properties": {
+        "conformance": {
+          "type": "object",
+          "properties": {
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "constraints": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "remediation": {
+                    "type": "string"
+                  },
+                  "severity": {
+                    "type": "string"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "value"
+                ]
+              }
+            },
+            "infrastructure": {
+              "type": "string"
+            },
+            "nodeSelection": {
+              "type": "object",
+              "properties": {
+                "excludeNodes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "maxNodes": {
+                  "type": "integer"
+                },
+                "selector": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "timeout": {
+              "type": "string"
+            }
+          }
+        },
+        "deployment": {
+          "type": "object",
+          "properties": {
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "constraints": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "remediation": {
+                    "type": "string"
+                  },
+                  "severity": {
+                    "type": "string"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "value"
+                ]
+              }
+            },
+            "infrastructure": {
+              "type": "string"
+            },
+            "nodeSelection": {
+              "type": "object",
+              "properties": {
+                "excludeNodes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "maxNodes": {
+                  "type": "integer"
+                },
+                "selector": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "timeout": {
+              "type": "string"
+            }
+          }
+        },
+        "performance": {
+          "type": "object",
+          "properties": {
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "constraints": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "remediation": {
+                    "type": "string"
+                  },
+                  "severity": {
+                    "type": "string"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "value"
+                ]
+              }
+            },
+            "infrastructure": {
+              "type": "string"
+            },
+            "nodeSelection": {
+              "type": "object",
+              "properties": {
+                "excludeNodes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "maxNodes": {
+                  "type": "integer"
+                },
+                "selector": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "timeout": {
+              "type": "string"
+            }
+          }
+        },
+        "readiness": {
+          "type": "object",
+          "properties": {
+            "checks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "constraints": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "remediation": {
+                    "type": "string"
+                  },
+                  "severity": {
+                    "type": "string"
+                  },
+                  "unit": {
+                    "type": "string"
+                  },
+                  "value": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "value"
+                ]
+              }
+            },
+            "infrastructure": {
+              "type": "string"
+            },
+            "nodeSelection": {
+              "type": "object",
+              "properties": {
+                "excludeNodes": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "maxNodes": {
+                  "type": "integer"
+                },
+                "selector": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "timeout": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "apiVersion",
+    "componentRefs",
+    "criteria",
+    "deploymentOrder",
+    "kind",
+    "metadata"
+  ]
+}

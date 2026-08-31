@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -186,7 +187,8 @@ func TestCLISurface(t *testing.T) {
 		return
 	}
 
-	added, removed := diffLines(stripComments(string(wantBytes)), stripComments(got))
+	want := stripComments(string(wantBytes))
+	added, removed := diffLines(want, stripComments(got))
 
 	var b strings.Builder
 	b.WriteString("the aicr CLI surface no longer matches its committed baseline.\n\n")
@@ -203,9 +205,22 @@ func TestCLISurface(t *testing.T) {
 			"intentional and the window has passed, regenerate the golden.\n\n")
 	}
 
-	if len(added) > 0 {
+	newlyRequired, compatible := classifyAdded(want, added)
+
+	if len(newlyRequired) > 0 {
+		b.WriteString("BREAKING — these flags are newly required on commands that already existed:\n")
+		for _, line := range newlyRequired {
+			fmt.Fprintf(&b, "  ! %s\n", line)
+		}
+		b.WriteString("\nAdding a required flag to an existing command makes previously valid\n" +
+			"invocations fail, which RELEASING.md § Deprecation Policy classifies as\n" +
+			"breaking. Give the flag a default that preserves current behavior, or\n" +
+			"ship it through the deprecation window.\n\n")
+	}
+
+	if len(compatible) > 0 {
 		b.WriteString("Additive — these entries are new:\n")
-		for _, line := range added {
+		for _, line := range compatible {
 			fmt.Fprintf(&b, "  + %s\n", line)
 		}
 		b.WriteString("\nAdditions are compatible. Regenerate the golden and commit it in\n" +
@@ -418,5 +433,108 @@ func TestFlagFactsRendersDashPrefixByNameLength(t *testing.T) {
 				t.Errorf("rendered names = %q, want %q", names, tt.want)
 			}
 		})
+	}
+}
+
+// classifyAdded splits new baseline lines into the ones that break the CLI
+// contract and the ones that do not.
+//
+// Not every addition is compatible. A flag arriving already required on a
+// command that already existed invalidates invocations that were valid before,
+// which RELEASING.md classifies as breaking — only a new flag whose default
+// preserves behavior is additive. On a brand-new command there is no prior
+// invocation to break, so requiredness there is additive; the split is by
+// whether the command was already in the baseline.
+//
+// This is a named function rather than a loop inside TestCLISurface because the
+// reporting block around it runs only on the failure path, which a green CI run
+// never reaches. Asserting on this directly is what keeps the classification
+// itself covered.
+func classifyAdded(want, added []string) (newlyRequired, compatible []string) {
+	existing := commandPaths(want)
+	for _, line := range added {
+		if isRequiredFlagLine(line) && existing[flagCommandPath(line)] {
+			newlyRequired = append(newlyRequired, line)
+			continue
+		}
+		compatible = append(compatible, line)
+	}
+	return newlyRequired, compatible
+}
+
+// commandPaths returns the command paths present in a baseline line set.
+func commandPaths(lines []string) map[string]bool {
+	paths := make(map[string]bool)
+	for _, line := range lines {
+		rest, ok := strings.CutPrefix(line, "command ")
+		if !ok {
+			continue
+		}
+		if path, _, found := strings.Cut(rest, "  aliases="); found {
+			paths[path] = true
+		}
+	}
+	return paths
+}
+
+// isRequiredFlagLine reports whether a rendered flag line marks the flag
+// required.
+func isRequiredFlagLine(line string) bool {
+	return strings.HasPrefix(line, "flag ") && strings.Contains(line, " required=true ")
+}
+
+// flagCommandPath extracts the command path from a rendered flag line, whose
+// shape is "flag    <path>  <names>  type=...".
+func flagCommandPath(line string) string {
+	rest, ok := strings.CutPrefix(line, "flag    ")
+	if !ok {
+		return ""
+	}
+	path, _, found := strings.Cut(rest, "  ")
+	if !found {
+		return ""
+	}
+	return path
+}
+
+// TestClassifyAddedSplitsBreakingFromAdditive drives the real classification
+// used by TestCLISurface's failure report.
+//
+// Two things make this worth asserting directly. The classify-and-report block
+// runs only when the live tree diverges from the golden, so a normal green run
+// never executes it — a swapped bucket would mislabel a newly required flag as
+// "Additive — Regenerate the golden", which is precisely the reflexive -update
+// this file exists to prevent. And the lines are produced by real flagFacts
+// calls rather than hand-written literals, so if its render format ever drifts,
+// flagCommandPath stops matching and this test fails instead of silently
+// fail-opening a breaking flag into the compatible bucket.
+func TestClassifyAddedSplitsBreakingFromAdditive(t *testing.T) {
+	t.Parallel()
+
+	baseline := []string{
+		"command aicr  aliases= hidden=false",
+		"command aicr bundle  aliases= hidden=false",
+		flagFacts("aicr bundle", &cli.StringFlag{Name: "recipe", Aliases: []string{"r"}}),
+	}
+
+	requiredOnExisting := flagFacts("aicr bundle",
+		&cli.StringFlag{Name: "must-set", Required: true})
+	optionalOnExisting := flagFacts("aicr bundle",
+		&cli.StringFlag{Name: "nice-to-have"})
+	requiredOnNew := flagFacts("aicr brandnew",
+		&cli.StringFlag{Name: "must-set", Required: true})
+	newCommand := "command aicr brandnew  aliases= hidden=false"
+
+	newlyRequired, compatible := classifyAdded(baseline, []string{
+		requiredOnExisting, optionalOnExisting, requiredOnNew, newCommand,
+	})
+
+	if len(newlyRequired) != 1 || newlyRequired[0] != requiredOnExisting {
+		t.Errorf("newlyRequired = %q, want exactly [%q]", newlyRequired, requiredOnExisting)
+	}
+
+	wantCompatible := []string{optionalOnExisting, requiredOnNew, newCommand}
+	if !slices.Equal(compatible, wantCompatible) {
+		t.Errorf("compatible = %q, want %q", compatible, wantCompatible)
 	}
 }

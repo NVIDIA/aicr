@@ -484,6 +484,17 @@ half of the pipeline and skips deploy-side assertions.
 - `e2e` — the end-to-end pipeline runner.
 - `scan` — Grype vulnerability scan.
 - `license-check` — license header / dependency-license sweep.
+- bundle layout — `TestBundleLayoutMatchesManifest` renders the frozen fixture
+  recipe through every deployer and compares the tree to
+  `pkg/bundler/testdata/layout/manifests/`. A removed or renamed path fails; an
+  added one is additive. See
+  [Bundle layout](../user/bundling.md#bundle-layout).
+- artifact schemas — `tools/schemagen` tests gate freshness, real-artifact
+  validity, and breaking changes against `api/aicr/v1/schemas/baseline/`. See
+  [API server](api-server.md#artifact-schema-gate).
+- `openapi-diff` — the REST contract in `api/aicr/v1/server.yaml` against its
+  committed baseline, failing on unacknowledged breaking changes and on stale
+  acknowledgements. See [API server](api-server.md#rest-contract-gate).
 - `api-diff` — exported `pkg/client/v1` compatibility, including the scoped
   repository-local type closure reachable through transparent aliases, against
   the latest stable release.
