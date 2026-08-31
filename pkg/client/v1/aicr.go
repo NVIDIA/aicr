@@ -200,6 +200,18 @@ type Client struct {
 	// change after construction, so it doesn't need locking.
 	version string
 
+	// deps holds the injectable entry points (OCI provider construction,
+	// snapshot-Job deployment). Populated once in NewClient from
+	// defaultClientDependencies; only tests substitute anything. Doesn't
+	// change after construction, so it doesn't need locking.
+	//
+	// A POINTER, not a value: clientDependencies holds func fields, and funcs
+	// are not comparable, so embedding it by value would silently make Client
+	// itself non-comparable. That is a breaking change to a frozen v1 type
+	// (api-diff reports "Client: old is comparable, new is not"), and no test
+	// seam is worth spending it.
+	deps *clientDependencies
+
 	// allowLists fences which criteria values the resolve path accepts.
 	// nil means "no fencing — all values allowed". Set by WithAllowLists;
 	// enforced in enforceAllowLists on the shared resolve path. Doesn't
@@ -235,6 +247,15 @@ type clientDependencies struct {
 		*recipe.EmbeddedDataProvider,
 		ocisource.Config,
 	) (recipe.DataProvider, error)
+
+	// deployAndCollect is the snapshot-Job deployment entry point. It is a
+	// seam because everything CollectSnapshot decides about the Job —
+	// including the fields it defaults — is otherwise observable only from a
+	// live apiserver, which is exactly where the #2256 foot-gun surfaced.
+	deployAndCollect func(
+		context.Context,
+		*snapshotter.AgentConfig,
+	) (*snapshotter.Snapshot, []byte, error)
 }
 
 func defaultClientDependencies() clientDependencies {
@@ -247,6 +268,7 @@ func defaultClientDependencies() clientDependencies {
 
 			return ocisource.New(ctx, embedded, config)
 		},
+		deployAndCollect: snapshotter.DeployAndCollect,
 	}
 }
 
@@ -296,7 +318,7 @@ func newClientWithContextAndDependencies(
 	if err := clientConstructionContextError(ctx); err != nil {
 		return nil, err
 	}
-	c := &Client{}
+	c := &Client{deps: &deps}
 
 	for _, opt := range opts {
 		// Skip nil Option entries defensively — a caller building a
@@ -1787,9 +1809,22 @@ func resolveHelmComponentValues(
 // without breaking signatures. CollectSnapshot is therefore safe even
 // on a Client whose recipe source is unrelated to the target cluster.
 //
-// cfg.Kubeconfig is the path (or empty for in-cluster). cfg.Namespace,
-// cfg.Image, cfg.ServiceAccountName must be set; other fields fall
-// back to package defaults documented on snapshotter.AgentConfig.
+// cfg.Kubeconfig is the path (or empty for in-cluster).
+//
+// # Required and defaulted fields
+//
+// cfg.Namespace is the only field you must set: it is where the Job, its RBAC,
+// and the result ConfigMap are created, and deploying a privileged
+// cluster-reading Job into an unstated namespace is not a safe default. An
+// empty one is rejected with ErrCodeInvalidRequest before any cluster access.
+//
+// cfg.Image, cfg.JobName, and cfg.ServiceAccountName are defaulted when empty,
+// to the same values the CLI's flags use — defaults.AgentName for the two names,
+// which are therefore SHARED across callers that omit them (see Concurrency),
+// and for the image the tag matching this Client's WithVersion (a Client with no
+// version, like a development build, gets :latest). Set cfg.Image explicitly to
+// pin a different agent generation or a mirrored registry. Other fields fall
+// back to the defaults documented on snapshotter.AgentConfig.
 //
 // # Output and delivery
 //
@@ -1846,8 +1881,26 @@ func resolveHelmComponentValues(
 //     carry the appropriate pkg/errors codes (ErrCodeInternal for
 //     deployment failures, ErrCodeTimeout for context expiry, etc.).
 //
-// Concurrent CollectSnapshot calls are safe; each call constructs an
-// independent run.
+// # Concurrency
+//
+// Concurrent CollectSnapshot calls are safe at the Client level — each call
+// constructs an independent run and shares no in-process state.
+//
+// They are NOT safe against the same cluster. The agent deployment is
+// name-addressed and partly cluster-scoped, so two runs collide in three ways
+// regardless of what this method defaults:
+//
+//   - The Job is delete-then-created, so a second run destroys a first run's
+//     in-flight Job even when Cleanup is false.
+//   - The ServiceAccount, Role, and RoleBinding are named from
+//     cfg.ServiceAccountName in cfg.Namespace.
+//   - The ClusterRoleBinding has a FIXED name and carries the ServiceAccount as
+//     its subject, so a second run repoints it and the first run's pod loses its
+//     node-read permission mid-collection. Distinct JobName and
+//     ServiceAccountName values do not avoid this one.
+//
+// Collect against one cluster at a time. Concurrent collection needs per-run
+// ownership down in pkg/k8s/agent, tracked in #2481.
 func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapshot, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
@@ -1888,13 +1941,61 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 	ctx, cancel := context.WithTimeout(ctx, budget+defaults.SnapshotOperationGrace)
 	defer cancel()
 
-	snap, raw, err := snapshotter.DeployAndCollect(ctx, toInternalAgentConfig(cfg))
+	// Defaults are applied to the internal copy, never to the caller's cfg:
+	// an AgentConfig the caller can reuse must not silently acquire fields
+	// after a call.
+	agentCfg := toInternalAgentConfig(cfg)
+	applyAgentDefaults(agentCfg, c.version)
+
+	// A Client built by anything but NewClient (a zero-value literal in a
+	// test) has no deps; fall back rather than nil-panic.
+	deploy := snapshotter.DeployAndCollect
+	if c.deps != nil && c.deps.deployAndCollect != nil {
+		deploy = c.deps.deployAndCollect
+	}
+
+	snap, raw, err := deploy(ctx, agentCfg)
 	if err != nil {
 		return nil, err
 	}
 	out := fromInternalSnapshot(snap)
 	out.Raw = raw
 	return out, nil
+}
+
+// applyAgentDefaults fills the agent fields the CLI has always supplied as flag
+// defaults and the facade did not.
+//
+// Image, JobName, and ServiceAccountName are copied verbatim into the Job and
+// RBAC objects and nothing under pkg/k8s/agent defaults them, so omitting any of
+// the three surfaced as a raw apiserver rejection from inside Deploy — after
+// the ServiceAccount had already been created, which with Cleanup false leaves
+// it behind (#2256). The CLI never hit it because pkg/cli/snapshot.go supplies
+// all three as flag defaults; sharing the definitions through pkg/defaults is
+// what keeps the two paths deploying the same image.
+//
+// Namespace is deliberately NOT defaulted. pkg/snapshotter already rejects an
+// empty one with a coded error naming the field, and quietly deploying a
+// privileged, cluster-reading Job into "default" is a worse outcome than being
+// told to choose. The CLI defaults it because a person is watching a flag they
+// can see; an SDK caller is not.
+//
+// A whitespace-only value counts as unset: it cannot be a valid Kubernetes name
+// or image reference, so treating it as a typo'd omission beats forwarding it to
+// the apiserver. This mirrors how pkg/snapshotter reads Namespace.
+func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
+	if cfg == nil {
+		return
+	}
+	if strings.TrimSpace(cfg.Image) == "" {
+		cfg.Image = defaults.AgentImageForVersion(version)
+	}
+	if strings.TrimSpace(cfg.JobName) == "" {
+		cfg.JobName = defaults.AgentName
+	}
+	if strings.TrimSpace(cfg.ServiceAccountName) == "" {
+		cfg.ServiceAccountName = defaults.AgentName
+	}
 }
 
 // ValidateState evaluates a resolved recipe against an observed cluster

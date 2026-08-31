@@ -61,7 +61,23 @@ func TestStability_Client(t *testing.T) {
 	requireSignature[func(*aicr.Client) error]((*aicr.Client).Close)
 	requireSignature[func(*aicr.Client, context.Context) error]((*aicr.Client).LoadCatalog)
 	requireSignature[func(*aicr.Client) *aicr.CriteriaRegistry]((*aicr.Client).CriteriaRegistry)
+
+	// Client must stay comparable. Adding an unexported func, map, or slice
+	// field silently takes that away, which api-diff reports as "old is
+	// comparable, new is not" — a breaking change to a frozen v1 type, caught
+	// here at compile time instead of at the release gate. Any injectable
+	// dependency therefore has to be held behind a pointer.
+	requireComparable[aicr.Client]()
 }
+
+// requireComparable fails to compile when T stops satisfying comparable.
+func requireComparable[T comparable]() {}
+
+// requireType fails to compile when its argument is not exactly T.
+//
+// Used where a composite literal alone would not pin the field type: assigning
+// a *time.Duration into a field still compiles if that field is `any`.
+func requireType[T any](T) {}
 
 // TestStability_RecipeResolution pins the resolution surface: the
 // RecipeRequest input shape and the three Resolve* entry points.
@@ -377,6 +393,24 @@ func TestStability_Verification(t *testing.T) {
 	requireSignature[func() []string](aicr.TrustLevels)
 	requireSignature[func(*aicr.EvidenceVerification) ([]byte, error)](aicr.RenderEvidenceJSON)
 	requireSignature[func(*aicr.EvidenceVerification) string](aicr.RenderEvidenceMarkdown)
+
+	// The per-call cap override is part of the contract: without it the facade
+	// ceiling is unconditional and a slow-registry verification cannot finish
+	// (#2225). Nil must keep the default, so the field's presence and its
+	// pointer-ness both matter.
+	var timeoutOverride *time.Duration
+	_ = aicr.BundleVerifyOptions{Timeout: timeoutOverride}
+	_ = aicr.EvidenceVerifyOptions{Timeout: timeoutOverride}
+	_ = aicr.CatalogVerifyOptions{Timeout: timeoutOverride}
+	_ = aicr.RecipeDigestOptions{Timeout: timeoutOverride}
+
+	// Read the field back AS a *time.Duration too. The literals above still
+	// compile if the field widens to `any`, which would silently drop the
+	// nil-vs-zero distinction the whole design rests on.
+	requireType[*time.Duration](aicr.BundleVerifyOptions{}.Timeout)
+	requireType[*time.Duration](aicr.EvidenceVerifyOptions{}.Timeout)
+	requireType[*time.Duration](aicr.CatalogVerifyOptions{}.Timeout)
+	requireType[*time.Duration](aicr.RecipeDigestOptions{}.Timeout)
 
 	var bv aicr.BundleVerifyOptions
 	_ = bv.CertificateIdentityRegexp
