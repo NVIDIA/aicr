@@ -290,8 +290,8 @@ your current working directory, one object per file:
 snapshot-rbac-<run-id>/
 ├── 01-role.yaml                 Role/aicr-agent-<sa>-rbac                       (namespaced)
 ├── 02-rolebinding.yaml          RoleBinding/aicr-agent-<sa>-rbac                (namespaced)
-├── 03-clusterrole.yaml          ClusterRole/aicr-agent-<ns>-<sa>-rbac           (cluster)
-└── 04-clusterrolebinding.yaml   ClusterRoleBinding/aicr-agent-<ns>-<sa>-rbac    (cluster)
+├── 03-clusterrole.yaml          ClusterRole/aicr-agent-<ns>.<sa>-rbac           (cluster)
+└── 04-clusterrolebinding.yaml   ClusterRoleBinding/aicr-agent-<ns>.<sa>-rbac    (cluster)
 ```
 
 Every file opens with a YAML comment header naming what the object grants and
