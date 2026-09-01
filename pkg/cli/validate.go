@@ -623,7 +623,7 @@ func validateCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "oke-addons",
-			Usage:    "Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem. When validate captures a live snapshot, the NvidiaGpuPlugin add-on's control-plane state is projected into the K8s oke-addons subtype so profile constraints recorded in OKE recipes can evaluate. Ignored when --snapshot supplies a pre-captured snapshot.",
+			Usage:    "Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem. When validate captures a live snapshot, the NvidiaGpuPlugin add-on's control-plane state is projected into the K8s oke-addons subtype so profile constraints recorded in OKE recipes can evaluate. The --all flag on the oci command is required: without it removed and non-ACTIVE add-ons are omitted from the dump and would read as absent instead of failing closed. Ignored when --snapshot supplies a pre-captured snapshot.",
 			Sources:  cli.EnvVars("AICR_OKE_ADDONS_PATH"),
 			Category: catAgentDeployment,
 		},

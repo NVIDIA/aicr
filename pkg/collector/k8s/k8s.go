@@ -84,12 +84,13 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 	}
 
 	var (
-		versions map[string]measurement.Reading
-		images   map[string]measurement.Reading
-		policies map[string]measurement.Reading
-		node     map[string]measurement.Reading
-		slinky   measurement.Subtype
-		mariaDB  measurement.Subtype
+		versions  map[string]measurement.Reading
+		images    map[string]measurement.Reading
+		policies  map[string]measurement.Reading
+		node      map[string]measurement.Reading
+		slinky    measurement.Subtype
+		mariaDB   measurement.Subtype
+		okeLegacy measurement.Subtype
 	)
 
 	g, gctx := errgroup.WithContext(ctx)
@@ -151,6 +152,14 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		return nil
 	})
 
+	g.Go(func() error {
+		okeLegacy = k.collectOKELegacyPlugin(gctx)
+		if err := cancellationErr(gctx, ctx, callerCtx); err != nil {
+			return errors.Wrap(errors.ErrCodeTimeout, "OKE legacy device-plugin collection cancelled", err)
+		}
+		return nil
+	})
+
 	// A timeout/cancellation surfaces here; deterministic sub-collector failures
 	// are swallowed inside collectSafe so the snapshot continues on partial failure.
 	if err := g.Wait(); err != nil {
@@ -168,6 +177,7 @@ func (k *Collector) Collect(ctx context.Context) (*measurement.Measurement, erro
 		WithSubtype(measurement.Subtype{Name: "node", Data: node}).
 		WithSubtype(slinky).
 		WithSubtype(mariaDB).
+		WithSubtype(okeLegacy).
 		Build()
 
 	return res, nil
@@ -237,6 +247,7 @@ func emptyK8sMeasurement() *measurement.Measurement {
 		WithSubtype(measurement.Subtype{Name: "node", Data: empty}).
 		WithSubtype(unknownSlinkySubtype()).
 		WithSubtype(unknownMariaDBSubtype()).
+		WithSubtype(unknownOKELegacyPluginSubtype()).
 		Build()
 }
 

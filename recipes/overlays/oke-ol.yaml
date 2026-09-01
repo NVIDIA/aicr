@@ -172,7 +172,11 @@ spec:
               this cluster, but the oci-managed profile expects Oracle's
               add-on to be the sole nvidia.com/gpu advertiser. For clusters
               with the add-on removed (bring-your-own driverless pools),
-              regenerate with --profile gpuStack=operator-managed. Capture
+              regenerate with --profile gpuStack=operator-managed. Clusters
+              still running the legacy addon-manager device plugin (the
+              pre-add-on kube-system/nvidia-gpu-device-plugin DaemonSet,
+              which list-addons cannot see) must migrate to the managed
+              add-on before qualifying oci-managed. Capture
               the signal with: aicr snapshot --oke-addons <path to
               `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump>.
       # Bring-your-own driverless image: the GPU Operator installs driver,
@@ -222,6 +226,31 @@ spec:
               (--profile gpuStack=oci-managed). Capture the signal with:
               aicr snapshot --oke-addons <path to
               `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump>.
+          # Tripwire for OKE's LEGACY device plugin: older clusters ship a
+          # kube-system/nvidia-gpu-device-plugin DaemonSet via the legacy
+          # Kubernetes addon-manager, which `oci ce cluster list-addons`
+          # cannot see — so the add-on constraint above reads absent while
+          # Oracle's plugin still advertises nvidia.com/gpu (#1327). The
+          # snapshot's in-cluster reading (pkg/collector/k8s/
+          # okelegacyplugin.go) collapses to none/active/unknown; only
+          # "none" (absent, unrelated same-name workload, or fully disabled
+          # with desiredNumberScheduled=0) qualifies. This tripwire is
+          # operator-managed-only by design: when the managed add-on IS
+          # installed, it manages the same DaemonSet name, so oci-managed
+          # would observe "active" on every healthy cluster.
+          - name: K8s.oke-legacy-plugin.nvidia-gpu-device-plugin
+            value: none
+            remediation: >-
+              OKE's legacy addon-manager device plugin (the kube-system
+              nvidia-gpu-device-plugin DaemonSet) still targets GPU nodes on
+              this cluster; deploying the GPU Operator's device plugin
+              alongside it would double-advertise nvidia.com/gpu. Disable it
+              on every GPU node pool via the
+              oci.oraclecloud.com/disable-gpu-device-plugin=true node label,
+              or migrate the cluster to the managed NvidiaGpuPlugin add-on
+              (and then use the default --profile gpuStack=oci-managed).
+              Re-run aicr snapshot after the change so the reading reflects
+              the new state.
 
   validation:
     conformance:

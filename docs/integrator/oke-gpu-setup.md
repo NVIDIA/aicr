@@ -90,6 +90,48 @@ explicitly and records the constraint without evaluating it.
 | any other lifecycle state (e.g. `addon-deleting`) | ❌ fails closed naming the observed state | ❌ fails closed |
 | no reading (snapshot captured without `--oke-addons`) | ❌ fails closed: reading **unavailable** — recapture with the flag | ❌ same |
 
+`operator-managed` additionally carries a constraint over the in-cluster
+`K8s.oke-legacy-plugin.nvidia-gpu-device-plugin` reading (see the next
+section):
+
+| Legacy-plugin reading | Default (`oci-managed`) | `--profile gpuStack=operator-managed` |
+|---|---|---|
+| `none` (absent, unrelated same-name workload, or fully disabled) | not gated | ✅ resolves (add-on constraint permitting) |
+| `active` (legacy DaemonSet targets ≥ 1 node) | not gated — when the add-on is installed it manages the same DaemonSet | ❌ fails closed: disable per pool or migrate to the add-on |
+| `unknown` (snapshot could not consult the API) | not gated | ❌ fails closed |
+| no reading (snapshot from an older aicr) | not gated | ❌ fails closed: reading **unavailable** — recapture |
+
+## Legacy Device Plugin Detection
+
+Older OKE clusters ship the device plugin through a second, pre-add-on
+mechanism: a `nvidia-gpu-device-plugin` DaemonSet in `kube-system`,
+reconciled by the legacy Kubernetes addon-manager
+(`addonmanager.kubernetes.io/mode: Reconcile`). That DaemonSet is
+**invisible to `oci ce cluster list-addons`**, so on such a cluster the
+add-on reading is `absent` even though Oracle's plugin is still advertising
+`nvidia.com/gpu`. Deploying `operator-managed` there would double-advertise
+(#1327).
+
+`aicr snapshot` therefore observes the DaemonSet directly (a read-only
+`apps/daemonsets` get, part of the agent's default ClusterRole) and
+records the collapsed `K8s.oke-legacy-plugin.nvidia-gpu-device-plugin`
+reading — `none`, `active`, or `unknown` — plus the uncollapsed detail
+under `K8s.oke-legacy-plugin.daemonset`. Only `none` qualifies
+`operator-managed`; remediation is either disabling the legacy plugin on
+every GPU node pool (`oci.oraclecloud.com/disable-gpu-device-plugin=true`
+node label — for the *legacy* DaemonSet this label is the supported
+mechanism, unlike the add-on route above) or migrating the cluster to the
+managed `NvidiaGpuPlugin` add-on. The tripwire deliberately does not gate
+`oci-managed`: when the managed add-on is installed it reconciles the same
+DaemonSet name, so a healthy `oci-managed` cluster legitimately observes an
+active DaemonSet.
+
+Qualification is defined for **enhanced** OKE clusters (the default cluster
+type; add-on management does not exist on basic clusters, so
+`list-addons` cannot produce a valid dump there and qualification fails
+closed). Basic clusters should be
+[upgraded to enhanced in place](https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contengworkingwithenhancedclusters.htm).
+
 ## Oracle Add-on Interactions
 
 Do **not** enable Oracle's `NvidiaGpuOperator` or `NvidiaNetworkOperator`

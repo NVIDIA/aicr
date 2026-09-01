@@ -55,30 +55,37 @@ func TestOKEGpuStackProfileResolution(t *testing.T) {
 		// wantAddonConstraint: the expected K8s.oke-addons.nvidia-gpu-plugin
 		// generation-constraint value for the selected profile value.
 		wantAddonConstraint string
+		// wantLegacyConstraint: the expected
+		// K8s.oke-legacy-plugin.nvidia-gpu-device-plugin generation-constraint
+		// value; empty asserts the tripwire is ABSENT (oci-managed must not
+		// carry it — the managed add-on reconciles the same DaemonSet name).
+		wantLegacyConstraint string
 	}{
 		{
-			name:                "default selection is oci-managed with the external advertiser",
-			selection:           "",
-			wantValue:           "oci-managed",
-			wantAdvertiser:      allocpolicy.AdvertiserExternal,
-			wantDriver:          false,
-			wantToolkit:         false,
-			wantPlugin:          false,
-			wantDRARoot:         "/",
-			wantAssume:          true,
-			wantAddonConstraint: "installed",
+			name:                 "default selection is oci-managed with the external advertiser",
+			selection:            "",
+			wantValue:            "oci-managed",
+			wantAdvertiser:       allocpolicy.AdvertiserExternal,
+			wantDriver:           false,
+			wantToolkit:          false,
+			wantPlugin:           false,
+			wantDRARoot:          "/",
+			wantAssume:           true,
+			wantAddonConstraint:  "installed",
+			wantLegacyConstraint: "",
 		},
 		{
-			name:                "operator-managed owns driver, toolkit, plugin, and the DRA root",
-			selection:           "gpuStack=operator-managed",
-			wantValue:           "operator-managed",
-			wantAdvertiser:      "",
-			wantDriver:          true,
-			wantToolkit:         true,
-			wantPlugin:          true,
-			wantDRARoot:         "/run/nvidia/driver",
-			wantAssume:          false,
-			wantAddonConstraint: "absent",
+			name:                 "operator-managed owns driver, toolkit, plugin, and the DRA root",
+			selection:            "gpuStack=operator-managed",
+			wantValue:            "operator-managed",
+			wantAdvertiser:       "",
+			wantDriver:           true,
+			wantToolkit:          true,
+			wantPlugin:           true,
+			wantDRARoot:          "/run/nvidia/driver",
+			wantAssume:           false,
+			wantAddonConstraint:  "absent",
+			wantLegacyConstraint: "none",
 		},
 	}
 	for _, tt := range tests {
@@ -164,13 +171,22 @@ func TestOKEGpuStackProfileResolution(t *testing.T) {
 			// to validation.readiness.
 			const addonPath = "K8s.oke-addons.nvidia-gpu-plugin"
 			var gotAddon string
+			const legacyPath = "K8s.oke-legacy-plugin.nvidia-gpu-device-plugin"
+			var gotLegacy string
 			for _, c := range result.Constraints {
 				if c.Name == addonPath {
 					gotAddon = c.Value
 				}
+				if c.Name == legacyPath {
+					gotLegacy = c.Value
+				}
 			}
 			if gotAddon != tt.wantAddonConstraint {
 				t.Errorf("generation constraint %s = %q, want %q", addonPath, gotAddon, tt.wantAddonConstraint)
+			}
+			if gotLegacy != tt.wantLegacyConstraint {
+				t.Errorf("generation constraint %s = %q, want %q (empty = tripwire must be absent)",
+					legacyPath, gotLegacy, tt.wantLegacyConstraint)
 			}
 			if result.Validation != nil && result.Validation.Readiness != nil {
 				for _, c := range result.Validation.Readiness.Constraints {
