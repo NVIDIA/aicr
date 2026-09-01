@@ -759,6 +759,68 @@ components:
         tolerationPaths:
           - acceleratedTolerations
 
+  # NVIDIA Cluster Readiness Engine — GPU cluster burn-in certification
+  # controller. Runs real training and NCCL communication workloads across
+  # topology-aware node groups, measures goodput and bandwidth, and bisects
+  # failing groups to isolate bad nodes.
+  #
+  # Named `nvcre` after the chart's own nameOverride, install namespace, and
+  # CRD group (nvcre.nvidia.com) rather than after the chart name
+  # (cluster-readiness-engine); `cre` and the long form are override keys.
+  #
+  # NVCRE orchestrates its benchmarks through Kubeflow Trainer — the manager
+  # creates TrainJobs against a TrainingRuntime — so any recipe referencing
+  # this component must also carry kubeflow-trainer. The chart itself does not
+  # install Trainer.
+  #
+  # The chart also renders a ServiceMonitor unconditionally under
+  # `metrics.serviceMonitor.enabled` (default true), so a referencing recipe
+  # needs prometheus-operator-crds ahead of it — as a dependencyRef, or by
+  # inheriting it from base.yaml — or must set the value to false.
+  - name: nvcre
+    displayName: NVIDIA Cluster Readiness Engine
+    valueOverrideKeys:
+      - cre
+      - cluster-readiness-engine
+    healthCheck:
+      assertFile: checks/nvcre/health-check.yaml
+    # The chart ships nvcre.nvidia.com_logprofiles.yaml in crds/ AND four
+    # LogProfile CRs of that kind in templates/ (nccl-bandwidth,
+    # nccl-loopback, megatron-training, megatron-bridge). On a fresh cluster
+    # helm-diff's render pass fails ("no matches for kind LogProfile") because
+    # only `helm install` applies crds/ before rendering. This flag emits
+    # disableValidation: true on the release so helm-diff skips the
+    # live-mapper check. Same pattern as kai-scheduler and gpu-operator.
+    # See https://github.com/NVIDIA/aicr/issues/914.
+    hasSelfRefCRDs: true
+    helm:
+      # Chart and controller image are public on GHCR and pull anonymously.
+      defaultRepository: oci://ghcr.io/nvidia
+      defaultChart: cluster-readiness-engine
+      # Chart version, appVersion, and controller image tag all move together
+      # with the release tag — bump all three by bumping this one pin.
+      defaultVersion: v0.1.0
+      defaultNamespace: nvcre
+    nodeScheduling:
+      # tolerationPaths only: the chart's Deployment template renders
+      # `affinity` and `tolerations` but has no `nodeSelector` block, so a
+      # system nodeSelector written into values would be silently dropped
+      # rather than applied. Listing it here would look like placement
+      # control that does not exist.
+      #
+      # This still narrows placement rather than widening it: the chart
+      # default is a blanket `tolerations: [{operator: Exists}]`, which
+      # tolerates every taint in the cluster including tainted GPU nodes.
+      # Replacing it with the recipe's system tolerations keeps the manager
+      # on the node class the operator intended.
+      #
+      # Only the manager is covered. NVCRE schedules its own benchmark
+      # workloads through Kubeflow Trainer and must not inherit system
+      # placement for those — the benchmarks belong on GPU nodes.
+      system:
+        tolerationPaths:
+          - manager.tolerations
+
   - name: slinky-slurm-operator-crds
     displayName: slinky-slurm-operator-crds
     valueOverrideKeys:
