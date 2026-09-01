@@ -26,7 +26,6 @@ import (
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -186,10 +185,15 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		// snapshot fingerprint below. Everything unmarked is fair game for the
 		// facade's relax-and-retry — see aicr.WithSnapshotCriteriaRelaxation.
 		touched := map[aicr.CriteriaDimension]bool{}
-		// Unwrap to reach the measurements: fingerprinting still reads the
-		// internal shape. The resolve calls below take the facade snapshot
-		// directly.
-		criteria := fingerprint.FromMeasurements(snap.Unwrap().Measurements).ToCriteria(reg)
+		// Derived through the facade so this workflow needs only pkg/client/v1
+		// (#2437). The Client parses against its own provider-scoped registry,
+		// so an external --data catalog's registered values resolve here the
+		// same way they will at resolve time.
+		facadeCriteria, criteriaErr := client.CriteriaFromSnapshot(snap)
+		if criteriaErr != nil {
+			return nil, criteriaErr
+		}
+		criteria := aicr.ToInternalCriteria(facadeCriteria)
 		if applyErr := applyCriteriaFromConfig(criteria, cfg, reg, touched); applyErr != nil {
 			return nil, applyErr
 		}

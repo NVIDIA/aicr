@@ -29,12 +29,12 @@ All server code lives in [`pkg/server`](https://github.com/NVIDIA/aicr/tree/main
 
 | File | Responsibility |
 |------|----------------|
-| `serve.go` | Entry point. Parses env allowlists, constructs `aicr.Client`, wires the v1 and v2 recipe, query, and bundle routes, runs `Server.Run` |
+| `serve.go` | Entry point. Parses env allowlists, constructs `aicr.Client`, wires the recipe, query, and bundle routes, runs `Server.Run` |
 | `server.go` | `Server` struct, options, route mux, lifecycle (`Start`, `Shutdown`, `Run`) |
 | `config.go` | `config` struct and env-var overrides (`PORT`, `SHUTDOWN_TIMEOUT_SECONDS`) |
 | `middleware.go` | 8-layer middleware chain; ordering rationale lives in source comments |
-| `recipe_handler.go` | `GET\|POST /v1/recipe`, `/v1/query`, `/v2/recipe`, and `/v2/query` adapter over the profile-aware `Client` resolution methods |
-| `bundle_handler.go` | `POST /v1/bundle` and `/v2/bundle` adapter over `Client.AdoptRecipe` + `Client.MakeBundle` |
+| `recipe_handler.go` | `GET\|POST /v1/recipe` and `/v1/query` adapter over the profile-aware `Client` resolution methods |
+| `bundle_handler.go` | `POST /v1/bundle` adapter over `Client.AdoptRecipe` + `Client.MakeBundle` |
 | `health.go` | `GET /health` and `GET /ready` |
 | `metrics.go` | Prometheus collectors (requests, duration, in-flight, rate-limit rejects, panic recoveries) |
 | `version.go` | `X-API-Version` header negotiation from `Accept: application/vnd.nvidia.aicr.v1+json` |
@@ -151,13 +151,10 @@ field is wired in one place.
 | `/` | GET | Lists registered routes (unmatched paths route here via `ServeMux`) |
 | `/health` | GET | Liveness — always 200 if the process is running |
 | `/ready` | GET | Readiness — 503 with `reason` until `setReady(true)`, 200 after |
-| `/metrics` | GET | Prometheus exposition (`promhttp.Handler()`) |
+| `/metrics` | GET, HEAD | Prometheus exposition (`promhttp.Handler()` behind `readOnly`, which rejects other methods with a structured 405) |
 | `/v1/recipe` | GET, POST | Resolve recipe from criteria → `RecipeResult` JSON |
 | `/v1/query` | GET, POST | Resolve recipe, hydrate values, return value at `?selector=path` |
 | `/v1/bundle` | POST | Adopt `RecipeResult` body, generate bundle, stream zip |
-| `/v2/recipe` | GET, POST | Resolve a profile-aware recipe from criteria → strict `RecipeResult` JSON |
-| `/v2/query` | GET, POST | Resolve a profile-aware recipe, hydrate values, and return the required selector path |
-| `/v2/bundle` | POST | Strictly decode a profile-aware `RecipeResult`, generate a bundle, and stream zip |
 
 Schemas, query parameters, and example payloads live in
 [docs/user/api-reference.md](../user/api-reference.md) and
@@ -287,19 +284,21 @@ contains two contract gates:
   `api/aicr/v1/server.yaml` matches the corresponding
   `pkg/recipe.GetCriteria*Types()` function. It scans both query-parameter enums
   and `components.schemas.Criteria` properties.
-- `TestOpenAPIV1BundleRecipeContract` asserts that `/v1/bundle` and its
-  deprecated wrapper share the request schema, that both `/v1/recipe` success
-  responses still point at the strict `RecipeResponse`, and that the header
-  enums on both sides stay synchronized with the Go constants. It matches the
-  `allOf` branches by content rather than position, since `allOf` is
-  semantically unordered.
+- `TestOpenAPIBundleContract` asserts that `POST /v1/bundle` points at
+  `BundleRecipeRequest`, that the union's branches stay wired to the legacy and
+  configured schemas, and that the header enums stay synchronized with the Go
+  constants. It matches the `allOf` branches by content rather than position,
+  since `allOf` is semantically unordered.
 
   Runtime acceptance of the legacy header shapes is pinned separately by
   `TestBundleHandler_LegacyRecipeHeaders`, which posts absent, empty, and
-  `kind: Recipe` bodies to the handler, asserts 200, and round-trips the
+  target-`apiVersion` bodies to the handler, asserts 200, and round-trips the
   emitted `recipe.yaml` back through the file loader to prove the ingest
   normalization holds. The spec gate alone would only be checking the spec
-  against itself.
+  against itself. The one legacy shape that is *not* accepted, `kind: Recipe`
+  (published through v0.18.0 and removed by the v1 collapse), is pinned by
+  `TestBundleHandler_RejectsLegacyRecipeKind` so the rejection stays a decision
+  rather than becoming an accident of a later refactor.
 
 Drift is a contract bug: clients conforming to the spec will reject
 inputs the server actually accepts, or generate types that reject
@@ -308,6 +307,103 @@ the spec — or the reverse — fails CI here.
 
 The wildcard `"any"` is allowed in the spec but not the Go list; the
 test strips it before comparison.
+
+## REST Contract Gate
+
+REST is one of the four surfaces [ROADMAP](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md)
+section 1 freezes at v1. Two gates guard it, and they fail for different
+reasons.
+
+**`make openapi-diff`** ([`tools/openapi-diff`](https://github.com/NVIDIA/aicr/blob/main/tools/openapi-diff))
+compares `api/aicr/v1/server.yaml` against the committed snapshot
+`api/aicr/v1/server.baseline.yaml` using the pinned `oasdiff`, and fails on
+breaking changes: a removed endpoint, a removed or narrowed field, a new
+required request field, a removed enum value. Additive change passes. It runs
+in `make qualify`, next to `api-diff`, which guards the Go SDK the same way.
+
+Three ways to resolve a failure, in order of preference:
+
+1. Make the change additive instead.
+2. Record it in `api/aicr/v1/openapi-diff-exceptions.yaml` with the oasdiff
+   rule id, the operation path, and a reason. **Scheduled ADR-022 apiVersion
+   removals belong here** — that is what the issue means by representing a
+   transition explicitly rather than disabling the gate.
+3. Accept it into the contract with `make openapi-baseline`, which rewrites the
+   baseline. That diff is the change under review; read it.
+
+An acknowledgement that stops matching a real breaking change **fails the
+gate**. A stale entry silently pre-approves the break returning later, which is
+the failure the file exists to prevent — the same contract as
+`pkg/client/v1/api-diff-exceptions.yaml`. `tools/openapi-diff_test.sh` pins each
+branch of that verdict to an exact exit code.
+
+**`pkg/server/openapi_validity_test.go`** answers a different question: not
+"did this change break the contract" but "is the contract coherent". A dangling
+`$ref`, an orphaned component, or a duplicate `operationId` is present in both
+baseline and spec, so the diff sees no change and passes while every generated
+client is wrong. It also guards the baseline against silent truncation, which
+would make the diff gate report no breaking changes for anything the truncated
+file omits.
+
+The baseline is a committed snapshot rather than the previous release, unlike
+`api-diff`. The v1 collapse (#2464) is unreleased, so comparing against v0.20.0
+reports 28 breaking changes that are all one already-merged decision — the gate
+would ship pre-loaded with noise that clears itself at v0.21 and teaches
+everyone to skim it in the meantime.
+
+## Artifact Schema Gate
+
+Artifact schemas are the second of the four surfaces ROADMAP section 1 freezes
+at v1 (issue #2113). `api/aicr/v1/schemas/*.schema.json` are JSON Schema
+documents for `Snapshot`, `RecipeResult`, `RecipeMetadata`, `RecipeMixin` and
+`RecipeCriteria`, generated from the Go types by
+[`tools/schemagen`](https://github.com/NVIDIA/aicr/tree/main/tools/schemagen)
+and regenerated with `make schemas`.
+
+They are derived rather than authored, so three tests keep them honest and each
+fails for a different reason:
+
+- **`TestCommittedSchemasAreFresh`** — the committed files match the current Go
+  types. Without it the schemas would drift into a snapshot of whatever the
+  types looked like when someone last remembered to run the generator.
+- **`TestSchemasDescribeRealArtifacts`** — the 110 committed overlays and 4
+  mixins validate against their schema. Freshness proves the schema matches the
+  *type*; this proves the type matches what is actually on disk.
+- **`TestArtifactSchemasAreCompatible`** — the generated schemas are compared to
+  the frozen snapshot in `api/aicr/v1/schemas/baseline/`, failing on a removed
+  field, a newly required field, a changed type, a removed enum value, or a
+  previously free-form field becoming an enum. Additive change passes.
+
+Intentional breaks go in `api/aicr/v1/schemas/schema-diff-exceptions.yaml` with
+a rule, kind, path and reason. **An acknowledgement that matches no reported
+break fails the gate** — a stale entry silently pre-approves the break
+returning. Same contract as `openapi-diff-exceptions.yaml` and
+`api-diff-exceptions.yaml`. Scheduled ADR-022 apiVersion removals are the
+expected occupants: retiring an alpha value is an `enum-value-removed` break,
+planned and dated.
+
+`make schema-baseline` accepts the current schemas as the frozen contract. That
+diff is the change under review.
+
+**`required` means different things for authored and emitted artifacts.**
+`RecipeResult` and `Snapshot` are emitted, so a field without `omitempty` is
+always written and a consumer may rely on it. `RecipeMetadata`, `RecipeMixin`
+and `RecipeCriteria` are authored by hand, where the encoder's behavior says
+nothing about what a human must supply — `ComponentRef.Source` is written on
+every emit but set by only 17 of the 110 committed overlays. Authored artifacts
+therefore declare nothing required; marking them published a schema that
+rejected the project's own catalog.
+
+The criteria enums add the `any` wildcard that `GetCriteria*Types()` omits, for
+the same reason the OpenAPI parity test strips it before comparing.
+
+**The generator uses reflection rather than a schema library on purpose.** It
+must compile against the types, so it cannot be a pinned binary the way
+`oasdiff` is; importing a schema library would put it in the module graph, and
+therefore in the SBOM and vulnerability surface of the shipped binaries, for
+something that only runs at build time. The cost is that `pkg/schema` is
+hand-written, so it covers only the shapes the artifacts use and **fails on
+anything else** rather than emitting a plausible guess.
 
 ## Adding an Endpoint
 

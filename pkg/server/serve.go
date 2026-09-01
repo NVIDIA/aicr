@@ -45,9 +45,6 @@ func newRoutes(h *recipeHandler, bh *bundleHandler) map[string]http.HandlerFunc 
 		"/v1/recipe": h.HandleRecipes,
 		"/v1/query":  h.HandleQuery,
 		"/v1/bundle": bh.HandleBundles,
-		"/v2/recipe": h.HandleRecipesV2,
-		"/v2/query":  h.HandleQueryV2,
-		"/v2/bundle": bh.HandleBundlesV2,
 	}
 }
 

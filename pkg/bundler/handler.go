@@ -383,7 +383,9 @@ func parseQueryParams(r *http.Request) (*bundleParams, error) {
 		return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest, "Invalid accelerated-node-toleration", err)
 	}
 
-	params.draEvictionNodeLabel = config.DefaultDRAEvictionNodeLabel()
+	// Absent means the DRA eviction contract was not requested: AICR then
+	// injects neither half (issue #2469). Presence is the opt-in, matching
+	// the CLI's --dra-eviction-node-label.
 	if query.Has(bundleQueryDRAEvictionNodeLabel) {
 		params.draEvictionNodeLabel, err = config.ParseNodeLabel(query.Get(bundleQueryDRAEvictionNodeLabel))
 		if err != nil {

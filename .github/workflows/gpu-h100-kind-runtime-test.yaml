@@ -85,16 +85,6 @@ jobs:
           control_plane_resource_patches: 'true'
           control_plane_leader_election_tuning: 'true'
 
-      - name: Label nodes for the DRA kubelet plugin
-        shell: bash
-        env:
-          DRA_EVICTION_NODE_LABEL: nvidia.com/dra-kubelet-plugin=true
-        run: >-
-          kubectl label nodes
-          --selector='!node-role.kubernetes.io/control-plane'
-          "${DRA_EVICTION_NODE_LABEL}"
-          --overwrite
-
       - name: Build AICR CLI
         timeout-minutes: 10
         uses: ./.github/actions/aicr-build

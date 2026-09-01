@@ -79,6 +79,9 @@ func TestMake_DRAIntegration_GeneratedArtifactParity(t *testing.T) {
 			cfg := config.NewConfig(
 				config.WithDeployer(tc.deployer),
 				config.WithVersion("v1.0.0"),
+				// The eviction contract is opt-in (#2469); these parity tests
+				// assert the rendered contract, so they configure the label.
+				config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()),
 			)
 			b, err := New(WithConfig(cfg))
 			if err != nil {
@@ -197,6 +200,9 @@ func TestMake_DRAIntegration_AllDeployersCarryDerivedValues(t *testing.T) {
 			cfg := config.NewConfig(
 				config.WithDeployer(tc.deployer),
 				config.WithVersion("v1.0.0"),
+				// The eviction contract is opt-in (#2469); these parity tests
+				// assert the rendered contract, so they configure the label.
+				config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()),
 			)
 			b, err := New(WithConfig(cfg))
 			if err != nil {

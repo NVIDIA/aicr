@@ -398,6 +398,16 @@ with a warning first, remove it only after the window, and add an entry to
 [`docs/user/deprecations.md`](../user/deprecations.md). Regenerate the golden
 only once the removal is actually due.
 
+**Framework-injected surface is covered separately.** `renderSurface` walks
+`RootCommand()`, which is the tree *before* urfave performs setup, so the
+`completion` command, its four shell subcommands, `--help`, and root
+`--version` never reach the golden. Rendering post-setup is not an option:
+urfave's setup functions are unexported, so reaching them means calling `Run`,
+which mutates parsed state on the instance (see the comment at
+`pkg/cli/root.go:64`) and would bake that state into a committed baseline.
+`pkg/cli/injected_surface_test.go` asserts that surface behaviorally instead —
+that the commands actually run, not that a golden line exists.
+
 Usage strings are deliberately not pinned. They are prose, they change for good
 reasons, and including them would make the gate fail on every wording fix — the
 fastest way to train everyone to run `-update` without reading the diff.

@@ -17,6 +17,8 @@ package config
 import (
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
+
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -220,12 +222,23 @@ func TestDRAEvictionNodeLabel(t *testing.T) {
 		})
 	}
 
-	defaultLabel := NewConfig().DRAEvictionNodeLabel()
-	if want := DefaultDRAEvictionNodeLabel(); defaultLabel != want {
-		t.Errorf("default DRA eviction label = %+v, want %+v", defaultLabel, want)
+	// The DRA eviction contract is opt-in (#2469): an unconfigured Config
+	// yields the zero label, which the bundler reads as "not requested".
+	if got := NewConfig().DRAEvictionNodeLabel(); got != (NodeLabel{}) {
+		t.Errorf("unconfigured DRA eviction label = %+v, want zero (opt-in)", got)
 	}
-	if got := NewConfig(WithDRAEvictionNodeLabel(NodeLabel{})).DRAEvictionNodeLabel(); got != defaultLabel {
-		t.Errorf("zero DRA eviction label should preserve default: got %+v, want %+v", got, defaultLabel)
+	if got := NewConfig(WithDRAEvictionNodeLabel(NodeLabel{})).DRAEvictionNodeLabel(); got != (NodeLabel{}) {
+		t.Errorf("zero DRA eviction label should stay unset: got %+v, want zero", got)
+	}
+	want := DefaultDRAEvictionNodeLabel()
+	if got := NewConfig(WithDRAEvictionNodeLabel(want)).DRAEvictionNodeLabel(); got != want {
+		t.Errorf("configured DRA eviction label = %+v, want %+v", got, want)
+	}
+	// The documented default is still what the opt-in uses when a caller asks
+	// for it by name.
+	if want.Key != defaults.DRAEvictionNodeLabelKey || want.Value != defaults.DRAEvictionNodeLabelValue {
+		t.Errorf("DefaultDRAEvictionNodeLabel() = %+v, want %s=%s",
+			want, defaults.DRAEvictionNodeLabelKey, defaults.DRAEvictionNodeLabelValue)
 	}
 }
 

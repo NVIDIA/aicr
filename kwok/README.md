@@ -231,6 +231,24 @@ Manual trigger:
 gh workflow run kwok-recipes.yaml -f recipe=your-recipe-name
 ```
 
+### Public image cache
+
+The lanes need two images from public registries — the in-cluster OCI registry and, for the `*-git` deployers, Gitea. Both are pinned in `.settings.yaml` under `testing_tools`.
+
+A full Tier 3 run fans out to well over a hundred concurrent jobs, and a job that pulls these itself competes with every sibling for the same per-IP quota at the registry: 127 jobs pulling at once reliably gets one or two shed, which reddens the run with nothing wrong in the repo (#2483). So CI pulls each image exactly once, in the `prime-images` job, and carries it to the matrix as a tarball in `actions/cache`. Each test job loads from that tarball, and `preload_image` then finds the image already in the host Docker cache and never contacts the registry.
+
+`kwok/scripts/lib/image-cache.sh` owns both ends, so the priming job and the test jobs derive the cache key from the same code:
+
+```bash
+bash kwok/scripts/lib/image-cache.sh settings .settings.yaml   # resolve pins + keys
+bash kwok/scripts/lib/image-cache.sh save <dir> <image>        # pull once, write the tarball
+bash kwok/scripts/lib/image-cache.sh load <dir> <image>        # restore it into Docker
+```
+
+Priming is a hard gate: if an image is genuinely unreachable, the run fails there rather than in every lane. Loading is best effort — a cache miss falls back to `preload_image`'s pull, and the kubelet pull behind that, so a cold cache degrades to the old behavior instead of failing.
+
+Local runs (`make kwok-test-all`) do not use the cache; they pull through `preload_image` as before.
+
 ## Troubleshooting
 
 **Pods stuck Pending** — check tolerations and node selectors:

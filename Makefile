@@ -81,12 +81,14 @@ generate-validator: ## Generate scaffolding for a new check or constraint valida
 # Code Formatting & Dependencies
 # =============================================================================
 
+# Deliberately does NOT run `notices`. THIRD_PARTY_NOTICES.md is generated at
+# release time (see the `release` target) and is not tracked, so regenerating it
+# here would add ~2m20s to every tidy to produce an ignored file.
 .PHONY: tidy
-tidy: ## Formats code, updates Go module dependencies, and regenerates third-party notices
+tidy: ## Formats code and updates Go module dependencies
 	@set -e; \
 	go fmt ./...; \
-	go mod tidy; \
-	$(MAKE) notices
+	go mod tidy
 
 .PHONY: fmt-check
 fmt-check: ## Checks if code is formatted (CI-friendly, no modifications)
@@ -363,8 +365,85 @@ scan: ## Scans for vulnerabilities with grype
 api-diff: ## Checks pkg/client/v1 and transparent-alias target compatibility against the latest stable release
 	@bash tools/api-diff
 
+.PHONY: bundle-layout-baseline
+bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the frozen layout
+	@printf '%s\n' "Regenerating pkg/bundler/testdata/layout/manifests/ from the fixture recipe." \
+		"A removed path is a broken promise to integrator automation -- read the diff."
+# Every manifest is rendered under $$tmp first and copied over the committed
+# files only after all five deployers succeed. Writing them in place meant a
+# failure partway left a mixed old/new baseline set, which is worse than no
+# refresh: the manifests would disagree with each other and with the bundler.
+#
+# The enumeration is deliberately not a pipeline. A shell pipeline exits with
+# the status of its LAST stage, so `find ... | sed | sort` reports success even
+# when find fails, and set -e never fires -- the target would commit a
+# truncated manifest. That fails open in the worst direction: paths missing
+# from a manifest read as additions, which this gate allows, so those paths
+# silently lose removal protection. pipefail would fix it but is not portable
+# to /bin/sh (dash lacks it), so each stage is a separate simple command that
+# set -e can catch.
+	@set -e; tmp=$$(mktemp -d); \
+	  trap 'rm -rf "$$tmp"' EXIT; \
+	  for d in helm argocd argocd-helm flux helmfile; do \
+	    GOFLAGS="-mod=readonly" go run ./cmd/aicr bundle \
+	      -r pkg/bundler/testdata/layout/recipe.yaml \
+	      --deployer "$$d" -o "$$tmp/bundle-$$d" >/dev/null; \
+	    ( cd "$$tmp/bundle-$$d" && find . -type f > "$$tmp/raw-$$d.txt" ); \
+	    sed 's|^\./||' "$$tmp/raw-$$d.txt" > "$$tmp/rel-$$d.txt"; \
+	    LC_ALL=C sort "$$tmp/rel-$$d.txt" > "$$tmp/$$d.txt"; \
+	  done; \
+	  for d in helm argocd argocd-helm flux helmfile; do \
+	    cp "$$tmp/$$d.txt" pkg/bundler/testdata/layout/manifests/"$$d".txt; \
+	  done
+	@echo "Bundle layout manifests updated."
+
+.PHONY: schemas
+schemas: ## Regenerates the committed artifact JSON Schemas from the Go types
+	@GOFLAGS="-mod=readonly" go run ./tools/schemagen
+	@echo "Artifact schemas regenerated. Review the diff before committing."
+
+.PHONY: schema-baseline
+schema-baseline: schemas ## Accepts the current artifact schemas as the frozen contract
+	@printf '%s\n' "Accepting the current artifact schemas as the frozen contract." \
+		"Every difference below becomes part of the v1 surface -- read the diff."
+	@rm -rf api/aicr/v1/schemas/baseline
+	@mkdir -p api/aicr/v1/schemas/baseline
+	@cp api/aicr/v1/schemas/*.schema.json api/aicr/v1/schemas/baseline/
+	@echo "Schema baseline updated."
+
+.PHONY: openapi-diff
+openapi-diff: ## Checks the REST contract in api/aicr/v1/server.yaml against its committed baseline
+	@bash tools/openapi-diff
+
+.PHONY: openapi-baseline
+openapi-baseline: ## Accepts the current REST spec as the frozen contract (regenerates the baseline)
+	@printf '%s\n' "Regenerating api/aicr/v1/server.baseline.yaml from api/aicr/v1/server.yaml." \
+		"This accepts every current difference into the frozen contract, so the" \
+		"resulting diff is the change under review -- read it before committing."
+# The header is taken from the existing baseline rather than a hardcoded line
+# count, so editing the explanatory comment cannot make regeneration lossy. The
+# spec's own license header is dropped because the baseline carries its own.
+	@awk '/^[^#]/ && NF {exit} {print}' api/aicr/v1/server.baseline.yaml \
+		> api/aicr/v1/server.baseline.yaml.tmp
+	@awk 'p {print} /^openapi:/ && !p {p=1; print} END {exit !p}' api/aicr/v1/server.yaml \
+		>> api/aicr/v1/server.baseline.yaml.tmp \
+		|| { rm -f api/aicr/v1/server.baseline.yaml.tmp; \
+		     echo "ERROR: no 'openapi:' key in api/aicr/v1/server.yaml; refusing to write a header-only baseline" >&2; \
+		     exit 1; }
+# The openapi: guard above proves a marker exists, not that the result is a
+# document oasdiff can read. Validate with the actual consumer -- a self-diff
+# loads and parses the file -- so a spec that is malformed below that line
+# cannot replace the committed baseline.
+	@oasdiff breaking api/aicr/v1/server.baseline.yaml.tmp \
+		api/aicr/v1/server.baseline.yaml.tmp >/dev/null 2>&1 \
+		|| { rm -f api/aicr/v1/server.baseline.yaml.tmp; \
+		     echo "ERROR: generated baseline is not a document oasdiff can load; refusing to replace the committed baseline" >&2; \
+		     exit 1; }
+	@mv api/aicr/v1/server.baseline.yaml.tmp api/aicr/v1/server.baseline.yaml
+	@echo "Baseline updated."
+
 .PHONY: qualify
-qualify: test-coverage lint tuning-check coverage-check e2e scan license-check api-diff ## Qualifies the codebase (test-coverage, lint, tuning-check, coverage-check, e2e, scan, API compatibility)
+qualify: test-coverage lint tuning-check coverage-check e2e scan license-check api-diff openapi-diff ## Qualifies the codebase (test-coverage, lint, tuning-check, coverage-check, e2e, scan, SDK and REST API compatibility)
 	@echo "Codebase qualification completed"
 
 .PHONY: bom
@@ -749,19 +828,22 @@ python-licenses: ## Refreshes the committed Python license section for the aiper
 notices: ## Generates THIRD_PARTY_NOTICES.md aggregating every dependency's license
 	@bash tools/generate-notices
 
-.PHONY: notices-check
-notices-check: ## Verifies THIRD_PARTY_NOTICES.md is up to date (run by the merge-gate on dependency changes)
-	@set -e; \
-	$(MAKE) notices; \
-	if ! git diff --quiet -- THIRD_PARTY_NOTICES.md; then \
-	   echo "ERROR: THIRD_PARTY_NOTICES.md is stale. Run 'make notices' and commit the change." >&2; \
-	   git --no-pager diff --stat -- THIRD_PARTY_NOTICES.md >&2; \
-	   exit 1; \
-	fi; \
-	echo "THIRD_PARTY_NOTICES.md is up to date"
-
+# `notices` is a prerequisite so the THIRD_PARTY_NOTICES.md that goreleaser
+# attaches is generated from the tag being released, not inherited from whatever
+# happened to be committed. OSRB requires the notices published with a release to
+# match that release; nothing requires the source tree to be current between
+# releases, so this is the only place the guarantee has to hold.
+#
+# .goreleaser.yaml's release.extra_files globs the file from the repo root, and
+# --clean only wipes dist/, so it survives the run.
+#
+# The file is gitignored, so regenerating it leaves the tree clean and
+# goreleaser's dirty-state validation is unaffected. That is why it must stay
+# untracked: were it tracked, a regeneration that differed from the committed
+# copy would abort the release with "git is currently in a dirty state", which
+# names neither the file nor the cause.
 .PHONY: release
-release: ## Runs the full release process with goreleaser
+release: notices ## Runs the full release process with goreleaser (regenerates THIRD_PARTY_NOTICES.md first)
 	@set -e; \
 	goreleaser release --clean --config .goreleaser.yaml --fail-fast --timeout 60m0s
 
@@ -1187,8 +1269,7 @@ help-full: ## Displays commands grouped by category
 	@echo "\033[1m=== Build & Release ===\033[0m"
 	@echo "  make build          Build binaries for current OS/arch"
 	@echo "  make image          Build and push container image"
-	@echo "  make notices        Generate THIRD_PARTY_NOTICES.md from Go deps"
-	@echo "  make notices-check  Verify THIRD_PARTY_NOTICES.md is up to date"
+	@echo "  make notices        Generate THIRD_PARTY_NOTICES.md from Go deps (untracked; made by 'make release')"
 	@echo "  make release        Full release with goreleaser"
 	@echo "  make bump-rc        Tag RC pre-release (v1.2.3 -> v1.3.0-rc1)"
 	@echo "  make bump-promote   Promote RC to stable (TAG=v1.2.4-rc1)"

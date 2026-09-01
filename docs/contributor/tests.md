@@ -484,6 +484,17 @@ half of the pipeline and skips deploy-side assertions.
 - `e2e` — the end-to-end pipeline runner.
 - `scan` — Grype vulnerability scan.
 - `license-check` — license header / dependency-license sweep.
+- bundle layout — `TestBundleLayoutMatchesManifest` renders the frozen fixture
+  recipe through every deployer and compares the tree to
+  `pkg/bundler/testdata/layout/manifests/`. A removed or renamed path fails; an
+  added one is additive. See
+  [Bundle layout](../user/bundling.md#bundle-layout).
+- artifact schemas — `tools/schemagen` tests gate freshness, real-artifact
+  validity, and breaking changes against `api/aicr/v1/schemas/baseline/`. See
+  [API server](api-server.md#artifact-schema-gate).
+- `openapi-diff` — the REST contract in `api/aicr/v1/server.yaml` against its
+  committed baseline, failing on unacknowledged breaking changes and on stale
+  acknowledgements. See [API server](api-server.md#rest-contract-gate).
 - `api-diff` — exported `pkg/client/v1` compatibility, including the scoped
   repository-local type closure reachable through transparent aliases, against
   the latest stable release.
@@ -581,15 +592,16 @@ token or a dependency on Fern's service at merge time.
   re-render comparison) is its **opt-in** blocking check, and the weekly
   BOM-refresh workflow auto-detects it and opens a PR. So run
   `make bom-docs` locally any time the change touches charts.
-- **Forgetting `make notices`** after a `go.mod` or `go.sum` change.
+- **Assuming `make notices` is needed** after a `go.mod` or `go.sum` change.
   `THIRD_PARTY_NOTICES.md` is the union of every redistributed
   dependency's license across the released OS/arch matrix
   (linux+darwin × amd64+arm64), so a dependency-graph change can add or
-  drop entries. `make tidy` regenerates the file as its last step, so the
-  normal dependency-update flow keeps it fresh with nothing to remember —
-  but if you edit `go.mod` by hand, run `make notices` yourself. The
-  `notices-freshness` merge-gate job regenerates the file and fails CI if
-  the committed copy is stale.
+  drop entries. The file is not committed — `make release` regenerates it
+  from the tag being released and goreleaser uploads it — so there is
+  nothing to keep fresh and nothing to remember after a dependency bump.
+  The `notices-generator` merge-gate job runs the generator on dependency
+  changes and fails CI if it cannot complete, so a break surfaces on the
+  PR that causes it instead of blocking a release at tag time.
 - **Forgetting `make python-licenses`** after editing
   `validators/performance/requirements.txt`. The notices file also covers
   the Python closure installed into the `aiperf-bench` image, but that
@@ -601,7 +613,7 @@ token or a dependency on Fern's service at merge time.
   then folds it in. The fragment records the sha256 of the requirements
   file it came from, and `make notices` fails closed when that no longer
   matches, so any edit without a refresh is caught by the same
-  `notices-freshness` job rather than shipping stale attributions.
+  `notices-generator` job rather than shipping stale attributions.
   The generator sets a fixed platform matrix and `LC_ALL=C`, so
   `make notices` produces byte-identical output on macOS and Linux.
 - **Coverage decrease > 0.5%** is flagged for justification (the project-wide

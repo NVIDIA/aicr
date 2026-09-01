@@ -23,6 +23,7 @@ import (
 	"time"
 
 	protobundle "github.com/sigstore/protobuf-specs/gen/pb-go/bundle/v1"
+	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/sign"
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -59,6 +60,16 @@ type SignOptions struct {
 	// way to target Rekor v2 — the endpoint set is Sigstore-maintained and nothing
 	// is hardcoded. Ignored when SigningConfigPath is set. See #1650.
 	UseTUFSigningConfig bool
+
+	// SigningConfig is an already-parsed signing config that takes precedence
+	// over all three fields above.
+	//
+	// It exists for callers that must INSPECT a config before signing with it:
+	// Client.SignCatalog rejects a config naming non-public-good endpoints, and
+	// re-loading from SigningConfigPath afterwards would sign against whatever
+	// the file holds at that later moment, not what was validated. Passing the
+	// parsed config makes the checked bytes and the used bytes the same bytes.
+	SigningConfig *root.SigningConfig
 }
 
 // SignOptionsFromResolve maps a resolved OIDC token plus the signing-target
@@ -75,6 +86,7 @@ func SignOptionsFromResolve(token string, o ResolveOptions) SignOptions {
 		RekorURL:            o.RekorURL,
 		SigningConfigPath:   o.SigningConfigPath,
 		UseTUFSigningConfig: o.UseTUFSigningConfig,
+		SigningConfig:       o.SigningConfig,
 	}
 }
 
@@ -146,6 +158,10 @@ func SignStatement(ctx context.Context, statementJSON []byte, opts SignOptions) 
 // fetch the v2 path may perform on a cold cache.
 func transparencyForOptions(ctx context.Context, opts SignOptions) (TransparencyPolicy, error) {
 	switch {
+	case opts.SigningConfig != nil:
+		// First, ahead of the path: when a caller validated a config it must be
+		// the one signed with, not a re-read of the same path.
+		return NewSigningConfigPolicy(opts.SigningConfig)
 	case opts.SigningConfigPath != "":
 		return NewSigningConfigPolicyFromPath(opts.SigningConfigPath)
 	case opts.UseTUFSigningConfig:

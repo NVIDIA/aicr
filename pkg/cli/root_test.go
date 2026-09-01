@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -43,11 +44,11 @@ func TestDefaultAgentImage(t *testing.T) {
 		version  string
 		expected string
 	}{
-		{"dev build", "dev", agentImageBase + ":latest"},
-		{"snapshot with v prefix", "v0.8.10-next", agentImageBase + ":latest"},
-		{"snapshot without v prefix", "0.8.10-next", agentImageBase + ":latest"},
-		{"release without v prefix", "0.8.10", agentImageBase + ":v0.8.10"},
-		{"release with v prefix", "v0.8.10", agentImageBase + ":v0.8.10"},
+		{"dev build", "dev", defaults.AgentImageRepository + ":latest"},
+		{"snapshot with v prefix", "v0.8.10-next", defaults.AgentImageRepository + ":latest"},
+		{"snapshot without v prefix", "0.8.10-next", defaults.AgentImageRepository + ":latest"},
+		{"release without v prefix", "0.8.10", defaults.AgentImageRepository + ":v0.8.10"},
+		{"release with v prefix", "v0.8.10", defaults.AgentImageRepository + ":v0.8.10"},
 	}
 
 	for _, tt := range tests {

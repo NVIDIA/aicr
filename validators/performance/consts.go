@@ -17,6 +17,7 @@ package main
 // Cross-file string constants for the performance validator.
 const (
 	apiGroupAPIExtensions    = "apiextensions.k8s.io"
+	apiGroupApps             = "apps"
 	resourceCRDs             = "customresourcedefinitions"
 	versionV1alpha1          = "v1alpha1"
 	versionV1beta1           = "v1beta1"

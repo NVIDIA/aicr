@@ -106,7 +106,7 @@ gcloud container node-pools create POOL_NAME \
   --node-locations=ZONE \
   --num-nodes=1 \
   --machine-type=a3-highgpu-8g \
-  --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=default
+  --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=default \
 ```
 
 Two flags deserve care:
@@ -328,7 +328,7 @@ the label lands, the DaemonSet controller reconciles asynchronously and evicts
 GKE's managed plugin pods from the labeled nodes, so allow a short delay (pods
 may show `Terminating` at first) before reading the checks below as failures.
 
-Verify all three parts of the result — every GPU node shows the label, GKE's
+Verify all three parts of the result — every GPU node shows both labels, GKE's
 managed plugin pods (kube-system, `k8s-app=nvidia-gpu-device-plugin`) are gone
 from those nodes, and the GPU Operator's plugin has actually taken ownership
 (its device-plugin pods are Running and every GPU node reports non-zero
@@ -377,6 +377,36 @@ pre-existing object. To migrate: delete the hand-applied DaemonSet,
 regenerate with `--profile gpuStack=bundle-installer`, and deploy the
 bundle. Nodes with a loaded driver are untouched (the installer's fast path
 skips them); the bundle takes over provisioning for new and rebooted nodes.
+
+## DRA kubelet plugin node labels are not required on GKE
+
+DRA eviction coordination is opt-in, and by default it does nothing on
+supported GKE recipes. Every GKE overlay is COS, and both the default and
+`gpuStack=bundle-installer` profiles keep GPU Operator's `driver.enabled=false`
+— `bundle-installer` provisions the driver through a separate
+`gcp-driver-installer` DaemonSet, not a GPU Operator driver pod. With no GPU
+Operator driver pod there is no Driver Manager to coordinate with.
+
+So bundles generated for GKE add no eviction node selector, and the DRA kubelet
+plugin runs on every accelerated node with no extra label. Nothing in the node
+pool commands below needs `nvidia.com/dra-kubelet-plugin`.
+
+If you opt in anyway, AICR renders the selector and every GPU node must carry
+the **same `key=value` pair** you passed, set in the node pool definition:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
+  --output bundle
+
+gcloud container node-pools create <pool> --cluster <cluster> \
+  --node-labels="nvidia.com/dra-kubelet-plugin=true"
+```
+
+See [DRA Driver Upgrade Eviction](../user/cli-reference.md#dra-driver-upgrade-eviction).
+This applies to existing clusters too — adding the selector during an
+upgrade removes a plugin that was previously working.
+See [Prepare DRA nodes when opting in to eviction coordination](../user/bundling.md#prepare-dra-nodes-when-opting-in-to-eviction-coordination).
 
 ## Troubleshooting
 

@@ -88,6 +88,12 @@ get_tool_metadata() {
         apidiff)
             echo "apidiff:::go_binary_module_version \"\$(command -v apidiff)\" golang.org/x/exp:::strict_exact"
             ;;
+        oasdiff)
+            # `oasdiff --version` reports "main" when installed with go install,
+            # so the module version recorded in the binary is the only reliable
+            # source.
+            echo "oasdiff:::go_binary_module_version \"\$(command -v oasdiff)\" github.com/oasdiff/oasdiff:::strict_exact"
+            ;;
         yamllint)
             echo "yamllint:::yamllint --version 2>/dev/null | awk '{print \$2}':::major"
             ;;
