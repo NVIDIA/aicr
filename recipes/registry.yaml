@@ -761,6 +761,27 @@ components:
         tolerationPaths:
           - acceleratedTolerations
 
+  - name: nvcre
+    displayName: Cluster Readiness Engine
+    ownsCRDs: true
+    valueOverrideKeys:
+      - nvcre
+      - cre
+    healthCheck:
+      assertFile: checks/nvcre/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/nvidia
+      defaultChart: cluster-readiness-engine
+      defaultVersion: v0.1.0
+      defaultNamespace: nvcre
+    nodeScheduling:
+      system:
+        # Chart v0.1.0 has no manager.nodeSelector; manager.tolerations
+        # default to operator: Exists. Injecting extra keyed taints is still
+        # useful when the CLI passes --system-node-toleration.
+        tolerationPaths:
+          - manager.tolerations
+
   - name: slinky-slurm-operator-crds
     displayName: slinky-slurm-operator-crds
     valueOverrideKeys:
