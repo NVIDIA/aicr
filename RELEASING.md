@@ -230,6 +230,26 @@ make bump-rc                         # v1.3.0-rc1 → v1.3.0-rc2
 make bump-promote TAG=v1.3.0-rc2    # → v1.3.0 on same commit
 ```
 
+**One-time check on the first RC after the notices change.**
+`THIRD_PARTY_NOTICES.md` is no longer committed — `make release` regenerates it
+from the tag being released and goreleaser uploads it. An RC runs the same
+`on-tag.yaml` → `go-build-release` → `make release` path as a stable release
+(the `Build and Release` step is not gated on `is_prerelease`), so the first RC
+is where that path is proven. Confirm the release job's output matches a local
+run:
+
+```bash
+gh release download vX.Y.Z-rc1 -p THIRD_PARTY_NOTICES.md -D /tmp/rc
+make notices
+diff /tmp/rc/THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.md
+```
+
+Identical output confirms both that the asset was attached and that generation
+is host-independent, which is what the generator's fixed platform matrix and
+`LC_ALL=C` sort exist to guarantee. A missing asset means the `extra_files` glob
+found nothing; a diff means generation is not reproducible and the release
+should not be promoted until it is understood.
+
 Pre-releases exercise the full build/test/scan/attest pipeline. After those
 gates pass, their version aliases are promoted to the exact candidate digests,
 but they do not update:
@@ -362,9 +382,11 @@ Every release includes:
   module cache means it fetches. The Go half
   is the union of the dependency graph across every released OS/arch
   target, generated deterministically so it is byte-identical on macOS and
-  Linux; the `notices-freshness` merge-gate job fails any PR whose
-  dependency changes leave the committed file stale (run `make notices`
-  and commit)
+  Linux. The file is not committed: `make release` depends on `make
+  notices`, so it is regenerated from the tag being released and uploaded
+  by goreleaser's `release.extra_files`. The `notices-generator`
+  merge-gate job runs the generator on dependency changes so a break
+  surfaces on that PR rather than blocking a release at tag time
 
 ## Versioning
 
