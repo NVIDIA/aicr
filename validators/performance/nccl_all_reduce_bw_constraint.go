@@ -1243,7 +1243,10 @@ func applyTrainJobWithRetry(ctx context.Context, dynamicClient dynamic.Interface
 	attempt := 0
 	for {
 		attempt++
-		createErr := createUnstructured(retryCtx, dynamicClient, trainJobGVR, namespace, obj)
+		// ctx, not retryCtx, so the reclaim wait inside createUnstructured
+		// gets its own NCCLResourceRecreateWait budget instead of retryCtx's
+		// shorter one. The retry loop itself still stays bounded below.
+		createErr := createUnstructured(ctx, dynamicClient, trainJobGVR, namespace, obj)
 		if createErr == nil {
 			if attempt > 1 {
 				slog.Info("TrainJob created after Trainer webhook cache caught up to the TrainingRuntime",
