@@ -747,7 +747,9 @@ func TestRunNCCLTrainJob_RefusesLiveForeignNamespace(t *testing.T) {
 	ns := ncclRunNamespace(variantDefault)
 
 	clientset := fake.NewClientset(
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{
+			labels.ManagedBy: labels.ValueValidator, labels.Component: labels.ValueNCCLPerf,
+		}}},
 		&corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{Name: "launcher-0", Namespace: ns},
 			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
