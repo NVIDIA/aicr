@@ -492,7 +492,14 @@ unset STUB_PULL_SILENT_FAIL
 #     already while writing this fix.
 reset
 export STUB_INSPECT_RC=0     # image IS present
-export STUB_INSPECT_SLOW=7   # slower than the 5s floor, well inside the budget
+#     6 is the cheapest value that still proves the point: it must exceed the
+#     5s floor (or a capped-at-floor probe would survive and the case would
+#     stop discriminating), and the image being present means preload_pull_retry
+#     pays it twice -- once for the in-loop preload_have_image that breaks
+#     immediately, once for the final preload_image_cached. So ~2*
+#     STUB_INSPECT_SLOW is the floor on this case's wall-clock, and 6 is as low
+#     as it goes without weakening the guard.
+export STUB_INSPECT_SLOW=6
 out=$(preload_pull_retry "${IMG}" "$(( $(date +%s) + 25 ))" 2>&1); rc=$?
 check "slow-but-responsive-probe-is-a-hit" 0 "${rc}"
 if [[ "${out}" == *"is not cached"* ]]; then

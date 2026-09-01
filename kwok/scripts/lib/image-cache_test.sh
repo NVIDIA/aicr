@@ -440,9 +440,19 @@ printf 'tarball-bytes' > "$(image_cache_file "${CACHE_DIR}" "${IMG}")"
 #      load == that timeout the load is killed instead of completing, and the
 #      case fails intermittently on the load-failed branch without ever
 #      reaching the probe it exists to test.
-export STUB_LOAD_SLOW=1      # exits 0 with >=1s to spare inside its timeout
-export STUB_INSPECT_SLOW=3   # exceeds any leftover budget, inside the 5s probe
-export KWOK_IMAGE_CACHE_BUDGET_SECONDS=3
+#      Two inequalities have to hold at once, and they pull in opposite
+#      directions:
+#        leftover-after-load < STUB_INSPECT_SLOW   keeps this a REGRESSION test
+#          -- a pre-fix deadline-bound probe must die. Raise the budget too far
+#          and the old probe completes too, so the case passes against the buggy
+#          code and silently stops guarding anything.
+#        STUB_INSPECT_SLOW <= 5                    keeps the FIXED code passing
+#          -- the floored probe must be able to finish.
+#      Budget 4 buys the load a ~3s margin against its 1s sleep (was ~2s) while
+#      leaving ~2-3s leftover, still under STUB_INSPECT_SLOW.
+export STUB_LOAD_SLOW=1      # exits 0 with >=3s to spare inside its timeout
+export STUB_INSPECT_SLOW=4   # exceeds any leftover budget, inside the 5s probe
+export KWOK_IMAGE_CACHE_BUDGET_SECONDS=4
 out=$(image_cache_load "${CACHE_DIR}" "${IMG}" 2>&1); rc=$?
 check_rc "load-then-slow-probe-still-succeeds" 0 "${rc}"
 if [[ "${out}" == *"still not present"* ]]; then
