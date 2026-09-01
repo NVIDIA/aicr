@@ -23,6 +23,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -31,76 +32,46 @@ import (
 )
 
 const (
-	creAPIGroup       = "excalibur.nvidia.com"
-	creNCCLRunName    = "aicr-cre-nccl"
-	creLogProfileNCCL = "nccl-bandwidth"
+	creAPIGroup    = "nvcre.nvidia.com"
+	creNCCLRunName = "aicr-cre-nccl"
 )
 
 var (
 	workloadRunGVR = schema.GroupVersionResource{
 		Group: creAPIGroup, Version: versionV1alpha1, Resource: "workloadruns",
 	}
+	certificationGVR = schema.GroupVersionResource{
+		Group: creAPIGroup, Version: versionV1alpha1, Resource: "certifications",
+	}
 	bandwidthMeasurementGVR = schema.GroupVersionResource{
 		Group: creAPIGroup, Version: versionV1alpha1, Resource: "bandwidthmeasurements",
 	}
 )
 
-func buildCRENCCLWorkloadRun(namespace string, gpuConfig *gpuConfiguration, nodeSelector map[string]string) *unstructured.Unstructured {
-	profile := creEKSH100EFAProfile()
-
-	env := make([]any, 0, len(profile.env))
-	envKeys := make([]string, 0, len(profile.env))
-	for k := range profile.env {
-		envKeys = append(envKeys, k)
-	}
-	sort.Strings(envKeys)
-	for _, k := range envKeys {
-		env = append(env, map[string]any{"name": k, "value": profile.env[k]})
-	}
-
+func buildCRENCCLCertification(namespace string, gpuConfig *gpuConfiguration, nodeSelector map[string]string) *unstructured.Unstructured {
 	spec := map[string]any{
-		"image":       profile.image,
-		"numNodes":    int64(gpuConfig.WorkerCount),
-		"gpusPerNode": int64(gpuConfig.GPUCountPerNode),
-		"enableMNNVL": false,
-		"framework": map[string]any{
-			"mpi": map[string]any{
-				"binary":     profile.binary,
-				"mpirunPath": profile.mpirunPath,
-				"args": []any{
-					"-b", "8",
-					"-e", "16G",
-					"-f", "2",
-					"-n", "100",
-					"-N", "10",
-				},
+		"categories": []any{
+			map[string]any{
+				"domain":  "communication",
+				"variant": "nccl-all-reduce",
 			},
 		},
-		"bandwidthMeasurement": map[string]any{
-			"logProfileRef":  creLogProfileNCCL,
-			"sampleInterval": "30s",
-			"testType":       "all_reduce",
-		},
-	}
-
-	if len(profile.mpiArgs) > 0 {
-		mpi := spec["framework"].(map[string]any)["mpi"].(map[string]any)
-		args := make([]any, len(profile.mpiArgs))
-		for i, a := range profile.mpiArgs {
-			args[i] = a
-		}
-		mpi["mpiArgs"] = args
-	}
-	if len(env) > 0 {
-		spec["env"] = env
-	}
-	if len(profile.extraLimits) > 0 {
-		spec["resources"] = creResourceRequirements(gpuConfig.GPUCountPerNode, profile.extraLimits)
+		"gpusPerNode": int64(gpuConfig.GPUCountPerNode),
 	}
 
 	addCRETarget(spec, gpuConfig, nodeSelector)
 
-	return newCREWorkloadRun(namespace, creNCCLRunName, spec)
+	return &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": creAPIGroup + "/" + versionV1alpha1,
+			"kind":       "Certification",
+			"metadata": map[string]any{
+				"name":      creNCCLRunName,
+				"namespace": namespace,
+			},
+			"spec": spec,
+		},
+	}
 }
 
 func addCRETarget(spec map[string]any, gpuConfig *gpuConfiguration, nodeSelector map[string]string) {
@@ -114,9 +85,64 @@ func addCRETarget(spec map[string]any, gpuConfig *gpuConfiguration, nodeSelector
 		}
 		target["nodeNames"] = names
 	}
+	// Intersect NoSchedule/NoExecute taints so CRE can select the intended
+	// GPU nodes and inject matching tolerations.
+	if sels := commonNodeTaintSelectors(gpuConfig.Nodes); len(sels) > 0 {
+		target["taintSelectors"] = sels
+	}
 	if len(target) > 0 {
 		spec["target"] = target
 	}
+}
+
+func taintKey(t corev1.Taint) string {
+	return string(t.Key) + "\x00" + t.Value + "\x00" + string(t.Effect)
+}
+
+func commonNodeTaintSelectors(nodes []corev1.Node) []any {
+	if len(nodes) == 0 {
+		return nil
+	}
+	counts := map[string]corev1.Taint{}
+	first := true
+	for i := range nodes {
+		seen := map[string]corev1.Taint{}
+		for _, t := range nodes[i].Spec.Taints {
+			if t.Effect != corev1.TaintEffectNoSchedule && t.Effect != corev1.TaintEffectNoExecute {
+				continue
+			}
+			seen[taintKey(t)] = t
+		}
+		if first {
+			counts = seen
+			first = false
+			continue
+		}
+		for k := range counts {
+			if _, ok := seen[k]; !ok {
+				delete(counts, k)
+			}
+		}
+	}
+	if len(counts) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(counts))
+	for k := range counts {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]any, 0, len(keys))
+	for _, k := range keys {
+		t := counts[k]
+		sel := map[string]any{"key": t.Key}
+		if t.Value != "" {
+			sel["value"] = t.Value
+		}
+		sel["effect"] = string(t.Effect)
+		out = append(out, sel)
+	}
+	return out
 }
 
 func newCREWorkloadRun(namespace, name string, spec map[string]any) *unstructured.Unstructured {
@@ -205,10 +231,23 @@ func unstructuredConditionTrue(obj *unstructured.Unstructured, condType string) 
 }
 
 func waitForWorkloadRunTerminal(ctx context.Context, client dynamic.Interface, namespace, name string) (*unstructured.Unstructured, error) {
+	return waitForCRETerminal(ctx, client, workloadRunGVR, "WorkloadRun", namespace, name)
+}
+
+func waitForCertificationTerminal(ctx context.Context, client dynamic.Interface, namespace, name string) (*unstructured.Unstructured, error) {
+	return waitForCRETerminal(ctx, client, certificationGVR, "Certification", namespace, name)
+}
+
+func waitForCRETerminal(
+	ctx context.Context,
+	client dynamic.Interface,
+	gvr schema.GroupVersionResource,
+	kind, namespace, name string,
+) (*unstructured.Unstructured, error) {
 	waitCtx, cancel := context.WithTimeout(ctx, defaults.CREWorkloadRunTimeout)
 	defer cancel()
 
-	res := client.Resource(workloadRunGVR).Namespace(namespace)
+	res := client.Resource(gvr).Namespace(namespace)
 
 	if obj, err := res.Get(waitCtx, name, metav1.GetOptions{}); err == nil {
 		if unstructuredConditionTrue(obj, "Succeeded") || unstructuredConditionTrue(obj, "Failed") {
@@ -218,14 +257,14 @@ func waitForWorkloadRunTerminal(ctx context.Context, client dynamic.Interface, n
 
 	watcher, err := res.Watch(waitCtx, metav1.ListOptions{FieldSelector: "metadata.name=" + name})
 	if err != nil {
-		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to watch WorkloadRun", err)
+		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to watch "+kind, err)
 	}
 	defer watcher.Stop()
 
 	for {
 		select {
 		case <-waitCtx.Done():
-			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for WorkloadRun", waitCtx.Err())
+			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for "+kind, waitCtx.Err())
 		case event, ok := <-watcher.ResultChan():
 			if !ok {
 				obj, getErr := res.Get(waitCtx, name, metav1.GetOptions{})
@@ -233,9 +272,9 @@ func waitForWorkloadRunTerminal(ctx context.Context, client dynamic.Interface, n
 					return obj, nil
 				}
 				if waitCtx.Err() != nil {
-					return nil, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for WorkloadRun", waitCtx.Err())
+					return nil, aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for "+kind, waitCtx.Err())
 				}
-				return nil, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "WorkloadRun watch channel closed before terminal condition")
+				return nil, aicrErrors.New(aicrErrors.ErrCodeUnavailable, kind+" watch channel closed before terminal condition")
 			}
 			obj, ok := event.Object.(*unstructured.Unstructured)
 			if !ok {
@@ -248,7 +287,30 @@ func waitForWorkloadRunTerminal(ctx context.Context, client dynamic.Interface, n
 	}
 }
 
-func listMaxBusBandwidth(ctx context.Context, client dynamic.Interface, namespace, runName string, createdAt metav1.Time) (float64, error) {
+func certificationWorkflowName(obj *unstructured.Unstructured) (string, error) {
+	statuses, found, err := unstructured.NestedSlice(obj.Object, "status", "categoryStatuses")
+	if err != nil {
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read Certification category statuses", err)
+	}
+	if !found {
+		return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "Certification category statuses are empty")
+	}
+	for _, raw := range statuses {
+		status, ok := raw.(map[string]any)
+		if !ok || fmt.Sprint(status["domain"]) != "communication" ||
+			fmt.Sprint(status["variant"]) != "nccl-all-reduce" {
+			continue
+		}
+		ref, ok := status["workflowRef"].(map[string]any)
+		if !ok || fmt.Sprint(ref["name"]) == "" {
+			return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "Certification NCCL workflow reference is empty")
+		}
+		return fmt.Sprint(ref["name"]), nil
+	}
+	return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "Certification NCCL category status not found")
+}
+
+func listMaxBusBandwidth(ctx context.Context, client dynamic.Interface, namespace, workflowName string, createdAt metav1.Time) (float64, error) {
 	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
 	list, err := client.Resource(bandwidthMeasurementGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{})
@@ -258,7 +320,7 @@ func listMaxBusBandwidth(ctx context.Context, client dynamic.Interface, namespac
 	var maxBW float64
 	var found bool
 	for i := range list.Items {
-		if !measurementBelongsToRun(&list.Items[i], runName, createdAt) {
+		if !measurementBelongsToRun(&list.Items[i], workflowName, createdAt) {
 			continue
 		}
 		results, _, _ := unstructured.NestedSlice(list.Items[i].Object, "status", "results")
@@ -291,11 +353,24 @@ func measurementBelongsToRun(obj *unstructured.Unstructured, runName string, cre
 }
 
 func deleteCREWorkloadRun(ctx context.Context, client dynamic.Interface, namespace, name string) error {
+	return deleteCREResource(ctx, client, workloadRunGVR, "WorkloadRun", namespace, name)
+}
+
+func deleteCRECertification(ctx context.Context, client dynamic.Interface, namespace, name string) error {
+	return deleteCREResource(ctx, client, certificationGVR, "Certification", namespace, name)
+}
+
+func deleteCREResource(
+	ctx context.Context,
+	client dynamic.Interface,
+	gvr schema.GroupVersionResource,
+	kind, namespace, name string,
+) error {
 	delCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
-	err := client.Resource(workloadRunGVR).Namespace(namespace).Delete(delCtx, name, metav1.DeleteOptions{})
+	err := client.Resource(gvr).Namespace(namespace).Delete(delCtx, name, metav1.DeleteOptions{})
 	if err != nil && !apierrors.IsNotFound(err) {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to delete WorkloadRun", err)
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to delete "+kind, err)
 	}
 	return nil
 }
