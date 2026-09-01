@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
+	"github.com/NVIDIA/aicr/pkg/runid"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -185,6 +186,20 @@ type Deployer struct {
 	mu      sync.Mutex
 	created []createdObject
 
+	// invocationID identifies THIS Deployer, and only this one. It is
+	// generated in NewDeployer and is reachable through no field of
+	// Config, which is the entire point: Config.RunID is caller-settable
+	// and deliberately shared (`aicr validate` hands one ID to its
+	// live-capture agent and its validator Jobs), so two invocations can
+	// stamp identical run labels. This value they cannot share.
+	//
+	// It is stamped as labels.InvocationID on every object this Deployer
+	// creates and is what createdByThisInvocation requires before Cleanup
+	// adopts an object whose Create response never arrived. Written once,
+	// before the Deployer escapes NewDeployer, and never mutated, so it
+	// needs no lock.
+	invocationID string
+
 	// existingSA is the exact, operator-named ServiceAccount this run
 	// runs as instead of creating its own, or "" in prefix mode. It is
 	// resolved once by resolveServiceAccount at the top of Deploy and
@@ -198,8 +213,9 @@ type Deployer struct {
 // NewDeployer creates a new agent Deployer with the given configuration.
 func NewDeployer(clientset kubernetes.Interface, config Config) *Deployer {
 	return &Deployer{
-		clientset: clientset,
-		config:    config,
+		clientset:    clientset,
+		config:       config,
+		invocationID: runid.Generate(),
 	}
 }
 
@@ -209,12 +225,22 @@ func NewDeployer(clientset kubernetes.Interface, config Config) *Deployer {
 // call returns a fresh map so callers attaching it to two objects (e.g. a
 // Job and its pod template) never alias the same underlying map.
 func (d *Deployer) objectLabels() map[string]string {
-	return map[string]string{
+	l := map[string]string{
 		labels.Name:      labels.ValueAICR,
 		labels.ManagedBy: labels.ValueAICR,
 		labels.Component: labels.ValueSnapshotAgent,
 		labels.RunID:     d.config.RunID,
 	}
+	// Omitted rather than stamped empty when this Deployer was built as a
+	// struct literal instead of through NewDeployer (in-package tests do
+	// that). An empty value is a legal label value that proves nothing, and
+	// writing one would let two such Deployers "match" each other;
+	// createdByThisInvocation refuses an empty invocation ID for the same
+	// reason.
+	if d.invocationID != "" {
+		l[labels.InvocationID] = d.invocationID
+	}
+	return l
 }
 
 // setExistingServiceAccount records that this run uses the operator's
@@ -311,13 +337,14 @@ func (d *Deployer) recordCreated(kind, name string, uid types.UID) {
 	d.created = append(d.created, createdObject{kind: kind, name: name, uid: uid, confirmed: true})
 }
 
-// needsStagingConfigMapSweep reports whether Cleanup must look for a staging
-// ConfigMap that is not in the created-set, given that set. Both halves of
-// the answer are read from the single snapshot Cleanup already took, rather
-// than re-entering the mutex: reading the set twice would let a recordCreated
-// landing between the two reads produce a snapshot that misses the staging
-// ConfigMap while the second read reports it present, skipping both the
-// created-set delete and the sweep and leaking the object.
+// stagingSweepJob returns the CONFIRMED Job entry that licenses Cleanup to
+// look for a staging ConfigMap not in the created-set, and false when no sweep
+// is warranted. Both halves of the answer are read from the single snapshot
+// Cleanup already took, rather than re-entering the mutex: reading the set
+// twice would let a recordCreated landing between the two reads produce a
+// snapshot that misses the staging ConfigMap while the second read reports it
+// present, skipping both the created-set delete and the sweep and leaking the
+// object.
 //
 // Two conditions must hold.
 //
@@ -339,17 +366,26 @@ func (d *Deployer) recordCreated(kind, name string, uid types.UID) {
 // never came back, and the window it forfeits is empty in practice: Deploy
 // aborts the moment that Create fails and Cleanup runs seconds later, far
 // short of the time the agent needs to collect a snapshot and write it.
-func needsStagingConfigMapSweep(objs []createdObject) bool {
+//
+// The entry is returned rather than a bare bool because a confirmed Job is a
+// necessary but not sufficient condition: it says this invocation created a
+// Job at that name once, not that the Job standing there now is it. Cleanup
+// completes the proof with stillHoldsJob before sweeping anything.
+func stagingSweepJob(objs []createdObject) (createdObject, bool) {
+	var job createdObject
 	var jobConfirmed bool
 	for _, o := range objs {
 		switch o.kind {
 		case kindConfigMap:
-			return false
+			return createdObject{}, false
 		case kindJob:
-			jobConfirmed = jobConfirmed || o.confirmed
+			if o.confirmed && !jobConfirmed {
+				job = o
+				jobConfirmed = true
+			}
 		}
 	}
-	return jobConfirmed
+	return job, jobConfirmed
 }
 
 // createdSnapshot returns a defensive copy of the created-set taken under

@@ -81,6 +81,57 @@ func (d *Deployer) deleteStagingConfigMap(ctx context.Context, name string, uid 
 	return ignoreNotFoundOrConflict(err)
 }
 
+// stillHoldsJob reports whether the Job standing at job.name right now is the
+// very object this invocation created — the one whose UID its Create response
+// returned. It is the ownership evidence for the staging-ConfigMap sweep.
+//
+// The sweep needs evidence that cannot come from the object it deletes. The
+// staging ConfigMap is written by the in-pod agent through pkg/serializer's
+// ConfigMapWriter, which stamps neither aicr.run/run-id nor the
+// aicr.run/invocation-id that authorizes every other cleanup delete — and
+// cannot be made to, because the agent image may be a different aicr version
+// than this controller, so a controller requiring that label would fail closed
+// on every skewed pair and leak. The only thing tying that ConfigMap to this
+// invocation is therefore the Job whose pod wrote it.
+//
+// A confirmed Job entry alone does not carry that. It says this invocation
+// created a Job at that name at some point, not that the Job standing there
+// now is it: if this run's Job was deleted and a second invocation reusing
+// Config.RunID created its own at the same name, the ConfigMap at the shared
+// staging name is the SECOND invocation's live artifact. Because only one Job
+// can hold a name at a time, requiring the recorded UID to still be the live
+// one rules that out — the second invocation could not have created its Job
+// without this Get returning a different UID or NotFound.
+//
+// Fails closed on every other answer, warning instead of deleting: a leaked
+// ConfigMap an operator can remove beats deleting another invocation's. A zero
+// recorded UID fails closed too — a real apiserver always assigns one, so that
+// shape means the evidence is missing, not that it agrees with some other zero
+// UID.
+func (d *Deployer) stillHoldsJob(ctx context.Context, job createdObject) bool {
+	live, err := d.clientset.BatchV1().Jobs(d.config.Namespace).Get(ctx, job.name, metav1.GetOptions{})
+	// Read through the returned object only on success: a Get that failed
+	// says nothing about what stands at the name, and fake clientsets are
+	// free to pair an error with a nil object.
+	var liveUID types.UID
+	if err == nil && live != nil {
+		liveUID = live.UID
+	}
+	if job.uid != "" && liveUID == job.uid {
+		return true
+	}
+
+	slog.Warn("cleanup left behind the ConfigMap at this run's staging name: this run no longer holds the Job whose agent would have written it",
+		slog.String(attrNamespace, d.config.Namespace),
+		slog.String(attrName, d.stagingConfigMapName()),
+		slog.String("jobName", job.name),
+		slog.String("jobUID", string(job.uid)),
+		slog.String("liveJobUID", string(liveUID)),
+		slog.String(attrRunID, d.config.RunID),
+		slog.Any("error", err))
+	return false
+}
+
 // deleteUnrecordedStagingConfigMap deletes this run's staging ConfigMap when
 // the in-pod agent wrote it but the controller never observed it — the run
 // failed between the agent's write and getSnapshotFromConfigMap, so there is
@@ -91,18 +142,21 @@ func (d *Deployer) deleteStagingConfigMap(ctx context.Context, name string, uid 
 // (public SDK surface), so two runs can resolve the same staging name, and a
 // Get plus a UID-pinned delete would only prove the object did not change
 // between the two calls. Cleanup gates this call on a confirmed Job entry
-// (needsStagingConfigMapSweep) — this run cannot have produced a staging
-// ConfigMap without the Job whose in-pod agent writes it — and this function
+// (stagingSweepJob) whose Job is still the live one at its name
+// (stillHoldsJob) — this run cannot have produced a staging ConfigMap without
+// the Job whose in-pod agent writes it, and no second invocation could have
+// produced one at this name while that Job stands. This function then
 // re-checks the object it finds.
 //
 // That re-check is app.kubernetes.io/name only. The staging ConfigMap is
 // written by pkg/serializer's ConfigMapWriter from inside the pod, which
 // stamps name/component/version and — unlike objectLabels() — no
-// aicr.run/run-id and no managed-by, so createdByThisRun() does not apply to
-// it. The check still rules out an unrelated ConfigMap parked at this name, and
-// component is deliberately not required: its value is the snapshot Kind
-// written by the agent image, which may be a different aicr version than the
-// controller.
+// aicr.run/run-id, no managed-by and no aicr.run/invocation-id, so
+// createdByThisInvocation() does not apply to it and the Job gate above is
+// what carries the ownership proof. The check still rules out an unrelated
+// ConfigMap parked at this name, and component is deliberately not required:
+// its value is the snapshot Kind written by the agent image, which may be a
+// different aicr version than the controller.
 //
 // Only called from Cleanup, and only when Config.OwnsOutputConfigMap is true.
 // That flag means Output is the run-scoped staging URI pkg/snapshotter builds

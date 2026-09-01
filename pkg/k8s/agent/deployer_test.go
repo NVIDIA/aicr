@@ -32,6 +32,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/k8s/labels"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	authv1 "k8s.io/api/authorization/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	nodev1 "k8s.io/api/node/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
@@ -40,6 +41,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
@@ -919,107 +921,128 @@ func TestCleanupPassesUIDPrecondition(t *testing.T) {
 // so an entry can reach Cleanup with no UID and no Create response ever having
 // named it. The run-scoped name alone is not ownership evidence — it says what
 // this run WOULD have created, not what is standing there now — so Cleanup
-// must recover the UID from the live object and prove that object carries this
-// run's labels before deleting anything. Ownership takes both halves: a label
-// mismatch and a missing UID each refuse the delete on their own.
+// must recover the UID from the live object and prove that object was created
+// by THIS invocation before deleting anything. Ownership takes both halves: a
+// label mismatch and a missing UID each refuse the delete on their own.
 //
-// The "replaced under the same name" case is the one this replaces a bare-name
-// delete for: an object at that name with a different UID and someone else's
-// labels must survive, and the operator must be told it was left behind.
+// The sharpest row is the same-RunID replacement. Config.RunID is public,
+// caller-settable SDK surface that `aicr validate` and pinned e2e runs share
+// on purpose, so a second invocation stamps identical name, managed-by,
+// component and run-id labels — every key that scopes a run. Only
+// labels.InvocationID, generated inside NewDeployer and settable through no
+// Config field, tells the two apart, and this test is what pins that: seeding
+// the object from a twin Deployer with the same Config is exactly the sequence
+// that a label-set check without the invocation ID would adopt and delete.
 //
-// Deleting by bare name with no Preconditions would collect the replacement.
-// Passing &"" instead would be worse than useless: the apiserver would compare
-// the empty UID against the live object's real one, reject every attempt with
-// a Conflict, and ignoreNotFoundOrConflict would swallow that as success.
+// The UID precondition does not cover it. Deleting by bare name with no
+// Preconditions would collect the replacement outright, and pinning to the UID
+// this Get returned only rules out a replacement made AFTER the Get — one
+// standing there before it is simply what the Get hands back. Passing &"" for
+// a missing UID would be worse than useless: the apiserver would compare the
+// empty UID against the live object's real one, reject every attempt with a
+// Conflict, and ignoreNotFoundOrConflict would swallow that as success.
 func TestCleanupResolvesUnconfirmedEntryBeforeDeleting(t *testing.T) {
 	const ns = "test-ns"
-	d := NewDeployer(fake.NewClientset(), Config{Namespace: ns, RunID: testRunID})
-	saName := d.saName()
-	ourLabels := d.objectLabels()
-
-	// Every aicr label except the run ID. This is the shape that makes the
-	// empty-RunID guard load-bearing: objLabels[labels.RunID] is "" here, so
-	// against an empty Config.RunID the run-ID comparison SUCCEEDS ("" == "")
-	// and the other three match too. Without the guard, createdByThisRun
-	// would claim this object. A label-less seed cannot show that — it is
-	// rejected on labels.Name regardless.
-	runIDLessLabels := map[string]string{
-		labels.Name:      labels.ValueAICR,
-		labels.ManagedBy: labels.ValueAICR,
-		labels.Component: labels.ValueSnapshotAgent,
-	}
-
-	// A replacement created after this run's object was deleted: same name,
-	// different identity. Carries a foreign run's labels, which is what a
-	// second aicr run standing an object up at this name would stamp.
-	foreignLabels := map[string]string{
-		labels.Name:      labels.ValueAICR,
-		labels.ManagedBy: labels.ValueAICR,
-		labels.Component: labels.ValueSnapshotAgent,
-		labels.RunID:     "20260822-090000-0011223344556677",
-	}
+	saName := NewDeployer(fake.NewClientset(), Config{Namespace: ns, RunID: testRunID}).saName()
 
 	tests := []struct {
-		name       string
-		seed       *corev1.ServiceAccount // nil: nothing at the name
-		runID      *string                // nil: testRunID
+		name string
+		// seedLabels builds the labels of the object standing at saName.
+		// It is a function of the two Deployers rather than a literal map
+		// because the interesting cases differ ONLY in the invocation ID:
+		// run is the invocation that calls Cleanup, twin is a second
+		// invocation configured identically to it — same RunID, same
+		// names, so byte-identical run labels. noSeed leaves the name
+		// empty instead.
+		seedLabels func(run, twin *Deployer) map[string]string
+		seedUID    types.UID
+		noSeed     bool
+		runID      *string // nil: testRunID
 		wantDelete bool
 		wantUID    types.UID // expected Preconditions.UID when wantDelete
 		wantWarn   bool
 	}{
 		{
-			name: "this run's object is deleted pinned to the recovered UID",
-			seed: &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
-				Name: saName, Namespace: ns, UID: types.UID("ours-uid"), Labels: ourLabels,
-			}},
+			name:       "this invocation's object is deleted pinned to the recovered UID",
+			seedLabels: func(run, _ *Deployer) map[string]string { return run.objectLabels() },
+			seedUID:    types.UID("ours-uid"),
 			wantDelete: true,
 			wantUID:    types.UID("ours-uid"),
 		},
 		{
 			name:       "nothing at the name issues no delete",
+			noSeed:     true,
 			wantDelete: false,
 		},
 		{
-			name: "a replacement under the same name survives",
-			seed: &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
-				Name: saName, Namespace: ns, UID: types.UID("replacement-uid"), Labels: foreignLabels,
-			}},
+			// THE REGRESSION. Another invocation replaced the object at
+			// this name before Cleanup ran, and because Config.RunID is
+			// public, caller-settable SDK surface that `aicr validate`
+			// and pinned e2e runs deliberately share, its labels are
+			// identical on every key the run scoping uses: name,
+			// managed-by, component AND run-id. Only the invocation ID
+			// differs.
+			//
+			// The UID precondition cannot save this one. The entry is
+			// unconfirmed, so no UID was captured at create time; the
+			// replacement is simply what the Get returns, and the delete
+			// would be pinned to the replacement's own UID and succeed.
+			// Ownership has to be settled by the labels, before any
+			// delete is issued.
+			name:       "a same-RunID replacement from another invocation survives",
+			seedLabels: func(_, twin *Deployer) map[string]string { return twin.objectLabels() },
+			seedUID:    types.UID("replacement-uid"),
 			wantDelete: false,
 			wantWarn:   true,
 		},
 		{
-			name: "an unlabeled object under the same name survives",
-			seed: &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
-				Name: saName, Namespace: ns, UID: types.UID("operators-uid"),
-			}},
+			name: "a replacement carrying another run's ID survives",
+			seedLabels: func(_, _ *Deployer) map[string]string {
+				return map[string]string{
+					labels.Name:         labels.ValueAICR,
+					labels.ManagedBy:    labels.ValueAICR,
+					labels.Component:    labels.ValueSnapshotAgent,
+					labels.RunID:        "20260822-090000-0011223344556677",
+					labels.InvocationID: "20260822-090000-8899aabbccddeeff",
+				}
+			},
+			seedUID:    types.UID("replacement-uid"),
 			wantDelete: false,
 			wantWarn:   true,
 		},
 		{
-			// Labels alone would clear this object — they are this run's
-			// own — but a real apiserver always assigns a UID, so a
-			// missing one means the delete cannot be pinned. Refusing is
-			// the point: the fallback would be the bare-name delete this
-			// path exists to prevent.
-			name: "this run's own labels without a UID still survive",
-			seed: &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
-				Name: saName, Namespace: ns, Labels: ourLabels,
-			}},
+			name:       "an unlabeled object under the same name survives",
+			seedLabels: func(_, _ *Deployer) map[string]string { return nil },
+			seedUID:    types.UID("operators-uid"),
+			wantDelete: false,
+			wantWarn:   true,
+		},
+		{
+			// Labels alone would clear this object — they are this
+			// invocation's own — but a real apiserver always assigns a
+			// UID, so a missing one means the delete cannot be pinned.
+			// Refusing is the point: the fallback would be the bare-name
+			// delete this path exists to prevent.
+			name:       "this invocation's own labels without a UID still survive",
+			seedLabels: func(run, _ *Deployer) map[string]string { return run.objectLabels() },
 			wantDelete: false,
 			wantWarn:   true,
 		},
 		{
 			// An empty Config.RunID is not a wildcard. The seed carries
-			// every aicr label but the run ID, so all four comparisons
-			// would pass against an empty RunID -- "" == "" included.
-			// createdByThisRun must still match nothing, because a run
-			// with no ID has no ownership to prove. Deleting the guard
-			// fails this row; a label-less seed would not.
+			// this invocation's own labels MINUS the run-ID key, so every
+			// remaining comparison passes against an empty RunID — the
+			// invocation ID included, and "" == "" for the run ID.
+			// createdByThisInvocation must still match nothing, because a
+			// run with no ID has no ownership to prove. Deleting that
+			// guard fails this row; a label-less seed would not.
 			name: "an empty RunID proves ownership of nothing",
-			seed: &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
-				Name: saName, Namespace: ns, UID: types.UID("operators-uid"),
-				Labels: runIDLessLabels,
-			}},
+			seedLabels: func(run, _ *Deployer) map[string]string {
+				l := run.objectLabels()
+				delete(l, labels.RunID)
+				return l
+			},
+			seedUID:    types.UID("operators-uid"),
 			runID:      ptr.To(""),
 			wantDelete: false,
 			wantWarn:   true,
@@ -1031,18 +1054,33 @@ func TestCleanupResolvesUnconfirmedEntryBeforeDeleting(t *testing.T) {
 			ctx := context.Background()
 			logs := captureLogs(t)
 			client := fake.NewClientset()
-			if tt.seed != nil {
-				if _, err := client.CoreV1().ServiceAccounts(ns).Create(ctx, tt.seed, metav1.CreateOptions{}); err != nil {
-					t.Fatalf("seed: %v", err)
-				}
-			}
-			deletes := spyOnDeletes(client)
 
 			runID := testRunID
 			if tt.runID != nil {
 				runID = *tt.runID
 			}
-			run := NewDeployer(client, Config{Namespace: ns, RunID: runID})
+			cfg := Config{Namespace: ns, RunID: runID}
+			run := NewDeployer(client, cfg)
+			// Same clientset, same Config, separate NewDeployer call:
+			// everything a second invocation reusing this run's RunID
+			// would have, including its own invocation ID.
+			twin := NewDeployer(client, cfg)
+			if run.invocationID == twin.invocationID {
+				t.Fatal("precondition: two Deployers must not share an invocation ID")
+			}
+
+			if !tt.noSeed {
+				if _, err := client.CoreV1().ServiceAccounts(ns).Create(ctx, &corev1.ServiceAccount{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: saName, Namespace: ns, UID: tt.seedUID,
+						Labels: tt.seedLabels(run, twin),
+					},
+				}, metav1.CreateOptions{}); err != nil {
+					t.Fatalf("seed: %v", err)
+				}
+			}
+			deletes := spyOnDeletes(client)
+
 			run.recordIntent(kindServiceAccount, saName)
 
 			if err := run.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
@@ -1054,13 +1092,13 @@ func TestCleanupResolvesUnconfirmedEntryBeforeDeleting(t *testing.T) {
 				if len(observed) != 0 {
 					t.Fatalf("Cleanup issued %d deletes, want none: %+v", len(observed), observed)
 				}
-				if tt.seed != nil {
+				if !tt.noSeed {
 					live, err := client.CoreV1().ServiceAccounts(ns).Get(ctx, saName, metav1.GetOptions{})
 					if err != nil {
 						t.Fatalf("Cleanup deleted an object this run cannot prove it created: %v", err)
 					}
-					if live.UID != tt.seed.UID {
-						t.Errorf("surviving object UID = %q, want %q", live.UID, tt.seed.UID)
+					if live.UID != tt.seedUID {
+						t.Errorf("surviving object UID = %q, want %q", live.UID, tt.seedUID)
 					}
 				}
 			} else {
@@ -1078,6 +1116,77 @@ func TestCleanupResolvesUnconfirmedEntryBeforeDeleting(t *testing.T) {
 			}
 			if tt.wantWarn && !strings.Contains(logs.String(), saName) {
 				t.Errorf("warning does not name the object left behind; logs: %s", logs.String())
+			}
+		})
+	}
+}
+
+// TestCreatedByThisInvocationRequiresThisInvocationsLabel pins the predicate
+// Cleanup's adoption branch turns on, including the two shapes the end-to-end
+// Cleanup test cannot reach: a Deployer built as a struct literal rather than
+// through NewDeployer, which has no invocation ID at all.
+//
+// Every row that must be refused is refused because of a MISSING or DIFFERENT
+// invocation ID while all four run labels agree — the reusable-label case. A
+// row that also differed on run-id would prove nothing about this check.
+func TestCreatedByThisInvocationRequiresThisInvocationsLabel(t *testing.T) {
+	cfg := Config{Namespace: "test-ns", RunID: testRunID}
+	d := NewDeployer(fake.NewClientset(), cfg)
+	twin := NewDeployer(fake.NewClientset(), cfg)
+
+	// A Deployer that never went through NewDeployer: no invocation ID, and
+	// so nothing to prove authorship with. Its own objectLabels() omit the
+	// key entirely, so both sides of the comparison are "" — the shape that
+	// must NOT read as agreement.
+	literal := &Deployer{clientset: fake.NewClientset(), config: cfg}
+
+	tests := []struct {
+		name      string
+		d         *Deployer
+		objLabels map[string]string
+		want      bool
+	}{
+		{
+			name:      "this invocation's own labels",
+			d:         d,
+			objLabels: d.objectLabels(),
+			want:      true,
+		},
+		{
+			name:      "a twin invocation sharing the RunID",
+			d:         d,
+			objLabels: twin.objectLabels(),
+			want:      false,
+		},
+		{
+			name: "run labels with the invocation ID missing",
+			d:    d,
+			objLabels: map[string]string{
+				labels.Name:      labels.ValueAICR,
+				labels.ManagedBy: labels.ValueAICR,
+				labels.Component: labels.ValueSnapshotAgent,
+				labels.RunID:     testRunID,
+			},
+			want: false,
+		},
+		{
+			name:      "a Deployer with no invocation ID against its own labels",
+			d:         literal,
+			objLabels: literal.objectLabels(),
+			want:      false,
+		},
+		{
+			name:      "a Deployer with no invocation ID against a real one's labels",
+			d:         literal,
+			objLabels: d.objectLabels(),
+			want:      false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.d.createdByThisInvocation(tt.objLabels); got != tt.want {
+				t.Errorf("createdByThisInvocation(%v) = %v, want %v", tt.objLabels, got, tt.want)
 			}
 		})
 	}
@@ -1415,7 +1524,7 @@ func TestCleanupSweepsUnrecordedStagingConfigMap(t *testing.T) {
 	})
 
 	// Deliberately no getSnapshotFromConfigMap call: this is the failed run.
-	d.recordCreated(kindJob, d.jobName(), types.UID("job-uid"))
+	seedConfirmedJob(t, ctx, clientset, d, types.UID("job-uid"))
 	if d.hasCreated(kindConfigMap) {
 		t.Fatal("precondition: created-set must not hold the staging ConfigMap")
 	}
@@ -1429,6 +1538,28 @@ func TestCleanupSweepsUnrecordedStagingConfigMap(t *testing.T) {
 	}
 	if !sawUIDPrecondition {
 		t.Error("staging ConfigMap delete was not pinned to the observed UID")
+	}
+}
+
+// seedConfirmedJob records the Job in d's created-set the way a successful
+// Create would AND stands the object itself up in the cluster, because the
+// staging-ConfigMap sweep requires both: the confirmed entry says this
+// invocation created a Job at that name, and the live object carrying the same
+// UID says that Job is still the one holding the name (see stillHoldsJob).
+// Recording without seeding would leave every sweep test passing vacuously,
+// with the sweep never running at all.
+func seedConfirmedJob(t *testing.T, ctx context.Context, clientset kubernetes.Interface, d *Deployer, uid types.UID) {
+	t.Helper()
+	d.recordCreated(kindJob, d.jobName(), uid)
+	if _, err := clientset.BatchV1().Jobs(d.config.Namespace).Create(ctx, &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      d.jobName(),
+			Namespace: d.config.Namespace,
+			UID:       uid,
+			Labels:    d.objectLabels(),
+		},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("seed Job %q: %v", d.jobName(), err)
 	}
 }
 
@@ -1549,7 +1680,7 @@ func TestCleanupSweepKeepsForeignConfigMapAtStagingName(t *testing.T) {
 		Output:              "cm://" + ns + "/" + name,
 		OwnsOutputConfigMap: true,
 	})
-	d.recordCreated(kindJob, d.jobName(), types.UID("job-uid"))
+	seedConfirmedJob(t, ctx, client, d, types.UID("job-uid"))
 
 	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
 		t.Fatalf("Cleanup() error = %v", err)
@@ -1560,6 +1691,112 @@ func TestCleanupSweepKeepsForeignConfigMapAtStagingName(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), name) {
 		t.Errorf("no warning naming the ConfigMap left behind; logs: %s", logs.String())
+	}
+}
+
+// TestCleanupSweepRequiresThisInvocationsLiveJob is the staging ConfigMap's
+// half of the same-RunID problem. That object is written by the in-pod agent
+// through pkg/serializer, which stamps neither aicr.run/run-id nor
+// aicr.run/invocation-id, so the evidence createdByThisInvocation uses does not
+// exist on it and cannot be put there — the agent image may be a different
+// aicr version than the controller.
+//
+// The evidence is the Job instead, and a confirmed Job ENTRY is not enough: it
+// records that this invocation created a Job at that name once, not that the
+// object standing there now is that Job. If this run's Job was deleted and a
+// second invocation reusing the RunID created its own, the ConfigMap at the
+// shared staging name is the second invocation's live artifact. Only one Job
+// can hold a name at a time, so requiring the recorded UID to still be the
+// live one settles it — and every other answer fails closed, leaving a
+// ConfigMap an operator can remove rather than deleting a running run's.
+func TestCleanupSweepRequiresThisInvocationsLiveJob(t *testing.T) {
+	const ns = "test-namespace"
+	const ourJobUID = types.UID("run-a-job-uid")
+
+	tests := []struct {
+		name        string
+		recordUID   types.UID // UID this invocation's Create response returned
+		seedLiveJob bool      // stand a Job up at this run's Job name
+		liveJobUID  types.UID // its UID, when seeded
+		wantSwept   bool
+	}{
+		{
+			name:        "the Job this invocation created still holds the name",
+			recordUID:   ourJobUID,
+			seedLiveJob: true,
+			liveJobUID:  ourJobUID,
+			wantSwept:   true,
+		},
+		{
+			name:        "another invocation replaced the Job at this name",
+			recordUID:   ourJobUID,
+			seedLiveJob: true,
+			liveJobUID:  types.UID("run-b-job-uid"),
+			wantSwept:   false,
+		},
+		{
+			name:      "the Job is gone entirely",
+			recordUID: ourJobUID,
+			wantSwept: false,
+		},
+		{
+			// A real apiserver always assigns a UID, so a confirmed
+			// entry without one means the evidence is missing. Matching
+			// it against an equally empty live UID would be agreement
+			// between two absences, not proof of anything.
+			name:        "no recorded Job UID to match against",
+			seedLiveJob: true,
+			liveJobUID:  "",
+			wantSwept:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			name := StagingConfigMapName(testRunID)
+			client := fake.NewClientset(&corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: ns,
+					UID:       types.UID("staging-uid"),
+					Labels:    stagingConfigMapLabels(),
+				},
+				Data: map[string]string{"snapshot.yaml": "data"},
+			})
+
+			d := NewDeployer(client, Config{
+				Namespace:           ns,
+				RunID:               testRunID,
+				Output:              "cm://" + ns + "/" + name,
+				OwnsOutputConfigMap: true,
+			})
+			// The entry the Create response produced for THIS invocation.
+			d.recordCreated(kindJob, d.jobName(), tt.recordUID)
+			// What is actually standing at that name when Cleanup runs.
+			if tt.seedLiveJob {
+				if _, err := client.BatchV1().Jobs(ns).Create(ctx, &batchv1.Job{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: d.jobName(), Namespace: ns, UID: tt.liveJobUID,
+					},
+				}, metav1.CreateOptions{}); err != nil {
+					t.Fatalf("seed Job: %v", err)
+				}
+			}
+
+			if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
+				t.Fatalf("Cleanup() error = %v", err)
+			}
+
+			_, err := client.CoreV1().ConfigMaps(ns).Get(ctx, name, metav1.GetOptions{})
+			swept := apierrors.IsNotFound(err)
+			if err != nil && !swept {
+				t.Fatalf("reading the staging ConfigMap back: %v", err)
+			}
+			if swept != tt.wantSwept {
+				t.Errorf("staging ConfigMap swept = %v, want %v", swept, tt.wantSwept)
+			}
+		})
 	}
 }
 
@@ -1608,7 +1845,7 @@ func TestCleanupSweepNoOpWhenStagingConfigMapAbsent(t *testing.T) {
 		Output:              "cm://test-namespace/" + StagingConfigMapName(testRunID),
 		OwnsOutputConfigMap: true,
 	})
-	d.recordCreated(kindJob, d.jobName(), types.UID("job-uid"))
+	seedConfirmedJob(t, ctx, clientset, d, types.UID("job-uid"))
 
 	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
 		t.Fatalf("Cleanup() error = %v, want nil when the staging ConfigMap was never written", err)
@@ -1632,7 +1869,7 @@ func TestCleanupSweepSurfacesUnexpectedGetError(t *testing.T) {
 		Output:              "cm://test-namespace/" + StagingConfigMapName(testRunID),
 		OwnsOutputConfigMap: true,
 	})
-	d.recordCreated(kindJob, d.jobName(), types.UID("job-uid"))
+	seedConfirmedJob(t, ctx, clientset, d, types.UID("job-uid"))
 
 	err := d.Cleanup(ctx, CleanupOptions{Enabled: true})
 	if err == nil {

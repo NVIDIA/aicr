@@ -496,9 +496,9 @@ func provisionedClusterRoleName(namespace, serviceAccount string) string {
 }
 
 // provisionedLabels is the label set stamped on every rendered object.
-// It deliberately omits labels.RunID: these objects belong to no run, so
-// Deployer.createdByThisRun can never match one and no run's Cleanup can
-// reclaim it. The component value is what distinguishes them from the
+// It deliberately omits labels.RunID and labels.InvocationID: these objects
+// belong to no run and to no invocation, so Deployer.createdByThisInvocation
+// can never match one and no run's Cleanup can reclaim it. The component value is what distinguishes them from the
 // run-scoped snapshot-agent objects in selectors and sweeps.
 func provisionedLabels() map[string]string {
 	return map[string]string{

@@ -78,14 +78,23 @@ Two objects are deliberately NOT run-scoped:
 Every object this package itself creates — the Job, ServiceAccount, Role,
 RoleBinding, ClusterRole, and ClusterRoleBinding — carries
 app.kubernetes.io/name=aicr, app.kubernetes.io/managed-by=aicr,
-app.kubernetes.io/component=snapshot-agent, and aicr.run/run-id=<RunID>, on the
-Job's pod template as well as the Job itself. Select agent pods across runs
-with the component label; the Job name changes every run.
+app.kubernetes.io/component=snapshot-agent, aicr.run/run-id=<RunID>, and
+aicr.run/invocation-id, on the Job's pod template as well as the Job itself.
+Select agent pods across runs with the component label; the Job name changes
+every run.
+
+aicr.run/invocation-id identifies the one Deployer that created the object,
+which the first four labels cannot: Config.RunID is caller-settable and
+sharing it is a supported scenario, so two invocations stamp identical values
+for all four. The invocation ID is generated inside NewDeployer and settable
+through no Config field, and it is what Cleanup requires before adopting an
+object whose creation it never had confirmed. Do not select on it — its value
+changes every invocation.
 
 The staging ConfigMap is the exception: it is written from inside the pod by
 pkg/serializer's ConfigMap writer, which stamps app.kubernetes.io/name=aicr,
 app.kubernetes.io/component=<snapshot kind> and app.kubernetes.io/version — not
-managed-by and not the run-ID label. That writer also produces the user's
+managed-by, not the run-ID label, and not the invocation-ID label. That writer also produces the user's
 delivered cm:// artifact, so it deliberately does not stamp the run-ID sweep
 key onto an object this package must never delete. Run scoping for the staging
 ConfigMap comes from its name (see StagingConfigMapName), which is what both
@@ -112,17 +121,30 @@ response never arrives, the entry is already in the set. That entry carries no
 UID, and its (run-unique) name is not evidence of ownership — it says what
 this run WOULD have created, not what is standing there now — so Cleanup never
 deletes it by bare name. It Gets the live object and re-verifies it: the
-delete is issued only when that object carries the full label set this run
-stamps at creation time AND a non-empty UID, and it is pinned to the UID that
-Get observed. A label mismatch or a missing UID fails closed — no delete at
-all, and a warning names the object left behind for an operator to judge —
-while a NotFound means there is nothing to reclaim. The one response that
-proves the object is not ours — AlreadyExists — discards the entry again.
+delete is issued only when that object carries the full label set this
+INVOCATION stamps at creation time — aicr.run/invocation-id included — AND a
+non-empty UID, and it is pinned to the UID that Get observed. A label mismatch
+or a missing UID fails closed — no delete at all, and a warning names the
+object left behind for an operator to judge — while a NotFound means there is
+nothing to reclaim. The one response that proves the object is not ours —
+AlreadyExists — discards the entry again.
+
+The invocation ID is what makes that re-verification mean anything. Pinning
+the delete to the UID this Get returned protects only against a replacement
+made after the Get; a replacement standing there before it is simply what the
+Get returns. Without a per-invocation label, an object another invocation
+created under the same RunID and the same name would pass every check and be
+deleted.
 
 The staging ConfigMap is written by the in-pod agent, so its UID is observed
 when GetSnapshot reads it. When the run owns that ConfigMap and failed before
 it could be observed, Cleanup Gets it by its run-scoped name and deletes it
-pinned to the UID that Get returned.
+pinned to the UID that Get returned. That object cannot carry the invocation
+ID — the agent image writing it may be a different aicr version — so the sweep
+takes its ownership evidence from the Job instead: it runs only while the Job
+this invocation created is still the live Job at its name, which is the one
+thing that rules out a second invocation's agent having written the ConfigMap
+at the shared staging name.
 
 # Usage Example
 

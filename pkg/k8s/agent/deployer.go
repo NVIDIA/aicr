@@ -188,11 +188,17 @@ func (d *Deployer) Cleanup(ctx context.Context, opts CleanupOptions) error {
 	//
 	// The name alone does not license that delete: Config.RunID is caller-
 	// settable, so a second run reusing a RunID resolves the same staging
-	// name as the first. needsStagingConfigMapSweep therefore requires this
-	// run to hold a CONFIRMED Job entry — the only way this run could have
-	// produced a staging ConfigMap at all — and deleteUnrecordedStagingConfigMap
+	// name as the first. stagingSweepJob therefore requires this run to hold
+	// a CONFIRMED Job entry — the only way this run could have produced a
+	// staging ConfigMap at all — stillHoldsJob requires that Job to still be
+	// the live one at its name, and deleteUnrecordedStagingConfigMap
 	// re-checks the object it finds before deleting it.
-	if d.config.OwnsOutputConfigMap && needsStagingConfigMapSweep(created) {
+	//
+	// stillHoldsJob is evaluated HERE, before the fan-out, and deliberately
+	// not inside the sweep task: the created-set delete of this run's own Job
+	// runs concurrently with the sweep, so a check made inside the task would
+	// race its sibling and see the Job already gone.
+	if job, sweep := stagingSweepJob(created); d.config.OwnsOutputConfigMap && sweep && d.stillHoldsJob(ctx, job) {
 		name := d.stagingConfigMapName()
 		tasks = append(tasks, task{
 			label: fmt.Sprintf("%s %q", kindConfigMap, name),
@@ -282,25 +288,28 @@ func (d *Deployer) deleteCreatedObject(ctx context.Context, obj createdObject) e
 //
 // The entry's run-scoped name is not evidence: it says what this run WOULD
 // have created, not what is standing there now. Get the live object and
-// require it to carry the label set objectLabels() stamps on everything
-// Deploy creates. That set is written at creation time by this run, so:
+// require it to carry the label set objectLabels() stamps on everything Deploy
+// creates — including aicr.run/invocation-id, which is what makes that set
+// evidence at all (see createdByThisInvocation). So:
 //
 //   - Labels match: the Create did commit and this is our object. Delete it,
 //     pinned to the UID this Get observed. (If it is replaced again between
 //     the Get and the Delete, the precondition turns that into a Conflict,
 //     which ignoreNotFoundOrConflict treats as "already gone".)
 //   - Labels do not match: whatever holds the name was not created by this
-//     run — an operator's object, another subsystem's, or a replacement made
-//     after this run's object was deleted. Deleting it would collect an
-//     object this run never owned, so fail closed and warn instead.
+//     invocation — an operator's object, another subsystem's, a replacement
+//     made after this run's object was deleted, or another invocation that
+//     reused this run's public RunID. Deleting it would collect an object
+//     this invocation never created, so fail closed and warn instead.
 //   - NotFound: nothing to reclaim.
 //
-// Residual, and deliberately not papered over: a second run that reuses this
-// run's RunID stamps an identical label set, so the two are indistinguishable
-// here. The ADR treats a duplicate RunID as an unsupported caller error —
-// every ensure* fails closed on the AlreadyExists it normally produces (see
-// discardIntent); this path is reachable only when that response was also
-// lost.
+// UID pinning alone would not cover the third case. It protects against a
+// replacement made after THIS Get, but the entry carries no UID from creation
+// time, so a replacement standing there BEFORE the Get is simply what the Get
+// returns — and its UID is what the delete would then be pinned to. Only the
+// invocation ID separates "the object I created" from "a same-named,
+// same-labelled object another invocation created", which is why the label
+// check, not the precondition, is the gate.
 func (d *Deployer) resolveIntentUID(ctx context.Context, obj createdObject) (uid types.UID, ours bool, err error) {
 	live, err := d.getCreatedObject(ctx, obj.kind, obj.name)
 	if k8serrors.IsNotFound(err) {
@@ -315,14 +324,15 @@ func (d *Deployer) resolveIntentUID(ctx context.Context, obj createdObject) (uid
 	// delete could not be pinned. Refuse rather than fall back to a
 	// bare-name delete: that is exactly the blind delete this path exists
 	// to prevent.
-	if !d.createdByThisRun(live.GetLabels()) || live.GetUID() == "" {
+	if !d.createdByThisInvocation(live.GetLabels()) || live.GetUID() == "" {
 		slog.Warn("cleanup left behind an object it cannot prove this run created; if it is a stale orphan of this run, remove it by hand",
 			slog.String("kind", obj.kind),
 			slog.String(attrName, obj.name),
 			slog.String(attrNamespace, live.GetNamespace()),
 			slog.String("uid", string(live.GetUID())),
 			slog.String(attrRunID, d.config.RunID),
-			slog.String("objectRunID", live.GetLabels()[labels.RunID]))
+			slog.String("objectRunID", live.GetLabels()[labels.RunID]),
+			slog.String("objectInvocationID", live.GetLabels()[labels.InvocationID]))
 		return "", false, nil
 	}
 	return live.GetUID(), true, nil
@@ -353,16 +363,35 @@ func (d *Deployer) getCreatedObject(ctx context.Context, kind, name string) (met
 	}
 }
 
-// createdByThisRun reports whether objLabels is the label set objectLabels()
-// stamps on every object this Deployer creates. All four keys are required:
-// aicr.run/run-id alone would also match a validator-owned object carrying
-// the same ID (`aicr validate` hands one run ID to both subsystems), and an
-// empty Config.RunID must never match a label-less object.
-func (d *Deployer) createdByThisRun(objLabels map[string]string) bool {
-	if d.config.RunID == "" {
+// createdByThisInvocation reports whether objLabels is the label set
+// objectLabels() stamps on every object THIS Deployer creates.
+//
+// labels.InvocationID is the load-bearing key, and the only one of the five
+// that answers the question. The other four are reusable by construction: any
+// invocation sharing Config.RunID stamps byte-identical
+// Name/ManagedBy/Component/RunID values, and sharing a RunID is a designed
+// scenario, not misuse — `aicr validate` hands one ID to its live-capture
+// agent and its validator Jobs, and e2e/chainsaw runs pin one deliberately.
+// Matching on those four would therefore let this run adopt an object a
+// different invocation stood up at the same name, which is exactly the delete
+// resolveIntentUID exists to refuse. labels.InvocationID is generated per
+// Deployer and settable through no Config field, so a same-RunID invocation
+// carries a different value there and cannot be mistaken for this one.
+//
+// The remaining four stay required, because a match on the invocation ID
+// alone would be a match on an unvalidated string: they keep the predicate a
+// statement about a snapshot-agent object of this run.
+//
+// Both IDs must be non-empty. An empty Config.RunID must never match a
+// label-less object, and an empty invocationID (a Deployer built as a struct
+// literal rather than through NewDeployer) has no authorship to prove — in
+// both cases "" == "" would otherwise read as agreement.
+func (d *Deployer) createdByThisInvocation(objLabels map[string]string) bool {
+	if d.config.RunID == "" || d.invocationID == "" {
 		return false
 	}
-	return objLabels[labels.RunID] == d.config.RunID &&
+	return objLabels[labels.InvocationID] == d.invocationID &&
+		objLabels[labels.RunID] == d.config.RunID &&
 		objLabels[labels.Name] == labels.ValueAICR &&
 		objLabels[labels.ManagedBy] == labels.ValueAICR &&
 		objLabels[labels.Component] == labels.ValueSnapshotAgent

@@ -590,14 +590,24 @@ Cleanup removes only the objects the run itself created, and pins every delete
 to the UID the apiserver returned when it created them. If a create's response
 is lost in flight, the run knows the name it used but never learned the
 object's identity — so cleanup re-reads the object and deletes it only when it
-still carries that run's `aicr.run/run-id` label. When something else has taken
-the name over, cleanup keeps the object and says so:
+still carries that invocation's own labels. When something else has taken the
+name over, cleanup keeps the object and says so:
 
 ```text
 WARN cleanup left behind an object it cannot prove this run created; if it is a
 stale orphan of this run, remove it by hand kind=Role name=aicr-<run-id>
 runID=<run-id> objectRunID=<other-run-id>
+objectInvocationID=<other-invocation-id>
 ```
+
+The deciding label there is `aicr.run/invocation-id`, not `aicr.run/run-id`.
+Every object a run creates carries both, but the run ID is yours to set — `aicr
+validate` gives one ID to its snapshot agent and its validation Jobs, and
+pinned CI runs reuse one on purpose — so two commands can legitimately stamp
+the same one. The invocation ID is generated inside the process for each
+`Deployer` and is not configurable, so it is what separates "the object I
+created" from "an object another invocation created at the same name". Do not
+select on it: its value changes every invocation.
 
 Inspect the named object and delete it yourself if it is a stale leftover:
 
@@ -605,12 +615,29 @@ Inspect the named object and delete it yourself if it is a stale leftover:
 kubectl get role -n gpu-operator aicr-<run-id> -o yaml
 ```
 
-The staging ConfigMap is warned about the same way. It is written by the in-pod
-agent rather than by the CLI, so it carries no `aicr.run/run-id` label to check
-(see [Job Completes but No Output](#job-completes-but-no-output)); cleanup
-sweeps it only when this run's Job was created successfully — the only way this
-run could have produced one — and only when the object looks like an aicr
-artifact (`app.kubernetes.io/name=aicr`).
+The staging ConfigMap is warned about the same way, but proved differently. It
+is written by the in-pod agent rather than by the CLI, so it carries neither of
+those labels (see [Job Completes but No Output](#job-completes-but-no-output))
+and the agent image may be a different aicr version than the CLI. Cleanup
+therefore takes its evidence from the Job whose pod wrote it: it sweeps the
+ConfigMap only when this run created that Job successfully AND that same Job —
+matched by UID, not by name — is still the one standing in the cluster, and
+only when the object looks like an aicr artifact
+(`app.kubernetes.io/name=aicr`). If the Job was deleted or replaced first, the
+ConfigMap is kept:
+
+```text
+WARN cleanup left behind the ConfigMap at this run's staging name: this run no
+longer holds the Job whose agent would have written it
+name=aicr-agent-snapshot-<run-id> jobName=aicr-<run-id> jobUID=<uid>
+liveJobUID=<other-uid>
+```
+
+Delete it by hand once you have confirmed it is not a live run's:
+
+```shell
+kubectl get cm -n gpu-operator aicr-agent-snapshot-<run-id> -o yaml
+```
 
 ## Security Considerations
 
