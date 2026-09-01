@@ -52,5 +52,5 @@ rtx-pro-6000-eks-ubuntu-inference-nim: 08b73d58d0d60681be55ee1402bdec5bf1367a0cb
 rtx-pro-6000-eks-ubuntu-training-kubeflow: c2595e2994d56a735714103eedd30c6afd45921f458bf026c3432017b5eba60e
 rtx-pro-6000-lke-ubuntu-inference: 28cdab0531f8ed6018391aba7cab1fbfad8ba551392de1b9138f3b88042f5340
 rtx-pro-6000-lke-ubuntu-training: 312c4cf49d0e8cec0377cd9858338d7106226a2252d81828a75c1d426a194a2f
-vr200-rke2-ubuntu-inference-dynamo: 7e7570e9c72edbb849e08db3ee35f98756e6bc482b059ead9e775b604899b40b
+vr200-rke2-ubuntu-inference-dynamo: faa58a482b486b00f4c4d5529c807f5da4e5aeff093cf0d9aed08dad7e8080b2
 vr200-rke2-ubuntu-training: 45c6caa7dc3a539ba2ca2de9890d11efd1ebef1a7b55351e5e7978b93cb98d81

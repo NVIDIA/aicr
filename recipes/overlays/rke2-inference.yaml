@@ -25,11 +25,28 @@ spec:
     service: rke2
     intent: inference
 
+  # RKE2's default packaged ingress switches from rke2-ingress-nginx to
+  # Traefik at v1.36 ("Ingress NGINX went End-of-Life in March 2026.
+  # Starting with v1.36, Traefik will be the default for new clusters." —
+  # docs.rke2.io/add-ons/helm). Traefik's own rke2-traefik-crd release
+  # owns the Gateway API CRD names this leaf installs below, so a v1.36+
+  # default cluster hits the same helm-ownership collision documented on
+  # those componentRefs. There is no way to install CRDs conditionally
+  # from a static recipe (manifestFiles merge additively and --set cannot
+  # remove a componentRef), so for v1 this leaf is capped below the
+  # Traefik-default transition rather than silently breaking on it.
+  # Revisit once a real conditional/splittable CRD mechanism exists, or
+  # once this leaf can assume the operator has disabled RKE2's bundled
+  # Traefik release.
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34.1 < 1.36.0"
+
   # Inference gateway components are inlined from the platform-inference
-  # mixin rather than referenced, because rke2 must drop the mixin's
-  # gateway-api-crds manifest and manifestFiles merge additively (an
-  # overlay cannot subtract a mixin's entry). Keep versions in lockstep
-  # with recipes/mixins/platform-inference.yaml when bumping.
+  # mixin rather than referenced, because rke2 additionally needs the
+  # TLSRoute experimental-channel CRD the mixin doesn't carry, and an
+  # RKE2-specific health-check step. Keep versions in lockstep with
+  # recipes/mixins/platform-inference.yaml when bumping.
   #
   # NOTE: RKE2 provisions no LoadBalancer controller, and the
   # inference-gateway Service is type LoadBalancer — a bare-metal LB
@@ -231,13 +248,15 @@ spec:
         #
         # KNOWN CONFLICT: if the cluster instead runs RKE2's bundled
         # rke2-traefik-crd Helm release (opt-in before v1.36, default at
-        # v1.36+), it already owns these CRD names and installing AICR's
-        # copies fails helm ownership validation ("invalid ownership
-        # metadata ... current value is rke2-traefik-crd"). On such a
-        # cluster, drop both manifestFiles below via an overlay/--set
-        # override; verifying rke2-traefik-crd's own TLSRoute is at
-        # v1alpha2-served (patching it if not, per the RKE2-bundled
-        # release notes) becomes the operator's responsibility instead.
+        # v1.36+ — see the K8s.server.version constraint above, which
+        # caps this leaf below that transition for exactly this reason),
+        # it already owns these CRD names and installing AICR's copies
+        # fails helm ownership validation ("invalid ownership metadata
+        # ... current value is rke2-traefik-crd"). manifestFiles merge
+        # additively and cannot be subtracted by an overlay or --set, so
+        # there is no supported way to opt out of these two manifests on
+        # a Traefik-default cluster today — the version constraint is
+        # what prevents reaching that state, not a runtime toggle.
         - components/agentgateway-crds/manifests/gateway-api-crds.yaml
         - components/agentgateway-crds/manifests/tlsroute-crd.yaml
         - components/agentgateway-crds/manifests/inference-extension-crds.yaml
