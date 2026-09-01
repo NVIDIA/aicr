@@ -691,6 +691,22 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 			document: document(`"CVE-2026-0001"`),
 			wantErr:  "statement 0 must be a JSON object",
 		},
+		{
+			// OpenVEX types each subcomponents entry as a Component object, so
+			// a scalar member has to be rejected before it is signed.
+			name: "subcomponents holding a scalar",
+			document: document(`{"vulnerability": {"name": "CVE-2026-0001"},
+				"products": [{"@id": "pkg:oci/aicr", "subcomponents": [42]}],
+				"status": "fixed"}`),
+			wantErr: "statement 0 has a product whose subcomponents is not an array of objects",
+		},
+		{
+			name: "subcomponents that is not an array",
+			document: document(`{"vulnerability": {"name": "CVE-2026-0001"},
+				"products": [{"@id": "pkg:oci/aicr", "subcomponents": "libssl3t64"}],
+				"status": "fixed"}`),
+			wantErr: "statement 0 has a product whose subcomponents is not an array of objects",
+		},
 		{name: "document that is not an object", document: `[]`, wantErr: "statements must be an array"},
 		{name: "document that is not JSON", document: `{`, wantErr: "not valid JSON"},
 		{name: "empty document", document: "", wantErr: "not found or empty"},

@@ -208,10 +208,13 @@ run cosign verify-attestation \
   --output-file "$VEX_PREDICATE"
 
 note "Each statement's product purl carries the platform digest, so the claim binds"
-note "to this exact manifest. An empty statements array is a valid answer: it means"
-note "AICR has triaged no CVE for this image, which is the usual case."
+note "to this exact manifest. An empty statements array is a valid answer, not a"
+note "failure: it means AICR has asserted no exceptions for this image."
 pause "Press Enter to extract openvex.json"
-run bash -c "set -o pipefail; jq -r .payload '$VEX_PREDICATE' | base64 -d | jq .predicate > '$VEX' && jq '[.statements[].products[][\"@id\"]] | unique' '$VEX'"
+# Report what the document actually says rather than predicting it. The count
+# and the status set are properties of the release being verified, and the
+# format carries affected / fixed / under_investigation as well as not_affected.
+run bash -c "set -o pipefail; jq -r .payload '$VEX_PREDICATE' | base64 -d | jq .predicate > '$VEX' && jq '{statements: (.statements|length), statuses: ([.statements[].status] | unique), products: ([.statements[].products[][\"@id\"]] | unique)}' '$VEX'"
 
 # --- SBOM use cases ----------------------------------------------------------
 

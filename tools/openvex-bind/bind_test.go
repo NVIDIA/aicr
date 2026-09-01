@@ -412,6 +412,28 @@ func TestBindRejectsBadInput(t *testing.T) {
 			image:  benchImage,
 			digest: amd64Digest,
 		},
+		{
+			// OpenVEX types every subcomponents entry as a Component object. A
+			// scalar marshals without complaint, so without an explicit check
+			// it would be copied verbatim into the signed projection.
+			name: "subcomponents array has a scalar member",
+			source: `{"@id":"https://example.test/vex","statements":[
+				{"vulnerability":{"name":"CVE-2026-0001"},
+				 "products":[{"@id":"pkg:oci/aiperf-bench","subcomponents":[42]}],
+				 "status":"fixed"}]}`,
+			image:  benchImage,
+			digest: amd64Digest,
+		},
+		{
+			name: "subcomponents array mixes objects and scalars",
+			source: `{"@id":"https://example.test/vex","statements":[
+				{"vulnerability":{"name":"CVE-2026-0001"},
+				 "products":[{"@id":"pkg:oci/aiperf-bench",
+				   "subcomponents":[{"@id":"pkg:deb/debian/libssl3t64"},"libssl"]}],
+				 "status":"fixed"}]}`,
+			image:  benchImage,
+			digest: amd64Digest,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

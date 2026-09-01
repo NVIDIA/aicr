@@ -97,8 +97,10 @@ def statement($index; $s):
                 and digestbound(field(field(.; "identifiers"); "purl"); $digest))) then empty
        else "statement \($index) has a product identifier not bound to @\($digest)" end),
       (if listing(field($s; "products"))
-          | all((field(.; "subcomponents") == null) or ((field(.; "subcomponents") | type) == "array")) then empty
-       else "statement \($index) has a product whose subcomponents is not an array" end),
+          | all((field(.; "subcomponents") == null)
+                or (((field(.; "subcomponents") | type) == "array")
+                    and (field(.; "subcomponents") | all(type == "object")))) then empty
+       else "statement \($index) has a product whose subcomponents is not an array of objects" end),
       (if (statuses | index(field($s; "status"))) != null then empty
        else "statement \($index) status \(field($s; "status") | tojson) is not one of \(statuses | join(", "))" end),
       (if field($s; "status") == "not_affected"

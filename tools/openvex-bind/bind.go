@@ -197,7 +197,12 @@ func bindProducts(index int, products []any, name, purl string) (map[string]any,
 // subcomponentList returns a product's subcomponents, or nil when it has none.
 // A present-but-malformed value is fatal rather than ignored: subcomponents
 // narrow a statement to specific packages, so silently dropping one would
-// publish a signed claim broader than the curated source made.
+// publish a signed claim broader than the curated source made, and passing one
+// through unchecked would sign a component that is not a component.
+//
+// OpenVEX v0.2.0 types every entry as a Component object, so a scalar member is
+// rejected too: it marshals without complaint and would otherwise be copied
+// verbatim into the signed projection.
 func subcomponentList(product map[string]any) ([]any, error) {
 	value, present := product["subcomponents"]
 	if !present || value == nil {
@@ -207,6 +212,12 @@ func subcomponentList(product map[string]any) ([]any, error) {
 	if !ok {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("subcomponents must be an array, got %T", value))
+	}
+	for i, entry := range list {
+		if _, ok := entry.(map[string]any); !ok {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("subcomponents[%d] must be a JSON object, got %T", i, entry))
+		}
 	}
 	return list, nil
 }
