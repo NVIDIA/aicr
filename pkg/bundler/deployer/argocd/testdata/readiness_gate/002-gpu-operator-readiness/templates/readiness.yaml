@@ -59,7 +59,7 @@ metadata:
   name: gpu-operator-readiness-gate
   namespace: gpu-operator
   annotations:
-    argocd.argoproj.io/sync-options: Replace=true
+    argocd.argoproj.io/sync-options: Replace=true,Force=true
 spec:
   backoffLimit: 6
   template:

@@ -1949,6 +1949,63 @@ func TestBundleGolden_ReadinessGate(t *testing.T) {
 	}
 }
 
+// TestGenerate_ApplyOutOfSyncOnlySyncOptions is the empirical proof that
+// transformApplication's generic map[string]any YAML round-trip preserves
+// the ApplyOutOfSyncOnly=true syncOptions entry the delegated argocd.Generator
+// adds to the readiness folder's Application, and that it stays scoped to
+// only that folder's transformed Helm-chart-template output. See #2367.
+func TestGenerate_ApplyOutOfSyncOnlySyncOptions(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	})
+	rr.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+		},
+		Version:        "v0.0.0-test",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		ComponentReadiness: map[string]map[string][]byte{
+			"gpu-operator": {
+				"readiness.yaml": readinessGateManifest(t, config.DeployerArgoCDHelm),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	primary, err := os.ReadFile(filepath.Join(outputDir, "templates", "gpu-operator.yaml"))
+	if err != nil {
+		t.Fatalf("read primary template: %v", err)
+	}
+	if strings.Contains(string(primary), "ApplyOutOfSyncOnly") {
+		t.Errorf("primary child template must not mention ApplyOutOfSyncOnly:\n%s", primary)
+	}
+
+	readiness, err := os.ReadFile(filepath.Join(outputDir, "templates", "gpu-operator-readiness.yaml"))
+	if err != nil {
+		t.Fatalf("read readiness template: %v", err)
+	}
+	if !strings.Contains(string(readiness), "ApplyOutOfSyncOnly=true") {
+		t.Errorf("readiness child template must contain \"ApplyOutOfSyncOnly=true\":\n%s", readiness)
+	}
+}
+
 // TestHelmTemplate_RendersWithSetRepoURL is the live-render counterpart to
 // the golden tests: goldens freeze the pre-render template bytes, this
 // test verifies that running `helm template` against the generated bundle
