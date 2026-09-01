@@ -107,7 +107,6 @@ gcloud container node-pools create POOL_NAME \
   --num-nodes=1 \
   --machine-type=a3-highgpu-8g \
   --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=default \
-  --node-labels="nvidia.com/dra-kubelet-plugin=true"
 ```
 
 Two flags deserve care:
@@ -231,7 +230,7 @@ gcloud container node-pools create POOL_NAME \
   --num-nodes=1 \
   --machine-type=a3-highgpu-8g \
   --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=disabled \
-  --node-labels="gke-no-default-nvidia-gpu-device-plugin=true,nvidia.com/dra-kubelet-plugin=true"
+  --node-labels="gke-no-default-nvidia-gpu-device-plugin=true"
 ```
 
 The `--machine-type` and `--num-nodes` cautions from the default-profile
@@ -294,7 +293,7 @@ gcloud container node-pools describe POOL_NAME \
 gcloud container node-pools update POOL_NAME \
   --cluster CLUSTER_NAME \
   --location=LOCATION \
-  --node-labels="EXISTING_KEY_1=EXISTING_VALUE_1,gke-no-default-nvidia-gpu-device-plugin=true,nvidia.com/dra-kubelet-plugin=true"
+  --node-labels="EXISTING_KEY_1=EXISTING_VALUE_1,gke-no-default-nvidia-gpu-device-plugin=true"
 ```
 
 Replace `EXISTING_KEY_…=EXISTING_VALUE_…` with every label the `describe`
@@ -337,7 +336,7 @@ allocatable `nvidia.com/gpu`):
 
 ```bash
 kubectl get nodes -l cloud.google.com/gke-accelerator \
-  -L gke-no-default-nvidia-gpu-device-plugin,nvidia.com/dra-kubelet-plugin
+  -L gke-no-default-nvidia-gpu-device-plugin
 kubectl get pods -n kube-system -l k8s-app=nvidia-gpu-device-plugin -o wide
 kubectl get pods -n gpu-operator -l app=nvidia-device-plugin-daemonset -o wide
 kubectl get nodes -l cloud.google.com/gke-accelerator \
@@ -379,23 +378,35 @@ regenerate with `--profile gpuStack=bundle-installer`, and deploy the
 bundle. Nodes with a loaded driver are untouched (the installer's fast path
 skips them); the bundle takes over provisioning for new and rebooted nodes.
 
-## Label GPU nodes for the DRA kubelet plugin
+## DRA kubelet plugin node labels are not required on GKE
 
-A bundle that enables both `gpu-operator` and `nvidia-dra-driver-gpu` schedules
-the DRA kubelet plugin only on nodes labeled
-`nvidia.com/dra-kubelet-plugin=true` (or the pair given to
-`aicr bundle --dra-eviction-node-label`). Set it **in the node pool
-definition**, with the other required node labels — an ad hoc
-`kubectl label node` does not survive node replacement, recycling,
-autoscaling, or a pool scaled from zero, so later nodes arrive unlabeled.
+DRA eviction coordination is opt-in, and by default it does nothing on
+supported GKE recipes. Every GKE overlay is COS, and both the default and
+`gpuStack=bundle-installer` profiles keep GPU Operator's `driver.enabled=false`
+— `bundle-installer` provisions the driver through a separate
+`gcp-driver-installer` DaemonSet, not a GPU Operator driver pod. With no GPU
+Operator driver pod there is no Driver Manager to coordinate with.
 
-An unlabeled GPU node fails silently: it runs no kubelet plugin and publishes
-no `ResourceSlices`, and neither Helm nor the bundle's `deploy.sh` reports an
-error. With no labeled GPU node at all the DaemonSet sits at `DESIRED=0`; with
-only some labeled, those nodes work while the rest silently lack DRA.
+So bundles generated for GKE add no eviction node selector, and the DRA kubelet
+plugin runs on every accelerated node with no extra label. Nothing in the node
+pool commands below needs `nvidia.com/dra-kubelet-plugin`.
+
+If you opt in anyway, AICR renders the selector and every GPU node must carry
+the **same `key=value` pair** you passed, set in the node pool definition:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
+  --output bundle
+
+gcloud container node-pools create <pool> --cluster <cluster> \
+  --node-labels="nvidia.com/dra-kubelet-plugin=true"
+```
+
+See [DRA Driver Upgrade Eviction](../user/cli-reference.md#dra-driver-upgrade-eviction).
 This applies to existing clusters too — adding the selector during an
 upgrade removes a plugin that was previously working.
-See [Prepare DRA nodes before applying upgraded bundles](../user/bundling.md#prepare-dra-nodes-before-applying-upgraded-bundles).
+See [Prepare DRA nodes when opting in to eviction coordination](../user/bundling.md#prepare-dra-nodes-when-opting-in-to-eviction-coordination).
 
 ## Troubleshooting
 

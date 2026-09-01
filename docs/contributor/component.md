@@ -237,13 +237,32 @@ The narrow exception is a **bundler-owned derived integration value**:
 when AICR renders both sides of a cross-chart contract and allowing either
 side to drift would produce an invalid bundle, the bundler may enforce that
 contract after ordinary overrides. The DRA/GPU Operator integration is the
-worked example: AICR merges the configured DRA eviction label into
+worked example: when opted in, AICR merges the configured DRA eviction label into
 `kubeletPlugin.nodeSelector` and writes the same label key to GPU Operator's
 `NODE_LABEL_FOR_GPU_POD_EVICTION`. This exception must remain gated on both
 components being enabled, must reject dynamic declarations that could move
 either managed path to install-time configuration, and must be covered across
 every deployer. Ordinary workload placement still uses registry paths and must
 not grow a special flag.
+
+**A bundler-owned contract that imposes cluster state must be opt-in.** The DRA
+eviction contract also illustrates the limit of the exception. Its selector is
+an exact-match `nodeSelector`, so rendering it unconditionally made a node label
+a precondition for the kubelet plugin to run at all — and an unlabeled node is
+then silently excluded, with `DESIRED=0` only when no node carries the label,
+and a successful `helm upgrade` either way. AICR does not
+own node labels, cannot verify them at bundle time, and generation is offline,
+so it cannot even warn accurately about what a given cluster carries.
+
+The rule that follows: a derived integration value may enforce consistency
+between two charts AICR renders, but when it also requires state outside those
+charts, the enforcement is opt-in. Absent the opt-in, AICR writes neither side
+and owns neither path — no injection, no override protection, no dynamic-path
+rejection. The single configuration surface that carries the state (here
+`--dra-eviction-node-label` and its config/API/Go equivalents) doubles as the
+opt-in, so there is no second boolean and no ambiguous combination. See
+[DRA Driver Upgrade Eviction](../user/cli-reference.md#dra-driver-upgrade-eviction)
+for the user-facing contract and issue #2469 for the reasoning.
 
 **Deciding where a knob belongs:**
 

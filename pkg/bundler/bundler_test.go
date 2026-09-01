@@ -3697,6 +3697,9 @@ func TestMake_OCP(t *testing.T) {
 	cfg := config.NewConfig(
 		config.WithReadinessHooks(true),
 		config.WithVersion(testVersion),
+		// The DRA eviction contract is opt-in (#2469); this test asserts the
+		// OCP ClusterPolicy carries it, so it configures the label.
+		config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()),
 	)
 	bundler, err := New(WithConfig(cfg))
 	if err != nil {

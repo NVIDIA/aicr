@@ -331,7 +331,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if err != nil {
 		return nil, err
 	}
-	if dynamicErr := rejectDRAEvictionDynamicPaths(recipeResult, dynamicValues); dynamicErr != nil {
+	if dynamicErr := rejectDRAEvictionDynamicPaths(recipeResult, dynamicValues, b.Config.DRAEvictionNodeLabel()); dynamicErr != nil {
 		return nil, dynamicErr
 	}
 
@@ -2887,7 +2887,14 @@ func draEvictionComponentNames(recipeResult *recipe.RecipeResult) ([]string, []s
 func rejectDRAEvictionDynamicPaths(
 	recipeResult *recipe.RecipeResult,
 	dynamicValues map[string][]string,
+	label config.NodeLabel,
 ) error {
+
+	// Nothing is managed unless the eviction contract was opted into, so a
+	// --dynamic declaration on these paths is the user's own business.
+	if label == (config.NodeLabel{}) {
+		return nil
+	}
 
 	draNames, gpuOperatorNames := draEvictionComponentNames(recipeResult)
 	if len(draNames) == 0 || len(gpuOperatorNames) == 0 {
@@ -2927,11 +2934,19 @@ func valuePathsIntersect(left, right string) bool {
 }
 
 // injectDRAEvictionLabel wires the GPU Operator and DRA driver halves of the
-// Driver Manager eviction contract when both components are enabled. DRA
-// kubelet plugins receive the configured key/value node selector, while GPU
-// Operators receive the same label key through their documented environment
-// variable. Injection happens after scheduling and user overrides so the two
-// values cannot drift; unrelated selectors and environment entries are kept.
+// Driver Manager eviction contract when both components are enabled AND an
+// eviction label has been configured. DRA kubelet plugins receive the
+// configured key/value node selector, while GPU Operators receive the same
+// label key through their documented environment variable. Injection happens
+// after scheduling and user overrides so the two values cannot drift;
+// unrelated selectors and environment entries are kept.
+//
+// The contract is opt-in (issue #2469). Without a configured label AICR
+// injects neither half, so the kubelet plugin carries no AICR-introduced
+// placement requirement and a cluster with unlabeled GPU nodes behaves as it
+// did before the contract existed. The cost is that the plugin cannot be
+// descheduled ahead of a driver container restart; that is surfaced as a
+// bundle-time warning where a Driver Manager actually runs.
 func (b *DefaultBundler) injectDRAEvictionLabel(
 	componentValues map[string]map[string]any,
 	recipeResult *recipe.RecipeResult,
@@ -2947,6 +2962,11 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 	}
 
 	label := b.Config.DRAEvictionNodeLabel()
+	if label == (config.NodeLabel{}) {
+		b.warnDRAEvictionNotConfigured(componentValues, draNames, gpuOperatorNames)
+		return nil
+	}
+
 	for _, name := range draNames {
 		values := componentValues[name]
 		if values == nil {
@@ -3002,6 +3022,60 @@ func (b *DefaultBundler) warnDRAEvictionNodeLabelRequired(draNames []string, lab
 			"label", label.String(),
 		)
 	}
+}
+
+// warnDRAEvictionNotConfigured is the opt-out counterpart of
+// warnDRAEvictionNodeLabelRequired: it reports that AICR did not configure
+// automatic DRA kubelet-plugin eviction, so a driver container restart is not
+// preceded by descheduling the plugin.
+//
+// It fires only where a Driver Manager actually runs. With a provider-installed
+// driver (driver.enabled=false — AKS azure-managed, GKE COS, OKE) GPU Operator
+// deploys no driver pod, nothing can restart the driver under the plugin, and
+// the warning would be noise. A missing field means enabled, matching the
+// GPU Operator chart default.
+func (b *DefaultBundler) warnDRAEvictionNotConfigured(
+	componentValues map[string]map[string]any,
+	draNames []string,
+	gpuOperatorNames []string,
+) {
+
+	operatorManagesDriver := false
+	for _, name := range gpuOperatorNames {
+		if gpuOperatorDriverEnabled(componentValues[name]) {
+			operatorManagesDriver = true
+			break
+		}
+	}
+	if !operatorManagesDriver {
+		return
+	}
+
+	for _, name := range draNames {
+		msg := fmt.Sprintf(
+			"AICR did not configure automatic eviction for %s: no DRA eviction node label is set, so the kubelet plugin is not descheduled before a GPU driver container restart. The plugin runs on every accelerated node and needs no extra node label. On a driver upgrade the module unload can fail with \"failed to uninstall nvidia driver components\"; on an unchanged-config restart the stale driver rootfs is unmounted underneath the running plugin, which upstream documents as leaving NodePrepareResources unable to build CDI specs for full-GPU allocation, with no error at restart time. Set --dra-eviction-node-label (or scheduling.draEvictionNodeLabel) to opt in, and label every GPU node at node-pool provisioning time",
+			name,
+		)
+		b.appendWarning(msg)
+		slog.Warn("DRA kubelet-plugin eviction not configured",
+			"component", name,
+		)
+	}
+}
+
+// gpuOperatorDriverEnabled reports whether GPU Operator manages the GPU driver
+// for this component. An absent driver.enabled means enabled, matching the
+// chart default.
+func gpuOperatorDriverEnabled(values map[string]any) bool {
+	driver, ok := values["driver"].(map[string]any)
+	if !ok {
+		return true
+	}
+	enabled, ok := driver["enabled"].(bool)
+	if !ok {
+		return true
+	}
+	return enabled
 }
 
 func mergeDRAEvictionNodeSelector(componentName string, values map[string]any, label config.NodeLabel) error {

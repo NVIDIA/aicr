@@ -237,16 +237,56 @@ aicr bundle --recipe recipe.yaml \
   --output ./bundles
 ```
 
-## Prepare DRA nodes before applying upgraded bundles
+## Prepare DRA nodes when opting in to eviction coordination
 
-> **Upgrade requirement:** A bundle containing both `gpu-operator` and
-> `nvidia-dra-driver-gpu` now selects DRA kubelet-plugin nodes with
-> `nvidia.com/dra-kubelet-plugin=true` by default. The same applies to the
-> corresponding `-ocp` components. Before applying the first newly generated
-> bundle to an existing deployment, label every GPU node that must run the DRA
-> kubelet plugin. Applying the bundle first can reduce the DaemonSet to zero
-> eligible nodes, interrupting ComputeDomain/IMEX and any whole-GPU resources
-> advertised through DRA.
+DRA eviction coordination is **opt-in**. By default a bundle containing both
+`gpu-operator` and `nvidia-dra-driver-gpu` adds no eviction node label, and the
+DRA kubelet plugin runs on every accelerated node with no extra labeling. The
+trade-off is that the plugin is not descheduled ahead of a GPU driver container
+restart; `aicr bundle` warns about this where GPU Operator manages the driver,
+and [DRA Driver Upgrade Eviction](cli-reference.md#dra-driver-upgrade-eviction)
+describes what can go wrong.
+
+Generate with `--dra-eviction-node-label key=value` to opt in. The rest of this
+section applies only then. The same applies to the corresponding `-ocp`
+components.
+
+### Choosing whether to opt in
+
+The label is how GPU Operator's Driver Manager finds the plugin: it deschedules
+the plugin by rewriting the label's value and restores it afterwards, so the
+plugin's `nodeSelector` has to match the label for the mechanism to work at all.
+That is what makes it a placement requirement, and why an unlabeled node ends up
+with no plugin rather than with an uncoordinated one.
+
+| | Not opted in (default) | Opted in |
+|---|---|---|
+| Node labeling | none needed | every GPU node, in the node pool definition |
+| Plugin placement | every accelerated node | only nodes carrying the label |
+| Driver restart | plugin is not descheduled first | plugin is descheduled and restored |
+| If a node is missed | n/a | that node silently runs without DRA |
+
+Opt in when GPU Operator manages the driver (`driver.enabled=true`) and you can
+guarantee the label is set at provisioning time for every GPU node, including
+ones added later by autoscaling or node replacement. Otherwise the default is
+the safer choice: a plugin that always runs, with a documented risk at driver
+restarts, beats a plugin that silently does not run on some nodes.
+
+There is nothing to opt in to where the driver is provider-installed
+(`driver.enabled=false` — AKS `azure-managed`, GKE COS, OKE). GPU Operator
+deploys no driver pod and therefore no Driver Manager, so no restart can occur
+under the plugin and no warning is emitted.
+
+Also note the mechanism is best-effort under `k8s-driver-manager` v0.12: the
+configured label is paused in the same batch as other GPU operands and no wait
+covers the standalone DRA kubelet plugin, so ordering against DRA claim holders
+and completion of plugin teardown are not guaranteed. See
+[NVIDIA/k8s-driver-manager#250](https://github.com/NVIDIA/k8s-driver-manager/issues/250).
+
+> **Opt-in requirement:** label every GPU node that must run the DRA kubelet
+> plugin *before* applying the bundle. Applying it first can reduce the
+> DaemonSet to zero eligible nodes, interrupting ComputeDomain/IMEX and any
+> whole-GPU resources advertised through DRA.
 
 ### Set the label at node-pool provisioning time
 
@@ -263,7 +303,9 @@ and silently runs without the DRA kubelet plugin, leaving the cluster
 because it is intermittent and node-dependent.
 
 Use `kubectl label` only to repair nodes that already exist, and fix the node
-pool definition in the same change so replacements inherit it:
+pool definition in the same change so replacements inherit it. Substitute the
+same `key=value` pair you passed to `--dra-eviction-node-label` — the examples
+below use the documented default:
 
 ```bash
 kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true
@@ -300,13 +342,47 @@ still with no error. Revisit the node labels whenever you regenerate a bundle
 for an existing deployment, not only when building a new cluster.
 
 `aicr bundle` emits a non-blocking warning describing this requirement whenever
-both components are enabled. See
+both components are enabled and an eviction label is configured. The
+complementary opt-out warning fires only where GPU Operator manages the driver
+(`driver.enabled=true`). See
 [Storage Class](cli-reference.md#storage-class), where that warning is
 described alongside the other cluster-state dependency reported the same way.
 
+### Upgrading from a build that applied the label implicitly
+
+For a window on unreleased `main`, the eviction label was applied
+automatically rather than requested. Bundles generated in that window — via the
+CLI, the REST API, config, or a Go caller — received the
+`nvidia.com/dra-kubelet-plugin=true` selector and the matching Driver Manager
+environment entry without asking for them. No tagged release contains that
+behavior, so only clusters built from `main` in that interval are affected.
+
+At this head the same inputs produce the opposite result: omitting
+`--dra-eviction-node-label` removes both the selector and the Driver Manager
+entry. Regenerating and upgrading such a cluster therefore *drops* eviction
+coordination silently — the reverse of the direction described above, and the
+case the preceding subsection does not cover.
+
+Decide deliberately, and only two answers are defensible:
+
+- **Keep coordination.** Confirm the nodes still carry the label
+  (`kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true`), confirm the count
+  matches the GPU nodes you expect, then pass
+  `--dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true` explicitly on
+  every subsequent generation. Verify node labels *before* upgrading: passing
+  the flag against unlabeled nodes takes the DaemonSet to `DESIRED=0`.
+- **Accept the opt-out.** Regenerate without the flag and accept the documented
+  risks in [DRA Driver Upgrade
+  Eviction](cli-reference.md#dra-driver-upgrade-eviction). The node labels
+  become inert and can be removed at leisure.
+
+The opt-out warning `aicr bundle` prints bounds the blast radius at generation
+time, but it is not upgrade guidance: it fires on every unlabeled generation and
+cannot know the cluster previously had coordination.
+
 ### Custom label conventions and post-install checks
 
-If the cluster uses a different convention, generate the bundle with
+The flag both opts in and selects the convention: generate the bundle with
 `--dra-eviction-node-label key=value` and apply that exact pair to the nodes.
 AICR gives the full pair to the DRA node selector, but GPU Operator's Driver
 Manager receives only the label key because its eviction contract matches and

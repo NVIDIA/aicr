@@ -535,6 +535,10 @@ func (c *Config) SharedStorageClass() string {
 
 // DRAEvictionNodeLabel returns the label shared by the DRA kubelet plugin
 // selector and GPU Operator Driver Manager eviction configuration.
+//
+// The zero NodeLabel means the eviction contract was not requested: AICR then
+// injects neither half and the DRA kubelet plugin carries no AICR-introduced
+// placement requirement. Configuring a label opts in (see issue #2469).
 func (c *Config) DRAEvictionNodeLabel() NodeLabel {
 	return c.draEvictionNodeLabel
 }
@@ -604,6 +608,11 @@ func (c *Config) Bundlers() []string {
 
 // Validate checks if the Config has valid settings.
 func (c *Config) Validate() error {
+	// The zero label means the DRA eviction contract was not requested, which
+	// is the default (issue #2469). Only a configured label is validated.
+	if c.draEvictionNodeLabel == (NodeLabel{}) {
+		return nil
+	}
 	return c.draEvictionNodeLabel.Validate()
 }
 
@@ -939,15 +948,14 @@ func WithBundlers(names []string) Option {
 // NewConfig returns a Config with default values.
 func NewConfig(options ...Option) *Config {
 	c := &Config{
-		deployer:             DeployerHelm,
-		includeChecksums:     true,
-		includeReadme:        true,
-		valueOverrides:       make(map[string]map[string]string),
-		valueOverridesTyped:  make(map[string]map[string]any),
-		dynamicValues:        make(map[string][]string),
-		draEvictionNodeLabel: DefaultDRAEvictionNodeLabel(),
-		verbose:              false,
-		version:              "dev",
+		deployer:            DeployerHelm,
+		includeChecksums:    true,
+		includeReadme:       true,
+		valueOverrides:      make(map[string]map[string]string),
+		valueOverridesTyped: make(map[string]map[string]any),
+		dynamicValues:       make(map[string][]string),
+		verbose:             false,
+		version:             "dev",
 	}
 	for _, opt := range options {
 		opt(c)

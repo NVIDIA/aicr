@@ -122,23 +122,28 @@ spec:
           enabled: false
 ```
 
-### Label GPU nodes for the DRA kubelet plugin
+### Label GPU nodes for the DRA kubelet plugin (opt-in only)
 
-A bundle that enables both `gpu-operator` and `nvidia-dra-driver-gpu` schedules
-the DRA kubelet plugin only on nodes labeled
-`nvidia.com/dra-kubelet-plugin=true` (or the pair given to
-`aicr bundle --dra-eviction-node-label`). Set it **in the node pool
-definition**, with the other required node labels — an ad hoc
-`kubectl label node` does not survive node replacement, recycling,
-autoscaling, or a pool scaled from zero, so later nodes arrive unlabeled.
+DRA eviction coordination is opt-in and **does nothing on the default AKS
+profile**. Under `gpuStack=azure-managed` the node image installs the driver, so
+GPU Operator sets `driver.enabled=false`, deploys no driver pod and runs no
+Driver Manager — there is nothing to coordinate with, and no node label is
+needed. Bundles generated without `--dra-eviction-node-label` add no such
+selector, and the DRA kubelet plugin runs on every accelerated node.
 
-An unlabeled GPU node fails silently: it runs no kubelet plugin and publishes
-no `ResourceSlices`, and neither Helm nor the bundle's `deploy.sh` reports an
-error. With no labeled GPU node at all the DaemonSet sits at `DESIRED=0`; with
-only some labeled, those nodes work while the rest silently lack DRA.
-This applies to existing clusters too — adding the selector during an
-upgrade removes a plugin that was previously working.
-See [Prepare DRA nodes before applying upgraded bundles](../user/bundling.md#prepare-dra-nodes-before-applying-upgraded-bundles).
+The label matters only if you both run an operator-managed driver (see the
+`gpuStack=operator-managed` procedure below) and generate the bundle with
+`aicr bundle --dra-eviction-node-label key=value`. In that case set it **in the
+node pool definition**, with the other required node labels — an ad hoc
+`kubectl label node` does not survive node replacement, recycling, autoscaling,
+or a pool scaled from zero, so later nodes arrive unlabeled.
+
+When you have opted in, an unlabeled GPU node fails silently: it runs no kubelet
+plugin and publishes no `ResourceSlices`, and neither Helm nor the bundle's
+`deploy.sh` reports an error. With no labeled GPU node at all the DaemonSet sits
+at `DESIRED=0`; with only some labeled, those nodes work while the rest silently
+lack DRA.
+See [Prepare DRA nodes when opting in to eviction coordination](../user/bundling.md#prepare-dra-nodes-when-opting-in-to-eviction-coordination).
 
 ## GPU Driver Setup
 
@@ -258,8 +263,7 @@ az aks nodepool add \
   --resource-group <rg> \
   --name gpupool \
   --node-vm-size Standard_ND96isr_H100_v5 \
-  --node-count 1 \
-  --labels nvidia.com/dra-kubelet-plugin=true
+  --node-count 1
 ```
 
 No changes to AICR recipes are needed — this is the AKS family's `gpuStack`
@@ -591,9 +595,28 @@ az aks nodepool add \
   --name gpupool \
   --node-vm-size Standard_ND96isr_H100_v5 \
   --gpu-driver none \
-  --node-count 1 \
-  --labels nvidia.com/dra-kubelet-plugin=true
+  --node-count 1
 ```
+
+Add the eviction label to this pool only if you also opt in at bundle time. The
+node label and the flag value must be the **same `key=value` pair** — the flag
+selects the convention, and AICR renders exactly what you pass:
+
+`az aks nodepool update --labels` **replaces** the pool's entire user-label map
+rather than merging, so repeat every label the pool already carries or they are
+dropped — including the accelerated-node selector the bundle relies on:
+
+```shell
+az aks nodepool update \
+  --cluster-name <cluster> --resource-group <rg> --name gpupool \
+  --labels nodeGroup=gpu-worker nvidia.com/dra-kubelet-plugin=true
+```
+
+Prefer setting both at pool creation time (`az aks nodepool add --labels ...`)
+so there is no map to preserve.
+
+Then pass the same pair to `aicr bundle` in the generation step below. See
+[Label GPU nodes for the DRA kubelet plugin (opt-in only)](#label-gpu-nodes-for-the-dra-kubelet-plugin-opt-in-only).
 
 Then select the mode at recipe generation time with the `gpuStack`
 configuration profile — one flag flips every ownership path together:
@@ -601,7 +624,11 @@ configuration profile — one flag flips every ownership path together:
 ```shell
 aicr recipe --service aks --accelerator h100 --os ubuntu --intent training \
   --profile gpuStack=operator-managed -o recipe.yaml
-aicr bundle -r recipe.yaml -o ./bundles
+# AKS requires a keyed accelerated-node toleration; add
+# --dra-eviction-node-label only if you opted in and labelled the pool.
+aicr bundle -r recipe.yaml -o ./bundles \
+  --accelerated-node-toleration nvidia.com/gpu:NoSchedule \
+  --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true
 ```
 
 The `operator-managed` value sets `driver.enabled=true`, `toolkit.enabled=true`,

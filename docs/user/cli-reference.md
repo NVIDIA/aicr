@@ -1502,13 +1502,13 @@ aicr bundle [flags]
 | `--set` | | string[] | Override **scalar** values in bundle files (repeatable, format: `component:path=value`). Use `enabled` key to include/exclude components (e.g., `--set awsebscsidriver:enabled=false`). Scalar-only — for list/object values use `--set-json` / `--set-file`. An override whose component is absent from the generated bundle is rejected rather than silently discarded; the scalar `enabled=false` spelling is exempt on a declared component (it is the removal mechanism). See [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). |
 | `--set-json` | | string[] | Override values with a JSON-encoded **list or object** (repeatable, format: `component:path=<json>`, e.g. `--set-json agentgateway:allowedSourceRanges='["216.228.127.128/30"]'`). Object values deep-merge into existing maps; lists and scalars replace. Takes precedence over `--set` on the same path. An override whose component is absent from the generated bundle is rejected — no `enabled` exemption on the typed path (`enabled` is honored only via scalar `--set`); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). See [List and Object Value Overrides](#list-and-object-value-overrides). |
 | `--set-file` | | string[] | Override a value by reading JSON/YAML from a file (repeatable, format: `component:path=<filepath>`). For larger structures than `--set-json`; same merge and absent-component-rejection semantics (no `enabled` exemption on the typed path). |
-| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, and `helmfile` deployers. A declaration whose component is absent from the generated bundle is rejected (no path is exempt — a dynamic path is never a removal idiom); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). Certain gate- or contract-owned paths on **present** components cannot be declared dynamic either — driver-ownership paths (e.g. `gpuoperator:driver.enabled`), GPU allocation-policy keys, the DRA eviction paths `kubeletPlugin.nodeSelector` and `driver.manager.env` when both contract components are enabled, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths — because an install-time edit there would undo what AICR verified or made consistent; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Dynamic Install-Time Values](#dynamic-install-time-values). |
+| `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, and `helmfile` deployers. A declaration whose component is absent from the generated bundle is rejected (no path is exempt — a dynamic path is never a removal idiom); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). Certain gate- or contract-owned paths on **present** components cannot be declared dynamic either — driver-ownership paths (e.g. `gpuoperator:driver.enabled`), GPU allocation-policy keys, the DRA eviction paths `kubeletPlugin.nodeSelector` and `driver.manager.env` when both contract components are enabled **and** the eviction contract is opted into with `--dra-eviction-node-label`, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths — because an install-time edit there would undo what AICR verified or made consistent; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
 | `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable) |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
 | `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable) |
 | `--accelerated-node-toleration` | | string[] | Toleration for accelerated/GPU nodes (format: key=value:effect, repeatable) |
-| `--dra-eviction-node-label` | | string | Node label coordinating DRA kubelet-plugin eviction with GPU Operator driver upgrades (format: `key=value`; default: `nvidia.com/dra-kubelet-plugin=true`). Applied only when both components are enabled. |
+| `--dra-eviction-node-label` | | string | Opt in to DRA kubelet-plugin eviction coordination with GPU Operator driver upgrades (format: `key=value`; no default — unset means AICR injects nothing). Applied only when both components are enabled. Nodes must then carry the label. |
 | `--workload-gate` | | string | Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
 | `--workload-selector` | | string[] | Label selector for nodewright-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when nodewright-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
@@ -1656,22 +1656,119 @@ This results in:
 
 #### DRA Driver Upgrade Eviction
 
-When a recipe includes both `nvidia-dra-driver-gpu` and `gpu-operator`, AICR automatically coordinates kubelet-plugin eviction during GPU driver container upgrades. The same behavior applies to the corresponding `-ocp` components. AICR merges the default `nvidia.com/dra-kubelet-plugin=true` selector into `kubeletPlugin.nodeSelector` and sets the GPU Operator `driver.manager.env` entry `NODE_LABEL_FOR_GPU_POD_EVICTION` to the same label key. Existing accelerated-node selectors and unrelated Driver Manager environment variables are preserved.
+**This is opt-in.** By default AICR injects nothing here, so the DRA kubelet plugin runs on every accelerated node with no extra node label required. Set `--dra-eviction-node-label` (or `scheduling.draEvictionNodeLabel`) to opt in.
 
-Nodes intended for DRA GPU allocation must carry the matching label. Set it in the **node pool definition** — an EKS managed nodegroup `labels` entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the equivalent for your provisioner — alongside the `nodeGroup=gpu-worker` label already set there. An ad hoc `kubectl label node` is a repair, not a configuration: it does not survive node replacement, recycling, autoscaling, or a nodegroup scaled from zero, so later GPU nodes arrive unlabeled and the cluster ends up partially DRA-enabled.
+**What the opt-in does.** When a recipe includes both `nvidia-dra-driver-gpu` and `gpu-operator` and a label is configured, AICR merges that `key=value` into `kubeletPlugin.nodeSelector` and sets the GPU Operator `driver.manager.env` entry `NODE_LABEL_FOR_GPU_POD_EVICTION` to the same key, so GPU Operator's Driver Manager can deschedule the plugin ahead of a driver container restart. The same applies to the `-ocp` components. Existing accelerated-node selectors and unrelated Driver Manager environment variables are preserved.
 
-Use `kubectl label` only to repair nodes that already exist, and fix the node pool definition in the same change:
+```bash
+aicr bundle --recipe recipe.yaml \
+  --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
+  --output bundle
+```
+
+**What you give up by not opting in.** The plugin is not descheduled before a driver container restart. On a driver upgrade the module unload can fail with `failed to uninstall nvidia driver components`, leaving the replacement uninstalled and the old driver possibly partially torn down. On a restart with unchanged driver configuration the stale driver rootfs is unmounted underneath the running plugin; upstream documents this as leaving `NodePrepareResources` unable to build CDI specs, with no error at restart time. That second shape concerns the **full-GPU allocation** path, and we have not observed it in AICR's default configuration — see the note below. `aicr bundle` warns about this when GPU Operator manages the driver.
+
+This does not apply where the driver is provider-installed (`driver.enabled=false` — AKS `azure-managed`, GKE COS, OKE). Those deploy no GPU Operator driver pod and therefore no Driver Manager, so there is nothing to coordinate with and no warning is emitted.
+
+**If you do opt in, every GPU node must carry the label.** Set it in the **node pool definition** — an EKS managed nodegroup `labels` entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the equivalent for your provisioner. An ad hoc `kubectl label node` is a repair, not a configuration: it does not survive node replacement, recycling, autoscaling, or a nodegroup scaled from zero.
 
 ```bash
 kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true
 kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
 ```
 
-**The failure mode is silent, and partial coverage is the dangerous shape.** An unlabeled GPU node runs no DRA kubelet plugin and publishes no `ResourceSlices` for itself. If *no* GPU node carries the label, the `nvidia-dra-driver-gpu-kubelet-plugin` DaemonSet sits at `DESIRED=0`. If *some* do, those nodes work normally while the rest silently lack DRA — a split cluster, which is harder to notice than uniform failure and is exactly what node replacement or autoscaling produces. Helm and the bundle's `deploy.sh` report success in every case, so verify the selector matches the node count you expect before applying, and check the DaemonSet afterwards.
+**The opt-in failure mode is silent, and partial coverage is the dangerous shape.** An unlabeled GPU node then runs no DRA kubelet plugin and publishes no `ResourceSlices` for itself. If *no* GPU node carries the label, the `nvidia-dra-driver-gpu-kubelet-plugin` DaemonSet sits at `DESIRED=0`. If *some* do, those nodes work normally while the rest silently lack DRA. Helm and the bundle's `deploy.sh` report success in every case, so check the DaemonSet after applying.
 
-**This is not only a fresh-install prerequisite.** On an existing cluster whose bundle predates this selector, the kubelet-plugin DaemonSet selects on `nodeGroup=gpu-worker` alone and works. Regenerating the bundle and running `helm upgrade` adds the second selector, and working functionality disappears — still silently. Revisit node labels whenever you regenerate a bundle for an existing deployment.
+**Recovering from the two opt-out failures.** Both are recoverable, and the procedures are different — only the first needs the plugin suppressed.
 
-Use `--dra-eviction-node-label` when the cluster follows a different label convention. The flag accepts exactly one Kubernetes label in `key=value` form; AICR uses the full pair for DRA placement and the key for GPU Operator:
+*Driver upgrade stopped with `failed to uninstall nvidia driver components`.* The plugin still holds the driver, so the replacement is not installed and the old driver may be partially torn down. Recovery means clearing the node's DRA claim holders and then removing the plugin before retrying the driver. Whether the removal can be confined to the failed node depends on the deployed tolerations, below.
+
+**`kubectl cordon` does not keep the plugin off the node.** The DaemonSet controller adds a `node.kubernetes.io/unschedulable:NoSchedule` toleration to its pods, so a cordoned node still gets one and deleting the pod simply recreates it. Suspending a GitOps controller does not help either; the DaemonSet controller is what recreates the pod.
+
+**Do not patch the DaemonSet to exclude a node.** Two properties of the shipped DaemonSet rule out per-node *template* edits: its affinity is five OR-ed `nodeSelectorTerms`, so excluding a node requires editing every term rather than one; and it uses `RollingUpdate` with `maxUnavailable: 100%`, so *any* change to `.spec.template` rolls pods on every node it covers — and reverting the change rolls them again. A node-scoped-looking patch is therefore cluster-wide in effect.
+
+**A node taint is the exception, and it is worth checking for.** A taint acts on the node, not the DaemonSet template, so it rolls nothing. Whether it can work depends on the tolerations of your *deployed* DaemonSet — read them before choosing a procedure:
+
+```bash
+kubectl -n nvidia-dra-driver get ds nvidia-dra-driver-gpu-kubelet-plugin \
+  -o jsonpath='{.spec.template.spec.tolerations}'
+```
+
+**Expect a wildcard, because that is AICR's default.** When `--accelerated-node-toleration` is not passed, AICR applies a keyless `{operator: Exists}` toleration, which accepts every taint and leaves no key to exclude a node with. A default bundle therefore has no node-scoped option and must use the cluster-wide sequence below. This was the deployed state on an EKS GB300 cluster whose bundle was generated without toleration flags.
+
+**A taint works only when the deployed list is narrow** — a bundle built with explicit `--accelerated-node-toleration` flags, or the upstream chart default of `nvidia.com/gpu` alone. Then a taint whose key appears nowhere in that list excludes the plugin from exactly that node.
+
+**"Node-scoped" describes the plugin suppression, not the blast radius of the whole procedure.** The taint affects one node, and the DaemonSet keeps running everywhere else. But step 2 quiesces the *controllers* that own claim holders, and a controller is rarely node-scoped: scaling a Deployment, StatefulSet or multi-replica `NodeSet` to zero terminates its Pods on **every** node it runs on, not just the failed one. Scope that step as narrowly as your workloads allow — suspending a single Job, or cordoning and draining only what holds claims here — and treat wider quiescing as a maintenance window, not a node-local repair.
+
+Three invariants govern the order, and every step below exists to preserve one of them:
+
+- **Fence before you drain.** Terminating a claim holder while a controller can still schedule onto the node re-fills what you just cleared.
+- **The plugin outlives its claim holders.** The kubelet routes `NodeUnprepareResources` through the plugin, so a holder still terminating after the plugin is gone will hang.
+- **The driver recovers before the plugin returns.** A plugin that comes back early reopens the driver mid-recovery, reintroducing the original failure.
+
+1. **Fence the node. This is the very first operation — before touching any workload.**
+
+   ```bash
+   kubectl taint node <node-name> aicr.nvidia.com/dra-recovery=true:NoSchedule
+   ```
+
+   `NoSchedule` blocks *new* pods while leaving running ones alone, so the taint fences the node without disturbing the plugin, which is still needed. Every later step assumes this fence is up.
+
+2. **Quiesce the controllers that own claim holders on that node.** The invariant is that *no owning controller can create a replacement Pod*; confirm reconciliation is actually quiesced before relying on it. The action is workload-specific — set `.spec.suspend: true` on Jobs, scale Deployments, StatefulSets and **standalone** ReplicaSets to zero, scale operator-owned workloads (a Slinky Slurm `NodeSet`, for instance) to zero replicas. A Deployment-owned ReplicaSet must be controlled through its Deployment, which will otherwise recreate it. **`kubectl rollout pause` is not sufficient**: it halts rollout progression while the ReplicaSet keeps reconciling replicas, so a deleted claim holder is recreated immediately.
+
+   These actions *terminate* Pods — Job suspension deletes active Pods, scaling to zero removes them — and, as noted above, they do so wherever that controller runs. That is why the fence goes up first: the terminations on this node cannot then be undone by a controller rescheduling onto it.
+
+3. **Confirm every claim holder on that node has completed `NodeUnprepareResources`.** Allocated ComputeDomain claims can legitimately persist cluster-wide, so a cluster-wide claim listing does not establish that *this* node is clear — resolve holders to the node before proceeding. This is stated as an invariant rather than a command because the holder-to-node mapping depends on your workload shape and no single command was verified here.
+
+4. **Only then delete the plugin on that node.**
+
+   ```bash
+   kubectl -n nvidia-dra-driver delete pod \
+     -l nvidia-dra-driver-gpu-component=kubelet-plugin \
+     --field-selector spec.nodeName=<node-name>
+   ```
+
+   Select on `nvidia-dra-driver-gpu-component=kubelet-plugin`, the DaemonSet's own selector. The chart-wide `app.kubernetes.io/name=nvidia-dra-driver-gpu` label also matches the DRA *controller*, which can be colocated on a GPU node.
+
+5. **Confirm at the node's runtime that the plugin container is actually gone**, not merely that the Pod object was deleted. Aggregate `kubectl get ds` counts prove nothing about this node, and a stuck `FailedKillPod` leaves the container — and the driver handle — alive after the API object disappears.
+
+6. **Retry the driver, and wait for it to finish.** Driver Manager must report success and the driver Pod must reach `Ready`. Do not proceed while it is still retrying.
+
+7. **Only now remove the taint.**
+
+   ```bash
+   kubectl taint node <node-name> aicr.nvidia.com/dra-recovery-
+   ```
+
+8. **Confirm the plugin returns `Ready` on that node and its `ResourceSlices` are republished**, then restore the controllers quiesced in step 2. Until the slices are back the node cannot serve DRA allocations, even though the pod is running.
+
+`NoSchedule` does not evict running pods, so the driver pod stays put and its driver-manager init container keeps retrying while the plugin is gone. The DRA plugin on other nodes is untouched; whether their *workloads* are depends entirely on how wide step 2 had to reach.
+
+The *suppression* mechanism in steps 1, 7 and 8 was verified on a two-GPU-node AKS cluster built with explicit tolerations, whose plugin tolerated only `nvidia.com/gpu=present:NoSchedule`: tainting one node took the DaemonSet from `DESIRED=2` to `DESIRED=1` with no replacement pod on the tainted node, while the second node's pod kept its original start time — no roll. Removing the taint returned it to `DESIRED=2 READY=2` with both `ResourceSlices` restored. That cluster uses a host-installed driver with no GPU Operator Driver Manager, so steps 3, 5 and 6 — the driver-recovery half — were not exercised there.
+
+**Cluster-wide sequence** — required for the default wildcard-toleration bundle, and for any cluster where the check above shows no usable taint key:
+
+1. Stop workload reconciliation across **every** node the DaemonSet covers. Same invariant as the node-scoped path — no owning controller may create a replacement Pod, confirmed quiesced before you drain — and the same caveat: `kubectl rollout pause` leaves the ReplicaSet reconciling replicas, so scale replica controllers to zero and suspend Jobs instead. This matters more here than in the node-scoped path, because there is no taint fence to fall back on: quiescing the controllers is the only lever.
+2. Clear DRA claim holders on **every** node the DaemonSet covers, not only the failed one, and confirm none remain. The kubelet needs the plugin to complete `NodeUnprepareResources`, so any claim holder still terminating when the plugin goes away will hang.
+3. Suppress the DaemonSet by deleting it. A DaemonSet has no replica count to scale, and editing its `nodeSelector` to match nothing is itself the cluster-wide template rollout — acceptable here only because this sequence has already accepted cluster-wide impact. Suspend any GitOps reconciliation first, or it will recreate the object underneath you.
+4. Confirm every plugin pod has terminated. Pod-object deletion is not proof the container is gone; check the nodes.
+5. Retry the driver on the affected node and **wait for it to finish** — Driver Manager reporting success and the driver Pod `Ready`. Restoring the DaemonSet while the driver is still retrying recreates the plugin and lets it reopen the driver mid-recovery, which is the same race the node-scoped path guards against.
+6. Only then restore the DaemonSet, and confirm the plugin reaches `Ready` with its `ResourceSlices` republished.
+7. Finally restore the workload controllers quiesced in step 1.
+
+If a GitOps controller reconciles the DaemonSet, suspend it for the duration and resume afterwards.
+
+*Claim preparation failing after a restart with unchanged driver configuration.* The stale rootfs was unmounted underneath a plugin that kept running, so upstream's comment describes it as no longer able to build CDI specs. This one needs no DaemonSet suppression and no claim-holder clearing: once the replacement driver pod is `Ready`, restart the plugin pod on the affected node and the recreated pod binds the new rootfs.
+
+**Not reproduced in AICR's default configuration.** An attempt on an EKS GB300 cluster running the default ComputeDomain-only DRA setup (`resources.gpus.enabled: false`) reached the exact conditions — driver-manager logged `skipping the uninstallation` and `Unmounting NVIDIA driver rootfs` while the kubelet plugin was never evicted — and then a fresh ComputeDomain claim still prepared successfully, with the plugin not restarted. An existing claim holder also terminated cleanly, so `NodeUnprepareResources` was still being serviced.
+
+The degradation upstream describes is about CDI specs, which is the full-GPU allocation path that AICR disables by default, so this shape may be unreachable in the default configuration. Treat that as one negative result in one configuration, not proof: full-GPU DRA was not tested, and only the unchanged-config restart path was exercised. The procedure above is retained because it is the correct response if the degradation does occur.
+
+**Known limitation of the opt-in.** Under `k8s-driver-manager` v0.12 the configured label is paused in the same batch as other GPU operands, and no wait covers the standalone DRA kubelet plugin, so ordering against DRA claim holders and completion of plugin teardown are not guaranteed. The mechanism is the one NVIDIA documents, but it is best-effort here. See [NVIDIA/k8s-driver-manager#250](https://github.com/NVIDIA/k8s-driver-manager/issues/250).
+
+**Support posture by GPU Operator version.** The 26.3 DRA installation guide requires this label for its **full-GPU allocation** workflow; its ComputeDomain-only procedure does not. AICR's default disables full-GPU DRA (`resources.gpus.enabled: false`) while keeping ComputeDomains, so an unlabeled default bundle does not satisfy the 26.3 full-GPU workflow — it does not put every bundle outside the guide. GPU Operator 26.7 documents the GPUCluster stack instead, which needs no separate label; AICR has not adopted that path.
+
+The flag accepts exactly one Kubernetes label in `key=value` form; AICR uses the full pair for DRA placement and the key for GPU Operator:
 
 ```bash
 aicr bundle --recipe recipe.yaml \
@@ -1685,7 +1782,7 @@ GPU Operator's Driver Manager receives only the label key; it does not receive
 or compare the configured value. The cluster's node-labeling convention must
 therefore preserve the configured key/value pair when the label is restored.
 
-The wiring is absent when either component is disabled. Direct value overrides for the managed selector key or `NODE_LABEL_FOR_GPU_POD_EVICTION` are overwritten so the cross-chart contract cannot drift. When both components are enabled, a `--dynamic` declaration intersecting `kubeletPlugin.nodeSelector` or `driver.manager.env` is rejected because install-time editing would split the same contract. See NVIDIA's [GPU Operator DRA installation guide](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/26.3/dra-intro-install.html) for the upstream driver-upgrade requirement.
+The wiring is absent when either component is disabled, and when no eviction label is configured. Once opted in, direct value overrides for the managed selector key or `NODE_LABEL_FOR_GPU_POD_EVICTION` are overwritten so the cross-chart contract cannot drift, and a `--dynamic` declaration intersecting `kubeletPlugin.nodeSelector` or `driver.manager.env` is rejected because install-time editing would split the same contract. Without the opt-in AICR owns neither path, so both remain freely overridable and declarable. See NVIDIA's [GPU Operator DRA installation guide](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/26.3/dra-intro-install.html) for the upstream driver-upgrade requirement.
 
 #### Storage Class
 
@@ -1711,7 +1808,7 @@ When `--storage-class` is not set, any `storageClassName` values already defined
 
 If a rendered component creates a PVC at a registry-declared `storageClassPaths` entry and no usable `storageClassName` is set after overlay, `--storage-class`, and `--set` precedence is resolved, `aicr bundle` emits a non-blocking warning. The bundle still relies on the target cluster's default StorageClass in that case.
 
-`aicr bundle` reports cluster-state dependencies it cannot verify as non-blocking warnings of this kind. The other one is the DRA eviction node label: when a recipe enables both `nvidia-dra-driver-gpu` and `gpu-operator`, the bundle warns that every GPU node must carry `nvidia.com/dra-kubelet-plugin=true` (or the pair given to `--dra-eviction-node-label`), that the label belongs in the node pool definition rather than an ad hoc `kubectl label`, and that unlabeled nodes silently run without DRA — no `ResourceSlices`, and `DESIRED=0` if no GPU node matches at all — with no error either way. Both warnings describe state AICR deliberately does not own — StorageClasses and node labels are cluster infrastructure. See [DRA Driver Upgrade Eviction](#dra-driver-upgrade-eviction).
+`aicr bundle` reports cluster-state dependencies it cannot verify as non-blocking warnings of this kind. Two more concern DRA eviction. Without `--dra-eviction-node-label`, and only where GPU Operator manages the driver, the bundle warns that automatic eviction was not configured and that a driver restart carries the documented risks. With the flag set, it warns that every GPU node must carry the configured label, that the label belongs in the node pool definition rather than an ad hoc `kubectl label`, and that unlabeled nodes silently run without DRA — no `ResourceSlices`, and `DESIRED=0` if no GPU node matches at all. These describe state AICR deliberately does not own — StorageClasses and node labels are cluster infrastructure. See [DRA Driver Upgrade Eviction](#dra-driver-upgrade-eviction).
 
 `--shared-storage-class` is a separate input for registry-declared
 `sharedStorageClassPaths`. It is used by opt-in Slinky Slurm PVCs mounted at

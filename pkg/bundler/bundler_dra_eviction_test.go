@@ -63,10 +63,14 @@ func TestInjectDRAEvictionLabel(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts := []config.Option{}
-			if tt.configured != (config.NodeLabel{}) {
-				opts = append(opts, config.WithDRAEvictionNodeLabel(tt.configured))
+			// The contract is opt-in (#2469), so these mechanics tests
+			// configure a label explicitly; cases with no override exercise
+			// the documented default label.
+			configured := tt.configured
+			if configured == (config.NodeLabel{}) {
+				configured = config.DefaultDRAEvictionNodeLabel()
 			}
+			opts := []config.Option{config.WithDRAEvictionNodeLabel(configured)}
 			b, err := New(WithConfig(config.NewConfig(opts...)))
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
@@ -136,7 +140,8 @@ func TestInjectDRAEvictionLabel(t *testing.T) {
 }
 
 func TestInjectDRAEvictionLabel_CreatesMissingManagedPaths(t *testing.T) {
-	b, err := New()
+	b, err := New(WithConfig(config.NewConfig(
+		config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()))))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -161,7 +166,8 @@ func TestInjectDRAEvictionLabel_CreatesMissingManagedPaths(t *testing.T) {
 }
 
 func TestInjectDRAEvictionLabel_PreservesStringMapNodeSelector(t *testing.T) {
-	b, err := New()
+	b, err := New(WithConfig(config.NewConfig(
+		config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()))))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
@@ -233,7 +239,8 @@ func TestInjectDRAEvictionLabel_RejectsMalformedManagedPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := New()
+			b, err := New(WithConfig(config.NewConfig(
+				config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()))))
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -278,7 +285,8 @@ func TestInjectDRAEvictionLabel_RequiresBothComponents(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := New()
+			b, err := New(WithConfig(config.NewConfig(
+				config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()))))
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -365,7 +373,8 @@ func TestRejectDRAEvictionDynamicPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := rejectDRAEvictionDynamicPaths(
-				&recipe.RecipeResult{ComponentRefs: tt.refs}, tt.dynamicValues)
+				&recipe.RecipeResult{ComponentRefs: tt.refs}, tt.dynamicValues,
+				config.DefaultDRAEvictionNodeLabel())
 			if tt.wantErr {
 				if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
 					t.Fatalf("rejectDRAEvictionDynamicPaths() error = %v, want ErrCodeInvalidRequest", err)
@@ -384,6 +393,7 @@ func TestRejectDRAEvictionDynamicPaths(t *testing.T) {
 
 func TestMake_DRAEvictionLabelMergesSchedulingSelector(t *testing.T) {
 	b, err := New(WithConfig(config.NewConfig(
+		config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()),
 		config.WithAcceleratedNodeSelector(map[string]string{
 			"node.dgxc.nvidia.com/has-gpu": "true",
 		}),
@@ -441,11 +451,13 @@ func TestMake_DRAEvictionLabelRejectsMalformedManagedOverrides(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := New(WithConfig(config.NewConfig(config.WithValueOverrides(
-				map[string]map[string]string{
-					tt.component: {tt.path: "invalid"},
-				},
-			))))
+			b, err := New(WithConfig(config.NewConfig(
+				config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()),
+				config.WithValueOverrides(
+					map[string]map[string]string{
+						tt.component: {tt.path: "invalid"},
+					},
+				))))
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -483,9 +495,11 @@ func TestMake_DRAEvictionLabelRejectsDynamicManagedPaths(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := New(WithConfig(config.NewConfig(config.WithDynamicValues(
-				map[string][]string{tt.componentKey: {tt.path}},
-			))))
+			b, err := New(WithConfig(config.NewConfig(
+				config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()),
+				config.WithDynamicValues(
+					map[string][]string{tt.componentKey: {tt.path}},
+				))))
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -644,12 +658,12 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			opts := []Option{}
-			if tt.configured.Key != "" {
-				opts = append(opts, WithConfig(config.NewConfig(
-					config.WithDRAEvictionNodeLabel(tt.configured))))
+			configured := tt.configured
+			if configured.Key == "" {
+				configured = config.DefaultDRAEvictionNodeLabel()
 			}
-			b, err := New(opts...)
+			b, err := New(WithConfig(config.NewConfig(
+				config.WithDRAEvictionNodeLabel(configured))))
 			if err != nil {
 				t.Fatalf("New() error = %v", err)
 			}
@@ -717,6 +731,216 @@ func TestWarnDRAEvictionNodeLabelRequired(t *testing.T) {
 				if !strings.Contains(got, want) {
 					t.Errorf("warning %q does not mention %q", got, want)
 				}
+			}
+		})
+	}
+}
+
+// TestInjectDRAEvictionLabel_OptOutByDefault covers the default introduced by
+// issue #2469: without a configured eviction label AICR injects neither half
+// of the contract, so the DRA kubelet plugin carries no AICR-introduced
+// placement requirement.
+func TestInjectDRAEvictionLabel_OptOutByDefault(t *testing.T) {
+	tests := []struct {
+		name    string
+		draName string
+		gpuName string
+	}{
+		{"standard components", draComponentName, gpuOperatorComponentName},
+		{"OpenShift components", "nvidia-dra-driver-gpu-ocp", "gpu-operator-ocp"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := New()
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			values := map[string]map[string]any{
+				tt.draName: {"kubeletPlugin": map[string]any{
+					"nodeSelector": map[string]any{"node.dgxc.nvidia.com/has-gpu": "true"},
+				}},
+				tt.gpuName: {"driver": map[string]any{
+					"manager": map[string]any{"env": []any{
+						map[string]any{"name": "UNRELATED", "value": "preserved"},
+					}},
+				}},
+			}
+			rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
+				{Name: tt.gpuName}, {Name: tt.draName},
+			}}
+
+			if err := b.injectDRAEvictionLabel(values, rr); err != nil {
+				t.Fatalf("injectDRAEvictionLabel() error = %v", err)
+			}
+
+			if got := dig(values[tt.draName], "kubeletPlugin", "nodeSelector", defaults.DRAEvictionNodeLabelKey); got != nil {
+				t.Errorf("DRA eviction selector = %v, want absent when not opted in", got)
+			}
+			if got := dig(values[tt.draName], "kubeletPlugin", "nodeSelector", "node.dgxc.nvidia.com/has-gpu"); got != "true" {
+				t.Errorf("accelerated selector = %v, want preserved", got)
+			}
+			if got := driverManagerEnvValues(values[tt.gpuName], draEvictionEnvName); len(got) != 0 {
+				t.Errorf("Driver Manager eviction env = %v, want none when not opted in", got)
+			}
+			if got := driverManagerEnvValues(values[tt.gpuName], "UNRELATED"); len(got) != 1 || got[0] != "preserved" {
+				t.Errorf("unrelated Driver Manager env = %v, want [preserved]", got)
+			}
+		})
+	}
+}
+
+// TestWarnDRAEvictionNotConfigured pins the opt-out warning to the only
+// configuration where the defect it describes can occur: GPU Operator managing
+// the driver. A provider-installed driver deploys no Driver Manager.
+func TestWarnDRAEvictionNotConfigured(t *testing.T) {
+	tests := []struct {
+		name         string
+		driverValues map[string]any
+		wantWarning  bool
+	}{
+		{"operator-managed driver warns", map[string]any{"enabled": true}, true},
+		{"absent driver.enabled means enabled", map[string]any{}, true},
+		{"missing driver block means enabled", nil, true},
+		{"provider-installed driver stays quiet", map[string]any{"enabled": false}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := New()
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+
+			gpuValues := map[string]any{}
+			if tt.driverValues != nil {
+				gpuValues["driver"] = tt.driverValues
+			}
+			values := map[string]map[string]any{
+				draComponentName:         {},
+				gpuOperatorComponentName: gpuValues,
+			}
+			rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
+				{Name: gpuOperatorComponentName}, {Name: draComponentName},
+			}}
+
+			if err := b.injectDRAEvictionLabel(values, rr); err != nil {
+				t.Fatalf("injectDRAEvictionLabel() error = %v", err)
+			}
+
+			var found bool
+			for _, w := range b.warnings {
+				if strings.Contains(w, "did not configure automatic eviction") {
+					found = true
+				}
+			}
+			if found != tt.wantWarning {
+				t.Errorf("opt-out warning present = %v, want %v; warnings = %v", found, tt.wantWarning, b.warnings)
+			}
+		})
+	}
+}
+
+// TestRejectDRAEvictionDynamicPaths_AllowedWhenNotOptedIn: AICR owns neither
+// path unless the contract is opted into, so a --dynamic declaration on them
+// is the user's own business.
+func TestRejectDRAEvictionDynamicPaths_AllowedWhenNotOptedIn(t *testing.T) {
+	refs := []recipe.ComponentRef{
+		{Name: gpuOperatorComponentName}, {Name: draComponentName},
+	}
+	dynamic := map[string][]string{
+		draComponentName:         {draEvictionNodeSelectorPath},
+		gpuOperatorComponentName: {gpuOperatorDRAEvictionEnvPath},
+	}
+
+	if err := rejectDRAEvictionDynamicPaths(
+		&recipe.RecipeResult{ComponentRefs: refs}, dynamic, config.NodeLabel{},
+	); err != nil {
+		t.Errorf("rejectDRAEvictionDynamicPaths() error = %v, want nil when not opted in", err)
+	}
+
+	if err := rejectDRAEvictionDynamicPaths(
+		&recipe.RecipeResult{ComponentRefs: refs}, dynamic, config.DefaultDRAEvictionNodeLabel(),
+	); err == nil {
+		t.Error("rejectDRAEvictionDynamicPaths() = nil, want error when opted in")
+	}
+}
+
+// TestWarnDRAEvictionNotConfigured_OCPAndMixedOperators covers the two shapes
+// the single-operator table cannot: the -ocp component pair, and a recipe
+// carrying two GPU Operator components where only one manages the driver. The
+// warning is an OR across operators, because one operator-managed driver is
+// enough to make a restart possible.
+func TestWarnDRAEvictionNotConfigured_OCPAndMixedOperators(t *testing.T) {
+	tests := []struct {
+		name        string
+		components  map[string]map[string]any
+		refs        []recipe.ComponentRef
+		wantWarning bool
+	}{
+		{
+			name: "ocp pair with operator-managed driver warns",
+			components: map[string]map[string]any{
+				"nvidia-dra-driver-gpu-ocp": {},
+				"gpu-operator-ocp":          {"driver": map[string]any{"enabled": true}},
+			},
+			refs: []recipe.ComponentRef{
+				{Name: "gpu-operator-ocp"}, {Name: "nvidia-dra-driver-gpu-ocp"},
+			},
+			wantWarning: true,
+		},
+		{
+			name: "ocp pair with provider-installed driver stays quiet",
+			components: map[string]map[string]any{
+				"nvidia-dra-driver-gpu-ocp": {},
+				"gpu-operator-ocp":          {"driver": map[string]any{"enabled": false}},
+			},
+			refs: []recipe.ComponentRef{
+				{Name: "gpu-operator-ocp"}, {Name: "nvidia-dra-driver-gpu-ocp"},
+			},
+			wantWarning: false,
+		},
+		{
+			name: "one of two operators manages the driver warns",
+			components: map[string]map[string]any{
+				draComponentName:         {},
+				gpuOperatorComponentName: {"driver": map[string]any{"enabled": false}},
+				"gpu-operator-ocp":       {"driver": map[string]any{"enabled": true}},
+			},
+			refs: []recipe.ComponentRef{
+				{Name: gpuOperatorComponentName}, {Name: "gpu-operator-ocp"}, {Name: draComponentName},
+			},
+			wantWarning: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := New()
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			if err := b.injectDRAEvictionLabel(tt.components, &recipe.RecipeResult{ComponentRefs: tt.refs}); err != nil {
+				t.Fatalf("injectDRAEvictionLabel() error = %v", err)
+			}
+
+			var optOut, placement bool
+			for _, w := range b.warnings {
+				if strings.Contains(w, "did not configure automatic eviction") {
+					optOut = true
+				}
+				if strings.Contains(w, "schedules its kubelet plugin only on nodes labeled") {
+					placement = true
+				}
+			}
+			if optOut != tt.wantWarning {
+				t.Errorf("opt-out warning = %v, want %v; warnings = %v", optOut, tt.wantWarning, b.warnings)
+			}
+			// The placement warning belongs to the opt-in path only; it must
+			// never accompany the opt-out warning.
+			if placement {
+				t.Errorf("placement warning emitted without opt-in; warnings = %v", b.warnings)
 			}
 		})
 	}
