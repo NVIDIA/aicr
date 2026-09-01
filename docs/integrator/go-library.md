@@ -911,7 +911,7 @@ Six resolved fields have no counterpart, by design rather than omission:
 | Field | Why not projected |
 |---|---|
 | `spec.bundle.input.recipe` | You already pass the recipe to `MakeBundle`; projecting it would give the same decision two homes. |
-| `spec.bundle.output.target`, `.imageRefs` | Output destinations chosen per invocation. `OutputDir` is the analog `MakeBundle` honors. |
+| `spec.bundle.output.target` (and its raw form), `.imageRefs` | Output destinations chosen per invocation. `OutputDir` is the analog `MakeBundle` honors. |
 | `spec.bundle.registry.insecureTLS`, `.plainHTTP` | OCI transport. `MakeBundle` does not push — the caller does, afterward — so a field here would be surface nothing reads. `EvidenceOptions` and `SignOptions` carry them because those operations do reach a registry. |
 
 Signing follows the same derive-don't-apply rule as everything else: a non-nil

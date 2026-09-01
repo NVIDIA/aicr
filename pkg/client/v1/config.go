@@ -332,8 +332,9 @@ func (c *Config) IsCriteriaStrict() bool {
 // scheduling (system/accelerated selectors and tolerations, DRA eviction
 // label, workload gate and selector, node count, storage classes), and the
 // two attestation flags the bundler itself reads (attest, certificate
-// identity regexp). OIDCResolve carries the four signing settings that reach
-// the attester rather than the bundler.
+// identity regexp). OIDCResolve carries what reaches the attester rather than
+// the bundler: the Attest gate, DeviceFlow, FulcioURL, RekorURL, SigningKey,
+// and the derived UseTUFSigningConfig.
 //
 // # What is deliberately NOT projected
 //
@@ -355,6 +356,14 @@ func (c *Config) IsCriteriaStrict() bool {
 // whose derivation is missing.
 //
 // # Zero values
+//
+// PromptWriter is also left nil, because config cannot carry an io.Writer. A
+// nil writer is treated as io.Discard, so a derived DeviceFlow discards the
+// verification URL and user code and the lazy attester then blocks until the
+// context deadline on first Attest(). That fails closed — no wrong signature —
+// but the caller must set OIDCResolve.PromptWriter to use device flow at all.
+// Erroring here instead would break derive-don't-apply: a caller may well
+// supply their own Attester and never reach the device flow.
 //
 // Attester, BinaryAttestation, OutputDir and Timeout are left at their zero
 // values. None has a spec.bundle counterpart, and defaulting them here would
@@ -422,17 +431,17 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 			"spec.bundle.attestation.signingKey must not be blank")
 	}
 	if signingKey != "" {
-		for _, c := range []struct {
+		for _, conflict := range []struct {
 			field  string
 			active bool
 		}{
 			{"oidcDeviceFlow", resolved.OIDCDeviceFlow},
 			{"fulcioURL", resolved.FulcioURL != ""},
 		} {
-			if c.active {
+			if conflict.active {
 				return BundleOptions{}, errors.New(errors.ErrCodeInvalidRequest,
 					"spec.bundle.attestation.signingKey is mutually exclusive with "+
-						"spec.bundle.attestation."+c.field)
+						"spec.bundle.attestation."+conflict.field)
 			}
 		}
 	}
