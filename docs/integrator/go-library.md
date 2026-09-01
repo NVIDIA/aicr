@@ -837,6 +837,7 @@ derive step rather than the load step.
 | Method | Reads |
 |---|---|
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
+| `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.attestation` |
 | `RecipeSource()` | `spec.recipe.data` |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
 | `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
@@ -844,10 +845,34 @@ derive step rather than the load step.
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 
-`spec.bundle`, `spec.validate`, and `spec.snapshot` are not yet projected;
-`Unwrap()` reaches the raw document meanwhile. Needing it is worth reporting —
-it means a derivation is missing, and `pkg/config` carries no stability
-guarantee.
+`spec.validate` and `spec.snapshot` are not yet projected; `Unwrap()` reaches
+the raw document meanwhile. Needing it is worth reporting — it means a
+derivation is missing, and `pkg/config` carries no stability guarantee.
+
+### What `BundleOptions()` does and does not carry
+
+`BundleOptions()` returns a populated `Config` (the 18 bundler settings
+`spec.bundle.deployment` and `spec.bundle.scheduling` configure, plus the two
+attestation flags the bundler itself reads) and `OIDCResolve` (the four signing
+settings that reach the attester rather than the bundler).
+
+Six resolved fields have no counterpart, by design rather than omission:
+
+| Field | Why not projected |
+|---|---|
+| `spec.bundle.input.recipe` | You already pass the recipe to `MakeBundle`; projecting it would give the same decision two homes. |
+| `spec.bundle.output.target`, `.imageRefs` | Output destinations chosen per invocation. `OutputDir` is the analog `MakeBundle` honors. |
+| `spec.bundle.registry.insecureTLS`, `.plainHTTP` | OCI transport. `MakeBundle` does not push — the caller does, afterwards — so a field here would be surface nothing reads. `EvidenceOptions` and `SignOptions` carry them because those operations do reach a registry. |
+
+Signing follows the same derive-don't-apply rule as everything else: a non-nil
+`Attester` wins over `OIDCResolve`, so an explicitly supplied signer is never
+silently rebuilt from config.
+
+```go
+opts, err := cfg.BundleOptions()       // from spec.bundle
+opts.OutputDir = "./bundles"           // caller wins, visibly
+artifact, err := client.MakeBundle(ctx, rec, opts)
+```
 
 One asymmetry worth knowing: `IgnoreTLog` has no config counterpart, so
 `BundleVerifyOptions()` always leaves it false. It weakens the trust floor by
@@ -1130,7 +1155,7 @@ if stderrors.As(err, &se) {
 
 ## Context handling
 
-`ResolveRecipe` (and every other context-aware facade method) honours
+`ResolveRecipe` (and every other context-aware facade method) honors
 context cancellation. Capped entry points wrap the caller's context
 with `context.WithTimeout` against their per-operation cap; the
 effective deadline is then the smaller of the caller's deadline and the

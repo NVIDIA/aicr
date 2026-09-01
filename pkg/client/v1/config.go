@@ -17,6 +17,7 @@ package aicr
 import (
 	"context"
 
+	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
 	appconfig "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -321,4 +322,94 @@ func (c *Config) IsCriteriaStrict() bool {
 		return false
 	}
 	return c.internal.Recipe().IsCriteriaStrict()
+}
+
+// BundleOptions derives Client.MakeBundle options from spec.bundle.
+//
+// Config carries the 18 bundler settings the section configures — deployment
+// (deployer, repo, value overrides, dynamic values, vendoring, app name),
+// scheduling (system/accelerated selectors and tolerations, DRA eviction
+// label, workload gate and selector, node count, storage classes), and the
+// two attestation flags the bundler itself reads (attest, certificate
+// identity regexp). OIDCResolve carries the four signing settings that reach
+// the attester rather than the bundler.
+//
+// # What is deliberately NOT projected
+//
+// Six resolved fields have no BundleOptions counterpart, by design:
+//
+//   - RecipeInput names which recipe to bundle. The caller already passes
+//     the recipe to MakeBundle, so projecting it would give the same
+//     decision two homes.
+//   - OutputTarget, OutputTargetRaw and ImageRefs are output destinations
+//     chosen per invocation. OutputDir is the analog MakeBundle honors,
+//     and the CLI owns flag-vs-config precedence for the rest.
+//   - InsecureTLS and PlainHTTP configure OCI transport. MakeBundle does not
+//     push — the CLI does, after it returns — so a field here would be
+//     surface that nothing reads. EvidenceOptions and SignOptions carry them
+//     because those operations do reach a registry.
+//
+// Reading any of the six still requires Unwrap(), which is the signal the
+// type's godoc describes: a field that is genuinely un-projected, not one
+// whose derivation is missing.
+//
+// # Zero values
+//
+// Attester, BinaryAttestation, OutputDir and Timeout are left at their zero
+// values. None has a spec.bundle counterpart, and defaulting them here would
+// hide which layer chose. A caller sets them after deriving, which is the
+// same precedence the CLI applies to an explicitly-set flag.
+//
+// Returns an error when spec.bundle is present but malformed.
+func (c *Config) BundleOptions() (BundleOptions, error) {
+	if c == nil || c.internal == nil {
+		return BundleOptions{}, nil
+	}
+	resolved, err := c.internal.Bundle().Resolve()
+	if err != nil {
+		// Already coded, and the message carries the spec path that failed.
+		return BundleOptions{}, err
+	}
+	if resolved == nil {
+		return BundleOptions{}, nil
+	}
+
+	opts := []bundlerconfig.Option{
+		bundlerconfig.WithDeployer(resolved.Deployer),
+		bundlerconfig.WithRepoURL(resolved.Repo),
+		bundlerconfig.WithValueOverridePaths(resolved.ValueOverrides),
+		bundlerconfig.WithDynamicValuePaths(resolved.DynamicValues),
+		bundlerconfig.WithSystemNodeSelector(resolved.SystemNodeSelector),
+		bundlerconfig.WithSystemNodeTolerations(resolved.SystemNodeTolerations),
+		bundlerconfig.WithAcceleratedNodeSelector(resolved.AcceleratedNodeSelector),
+		bundlerconfig.WithAcceleratedNodeTolerations(resolved.AcceleratedNodeTolerations),
+		bundlerconfig.WithWorkloadGateTaint(resolved.WorkloadGate),
+		bundlerconfig.WithWorkloadSelector(resolved.WorkloadSelector),
+		bundlerconfig.WithEstimatedNodeCount(resolved.Nodes),
+		bundlerconfig.WithStorageClass(resolved.StorageClass),
+		bundlerconfig.WithSharedStorageClass(resolved.SharedStorageClass),
+		bundlerconfig.WithVendorCharts(resolved.VendorCharts),
+		bundlerconfig.WithAppName(resolved.AppName),
+		bundlerconfig.WithAttest(resolved.Attest),
+		bundlerconfig.WithCertificateIdentityRegexp(resolved.CertIDRegexp),
+	}
+	// DRAEvictionNodeLabel resolves as a pointer specifically so "unset" is
+	// distinguishable from "set to the zero label", and the option takes a
+	// value. Appending unconditionally would dereference nil and, worse,
+	// would overwrite the NVIDIA-documented default the bundler applies when
+	// config said nothing.
+	if resolved.DRAEvictionNodeLabel != nil {
+		opts = append(opts, bundlerconfig.WithDRAEvictionNodeLabel(*resolved.DRAEvictionNodeLabel))
+	}
+
+	return BundleOptions{
+		Config: bundlerconfig.NewConfig(opts...),
+		OIDCResolve: OIDCResolveOptions{
+			Attest:     resolved.Attest,
+			DeviceFlow: resolved.OIDCDeviceFlow,
+			FulcioURL:  resolved.FulcioURL,
+			RekorURL:   resolved.RekorURL,
+			SigningKey: resolved.SigningKey,
+		},
+	}, nil
 }

@@ -19,6 +19,7 @@ import (
 	stderrors "errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
@@ -669,4 +670,146 @@ func TestConfig_RuntimeInventoryMode(t *testing.T) {
 	if _, set, err := nilCfg.RecipeRuntimeInventoryMode(); err != nil || set {
 		t.Errorf("nil Config: set=%v err=%v, want false/nil", set, err)
 	}
+}
+
+// bundleConfig exercises every spec.bundle field BundleOptions projects, so a
+// dropped mapping shows up as a wrong value rather than a smaller option list.
+const bundleConfig = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+spec:
+  bundle:
+    deployment:
+      deployer: argocd
+      repo: https://git.example.com/fleet
+      appName: fleet-gpu
+      vendorCharts: true
+    scheduling:
+      systemNodeSelector:
+        role: system
+      acceleratedNodeSelector:
+        role: gpu
+      draEvictionNodeLabel: nvidia.com/drain=true
+      workloadSelector:
+        app: training
+      nodes: 12
+      storageClass: fast
+      sharedStorageClass: shared
+    attestation:
+      enabled: true
+      certificateIdentityRegexp: ^https://github\.com/NVIDIA/.*$
+      oidcDeviceFlow: true
+      fulcioURL: https://fulcio.example.com
+      rekorURL: https://rekor.example.com
+      signingKey: gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k
+`
+
+// TestConfig_BundleOptions asserts the FOLDED VALUES, not that some options
+// were produced. A count-only assertion passes when two fields are swapped,
+// which is the whole failure mode this derivation can have.
+func TestConfig_BundleOptions(t *testing.T) {
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, bundleConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	opts, err := cfg.BundleOptions()
+	if err != nil {
+		t.Fatalf("BundleOptions: %v", err)
+	}
+	if opts.Config == nil {
+		t.Fatal("BundleOptions returned a nil Config")
+	}
+	bc := opts.Config
+
+	if got, want := string(bc.Deployer()), "argocd"; got != want {
+		t.Errorf("Deployer = %q, want %q", got, want)
+	}
+	if got, want := bc.RepoURL(), "https://git.example.com/fleet"; got != want {
+		t.Errorf("RepoURL = %q, want %q", got, want)
+	}
+	if got, want := bc.EstimatedNodeCount(), 12; got != want {
+		t.Errorf("EstimatedNodeCount = %d, want %d", got, want)
+	}
+	if got, want := bc.StorageClass(), "fast"; got != want {
+		t.Errorf("StorageClass = %q, want %q", got, want)
+	}
+	if got, want := bc.SharedStorageClass(), "shared"; got != want {
+		t.Errorf("SharedStorageClass = %q, want %q", got, want)
+	}
+	if !bc.VendorCharts() {
+		t.Error("VendorCharts = false, want true")
+	}
+	if !bc.Attest() {
+		t.Error("Attest = false, want true")
+	}
+	if got, want := bc.CertificateIdentityRegexp(), `^https://github\.com/NVIDIA/.*$`; got != want {
+		t.Errorf("CertificateIdentityRegexp = %q, want %q", got, want)
+	}
+	if got, want := bc.SystemNodeSelector()["role"], "system"; got != want {
+		t.Errorf("SystemNodeSelector[role] = %q, want %q", got, want)
+	}
+	if got, want := bc.AcceleratedNodeSelector()["role"], "gpu"; got != want {
+		t.Errorf("AcceleratedNodeSelector[role] = %q, want %q", got, want)
+	}
+	if got, want := bc.WorkloadSelector()["app"], "training"; got != want {
+		t.Errorf("WorkloadSelector[app] = %q, want %q", got, want)
+	}
+
+	// The four signing settings reach the attester, not the bundler.
+	if !opts.OIDCResolve.Attest {
+		t.Error("OIDCResolve.Attest = false, want true")
+	}
+	if !opts.OIDCResolve.DeviceFlow {
+		t.Error("OIDCResolve.DeviceFlow = false, want true")
+	}
+	if got, want := opts.OIDCResolve.FulcioURL, "https://fulcio.example.com"; got != want {
+		t.Errorf("OIDCResolve.FulcioURL = %q, want %q", got, want)
+	}
+	if got, want := opts.OIDCResolve.RekorURL, "https://rekor.example.com"; got != want {
+		t.Errorf("OIDCResolve.RekorURL = %q, want %q", got, want)
+	}
+	if !strings.HasPrefix(opts.OIDCResolve.SigningKey, "gcpkms://") {
+		t.Errorf("OIDCResolve.SigningKey = %q, want a gcpkms:// reference", opts.OIDCResolve.SigningKey)
+	}
+
+	// Fields with no spec.bundle counterpart stay zero so the caller, not the
+	// derivation, decides them.
+	if opts.Attester != nil {
+		t.Error("Attester should stay nil; OIDCResolve drives signing")
+	}
+	if opts.OutputDir != "" || opts.Timeout != 0 || opts.BinaryAttestation != nil {
+		t.Error("OutputDir/Timeout/BinaryAttestation should stay at zero values")
+	}
+}
+
+// TestConfig_BundleOptions_Absent covers the paths the CLI hits when --config
+// is absent or the document omits spec.bundle: derive unconditionally, get
+// "nothing configured" rather than an error.
+func TestConfig_BundleOptions_Absent(t *testing.T) {
+	t.Run("nil config", func(t *testing.T) {
+		var cfg *aicr.Config
+		opts, err := cfg.BundleOptions()
+		if err != nil {
+			t.Fatalf("BundleOptions on nil Config: %v", err)
+		}
+		if opts.Config != nil || opts.OIDCResolve.Attest {
+			t.Error("nil Config should derive an empty BundleOptions")
+		}
+	})
+
+	t.Run("no spec.bundle", func(t *testing.T) {
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, verifyConfig))
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		opts, err := cfg.BundleOptions()
+		if err != nil {
+			t.Fatalf("BundleOptions: %v", err)
+		}
+		// An unset draEvictionNodeLabel must leave the bundler's documented
+		// default in place rather than overwriting it with a zero label.
+		if opts.Config != nil && opts.Config.DRAEvictionNodeLabel().Key != "" {
+			t.Error("absent spec.bundle should not set a DRA eviction label")
+		}
+	})
 }

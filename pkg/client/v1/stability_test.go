@@ -248,6 +248,12 @@ func TestStability_Bundle(t *testing.T) {
 	t.Parallel()
 
 	_ = aicr.BundleOptions{}
+	// OIDCResolve lets a committed spec.bundle.attestation reach the
+	// bundler without the caller constructing an Attester. Pinned by name
+	// and type: a bare composite literal above would still compile if the
+	// field were renamed or retyped.
+	_ = aicr.BundleOptions{OIDCResolve: aicr.OIDCResolveOptions{}}
+	requireType[aicr.OIDCResolveOptions](aicr.BundleOptions{}.OIDCResolve)
 	requireSignature[func(*aicr.Client, context.Context, *recipe.RecipeResult) (*aicr.RecipeResult, error)]((*aicr.Client).AdoptRecipe)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, aicr.BundleOptions) (aicr.BundleArtifact, error)]((*aicr.Client).MakeBundle)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult) ([]aicr.ComponentBundle, error)]((*aicr.Client).BundleComponents)
@@ -500,6 +506,7 @@ func TestStability_Config(t *testing.T) {
 	requireSignature[func(*aicr.Config) *appconfig.AICRConfig]((*aicr.Config).Unwrap)
 
 	requireSignature[func(*aicr.Config) (aicr.BundleVerifyOptions, error)]((*aicr.Config).BundleVerifyOptions)
+	requireSignature[func(*aicr.Config) (aicr.BundleOptions, error)]((*aicr.Config).BundleOptions)
 	requireSignature[func(*aicr.Config) string]((*aicr.Config).RecipeProfile)
 	requireSignature[func(*aicr.Config) (string, bool, error)]((*aicr.Config).RecipeAccountingMode)
 	requireSignature[func(*aicr.Config) (aicr.RecipeSourceOption, bool)]((*aicr.Config).RecipeSource)

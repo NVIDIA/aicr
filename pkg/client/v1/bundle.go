@@ -61,11 +61,27 @@ type BundleOptions struct {
 	// default bundler.New applies (Helm deployer, no overrides).
 	Config *BundleConfig
 
-	// Attester signs bundle content. When nil, MakeBundle uses the
-	// no-op attester (matching bundler.New's default when --attest is
-	// not set). The CLI builds this via attestation.ResolveAttesterLazy
-	// when --attest is passed.
+	// Attester signs bundle content. When nil, MakeBundle derives one from
+	// OIDCResolve; when both are unset, the no-op attester applies (matching
+	// bundler.New's default when --attest is not set).
+	//
+	// A non-nil Attester WINS over OIDCResolve. That precedence is the
+	// facade's derive-don't-apply rule applied to signing: an explicitly
+	// supplied signer is a caller decision, and silently rebuilding one from
+	// config would discard it. The aicrd server relies on this to inject its
+	// own attester; the CLI sets it via attestation.ResolveAttesterLazy when
+	// --attest is passed, so both keep working unchanged.
 	Attester BundleAttester
+
+	// OIDCResolve configures keyless/KMS signing when Attester is nil and
+	// OIDCResolve.Attest is true, letting a committed spec.bundle.attestation
+	// reach the bundler without the caller constructing an Attester itself.
+	// Config.BundleOptions derives it.
+	//
+	// Ignored when Attest is false, so the zero value stays a true no-op
+	// rather than resolving a signer nobody asked for. Mirrors the
+	// OIDCResolve field EvidenceOptions and SignOptions already carry.
+	OIDCResolve OIDCResolveOptions
 
 	// BinaryAttestation, when non-empty, is a pre-verified binary attestation
 	// (Sigstore bundle bytes) embedded into attested bundles as tool provenance.
@@ -316,8 +332,22 @@ func (c *Client) MakeBundle(ctx context.Context, recipe *RecipeResult, opts Bund
 	}
 
 	bundlerOpts := []bundler.Option{bundler.WithConfig(cfg)}
-	if opts.Attester != nil {
-		bundlerOpts = append(bundlerOpts, bundler.WithAttester(opts.Attester))
+	// Attester wins when supplied; otherwise derive one from OIDCResolve. The
+	// Attest gate matters: ResolveAttesterLazy returns a no-op attester when
+	// it is false, so deriving unconditionally would replace "caller wants no
+	// signing" with an attester that merely behaves like none — same result
+	// today, but it makes the zero value depend on resolver internals.
+	attester := opts.Attester
+	if attester == nil && opts.OIDCResolve.Attest {
+		resolved, rerr := attestation.ResolveAttesterLazy(ctx, opts.OIDCResolve)
+		if rerr != nil {
+			// Already coded; the message names the signing input that failed.
+			return nil, rerr
+		}
+		attester = resolved
+	}
+	if attester != nil {
+		bundlerOpts = append(bundlerOpts, bundler.WithAttester(attester))
 	}
 	if len(opts.BinaryAttestation) > 0 {
 		bundlerOpts = append(bundlerOpts, bundler.WithVerifiedBinaryAttestation(opts.BinaryAttestation))
