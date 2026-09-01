@@ -108,6 +108,15 @@ type ApplicationData struct {
 	// CascadeDelete adds ResourcesFinalizer to the rendered Application.
 	// See #1628.
 	CascadeDelete bool
+
+	// ApplyOutOfSyncOnly adds ApplyOutOfSyncOnly=true to spec.syncPolicy.syncOptions.
+	// Set only for the -readiness folder's Application: paired with the Job-level
+	// Replace=true,Force=true annotation (see gatemanifest.jobMetadataAnnotations),
+	// this prevents ArgoCD from deleting/recreating the readiness-gate Job on every
+	// sync when nothing actually changed — Replace+Force alone forces a
+	// delete-and-recreate unconditionally. See #2367 and the CodeRabbit finding on
+	// PR #2408.
+	ApplyOutOfSyncOnly bool
 }
 
 // AppOfAppsData contains data for rendering the App of Apps manifest.
@@ -790,11 +799,20 @@ func waveForFolder(f localformat.Folder, level int) int {
 		return base
 	case f.Parent + "-post":
 		return base + 2
-	case f.Parent + "-readiness":
-		return base + 3
-	default: // primary: Name == Parent
-		return base + 1
+	default:
+		if isReadinessFolder(f) {
+			return base + 3
+		}
+		return base + 1 // primary: Name == Parent
 	}
+}
+
+// isReadinessFolder reports whether f is the injected -readiness folder for
+// its parent component. Shared by waveForFolder (sync-wave banding) and
+// buildApplicationData (ApplyOutOfSyncOnly scoping) so the two can't
+// silently diverge on what counts as a readiness folder. See #2367.
+func isReadinessFolder(f localformat.Folder) bool {
+	return f.Name == f.Parent+"-readiness"
 }
 
 // buildApplicationData constructs ApplicationData for a single folder. The
@@ -811,12 +829,13 @@ func waveForFolder(f localformat.Folder, level int) int {
 func buildApplicationData(comp recipe.ComponentRef, f localformat.Folder, syncWave int, repoURL, targetRevision string, values map[string]any, inline bool) (ApplicationData, error) {
 	chart := comp.EffectiveChart()
 	data := ApplicationData{
-		Name:           f.Name,
-		Namespace:      comp.Namespace,
-		SyncWave:       syncWave,
-		RepoURL:        repoURL,
-		TargetRevision: targetRevision,
-		BundleDir:      f.Dir,
+		Name:               f.Name,
+		Namespace:          comp.Namespace,
+		SyncWave:           syncWave,
+		RepoURL:            repoURL,
+		TargetRevision:     targetRevision,
+		BundleDir:          f.Dir,
+		ApplyOutOfSyncOnly: isReadinessFolder(f),
 	}
 	switch f.Kind {
 	case localformat.KindLocalHelm:

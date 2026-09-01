@@ -332,6 +332,11 @@ test-coverage: check-coverage-threshold test ## Runs tests and enforces coverage
 	fi; \
 	echo "Coverage check passed"
 
+.PHONY: update-goldens
+update-goldens: ## Regenerates golden test fixtures (catalog/coverage/render parity); review with git diff before committing
+	@GOFLAGS="-mod=readonly" AICR_UPDATE_GOLDEN=1 go test -count=1 -run 'TestCatalogParityGolden|TestCoverageGoldenMatrix' ./pkg/recipe/
+	@GOFLAGS="-mod=readonly" AICR_UPDATE_GOLDEN=1 go test -count=1 -run 'TestStockRenderParityGolden' ./pkg/bundler/
+
 .PHONY: bench
 bench: ## Runs benchmarks
 	@echo "Running benchmarks..."
