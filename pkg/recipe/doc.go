@@ -25,8 +25,8 @@
 // Criteria: Specifies target deployment parameters
 //
 //	type Criteria struct {
-//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, any
-//	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any
+//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, rke2, any
+//	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, vr200, any
 //	    Intent      CriteriaIntentType      // training, inference, any
 //	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, ol, talos, any
 //	    Platform    CriteriaPlatformType    // dynamo, kubeflow, nim, runai, slurm, any
@@ -182,8 +182,8 @@
 // # Query Parameters (HTTP API - GET)
 //
 // The HTTP handler accepts these query parameters for GET requests:
-//   - service: eks, gke, aks, oke, kind, lke, bcm, ocp, any (default: any)
-//   - accelerator: h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any (default: any)
+//   - service: eks, gke, aks, oke, kind, lke, bcm, ocp, rke2, any (default: any)
+//   - accelerator: h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, vr200, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
 //   - os: ubuntu, rhel, cos, amazonlinux, ol, talos, any (default: any)

@@ -1,0 +1,174 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: vr200-rke2-ubuntu-training
+
+spec:
+  # Inherits from rke2-training recipe (RKE2 + training settings)
+  base: rke2-training
+
+  criteria:
+    service: rke2
+    accelerator: vr200
+    os: ubuntu
+    intent: training
+
+  # The os-ubuntu mixin is NOT used: it pins VERSION_ID "24.04" / kernel
+  # >= 6.8, while the Vera Rubin NVL72 reference image ships Ubuntu 26.04
+  # with the Grace/Vera-optimized arm64 64k-page kernel
+  # (7.0.0-*-nvidia-bos-64k). Constraint names use fully qualified
+  # measurement paths: {type}.{subtype}.{key}
+  constraints:
+    # >= 1.34.1: ComputeDomains/IMEX for the NVL72 MNNVL fabric use the GA
+    # DRA API resource.k8s.io/v1 (K8s >= 1.34, same rationale as
+    # gb300-eks-training), and the rke2 root's CDI/NRI toolkit path needs
+    # containerd 2.1 (>= v1.34.1+rke2r1) — kept aligned with the root floor
+    # so this leaf never weakens it.
+    - name: K8s.server.version
+      value: ">= 1.34.1"
+    - name: OS.release.ID
+      value: ubuntu
+    - name: OS.release.VERSION_ID
+      value: "26.04"
+    - name: OS.sysctl./proc/sys/kernel/osrelease
+      value: ">= 7.0"
+  # NOTE: the 615-branch host-driver floor is deliberately NOT expressed as
+  # a constraint. AICR snapshots carry no driver-version measurement today
+  # — the GPU collector emits only GPU.hardware (gpu-present/gpu-count/
+  # driver-loaded/model) — so any GPU.* driver constraint would exclude
+  # this leaf from snapshot-backed generation and fail validate readiness
+  # with NOT_FOUND before any phase runs. Enforce >= 615 out-of-band until
+  # a driver-version measurement or deployment validator exists.
+
+  componentRefs:
+    # VR200 driver strategy: the reference image pre-bakes the Vera Rubin
+    # bring-up driver (615-branch open kernel module, aarch64). Host-managed
+    # driver is the only path exercised on VR200 hardware today, so
+    # driver.enabled: false; the container toolkit is operator-managed
+    # (recommended over a host install), and the CDI/NRI configuration
+    # comes from the rke2 service root (no containerd config mutation on
+    # RKE2).
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+        - nodewright-customizations
+      overrides:
+        driver:
+          enabled: false
+
+    # The reference image preinstalls the driver on the host
+    # (gpu-operator driver.enabled is false above), so there is no driver
+    # pod for the NVSentinel labeler to watch. Without
+    # assumeDriverInstalled the nvsentinel.dgxc.nvidia.com/driver.installed
+    # label is never applied and metadata-collector plus both
+    # syslog-health-monitor DaemonSets sit at zero desired pods — silently,
+    # with no error and no event (mirrors the kind.yaml/oke-ol.yaml
+    # host-managed-driver pattern, #2175/#2181).
+    - name: nvsentinel
+      type: Helm
+      overrides:
+        labeler:
+          assumeDriverInstalled: true
+
+    # GPU-allocation policy is unchanged: resources.gpus stays disabled
+    # (the gpu-operator device plugin remains the whole-GPU advertiser per
+    # #1327); ComputeDomains/IMEX are the embedded defaults (#1327/#1671)
+    # and are what this componentRef brings up for the NVL72 fabric.
+    #
+    # Keep nvidiaDriverRoot: / — host-managed driver lockstep: with
+    # gpu-operator driver.enabled: false, the DRA driver must read the
+    # driver userspace from the host root, not /run/nvidia/driver.
+    #
+    # HOST IMEX CONFLICT: the Vera Rubin reference image installs the
+    # host-managed 615 driver stack, which includes an nvidia-imex systemd
+    # service (enabled by default) that owns the GPU driver's single IMEX
+    # session. The DRA ComputeDomain daemon starts its own nvidia-imex and
+    # cannot allocate the session ("Failed to allocate Imex session ...
+    # NV_ERR_IN_USE"), so the daemon never goes Ready and ComputeDomain
+    # workloads hang on NodePrepareResources. Host static IMEX and
+    # DRA-managed ComputeDomains are mutually exclusive. Nodes running DRA
+    # ComputeDomains MUST have the host service disabled:
+    #   systemctl disable --now nvidia-imex
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        nvidiaDriverRoot: /
+
+    # VR200 node tuning is applied out-of-band today (gb200-equivalent
+    # nodewright profile), so this recipe wires the documented no-op
+    # placeholder — it establishes the Skyhook CR (autoTaint, tolerations,
+    # node selectors from the --accelerated-node-* flags) while applying no
+    # tuning packages, mirroring gb300-eks-training. To turn training
+    # tuning on later, swap the manifest for tuning.yaml, drop the no-op
+    # placeholder, and set the gb200 profile (service/accelerator) +
+    # intent: multiNodeTraining + kernelAllowNewer: true (Vera's arm64
+    # 64k-page kernel is newer than the pinned baseline).
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/no-op.yaml
+      dependencyRefs:
+        - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+          # The chart's default TU memory limit (60Mi) OOM-kills the
+          # topology updater on large-memory NVL72 workers (exit-137 crash
+          # loops on multi-TiB nodes; working set scales with node
+          # inventory). Leaf-scoped so no other platform is affected.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+
+  # Validation for VR200 on RKE2 training.
+  #
+  # Performance validation (NCCL all-reduce) is deferred: no VR200-measured
+  # bandwidth floor exists yet in the public catalog. Add a `performance:`
+  # block once a runtime and floor are baselined (see gb200/gb300 leaves
+  # for the pattern).
+  #
+  # pod-autoscaling / cluster-autoscaling conformance omitted: bare-metal
+  # RKE2 has no cluster autoscaler, and DRA-allocated GPUs currently break
+  # the dcgm-exporter exported_pod attribution that pod-autoscaling relies
+  # on.
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v26.7.0"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling

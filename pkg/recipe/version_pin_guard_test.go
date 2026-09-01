@@ -543,4 +543,24 @@ var versionPinExemptions = []versionPinExemption{
 			"state (#700); the registry default (84.4.0) tracks the base/EKS/GKE line and " +
 			"is installed by every non-AKS recipe, so the BOM's default is not fictional.",
 	},
+	{
+		source:          "rke2-inference",
+		component:       "agentgateway-crds",
+		field:           "version",
+		expectedPin:     "v2.2.1",
+		expectedDefault: "v1.3.1",
+		reason: "RKE2's bundled rke2-traefik-crd Helm release already owns the Gateway API " +
+			"CRDs and serves TLSRoute only at v1 — agentgateway must run a release built " +
+			"against a Gateway API client new enough to additionally require (and be " +
+			"validated against a cluster serving) TLSRoute v1alpha2, which v2.2.1 is and " +
+			"the registry default v1.3.1 is not.",
+	},
+	{
+		source:          "rke2-inference",
+		component:       "agentgateway",
+		field:           "version",
+		expectedPin:     "v2.2.1",
+		expectedDefault: "v1.3.1",
+		reason:          "Kept in lockstep with the agentgateway-crds pin above — see that entry.",
+	},
 }
