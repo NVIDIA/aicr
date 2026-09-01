@@ -719,6 +719,13 @@ const (
 	// against a separate lister that lags that strongly-consistent read — a freshness the
 	// client cannot observe. This bounds how long we let the webhook cache catch up.
 	TrainJobAdmissionRetryTimeout = 1 * time.Minute
+
+	// NCCLResourceRecreateWait bounds waitForResourceGone in createUnstructured's
+	// same-run TrainJob reclaim. A controller-serviced finalizer (Trainer v2 /
+	// JobSet ownership) can hold the delete for a while, so this gets its own
+	// bound instead of the much shorter DiagnosticTimeout used for the rest of
+	// createUnstructured's calls.
+	NCCLResourceRecreateWait = 5 * time.Minute
 )
 
 // Inference performance validation timeouts.

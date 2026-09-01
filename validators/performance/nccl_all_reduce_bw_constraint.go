@@ -1595,12 +1595,16 @@ func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gv
 		// finalizer (Trainer v2 / JobSet ownership) is still clearing.
 		// Recreating immediately would race it and hit AlreadyExists again,
 		// defeating the same-run retry-after-hard-kill path this exists for.
-		if err := waitForResourceGone(applyCtx, client, obj.GetName()); err != nil {
+		// A finalizer can outlast applyCtx's short DiagnosticTimeout, so the
+		// wait and the recreate that depends on it get their own bound.
+		waitCtx, waitCancel := context.WithTimeout(ctx, defaults.NCCLResourceRecreateWait)
+		defer waitCancel()
+		if err := waitForResourceGone(waitCtx, client, obj.GetName()); err != nil {
 			return aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal,
 				"failed waiting for stale resource to finish deleting before recreate")
 		}
 		obj.SetResourceVersion("")
-		if _, err := client.Create(applyCtx, obj, metav1.CreateOptions{}); err != nil {
+		if _, err := client.Create(waitCtx, obj, metav1.CreateOptions{}); err != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to recreate resource", err)
 		}
 		return nil
