@@ -1,0 +1,125 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: vr200-rke2-ubuntu-inference
+
+spec:
+  # Platform-neutral VR200 inference base: carries every VR200-specific
+  # safety override so that resolving rke2/vr200 inference WITHOUT
+  # --platform can never fall through to generic rke2-inference with the
+  # driver container enabled. The dynamo leaf inherits from here.
+  base: rke2-inference
+
+  criteria:
+    service: rke2
+    accelerator: vr200
+    os: ubuntu
+    intent: inference
+
+  # Same VR200 NVL72 platform constraints as vr200-rke2-ubuntu-training —
+  # see that leaf for the full rationale (Ubuntu 26.04 reference image,
+  # Grace/Vera arm64 64k-page kernel, K8s floor aligned with the rke2
+  # root's CDI/NRI containerd 2.1 requirement). The 615-branch host-driver
+  # floor is enforced out-of-band (no driver-version measurement exists in
+  # snapshots today).
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34.1"
+    - name: OS.release.ID
+      value: ubuntu
+    - name: OS.release.VERSION_ID
+      value: "26.04"
+    - name: OS.sysctl./proc/sys/kernel/osrelease
+      value: ">= 7.0"
+
+  componentRefs:
+    # Host-managed 615-branch driver (reference image), operator-managed
+    # toolkit over the rke2 root's CDI/NRI path — identical to the
+    # training leaf; see vr200-rke2-ubuntu-training for the full VR200
+    # driver strategy.
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+        - nodewright-customizations
+      overrides:
+        driver:
+          enabled: false
+
+    # See vr200-rke2-ubuntu-training for the host-managed-driver /
+    # NVSentinel labeler rationale.
+    - name: nvsentinel
+      type: Helm
+      overrides:
+        labeler:
+          assumeDriverInstalled: true
+
+    # See vr200-rke2-ubuntu-training for the host-managed-driver root
+    # rationale and the host nvidia-imex/ComputeDomain conflict note.
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        nvidiaDriverRoot: /
+
+    # VR200 node tuning is applied out-of-band today — same no-op scaffold
+    # as the training leaf; see vr200-rke2-ubuntu-training for the
+    # enable-later steps.
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/no-op.yaml
+      dependencyRefs:
+        - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+          # The chart's default TU memory limit (60Mi) OOM-kills the
+          # topology updater on large-memory NVL72 workers (exit-137 crash
+          # loops on multi-TiB nodes; working set scales with node
+          # inventory). Leaf-scoped so no other platform is affected.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+
+  # pod-autoscaling / cluster-autoscaling conformance omitted: bare-metal
+  # RKE2 has no cluster autoscaler.
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v26.7.0"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - inference-gateway

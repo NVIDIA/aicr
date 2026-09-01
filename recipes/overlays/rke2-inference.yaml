@@ -1,0 +1,213 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: rke2-inference
+
+spec:
+  # Inherits from rke2 recipe (RKE2-specific settings)
+  base: rke2
+
+  criteria:
+    service: rke2
+    intent: inference
+
+  # Inference gateway components are inlined from the platform-inference
+  # mixin rather than referenced, because rke2 must drop the mixin's
+  # gateway-api-crds manifest and manifestFiles merge additively (an
+  # overlay cannot subtract a mixin's entry). Keep versions in lockstep
+  # with recipes/mixins/platform-inference.yaml when bumping.
+  #
+  # NOTE: RKE2 provisions no LoadBalancer controller, and the
+  # inference-gateway Service is type LoadBalancer — a bare-metal LB
+  # implementation (e.g. MetalLB or kube-vip) is a cluster prerequisite,
+  # the same documented expectation as bcm-inference. Until one exists the
+  # gateway is reachable via its NodePort/ClusterIP.
+  componentRefs:
+    - name: agentgateway-crds
+      type: Helm
+      source: oci://cr.agentgateway.dev/charts
+      version: v2.2.1
+      valuesFile: components/agentgateway-crds/values.yaml
+      # RKE2-scoped health check: declared INLINE so the TLSRoute v1alpha2
+      # served-version gate applies only to rke2 recipes. A
+      # checks/agentgateway-crds/health-check.yaml file in this repo would
+      # replace the embedded check by path for EVERY recipe using the
+      # component (e.g. gb300-eks inference), and non-RKE2 bundles install
+      # the standard Gateway API manifest, which has no TLSRoute CRD at
+      # all — their validation would fail. Content = the embedded OSS
+      # check (CRDs Established) plus the RKE2-specific step asserting
+      # tlsroutes exists, is Established, and SERVES v1alpha2 (agentgateway
+      # v2.2.1's compiled watch requirement; traefik ships the schema with
+      # served: false until patched).
+      # DRIFT NOTE: everything above the tlsroute step is a copy of this
+      # repo's embedded checks/agentgateway-crds/health-check.yaml. When
+      # bumping agentgateway versions, re-diff this whole block against the
+      # embedded check (not just the version pins) — otherwise
+      # added/removed CRD assertions silently diverge and the rke2 gate
+      # weakens without signal.
+      healthCheckAsserts: |
+        apiVersion: chainsaw.kyverno.io/v1alpha1
+        kind: Test
+        metadata:
+          name: agentgateway-crds-health-check
+        spec:
+          timeouts:
+            assert: 5m
+          steps:
+            - name: validate-gateway-api-crds-established
+              # Standard Gateway API CRDs vendored under
+              # manifests/gateway-api-crds.yaml. Verified against the in-tree
+              # manifest content.
+              try:
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: gatewayclasses.gateway.networking.k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: gateways.gateway.networking.k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: grpcroutes.gateway.networking.k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: httproutes.gateway.networking.k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: referencegrants.gateway.networking.k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+            - name: validate-inference-extension-crds-established
+              # Gateway API Inference Extension CRDs vendored under
+              # manifests/inference-extension-crds.yaml.
+              try:
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: inferencemodelrewrites.inference.networking.x-k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: inferenceobjectives.inference.networking.x-k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: inferencepoolimports.inference.networking.x-k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: inferencepools.inference.networking.k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: inferencepools.inference.networking.x-k8s.io
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+            - name: validate-tlsroute-v1alpha2-served
+              # agentgateway v2.2.1 (Gateway API v1.2.x client) watches TLSRoute
+              # v1alpha2. The CRD must exist AND serve v1alpha2 (projection must
+              # match exactly one served entry).
+              try:
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: tlsroutes.gateway.networking.k8s.io
+                      spec:
+                        (versions[?name == 'v1alpha2' && served]):
+                          - name: v1alpha2
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+      manifestFiles:
+        # gateway-api-crds.yaml is commented out on RKE2: the bundled
+        # rke2-traefik-crd Helm release already owns the Gateway API CRDs
+        # (bundle-version v1.5.1, standard channel), so installing our
+        # copy fails helm ownership validation ("invalid ownership
+        # metadata ... current value is rke2-traefik-crd"). The cluster's
+        # newer CRDs serve every kind agentgateway needs EXCEPT TLSRoute
+        # v1alpha2 (v1.5.1 serves only v1) — agentgateway v2.2.1 compiles
+        # its watch against Gateway API v1.2.x, so on RKE2 the TLSRoute CRD
+        # must additionally serve v1alpha2 (one-line kubectl patch of
+        # spec.versions[].served; reverted by any rke2-traefik-crd upgrade)
+        # until an agentgateway release built against Gateway API >= the
+        # RKE2-bundled version is pinned. Re-enable this manifest only for
+        # RKE2 targets without the bundled traefik CRDs.
+        # - components/agentgateway-crds/manifests/gateway-api-crds.yaml
+        - components/agentgateway-crds/manifests/inference-extension-crds.yaml
+
+    - name: agentgateway
+      type: Helm
+      source: oci://cr.agentgateway.dev/charts
+      version: v2.2.1
+      valuesFile: components/agentgateway/values.yaml
+      manifestFiles:
+        - components/agentgateway/manifests/inference-gateway.yaml
+      dependencyRefs:
+        - agentgateway-crds
+        - cert-manager
