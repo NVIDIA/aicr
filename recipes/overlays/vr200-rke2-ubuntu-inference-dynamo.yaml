@@ -64,11 +64,26 @@ spec:
         - kai-scheduler
 
   # Performance validation (inference-perf) is deferred: no VR200-measured
-  # throughput/TTFT floor exists yet in the public catalog. Add a
-  # `validation.performance` block once a runtime image with sm_107a
-  # kernel support and a measured floor are baselined (same class of gap
-  # as GB300/sm_103 — plain CUDA kernels forward-compat onto Rubin via PTX
-  # JIT, but runtime kernel compilers need explicit sm_107a support).
+  # throughput/TTFT floor exists yet in the public catalog. This is not
+  # just a missing measurement — as of 2026-09-01 no published runtime
+  # image carries the fix either:
+  #   - vllm-project/vllm merged sm_107a (Rubin) support in v0.27.0
+  #     (2026-08-10): PR #49387 "Add sm_107 for Rubin" (merged
+  #     2026-07-24) and PR #49647 "[Rubin] Enable NVLink all-reduce
+  #     paths on SM107" (merged 2026-07-29).
+  #   - ai-dynamo's latest tagged release (v1.4.2, 2026-08-29) still pins
+  #     vllm/vllm-openai:v0.26.0 — one version behind the fix.
+  #   - ai-dynamo's unreleased main branch pins v0.28.0 (has the fix),
+  #     but nothing built from main is published.
+  # So the JIT-compile crash this leaf's performance validation was
+  # blocked on (sm_107a not recognized) is fixed upstream but not yet
+  # reachable from any image this recipe can pull. Add a
+  # `validation.performance` block once a published ai-dynamo release
+  # picks up vLLM >= 0.27.0 (or an equivalent self-built/pushed image is
+  # validated) and a real floor is measured on VR200 hardware (same
+  # class of gap as GB300/sm_103 — plain CUDA kernels forward-compat
+  # onto Rubin via PTX JIT, but runtime kernel compilers need explicit
+  # sm_107a support).
   #
   # Deployment phase and baseline conformance checks are inherited from
   # vr200-rke2-ubuntu-inference (checks union across the overlay chain);
