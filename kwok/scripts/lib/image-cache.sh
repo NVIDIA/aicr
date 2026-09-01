@@ -228,7 +228,7 @@ image_cache_load() {
     # time remains says nothing about whether the image is there. Gating this on
     # the deadline reported a successful load that consumed the budget as a
     # failure, and the caller then re-pulled an image it already had.
-    if ! preload_image_cached "${image}"; then
+    if ! preload_image_cached "${image}" "${deadline}"; then
         log_warn "${image} is still not present after loading ${file}"
         return 1
     fi

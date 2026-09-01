@@ -103,6 +103,9 @@ case "$1 $2" in
     "image inspect")
         # A wedged Docker Engine: the request is accepted and never answered.
         if [[ -n "${STUB_INSPECT_HANGS:-}" ]]; then sleep 3600; fi
+        # A busy but RESPONSIVE Engine: slow, yet it does answer. Must not be
+        # mistaken for a cache miss while the budget still has room.
+        if [[ -n "${STUB_INSPECT_SLOW:-}" ]]; then sleep "${STUB_INSPECT_SLOW}"; fi
         # Once a pull has succeeded the image is cached, so later inspects
         # must succeed too — otherwise the retry loop could not terminate.
         if [[ -f "${STUB_DIR}/pulled" ]]; then exit 0; fi
@@ -167,7 +170,7 @@ reset() {
     rm -f "${STUB_DIR}/pulls" "${STUB_DIR}/pulled"
     unset STUB_INSPECT_RC STUB_PULL_FAILS STUB_KIND_LOAD_RC STUB_CLUSTERS STUB_PULL_HANGS
     unset STUB_INSPECT_HANGS STUB_PULL_SLOW_FAIL STUB_PULL_SLOW_SUCCESS
-    unset STUB_PULL_SILENT_FAIL
+    unset STUB_PULL_SILENT_FAIL STUB_INSPECT_SLOW
     unset KWOK_PRELOAD_BUDGET_SECONDS
     unset KUBECTL_CONTEXT KWOK_CLUSTER
     export STUB_DIR TRACE
@@ -450,6 +453,23 @@ else
     fails=$((fails + 1))
 fi
 unset STUB_PULL_SILENT_FAIL
+
+# 17. A busy but responsive Docker Engine, with plenty of budget left. The
+#     probe must use the REMAINING budget when that is larger than its floor:
+#     capping every probe at the floor would swap the budget-spent false miss
+#     for a slow-daemon one, narrowing an allowance the old code did give.
+reset
+export STUB_INSPECT_RC=0     # image IS present
+export STUB_INSPECT_SLOW=7   # slower than the 5s floor, well inside the budget
+out=$(preload_pull_retry "${IMG}" "$(( $(date +%s) + 25 ))" 2>&1); rc=$?
+check "slow-but-responsive-probe-is-a-hit" 0 "${rc}"
+if [[ "${out}" == *"is not cached"* ]]; then
+    echo "FAIL: slow-probe-with-budget-left-is-not-a-miss (probe was capped below the budget: ${out})"
+    fails=$((fails + 1))
+else
+    echo "PASS: slow-probe-with-budget-left-is-not-a-miss"
+fi
+unset STUB_INSPECT_RC STUB_INSPECT_SLOW
 
 if (( fails > 0 )); then
     echo "FAILED: ${fails} case(s)"

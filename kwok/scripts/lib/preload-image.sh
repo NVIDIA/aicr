@@ -25,10 +25,11 @@
 # to `timeout`, and the retry backoff is clamped to it as well, so no number of
 # retries can make the function outlive it.
 #
-# The one deliberate exception is the final "is it cached" probe, which is bound
-# by PRELOAD_PROBE_TIMEOUT instead of the deadline (see preload_image_cached).
-# The real ceiling is therefore the budget plus at most one probe. That is one
-# probe per call, not per retry, so it does not scale with the retry count.
+# The one deliberate exception is the final "is it cached" probe, which is given
+# at least PRELOAD_PROBE_TIMEOUT even once the deadline is spent (see
+# preload_image_cached). The real ceiling is therefore the budget plus at most
+# one probe floor. That is one probe per call, not per retry, so it does not
+# scale with the retry count.
 # 180s is generous for two small images and leaves the 20-minute KWOK job budget
 # essentially intact even if both preloads time out completely.
 #
@@ -42,11 +43,11 @@ KWOK_PRELOAD_BUDGET_DEFAULT=180
 PRELOAD_BACKOFF_START=5
 PRELOAD_BACKOFF_MAX=30
 
-# Ceiling for a single "is this image cached" probe that is deliberately NOT
-# drawn from the run budget (see preload_image_cached). Large enough that a
-# loaded runner answering slowly is not misread as a cache miss — the very
-# misreport this constant exists to prevent — and small enough that a wedged
-# Docker Engine still hands control back promptly.
+# FLOOR for a single "is this image cached" probe (see preload_image_cached).
+# A probe gets at least this long even when the run budget is spent, and more
+# when the budget still has more to give. It is a floor and not a cap precisely
+# so it cannot narrow the allowance a busy daemon would otherwise have had.
+# Small enough that a wedged Docker Engine still hands control back promptly.
 PRELOAD_PROBE_TIMEOUT=5
 
 # Side-load an image into the Kind node so the kubelet never pulls it.
@@ -108,11 +109,23 @@ preload_have_image() {
 # missing. The caller sends the lane back to the kubelet for an image already on
 # the node, and the log blames a pull that actually worked.
 #
-# Still bounded, for the wedged-daemon reason above, but by its own small
-# constant so it cannot inherit an already-spent deadline. Callers that need to
-# know whether there is time left to do more WORK ask preload_remaining.
+# Still bounded, for the wedged-daemon reason above. The bound is the LARGER of
+# the remaining budget and PRELOAD_PROBE_TIMEOUT, so the constant acts as a floor
+# rather than a cap: it guarantees a fair chance to answer once the deadline is
+# spent, without narrowing the allowance a busy daemon would otherwise have had
+# while plenty of budget remains. Capping at the constant would trade the
+# budget-spent false miss for a slow-daemon one.
+#
+# DEADLINE is optional; omit it to get the bare floor. Callers that need to know
+# whether there is time left to do more WORK ask preload_remaining instead.
 preload_image_cached() {
-    timeout "${PRELOAD_PROBE_TIMEOUT}" docker image inspect "$1" &>/dev/null
+    local image="$1" deadline="${2:-}" bound="${PRELOAD_PROBE_TIMEOUT}" remaining
+    if [[ -n "${deadline}" ]] && remaining=$(preload_remaining "${deadline}"); then
+        if (( remaining > bound )); then
+            bound="${remaining}"
+        fi
+    fi
+    timeout "${bound}" docker image inspect "${image}" &>/dev/null
 }
 
 # preload_pull_retry gets IMAGE into the host's Docker cache before DEADLINE,
@@ -197,7 +210,7 @@ preload_pull_retry() {
     # the budget as well made a pull that succeeded with the last of the budget
     # report as a miss, sending the lane back to the kubelet for an image that
     # was already there.
-    if preload_image_cached "${image}"; then
+    if preload_image_cached "${image}" "${deadline}"; then
         return 0
     fi
     # Select the message on what was actually observed -- the attempt counter
