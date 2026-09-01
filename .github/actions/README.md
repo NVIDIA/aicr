@@ -70,7 +70,7 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 
 #### `install-go-licenses/`
 **Purpose**: Install the pinned `go-licenses` with `GOFLAGS` cleared
-**When to use**: Any job running `make license-check`, `make notices`, or `make notices-check`
+**When to use**: Any job running `make license-check`, `make notices`, or `make release`
 **Inputs**:
 - `version` (required): go-licenses version from `load-versions` (`.settings.yaml` `linting.go_licenses`)
 

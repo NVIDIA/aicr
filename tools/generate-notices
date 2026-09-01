@@ -52,8 +52,8 @@ PACKAGES=("./...")
 # this repo. It is collected out-of-band by tools/generate-python-licenses
 # (which needs docker + network), rendered to Markdown there, and COMMITTED.
 # This script appends that fragment verbatim, keeping generation hermetic and
-# byte-deterministic: 'make notices-check' regenerates and git-diffs in the
-# merge gate, where neither docker nor PyPI is available.
+# byte-deterministic: this script must run in the merge gate and at release
+# time, where neither docker nor PyPI is available.
 PYTHON_NOTICES="${PYTHON_NOTICES:-validators/performance/licenses/python-notices.md}"
 PYTHON_REQUIREMENTS="${PYTHON_REQUIREMENTS:-validators/performance/requirements.txt}"
 
@@ -86,8 +86,8 @@ if [[ ! -s "${PYTHON_NOTICES}" ]]; then
     exit 1
 fi
 
-# Staleness gate for the Python fragment. 'make notices-check' can only prove
-# the notices file matches its committed inputs; it cannot tell whether those
+# Staleness gate for the Python fragment. This script can only prove the notices
+# file matches its committed inputs; it cannot tell whether those
 # inputs still describe the image, because regenerating them needs docker and
 # PyPI (unavailable in the merge gate). Editing requirements.txt without
 # re-running 'make python-licenses' would otherwise ship an image whose
@@ -261,9 +261,15 @@ MISSING_LIST="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-missing.XXXXXX")"
 LIST_ERR="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-listerr.XXXXXX")"
 MODMAP_RAW="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-modmap.XXXXXX")"
 MODMAP="$(mktemp "${TMPDIR:-/tmp}/aicr-notices-modmap-u.XXXXXX")"
+# Staged beside ${OUTPUT} rather than under TMPDIR so publishing is a rename
+# within one filesystem. The composed file is only moved into place once it
+# passes the fence-balance check below; staging under TMPDIR would make that
+# publish a cross-device copy, which reintroduces the window where a
+# half-written notices file is readable at ${OUTPUT}.
+OUTPUT_TMP="$(mktemp "$(dirname "${OUTPUT}")/.aicr-notices-out.XXXXXX")"
 trap 'rm -rf "${SAVE_ROOT}"; rm -f "${COMBINED_CSV}" "${INDEX_FILE}" \
     "${LINKED_RAW}" "${INDEX_KEYS}" "${LINKED_LIST}" "${MISSING_LIST}" \
-    "${LIST_ERR}" "${MODMAP_RAW}" "${MODMAP}"' EXIT
+    "${LIST_ERR}" "${MODMAP_RAW}" "${MODMAP}" "${OUTPUT_TMP}"' EXIT
 
 mkdir -p "${LICENSES_DIR}"
 
@@ -621,7 +627,25 @@ EOF
     # what lands here, which is what makes the fragment reviewable on its own.
     echo
     cat "${PYTHON_NOTICES}"
-} > "${OUTPUT}"
+} > "${OUTPUT_TMP}"
+
+# Fence-balance gate: embedded license text must not escape the code block that
+# wraps it. Asserted on the artifact this script produces rather than on a
+# committed copy, which is not guaranteed to exist — the file is generated at
+# release time, not tracked. The check itself lives in a sibling script so it is
+# testable without a full four-platform go-licenses walk; see
+# tools/check-fence-balance and its _test.sh for the rules and the cases.
+#
+# A failure to even locate or execute the checker lands here too: the command
+# substitution exits non-zero, so a mis-wire fails the generator loudly instead
+# of silently publishing an unverified file.
+if ! FENCE_ERROR="$(tools/check-fence-balance "${OUTPUT_TMP}" 2>&1)"; then
+    echo "ERROR: composed notices are malformed: ${FENCE_ERROR}" >&2
+    echo "Embedded license text escaped its code block; ${OUTPUT} not written." >&2
+    exit 1
+fi
+
+mv "${OUTPUT_TMP}" "${OUTPUT}"
 
 GO_ENTRIES=$(wc -l < "${INDEX_FILE}" | tr -d ' ')
 # Count the index table rows, not '### ' headings: license texts are embedded
