@@ -445,6 +445,18 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 			FulcioURL:  resolved.FulcioURL,
 			RekorURL:   resolved.RekorURL,
 			SigningKey: signingKey,
+			// Mirrors the CLI's signingTargetFromFlags: with no explicit Rekor
+			// URL, sign against the TUF-distributed signing config (Rekor v2,
+			// #1650) rather than falling through transparencyForOptions to
+			// NewRekorPolicy("") — public Rekor v1.
+			//
+			// Without this a config-driven SDK sign silently records to the
+			// legacy log while the identical CLI invocation records to v2.
+			// AttestationSpec carries no signing-config or TUF field, so
+			// rekorURL is the only signal config can give: setting it is an
+			// explicit v1 choice, and leaving it empty takes the same default
+			// the CLI does.
+			UseTUFSigningConfig: resolved.RekorURL == "",
 		},
 	}, nil
 }

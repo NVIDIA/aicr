@@ -682,12 +682,21 @@ spec:
       repo: https://git.example.com/fleet
       appName: fleet-gpu
       vendorCharts: true
+      set:
+        - gpu-operator:driver.version=570.86.16
+      dynamic:
+        - gpu-operator:driver.enabled
     scheduling:
       systemNodeSelector:
         role: system
+      systemNodeTolerations:
+        - "node-role.kubernetes.io/control-plane:NoSchedule"
       acceleratedNodeSelector:
         role: gpu
+      acceleratedNodeTolerations:
+        - "nvidia.com/gpu:NoSchedule"
       draEvictionNodeLabel: nvidia.com/drain=true
+      workloadGate: aicr.run/gate=busy:NoSchedule
       workloadSelector:
         app: training
       nodes: 12
@@ -751,6 +760,34 @@ func TestConfig_BundleOptions(t *testing.T) {
 	}
 	if got, want := bc.WorkloadSelector()["app"], "training"; got != want {
 		t.Errorf("WorkloadSelector[app] = %q, want %q", got, want)
+	}
+	if got, want := bc.AppName(), "fleet-gpu"; got != want {
+		t.Errorf("AppName = %q, want %q", got, want)
+	}
+	if got := bc.DRAEvictionNodeLabel(); got.Key != "nvidia.com/drain" || got.Value != "true" {
+		t.Errorf("DRAEvictionNodeLabel = %+v, want nvidia.com/drain=true", got)
+	}
+	if got := bc.WorkloadGateTaint(); got == nil || got.Key != "aicr.run/gate" {
+		t.Errorf("WorkloadGateTaint = %+v, want key aicr.run/gate", got)
+	}
+	if len(bc.SystemNodeTolerations()) != 1 {
+		t.Errorf("SystemNodeTolerations = %v, want 1 entry", bc.SystemNodeTolerations())
+	}
+	if len(bc.AcceleratedNodeTolerations()) != 1 {
+		t.Errorf("AcceleratedNodeTolerations = %v, want 1 entry", bc.AcceleratedNodeTolerations())
+	}
+	if len(bc.ValueOverrides()) == 0 {
+		t.Error("ValueOverrides is empty; spec.bundle.deployment.set was dropped")
+	}
+	if !bc.HasDynamicValues() {
+		t.Error("HasDynamicValues = false; spec.bundle.deployment.dynamic was dropped")
+	}
+
+	// This fixture DOES set rekorURL, which is an explicit Rekor v1 choice, so
+	// the TUF signing config must be off. The default direction is covered by
+	// TestConfig_BundleOptions_SigningTargetDefault.
+	if opts.OIDCResolve.UseTUFSigningConfig {
+		t.Error("UseTUFSigningConfig = true despite an explicit rekorURL")
 	}
 
 	// The four signing settings reach the attester, not the bundler.
@@ -880,5 +917,48 @@ spec:
 	}
 	if got := opts.OIDCResolve.SigningKey; got != "gcpkms://projects/p/k" {
 		t.Errorf("SigningKey = %q, want it trimmed", got)
+	}
+}
+
+// TestConfig_BundleOptions_SigningTargetDefault pins the transparency target,
+// which is invisible in the derived value and only shows up in where a
+// signature lands.
+//
+// transparencyForOptions falls through to NewRekorPolicy("") — public Rekor
+// v1 — when SigningConfig, SigningConfigPath, UseTUFSigningConfig and RekorURL
+// are all unset. The CLI never hits that: signingTargetFromFlags defaults
+// useTUF to true with no --rekor-url. Without the same default here, a
+// config-driven SDK sign records to the legacy log while the identical CLI
+// invocation records to v2 (#1650), silently.
+func TestConfig_BundleOptions_SigningTargetDefault(t *testing.T) {
+	const head = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+spec:
+  bundle:
+    attestation:
+      enabled: true
+`
+	tests := []struct {
+		name    string
+		body    string
+		wantTUF bool
+	}{
+		{"no rekorURL takes the TUF signing config (v2)", head, true},
+		{"explicit rekorURL is a deliberate v1 choice", head + "      rekorURL: https://rekor.example.com\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, tt.body))
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			opts, err := cfg.BundleOptions()
+			if err != nil {
+				t.Fatalf("BundleOptions: %v", err)
+			}
+			if opts.OIDCResolve.UseTUFSigningConfig != tt.wantTUF {
+				t.Errorf("UseTUFSigningConfig = %v, want %v", opts.OIDCResolve.UseTUFSigningConfig, tt.wantTUF)
+			}
+		})
 	}
 }
