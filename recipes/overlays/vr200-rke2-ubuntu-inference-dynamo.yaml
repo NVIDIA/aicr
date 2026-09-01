@@ -18,6 +18,11 @@ metadata:
   name: vr200-rke2-ubuntu-inference-dynamo
 
 spec:
+  # PREVIEW: publishes an early-adopter VR200 (Vera Rubin) recipe path
+  # without the full production support and lifecycle qualification
+  # required for Supported status. See validation.aicr.run for the
+  # published evidence this recipe is validated against.
+  #
   # Inherits every VR200-specific safety override (host-managed driver,
   # tuning scaffold, NFD topology updater) from the platform-neutral
   # vr200-rke2-ubuntu-inference base, and adds only the Dynamo platform

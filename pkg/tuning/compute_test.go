@@ -52,6 +52,9 @@ func TestCompute_Structure(t *testing.T) {
 		{"gke", "a100", "h100", "", "nvidia-tuning-gke"},
 		{"gke", "b200", "-", "", "nvidia-tuning-gke"},
 		{"gke", "h100", "-", "", "nvidia-tuning-gke"},
+		// VR200 wires the no-op placeholder: node tuning is applied out-of-band
+		// today, same as GB300.
+		{"rke2", "vr200", "-", "", ""},
 	}
 	if len(report.Rows) != len(want) {
 		t.Fatalf("got %d rows, want %d: %+v", len(report.Rows), len(want), report.Rows)

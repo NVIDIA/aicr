@@ -18,6 +18,11 @@ metadata:
   name: vr200-rke2-ubuntu-training
 
 spec:
+  # PREVIEW: publishes an early-adopter VR200 (Vera Rubin) recipe path
+  # without the full production support and lifecycle qualification
+  # required for Supported status. See validation.aicr.run for the
+  # published evidence this recipe is validated against.
+  #
   # Inherits from rke2-training recipe (RKE2 + training settings)
   base: rke2-training
 
@@ -26,6 +31,14 @@ spec:
     accelerator: vr200
     os: ubuntu
     intent: training
+
+  # SKU auto-detection cannot identify vr200 yet: the pre-release driver
+  # reports the generic "NVIDIA Graphics Device" placeholder rather than a
+  # Vera Rubin marketing name, and pkg/fingerprint/gpu_sku.go has no vr200
+  # token to match against until a driver drop exposes one. Until then,
+  # snapshot-backed recipe generation on VR200 hardware resolves
+  # accelerator: any and this leaf must be selected explicitly with
+  # --accelerator vr200 (or --service rke2 --accelerator vr200 by query).
 
   # The os-ubuntu mixin is NOT used: it pins VERSION_ID "24.04" / kernel
   # >= 6.8, while the Vera Rubin NVL72 reference image ships Ubuntu 26.04
@@ -162,6 +175,14 @@ spec:
         - gpu-operator-version
         - check-nvidia-smi
       constraints:
+        # No deployment-phase version check exists for nvidia-dra-driver-gpu
+        # (only gpu-operator has one), so this gates that component too by
+        # proxy: gpu-operator v26.7.0 and nvidia-dra-driver-gpu 0.5.0 are
+        # bumped together in the same registry.yaml change, so a cluster
+        # that clears this floor also has the DRA driver line with formal
+        # Vera Rubin support (the 0.4.1 default crash-loops on VR200's
+        # NVML arch value — see the nvidia-dra-driver-gpu componentRef
+        # above).
         - name: Deployment.gpu-operator.version
           value: ">= v26.7.0"
     conformance:
