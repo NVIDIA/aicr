@@ -1,0 +1,56 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# RKE2 Accelerated Node Profile: VR200 (Vera Rubin) NVL72 compute tray
+#
+# Bare-metal Vera Rubin NVL72 GPU worker:
+# - 4x NVIDIA VR200 GPUs (matches the 2-node x 4-GPU topology measured on
+#   the reference cluster)
+# - Grace CPU (arm64), Ubuntu 26.04 reference image
+# - gpu.product is a provisional placeholder: the pre-release driver
+#   reports the generic "NVIDIA Graphics Device" string rather than a
+#   stable Vera Rubin marketing name (see
+#   vr200-rke2-ubuntu-training.yaml), so no recipe or validator keys
+#   scheduling on this exact value today — it exists only to keep this
+#   profile's shape consistent with the other accelerated profiles.
+
+apiVersion: aicr.run/v1alpha2
+kind: KWOKNodeProfile
+metadata:
+  name: accelerated-vr200
+  labels:
+    provider: rke2
+    nodeType: accelerated
+    accelerator: vr200
+
+spec:
+  # Instance specifications
+  instanceType: vr200-nvl72-tray
+  arch: arm64  # Grace CPU is ARM-based
+  osImage: Ubuntu 26.04
+
+  # Resource capacity (provisional — pending confirmed GA hardware specs)
+  resources:
+    cpu: "144"
+    memory: 1536Gi
+    storage: 3800Gi
+
+  # GPU specifications
+  gpu:
+    product: NVIDIA-VR200-186GB
+    count: 4
+    memory: 190464  # MiB per GPU (~186GB), provisional
+    driver: "615.0.0"
+    driverMajor: "615"
+    driverMinor: "0"
