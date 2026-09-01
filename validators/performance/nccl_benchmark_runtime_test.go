@@ -442,7 +442,7 @@ spec:
 	// job. No --node-selector override, so the runtime's own selector must win.
 	if err := applyNCCLResources(ctx, fakeClient, config,
 		recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
-		runtimeWithSelector); err != nil {
+		runtimeWithSelector, ""); err != nil {
 		t.Fatalf("applyNCCLResources (custom runtime) failed: %v", err)
 	}
 

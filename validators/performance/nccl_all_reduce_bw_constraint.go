@@ -316,6 +316,19 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 		}
 	}
 
+	// AICR_NCCL_RUNTIME_IMAGE governs only the baked-in template path, mirroring
+	// AICR_NCCL_FABRIC above: a recipe-supplied runtime owns its own workload
+	// image end to end (issue #1751), so a malformed override must not fail it.
+	// Validated up front — before any cluster discovery or TrainJob spend — so
+	// a typo'd image reference fails fast rather than after minutes of setup.
+	runtimeImage := ""
+	if customRuntime == "" {
+		runtimeImage, err = resolveNCCLRuntimeImage()
+		if err != nil {
+			return "", false, err
+		}
+	}
+
 	if profile != nil {
 		target = *profile
 		slog.Info("Recipe declares an NCCL benchmark profile — overriding criteria-derived applicability",
@@ -420,7 +433,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Run the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
 	// Each platform has a per-platform TrainingRuntime with all platform-specific
 	// configuration (image, mpirun args, resources, sidecars). The TrainJob is shared.
-	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime)
+	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime, runtimeImage)
 	if err != nil {
 		return "", false, err
 	}
@@ -474,7 +487,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 // pod to complete, and returns the benchmark logs.
 func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType,
-	customRuntime string) (logs string, err error) {
+	customRuntime string, runtimeImage string) (logs string, err error) {
 
 	dynamicClient := ctx.DynamicClient
 
@@ -510,7 +523,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// Apply runtime and trainjob resources. Propagate an inner code rather than
 	// forcing ErrCodeInternal — a recipe-supplied runtime that fails to render is
 	// an ErrCodeInvalidRequest (recipe-authoring error), not an internal fault.
-	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service, variant, fabric, customRuntime); applyErr != nil {
+	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service, variant, fabric, customRuntime, runtimeImage); applyErr != nil {
 		return "", aicrErrors.PropagateOrWrap(applyErr, aicrErrors.ErrCodeInternal, "failed to apply NCCL resources")
 	}
 
@@ -822,8 +835,8 @@ func uniformGPUCountPerNode(nodes []v1.Node) (int, error) {
 // YAML files with template substitution using the dynamic client.
 // Runtime: testdata/{accelerator}/{service}/runtime[-{variant}].yaml (per-platform+variant)
 // TrainJob: testdata/trainjob.yaml (shared, just runtimeRef + numNodes)
-func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface, config *gpuConfiguration, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType, customRuntime string) error {
-	slog.Info("Applying NCCL test resources...", "accelerator", accelerator, "service", service, "variant", string(variant), "fabric", string(fabric), "customRuntime", customRuntime != "")
+func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface, config *gpuConfiguration, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType, customRuntime string, runtimeImage string) error {
+	slog.Info("Applying NCCL test resources...", "accelerator", accelerator, "service", service, "variant", string(variant), "fabric", string(fabric), "customRuntime", customRuntime != "", "runtimeImageOverride", runtimeImage != "")
 
 	templateData := map[string]string{
 		"NAMESPACE":          config.Namespace,
@@ -928,6 +941,15 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	runtimeObj, err := buildNCCLRuntimeObject(customRuntime, accelerator, service, variant, fabric, config.Namespace, templateData)
 	if err != nil {
 		return err
+	}
+	// Render the resolved workload image into every launcher/worker container
+	// this override governs (issue #1751). No-op when runtimeImage == "";
+	// applyNCCLResources is only called with a non-empty override on the
+	// baked-in template path — a recipe-supplied runtime (customRuntime != "")
+	// is never reachable here with runtimeImage set, since the resolve site in
+	// validateNcclAllReduceBw gates resolution on customRuntime == "".
+	if err := applyNCCLRuntimeImageOverride(runtimeObj, runtimeImage); err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL runtime image override", err)
 	}
 	if err := applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", err)
