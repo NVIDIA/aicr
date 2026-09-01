@@ -18,6 +18,10 @@
 # - 4x NVIDIA VR200 GPUs (matches the 2-node x 4-GPU topology measured on
 #   the reference cluster)
 # - Grace CPU (arm64), Ubuntu 26.04 reference image
+# - Memory: 288GB HBM4 per GPU, NVIDIA's published Rubin specification
+#   (developer.nvidia.com/blog/inside-the-nvidia-rubin-platform-six-new-chips-one-ai-supercomputer,
+#   2026-08). 294912 MiB, following this repo's existing GiB*1024 MiB
+#   convention (see kwok/profiles/eks/p6-gb200.yaml).
 # - gpu.product is a provisional placeholder: the pre-release driver
 #   reports the generic "NVIDIA Graphics Device" string rather than a
 #   stable Vera Rubin marketing name (see
@@ -48,9 +52,9 @@ spec:
 
   # GPU specifications
   gpu:
-    product: NVIDIA-VR200-186GB
+    product: NVIDIA-VR200-288GB
     count: 4
-    memory: 190464  # MiB per GPU (~186GB), provisional
+    memory: 294912  # MiB per GPU (288GB HBM4, NVIDIA's published spec)
     driver: "615.0.0"
     driverMajor: "615"
     driverMinor: "0"

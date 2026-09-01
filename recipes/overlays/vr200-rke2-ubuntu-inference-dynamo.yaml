@@ -49,10 +49,9 @@ spec:
     # node-local storage via rancher/local-path-provisioner (set as
     # default StorageClass) is the validated minimum.
     #
-    # RKE2 also needs the TLSRoute v1alpha2 served-version patch (see the
-    # rke2-inference agentgateway-crds notes for the mechanics; the patch
-    # is reverted by any rke2-traefik-crd upgrade, so re-check it after
-    # RKE2 upgrades).
+    # RKE2 also needs the TLSRoute v1alpha2 CRD, which rke2-inference
+    # installs from a vendored manifest rather than relying on a Traefik
+    # release owning it — see the rke2-inference agentgateway-crds notes.
     - name: dynamo-platform
       type: Helm
       valuesFile: components/dynamo-platform/values.yaml
@@ -65,25 +64,39 @@ spec:
 
   # Performance validation (inference-perf) is deferred: no VR200-measured
   # throughput/TTFT floor exists yet in the public catalog. This is not
-  # just a missing measurement — as of 2026-09-01 no published runtime
-  # image carries the fix either:
+  # just a missing measurement — as of 2026-09-01 the fix isn't reachable
+  # from any image this recipe can pull, and the requirement is CUDA
+  # 13.4, not just a vLLM version:
   #   - vllm-project/vllm merged sm_107a (Rubin) support in v0.27.0
   #     (2026-08-10): PR #49387 "Add sm_107 for Rubin" (merged
   #     2026-07-24) and PR #49647 "[Rubin] Enable NVLink all-reduce
-  #     paths on SM107" (merged 2026-07-29).
-  #   - ai-dynamo's latest tagged release (v1.4.2, 2026-08-29) still pins
-  #     vllm/vllm-openai:v0.26.0 — one version behind the fix.
-  #   - ai-dynamo's unreleased main branch pins v0.28.0 (has the fix),
-  #     but nothing built from main is published.
-  # So the JIT-compile crash this leaf's performance validation was
-  # blocked on (sm_107a not recognized) is fixed upstream but not yet
-  # reachable from any image this recipe can pull. Add a
-  # `validation.performance` block once a published ai-dynamo release
-  # picks up vLLM >= 0.27.0 (or an equivalent self-built/pushed image is
-  # validated) and a real floor is measured on VR200 hardware (same
-  # class of gap as GB300/sm_103 — plain CUDA kernels forward-compat
-  # onto Rubin via PTX JIT, but runtime kernel compilers need explicit
-  # sm_107a support).
+  #     paths on SM107" (merged 2026-07-29). The SM107 kernel path is
+  #     itself gated on CUDA >= 13.4 at build time
+  #     (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 13.4) — a
+  #     vLLM build against an older CUDA toolkit has the Python/dispatch
+  #     code but not the compiled kernel.
+  #   - vLLM's own published Docker images, including v0.28.0, still
+  #     build against CUDA 13.0.3 (docker/Dockerfile ARG CUDA_VERSION),
+  #     below the 13.4 floor — so even the newest vLLM release image
+  #     does not actually carry a working SM107 kernel.
+  #   - ai-dynamo's latest tagged release (v1.4.2, 2026-08-29) pins
+  #     vllm/vllm-openai:v0.26.0 (predates the code); its unreleased main
+  #     branch pins v0.28.0 (has the code, not yet CUDA 13.4); neither is
+  #     what this leaf needs, and nothing built from main is published.
+  #   - Independent of the runtime image, this repo's own performance
+  #     validator hardcodes nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
+  #     in two places (validators/performance/model_cache.go
+  #     cacheWorkerImage, and the DynamoGraphDeployment testdata under
+  #     validators/performance/testdata/inference/) — those pins need
+  #     updating too before this leaf's inference-perf check would even
+  #     exercise a different image.
+  # Add a `validation.performance` block once a published, CUDA
+  # >= 13.4-built runtime image is verified on real VR200 hardware (past
+  # the JIT-compile crash, not just past a version-number check), the
+  # AICR-side 1.2.1 pins above are updated in lockstep, and a real floor
+  # is measured (same class of gap as GB300/sm_103 — plain CUDA kernels
+  # forward-compat onto Rubin via PTX JIT, but runtime kernel compilers
+  # need explicit sm_107a support).
   #
   # Deployment phase and baseline conformance checks are inherited from
   # vr200-rke2-ubuntu-inference (checks union across the overlay chain);
