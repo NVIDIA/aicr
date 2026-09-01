@@ -36,9 +36,18 @@ spec:
   # root's CDI/NRI containerd 2.1 requirement). The 615-branch host-driver
   # floor is enforced out-of-band (no driver-version measurement exists in
   # snapshots today).
+  #
+  # The upper bound (< 1.36.0) is inference-specific — see the same
+  # constraint on rke2-inference.yaml for why (RKE2's default packaged
+  # ingress becomes Traefik at v1.36, which conflicts with this leaf's
+  # own Gateway API CRD installs). Restated here, not just on
+  # rke2-inference.yaml, because constraint merging is same-name-wins
+  # per layer: without restating it, this leaf's own >= 1.34.1 (with no
+  # upper bound) would silently win over the intermediate layer's
+  # tightened range.
   constraints:
     - name: K8s.server.version
-      value: ">= 1.34.1"
+      value: ">= 1.34.1 < 1.36.0"
     - name: OS.release.ID
       value: ubuntu
     - name: OS.release.VERSION_ID
