@@ -38,7 +38,7 @@ func writeOKEAddonsFile(t *testing.T, content string) string {
 // state as the actual.
 func TestProjectOKEAddons(t *testing.T) {
 	t.Parallel()
-	// Shaped like real `oci ce cluster list-addons --all --output json`
+	// Shaped like real `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`
 	// output: a data[] array of add-on objects with kebab-case keys.
 	dgxcShaped := `{"data": [
 		{"name": "CertManager", "lifecycle-state": "ACTIVE"},

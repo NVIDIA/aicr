@@ -70,7 +70,7 @@ const (
 	MaxAKSGPUPoolsBytes = int64(1 << 20) // 1 MiB
 
 	// MaxOKEAddonsBytes caps the size of an --oke-addons JSON file
-	// (`oci ce cluster list-addons --all --output json`); the dump is a
+	// (`oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`); the dump is a
 	// short per-cluster add-on list, so 1 MiB is generous.
 	MaxOKEAddonsBytes = int64(1 << 20) // 1 MiB
 )

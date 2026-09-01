@@ -76,7 +76,7 @@ image's.
 Each value carries the canonical distinguishing constraint over the
 `K8s.oke-addons.nvidia-gpu-plugin` snapshot reading — the projection of the
 `NvidiaGpuPlugin` add-on's control-plane state from an operator-supplied
-`oci ce cluster list-addons --all --output json` dump (`--oke-addons` on
+`oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump (`--oke-addons` on
 both `aicr snapshot` and `aicr validate`, which re-captures live). The
 constraint joins the recipe's constraint set: evaluated at snapshot-based
 generation and re-evaluated by the `aicr validate` readiness pre-flight,

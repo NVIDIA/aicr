@@ -607,7 +607,7 @@ func snapshotCmdFlags() []cli.Flag {
 		},
 		&cli.StringFlag{
 			Name:     "oke-addons",
-			Usage:    "Path to an `oci ce cluster list-addons --all --output json` dump on the local filesystem. Projects the NvidiaGpuPlugin add-on's control-plane state into the K8s oke-addons subtype (installed/absent; any other lifecycle state projects a value no profile constraint accepts). The projection runs controller-side in both agent Job mode (merged into the returned snapshot) and local mode, and a bad file fails the snapshot before any cluster work.",
+			Usage:    "Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem. Projects the NvidiaGpuPlugin add-on's control-plane state into the K8s oke-addons subtype (installed/absent; any other lifecycle state projects a value no profile constraint accepts). The projection runs controller-side in both agent Job mode (merged into the returned snapshot) and local mode, and a bad file fails the snapshot before any cluster work.",
 			Sources:  cli.EnvVars("AICR_OKE_ADDONS_PATH"),
 			Category: catAgentDeployment,
 		},

@@ -300,6 +300,49 @@ The constraint path is `K8s.aks-gpu-pools.gpu-driver` in profile value
 constraints; `K8s.aks-gpu-pools.gpu-pool-count` and
 `K8s.aks-gpu-pools.gpu-pools` use the same non-item path form.
 
+## K8s oke-addons shape
+
+`K8s.oke-addons` projects the OKE `NvidiaGpuPlugin` cluster add-on's
+control-plane state for `gpuStack` profile qualification on the OKE family.
+Like `aks-gpu-pools`, it is not produced by a cluster collector: the
+projection is attached at the snapshot orchestration layer from the
+operator-supplied `oci ce cluster list-addons --cluster-id <cluster-ocid>
+--all --output json` dump passed to `aicr snapshot --oke-addons` (merged
+controller-side in both agent Job mode and local mode). A missing, truncated,
+or malformed dump fails the command — a file error is never degraded into a
+"reading unavailable" measurement.
+
+```yaml
+type: K8s
+subtypes:
+  - subtype: oke-addons
+    data:
+      addon-count: 3
+      nvidia-gpu-plugin: installed
+```
+
+The fields are:
+
+- `nvidia-gpu-plugin` (`string`) — the add-on's normalized control-plane
+  state: `installed` (present with lifecycle state `ACTIVE`), `absent`
+  (missing from the dump — the shape produced when the add-on is removed),
+  or, for any other lifecycle state, the state preserved verbatim, lowercased
+  with an `addon-` prefix (e.g. `addon-deleting`, `addon-needs_attention`).
+  Always emitted.
+- `addon-count` (`int`) — the number of add-ons in the dump. Always emitted,
+  including `0`.
+
+Interpretation is fail-closed: `installed` and `absent` are the only values a
+declared `gpuStack` profile constraint accepts (`installed` qualifies
+`oci-managed`, `absent` qualifies `operator-managed`). The `addon-*` markers
+match no constraint, so profile-qualified resolution fails closed with the
+observed lifecycle state as the actual. When the subtype is absent (no
+`--oke-addons` dump), constraint evaluation reports the reading unavailable
+and fails closed rather than guessing an ownership mode.
+
+The constraint path is `K8s.oke-addons.nvidia-gpu-plugin` in profile value
+constraints; `K8s.oke-addons.addon-count` uses the same non-item path form.
+
 ## NodeTopology shape
 
 `TypeNodeTopology` is a cluster-wide aggregate: one reading per distinct taint

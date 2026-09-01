@@ -97,7 +97,7 @@ spec:
   # control-plane signal qualifies a selection.
   #
   # Qualification (#2363, decided): the NvidiaGpuPlugin add-on's
-  # control-plane state, supplied as an `oci ce cluster list-addons --all
+  # control-plane state, supplied as an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all
   # --output json` dump via --oke-addons at BOTH phases (snapshot-based
   # generation and the aicr validate pre-flight re-capture). installed →
   # oci-managed; absent → operator-managed; any other lifecycle state, a
@@ -151,7 +151,7 @@ spec:
               labeler: {assumeDriverInstalled: true}
         # The canonical qualification signal (#2363): the NvidiaGpuPlugin
         # add-on's control-plane state, projected from an operator-supplied
-        # `oci ce cluster list-addons --all --output json` dump via
+        # `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump via
         # `aicr snapshot --oke-addons` / `aicr validate --oke-addons`.
         # Externally grounded (the control plane, not the bundle's output),
         # durable at both phases, fail-closed on any other lifecycle state
@@ -174,7 +174,7 @@ spec:
               with the add-on removed (bring-your-own driverless pools),
               regenerate with --profile gpuStack=operator-managed. Capture
               the signal with: aicr snapshot --oke-addons <path to
-              `oci ce cluster list-addons --all --output json` dump>.
+              `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump>.
       # Bring-your-own driverless image: the GPU Operator installs driver,
       # toolkit, and device plugin; the DRA kubelet plugin reads the driver
       # userspace from the operator install path (TestDriverRootLockstep,
@@ -221,7 +221,7 @@ spec:
               Oracle-managed pools regenerate with the default
               (--profile gpuStack=oci-managed). Capture the signal with:
               aicr snapshot --oke-addons <path to
-              `oci ce cluster list-addons --all --output json` dump>.
+              `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump>.
 
   validation:
     conformance:

@@ -65,7 +65,7 @@ type NodeSnapshotter struct {
 	AKSGPUPoolsPath string
 
 	// OKEAddonsPath, when set, points at an operator-supplied
-	// `oci ce cluster list-addons --all --output json` dump. Same
+	// `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump. Same
 	// contract as AKSGPUPoolsPath: projected fail-loud into the K8s
 	// measurement's oke-addons subtype before any collector runs.
 	OKEAddonsPath string

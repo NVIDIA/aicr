@@ -226,7 +226,7 @@ type AgentConfig struct {
 	NameBase string
 
 	// OKEAddonsPath points at an operator-supplied
-	// `oci ce cluster list-addons --all --output json` dump. Same
+	// `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump. Same
 	// contract as AKSGPUPoolsPath: projected controller-side and merged
 	// into the snapshot as the oke-addons subtype.
 	OKEAddonsPath string

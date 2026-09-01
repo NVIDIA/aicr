@@ -155,7 +155,7 @@ type AgentConfig struct {
 	AKSGPUPoolsPath string
 
 	// OKEAddonsPath, when set, points at an operator-supplied
-	// `oci ce cluster list-addons --all --output json` dump on the
+	// `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the
 	// CALLER's filesystem. Same contract as AKSGPUPoolsPath: projected
 	// controller-side before deploying, merged into the returned
 	// snapshot as the oke-addons subtype.
@@ -486,7 +486,7 @@ func mergeProviderProjection(snapshotData []byte, subtype measurement.Subtype) (
 	merged, err := serializer.MarshalYAMLDeterministic(doc)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to serialize snapshot after AKS GPU pools merge", err)
+			"failed to serialize snapshot after provider projection merge", err)
 	}
 	return merged, nil
 }
@@ -633,7 +633,7 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 //
 // The Job always writes to a ConfigMap. When config.Output is a cm:// URI the
 // user asked for that exact ConfigMap, so the Job targets it directly,
-// ownsOutput is false, and a failed AKS-pool-merge rewrite is fatal rather
+// ownsOutput is false, and a failed provider-projection-merge rewrite is fatal rather
 // than a warning — the bytes the user will read live there, and this run
 // must never delete an artifact it does not own. Any other Output (file,
 // stdout, template, or unset) stages to an internal, run-scoped ConfigMap in
@@ -1124,7 +1124,7 @@ func rewriteMergedSnapshotConfigMap(ctx context.Context, uri, kubeconfig string,
 
 // writeSnapshotConfigMap applies snapshot bytes to a cm://namespace/name
 // destination in the requested format, replacing whatever is there. Shared by
-// DeliverSnapshot (the caller's chosen destination) and the AKS-pool merge
+// DeliverSnapshot (the caller's chosen destination) and the provider-projection merge
 // rewrite (replacing the pre-merge content the agent Job stored), which pins
 // YAML: pkg/k8s/agent reads the staging ConfigMap's snapshot.yaml key.
 //

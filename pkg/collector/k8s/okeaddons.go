@@ -63,7 +63,7 @@ type okeAddonsDump struct {
 	Data []okeAddon `json:"data"`
 }
 
-// ProjectOKEAddons reads an `oci ce cluster list-addons --all --output json`
+// ProjectOKEAddons reads an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`
 // dump and projects the NvidiaGpuPlugin add-on's control-plane state into
 // the oke-addons subtype:
 //
@@ -126,7 +126,7 @@ func readOKEAddons(ctx context.Context, path string) ([]okeAddon, error) {
 	if err := json.Unmarshal(raw, &dump); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("failed to decode OKE add-ons file %q: expected the JSON object "+
-				"emitted by `oci ce cluster list-addons --all --output json`", path), err)
+				"emitted by `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`", path), err)
 	}
 	// json.Unmarshal accepts a top-level `null` (or an object without a
 	// data key) leaving Data nil — that is not the documented oci output
@@ -136,7 +136,7 @@ func readOKEAddons(ctx context.Context, path string) ([]okeAddon, error) {
 	if dump.Data == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("failed to decode OKE add-ons file %q: no data array, expected the "+
-				"JSON object emitted by `oci ce cluster list-addons --all --output json`", path))
+				"JSON object emitted by `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`", path))
 	}
 	return dump.Data, nil
 }
