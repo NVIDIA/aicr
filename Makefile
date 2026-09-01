@@ -837,8 +837,24 @@ notices-check: ## Verifies THIRD_PARTY_NOTICES.md is up to date (run by the merg
 	fi; \
 	echo "THIRD_PARTY_NOTICES.md is up to date"
 
+# `notices` is a prerequisite so the THIRD_PARTY_NOTICES.md that goreleaser
+# attaches is generated from the tag being released, not inherited from whatever
+# happened to be committed. OSRB requires the notices published with a release to
+# match that release; nothing requires the source tree to be current between
+# releases, so this is the only place the guarantee has to hold.
+#
+# .goreleaser.yaml's release.extra_files globs the file from the repo root, and
+# --clean only wipes dist/, so it survives the run.
+#
+# Regeneration is normally a no-op: the merge gate keeps the committed copy
+# fresh, so the tree stays clean and goreleaser proceeds as before. If the copy
+# IS stale, regeneration dirties the tree and goreleaser's dirty-state
+# validation aborts the release. That failure is the point — a release that
+# ships notices not matching its tag is the outcome OSRB forbids — but the
+# message will read "git is currently in a dirty state" rather than naming the
+# notices, so check `git diff -- THIRD_PARTY_NOTICES.md` first if it fires.
 .PHONY: release
-release: ## Runs the full release process with goreleaser
+release: notices ## Runs the full release process with goreleaser (regenerates THIRD_PARTY_NOTICES.md first)
 	@set -e; \
 	goreleaser release --clean --config .goreleaser.yaml --fail-fast --timeout 60m0s
 
