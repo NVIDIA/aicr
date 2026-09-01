@@ -47,9 +47,11 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 
 | Name | Description | Timeout |
 |------|-------------|---------|
-| `nccl-all-reduce-bw` | Verify NCCL All Reduce Bus Bandwidth meets threshold | 30m |
+| `nccl-all-reduce-bw` | Verify NCCL All Reduce Bus Bandwidth meets threshold (TrainJob path) | 30m |
 | `nccl-all-reduce-bw-net` | Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`) | 30m |
 | `nccl-all-reduce-bw-nvls` | Verify NCCL All Reduce Bus Bandwidth on the NVLS transport (MNNVL across an NVL72 IMEX domain) | 30m |
+| `nccl-cre-all-reduce-bw` | EKS H100 NCCL via CRE `Certification` (`communication/nccl-all-reduce`) (opt-in) | 30m |
+| `cre-training-goodput` | EKS H100 NeMo goodput via CRE `WorkloadRun` (opt-in) | 30m |
 
 The NCCL checks derive applicability from the recipe's `criteria` by default;
 a recipe outside the embedded service + accelerator matrix (e.g. registered

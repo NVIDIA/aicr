@@ -287,7 +287,8 @@ validators:
     args: ["nccl-all-reduce-bw-nvls"]
     env: []
   # CRE-driven EKS H100 NCCL check. Opt-in only: no embedded overlay
-  # references this check until correlation with the TrainJob path is complete.
+  # references this check. Shipped EKS H100 training keeps TrainJob
+  # nccl-all-reduce-bw.
   - name: nccl-cre-all-reduce-bw
     phase: performance
     description: "Verify EKS H100 NCCL All Reduce Bus Bandwidth via a Cluster Readiness Engine Certification"

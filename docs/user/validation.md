@@ -55,8 +55,9 @@ ones) that match the target fabric:
 
 An opt-in Cluster Readiness Engine (CRE) pair of checks is available for EKS H100
 against public CRE (`nvcre.nvidia.com`, [cluster-readiness-engine](https://github.com/NVIDIA/cluster-readiness-engine)).
-They are not attached to shipped overlays until NCCL results are correlated with
-the TrainJob path. Each check requires a same-named constraint:
+Shipped overlays keep the TrainJob `nccl-all-reduce-bw` path. Add `nvcre` and
+the CRE check names only when you intend to run CRE. Each CRE check requires a
+same-named constraint:
 
 | Check | What it measures |
 |---|---|
