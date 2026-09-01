@@ -93,6 +93,9 @@ func TestCoverageGoldenMatrix(t *testing.T) {
 	}
 
 	if os.Getenv("AICR_UPDATE_GOLDEN") == "1" {
+		if t.Failed() {
+			t.Fatal("not writing golden: one or more projections failed to classify (see errors above)")
+		}
 		writeGolden(t, got)
 		t.Logf("golden updated: %d projections", len(got))
 		return
