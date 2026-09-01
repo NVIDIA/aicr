@@ -123,6 +123,19 @@ if [[ "$1" == "pull" ]]; then
         sleep "${STUB_PULL_SLOW_FAIL}"
         exit 1
     fi
+    # A pull that lands the image and then overruns the budget. The layers are
+    # on the host before `timeout` kills the client, so the image IS cached; any
+    # verdict that says otherwise is reporting the clock, not the cache.
+    if [[ -n "${STUB_PULL_SLOW_SUCCESS:-}" ]]; then
+        touch "${STUB_DIR}/pulled"
+        sleep "${STUB_PULL_SLOW_SUCCESS}"
+        exit 0
+    fi
+    # A pull that fails WITHOUT writing to stderr. docker does this on its own,
+    # so an empty captured cause must not be read as "timeout killed it".
+    if [[ -n "${STUB_PULL_SILENT_FAIL:-}" ]]; then
+        exit 1
+    fi
     if (( n <= ${STUB_PULL_FAILS:-0} )); then
         # Real docker writes the cause here; the subject must forward it.
         echo "toomanyrequests: Rate exceeded" >&2
@@ -153,7 +166,8 @@ reset() {
     : > "${TRACE}"
     rm -f "${STUB_DIR}/pulls" "${STUB_DIR}/pulled"
     unset STUB_INSPECT_RC STUB_PULL_FAILS STUB_KIND_LOAD_RC STUB_CLUSTERS STUB_PULL_HANGS
-    unset STUB_INSPECT_HANGS STUB_PULL_SLOW_FAIL
+    unset STUB_INSPECT_HANGS STUB_PULL_SLOW_FAIL STUB_PULL_SLOW_SUCCESS
+    unset STUB_PULL_SILENT_FAIL
     unset KWOK_PRELOAD_BUDGET_SECONDS
     unset KUBECTL_CONTEXT KWOK_CLUSTER
     export STUB_DIR TRACE
@@ -326,6 +340,13 @@ unset STUB_PULL_HANGS KWOK_PRELOAD_BUDGET_SECONDS
 #     first call in the retry loop, so an unbounded inspect stalls once per
 #     attempt before the kubelet fallback can run — the same failure class as a
 #     hanging pull, in the call that is easiest to assume is local and cheap.
+#
+#     The ceiling here is the budget PLUS one PRELOAD_PROBE_TIMEOUT, not the
+#     budget alone: the final "is it cached" verdict is deliberately not drawn
+#     from the deadline (a spent budget must not be reported as a cache miss),
+#     so against a wedged daemon it costs its own bound on top. That is one
+#     probe, not one per attempt — the in-loop check stays budget-bounded, which
+#     is what keeps this from growing with the retry count.
 reset
 export STUB_INSPECT_HANGS=1
 export KWOK_PRELOAD_BUDGET_SECONDS=3
@@ -333,7 +354,8 @@ started=$(date +%s)
 preload_image "${IMG}" >/dev/null; rc=$?
 elapsed=$(( $(date +%s) - started ))
 check "hanging-inspect-does-not-fail-the-lane" 0 "${rc}"
-check_bounded "hanging-inspect-is-bounded" "${KWOK_PRELOAD_BUDGET_SECONDS}" "${elapsed}"
+check_bounded "hanging-inspect-is-bounded" \
+    "$(( KWOK_PRELOAD_BUDGET_SECONDS + PRELOAD_PROBE_TIMEOUT ))" "${elapsed}"
 check_absent "hanging-inspect-skips-load" "kind load"
 unset STUB_INSPECT_HANGS KWOK_PRELOAD_BUDGET_SECONDS
 
@@ -358,6 +380,76 @@ else
 fi
 check_absent "budget-consumed-by-pull-skips-load" "kind load"
 unset STUB_PULL_SLOW_FAIL KWOK_PRELOAD_BUDGET_SECONDS
+
+# 14. The image is cached, but the pull that cached it spent the budget doing
+#     it. The verdict must be "is the image there", not "is the image there AND
+#     is there time left" — the caller's next step (side-load) does its own
+#     budget check, and reporting a cached image as missing sends a lane back to
+#     the kubelet for an image already on the host.
+#
+#     Drives preload_pull_retry directly: via preload_image the success falls
+#     through to the side-load budget check and bails for an unrelated reason,
+#     which would make this assertion prove nothing.
+reset
+export STUB_PULL_SLOW_SUCCESS=6
+started=$(date +%s)
+out=$(preload_pull_retry "${IMG}" "$(( $(date +%s) + 2 ))" 2>&1); rc=$?
+elapsed=$(( $(date +%s) - started ))
+check "cached-after-budget-spent-reports-success" 0 "${rc}"
+check_bounded "cached-after-budget-spent-is-bounded" 2 "${elapsed}"
+if [[ "${out}" == *"is not cached"* ]]; then
+    echo "FAIL: cached-after-budget-spent-does-not-misreport (claimed the cached image is missing: ${out})"
+    fails=$((fails + 1))
+else
+    echo "PASS: cached-after-budget-spent-does-not-misreport"
+fi
+unset STUB_PULL_SLOW_SUCCESS
+
+# 15. A pull killed by `timeout` writes nothing to stderr, so the captured cause
+#     is empty. Selecting the message on that emptiness reports "no pull was
+#     attempted" directly beneath the line announcing the attempt. The message
+#     must follow the attempt counter, which knows what happened.
+reset
+export STUB_PULL_HANGS=1
+out=$(preload_pull_retry "${IMG}" "$(( $(date +%s) + 3 ))" 2>&1); rc=$?
+check "timeout-killed-pull-reports-failure" 1 "${rc}"
+# Assert the message POSITIVELY -- the attempt count and the cause. Forbidding
+# only the known-wrong string still passes if the message degrades into
+# something else uninformative, which is the same vacuity this file exists to
+# remove.
+if [[ "${out}" == *"after 1 attempt(s)"* && "${out}" == *"killed by the budget timeout"* ]]; then
+    echo "PASS: timeout-killed-pull-names-attempt-and-cause"
+else
+    echo "FAIL: timeout-killed-pull-names-attempt-and-cause (got: ${out})"
+    fails=$((fails + 1))
+fi
+if [[ "${out}" == *"no pull was attempted"* ]]; then
+    echo "FAIL: timeout-killed-pull-does-not-claim-no-attempt (contradicts its own attempt log: ${out})"
+    fails=$((fails + 1))
+fi
+unset STUB_PULL_HANGS
+
+# 16. A pull that fails on its own with a nonzero exit and NO stderr must not be
+#     blamed on the budget. Empty stderr is ambiguous -- docker produces it too
+#     -- so the timeout claim has to come from `timeout`'s own rc 124, not from
+#     inferring a cause the code never observed.
+reset
+export STUB_PULL_SILENT_FAIL=1
+out=$(preload_pull_retry "${IMG}" "$(( $(date +%s) + 4 ))" 2>&1); rc=$?
+check "silent-pull-failure-reports-failure" 1 "${rc}"
+if [[ "${out}" == *"killed by the budget timeout"* ]]; then
+    echo "FAIL: silent-pull-failure-is-not-blamed-on-the-budget (got: ${out})"
+    fails=$((fails + 1))
+else
+    echo "PASS: silent-pull-failure-is-not-blamed-on-the-budget"
+fi
+if [[ "${out}" == *"exited 1 without writing an error"* ]]; then
+    echo "PASS: silent-pull-failure-reports-the-exit-code"
+else
+    echo "FAIL: silent-pull-failure-reports-the-exit-code (got: ${out})"
+    fails=$((fails + 1))
+fi
+unset STUB_PULL_SILENT_FAIL
 
 if (( fails > 0 )); then
     echo "FAILED: ${fails} case(s)"

@@ -42,10 +42,10 @@
 
 IMAGE_CACHE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# preload_remaining / preload_have_image / preload_pull_retry. The retry
-# schedule is deliberately shared rather than reimplemented: it is the one
-# tuned against the observed throttle (#2496), and a second copy here would
-# drift from it.
+# preload_remaining / preload_have_image / preload_image_cached /
+# preload_pull_retry. The retry schedule is deliberately shared rather than
+# reimplemented: it is the one tuned against the observed throttle (#2496), and
+# a second copy here would drift from it.
 # shellcheck source=preload-image.sh
 source "${IMAGE_CACHE_SCRIPT_DIR}/preload-image.sh"
 
@@ -223,7 +223,12 @@ image_cache_load() {
     # A truncated or wrong-image tarball can load "successfully" and leave the
     # image absent; reporting that as a hit would tell the caller to skip a
     # pull it still needs.
-    if ! preload_have_image "${image}" "${deadline}"; then
+    #
+    # Deliberately not budget-bounded: the load has already happened, so whether
+    # time remains says nothing about whether the image is there. Gating this on
+    # the deadline reported a successful load that consumed the budget as a
+    # failure, and the caller then re-pulled an image it already had.
+    if ! preload_image_cached "${image}"; then
         log_warn "${image} is still not present after loading ${file}"
         return 1
     fi
