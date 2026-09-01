@@ -93,6 +93,11 @@ PATH="${STUB_DIR}:${PATH}"
 #   STUB_PULL_HANGS   non-empty makes every `docker pull` hang forever
 #   STUB_INSPECT_HANGS non-empty makes every `docker image inspect` hang forever
 #   STUB_PULL_SLOW_FAIL seconds a `docker pull` stalls after emitting its error
+#   STUB_PULL_SLOW_SUCCESS seconds a `docker pull` stalls AFTER landing the image
+#   STUB_PULL_SILENT_FAIL non-empty makes `docker pull` exit 1 with no stderr
+#   STUB_PULL_BLANK_ERR non-empty makes a killed `docker pull` emit only a newline
+#   STUB_INSPECT_SLOW seconds every `docker image inspect` stalls before answering
+#   STUB_INSPECT_ALWAYS_MISS non-empty makes inspect report absent even after a pull
 #   STUB_KIND_LOAD_RC `kind load` exit code
 #   STUB_CLUSTERS     newline-separated `kind get clusters` output
 write_stubs() {
@@ -106,6 +111,10 @@ case "$1 $2" in
         # A busy but RESPONSIVE Engine: slow, yet it does answer. Must not be
         # mistaken for a cache miss while the budget still has room.
         if [[ -n "${STUB_INSPECT_SLOW:-}" ]]; then sleep "${STUB_INSPECT_SLOW}"; fi
+        # The image never becomes visible, even after a pull reports success:
+        # a pull that exits 0 without the image landing (wrong ref, racing
+        # prune). The loop still terminates because the pull breaks it.
+        if [[ -n "${STUB_INSPECT_ALWAYS_MISS:-}" ]]; then exit 1; fi
         # Once a pull has succeeded the image is cached, so later inspects
         # must succeed too — otherwise the retry loop could not terminate.
         if [[ -f "${STUB_DIR}/pulled" ]]; then exit 0; fi
@@ -133,6 +142,13 @@ if [[ "$1" == "pull" ]]; then
         touch "${STUB_DIR}/pulled"
         sleep "${STUB_PULL_SLOW_SUCCESS}"
         exit 0
+    fi
+    # A pull killed by `timeout` that managed to emit only a blank line first.
+    # `tr` turns that newline into a space, so the captured cause is non-empty
+    # whitespace -- which must not out-rank the exit code as a diagnosis.
+    if [[ -n "${STUB_PULL_BLANK_ERR:-}" ]]; then
+        printf '\n' >&2
+        sleep 3600
     fi
     # A pull that fails WITHOUT writing to stderr. docker does this on its own,
     # so an empty captured cause must not be read as "timeout killed it".
@@ -171,6 +187,7 @@ reset() {
     unset STUB_INSPECT_RC STUB_PULL_FAILS STUB_KIND_LOAD_RC STUB_CLUSTERS STUB_PULL_HANGS
     unset STUB_INSPECT_HANGS STUB_PULL_SLOW_FAIL STUB_PULL_SLOW_SUCCESS
     unset STUB_PULL_SILENT_FAIL STUB_INSPECT_SLOW
+    unset STUB_INSPECT_ALWAYS_MISS STUB_PULL_BLANK_ERR
     unset KWOK_PRELOAD_BUDGET_SECONDS
     unset KUBECTL_CONTEXT KWOK_CLUSTER
     export STUB_DIR TRACE
@@ -385,21 +402,30 @@ check_absent "budget-consumed-by-pull-skips-load" "kind load"
 unset STUB_PULL_SLOW_FAIL KWOK_PRELOAD_BUDGET_SECONDS
 
 # 14. The image is cached, but the pull that cached it spent the budget doing
-#     it. The verdict must be "is the image there", not "is the image there AND
-#     is there time left" — the caller's next step (side-load) does its own
-#     budget check, and reporting a cached image as missing sends a lane back to
-#     the kubelet for an image already on the host.
+#     it. The verdict must answer "is the image there", not "is the image there
+#     AND is there time left" — otherwise the run is reported as a failed pull
+#     when the pull in fact worked.
 #
-#     Drives preload_pull_retry directly: via preload_image the success falls
-#     through to the side-load budget check and bails for an unrelated reason,
-#     which would make this assertion prove nothing.
+#     What this does NOT claim: that the image then reaches the Kind node. The
+#     side-load has its own budget check and a genuinely exhausted budget still
+#     ends in the kubelet pull, which is correct — there is no time left to
+#     transfer it. #2502 is a reporting fix, so this asserts the report.
+#
+#     Drives preload_pull_retry directly for that reason: through preload_image
+#     the return value is swallowed by the side-load budget check, so the
+#     assertion would prove nothing about the verdict under test.
 reset
 export STUB_PULL_SLOW_SUCCESS=6
 started=$(date +%s)
 out=$(preload_pull_retry "${IMG}" "$(( $(date +%s) + 2 ))" 2>&1); rc=$?
 elapsed=$(( $(date +%s) - started ))
 check "cached-after-budget-spent-reports-success" 0 "${rc}"
-check_bounded "cached-after-budget-spent-is-bounded" 2 "${elapsed}"
+# Same ceiling composition as hanging-inspect-is-bounded: the budget plus one
+# probe floor. It happens to finish far inside that here because this case's
+# stub inspect answers instantly, but the two assertions must not encode two
+# different ceilings for the same function.
+check_bounded "cached-after-budget-spent-is-bounded" \
+    "$(( 2 + PRELOAD_PROBE_TIMEOUT ))" "${elapsed}"
 if [[ "${out}" == *"is not cached"* ]]; then
     echo "FAIL: cached-after-budget-spent-does-not-misreport (claimed the cached image is missing: ${out})"
     fails=$((fails + 1))
@@ -458,6 +484,12 @@ unset STUB_PULL_SILENT_FAIL
 #     probe must use the REMAINING budget when that is larger than its floor:
 #     capping every probe at the floor would swap the budget-spent false miss
 #     for a slow-daemon one, narrowing an allowance the old code did give.
+#
+#     CHARACTERISATION, not a regression test. It cannot fail against the
+#     pre-change code, which bounded this probe by the remaining deadline and so
+#     already allowed the slow inspect. It pins floor-not-cap against a FUTURE
+#     change that turns the constant into a ceiling -- a mistake made once
+#     already while writing this fix.
 reset
 export STUB_INSPECT_RC=0     # image IS present
 export STUB_INSPECT_SLOW=7   # slower than the 5s floor, well inside the budget
@@ -470,6 +502,45 @@ else
     echo "PASS: slow-probe-with-budget-left-is-not-a-miss"
 fi
 unset STUB_INSPECT_RC STUB_INSPECT_SLOW
+
+# 18. A failed attempt superseded by a successful one must not be reported as
+#     the cause when the final probe still misses. The carried cause has to be
+#     cleared on the success break, or the log blames a pull that was retried
+#     away -- the same misattribution as reading a timeout out of empty stderr,
+#     one iteration further back.
+reset
+export STUB_PULL_FAILS=1          # attempt 1 fails, writing a real cause
+export STUB_INSPECT_ALWAYS_MISS=1 # the image never becomes visible
+out=$(preload_pull_retry "${IMG}" "$(( $(date +%s) + 15 ))" 2>&1); rc=$?
+check "superseded-failure-reports-failure" 1 "${rc}"
+if [[ "${out}" == *"toomanyrequests"* ]]; then
+    echo "FAIL: superseded-failure-is-not-blamed (reported a cause a later attempt superseded: ${out})"
+    fails=$((fails + 1))
+else
+    echo "PASS: superseded-failure-is-not-blamed"
+fi
+if [[ "${out}" == *"reported success but the image is not present"* ]]; then
+    echo "PASS: pull-success-without-image-says-so"
+else
+    echo "FAIL: pull-success-without-image-says-so (got: ${out})"
+    fails=$((fails + 1))
+fi
+unset STUB_PULL_FAILS STUB_INSPECT_ALWAYS_MISS
+
+# 19. A killed pull that emitted only a blank line still has an empty CAUSE, but
+#     a non-empty captured string. Testing that string for emptiness lets
+#     whitespace out-rank the exit code and prints a blank "last error:".
+reset
+export STUB_PULL_BLANK_ERR=1
+out=$(preload_pull_retry "${IMG}" "$(( $(date +%s) + 3 ))" 2>&1); rc=$?
+check "blank-stderr-kill-reports-failure" 1 "${rc}"
+if [[ "${out}" == *"killed by the budget timeout"* ]]; then
+    echo "PASS: blank-stderr-kill-still-names-the-timeout"
+else
+    echo "FAIL: blank-stderr-kill-still-names-the-timeout (whitespace out-ranked the exit code: ${out})"
+    fails=$((fails + 1))
+fi
+unset STUB_PULL_BLANK_ERR
 
 if (( fails > 0 )); then
     echo "FAILED: ${fails} case(s)"

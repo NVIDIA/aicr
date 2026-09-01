@@ -224,10 +224,12 @@ image_cache_load() {
     # image absent; reporting that as a hit would tell the caller to skip a
     # pull it still needs.
     #
-    # Deliberately not budget-bounded: the load has already happened, so whether
-    # time remains says nothing about whether the image is there. Gating this on
-    # the deadline reported a successful load that consumed the budget as a
-    # failure, and the caller then re-pulled an image it already had.
+    # The probe is bounded by the larger of the remaining budget and
+    # PRELOAD_PROBE_TIMEOUT, so a spent deadline cannot answer for it. Gating it
+    # on the deadline alone reported a successful load that consumed the budget
+    # as a failure. Note the bound is a floor, not a cap: while budget remains
+    # this probe may wait for most of it, which is deliberate -- capping it
+    # would make a slow-but-responsive daemon look like a cache miss instead.
     if ! preload_image_cached "${image}" "${deadline}"; then
         log_warn "${image} is still not present after loading ${file}"
         return 1

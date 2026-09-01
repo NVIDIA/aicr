@@ -104,6 +104,11 @@ PATH="${STUB_DIR}:${PATH}"
 #   STUB_LOAD_RC      `docker load` exit code
 #   STUB_LOAD_CORRUPT non-empty makes `docker load` succeed without the image
 #                     becoming present — a truncated or wrong-image tarball
+#   STUB_LOAD_SLOW    seconds a `docker load` stalls AFTER landing the image,
+#                     leaving only a sliver of the budget for the probe
+#   STUB_INSPECT_SLOW seconds `docker image inspect` stalls before answering,
+#                     applied only once the image is present (the post-load
+#                     probe) so it cannot spend the budget before the load
 write_stubs() {
     cat > "${STUB_DIR}/docker" <<'EOF'
 #!/usr/bin/env bash
