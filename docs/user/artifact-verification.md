@@ -104,10 +104,10 @@ those before adopting a suppression: the analysis is specific to how AICR
 invokes the affected component.
 
 An empty `statements` array is a valid result, not a failure: it means AICR has
-triaged no CVE for that image. Six of the seven released images are in that
-state; today only `ghcr.io/nvidia/aicr-validators/aiperf-bench` carries
-statements. **An empty VEX means "no exceptions asserted", not "no
-vulnerabilities."** It says what AICR has claimed, not what a scanner would
+triaged no CVE for that image. Most released images are in that state at any
+given time; which ones is a property of the release you are verifying, so read
+the document you retrieved rather than assuming. **An empty VEX means "no
+exceptions asserted", not "no vulnerabilities."** It says what AICR has claimed, not what a scanner would
 find, so do not read one as a clean bill of health, and do not read the absence
 of a statement about a CVE as a claim that the image is unaffected by it. Every
 released image carries a document so that "no exceptions asserted" stays

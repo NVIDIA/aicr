@@ -728,7 +728,7 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 			if tc.projectionOK {
 				wantErr = ""
 			}
-			output, result := runOpenVEXProjectionGuard(t, bindScript, tc.document)
+			output, result := runOpenVEXProjectionGuard(t, bindScript, tc.document, false)
 			if (result != nil) != (wantErr != "") {
 				t.Fatalf("binding guard error = %v, wantErr %q\n%s", result, wantErr, output)
 			}
@@ -737,6 +737,21 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 			}
 		})
 	}
+
+	// The failure the projection rule exists to catch: binding did not happen,
+	// so the signed document would carry bare `pkg:oci/<image>` products that no
+	// consumer can tie back to a manifest. Every other rule passes here, which
+	// is exactly why the guard has to check binding specifically.
+	t.Run("projection/unbound products are rejected", func(t *testing.T) {
+		t.Parallel()
+		output, err := runOpenVEXProjectionGuard(t, bindScript, document(validStatement), true)
+		if err == nil {
+			t.Fatalf("an unbound projection reached cosign attest\n%s", output)
+		}
+		if !strings.Contains(output, "not bound to @") {
+			t.Errorf("guard output = %q, want it to name the unbound identifier", output)
+		}
+	})
 
 	// The shipped document has to survive the guard it is published through.
 	// A release cannot be the first place this is discovered.
@@ -762,19 +777,33 @@ const openVEXGuardPath = ".github/actions/sbom-and-attest/openvex-guard.sh"
 // step can be driven with an arbitrary projection. The generator has its own
 // tests in tools/openvex-bind; what this covers is the step's handling of what
 // comes back, which is where the guard has to sit.
+//
+// It performs the one transformation the guard checks for — qualifying product
+// identifiers with the digest it was handed — so each platform in the step's
+// loop gets a projection bound to its own manifest. Setting
+// FAKE_BIND_SKIP_BINDING=1 suppresses that, which is how the test reproduces
+// the failure the projection rule exists to catch.
 const fakeOpenVEXBind = `#!/usr/bin/env bash
 set -euo pipefail
 out=""
+digest=""
 previous=""
 for argument in "$@"; do
-  if [[ "${previous}" == "-out" ]]; then out="${argument}"; fi
+  case "${previous}" in
+    -out) out="${argument}" ;;
+    -digest) digest="${argument}" ;;
+  esac
   previous="${argument}"
 done
-if [[ -z "${out}" ]]; then
-  echo "fake go: the step did not pass -out" >&2
+if [[ -z "${out}" || -z "${digest}" ]]; then
+  echo "fake go: the step did not pass both -out and -digest" >&2
   exit 1
 fi
-cat "${FAKE_BIND_FIXTURE}" > "${out}"
+if [[ "${FAKE_BIND_SKIP_BINDING:-0}" == "1" ]]; then
+  cat "${FAKE_BIND_FIXTURE}" > "${out}"
+else
+  sed "s|pkg:oci/aicr|pkg:oci/aicr@${digest}|g" "${FAKE_BIND_FIXTURE}" > "${out}"
+fi
 `
 
 // runOpenVEXGuard executes the extracted source-verification step against a
@@ -809,7 +838,7 @@ func runOpenVEXGuard(t *testing.T, script, workspace string) (string, error) {
 // validates is the one the caller chose. It returns the combined output and the
 // exit status; a non-nil error means the step refused to hand that projection
 // on to `cosign attest`.
-func runOpenVEXProjectionGuard(t *testing.T, bindScript, document string) (string, error) {
+func runOpenVEXProjectionGuard(t *testing.T, bindScript, document string, skipBinding bool) (string, error) {
 	t.Helper()
 	budget := scriptBudget(t)
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
@@ -833,12 +862,17 @@ func runOpenVEXProjectionGuard(t *testing.T, bindScript, document string) (strin
 		t.Fatalf("create step workdir: %v", err)
 	}
 
+	skip := "0"
+	if skipBinding {
+		skip = "1"
+	}
 	command := exec.CommandContext(ctx, "bash", "-c", bindScript)
 	command.Dir = workdir
 	command.Env = append(os.Environ(),
 		"PATH="+bin+":"+os.Getenv("PATH"),
 		"GITHUB_ACTION_PATH="+filepath.Join(repositoryRoot(t), ".github/actions/sbom-and-attest"),
 		"FAKE_BIND_FIXTURE="+fixture,
+		"FAKE_BIND_SKIP_BINDING="+skip,
 		"IMAGE_NAME=ghcr.io/nvidia/aicr",
 		"AMD64_DIGEST=sha256:1111111111111111111111111111111111111111111111111111111111111111",
 		"ARM64_DIGEST=sha256:2222222222222222222222222222222222222222222222222222222222222222",

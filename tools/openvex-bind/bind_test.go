@@ -244,15 +244,39 @@ func TestBindIsDeterministic(t *testing.T) {
 
 // TestBindDoesNotMutateSource guards the invariant that .openvex.json remains
 // the untouched source of truth.
+//
+// The byte comparison alone is weak: json.Unmarshal never writes into the
+// caller's buffer, so it cannot fail. The invariant that can actually break is
+// on the decoded tree, because Bind rewrites `products` and `@id` on every
+// statement it keeps. Binding the same buffer twice against different digests
+// is what exercises that: if the first projection leaked into shared state, the
+// second would carry the first digest.
 func TestBindDoesNotMutateSource(t *testing.T) {
 	t.Parallel()
 	source := []byte(sourceDocument)
 	before := append([]byte(nil), source...)
-	if _, err := Bind(source, Options{Image: benchImage, Digest: amd64Digest}); err != nil {
+	first, err := Bind(source, Options{Image: benchImage, Digest: amd64Digest})
+	if err != nil {
 		t.Fatalf("Bind() error = %v", err)
 	}
 	if !bytes.Equal(before, source) {
 		t.Error("Bind mutated its source buffer")
+	}
+
+	second, err := Bind(source, Options{Image: benchImage, Digest: arm64Digest})
+	if err != nil {
+		t.Fatalf("Bind() error = %v", err)
+	}
+	want := "pkg:oci/aiperf-bench@" + arm64Digest
+	product := statementsOf(t, decode(t, second.Document))[0].(map[string]any)["products"].([]any)[0].(map[string]any)
+	if got := product["@id"]; got != want {
+		t.Errorf("second projection product @id = %v, want %s", got, want)
+	}
+	if identifiers := product["identifiers"].(map[string]any); identifiers["purl"] != want {
+		t.Errorf("second projection purl = %v, want %s", identifiers["purl"], want)
+	}
+	if bytes.Equal(first.Document, second.Document) {
+		t.Error("projections for two different digests are byte-identical")
 	}
 }
 
@@ -350,6 +374,41 @@ func TestBindRejectsBadInput(t *testing.T) {
 		{
 			name:   "product is not an object",
 			source: `{"@id":"https://example.test/vex","statements":[{"products":["pkg:oci/aiperf-bench"]}]}`,
+			image:  benchImage,
+			digest: amd64Digest,
+		},
+		{
+			// json.Decoder stops after the first value, so without an explicit
+			// EOF check the suffix would be dropped and the truncated document
+			// signed as if it were the whole thing.
+			name:   "trailing JSON value after the document",
+			source: sourceDocument + `{"@id":"https://example.test/second"}`,
+			image:  benchImage,
+			digest: amd64Digest,
+		},
+		{
+			name:   "trailing scalar after the document",
+			source: sourceDocument + ` 42`,
+			image:  benchImage,
+			digest: amd64Digest,
+		},
+		{
+			// Dropping a malformed subcomponents value would widen the
+			// statement from specific packages to the whole image.
+			name: "subcomponents is not an array",
+			source: `{"@id":"https://example.test/vex","statements":[
+				{"vulnerability":{"name":"CVE-2026-0001"},
+				 "products":[{"@id":"pkg:oci/aiperf-bench","subcomponents":"libssl3t64"}],
+				 "status":"fixed"}]}`,
+			image:  benchImage,
+			digest: amd64Digest,
+		},
+		{
+			name: "subcomponents is an object",
+			source: `{"@id":"https://example.test/vex","statements":[
+				{"vulnerability":{"name":"CVE-2026-0001"},
+				 "products":[{"@id":"pkg:oci/aiperf-bench","subcomponents":{"@id":"pkg:deb/x"}}],
+				 "status":"fixed"}]}`,
 			image:  benchImage,
 			digest: amd64Digest,
 		},

@@ -236,9 +236,11 @@ runs:
     # source check does not cover the bytes that get signed; each projection is
     # re-validated here, before any `cosign attest` call can reach it.
     #
-    # Projection mode differs from source mode in exactly one rule: an empty
-    # `statements` array is accepted. Six of the seven released images have no
-    # triaged CVE, so `[]` is the truthful projection for them.
+    # Projection mode relaxes one rule and adds another. An empty `statements`
+    # array is accepted, because an image with no triaged CVE projects to `[]`
+    # and that is the truthful answer for most of the released set. In exchange,
+    # every product identifier must end in the platform digest, which is the one
+    # failure this whole change exists to prevent.
     #
     # The generator is deterministic (no wall clock, no UUID: the source
     # timestamp and version pass through), so re-running a release reproduces
@@ -270,7 +272,7 @@ runs:
             -out "${out}" \
             -image "${IMAGE_NAME}" \
             -digest "${platform_digest}"
-          validate_openvex projection "${out}"
+          validate_openvex projection "${out}" "${platform_digest}"
         done
 
     # --new-bundle-format is set explicitly on every attest call: it is what

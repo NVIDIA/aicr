@@ -134,8 +134,9 @@ jq -r '.payload' predicate.json | base64 -d | jq '.predicate' > sbom.json
 ```
 
 The VEX document sits beside it on the same manifest. The SBOM says what is in
-the image; the VEX says which CVEs AICR has triaged as not affecting it, and
-why. They are in different formats on purpose: an OCI referrer descriptor has no
+the image; the VEX records AICR's triage verdict for each CVE it covers, and
+why. Most statements are `not_affected`, but the format also carries `affected`,
+`fixed` and `under_investigation`, and any of those is published as curated. They are in different formats on purpose: an OCI referrer descriptor has no
 name field, so a second CycloneDX document would be indistinguishable from the
 SBOM in a listing without downloading both.
 
@@ -156,13 +157,16 @@ jq '[.statements[].products[]["@id"]] | unique' openvex.json
 An empty `statements` array is a valid answer, not a failure: it means AICR has
 triaged no CVE for this image. Every released image carries a VEX document so
 that "no exceptions asserted" stays distinguishable from evidence that never
-reached the registry. Today only `aicr-validators/aiperf-bench` carries
-statements, so `ghcr.io/nvidia/aicr` returns an empty list here.
+reached the registry. Most images are in that state, so `ghcr.io/nvidia/aicr`
+will usually return an empty list here.
 
 ### Alternative: binary SBOM from the release page
 
-Released binaries carry their SBOM as a separate release asset (not an OCI
-attestation). Fetch it directly:
+Released binaries carry their SBOM as a separate release asset, not an OCI
+attestation, and it is **SPDX** rather than CycloneDX. That split is real: the
+GoReleaser binary path still emits SPDX while the image path has moved to
+CycloneDX. Download it under its own name so it does not overwrite the image
+SBOM retrieved above:
 
 ```shell
 VERSION=${TAG#v}                                 # strip the 'v' prefix
@@ -170,15 +174,18 @@ gh release download "$TAG" \
   --repo NVIDIA/aicr \
   --pattern "aicr_${VERSION}_linux_arm64.sbom.json" \
   --clobber \
-  --output sbom.json
+  --output sbom-binary.spdx.json
 ```
 
 ## 4. SBOM use cases
 
-The image SBOM (OCI attestation) is CycloneDX; the binary SBOM (release asset)
-is SPDX. Scanners read both, but the jq filters below are CycloneDX-shaped:
-against an SPDX document the same queries read `.packages[]`,
-`.licenseDeclared`, `.versionInfo`, and `.creationInfo.created`.
+**The commands in this section are for the image SBOM** (`sbom.json`, CycloneDX)
+and its matching VEX (`openvex.json`, verified for `IMAGE_PLATFORM`). Do not
+point them at `sbom-binary.spdx.json`: the jq filters below read CycloneDX keys
+and would return nothing against SPDX, and the VEX describes the image, not the
+binary. Against the binary SBOM the equivalent queries read `.packages[]`,
+`.licenseDeclared`, `.versionInfo`, and `.creationInfo.created`, and there is no
+VEX to pass.
 
 **Vulnerability scan:**
 

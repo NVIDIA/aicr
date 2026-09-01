@@ -17,7 +17,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 
@@ -161,7 +163,12 @@ func bindProducts(index int, products []any, name, purl string) (map[string]any,
 			continue
 		}
 		matched = true
-		for _, sub := range subcomponentList(product) {
+		listed, listErr := subcomponentList(product)
+		if listErr != nil {
+			return nil, false, errors.Wrap(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("statement %d has a malformed product", index), listErr)
+		}
+		for _, sub := range listed {
 			key, err := json.Marshal(sub)
 			if err != nil {
 				return nil, false, errors.Wrap(errors.ErrCodeInvalidRequest,
@@ -188,14 +195,20 @@ func bindProducts(index int, products []any, name, purl string) (map[string]any,
 }
 
 // subcomponentList returns a product's subcomponents, or nil when it has none.
-// A malformed value is treated as absent rather than fatal: subcomponents
-// narrow a claim, so losing one is safe where mis-binding a product is not.
-func subcomponentList(product map[string]any) []any {
-	list, ok := product["subcomponents"].([]any)
-	if !ok {
-		return nil
+// A present-but-malformed value is fatal rather than ignored: subcomponents
+// narrow a statement to specific packages, so silently dropping one would
+// publish a signed claim broader than the curated source made.
+func subcomponentList(product map[string]any) ([]any, error) {
+	value, present := product["subcomponents"]
+	if !present || value == nil {
+		return nil, nil
 	}
-	return list
+	list, ok := value.([]any)
+	if !ok {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("subcomponents must be an array, got %T", value))
+	}
+	return list, nil
 }
 
 // productNames reports whether a product identifies the image named by
@@ -286,6 +299,14 @@ func decodeDocument(source []byte) (map[string]any, error) {
 	}
 	if doc == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "source is not a JSON object")
+	}
+	// json.Decoder stops at the end of the first value, so a document followed
+	// by a second one would be silently truncated to the first. Input that
+	// ambiguous must not become signed evidence.
+	var trailing any
+	if err := decoder.Decode(&trailing); !stderrors.Is(err, io.EOF) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"source must hold exactly one JSON object")
 	}
 	return doc, nil
 }

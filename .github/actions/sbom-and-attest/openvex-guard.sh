@@ -23,15 +23,21 @@
 # statement it keeps.
 #
 # The rules live in one jq program shared by both modes so they cannot drift.
-# Exactly one rule differs, and it differs by intent:
+# Two rules are mode-specific, and each differs by intent:
 #
 #   source     -> `statements` must be non-empty. An empty committed document
 #                 means someone truncated or mis-generated it, and failing the
 #                 release loudly is the right answer.
-#   projection -> `statements` may be empty. Six of the seven released images
-#                 have no triaged CVE, so `[]` is the truthful projection: it
-#                 asserts no exceptions for that image. It is NOT a claim that
-#                 the image has no vulnerabilities.
+#   projection -> `statements` may be empty. An image with no triaged CVE
+#                 projects to `[]`, which is the truthful answer: it asserts no
+#                 exceptions for that image. It is NOT a claim that the image
+#                 has no vulnerabilities.
+#   projection -> every product identifier must end in `@<platform-digest>`.
+#                 This is the one failure the whole change exists to prevent:
+#                 a bare `pkg:oci/<image>` product no consumer can tie to a
+#                 manifest. Without it the last gate before `cosign attest`
+#                 would pass a projection where binding silently did not
+#                 happen, so the digest is required in projection mode.
 #
 # Everything else applies to both. These are the OpenVEX v0.2.0 contract:
 #
@@ -72,6 +78,10 @@ def justifications: [
 def field($object; $key): if ($object | type) == "object" then $object[$key] else null end;
 def filled($value): ($value | type) == "string" and ($value | test("[^[:space:]]"));
 def listing($value): if ($value | type) == "array" then $value else [] end;
+# An identifier that is absent passes; one that is present must carry the
+# platform digest. Combined with the "at least one identifier" rule below, that
+# means every product names the manifest the statement is published against.
+def digestbound($value; $digest): (filled($value) | not) or ($value | endswith("@" + $digest));
 def statement($index; $s):
   if ($s | type) != "object" then ["statement \($index) must be a JSON object"]
   else
@@ -82,6 +92,13 @@ def statement($index; $s):
       (if listing(field($s; "products"))
           | all(filled(field(.; "@id")) or filled(field(field(.; "identifiers"); "purl"))) then empty
        else "statement \($index) has a product with neither @id nor identifiers.purl" end),
+      (if $digest == "" or (listing(field($s; "products"))
+          | all(digestbound(field(.; "@id"); $digest)
+                and digestbound(field(field(.; "identifiers"); "purl"); $digest))) then empty
+       else "statement \($index) has a product identifier not bound to @\($digest)" end),
+      (if listing(field($s; "products"))
+          | all((field(.; "subcomponents") == null) or ((field(.; "subcomponents") | type) == "array")) then empty
+       else "statement \($index) has a product whose subcomponents is not an array" end),
       (if (statuses | index(field($s; "status"))) != null then empty
        else "statement \($index) status \(field($s; "status") | tojson) is not one of \(statuses | join(", "))" end),
       (if field($s; "status") == "not_affected"
@@ -114,16 +131,29 @@ def statement($index; $s):
 JQ
 )"
 
-# validate_openvex <source|projection> <file> fails closed on a malformed
-# document rather than letting the release publish a VEX attestation no scanner
-# can apply. An unknown mode is itself a failure: defaulting it would silently
-# pick one of the two `statements` rules.
+# validate_openvex <source|projection> <file> [platform-digest] fails closed on
+# a malformed document rather than letting the release publish a VEX attestation
+# no scanner can apply. An unknown mode is itself a failure: defaulting it would
+# silently pick one of the two mode-specific rules. Projection mode requires the
+# digest, because a projection that cannot be checked against one is exactly the
+# case this guard exists to reject.
 validate_openvex() {
-  local mode="$1" file="$2" require_statements problems
+  local mode="$1" file="$2" digest="${3:-}" require_statements problems
 
   case "${mode}" in
-    source) require_statements=true ;;
-    projection) require_statements=false ;;
+    source)
+      require_statements=true
+      # A committed source carries bare `pkg:oci/<image>` products by design,
+      # so the binding rule is switched off rather than merely unsatisfied.
+      digest=""
+      ;;
+    projection)
+      require_statements=false
+      if [[ ! "${digest}" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+        echo "::error::validate_openvex: projection mode needs the platform digest as sha256:<64 hex>, got '${digest}'"
+        return 1
+      fi
+      ;;
     *)
       echo "::error::validate_openvex: unknown mode ${mode}; expected source or projection"
       return 1
@@ -137,6 +167,7 @@ validate_openvex() {
 
   if ! problems="$(jq -r \
     --arg context "${OPENVEX_CONTEXT}" \
+    --arg digest "${digest}" \
     --argjson require_statements "${require_statements}" \
     "${OPENVEX_RULES}" "${file}")"; then
     echo "::error::OpenVEX ${mode} document is not valid JSON: ${file}"

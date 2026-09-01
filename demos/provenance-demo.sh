@@ -187,13 +187,16 @@ run cosign verify-attestation \
 note "Extracting the CycloneDX predicate (the actual SBOM JSON) from the DSSE payload."
 pause "Press Enter to extract sbom.json"
 # The cosign --output-file writes a DSSE envelope; the inner predicate is the SBOM.
-run bash -c "jq -r .payload '$PREDICATE' | base64 -d | jq .predicate > '$SBOM' && jq '.bomFormat, .specVersion, (.components|length)' '$SBOM'"
+# `set -o pipefail` inside the child: a child bash -c does not inherit it, and
+# without it a failed jq or base64 mid-pipeline still exits 0, leaving an empty
+# sbom.json that the scan below would happily report as clean.
+run bash -c "set -o pipefail; jq -r .payload '$PREDICATE' | base64 -d | jq .predicate > '$SBOM' && jq '.bomFormat, .specVersion, (.components|length)' '$SBOM'"
 
 # --- verify the VEX attestation ----------------------------------------------
 
 banner "Verify the OpenVEX attestation (same subject, different predicate type)"
-note "The SBOM says what is in the image. The VEX says which CVEs AICR has triaged"
-note "as not affecting it, and why. Both hang off the same platform manifest; they are"
+note "The SBOM says what is in the image. The VEX records AICR's triage verdict"
+note "for each CVE it covers, and why. Both hang off the same platform manifest; they are"
 note "in different formats so a referrers listing can tell them apart without"
 note "downloading either one."
 pause "Press Enter to verify the VEX attestation"
@@ -206,9 +209,9 @@ run cosign verify-attestation \
 
 note "Each statement's product purl carries the platform digest, so the claim binds"
 note "to this exact manifest. An empty statements array is a valid answer: it means"
-note "AICR has triaged no CVE for this image. Today only aiperf-bench carries any."
+note "AICR has triaged no CVE for this image, which is the usual case."
 pause "Press Enter to extract openvex.json"
-run bash -c "jq -r .payload '$VEX_PREDICATE' | base64 -d | jq .predicate > '$VEX' && jq '[.statements[].products[][\"@id\"]] | unique' '$VEX'"
+run bash -c "set -o pipefail; jq -r .payload '$VEX_PREDICATE' | base64 -d | jq .predicate > '$VEX' && jq '[.statements[].products[][\"@id\"]] | unique' '$VEX'"
 
 # --- SBOM use cases ----------------------------------------------------------
 
