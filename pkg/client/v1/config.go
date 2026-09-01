@@ -413,3 +413,91 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 		},
 	}, nil
 }
+
+// ValidateOptions derives Client.ValidateState options from spec.validate.
+//
+// Nine settings map onto the WithValidation* option set: namespace, image pull
+// secrets, node selector, tolerations, no-cluster, cleanup, phases, fail-fast
+// and timeout. The returned slice is appendable, so a caller layers its own
+// options after the derived ones and the later value wins — the same shape
+// RecipeResolveOptions uses, and the reason this returns options rather than a
+// built value.
+//
+// # Where the rest of spec.validate goes
+//
+// The section is not served by one destination, which the per-section table in
+// docs/integrator/go-library.md now records:
+//
+//   - Image, JobName, ServiceAccountName and RequireGPU configure the
+//     validator's Kubernetes Job, and reach it through AgentConfig rather than
+//     a validator option — pkg/validator exposes no With* for any of them.
+//     Deriving them here would produce options with nothing to translate into.
+//   - FailOnError decides whether a failed check makes the CALLER fail. The
+//     validator reports; it does not act on it, so there is nothing to pass
+//     through. Command-line-only for the same reason IgnoreTLog is on
+//     BundleVerifyOptions: a checked-in file should not be able to make a
+//     failing run report success.
+//   - RecipePath and SnapshotPath name what to validate. The caller already
+//     passes both to ValidateState.
+//   - EvidenceCNCF and EvidenceAttestation configure evidence emission, whose
+//     facade home is EvidenceOptions.
+//
+// # Two mappings that are not pass-throughs
+//
+// NoCleanup is INVERTED: the config field says "do not clean up", the option
+// says "clean up". Passing it straight through would delete artifacts a
+// post-mortem asked to keep, silently and in either direction.
+//
+// Phases are cast, not re-parsed, because Validation().Resolve() already
+// rejects an unknown entry and names the spec field — on the WrapConfig path
+// too, since that check lives in Resolve rather than in the loader.
+//
+// Returns an error when spec.validate is present but malformed.
+func (c *Config) ValidateOptions() ([]ValidateOption, error) {
+	if c == nil || c.internal == nil {
+		return nil, nil
+	}
+	resolved, err := c.internal.Validation().Resolve()
+	if err != nil {
+		// Already coded, and the message carries the spec path that failed.
+		return nil, err
+	}
+	if resolved == nil {
+		return nil, nil
+	}
+
+	opts := []ValidateOption{
+		WithValidationNamespace(resolved.Namespace),
+		WithValidationImagePullSecrets(resolved.ImagePullSecrets),
+		WithValidationNodeSelector(resolved.NodeSelector),
+		WithValidationTolerations(resolved.Tolerations),
+		WithValidationNoCluster(resolved.NoCluster),
+		// Inverted on purpose. See the godoc above.
+		WithValidationCleanup(!resolved.NoCleanup),
+	}
+
+	if len(resolved.Phases) > 0 {
+		// Cast, don't re-parse. Validation().Resolve() rejects an unknown phase
+		// before returning — on both the LoadConfig and WrapConfig paths, since
+		// the check lives in Resolve rather than the loader — so by here every
+		// entry is known-good. A defensive re-parse would be unreachable, and
+		// unreachable validation reads as a guarantee nobody is actually
+		// providing.
+		facade := make([]Phase, len(resolved.Phases))
+		for i, p := range resolved.Phases {
+			facade[i] = Phase(p)
+		}
+		opts = append(opts, WithValidationPhases(facade...))
+	}
+	// FailFast and Timeout resolve as pointers so "unset" stays distinct from
+	// an explicit false/0, and both options take values. Emitting them
+	// unconditionally would turn "config said nothing" into an explicit
+	// choice, overriding the validator's own default.
+	if resolved.FailFast != nil {
+		opts = append(opts, WithValidationFailFast(*resolved.FailFast))
+	}
+	if resolved.Timeout != nil {
+		opts = append(opts, WithValidationTimeout(*resolved.Timeout))
+	}
+	return opts, nil
+}

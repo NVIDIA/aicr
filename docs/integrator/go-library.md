@@ -838,6 +838,7 @@ derive step rather than the load step.
 |---|---|
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
 | `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.attestation` |
+| `ValidateOptions()` | `spec.validate.execution` + the agent fields the validator accepts as options |
 | `RecipeSource()` | `spec.recipe.data` |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
 | `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
@@ -845,8 +846,8 @@ derive step rather than the load step.
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 
-`spec.validate` and `spec.snapshot` are not yet projected; `Unwrap()` reaches
-the raw document meanwhile. Needing it is worth reporting — it means a
+`spec.snapshot` is not yet projected; `Unwrap()` reaches the raw document
+meanwhile. Needing it is worth reporting — it means a
 derivation is missing, and `pkg/config` carries no stability guarantee.
 
 ### What `BundleOptions()` does and does not carry
@@ -1292,3 +1293,24 @@ active deprecations across all surfaces is in
 - [Recipe development](./recipe-development.md) — authoring recipes
 
 [semver]: https://semver.org/spec/v2.0.0.html
+
+### What `ValidateOptions()` does and does not carry
+
+`spec.validate` is the one section that does not map to a single destination,
+so `ValidateOptions()` carries only the part the validator accepts as options:
+namespace, image pull secrets, node selector, tolerations, no-cluster, cleanup,
+phases, fail-fast, and timeout. The slice is appendable — layer your own
+options after the derived ones and the later value wins.
+
+The rest of the section has other homes, and knowing which saves a search:
+
+| Field | Home |
+|---|---|
+| `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | `AgentConfig`. These configure the validator's Kubernetes Job; `pkg/validator` exposes no option for any of them, so a `WithValidation*` here would have nothing to translate into. |
+| `spec.validate.execution.failOnError` | Nowhere, deliberately. It decides whether a failed check makes the *caller* fail; the validator reports and does not act on it. Command-line-only for the same reason as `IgnoreTLog`: a checked-in file should not be able to make a failing run report success. |
+| `spec.validate.input.recipe`, `.snapshot` | Not projected — you already pass both to `ValidateState`. |
+| `spec.validate.evidence` | `EvidenceOptions`. |
+
+One inversion worth knowing: config says `noCleanup`, the option says
+`cleanup`. `ValidateOptions()` flips it, so `noCleanup: true` becomes
+`WithValidationCleanup(false)`.
