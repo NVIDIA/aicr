@@ -238,7 +238,16 @@ from the tag being released and goreleaser uploads it. An RC runs the same
 is where that path is proven. Confirm the release job's output matches a local
 run:
 
+Both inputs have to match what the release job used, or the comparison measures
+drift rather than reproducibility. The release generated from the RC tag's tree
+with the toolchain pinned in `.settings.yaml`, so pin both locally: run from a
+worktree at the tag rather than the ambient checkout, and confirm the local
+`go` and `go-licenses` match their pins first.
+
 ```bash
+git worktree add /tmp/rc-verify vX.Y.Z-rc1
+cd /tmp/rc-verify
+make tools-check   # go and go_licenses must match .settings.yaml
 gh release download vX.Y.Z-rc1 -p THIRD_PARTY_NOTICES.md -D /tmp/rc
 make notices
 diff /tmp/rc/THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.md
@@ -247,8 +256,10 @@ diff /tmp/rc/THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.md
 Identical output confirms both that the asset was attached and that generation
 is host-independent, which is what the generator's fixed platform matrix and
 `LC_ALL=C` sort exist to guarantee. A missing asset means the `extra_files` glob
-found nothing; a diff means generation is not reproducible and the release
-should not be promoted until it is understood.
+found nothing. A diff means generation is not reproducible and the release
+should not be promoted until it is understood — but check `make tools-check`
+first: a `⚠` on `go` or `go_licenses` means the local toolchain, not the
+generator, explains the difference.
 
 Pre-releases exercise the full build/test/scan/attest pipeline. After those
 gates pass, their version aliases are promoted to the exact candidate digests,

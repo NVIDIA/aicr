@@ -592,7 +592,7 @@ token or a dependency on Fern's service at merge time.
   re-render comparison) is its **opt-in** blocking check, and the weekly
   BOM-refresh workflow auto-detects it and opens a PR. So run
   `make bom-docs` locally any time the change touches charts.
-- **Forgetting `make notices`** after a `go.mod` or `go.sum` change.
+- **Assuming `make notices` is needed** after a `go.mod` or `go.sum` change.
   `THIRD_PARTY_NOTICES.md` is the union of every redistributed
   dependency's license across the released OS/arch matrix
   (linux+darwin × amd64+arm64), so a dependency-graph change can add or
