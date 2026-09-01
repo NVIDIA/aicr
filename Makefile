@@ -740,11 +740,14 @@ validator-binaries: ## Builds Linux validator binaries (VALIDATOR_PHASES, VALIDA
 .PHONY: image-validators
 image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IMAGE_TAG)
 	@set -e; \
-	arch="$$(go env GOARCH)"; \
+	arch="$(VALIDATOR_ARCHES)"; \
+	if [ -z "$${arch}" ]; then arch="$$(go env GOARCH)"; fi; \
+	arch="$${arch%% *}"; arch="$${arch%%,*}"; \
 	VALIDATOR_ARCHES="$${arch}" ./tools/build-validator-binaries; \
 	for phase in deployment performance conformance; do \
 		echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
 		docker build -f validators/$${phase}/Dockerfile \
+			--platform linux/$${arch} \
 			--build-arg TARGETARCH=$${arch} \
 			-t $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG) .; \
 		if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
@@ -754,6 +757,7 @@ image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IM
 	done; \
 	echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG)"; \
 	docker build -f validators/performance/aiperf-bench.Dockerfile \
+		--platform linux/$${arch} \
 		-t $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG) .; \
 	if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
 		echo "Pushing: $(IMAGE_REGISTRY)/aicr-validators/aiperf-bench:$(IMAGE_TAG)"; \

@@ -63,39 +63,43 @@ func validateCRENcclAllReduceBw(ctx *validators.Context, constraint recipe.Const
 
 	dyn := ctx.DynamicClient
 	if dyn == nil {
-		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal, "dynamic client is required to create a WorkloadRun")
+		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal, "dynamic client is required to create a Certification")
 	}
 
-	obj := buildCRENCCLWorkloadRun(ctx.Namespace, gpuConfig, ctx.NodeSelector)
+	obj := buildCRENCCLCertification(ctx.Namespace, gpuConfig, ctx.NodeSelector)
 
-	if err := deleteCREWorkloadRun(ctx.Ctx, dyn, ctx.Namespace, creNCCLRunName); err != nil {
+	if err := deleteCRECertification(ctx.Ctx, dyn, ctx.Namespace, creNCCLRunName); err != nil {
 		return "", false, err
 	}
 
 	defer func() {
-		if delErr := deleteCREWorkloadRun(context.Background(), dyn, ctx.Namespace, creNCCLRunName); delErr != nil {
-			slog.Warn("failed to delete CRE NCCL WorkloadRun", "error", delErr)
+		if delErr := deleteCRECertification(context.Background(), dyn, ctx.Namespace, creNCCLRunName); delErr != nil {
+			slog.Warn("failed to delete CRE NCCL Certification", "error", delErr)
 		}
 	}()
 
-	if err := createUnstructured(ctx.Ctx, dyn, workloadRunGVR, ctx.Namespace, obj); err != nil {
+	if err := createUnstructured(ctx.Ctx, dyn, certificationGVR, ctx.Namespace, obj); err != nil {
 		return "", false, err
 	}
 
-	run, err := waitForWorkloadRunTerminal(ctx.Ctx, dyn, ctx.Namespace, creNCCLRunName)
+	run, err := waitForCertificationTerminal(ctx.Ctx, dyn, ctx.Namespace, creNCCLRunName)
 	if err != nil {
 		return "", false, err
 	}
 	if unstructuredConditionTrue(run, "Failed") {
-		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal, "CRE WorkloadRun Failed")
+		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal, "CRE Certification failed")
 	}
 
-	bw, err := listMaxBusBandwidth(ctx.Ctx, dyn, ctx.Namespace, creNCCLRunName, run.GetCreationTimestamp())
+	workflowName, err := certificationWorkflowName(run)
+	if err != nil {
+		return "", false, err
+	}
+	bw, err := listMaxBusBandwidth(ctx.Ctx, dyn, ctx.Namespace, workflowName, run.GetCreationTimestamp())
 	if err != nil {
 		return "", false, err
 	}
 
-	logs, logErr := creLauncherLogs(ctx, run.GetCreationTimestamp())
+	logs, logErr := creLauncherLogs(ctx, workflowName, run.GetCreationTimestamp())
 	if logErr != nil {
 		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "CRE launcher logs required for transport assertion", logErr)
 	}
@@ -107,21 +111,24 @@ func validateCRENcclAllReduceBw(ctx *validators.Context, constraint recipe.Const
 	return actual, bw >= threshold, nil
 }
 
-func creLauncherLogs(ctx *validators.Context, createdAt metav1.Time) (string, error) {
+func creLauncherLogs(ctx *validators.Context, workflowName string, createdAt metav1.Time) (string, error) {
 	listCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
 	defer cancel()
 	pods, err := ctx.Clientset.CoreV1().Pods(ctx.Namespace).List(listCtx, metav1.ListOptions{
-		LabelSelector: "jobset.sigs.k8s.io/replicatedjob-name=launcher",
+		LabelSelector: fmt.Sprintf(
+			"jobset.sigs.k8s.io/jobset-name=%s-job-workload,jobset.sigs.k8s.io/replicatedjob-name=launcher",
+			workflowName,
+		),
 	})
 	if err != nil {
-		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list CRE worker pods", err)
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list CRE launcher pods", err)
 	}
 	if len(pods.Items) == 0 {
-		return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "no CRE worker pods found for transport assertion")
+		return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "no CRE launcher pods found for transport assertion")
 	}
 	pod := youngestLivePodSince(pods.Items, createdAt)
 	if pod == nil {
-		return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "no live CRE worker pods found for transport assertion")
+		return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "no live CRE launcher pods found for transport assertion")
 	}
 	return k8spod.GetPodLogs(listCtx, ctx.Clientset, ctx.Namespace, pod.Name, nodeJobName)
 }

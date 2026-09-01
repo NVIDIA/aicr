@@ -287,11 +287,10 @@ validators:
     args: ["nccl-all-reduce-bw-nvls"]
     env: []
   # CRE-driven EKS H100 NCCL check. Opt-in only: no embedded overlay
-  # references this check while CRE remains private and correlation with
-  # the TrainJob path is incomplete.
+  # references this check until correlation with the TrainJob path is complete.
   - name: nccl-cre-all-reduce-bw
     phase: performance
-    description: "Verify EKS H100 NCCL All Reduce Bus Bandwidth via a Cluster Readiness Engine WorkloadRun"
+    description: "Verify EKS H100 NCCL All Reduce Bus Bandwidth via a Cluster Readiness Engine Certification"
     image: ghcr.io/nvidia/aicr-validators/performance:latest
     timeout: 30m
     args: ["nccl-cre-all-reduce-bw"]
