@@ -171,9 +171,19 @@ jobs:
               - 'go.mod'
               - 'go.sum'
               - 'tools/generate-notices'
+              - 'tools/check-fence-balance'
               - 'tools/generate-python-licenses'
               - 'validators/performance/requirements.txt'
               - 'validators/performance/licenses/**'
+              # The actions that supply this job's toolchain. install-go-licenses
+              # matters most: it exists to clear GOFLAGS, and an install that
+              # inherits -trimpath yields a go-licenses with no GOROOT. The
+              # `deps` filter watches both too, but that gates verify-licenses,
+              # which under -trimpath PASSES while inspecting zero packages —
+              # `make notices` is the one that fails closed, so it is the better
+              # canary and must not skip when its own toolchain changes.
+              - '.github/actions/install-go-licenses/**'
+              - '.github/actions/load-versions/**'
             coverage:
               # Inputs to the committed CUJ/CLI coverage-matrix freshness check.
               # The matrix is derived, so a change to ANY of its signal sources
