@@ -1524,7 +1524,7 @@ func TestCleanupSweepsUnrecordedStagingConfigMap(t *testing.T) {
 	})
 
 	// Deliberately no getSnapshotFromConfigMap call: this is the failed run.
-	seedConfirmedJob(t, ctx, clientset, d, types.UID("job-uid"))
+	seedConfirmedJob(t, ctx, clientset, d)
 	if d.hasCreated(kindConfigMap) {
 		t.Fatal("precondition: created-set must not hold the staging ConfigMap")
 	}
@@ -1548,7 +1548,12 @@ func TestCleanupSweepsUnrecordedStagingConfigMap(t *testing.T) {
 // UID says that Job is still the one holding the name (see stillHoldsJob).
 // Recording without seeding would leave every sweep test passing vacuously,
 // with the sweep never running at all.
-func seedConfirmedJob(t *testing.T, ctx context.Context, clientset kubernetes.Interface, d *Deployer, uid types.UID) {
+// seedConfirmedJob stands up the Job this Deployer would have created and
+// records it as a confirmed create. The UID is fixed rather than a parameter:
+// every caller wants "this invocation's live Job", and the specific value is
+// never asserted on.
+func seedConfirmedJob(t *testing.T, ctx context.Context, clientset kubernetes.Interface, d *Deployer) {
+	const uid = types.UID("job-uid")
 	t.Helper()
 	d.recordCreated(kindJob, d.jobName(), uid)
 	if _, err := clientset.BatchV1().Jobs(d.config.Namespace).Create(ctx, &batchv1.Job{
@@ -1680,7 +1685,7 @@ func TestCleanupSweepKeepsForeignConfigMapAtStagingName(t *testing.T) {
 		Output:              "cm://" + ns + "/" + name,
 		OwnsOutputConfigMap: true,
 	})
-	seedConfirmedJob(t, ctx, client, d, types.UID("job-uid"))
+	seedConfirmedJob(t, ctx, client, d)
 
 	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
 		t.Fatalf("Cleanup() error = %v", err)
@@ -1845,7 +1850,7 @@ func TestCleanupSweepNoOpWhenStagingConfigMapAbsent(t *testing.T) {
 		Output:              "cm://test-namespace/" + StagingConfigMapName(testRunID),
 		OwnsOutputConfigMap: true,
 	})
-	seedConfirmedJob(t, ctx, clientset, d, types.UID("job-uid"))
+	seedConfirmedJob(t, ctx, clientset, d)
 
 	if err := d.Cleanup(ctx, CleanupOptions{Enabled: true}); err != nil {
 		t.Fatalf("Cleanup() error = %v, want nil when the staging ConfigMap was never written", err)
@@ -1869,7 +1874,7 @@ func TestCleanupSweepSurfacesUnexpectedGetError(t *testing.T) {
 		Output:              "cm://test-namespace/" + StagingConfigMapName(testRunID),
 		OwnsOutputConfigMap: true,
 	})
-	seedConfirmedJob(t, ctx, clientset, d, types.UID("job-uid"))
+	seedConfirmedJob(t, ctx, clientset, d)
 
 	err := d.Cleanup(ctx, CleanupOptions{Enabled: true})
 	if err == nil {

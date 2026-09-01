@@ -308,7 +308,7 @@ func (d *Deployer) deleteCreatedObject(ctx context.Context, obj createdObject) e
 // time, so a replacement standing there BEFORE the Get is simply what the Get
 // returns — and its UID is what the delete would then be pinned to. Only the
 // invocation ID separates "the object I created" from "a same-named,
-// same-labelled object another invocation created", which is why the label
+// same-labeled object another invocation created", which is why the label
 // check, not the precondition, is the gate.
 func (d *Deployer) resolveIntentUID(ctx context.Context, obj createdObject) (uid types.UID, ours bool, err error) {
 	live, err := d.getCreatedObject(ctx, obj.kind, obj.name)
