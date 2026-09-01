@@ -63,13 +63,13 @@ func buildCRENCCLCertification(namespace string, gpuConfig *gpuConfiguration, no
 
 	return &unstructured.Unstructured{
 		Object: map[string]any{
-			"apiVersion": creAPIGroup + "/" + versionV1alpha1,
-			"kind":       "Certification",
-			"metadata": map[string]any{
-				"name":      creNCCLRunName,
-				"namespace": namespace,
+			keyAPIVersion: creAPIGroup + "/" + versionV1alpha1,
+			keyKind:       "Certification",
+			keyMetadata: map[string]any{
+				keyName:      creNCCLRunName,
+				keyNamespace: namespace,
 			},
-			"spec": spec,
+			keySpec: spec,
 		},
 	}
 }
@@ -96,7 +96,7 @@ func addCRETarget(spec map[string]any, gpuConfig *gpuConfiguration, nodeSelector
 }
 
 func taintKey(t corev1.Taint) string {
-	return string(t.Key) + "\x00" + t.Value + "\x00" + string(t.Effect)
+	return t.Key + "\x00" + t.Value + "\x00" + string(t.Effect)
 }
 
 func commonNodeTaintSelectors(nodes []corev1.Node) []any {
@@ -137,7 +137,7 @@ func commonNodeTaintSelectors(nodes []corev1.Node) []any {
 		t := counts[k]
 		sel := map[string]any{"key": t.Key}
 		if t.Value != "" {
-			sel["value"] = t.Value
+			sel[keyValue] = t.Value
 		}
 		sel["effect"] = string(t.Effect)
 		out = append(out, sel)
@@ -148,13 +148,13 @@ func commonNodeTaintSelectors(nodes []corev1.Node) []any {
 func newCREWorkloadRun(namespace, name string, spec map[string]any) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]any{
-			"apiVersion": creAPIGroup + "/" + versionV1alpha1,
-			"kind":       "WorkloadRun",
-			"metadata": map[string]any{
-				"name":      name,
-				"namespace": namespace,
+			keyAPIVersion: creAPIGroup + "/" + versionV1alpha1,
+			keyKind:       "WorkloadRun",
+			keyMetadata: map[string]any{
+				keyName:      name,
+				keyNamespace: namespace,
 			},
-			"spec": spec,
+			keySpec: spec,
 		},
 	}
 }
@@ -244,6 +244,7 @@ func waitForCRETerminal(
 	gvr schema.GroupVersionResource,
 	kind, namespace, name string,
 ) (*unstructured.Unstructured, error) {
+
 	waitCtx, cancel := context.WithTimeout(ctx, defaults.CREWorkloadRunTimeout)
 	defer cancel()
 
@@ -299,8 +300,10 @@ func certificationWorkflowName(obj *unstructured.Unstructured) (string, error) {
 		status, ok := raw.(map[string]any)
 		if !ok || fmt.Sprint(status["domain"]) != "communication" ||
 			fmt.Sprint(status["variant"]) != "nccl-all-reduce" {
+
 			continue
 		}
+
 		ref, ok := status["workflowRef"].(map[string]any)
 		if !ok || fmt.Sprint(ref["name"]) == "" {
 			return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "Certification NCCL workflow reference is empty")
@@ -366,6 +369,7 @@ func deleteCREResource(
 	gvr schema.GroupVersionResource,
 	kind, namespace, name string,
 ) error {
+
 	delCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
 	err := client.Resource(gvr).Namespace(namespace).Delete(delCtx, name, metav1.DeleteOptions{})
