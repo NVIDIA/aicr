@@ -227,12 +227,12 @@ surfaces are covered:
 | `gopkg.in/inf.v0` | BSD-3-Clause | https://github.com/go-inf/inf/blob/v0.9.1/LICENSE |
 | `gopkg.in/yaml.v2` | Apache-2.0 | https://github.com/go-yaml/yaml/blob/v2.4.0/LICENSE |
 | `gopkg.in/yaml.v3` | MIT | https://github.com/go-yaml/yaml/blob/v3.0.1/LICENSE |
-| `k8s.io/api` | Apache-2.0 | https://github.com/kubernetes/api/blob/v0.36.4/LICENSE |
+| `k8s.io/api` | Apache-2.0 | https://github.com/kubernetes/api/blob/v0.37.0/LICENSE |
 | `k8s.io/apiextensions-apiserver/pkg/apis/apiextensions` | Apache-2.0 | https://github.com/kubernetes/apiextensions-apiserver/blob/v0.36.4/LICENSE |
-| `k8s.io/apimachinery/pkg` | Apache-2.0 | https://github.com/kubernetes/apimachinery/blob/v0.36.4/LICENSE |
-| `k8s.io/apimachinery/third_party/forked/golang` | BSD-3-Clause | https://github.com/kubernetes/apimachinery/blob/v0.36.4/third_party/forked/golang/LICENSE |
+| `k8s.io/apimachinery/pkg` | Apache-2.0 | https://github.com/kubernetes/apimachinery/blob/v0.37.0/LICENSE |
+| `k8s.io/apimachinery/third_party/forked/golang` | BSD-3-Clause | https://github.com/kubernetes/apimachinery/blob/v0.37.0/third_party/forked/golang/LICENSE |
 | `k8s.io/apiserver/pkg` | Apache-2.0 | https://github.com/kubernetes/apiserver/blob/v0.36.4/LICENSE |
-| `k8s.io/client-go` | Apache-2.0 | https://github.com/kubernetes/client-go/blob/v0.36.4/LICENSE |
+| `k8s.io/client-go` | Apache-2.0 | https://github.com/kubernetes/client-go/blob/v0.37.0/LICENSE |
 | `k8s.io/component-base` | Apache-2.0 | https://github.com/kubernetes/component-base/blob/v0.36.4/LICENSE |
 | `k8s.io/klog/v2` | Apache-2.0 | https://github.com/kubernetes/klog/blob/v2.140.0/LICENSE |
 | `k8s.io/kube-openapi/pkg` | Apache-2.0 | https://github.com/kubernetes/kube-openapi/blob/be32def86098/LICENSE |
@@ -242,7 +242,7 @@ surfaces are covered:
 | `k8s.io/kube-openapi/pkg/validation/spec` | Apache-2.0 | https://github.com/kubernetes/kube-openapi/blob/be32def86098/pkg/validation/spec/LICENSE |
 | `k8s.io/kube-openapi/pkg/validation/strfmt` | Apache-2.0 | https://github.com/kubernetes/kube-openapi/blob/be32def86098/pkg/validation/strfmt/LICENSE |
 | `k8s.io/kubernetes/pkg/apis/core` | Apache-2.0 | https://github.com/kubernetes/kubernetes/blob/v1.36.4/LICENSE |
-| `k8s.io/streaming/pkg` | Apache-2.0 | https://github.com/kubernetes/streaming/blob/v0.36.4/LICENSE |
+| `k8s.io/streaming/pkg` | Apache-2.0 | https://github.com/kubernetes/streaming/blob/v0.37.0/LICENSE |
 | `k8s.io/utils` | Apache-2.0 | https://github.com/kubernetes/utils/blob/cf1189d6abe3/LICENSE |
 | `k8s.io/utils/internal/third_party/forked/golang/net` | BSD-3-Clause | https://github.com/kubernetes/utils/blob/cf1189d6abe3/internal/third_party/forked/golang/LICENSE |
 | `oras.land/oras-go/v2` | Apache-2.0 | https://github.com/oras-project/oras-go/blob/v2.6.2/LICENSE |
@@ -31021,7 +31021,7 @@ limitations under the License.
 ### k8s.io/api
 
 * License: Apache-2.0
-* Source: https://github.com/kubernetes/api/blob/v0.36.4/LICENSE
+* Source: https://github.com/kubernetes/api/blob/v0.37.0/LICENSE
 
 #### LICENSE
 
@@ -31449,7 +31449,7 @@ limitations under the License.
 ### k8s.io/apimachinery/pkg
 
 * License: Apache-2.0
-* Source: https://github.com/kubernetes/apimachinery/blob/v0.36.4/LICENSE
+* Source: https://github.com/kubernetes/apimachinery/blob/v0.37.0/LICENSE
 
 #### LICENSE
 
@@ -31663,7 +31663,7 @@ limitations under the License.
 ### k8s.io/apimachinery/third_party/forked/golang
 
 * License: BSD-3-Clause
-* Source: https://github.com/kubernetes/apimachinery/blob/v0.36.4/third_party/forked/golang/LICENSE
+* Source: https://github.com/kubernetes/apimachinery/blob/v0.37.0/third_party/forked/golang/LICENSE
 
 #### LICENSE
 
@@ -31916,7 +31916,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ### k8s.io/client-go
 
 * License: Apache-2.0
-* Source: https://github.com/kubernetes/client-go/blob/v0.36.4/LICENSE
+* Source: https://github.com/kubernetes/client-go/blob/v0.37.0/LICENSE
 
 #### LICENSE
 
@@ -33688,7 +33688,7 @@ SOFTWARE.
 ### k8s.io/streaming/pkg
 
 * License: Apache-2.0
-* Source: https://github.com/kubernetes/streaming/blob/v0.36.4/LICENSE
+* Source: https://github.com/kubernetes/streaming/blob/v0.37.0/LICENSE
 
 #### LICENSE
 
