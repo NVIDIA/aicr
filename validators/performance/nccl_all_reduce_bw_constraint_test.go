@@ -506,6 +506,36 @@ func TestCleanupNCCLRun_PropagatesTrainerCleanupFailure(t *testing.T) {
 	}
 }
 
+// TestCleanupNCCLRun_SkipsTrainerTeardownOnNamespaceDeleteFailure verifies
+// that cleanupNCCLRun skips Trainer teardown, and fails the check, when the
+// namespace delete itself fails.
+func TestCleanupNCCLRun_SkipsTrainerTeardownOnNamespaceDeleteFailure(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
+	dynamicClient := newTrainerFakeClient()
+
+	clientset.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "namespaces"}, ns, nil)
+	})
+	trainerDeleted := false
+	dynamicClient.PrependReactor("delete", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
+		trainerDeleted = true
+		return false, nil, nil
+	})
+
+	resources := []trainerResourceRef{
+		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
+	}
+
+	err := cleanupNCCLRun(clientset, dynamicClient, ns, testNamespaceUID, resources, nil)
+	if err == nil {
+		t.Fatal("expected the namespace delete failure to fail the check, got nil")
+	}
+	if trainerDeleted {
+		t.Error("expected Trainer teardown to be skipped after the namespace delete failed, but deleteTrainer ran")
+	}
+}
+
 // TestVerifyNCCLNamespaceNotLive covers the ownership gate that decides
 // whether an already-existing per-run namespace is safe to adopt. Regression
 // guard for the MAJOR finding that silently reusing any active namespace let

@@ -2413,16 +2413,20 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 // order. It deletes the per-run namespace first (cascading its
 // TrainJob/TrainingRuntime/ComputeDomain/RoCE-claim CRs), then, only on the
 // self-install fallback path, the Kubeflow Trainer installation itself.
-// The order matters. deleteTrainer removes the Trainer controller and its
-// CRDs, and doing that first would strand the namespace's own CRs'
-// controller-serviced finalizers, hanging the namespace in Terminating.
+// The order matters, deleteTrainer removes the Trainer controller and its
+// CRDs, which would strand the namespace's own CRs' finalizers if it ran
+// first. Trainer teardown only runs if the namespace delete succeeded,
+// since those CRs may otherwise still exist.
 //
 // benchErr is the check's result so far. A cleanup failure only overrides
 // a nil benchErr, never masking a real benchmark failure (see
 // foldCleanupError).
 func cleanupNCCLRun(clientset kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, uid types.UID, installedResources []trainerResourceRef, benchErr error) error {
-	err := foldCleanupError(benchErr, cleanupNCCLResources(clientset, namespace, uid),
-		"NCCL benchmark succeeded but NCCL resource cleanup failed")
+	nsErr := cleanupNCCLResources(clientset, namespace, uid)
+	err := foldCleanupError(benchErr, nsErr, "NCCL benchmark succeeded but NCCL resource cleanup failed")
+	if nsErr != nil {
+		return err
+	}
 	if len(installedResources) > 0 {
 		err = foldCleanupError(err, deleteTrainer(dynamicClient, installedResources),
 			"NCCL benchmark succeeded but Kubeflow Trainer cleanup failed")
