@@ -16,6 +16,7 @@ package aicr
 
 import (
 	"context"
+	"strings"
 
 	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
 	appconfig "github.com/NVIDIA/aicr/pkg/config"
@@ -402,6 +403,40 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 		opts = append(opts, bundlerconfig.WithDRAEvictionNodeLabel(*resolved.DRAEvictionNodeLabel))
 	}
 
+	// Signing mode is exclusive: a KMS key or keyless OIDC, never both.
+	// ResolveAttesterLazy picks KMS whenever SigningKey is non-empty, so a
+	// document setting both would silently sign with the key while its
+	// fulcioURL/oidcDeviceFlow settings did nothing. The CLI rejects that
+	// combination (validateSigningKeyExclusivity, and
+	// TestValidateSigningKeyExclusivity_ConfigSourcedConflict covers exactly
+	// the config-sourced case) — enforcing it only there would leave SDK
+	// callers with the silent behavior.
+	//
+	// Trimmed first for the same reason the CLI trims: a YAML block scalar
+	// carries surrounding whitespace, and an untrimmed key fails late in the
+	// KMS URI parser instead of here. rekorURL is deliberately not a conflict;
+	// it has its own exclusivity rule against signingConfig.
+	signingKey := strings.TrimSpace(resolved.SigningKey)
+	if resolved.SigningKey != "" && signingKey == "" {
+		return BundleOptions{}, errors.New(errors.ErrCodeInvalidRequest,
+			"spec.bundle.attestation.signingKey must not be blank")
+	}
+	if signingKey != "" {
+		for _, c := range []struct {
+			field  string
+			active bool
+		}{
+			{"oidcDeviceFlow", resolved.OIDCDeviceFlow},
+			{"fulcioURL", resolved.FulcioURL != ""},
+		} {
+			if c.active {
+				return BundleOptions{}, errors.New(errors.ErrCodeInvalidRequest,
+					"spec.bundle.attestation.signingKey is mutually exclusive with "+
+						"spec.bundle.attestation."+c.field)
+			}
+		}
+	}
+
 	return BundleOptions{
 		Config: bundlerconfig.NewConfig(opts...),
 		OIDCResolve: OIDCResolveOptions{
@@ -409,7 +444,7 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 			DeviceFlow: resolved.OIDCDeviceFlow,
 			FulcioURL:  resolved.FulcioURL,
 			RekorURL:   resolved.RekorURL,
-			SigningKey: resolved.SigningKey,
+			SigningKey: signingKey,
 		},
 	}, nil
 }
@@ -439,8 +474,10 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 //     failing run report success.
 //   - RecipePath and SnapshotPath name what to validate. The caller already
 //     passes both to ValidateState.
-//   - EvidenceCNCF and EvidenceAttestation configure evidence emission, whose
-//     facade home is EvidenceOptions.
+//   - EvidenceCNCF and EvidenceAttestation configure evidence emission.
+//     EvidenceOptions is the shape they would map onto, but no derivation
+//     produces one yet, so reading them still needs Unwrap(). Tracked as a
+//     remaining gap rather than a decided exclusion.
 //
 // # Two mappings that are not pass-throughs
 //

@@ -19,7 +19,6 @@ import (
 	stderrors "errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
@@ -700,7 +699,6 @@ spec:
       oidcDeviceFlow: true
       fulcioURL: https://fulcio.example.com
       rekorURL: https://rekor.example.com
-      signingKey: gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k
 `
 
 // TestConfig_BundleOptions asserts the FOLDED VALUES, not that some options
@@ -768,8 +766,10 @@ func TestConfig_BundleOptions(t *testing.T) {
 	if got, want := opts.OIDCResolve.RekorURL, "https://rekor.example.com"; got != want {
 		t.Errorf("OIDCResolve.RekorURL = %q, want %q", got, want)
 	}
-	if !strings.HasPrefix(opts.OIDCResolve.SigningKey, "gcpkms://") {
-		t.Errorf("OIDCResolve.SigningKey = %q, want a gcpkms:// reference", opts.OIDCResolve.SigningKey)
+	// Keyless fixture: no KMS key. Setting both is rejected outright, which
+	// TestConfig_BundleOptions_SigningModeExclusive covers.
+	if opts.OIDCResolve.SigningKey != "" {
+		t.Errorf("OIDCResolve.SigningKey = %q, want empty for a keyless config", opts.OIDCResolve.SigningKey)
 	}
 
 	// Fields with no spec.bundle counterpart stay zero so the caller, not the
@@ -812,4 +812,73 @@ func TestConfig_BundleOptions_Absent(t *testing.T) {
 			t.Error("absent spec.bundle should not set a DRA eviction label")
 		}
 	})
+}
+
+// TestConfig_BundleOptions_SigningModeExclusive pins the rule the CLI enforces
+// in validateSigningKeyExclusivity. ResolveAttesterLazy takes the KMS branch
+// whenever SigningKey is non-empty, so accepting both would sign with the key
+// while the document's keyless settings silently did nothing — the caller
+// believing they signed against a named Fulcio.
+func TestConfig_BundleOptions_SigningModeExclusive(t *testing.T) {
+	const head = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+spec:
+  bundle:
+    attestation:
+      enabled: true
+`
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{"kms alone is fine", head + "      signingKey: gcpkms://projects/p/k\n", false},
+		{"keyless alone is fine", head + "      oidcDeviceFlow: true\n      fulcioURL: https://fulcio.example.com\n", false},
+		{"kms plus device flow is rejected", head + "      signingKey: gcpkms://projects/p/k\n      oidcDeviceFlow: true\n", true},
+		{"kms plus fulcio is rejected", head + "      signingKey: gcpkms://projects/p/k\n      fulcioURL: https://fulcio.example.com\n", true},
+		// rekorURL is NOT a conflict; it has its own rule against signingConfig.
+		{"kms plus rekor is allowed", head + "      signingKey: gcpkms://projects/p/k\n      rekorURL: https://rekor.example.com\n", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, tt.body))
+			if err != nil {
+				if tt.wantErr {
+					return // rejected even earlier, which is also fail-closed
+				}
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			_, err = cfg.BundleOptions()
+			if tt.wantErr && err == nil {
+				t.Fatal("BundleOptions accepted mixed KMS and keyless signing settings")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("BundleOptions rejected a valid single-mode config: %v", err)
+			}
+		})
+	}
+}
+
+// TestConfig_BundleOptions_SigningKeyTrimmed covers the YAML block-scalar case
+// the CLI trims for: untrimmed, the key fails late in the KMS URI parser.
+func TestConfig_BundleOptions_SigningKeyTrimmed(t *testing.T) {
+	body := `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+spec:
+  bundle:
+    attestation:
+      enabled: true
+      signingKey: "  gcpkms://projects/p/k  "
+`
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, body))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	opts, err := cfg.BundleOptions()
+	if err != nil {
+		t.Fatalf("BundleOptions: %v", err)
+	}
+	if got := opts.OIDCResolve.SigningKey; got != "gcpkms://projects/p/k" {
+		t.Errorf("SigningKey = %q, want it trimmed", got)
+	}
 }

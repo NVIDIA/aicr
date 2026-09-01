@@ -173,7 +173,7 @@ its **current** contents, which for a URL or a ConfigMap (or a file
 someone rewrote) need not be what this call parsed. When byte-for-byte
 identity with the loaded snapshot matters, such as hashing what you
 validated, capture the source contents yourself and load from that
-capture instead of re-reading afterwards.
+capture instead of re-reading afterward.
 
 ### Comparing snapshots for drift
 
@@ -846,8 +846,8 @@ derive step rather than the load step.
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 
-`spec.snapshot` is not yet projected; `Unwrap()` reaches the raw document
-meanwhile. Needing it is worth reporting — it means a
+`spec.snapshot` is not yet projected, and neither is `spec.validate.evidence`;
+`Unwrap()` reaches the raw document meanwhile. Needing it is worth reporting — it means a
 derivation is missing, and `pkg/config` carries no stability guarantee.
 
 ### What `BundleOptions()` does and does not carry
@@ -863,17 +863,42 @@ Six resolved fields have no counterpart, by design rather than omission:
 |---|---|
 | `spec.bundle.input.recipe` | You already pass the recipe to `MakeBundle`; projecting it would give the same decision two homes. |
 | `spec.bundle.output.target`, `.imageRefs` | Output destinations chosen per invocation. `OutputDir` is the analog `MakeBundle` honors. |
-| `spec.bundle.registry.insecureTLS`, `.plainHTTP` | OCI transport. `MakeBundle` does not push — the caller does, afterwards — so a field here would be surface nothing reads. `EvidenceOptions` and `SignOptions` carry them because those operations do reach a registry. |
+| `spec.bundle.registry.insecureTLS`, `.plainHTTP` | OCI transport. `MakeBundle` does not push — the caller does, afterward — so a field here would be surface nothing reads. `EvidenceOptions` and `SignOptions` carry them because those operations do reach a registry. |
 
 Signing follows the same derive-don't-apply rule as everything else: a non-nil
 `Attester` wins over `OIDCResolve`, so an explicitly supplied signer is never
 silently rebuilt from config.
 
+A KMS key and keyless OIDC are mutually exclusive, and `BundleOptions()`
+rejects a document setting both rather than letting `signingKey` quietly win —
+the same rule the CLI enforces.
+
+**Device flow needs a prompt writer.** `spec.bundle.attestation.oidcDeviceFlow`
+sets `OIDCResolve.DeviceFlow`, but config cannot carry an `io.Writer`, so the
+derived value leaves `PromptWriter` nil. Set one before signing or the
+verification code the user has to enter goes nowhere:
+
+```go
+opts, err := cfg.BundleOptions()
+if err != nil {
+    return err
+}
+opts.OIDCResolve.PromptWriter = os.Stderr   // or any caller-owned writer
+```
+
 ```go
 opts, err := cfg.BundleOptions()       // from spec.bundle
+if err != nil {
+    return err                         // malformed spec.bundle, or mixed
+}                                      // KMS + keyless signing settings
 opts.OutputDir = "./bundles"           // caller wins, visibly
 artifact, err := client.MakeBundle(ctx, rec, opts)
 ```
+
+Check that first error rather than letting the second assignment overwrite it.
+`BundleOptions()` returns a zero value alongside its error, so a swallowed
+failure bundles with defaults — no deployer, no overrides, no attestation —
+from a document that looked configured.
 
 One asymmetry worth knowing: `IgnoreTLog` has no config counterpart, so
 `BundleVerifyOptions()` always leaves it false. It weakens the trust floor by
@@ -1309,7 +1334,7 @@ The rest of the section has other homes, and knowing which saves a search:
 | `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | `AgentConfig`. These configure the validator's Kubernetes Job; `pkg/validator` exposes no option for any of them, so a `WithValidation*` here would have nothing to translate into. |
 | `spec.validate.execution.failOnError` | Nowhere, deliberately. It decides whether a failed check makes the *caller* fail; the validator reports and does not act on it. Command-line-only for the same reason as `IgnoreTLog`: a checked-in file should not be able to make a failing run report success. |
 | `spec.validate.input.recipe`, `.snapshot` | Not projected — you already pass both to `ValidateState`. |
-| `spec.validate.evidence` | `EvidenceOptions`. |
+| `spec.validate.evidence` | **Not projected.** `EvidenceOptions` is the shape it would map onto, but no `Config` derivation produces one yet, so reading it still needs `Unwrap()`. |
 
 One inversion worth knowing: config says `noCleanup`, the option says
 `cleanup`. `ValidateOptions()` flips it, so `noCleanup: true` becomes
