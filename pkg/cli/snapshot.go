@@ -16,8 +16,11 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -128,6 +131,12 @@ type snapshotCmdOptions struct {
 // by SDK consumers. Job mode is its only consumer: local (in-pod) collection
 // deploys no Job and builds a collector.Factory and serializer.Serializer from
 // opts directly, so it never needs an AgentConfig.
+//
+// NameBase carries the "aicr" prefix that --job-name and
+// --service-account-name declare as their default. Routing it through this
+// field rather than through JobName/ServiceAccountName is what lets an unset
+// flag stay empty (see explicitStringFlagOrConfig) while the deployed objects
+// keep the names the released defaults produced.
 func (o *snapshotCmdOptions) toAgentConfig() *aicr.AgentConfig {
 	return &aicr.AgentConfig{
 		Kubeconfig:         o.kubeconfig,
@@ -153,6 +162,7 @@ func (o *snapshotCmdOptions) toAgentConfig() *aicr.AgentConfig {
 		DiscoverNetwork:    o.discoverNetwork,
 		Requests:           o.requests,
 		Limits:             o.limits,
+		NameBase:           name,
 	}
 }
 
@@ -175,7 +185,7 @@ func (o *snapshotCmdOptions) toSnapshotDelivery() snapshotter.SnapshotDelivery {
 // over config values. Returns a fully-typed snapshotCmdOptions that callers
 // can pass to the snapshotter without further parsing.
 func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapshotCmdOptions, error) {
-	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config", "aks-gpu-pools"); err != nil {
+	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", flagAddRolesToSA, "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config", "aks-gpu-pools"); err != nil {
 		return nil, err
 	}
 
@@ -242,13 +252,18 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --limits")
 	}
 
+	// jobName and serviceAccountName resolve through
+	// explicitStringFlagOrConfig, not stringFlagOrConfig: the flags keep
+	// their released "aicr" default for --help, but only a name the operator
+	// actually supplied (flag or --config) may travel downstream. See
+	// toAgentConfig's NameBase for what supplies the prefix instead.
 	return &snapshotCmdOptions{
 		kubeconfig:         cmd.String("kubeconfig"),
 		namespace:          stringFlagOrConfig(cmd, "namespace", resolved.Namespace),
 		image:              stringFlagOrConfig(cmd, "image", resolved.Image),
 		imagePullSecrets:   stringSliceFlagOrConfig(cmd, "image-pull-secret", resolved.ImagePullSecrets),
-		jobName:            stringFlagOrConfig(cmd, "job-name", resolved.JobName),
-		serviceAccountName: stringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
+		jobName:            explicitStringFlagOrConfig(cmd, "job-name", resolved.JobName),
+		serviceAccountName: explicitStringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
 		nodeSelector:       nodeSelector,
 		tolerations:        tolerations,
 		timeout:            durationFlagOrConfig(cmd, "timeout", resolved.Timeout),
@@ -266,6 +281,100 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 		limits:             resourceLimits,
 		tmplOpts:           tmplOpts,
 	}, nil
+}
+
+// runWriteRoleManifests handles the generate-and-exit invocation
+// `aicr snapshot --add-roles-to-service-account <name>`: it writes the RBAC
+// manifests that would grant the agent's permissions to that ServiceAccount
+// and returns, applying nothing, contacting no cluster, and capturing
+// nothing.
+//
+// It takes no context because there is no I/O to bound beyond writing four
+// local files.
+//
+// It is a thin adapter — name derivation, the rule sets, the explanatory
+// headers, and the directory layout all live in pkg/snapshotter and
+// pkg/k8s/agent. What belongs here is only presenting the outcome, including
+// the two things an operator must not have to discover on their own: nothing
+// is live yet, and the exact commands that make it live and take it away
+// again.
+func runWriteRoleManifests(cmd *cli.Command, opts *snapshotCmdOptions, saName string) error {
+	res, err := snapshotter.WriteAgentRoleManifests(&snapshotter.AgentRolesConfig{
+		Namespace:          opts.namespace,
+		ServiceAccountName: saName,
+		DiscoverNetwork:    opts.discoverNetwork,
+	})
+	if err != nil {
+		return err
+	}
+
+	writeManifestReport(cmd.Root().Writer, res)
+	return nil
+}
+
+// writeManifestReport renders the outcome of a manifest-generating run. It is
+// split out from runWriteRoleManifests so the properties an operator must not
+// have to discover on their own — nothing was applied, how to apply it, how to
+// remove it again, and that a shared ServiceAccount waives per-run permission
+// isolation — are assertable without a cluster or a filesystem.
+func writeManifestReport(w io.Writer, res *snapshotter.AgentRolesResult) {
+	fmt.Fprintf(w, `Wrote the snapshot agent's RBAC manifests for ServiceAccount %[1]q in namespace
+%[2]q to:
+
+  %[3]s/
+
+NOTHING WAS APPLIED. No cluster was contacted, and %[1]s has no new permissions
+yet.
+
+`, res.ServiceAccountName, res.Namespace, res.Dir)
+
+	for _, obj := range res.Objects {
+		fmt.Fprintf(w, "  %-28s %s/%s\n", filepath.Base(obj.Path), strings.ToLower(obj.Kind), obj.Name)
+	}
+
+	fmt.Fprintf(w, `
+Read them — each file explains what it grants and why the agent needs it — then
+apply them yourself:
+  kubectl apply -f %[1]s/
+
+Capture a snapshot as this ServiceAccount with:
+  aicr snapshot --namespace %[2]s --service-account-name %[3]s
+
+Remove the grant when the ServiceAccount no longer needs it:
+  kubectl delete -f %[1]s/
+
+That delete is the only teardown: no aicr run creates, refreshes, or deletes
+these objects. Keep the directory for as long as you want the easy teardown.
+
+The ServiceAccount is not verified to exist — aicr contacted no cluster. Check
+it before you rely on the grant:
+  kubectl get serviceaccount %[3]s -n %[2]s
+
+Trade-off: runs that share this ServiceAccount share its permissions, so per-run
+permission isolation is waived for them.
+`, res.Dir, res.Namespace, res.ServiceAccountName)
+
+	if !res.DiscoverNetwork {
+		return
+	}
+	fmt.Fprintf(w, `
+WARNING: --discover-network means the ClusterRole in this directory also carries
+cluster-scoped MUTATING rules (nodes: patch, pods/exec: create, CRD/namespace/
+DaemonSet create-delete). Applying it grants them permanently, not for one run.
+Each rule and the discovery step it exists for is explained in %s.
+`, clusterRoleManifestName(res))
+}
+
+// clusterRoleManifestName returns the file name of the rendered ClusterRole,
+// looked up by kind rather than by position so the discovery warning keeps
+// pointing at the right file if the manifest order ever changes.
+func clusterRoleManifestName(res *snapshotter.AgentRolesResult) string {
+	for _, obj := range res.Objects {
+		if obj.Kind == "ClusterRole" {
+			return filepath.Base(obj.Path)
+		}
+	}
+	return "the ClusterRole manifest"
 }
 
 // snapshotTemplateOptions holds parsed template options for the snapshot command.
@@ -342,16 +451,27 @@ func snapshotCmdFlags() []cli.Flag {
 			Usage:    "Secret name for pulling images from private registries (can be repeated)",
 			Category: catAgentDeployment,
 		},
+		// Value stays "aicr" on both name flags: it is the released v1
+		// default `--help` prints and testdata/cli-surface.golden pins.
+		// parseSnapshotCmdOptions reads them with
+		// explicitStringFlagOrConfig, so an unset flag reaches the deployer
+		// as "" rather than as this default — see that helper for why the
+		// two must not be conflated.
 		&cli.StringFlag{
 			Name:     "job-name",
-			Usage:    "Override default Job name",
+			Usage:    "Job name prefix; the run ID is always appended",
 			Value:    name,
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
-			Usage:    "Override default ServiceAccount name",
+			Usage:    "ServiceAccount to run the agent as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and aicr creates and deletes no RBAC for the run (generate its RBAC manifests with --add-roles-to-service-account, then apply them yourself). Otherwise it is a name prefix and the run ID is appended. Leaving the flag unset is not the same as passing the default shown: an unset value is never probed for existence, so a stray ServiceAccount cannot capture the run.",
 			Value:    name,
+			Category: catAgentDeployment,
+		},
+		&cli.StringFlag{
+			Name:     flagAddRolesToSA,
+			Usage:    "WRITES MANIFESTS AND APPLIES NOTHING. Renders the Role, RoleBinding, ClusterRole and ClusterRoleBinding that grant the agent's permissions to the named ServiceAccount into ./snapshot-rbac-<run-id>/, then exits without taking a snapshot. No cluster is contacted, so no kubeconfig or privileges are needed. Review the files, then grant with 'kubectl apply -f <dir>/' and revoke with 'kubectl delete -f <dir>/' yourself. Add --discover-network to include the mutating live-discovery rules.",
 			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{
@@ -525,6 +645,15 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			opts, err := parseSnapshotCmdOptions(cmd, cfg)
 			if err != nil {
 				return err
+			}
+
+			// Generate-and-exit: --add-roles-to-service-account writes the
+			// RBAC manifests for an existing ServiceAccount, applies nothing,
+			// and takes no snapshot. Checked ahead of every collection path
+			// (including the in-pod one below) so the flag can never be
+			// combined with a capture.
+			if saName := cmd.String(flagAddRolesToSA); saName != "" {
+				return runWriteRoleManifests(cmd, opts, saName)
 			}
 
 			agentCfg := opts.toAgentConfig()

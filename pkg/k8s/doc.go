@@ -60,11 +60,16 @@
 //
 // For agent deployment, import the agent sub-package:
 //
-//	import "github.com/NVIDIA/aicr/pkg/k8s/agent"
+//	import (
+//	    "github.com/NVIDIA/aicr/pkg/k8s/agent"
+//	    "github.com/NVIDIA/aicr/pkg/runid"
+//	)
 //
-//	// Deploy snapshot agent
+//	// Deploy snapshot agent. RunID scopes every object the deployment
+//	// creates, so concurrent runs never collide; see pkg/k8s/agent.
 //	config := agent.Config{
 //	    Namespace: "gpu-operator",
+//	    RunID:     runid.Generate(),
 //	    Image:     "ghcr.io/nvidia/aicr-validator:latest",
 //	}
 //	deployer := agent.NewDeployer(clientset, config)

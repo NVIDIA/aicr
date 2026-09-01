@@ -221,8 +221,8 @@ reported as no drift.
 // CollectSnapshot deploys a snapshotter Job to the target cluster and
 // returns the resulting Snapshot. cfg is a facade-owned struct that
 // mirrors pkg/snapshotter.AgentConfig field for field; the mirror is
-// enforced by a test, so a field added upstream cannot silently stay at
-// its zero value here.
+// enforced by TestAgentConfigMirrorsInternal, so a field added upstream
+// cannot silently stay at its zero value here.
 //
 // The returned Snapshot carries the parsed form plus Snapshot.Raw — the
 // exact bytes the agent emitted. Persist Raw rather than re-serializing
@@ -250,24 +250,27 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	Kubeconfig: "/path/to/target-kubeconfig",
 	// Namespace is the only required field: the Job, its RBAC, and the result
 	// ConfigMap are created there, and an empty value is rejected with
-	// ErrCodeInvalidRequest before any cluster access. Image, JobName, and
-	// ServiceAccountName are defaulted when empty — the names to "aicr" and
-	// the image to the tag matching the Client's WithVersion. They are set
-	// explicitly here because pinning the agent generation is what a
-	// version-skew-sensitive or air-gapped deployment wants.
+	// ErrCodeInvalidRequest before any cluster access. Image is defaulted
+	// when empty to the tag matching the Client's WithVersion; it is pinned
+	// explicitly here because that is what a version-skew-sensitive or
+	// air-gapped deployment wants.
 	//
-	// Collect against one cluster at a time. The default names are shared, the
-	// Job is delete-then-created, and the ClusterRoleBinding has a fixed name
-	// carrying the ServiceAccount as its subject — so two concurrent runs
-	// interfere even with distinct JobName values. See CollectSnapshot's
-	// Concurrency godoc.
-	Namespace:          "aicr-snapshot",
-	Image:              "ghcr.io/nvidia/aicr:v0.19.0",
-	JobName:            "aicr-snapshot",
-	ServiceAccountName: "aicr-agent",
-	Timeout:            5 * time.Minute,
-	Cleanup:            true,
-	AKSGPUPoolsPath:    "/path/to/aks-gpu-pools.json", // AKS only
+	// JobName is an optional name prefix; leaving it unset defaults to
+	// "aicr" with a generated run ID appended, so every run gets its own
+	// uniquely named Job without the caller managing that.
+	//
+	// ServiceAccountName carries two meanings and is EXACT-IF-EXISTS. When
+	// a ServiceAccount of exactly that name already exists in Namespace it
+	// is used verbatim and the run creates NO ServiceAccount, Role,
+	// RoleBinding, ClusterRole or ClusterRoleBinding — and deletes none at
+	// cleanup. Otherwise it is a prefix and the run creates and owns the
+	// full run-scoped RBAC set. Leaving it unset, as here, keeps the
+	// run-scoped default and never probes for an existing ServiceAccount.
+	Namespace:       "aicr-snapshot",
+	Image:           "ghcr.io/nvidia/aicr:v0.19.0",
+	Timeout:         5 * time.Minute,
+	Cleanup:         true,
+	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
 })
 if err != nil {
 	log.Fatalf("collect snapshot: %v", err)
@@ -345,6 +348,52 @@ Valid phase values are `PhaseDeployment`, `PhaseConformance`, and
 `PhasePerformance` (canonical execution order). An unrecognized phase is rejected with
 `ErrCodeInvalidRequest` before any cluster work, so a typo cannot
 silently degrade to an empty run.
+
+#### Running the agent as an existing ServiceAccount
+
+`AgentConfig.ServiceAccountName` is **exact-if-exists**, so it carries two
+meanings depending on the cluster:
+
+- A ServiceAccount of exactly that name already exists in `Namespace`: the
+  agent pod runs as it verbatim, and `CollectSnapshot` creates **no**
+  ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding, and
+  deletes none at cleanup.
+- Otherwise it is a name prefix and the run creates and owns the full
+  run-scoped RBAC set, named `<prefix>-<run-id>`.
+
+Leaving the field empty keeps the run-scoped default and never probes for an
+existing ServiceAccount, so a stray ServiceAccount cannot capture a run.
+
+Use the first form when the ServiceAccount must carry EKS IRSA or GKE Workload
+Identity annotations: both providers pin trust to the ServiceAccount *name*, so
+a run-scoped name can never be trusted by either. Grant it the agent's
+permissions once — the objects it creates are permanent and no run cleanup
+removes them:
+
+```go
+// Admin step, run once. Provisions and returns; it deploys no Job.
+// Returns ErrCodeNotFound when the ServiceAccount does not exist.
+res, err := snapshotter.ProvisionAgentRoles(ctx, &snapshotter.AgentRolesConfig{
+	Kubeconfig:         "/path/to/target-kubeconfig",
+	Namespace:          "gpu-operator",
+	ServiceAccountName: "irsa-snapshotter",
+	// DiscoverNetwork also grants the cluster-scoped MUTATING rules live
+	// network discovery needs — permanently, not for one run's lifetime.
+	DiscoverNetwork: false,
+})
+if err != nil {
+	log.Fatalf("provision agent roles: %v", err)
+}
+log.Printf("granted via %s/%s and %s/%s",
+	res.Role, res.RoleBinding, res.ClusterRole, res.ClusterRoleBinding)
+```
+
+Adopting one ServiceAccount across runs waives per-run permission isolation:
+concurrent runs sharing it hold the same grants, and a `DiscoverNetwork`
+provisioning leaves mutating cluster permissions in place until an operator
+removes them. See
+[Agent Deployment](../user/agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity)
+for the full migration path and teardown commands.
 
 ### Loading an existing recipe
 

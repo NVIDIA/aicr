@@ -39,6 +39,19 @@ import (
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 )
 
+// validateNameBase is the prefix applied to the live-capture snapshot
+// agent's Job/ServiceAccount/RBAC names when --job-name / --service-account-name
+// are left unset, distinguishing `aicr validate`'s agent resources from
+// `aicr snapshot`'s (which use the package-level "aicr" base). RunID is
+// always appended, so the deployed names are run-scoped regardless of
+// whether this base is used.
+//
+// It doubles as --job-name's declared Value: default so the released v1
+// help output is unchanged. That default is never read as a value — see
+// explicitStringFlagOrConfig — which is why the constant, not the flag,
+// is what actually supplies the prefix.
+const validateNameBase = "aicr-validate"
+
 // validateAgentConfig holds parsed agent configuration for validate command.
 type validateAgentConfig struct {
 	kubeconfig         string
@@ -54,6 +67,14 @@ type validateAgentConfig struct {
 	debug              bool
 	requireGPU         bool
 	aksGPUPoolsPath    string
+
+	// runID correlates this run's live-capture snapshot agent with the
+	// validator Jobs runValidation deploys for the same `aicr validate`
+	// invocation — both are given the SAME id (generated once, up front,
+	// by the caller of parseValidateAgentConfig) so ADR-020 run isolation
+	// scopes every resource this command creates to a single run rather
+	// than splitting it across two independently generated ids.
+	runID string
 }
 
 // parseValidateAgentConfig builds the snapshot-capture agent's deployment
@@ -61,19 +82,31 @@ type validateAgentConfig struct {
 // namespace, cleanup) are resolved once by the caller and passed in; this
 // keeps any CLI-overrides-config slog.Info from firing twice when both
 // the agent and the downstream validator job want the same value.
+//
+// runID is the single id generated once for the whole `aicr validate`
+// invocation; passing it in here (rather than leaving AgentConfig.RunID
+// empty and letting the snapshot agent default its own) is what keeps the
+// live-capture agent and the validator Jobs it feeds correlated under one
+// RunID.
 func parseValidateAgentConfig(
 	cmd *cli.Command,
 	resolved *config.ValidateResolved,
 	shared validateSharedResolved,
+	runID string,
 ) *validateAgentConfig {
 
+	// jobName and serviceAccountName resolve through
+	// explicitStringFlagOrConfig, not stringFlagOrConfig: the flags keep
+	// their released defaults for --help, but only a name the operator
+	// actually supplied (flag or --config) may travel downstream. An unset
+	// flag stays "" so validateNameBase governs — see toAgentConfig.
 	return &validateAgentConfig{
 		kubeconfig:         cmd.String("kubeconfig"),
 		namespace:          shared.namespace,
 		image:              stringFlagOrConfig(cmd, "image", resolved.Image),
 		imagePullSecrets:   shared.imagePullSecrets,
-		jobName:            stringFlagOrConfig(cmd, "job-name", resolved.JobName),
-		serviceAccountName: stringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
+		jobName:            explicitStringFlagOrConfig(cmd, "job-name", resolved.JobName),
+		serviceAccountName: explicitStringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
 		nodeSelector:       shared.nodeSelector,
 		tolerations:        shared.tolerations,
 		timeout:            durationFlagOrConfig(cmd, "timeout", resolved.Timeout),
@@ -81,6 +114,7 @@ func parseValidateAgentConfig(
 		debug:              cmd.Bool("debug"),
 		requireGPU:         boolFlagOrConfig(cmd, "require-gpu", resolved.RequireGPU),
 		aksGPUPoolsPath:    cmd.String("aks-gpu-pools"),
+		runID:              runID,
 	}
 }
 
@@ -156,7 +190,11 @@ func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResol
 // toAgentConfig projects the validate command's resolved flags onto the
 // facade AgentConfig that Client.CollectSnapshot consumes. Privileged is
 // unconditional here: the validation snapshot needs the GPU and SystemD
-// collectors, which do not work in restricted mode.
+// collectors, which do not work in restricted mode. RunID forwards the
+// single id parseValidateAgentConfig's caller generated for this whole
+// `aicr validate` invocation, so the live-capture agent's Job/RBAC share it
+// with the validator Jobs runValidation deploys — one RunID per command,
+// per ADR-020, instead of the agent falling back to its own default.
 func (c *validateAgentConfig) toAgentConfig() *aicr.AgentConfig {
 	return &aicr.AgentConfig{
 		Kubeconfig:         c.kubeconfig,
@@ -173,6 +211,8 @@ func (c *validateAgentConfig) toAgentConfig() *aicr.AgentConfig {
 		Privileged:         true,
 		RequireGPU:         c.requireGPU,
 		AKSGPUPoolsPath:    c.aksGPUPoolsPath,
+		RunID:              c.runID,
+		NameBase:           validateNameBase,
 	}
 }
 
@@ -206,6 +246,13 @@ func deployAgentForValidation(ctx context.Context, client *aicr.Client, cfg *val
 type validationConfig struct {
 	// Input
 	phases []validator.Phase
+
+	// runID is generated once, up front, for the whole `aicr validate`
+	// invocation (see validateCmd's Action) and reused here instead of a
+	// second v1.GenerateRunID() call. Sharing one ID keeps names, labels,
+	// logs, and cleanup hints correlated to a single command instead of
+	// fragmenting across an agent-side ID and a validator-side one.
+	runID string
 
 	// Kubeconfig path; propagated to ConfigMap reads/writes so a single
 	// validate invocation can target a non-default cluster end-to-end.
@@ -257,12 +304,13 @@ func runValidation(
 
 	slog.Info("running validation", "phases", cfg.phases)
 
-	// Generate the run ID CLI-side rather than letting the validator
-	// auto-generate it internally: the no-cleanup debug log below needs to
-	// surface the same ID the validator stamps on its Jobs/RBAC so an
-	// operator can locate the kept resources. Passing it via
-	// WithValidationRunID keeps that value in our hands.
-	runID := v1.GenerateRunID()
+	// Generated once CLI-side, before either snapshot source ran (see
+	// validateCmd's Action), rather than letting the validator auto-generate
+	// it internally: the no-cleanup debug log below needs to surface the
+	// same ID the validator stamps on its Jobs/RBAC so an operator can
+	// locate the kept resources. Passing it via WithValidationRunID keeps
+	// that value in our hands.
+	runID := cfg.runID
 
 	// Translate the resolved CLI values into facade ValidateOptions. These
 	// mirror the validator.With* options the direct invocation used to set;
@@ -453,15 +501,20 @@ func validateCmdFlags() []cli.Flag {
 			Usage:    "Secret name for pulling images from private registries (can be repeated)",
 			Category: catAgentDeployment,
 		},
+		// Value stays at the released v1 defaults ("aicr-validate" and
+		// "aicr"): they are what `--help` prints and what
+		// testdata/cli-surface.golden pins. parseValidateAgentConfig reads
+		// both with explicitStringFlagOrConfig, so an unset flag reaches the
+		// agent as "" and validateNameBase supplies the prefix instead.
 		&cli.StringFlag{
 			Name:     "job-name",
-			Usage:    "Override default Job name",
-			Value:    "aicr-validate",
+			Usage:    "Job name prefix; the run ID is always appended",
+			Value:    validateNameBase,
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
-			Usage:    "Override default ServiceAccount name",
+			Usage:    "ServiceAccount the live snapshot-capture agent runs as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and the agent creates and deletes no RBAC for the run (generate its RBAC manifests with 'aicr snapshot --add-roles-to-service-account', then apply them yourself). Otherwise it is a name prefix and the run ID is appended. Leaving the flag unset is not the same as passing the default shown: an unset value is never probed for existence, and the agent's run-scoped names are derived from the \"aicr-validate\" base instead.",
 			Value:    name,
 			Category: catAgentDeployment,
 		},
@@ -805,6 +858,38 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 				return err
 			}
 
+			// Generate the run ID once, up front, for this whole invocation —
+			// before either snapshot source below runs. The validator Jobs
+			// deployed by runValidation need it (passed through
+			// validationConfig.runID); generating it here rather than inside
+			// runValidation means a single `aicr validate` no longer risks
+			// splitting its correlation ID across two independent
+			// v1.GenerateRunID() calls. The same runID is also threaded into
+			// parseValidateAgentConfig below, so the live-capture branch's
+			// snapshot agent shares this run's id with the validator Jobs
+			// rather than defaulting its own inside DeployAndCollect —
+			// ADR-020 requires one RunID per `aicr validate` invocation.
+			//
+			// WARNING, not enforced by an automated test: this line must
+			// stay the ONLY v1.GenerateRunID() call in this Action. Adding a
+			// second call — e.g. generating a fresh id inline for the
+			// parseValidateAgentConfig call below, or for the
+			// validationConfig{runID: ...} literal further down — silently
+			// splits a single `aicr validate` invocation back into two
+			// uncorrelated runs. The two consumer sites are NOT mutually
+			// exclusive: with neither --snapshot nor --no-cluster, the
+			// live-capture branch below and runValidation both consume this
+			// id in the same invocation — which is exactly the case the
+			// invariant protects. What blocks a unit test is that reaching
+			// both requires live-cluster I/O (deployAgentForValidation
+			// deploys a Job; runValidation deploys validator Jobs) with no
+			// injectable seam here to fake it. See
+			// TestValidateAgentConfig_ToAgentConfig_ForwardsRunID and
+			// TestParseValidateAgentConfig_ForwardsCallerRunID in
+			// validate_test.go for what IS covered (passthrough at each
+			// function boundary only) and what is not.
+			runID := v1.GenerateRunID()
+
 			var snap *aicr.Snapshot
 
 			// --no-cluster means "do not touch the cluster". The agent-deploy
@@ -826,7 +911,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			} else {
 				slog.Info("deploying agent to capture snapshot")
 
-				agentCfg := parseValidateAgentConfig(cmd, resolved, shared)
+				agentCfg := parseValidateAgentConfig(cmd, resolved, shared, runID)
 
 				var deployErr error
 				snap, deployErr = deployAgentForValidation(ctx, client, agentCfg)
@@ -861,6 +946,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 
 			return runValidation(ctx, client, rec, snap, validationConfig{
 				phases:                phases,
+				runID:                 runID,
 				kubeconfig:            kubeconfig,
 				output:                cmd.String("output"),
 				outFormat:             serializer.FormatJSON,

@@ -488,6 +488,37 @@ func stringFlagOrConfig(cmd *cli.Command, flagName, fallback string) string {
 	return v
 }
 
+// explicitStringFlagOrConfig is stringFlagOrConfig for a flag whose declared
+// Value: default must keep appearing in `--help` — it is part of the v1 CLI
+// surface pinned by testdata/cli-surface.golden — but must NOT be substituted
+// for the caller's silence downstream:
+//
+//   - Explicit CLI flag (cmd.IsSet) → CLI value, with an INFO log if it
+//     differs from a non-empty config fallback.
+//   - No CLI flag, non-empty config fallback → fallback (a value in --config
+//     is an operator choice too, so it counts as explicit input).
+//   - Neither → "", NOT the flag's compile-time Value: default.
+//
+// The distinction is load-bearing for the agent's --job-name and
+// --service-account-name, where "" is a value rather than a missing one: it
+// tells pkg/k8s/agent that no prefix was named, so one is derived from
+// Config.NameBase and this run's ID. Substituting the declared default there
+// would hand agent.Deployer.resolveServiceAccount a name aicr picked rather
+// than one the operator typed, and on any cluster still carrying a leftover
+// "aicr" ServiceAccount from a pre-ADR-020 install EVERY run would silently
+// resolve to exact-ServiceAccount mode and manage no RBAC at all. Exact mode
+// must be reachable only from a name the operator actually supplied.
+func explicitStringFlagOrConfig(cmd *cli.Command, flagName, fallback string) string {
+	if !cmd.IsSet(flagName) {
+		return fallback
+	}
+	v := cmd.String(flagName)
+	if fallback != "" && fallback != v {
+		slog.Info("CLI flag overriding config value", "flag", flagName, "config", fallback, "override", v)
+	}
+	return v
+}
+
 // intFlagOrConfig returns the CLI flag value when explicitly set; otherwise
 // the fallback. Logs an INFO line whenever the resolved value differs from
 // the fallback (matching stringFlagOrConfig's symmetric guard so a config
