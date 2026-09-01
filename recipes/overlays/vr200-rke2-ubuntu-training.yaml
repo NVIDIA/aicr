@@ -42,7 +42,7 @@ spec:
 
   # The os-ubuntu mixin is NOT used: it pins VERSION_ID "24.04" / kernel
   # >= 6.8, while the Vera Rubin NVL72 reference image ships Ubuntu 26.04
-  # with the Grace/Vera-optimized arm64 64k-page kernel
+  # with the Vera-optimized arm64 64k-page kernel
   # (7.0.0-*-nvidia-bos-64k). Constraint names use fully qualified
   # measurement paths: {type}.{subtype}.{key}
   constraints:
