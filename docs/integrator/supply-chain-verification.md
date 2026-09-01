@@ -780,6 +780,69 @@ Pin every policy to AICR's release identity:
 > Sigstore Policy Controller policy below. Tracking:
 > [#1537](https://github.com/NVIDIA/aicr/issues/1537).
 
+### Kyverno and per-platform evidence
+
+The caveat above concerns AICR's **GitHub Artifact Attestation** on the index
+digest. The results below are a separate measurement: `cosign attest` output on
+**platform manifests**, read with `type: SigstoreBundle`. Different producer,
+different subject, and both results hold.
+
+Measured on kind with Kubernetes v1.34.0, Kyverno v1.19.0 and cosign v3.0.6.
+
+A deployment manifest names a tag, not a digest. Kyverno's `mutateDigest` is on
+by default and resolves that tag to the **index** digest, which is where
+provenance lives and where the SBOM and the VEX do not. Four policies against
+one image:
+
+| Policy | Subject it evaluates | Result |
+|--------|----------------------|--------|
+| provenance only | index digest | admitted |
+| SBOM only | index digest | denied |
+| SBOM + VEX + provenance | platform manifest | denied |
+| provenance only | platform manifest | denied |
+
+No single rule spans both digests. So for a normal tag-naming workload, SLSA
+provenance is enforceable at admission and the CycloneDX SBOM and the OpenVEX
+document are not. This follows from where the evidence is attached, not from how
+the policy is written, so a better policy will not recover it.
+
+The completeness property does work. Listing several `attestations[]` entries
+requires all of them, in both `ClusterPolicy` and `ImageValidatingPolicy`:
+deleting the VEX referrer and re-running a SBOM + VEX policy denies in both
+engines. It is only the cross-digest span that fails.
+
+Three ways to live with this, none of them free:
+
+* **Attach every predicate type to whichever digest you gate on.** This makes
+  one rule sufficient, at the cost of honesty in the SBOM: a single index-level
+  SBOM cannot describe two different root filesystems.
+* **Split the gate.** Enforce provenance at admission, and the SBOM and VEX at
+  build or promotion time where the platform digest is already known. This keeps
+  every document truthful but moves part of the check off the admission path.
+* **Pin platform digests in pod specs.** One rule then covers everything, and
+  you give up multi-arch scheduling.
+
+### Kyverno attestation payload limits
+
+Kyverno loads the whole attestation payload into the policy evaluation context
+*before* any condition runs, bounded by `maxContextSize` in Kyverno's ConfigMap.
+The default is 2 MiB and exists as a denial-of-service control:
+
+```text
+context size limit exceeded: 5216263 bytes exceeds limit of 2097152 bytes
+```
+
+This is not about condition complexity. A condition reading only `bomFormat`
+fails exactly as a condition walking 9,003 components does, because neither has
+run yet. Measured with a synthetically padded SBOM: 1.2 MB admitted, 5.5 MB
+denied, and the same 5.5 MB admitted after setting `maxContextSize: 32Mi`.
+
+AICR's own image SBOMs are well under the default, but real application-image
+SBOMs pass 2 MiB routinely, and the error names neither the predicate nor the
+condition that triggered it. Treat raising `maxContextSize` as a prerequisite
+for deploying SBOM-reading policies rather than as tuning to reach for after a
+failure.
+
 ### Sigstore Policy Controller
 
 Sigstore-bundle support requires **v0.13.0+** and `signatureFormat: bundle`;
