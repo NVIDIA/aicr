@@ -549,11 +549,12 @@ var versionPinExemptions = []versionPinExemption{
 		field:           "version",
 		expectedPin:     "v2.2.1",
 		expectedDefault: "v1.3.1",
-		reason: "RKE2's bundled rke2-traefik-crd Helm release already owns the Gateway API " +
-			"CRDs and serves TLSRoute only at v1 — agentgateway must run a release built " +
-			"against a Gateway API client new enough to additionally require (and be " +
-			"validated against a cluster serving) TLSRoute v1alpha2, which v2.2.1 is and " +
-			"the registry default v1.3.1 is not.",
+		reason: "rke2-inference installs its own vendored TLSRoute v1alpha2 CRD (RKE2's " +
+			"default ingress-nginx ships none, and this leaf's K8s.server.version " +
+			"constraint caps it below the v1.36 Traefik-default transition to avoid " +
+			"CRD-ownership collisions with RKE2's own Traefik release) — agentgateway " +
+			"must run a release built against a Gateway API client new enough to watch " +
+			"TLSRoute v1alpha2, which v2.2.1 is and the registry default v1.3.1 is not.",
 	},
 	{
 		source:          "rke2-inference",
