@@ -71,6 +71,8 @@ make tools-check  # Verify versions match .settings.yaml
 make check-health COMPONENT=nvsentinel  # Direct chainsaw against Kind
 make check-health-all                   # All components
 make validate-local RECIPE=recipe.yaml  # Full pipeline in Kind
+# Live-cluster performance phase (shipped EKS H100 training uses TrainJob NCCL)
+make validate-performance RECIPE=recipe.yaml SNAPSHOT=snapshot.yaml
 ```
 
 ## Non-Negotiable Rules

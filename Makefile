@@ -829,6 +829,39 @@ validate-local: image-validators ## Builds validator images and runs validation 
 		--recipe "$(RECIPE)" \
 		--phase deployment
 
+.PHONY: validate-performance
+validate-performance: ## Recipe performance phase on the current kubecontext (RECIPE= [SNAPSHOT=] [NODE_SELECTOR=])
+	@set -e; \
+	if [ -z "$(RECIPE)" ]; then \
+		echo "Usage: make validate-performance RECIPE=<path-to-recipe.yaml> [SNAPSHOT=<path>] [NODE_SELECTOR=nvidia.com/gpu.present=true]"; \
+		exit 1; \
+	fi; \
+	if [ ! -f "$(RECIPE)" ]; then \
+		echo "Error: recipe file $(RECIPE) not found"; \
+		exit 1; \
+	fi; \
+	AICR_BIN=$$(command -v aicr 2>/dev/null || true); \
+	if [ -z "$$AICR_BIN" ]; then \
+		AICR_BIN=$$(find dist/ -name "aicr" -type f 2>/dev/null | head -1); \
+	fi; \
+	if [ -z "$$AICR_BIN" ]; then \
+		echo "Error: aicr binary not found. Run 'make build' or put aicr on PATH."; \
+		exit 1; \
+	fi; \
+	set -- validate --recipe "$(RECIPE)" --phase performance --fail-on-error; \
+	if [ -n "$(SNAPSHOT)" ]; then \
+		if [ ! -f "$(SNAPSHOT)" ]; then \
+			echo "Error: snapshot file $(SNAPSHOT) not found"; \
+			exit 1; \
+		fi; \
+		set -- "$$@" --snapshot "$(SNAPSHOT)"; \
+	fi; \
+	if [ -n "$(NODE_SELECTOR)" ]; then \
+		set -- "$$@" --node-selector "$(NODE_SELECTOR)"; \
+	fi; \
+	echo "Running performance phase with $$AICR_BIN"; \
+	"$$AICR_BIN" "$$@"
+
 .PHONY: python-licenses
 python-licenses: ## Refreshes the committed Python license section for the aiperf-bench image (needs network)
 	@python3 tools/generate-python-licenses
