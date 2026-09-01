@@ -375,7 +375,8 @@ for audit, diagnosis, and recovery.
 Every release includes:
 
 - **SLSA Build Level 3 Provenance** — verifiable image build attestations (provenance v1), generated from a reusable workflow
-- **SBOM** — Software Bill of Materials (SPDX format)
+- **SBOM** — Software Bill of Materials (SPDX for the release binaries, CycloneDX for the container images)
+- **OpenVEX** — per-platform vulnerability triage, attested alongside each container image SBOM
 - **Sigstore Signatures** — keyless signing via Fulcio + Rekor
 - **Checksums** — SHA256 for all binaries
 - **Third-party notices** — `THIRD_PARTY_NOTICES.md` listing every
@@ -419,11 +420,11 @@ digest you verify against depends on what you are asking for:
 | Predicate | Attached to | Verify against |
 |-----------|-------------|----------------|
 | SLSA provenance (`slsaprovenance1`) | multi-arch index | `crane digest <image>:<tag>` |
-| OpenVEX (`openvex`) | multi-arch index | `crane digest <image>:<tag>` |
-| SBOM (`spdxjson`) | per-platform child manifest | `crane digest --platform <os>/<arch> <image>:<tag>` |
+| SBOM (`cyclonedx`) | per-platform child manifest | `crane digest --platform <os>/<arch> <image>:<tag>` |
+| OpenVEX (`openvex`) | per-platform child manifest | `crane digest --platform <os>/<arch> <image>:<tag>` |
 
-Asking for `spdxjson` against the index digest fails with `none of the
-attestations matched the predicate type`.
+Asking for `cyclonedx` or `openvex` against the index digest fails with `none of
+the attestations matched the predicate type`.
 
 ```bash
 set -euo pipefail
@@ -451,30 +452,30 @@ gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/performance@${PERF_I
 gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/conformance@${CONF_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/aiperf-bench@${AIPERF_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
-# Cosign — provenance and OpenVEX are on the index. Pin the workflow *and*
-# the exact tag ref (same binding as --source-ref above): without
+# Cosign — only provenance is on the index. Pin the workflow *and* the exact
+# tag ref (same binding as --source-ref above): without
 # --certificate-github-workflow-ref, the identity regexp alone would accept
 # an attestation signed for any release tag on a digest this tag was
 # rewritten to point at.
 IDENTITY='^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$'
-for predicate in slsaprovenance1 openvex; do
+cosign verify-attestation \
+  --type slsaprovenance1 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp "${IDENTITY}" \
+  --certificate-github-workflow-ref "refs/tags/${TAG}" \
+  "ghcr.io/nvidia/aicr@${AICR_INDEX}" >/dev/null
+
+# Cosign — the SBOM and the VEX are both on the per-platform child manifest
+platform="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+AICR_CHILD=$(crane digest --platform "${platform}" "ghcr.io/nvidia/aicr@${AICR_INDEX}")
+for predicate in cyclonedx openvex; do
   cosign verify-attestation \
     --type "${predicate}" \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
     --certificate-identity-regexp "${IDENTITY}" \
     --certificate-github-workflow-ref "refs/tags/${TAG}" \
-    "ghcr.io/nvidia/aicr@${AICR_INDEX}" >/dev/null
+    "ghcr.io/nvidia/aicr@${AICR_CHILD}" >/dev/null
 done
-
-# Cosign — the SBOM is on the per-platform child manifest
-platform="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
-AICR_CHILD=$(crane digest --platform "${platform}" "ghcr.io/nvidia/aicr@${AICR_INDEX}")
-cosign verify-attestation \
-  --type spdxjson \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp "${IDENTITY}" \
-  --certificate-github-workflow-ref "refs/tags/${TAG}" \
-  "ghcr.io/nvidia/aicr@${AICR_CHILD}" >/dev/null
 ```
 
 ### Binary Checksums

@@ -861,6 +861,14 @@ const (
 	// allocate the whole file into memory.
 	MaxBOMBytes int64 = 8 * 1024 * 1024 // 8 MiB
 
+	// MaxOpenVEXBytes caps the size of an OpenVEX document read from disk
+	// (the `.openvex.json` source that tools/openvex-bind projects onto a
+	// platform manifest digest). The committed document is well under
+	// 100 KiB even with per-statement impact prose; 1 MiB is generous
+	// headroom while bounding an attacker-influenced path before
+	// os.ReadFile would allocate the whole file into memory.
+	MaxOpenVEXBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
 	// MaxConfigBytes caps the size of a user-supplied --config file. Real
 	// configs are well under 100 KiB; 1 MiB is generous headroom while
 	// preventing a hostile symlink (/proc, FUSE, NFS) from forcing the CLI

@@ -22,6 +22,16 @@ consumed by the `Weekly Image Vulnerability Scan` workflow
 `anchore/scan-action@v7.4.0`, which passes it to grype as `--vex
 .openvex.json`.
 
+It is also the source for the OpenVEX attestation each release publishes on
+every platform manifest. `.github/actions/sbom-and-attest` validates this file,
+then runs `tools/openvex-bind` to rewrite each statement's bare
+`pkg:oci/<image>` products to `pkg:oci/<image>@sha256:<platform-digest>` and
+signs that projection. Edit this file only: the published document is
+generated, never committed. Two consequences for edits here: a statement whose
+product PURL does not name a released image is silently dropped from every
+projection, and statuses, justifications and impact statements are published
+verbatim to a public registry.
+
 This skill exists because the file has *non-obvious* invariants — most
 notably the product-PURL matching rule — and getting them wrong silently
 no-ops every statement in the document.
@@ -302,6 +312,8 @@ Bump the document `version` and refresh `timestamp` in the same edit.
 
 - Workflow: `.github/workflows/vuln-scan-images.yaml`
 - VEX document: `.openvex.json`
+- Release publication: `.github/actions/sbom-and-attest/action.yml` +
+  `tools/openvex-bind` (digest binding)
 - Grype config (excludes for source scans only): `.grype.yaml`
 - Image source: `validators/performance/aiperf-bench.Dockerfile`
 - aiperf pin: `AIPERF_VERSION` ARG in that Dockerfile

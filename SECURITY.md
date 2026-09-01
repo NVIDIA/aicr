@@ -88,7 +88,8 @@ For all security-related concerns: [NVIDIA Product Security](https://www.nvidia.
 
 AICR (AI Cluster Runtime) provides supply chain security artifacts for all container images:
 
-- **SBOM Attestation**: Complete inventory of packages, libraries, and components in SPDX format
+- **SBOM Attestation**: Complete inventory of packages, libraries, and components in CycloneDX format, one per platform manifest
+- **VEX Attestation**: OpenVEX triage recording which CVEs do not affect the image and why, published alongside each platform SBOM
 - **SLSA Build Provenance**: Verifiable build information (how and where images were created)
 
 ### Deployed Image Inventory and Pinning Policy
@@ -149,7 +150,8 @@ and how it is signed:
 |-----------|----------|-------------------|---------|
 | Build provenance | Container images | SLSA Build Level 3 (provenance v1) | Sigstore keyless via GitHub Actions OIDC, generated from a reusable workflow |
 | Build provenance | CLI binaries | SLSA Build Provenance v1 (Sigstore bundle) | Cosign keyless, logged to public Rekor |
-| Signed SBOM | Container images | SPDX v2.3 JSON attestation | Cosign keyless (Fulcio + Rekor) |
+| Signed SBOM | Container images | CycloneDX 1.6 JSON attestation, per platform manifest | Cosign keyless (Fulcio + Rekor) |
+| Signed VEX | Container images | OpenVEX 0.2.0 attestation, per platform manifest | Cosign keyless (Fulcio + Rekor) |
 | Binary SBOM | CLI binaries | SPDX v2.3 JSON (via GoReleaser) | Separate release asset (`*.sbom.json`), not embedded |
 | Bundle attestation | `aicr bundle` output | SLSA Build Provenance v1 | Sigstore keyless OIDC (opt-in `--attest`) |
 | Recipe / bundle validity | `aicr verify` trust levels | `verified` / `attested` / `unverified` / `unknown` | Checksums + Sigstore trusted root |
@@ -195,7 +197,8 @@ export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | 
 export IMAGE="ghcr.io/nvidia/aicr"
 export DIGEST=$(crane digest "${IMAGE}:${TAG}")
 
-# Verify build provenance (the SPDX SBOM uses the Cosign flow in docs/integrator/supply-chain-verification.md)
+# Verify build provenance (the CycloneDX SBOM and the OpenVEX document use the Cosign flow
+# in docs/integrator/supply-chain-verification.md, against the per-platform manifest digest)
 # --signer-workflow pins the trusted reusable builder; passing it is the SLSA Build Level 3 check.
 gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 # ✓ Verification succeeded!
