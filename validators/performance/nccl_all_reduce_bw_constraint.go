@@ -544,7 +544,7 @@ const ncclRunLockName = "aicr-nccl-run-lock"
 // pod. A missing Lease is claimed by Create, which only one caller can win.
 // An existing Lease is claimed by Update pinned to the resourceVersion just
 // read, so a racing takeover also loses to a Conflict, unless it was
-// renewed within NCCLStaleNamespacePruneAge, in which case it's still live
+// renewed within NCCLExecutionLockStaleAge, in which case it's still live
 // and returns ErrCodeConflict instead.
 //
 // The returned holder ID is fresh per call, so cleanupNCCLRun can tell
@@ -552,7 +552,7 @@ const ncclRunLockName = "aicr-nccl-run-lock"
 func claimNCCLExecutionLock(ctx context.Context, clientset kubernetes.Interface, namespace string) (string, error) {
 	holderID := generateExecutionID()
 	now := metav1.NewMicroTime(time.Now())
-	leaseDurationSeconds := int32(defaults.NCCLStaleNamespacePruneAge.Seconds())
+	leaseDurationSeconds := int32(defaults.NCCLExecutionLockStaleAge.Seconds())
 
 	claimCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
@@ -575,7 +575,7 @@ func claimNCCLExecutionLock(ctx context.Context, clientset kubernetes.Interface,
 	if err != nil {
 		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read NCCL benchmark execution lock", err)
 	}
-	if existing.Spec.RenewTime != nil && time.Since(existing.Spec.RenewTime.Time) < defaults.NCCLStaleNamespacePruneAge {
+	if existing.Spec.RenewTime != nil && time.Since(existing.Spec.RenewTime.Time) < defaults.NCCLExecutionLockStaleAge {
 		return "", aicrErrors.New(aicrErrors.ErrCodeConflict,
 			fmt.Sprintf("NCCL benchmark namespace %q is claimed by another execution; refusing to proceed", namespace))
 	}

@@ -562,7 +562,7 @@ func TestClaimNCCLExecutionLock_ConcurrentCallersOneWins(t *testing.T) {
 func TestClaimNCCLExecutionLock_ConcurrentTakeoverOneWins(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	oldHolder := "stale-holder"
-	oldRenew := metav1.NewMicroTime(time.Now().Add(-2 * defaults.NCCLStaleNamespacePruneAge))
+	oldRenew := metav1.NewMicroTime(time.Now().Add(-2 * defaults.NCCLExecutionLockStaleAge))
 	clientset := fake.NewClientset(&coordinationv1.Lease{
 		ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns, ResourceVersion: "1"},
 		Spec: coordinationv1.LeaseSpec{
@@ -611,6 +611,31 @@ func TestClaimNCCLExecutionLock_RefusesLiveLease(t *testing.T) {
 
 	if _, err := claimNCCLExecutionLock(context.Background(), clientset, ns); !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
 		t.Errorf("expected ErrCodeConflict against a live lease, got: %v", err)
+	}
+}
+
+// TestClaimNCCLExecutionLock_ReclaimsWellBeforeNamespacePruneAge verifies a
+// retry after a hard kill reclaims its dead lock promptly, well under
+// NCCLStaleNamespacePruneAge, not after waiting out that much longer age.
+func TestClaimNCCLExecutionLock_ReclaimsWellBeforeNamespacePruneAge(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	deadHolder := "dead-holder"
+	deadRenew := metav1.NewMicroTime(time.Now().Add(-2 * defaults.NCCLExecutionLockStaleAge))
+	if time.Since(deadRenew.Time) >= defaults.NCCLStaleNamespacePruneAge {
+		t.Fatalf("test fixture is not a useful regression guard: 2x NCCLExecutionLockStaleAge "+
+			"(%s ago) already exceeds NCCLStaleNamespacePruneAge (%s)",
+			time.Since(deadRenew.Time), defaults.NCCLStaleNamespacePruneAge)
+	}
+	clientset := fake.NewClientset(&coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns},
+		Spec: coordinationv1.LeaseSpec{
+			HolderIdentity: &deadHolder,
+			RenewTime:      &deadRenew,
+		},
+	})
+
+	if _, err := claimNCCLExecutionLock(context.Background(), clientset, ns); err != nil {
+		t.Errorf("expected the dead holder's lock to be reclaimed, got: %v", err)
 	}
 }
 

@@ -697,6 +697,13 @@ const (
 	// sibling variant, or a run that is simply slow, is never touched.
 	NCCLStaleNamespacePruneAge = 2 * NCCLTrainJobTimeout
 
+	// NCCLExecutionLockStaleAge is how long an unrenewed run execution lock
+	// (see claimNCCLExecutionLock) is honored before a new caller may take
+	// it over. Only needs to cover claim-to-first-pod, not the full run, so
+	// a retry after a hard kill isn't stuck waiting out
+	// NCCLStaleNamespacePruneAge instead.
+	NCCLExecutionLockStaleAge = 20 * time.Minute
+
 	// NCCLLauncherPodTimeout is the maximum time to wait for the NCCL launcher pod to be created.
 	NCCLLauncherPodTimeout = 5 * time.Minute
 
