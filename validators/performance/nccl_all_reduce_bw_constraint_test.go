@@ -639,6 +639,75 @@ func TestClaimNCCLExecutionLock_ReclaimsWellBeforeNamespacePruneAge(t *testing.T
 	}
 }
 
+// TestNcclExecutionLockHeldBy_LosesRaceToTakeover verifies that a takeover
+// landing between ncclExecutionLockHeldBy's read and its renewal makes it
+// report the lock not held, instead of the stale holder's cleanup going on
+// to delete the new holder's live namespace. A reactor on the Lease Get
+// applies a rival takeover to the tracker before returning the stale
+// holder's view, then a second reactor emulates the apiserver's
+// resourceVersion check the fake ObjectTracker skips on Update, so the
+// renewal that follows the Get sees the same conflict a real cluster would.
+func TestNcclExecutionLockHeldBy_LosesRaceToTakeover(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	holderA, holderB := "holder-a", "holder-b"
+	leaseGVR := coordinationv1.SchemeGroupVersion.WithResource("leases")
+	clientset := fake.NewClientset(&coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns, ResourceVersion: "1"},
+		Spec:       coordinationv1.LeaseSpec{HolderIdentity: &holderA},
+	})
+
+	var (
+		mu        sync.Mutex
+		currentRV = 1
+		tookOver  bool
+	)
+	clientset.PrependReactor("get", "leases", func(k8stesting.Action) (bool, runtime.Object, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if tookOver {
+			return false, nil, nil
+		}
+		tookOver = true
+		// Return this caller its stale, pre-takeover view...
+		staleView := &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns, ResourceVersion: "1"},
+			Spec:       coordinationv1.LeaseSpec{HolderIdentity: &holderA},
+		}
+		// ...while a rival's takeover lands underneath it, the interleaving
+		// this test exists to prove ncclExecutionLockHeldBy's renewal
+		// detects instead of proceeding on the stale view.
+		renew := metav1.NewMicroTime(time.Now())
+		currentRV++
+		rival := &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns, ResourceVersion: strconv.Itoa(currentRV)},
+			Spec:       coordinationv1.LeaseSpec{HolderIdentity: &holderB, RenewTime: &renew},
+		}
+		if err := clientset.Tracker().Update(leaseGVR, rival, ns); err != nil {
+			return true, nil, err
+		}
+		return true, staleView, nil
+	})
+	clientset.PrependReactor("update", "leases", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		lease := action.(k8stesting.UpdateAction).GetObject().(*coordinationv1.Lease)
+		mu.Lock()
+		defer mu.Unlock()
+		if lease.ResourceVersion != strconv.Itoa(currentRV) {
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Group: "coordination.k8s.io", Resource: "leases"},
+				ncclRunLockName, stderrors.New("resourceVersion mismatch"))
+		}
+		currentRV++
+		return true, lease, nil
+	})
+
+	held, err := ncclExecutionLockHeldBy(clientset, ns, holderA)
+	if err != nil {
+		t.Fatalf("ncclExecutionLockHeldBy() error = %v", err)
+	}
+	if held {
+		t.Error("expected the renewal to lose the race to the takeover and report the lock not held")
+	}
+}
+
 // raceClaimNCCLExecutionLock calls claimNCCLExecutionLock concurrently from
 // n goroutines against the same namespace and returns the winning holder
 // IDs and the errors from the rest.

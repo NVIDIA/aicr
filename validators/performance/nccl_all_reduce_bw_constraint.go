@@ -604,20 +604,41 @@ func generateExecutionID() string {
 	return hex.EncodeToString(buf)
 }
 
-// ncclExecutionLockHeldBy reports whether namespace's execution lock still
-// names holderID as the current holder. A missing lock has nothing left to
-// protect and reports true.
+// ncclExecutionLockHeldBy confirms namespace's execution lock still names
+// holderID as the current holder, and renews it in the same call. A plain
+// read-only check here would leave a gap between the read and
+// cleanupNCCLResources's delete for a takeover to land in: both executions
+// would then share the same namespace UID, and the stale holder's delete
+// would remove the new holder's live namespace. Renewing pinned to the
+// resourceVersion just read closes that gap the same way
+// claimNCCLExecutionLock's own takeover does. Renewing either succeeds,
+// proving nothing raced it, or loses to a Conflict, proving a takeover
+// already happened, in which case cleanup must not touch the namespace. A
+// missing lock has nothing left to protect and reports true.
 func ncclExecutionLockHeldBy(clientset kubernetes.Interface, namespace, holderID string) (bool, error) {
 	getCtx, cancel := context.WithTimeout(context.Background(), defaults.DiagnosticTimeout)
 	defer cancel()
-	lease, err := clientset.CoordinationV1().Leases(namespace).Get(getCtx, ncclRunLockName, metav1.GetOptions{})
+	leaseClient := clientset.CoordinationV1().Leases(namespace)
+	lease, err := leaseClient.Get(getCtx, ncclRunLockName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		return true, nil
 	}
 	if err != nil {
 		return false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to check NCCL benchmark execution lock", err)
 	}
-	return lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity == holderID, nil
+	if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity != holderID {
+		return false, nil
+	}
+
+	now := metav1.NewMicroTime(time.Now())
+	lease.Spec.RenewTime = &now
+	if _, err := leaseClient.Update(getCtx, lease, metav1.UpdateOptions{}); err != nil {
+		if apierrors.IsConflict(err) {
+			return false, nil
+		}
+		return false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to renew NCCL benchmark execution lock before cleanup", err)
+	}
+	return true, nil
 }
 
 // pruneStaleNCCLNamespaces best-effort deletes aicr-nccl-perf-* namespaces
