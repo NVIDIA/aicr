@@ -19,7 +19,9 @@ import (
 	"context"
 	stderrors "errors"
 	"log/slog"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +29,7 @@ import (
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	"github.com/NVIDIA/aicr/validators"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,6 +40,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -473,7 +477,7 @@ func TestCleanupNCCLRun_DeletesNamespaceBeforeTrainer(t *testing.T) {
 		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
 	}
 
-	if err := cleanupNCCLRun(clientset, dynamicClient, ns, testNamespaceUID, resources, nil); err != nil {
+	if err := cleanupNCCLRun(clientset, dynamicClient, ns, testNamespaceUID, testHolderID, resources, nil); err != nil {
 		t.Fatalf("cleanupNCCLRun failed: %v", err)
 	}
 
@@ -497,7 +501,7 @@ func TestCleanupNCCLRun_PropagatesTrainerCleanupFailure(t *testing.T) {
 		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
 	}
 
-	err := cleanupNCCLRun(clientset, dynamicClient, ns, testNamespaceUID, resources, nil)
+	err := cleanupNCCLRun(clientset, dynamicClient, ns, testNamespaceUID, testHolderID, resources, nil)
 	if err == nil {
 		t.Fatal("expected the Trainer teardown failure to fail the check, got nil")
 	}
@@ -527,12 +531,126 @@ func TestCleanupNCCLRun_SkipsTrainerTeardownOnNamespaceDeleteFailure(t *testing.
 		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
 	}
 
-	err := cleanupNCCLRun(clientset, dynamicClient, ns, testNamespaceUID, resources, nil)
+	err := cleanupNCCLRun(clientset, dynamicClient, ns, testNamespaceUID, testHolderID, resources, nil)
 	if err == nil {
 		t.Fatal("expected the namespace delete failure to fail the check, got nil")
 	}
 	if trainerDeleted {
 		t.Error("expected Trainer teardown to be skipped after the namespace delete failed, but deleteTrainer ran")
+	}
+}
+
+// TestClaimNCCLExecutionLock_ConcurrentCallersOneWins verifies that when
+// several callers race to claim a namespace with no existing lock, exactly
+// one wins and the rest get ErrCodeConflict.
+func TestClaimNCCLExecutionLock_ConcurrentCallersOneWins(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	clientset := fake.NewClientset()
+	holders, errs := raceClaimNCCLExecutionLock(clientset, ns, 8)
+
+	if len(holders) != 1 {
+		t.Fatalf("expected exactly one winner, got %d: %v", len(holders), holders)
+	}
+	assertAllConflict(t, errs, 7)
+}
+
+// TestClaimNCCLExecutionLock_ConcurrentTakeoverOneWins verifies that when
+// several callers race to take over an abandoned lock, exactly one wins and
+// the rest get ErrCodeConflict, instead of all of them proceeding. The
+// fake ObjectTracker doesn't enforce optimistic concurrency on Update, so a
+// reactor emulates the real apiserver's resourceVersion check.
+func TestClaimNCCLExecutionLock_ConcurrentTakeoverOneWins(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	oldHolder := "stale-holder"
+	oldRenew := metav1.NewMicroTime(time.Now().Add(-2 * defaults.NCCLStaleNamespacePruneAge))
+	clientset := fake.NewClientset(&coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns, ResourceVersion: "1"},
+		Spec: coordinationv1.LeaseSpec{
+			HolderIdentity: &oldHolder,
+			RenewTime:      &oldRenew,
+		},
+	})
+
+	var (
+		mu        sync.Mutex
+		currentRV = 1
+	)
+	clientset.PrependReactor("update", "leases", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		lease := action.(k8stesting.UpdateAction).GetObject().(*coordinationv1.Lease)
+		mu.Lock()
+		defer mu.Unlock()
+		if lease.ResourceVersion != strconv.Itoa(currentRV) {
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Group: "coordination.k8s.io", Resource: "leases"},
+				ncclRunLockName, stderrors.New("resourceVersion mismatch"))
+		}
+		currentRV++
+		return true, lease, nil
+	})
+
+	holders, errs := raceClaimNCCLExecutionLock(clientset, ns, 8)
+
+	if len(holders) != 1 {
+		t.Fatalf("expected exactly one winner, got %d: %v", len(holders), holders)
+	}
+	assertAllConflict(t, errs, 7)
+}
+
+// TestClaimNCCLExecutionLock_RefusesLiveLease verifies a lock renewed
+// recently is treated as a live execution's claim, not taken over.
+func TestClaimNCCLExecutionLock_RefusesLiveLease(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	liveHolder := "live-holder"
+	liveRenew := metav1.NewMicroTime(time.Now())
+	clientset := fake.NewClientset(&coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns},
+		Spec: coordinationv1.LeaseSpec{
+			HolderIdentity: &liveHolder,
+			RenewTime:      &liveRenew,
+		},
+	})
+
+	if _, err := claimNCCLExecutionLock(context.Background(), clientset, ns); !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+		t.Errorf("expected ErrCodeConflict against a live lease, got: %v", err)
+	}
+}
+
+// raceClaimNCCLExecutionLock calls claimNCCLExecutionLock concurrently from
+// n goroutines against the same namespace and returns the winning holder
+// IDs and the errors from the rest.
+func raceClaimNCCLExecutionLock(clientset kubernetes.Interface, namespace string, n int) (holders []string, errs []error) {
+	var (
+		wg sync.WaitGroup
+		mu sync.Mutex
+	)
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			holderID, err := claimNCCLExecutionLock(context.Background(), clientset, namespace)
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				errs = append(errs, err)
+			} else {
+				holders = append(holders, holderID)
+			}
+		}()
+	}
+	wg.Wait()
+	return holders, errs
+}
+
+// assertAllConflict fails the test unless errs has wantCount entries, all
+// ErrCodeConflict.
+func assertAllConflict(t *testing.T, errs []error, wantCount int) {
+	t.Helper()
+	if len(errs) != wantCount {
+		t.Fatalf("expected %d losing callers, got %d: %v", wantCount, len(errs), errs)
+	}
+	for _, err := range errs {
+		if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+			t.Errorf("expected ErrCodeConflict for a losing caller, got: %v", err)
+		}
 	}
 }
 

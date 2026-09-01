@@ -16,6 +16,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"os"
@@ -36,6 +39,7 @@ import (
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
 	"github.com/NVIDIA/aicr/validators/internal/gkenet"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -530,6 +534,92 @@ func verifyNCCLNamespaceNotLive(ctx context.Context, clientset kubernetes.Interf
 	return nil
 }
 
+// ncclRunLockName is the Lease that admits exactly one execution into a
+// per-run NCCL namespace at a time.
+const ncclRunLockName = "aicr-nccl-run-lock"
+
+// claimNCCLExecutionLock atomically admits exactly one execution into
+// namespace, closing the race where two callers (e.g. sharing one
+// AICR_RUN_ID) both pass verifyNCCLNamespaceNotLive before either creates a
+// pod. A missing Lease is claimed by Create, which only one caller can win.
+// An existing Lease is claimed by Update pinned to the resourceVersion just
+// read, so a racing takeover also loses to a Conflict, unless it was
+// renewed within NCCLStaleNamespacePruneAge, in which case it's still live
+// and returns ErrCodeConflict instead.
+//
+// The returned holder ID is fresh per call, so cleanupNCCLRun can tell
+// whether it still holds the lock before deleting anything.
+func claimNCCLExecutionLock(ctx context.Context, clientset kubernetes.Interface, namespace string) (string, error) {
+	holderID := generateExecutionID()
+	now := metav1.NewMicroTime(time.Now())
+	leaseDurationSeconds := int32(defaults.NCCLStaleNamespacePruneAge.Seconds())
+
+	claimCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	leaseClient := clientset.CoordinationV1().Leases(namespace)
+
+	lease := &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: namespace},
+		Spec: coordinationv1.LeaseSpec{
+			HolderIdentity: &holderID, LeaseDurationSeconds: &leaseDurationSeconds,
+			AcquireTime: &now, RenewTime: &now,
+		},
+	}
+	if _, err := leaseClient.Create(claimCtx, lease, metav1.CreateOptions{}); err == nil {
+		return holderID, nil
+	} else if !apierrors.IsAlreadyExists(err) {
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to claim NCCL benchmark execution lock", err)
+	}
+
+	existing, err := leaseClient.Get(claimCtx, ncclRunLockName, metav1.GetOptions{})
+	if err != nil {
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read NCCL benchmark execution lock", err)
+	}
+	if existing.Spec.RenewTime != nil && time.Since(existing.Spec.RenewTime.Time) < defaults.NCCLStaleNamespacePruneAge {
+		return "", aicrErrors.New(aicrErrors.ErrCodeConflict,
+			fmt.Sprintf("NCCL benchmark namespace %q is claimed by another execution; refusing to proceed", namespace))
+	}
+
+	existing.Spec.HolderIdentity, existing.Spec.LeaseDurationSeconds = &holderID, &leaseDurationSeconds
+	existing.Spec.AcquireTime, existing.Spec.RenewTime = &now, &now
+	if _, err := leaseClient.Update(claimCtx, existing, metav1.UpdateOptions{}); err != nil {
+		if apierrors.IsConflict(err) {
+			return "", aicrErrors.New(aicrErrors.ErrCodeConflict,
+				fmt.Sprintf("NCCL benchmark namespace %q was claimed by a concurrent execution; refusing to proceed", namespace))
+		}
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to take over an abandoned NCCL benchmark execution lock", err)
+	}
+	return holderID, nil
+}
+
+// generateExecutionID returns a fresh random identifier for one execution,
+// distinct from AICR_RUN_ID so two invocations sharing a run ID still get
+// different lock holder identities.
+func generateExecutionID() string {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		sum := sha256.Sum256(fmt.Appendf(nil, "%d", time.Now().UnixNano()))
+		return hex.EncodeToString(sum[:8])
+	}
+	return hex.EncodeToString(buf)
+}
+
+// ncclExecutionLockHeldBy reports whether namespace's execution lock still
+// names holderID as the current holder. A missing lock has nothing left to
+// protect and reports true.
+func ncclExecutionLockHeldBy(clientset kubernetes.Interface, namespace, holderID string) (bool, error) {
+	getCtx, cancel := context.WithTimeout(context.Background(), defaults.DiagnosticTimeout)
+	defer cancel()
+	lease, err := clientset.CoordinationV1().Leases(namespace).Get(getCtx, ncclRunLockName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to check NCCL benchmark execution lock", err)
+	}
+	return lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity == holderID, nil
+}
+
 // pruneStaleNCCLNamespaces best-effort deletes aicr-nccl-perf-* namespaces
 // left behind by a standalone (no AICR_RUN_ID) run killed before its own
 // deferred cleanup ran. The Job path doesn't need this. Its deterministic
@@ -621,6 +711,14 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 		return "", err
 	}
 
+	// Two callers can still both pass the check above before either creates
+	// a pod. Claim exclusive ownership atomically so the loser fails
+	// closed instead of sharing the namespace.
+	holderID, err := claimNCCLExecutionLock(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
+	if err != nil {
+		return "", err
+	}
+
 	// Pin the namespace instance ensureNamespace just created or reclaimed by
 	// UID so the deferred delete below can never remove a different
 	// namespace object that came to exist under this same name afterward
@@ -637,7 +735,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// cleanupNCCLRun for the enforced order.
 	var installedResources []trainerResourceRef
 	defer func() {
-		err = cleanupNCCLRun(ctx.Clientset, dynamicClient, gpuConfig.Namespace, namespaceUID, installedResources, err)
+		err = cleanupNCCLRun(ctx.Clientset, dynamicClient, gpuConfig.Namespace, namespaceUID, holderID, installedResources, err)
 	}()
 
 	// Ensure a usable Kubeflow Trainer. Whether an incomplete installation is a
@@ -2410,18 +2508,27 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 }
 
 // cleanupNCCLRun tears down everything runNCCLTrainJob created, in a fixed
-// order. It deletes the per-run namespace first (cascading its
+// order. It skips cleanup entirely if holderID no longer holds the
+// namespace's execution lock, since another execution has since taken it
+// over. Otherwise it deletes the per-run namespace first (cascading its
 // TrainJob/TrainingRuntime/ComputeDomain/RoCE-claim CRs), then, only on the
-// self-install fallback path, the Kubeflow Trainer installation itself.
-// The order matters, deleteTrainer removes the Trainer controller and its
-// CRDs, which would strand the namespace's own CRs' finalizers if it ran
-// first. Trainer teardown only runs if the namespace delete succeeded,
-// since those CRs may otherwise still exist.
+// self-install fallback path, the Kubeflow Trainer installation, whose
+// removal would otherwise strand those CRs' finalizers if it ran first.
+// Trainer teardown only runs if the namespace delete succeeded.
 //
 // benchErr is the check's result so far. A cleanup failure only overrides
 // a nil benchErr, never masking a real benchmark failure (see
 // foldCleanupError).
-func cleanupNCCLRun(clientset kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, uid types.UID, installedResources []trainerResourceRef, benchErr error) error {
+func cleanupNCCLRun(clientset kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, uid types.UID, holderID string, installedResources []trainerResourceRef, benchErr error) error {
+	held, lockErr := ncclExecutionLockHeldBy(clientset, namespace, holderID)
+	if lockErr != nil {
+		return foldCleanupError(benchErr, lockErr, "NCCL benchmark succeeded but its execution lock could not be checked")
+	}
+	if !held {
+		slog.Warn("NCCL benchmark execution lock was taken over by another execution; skipping cleanup", "namespace", namespace)
+		return benchErr
+	}
+
 	nsErr := cleanupNCCLResources(clientset, namespace, uid)
 	err := foldCleanupError(benchErr, nsErr, "NCCL benchmark succeeded but NCCL resource cleanup failed")
 	if nsErr != nil {

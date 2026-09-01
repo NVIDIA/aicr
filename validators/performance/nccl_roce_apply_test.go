@@ -127,6 +127,11 @@ func TestCreateOrUpdateFromTemplate_RoCEClaimIdempotent(t *testing.T) {
 // TestCleanupNCCLResources_RejectsEmptyUID).
 const testNamespaceUID = types.UID("test-owner-uid")
 
+// testHolderID is the execution lock holder ID used across cleanupNCCLRun
+// tests that don't seed a Lease. ncclExecutionLockHeldBy treats a missing
+// Lease as nothing left to protect, so any value works here.
+const testHolderID = "test-holder-id"
+
 // TestCleanupNCCLResources_ToleratesMissing verifies the deferred cleanup is
 // safe to run after an early/partial-apply failure. With no namespace ever
 // created, deleting it must be treated as success (NotFound-tolerant), not
