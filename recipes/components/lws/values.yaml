@@ -25,8 +25,17 @@
 #
 # MAINTENANCE: on every chart version bump, re-diff against
 #   helm show values oci://registry.k8s.io/lws/charts/lws --version <new>
-# and re-verify the top-level nodeSelector/tolerations paths pinned in
-# recipes/registry.yaml nodeScheduling.
+# re-verify the top-level nodeSelector/tolerations paths pinned in
+# recipes/registry.yaml nodeScheduling, and bump the image tag pin below
+# to the new chart's appVersion.
+
+# Pin the controller image tag to the appVersion of the chart pinned in
+# registry.yaml (lws v0.8.0 → appVersion v0.8.0) so the image cannot
+# drift from the qualified chart even if a future chart revision changes
+# its default tag handling.
+image:
+  manager:
+    tag: v0.8.0
 
 # Match the kueue convention for system controllers: tolerate all taints
 # so the controller schedules on tainted system pools; bundle-time
