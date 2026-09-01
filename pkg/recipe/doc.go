@@ -69,6 +69,7 @@
 //   - CriteriaServiceLKE: Linode LKE
 //   - CriteriaServiceBCM: NVIDIA Base Command Manager
 //   - CriteriaServiceOCP: Red Hat OpenShift Container Platform
+//   - CriteriaServiceRKE2: Rancher Kubernetes Engine 2 (bare-metal)
 //   - CriteriaServiceAny: Any service (wildcard)
 //
 // Accelerator types for GPU selection:
@@ -80,6 +81,7 @@
 //   - CriteriaAcceleratorL40: NVIDIA L40
 //   - CriteriaAcceleratorL40S: NVIDIA L40S
 //   - CriteriaAcceleratorRTXPro6000: NVIDIA RTX PRO 6000
+//   - CriteriaAcceleratorVR200: NVIDIA VR200 (Vera Rubin)
 //   - CriteriaAcceleratorAny: Any accelerator (wildcard)
 //
 // Intent types for workload optimization:
