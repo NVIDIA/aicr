@@ -60,7 +60,7 @@ const (
 	NCCLAllReduceBWNetCheckName = "nccl-all-reduce-bw-net"
 
 	// CRENCCLAllReduceBWCheckName is the catalog name of the CRE-driven NCCL
-	// all-reduce check (WorkloadRun). Overlays opt in by listing this check and
+	// all-reduce check (Certification). Overlays opt in by listing this check and
 	// a same-named performance constraint. It is limited to EKS H100 while CRE
 	// integration is validated, and no embedded overlay enables it.
 	CRENCCLAllReduceBWCheckName = "nccl-cre-all-reduce-bw"

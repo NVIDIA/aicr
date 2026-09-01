@@ -83,36 +83,63 @@ func TestMaxBusBandwidthGBps(t *testing.T) {
 	}
 }
 
-func TestBuildCRENCCLWorkloadRunEKSUsesEFAImage(t *testing.T) {
+func TestBuildCRENCCLCertification(t *testing.T) {
 	cfg := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8, Namespace: "ns"}
-	obj := buildCRENCCLWorkloadRun("ns", cfg, map[string]string{"foo": "bar"})
+	obj := buildCRENCCLCertification("ns", cfg, map[string]string{"foo": "bar"})
+	if obj.GetAPIVersion() != "nvcre.nvidia.com/v1alpha1" {
+		t.Errorf("apiVersion = %q", obj.GetAPIVersion())
+	}
+	if obj.GetKind() != "Certification" {
+		t.Errorf("kind = %q", obj.GetKind())
+	}
 	spec, ok := obj.Object["spec"].(map[string]any)
 	if !ok {
 		t.Fatal("spec is not a map")
 	}
-	if spec["image"] != creEFANCCLImage {
-		t.Errorf("image = %v, want EFA nccl-tests image", spec["image"])
+	categories := spec["categories"].([]any)
+	category := categories[0].(map[string]any)
+	if category["domain"] != "communication" || category["variant"] != "nccl-all-reduce" {
+		t.Errorf("category = %#v", category)
 	}
-	fw := spec["framework"].(map[string]any)
-	mpi := fw["mpi"].(map[string]any)
-	if mpi["mpirunPath"] != creEFAMpirun {
-		t.Errorf("mpirunPath = %v, want %s", mpi["mpirunPath"], creEFAMpirun)
+	target := spec["target"].(map[string]any)
+	selector := target["nodeSelector"].(map[string]any)
+	if selector["foo"] != "bar" {
+		t.Errorf("nodeSelector = %#v", selector)
 	}
-	if mpi["binary"] != creEFANCCLBin {
-		t.Errorf("binary = %v, want %s", mpi["binary"], creEFANCCLBin)
+	if spec["gpusPerNode"] != int64(8) {
+		t.Errorf("gpusPerNode = %#v", spec["gpusPerNode"])
 	}
-	res := spec["resources"].(map[string]any)
-	limits := res["limits"].(map[string]any)
-	if limits[creEFAResource] != creEFACountH100 {
-		t.Errorf("efa limit = %v, want %s", limits[creEFAResource], creEFACountH100)
+}
+
+func TestBuildCRENCCLCertificationCopiesSharedGPUTaints(t *testing.T) {
+	taint := corev1.Taint{
+		Key:    "dedicated",
+		Value:  "worker-workload",
+		Effect: corev1.TaintEffectNoSchedule,
 	}
-	if spec["enableMNNVL"] != false {
-		t.Errorf("enableMNNVL = %v, want false", spec["enableMNNVL"])
+	cfg := &gpuConfiguration{
+		WorkerCount:     2,
+		GPUCountPerNode: 8,
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "a"}, Spec: corev1.NodeSpec{Taints: []corev1.Taint{taint}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "b"}, Spec: corev1.NodeSpec{Taints: []corev1.Taint{taint}}},
+		},
+	}
+	obj := buildCRENCCLCertification("ns", cfg, nil)
+	spec := obj.Object["spec"].(map[string]any)
+	target := spec["target"].(map[string]any)
+	sels, ok := target["taintSelectors"].([]any)
+	if !ok || len(sels) != 1 {
+		t.Fatalf("taintSelectors = %#v", target["taintSelectors"])
+	}
+	sel := sels[0].(map[string]any)
+	if sel["key"] != "dedicated" || sel["value"] != "worker-workload" || sel["effect"] != string(corev1.TaintEffectNoSchedule) {
+		t.Fatalf("selector = %#v", sel)
 	}
 }
 
 func TestUnstructuredConditionTrue(t *testing.T) {
-	obj := buildCRENCCLWorkloadRun("ns", &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
+	obj := buildCRENCCLCertification("ns", &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
 	obj.Object["status"] = map[string]any{
 		"conditions": []any{
 			map[string]any{"type": "Succeeded", "status": "True"},
@@ -123,6 +150,28 @@ func TestUnstructuredConditionTrue(t *testing.T) {
 	}
 	if unstructuredConditionTrue(obj, "Failed") {
 		t.Fatal("did not expect Failed")
+	}
+}
+
+func TestCertificationWorkflowName(t *testing.T) {
+	obj := buildCRENCCLCertification("ns", &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
+	obj.Object["status"] = map[string]any{
+		"categoryStatuses": []any{
+			map[string]any{
+				"domain":  "communication",
+				"variant": "nccl-all-reduce",
+				"workflowRef": map[string]any{
+					"name": "aicr-cre-nccl-abcde",
+				},
+			},
+		},
+	}
+	got, err := certificationWorkflowName(obj)
+	if err != nil {
+		t.Fatalf("certificationWorkflowName() error = %v", err)
+	}
+	if got != "aicr-cre-nccl-abcde" {
+		t.Errorf("workflow name = %q", got)
 	}
 }
 
@@ -157,7 +206,7 @@ func TestYoungestLivePodSince(t *testing.T) {
 
 func TestMeasurementBelongsToRun(t *testing.T) {
 	createdAt := metav1.NewTime(time.Unix(100, 0))
-	obj := buildCRENCCLWorkloadRun("ns", &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
+	obj := buildCRENCCLCertification("ns", &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
 	obj.SetCreationTimestamp(metav1.NewTime(time.Unix(101, 0)))
 	obj.SetOwnerReferences([]metav1.OwnerReference{{Kind: "Workflow", Name: creNCCLRunName}})
 	if !measurementBelongsToRun(obj, creNCCLRunName, createdAt) {
