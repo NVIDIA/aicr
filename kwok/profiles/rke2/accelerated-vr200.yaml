@@ -17,7 +17,7 @@
 # Bare-metal Vera Rubin NVL72 GPU worker:
 # - 4x NVIDIA VR200 GPUs (matches the 2-node x 4-GPU topology measured on
 #   the reference cluster)
-# - Grace CPU (arm64), Ubuntu 26.04 reference image
+# - Vera CPU (arm64), Ubuntu 26.04 reference image
 # - Memory: 288GB HBM4 per GPU, NVIDIA's published Rubin specification
 #   (developer.nvidia.com/blog/inside-the-nvidia-rubin-platform-six-new-chips-one-ai-supercomputer,
 #   2026-08). 294912 MiB, following this repo's existing GiB*1024 MiB
@@ -41,7 +41,7 @@ metadata:
 spec:
   # Instance specifications
   instanceType: vr200-nvl72-tray
-  arch: arm64  # Grace CPU is ARM-based
+  arch: arm64  # Vera CPU is ARM-based
   osImage: Ubuntu 26.04
 
   # Resource capacity (provisional — pending confirmed GA hardware specs)

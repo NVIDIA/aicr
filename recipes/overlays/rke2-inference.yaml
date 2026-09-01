@@ -68,8 +68,10 @@ spec:
       # all — their validation would fail. Content = the embedded OSS
       # check (CRDs Established) plus the RKE2-specific step asserting
       # tlsroutes exists, is Established, and SERVES v1alpha2 (agentgateway
-      # v2.2.1's compiled watch requirement; traefik ships the schema with
-      # served: false until patched).
+      # v2.2.1's compiled watch requirement, satisfied by the vendored
+      # tlsroute-crd.yaml manifest below on the supported < 1.36 default;
+      # a cluster that instead runs RKE2's bundled Traefik hits the
+      # documented CRD-ownership conflict, not a served-version gap).
       # DRIFT NOTE: everything above the tlsroute step is a copy of this
       # repo's embedded checks/agentgateway-crds/health-check.yaml. When
       # bumping agentgateway versions, re-diff this whole block against the

@@ -32,7 +32,7 @@ spec:
 
   # Same VR200 NVL72 platform constraints as vr200-rke2-ubuntu-training —
   # see that leaf for the full rationale (Ubuntu 26.04 reference image,
-  # Grace/Vera arm64 64k-page kernel, K8s floor aligned with the rke2
+  # Vera arm64 64k-page kernel, K8s floor aligned with the rke2
   # root's CDI/NRI containerd 2.1 requirement). The 615-branch host-driver
   # floor is enforced out-of-band (no driver-version measurement exists in
   # snapshots today).
