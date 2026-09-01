@@ -68,8 +68,8 @@ func validateCRENcclAllReduceBw(ctx *validators.Context, constraint recipe.Const
 
 	obj := buildCRENCCLCertification(ctx.Namespace, gpuConfig, ctx.NodeSelector)
 
-	if err := deleteCRECertification(ctx.Ctx, dyn, ctx.Namespace, creNCCLRunName); err != nil {
-		return "", false, err
+	if deleteErr := deleteCRECertification(ctx.Ctx, dyn, ctx.Namespace, creNCCLRunName); deleteErr != nil {
+		return "", false, deleteErr
 	}
 
 	defer func() {
@@ -78,8 +78,8 @@ func validateCRENcclAllReduceBw(ctx *validators.Context, constraint recipe.Const
 		}
 	}()
 
-	if err := createUnstructured(ctx.Ctx, dyn, certificationGVR, ctx.Namespace, obj); err != nil {
-		return "", false, err
+	if createErr := createUnstructured(ctx.Ctx, dyn, certificationGVR, ctx.Namespace, obj); createErr != nil {
+		return "", false, createErr
 	}
 
 	run, err := waitForCertificationTerminal(ctx.Ctx, dyn, ctx.Namespace, creNCCLRunName)
@@ -139,8 +139,10 @@ func youngestLivePodSince(pods []corev1.Pod, createdAt metav1.Time) *corev1.Pod 
 		p := &pods[i]
 		if p.DeletionTimestamp != nil || p.Status.Phase == corev1.PodFailed ||
 			p.CreationTimestamp.Time.Before(createdAt.Time) {
+
 			continue
 		}
+
 		if best == nil || p.CreationTimestamp.After(best.CreationTimestamp.Time) {
 			best = p
 		}

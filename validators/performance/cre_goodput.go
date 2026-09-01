@@ -40,6 +40,7 @@ func checkCRETrainingGoodput(ctx *validators.Context) error {
 	}
 	if ctx.ValidationInput.Criteria.Service != recipe.CriteriaServiceEKS ||
 		ctx.ValidationInput.Criteria.Accelerator != recipe.CriteriaAcceleratorH100 {
+
 		return validators.Skip(fmt.Sprintf(
 			"%s currently supports only eks × h100, got %s × %s",
 			checkNameCRETrainingGoodput,
@@ -71,8 +72,8 @@ func checkCRETrainingGoodput(ctx *validators.Context) error {
 	}
 
 	runObj := buildCRETrainingWorkloadRun(ctx.Namespace, gpuConfig, ctx.NodeSelector)
-	if err := deleteCREWorkloadRun(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, creTrainingRunName); err != nil {
-		return err
+	if deleteErr := deleteCREWorkloadRun(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, creTrainingRunName); deleteErr != nil {
+		return deleteErr
 	}
 	defer func() {
 		if deleteErr := deleteCREWorkloadRun(
@@ -85,8 +86,8 @@ func checkCRETrainingGoodput(ctx *validators.Context) error {
 		}
 	}()
 
-	if err := createUnstructured(ctx.Ctx, ctx.DynamicClient, workloadRunGVR, ctx.Namespace, runObj); err != nil {
-		return err
+	if createErr := createUnstructured(ctx.Ctx, ctx.DynamicClient, workloadRunGVR, ctx.Namespace, runObj); createErr != nil {
+		return createErr
 	}
 	run, err := waitForWorkloadRunTerminal(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, creTrainingRunName)
 	if err != nil {
@@ -157,6 +158,7 @@ if [ ! -d "/mnt/workspace/megatron-lm/.git" ]; then
     https://github.com/NVIDIA/Megatron-LM.git /mnt/workspace/megatron-lm
 fi
 `
+	creWorkspaceVolume = "workspace"
 )
 
 var goodputMeasurementGVR = schema.GroupVersionResource{
@@ -178,27 +180,27 @@ func buildCRETrainingWorkloadRun(namespace string, gpuConfig *gpuConfiguration, 
 		},
 		"initContainers": []any{
 			map[string]any{
-				"name":    "megatron-clone",
+				keyName:   "megatron-clone",
 				"image":   creTrainingImage,
 				"command": []any{"/bin/bash", "-c"},
 				"args":    []any{creTrainingCloneScript},
 				"volumeMounts": []any{
-					map[string]any{"name": "workspace", "mountPath": "/mnt/workspace"},
+					map[string]any{keyName: creWorkspaceVolume, keyMountPath: "/mnt/workspace"},
 				},
 			},
 		},
 		"volumes": []any{
 			map[string]any{
-				"name":     "workspace",
+				keyName:    creWorkspaceVolume,
 				"emptyDir": map[string]any{"medium": "Memory"},
 			},
 		},
 		"volumeMounts": []any{
-			map[string]any{"name": "workspace", "mountPath": "/mnt/workspace"},
+			map[string]any{keyName: creWorkspaceVolume, keyMountPath: "/mnt/workspace"},
 		},
 		"env": []any{
-			map[string]any{"name": "PYTHONPATH", "value": "/mnt/workspace/megatron-lm"},
-			map[string]any{"name": "CUDA_DEVICE_MAX_CONNECTIONS", "value": "1"},
+			map[string]any{keyName: "PYTHONPATH", keyValue: "/mnt/workspace/megatron-lm"},
+			map[string]any{keyName: "CUDA_DEVICE_MAX_CONNECTIONS", keyValue: "1"},
 		},
 		"goodputMeasurement": map[string]any{
 			"logProfileRef":  creLogProfileTrainingGoodput,
