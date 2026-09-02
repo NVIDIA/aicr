@@ -1981,6 +1981,30 @@ func TestEnsureNamespace(t *testing.T) {
 			t.Error("expected created=true: our own Create landed after the prior winner finished terminating")
 		}
 	})
+
+	t.Run("waits for a pre-existing terminating namespace then creates its own", func(t *testing.T) {
+		now := metav1.Now()
+		terminating := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name: ns, DeletionTimestamp: &now, Finalizers: []string{"kubernetes"},
+		}}
+		client := fake.NewClientset(terminating)
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			_ = client.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
+		}()
+
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("expected creation to succeed once the terminating namespace finished deleting, got: %v", err)
+		}
+		if got.Labels[labels.ManagedBy] != labels.ValueValidator || got.Labels[labels.Component] != component {
+			t.Errorf("created namespace labels = %v, want ManagedBy/Component set", got.Labels)
+		}
+		if !created {
+			t.Error("expected created=true: our own Create landed after the pre-existing namespace finished terminating")
+		}
+	})
 }
 
 // TestBuildAIPerfJob_EnvOverrides verifies the AICR_INFERENCE_PERF_* knobs flow
