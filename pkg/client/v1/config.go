@@ -564,7 +564,7 @@ func (c *Config) ValidateOptions() ([]ValidateOption, error) {
 // SnapshotAgentConfig derives Client.CollectSnapshot's AgentConfig from
 // spec.snapshot.
 //
-// Sixteen settings map onto the agent Job: namespace, image, image pull
+// These settings map onto the agent Job: namespace, image, image pull
 // secrets, job name, service account, node selector, tolerations, require-GPU,
 // runtime class, OS, max nodes per entry, output path, template path, resource
 // requests and limits, timeout, cleanup and privileged.
