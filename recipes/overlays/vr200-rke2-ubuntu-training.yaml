@@ -20,8 +20,12 @@ metadata:
 spec:
   # PREVIEW: publishes an early-adopter VR200 (Vera Rubin) recipe path
   # without the full production support and lifecycle qualification
-  # required for Supported status. See validation.aicr.run for the
-  # published evidence this recipe is validated against.
+  # required for Supported status. See validation.aicr.run for published
+  # evidence for this Preview coordinate — the recipe has since changed
+  # (aicr evidence digest reports a mismatch against the linked pointer's
+  # predicate.recipe.digest), so treat that evidence as historical
+  # precedent, not as validating the current recipe content. Fresh
+  # hardware validation is pending VR cluster access.
   #
   # Inherits from rke2-training recipe (RKE2 + training settings)
   base: rke2-training
@@ -117,8 +121,11 @@ spec:
     # NV_ERR_IN_USE"), so the daemon never goes Ready and ComputeDomain
     # workloads hang on NodePrepareResources. Host static IMEX and
     # DRA-managed ComputeDomains are mutually exclusive. Nodes running DRA
-    # ComputeDomains MUST have the host service disabled:
-    #   systemctl disable --now nvidia-imex
+    # ComputeDomains MUST have the host service disabled AND masked — a
+    # disable-only leaves systemd free to reactivate it (e.g. on a
+    # dependency pull-in or a package upgrade), reproducing the same
+    # NV_ERR_IN_USE conflict:
+    #   systemctl disable --now nvidia-imex.service && systemctl mask nvidia-imex.service
     - name: nvidia-dra-driver-gpu
       type: Helm
       overrides:
