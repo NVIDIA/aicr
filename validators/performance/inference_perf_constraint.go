@@ -1619,7 +1619,7 @@ func buildTolerations(node v1.Node) []v1.Toleration {
 func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadConfig) error {
 	// Create namespace (idempotent).
 	if _, _, err := ensureNamespace(ctx, config.namespace, labels.ValueInferencePerf); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+		return err
 	}
 
 	// Mark deployed early (namespace now exists) so cleanup tears down the
