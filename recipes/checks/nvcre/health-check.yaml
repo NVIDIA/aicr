@@ -23,9 +23,13 @@
 # pod health: the manager reports Ready long before a caller finds out that the
 # kind it submits is unregistered.
 #
-# readyReplicas is omitempty — absent (null) on a Deployment that has never had
-# a ready pod, so `readyReplicas > 0` fails closed rather than passing
-# vacuously the way `unavailableReplicas == 0` would.
+# Compare status.readyReplicas to spec.replicas (not status.replicas).
+# status.replicas is the observed pod count and can match a partial
+# rollout (one ready replica of a spec of two). readyReplicas is
+# omitempty — absent (null) until a pod has been ready — so the equality
+# fails closed rather than passing vacuously the way
+# `unavailableReplicas == 0` would. spec.replicas > 0 rejects a
+# zero-replica Deployment.
 #
 # Resource names assume components/nvcre/values.yaml sets
 # `fullnameOverride: nvcre`; without it the Deployment carries the
@@ -47,9 +51,9 @@ spec:
               metadata:
                 name: nvcre-manager
                 namespace: nvcre
-              status:
-                (readyReplicas > `0`): true
-                (readyReplicas == replicas): true
+              spec:
+                (replicas > `0`): true
+              (status.readyReplicas == spec.replicas): true
 
     - name: validate-crds-established
       try:
