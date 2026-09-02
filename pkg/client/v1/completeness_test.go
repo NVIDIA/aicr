@@ -93,3 +93,22 @@ func TestSnapshotResolved_IsFullyProjected(t *testing.T) {
 		map[string]string{},
 	)
 }
+
+func TestValidateResolved_IsFullyProjected(t *testing.T) {
+	t.Parallel()
+
+	assertProjected(t,
+		reflect.TypeOf(appconfig.ValidateResolved{}),
+		[]reflect.Type{
+			reflect.TypeOf(aicr.ValidateSettings{}),
+			reflect.TypeOf(aicr.ValidateInputOptions{}),
+		},
+		map[string]string{
+			"NoCleanup": "Cleanup", // inverted
+		},
+		map[string]string{
+			"EvidenceCNCF":        "no facade method emits CNCF evidence, so a derivation would have no consumer",
+			"EvidenceAttestation": "projected by Config.EvidenceAttestationOptions, not by ValidateSettings",
+		},
+	)
+}

@@ -887,7 +887,7 @@ derive step rather than the load step.
 |---|---|
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
 | `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.attestation` |
-| `ValidateOptions()` | `spec.validate.execution` + the agent fields the validator accepts as options |
+| `ValidateSettings()` | `spec.validate.agent` + `.execution` |
 | `EvidenceAttestationOptions()` | `spec.validate.evidence.attestation` (**not** `.cncf`) |
 | `SnapshotAgentConfig()` | `spec.snapshot.agent` + `.execution` (**not** `.output`) |
 | `RecipeSource()` | `spec.recipe.data` |
@@ -1374,27 +1374,43 @@ active deprecations across all surfaces is in
 
 [semver]: https://semver.org/spec/v2.0.0.html
 
-### What `ValidateOptions()` does and does not carry
+### What `ValidateSettings()` does and does not carry
 
 `spec.validate` is the one section that does not map to a single destination,
-so `ValidateOptions()` carries only the part the validator accepts as options:
-namespace, image pull secrets, node selector, tolerations, no-cluster, cleanup,
-phases, fail-fast, and timeout. The slice is appendable — layer your own
-options after the derived ones and the later value wins.
+so `ValidateSettings()` carries only the part `Client.ValidateState` accepts:
+namespace, image, image pull secrets, job name, service account name, node
+selector, tolerations, require-GPU, phases, no-cluster, cleanup, fail-fast, and
+timeout — a plain value, not an option slice, so you read and override
+individual fields directly:
+
+```go
+opts, err := cfg.ValidateSettings()
+if err != nil {
+    return err
+}
+opts.NoCluster = true // caller wins, visibly
+results, err := client.ValidateState(ctx, rec, snap,
+    aicr.WithValidationNamespace(opts.Namespace),
+    aicr.WithValidationImagePullSecrets(opts.ImagePullSecrets),
+    aicr.WithValidationNodeSelector(opts.NodeSelector),
+    aicr.WithValidationTolerations(opts.Tolerations),
+    aicr.WithValidationNoCluster(opts.NoCluster),
+    aicr.WithValidationCleanup(opts.Cleanup),
+)
+```
 
 The rest of the section has other homes, and knowing which saves a search:
 
 | Field | Home |
 |---|---|
-| `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | `AgentConfig`. These configure the validator's Kubernetes Job; `pkg/validator` exposes no option for any of them, so a `WithValidation*` here would have nothing to translate into. |
 | `spec.validate.execution.failOnError` | Nowhere, deliberately. It decides whether a failed check makes the *caller* fail; the validator reports and does not act on it. Command-line-only for the same reason as `IgnoreTLog`: a checked-in file should not be able to make a failing run report success. |
 | `spec.validate.input.recipe`, `.snapshot` | Not projected — you already pass both to `ValidateState`. |
 | `spec.validate.evidence.attestation` | `EvidenceAttestationOptions()`, which targets `EmitRecipeEvidence` rather than `ValidateState` — see below. |
 | `spec.validate.evidence.cncf` | **Not projected.** No facade method emits CNCF AI Conformance evidence, so there is nothing for a derivation to feed. Reading it still needs `Unwrap()`. |
 
-One inversion worth knowing: config says `noCleanup`, the option says
-`cleanup`. `ValidateOptions()` flips it, so `noCleanup: true` becomes
-`WithValidationCleanup(false)`.
+One inversion worth knowing: config says `noCleanup`, the field says
+`Cleanup`. `ValidateSettings()` flips it, so `noCleanup: true` becomes
+`Cleanup: false`.
 
 ### What `EvidenceAttestationOptions()` does and does not carry
 

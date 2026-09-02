@@ -1474,3 +1474,216 @@ spec:
 		}
 	})
 }
+
+const validateValueConfig = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  validate:
+    agent:
+      namespace: val-ns
+      image: example.com/val:1
+      jobName: val-job
+      serviceAccountName: val-sa
+      requireGpu: true
+    execution:
+      phases: [deployment]
+      failFast: true
+      noCluster: true
+      noCleanup: true
+      timeout: 7m
+`
+
+func TestConfig_ValidateSettings_FoldsValues(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, validateValueConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, present, err := cfg.ValidateSettings()
+	if err != nil {
+		t.Fatalf("ValidateSettings: %v", err)
+	}
+	if !present {
+		t.Error("present = false, want true: spec.validate is present in this document")
+	}
+
+	for _, tt := range []struct{ field, got, want string }{
+		{"Namespace", got.Namespace, "val-ns"},
+		{"Image", got.Image, "example.com/val:1"},
+		{"JobName", got.JobName, "val-job"},
+		{"ServiceAccountName", got.ServiceAccountName, "val-sa"},
+	} {
+		if tt.got != tt.want {
+			t.Errorf("%s = %q, want %q", tt.field, tt.got, tt.want)
+		}
+	}
+	if !got.RequireGPU {
+		t.Error("RequireGPU = false, want true")
+	}
+	if !got.NoCluster {
+		t.Error("NoCluster = false, want true")
+	}
+	// INVERTED: config says noCleanup: true, so Cleanup must be false.
+	if got.Cleanup {
+		t.Error("Cleanup = true, want false (noCleanup: true inverts)")
+	}
+	if got.FailFast == nil || !*got.FailFast {
+		t.Error("FailFast not folded as true")
+	}
+	if got.Timeout == nil || *got.Timeout != 7*time.Minute {
+		t.Errorf("Timeout = %v, want 7m", got.Timeout)
+	}
+	if len(got.Phases) != 1 || got.Phases[0] != aicr.PhaseDeployment {
+		t.Errorf("Phases = %v, want [deployment]", got.Phases)
+	}
+}
+
+// TestConfig_ValidateSettings_PresenceBool covers BOTH routes to "no validate
+// configuration", which fail differently, plus the presence bool that lets a
+// caller tell them apart from "the document decided every field, silently."
+// Mirrors TestConfig_SnapshotAgentConfig_Absent exactly, for the sibling
+// derivation.
+//
+// A nil Config is caught by the receiver check. A document that simply omits
+// spec.validate is NOT: Resolve() returns a non-nil ValidateResolved for an
+// absent section, so without the section-presence check the derivation falls
+// through and applies the in-section default — Cleanup: true (NoCleanup's
+// zero value inverted) — to a document that never opted into validate
+// configuration. Both routes must report present=false, and a document that
+// DOES carry the section — even one that sets nothing inside it — must
+// report present=true, so a caller (like the validate CLI) applies its own
+// default only in the former case rather than trusting the zero
+// ValidateSettings as configured intent.
+//
+// This is also the direct regression guard for the security defect fix round
+// 2 found: pre-fix, a nil Config yielded Cleanup=false while a present-but-
+// silent section yielded Cleanup=true — two spellings of "no opinion"
+// disagreeing on whether the CLI should leave cluster-admin RBAC and Jobs
+// behind. Post-fix, a correct caller reads present rather than trusting
+// Cleanup directly, so both routes agree on the EFFECTIVE decision (clean
+// up): present=false tells the caller to substitute its own true default
+// (asserted below), and present=true here already carries Cleanup=true from
+// the config's own zero-value default.
+func TestConfig_ValidateSettings_PresenceBool(t *testing.T) {
+	t.Parallel()
+
+	t.Run("document omits spec.validate", func(t *testing.T) {
+		t.Parallel()
+		body := `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+spec:
+  verify:
+    policy:
+      minTrustLevel: max
+`
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		got, present, err := cfg.ValidateSettings()
+		if err != nil {
+			t.Fatalf("ValidateSettings: %v", err)
+		}
+		if present {
+			t.Error("present = true, want false for a document with no spec.validate")
+		}
+		if got.Cleanup {
+			t.Error("Cleanup = true; an absent section must not apply in-section defaults")
+		}
+	})
+
+	t.Run("document has an empty spec.validate", func(t *testing.T) {
+		t.Parallel()
+		body := "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  validate: {}\n"
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		got, present, err := cfg.ValidateSettings()
+		if err != nil {
+			t.Fatalf("ValidateSettings: %v", err)
+		}
+		if !present {
+			t.Error("present = false, want true: spec.validate is present, even though it sets nothing")
+		}
+		// A present-but-silent section DOES apply the in-section default — the
+		// opposite of the fully-absent case above, and the exact disagreement the
+		// fix closes.
+		if !got.Cleanup {
+			t.Error("Cleanup = false; a present-but-silent section must apply the in-section default (clean up)")
+		}
+	})
+
+	t.Run("nil Config", func(t *testing.T) {
+		t.Parallel()
+		var cfg *aicr.Config
+		got, present, err := cfg.ValidateSettings()
+		if err != nil {
+			t.Fatalf("ValidateSettings on nil Config: %v", err)
+		}
+		if present {
+			t.Error("present = true, want false for a nil Config")
+		}
+		if got.Namespace != "" || got.Cleanup || got.NoCluster || len(got.Phases) != 0 {
+			t.Errorf("got %+v, want a zero value", got)
+		}
+	})
+}
+
+const validateInputConfig = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  validate:
+    input:
+      recipe: ./r.yaml
+      snapshot: ./s.yaml
+    execution:
+      failOnError: false
+`
+
+func TestConfig_ValidateInputOptions_FoldsValues(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, validateInputConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, err := cfg.ValidateInputOptions()
+	if err != nil {
+		t.Fatalf("ValidateInputOptions: %v", err)
+	}
+
+	if got.RecipePath != "./r.yaml" {
+		t.Errorf("RecipePath = %q, want ./r.yaml", got.RecipePath)
+	}
+	if got.SnapshotPath != "./s.yaml" {
+		t.Errorf("SnapshotPath = %q, want ./s.yaml", got.SnapshotPath)
+	}
+	// The pointer itself is the assertion: FailOnError must be a non-nil
+	// pointer to false, distinguishing "explicitly false" from "config said
+	// nothing" (nil) — the whole reason the field is a pointer.
+	if got.FailOnError == nil {
+		t.Fatal("FailOnError = nil, want a non-nil pointer to false")
+	}
+	if *got.FailOnError {
+		t.Error("FailOnError = true, want false")
+	}
+}
+
+func TestConfig_ValidateInputOptions_NilConfig(t *testing.T) {
+	t.Parallel()
+
+	var cfg *aicr.Config
+	got, err := cfg.ValidateInputOptions()
+	if err != nil {
+		t.Fatalf("ValidateInputOptions on nil Config: %v", err)
+	}
+	if got.RecipePath != "" || got.SnapshotPath != "" || got.FailOnError != nil {
+		t.Errorf("got %+v, want zero value", got)
+	}
+}

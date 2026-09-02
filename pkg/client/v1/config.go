@@ -17,6 +17,9 @@ package aicr
 import (
 	"context"
 	"strings"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
 
 	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
 	appconfig "github.com/NVIDIA/aicr/pkg/config"
@@ -472,31 +475,52 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 	}, nil
 }
 
-// ValidateOptions derives Client.ValidateState options from spec.validate.
+// ValidateSettings carries the spec.validate settings Client.ValidateState
+// accepts. Fields are exported so a caller derives, then overrides any of them
+// before the call — the same derive-don't-apply precedence the other
+// derivations use.
+type ValidateSettings struct {
+	Namespace          string
+	Image              string
+	ImagePullSecrets   []string
+	JobName            string
+	ServiceAccountName string
+	NodeSelector       map[string]string
+	Tolerations        []corev1.Toleration
+	RequireGPU         bool
+	Phases             []Phase
+	NoCluster          bool
+
+	// Cleanup is INVERTED against spec.validate.execution.noCleanup. The
+	// config field says "do not clean up"; this says "clean up". Passing it
+	// through straight would delete artifacts a post-mortem asked to keep.
+	Cleanup bool
+
+	// FailFast and Timeout stay pointers so "config said nothing" remains
+	// distinct from an explicit false / 0s, letting the caller's own default
+	// apply rather than being overridden by a zero value.
+	FailFast *bool
+	Timeout  *time.Duration
+}
+
+// ValidateSettings derives the spec.validate settings Client.ValidateState
+// accepts, as a plain value rather than an opaque option slice — so a caller
+// (the CLI, in particular) can read and override individual fields with its
+// own flag precedence instead of replaying a built option list.
 //
-// Nine settings map onto the WithValidation* option set: namespace, image pull
-// secrets, node selector, tolerations, no-cluster, cleanup, phases, fail-fast
-// and timeout. The returned slice is appendable, so a caller layers its own
-// options after the derived ones and the later value wins — the same shape
-// RecipeResolveOptions uses, and the reason this returns options rather than a
-// built value.
+// Thirteen settings project: namespace, image, image pull secrets, job name,
+// service account name, node selector, tolerations, require-GPU, phases,
+// no-cluster, cleanup, fail-fast and timeout.
 //
 // # Where the rest of spec.validate goes
 //
-// The section is not served by one destination, which the per-section table in
-// docs/integrator/go-library.md now records:
+// The section is not served by this method alone, which the per-section table
+// in docs/integrator/go-library.md records:
 //
-//   - Image, JobName, ServiceAccountName and RequireGPU configure the
-//     validator's Kubernetes Job, and reach it through AgentConfig rather than
-//     a validator option — pkg/validator exposes no With* for any of them.
-//     Deriving them here would produce options with nothing to translate into.
-//   - FailOnError decides whether a failed check makes the CALLER fail. The
-//     validator reports; it does not act on it, so there is nothing to pass
-//     through. Command-line-only for the same reason IgnoreTLog is on
-//     BundleVerifyOptions: a checked-in file should not be able to make a
-//     failing run report success.
-//   - RecipePath and SnapshotPath name what to validate. The caller already
-//     passes both to ValidateState.
+//   - FailOnError, RecipePath and SnapshotPath are consumed by the CALLER, not
+//     by ValidateState, so a caller still needs them projected to apply its
+//     own flag-over-config precedence — just not on this type.
+//     ValidateInputOptions carries them.
 //   - EvidenceAttestation configures the recipe-evidence bundle.
 //     EvidenceAttestationOptions derives it; it is not folded in here because
 //     it targets Client.EmitRecipeEvidence rather than ValidateState.
@@ -506,7 +530,7 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 //
 // # Two mappings that are not pass-throughs
 //
-// NoCleanup is INVERTED: the config field says "do not clean up", the option
+// NoCleanup is INVERTED: the config field says "do not clean up", the field
 // says "clean up". Passing it straight through would delete artifacts a
 // post-mortem asked to keep, silently and in either direction.
 //
@@ -514,54 +538,118 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 // rejects an unknown entry and names the spec field — on the WrapConfig path
 // too, since that check lives in Resolve rather than in the loader.
 //
+// # A zero value is not a safe default
+//
+// Cleanup: false is the opposite of the CLI's own default (clean up). A
+// caller that cannot distinguish "no spec.validate at all" from "spec.validate
+// is present but silent about cleanup" and always applies the returned value
+// as-is will leave the cluster-admin ClusterRoleBinding and validator Jobs
+// active on the plain, no-config invocation — silently, since nothing errors.
+// This is the same hazard SnapshotAgentConfig documents for Privileged; see
+// "# The bool" below for the signal that resolves it.
+//
+// # The bool
+//
+// The second return reports whether spec.validate is present — true when the
+// section exists (even if silent about every field), false for a nil Config,
+// a nil internal document, or a document that omits the section — mirroring
+// SnapshotAgentConfig's bool exactly, including why it exists: a caller
+// deriving unconditionally (before it knows whether --config was even given)
+// otherwise cannot tell "the document made no validate decisions, supply your
+// own defaults" from "the document decided every field, apply them as-is",
+// and only one of those is safe to treat as-is.
+//
 // Returns an error when spec.validate is present but malformed.
-func (c *Config) ValidateOptions() ([]ValidateOption, error) {
-	if c == nil || c.internal == nil {
-		return nil, nil
+func (c *Config) ValidateSettings() (ValidateSettings, bool, error) {
+	// The section-presence check is load-bearing and cannot be replaced by a
+	// nil check on the resolved value: Resolve() returns a NON-nil
+	// ValidateResolved for an absent section (same contract as
+	// SnapshotSpec.Resolve), so falling through would apply Cleanup: true to a
+	// document that never opted into validate configuration at all. It is also
+	// exactly the presence signal the second return value surfaces.
+	if c == nil || c.internal == nil || c.internal.Validation() == nil {
+		return ValidateSettings{}, false, nil
 	}
 	resolved, err := c.internal.Validation().Resolve()
 	if err != nil {
 		// Already coded, and the message carries the spec path that failed.
-		return nil, err
+		return ValidateSettings{}, true, err
 	}
 	if resolved == nil {
-		return nil, nil
+		return ValidateSettings{}, true, nil
 	}
 
-	opts := []ValidateOption{
-		WithValidationNamespace(resolved.Namespace),
-		WithValidationImagePullSecrets(resolved.ImagePullSecrets),
-		WithValidationNodeSelector(resolved.NodeSelector),
-		WithValidationTolerations(resolved.Tolerations),
-		WithValidationNoCluster(resolved.NoCluster),
-		// Inverted on purpose. See the godoc above.
-		WithValidationCleanup(!resolved.NoCleanup),
-	}
-
+	// Cast, don't re-parse: Validation().Resolve() rejects an unknown phase
+	// before returning, on both the LoadConfig and WrapConfig paths.
+	var phases []Phase
 	if len(resolved.Phases) > 0 {
-		// Cast, don't re-parse. Validation().Resolve() rejects an unknown phase
-		// before returning — on both the LoadConfig and WrapConfig paths, since
-		// the check lives in Resolve rather than the loader — so by here every
-		// entry is known-good. A defensive re-parse would be unreachable, and
-		// unreachable validation reads as a guarantee nobody is actually
-		// providing.
-		facade := make([]Phase, len(resolved.Phases))
+		phases = make([]Phase, len(resolved.Phases))
 		for i, p := range resolved.Phases {
-			facade[i] = Phase(p)
+			phases[i] = Phase(p)
 		}
-		opts = append(opts, WithValidationPhases(facade...))
 	}
-	// FailFast and Timeout resolve as pointers so "unset" stays distinct from
-	// an explicit false/0, and both options take values. Emitting them
-	// unconditionally would turn "config said nothing" into an explicit
-	// choice, overriding the validator's own default.
-	if resolved.FailFast != nil {
-		opts = append(opts, WithValidationFailFast(*resolved.FailFast))
+
+	return ValidateSettings{
+		Namespace:          resolved.Namespace,
+		Image:              resolved.Image,
+		ImagePullSecrets:   resolved.ImagePullSecrets,
+		JobName:            resolved.JobName,
+		ServiceAccountName: resolved.ServiceAccountName,
+		NodeSelector:       resolved.NodeSelector,
+		Tolerations:        resolved.Tolerations,
+		RequireGPU:         resolved.RequireGPU,
+		Phases:             phases,
+		NoCluster:          resolved.NoCluster,
+		// Inverted on purpose. See the field godoc.
+		Cleanup:  !resolved.NoCleanup,
+		FailFast: resolved.FailFast,
+		Timeout:  resolved.Timeout,
+	}, true, nil
+}
+
+// ValidateInputOptions carries the spec.validate fields the CALLER consumes
+// rather than the validator: which recipe and snapshot to validate, and
+// whether a failed check should fail the caller.
+//
+// Separate from ValidateSettings on purpose. ValidateState takes an
+// already-resolved recipe and snapshot, and it reports check results without
+// acting on them — so these three on ValidateSettings would be surface the
+// validator never reads. The CLI needs them to apply flag-over-config
+// precedence, which is why they are derived at all.
+type ValidateInputOptions struct {
+	RecipePath   string
+	SnapshotPath string
+
+	// FailOnError decides whether a failed check fails the CALLER. Pointer so
+	// "config said nothing" stays distinct from an explicit false, letting the
+	// caller's own default apply.
+	FailOnError *bool
+}
+
+// ValidateInputOptions derives spec.validate.input and
+// spec.validate.execution.failOnError — the three spec.validate fields a
+// caller (not the validator) consumes, so a caller applying its own
+// flag-over-config precedence does not need Unwrap() to read them.
+//
+// Returns the zero value for a nil Config or an absent spec.validate, and an
+// error when the section is present but malformed.
+func (c *Config) ValidateInputOptions() (ValidateInputOptions, error) {
+	if c == nil || c.internal == nil {
+		return ValidateInputOptions{}, nil
 	}
-	if resolved.Timeout != nil {
-		opts = append(opts, WithValidationTimeout(*resolved.Timeout))
+	resolved, err := c.internal.Validation().Resolve()
+	if err != nil {
+		// Already coded, and the message carries the spec path that failed.
+		return ValidateInputOptions{}, err
 	}
-	return opts, nil
+	if resolved == nil {
+		return ValidateInputOptions{}, nil
+	}
+	return ValidateInputOptions{
+		RecipePath:   resolved.RecipePath,
+		SnapshotPath: resolved.SnapshotPath,
+		FailOnError:  resolved.FailOnError,
+	}, nil
 }
 
 // EvidenceAttestationOptions derives Client.EmitRecipeEvidence's options from

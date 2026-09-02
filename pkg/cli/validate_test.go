@@ -79,15 +79,16 @@ func TestResolveCNCFAllocationPolicy(t *testing.T) {
 			var gotPolicy string
 			cmd := validateCmd()
 			cmd.Action = func(ctx context.Context, c *cli.Command) error {
-				cfg, err := loadCmdConfig(ctx, c)
+				cfg, err := loadFacadeConfig(ctx, c)
 				if err != nil {
 					return err
 				}
-				resolved, err := cfg.Validation().Resolve()
+				resolved, err := cfg.Unwrap().Validation().Resolve()
 				if err != nil {
 					return err
 				}
-				gotPolicy, err = resolveCNCFAllocationPolicy(ctx, c, cfg, resolved)
+				recipeFilePath := stringFlagOrConfig(c, "recipe", resolved.RecipePath)
+				gotPolicy, err = resolveCNCFAllocationPolicy(ctx, c, cfg, recipeFilePath)
 				return err
 			}
 			err := cmd.Run(t.Context(), args)
@@ -524,16 +525,16 @@ func TestParseValidateAgentConfig_ForwardsCallerRunID(t *testing.T) {
 	var captured *validateAgentConfig
 	cmd := validateCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}
-		resolved, err := cfg.Validation().Resolve()
+		opts, _, err := cfg.ValidateSettings()
 		if err != nil {
 			return err
 		}
 		shared := validateSharedResolved{namespace: "aicr-validation-test"}
-		captured = parseValidateAgentConfig(c, resolved, shared, wantRunID)
+		captured = parseValidateAgentConfig(c, opts, shared, wantRunID)
 		return nil
 	}
 	if err := cmd.Run(t.Context(), []string{"validate", "--no-cluster"}); err != nil {
@@ -542,6 +543,45 @@ func TestParseValidateAgentConfig_ForwardsCallerRunID(t *testing.T) {
 
 	if captured.runID != wantRunID {
 		t.Errorf("validateAgentConfig.runID = %q, want %q", captured.runID, wantRunID)
+	}
+}
+
+// TestValidateCmd_NoConfigDefaultsToCleanup is the regression test for the
+// fix-round-2 security defect: a plain `aicr validate` — no --config, no
+// --no-cleanup, which is the common invocation — must clean up by default.
+//
+// Before the fix, ValidateSettings() returned only (ValidateSettings, error),
+// and its zero value (Cleanup: false, returned for both a nil Config and an
+// absent spec.validate) was trusted directly as the fallback for
+// --no-cleanup. That silently flipped the CLI's own default: a plain
+// invocation left the cluster-admin ClusterRoleBinding and validator Jobs
+// active. The Action is overridden here to isolate exactly the computation
+// that broke — loadFacadeConfig, ValidateSettings' presence bool,
+// validateCleanupFallback, then the same boolFlagOrConfig call the
+// production Action makes — without needing a live cluster to reach it.
+func TestValidateCmd_NoConfigDefaultsToCleanup(t *testing.T) {
+	var gotNoCleanup bool
+	cmd := validateCmd()
+	cmd.Action = func(ctx context.Context, c *cli.Command) error {
+		cfg, err := loadFacadeConfig(ctx, c)
+		if err != nil {
+			return err
+		}
+		opts, present, err := cfg.ValidateSettings()
+		if err != nil {
+			return err
+		}
+		cleanupFallback := validateCleanupFallback(opts, present)
+		gotNoCleanup = boolFlagOrConfig(c, "no-cleanup", !cleanupFallback)
+		return nil
+	}
+	if err := cmd.Run(t.Context(), []string{"validate"}); err != nil {
+		t.Fatalf("validate run: %v", err)
+	}
+
+	if gotNoCleanup {
+		t.Error("noCleanup = true, want false: a plain `aicr validate` " +
+			"(no --config, no --no-cleanup) must clean up by default")
 	}
 }
 
@@ -571,16 +611,16 @@ func TestValidateCmd_DeclaredNameDefaultsNeverReachTheAgent(t *testing.T) {
 		var captured *validateAgentConfig
 		c := validateCmd()
 		c.Action = func(ctx context.Context, cc *cli.Command) error {
-			cfg, err := loadCmdConfig(ctx, cc)
+			cfg, err := loadFacadeConfig(ctx, cc)
 			if err != nil {
 				return err
 			}
-			resolved, err := cfg.Validation().Resolve()
+			opts, _, err := cfg.ValidateSettings()
 			if err != nil {
 				return err
 			}
 			shared := validateSharedResolved{namespace: "aicr-validation-test"}
-			captured = parseValidateAgentConfig(cc, resolved, shared, "20260821-142233-9f3a1c0b7e2d4a55")
+			captured = parseValidateAgentConfig(cc, opts, shared, "20260821-142233-9f3a1c0b7e2d4a55")
 			return nil
 		}
 		if err := c.Run(t.Context(), append([]string{"validate", "--no-cluster"}, args...)); err != nil {
