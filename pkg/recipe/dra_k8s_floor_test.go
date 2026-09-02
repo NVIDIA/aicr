@@ -110,8 +110,9 @@ const floorMajor = 1
 //
 //   - ">= v" admits exactly [v, inf)
 //   - "> v"  admits (v, inf); requiring v itself to clear the floor is one
-//     patch conservative and never fails open, since the patch component is
-//     unbounded (there is no "last" 1.31.x to fall back on)
+//     unit conservative at v's own precision (one whole minor for a
+//     minor-precision value) and never fails open, since the patch component
+//     is unbounded (there is no "last" 1.31.x to fall back on)
 //   - "== v" and a bare exact match admit only v
 //
 // "<", "<=", and "!=" place no lower bound at all, so they return false: they
@@ -201,12 +202,6 @@ func proveExpressionClearsFloor(expr string, floorMinor int) error {
 	return nil
 }
 
-// supportedProbeVersions returns readings at or above the floor, used only to
-// prove a constraint is not vacuous. An expression satisfied by nothing admits
-// no sub-floor cluster and would pass the sub-floor sweep trivially, but it
-// also rejects every cluster the catalog claims to support — a typo, not a
-// floor. Failing on it keeps the guard closed against expressions it cannot
-// show are meaningful.
 // probeReadings returns the Kubernetes readings used to show that a
 // declaration admits at least one cluster. Minor-precision probes alone are
 // not enough: a patch-precision range such as ">= 1.34.3 < 1.35.0" is
@@ -227,6 +222,12 @@ func probeReadings(supported []string, parsed *constraints.CompoundConstraint) [
 	return readings
 }
 
+// supportedProbeVersions returns readings at or above the floor, used only to
+// prove a constraint is not vacuous. An expression satisfied by nothing admits
+// no sub-floor cluster and would pass the sub-floor sweep trivially, but it
+// also rejects every cluster the catalog claims to support — a typo, not a
+// floor. Failing on it keeps the guard closed against expressions it cannot
+// show are meaningful.
 func supportedProbeVersions(floorMinor int) []string {
 	var probes []string
 	for minor := floorMinor; minor <= 60; minor++ {
@@ -416,9 +417,10 @@ func verifyK8sFloorDeclaration(t *testing.T, decl k8sFloorDeclaration, floorMino
 		}
 	}
 
-	t.Errorf("%s (%s) declares K8s.server.version %q, which no Kubernetes release from\n"+
-		"  1.%d through 1.60 satisfies. It admits no cluster the catalog supports, so this\n"+
-		"  guard cannot show it is a floor rather than a typo, and fails closed. See #2402.",
+	t.Errorf("%s (%s) declares K8s.server.version %q, which none of the probed Kubernetes\n"+
+		"  readings (1.%d through 1.60 plus the expression's declared bounds) satisfies.\n"+
+		"  It admits no cluster the catalog supports, so this guard cannot show it is a\n"+
+		"  floor rather than a typo, and fails closed. See #2402.",
 		decl.file, decl.location, decl.value, floorMinor)
 }
 
@@ -506,7 +508,7 @@ func TestProveExpressionRejectsWhatTheEvaluatorAdmits(t *testing.T) {
 }
 
 // TestProbeSetAdmitsPatchPrecisionRange is the regression control for the
-// probe sweep in assertDeclarationIsSatisfiable. The sweep used to try only
+// probe sweep used by verifyK8sFloorDeclaration. The sweep used to try only
 // "1.N.0" readings, which no patch-precision range can satisfy: ">= 1.34.3
 // < 1.35.0" clears proveExpressionClearsFloor, yet 1.34.0 is below its lower
 // bound and 1.35.0 is excluded by its upper one. A correct floor was therefore
