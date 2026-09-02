@@ -41,15 +41,14 @@ Typical symptoms:
   15 min — while `deployment` and `conformance` pass; the workload never
   reaches a ready state
 
-You can confirm reachability directly from a GPU node before re-running. The
-toleration is required because the GPU node groups on these clusters are
-tainted (`NoSchedule`/`NoExecute`); without it the probe pod stays `Pending`
-and never runs:
+You can confirm reachability directly from a system-nodegroup node before
+re-running — this is the direction that matters, since the frontend (system
+nodegroup) is what initiates the connection to the worker (GPU nodegroup):
 
 ```shell
 kubectl run tcp-probe --rm -i --restart=Never --image=busybox:1.36 \
   --overrides='{"spec":{"nodeSelector":{"<gpu-node-label-key>":"<value>"},"tolerations":[{"operator":"Exists"}]}}' \
-  -- sh -c 'nc -zv -w 5 <worker-pod-ip-or-svc> <PORT>'
+  -- sh -c 'nc -zv -w 5 <worker-pod-ip-or-svc> 5557'
 ```
 
 The conformance validator's `ai-service-metrics` check adds a third requirement:
