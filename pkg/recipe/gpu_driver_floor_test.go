@@ -380,8 +380,8 @@ func TestGPUDriverFloorPlacementInvariant(t *testing.T) {
 		}
 
 		if strings.HasSuffix(name, "-any") ||
-			criteria.Service == CriteriaServiceAny ||
-			criteria.Intent == CriteriaIntentAny {
+			criteria.Service == "" || criteria.Service == CriteriaServiceAny ||
+			criteria.Intent == "" || criteria.Intent == CriteriaIntentAny {
 
 			t.Errorf("overlay %q declares %s on a criteria-wildcard overlay.\n"+
 				"Wildcards are applied BEFORE the service overlays they compose with, "+
