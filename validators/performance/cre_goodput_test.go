@@ -15,10 +15,12 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestCheckCRETrainingGoodputSkipsWithoutConstraint(t *testing.T) {
@@ -50,12 +52,95 @@ func TestBuildCRETrainingWorkloadRun(t *testing.T) {
 		t.Errorf("command = %v, want /bin/bash /config/train.sh", command)
 	}
 	config := spec["config"].(map[string]any)["inline"].(map[string]any)
-	if config["train.sh"] != creTrainingScript {
+	script, _ := config["train.sh"].(string)
+	if script != creTrainingScript {
 		t.Error("training script does not match the pinned CRE EKS H100 workload")
+	}
+	for _, want := range []string{
+		"--mock-data",
+		"--tensor-model-parallel-size",
+		"${TENSOR_PARALLELISM:-2}",
+		"--num-layers 32",
+		"--hidden-size 4096",
+		"--log-throughput",
+		"--use-mcore-models",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("training script missing %q", want)
+		}
+	}
+	if strings.Contains(script, "--num-layers 79") {
+		t.Error("2-node H100 check must use Nemotron-5 8B, not the 56B sample")
+	}
+	if strings.Contains(script, "${TENSOR_PARALLELISM:-4}") {
+		t.Error("H100 8B check must not default TP to the GB200/GB300 56B value 4")
+	}
+	env := spec["env"].([]any)
+	foundTP := false
+	for _, raw := range env {
+		m := raw.(map[string]any)
+		if m[keyName] == "TENSOR_PARALLELISM" {
+			foundTP = true
+			if m[keyValue] != "2" {
+				t.Errorf("TENSOR_PARALLELISM = %v, want 2", m[keyValue])
+			}
+		}
+	}
+	if !foundTP {
+		t.Error("missing TENSOR_PARALLELISM=2 env (CRE catalog parallelism.h100 for nemotron5-8b)")
 	}
 	goodput := spec["goodputMeasurement"].(map[string]any)
 	if goodput["logProfileRef"] != creLogProfileTrainingGoodput {
 		t.Errorf("logProfileRef = %v, want %s", goodput["logProfileRef"], creLogProfileTrainingGoodput)
+	}
+}
+
+func TestCRETerminalConditionSummary(t *testing.T) {
+	tests := []struct {
+		name string
+		obj  *unstructured.Unstructured
+		want string
+	}{
+		{
+			name: "missing conditions",
+			obj:  &unstructured.Unstructured{Object: map[string]any{}},
+			want: "no status.conditions",
+		},
+		{
+			name: "Failed with reason and message",
+			obj: &unstructured.Unstructured{Object: map[string]any{
+				"status": map[string]any{
+					"conditions": []any{
+						map[string]any{
+							"type":    "Failed",
+							"status":  "True",
+							"reason":  "WorkloadFailed",
+							"message": "JobSet FailedJobs",
+						},
+					},
+				},
+			}},
+			want: "Failed (WorkloadFailed): JobSet FailedJobs",
+		},
+		{
+			name: "ignores False conditions",
+			obj: &unstructured.Unstructured{Object: map[string]any{
+				"status": map[string]any{
+					"conditions": []any{
+						map[string]any{"type": "InProgress", "status": "False"},
+						map[string]any{"type": "Failed", "status": "True", "reason": "WorkloadFailed"},
+					},
+				},
+			}},
+			want: "Failed (WorkloadFailed)",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := creTerminalConditionSummary(tt.obj); got != tt.want {
+				t.Errorf("got %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
