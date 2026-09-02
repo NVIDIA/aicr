@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -784,11 +786,23 @@ func TestConfig_BundleOptions(t *testing.T) {
 	if opts.WorkloadGate == nil || opts.WorkloadGate.Key != "aicr.run/gate" {
 		t.Errorf("WorkloadGate = %+v, want key aicr.run/gate", opts.WorkloadGate)
 	}
-	if len(opts.SystemNodeTolerations) != 1 {
-		t.Errorf("SystemNodeTolerations = %v, want 1 entry", opts.SystemNodeTolerations)
+	// Assert IDENTITY, not just length. Both lists hold exactly one entry, so a
+	// length check passes even when the two fields are swapped — and the drift
+	// guard cannot catch a same-typed misroute either. The keys differ, so
+	// comparing them is the only thing that pins the mapping.
+	if len(opts.SystemNodeTolerations) != 1 ||
+		opts.SystemNodeTolerations[0].Key != "node-role.kubernetes.io/control-plane" ||
+		opts.SystemNodeTolerations[0].Effect != corev1.TaintEffectNoSchedule {
+
+		t.Errorf("SystemNodeTolerations = %+v, want one node-role.kubernetes.io/control-plane:NoSchedule",
+			opts.SystemNodeTolerations)
 	}
-	if len(opts.AcceleratedNodeTolerations) != 1 {
-		t.Errorf("AcceleratedNodeTolerations = %v, want 1 entry", opts.AcceleratedNodeTolerations)
+	if len(opts.AcceleratedNodeTolerations) != 1 ||
+		opts.AcceleratedNodeTolerations[0].Key != "nvidia.com/gpu" ||
+		opts.AcceleratedNodeTolerations[0].Effect != corev1.TaintEffectNoSchedule {
+
+		t.Errorf("AcceleratedNodeTolerations = %+v, want one nvidia.com/gpu:NoSchedule",
+			opts.AcceleratedNodeTolerations)
 	}
 	if len(opts.ValueOverrides) == 0 {
 		t.Error("ValueOverrides is empty; spec.bundle.deployment.set was dropped")

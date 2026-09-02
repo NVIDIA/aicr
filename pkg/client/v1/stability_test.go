@@ -290,6 +290,12 @@ func TestStability_Bundle(t *testing.T) {
 	requireType[[]corev1.Toleration](aicr.BundleOptions{}.AcceleratedNodeTolerations)
 	requireType[*bundlerconfig.NodeLabel](aicr.BundleOptions{}.DRAEvictionNodeLabel)
 	requireType[*corev1.Taint](aicr.BundleOptions{}.WorkloadGate)
+	// The three selectors are pinned by TYPE, not only by the nil literals in
+	// the struct above: an untyped nil satisfies any map or pointer, so the
+	// literal alone would keep compiling if one of these were retyped.
+	requireType[map[string]string](aicr.BundleOptions{}.SystemNodeSelector)
+	requireType[map[string]string](aicr.BundleOptions{}.AcceleratedNodeSelector)
+	requireType[map[string]string](aicr.BundleOptions{}.WorkloadSelector)
 	requireType[int](aicr.BundleOptions{}.Nodes)
 	requireType[bool](aicr.BundleOptions{}.Attest)
 	requireType[bool](aicr.BundleOptions{}.VendorCharts)

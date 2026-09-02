@@ -114,11 +114,21 @@ func TestBundleOptions_BundlerConfig_FoldsFlatFields(t *testing.T) {
 	if got := bc.WorkloadGateTaint(); got == nil || got.Key != "aicr.run/gate" {
 		t.Errorf("WorkloadGateTaint = %+v, want key aicr.run/gate", got)
 	}
-	if len(bc.SystemNodeTolerations()) != 1 {
-		t.Errorf("SystemNodeTolerations = %v, want 1 entry", bc.SystemNodeTolerations())
+	// Assert IDENTITY, not just length. Both lists hold exactly one entry, so a
+	// length check passes even when the two fields are swapped in the
+	// resolved-to-With* mapping. The keys differ, so comparing them is what
+	// actually pins the wiring.
+	if sys := bc.SystemNodeTolerations(); len(sys) != 1 ||
+		sys[0].Key != "node-role.kubernetes.io/control-plane" ||
+		sys[0].Effect != corev1.TaintEffectNoSchedule {
+
+		t.Errorf("SystemNodeTolerations = %+v, want one node-role.kubernetes.io/control-plane:NoSchedule", sys)
 	}
-	if len(bc.AcceleratedNodeTolerations()) != 1 {
-		t.Errorf("AcceleratedNodeTolerations = %v, want 1 entry", bc.AcceleratedNodeTolerations())
+	if acc := bc.AcceleratedNodeTolerations(); len(acc) != 1 ||
+		acc[0].Key != "nvidia.com/gpu" ||
+		acc[0].Effect != corev1.TaintEffectNoSchedule {
+
+		t.Errorf("AcceleratedNodeTolerations = %+v, want one nvidia.com/gpu:NoSchedule", acc)
 	}
 	if len(bc.ValueOverrides()) == 0 {
 		t.Error("ValueOverrides is empty; ValueOverrides field was dropped")
