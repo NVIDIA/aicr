@@ -110,10 +110,16 @@ can false-fail a healthy run. Making the NCCL gate fabric/transport-class
 aware is tracked in [#1256](https://github.com/NVIDIA/aicr/issues/1256).
 
 Expected flow (~5–10 min per variant): readiness pre-flight → deploy
-`TrainingRuntime` + `TrainJob` in `aicr-validation` → worker pods reach
-`Running` → run `all_reduce_perf` → parse peak bus bandwidth → verify the
-intended transport actually carried traffic (for `-net` / `-nvls`) → compare
-to recipe constraint (10 % tolerance) → cleanup.
+`TrainingRuntime` + `TrainJob` in a per-run namespace named
+`aicr-nccl-perf-<variant>-<run-id>` → worker pods reach `Running` → run
+`all_reduce_perf` → parse peak bus bandwidth → verify the intended transport
+actually carried traffic (for `-net` / `-nvls`) → compare to recipe
+constraint (10 % tolerance) → cleanup.
+
+Each variant (`-net`, `-nvls`, default) gets its own namespace, deleted on
+exit along with its `TrainingRuntime`/`TrainJob`. A namespace left behind by
+an interrupted run is reclaimed by its next retry (same run ID) or pruned on
+a later run (standalone runs, no run ID).
 
 A passing CTRF entry:
 
