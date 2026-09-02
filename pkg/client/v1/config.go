@@ -21,6 +21,7 @@ import (
 	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
 	appconfig "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
@@ -566,8 +567,13 @@ func (c *Config) ValidateOptions() ([]ValidateOption, error) {
 //
 // These settings map onto the agent Job: namespace, image, image pull
 // secrets, job name, service account, node selector, tolerations, require-GPU,
-// runtime class, OS, max nodes per entry, output path, template path, resource
-// requests and limits, timeout, cleanup and privileged.
+// runtime class, OS, max nodes per entry, resource requests and limits,
+// timeout, cleanup and privileged.
+//
+// OS is parsed through the criteria registry rather than copied, matching what
+// the CLI does with --os. That keeps undocumented values from reaching the
+// agent, and it matters for exact matches: an unparsed "Talos" misses the
+// agent's "talos" check and selects incompatible host mounts.
 //
 // AgentConfig's fields are exported, so a caller overrides any of them after
 // deriving — the same derive-don't-apply precedence the other methods use, but
@@ -589,10 +595,20 @@ func (c *Config) ValidateOptions() ([]ValidateOption, error) {
 //
 // # What is deliberately NOT projected
 //
-// OutputFormat has no AgentConfig counterpart, and that is not an omission:
-// format is applied at delivery, not by the agent. The Job always stages YAML
-// in a ConfigMap, so a format routed through AgentConfig would be silently
-// ignored (#2398). Callers set it on the delivery path instead.
+// The whole spec.snapshot.output section is un-projected, and that is not an
+// omission. Output describes DELIVERY; AgentConfig describes the collection
+// Job, and the two are different concerns:
+//
+//   - output.format is applied at delivery. The Job always stages YAML in a
+//     ConfigMap, so a format routed through AgentConfig would be silently
+//     ignored (#2398).
+//   - output.path and output.template are not AgentConfig.Output and
+//     .TemplatePath. Per AgentConfig.Output's own godoc, any value that is not
+//     a cm:// URI stages to an internal ConfigMap and delivery becomes the
+//     caller's job. Projecting a file path there would look configured and
+//     write nothing.
+//
+// Callers deliver with snapshotter.DeliverSnapshot, passing Snapshot.Raw.
 //
 // Kubeconfig, Debug, ClusterConfigPath, AKSGPUPoolsPath, DiscoverNetwork,
 // RunID and NameBase are left at their zero values. None has a spec.snapshot
@@ -603,12 +619,25 @@ func (c *Config) ValidateOptions() ([]ValidateOption, error) {
 //
 // Returns a zero-value AgentConfig (never nil) when the document has no
 // spec.snapshot, and an error when the section is present but malformed.
+//
+// A zero value is not a working configuration: Privileged is false, which the
+// collector generally needs true. That is deliberate. Defaults apply when the
+// section EXISTS and is silent about a field; a document with no spec.snapshot
+// at all made no snapshot decisions, so the facade does not invent them. A
+// caller in that position supplies its own defaults, as the CLI does from its
+// flag defaults.
 func (c *Config) SnapshotAgentConfig() (*AgentConfig, error) {
 	// A zero-value AgentConfig rather than nil, so a caller that did not supply
 	// a config (or supplied one without spec.snapshot) can derive
 	// unconditionally and then set the caller-owned fields — matching the
 	// "returns zero values" contract in the Config godoc.
-	if c == nil || c.internal == nil {
+	//
+	// The section-presence check is load-bearing and cannot be replaced by a
+	// nil check on the resolved value: Resolve() returns a NON-nil
+	// SnapshotResolved for an absent section, so falling through would apply
+	// the in-section defaults (Cleanup and Privileged both true) to a document
+	// that never opted into snapshot configuration at all.
+	if c == nil || c.internal == nil || c.internal.Snapshot() == nil {
 		return &AgentConfig{}, nil
 	}
 	resolved, err := c.internal.Snapshot().Resolve()
@@ -631,6 +660,21 @@ func (c *Config) SnapshotAgentConfig() (*AgentConfig, error) {
 			"invalid spec.snapshot.agent.limits", err)
 	}
 
+	// The CLI parses --os through the criteria registry so only documented
+	// values reach the agent and the in-pod collector factory, and so an
+	// invalid value errors rather than traveling. Passing resolved.OS through
+	// raw would skip both: "Talos" would miss the agent's exact "talos" match
+	// and select incompatible host mounts.
+	osValue := resolved.OS
+	if osValue != "" {
+		parsed, perr := recipe.NewCriteriaRegistry().ParseOS(osValue)
+		if perr != nil {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				"invalid spec.snapshot.agent.os", perr)
+		}
+		osValue = string(parsed)
+	}
+
 	cfg := &AgentConfig{
 		Namespace:          resolved.Namespace,
 		Image:              resolved.Image,
@@ -641,10 +685,8 @@ func (c *Config) SnapshotAgentConfig() (*AgentConfig, error) {
 		Tolerations:        resolved.Tolerations,
 		RequireGPU:         resolved.RequireGPU,
 		RuntimeClassName:   resolved.RuntimeClassName,
-		OS:                 resolved.OS,
+		OS:                 osValue,
 		MaxNodesPerEntry:   resolved.MaxNodesPerEntry,
-		Output:             resolved.OutputPath,
-		TemplatePath:       resolved.OutputTemplate,
 		Requests:           requests,
 		Limits:             limits,
 		// Inverted on purpose. See the godoc above.

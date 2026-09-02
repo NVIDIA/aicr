@@ -1394,8 +1394,7 @@ One inversion worth knowing: config says `noCleanup`, the option says
 ### What `SnapshotAgentConfig()` does and does not carry
 
 `AgentConfig`'s fields are exported, so unlike the bundle path there is no
-options slice — derive it, then set any field directly. It is never nil, so a
-document without `spec.snapshot` yields a usable zero value:
+options slice — derive it, then set any field directly. It is never nil:
 
 ```go
 agent, err := cfg.SnapshotAgentConfig()
@@ -1415,11 +1414,32 @@ silently if you reimplement them by hand:
 | `privileged` → `Privileged` | **Defaults to true** when config says nothing. The resolved field is a pointer so unset stays distinct from an explicit `false`; treating nil as `false` drops privileges the collector needs, and it surfaces as missing data rather than an error |
 | `requests`, `limits` | Parsed from raw `name=quantity,...` strings. `Resolve()` deliberately leaves them unparsed, so a malformed value errors here instead of becoming an empty `ResourceList` |
 
-`spec.snapshot.output.format` is **not** projected, and that is deliberate:
-format is applied at delivery, not by the agent. The Job always stages YAML in
-a ConfigMap, so a format routed through `AgentConfig` would be silently ignored
-(#2398).
+The whole `spec.snapshot.output` section is **not** projected, and that is
+deliberate. Output describes *delivery*; `AgentConfig` describes the collection
+Job.
+
+- `output.format` is applied at delivery. The Job always stages YAML in a
+  ConfigMap, so a format routed through `AgentConfig` would be silently ignored
+  (#2398).
+- `output.path` and `output.template` are **not** `AgentConfig.Output` and
+  `.TemplatePath`. Any `Output` value that is not a `cm://` URI stages to an
+  internal ConfigMap and delivery becomes yours, so projecting a file path
+  there would look configured and write nothing.
+
+Deliver with `snapshotter.DeliverSnapshot`, passing `Snapshot.Raw`.
+
+`OS` is parsed through the criteria registry rather than copied, matching what
+the CLI does with `--os`. An unparsed `Talos` would miss the agent's exact
+`talos` check and select incompatible host mounts, and an undocumented value
+errors here instead of traveling.
 
 `Kubeconfig`, `Debug`, `ClusterConfigPath`, `AKSGPUPoolsPath`,
 `DiscoverNetwork`, `RunID` and `NameBase` have no config counterpart and stay
 zero — they are per-invocation or caller-owned.
+
+**A document with no `spec.snapshot` yields a zero value, which is not a
+working configuration** — `Privileged` is false, which the collector generally
+needs true. That is deliberate: defaults apply when the section exists and is
+silent about a field, but a document that made no snapshot decisions at all
+does not get decisions invented for it. Supply your own defaults in that case,
+as the CLI does from its flag defaults.

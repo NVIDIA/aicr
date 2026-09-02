@@ -1022,8 +1022,6 @@ func TestConfig_SnapshotAgentConfig(t *testing.T) {
 		{"OS", ac.OS, "ubuntu"},
 		{"MaxNodesPerEntry", ac.MaxNodesPerEntry, 7},
 		{"Timeout", ac.Timeout, 12 * time.Minute},
-		{"Output", ac.Output, "./snap.yaml"},
-		{"TemplatePath", ac.TemplatePath, "./tmpl.tmpl"},
 	}
 	for _, c := range checks {
 		if c.got != c.want {
@@ -1104,7 +1102,40 @@ func TestConfig_SnapshotAgentConfig_PrivilegedDefaultsTrue(t *testing.T) {
 	}
 }
 
+// TestConfig_SnapshotAgentConfig_Absent covers BOTH routes to "no snapshot
+// configuration", which fail differently.
+//
+// A nil Config is caught by the receiver check. A document that simply omits
+// spec.snapshot is NOT: Resolve() returns a non-nil SnapshotResolved for an
+// absent section, so without the section-presence check the derivation falls
+// through and applies the in-section defaults — Cleanup and Privileged both
+// true — to a document that never opted into snapshot configuration.
 func TestConfig_SnapshotAgentConfig_Absent(t *testing.T) {
+	t.Run("document omits spec.snapshot", func(t *testing.T) {
+		body := `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+spec:
+  verify:
+    policy:
+      minTrustLevel: max
+`
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		ac, err := cfg.SnapshotAgentConfig()
+		if err != nil {
+			t.Fatalf("SnapshotAgentConfig: %v", err)
+		}
+		if ac == nil {
+			t.Fatal("got nil; an absent section must still derive a zero value")
+		}
+		if ac.Cleanup || ac.Privileged {
+			t.Errorf("Cleanup=%v Privileged=%v; an absent section must not apply in-section defaults",
+				ac.Cleanup, ac.Privileged)
+		}
+	})
+
 	var cfg *aicr.Config
 	ac, err := cfg.SnapshotAgentConfig()
 	if err != nil {
@@ -1120,4 +1151,34 @@ func TestConfig_SnapshotAgentConfig_Absent(t *testing.T) {
 
 		t.Errorf("got %+v, want a zero value", ac)
 	}
+}
+
+// TestConfig_SnapshotAgentConfig_OSIsParsed pins that OS goes through the
+// criteria registry rather than being copied. An unparsed "Talos" misses the
+// agent's exact "talos" match and selects incompatible host mounts, and an
+// undocumented value would travel instead of erroring.
+func TestConfig_SnapshotAgentConfig_OSIsParsed(t *testing.T) {
+	head := "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  snapshot:\n    agent:\n      os: "
+	t.Run("mixed case is normalized", func(t *testing.T) {
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, head+"Talos\n"))
+		if err != nil {
+			t.Skipf("loader rejected the value before the derivation: %v", err)
+		}
+		ac, err := cfg.SnapshotAgentConfig()
+		if err != nil {
+			t.Fatalf("SnapshotAgentConfig: %v", err)
+		}
+		if ac.OS != "talos" {
+			t.Errorf("OS = %q, want %q", ac.OS, "talos")
+		}
+	})
+	t.Run("undocumented value is rejected", func(t *testing.T) {
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, head+"plan9\n"))
+		if err != nil {
+			return // rejected earlier, also fail-closed
+		}
+		if _, err := cfg.SnapshotAgentConfig(); err == nil {
+			t.Fatal("SnapshotAgentConfig accepted an undocumented OS value")
+		}
+	})
 }
