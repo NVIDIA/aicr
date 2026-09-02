@@ -124,7 +124,7 @@ Currently on disk:
 | eks | gb200 | `eks/system-m7i.yaml` | `eks/p6-gb200.yaml` |
 | eks | gb300 | `eks/system-m7i.yaml` | `eks/p6e-gb300.yaml` |
 
-**Cluster defaults:** 2 system nodes, 4 GPU nodes, Kubernetes v1.33.5, region `us-east-1`. GPUs per node come from the selected profile's `spec.gpu.count`, so the cluster total varies by profile: 32 on `p5-h100` / `p6-gb200` (8 each), 16 on `p6e-gb300` (4 each).
+**Cluster defaults:** 2 system nodes, 4 GPU nodes, Kubernetes v1.33.5, region `us-east-1`. The cluster's GPU total is `4 × spec.gpu.count` of the selected GPU profile, so it varies by accelerator — read the count from the profile rather than assuming a fixed total.
 
 ## Makefile Targets
 

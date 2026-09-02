@@ -47,11 +47,18 @@ spec:
       value: ">= 1.34"
 
   # The Slinky operator (CRDs + operator + cluster instance) is declared
-  # inline per slurm leaf, mirroring the dynamo-platform pattern in
-  # h100-*-inference-dynamo leaves. Inlining lets each leaf carry its
-  # own GPU/GRES tuning without fighting the mixin-vs-leaf identity-field
-  # guard in mixinComponentRefSafeForMerge (pkg/recipe/metadata_store.go),
-  # and keeps base.yaml free of platform-specific components.
+  # inline per slurm leaf, matching all six existing *-training-slurm leaves.
+  #
+  # This is duplication, not a necessity: recipes/mixins/platform-kubeflow.yaml
+  # shows a mixin CAN carry componentRefs with type/valuesFile/dependencyRefs,
+  # and the six Slurm components are absent from the base, so a platform-slurm
+  # mixin would add them wholesale the same way. What is untested is the last
+  # step -- this leaf puts `overrides` on slinky-slurm for GRES, and whether a
+  # leaf may override a mixin-supplied componentRef has not been established
+  # (see mixinComponentRefSafeForMerge in pkg/recipe/metadata_store.go, which
+  # rejects a mixin ref carrying `overrides` when it collides with a base ref).
+  # Factoring the block out is a cross-cutting change to seven leaves and does
+  # not belong in a leaf addition; this leaf follows the existing convention.
   #
   # GPU GRES and device isolation on slinky-slurm must be declared in four
   # places because the chart does not derive GRES config in slurm.conf from

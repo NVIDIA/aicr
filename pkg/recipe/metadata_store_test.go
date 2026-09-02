@@ -1047,7 +1047,7 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"secure-accelerator-access",
 		"slinky-slurm-health",
 	}
-	gb200ConformanceChecks := []string{
+	imexSlurmConformanceChecks := []string{
 		"platform-health",
 		"gpu-operator-health",
 		"dra-support",
@@ -1076,8 +1076,8 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		name string
 		want []string
 	}{
-		{name: "gb200-eks-ubuntu-training-slurm", want: gb200ConformanceChecks},
-		{name: "gb300-eks-ubuntu-training-slurm", want: gb200ConformanceChecks},
+		{name: "gb200-eks-ubuntu-training-slurm", want: imexSlurmConformanceChecks},
+		{name: "gb300-eks-ubuntu-training-slurm", want: imexSlurmConformanceChecks},
 		{name: "h100-aks-ubuntu-training-slurm", want: conformanceChecks},
 		{name: "h100-eks-ubuntu-training-slurm", want: conformanceChecks},
 		{name: "h100-gke-cos-training-slurm", want: conformanceChecks},
@@ -1110,6 +1110,12 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 // verbatim between leaves, so a new leaf that drops or typos any part of it
 // must fail here by name rather than only as an opaque golden-digest diff.
 func TestGPUSlurmLeavesWireIMEXComputeDomain(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("failed to load metadata store: %v", err)
+	}
+
 	tests := []struct {
 		name     string
 		wantGres string
@@ -1119,18 +1125,14 @@ func TestGPUSlurmLeavesWireIMEXComputeDomain(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assertSlurmLeafWiresIMEXComputeDomain(t, tt.name, tt.wantGres)
+			assertSlurmLeafWiresIMEXComputeDomain(t, store, tt.name, tt.wantGres)
 		})
 	}
 }
 
-func assertSlurmLeafWiresIMEXComputeDomain(t *testing.T, leafName, wantGres string) {
+func assertSlurmLeafWiresIMEXComputeDomain(t *testing.T, store *MetadataStore, leafName, wantGres string) {
 	t.Helper()
 	ctx := context.Background()
-	store, err := loadMetadataStore(ctx)
-	if err != nil {
-		t.Fatalf("failed to load metadata store: %v", err)
-	}
 
 	leaf, ok := store.GetRecipeByName(leafName)
 	if !ok {
