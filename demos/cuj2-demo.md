@@ -212,15 +212,18 @@ publication revalidate a private snapshot and publish only that inventory.
 │  Requests:  Dynamo request plane (default TCP)                  │
 │  Events:    ZMQ-based KV-cache event plane (direct, no NATS)    │
 │                                                                 │
-│  CRDs (6):                                                      │
+│  CRDs (9):                                                      │
 │  ├── DynamoGraphDeployment         (inference serving graph)    │
 │  ├── DynamoComponentDeployment     (per-component pod mgmt)     │
 │  ├── DynamoGraphDeploymentRequest  (deployment lifecycle)       │
 │  ├── DynamoModel                   (model metadata)             │
 │  ├── DynamoWorkerMetadata          (worker state tracking)      │
-│  └── DynamoGraphDeploymentScalingAdapter  (autoscaling config)  │
+│  ├── DynamoGraphDeploymentScalingAdapter  (autoscaling config)  │
+│  ├── DynamoCheckpoint              (checkpoint/warm-restore)    │
+│  ├── PodSnapshot                   (checkpoint pod snapshot)    │
+│  └── PodSnapshotContent            (checkpoint snapshot data)   │
 │                                                                 │
-│  Webhooks: 4 validating (schema + business rule enforcement)    │
+│  Webhooks: 5 validating (schema + business rule enforcement)    │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               │ reconciles

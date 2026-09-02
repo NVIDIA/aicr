@@ -37,20 +37,32 @@ Typical symptoms:
   through to a worker
 - Worker startup probes failing with `connection refused` because the
   process exits before serving
-- The `inference-perf` performance validator failing after its
-  workload-readiness (10 min) and health (5 min) gates lapse — roughly
-  15 min — while `deployment` and `conformance` pass; the workload never
-  reaches a ready state
+- The `inference-perf` performance validator failing while `deployment` and
+  `conformance` pass; the workload never reaches a ready state. This is a
+  blocked-SG-traffic scenario, so it most often surfaces at the
+  workload-readiness gate (~10 min timeout) — the deployment never becomes
+  ready without connectivity, so the separate ~5 min health-check gate is
+  never reached. If readiness does pass (e.g. a subset of pods can reach
+  each other) but health checks then fail, the wait is up to ~15 min total.
 
-You can confirm reachability directly from a system-nodegroup node before
-re-running — this is the direction that matters, since the frontend (system
-nodegroup) is what initiates the connection to the worker (GPU nodegroup):
+You can confirm reachability for the fixed ZMQ port directly from a
+system-nodegroup node before re-running:
 
 ```shell
 kubectl run tcp-probe --rm -i --restart=Never --image=busybox:1.36 \
   --overrides='{"spec":{"nodeSelector":{"<system-node-label-key>":"<value>"}}}' \
   -- sh -c 'nc -zv -w 5 <worker-pod-ip-or-svc> 5557'
 ```
+
+This only validates the ZMQ port for dp_rank 0 (`5557`; add the rank's
+offset for dp_rank > 0) and only the system→GPU direction. It does **not**
+validate either dynamic TCP plane (`DYN_TCP_RPC_PORT`,
+`DYN_TCP_RESPONSE_STREAM_PORT`) in either direction — those bind to an
+OS-assigned port only once the pod is running, so there is no fixed port to
+probe ahead of time. To check them, `kubectl exec` into a running frontend
+or worker pod and inspect its actual listening sockets (e.g. `ss -tlnp` if
+available in the image, or read `/proc/net/tcp`), then probe that specific
+port from the other side.
 
 The conformance validator's `ai-service-metrics` check adds a third requirement:
 it dials Prometheus over the cluster Service (typically
@@ -81,7 +93,9 @@ SG rule below remains the reliable cluster-side guarantee.
 
 Allow ingress from the **system node security group to the GPU node
 security group** on:
-- TCP `5557` - ZMQ KV-cache event plane (fixed port)
+- TCP `5557` through `5557 + (max dp_rank across your workers)` - ZMQ
+  KV-cache event plane (fixed base port `5557`, offset per worker by
+  `dp_rank`; a single-worker deployment only needs `5557`)
 - TCP ephemeral range `1024-65535` - Dynamo request plane `DYN_TCP_RPC_PORT` (OS-assigned)
 
 Allow ingress from the **GPU node security group to the system node
@@ -115,9 +129,13 @@ aws ec2 describe-instances \
   --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" \
   --output text
 
-# 2a) ZMQ KV-events: system → GPU on fixed port 5557
+# 2a) ZMQ KV-events: system → GPU on 5557 (single worker) or a range
+#     covering 5557 + max dp_rank for a multi-worker deployment
 aws ec2 authorize-security-group-ingress --group-id <gpu-sg-id> \
   --protocol tcp --port 5557 --source-group <system-sg-id>
+# For dp_rank > 0, e.g. up to 8 workers per node:
+#   aws ec2 authorize-security-group-ingress --group-id <gpu-sg-id> \
+#     --protocol tcp --port 5557-5564 --source-group <system-sg-id>
 
 # 2b) Request plane: system → GPU (ephemeral range)
 aws ec2 authorize-security-group-ingress --group-id <gpu-sg-id> \
