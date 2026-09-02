@@ -1761,6 +1761,14 @@ func createUnstructured(ctx context.Context, dynamicClient dynamic.Interface, gv
 	}
 
 	existing, err := client.Get(applyCtx, obj.GetName(), metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		// Deleted between the AlreadyExists above and this Get. Create
+		// fresh instead of failing on a race a plain Create would win.
+		if _, createErr := client.Create(applyCtx, obj, metav1.CreateOptions{}); createErr != nil {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to recreate resource", createErr)
+		}
+		return nil
+	}
 	if err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get existing resource for update", err)
 	}

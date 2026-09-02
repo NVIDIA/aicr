@@ -1244,6 +1244,49 @@ func TestCreateUnstructured_ReclaimsStaleResource_UpdatesInPlace(t *testing.T) {
 	}
 }
 
+// TestCreateUnstructured_RecreatesAfterNotFoundRace checks that a resource
+// deleted between the AlreadyExists Create and the follow-up Get falls
+// through to a fresh Create, instead of surfacing that race as a spurious
+// internal error.
+func TestCreateUnstructured_RecreatesAfterNotFoundRace(t *testing.T) {
+	const ns = "aicr-nccl-bench-deadbeef"
+	listKinds := map[schema.GroupVersionResource]string{trainingRuntimeGVR: "TrainingRuntimeList"}
+
+	stale := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": trainingRuntimeGVR.GroupVersion().String(),
+		"kind":       "TrainingRuntime",
+		"metadata": map[string]interface{}{
+			"name":            ncclTrainingRuntimeName,
+			"namespace":       ns,
+			"resourceVersion": "1",
+		},
+	}}
+	dynamicClient := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, stale)
+
+	var raced bool
+	dynamicClient.PrependReactor("get", "trainingruntimes", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if raced {
+			return false, nil, nil // second Get, from the fallback Create's caller, uses the default reactor.
+		}
+		raced = true
+		if err := dynamicClient.Tracker().Delete(trainingRuntimeGVR, ns, ncclTrainingRuntimeName); err != nil {
+			return true, nil, err
+		}
+		return true, nil, apierrors.NewNotFound(trainingRuntimeGVR.GroupResource(), ncclTrainingRuntimeName)
+	})
+
+	fresh := stale.DeepCopy()
+	fresh.SetResourceVersion("")
+
+	if err := createUnstructured(context.Background(), dynamicClient, trainingRuntimeGVR, ns, fresh); err != nil {
+		t.Fatalf("createUnstructured() after a NotFound race = %v, want a fresh Create", err)
+	}
+
+	if _, err := dynamicClient.Resource(trainingRuntimeGVR).Namespace(ns).Get(context.Background(), ncclTrainingRuntimeName, metav1.GetOptions{}); err != nil {
+		t.Fatalf("expected the resource to exist after the fallback Create: %v", err)
+	}
+}
+
 // TestCreateUnstructured_ReclaimsStaleTrainJob_DeletesAndRecreates is the
 // regression guard for the finding that reclaiming a stale TrainJob by
 // updating it in place does not recover a same-run retry (see
