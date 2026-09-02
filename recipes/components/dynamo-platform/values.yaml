@@ -33,7 +33,23 @@ global:
   # Upgrade note: on an in-place `helm upgrade` of a standing cluster,
   # accepting this default removes bundled NATS and drops NATS_SERVER from
   # operator-managed workload specs, which triggers rolling restarts. Fresh
-  # bundle installs are unaffected. To opt out and avoid the restart: the
+  # bundle installs are unaffected.
+  #
+  # CRITICAL for standing clusters: this only restarts operator-managed
+  # workload specs -- it does not touch the runtime IMAGE any existing
+  # DynamoGraphDeployment already pins. A workload still running an older
+  # runtime image (e.g. vllm-runtime:1.2.1, AICR's own prior pin) without
+  # DYN_EVENT_PLANE set relies on THAT image's own compiled-in default, not
+  # this chart's. At 1.2.1 that default is nats for etcd/kubernetes
+  # discovery (verified against upstream's resolve_event_transport_kind());
+  # it only became zmq-for-every-backend later, by 1.4.2. So a restarted
+  # 1.2.1 pod can silently keep trying to reach a NATS server this chart
+  # just removed. Before or alongside this platform upgrade, also bump any
+  # standing DynamoGraphDeployment's runtime image and/or set
+  # DYN_EVENT_PLANE=zmq explicitly -- don't rely on the platform upgrade
+  # alone to carry old workloads through.
+  #
+  # To opt out of the NATS removal and avoid the restart instead: the
   # generated install.sh does NOT forward extra flags (no --set passthrough)
   # -- edit this component's rendered values.yaml (or cluster-values.yaml)
   # in the bundle directly, setting global.nats.install: true, before

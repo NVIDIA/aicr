@@ -26,10 +26,12 @@ across security groups.** AICR's own supported paths often don't:
   Worker on the same `gpu-worker` group — no cross-nodegroup rules needed.
 
 If your deployment co-locates every Dynamo component on one node group (one
-security group), skip this document — there is no cross-SG traffic to
-allow. The rest of this document applies only when Frontend and Worker sit
-in different security groups, described by role rather than by fixed
-node-group name:
+security group), you can skip the Frontend↔Worker rules below — there is no
+cross-SG traffic between them to allow. The separate Prometheus/`ai-service-metrics`
+requirement further down still applies regardless of Frontend/Worker
+co-location; see that section. The Frontend↔Worker rules below apply only
+when Frontend and Worker sit in different security groups, described by
+role rather than by fixed node-group name:
 
 **Confirmed on a live Dynamo 1.4.1 EKS deployment (`aicr-gb300`, 2026-09-01)
 and against upstream runtime source (`lib/runtime/src/pipeline/network/manager.rs`,
@@ -49,18 +51,21 @@ Traffic between the Frontend/router role and the Worker role is
 
 If the Frontend/router and Worker roles sit in different security groups,
 these ports may be blocked in one or both directions. Typical symptoms:
-- Dynamo frontend and vLLM worker pods stuck in `CrashLoopBackOff`, or a
-  frontend that starts cleanly but never successfully routes a request
-  through to a worker
-- Worker startup probes failing with `connection refused` because the
-  process exits before serving
+- Dynamo frontend and vLLM worker pods stuck in `CrashLoopBackOff`
 - The `inference-perf` performance validator failing while `deployment` and
-  `conformance` pass; the workload never reaches a ready state. This is a
-  blocked-SG-traffic scenario, so it most often surfaces at the
-  workload-readiness gate (~10 min timeout) — the deployment never becomes
-  ready without connectivity, so the separate ~5 min health-check gate is
-  never reached. If readiness does pass (e.g. a subset of pods can reach
-  each other) but health checks then fail, the wait is up to ~15 min total.
+  `conformance` pass, and while the `DynamoGraphDeployment` itself reports
+  ready. **A pure SG block will usually pass the ~10 min
+  workload-readiness gate** — the Frontend and Worker's own readiness
+  probes are local-only HTTP checks against each pod's own `/health`
+  endpoint and don't exercise cross-pod networking at all (confirmed in
+  upstream's `component_worker.go`: *"ReadinessProbe in Dynamo worker
+  context doesn't determine that the worker is ready to receive
+  traffic"*). A blocked SG instead surfaces at the separate **~5 min
+  `/v1/chat/completions` health probe** that runs after DGD readiness —
+  the first real end-to-end request, which is what actually depends on
+  the request-plane and ZMQ connectivity above. Total time to failure is
+  roughly 15 min (readiness passes quickly, then the health probe times
+  out), not ~10 min.
 
 You can confirm reachability for the fixed ZMQ port directly from a node in
 the Frontend/router's security group before re-running. The probe pod needs
@@ -71,11 +76,20 @@ target the **worker Pod IP directly, not a Service**: the operator-generated
 worker Service only forwards the health port (`9090`), not `5557`.
 
 ```shell
-kubectl get pod -n dynamo-system -l nvidia.com/dynamo-component-type=worker -o wide  # find the worker Pod IP
+# <workload-namespace> is wherever your DynamoGraphDeployment actually runs
+# (e.g. dynamo-workload for the demo, dynamo-system for a validator run) --
+# check `kubectl get dynamographdeployments -A` if unsure.
+kubectl get pod -n <workload-namespace> -l nvidia.com/dynamo-component-type=worker -o wide  # find the worker Pod IP
 kubectl run tcp-probe --rm -i --restart=Never --image=busybox:1.36 \
-  --overrides='{"spec":{"nodeSelector":{"<frontend-node-label-key>":"<value>"},"tolerations":[{"key":"<taint-key>","operator":"Equal","value":"<taint-value>","effect":"NoSchedule"}]}}' \
+  --overrides='{"spec":{"nodeSelector":{"<frontend-node-label-key>":"<value>"},"tolerations":[{"operator":"Exists"}]}}' \
   -- sh -c 'nc -zv -w 5 <worker-pod-ip> 5557'
 ```
+
+The bare `"tolerations":[{"operator":"Exists"}]` above tolerates every taint
+regardless of key, value, or effect — simplest when you don't know exactly
+which taints (and which effects, `NoSchedule` vs `NoExecute`) the target
+node group carries. Narrow it to the specific key/value/effect if you want
+the probe to land only on a specific node group.
 
 This only validates the ZMQ port and only the frontend/router→worker
 direction. It does **not** validate either dynamic TCP plane
@@ -117,6 +131,8 @@ SG rule below remains the reliable cluster-side guarantee.
 
 ## Required Security Group Rules
 
+### Frontend↔Worker rules
+
 Only applies if your deployment splits the Frontend/router and Worker roles
 across security groups (see above — AICR's own validator and UAT paths
 co-locate them and need none of this).
@@ -135,21 +151,35 @@ security group** on:
 Allow ingress from the **Worker security group to the Frontend/router
 security group** on:
 - TCP ephemeral range `1024-65535` - Dynamo response-stream `DYN_TCP_RESPONSE_STREAM_PORT` (OS-assigned)
-- TCP `9090` - Prometheus (required for the `ai-service-metrics` conformance check)
 
-The `9090` rule is required as a fallback guarantee: the orchestrator *prefers*
-to co-locate with Prometheus, but that preference is best-effort, so it can
-still land on any worker node. Every node group whose pods can host the
-orchestrator must therefore be able to reach the Prometheus pod's IP on `9090`.
-On clusters with separate customer/system ENI subnets (e.g. DGXC EKS), this
-means the Prometheus-side SG must accept ingress from every other worker SG,
-not only from itself.
+### Prometheus rule — always required, independent of Frontend/Worker placement
+
+`kube-prometheus-stack` is scheduled via AICR's `--system-node-selector`
+regardless of where Frontend and Worker land (`recipes/registry.yaml`'s
+`kube-prometheus-stack` entry pins it to the `system` node scheduling
+group), so this rule is needed **even when Frontend and Worker are
+co-located** — it is not part of the Frontend↔Worker relationship above.
+
+Allow ingress on TCP `9090` (Prometheus, required for the `ai-service-metrics`
+conformance check) from **every security group that can host the
+conformance orchestrator Job** into the **Prometheus/system security
+group**. The orchestrator Job tolerates every taint (can schedule on any
+node group) and only *prefers* — via best-effort `dependencyAffinity` — to
+co-locate with Prometheus; on a fallback placement it can land on any
+worker node. Every node group whose pods can host the orchestrator must
+therefore be able to reach the Prometheus pod's IP on `9090`, including
+Worker's security group even if Frontend and Worker are co-located and
+otherwise need none of the rules above. On clusters with separate
+customer/system ENI subnets (e.g. DGXC EKS), this means the Prometheus-side
+SG must accept ingress from every other worker SG, not only from itself.
 
 If the cluster has more than two worker security groups (e.g. a separate
 inference node group), repeat the `9090` rule for each SG that can host the
 orchestrator — on a fallback placement it may land on any of them.
 
-Example, using AICR's own `--system-node-selector`/`--accelerated-node-selector`
+### Example
+
+Using AICR's own `--system-node-selector`/`--accelerated-node-selector`
 convention (Frontend on the system node group, Worker on the GPU node group)
 as a concrete instance of the frontend/router vs. worker roles above:
 
@@ -177,6 +207,10 @@ aws ec2 authorize-security-group-ingress --group-id <worker-sg-id> \
 aws ec2 authorize-security-group-ingress --group-id <frontend-sg-id> \
   --protocol tcp --port 1024-65535 --source-group <worker-sg-id>
 
+# 3) Prometheus: always required, from every SG that can host the
+#    conformance orchestrator -- worker-sg here, but repeat for any other
+#    worker security group in the cluster (this rule applies even if
+#    Frontend and Worker are co-located and skip rules 2a-2c above)
 aws ec2 authorize-security-group-ingress --group-id <frontend-sg-id> \
   --protocol tcp --port 9090 --source-group <worker-sg-id>
 ```
