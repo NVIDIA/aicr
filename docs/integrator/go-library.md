@@ -890,7 +890,8 @@ derive step rather than the load step.
 | `BundleInputOptions()` | `spec.bundle.input` + `.output` + `.registry` |
 | `ValidateSettings()` | `spec.validate.agent` + `.execution` |
 | `ValidateInputOptions()` | `spec.validate.input` + `.execution.failOnError` |
-| `EvidenceAttestationOptions()` | `spec.validate.evidence.attestation` (**not** `.cncf`) |
+| `EvidenceAttestationOptions()` | `spec.validate.evidence.attestation` |
+| `CNCFEvidenceOptions()` | `spec.validate.evidence.cncf` |
 | `SnapshotAgentConfig()` | `spec.snapshot.agent` + `.execution` (**not** `.output`) |
 | `SnapshotOutputOptions()` | `spec.snapshot.output` |
 | `RecipeSource()` | `spec.recipe.data` |
@@ -901,13 +902,16 @@ derive step rather than the load step.
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 
-All five spec sections now have a derivation. The one remaining gap is
-`spec.validate.evidence.cncf`: unlike every other un-projected field, it is not
-a deliberate exclusion but a missing *destination* — no facade method emits
-CNCF AI Conformance evidence, so there is no options type for a derivation to
-produce. Reading it still needs `Unwrap()`. Needing `Unwrap()` anywhere is worth
-reporting — it means a derivation is missing, and `pkg/config` carries no
-stability guarantee.
+All five spec sections have a derivation, and every one of them has a
+destination — including `spec.validate.evidence.cncf`, which
+`CNCFEvidenceOptions()` carries even though no `Client` method consumes CNCF
+AI Conformance evidence directly; the caller does (the CLI's
+`validateFlagCombinations`, `cncf.New`, and `runCNCFSubmission`). That mirrors
+`SnapshotOutputOptions()`, which projects `spec.snapshot.output` for the same
+reason: `Client.CollectSnapshot` does not consume it either, but the caller
+performing delivery does. Needing `Unwrap()` anywhere is worth reporting — it
+means a derivation is missing, and `pkg/config` carries no stability
+guarantee.
 
 ### What `BundleOptions()` does and does not carry
 
@@ -943,11 +947,31 @@ next section.
 
 Signing follows the same derive-don't-apply rule as everything else: a non-nil
 `Attester` wins over `OIDCResolve`, so an explicitly supplied signer is never
-silently rebuilt from config.
+silently rebuilt from config. When `Attester` is nil, `MakeBundle` also
+requires `Config.Attest()` (when `Config` is set) and `OIDCResolve.Attest` to
+agree — a hand-built `BundleOptions` that sets both and disagrees (say,
+`config.WithAttest(false)` baked into `Config` while `OIDCResolve.Attest` is
+`true`) is rejected with `ErrCodeInvalidRequest` rather than silently
+producing unsigned output that looks attested, or deriving a real signer
+whose result `Config.Attest()` then discards. `BundleOptions()` itself always
+keeps the two in agreement (`opts.Attest` and `opts.OIDCResolve.Attest` come
+from the same `spec.bundle.attestation.enabled` value), so this only matters
+for a caller who assembles `BundleOptions` by hand.
 
-A KMS key and keyless OIDC are mutually exclusive, and `BundleOptions()`
-rejects a document setting both rather than letting `signingKey` quietly win —
-the same rule the CLI enforces.
+A KMS key and keyless OIDC are mutually exclusive. `BundleOptions()` rejects a
+whitespace-only `signingKey` (must not be blank after trimming) and rejects
+`signingKey` combined with `fulcioURL`. It deliberately does NOT reject
+`signingKey` combined with `oidcDeviceFlow` at this layer: `BundleOptions()`
+runs before the CLI's flag-over-config merge, so an eager rejection here would
+make `--oidc-device-flow=false` unable to correct a document that sets both —
+the error would fire before that flag is ever read. The CLI's
+`validateSigningKeyExclusivity`, run on the flag-merged options, is what
+catches the `signingKey` + `oidcDeviceFlow` combination for CLI invocations.
+An SDK caller deriving `BundleOptions()` directly and calling `MakeBundle`
+with no flag merge gets no equivalent guard for that specific pair — the
+resulting bundle still signs with the KMS key (`ResolveAttesterLazy` picks KMS
+whenever `SigningKey` is non-empty), matching the pre-#2245 behavior; avoid
+setting both in a document consumed outside the CLI.
 
 **Device flow needs a prompt writer.** `spec.bundle.attestation.oidcDeviceFlow`
 sets `OIDCResolve.DeviceFlow`, but config cannot carry an `io.Writer`, so the
@@ -1481,7 +1505,7 @@ The rest of the section has other homes, and knowing which saves a search:
 | `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | Still on `ValidateSettings()` (`Image`, `JobName`, `ServiceAccountName`, `RequireGPU`), but not passed to `ValidateState` — `pkg/validator` exposes no option for any of them, so a `WithValidation*` here would have nothing to translate into. The CLI reads them directly to build the validator's own agent Job. |
 | `spec.validate.input.recipe`, `.snapshot`, `spec.validate.execution.failOnError` | `ValidateInputOptions()`, which targets the CALLER rather than `ValidateState` — see below. |
 | `spec.validate.evidence.attestation` | `EvidenceAttestationOptions()`, which targets `EmitRecipeEvidence` rather than `ValidateState` — see below. |
-| `spec.validate.evidence.cncf` | **Not projected.** No facade method emits CNCF AI Conformance evidence, so there is nothing for a derivation to feed. Reading it still needs `Unwrap()`. |
+| `spec.validate.evidence.cncf` | `CNCFEvidenceOptions()`, which targets the CALLER — there is no `Client.Emit*` for CNCF AI Conformance evidence — see below. |
 
 One inversion worth knowing: config says `noCleanup`, the field says
 `Cleanup`. `ValidateSettings()` flips it, so `noCleanup: true` becomes
@@ -1586,11 +1610,29 @@ network path. It is accepted because the destination is already the document's
 call. Treat it as a reviewable transport decision, not as evidence that
 excluding `NoSign` and `Full` is arbitrary.
 
-**`spec.validate.evidence.cncf` is not projected**, and this one is a genuine
-gap rather than a decision. There is no `Client.Emit*` that consumes
-`dir`/`cncfSubmission`/`features`, so a derivation would have nothing to
-produce. Projecting it means designing the emission API first. Read that half
-through `Unwrap()` until then.
+### What `CNCFEvidenceOptions()` does and does not carry
+
+`spec.validate.evidence` carries two kinds of evidence; `CNCFEvidenceOptions()`
+covers the other one — CNCF AI Conformance markdown, gated behind
+`--evidence-dir` / `--cncf-submission` / `--feature`:
+
+```go
+cncfOpts, err := cfg.CNCFEvidenceOptions()
+if err != nil {
+    return err
+}
+evidenceDir := cncfOpts.Dir // caller applies its own flag-over-config precedence
+```
+
+Unlike `EvidenceAttestationOptions()`, this one has no `Client.Emit*`
+counterpart at all: there is no `Client.EmitCNCFEvidence` for
+`CNCFEvidenceOptions()` to feed. The caller — the CLI's
+`validateFlagCombinations`, `cncf.New`, and `runCNCFSubmission` — consumes the
+three fields (`Dir`, `CNCFSubmission`, `Features`) directly, applying its own
+flag-over-config precedence the same way `SnapshotOutputOptions()` and
+`ValidateInputOptions()` already do for their own caller-consumed fields.
+`CNCFEvidenceOptions()` returns the zero value (never an error) for an absent
+section, and an error only when `spec.validate` is present but malformed.
 
 ### What `SnapshotAgentConfig()` does and does not carry
 

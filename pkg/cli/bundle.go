@@ -417,7 +417,12 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOption
 		}
 		opts.storageClass = sc
 	} else if bundleOpts.StorageClass != "" {
-		opts.storageClass = bundleOpts.StorageClass
+		sc := strings.TrimSpace(bundleOpts.StorageClass)
+		if sc == "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"spec.bundle.scheduling.storageClass cannot be blank")
+		}
+		opts.storageClass = sc
 	}
 
 	if cmd.IsSet("shared-storage-class") {

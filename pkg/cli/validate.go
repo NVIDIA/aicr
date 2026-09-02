@@ -26,7 +26,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -812,23 +811,13 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 				return err
 			}
 
-			// Read ONLY for EvidenceCNCF below: spec.validate.evidence.cncf has no
-			// facade derivation because no facade method emits CNCF evidence — a
-			// derivation would produce a value nothing consumes. The blocker is a
-			// missing consumer, not a missing mapping. This is the one Unwrap()
-			// #2245 leaves standing; see the slice-4 design.
-			resolved, err := cfg.Unwrap().Validation().Resolve()
+			cncfOpts, err := cfg.CNCFEvidenceOptions()
 			if err != nil {
 				return err
 			}
-
-			cncfCfg := resolved.EvidenceCNCF
-			if cncfCfg == nil {
-				cncfCfg = &config.EvidenceCNCFResolved{}
-			}
-			evidenceDir := stringFlagOrConfig(cmd, "evidence-dir", cncfCfg.Dir)
-			cncfSubmission := boolFlagOrConfig(cmd, "cncf-submission", cncfCfg.CNCFSubmission)
-			features := stringSliceFlagOrConfig(cmd, "feature", cncfCfg.Features)
+			evidenceDir := stringFlagOrConfig(cmd, "evidence-dir", cncfOpts.Dir)
+			cncfSubmission := boolFlagOrConfig(cmd, "cncf-submission", cncfOpts.CNCFSubmission)
+			features := stringSliceFlagOrConfig(cmd, "feature", cncfOpts.Features)
 			// Resolved once here (flag > config) and reused by the guards below and
 			// the mode banner further down.
 			noCluster := boolFlagOrConfig(cmd, "no-cluster", opts.NoCluster)

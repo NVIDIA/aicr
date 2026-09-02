@@ -585,6 +585,35 @@ func TestValidateCmd_NoConfigDefaultsToCleanup(t *testing.T) {
 	}
 }
 
+// TestValidateCleanupFallback drives validateCleanupFallback directly for
+// both branches. present=false is also exercised indirectly by
+// TestValidateCmd_NoConfigDefaultsToCleanup through a full command run; the
+// two present=true rows here are not exercised by any other test — present's
+// whole point is to gate ONLY when spec.validate was actually evaluated, so
+// a present=true document that decided Cleanup=false must flow through
+// unmodified rather than being silently overridden by the CLI's own
+// clean-up-by-default.
+func TestValidateCleanupFallback(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    aicr.ValidateSettings
+		present bool
+		want    bool
+	}{
+		{"absent spec.validate defaults to cleanup", aicr.ValidateSettings{Cleanup: false}, false, true},
+		{"present spec.validate with cleanup true", aicr.ValidateSettings{Cleanup: true}, true, true},
+		{"present spec.validate with cleanup false", aicr.ValidateSettings{Cleanup: false}, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := validateCleanupFallback(tt.opts, tt.present); got != tt.want {
+				t.Errorf("validateCleanupFallback(%+v, present=%t) = %t, want %t",
+					tt.opts, tt.present, got, tt.want)
+			}
+		})
+	}
+}
+
 // TestValidateCmd_DeclaredNameDefaultsNeverReachTheAgent is the validate-side
 // half of TestSnapshotCmd_DeclaredNameDefaultsNeverReachTheDeployer; see that
 // test for why an unset --service-account-name must not resolve to a name aicr
