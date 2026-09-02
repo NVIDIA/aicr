@@ -71,8 +71,12 @@ func checkCRETrainingGoodput(ctx *validators.Context) error {
 		return aicrErrors.New(aicrErrors.ErrCodeInternal, "dynamic client is required to create a WorkloadRun")
 	}
 
-	runObj := buildCRETrainingWorkloadRun(ctx.Namespace, gpuConfig, ctx.NodeSelector)
-	if deleteErr := deleteCREWorkloadRun(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, creTrainingRunName); deleteErr != nil {
+	runName, err := uniqueCREResourceName(creTrainingRunName)
+	if err != nil {
+		return err
+	}
+	runObj := buildCRETrainingWorkloadRun(ctx.Namespace, runName, gpuConfig, ctx.NodeSelector)
+	if deleteErr := deleteCREWorkloadRun(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, runName); deleteErr != nil {
 		return deleteErr
 	}
 	defer func() {
@@ -80,7 +84,7 @@ func checkCRETrainingGoodput(ctx *validators.Context) error {
 			context.Background(),
 			ctx.DynamicClient,
 			ctx.Namespace,
-			creTrainingRunName,
+			runName,
 		); deleteErr != nil {
 			slog.Warn("failed to delete CRE training WorkloadRun", "error", deleteErr)
 		}
@@ -89,7 +93,7 @@ func checkCRETrainingGoodput(ctx *validators.Context) error {
 	if createErr := createUnstructured(ctx.Ctx, ctx.DynamicClient, workloadRunGVR, ctx.Namespace, runObj); createErr != nil {
 		return createErr
 	}
-	run, err := waitForWorkloadRunTerminal(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, creTrainingRunName)
+	run, err := waitForWorkloadRunTerminal(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, runName)
 	if err != nil {
 		return err
 	}
@@ -101,7 +105,7 @@ func checkCRETrainingGoodput(ctx *validators.Context) error {
 		ctx.Ctx,
 		ctx.DynamicClient,
 		ctx.Namespace,
-		creTrainingRunName,
+		runName,
 		run.GetCreationTimestamp(),
 	)
 	if err != nil {
@@ -165,7 +169,7 @@ var goodputMeasurementGVR = schema.GroupVersionResource{
 	Group: creAPIGroup, Version: versionV1alpha1, Resource: "goodputmeasurements",
 }
 
-func buildCRETrainingWorkloadRun(namespace string, gpuConfig *gpuConfiguration, nodeSelector map[string]string) *unstructured.Unstructured {
+func buildCRETrainingWorkloadRun(namespace, name string, gpuConfig *gpuConfiguration, nodeSelector map[string]string) *unstructured.Unstructured {
 	spec := map[string]any{
 		"image":       creTrainingImage,
 		"numNodes":    int64(gpuConfig.WorkerCount),
@@ -208,7 +212,7 @@ func buildCRETrainingWorkloadRun(namespace string, gpuConfig *gpuConfiguration, 
 		},
 	}
 	addCRETarget(spec, gpuConfig, nodeSelector)
-	return newCREWorkloadRun(namespace, creTrainingRunName, spec)
+	return newCREWorkloadRun(namespace, name, spec)
 }
 
 func parseGoodputRatio(status map[string]any) (float64, error) {

@@ -32,9 +32,13 @@ func TestBuildCRETrainingWorkloadRun(t *testing.T) {
 	cfg := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}
 	obj := buildCRETrainingWorkloadRun(
 		"ns",
+		creTrainingRunName,
 		cfg,
 		map[string]string{"nvidia.com/gpu.product": "NVIDIA-H100-80GB-HBM3"},
 	)
+	if obj.GetName() != creTrainingRunName {
+		t.Errorf("name = %q, want %s", obj.GetName(), creTrainingRunName)
+	}
 	spec := obj.Object["spec"].(map[string]any)
 	if spec["image"] != creTrainingImage {
 		t.Errorf("image = %v, want %s", spec["image"], creTrainingImage)

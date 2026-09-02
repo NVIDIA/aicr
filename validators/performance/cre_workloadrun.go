@@ -16,10 +16,12 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -34,6 +36,10 @@ import (
 const (
 	creAPIGroup    = "nvcre.nvidia.com"
 	creNCCLRunName = "aicr-cre-nccl"
+	// creGonePollInterval is how often deleteCREResource re-Gets a CR that is
+	// still terminating (finalizers). Bounded by DiagnosticTimeout on the
+	// parent context.
+	creGonePollInterval = 200 * time.Millisecond
 )
 
 var (
@@ -48,7 +54,15 @@ var (
 	}
 )
 
-func buildCRENCCLCertification(namespace string, gpuConfig *gpuConfiguration, nodeSelector map[string]string) *unstructured.Unstructured {
+func uniqueCREResourceName(prefix string) (string, error) {
+	var nonce [4]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to generate CRE resource name", err)
+	}
+	return fmt.Sprintf("%s-%x", prefix, nonce), nil
+}
+
+func buildCRENCCLCertification(namespace, name string, gpuConfig *gpuConfiguration, nodeSelector map[string]string) *unstructured.Unstructured {
 	spec := map[string]any{
 		"categories": []any{
 			map[string]any{
@@ -66,7 +80,7 @@ func buildCRENCCLCertification(namespace string, gpuConfig *gpuConfiguration, no
 			keyAPIVersion: creAPIGroup + "/" + versionV1alpha1,
 			keyKind:       "Certification",
 			keyMetadata: map[string]any{
-				keyName:      creNCCLRunName,
+				keyName:      name,
 				keyNamespace: namespace,
 			},
 			keySpec: spec,
@@ -250,13 +264,19 @@ func waitForCRETerminal(
 
 	res := client.Resource(gvr).Namespace(namespace)
 
+	watchOpts := metav1.ListOptions{FieldSelector: "metadata.name=" + name}
 	if obj, err := res.Get(waitCtx, name, metav1.GetOptions{}); err == nil {
 		if unstructuredConditionTrue(obj, "Succeeded") || unstructuredConditionTrue(obj, "Failed") {
 			return obj, nil
 		}
+		// Seed Watch from the observed RV so a terminal update between Get
+		// and Watch is replayed rather than missed.
+		if rv := obj.GetResourceVersion(); rv != "" {
+			watchOpts.ResourceVersion = rv
+		}
 	}
 
-	watcher, err := res.Watch(waitCtx, metav1.ListOptions{FieldSelector: "metadata.name=" + name})
+	watcher, err := res.Watch(waitCtx, watchOpts)
 	if err != nil {
 		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to watch "+kind, err)
 	}
@@ -372,9 +392,37 @@ func deleteCREResource(
 
 	delCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
-	err := client.Resource(gvr).Namespace(namespace).Delete(delCtx, name, metav1.DeleteOptions{})
-	if err != nil && !apierrors.IsNotFound(err) {
+	res := client.Resource(gvr).Namespace(namespace)
+	err := res.Delete(delCtx, name, metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to delete "+kind, err)
 	}
-	return nil
+	return waitForCREResourceGone(delCtx, res, kind, name)
+}
+
+func waitForCREResourceGone(ctx context.Context, res dynamic.ResourceInterface, kind, name string) error {
+	ticker := time.NewTicker(creGonePollInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for "+kind+" deletion", ctx.Err())
+		default:
+		}
+		_, err := res.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get "+kind+" during deletion wait", err)
+		}
+		select {
+		case <-ctx.Done():
+			return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout, "timed out waiting for "+kind+" deletion", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }

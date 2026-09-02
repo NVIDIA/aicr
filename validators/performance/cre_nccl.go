@@ -66,14 +66,18 @@ func validateCRENcclAllReduceBw(ctx *validators.Context, constraint recipe.Const
 		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal, "dynamic client is required to create a Certification")
 	}
 
-	obj := buildCRENCCLCertification(ctx.Namespace, gpuConfig, ctx.NodeSelector)
+	objName, err := uniqueCREResourceName(creNCCLRunName)
+	if err != nil {
+		return "", false, err
+	}
+	obj := buildCRENCCLCertification(ctx.Namespace, objName, gpuConfig, ctx.NodeSelector)
 
-	if deleteErr := deleteCRECertification(ctx.Ctx, dyn, ctx.Namespace, creNCCLRunName); deleteErr != nil {
+	if deleteErr := deleteCRECertification(ctx.Ctx, dyn, ctx.Namespace, objName); deleteErr != nil {
 		return "", false, deleteErr
 	}
 
 	defer func() {
-		if delErr := deleteCRECertification(context.Background(), dyn, ctx.Namespace, creNCCLRunName); delErr != nil {
+		if delErr := deleteCRECertification(context.Background(), dyn, ctx.Namespace, objName); delErr != nil {
 			slog.Warn("failed to delete CRE NCCL Certification", "error", delErr)
 		}
 	}()
@@ -82,7 +86,7 @@ func validateCRENcclAllReduceBw(ctx *validators.Context, constraint recipe.Const
 		return "", false, createErr
 	}
 
-	run, err := waitForCertificationTerminal(ctx.Ctx, dyn, ctx.Namespace, creNCCLRunName)
+	run, err := waitForCertificationTerminal(ctx.Ctx, dyn, ctx.Namespace, objName)
 	if err != nil {
 		return "", false, err
 	}

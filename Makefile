@@ -842,7 +842,11 @@ validate-performance: ## Recipe performance phase on the current kubecontext (RE
 	fi; \
 	AICR_BIN=$$(command -v aicr 2>/dev/null || true); \
 	if [ -z "$$AICR_BIN" ]; then \
-		AICR_BIN=$$(find dist/ -name "aicr" -type f 2>/dev/null | head -1); \
+		HOST_GOOS=$$(go env GOOS); HOST_GOARCH=$$(go env GOARCH); \
+		DIST_DIR=$$(find dist -maxdepth 1 -type d -name "aicr_$${HOST_GOOS}_$${HOST_GOARCH}*" 2>/dev/null | head -1); \
+		if [ -n "$$DIST_DIR" ] && [ -x "$$DIST_DIR/aicr" ]; then \
+			AICR_BIN="$$DIST_DIR/aicr"; \
+		fi; \
 	fi; \
 	if [ -z "$$AICR_BIN" ]; then \
 		echo "Error: aicr binary not found. Run 'make build' or put aicr on PATH."; \
