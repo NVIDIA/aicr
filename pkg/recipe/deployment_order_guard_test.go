@@ -200,6 +200,33 @@ func TestDeploymentOrderGuards(t *testing.T) {
 			},
 		},
 		{
+			name: "gb300-eks-ubuntu-training-slurm",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorGB300
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformSlurm
+				return c
+			},
+			requiredDeps: map[string][]string{
+				"slinky-slurm-operator": {"cert-manager", "slinky-slurm-operator-crds"},
+				"slinky-slurm":          {"nvidia-dra-driver-gpu", "slinky-slurm-operator", "slinky-slurm-operator-crds"},
+			},
+			requiredOrdering: [][2]string{
+				// The IMEX ComputeDomain pre-manifest rides with slinky-slurm and
+				// consumes the DRA driver's ResourceClaimTemplate, so the driver
+				// must land first or the NodeSet pods stay Pending.
+				{"nvidia-dra-driver-gpu", "slinky-slurm"},
+				{"cert-manager", "slinky-slurm-operator"},
+				{"slinky-slurm-operator-crds", "slinky-slurm-operator"},
+				{"slinky-slurm-operator", "slinky-slurm"},
+				{"slinky-slurm-operator-crds", "slinky-slurm"},
+				{"gpu-operator", "nvsentinel"},
+			},
+		},
+		{
 			name: "h100-aks-ubuntu-training-slurm",
 			criteria: func() *Criteria {
 				c := NewCriteria()
