@@ -172,7 +172,7 @@ func tryCaptureBundleOpts(t *testing.T, args []string) (*bundleCmdOptions, error
 	var captured *bundleCmdOptions
 	cmd := bundleCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}

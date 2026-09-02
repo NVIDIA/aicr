@@ -887,6 +887,7 @@ derive step rather than the load step.
 |---|---|
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
 | `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.attestation` |
+| `BundleInputOptions()` | `spec.bundle.input` + `.output` + `.registry` |
 | `ValidateSettings()` | `spec.validate.agent` + `.execution` |
 | `EvidenceAttestationOptions()` | `spec.validate.evidence.attestation` (**not** `.cncf`) |
 | `SnapshotAgentConfig()` | `spec.snapshot.agent` + `.execution` (**not** `.output`) |
@@ -907,18 +908,30 @@ stability guarantee.
 
 ### What `BundleOptions()` does and does not carry
 
-`BundleOptions()` returns a populated `Config` (the 18 bundler settings
-`spec.bundle.deployment` and `spec.bundle.scheduling` configure, plus the two
-attestation flags the bundler itself reads) and `OIDCResolve` (the four signing
-settings that reach the attester rather than the bundler).
+`BundleOptions()` returns the 18 bundler settings `spec.bundle.deployment` and
+`spec.bundle.scheduling` configure (plus the two attestation flags the bundler
+itself reads) as plain fields — not a built `Config` — so you read and
+override individual settings directly, the same as `ValidateSettings()`. It
+also returns `OIDCResolve` (the four signing settings that reach the attester
+rather than the bundler):
 
-Six resolved fields have no counterpart, by design rather than omission:
+```go
+opts, err := cfg.BundleOptions()
+if err != nil {
+    return err
+}
+opts.Nodes = 32 // caller wins, visibly
+```
 
-| Field | Why not projected |
-|---|---|
-| `spec.bundle.input.recipe` | You already pass the recipe to `MakeBundle`; projecting it would give the same decision two homes. |
-| `spec.bundle.output.target` (and its raw form), `.imageRefs` | Output destinations chosen per invocation. `OutputDir` is the analog `MakeBundle` honors. |
-| `spec.bundle.registry.insecureTLS`, `.plainHTTP` | OCI transport. `MakeBundle` does not push — the caller does, afterward — so a field here would be surface nothing reads. `EvidenceOptions` and `SignOptions` carry them because those operations do reach a registry. |
+`Config` is still on the struct, as an escape hatch: when you already have a
+fully built `*BundleConfig` from something the flat fields cannot express (a
+CLI-flag-only setting such as `Version` or `Serial`, or a config object you
+mutate in place), set it and it wins outright over every flat field below —
+`BundleOptions()` itself never populates it.
+
+The six caller-side fields have their own type, `BundleInputOptions()`, not
+because they are declined but because `MakeBundle` never reads them — see the
+next section.
 
 Signing follows the same derive-don't-apply rule as everything else: a non-nil
 `Attester` wins over `OIDCResolve`, so an explicitly supplied signer is never
@@ -954,6 +967,32 @@ Check that first error rather than letting the second assignment overwrite it.
 `BundleOptions()` returns a zero value alongside its error, so a swallowed
 failure bundles with defaults — no deployer, no overrides, no attestation —
 from a document that looked configured.
+
+### What `BundleInputOptions()` does and does not carry
+
+`MakeBundle` takes an already-resolved `RecipeResult` and does not push its
+own result anywhere — the caller does, after it returns. `BundleInputOptions()`
+carries the `spec.bundle` fields that describe that caller-side work instead:
+which recipe to bundle, which image-refs file to write to, where to push the
+finished bundle, and how to reach that registry:
+
+```go
+input, err := cfg.BundleInputOptions()
+if err != nil {
+    return err
+}
+rec, err := client.LoadRecipe(ctx, input.RecipePath, "")
+```
+
+| Field | Source |
+|---|---|
+| `RecipePath` | `spec.bundle.input.recipe` |
+| `ImageRefsPath` | `spec.bundle.output.imageRefs` |
+| `OutputTarget`, `OutputTargetRaw` | `spec.bundle.output.target`, parsed and raw |
+| `InsecureTLS`, `PlainHTTP` | `spec.bundle.registry.insecureTLS`, `.plainHTTP` — the document already chose the push destination in `OutputTarget`, so it is trusted to describe how to reach it too, the same reasoning `EvidenceOptions` and `SignOptions` apply to their own transport fields |
+
+None of these five reach `MakeBundle`; `BundleOptions()` carries what the
+bundler itself reads.
 
 One asymmetry worth knowing: `IgnoreTLog` has no config counterpart, so
 `BundleVerifyOptions()` always leaves it false. It weakens the trust floor by

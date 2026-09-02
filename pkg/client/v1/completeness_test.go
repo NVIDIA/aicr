@@ -112,3 +112,28 @@ func TestValidateResolved_IsFullyProjected(t *testing.T) {
 		},
 	)
 }
+
+// BundleResolved projects across BundleOptions and BundleInputOptions: the
+// former describes what the bundler itself reads, the latter what the caller
+// consumes (which recipe, where to push, how to reach that registry).
+func TestBundleResolved_IsFullyProjected(t *testing.T) {
+	t.Parallel()
+
+	assertProjected(t,
+		reflect.TypeOf(appconfig.BundleResolved{}),
+		[]reflect.Type{
+			reflect.TypeOf(aicr.BundleOptions{}),
+			reflect.TypeOf(aicr.BundleInputOptions{}),
+		},
+		map[string]string{
+			"RecipeInput": "RecipePath",
+			"ImageRefs":   "ImageRefsPath",
+		},
+		map[string]string{
+			"OIDCDeviceFlow": "folded into BundleOptions.OIDCResolve.DeviceFlow",
+			"FulcioURL":      "folded into BundleOptions.OIDCResolve.FulcioURL",
+			"RekorURL":       "folded into BundleOptions.OIDCResolve.RekorURL",
+			"SigningKey":     "folded into BundleOptions.OIDCResolve.SigningKey",
+		},
+	)
+}

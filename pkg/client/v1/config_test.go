@@ -729,64 +729,72 @@ func TestConfig_BundleOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BundleOptions: %v", err)
 	}
-	if opts.Config == nil {
-		t.Fatal("BundleOptions returned a nil Config")
+	// A caller-supplied Config always wins over the flat fields (see
+	// BundleOptions' "Two ways to supply the bundler configuration" godoc);
+	// the derivation itself must never populate it, or a config-driven
+	// caller's own per-field flag overrides on the flat fields below would
+	// be silently ignored by bundlerConfig.
+	if opts.Config != nil {
+		t.Fatal("BundleOptions must not populate Config; it derives the flat fields only")
 	}
-	bc := opts.Config
 
-	if got, want := string(bc.Deployer()), "argocd"; got != want {
+	if got, want := string(opts.Deployer), "argocd"; got != want {
 		t.Errorf("Deployer = %q, want %q", got, want)
 	}
-	if got, want := bc.RepoURL(), "https://git.example.com/fleet"; got != want {
-		t.Errorf("RepoURL = %q, want %q", got, want)
+	if got, want := opts.Repo, "https://git.example.com/fleet"; got != want {
+		t.Errorf("Repo = %q, want %q", got, want)
 	}
-	if got, want := bc.EstimatedNodeCount(), 12; got != want {
-		t.Errorf("EstimatedNodeCount = %d, want %d", got, want)
+	if got, want := opts.Nodes, 12; got != want {
+		t.Errorf("Nodes = %d, want %d", got, want)
 	}
-	if got, want := bc.StorageClass(), "fast"; got != want {
+	// Distinct values: a swap between these two same-typed fields is
+	// invisible to the drift guard and to any fixture that reuses one value.
+	if got, want := opts.StorageClass, "fast"; got != want {
 		t.Errorf("StorageClass = %q, want %q", got, want)
 	}
-	if got, want := bc.SharedStorageClass(), "shared"; got != want {
+	if got, want := opts.SharedStorageClass, "shared"; got != want {
 		t.Errorf("SharedStorageClass = %q, want %q", got, want)
 	}
-	if !bc.VendorCharts() {
+	if !opts.VendorCharts {
 		t.Error("VendorCharts = false, want true")
 	}
-	if !bc.Attest() {
+	if !opts.Attest {
 		t.Error("Attest = false, want true")
 	}
-	if got, want := bc.CertificateIdentityRegexp(), `^https://github\.com/NVIDIA/.*$`; got != want {
-		t.Errorf("CertificateIdentityRegexp = %q, want %q", got, want)
+	if got, want := opts.CertIDRegexp, `^https://github\.com/NVIDIA/.*$`; got != want {
+		t.Errorf("CertIDRegexp = %q, want %q", got, want)
 	}
-	if got, want := bc.SystemNodeSelector()["role"], "system"; got != want {
+	if got, want := opts.SystemNodeSelector["role"], "system"; got != want {
 		t.Errorf("SystemNodeSelector[role] = %q, want %q", got, want)
 	}
-	if got, want := bc.AcceleratedNodeSelector()["role"], "gpu"; got != want {
+	if got, want := opts.AcceleratedNodeSelector["role"], "gpu"; got != want {
 		t.Errorf("AcceleratedNodeSelector[role] = %q, want %q", got, want)
 	}
-	if got, want := bc.WorkloadSelector()["app"], "training"; got != want {
+	if got, want := opts.WorkloadSelector["app"], "training"; got != want {
 		t.Errorf("WorkloadSelector[app] = %q, want %q", got, want)
 	}
-	if got, want := bc.AppName(), "fleet-gpu"; got != want {
+	if got, want := opts.AppName, "fleet-gpu"; got != want {
 		t.Errorf("AppName = %q, want %q", got, want)
 	}
-	if got := bc.DRAEvictionNodeLabel(); got.Key != "nvidia.com/drain" || got.Value != "true" {
-		t.Errorf("DRAEvictionNodeLabel = %+v, want nvidia.com/drain=true", got)
+	if opts.DRAEvictionNodeLabel == nil || opts.DRAEvictionNodeLabel.Key != "nvidia.com/drain" ||
+		opts.DRAEvictionNodeLabel.Value != "true" {
+
+		t.Errorf("DRAEvictionNodeLabel = %+v, want nvidia.com/drain=true", opts.DRAEvictionNodeLabel)
 	}
-	if got := bc.WorkloadGateTaint(); got == nil || got.Key != "aicr.run/gate" {
-		t.Errorf("WorkloadGateTaint = %+v, want key aicr.run/gate", got)
+	if opts.WorkloadGate == nil || opts.WorkloadGate.Key != "aicr.run/gate" {
+		t.Errorf("WorkloadGate = %+v, want key aicr.run/gate", opts.WorkloadGate)
 	}
-	if len(bc.SystemNodeTolerations()) != 1 {
-		t.Errorf("SystemNodeTolerations = %v, want 1 entry", bc.SystemNodeTolerations())
+	if len(opts.SystemNodeTolerations) != 1 {
+		t.Errorf("SystemNodeTolerations = %v, want 1 entry", opts.SystemNodeTolerations)
 	}
-	if len(bc.AcceleratedNodeTolerations()) != 1 {
-		t.Errorf("AcceleratedNodeTolerations = %v, want 1 entry", bc.AcceleratedNodeTolerations())
+	if len(opts.AcceleratedNodeTolerations) != 1 {
+		t.Errorf("AcceleratedNodeTolerations = %v, want 1 entry", opts.AcceleratedNodeTolerations)
 	}
-	if len(bc.ValueOverrides()) == 0 {
+	if len(opts.ValueOverrides) == 0 {
 		t.Error("ValueOverrides is empty; spec.bundle.deployment.set was dropped")
 	}
-	if !bc.HasDynamicValues() {
-		t.Error("HasDynamicValues = false; spec.bundle.deployment.dynamic was dropped")
+	if len(opts.DynamicValues) == 0 {
+		t.Error("DynamicValues is empty; spec.bundle.deployment.dynamic was dropped")
 	}
 
 	// This fixture DOES set rekorURL, which is an explicit Rekor v1 choice, so
@@ -835,7 +843,7 @@ func TestConfig_BundleOptions_Absent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BundleOptions on nil Config: %v", err)
 		}
-		if opts.Config != nil || opts.OIDCResolve.Attest {
+		if opts.Config != nil || opts.Deployer != "" || opts.OIDCResolve.Attest {
 			t.Error("nil Config should derive an empty BundleOptions")
 		}
 	})
@@ -849,12 +857,125 @@ func TestConfig_BundleOptions_Absent(t *testing.T) {
 		if err != nil {
 			t.Fatalf("BundleOptions: %v", err)
 		}
-		// An unset draEvictionNodeLabel must leave the bundler's documented
-		// default in place rather than overwriting it with a zero label.
-		if opts.Config != nil && opts.Config.DRAEvictionNodeLabel().Key != "" {
+		// An unset draEvictionNodeLabel must stay nil so bundlerConfig leaves
+		// the bundler's documented default in place rather than overwriting
+		// it with a zero label.
+		if opts.DRAEvictionNodeLabel != nil {
 			t.Error("absent spec.bundle should not set a DRA eviction label")
 		}
 	})
+}
+
+// bundleValueConfig gives every BundleOptions/BundleInputOptions field a
+// distinct sentinel, so a swap between two same-typed neighbors (e.g.
+// StorageClass/SharedStorageClass, SystemNodeSelector/AcceleratedNodeSelector)
+// shows up as a wrong value rather than passing on a fixture that reuses one
+// value for both.
+const bundleValueConfig = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  bundle:
+    input:
+      recipe: ./bundle-recipe.yaml
+    output:
+      imageRefs: ./image-refs.txt
+    deployment:
+      deployer: argocd
+      repo: https://git.example.com/gitops
+      appName: bundle-app
+      vendorCharts: true
+    scheduling:
+      systemNodeSelector:
+        tier: system
+      acceleratedNodeSelector:
+        tier: accel
+      storageClass: sc-main
+      sharedStorageClass: sc-shared
+      nodes: 12
+`
+
+// TestConfig_BundleOptions_FoldsValues asserts the FOLDED VALUES on the flat
+// fields, including the two same-typed-neighbor pairs a swap could hide in.
+func TestConfig_BundleOptions_FoldsValues(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, bundleValueConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, err := cfg.BundleOptions()
+	if err != nil {
+		t.Fatalf("BundleOptions: %v", err)
+	}
+
+	if got.Repo != "https://git.example.com/gitops" {
+		t.Errorf("Repo = %q, want the gitops URL", got.Repo)
+	}
+	if got.AppName != "bundle-app" {
+		t.Errorf("AppName = %q, want bundle-app", got.AppName)
+	}
+	// Distinct values: a swap between these two same-typed fields is invisible
+	// to the drift guard and to any fixture that reuses one value.
+	if got.StorageClass != "sc-main" {
+		t.Errorf("StorageClass = %q, want sc-main", got.StorageClass)
+	}
+	if got.SharedStorageClass != "sc-shared" {
+		t.Errorf("SharedStorageClass = %q, want sc-shared", got.SharedStorageClass)
+	}
+	if got.SystemNodeSelector["tier"] != "system" {
+		t.Errorf("SystemNodeSelector = %v, want tier=system", got.SystemNodeSelector)
+	}
+	if got.AcceleratedNodeSelector["tier"] != "accel" {
+		t.Errorf("AcceleratedNodeSelector = %v, want tier=accel", got.AcceleratedNodeSelector)
+	}
+	if got.Nodes != 12 {
+		t.Errorf("Nodes = %d, want 12", got.Nodes)
+	}
+	if !got.VendorCharts {
+		t.Error("VendorCharts = false, want true")
+	}
+}
+
+// TestConfig_BundleInputOptions_FoldsValues asserts the FOLDED VALUES on the
+// caller-side fields, mirroring TestConfig_BundleOptions_FoldsValues for the
+// half of spec.bundle BundleOptions does not carry.
+func TestConfig_BundleInputOptions_FoldsValues(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, bundleValueConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, err := cfg.BundleInputOptions()
+	if err != nil {
+		t.Fatalf("BundleInputOptions: %v", err)
+	}
+	if got.RecipePath != "./bundle-recipe.yaml" {
+		t.Errorf("RecipePath = %q, want ./bundle-recipe.yaml", got.RecipePath)
+	}
+	if got.ImageRefsPath != "./image-refs.txt" {
+		t.Errorf("ImageRefsPath = %q, want ./image-refs.txt", got.ImageRefsPath)
+	}
+}
+
+// TestConfig_BundleInputOptions_NilConfig mirrors the nil-safety contract
+// every Config derivation makes: a nil *Config yields the zero value, never
+// an error.
+func TestConfig_BundleInputOptions_NilConfig(t *testing.T) {
+	t.Parallel()
+
+	var cfg *aicr.Config
+	got, err := cfg.BundleInputOptions()
+	if err != nil {
+		t.Fatalf("BundleInputOptions on nil Config: %v", err)
+	}
+	if got.RecipePath != "" || got.ImageRefsPath != "" || got.OutputTarget != nil ||
+		got.OutputTargetRaw != "" || got.InsecureTLS || got.PlainHTTP {
+
+		t.Errorf("got %+v, want zero value", got)
+	}
 }
 
 // TestConfig_BundleOptions_SigningModeExclusive pins the rule the CLI enforces

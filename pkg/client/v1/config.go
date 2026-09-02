@@ -21,9 +21,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
-	bundlerconfig "github.com/NVIDIA/aicr/pkg/bundler/config"
 	appconfig "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
@@ -330,35 +330,26 @@ func (c *Config) IsCriteriaStrict() bool {
 	return c.internal.Recipe().IsCriteriaStrict()
 }
 
-// BundleOptions derives Client.MakeBundle options from spec.bundle.
+// BundleOptions derives Client.MakeBundle options from spec.bundle, as plain
+// fields rather than a built *BundleConfig — so a caller (the CLI in
+// particular) can read and override individual settings with its own flag
+// precedence instead of reaching into an opaque built config.
 //
-// Config carries the 18 bundler settings the section configures — deployment
-// (deployer, repo, value overrides, dynamic values, vendoring, app name),
-// scheduling (system/accelerated selectors and tolerations, DRA eviction
-// label, workload gate and selector, node count, storage classes), and the
-// two attestation flags the bundler itself reads (attest, certificate
+// Eighteen flat fields project the bundler settings the section configures —
+// deployment (deployer, repo, value overrides, dynamic values, vendoring, app
+// name), scheduling (system/accelerated selectors and tolerations, DRA
+// eviction label, workload gate and selector, node count, storage classes),
+// and the two attestation flags the bundler itself reads (attest, certificate
 // identity regexp). OIDCResolve carries what reaches the attester rather than
 // the bundler: the Attest gate, DeviceFlow, FulcioURL, RekorURL, SigningKey,
 // and the derived UseTUFSigningConfig.
 //
-// # What is deliberately NOT projected
+// # What is deliberately NOT projected here
 //
-// Six resolved fields have no BundleOptions counterpart, by design:
-//
-//   - RecipeInput names which recipe to bundle. The caller already passes
-//     the recipe to MakeBundle, so projecting it would give the same
-//     decision two homes.
-//   - OutputTarget, OutputTargetRaw and ImageRefs are output destinations
-//     chosen per invocation. OutputDir is the analog MakeBundle honors,
-//     and the CLI owns flag-vs-config precedence for the rest.
-//   - InsecureTLS and PlainHTTP configure OCI transport. MakeBundle does not
-//     push — the CLI does, after it returns — so a field here would be
-//     surface that nothing reads. EvidenceOptions and SignOptions carry them
-//     because those operations do reach a registry.
-//
-// Reading any of the six still requires Unwrap(), which is the signal the
-// type's godoc describes: a field that is genuinely un-projected, not one
-// whose derivation is missing.
+// RecipeInput, OutputTarget, OutputTargetRaw, ImageRefs, InsecureTLS and
+// PlainHTTP are CALLER-side settings — which recipe to bundle, where to push
+// the result, and how to reach that registry — not bundler settings, so they
+// have no home on BundleOptions. BundleInputOptions carries them.
 //
 // # Zero values
 //
@@ -387,34 +378,6 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 	}
 	if resolved == nil {
 		return BundleOptions{}, nil
-	}
-
-	opts := []bundlerconfig.Option{
-		bundlerconfig.WithDeployer(resolved.Deployer),
-		bundlerconfig.WithRepoURL(resolved.Repo),
-		bundlerconfig.WithValueOverridePaths(resolved.ValueOverrides),
-		bundlerconfig.WithDynamicValuePaths(resolved.DynamicValues),
-		bundlerconfig.WithSystemNodeSelector(resolved.SystemNodeSelector),
-		bundlerconfig.WithSystemNodeTolerations(resolved.SystemNodeTolerations),
-		bundlerconfig.WithAcceleratedNodeSelector(resolved.AcceleratedNodeSelector),
-		bundlerconfig.WithAcceleratedNodeTolerations(resolved.AcceleratedNodeTolerations),
-		bundlerconfig.WithWorkloadGateTaint(resolved.WorkloadGate),
-		bundlerconfig.WithWorkloadSelector(resolved.WorkloadSelector),
-		bundlerconfig.WithEstimatedNodeCount(resolved.Nodes),
-		bundlerconfig.WithStorageClass(resolved.StorageClass),
-		bundlerconfig.WithSharedStorageClass(resolved.SharedStorageClass),
-		bundlerconfig.WithVendorCharts(resolved.VendorCharts),
-		bundlerconfig.WithAppName(resolved.AppName),
-		bundlerconfig.WithAttest(resolved.Attest),
-		bundlerconfig.WithCertificateIdentityRegexp(resolved.CertIDRegexp),
-	}
-	// DRAEvictionNodeLabel resolves as a pointer specifically so "unset" is
-	// distinguishable from "set to the zero label", and the option takes a
-	// value. Appending unconditionally would dereference nil and, worse,
-	// would overwrite the NVIDIA-documented default the bundler applies when
-	// config said nothing.
-	if resolved.DRAEvictionNodeLabel != nil {
-		opts = append(opts, bundlerconfig.WithDRAEvictionNodeLabel(*resolved.DRAEvictionNodeLabel))
 	}
 
 	// Signing mode is exclusive: a KMS key or keyless OIDC, never both.
@@ -452,7 +415,28 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 	}
 
 	return BundleOptions{
-		Config: bundlerconfig.NewConfig(opts...),
+		Deployer:                   resolved.Deployer,
+		Repo:                       resolved.Repo,
+		ValueOverrides:             resolved.ValueOverrides,
+		DynamicValues:              resolved.DynamicValues,
+		SystemNodeSelector:         resolved.SystemNodeSelector,
+		SystemNodeTolerations:      resolved.SystemNodeTolerations,
+		AcceleratedNodeSelector:    resolved.AcceleratedNodeSelector,
+		AcceleratedNodeTolerations: resolved.AcceleratedNodeTolerations,
+		// Pointer field: nil means the document said nothing. bundlerConfig
+		// leaves the bundler's NVIDIA-documented default in place rather than
+		// overwriting it with a zero label; passing the pointer straight
+		// through here preserves that distinction.
+		DRAEvictionNodeLabel: resolved.DRAEvictionNodeLabel,
+		WorkloadGate:         resolved.WorkloadGate,
+		WorkloadSelector:     resolved.WorkloadSelector,
+		Nodes:                resolved.Nodes,
+		StorageClass:         resolved.StorageClass,
+		SharedStorageClass:   resolved.SharedStorageClass,
+		Attest:               resolved.Attest,
+		CertIDRegexp:         resolved.CertIDRegexp,
+		VendorCharts:         resolved.VendorCharts,
+		AppName:              resolved.AppName,
 		OIDCResolve: OIDCResolveOptions{
 			Attest:     resolved.Attest,
 			DeviceFlow: resolved.OIDCDeviceFlow,
@@ -472,6 +456,54 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 			// the CLI does.
 			UseTUFSigningConfig: resolved.RekorURL == "",
 		},
+	}, nil
+}
+
+// BundleInputOptions carries the spec.bundle fields the CALLER consumes, not
+// the bundler: which recipe to load, which image-refs file to read, and where
+// to push the finished bundle.
+//
+// Separate from BundleOptions on purpose. MakeBundle takes an already-resolved
+// RecipeResult and does not push — the caller does, after it returns — so
+// these on MakeBundle's parameter would be surface that nothing reads. The
+// transport pair mirrors EvidenceOptions/SignOptions carrying
+// PlainHTTP/InsecureTLS for the same "the caller reaches a registry,
+// MakeBundle does not" reason.
+type BundleInputOptions struct {
+	RecipePath      string
+	ImageRefsPath   string
+	OutputTarget    *oci.Reference
+	OutputTargetRaw string
+	InsecureTLS     bool
+	PlainHTTP       bool
+}
+
+// BundleInputOptions derives the caller-side spec.bundle settings: which
+// recipe to bundle, which image-refs file to write to, where to push the
+// finished bundle, and how to reach that registry. None of these reach
+// MakeBundle — BundleOptions carries what the bundler itself reads.
+//
+// Returns the zero value for a nil Config or an absent spec.bundle, and an
+// error when the section is present but malformed.
+func (c *Config) BundleInputOptions() (BundleInputOptions, error) {
+	if c == nil || c.internal == nil {
+		return BundleInputOptions{}, nil
+	}
+	resolved, err := c.internal.Bundle().Resolve()
+	if err != nil {
+		// Already coded, and the message carries the spec path that failed.
+		return BundleInputOptions{}, err
+	}
+	if resolved == nil {
+		return BundleInputOptions{}, nil
+	}
+	return BundleInputOptions{
+		RecipePath:      resolved.RecipeInput,
+		ImageRefsPath:   resolved.ImageRefs,
+		OutputTarget:    resolved.OutputTarget,
+		OutputTargetRaw: resolved.OutputTargetRaw,
+		InsecureTLS:     resolved.InsecureTLS,
+		PlainHTTP:       resolved.PlainHTTP,
 	}, nil
 }
 

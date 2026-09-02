@@ -43,6 +43,7 @@ import (
 	appconfig "github.com/NVIDIA/aicr/pkg/config"
 	evverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/health"
+	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
@@ -254,6 +255,54 @@ func TestStability_Bundle(t *testing.T) {
 	// field were renamed or retyped.
 	_ = aicr.BundleOptions{OIDCResolve: aicr.OIDCResolveOptions{}}
 	requireType[aicr.OIDCResolveOptions](aicr.BundleOptions{}.OIDCResolve)
+	// Config is the escape hatch a caller-built *BundleConfig still wins
+	// through (see BundleOptions' "Two ways to supply the bundler
+	// configuration" godoc); the CLI's own bundle-generation call and the
+	// aicrd /v1/bundle handler both rely on it.
+	requireType[*aicr.BundleConfig](aicr.BundleOptions{}.Config)
+	// The 18 flat fields Config.BundleOptions derives from spec.bundle.
+	// Pinned by name and type together: a bare zero-value literal above
+	// would still compile through a rename or retype of any one of them.
+	_ = aicr.BundleOptions{
+		Deployer:                   bundlerconfig.DeployerHelm,
+		Repo:                       "",
+		ValueOverrides:             nil,
+		DynamicValues:              nil,
+		SystemNodeSelector:         nil,
+		SystemNodeTolerations:      nil,
+		AcceleratedNodeSelector:    nil,
+		AcceleratedNodeTolerations: nil,
+		DRAEvictionNodeLabel:       nil,
+		WorkloadGate:               nil,
+		WorkloadSelector:           nil,
+		Nodes:                      0,
+		StorageClass:               "",
+		SharedStorageClass:         "",
+		Attest:                     false,
+		CertIDRegexp:               "",
+		VendorCharts:               false,
+		AppName:                    "",
+	}
+	requireType[bundlerconfig.DeployerType](aicr.BundleOptions{}.Deployer)
+	requireType[[]bundlerconfig.ComponentPath](aicr.BundleOptions{}.ValueOverrides)
+	requireType[[]bundlerconfig.ComponentPath](aicr.BundleOptions{}.DynamicValues)
+	requireType[[]corev1.Toleration](aicr.BundleOptions{}.SystemNodeTolerations)
+	requireType[[]corev1.Toleration](aicr.BundleOptions{}.AcceleratedNodeTolerations)
+	requireType[*bundlerconfig.NodeLabel](aicr.BundleOptions{}.DRAEvictionNodeLabel)
+	requireType[*corev1.Taint](aicr.BundleOptions{}.WorkloadGate)
+	requireType[int](aicr.BundleOptions{}.Nodes)
+	requireType[bool](aicr.BundleOptions{}.Attest)
+	requireType[bool](aicr.BundleOptions{}.VendorCharts)
+
+	var bi aicr.BundleInputOptions
+	_ = bi.RecipePath
+	_ = bi.ImageRefsPath
+	_ = bi.OutputTarget
+	_ = bi.OutputTargetRaw
+	_ = bi.InsecureTLS
+	_ = bi.PlainHTTP
+	requireType[*oci.Reference](aicr.BundleInputOptions{}.OutputTarget)
+
 	requireSignature[func(*aicr.Client, context.Context, *recipe.RecipeResult) (*aicr.RecipeResult, error)]((*aicr.Client).AdoptRecipe)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, aicr.BundleOptions) (aicr.BundleArtifact, error)]((*aicr.Client).MakeBundle)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult) ([]aicr.ComponentBundle, error)]((*aicr.Client).BundleComponents)
@@ -522,6 +571,7 @@ func TestStability_Config(t *testing.T) {
 
 	requireSignature[func(*aicr.Config) (aicr.BundleVerifyOptions, error)]((*aicr.Config).BundleVerifyOptions)
 	requireSignature[func(*aicr.Config) (aicr.BundleOptions, error)]((*aicr.Config).BundleOptions)
+	requireSignature[func(*aicr.Config) (aicr.BundleInputOptions, error)]((*aicr.Config).BundleInputOptions)
 	requireSignature[func(*aicr.Config) (aicr.ValidateSettings, bool, error)]((*aicr.Config).ValidateSettings)
 	requireSignature[func(*aicr.Config) (aicr.ValidateInputOptions, error)]((*aicr.Config).ValidateInputOptions)
 	requireSignature[func(*aicr.Config) (*aicr.AgentConfig, bool, error)]((*aicr.Config).SnapshotAgentConfig)

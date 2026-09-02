@@ -452,7 +452,13 @@ func embeddedClient(ctx context.Context) (*aicr.Client, error) {
 // (nil, nil) is the deliberate "config flag not set" signal — a sentinel
 // error would force every caller into a useless error-check branch.
 //
-//nolint:nilnil
+// bundle.go was this function's last non-test caller; migrating it (this
+// commit) leaves loadCmdConfig with none. Kept rather than deleted — the
+// next commit in the pkg/cli-off-pkg/config migration series removes it once
+// no caller anywhere in the package (including tests) needs the raw
+// *config.AICRConfig it returns.
+//
+//nolint:unused,nilnil // last caller migrated this commit; removed next commit (see comment above)
 func loadCmdConfig(ctx context.Context, cmd *cli.Command) (*config.AICRConfig, error) {
 	cfg, err := loadFacadeConfig(ctx, cmd)
 	if err != nil {
