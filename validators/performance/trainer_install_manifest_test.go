@@ -22,8 +22,24 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
 )
+
+// backdateTrainerInstallManifest rewrites the persisted manifest's
+// CreationTimestamp so reapOrphanedTrainerInstall treats it as abandoned
+// rather than possibly mid-install.
+func backdateTrainerInstallManifest(t *testing.T, client kubernetes.Interface) {
+	t.Helper()
+	cm, err := client.CoreV1().ConfigMaps(trainerNamespace).Get(context.Background(), trainerInstallManifestName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to fetch the manifest to backdate it: %v", err)
+	}
+	cm.CreationTimestamp = metav1.NewTime(time.Now().Add(-2 * defaults.NCCLExecutionLockStaleAge))
+	if _, err := client.CoreV1().ConfigMaps(trainerNamespace).Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("failed to backdate the manifest: %v", err)
+	}
+}
 
 // TestTrainerInstallManifest_RoundTrips checks that a persisted manifest can
 // be read back with the same resource list, and that deleting it leaves
@@ -205,14 +221,7 @@ func TestReapOrphanedTrainerInstall_ReapsStaleAbandonedInstall(t *testing.T) {
 	persistTrainerInstallManifest(context.Background(), client, []trainerResourceRef{
 		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
 	})
-	cm, err := client.CoreV1().ConfigMaps(trainerNamespace).Get(context.Background(), trainerInstallManifestName, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("failed to fetch the manifest to backdate it: %v", err)
-	}
-	cm.CreationTimestamp = metav1.NewTime(time.Now().Add(-2 * defaults.NCCLExecutionLockStaleAge))
-	if _, err := client.CoreV1().ConfigMaps(trainerNamespace).Update(context.Background(), cm, metav1.UpdateOptions{}); err != nil {
-		t.Fatalf("failed to backdate the manifest: %v", err)
-	}
+	backdateTrainerInstallManifest(t, client)
 
 	reapOrphanedTrainerInstall(context.Background(), client, dynamicClient, false)
 

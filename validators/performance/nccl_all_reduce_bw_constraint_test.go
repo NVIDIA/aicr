@@ -565,6 +565,59 @@ func TestPruneStaleNCCLNamespaces(t *testing.T) {
 	}
 }
 
+// TestPruneStaleNCCLNamespaces_TerminatingNamespaceBlocksTrainerReap checks
+// that a namespace still cascading its own deletion holds back Trainer
+// reaping. Its TrainJob/TrainingRuntime CRs still need the Trainer
+// controller alive to clear their finalizers.
+func TestPruneStaleNCCLNamespaces_TerminatingNamespaceBlocksTrainerReap(t *testing.T) {
+	old := metav1.NewTime(time.Now().Add(-2 * defaults.NCCLStaleNamespacePruneAge))
+	terminatingNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-cafef00d", CreationTimestamp: old,
+		Labels:            map[string]string{labels.ManagedBy: labels.ValueValidator, labels.Component: labels.ValueNCCLPerf},
+		DeletionTimestamp: &metav1.Time{Time: time.Now()}, Finalizers: []string{"kubernetes"},
+	}}
+
+	client := fake.NewClientset(terminatingNS)
+	persistTrainerInstallManifest(context.Background(), client, []trainerResourceRef{
+		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
+	})
+	backdateTrainerInstallManifest(t, client)
+
+	pruneStaleNCCLNamespaces(context.Background(), client, newTrainerFakeClient(), "aicr-nccl-perf-default-currentrun")
+
+	if _, resources, _ := loadTrainerInstallManifest(context.Background(), client); resources == nil {
+		t.Error("expected the Trainer install manifest to survive while a namespace is still terminating")
+	}
+}
+
+// TestPruneStaleNCCLNamespaces_OwnDeleteBlocksTrainerReap checks that a
+// namespace this sweep just deleted also holds back Trainer reaping in the
+// same pass. The delete only starts the cascade, and the accepted
+// namespace's TrainJob/TrainingRuntime CRs still need Trainer alive to
+// clear their finalizers.
+func TestPruneStaleNCCLNamespaces_OwnDeleteBlocksTrainerReap(t *testing.T) {
+	old := metav1.NewTime(time.Now().Add(-2 * defaults.NCCLStaleNamespacePruneAge))
+	staleNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-deadbeef", CreationTimestamp: old,
+		Labels: map[string]string{labels.ManagedBy: labels.ValueValidator, labels.Component: labels.ValueNCCLPerf},
+	}}
+
+	client := fake.NewClientset(staleNS)
+	persistTrainerInstallManifest(context.Background(), client, []trainerResourceRef{
+		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
+	})
+	backdateTrainerInstallManifest(t, client)
+
+	pruneStaleNCCLNamespaces(context.Background(), client, newTrainerFakeClient(), "aicr-nccl-perf-default-currentrun")
+
+	if _, err := client.CoreV1().Namespaces().Get(context.Background(), staleNS.Name, metav1.GetOptions{}); err == nil {
+		t.Fatalf("expected %q to be deleted by this sweep", staleNS.Name)
+	}
+	if _, resources, _ := loadTrainerInstallManifest(context.Background(), client); resources == nil {
+		t.Error("expected the Trainer install manifest to survive: the delete only started the cascade")
+	}
+}
+
 // TestPruneStaleNCCLNamespaces_SkipsDeleteOnConcurrentClaim checks that
 // prune backs off if a caller claims the namespace's lock in the instant
 // between prune's own liveness check and its delete, instead of deleting

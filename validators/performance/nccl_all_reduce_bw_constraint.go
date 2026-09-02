@@ -705,6 +705,9 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 			continue
 		}
 		if ns.DeletionTimestamp != nil {
+			// Still terminating. Its TrainJob/TrainingRuntime CRs need the
+			// Trainer controller alive to clear their finalizers.
+			otherNamespacesRemain = true
 			continue
 		}
 		if time.Since(ns.CreationTimestamp.Time) < defaults.NCCLStaleNamespacePruneAge {
@@ -752,6 +755,9 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 		}
 		slog.Info("Deleted stale NCCL benchmark namespace left behind by an interrupted run",
 			"namespace", ns.Name, "age", time.Since(ns.CreationTimestamp.Time).Round(time.Minute))
+		// The delete was accepted, but its cascade still needs the Trainer
+		// controller to service the namespace's CRs' finalizers.
+		otherNamespacesRemain = true
 	}
 
 	reapOrphanedTrainerInstall(ctx, clientset, dynamicClient, otherNamespacesRemain)
