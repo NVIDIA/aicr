@@ -1005,12 +1005,15 @@ func TestConfig_SnapshotAgentConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	ac, err := cfg.SnapshotAgentConfig()
+	ac, present, err := cfg.SnapshotAgentConfig()
 	if err != nil {
 		t.Fatalf("SnapshotAgentConfig: %v", err)
 	}
 	if ac == nil {
 		t.Fatal("SnapshotAgentConfig returned nil for a populated spec.snapshot")
+	}
+	if !present {
+		t.Error("present = false, want true for a document with spec.snapshot")
 	}
 
 	checks := []struct {
@@ -1065,7 +1068,7 @@ func TestConfig_SnapshotAgentConfig_CleanupIsInverted(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LoadConfig: %v", err)
 			}
-			ac, err := cfg.SnapshotAgentConfig()
+			ac, _, err := cfg.SnapshotAgentConfig()
 			if err != nil {
 				t.Fatalf("SnapshotAgentConfig: %v", err)
 			}
@@ -1096,7 +1099,7 @@ func TestConfig_SnapshotAgentConfig_PrivilegedDefaultsTrue(t *testing.T) {
 			if err != nil {
 				t.Fatalf("LoadConfig: %v", err)
 			}
-			ac, err := cfg.SnapshotAgentConfig()
+			ac, _, err := cfg.SnapshotAgentConfig()
 			if err != nil {
 				t.Fatalf("SnapshotAgentConfig: %v", err)
 			}
@@ -1108,13 +1111,18 @@ func TestConfig_SnapshotAgentConfig_PrivilegedDefaultsTrue(t *testing.T) {
 }
 
 // TestConfig_SnapshotAgentConfig_Absent covers BOTH routes to "no snapshot
-// configuration", which fail differently.
+// configuration", which fail differently, plus the presence bool that lets a
+// caller tell them apart from "the document decided every field, silently."
 //
 // A nil Config is caught by the receiver check. A document that simply omits
 // spec.snapshot is NOT: Resolve() returns a non-nil SnapshotResolved for an
 // absent section, so without the section-presence check the derivation falls
 // through and applies the in-section defaults — Cleanup and Privileged both
-// true — to a document that never opted into snapshot configuration.
+// true — to a document that never opted into snapshot configuration. Both
+// routes must report present=false, and a document that DOES carry the
+// section — even one that sets nothing inside it — must report present=true,
+// so a caller (like the snapshot CLI) can apply its own defaults only in the
+// former case rather than trusting the zero AgentConfig as configured intent.
 func TestConfig_SnapshotAgentConfig_Absent(t *testing.T) {
 	t.Run("document omits spec.snapshot", func(t *testing.T) {
 		body := `apiVersion: aicr.run/v1beta1
@@ -1128,12 +1136,15 @@ spec:
 		if err != nil {
 			t.Fatalf("LoadConfig: %v", err)
 		}
-		ac, err := cfg.SnapshotAgentConfig()
+		ac, present, err := cfg.SnapshotAgentConfig()
 		if err != nil {
 			t.Fatalf("SnapshotAgentConfig: %v", err)
 		}
 		if ac == nil {
 			t.Fatal("got nil; an absent section must still derive a zero value")
+		}
+		if present {
+			t.Error("present = true, want false for a document with no spec.snapshot")
 		}
 		if ac.Cleanup || ac.Privileged {
 			t.Errorf("Cleanup=%v Privileged=%v; an absent section must not apply in-section defaults",
@@ -1141,13 +1152,37 @@ spec:
 		}
 	})
 
+	t.Run("document has an empty spec.snapshot", func(t *testing.T) {
+		body := "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  snapshot: {}\n"
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		ac, present, err := cfg.SnapshotAgentConfig()
+		if err != nil {
+			t.Fatalf("SnapshotAgentConfig: %v", err)
+		}
+		if !present {
+			t.Error("present = false, want true: spec.snapshot is present, even though it sets nothing")
+		}
+		// A present-but-silent section DOES apply in-section defaults — the
+		// opposite of the fully-absent case above.
+		if !ac.Cleanup || !ac.Privileged {
+			t.Errorf("Cleanup=%v Privileged=%v; a present-but-silent section must apply in-section defaults",
+				ac.Cleanup, ac.Privileged)
+		}
+	})
+
 	var cfg *aicr.Config
-	ac, err := cfg.SnapshotAgentConfig()
+	ac, present, err := cfg.SnapshotAgentConfig()
 	if err != nil {
 		t.Fatalf("SnapshotAgentConfig on nil Config: %v", err)
 	}
 	if ac == nil {
 		t.Fatal("got nil; a nil Config must still derive a zero-value AgentConfig")
+	}
+	if present {
+		t.Error("present = true, want false for a nil Config")
 	}
 	// AgentConfig contains slices/maps, so compare the fields a derivation
 	// would have populated rather than the struct as a whole.
@@ -1169,7 +1204,7 @@ func TestConfig_SnapshotAgentConfig_OSIsParsed(t *testing.T) {
 		if err != nil {
 			t.Skipf("loader rejected the value before the derivation: %v", err)
 		}
-		ac, err := cfg.SnapshotAgentConfig()
+		ac, _, err := cfg.SnapshotAgentConfig()
 		if err != nil {
 			t.Fatalf("SnapshotAgentConfig: %v", err)
 		}
@@ -1182,10 +1217,98 @@ func TestConfig_SnapshotAgentConfig_OSIsParsed(t *testing.T) {
 		if err != nil {
 			return // rejected earlier, also fail-closed
 		}
-		if _, err := cfg.SnapshotAgentConfig(); err == nil {
+		if _, _, err := cfg.SnapshotAgentConfig(); err == nil {
 			t.Fatal("SnapshotAgentConfig accepted an undocumented OS value")
 		}
 	})
+}
+
+const snapshotOutputConfig = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  snapshot:
+    output:
+      path: ./snap-out.yaml
+      format: json
+      template: ./tmpl.tmpl
+`
+
+func TestConfig_SnapshotOutputOptions(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, snapshotOutputConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, err := cfg.SnapshotOutputOptions()
+	if err != nil {
+		t.Fatalf("SnapshotOutputOptions: %v", err)
+	}
+	// Distinct values on purpose: a swap between two same-typed fields is
+	// invisible when the fixture reuses one value.
+	if got.Path != "./snap-out.yaml" {
+		t.Errorf("Path = %q, want ./snap-out.yaml", got.Path)
+	}
+	if got.Format != "json" {
+		t.Errorf("Format = %q, want json", got.Format)
+	}
+	if got.Template != "./tmpl.tmpl" {
+		t.Errorf("Template = %q, want ./tmpl.tmpl", got.Template)
+	}
+}
+
+func TestConfig_SnapshotOutputOptions_Absent(t *testing.T) {
+	t.Parallel()
+
+	var cfg *aicr.Config
+	got, err := cfg.SnapshotOutputOptions()
+	if err != nil {
+		t.Fatalf("SnapshotOutputOptions on nil Config: %v", err)
+	}
+	if got != (aicr.SnapshotOutputOptions{}) {
+		t.Errorf("got %+v, want zero value", got)
+	}
+}
+
+const recipeOutputConfig = `apiVersion: aicr.run/v1alpha2
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  recipe:
+    output:
+      path: ./out-recipe.yaml
+      format: json
+`
+
+func TestConfig_RecipeOutputOptions(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, recipeOutputConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got := cfg.RecipeOutputOptions()
+	// Distinct values on purpose: a swap between two same-typed fields is
+	// invisible when the fixture reuses one value.
+	if got.Path != "./out-recipe.yaml" {
+		t.Errorf("Path = %q, want ./out-recipe.yaml", got.Path)
+	}
+	if got.Format != "json" {
+		t.Errorf("Format = %q, want json", got.Format)
+	}
+}
+
+func TestConfig_RecipeOutputOptions_Absent(t *testing.T) {
+	t.Parallel()
+
+	var cfg *aicr.Config
+	got := cfg.RecipeOutputOptions()
+	if got != (aicr.RecipeOutputOptions{}) {
+		t.Errorf("got %+v, want zero value", got)
+	}
 }
 
 const evidenceAttestationConfig = `apiVersion: aicr.run/v1beta1

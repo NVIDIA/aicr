@@ -73,22 +73,23 @@ func assertProjected(
 	}
 }
 
-// SnapshotResolved projects across AgentConfig today. The three output fields
-// are declined here and become projected in Task 3, at which point their
-// entries move out of this map.
+// SnapshotResolved projects across AgentConfig and SnapshotOutputOptions: the
+// former describes the collection Job, the latter delivery (#2542).
 func TestSnapshotResolved_IsFullyProjected(t *testing.T) {
 	t.Parallel()
 
 	assertProjected(t,
 		reflect.TypeOf(appconfig.SnapshotResolved{}),
-		[]reflect.Type{reflect.TypeOf(aicr.AgentConfig{})},
-		map[string]string{
-			"NoCleanup": "Cleanup", // inverted; see SnapshotAgentConfig godoc
+		[]reflect.Type{
+			reflect.TypeOf(aicr.AgentConfig{}),
+			reflect.TypeOf(aicr.SnapshotOutputOptions{}),
 		},
 		map[string]string{
-			"OutputPath":     "delivery, not the collection Job (#2542); projected in a later commit",
-			"OutputFormat":   "delivery, not the collection Job (#2542); projected in a later commit",
-			"OutputTemplate": "delivery, not the collection Job (#2542); projected in a later commit",
+			"NoCleanup":      "Cleanup", // inverted; see SnapshotAgentConfig godoc
+			"OutputPath":     "Path",
+			"OutputFormat":   "Format",
+			"OutputTemplate": "Template",
 		},
+		map[string]string{},
 	)
 }

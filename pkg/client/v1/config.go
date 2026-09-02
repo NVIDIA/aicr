@@ -737,7 +737,21 @@ func (c *Config) EvidenceAttestationOptions() (EvidenceOptions, bool, error) {
 // at all made no snapshot decisions, so the facade does not invent them. A
 // caller in that position supplies its own defaults, as the CLI does from its
 // flag defaults.
-func (c *Config) SnapshotAgentConfig() (*AgentConfig, error) {
+//
+// # The bool
+//
+// The second return reports whether spec.snapshot is present — true when the
+// section exists (even if silent about every field), false for a nil Config,
+// a nil internal document, or a document that omits the section. It exists
+// for the same reason EvidenceAttestationOptions returns one: a caller
+// deriving unconditionally (before it knows whether --config was even given)
+// otherwise cannot tell "the document made no snapshot decisions, supply your
+// own defaults" from "the document decided every field, apply them as-is" —
+// both produce a populated *AgentConfig, and only one of them is safe to
+// treat as-is. A caller that skips this bool and always applies the returned
+// value silently drops privileges: an absent section returns
+// Privileged: false, which the collector generally needs true.
+func (c *Config) SnapshotAgentConfig() (*AgentConfig, bool, error) {
 	// A zero-value AgentConfig rather than nil, so a caller that did not supply
 	// a config (or supplied one without spec.snapshot) can derive
 	// unconditionally and then set the caller-owned fields — matching the
@@ -747,27 +761,28 @@ func (c *Config) SnapshotAgentConfig() (*AgentConfig, error) {
 	// nil check on the resolved value: Resolve() returns a NON-nil
 	// SnapshotResolved for an absent section, so falling through would apply
 	// the in-section defaults (Cleanup and Privileged both true) to a document
-	// that never opted into snapshot configuration at all.
+	// that never opted into snapshot configuration at all. It is also exactly
+	// the presence signal the second return value surfaces.
 	if c == nil || c.internal == nil || c.internal.Snapshot() == nil {
-		return &AgentConfig{}, nil
+		return &AgentConfig{}, false, nil
 	}
 	resolved, err := c.internal.Snapshot().Resolve()
 	if err != nil {
 		// Already coded, and the message carries the spec path that failed.
-		return nil, err
+		return nil, true, err
 	}
 	if resolved == nil {
-		return &AgentConfig{}, nil
+		return &AgentConfig{}, true, nil
 	}
 
 	requests, err := snapshotter.ParseResourceList(resolved.Requests)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+		return nil, true, errors.Wrap(errors.ErrCodeInvalidRequest,
 			"invalid spec.snapshot.agent.requests", err)
 	}
 	limits, err := snapshotter.ParseResourceList(resolved.Limits)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+		return nil, true, errors.Wrap(errors.ErrCodeInvalidRequest,
 			"invalid spec.snapshot.agent.limits", err)
 	}
 
@@ -780,7 +795,7 @@ func (c *Config) SnapshotAgentConfig() (*AgentConfig, error) {
 	if osValue != "" {
 		parsed, perr := recipe.NewCriteriaRegistry().ParseOS(osValue)
 		if perr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+			return nil, true, errors.Wrap(errors.ErrCodeInvalidRequest,
 				"invalid spec.snapshot.agent.os", perr)
 		}
 		osValue = string(parsed)
@@ -809,5 +824,77 @@ func (c *Config) SnapshotAgentConfig() (*AgentConfig, error) {
 	if resolved.Timeout != nil {
 		cfg.Timeout = *resolved.Timeout
 	}
-	return cfg, nil
+	return cfg, true, nil
+}
+
+// SnapshotOutputOptions carries spec.snapshot.output — where and how a
+// collected snapshot is written. Consumed by the caller performing delivery
+// (snapshotter.DeliverSnapshot), not by Client.CollectSnapshot.
+type SnapshotOutputOptions struct {
+	// Path is spec.snapshot.output.path, the file the snapshot is written to.
+	Path string
+
+	// Format is spec.snapshot.output.format (yaml, json, or table), validated
+	// by the loader.
+	Format string
+
+	// Template is spec.snapshot.output.template, a Go template rendered
+	// instead of the structured formats. Requires Format yaml.
+	Template string
+}
+
+// SnapshotOutputOptions derives snapshot DELIVERY settings from
+// spec.snapshot.output.
+//
+// Deliberately separate from SnapshotAgentConfig. That method describes the
+// collection Job and projects nothing from spec.snapshot.output, because output
+// describes delivery and the Job always stages YAML in a ConfigMap — a format
+// routed through AgentConfig would be silently ignored (#2398). These three
+// fields are what a caller needs AFTER CollectSnapshot returns, to write the
+// snapshot where the document asked.
+//
+// Returns the zero value (never an error for an absent section) when the
+// document has no spec.snapshot or no output block.
+func (c *Config) SnapshotOutputOptions() (SnapshotOutputOptions, error) {
+	if c == nil || c.internal == nil || c.internal.Snapshot() == nil {
+		return SnapshotOutputOptions{}, nil
+	}
+	resolved, err := c.internal.Snapshot().Resolve()
+	if err != nil {
+		// Already coded, and the message carries the spec path that failed.
+		return SnapshotOutputOptions{}, err
+	}
+	if resolved == nil {
+		return SnapshotOutputOptions{}, nil
+	}
+	return SnapshotOutputOptions{
+		Path:     resolved.OutputPath,
+		Format:   resolved.OutputFormat,
+		Template: resolved.OutputTemplate,
+	}, nil
+}
+
+// RecipeOutputOptions carries spec.recipe.output — where and in what format a
+// generated recipe is written. Consumed by the caller after ResolveRecipe
+// returns, not by the resolve itself.
+type RecipeOutputOptions struct {
+	// Path is spec.recipe.output.path. Empty when unset.
+	Path string
+
+	// Format is spec.recipe.output.format. Empty when unset, leaving the
+	// caller's own default in place.
+	Format string
+}
+
+// RecipeOutputOptions derives spec.recipe.output. Returns the zero value for a
+// nil Config or an absent section — never an error, because the underlying
+// accessors are nil-safe and perform no parsing.
+func (c *Config) RecipeOutputOptions() RecipeOutputOptions {
+	if c == nil || c.internal == nil {
+		return RecipeOutputOptions{}
+	}
+	return RecipeOutputOptions{
+		Path:   c.internal.Recipe().OutputPath(),
+		Format: c.internal.Recipe().OutputFormat(),
+	}
 }

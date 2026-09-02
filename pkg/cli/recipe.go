@@ -272,7 +272,7 @@ func applyClientCriteriaStrictMode(cmd *cli.Command, cfg *aicr.Config, client *a
 // recipeOutputPath returns the recipe output destination, with the CLI flag
 // overriding spec.recipe.output.path.
 func recipeOutputPath(cmd *cli.Command, cfg *aicr.Config) string {
-	return stringFlagOrConfig(cmd, "output", cfg.Unwrap().Recipe().OutputPath())
+	return stringFlagOrConfig(cmd, "output", cfg.RecipeOutputOptions().Path)
 }
 
 // parseRecipeOutputFormat reads --format with precedence
@@ -282,7 +282,7 @@ func recipeOutputPath(cmd *cli.Command, cfg *aicr.Config) string {
 // through to cmd.String(flag) (which surfaces the Value: default) only
 // when both CLI and config are empty.
 func parseRecipeOutputFormat(cmd *cli.Command, cfg *aicr.Config) (serializer.Format, error) {
-	raw := stringFlagOrConfig(cmd, "format", cfg.Unwrap().Recipe().OutputFormat())
+	raw := stringFlagOrConfig(cmd, "format", cfg.RecipeOutputOptions().Format)
 	out := serializer.Format(raw)
 	if out.IsUnknown() {
 		return "", errors.New(errors.ErrCodeInvalidRequest,

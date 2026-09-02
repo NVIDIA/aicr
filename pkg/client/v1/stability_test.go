@@ -346,6 +346,8 @@ func TestStability_TypesAndAliases(t *testing.T) {
 	requireType[bool](aicr.AgentConfig{}.Cleanup)
 	requireType[bool](aicr.AgentConfig{}.Privileged)
 	requireType[time.Duration](aicr.AgentConfig{}.Timeout)
+	_ = aicr.SnapshotOutputOptions{Path: "", Format: "", Template: ""}
+	_ = aicr.RecipeOutputOptions{Path: "", Format: ""}
 	_ = aicr.Snapshot{}
 	_ = aicr.Snapshot{}.Raw
 	_ = aicr.ReportSummary{}
@@ -521,7 +523,9 @@ func TestStability_Config(t *testing.T) {
 	requireSignature[func(*aicr.Config) (aicr.BundleVerifyOptions, error)]((*aicr.Config).BundleVerifyOptions)
 	requireSignature[func(*aicr.Config) (aicr.BundleOptions, error)]((*aicr.Config).BundleOptions)
 	requireSignature[func(*aicr.Config) ([]aicr.ValidateOption, error)]((*aicr.Config).ValidateOptions)
-	requireSignature[func(*aicr.Config) (*aicr.AgentConfig, error)]((*aicr.Config).SnapshotAgentConfig)
+	requireSignature[func(*aicr.Config) (*aicr.AgentConfig, bool, error)]((*aicr.Config).SnapshotAgentConfig)
+	requireSignature[func(*aicr.Config) (aicr.SnapshotOutputOptions, error)]((*aicr.Config).SnapshotOutputOptions)
+	requireSignature[func(*aicr.Config) aicr.RecipeOutputOptions]((*aicr.Config).RecipeOutputOptions)
 	// The bool is load-bearing, not decoration: it separates "the document
 	// declined the bundle" from "the document fumbled it", which a zero
 	// EvidenceOptions alone cannot express. Dropping it would compile at every
