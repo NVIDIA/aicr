@@ -27,7 +27,6 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/mirror"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -153,15 +152,16 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 				format, strings.Join(mirror.SupportedFormats(), ", ")))
 	}
 
-	cfg, err := loadCmdConfig(ctx, cmd)
+	cfg, err := loadFacadeConfig(ctx, cmd)
 	if err != nil {
 		return err
 	}
 
 	// Build ONE per-command Client bound to the resolved data source. Both
 	// recipe-resolution paths (--recipe load and criteria resolve) run through
-	// it, replacing the old process-global data provider.
-	client, err := recipeClientFromCmd(ctx, cmd, cfg)
+	// it, replacing the old process-global data provider. recipeClientFromCmd
+	// still takes the raw config type, so Unwrap here.
+	client, err := recipeClientFromCmd(ctx, cmd, cfg.Unwrap())
 	if err != nil {
 		return err
 	}
@@ -229,10 +229,10 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 //     Client and parses criteria against its per-provider registry. The
 //     caller seeds that registry via client.LoadCatalog before this call so
 //     a `--data` overlay's non-OSS criteria values validate.
-func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*recipe.RecipeResult, error) {
+func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, client *aicr.Client) (*recipe.RecipeResult, error) {
 	recipePath := cmd.String("recipe")
 	if recipePath != "" {
-		if cmd.IsSet(flagProfile) || aicr.WrapConfig(cfg).RecipeProfile() != "" {
+		if cmd.IsSet(flagProfile) || cfg.RecipeProfile() != "" {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--profile/spec.recipe.profile selects during criteria resolution and cannot be combined with --recipe")
 		}
