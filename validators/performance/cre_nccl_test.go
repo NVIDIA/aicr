@@ -85,7 +85,7 @@ func TestMaxBusBandwidthGBps(t *testing.T) {
 
 func TestBuildCRENCCLCertification(t *testing.T) {
 	cfg := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8, Namespace: "ns"}
-	obj := buildCRENCCLCertification("ns", cfg, map[string]string{"foo": "bar"})
+	obj := buildCRENCCLCertification("ns", creNCCLRunName, cfg, map[string]string{"foo": "bar"})
 	if obj.GetAPIVersion() != "nvcre.nvidia.com/v1alpha1" {
 		t.Errorf("apiVersion = %q", obj.GetAPIVersion())
 	}
@@ -125,7 +125,7 @@ func TestBuildCRENCCLCertificationCopiesSharedGPUTaints(t *testing.T) {
 			{ObjectMeta: metav1.ObjectMeta{Name: "b"}, Spec: corev1.NodeSpec{Taints: []corev1.Taint{taint}}},
 		},
 	}
-	obj := buildCRENCCLCertification("ns", cfg, nil)
+	obj := buildCRENCCLCertification("ns", creNCCLRunName, cfg, nil)
 	spec := obj.Object["spec"].(map[string]any)
 	target := spec["target"].(map[string]any)
 	sels, ok := target["taintSelectors"].([]any)
@@ -139,7 +139,7 @@ func TestBuildCRENCCLCertificationCopiesSharedGPUTaints(t *testing.T) {
 }
 
 func TestUnstructuredConditionTrue(t *testing.T) {
-	obj := buildCRENCCLCertification("ns", &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
+	obj := buildCRENCCLCertification("ns", creNCCLRunName, &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
 	obj.Object["status"] = map[string]any{
 		"conditions": []any{
 			map[string]any{"type": "Succeeded", "status": "True"},
@@ -154,7 +154,7 @@ func TestUnstructuredConditionTrue(t *testing.T) {
 }
 
 func TestCertificationWorkflowName(t *testing.T) {
-	obj := buildCRENCCLCertification("ns", &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
+	obj := buildCRENCCLCertification("ns", creNCCLRunName, &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
 	obj.Object["status"] = map[string]any{
 		"categoryStatuses": []any{
 			map[string]any{
@@ -206,7 +206,7 @@ func TestYoungestLivePodSince(t *testing.T) {
 
 func TestMeasurementBelongsToRun(t *testing.T) {
 	createdAt := metav1.NewTime(time.Unix(100, 0))
-	obj := buildCRENCCLCertification("ns", &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
+	obj := buildCRENCCLCertification("ns", creNCCLRunName, &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
 	obj.SetCreationTimestamp(metav1.NewTime(time.Unix(101, 0)))
 	obj.SetOwnerReferences([]metav1.OwnerReference{{Kind: "Workflow", Name: creNCCLRunName}})
 	if !measurementBelongsToRun(obj, creNCCLRunName, createdAt) {

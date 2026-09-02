@@ -108,7 +108,7 @@ This epic makes CRE the executor for AICR performance validation, starting with 
 2. **AICR remains the judge.** Thresholds stay in the recipe's `performance.constraints`. CRE executes and reports; AICR evaluates.
 3. **The transport assertion stays in AICR.** CRE's log-parsing profiles extract values but cannot assert presence or reject a value. AICR's existing assertion, roughly 200 lines, is retained.
 4. **Each check gets its own constraint name.** The two checks will not report the same number, and sharing a name would permanently miscalibrate one of them. This is the least reversible decision here.
-5. **Supply fabric configuration directly, and contribute it upstream in parallel.** This removes a three-to-six week external dependency from the critical path at the cost of doing one day of work twice.
+5. **Supply fabric configuration directly, and contribute it upstream in parallel.** This removes a three-to-six-week external dependency from the critical path at the cost of doing one day of work twice.
 6. **Retirement is coverage-gated.** All seven overlays that run an NCCL check are validated first, then they migrate, then the old path is deleted.
 7. **GPU types opt in gradually** for training and goodput (task 4). There is no per-overlay training ticket list.
 8. **Do not run the internal qualification pipeline for the first CRE deploy.** Prove the component on a manually created cluster (task 2).
@@ -139,15 +139,15 @@ This lands in the internal repository rather than the OSS registry, and moves wh
 
 #### Task 2 — Test CRE on a manually created cluster
 
-Install the published bundle on a cluster created by hand and confirm the controller, CRDs, pull secret, and a first `WorkloadRun` (or equivalent) come up. **Do not** run this through the internal qualification pipeline. That pipeline would add complexity this integration does not need for the first prove-out.
+Install the published bundle on a cluster created by hand and confirm the controller, CRDs, pull secret, and a first `Certification` (`communication/nccl-all-reduce`) come up. **Do not** run this through the internal qualification pipeline. That pipeline would add complexity this integration does not need for the first prove-out.
 
-**Done when** CRE is running on that cluster and a NCCL `WorkloadRun` can be created against it. **Depends on** task 1.
+**Done when** CRE is running on that cluster and an NCCL `Certification` can be created against it. **Depends on** task 1.
 
-#### Task 3 — Implement the AICR NCCL check that drives `WorkloadRun`
+#### Task 3 — Implement the AICR NCCL check that drives `Certification`
 
-Write the validator that creates a `WorkloadRun`, watches it to completion, reads bandwidth from structured status rather than scraping the launcher log, evaluates the result against a new recipe constraint name, and asserts transport from the launcher log inside AICR.
+Write the validator that creates a `nvcre.nvidia.com/v1alpha1` `Certification` with `communication/nccl-all-reduce`, watches it to a Succeeded or Failed condition, reads max `busBW` from the category Workflow's `BandwidthMeasurement` results, evaluates the result against a new recipe constraint name, and asserts transport from the launcher log inside AICR.
 
-`WorkloadRun` carries everything the check needs: node targeting, thresholds, node and GPU counts, MNNVL and Mellanox NIC settings, MPI framework selection, a free-form configuration object, overrides, and a reference to the bandwidth log-parsing profile.
+The Certification owns the OSS catalog's EFA nccl-tests image and MPI command. AICR still supplies node targeting (selector, names, shared taints) and remains the judge. Training/goodput stays on `WorkloadRun` (task 4), which carries image, script, and goodput log-profile overrides.
 
 Most of this is patterned on existing files. The check reuses AICR's threshold parsing, log fetch, evidence emission, and validator Job scaffolding, so the genuinely new code is creating a resource, watching it, and reading its status. No RBAC change is needed, because AICR deliberately binds each run's validator service account to cluster-admin precisely so validators can reach CRDs that do not exist at compile time.
 
