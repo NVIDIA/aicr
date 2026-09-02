@@ -888,7 +888,7 @@ derive step rather than the load step.
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
 | `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.attestation` |
 | `ValidateOptions()` | `spec.validate.execution` + the agent fields the validator accepts as options |
-| `SnapshotAgentConfig()` | `spec.snapshot.agent` + `.execution` + `.output` |
+| `SnapshotAgentConfig()` | `spec.snapshot.agent` + `.execution` (**not** `.output`) |
 | `RecipeSource()` | `spec.recipe.data` |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
 | `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
