@@ -13,20 +13,20 @@ pods still run on the system nodegroup while workers run on the GPU
 nodegroup, so traffic still crosses the same GPU↔system nodegroup SG
 boundary as before.
 
-> **TODO before merging (tracked in NVIDIA/aicr#1836):** the port(s) below
-> are not yet confirmed against a real Dynamo 1.4+ EKS deployment. What's
-> known from the AICR recipes: the ZMQ KV-event endpoint is set explicitly
-> per worker via `--kv-events-config`, e.g.
-> `{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557"}`
-> (see `tests/manifests/dynamo-vllm-smoke-test.yaml`), offset by `+dp_rank`
-> for dp_rank > 0. The TCP request plane does not have one fixed,
-> documented port the way NATS had `4222` — confirm the actual listening
-> port(s) on a live cluster before finalizing the SG rule below.
+**Confirmed on a live Dynamo 1.4.1 EKS deployment (`aicr-gb300`, 2026-09-01)
+and against upstream runtime source (`lib/runtime/src/pipeline/network/manager`
+`distributed.rs`).** The 1.4.2 chart pins the same `grove`/`kai-scheduler`
+dependency versions as 1.4.1, so this is not expected to change in 1.4.2.
+Traffic crossing the GPU↔system nodegroup boundary is **bidirectional**, by
+connection initiator:
 
-```shell
-kubectl exec -n dynamo-system <frontend-pod> -- ss -tlnp
-kubectl exec -n dynamo-system <worker-pod> -- ss -tlnp
-```
+- **System/frontend → GPU/worker** — request-plane connection to the
+  worker's `DYN_TCP_RPC_PORT`. OS-assigned by default.
+- **GPU/worker → system/frontend** — response-stream connection to the
+  frontend's `DYN_TCP_RESPONSE_STREAM_PORT`. OS-assigned by default.
+- **System/router → GPU/worker** — ZMQ subscriber connects to the worker's
+  bound port `5557` (offset by `+dp_rank` for dp_rank > 0). What's
+  bound port `5557` (offset by `+dp_rank` for dp_rank > 0).
 
 If the GPU and system node groups sit in different security groups, these
 ports may be blocked from GPU nodes to the frontend's node (and vice versa).
@@ -47,7 +47,7 @@ nodegroup) is what initiates the connection to the worker (GPU nodegroup):
 
 ```shell
 kubectl run tcp-probe --rm -i --restart=Never --image=busybox:1.36 \
-  --overrides='{"spec":{"nodeSelector":{"<gpu-node-label-key>":"<value>"},"tolerations":[{"operator":"Exists"}]}}' \
+  --overrides='{"spec":{"nodeSelector":{"<system-node-label-key>":"<value>"}}}' \
   -- sh -c 'nc -zv -w 5 <worker-pod-ip-or-svc> 5557'
 ```
 
@@ -80,7 +80,9 @@ SG rule below remains the reliable cluster-side guarantee.
 
 Allow ingress from the GPU node security group to the system node security
 group on:
-- TCP `<PORT>` - Dynamo request plane + KV events (dynamo-platform) — confirm exact port(s) on-cluster, see TODO above
+- TCP `5557` - ZMQ KV-event plane, system→GPU (dynamo-platform)
+- TCP ephemeral range `1024-65535` - Dynamo request plane `DYN_TCP_RPC_PORT`, system→GPU (OS-assigned)
+- TCP ephemeral range `1024-65535` - Dynamo response-stream `DYN_TCP_RESPONSE_STREAM_PORT`, GPU→system (OS-assigned)
 - TCP `9090` - Prometheus (required for the `ai-service-metrics` conformance check)
 
 The `9090` rule is required as a fallback guarantee: the orchestrator *prefers*
@@ -109,9 +111,17 @@ aws ec2 describe-instances \
   --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" \
   --output text
 
-# 2) Allow Dynamo request/event-plane + Prometheus from GPU SG -> system SG
+# 2a) ZMQ KV-events: system → GPU on fixed port 5557
+aws ec2 authorize-security-group-ingress --group-id <gpu-sg-id> \
+  --protocol tcp --port 5557 --source-group <system-sg-id>
+
+# 2b) Request plane: system → GPU (ephemeral range)
+aws ec2 authorize-security-group-ingress --group-id <gpu-sg-id> \
+  --protocol tcp --port 1024-65535 --source-group <system-sg-id>
+
+# 2c) Response stream: GPU → system (ephemeral range)
 aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
-  --protocol tcp --port <PORT> --source-group <gpu-sg-id>
+  --protocol tcp --port 1024-65535 --source-group <gpu-sg-id>
 
 aws ec2 authorize-security-group-ingress --group-id <system-sg-id> \
   --protocol tcp --port 9090 --source-group <gpu-sg-id>
