@@ -16,6 +16,7 @@ package aicr
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -85,6 +86,21 @@ type BundleArtifact = *result.Output
 // Config. The REST /v1/bundle handler depends on this split — it sets Config
 // and OutputDir/Timeout in the same BundleOptions literal and requires both
 // to take effect.
+//
+// # Config's Attest must agree with OIDCResolve.Attest
+//
+// The split above has one guarded exception. Config's baked-in Attest and
+// OIDCResolve.Attest are independent gates — one reaches the bundler's
+// attestBundle check, the other decides whether MakeBundle derives a signer
+// — and when Attester is nil (so OIDCResolve is actually consulted) MakeBundle
+// rejects a Config and OIDCResolve.Attest that disagree, with
+// ErrCodeInvalidRequest naming both values, rather than silently producing
+// unsigned "signed" output or burning an OIDC/KMS round trip whose result
+// Config then discards. Supplying Attester directly sidesteps the check
+// entirely — it wins outright and neither gate is consulted. Both current
+// callers keep the two in lockstep already: the CLI always supplies Attester
+// (so OIDCResolve is never consulted), and the REST handler sets Config's
+// Attest and Attester together.
 type BundleOptions struct {
 	// Config carries an already-built bundler configuration and, when
 	// non-nil, wins over the 18 flat fields below (Deployer through AppName).
@@ -496,13 +512,39 @@ func (c *Client) MakeBundle(ctx context.Context, recipe *RecipeResult, opts Bund
 	// signing" with an attester that merely behaves like none — same result
 	// today, but it makes the zero value depend on resolver internals.
 	attester := opts.Attester
-	if attester == nil && opts.OIDCResolve.Attest {
-		resolved, rerr := attestation.ResolveAttesterLazy(ctx, opts.OIDCResolve)
-		if rerr != nil {
-			// Already coded; the message names the signing input that failed.
-			return nil, rerr
+	if attester == nil {
+		// Reconcile the two independent Attest gates before deriving. cfg
+		// (== opts.Config when it is set — bundlerConfig() returns it
+		// outright) is what actually reaches the bundler's attestBundle
+		// gate; OIDCResolve.Attest is what decides, right here, whether a
+		// signer gets derived at all. A hand-built BundleOptions that sets
+		// both and disagrees — e.g. WithAttest(false) baked into Config
+		// while OIDCResolve.Attest is true — would otherwise fail silently
+		// in either direction: Config says sign but no signer is derived
+		// (attestBundle falls back to the no-op attester, producing
+		// unsigned output that looks attested), or OIDCResolve derives a
+		// real signer that Config's Attest()==false then discards (a
+		// wasted OIDC/KMS round trip). Fail closed instead — this is a
+		// supply-chain-adjacent signal, and only reachable when Attester is
+		// nil: a caller-supplied Attester wins outright and never consults
+		// either gate, which is why neither current caller (the CLI always
+		// supplies Attester; the REST handler sets Config's Attest and
+		// Attester together) can trip this.
+		if opts.Config != nil && cfg.Attest() != opts.OIDCResolve.Attest {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("BundleOptions.Config.Attest()=%t disagrees with "+
+					"BundleOptions.OIDCResolve.Attest=%t; set both to the same "+
+					"value or supply BundleOptions.Attester directly",
+					cfg.Attest(), opts.OIDCResolve.Attest))
 		}
-		attester = resolved
+		if opts.OIDCResolve.Attest {
+			resolved, rerr := attestation.ResolveAttesterLazy(ctx, opts.OIDCResolve)
+			if rerr != nil {
+				// Already coded; the message names the signing input that failed.
+				return nil, rerr
+			}
+			attester = resolved
+		}
 	}
 	if attester != nil {
 		bundlerOpts = append(bundlerOpts, bundler.WithAttester(attester))

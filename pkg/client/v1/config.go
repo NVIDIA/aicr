@@ -376,18 +376,28 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 		// Already coded, and the message carries the spec path that failed.
 		return BundleOptions{}, err
 	}
-	if resolved == nil {
-		return BundleOptions{}, nil
-	}
 
 	// Signing mode is exclusive: a KMS key or keyless OIDC, never both.
 	// ResolveAttesterLazy picks KMS whenever SigningKey is non-empty, so a
 	// document setting both would silently sign with the key while its
 	// fulcioURL/oidcDeviceFlow settings did nothing. The CLI rejects that
-	// combination (validateSigningKeyExclusivity, and
+	// combination on the MERGED opts (validateSigningKeyExclusivity, and
 	// TestValidateSigningKeyExclusivity_ConfigSourcedConflict covers exactly
-	// the config-sourced case) — enforcing it only there would leave SDK
-	// callers with the silent behavior.
+	// the config-sourced case) — this is what an SDK caller who never merges
+	// flags relies on for the same guarantee.
+	//
+	// oidcDeviceFlow is deliberately NOT checked here, unlike fulcioURL. This
+	// method runs before the CLI's flag-over-config merge (BundleOptions is
+	// derived, then the CLI layers flags on top — see parseBundleCmdOptions),
+	// so an eager oidcDeviceFlow check would reject a document that sets both
+	// signingKey and oidcDeviceFlow: true even when the caller passes
+	// --oidc-device-flow=false specifically to correct it: the error fires
+	// before that flag is ever read, and validateSigningKeyExclusivity on the
+	// merged opts never gets a chance to see the correction. Checking it only
+	// on the merged opts — the same layer that already re-validates
+	// fulcioURL — restores that per-field override for a boolean flag whose
+	// zero value (false) cannot be told apart from "explicitly cleared"
+	// without cmd.IsSet, which only the CLI layer has.
 	//
 	// Trimmed first for the same reason the CLI trims: a YAML block scalar
 	// carries surrounding whitespace, and an untrimmed key fails late in the
@@ -398,20 +408,10 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 		return BundleOptions{}, errors.New(errors.ErrCodeInvalidRequest,
 			"spec.bundle.attestation.signingKey must not be blank")
 	}
-	if signingKey != "" {
-		for _, conflict := range []struct {
-			field  string
-			active bool
-		}{
-			{"oidcDeviceFlow", resolved.OIDCDeviceFlow},
-			{"fulcioURL", resolved.FulcioURL != ""},
-		} {
-			if conflict.active {
-				return BundleOptions{}, errors.New(errors.ErrCodeInvalidRequest,
-					"spec.bundle.attestation.signingKey is mutually exclusive with "+
-						"spec.bundle.attestation."+conflict.field)
-			}
-		}
+	if signingKey != "" && resolved.FulcioURL != "" {
+		return BundleOptions{}, errors.New(errors.ErrCodeInvalidRequest,
+			"spec.bundle.attestation.signingKey is mutually exclusive with "+
+				"spec.bundle.attestation.fulcioURL")
 	}
 
 	return BundleOptions{
@@ -493,9 +493,6 @@ func (c *Config) BundleInputOptions() (BundleInputOptions, error) {
 	if err != nil {
 		// Already coded, and the message carries the spec path that failed.
 		return BundleInputOptions{}, err
-	}
-	if resolved == nil {
-		return BundleInputOptions{}, nil
 	}
 	return BundleInputOptions{
 		RecipePath:      resolved.RecipeInput,
@@ -628,9 +625,6 @@ func (c *Config) ValidateSettings() (ValidateSettings, bool, error) {
 		// Already coded, and the message carries the spec path that failed.
 		return ValidateSettings{}, true, err
 	}
-	if resolved == nil {
-		return ValidateSettings{}, true, nil
-	}
 
 	// Cast, don't re-parse: Validation().Resolve() rejects an unknown phase
 	// before returning, on both the LoadConfig and WrapConfig paths.
@@ -694,9 +688,6 @@ func (c *Config) ValidateInputOptions() (ValidateInputOptions, error) {
 	if err != nil {
 		// Already coded, and the message carries the spec path that failed.
 		return ValidateInputOptions{}, err
-	}
-	if resolved == nil {
-		return ValidateInputOptions{}, nil
 	}
 	return ValidateInputOptions{
 		RecipePath:   resolved.RecipePath,
@@ -771,15 +762,15 @@ func (c *Config) ValidateInputOptions() (ValidateInputOptions, error) {
 // transport decision, not as evidence that excluding NoSign and Full is
 // arbitrary.
 //
-// # spec.validate.evidence.cncf is NOT projected
+// # spec.validate.evidence.cncf is projected separately
 //
-// The evidence section carries two kinds; this method covers one. CNCF AI
-// Conformance emission has no facade entry point at all — there is no
-// Client.Emit* that consumes dir/cncfSubmission/features — so there is
-// nothing for a derivation to feed. Projecting it would mean designing the
-// emission API, not mapping config onto an existing one. Reading that half
-// still needs Unwrap(), and this method is named for the half it carries so
-// the name cannot drift into covering both.
+// The evidence section carries two kinds; this method covers one.
+// CNCFEvidenceOptions covers the other — it is a separate method, not folded
+// in here, because the two target different consumers: this one feeds
+// Client.EmitRecipeEvidence, while CNCF AI Conformance markdown has no
+// Client.Emit* counterpart and is consumed directly by the caller (the CLI's
+// validateFlagCombinations, cncf.New and runCNCFSubmission). Reading that
+// half through Unwrap() is no longer necessary.
 //
 // Returns (zero, false, nil) for a nil Config, an absent spec.validate, or an
 // absent evidence.attestation. An empty out also returns ok=false, but unlike
@@ -826,6 +817,53 @@ func (c *Config) EvidenceAttestationOptions() (EvidenceOptions, bool, error) {
 	}
 	opts.OutDir = att.Out
 	return opts, true, nil
+}
+
+// CNCFEvidenceOptions carries spec.validate.evidence.cncf — the CNCF AI
+// Conformance evidence-markdown settings (--evidence-dir / --cncf-submission
+// / --feature). Consumed by the CALLER, not by a Client method: there is no
+// Client.Emit* for CNCF evidence, so validateFlagCombinations, cncf.New and
+// runCNCFSubmission read this directly. Mirrors SnapshotOutputOptions, which
+// carries spec.snapshot.output the same way despite Client.CollectSnapshot
+// not consuming it either.
+type CNCFEvidenceOptions struct {
+	// Dir is spec.validate.evidence.cncf.dir, the directory CNCF AI
+	// Conformance evidence markdown is written to.
+	Dir string
+
+	// CNCFSubmission is spec.validate.evidence.cncf.cncfSubmission: whether to
+	// collect detailed behavioral evidence for a CNCF AI Conformance
+	// submission rather than the lighter default evidence.
+	CNCFSubmission bool
+
+	// Features is spec.validate.evidence.cncf.features, restricting collection
+	// to specific evidence features. Empty means "all features" — only
+	// honored when CNCFSubmission is true.
+	Features []string
+}
+
+// CNCFEvidenceOptions derives spec.validate.evidence.cncf.
+//
+// Returns the zero value (never an error for an absent section) when the
+// document has no spec.validate or no evidence.cncf block, and an error when
+// spec.validate is present but malformed.
+func (c *Config) CNCFEvidenceOptions() (CNCFEvidenceOptions, error) {
+	if c == nil || c.internal == nil {
+		return CNCFEvidenceOptions{}, nil
+	}
+	resolved, err := c.internal.Validation().Resolve()
+	if err != nil {
+		// Already coded, and the message carries the spec path that failed.
+		return CNCFEvidenceOptions{}, err
+	}
+	if resolved.EvidenceCNCF == nil {
+		return CNCFEvidenceOptions{}, nil
+	}
+	return CNCFEvidenceOptions{
+		Dir:            resolved.EvidenceCNCF.Dir,
+		CNCFSubmission: resolved.EvidenceCNCF.CNCFSubmission,
+		Features:       resolved.EvidenceCNCF.Features,
+	}, nil
 }
 
 // SnapshotAgentConfig derives Client.CollectSnapshot's AgentConfig from
@@ -926,9 +964,6 @@ func (c *Config) SnapshotAgentConfig() (*AgentConfig, bool, error) {
 		// Already coded, and the message carries the spec path that failed.
 		return nil, true, err
 	}
-	if resolved == nil {
-		return &AgentConfig{}, true, nil
-	}
 
 	requests, err := snapshotter.ParseResourceList(resolved.Requests)
 	if err != nil {
@@ -1018,9 +1053,6 @@ func (c *Config) SnapshotOutputOptions() (SnapshotOutputOptions, error) {
 	if err != nil {
 		// Already coded, and the message carries the spec path that failed.
 		return SnapshotOutputOptions{}, err
-	}
-	if resolved == nil {
-		return SnapshotOutputOptions{}, nil
 	}
 	return SnapshotOutputOptions{
 		Path:     resolved.OutputPath,
