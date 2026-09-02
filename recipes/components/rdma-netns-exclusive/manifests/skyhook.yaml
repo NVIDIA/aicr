@@ -1,0 +1,72 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Switch the host RDMA subsystem to "exclusive" network-namespace mode so each
+# pod sees ONLY its DRA-allocated HCA(s) in /sys/class/infiniband — required for
+# clean NCCL/GPUDirect behavior alongside DraNet. In the default "shared" mode
+# sysfs is not namespaced, so a pod sees all HCAs but can open only the injected
+# one; NCCL auto-detect then trips on unopenable devices.
+#
+# Mechanism: the mode is fixed by the `ib_core` module parameter `netns_mode`
+# (1=shared default, 0=exclusive). It CANNOT be flipped live — the sysfs param is
+# read-only (0444) and `rdma system set netns exclusive` returns EBUSY whenever
+# non-init net namespaces exist (always true on a running node). ib_core also
+# can't be unloaded live (the whole mlx5 stack depends on it). So the setting is
+# persisted via modprobe.d and Skyhook reboots the node to apply it (ib_core is
+# a loadable module on the VR200 reference image, loaded post-root, so
+# modprobe.d — not initramfs/GRUB — is sufficient).
+#
+# Node-wide change (affects every RDMA user on the host) and interrupting: nodes
+# reboot one at a time (interruptionBudget). Requires the Skyhook operator
+# (nodewright-operator) — declared as a dependencyRef on the componentRef.
+apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Skyhook
+metadata:
+  annotations:
+    # Helm hooks ensure this CR is applied after the Skyhook CRD is installed
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "10"
+    "helm.sh/hook-delete-policy": before-hook-creation
+  name: rdma-netns-exclusive
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: rdma-netns-exclusive
+    app.kubernetes.io/instance: rdma-netns-exclusive
+spec:
+  runtimeRequired: false
+  interruptionBudget:
+    count: 1
+  additionalTolerations:
+    - operator: Exists
+  # Only GPU workers carry the Mellanox fabric (matches the DraNet DaemonSet).
+  nodeSelectors:
+    matchLabels:
+      nvidia.com/gpu.present: "true"
+  packages:
+    rdma-netns-exclusive:
+      image: ghcr.io/nvidia/skyhook-packages/shellscript
+      version: "1.1.1"
+      containerSHA: sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf
+      interrupt:
+        type: reboot
+      configMap:
+        apply.sh: |-
+          #!/bin/bash
+          set -euo pipefail
+          # 0 = exclusive (per-netns RDMA isolation), 1 = shared (kernel default)
+          printf 'options ib_core netns_mode=0\n' > /etc/modprobe.d/dranet-rdma-netns-exclusive.conf
+        apply_check.sh: |-
+          #!/bin/bash
+          set -euo pipefail
+          grep -qx 'options ib_core netns_mode=0' /etc/modprobe.d/dranet-rdma-netns-exclusive.conf
