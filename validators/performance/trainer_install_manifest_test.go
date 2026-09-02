@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
@@ -80,6 +81,23 @@ func TestLoadTrainerInstallManifest_MissingIsNil(t *testing.T) {
 	}
 	if cm != nil || resources != nil {
 		t.Errorf("loadTrainerInstallManifest() = (%v, %v), want (nil, nil)", cm, resources)
+	}
+}
+
+// TestLoadTrainerInstallManifest_MissingDataKeyIsEmpty checks that a
+// ConfigMap present without the resources key reports an empty list instead
+// of a decode error, so it does not permanently block orphan reaping.
+func TestLoadTrainerInstallManifest_MissingDataKeyIsEmpty(t *testing.T) {
+	client := fake.NewClientset(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
+		Name: trainerInstallManifestName, Namespace: trainerNamespace,
+	}})
+
+	cm, resources, err := loadTrainerInstallManifest(context.Background(), client)
+	if err != nil {
+		t.Fatalf("loadTrainerInstallManifest() error = %v", err)
+	}
+	if cm == nil || resources != nil {
+		t.Errorf("loadTrainerInstallManifest() = (%v, %v), want (non-nil, nil)", cm, resources)
 	}
 }
 

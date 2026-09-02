@@ -1061,8 +1061,12 @@ func loadTrainerInstallManifest(ctx context.Context, clientset kubernetes.Interf
 	if err != nil {
 		return nil, nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read Trainer install manifest", err)
 	}
+	raw, ok := cm.Data[trainerInstallManifestKey]
+	if !ok || raw == "" {
+		return cm, nil, nil
+	}
 	var resources []trainerResourceRef
-	if err := json.Unmarshal([]byte(cm.Data[trainerInstallManifestKey]), &resources); err != nil {
+	if err := json.Unmarshal([]byte(raw), &resources); err != nil {
 		return cm, nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to decode Trainer install manifest", err)
 	}
 	return cm, resources, nil
