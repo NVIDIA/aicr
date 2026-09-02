@@ -52,9 +52,11 @@ func TestCompute_Structure(t *testing.T) {
 		{"gke", "a100", "h100", "", "nvidia-tuning-gke"},
 		{"gke", "b200", "-", "", "nvidia-tuning-gke"},
 		{"gke", "h100", "-", "", "nvidia-tuning-gke"},
-		// VR200 wires the no-op placeholder: node tuning is applied out-of-band
-		// today, same as GB300.
-		{"rke2", "vr200", "-", "", ""},
+		// VR200 runs the bcm profile as a stopgap (kernel-headers aliasing
+		// only, accelerator-agnostic) until a vr200-native nodewright
+		// profile exists — same accelerator: h100 hardcode as bcm.yaml,
+		// since the bcm path filters on service only.
+		{"rke2", "vr200", "h100", "nvidia-setup", ""},
 	}
 	if len(report.Rows) != len(want) {
 		t.Fatalf("got %d rows, want %d: %+v", len(report.Rows), len(want), report.Rows)

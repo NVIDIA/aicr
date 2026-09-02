@@ -238,10 +238,35 @@ spec:
                         namespace: skyhook
                       status:
                         ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    # No vr200-native nodewright tuning profile exists yet (only
+    # bcm-h100/eks-gb200/bcm-gb200/eks-h100 are defined in
+    # nodewright-packages), so this leaf runs the bcm profile as a
+    # stopgap, matching bcm.yaml. Confirmed with the nodewright
+    # maintainer: the bcm profile's service=bcm path is
+    # accelerator-agnostic and only aliases the kernel-headers tree
+    # (#1093) — no hugepages/sysctl/GRUB — so it is safe to run alongside
+    # the existing out-of-band VR200 tuning (Skyhook CRs apply
+    # independently by priority; they don't merge/conflict). Validated
+    # live: no reboot, Skyhook CR reaches complete, kernel-headers
+    # symlink confirmed correct on-host; a full aicr validate re-run
+    # afterward stayed clean (deployment 4/4, conformance 5/5,
+    # performance/NCCL all-reduce 744 GB/s against the >= 600 GB/s
+    # threshold).
+    #
+    # accelerator: h100 is hardcoded intentionally, matching bcm.yaml —
+    # the bcm path filters on service only, so the accelerator value is
+    # inert (accelerator: vr200 fails fast with "Unsupported
+    # combination"; h100 is the only value tested against this path).
+    #
+    # Switch to a real vr200/rke2 reboot-capable nodewright profile once
+    # one exists; this is a stopgap until it lands.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:
-        - components/nodewright-customizations/manifests/no-op.yaml
+        - components/nodewright-customizations/manifests/bcm-setup.yaml
+      overrides:
+        service: bcm
+        accelerator: h100
       dependencyRefs:
         - nodewright-operator
 
