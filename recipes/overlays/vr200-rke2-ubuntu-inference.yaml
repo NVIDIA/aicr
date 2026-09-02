@@ -78,6 +78,11 @@ spec:
       overrides:
         labeler:
           assumeDriverInstalled: true
+        # See vr200-rke2-ubuntu-training for why metadata-collector is
+        # disabled rather than patched (NVIDIA/nvsentinel#1717).
+        global:
+          metadataCollector:
+            enabled: false
 
     # See vr200-rke2-ubuntu-training for the host-managed-driver root
     # rationale and the host nvidia-imex/ComputeDomain conflict note.
@@ -85,6 +90,84 @@ spec:
       type: Helm
       overrides:
         nvidiaDriverRoot: /
+
+    # See vr200-rke2-ubuntu-training for the nodewright-operator naming-drift
+    # rationale (NVIDIA/aicr#1828).
+    - name: nodewright-operator
+      type: Helm
+      healthCheckAsserts: |
+        apiVersion: chainsaw.kyverno.io/v1alpha1
+        kind: Test
+        metadata:
+          name: nodewright-operator-health-check
+        spec:
+          timeouts:
+            assert: 5m
+          steps:
+            - name: validate-skyhook-crd-established
+              try:
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: skyhooks.skyhook.nvidia.com
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+            - name: validate-deployment-exists
+              try:
+                - assert:
+                    resource:
+                      apiVersion: apps/v1
+                      kind: Deployment
+                      metadata:
+                        name: nodewright-controller-manager
+                        namespace: skyhook
+                      status:
+                        (availableReplicas > `0`): true
+            - name: validate-all-pods-healthy
+              try:
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        phase: Pending
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        phase: Failed
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        phase: Unknown
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
 
     # VR200 node tuning is applied out-of-band today — same no-op scaffold
     # as the training leaf; see vr200-rke2-ubuntu-training for the
