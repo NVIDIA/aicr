@@ -652,6 +652,38 @@ func TestPruneStaleNCCLNamespaces_SkipsDeleteOnConcurrentClaim(t *testing.T) {
 	}
 }
 
+// TestPruneStaleNCCLNamespaces_ReleasesLockOnFailedDelete checks that a
+// transient namespace-delete failure releases the fence Lease prune just
+// claimed, instead of leaving it to block a same-run retry closed until it
+// ages out on its own.
+func TestPruneStaleNCCLNamespaces_ReleasesLockOnFailedDelete(t *testing.T) {
+	old := metav1.NewTime(time.Now().Add(-2 * defaults.NCCLStaleNamespacePruneAge))
+	ownedLabels := map[string]string{labels.ManagedBy: labels.ValueValidator, labels.Component: labels.ValueNCCLPerf}
+	targetNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-flaky", CreationTimestamp: old, Labels: ownedLabels,
+	}}
+
+	client := fake.NewClientset(targetNS)
+	client.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewServiceUnavailable("apiserver unavailable")
+	})
+
+	pruneStaleNCCLNamespaces(context.Background(), client, newTrainerFakeClient(), "some-other-namespace")
+
+	if _, err := client.CoreV1().Namespaces().Get(context.Background(), targetNS.Name, metav1.GetOptions{}); err != nil {
+		t.Fatalf("expected the namespace to survive a failed delete: %v", err)
+	}
+	if _, err := client.CoordinationV1().Leases(targetNS.Name).Get(context.Background(), ncclRunLockName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Errorf("expected the fence Lease to be released after the failed delete, got: %v", err)
+	}
+
+	// A same-run retry must be able to claim it immediately, not fail
+	// closed until NCCLExecutionLockStaleAge passes.
+	if _, err := claimNCCLExecutionLock(context.Background(), client, targetNS.Name); err != nil {
+		t.Errorf("expected a retry to claim the released lock immediately, got: %v", err)
+	}
+}
+
 // TestWaitForPodByLabelSelector_IgnoresStaleDeletedLauncher is the regression
 // guard for the finding that any watch event, including a Deleted event for a
 // stale pod, was returned as-is. applyNCCLResources's TrainJob admission

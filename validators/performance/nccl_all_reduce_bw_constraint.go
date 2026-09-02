@@ -609,6 +609,33 @@ func rollbackNCCLNamespace(clientset kubernetes.Interface, namespace string, uid
 	}
 }
 
+// releaseNCCLExecutionLockIfHeldBy best-effort deletes namespace's execution
+// lock, but only if it's still named holderID as the current holder.
+// pruneStaleNCCLNamespaces calls this when its own namespace delete fails
+// transiently. Left in place, the fence Lease it just claimed would
+// otherwise sit there until it ages past NCCLExecutionLockStaleAge, failing
+// a same-run retry closed for up to that long. Checking the holder first,
+// rather than deleting outright, keeps this from removing a legitimate
+// claim that lands in between.
+func releaseNCCLExecutionLockIfHeldBy(ctx context.Context, clientset kubernetes.Interface, namespace, holderID string) {
+	getCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	leaseClient := clientset.CoordinationV1().Leases(namespace)
+	lease, err := leaseClient.Get(getCtx, ncclRunLockName, metav1.GetOptions{})
+	if err != nil {
+		return // Gone, or unreadable; nothing this call can safely remove.
+	}
+	if lease.Spec.HolderIdentity == nil || *lease.Spec.HolderIdentity != holderID {
+		return // Already taken over by someone else; not ours to remove.
+	}
+	if delErr := leaseClient.Delete(getCtx, ncclRunLockName, metav1.DeleteOptions{
+		Preconditions: &metav1.Preconditions{ResourceVersion: &lease.ResourceVersion},
+	}); delErr != nil && !apierrors.IsNotFound(delErr) {
+		slog.Warn("Failed to release an orphaned NCCL benchmark execution lock after a failed namespace delete",
+			"namespace", namespace, "error", delErr)
+	}
+}
+
 // generateExecutionID returns a fresh random identifier for one execution,
 // distinct from AICR_RUN_ID so two invocations sharing a run ID still get
 // different lock holder identities.
@@ -733,7 +760,8 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 		// or freshly-won lock fails this with ErrCodeConflict. The
 		// namespace delete cascades this pruner's own claim away with
 		// everything else, so it never lingers.
-		if _, claimErr := claimNCCLExecutionLock(ctx, clientset, ns.Name); claimErr != nil {
+		holderID, claimErr := claimNCCLExecutionLock(ctx, clientset, ns.Name)
+		if claimErr != nil {
 			if stderrors.Is(claimErr, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
 				slog.Info("Skipping stale NCCL benchmark namespace prune: namespace has a live execution lock",
 					"namespace", ns.Name)
@@ -753,6 +781,11 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 		delCancel()
 		if delErr != nil && !apierrors.IsNotFound(delErr) {
 			slog.Warn("Failed to delete stale NCCL benchmark namespace", "namespace", ns.Name, "error", delErr)
+			// The claim above just fenced this namespace off. Left in
+			// place after a failed delete, that Lease would otherwise
+			// block a legitimate same-run retry closed until it goes
+			// stale on its own.
+			releaseNCCLExecutionLockIfHeldBy(ctx, clientset, ns.Name, holderID)
 			otherNamespacesRemain = true
 			continue
 		}
