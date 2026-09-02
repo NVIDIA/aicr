@@ -395,7 +395,12 @@ func recipeClientFromCmd(
 	} else if configured, ok := aicr.WrapConfig(cfg).RecipeSource(); ok {
 		// spec.recipe.data, derived through the facade so an SDK caller
 		// building a Client from the same document gets the same source.
-		slog.Info("initializing external data provider", "source", "spec.recipe.data")
+		// Log the concrete directory as the --data branch does: the audit line
+		// exists so an operator can tell which catalog a run actually read, and
+		// naming only the spec field leaves that unanswered. Read from the same
+		// accessor RecipeSource() uses, so the two cannot disagree.
+		slog.Info("initializing external data provider",
+			"directory", cfg.Recipe().DataDir(), "source", "spec.recipe.data")
 		source = configured
 	}
 	client, err := aicr.NewClientContext(ctx,
@@ -480,6 +485,37 @@ func stringFlagOrConfig(cmd *cli.Command, flagName, fallback string) string {
 			return fallback
 		}
 		return cmd.String(flagName)
+	}
+	v := cmd.String(flagName)
+	if fallback != "" && fallback != v {
+		slog.Info("CLI flag overriding config value", "flag", flagName, "config", fallback, "override", v)
+	}
+	return v
+}
+
+// explicitStringFlagOrConfig is stringFlagOrConfig for a flag whose declared
+// Value: default must keep appearing in `--help` — it is part of the v1 CLI
+// surface pinned by testdata/cli-surface.golden — but must NOT be substituted
+// for the caller's silence downstream:
+//
+//   - Explicit CLI flag (cmd.IsSet) → CLI value, with an INFO log if it
+//     differs from a non-empty config fallback.
+//   - No CLI flag, non-empty config fallback → fallback (a value in --config
+//     is an operator choice too, so it counts as explicit input).
+//   - Neither → "", NOT the flag's compile-time Value: default.
+//
+// The distinction is load-bearing for the agent's --job-name and
+// --service-account-name, where "" is a value rather than a missing one: it
+// tells pkg/k8s/agent that no prefix was named, so one is derived from
+// Config.NameBase and this run's ID. Substituting the declared default there
+// would hand agent.Deployer.resolveServiceAccount a name aicr picked rather
+// than one the operator typed, and on any cluster still carrying a leftover
+// "aicr" ServiceAccount from a pre-ADR-020 install EVERY run would silently
+// resolve to exact-ServiceAccount mode and manage no RBAC at all. Exact mode
+// must be reachable only from a name the operator actually supplied.
+func explicitStringFlagOrConfig(cmd *cli.Command, flagName, fallback string) string {
+	if !cmd.IsSet(flagName) {
+		return fallback
 	}
 	v := cmd.String(flagName)
 	if fallback != "" && fallback != v {

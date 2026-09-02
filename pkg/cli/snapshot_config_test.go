@@ -590,6 +590,7 @@ func TestSnapshotCmdOptions_ToAgentConfig(t *testing.T) {
 		{"ClusterConfigPath", ac.ClusterConfigPath, "/l8k/cluster-config.yaml"},
 		{"AKSGPUPoolsPath", ac.AKSGPUPoolsPath, "/aks/pools.json"},
 		{"DiscoverNetwork", ac.DiscoverNetwork, true},
+		{"NameBase", ac.NameBase, name},
 	}
 	for _, w := range wants {
 		if !reflect.DeepEqual(w.got, w.want) {

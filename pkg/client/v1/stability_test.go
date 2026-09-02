@@ -248,6 +248,12 @@ func TestStability_Bundle(t *testing.T) {
 	t.Parallel()
 
 	_ = aicr.BundleOptions{}
+	// OIDCResolve lets a committed spec.bundle.attestation reach the
+	// bundler without the caller constructing an Attester. Pinned by name
+	// and type: a bare composite literal above would still compile if the
+	// field were renamed or retyped.
+	_ = aicr.BundleOptions{OIDCResolve: aicr.OIDCResolveOptions{}}
+	requireType[aicr.OIDCResolveOptions](aicr.BundleOptions{}.OIDCResolve)
 	requireSignature[func(*aicr.Client, context.Context, *recipe.RecipeResult) (*aicr.RecipeResult, error)]((*aicr.Client).AdoptRecipe)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, aicr.BundleOptions) (aicr.BundleArtifact, error)]((*aicr.Client).MakeBundle)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult) ([]aicr.ComponentBundle, error)]((*aicr.Client).BundleComponents)
@@ -327,6 +333,19 @@ func TestStability_TypesAndAliases(t *testing.T) {
 	_ = aicr.Criteria{}
 	_ = aicr.AllowLists{}
 	_ = aicr.AgentConfig{}
+	// Pinned by name and type, not just shape: Config.SnapshotAgentConfig
+	// populates these, and the bare literal above would still compile
+	// through a rename or retype. Cleanup and Privileged especially --
+	// both are derived through a transform (an inversion and a
+	// defaults-to-true), so a silent flip has no other guard here.
+	_ = aicr.AgentConfig{
+		Namespace: "", Image: "", JobName: "", ServiceAccountName: "",
+		RuntimeClassName: "", OS: "", Output: "", TemplatePath: "",
+		MaxNodesPerEntry: 0, RequireGPU: false, Cleanup: false, Privileged: false,
+	}
+	requireType[bool](aicr.AgentConfig{}.Cleanup)
+	requireType[bool](aicr.AgentConfig{}.Privileged)
+	requireType[time.Duration](aicr.AgentConfig{}.Timeout)
 	_ = aicr.Snapshot{}
 	_ = aicr.Snapshot{}.Raw
 	_ = aicr.ReportSummary{}
@@ -500,6 +519,14 @@ func TestStability_Config(t *testing.T) {
 	requireSignature[func(*aicr.Config) *appconfig.AICRConfig]((*aicr.Config).Unwrap)
 
 	requireSignature[func(*aicr.Config) (aicr.BundleVerifyOptions, error)]((*aicr.Config).BundleVerifyOptions)
+	requireSignature[func(*aicr.Config) (aicr.BundleOptions, error)]((*aicr.Config).BundleOptions)
+	requireSignature[func(*aicr.Config) ([]aicr.ValidateOption, error)]((*aicr.Config).ValidateOptions)
+	requireSignature[func(*aicr.Config) (*aicr.AgentConfig, error)]((*aicr.Config).SnapshotAgentConfig)
+	// The bool is load-bearing, not decoration: it separates "the document
+	// declined the bundle" from "the document fumbled it", which a zero
+	// EvidenceOptions alone cannot express. Dropping it would compile at every
+	// call site that ignores it.
+	requireSignature[func(*aicr.Config) (aicr.EvidenceOptions, bool, error)]((*aicr.Config).EvidenceAttestationOptions)
 	requireSignature[func(*aicr.Config) string]((*aicr.Config).RecipeProfile)
 	requireSignature[func(*aicr.Config) (string, bool, error)]((*aicr.Config).RecipeAccountingMode)
 	requireSignature[func(*aicr.Config) (aicr.RecipeSourceOption, bool)]((*aicr.Config).RecipeSource)

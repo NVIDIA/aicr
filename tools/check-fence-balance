@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Assert that every fenced code block in a Markdown file is balanced.
+#
+# Used by tools/generate-notices on the composed THIRD_PARTY_NOTICES.md before
+# it is published. That file embeds arbitrary upstream license text, and some of
+# it is Markdown: hashicorp/errwrap ships ```go samples and pillow's LICENSE has
+# bare fences. A fixed ``` wrapper is closed early by that content, after which
+# the remainder renders as Markdown and every following block is inverted for
+# the rest of the file. The corruption is invisible in a diff and only shows up
+# when the file is rendered, so it has to be asserted mechanically.
+#
+# Split out of the generator so the guard is testable on its own: driving it
+# through generate-notices would mean a full go-licenses walk across four
+# platforms (~2m20s), which is too slow to run in `make test`. See
+# tools/check-fence-balance_test.sh.
+#
+# Rules, matching CommonMark closely enough for this purpose:
+#   * A fence line is a run of >= 3 backticks followed only by an info string of
+#     word characters and optional trailing whitespace.
+#   * With no block open, a fence WITH an info string opens one; a fence WITHOUT
+#     one is a closer with no opener, which is the corruption signature.
+#   * With a block open, a bare fence of at least as many backticks closes it.
+#     A shorter fence, or one carrying an info string, is content.
+#
+# Usage: check-fence-balance <file>
+# Exits 0 when balanced; prints a diagnosis to stdout and exits 1 otherwise.
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+    echo "usage: $(basename "$0") <file>" >&2
+    exit 2
+fi
+
+readonly TARGET="$1"
+
+if [[ ! -f "${TARGET}" ]]; then
+    echo "ERROR: no such file: ${TARGET}" >&2
+    exit 2
+fi
+
+# Interval expressions ({3,}) are deliberately avoided: the awk shipped on some
+# macOS releases does not support them, and a regex that silently never matches
+# would turn this guard into a no-op — the exact failure mode it exists to
+# prevent. The leading /^```/ is a plain prefix match, and the tick count is
+# taken by walking the line.
+exec awk '
+    /^```/ {
+        ticks = 0
+        while (substr($0, ticks + 1, 1) == "`") { ticks++ }
+        rest = substr($0, ticks + 1)
+        sub(/[ \t\r]+$/, "", rest)
+        # Anything other than a word-character info string means this line is
+        # ordinary content that happens to start with backticks.
+        if (rest !~ /^[A-Za-z0-9_]*$/) { next }
+        if (open == 0) {
+            if (rest == "") {
+                printf "line %d: closing fence with no opener (embedded text escaped its block)\n", NR
+                bad = 1
+                exit
+            }
+            open = ticks
+        } else if (rest == "" && ticks >= open) {
+            open = 0
+            blocks++
+        }
+    }
+    END {
+        # exit inside a rule still runs END, so the failure is flagged rather
+        # than re-decided here.
+        if (bad) { exit 1 }
+        if (open != 0) { print "unterminated code fence"; exit 1 }
+        if (blocks == 0) { print "no fenced blocks found; the file is not being generated"; exit 1 }
+    }
+' "${TARGET}"

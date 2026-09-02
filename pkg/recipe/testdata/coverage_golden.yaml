@@ -2068,6 +2068,8 @@ criteria(service=, accelerator=l40s, intent=training, os=ol, platform=):
             - service=oke
         os:
             - service=oke
+criteria(service=, accelerator=l40, intent=, os=, platform=):
+    outcome: success
 criteria(service=, accelerator=rtx-pro-6000, intent=, os=, platform=):
     outcome: success
 criteria(service=, accelerator=rtx-pro-6000, intent=, os=, platform=dynamo):

@@ -26,6 +26,10 @@
 # are touched. Cluster-scoped resources outside the AICR component domains are
 # left alone.
 #
+# Not narrow, by design: the snapshot-agent sweep in phase 2 is label-based and
+# matches every run, including one in flight. See the HAZARD note there before
+# running this against a cluster someone else is using.
+#
 # On shared / bring-up clusters a registry component may be deliberately owned
 # out-of-band (installed by the platform team, excluded from the AICR recipe).
 # Destroying it is data loss AICR does not own, so `--exclude-ns` and
@@ -376,8 +380,16 @@ fi
 # runID suffix; we delete by label selector to catch all runs. Legacy resources
 # from the older job pattern lived in gpu-operator under the name "aicr".
 msg "Phase 2: Removing AICR validator artifacts..."
-kc delete clusterrolebinding -l app.kubernetes.io/managed-by=aicr --ignore-not-found
-kc delete clusterrole        -l app.kubernetes.io/managed-by=aicr --ignore-not-found
+# The component!=agent-rbac term spares the cluster RBAC an operator applied
+# from the manifests `aicr snapshot --add-roles-to-service-account` wrote for
+# an operator-supplied ServiceAccount. Those objects belong to no run — they
+# carry no run-ID label and no run's cleanup deletes them — and restoring them
+# needs the admin who applied them, so a teardown tool must not sweep them away
+# with the per-run leftovers it exists to reclaim. Revoke them deliberately
+# with `kubectl delete -f snapshot-rbac-<run-id>/` when the ServiceAccount is
+# retired.
+kc delete clusterrolebinding -l 'app.kubernetes.io/managed-by=aicr,app.kubernetes.io/component!=agent-rbac' --ignore-not-found
+kc delete clusterrole        -l 'app.kubernetes.io/managed-by=aicr,app.kubernetes.io/component!=agent-rbac' --ignore-not-found
 kc delete clusterrolebinding -l app.kubernetes.io/name=aicr-validator --ignore-not-found
 kc delete clusterrole        -l app.kubernetes.io/name=aicr-validator --ignore-not-found
 # Fall back to name-based deletion for any without the expected labels.
@@ -390,11 +402,50 @@ if ! $DRY_RUN; then
         | xargs -r kubectl delete --ignore-not-found || true
 fi
 kc delete ns aicr-validation --ignore-not-found --wait=false
-# Legacy on-cluster agent leftovers from the older deployment pattern.
+# On-cluster snapshot-agent leftovers, current and legacy. Both sweeps are
+# needed and neither subsumes the other:
+#
+#   - Current (ADR-020) runs name their Job/SA/Role/RoleBinding
+#     "aicr-<run-id>", so no fixed-name delete matches them; they are found by
+#     the label set every one of them carries.
+#   - Pre-ADR-020 runs used the fixed name "aicr" and carried none of those
+#     labels — the Job had only app.kubernetes.io/name, and the SA, Role and
+#     RoleBinding had no labels at all — so the label selector above misses
+#     them entirely. The name-based deletes below are the only thing that
+#     collects them.
+#
+# The two cannot collide: a run-scoped name is always "aicr-<run-id>", never
+# the bare "aicr".
+#
+# HAZARD -- this sweep is not run-scoped, and deliberately so. EVERY agent run
+# carries this exact label set, so running `tools/cleanup` while a snapshot is
+# in flight deletes that run's Job and revokes its ServiceAccount, Role and
+# RoleBinding; the run fails partway through. That is the intended contract for
+# a manual teardown tool: it reclaims the namespace regardless of which run
+# left an object behind, including runs whose IDs this invocation never saw.
+# Contrast tests/e2e/run.sh, which records the run IDs it launched and sweeps
+# only those: an unattended suite shares its cluster and cannot make this
+# choice. Do not run this tool against a cluster with an active
+# `aicr snapshot` or `aicr validate`.
+kc -n gpu-operator delete job -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
+kc -n gpu-operator delete sa -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
+kc -n gpu-operator delete role -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
+kc -n gpu-operator delete rolebinding -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
 kc -n gpu-operator delete job aicr --ignore-not-found
 kc -n gpu-operator delete sa aicr --ignore-not-found
 kc -n gpu-operator delete role aicr --ignore-not-found
 kc -n gpu-operator delete rolebinding aicr --ignore-not-found
+# The pre-ADR-020 cluster-scoped pair, for the same reason: it was named
+# literally "aicr-node-reader" and carried no labels, so every selector above
+# misses it and the name-grep fallback ('/aicr-validator-|/aicr$') does not
+# match it either. Nothing else in the tree deletes it now that run-owned
+# names are "aicr-node-reader-<run-id>" — a later run no longer reclaims the
+# bare name — so without this it is a permanent orphan. That matters because a
+# leftover from `--discover-network` carries mutating grants (nodes: patch,
+# pods/exec: create, CRD and namespace create/delete). The exact-name delete
+# cannot touch a live run, whose name always carries a run-ID suffix.
+kc delete clusterrole aicr-node-reader --ignore-not-found
+kc delete clusterrolebinding aicr-node-reader --ignore-not-found
 
 # Phase 3: Component CRDs.
 # Helm does NOT remove CRDs on uninstall — they must be deleted manually or a

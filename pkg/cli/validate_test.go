@@ -470,6 +470,154 @@ func TestDeployAgentForValidation_ExplicitKubeconfigFailsFast(t *testing.T) {
 	}
 }
 
+// TestValidateAgentConfig_ToAgentConfig_ForwardsRunID covers ONLY the
+// toAgentConfig projection boundary: given a validateAgentConfig whose
+// runID field is already set, toAgentConfig must copy it onto the facade
+// AgentConfig.RunID unchanged (and set NameBase to validateNameBase rather
+// than leaving JobName/ServiceAccountName to carry the naming prefix).
+//
+// What this does NOT cover: it never runs the validateCmd Action, so it
+// says nothing about whether `aicr validate` generates exactly one RunID
+// per invocation and hands that SAME value to both the live-capture
+// snapshot agent and the validator Jobs — that single-generation invariant
+// (ADR-020 Ruling 7) is not exercised by an automated test at all; see the
+// WARNING comment on the Action's `runID := v1.GenerateRunID()` call in
+// validate.go for why, and TestParseValidateAgentConfig_ForwardsCallerRunID
+// below for the adjacent (also boundary-only) coverage on the parsing side.
+func TestValidateAgentConfig_ToAgentConfig_ForwardsRunID(t *testing.T) {
+	cfg := &validateAgentConfig{
+		namespace: "aicr-validation-test",
+		runID:     "20260821-142233-9f3a1c0b7e2d4a55",
+	}
+
+	ac := cfg.toAgentConfig()
+
+	if ac.RunID != cfg.runID {
+		t.Errorf("AgentConfig.RunID = %q, want %q (validateAgentConfig.runID)", ac.RunID, cfg.runID)
+	}
+	if ac.NameBase != validateNameBase {
+		t.Errorf("AgentConfig.NameBase = %q, want %q", ac.NameBase, validateNameBase)
+	}
+}
+
+// TestParseValidateAgentConfig_ForwardsCallerRunID covers ONLY
+// parseValidateAgentConfig's own mapping: the runID parameter it is given
+// lands unchanged on the returned validateAgentConfig.runID field.
+//
+// This test replaces cmd.Action outright (to isolate that mapping from
+// recipe/snapshot I/O without touching a cluster), so NONE of the
+// production Action code at validate.go's `runID := v1.GenerateRunID()`
+// call through the parseValidateAgentConfig call site actually runs here.
+// It cannot detect a regression in how the real Action generates or
+// threads runID — in particular it says nothing about ADR-020 Ruling 7's
+// single-generation invariant (one v1.GenerateRunID() call feeding BOTH
+// the live-capture agent and the validator Jobs). See the WARNING comment
+// on that call site in validate.go: no automated test in this package
+// enforces single-generation. The two consumer sites are NOT mutually
+// exclusive — with neither --snapshot nor --no-cluster, the live-capture
+// branch and runValidation both consume the id in one invocation. What
+// blocks the test is that exercising both requires live-cluster I/O (both
+// branches deploy Jobs) with no injectable seam in the Action to fake it.
+func TestParseValidateAgentConfig_ForwardsCallerRunID(t *testing.T) {
+	const wantRunID = "20260821-142233-9f3a1c0b7e2d4a55"
+
+	var captured *validateAgentConfig
+	cmd := validateCmd()
+	cmd.Action = func(ctx context.Context, c *cli.Command) error {
+		cfg, err := loadCmdConfig(ctx, c)
+		if err != nil {
+			return err
+		}
+		resolved, err := cfg.Validation().Resolve()
+		if err != nil {
+			return err
+		}
+		shared := validateSharedResolved{namespace: "aicr-validation-test"}
+		captured = parseValidateAgentConfig(c, resolved, shared, wantRunID)
+		return nil
+	}
+	if err := cmd.Run(t.Context(), []string{"validate", "--no-cluster"}); err != nil {
+		t.Fatalf("validate run: %v", err)
+	}
+
+	if captured.runID != wantRunID {
+		t.Errorf("validateAgentConfig.runID = %q, want %q", captured.runID, wantRunID)
+	}
+}
+
+// TestValidateCmd_DeclaredNameDefaultsNeverReachTheAgent is the validate-side
+// half of TestSnapshotCmd_DeclaredNameDefaultsNeverReachTheDeployer; see that
+// test for why an unset --service-account-name must not resolve to a name aicr
+// chose. The released v1 defaults here are "aicr-validate" for --job-name and
+// "aicr" for --service-account-name, and both stay declared for `--help` and
+// testdata/cli-surface.golden while neither is delivered as a value.
+//
+// The prefix the agent's objects actually get comes from
+// AgentConfig.NameBase (validateNameBase) instead, which is what keeps this
+// command's agent resources distinguishable from `aicr snapshot`'s.
+func TestValidateCmd_DeclaredNameDefaultsNeverReachTheAgent(t *testing.T) {
+	cmd := validateCmd()
+	if got := stringFlagValue(t, cmd, "job-name"); got != validateNameBase {
+		t.Errorf("--job-name declared default = %q, want the released %q",
+			got, validateNameBase)
+	}
+	if got := stringFlagValue(t, cmd, "service-account-name"); got != name {
+		t.Errorf("--service-account-name declared default = %q, want the released %q",
+			got, name)
+	}
+
+	capture := func(t *testing.T, args ...string) *validateAgentConfig {
+		t.Helper()
+		var captured *validateAgentConfig
+		c := validateCmd()
+		c.Action = func(ctx context.Context, cc *cli.Command) error {
+			cfg, err := loadCmdConfig(ctx, cc)
+			if err != nil {
+				return err
+			}
+			resolved, err := cfg.Validation().Resolve()
+			if err != nil {
+				return err
+			}
+			shared := validateSharedResolved{namespace: "aicr-validation-test"}
+			captured = parseValidateAgentConfig(cc, resolved, shared, "20260821-142233-9f3a1c0b7e2d4a55")
+			return nil
+		}
+		if err := c.Run(t.Context(), append([]string{"validate", "--no-cluster"}, args...)); err != nil {
+			t.Fatalf("validate run: %v", err)
+		}
+		return captured
+	}
+
+	unset := capture(t)
+	if unset.serviceAccountName != "" {
+		t.Errorf("serviceAccountName = %q for an unset flag, want empty; a "+
+			"non-empty value is probed for existence and a hit disables RBAC "+
+			"management for the whole run", unset.serviceAccountName)
+	}
+	if unset.jobName != "" {
+		t.Errorf("jobName = %q for an unset flag, want empty", unset.jobName)
+	}
+	if base := unset.toAgentConfig().NameBase; base != validateNameBase {
+		t.Errorf("AgentConfig.NameBase = %q, want %q — it is what supplies the "+
+			"prefix once the declared defaults stop being delivered",
+			base, validateNameBase)
+	}
+
+	// Guard against the vacuous pass: an operator-supplied name must survive,
+	// since that is the only route into exact-ServiceAccount mode.
+	explicit := capture(t, "--job-name", "validate-gpu-nodes",
+		"--service-account-name", "irsa-snapshotter")
+	if explicit.serviceAccountName != "irsa-snapshotter" {
+		t.Errorf("serviceAccountName = %q, want the operator's %q",
+			explicit.serviceAccountName, "irsa-snapshotter")
+	}
+	if explicit.jobName != "validate-gpu-nodes" {
+		t.Errorf("jobName = %q, want the operator's %q",
+			explicit.jobName, "validate-gpu-nodes")
+	}
+}
+
 // TestClassifyIgnoredAKSGPUPools pins the provenance matrix of the
 // ignored-projection note: explicit CLI presence (either flag form) always
 // warns; a purely ambient env source is demoted to debug; nothing logs
