@@ -309,16 +309,32 @@ spec:
 
   # Validation for VR200 on RKE2 training.
   #
-  # Performance validation (NCCL all-reduce) is deferred: no VR200-measured
-  # bandwidth floor exists yet in the public catalog. Add a `performance:`
-  # block once a runtime and floor are baselined (see gb200/gb300 leaves
-  # for the pattern).
-  #
   # pod-autoscaling / cluster-autoscaling conformance omitted: bare-metal
   # RKE2 has no cluster autoscaler, and DRA-allocated GPUs currently break
   # the dcgm-exporter exported_pod attribution that pod-autoscaling relies
   # on.
   validation:
+    # NCCL all-reduce (MNNVL across the NVL72 IMEX domain). First measured on
+    # the reference cluster: 744.71 GB/s busbw at the 16 GiB message size;
+    # floor set at 600 for headroom on pre-release silicon.
+    #
+    # The benchmark is recipe-supplied (nccl-benchmark-runtime-ref) because
+    # rke2/vr200 is not in the validator's compiled applicability matrix yet
+    # — see validators/performance/testdata/vr200/rke2/runtime.yaml in this
+    # repo for the runtime and its operator prerequisites (pre-create the
+    # nccl-all-reduce-cd ComputeDomain per run; --node-selector
+    # nvidia.com/gpu.present=true; an aicr CLI build including NVIDIA/aicr#1805).
+    # Promote to an embedded template with a compiled applicability entry
+    # once rke2/vr200 is registered in the public catalog's binary matrix —
+    # the runtime file's own header documents this as future work.
+    performance:
+      checks:
+        - nccl-all-reduce-bw
+      constraints:
+        - name: nccl-benchmark-runtime-ref
+          value: vr200/rke2
+        - name: nccl-all-reduce-bw
+          value: ">= 600"
     deployment:
       checks:
         - operator-health
