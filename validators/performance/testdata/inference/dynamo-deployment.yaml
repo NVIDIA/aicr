@@ -64,6 +64,8 @@ spec:
                 # to 4-77s.
                 - name: DYN_ROUTER_MODE
                   value: ${ROUTER_MODE}
+                - name: DYN_EVENT_PLANE
+                  value: zmq
                 - name: HF_TOKEN
                   valueFrom:
                     secretKeyRef:
@@ -117,6 +119,9 @@ spec:
                 - --kv-events-config
                 - '{"enable_kv_cache_events":true,"publisher":"zmq","endpoint":"tcp://*:5557"}'
               env:
+              env:
+                - name: DYN_EVENT_PLANE
+                  value: zmq
                 - name: HF_TOKEN
                   valueFrom:
                     secretKeyRef:
