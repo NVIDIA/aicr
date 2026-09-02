@@ -174,9 +174,8 @@ Override snapshot-detected criteria:
 			// Build a per-command Client bound to the resolved data source
 			// (--data / spec.recipe.data, else embedded). The Client owns its
 			// own DataProvider and per-provider criteria registry, replacing
-			// the old process-global data provider. recipeClientFromCmd still
-			// takes the raw config type, so Unwrap here.
-			client, err := recipeClientFromCmd(ctx, cmd, cfg.Unwrap())
+			// the old process-global data provider.
+			client, err := recipeClientFromCmd(ctx, cmd, cfg)
 			if err != nil {
 				return err
 			}

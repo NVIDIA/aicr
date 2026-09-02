@@ -1101,9 +1101,8 @@ func runBundleCmdWithDependencies(
 	// the embedded data when --data resolves, and uses embedded data alone
 	// otherwise. The Client owns its DataProvider — LoadRecipe and
 	// MakeBundle thread it through, replacing the old process-global
-	// data provider. recipeClientFromCmd still takes the raw *config.AICRConfig
-	// (its own migration is a later commit); Unwrap supplies it here.
-	client, err := recipeClientFromCmd(ctx, cmd, cfg.Unwrap())
+	// data provider.
+	client, err := recipeClientFromCmd(ctx, cmd, cfg)
 	if err != nil {
 		return err
 	}

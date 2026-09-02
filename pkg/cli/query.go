@@ -108,9 +108,7 @@ Use in shell scripts:
 			// registry; it now explicitly seeds its OWN provider via
 			// LoadCatalog before parsing criteria, fixing a latent ordering
 			// bug where the first parse could run against an empty registry.
-			// recipeClientFromCmd still takes the raw config type, so Unwrap
-			// here.
-			client, err := recipeClientFromCmd(ctx, cmd, cfg.Unwrap())
+			client, err := recipeClientFromCmd(ctx, cmd, cfg)
 			if err != nil {
 				return err
 			}

@@ -918,7 +918,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// handle to the same directory (dataDir) so SLSA / conformance
 			// evidence resolves files against the command's source rather
 			// than the package global.
-			client, err := recipeClientFromCmd(ctx, cmd, cfg.Unwrap())
+			client, err := recipeClientFromCmd(ctx, cmd, cfg)
 			if err != nil {
 				return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to initialize data provider")
 			}
@@ -1057,7 +1057,7 @@ func resolveCNCFAllocationPolicy(ctx context.Context, cmd *cli.Command, cfg *aic
 		return "", nil
 	}
 
-	client, err := recipeClientFromCmd(ctx, cmd, cfg.Unwrap())
+	client, err := recipeClientFromCmd(ctx, cmd, cfg)
 	if err != nil {
 		return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to initialize data provider")
 	}

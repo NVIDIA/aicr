@@ -889,12 +889,15 @@ derive step rather than the load step.
 | `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.attestation` |
 | `BundleInputOptions()` | `spec.bundle.input` + `.output` + `.registry` |
 | `ValidateSettings()` | `spec.validate.agent` + `.execution` |
+| `ValidateInputOptions()` | `spec.validate.input` + `.execution.failOnError` |
 | `EvidenceAttestationOptions()` | `spec.validate.evidence.attestation` (**not** `.cncf`) |
 | `SnapshotAgentConfig()` | `spec.snapshot.agent` + `.execution` (**not** `.output`) |
+| `SnapshotOutputOptions()` | `spec.snapshot.output` |
 | `RecipeSource()` | `spec.recipe.data` |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
 | `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
 | `RecipeProfile()` / `RecipeAccountingMode()` / `RecipeRuntimeInventoryMode()` | the same three, raw, for callers applying their own precedence first |
+| `RecipeOutputOptions()` | `spec.recipe.output` |
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 
@@ -1423,11 +1426,13 @@ timeout — a plain value, not an option slice, so you read and override
 individual fields directly:
 
 ```go
-opts, err := cfg.ValidateSettings()
+opts, ok, err := cfg.ValidateSettings()
 if err != nil {
     return err
 }
-opts.NoCluster = true // caller wins, visibly
+if ok {
+    opts.NoCluster = true // caller wins, visibly
+}
 results, err := client.ValidateState(ctx, rec, snap,
     aicr.WithValidationNamespace(opts.Namespace),
     aicr.WithValidationImagePullSecrets(opts.ImagePullSecrets),
@@ -1438,18 +1443,56 @@ results, err := client.ValidateState(ctx, rec, snap,
 )
 ```
 
+**The second return is a presence signal, not decoration — skipping it is the
+failure mode.** The zero value's `Cleanup: false` is not a safe default: it is
+the opposite of the CLI's own default (clean up). A caller that cannot
+distinguish "no `spec.validate` at all, supply your own defaults" from
+"`spec.validate` is present but silent about cleanup", and always applies the
+returned value as-is, leaves the cluster-admin `ClusterRoleBinding` and
+validator Jobs active on a plain, no-config invocation — silently, since
+nothing errors. `ok` is `true` when the section exists at all (even if silent
+about every field) and `false` for a nil `Config`, a nil internal document, or
+a document that omits the section entirely. `SnapshotAgentConfig()` returns
+the same signal for the same reason, guarding `Privileged` instead of
+`Cleanup`; see [below](#what-snapshotagentconfig-does-and-does-not-carry).
+
 The rest of the section has other homes, and knowing which saves a search:
 
 | Field | Home |
 |---|---|
-| `spec.validate.execution.failOnError` | Nowhere, deliberately. It decides whether a failed check makes the *caller* fail; the validator reports and does not act on it. Command-line-only for the same reason as `IgnoreTLog`: a checked-in file should not be able to make a failing run report success. |
-| `spec.validate.input.recipe`, `.snapshot` | Not projected — you already pass both to `ValidateState`. |
+| `spec.validate.input.recipe`, `.snapshot`, `spec.validate.execution.failOnError` | `ValidateInputOptions()`, which targets the CALLER rather than `ValidateState` — see below. |
 | `spec.validate.evidence.attestation` | `EvidenceAttestationOptions()`, which targets `EmitRecipeEvidence` rather than `ValidateState` — see below. |
 | `spec.validate.evidence.cncf` | **Not projected.** No facade method emits CNCF AI Conformance evidence, so there is nothing for a derivation to feed. Reading it still needs `Unwrap()`. |
 
 One inversion worth knowing: config says `noCleanup`, the field says
 `Cleanup`. `ValidateSettings()` flips it, so `noCleanup: true` becomes
 `Cleanup: false`.
+
+### What `ValidateInputOptions()` does and does not carry
+
+`ValidateState` takes an already-resolved recipe and snapshot and reports
+check results without acting on them, so the three `spec.validate` fields a
+CALLER needs — which recipe and snapshot to validate, and whether a failed
+check should fail the caller — have no home on `ValidateSettings()`.
+`ValidateInputOptions()` carries them instead, so a caller applying its own
+flag-over-config precedence does not need `Unwrap()` to read them:
+
+```go
+input, err := cfg.ValidateInputOptions()
+if err != nil {
+    return err
+}
+rec, err := client.LoadRecipe(ctx, input.RecipePath, "")
+```
+
+| Field | Source |
+|---|---|
+| `RecipePath` | `spec.validate.input.recipe` |
+| `SnapshotPath` | `spec.validate.input.snapshot` |
+| `FailOnError` | `spec.validate.execution.failOnError` — a pointer so "config said nothing" stays distinct from an explicit `false`, letting the caller's own default apply, the same pattern the CLI's `--fail-on-error` flag uses to win over a configured value |
+
+None of these three reach `ValidateState`; `ValidateSettings()` carries what
+the validator itself accepts.
 
 ### What `EvidenceAttestationOptions()` does and does not carry
 
@@ -1525,14 +1568,17 @@ through `Unwrap()` until then.
 ### What `SnapshotAgentConfig()` does and does not carry
 
 `AgentConfig`'s fields are exported, so unlike the bundle path there is no
-options slice — derive it, then set any field directly. It is never nil:
+options slice — derive it, then set any field directly. The returned
+`*AgentConfig` is never nil, even for a nil `Config`:
 
 ```go
-agent, err := cfg.SnapshotAgentConfig()
+agent, ok, err := cfg.SnapshotAgentConfig()
 if err != nil {
     return err
 }
-agent.Kubeconfig = kubeconfigPath  // caller-owned, no config counterpart
+if ok {
+    agent.Kubeconfig = kubeconfigPath  // caller-owned, no config counterpart
+}
 snap, err := client.CollectSnapshot(ctx, agent)
 ```
 
@@ -1574,3 +1620,71 @@ needs true. That is deliberate: defaults apply when the section exists and is
 silent about a field, but a document that made no snapshot decisions at all
 does not get decisions invented for it. Supply your own defaults in that case,
 as the CLI does from its flag defaults.
+
+**The second return, `ok`, is the presence signal that resolves this — skip it
+and the failure mode is silent.** `ok` is `true` when `spec.snapshot` exists at
+all (even if silent about every field) and `false` for a nil `Config`, a nil
+internal document, or a document that omits the section. A caller that always
+applies the returned `*AgentConfig` as-is, without checking `ok`, cannot tell
+"no `spec.snapshot`, supply your own defaults" from "`spec.snapshot` decided
+every field, apply them as-is" — both produce a populated, non-nil
+`*AgentConfig` — and silently drops privileges the collector needs on the
+common no-config case. `ValidateSettings()` returns the same signal for the
+same reason, guarding `Cleanup` instead of `Privileged`; see
+[above](#what-validatesettings-does-and-does-not-carry).
+
+### What `SnapshotOutputOptions()` does and does not carry
+
+`CollectSnapshot` never reads `spec.snapshot.output` — the whole section
+describes *delivery*, which `SnapshotAgentConfig()` deliberately excludes (see
+above): the Job always stages YAML in a ConfigMap, so a format routed through
+`AgentConfig` would be silently ignored (#2398). `SnapshotOutputOptions()`
+carries the three fields a caller needs AFTER `CollectSnapshot` returns, to
+write the snapshot where the document asked:
+
+```go
+out, err := cfg.SnapshotOutputOptions()
+if err != nil {
+    return err
+}
+err = snapshotter.DeliverSnapshot(ctx, snap.Raw, snapshotter.SnapshotDelivery{
+    Output:       out.Path,
+    Format:       serializer.Format(out.Format),
+    TemplatePath: out.Template,
+})
+```
+
+| Field | Source |
+|---|---|
+| `Path` | `spec.snapshot.output.path` |
+| `Format` | `spec.snapshot.output.format` (`yaml`, `json`, or `table`), validated by the loader |
+| `Template` | `spec.snapshot.output.template`, a Go template rendered instead of the structured formats; requires `Format` `yaml` |
+
+Returns the zero value — never an error — for a nil `Config`, an absent
+`spec.snapshot`, or an absent `output` block, since delivery is optional. None
+of these three reach `CollectSnapshot`; `SnapshotAgentConfig()` carries what
+the collection Job itself reads.
+
+### What `RecipeOutputOptions()` does and does not carry
+
+`ResolveRecipe` and `LoadRecipe` never see `spec.recipe.output` either, for the
+same reason `CollectSnapshot` never sees `spec.snapshot.output`: writing the
+resolved recipe is a caller decision made AFTER resolution returns, not part
+of resolving it. `RecipeOutputOptions()` carries the two fields:
+
+```go
+out := cfg.RecipeOutputOptions()
+if out.Path != "" {
+    // write rec to out.Path in out.Format, mirroring `aicr recipe --output`
+}
+```
+
+| Field | Source |
+|---|---|
+| `Path` | `spec.recipe.output.path`. Empty when unset. |
+| `Format` | `spec.recipe.output.format`. Empty when unset, leaving the caller's own default in place. |
+
+Unlike every other derivation on `Config`, `RecipeOutputOptions()` returns no
+error: the underlying accessors are nil-safe and perform no parsing, so
+nothing here can fail. A nil `Config` or an absent `spec.recipe.output` each
+yield the zero value.
