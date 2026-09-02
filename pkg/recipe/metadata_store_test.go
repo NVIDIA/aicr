@@ -1047,7 +1047,16 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"secure-accelerator-access",
 		"slinky-slurm-health",
 	}
-	imexSlurmConformanceChecks := []string{
+	// The gb200/gb300 EKS Slurm leaves differ from the h100 list above in two
+	// INDEPENDENT ways; do not collapse them into one explanation:
+	//   + slinky-slurm-imex-channel — added by the leaf, genuinely IMEX-specific.
+	//   - robust-controller, secure-accelerator-access — absent because
+	//     gb200-eks-training.yaml and gb300-eks-training.yaml do not declare
+	//     them while h100-eks-training.yaml does. That is a property of the
+	//     accelerator training bases, NOT of IMEX or of Slurm; gb300 is not
+	//     categorically excluded, since gb300-eks-ubuntu-inference-dynamo
+	//     declares both. Naming this fixture for IMEX would misattribute it.
+	gbEKSSlurmConformanceChecks := []string{
 		"platform-health",
 		"gpu-operator-health",
 		"dra-support",
@@ -1076,8 +1085,8 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		name string
 		want []string
 	}{
-		{name: "gb200-eks-ubuntu-training-slurm", want: imexSlurmConformanceChecks},
-		{name: "gb300-eks-ubuntu-training-slurm", want: imexSlurmConformanceChecks},
+		{name: "gb200-eks-ubuntu-training-slurm", want: gbEKSSlurmConformanceChecks},
+		{name: "gb300-eks-ubuntu-training-slurm", want: gbEKSSlurmConformanceChecks},
 		{name: "h100-aks-ubuntu-training-slurm", want: conformanceChecks},
 		{name: "h100-eks-ubuntu-training-slurm", want: conformanceChecks},
 		{name: "h100-gke-cos-training-slurm", want: conformanceChecks},
@@ -1125,14 +1134,17 @@ func TestGPUSlurmLeavesWireIMEXComputeDomain(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assertSlurmLeafWiresIMEXComputeDomain(t, store, tt.name, tt.wantGres)
+			assertSlurmLeafWiresIMEXComputeDomain(t, ctx, store, tt.name, tt.wantGres)
 		})
 	}
 }
 
-func assertSlurmLeafWiresIMEXComputeDomain(t *testing.T, store *MetadataStore, leafName, wantGres string) {
+//nolint:revive // ctx follows t, the conventional order for a t.Helper assertion.
+func assertSlurmLeafWiresIMEXComputeDomain(
+	t *testing.T, ctx context.Context, store *MetadataStore, leafName, wantGres string,
+) {
+
 	t.Helper()
-	ctx := context.Background()
 
 	leaf, ok := store.GetRecipeByName(leafName)
 	if !ok {
@@ -1167,9 +1179,9 @@ func assertSlurmLeafWiresIMEXComputeDomain(t *testing.T, store *MetadataStore, l
 		t.Errorf("slinky-slurm dependencyRefs = %v, want nvidia-dra-driver-gpu", slurm.DependencyRefs)
 	}
 
-	values, err := result.GetValuesForComponent("slinky-slurm")
+	values, err := result.GetValuesForComponentWithContext(ctx, "slinky-slurm")
 	if err != nil {
-		t.Fatalf("GetValuesForComponent(slinky-slurm) failed: %v", err)
+		t.Fatalf("GetValuesForComponentWithContext(slinky-slurm) failed: %v", err)
 	}
 	if got := valueAtPath[string](t, values, "controller", "extraConfMap", "SwitchType"); got != "switch/nvidia_imex" {
 		t.Errorf("controller.extraConfMap.SwitchType = %q, want switch/nvidia_imex", got)
