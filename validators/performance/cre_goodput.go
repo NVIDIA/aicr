@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -79,7 +80,12 @@ func checkCRETrainingGoodput(ctx *validators.Context) error {
 	if deleteErr := deleteCREWorkloadRun(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, runName); deleteErr != nil {
 		return deleteErr
 	}
+	keepWorkloadRun := false
 	defer func() {
+		if keepWorkloadRun {
+			slog.Warn("leaving CRE training WorkloadRun for diagnosis", "workloadRun", runName)
+			return
+		}
 		if deleteErr := deleteCREWorkloadRun(
 			context.Background(),
 			ctx.DynamicClient,
@@ -98,7 +104,11 @@ func checkCRETrainingGoodput(ctx *validators.Context) error {
 		return err
 	}
 	if unstructuredConditionTrue(run, "Failed") {
-		return aicrErrors.New(aicrErrors.ErrCodeInternal, "CRE training WorkloadRun failed")
+		keepWorkloadRun = true
+		summary := creTerminalConditionSummary(run)
+		slog.Error("CRE training WorkloadRun failed", "workloadRun", runName, "summary", summary)
+		return aicrErrors.New(aicrErrors.ErrCodeInternal,
+			fmt.Sprintf("CRE training WorkloadRun failed: %s", summary))
 	}
 
 	status, err := getGoodputStatus(
@@ -141,20 +151,106 @@ const (
 	creTrainingRunName           = "aicr-cre-nemo"
 	creLogProfileTrainingGoodput = "megatron-training"
 	creTrainingImage             = "nvcr.io/nvidia/pytorch:25.08-py3"
-	creTrainingScript            = `#!/bin/bash
+	// creTrainingScript is CRE's training/nemotron5-8b exec workload (not the
+	// public 56B WorkloadRun sample). 56B requires minGPUs=32; this check's
+	// eks×h100 gate is 2 nodes × 8 GPUs. H100 catalog TP is 2.
+	creTrainingScript = `#!/bin/bash
 set -euo pipefail
-cd /mnt/workspace/megatron-lm
-torchrun \
-  --nproc_per_node="${PET_NPROC_PER_NODE}" \
-  --nnodes="${PET_NNODES}" \
-  pretrain_gpt.py \
-    --num-layers 79 \
-    --hidden-size 8192 \
-    --num-attention-heads 64 \
-    --seq-length 8192 \
-    --micro-batch-size 1 \
-    --train-iters 50 \
-    --bf16
+
+WORKSPACE_DIR=${WORKSPACE_DIR:-/mnt/workspace}
+MEGATRON_PATH=${MEGATRON_PATH:-${WORKSPACE_DIR}/megatron-lm}
+CHECKPOINT_DIR=${CHECKPOINT_DIR:-${WORKSPACE_DIR}/checkpoints}
+TENSORBOARD_DIR=${TENSORBOARD_DIR:-${WORKSPACE_DIR}/tensorboard}
+mkdir -p "${CHECKPOINT_DIR}" "${TENSORBOARD_DIR}"
+
+if ! ls "${MEGATRON_PATH}"/megatron/core/datasets/helpers_cpp*.so 1>/dev/null 2>&1; then
+  echo "Building Megatron helpers_cpp..."
+  cd "${MEGATRON_PATH}"
+  pip install -e . --no-deps --no-build-isolation 2>&1 | tail -5
+  cd "${WORKSPACE_DIR}"
+fi
+
+TOTAL_GPUS=$((PET_NNODES * PET_NPROC_PER_NODE))
+TP=${TENSOR_PARALLELISM:-2}
+PP=${PIPELINE_PARALLELISM:-1}
+MBS=${MICRO_BATCH_SIZE:-1}
+GBS=${GLOBAL_BATCH_SIZE:-$TOTAL_GPUS}
+
+echo "TOTAL_GPUS=${TOTAL_GPUS} GBS=${GBS} MBS=${MBS} TP=${TP} PP=${PP}"
+
+exec torchrun \
+  --nnodes "${PET_NNODES}" \
+  --nproc-per-node "${PET_NPROC_PER_NODE}" \
+  "${MEGATRON_PATH}/pretrain_gpt.py" \
+  --attention-backend flash \
+  --distributed-timeout-minutes 230 \
+  --use-mcore-models \
+  --no-mmap-bin-files \
+  --sequence-parallel \
+  --untie-embeddings-and-output-weights \
+  --disable-bias-linear \
+  --init-method-std 0.014 \
+  --position-embedding-type rope \
+  --rotary-base 1000000 \
+  --rotary-percent 1.0 \
+  --squared-relu \
+  --group-query-attention \
+  --kv-channels 128 \
+  --normalization RMSNorm \
+  --attention-dropout 0.0 \
+  --hidden-dropout 0.0 \
+  --exit-duration-in-mins 30 \
+  --train-iters 50 \
+  --lr-decay-iters 1830030 \
+  --lr 6e-4 \
+  --min-lr 6e-6 \
+  --weight-decay 0.1 \
+  --clip-grad 1.0 \
+  --lr-decay-style cosine \
+  --lr-warmup-iters 5 \
+  --eval-iters 1 \
+  --eval-interval 50 \
+  --log-interval 10 \
+  --tokenizer-type NullTokenizer \
+  --vocab-size 131072 \
+  --mock-data \
+  --num-workers 1 \
+  --no-create-attention-mask-in-dataloader \
+  --log-progress \
+  --timing-log-option minmax \
+  --log-params-norm \
+  --log-num-zeros-in-grad \
+  --log-throughput \
+  --bf16 \
+  --adam-beta1 0.9 \
+  --adam-beta2 0.95 \
+  --use-distributed-optimizer \
+  --overlap-grad-reduce \
+  --overlap-param-gather \
+  --manual-gc \
+  --log-straggler \
+  --disable-straggler-on-startup \
+  --straggler-minmax-count 16 \
+  --check-weight-hash-across-dp-replicas-interval 20000 \
+  --ckpt-fully-parallel-save \
+  --ckpt-fully-parallel-load \
+  --async-save \
+  --ckpt-assume-constant-structure \
+  --ckpt-format torch_dist \
+  --num-layers 32 \
+  --hidden-size 4096 \
+  --ffn-hidden-size 21504 \
+  --num-attention-heads 32 \
+  --seq-length 8192 \
+  --max-position-embeddings 8192 \
+  --num-query-groups 8 \
+  --tensor-model-parallel-size "${TP}" \
+  --pipeline-model-parallel-size "${PP}" \
+  --micro-batch-size "${MBS}" \
+  --global-batch-size "${GBS}" \
+  --save-interval "${SAVE_INTERVAL:-250}" \
+  --save-retain-interval "${SAVE_RETAIN_INTERVAL:-1000}" \
+  --tensorboard-dir "${TENSORBOARD_DIR}"
 `
 	creTrainingCloneScript = `set -euo pipefail
 if [ ! -d "/mnt/workspace/megatron-lm/.git" ]; then
@@ -205,6 +301,16 @@ func buildCRETrainingWorkloadRun(namespace, name string, gpuConfig *gpuConfigura
 		"env": []any{
 			map[string]any{keyName: "PYTHONPATH", keyValue: "/mnt/workspace/megatron-lm"},
 			map[string]any{keyName: "CUDA_DEVICE_MAX_CONNECTIONS", keyValue: "1"},
+			map[string]any{keyName: "TENSOR_PARALLELISM", keyValue: "2"},
+			map[string]any{keyName: "PYTORCH_CUDA_ALLOC_CONF", keyValue: "expandable_segments:True"},
+			map[string]any{keyName: "NVTE_FWD_LAYERNORM_SM_MARGIN", keyValue: "16"},
+			map[string]any{keyName: "NVTE_BWD_LAYERNORM_SM_MARGIN", keyValue: "16"},
+			map[string]any{keyName: "NVTE_FUSED_ATTN", keyValue: "0"},
+			map[string]any{keyName: "TORCHINDUCTOR_WORKER_START", keyValue: "fork"},
+			map[string]any{keyName: "TORCH_NCCL_AVOID_RECORD_STREAMS", keyValue: "1"},
+			map[string]any{keyName: "TORCH_NCCL_HIGH_PRIORITY", keyValue: "1"},
+			map[string]any{keyName: "ENABLE_CHECKPOINT", keyValue: "false"},
+			map[string]any{keyName: "TRAIN_ITERS", keyValue: "50"},
 		},
 		"goodputMeasurement": map[string]any{
 			"logProfileRef":  creLogProfileTrainingGoodput,
@@ -213,6 +319,41 @@ func buildCRETrainingWorkloadRun(namespace, name string, gpuConfig *gpuConfigura
 	}
 	addCRETarget(spec, gpuConfig, nodeSelector)
 	return newCREWorkloadRun(namespace, name, spec)
+}
+
+func creTerminalConditionSummary(obj *unstructured.Unstructured) string {
+	conds, found, err := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	if err != nil || !found {
+		return "no status.conditions"
+	}
+	var parts []string
+	for _, raw := range conds {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		typ := fmt.Sprint(m["type"])
+		status := fmt.Sprint(m["status"])
+		if status != "True" {
+			continue
+		}
+		reason := strings.TrimSpace(fmt.Sprint(m["reason"]))
+		msg := strings.TrimSpace(fmt.Sprint(m["message"]))
+		switch {
+		case reason != "" && msg != "" && reason != "<nil>" && msg != "<nil>":
+			parts = append(parts, fmt.Sprintf("%s (%s): %s", typ, reason, msg))
+		case reason != "" && reason != "<nil>":
+			parts = append(parts, fmt.Sprintf("%s (%s)", typ, reason))
+		case msg != "" && msg != "<nil>":
+			parts = append(parts, fmt.Sprintf("%s: %s", typ, msg))
+		default:
+			parts = append(parts, typ)
+		}
+	}
+	if len(parts) == 0 {
+		return "Failed with empty condition reason/message"
+	}
+	return strings.Join(parts, "; ")
 }
 
 func parseGoodputRatio(status map[string]any) (float64, error) {
