@@ -641,6 +641,25 @@ func ncclExecutionLockHeldBy(clientset kubernetes.Interface, namespace, holderID
 	return true, nil
 }
 
+// ncclExecutionLockIsLive reports whether namespace's execution lock exists
+// and was renewed within NCCLExecutionLockStaleAge. An admitted execution
+// can hold a fresh lock with no pod yet, still installing Trainer or
+// applying resources, so pruneStaleNCCLNamespaces checks this alongside pod
+// occupancy instead of treating a podless namespace as unclaimed. A missing
+// lock is not live.
+func ncclExecutionLockIsLive(ctx context.Context, clientset kubernetes.Interface, namespace string) (bool, error) {
+	getCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	lease, err := clientset.CoordinationV1().Leases(namespace).Get(getCtx, ncclRunLockName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to check NCCL benchmark execution lock", err)
+	}
+	return lease.Spec.RenewTime != nil && time.Since(lease.Spec.RenewTime.Time) < defaults.NCCLExecutionLockStaleAge, nil
+}
+
 // pruneStaleNCCLNamespaces best-effort deletes aicr-nccl-perf-* namespaces
 // left behind by a standalone (no AICR_RUN_ID) run killed before its own
 // deferred cleanup ran. The Job path doesn't need this. Its deterministic
@@ -687,6 +706,15 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 		if liveErr := verifyNCCLNamespaceNotLive(ctx, clientset, &ns); liveErr != nil {
 			slog.Info("Skipping stale NCCL benchmark namespace prune: namespace still has a live pod",
 				"namespace", ns.Name, "reason", liveErr)
+			continue
+		}
+		if leaseLive, leaseErr := ncclExecutionLockIsLive(ctx, clientset, ns.Name); leaseErr != nil {
+			slog.Warn("Skipping stale NCCL benchmark namespace prune: failed to check its execution lock",
+				"namespace", ns.Name, "error", leaseErr)
+			continue
+		} else if leaseLive {
+			slog.Info("Skipping stale NCCL benchmark namespace prune: namespace has a live execution lock",
+				"namespace", ns.Name)
 			continue
 		}
 

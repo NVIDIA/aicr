@@ -370,9 +370,20 @@ func TestPruneStaleNCCLNamespaces(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "launcher-0", Namespace: liveAgedNS.Name},
 		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
 	}
+	// Aged past the prune age and podless, but admitted moments ago, still
+	// installing Trainer or applying resources.
+	admittedPodlessNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-admitted", CreationTimestamp: old, Labels: ownedLabels,
+	}}
+	admittedHolder := "admitted-holder"
+	freshRenew := metav1.NewMicroTime(time.Now())
+	admittedLease := &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: admittedPodlessNS.Name},
+		Spec:       coordinationv1.LeaseSpec{HolderIdentity: &admittedHolder, RenewTime: &freshRenew},
+	}
 
 	client := fake.NewClientset(staleNS, youngNS, currentNS, terminatingNS, unrelatedNS,
-		unlabeledMatchingNS, otherComponentNS, liveAgedNS, liveAgedPod)
+		unlabeledMatchingNS, otherComponentNS, liveAgedNS, liveAgedPod, admittedPodlessNS, admittedLease)
 	pruneStaleNCCLNamespaces(context.Background(), client, currentNS.Name)
 
 	remaining, err := client.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
@@ -388,7 +399,7 @@ func TestPruneStaleNCCLNamespaces(t *testing.T) {
 		t.Errorf("expected stale namespace %q to be deleted", staleNS.Name)
 	}
 	for _, keep := range []string{youngNS.Name, currentNS.Name, terminatingNS.Name, unrelatedNS.Name,
-		unlabeledMatchingNS.Name, otherComponentNS.Name, liveAgedNS.Name} {
+		unlabeledMatchingNS.Name, otherComponentNS.Name, liveAgedNS.Name, admittedPodlessNS.Name} {
 		if !names[keep] {
 			t.Errorf("expected namespace %q to be left alone, but it was deleted", keep)
 		}
