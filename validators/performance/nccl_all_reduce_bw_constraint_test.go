@@ -361,6 +361,76 @@ func TestRunNCCLTrainJob_AbortsIfExecutionLockLostBeforeApply(t *testing.T) {
 	}
 }
 
+// TestRunNCCLTrainJob_RollsBackNamespaceOnLeaseAdmissionFailure checks that
+// a namespace ensureNamespace just created is deleted again if claiming the
+// execution lock fails for a reason other than a concurrent caller already
+// holding it, so a standalone run doesn't leak a namespace on every retry.
+func TestRunNCCLTrainJob_RollsBackNamespaceOnLeaseAdmissionFailure(t *testing.T) {
+	clientset := fake.NewClientset()
+	clientset.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if ns, ok := action.(k8stesting.CreateAction).GetObject().(*corev1.Namespace); ok && ns.UID == "" {
+			ns.UID = testNamespaceUID
+		}
+		return false, nil, nil
+	})
+	clientset.PrependReactor("create", "leases", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: "coordination.k8s.io", Resource: "leases"},
+			ncclRunLockName, nil)
+	})
+
+	vctx := &validators.Context{
+		Ctx:           context.Background(),
+		Clientset:     clientset,
+		DynamicClient: newTrainerFakeClient(),
+	}
+	gpuConfig := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8}
+
+	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "")
+	if err == nil {
+		t.Fatal("expected an error from the failed Lease claim, got nil")
+	}
+	if gpuConfig.Namespace == "" {
+		t.Fatal("gpuConfig.Namespace was never set; ensureNamespace apparently wasn't reached")
+	}
+	if _, getErr := clientset.CoreV1().Namespaces().Get(context.Background(), gpuConfig.Namespace, metav1.GetOptions{}); !apierrors.IsNotFound(getErr) {
+		t.Errorf("namespace %q was not rolled back after the Lease claim failed: get err = %v", gpuConfig.Namespace, getErr)
+	}
+}
+
+// TestRunNCCLTrainJob_KeepsNamespaceOnConcurrentClaimConflict checks that
+// the rollback added for a failed Lease claim does not fire when the claim
+// failed because a concurrent caller already holds the lock, since that
+// namespace belongs to them, not to this caller.
+func TestRunNCCLTrainJob_KeepsNamespaceOnConcurrentClaimConflict(t *testing.T) {
+	t.Setenv("AICR_RUN_ID", "test-run-id")
+	ns := ncclRunNamespace(variantDefault)
+	concurrentHolder := "concurrent-holder"
+	liveRenew := metav1.NewMicroTime(time.Now())
+	clientset := fake.NewClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID, Labels: map[string]string{
+			labels.ManagedBy: labels.ValueValidator, labels.Component: labels.ValueNCCLPerf,
+		}}},
+		&coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns},
+			Spec:       coordinationv1.LeaseSpec{HolderIdentity: &concurrentHolder, RenewTime: &liveRenew},
+		},
+	)
+	vctx := &validators.Context{
+		Ctx:           context.Background(),
+		Clientset:     clientset,
+		DynamicClient: newTrainerFakeClient(),
+	}
+	gpuConfig := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8}
+
+	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "")
+	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+		t.Fatalf("expected ErrCodeConflict, got %v", err)
+	}
+	if _, getErr := clientset.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{}); getErr != nil {
+		t.Errorf("namespace was rolled back even though a concurrent caller holds the lock: %v", getErr)
+	}
+}
+
 // TestNCCLRunNamespace_VariesByVariant is the regression guard for the
 // finding that all three catalog checks share one AICR_RUN_ID per
 // invocation, so deriveRunID's suffix alone would give them the identical

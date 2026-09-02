@@ -19,6 +19,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	stderrors "errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -592,6 +593,22 @@ func claimNCCLExecutionLock(ctx context.Context, clientset kubernetes.Interface,
 	return holderID, nil
 }
 
+// rollbackNCCLNamespace best-effort deletes namespace, pinned to uid, after
+// claimNCCLExecutionLock fails before the cleanup defer is registered.
+// Errors are only logged. This is a leak-avoidance nicety, not correctness
+// critical, since pruneStaleNCCLNamespaces reclaims an orphaned namespace on
+// a later run regardless.
+func rollbackNCCLNamespace(clientset kubernetes.Interface, namespace string, uid types.UID) {
+	delCtx, cancel := context.WithTimeout(context.Background(), defaults.DiagnosticTimeout)
+	defer cancel()
+	if err := clientset.CoreV1().Namespaces().Delete(delCtx, namespace, metav1.DeleteOptions{
+		Preconditions: &metav1.Preconditions{UID: &uid},
+	}); err != nil && !apierrors.IsNotFound(err) {
+		slog.Warn("Failed to roll back NCCL benchmark namespace after execution lock admission failed",
+			"namespace", namespace, "error", err)
+	}
+}
+
 // generateExecutionID returns a fresh random identifier for one execution,
 // distinct from AICR_RUN_ID so two invocations sharing a run ID still get
 // different lock holder identities.
@@ -771,6 +788,14 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// closed instead of sharing the namespace.
 	holderID, err := claimNCCLExecutionLock(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
 	if err != nil {
+		// The cleanup defer below isn't registered yet, so a namespace
+		// ensureNamespace just created or reclaimed would otherwise leak
+		// until the next run's prune sweep. Roll it back now, unless a
+		// concurrent caller won the claim instead, since that namespace is
+		// legitimately theirs, not ours to remove.
+		if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+			rollbackNCCLNamespace(ctx.Clientset, gpuConfig.Namespace, nsObj.UID)
+		}
 		return "", err
 	}
 
