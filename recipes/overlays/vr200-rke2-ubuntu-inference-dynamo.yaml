@@ -20,8 +20,12 @@ metadata:
 spec:
   # PREVIEW: publishes an early-adopter VR200 (Vera Rubin) recipe path
   # without the full production support and lifecycle qualification
-  # required for Supported status. See validation.aicr.run for the
-  # published evidence this recipe is validated against.
+  # required for Supported status. See validation.aicr.run for published
+  # evidence for this Preview coordinate — the recipe has since changed
+  # (aicr evidence digest reports a mismatch against the linked pointer's
+  # predicate.recipe.digest), so treat that evidence as historical
+  # precedent, not as validating the current recipe content. Fresh
+  # hardware validation is pending VR cluster access.
   #
   # Inherits every VR200-specific safety override (host-managed driver,
   # tuning scaffold, NFD topology updater) from the platform-neutral
