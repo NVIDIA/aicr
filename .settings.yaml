@@ -91,7 +91,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
   helm: 'v4.2.4'
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
-  helm_diff: 'v3.15.11'
+  helm_diff: 'v3.15.12'
   # helm_diff_checksums are refreshed automatically by tools/update-helm-diff-checksums
   # via Renovate postUpgradeTasks whenever the helm-diff version above is bumped.
   # The darwin_* keys name GOOS (matching the sibling blocks); upstream labels
