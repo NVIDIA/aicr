@@ -1,0 +1,221 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NCCL all-reduce TrainingRuntime for VR200 on RKE2 (recipe-supplied via the
+# nccl-benchmark-runtime-ref constraint in vr200-rke2-ubuntu-training).
+#
+# Measures MNNVL (multi-node NVLink) across the VR NVL72 IMEX domain.
+# First measured on the reference cluster (2026-07-21, 2 nodes x 4 GPUs,
+# R615 host driver, DRA driver 0.5.0-dev-9001f17e): 744.71 GB/s busbw at
+# the 16 GiB message size — the basis for the overlay's >= 600 floor.
+#
+# Composition: the embedded gb200/any runtime (NGC pytorch image with
+# /usr/local/bin/*_mpi nccl-tests, apt-installed sshd) plus the IMEX
+# wiring from the embedded gb200/eks NVLS variant (worker resourceClaims
+# against the nccl-all-reduce-imex ResourceClaimTemplate, NCCL_NVLS_ENABLE=1).
+# The CUDA 12.x image runs on Rubin via PTX JIT forward-compatibility.
+#
+# OPERATOR PREREQUISITES (runtime-ref runtimes own their fabric wiring —
+# the validator's applyNCCLComputeDomain() is skipped for supplied runtimes):
+#   1. Pre-create the ComputeDomain before EACH validate run:
+#        apiVersion: resource.nvidia.com/v1beta1
+#        kind: ComputeDomain
+#        metadata: {name: nccl-all-reduce-cd, namespace: aicr-validation}
+#        spec: {numNodes: 2, channel: {resourceClaimTemplate: {name: nccl-all-reduce-imex}}}
+#      The validator's cleanup DELETES this CD (by its well-known name) when
+#      the run ends, so it must be re-created per run. Never overlap two
+#      validate runs: the first one's cleanup starves the second's workers.
+#   2. Pass --node-selector nvidia.com/gpu.present=true (VR pre-GA nodes
+#      carry the placeholder GFD product name, so no accelerator matcher fits).
+#   3. aicr CLI must include NVIDIA/aicr#1805 (post-v0.17.0): the CLI lowers
+#      nccl-benchmark-runtime-ref into the validator input; v0.17.0 fails with
+#      "reached the validator unresolved".
+#
+# UPSTREAMING: when a future AICR release registers rke2/vr200 in the
+# compiled catalog, promote this file to the embedded template set with a
+# supportedNCCLCombinations[variantNVLS] entry — the validator then provisions
+# the ComputeDomain automatically (as on gb200/eks|oke) and the runtime-ref
+# constraint and prerequisites above disappear.
+
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: nccl-all-reduce-runtime
+  namespace: ${NAMESPACE}
+  labels:
+    trainer.kubeflow.org/framework: mpi
+spec:
+  mlPolicy:
+    mpi:
+      mpiImplementation: OpenMPI
+      numProcPerNode: ${GPU_COUNT_PER_NODE}
+      runLauncherAsNode: false
+      sshAuthMountPath: /tmp/mpi-keys
+  template:
+    spec:
+      network:
+        enableDNSHostnames: true
+        publishNotReadyAddresses: true
+      replicatedJobs:
+      - name: launcher
+        replicas: 1
+        template:
+          spec:
+            template:
+              spec:
+                tolerations:
+                - operator: Exists
+                initContainers:
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    mkdir -p /root/.ssh
+                    cp /tmp/mpi-keys/id_rsa /root/.ssh/id_rsa
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys
+                    chmod 700 /root/.ssh
+                    chmod 600 /root/.ssh/id_rsa /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  env:
+                  - name: LD_LIBRARY_PATH
+                    value: "/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+                  command:
+                  - /usr/local/mpi/bin/mpirun
+                  args:
+                  - -np
+                  - "${GPU_COUNT}"
+                  - --allow-run-as-root
+                  - --mca
+                  - plm_rsh_args
+                  - -o StrictHostKeyChecking=no -o ConnectionAttempts=10
+                  - --mca
+                  - btl
+                  - ^openib
+                  - --mca
+                  - btl_tcp_if_include
+                  - eth0
+                  - --mca
+                  - oob_tcp_if_include
+                  - eth0
+                  - -x
+                  - LD_LIBRARY_PATH
+                  - -x
+                  - NCCL_DEBUG=INFO
+                  - -x
+                  - NCCL_NVLS_ENABLE=1
+                  - -x
+                  - NCCL_IGNORE_DISABLED_P2P=1
+                  - -x
+                  - NCCL_SOCKET_IFNAME=eth0
+                  - /usr/local/bin/${TEST_TYPE}_mpi
+                  - -b
+                  - ${MIN_MESSAGE_SIZE}
+                  - -e
+                  - ${MAX_MESSAGE_SIZE}
+                  - -f
+                  - "2"
+                  - -g
+                  - "1"
+                  resources:
+                    limits:
+                      cpu: "2"
+                      memory: 128Mi
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+      - name: node
+        template:
+          spec:
+            template:
+              spec:
+                # IMEX channel claim — ComputeDomain nccl-all-reduce-cd is
+                # pre-created by the operator in the validation namespace
+                # (runtime-ref runtimes own their fabric wiring).
+                resourceClaims:
+                - name: imex-channel
+                  resourceClaimTemplateName: nccl-all-reduce-imex
+                initContainers:
+                - name: fix-ssh-perms
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    apt-get update &&
+                    apt-get install -y --no-install-recommends openssh-server &&
+                    mkdir -p /var/run/sshd &&
+                    chmod 0755 /var/run/sshd &&
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/authorized_keys /root/.ssh/authorized_keys &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys
+                  volumeMounts:
+                  - name: mpi-ssh-auth
+                    mountPath: /tmp/mpi-keys
+                    readOnly: true
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                containers:
+                - name: node
+                  image: nvcr.io/nvidia/pytorch:25.06-py3
+                  command: ["sh", "-c"]
+                  args:
+                  - |
+                    apt-get update &&
+                    apt-get install -y --no-install-recommends openssh-server &&
+                    mkdir -p /var/run/sshd &&
+                    chmod 0755 /var/run/sshd &&
+                    mkdir -p /root/.ssh &&
+                    cp /tmp/mpi-keys/* /root/.ssh/ &&
+                    chmod 700 /root/.ssh &&
+                    chmod 600 /root/.ssh/authorized_keys &&
+                    /usr/sbin/sshd -De
+                  resources:
+                    claims:
+                    - name: imex-channel
+                    limits:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                    requests:
+                      nvidia.com/gpu: ${GPU_COUNT_PER_NODE}
+                  securityContext:
+                    capabilities:
+                      add: ["IPC_LOCK"]
+                  volumeMounts:
+                  - name: ssh-config
+                    mountPath: /root/.ssh
+                  - name: dshm
+                    mountPath: /dev/shm
+                volumes:
+                - name: ssh-config
+                  emptyDir: {}
+                - name: dshm
+                  emptyDir:
+                    medium: Memory
+      successPolicy:
+        operator: All
+        targetReplicatedJobs:
+        - launcher
