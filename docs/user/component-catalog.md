@@ -806,3 +806,24 @@ under a newer operator is the same version-skew class that caused the
 frontend discovery panic fixed in #1193 -- setting `DYN_EVENT_PLANE=zmq`
 on the old workload is defense in depth, not a substitute for bumping its
 image to match the operator.
+### `gpu-operator` + `nvidia-dra-driver-gpu`: ComputeDomain CRD ownership on Argo CD
+
+`gpu-operator` and `nvidia-dra-driver-gpu` (and `nvidia-dra-driver-gpu-ocp`) both
+ship the `computedomains.resource.nvidia.com` CRD. As of `gpu-operator`
+v26.7.0 the two chart copies disagree on schema (`spec.numNodes` required vs.
+optional with a default), so on `--deployer argocd` and `--deployer
+argocd-helm` — where every generated `Application` syncs with
+`automated.selfHeal: true` — Argo CD perpetually reconciles the CRD toward
+whichever `Application` last synced.
+
+When a bundle includes both components, AICR now scopes an
+`ignoreDifferences` entry to the divergent fields on the `gpu-operator`
+`Application`, so the DRA driver's copy stays the effective owner and the
+reconcile loop stops. This is generated automatically — no flag or override
+is needed, and bundles with only one of the two components are unaffected.
+
+This is a stopgap, not a durable fix. `Helm` and `Flux` bundles are not
+affected (both install CRDs once and never re-apply them), and the
+OLM-based OCP path (`gpu-operator-ocp`, `gpu-operator-ocp-olm`) is not
+covered — CRD reconciliation there is owned by OLM, not an AICR-generated
+Argo `Application`. See [NVIDIA/aicr#2546](https://github.com/NVIDIA/aicr/issues/2546).

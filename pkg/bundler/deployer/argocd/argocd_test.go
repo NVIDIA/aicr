@@ -2468,3 +2468,99 @@ func TestGenerate_ApplyOutOfSyncOnlySyncOptions(t *testing.T) {
 		t.Errorf("readiness Application must contain \"- ApplyOutOfSyncOnly=true\":\n%s", readiness)
 	}
 }
+
+// TestGenerate_IgnoreComputeDomainCRDDiff asserts the gpu-operator
+// Application carries the computedomains ignoreDifferences stopgap only
+// when the bundle also ships a standalone DRA driver component. See
+// NVIDIA/aicr#2546.
+func TestGenerate_IgnoreComputeDomainCRDDiff(t *testing.T) {
+	newGenerator := func(t *testing.T, withDRADriver bool) *Generator {
+		t.Helper()
+		componentRefs := []recipe.ComponentRef{
+			{
+				Name:      "gpu-operator",
+				Namespace: "gpu-operator",
+				Chart:     "gpu-operator",
+				Version:   "v26.7.0",
+				Type:      recipe.ComponentTypeHelm,
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+			},
+		}
+		deploymentOrder := []string{"gpu-operator"}
+		componentValues := map[string]map[string]any{"gpu-operator": {}}
+		if withDRADriver {
+			componentRefs = append(componentRefs, recipe.ComponentRef{
+				Name:      "nvidia-dra-driver-gpu",
+				Namespace: "nvidia-dra-driver",
+				Chart:     "dra-driver-nvidia-gpu",
+				Version:   "0.5.0",
+				Type:      recipe.ComponentTypeHelm,
+				Source:    "oci://registry.k8s.io/dra-driver-nvidia/charts",
+			})
+			deploymentOrder = append(deploymentOrder, "nvidia-dra-driver-gpu")
+			componentValues["nvidia-dra-driver-gpu"] = map[string]any{}
+		}
+
+		recipeResult := &recipe.RecipeResult{}
+		recipeResult.Metadata.Version = testVersion
+		recipeResult.ComponentRefs = componentRefs
+		recipeResult.DeploymentOrder = deploymentOrder
+
+		return &Generator{
+			RecipeResult:    recipeResult,
+			ComponentValues: componentValues,
+			Version:         "v0.0.0-test",
+			RepoURL:         "https://github.com/example/aicr-bundles.git",
+			TargetRevision:  "main",
+		}
+	}
+
+	t.Run("gpu-operator with DRA driver present", func(t *testing.T) {
+		ctx := context.Background()
+		outputDir := t.TempDir()
+		g := newGenerator(t, true)
+		if _, err := g.Generate(ctx, outputDir); err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+
+		app, err := os.ReadFile(filepath.Join(outputDir, "001-gpu-operator", "application.yaml"))
+		if err != nil {
+			t.Fatalf("read gpu-operator application.yaml: %v", err)
+		}
+		got := string(app)
+		if !strings.Contains(got, "- RespectIgnoreDifferences=true") {
+			t.Errorf("gpu-operator Application must contain \"- RespectIgnoreDifferences=true\":\n%s", got)
+		}
+		if !strings.Contains(got, "name: computedomains.resource.nvidia.com") {
+			t.Errorf("gpu-operator Application must ignoreDifferences on computedomains.resource.nvidia.com:\n%s", got)
+		}
+		for _, pointer := range []string{
+			"/spec/versions/0/schema/openAPIV3Schema/properties/spec/required",
+			"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/default",
+			"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/minimum",
+			"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/description",
+		} {
+			if !strings.Contains(got, pointer) {
+				t.Errorf("gpu-operator Application must ignore jsonPointer %q:\n%s", pointer, got)
+			}
+		}
+	})
+
+	t.Run("gpu-operator alone", func(t *testing.T) {
+		ctx := context.Background()
+		outputDir := t.TempDir()
+		g := newGenerator(t, false)
+		if _, err := g.Generate(ctx, outputDir); err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+
+		app, err := os.ReadFile(filepath.Join(outputDir, "001-gpu-operator", "application.yaml"))
+		if err != nil {
+			t.Fatalf("read gpu-operator application.yaml: %v", err)
+		}
+		got := string(app)
+		if strings.Contains(got, "RespectIgnoreDifferences") || strings.Contains(got, "ignoreDifferences") {
+			t.Errorf("gpu-operator Application without a DRA driver component must not mention ignoreDifferences:\n%s", got)
+		}
+	})
+}

@@ -117,6 +117,36 @@ type ApplicationData struct {
 	// delete-and-recreate unconditionally. See #2367 and the CodeRabbit finding on
 	// PR #2408.
 	ApplyOutOfSyncOnly bool
+
+	// IgnoreComputeDomainCRDDiff scopes an ignoreDifferences entry to the
+	// gpu-operator Application when the bundle also ships
+	// nvidia-dra-driver-gpu or nvidia-dra-driver-gpu-ocp. Both charts
+	// install computedomains.resource.nvidia.com, and as of gpu-operator
+	// v26.7.0 the two copies disagree on schema. Under automated
+	// selfHeal, Argo CD perpetually reconciles the CRD toward whichever
+	// Application synced last. Stopgap; see NVIDIA/aicr#2546.
+	IgnoreComputeDomainCRDDiff bool
+}
+
+// Components involved in the computedomains.resource.nvidia.com CRD
+// ownership conflict between gpu-operator and the standalone DRA driver.
+// See NVIDIA/aicr#2546. Scoped to the Helm-based components only —
+// gpu-operator-ocp/-ocp-olm are OLM CR-pattern components with no
+// AICR-authored Argo Application, so this mitigation does not apply there.
+const (
+	computeDomainComponentGPUOperator  = "gpu-operator"
+	computeDomainComponentDRADriver    = "nvidia-dra-driver-gpu"
+	computeDomainComponentDRADriverOCP = "nvidia-dra-driver-gpu-ocp"
+)
+
+// hasComponent reports whether components contains a ref named name.
+func hasComponent(components []recipe.ComponentRef, name string) bool {
+	for _, c := range components {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // AppOfAppsData contains data for rendering the App of Apps manifest.
@@ -578,6 +608,14 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 	}
 
+	// computeDomainConflict is true when the bundle contains both
+	// gpu-operator and a standalone DRA driver component, which as of
+	// gpu-operator v26.7.0 ship conflicting computedomains CRD schemas.
+	// See IgnoreComputeDomainCRDDiff and NVIDIA/aicr#2546.
+	computeDomainConflict := hasComponent(components, computeDomainComponentGPUOperator) &&
+		(hasComponent(components, computeDomainComponentDRADriver) ||
+			hasComponent(components, computeDomainComponentDRADriverOCP))
+
 	// Build ApplicationData per folder and write application.yaml inside the
 	// NNN-<name>/ directory. Branching on FolderKind selects the Application
 	// shape (path-based single-source vs multi-source upstream-helm).
@@ -633,6 +671,13 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		appData.DestinationServer = g.destinationServer()
 		appData.Project = g.project()
 		appData.CascadeDelete = g.CascadeDelete
+		// Scoped to gpu-operator's primary folder only (f.Name == f.Parent):
+		// the -pre/-post/-readiness sidecar folders don't ship the
+		// upstream chart's CRDs, so ignoreDifferences would be a no-op
+		// there. See computeDomainConflict above and NVIDIA/aicr#2546.
+		if computeDomainConflict && comp.Name == computeDomainComponentGPUOperator && f.Name == f.Parent {
+			appData.IgnoreComputeDomainCRDDiff = true
+		}
 		appDataList = append(appDataList, appData)
 
 		folderDir, joinErr := deployer.SafeJoin(outputDir, f.Dir)
