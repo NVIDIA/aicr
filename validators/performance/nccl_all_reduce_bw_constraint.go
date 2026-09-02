@@ -954,8 +954,17 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// baked-in template path — a recipe-supplied runtime (customRuntime != "")
 	// is never reachable here with runtimeImage set, since the resolve site in
 	// validateNcclAllReduceBw gates resolution on customRuntime == "".
-	if err := applyNCCLRuntimeImageOverride(runtimeObj, runtimeImage); err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL runtime image override", err)
+	// Defense in depth: even though the only current caller
+	// (validateNcclAllReduceBw) already gates runtimeImage resolution on
+	// customRuntime == "", applyNCCLResources must not silently overwrite a
+	// recipe-supplied image if ever called with both non-empty — the
+	// recipe-supplied runtime owns its image, full stop. This is the guard
+	// TestApplyNCCLResourcesRuntimeImageOverride's custom-runtime subtest
+	// (mchmarny, 691b3b3 review) asserts.
+	if customRuntime == "" {
+		if err := applyNCCLRuntimeImageOverride(runtimeObj, runtimeImage); err != nil {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL runtime image override", err)
+		}
 	}
 	if err := applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", err)
