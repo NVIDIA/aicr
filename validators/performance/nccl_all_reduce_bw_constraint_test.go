@@ -565,6 +565,40 @@ func TestPruneStaleNCCLNamespaces(t *testing.T) {
 	}
 }
 
+// TestPruneStaleNCCLNamespaces_SkipsDeleteOnConcurrentClaim checks that
+// prune backs off if a caller claims the namespace's lock in the instant
+// between prune's own liveness check and its delete, instead of deleting
+// out from under a claim that didn't exist yet when prune first looked.
+func TestPruneStaleNCCLNamespaces_SkipsDeleteOnConcurrentClaim(t *testing.T) {
+	old := metav1.NewTime(time.Now().Add(-2 * defaults.NCCLStaleNamespacePruneAge))
+	ownedLabels := map[string]string{labels.ManagedBy: labels.ValueValidator, labels.Component: labels.ValueNCCLPerf}
+	targetNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-raced", CreationTimestamp: old, Labels: ownedLabels,
+	}}
+
+	client := fake.NewClientset(targetNS)
+	client.PrependReactor("create", "leases", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		// A caller wins the claim moments after prune's own check found no
+		// lease at all, racing prune's own claim attempt on the same Create.
+		rivalHolder := "rival-holder"
+		renew := metav1.NewMicroTime(time.Now())
+		rival := &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: action.GetNamespace()},
+			Spec:       coordinationv1.LeaseSpec{HolderIdentity: &rivalHolder, RenewTime: &renew},
+		}
+		if err := client.Tracker().Add(rival); err != nil {
+			return true, nil, err
+		}
+		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Group: "coordination.k8s.io", Resource: "leases"}, ncclRunLockName)
+	})
+
+	pruneStaleNCCLNamespaces(context.Background(), client, "some-other-namespace")
+
+	if _, err := client.CoreV1().Namespaces().Get(context.Background(), targetNS.Name, metav1.GetOptions{}); err != nil {
+		t.Errorf("namespace was deleted despite a concurrent caller claiming its lock first: %v", err)
+	}
+}
+
 // TestWaitForPodByLabelSelector_IgnoresStaleDeletedLauncher is the regression
 // guard for the finding that any watch event, including a Deleted event for a
 // stale pod, was returned as-is. applyNCCLResources's TrainJob admission
