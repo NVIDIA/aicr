@@ -303,6 +303,64 @@ func TestRunNCCLTrainJob_TrainerInstallFailureCleansUpNamespace(t *testing.T) {
 	}
 }
 
+// TestRunNCCLTrainJob_AbortsIfExecutionLockLostBeforeApply checks that if
+// another caller takes the execution lock over while Trainer install is
+// running, runNCCLTrainJob aborts instead of applying resources under a
+// lock it no longer holds. The reactor takes the lock over on the first
+// Lease read after the initial claim.
+func TestRunNCCLTrainJob_AbortsIfExecutionLockLostBeforeApply(t *testing.T) {
+	dynamicClient := newTrainerFakeClient(completeTrainerInstall()...)
+	runtimeApplied := false
+	dynamicClient.PrependReactor("create", "trainingruntimes", func(k8stesting.Action) (bool, runtime.Object, error) {
+		runtimeApplied = true
+		return false, nil, nil
+	})
+	clientset := fake.NewClientset()
+	clientset.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if ns, ok := action.(k8stesting.CreateAction).GetObject().(*corev1.Namespace); ok && ns.UID == "" {
+			ns.UID = testNamespaceUID
+		}
+		return false, nil, nil
+	})
+
+	leaseGVR := coordinationv1.SchemeGroupVersion.WithResource("leases")
+	var takenOver bool
+	clientset.PrependReactor("get", "leases", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if takenOver {
+			return false, nil, nil
+		}
+		takenOver = true
+		rivalHolder := "rival-holder"
+		renew := metav1.NewMicroTime(time.Now())
+		rival := &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: action.GetNamespace(), ResourceVersion: "999"},
+			Spec:       coordinationv1.LeaseSpec{HolderIdentity: &rivalHolder, RenewTime: &renew},
+		}
+		if err := clientset.Tracker().Update(leaseGVR, rival, action.GetNamespace()); err != nil {
+			return true, nil, err
+		}
+		return false, nil, nil // let the default reactor return the now-updated (rival) object
+	})
+
+	vctx := &validators.Context{
+		Ctx:           context.Background(),
+		Clientset:     clientset,
+		DynamicClient: dynamicClient,
+	}
+	gpuConfig := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8}
+
+	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "")
+	if err == nil {
+		t.Fatal("expected a conflict error when the execution lock was taken over before apply, got nil")
+	}
+	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+		t.Errorf("expected ErrCodeConflict, got %v", err)
+	}
+	if runtimeApplied {
+		t.Error("expected no TrainingRuntime to be applied after losing the execution lock")
+	}
+}
+
 // TestNCCLRunNamespace_VariesByVariant is the regression guard for the
 // finding that all three catalog checks share one AICR_RUN_ID per
 // invocation, so deriveRunID's suffix alone would give them the identical
@@ -650,6 +708,32 @@ func TestClaimNCCLExecutionLock_ReclaimsWellBeforeNamespacePruneAge(t *testing.T
 	}
 }
 
+// TestNcclExecutionLockHeldBy_ExpiredHolderCannotResumeAfterTakeover checks
+// that a holder whose lock went stale and was taken over by another caller
+// is correctly told it no longer holds the lock.
+func TestNcclExecutionLockHeldBy_ExpiredHolderCannotResumeAfterTakeover(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	pausedHolder := "paused-holder"
+	staleRenew := metav1.NewMicroTime(time.Now().Add(-2 * defaults.NCCLExecutionLockStaleAge))
+	clientset := fake.NewClientset(&coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns},
+		Spec:       coordinationv1.LeaseSpec{HolderIdentity: &pausedHolder, RenewTime: &staleRenew},
+	})
+
+	newHolder, err := claimNCCLExecutionLock(context.Background(), clientset, ns)
+	if err != nil {
+		t.Fatalf("expected the stale lock to be taken over, got: %v", err)
+	}
+
+	held, err := ncclExecutionLockHeldBy(context.Background(), clientset, ns, pausedHolder)
+	if err != nil {
+		t.Fatalf("ncclExecutionLockHeldBy() error = %v", err)
+	}
+	if held {
+		t.Errorf("expected paused holder %q to no longer hold the lock after %q took it over", pausedHolder, newHolder)
+	}
+}
+
 // TestNcclExecutionLockHeldBy_LosesRaceToTakeover verifies that a takeover
 // landing between ncclExecutionLockHeldBy's read and its renewal makes it
 // report the lock not held, instead of the stale holder's cleanup going on
@@ -710,7 +794,7 @@ func TestNcclExecutionLockHeldBy_LosesRaceToTakeover(t *testing.T) {
 		return true, lease, nil
 	})
 
-	held, err := ncclExecutionLockHeldBy(clientset, ns, holderA)
+	held, err := ncclExecutionLockHeldBy(context.Background(), clientset, ns, holderA)
 	if err != nil {
 		t.Fatalf("ncclExecutionLockHeldBy() error = %v", err)
 	}

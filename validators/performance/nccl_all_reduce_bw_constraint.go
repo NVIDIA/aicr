@@ -615,8 +615,14 @@ func generateExecutionID() string {
 // proving nothing raced it, or loses to a Conflict, proving a takeover
 // already happened, in which case cleanup must not touch the namespace. A
 // missing lock has nothing left to protect and reports true.
-func ncclExecutionLockHeldBy(clientset kubernetes.Interface, namespace, holderID string) (bool, error) {
-	getCtx, cancel := context.WithTimeout(context.Background(), defaults.DiagnosticTimeout)
+//
+// Also used mid-run, right before mutating this namespace's fixed-name
+// resources, to revalidate a holder whose earlier pre-pod steps (Trainer
+// install, resource apply) ran long enough for a same-run retry to take the
+// lock over. The renewal doubles as a heartbeat in that case, since
+// succeeding extends the caller's own claim by another NCCLExecutionLockStaleAge.
+func ncclExecutionLockHeldBy(ctx context.Context, clientset kubernetes.Interface, namespace, holderID string) (bool, error) {
+	getCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
 	leaseClient := clientset.CoordinationV1().Leases(namespace)
 	lease, err := leaseClient.Get(getCtx, ncclRunLockName, metav1.GetOptions{})
@@ -798,6 +804,20 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 		ctx.Clientset.Discovery(), recipeDeclaresTrainer)
 	if err != nil {
 		return "", err
+	}
+
+	// Trainer install can run long enough for the execution lock to go stale
+	// and be taken over by a same-run retry. Revalidate (and renew)
+	// ownership before mutating this namespace's fixed-name resources, so a
+	// resumed caller that's since been superseded fails closed instead of
+	// updating or recreating the new holder's resources.
+	held, err := ncclExecutionLockHeldBy(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace, holderID)
+	if err != nil {
+		return "", err
+	}
+	if !held {
+		return "", aicrErrors.New(aicrErrors.ErrCodeConflict,
+			fmt.Sprintf("NCCL benchmark execution lock for namespace %q was taken over by another execution; refusing to proceed", gpuConfig.Namespace))
 	}
 
 	// Apply runtime and trainjob resources. Propagate an inner code rather than
@@ -2576,7 +2596,7 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 // a nil benchErr, never masking a real benchmark failure (see
 // foldCleanupError).
 func cleanupNCCLRun(clientset kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, uid types.UID, holderID string, installedResources []trainerResourceRef, benchErr error) error {
-	held, lockErr := ncclExecutionLockHeldBy(clientset, namespace, holderID)
+	held, lockErr := ncclExecutionLockHeldBy(context.Background(), clientset, namespace, holderID)
 	if lockErr != nil {
 		return foldCleanupError(benchErr, lockErr, "NCCL benchmark succeeded but its execution lock could not be checked")
 	}
