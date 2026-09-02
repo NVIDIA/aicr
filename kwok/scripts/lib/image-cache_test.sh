@@ -104,12 +104,25 @@ PATH="${STUB_DIR}:${PATH}"
 #   STUB_LOAD_RC      `docker load` exit code
 #   STUB_LOAD_CORRUPT non-empty makes `docker load` succeed without the image
 #                     becoming present — a truncated or wrong-image tarball
+#   STUB_LOAD_SLOW    seconds a `docker load` stalls AFTER landing the image,
+#                     leaving only a sliver of the budget for the probe
+#   STUB_INSPECT_SLOW seconds `docker image inspect` stalls before answering,
+#                     applied only once the image is present (the post-load
+#                     probe) so it cannot spend the budget before the load
 write_stubs() {
     cat > "${STUB_DIR}/docker" <<'EOF'
 #!/usr/bin/env bash
 echo "docker $*" >> "${TRACE}"
 case "$1 $2" in
     "image inspect")
+        # A busy Docker Engine answers, but not instantly. Applied only once the
+        # image is present, which is precisely the post-load probe: slowing the
+        # pre-load check too would spend the budget before the load and test a
+        # different path. Under a sliver of remaining budget a deadline-bounded
+        # probe kills this and calls a present image missing.
+        if [[ -n "${STUB_INSPECT_SLOW:-}" && -f "${STUB_DIR}/have" ]]; then
+            sleep "${STUB_INSPECT_SLOW}"
+        fi
         # Once a pull or load has landed the image is present, so later
         # inspects must succeed too — otherwise no loop could terminate.
         if [[ -f "${STUB_DIR}/have" ]]; then exit 0; fi
@@ -159,6 +172,14 @@ case "$1" in
             echo "invalid tar header" >&2
             exit "${STUB_LOAD_RC}"
         fi
+        # A load that lands the image and then overruns the budget. The image is
+        # on the host before the clock runs out, so the post-load verification
+        # must answer about the image, not about the time left.
+        if [[ -n "${STUB_LOAD_SLOW:-}" ]]; then
+            touch "${STUB_DIR}/have"
+            sleep "${STUB_LOAD_SLOW}"
+            exit 0
+        fi
         if [[ -z "${STUB_LOAD_CORRUPT:-}" ]]; then
             touch "${STUB_DIR}/have"
         fi
@@ -177,6 +198,7 @@ reset() {
     rm -f "${STUB_DIR}/pulls" "${STUB_DIR}/have"
     unset STUB_INSPECT_RC STUB_PULL_FAILS STUB_PULL_HANGS
     unset STUB_SAVE_RC STUB_SAVE_PARTIAL STUB_SAVE_STALL STUB_LOAD_RC STUB_LOAD_CORRUPT
+    unset STUB_LOAD_SLOW STUB_INSPECT_SLOW
     unset KWOK_IMAGE_CACHE_BUDGET_SECONDS
     export STUB_DIR TRACE
     write_stubs
@@ -403,6 +425,42 @@ export STUB_INSPECT_RC=0
 image_cache_load "${CACHE_DIR}" "${IMG}" >/dev/null 2>&1; rc=$?
 check_rc "load-already-present-succeeds" 0 "${rc}"
 check_trace_absent "load-already-present-skips-docker-load" "docker load"
+
+# 17b. The load succeeds but leaves only a sliver of the budget, and the Engine
+#      is busy enough that the presence probe takes a moment. Bounding that
+#      probe by the leftover deadline kills it and reports a freshly loaded
+#      image as missing -- the caller then re-pulls an image it already has.
+#      The probe answers "is it there", so it gets its own bound, not the
+#      remainder of a budget that has already done its job.
+reset
+printf 'tarball-bytes' > "$(image_cache_file "${CACHE_DIR}" "${IMG}")"
+#
+#      Every boundary here needs a margin, because the checks before the load
+#      can let a whole second tick and shrink the load's own timeout. With
+#      load == that timeout the load is killed instead of completing, and the
+#      case fails intermittently on the load-failed branch without ever
+#      reaching the probe it exists to test.
+#      Two inequalities have to hold at once, and they pull in opposite
+#      directions:
+#        leftover-after-load < STUB_INSPECT_SLOW   keeps this a REGRESSION test
+#          -- a pre-fix deadline-bound probe must die. Raise the budget too far
+#          and the old probe completes too, so the case passes against the buggy
+#          code and silently stops guarding anything.
+#        STUB_INSPECT_SLOW <= 5                    keeps the FIXED code passing
+#          -- the floored probe must be able to finish.
+#      Budget 4 buys the load a ~3s margin against its 1s sleep (was ~2s) while
+#      leaving ~2-3s leftover, still under STUB_INSPECT_SLOW.
+export STUB_LOAD_SLOW=1      # exits 0 with >=3s to spare inside its timeout
+export STUB_INSPECT_SLOW=4   # exceeds any leftover budget, inside the 5s probe
+export KWOK_IMAGE_CACHE_BUDGET_SECONDS=4
+out=$(image_cache_load "${CACHE_DIR}" "${IMG}" 2>&1); rc=$?
+check_rc "load-then-slow-probe-still-succeeds" 0 "${rc}"
+if [[ "${out}" == *"still not present"* ]]; then
+    fail "load-then-slow-probe-is-not-misreported (claimed a loaded image is missing: ${out})"
+else
+    pass "load-then-slow-probe-is-not-misreported"
+fi
+unset STUB_LOAD_SLOW STUB_INSPECT_SLOW KWOK_IMAGE_CACHE_BUDGET_SECONDS
 
 # ── image_cache_settings ─────────────────────────────────────────────────────
 
