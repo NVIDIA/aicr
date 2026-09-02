@@ -134,6 +134,28 @@ func TestCRETerminalConditionSummary(t *testing.T) {
 			}},
 			want: "Failed (WorkloadFailed)",
 		},
+		{
+			name: "nil reason and message",
+			obj: &unstructured.Unstructured{Object: map[string]any{
+				"status": map[string]any{
+					"conditions": []any{
+						map[string]any{"type": "Failed", "status": "True", "reason": nil, "message": nil},
+					},
+				},
+			}},
+			want: "Failed",
+		},
+		{
+			name: "nil reason and message",
+			obj: &unstructured.Unstructured{Object: map[string]any{
+				"status": map[string]any{
+					"conditions": []any{
+						map[string]any{"type": "Failed", "status": "True", "reason": nil, "message": nil},
+					},
+				},
+			}},
+			want: "Failed",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
