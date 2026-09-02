@@ -333,18 +333,17 @@ func creTerminalConditionSummary(obj *unstructured.Unstructured) string {
 			continue
 		}
 		typ := fmt.Sprint(m["type"])
-		status := fmt.Sprint(m["status"])
-		if status != "True" {
+		if unstructuredString(m["status"]) != conditionStatusTrue {
 			continue
 		}
-		reason := strings.TrimSpace(fmt.Sprint(m["reason"]))
-		msg := strings.TrimSpace(fmt.Sprint(m["message"]))
+		reason := unstructuredString(m["reason"])
+		msg := unstructuredString(m["message"])
 		switch {
-		case reason != "" && msg != "" && reason != "<nil>" && msg != "<nil>":
+		case reason != "" && msg != "":
 			parts = append(parts, fmt.Sprintf("%s (%s): %s", typ, reason, msg))
-		case reason != "" && reason != "<nil>":
+		case reason != "":
 			parts = append(parts, fmt.Sprintf("%s (%s)", typ, reason))
-		case msg != "" && msg != "<nil>":
+		case msg != "":
 			parts = append(parts, fmt.Sprintf("%s: %s", typ, msg))
 		default:
 			parts = append(parts, typ)
@@ -354,6 +353,17 @@ func creTerminalConditionSummary(obj *unstructured.Unstructured) string {
 		return "Failed with empty condition reason/message"
 	}
 	return strings.Join(parts, "; ")
+}
+
+func unstructuredString(v any) string {
+	if v == nil {
+		return ""
+	}
+	s, ok := v.(string)
+	if !ok {
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
+	return strings.TrimSpace(s)
 }
 
 func parseGoodputRatio(status map[string]any) (float64, error) {
