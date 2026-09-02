@@ -1855,12 +1855,15 @@ func TestEnsureNamespace(t *testing.T) {
 	t.Run("creates a fresh namespace", func(t *testing.T) {
 		client := fake.NewClientset()
 		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
-		got, err := ensureNamespace(ctx, ns, component)
+		got, created, err := ensureNamespace(ctx, ns, component)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if got.Labels[labels.ManagedBy] != labels.ValueValidator || got.Labels[labels.Component] != component {
 			t.Errorf("created namespace labels = %v, want ManagedBy/Component set", got.Labels)
+		}
+		if !created {
+			t.Error("expected created=true for a brand new namespace")
 		}
 	})
 
@@ -1870,12 +1873,15 @@ func TestEnsureNamespace(t *testing.T) {
 		}}}
 		client := fake.NewClientset(owned)
 		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
-		got, err := ensureNamespace(ctx, ns, component)
+		got, created, err := ensureNamespace(ctx, ns, component)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if got.Name != ns {
 			t.Errorf("got namespace %q, want %q", got.Name, ns)
+		}
+		if created {
+			t.Error("expected created=false for a reused namespace")
 		}
 	})
 
@@ -1883,7 +1889,7 @@ func TestEnsureNamespace(t *testing.T) {
 		foreign := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
 		client := fake.NewClientset(foreign)
 		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
-		if _, err := ensureNamespace(ctx, ns, component); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+		if _, _, err := ensureNamespace(ctx, ns, component); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
 			t.Errorf("got %v, want ErrCodeConflict", err)
 		}
 	})
@@ -1904,8 +1910,38 @@ func TestEnsureNamespace(t *testing.T) {
 			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
 		})
 		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
-		if _, err := ensureNamespace(ctx, ns, component); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+		if _, _, err := ensureNamespace(ctx, ns, component); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
 			t.Errorf("got %v, want ErrCodeConflict", err)
+		}
+	})
+
+	t.Run("adopts an owned create-race winner without claiming to have created it", func(t *testing.T) {
+		client := fake.NewClientset()
+		client.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			createAction, ok := action.(k8stesting.CreateAction)
+			obj, objOK := createAction.GetObject().(*v1.Namespace)
+			if !ok || !objOK || obj.Name != ns {
+				return false, nil, nil
+			}
+			// A concurrent caller using the same labels won the race.
+			winner := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{
+				labels.ManagedBy: labels.ValueValidator, labels.Component: component,
+			}}}
+			if err := client.Tracker().Add(winner); err != nil {
+				return true, nil, err
+			}
+			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
+		})
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Name != ns {
+			t.Errorf("got namespace %q, want %q", got.Name, ns)
+		}
+		if created {
+			t.Error("expected created=false: a concurrent caller's Create won the race, not ours")
 		}
 	})
 
@@ -1934,12 +1970,15 @@ func TestEnsureNamespace(t *testing.T) {
 		}()
 
 		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
-		got, err := ensureNamespace(ctx, ns, component)
+		got, created, err := ensureNamespace(ctx, ns, component)
 		if err != nil {
 			t.Fatalf("expected the retry to succeed once the winner finished terminating, got: %v", err)
 		}
 		if got.DeletionTimestamp != nil {
 			t.Error("returned namespace is still terminating")
+		}
+		if !created {
+			t.Error("expected created=true: our own Create landed after the prior winner finished terminating")
 		}
 	})
 }

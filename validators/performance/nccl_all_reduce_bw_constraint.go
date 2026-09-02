@@ -775,7 +775,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// returned, needing no separate fetch).
 	gpuConfig.Namespace = ncclRunNamespace(variant)
 	pruneStaleNCCLNamespaces(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
-	nsObj, err := ensureNamespace(ctx, gpuConfig.Namespace, labels.ValueNCCLPerf)
+	nsObj, nsCreated, err := ensureNamespace(ctx, gpuConfig.Namespace, labels.ValueNCCLPerf)
 	if err != nil {
 		return "", aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal, "failed to create NCCL benchmark namespace")
 	}
@@ -788,12 +788,14 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// closed instead of sharing the namespace.
 	holderID, err := claimNCCLExecutionLock(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
 	if err != nil {
-		// The cleanup defer below isn't registered yet, so a namespace
-		// ensureNamespace just created or reclaimed would otherwise leak
-		// until the next run's prune sweep. Roll it back now, unless a
-		// concurrent caller won the claim instead, since that namespace is
+		// The cleanup defer below isn't registered yet, so a namespace this
+		// call alone just created would otherwise leak until the next run's
+		// prune sweep. Roll it back now, but only the one we created. A
+		// reused or concurrently-adopted namespace (nsCreated false) may
+		// hold another execution's leftovers worth reclaiming later, and a
+		// concurrent caller's conflicting claim means that namespace is
 		// legitimately theirs, not ours to remove.
-		if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+		if nsCreated && !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
 			rollbackNCCLNamespace(ctx.Clientset, gpuConfig.Namespace, nsObj.UID)
 		}
 		return "", err

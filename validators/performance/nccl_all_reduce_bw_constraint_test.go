@@ -397,6 +397,37 @@ func TestRunNCCLTrainJob_RollsBackNamespaceOnLeaseAdmissionFailure(t *testing.T)
 	}
 }
 
+// TestRunNCCLTrainJob_KeepsReusedNamespaceOnLeaseAdmissionFailure checks
+// that the rollback added for a failed Lease claim does not fire for a
+// namespace ensureNamespace reused rather than created, since it may hold
+// another execution's leftovers worth reclaiming on a later retry.
+func TestRunNCCLTrainJob_KeepsReusedNamespaceOnLeaseAdmissionFailure(t *testing.T) {
+	t.Setenv("AICR_RUN_ID", "test-run-id")
+	ns := ncclRunNamespace(variantDefault)
+
+	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID, Labels: map[string]string{
+		labels.ManagedBy: labels.ValueValidator, labels.Component: labels.ValueNCCLPerf,
+	}}})
+	clientset.PrependReactor("create", "leases", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: "coordination.k8s.io", Resource: "leases"},
+			ncclRunLockName, nil)
+	})
+
+	vctx := &validators.Context{
+		Ctx:           context.Background(),
+		Clientset:     clientset,
+		DynamicClient: newTrainerFakeClient(),
+	}
+	gpuConfig := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8}
+
+	if _, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, ""); err == nil {
+		t.Fatal("expected an error from the failed Lease claim, got nil")
+	}
+	if _, getErr := clientset.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{}); getErr != nil {
+		t.Errorf("reused namespace was rolled back after an unrelated Lease claim failure: %v", getErr)
+	}
+}
+
 // TestRunNCCLTrainJob_KeepsNamespaceOnConcurrentClaimConflict checks that
 // the rollback added for a failed Lease claim does not fire when the claim
 // failed because a concurrent caller already holds the lock, since that
