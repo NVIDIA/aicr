@@ -543,7 +543,7 @@ func TestPruneStaleNCCLNamespaces(t *testing.T) {
 
 	client := fake.NewClientset(staleNS, youngNS, currentNS, terminatingNS, unrelatedNS,
 		unlabeledMatchingNS, otherComponentNS, liveAgedNS, liveAgedPod, admittedPodlessNS, admittedLease)
-	pruneStaleNCCLNamespaces(context.Background(), client, currentNS.Name)
+	pruneStaleNCCLNamespaces(context.Background(), client, newTrainerFakeClient(), currentNS.Name)
 
 	remaining, err := client.CoreV1().Namespaces().List(context.Background(), metav1.ListOptions{})
 	if err != nil {
@@ -592,7 +592,7 @@ func TestPruneStaleNCCLNamespaces_SkipsDeleteOnConcurrentClaim(t *testing.T) {
 		return true, nil, apierrors.NewAlreadyExists(schema.GroupResource{Group: "coordination.k8s.io", Resource: "leases"}, ncclRunLockName)
 	})
 
-	pruneStaleNCCLNamespaces(context.Background(), client, "some-other-namespace")
+	pruneStaleNCCLNamespaces(context.Background(), client, newTrainerFakeClient(), "some-other-namespace")
 
 	if _, err := client.CoreV1().Namespaces().Get(context.Background(), targetNS.Name, metav1.GetOptions{}); err != nil {
 		t.Errorf("namespace was deleted despite a concurrent caller claiming its lock first: %v", err)

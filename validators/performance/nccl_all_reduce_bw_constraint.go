@@ -684,7 +684,7 @@ func ncclExecutionLockHeldBy(ctx context.Context, clientset kubernetes.Interface
 // a live pod (via verifyNCCLNamespaceNotLive) are left alone too. Failures
 // are logged and ignored, since this is opportunistic cleanup a benchmark
 // run should never fail for.
-func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interface, currentNamespace string) {
+func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interface, dynamicClient dynamic.Interface, currentNamespace string) {
 	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
 
@@ -697,11 +697,18 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 		return
 	}
 
+	// Feeds reapOrphanedTrainerInstall below. Only reap once no other
+	// namespace could still depend on Trainer.
+	otherNamespacesRemain := false
 	for _, ns := range namespaces.Items {
 		if ns.Name == currentNamespace {
 			continue
 		}
-		if ns.DeletionTimestamp != nil || time.Since(ns.CreationTimestamp.Time) < defaults.NCCLStaleNamespacePruneAge {
+		if ns.DeletionTimestamp != nil {
+			continue
+		}
+		if time.Since(ns.CreationTimestamp.Time) < defaults.NCCLStaleNamespacePruneAge {
+			otherNamespacesRemain = true
 			continue
 		}
 		// An aged namespace can still belong to a live execution that has
@@ -710,6 +717,7 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 		if liveErr := verifyNCCLNamespaceNotLive(ctx, clientset, &ns); liveErr != nil {
 			slog.Info("Skipping stale NCCL benchmark namespace prune: namespace still has a live pod",
 				"namespace", ns.Name, "reason", liveErr)
+			otherNamespacesRemain = true
 			continue
 		}
 		// A plain read here, checked then acted on moments later, would
@@ -727,6 +735,7 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 				slog.Warn("Skipping stale NCCL benchmark namespace prune: failed to claim its execution lock",
 					"namespace", ns.Name, "error", claimErr)
 			}
+			otherNamespacesRemain = true
 			continue
 		}
 
@@ -738,11 +747,14 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 		delCancel()
 		if delErr != nil && !apierrors.IsNotFound(delErr) {
 			slog.Warn("Failed to delete stale NCCL benchmark namespace", "namespace", ns.Name, "error", delErr)
+			otherNamespacesRemain = true
 			continue
 		}
 		slog.Info("Deleted stale NCCL benchmark namespace left behind by an interrupted run",
 			"namespace", ns.Name, "age", time.Since(ns.CreationTimestamp.Time).Round(time.Minute))
 	}
+
+	reapOrphanedTrainerInstall(ctx, clientset, dynamicClient, otherNamespacesRemain)
 }
 
 // runNCCLTrainJob runs the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
@@ -763,7 +775,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// still live under it (running on the object ensureNamespace already
 	// returned, needing no separate fetch).
 	gpuConfig.Namespace = ncclRunNamespace(variant)
-	pruneStaleNCCLNamespaces(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
+	pruneStaleNCCLNamespaces(ctx.Ctx, ctx.Clientset, dynamicClient, gpuConfig.Namespace)
 	nsObj, nsCreated, err := ensureNamespace(ctx, gpuConfig.Namespace, labels.ValueNCCLPerf)
 	if err != nil {
 		return "", aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal, "failed to create NCCL benchmark namespace")
@@ -820,6 +832,9 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 		ctx.Clientset.Discovery(), recipeDeclaresTrainer)
 	if err != nil {
 		return "", err
+	}
+	if len(installedResources) > 0 {
+		persistTrainerInstallManifest(ctx.Ctx, ctx.Clientset, installedResources)
 	}
 
 	// Trainer install can run long enough for the execution lock to go stale
@@ -2627,8 +2642,11 @@ func cleanupNCCLRun(clientset kubernetes.Interface, dynamicClient dynamic.Interf
 		return err
 	}
 	if len(installedResources) > 0 {
-		err = foldCleanupError(err, deleteTrainer(dynamicClient, installedResources),
-			"NCCL benchmark succeeded but Kubeflow Trainer cleanup failed")
+		if trainerErr := deleteTrainer(dynamicClient, installedResources); trainerErr != nil {
+			err = foldCleanupError(err, trainerErr, "NCCL benchmark succeeded but Kubeflow Trainer cleanup failed")
+		} else {
+			removeTrainerInstallManifestEntries(context.Background(), clientset, installedResources)
+		}
 	}
 	return err
 }
