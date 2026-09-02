@@ -631,7 +631,10 @@ func generateExecutionID() string {
 // claimNCCLExecutionLock's own takeover does. Renewing either succeeds,
 // proving nothing raced it, or loses to a Conflict, proving a takeover
 // already happened, in which case cleanup must not touch the namespace. A
-// missing lock has nothing left to protect and reports true.
+// missing lock reports false rather than true. It could mean this holder's
+// own lock was never created, but it could just as easily mean a replacement
+// is about to claim it, and treating the ambiguous case as authorization to
+// proceed risks deleting or mutating that replacement's live resources.
 //
 // Also used mid-run, right before mutating this namespace's fixed-name
 // resources, to revalidate a holder whose earlier pre-pod steps (Trainer
@@ -644,7 +647,7 @@ func ncclExecutionLockHeldBy(ctx context.Context, clientset kubernetes.Interface
 	leaseClient := clientset.CoordinationV1().Leases(namespace)
 	lease, err := leaseClient.Get(getCtx, ncclRunLockName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		return true, nil
+		return false, nil
 	}
 	if err != nil {
 		return false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to check NCCL benchmark execution lock", err)

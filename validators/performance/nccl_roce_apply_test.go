@@ -23,6 +23,7 @@ import (
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -128,9 +129,20 @@ func TestCreateOrUpdateFromTemplate_RoCEClaimIdempotent(t *testing.T) {
 const testNamespaceUID = types.UID("test-owner-uid")
 
 // testHolderID is the execution lock holder ID used across cleanupNCCLRun
-// tests that don't seed a Lease. ncclExecutionLockHeldBy treats a missing
-// Lease as nothing left to protect, so any value works here.
+// tests. Pair it with testHeldLease so ncclExecutionLockHeldBy finds a live
+// Lease naming this holder, rather than failing closed on one that's missing.
 const testHolderID = "test-holder-id"
+
+// testHeldLease returns a Lease naming testHolderID as the current holder
+// of namespace's execution lock, for tests that exercise cleanupNCCLRun
+// without covering the lock check itself.
+func testHeldLease(namespace string) *coordinationv1.Lease {
+	holder := testHolderID
+	return &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: namespace},
+		Spec:       coordinationv1.LeaseSpec{HolderIdentity: &holder},
+	}
+}
 
 // TestCleanupNCCLResources_ToleratesMissing verifies the deferred cleanup is
 // safe to run after an early/partial-apply failure. With no namespace ever

@@ -717,7 +717,10 @@ func TestWaitForPodByLabelSelector_IgnoresStaleDeletedLauncher(t *testing.T) {
 // always delete the namespace first.
 func TestCleanupNCCLRun_DeletesNamespaceBeforeTrainer(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
-	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
+	clientset := fake.NewClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}},
+		testHeldLease(ns),
+	)
 	dynamicClient := newTrainerFakeClient()
 
 	var order []string
@@ -748,7 +751,10 @@ func TestCleanupNCCLRun_DeletesNamespaceBeforeTrainer(t *testing.T) {
 // not just the namespace half of cleanup.
 func TestCleanupNCCLRun_PropagatesTrainerCleanupFailure(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
-	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
+	clientset := fake.NewClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}},
+		testHeldLease(ns),
+	)
 	dynamicClient := newTrainerFakeClient()
 	dynamicClient.PrependReactor("delete", "deployments", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "deployments"}, trainerControllerDeployment, nil)
@@ -772,7 +778,10 @@ func TestCleanupNCCLRun_PropagatesTrainerCleanupFailure(t *testing.T) {
 // namespace delete itself fails.
 func TestCleanupNCCLRun_SkipsTrainerTeardownOnNamespaceDeleteFailure(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
-	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
+	clientset := fake.NewClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}},
+		testHeldLease(ns),
+	)
 	dynamicClient := newTrainerFakeClient()
 
 	clientset.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -893,6 +902,37 @@ func TestClaimNCCLExecutionLock_ReclaimsWellBeforeNamespacePruneAge(t *testing.T
 
 	if _, err := claimNCCLExecutionLock(context.Background(), clientset, ns); err != nil {
 		t.Errorf("expected the dead holder's lock to be reclaimed, got: %v", err)
+	}
+}
+
+// TestNcclExecutionLockHeldBy_MissingLeaseFailsClosed checks that a missing
+// Lease reports the lock not held, not held by default.
+func TestNcclExecutionLockHeldBy_MissingLeaseFailsClosed(t *testing.T) {
+	clientset := fake.NewClientset()
+
+	held, err := ncclExecutionLockHeldBy(context.Background(), clientset, "aicr-nccl-perf-deadbeef", testHolderID)
+	if err != nil {
+		t.Fatalf("ncclExecutionLockHeldBy() error = %v", err)
+	}
+	if held {
+		t.Error("expected a missing Lease to report the lock not held")
+	}
+}
+
+// TestCleanupNCCLRun_MissingLeaseSkipsDelete checks that cleanupNCCLRun
+// leaves the namespace alone, instead of deleting it, when its Lease is
+// missing.
+func TestCleanupNCCLRun_MissingLeaseSkipsDelete(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
+	dynamicClient := newTrainerFakeClient()
+
+	if err := cleanupNCCLRun(clientset, dynamicClient, ns, testNamespaceUID, testHolderID, nil, nil); err != nil {
+		t.Fatalf("cleanupNCCLRun failed: %v", err)
+	}
+
+	if _, err := clientset.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{}); err != nil {
+		t.Errorf("expected the namespace to survive a missing Lease, got: %v", err)
 	}
 }
 
