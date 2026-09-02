@@ -75,6 +75,10 @@ spec:
         - components/gpu-operator-ocp/manifests/clusterpolicy.yaml
       dependencyRefs:
         - gpu-operator-ocp-olm
+        # The OCP ClusterPolicy enables the legacy nvidia-peermem route.
+        # Deploy Network Operator's NicClusterPolicy (and, when requested,
+        # its DOCA/OFED readiness gate) before the GPU driver stack (#2499).
+        - network-operator-ocp
 
     # Network Operator via OLM for RDMA/InfiniBand networking
     - name: network-operator-ocp-olm

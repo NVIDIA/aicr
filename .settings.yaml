@@ -97,10 +97,10 @@ testing_tools:
   # The darwin_* keys name GOOS (matching the sibling blocks); upstream labels
   # those release assets "macos".
   helm_diff_checksums:
-    linux_amd64: 'ed54aa5a14a51a6e44cf8ab6020aaa9e56779b4d33bc2adf07abea6b240a5e7c'
-    linux_arm64: '1c38c487ec348fe5ef2b10c61deddff79f0fa5bfbab762b302874578e6dc2d2c'
-    darwin_amd64: '833e1054d0cfe28bbd6f2edc4c1d5b786968b7732f8df6fe99b67c3bf12bf7bb'
-    darwin_arm64: 'ba489cc4a5998ad259fbc18c454f2319da26ba4c8f469e7acb587a07e61072cd'
+    linux_amd64: '977f92cd82269585a3ee7744d646462142333bb0be573fd8be0c983973175fc7'
+    linux_arm64: 'c3d240d4b284b57b6ab76bbfe47ac84edbf0de239f15c4ff759152fa2b7777f8'
+    darwin_amd64: 'b0f836ad0ca146f896d0da16ffd03bde4d414cd2e2920b11455cd551f3adf933'
+    darwin_arm64: 'cb9e5b6cb157e17bc70ca0f719635914fa9c39e89b82d67a0b78c4538632b580'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
   helmfile: 'v1.7.4'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums

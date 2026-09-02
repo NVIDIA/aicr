@@ -154,10 +154,10 @@ spec:
 // the emitter's RBAC surface stays statically auditable — the trade-off is
 // that a new readiness gate for a new API group must be registered here.
 func componentClusterRoleRules(componentName string) string {
-	switch componentName { //nolint:gocritic // single case today; kept as a switch per the doc-comment rationale above (future readiness gates register a new case here).
-	case "network-operator":
-		// See recipes/components/network-operator/readiness.yaml — the
-		// gate asserts on mellanox.com/v1alpha1 NicClusterPolicy.
+	switch componentName { //nolint:gocritic // one permission family today; kept as a switch so future readiness API groups remain explicitly allowlisted.
+	case "network-operator", "network-operator-ocp":
+		// See recipes/components/network-operator*/readiness.yaml — both
+		// gates assert on mellanox.com/v1alpha1 NicClusterPolicy.
 		return `  - apiGroups: ["mellanox.com"]
     resources: ["nicclusterpolicies"]
     verbs: ["get", "list", "watch"]

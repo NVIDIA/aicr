@@ -3677,11 +3677,13 @@ func TestMake_ArgoCDRejectsDynamic(t *testing.T) {
 
 // TestMake_OCP builds a real OCP inference recipe via BuildFromCriteria,
 // bundles it with --readiness-hooks, and verifies:
-//   - Numbered folder layout: 3 OLM + 3 readiness + 3 CR = 9 directories
+//   - Numbered operator-folder layout: each OLM release and readiness gate,
+//     each operator CR, and the Network Operator CR readiness barrier
 //   - Rendered manifest content: Subscription, OperatorGroup, ClusterPolicy,
 //     and the DRA eviction contract in the ClusterPolicy driver manager
 //   - Readiness gate folders with correct gate image
-//   - Deployment ordering: OLM < readiness < CR for each operator
+//   - Deployment ordering: OLM < readiness < CR for each operator, plus
+//     network CR < network readiness < GPU CR for the peermem path
 func TestMake_OCP(t *testing.T) {
 	b := recipe.NewBuilder()
 	criteria := &recipe.Criteria{
@@ -3749,12 +3751,16 @@ func TestMake_OCP(t *testing.T) {
 		}
 	}
 
-	// Assert readiness gate directories exist (one per OLM component).
+	// Assert readiness gate directories exist (one per OLM component), plus
+	// the Network Operator CR barrier that waits for DOCA/OFED reconciliation.
 	for _, olm := range olmComponents {
 		rdnsName := olm + "-readiness"
 		if _, ok := dirByName[rdnsName]; !ok {
 			t.Errorf("missing readiness directory: %s", rdnsName)
 		}
+	}
+	if _, ok := dirByName["network-operator-ocp-readiness"]; !ok {
+		t.Error("missing readiness directory: network-operator-ocp-readiness")
 	}
 
 	// Assert ordering: OLM < readiness < CR for each operator pair.
@@ -3778,6 +3784,23 @@ func TestMake_OCP(t *testing.T) {
 		}
 		if rdnsSeq >= crSeq {
 			t.Errorf("%s-readiness (seq %d) must precede %s (seq %d)", op.olm, rdnsSeq, op.cr, crSeq)
+		}
+	}
+
+	// The direct dependency added for #2499 must put the Network Operator CR
+	// and its aggregate readiness barrier before the GPU ClusterPolicy. The
+	// latter enables driver.rdma and starts the nvidia-peermem path.
+	networkCRSeq, networkCROK := dirByName["network-operator-ocp"]
+	networkReadinessSeq, networkReadinessOK := dirByName["network-operator-ocp-readiness"]
+	gpuCRSeq, gpuCROK := dirByName["gpu-operator-ocp"]
+	if networkCROK && networkReadinessOK && gpuCROK {
+		if networkCRSeq >= networkReadinessSeq {
+			t.Errorf("network-operator-ocp (seq %d) must precede its readiness barrier (seq %d)",
+				networkCRSeq, networkReadinessSeq)
+		}
+		if networkReadinessSeq >= gpuCRSeq {
+			t.Errorf("network-operator-ocp-readiness (seq %d) must precede gpu-operator-ocp (seq %d)",
+				networkReadinessSeq, gpuCRSeq)
 		}
 	}
 
@@ -3832,8 +3855,9 @@ func TestMake_OCP(t *testing.T) {
 	// Assert readiness gate content — each readiness folder must contain the
 	// gate image reference.
 	wantImage := "ghcr.io/nvidia/aicr-gate:" + testVersion
-	for _, olm := range olmComponents {
-		rdnsDir := findNumberedDir(t, outDir, olm+"-readiness")
+	readinessComponents := append(append([]string(nil), olmComponents...), "network-operator-ocp")
+	for _, component := range readinessComponents {
+		rdnsDir := findNumberedDir(t, outDir, component+"-readiness")
 		if rdnsDir == "" {
 			continue
 		}
@@ -3846,7 +3870,30 @@ func TestMake_OCP(t *testing.T) {
 			}
 		}
 		if !found {
-			t.Errorf("%s-readiness: gate image %q not found in templates", olm, wantImage)
+			t.Errorf("%s-readiness: gate image %q not found in templates", component, wantImage)
+		}
+	}
+
+	// The OCP Network Operator CR barrier must assert the operator's aggregate
+	// NicClusterPolicy state and carry the least-privilege read permissions
+	// synthesized by gatemanifest.Render.
+	networkReadinessDir := findNumberedDir(t, outDir, "network-operator-ocp-readiness")
+	if networkReadinessDir != "" {
+		templates := readTemplateFiles(t, networkReadinessDir)
+		var rendered strings.Builder
+		for _, content := range templates {
+			rendered.WriteString(content)
+		}
+		body := rendered.String()
+		for _, want := range []string{
+			"kind: NicClusterPolicy",
+			"state: ready",
+			"(status.state != 'ready'): true",
+			"nicclusterpolicies",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("network-operator-ocp-readiness missing %q", want)
+			}
 		}
 	}
 }

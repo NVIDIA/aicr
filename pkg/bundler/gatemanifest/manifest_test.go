@@ -159,23 +159,25 @@ func TestRender_EmptyComponentName(t *testing.T) {
 	}
 }
 
-// TestRender_NetworkOperator pins the component-specific mellanox.com
-// rule that componentClusterRoleRules injects only for the
-// network-operator gate (PR #2337 review).
+// TestRender_NetworkOperator pins the component-specific mellanox.com rule
+// that componentClusterRoleRules injects only for Network Operator gates.
 func TestRender_NetworkOperator(t *testing.T) {
-	got, err := Render("network-operator", "img:tag", []byte(validReadinessTestYAML), config.DeployerArgoCD)
-	if err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	s := string(got)
-
 	const mellanoxRule = `  - apiGroups: ["mellanox.com"]
     resources: ["nicclusterpolicies"]
     verbs: ["get", "list", "watch"]`
-	if !strings.Contains(s, mellanoxRule) {
-		t.Errorf("network-operator manifest missing mellanox.com rule:\n%s", s)
-	}
-	if strings.Count(s, `apiGroups: ["mellanox.com"]`) != 1 {
-		t.Errorf("mellanox.com rule must appear exactly once in the ClusterRole; got:\n%s", s)
+	for _, componentName := range []string{"network-operator", "network-operator-ocp"} {
+		t.Run(componentName, func(t *testing.T) {
+			got, err := Render(componentName, "img:tag", []byte(validReadinessTestYAML), config.DeployerArgoCD)
+			if err != nil {
+				t.Fatalf("Render: %v", err)
+			}
+			s := string(got)
+			if !strings.Contains(s, mellanoxRule) {
+				t.Errorf("%s manifest missing mellanox.com rule:\n%s", componentName, s)
+			}
+			if strings.Count(s, `apiGroups: ["mellanox.com"]`) != 1 {
+				t.Errorf("mellanox.com rule must appear exactly once in the ClusterRole; got:\n%s", s)
+			}
+		})
 	}
 }

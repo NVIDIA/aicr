@@ -226,22 +226,44 @@ func TestReleaseSBOMCoversBothPlatforms(t *testing.T) {
 	}
 }
 
-// TestReleaseCosignAttestationsAreBounded pins the subject cardinality as well
-// as the timeout. An SBOM describes one root filesystem, so each platform SBOM
-// must be attested against that platform's own manifest digest; the OpenVEX
-// document is platform independent and belongs on the index digest. Regressing
-// an SBOM subject back to the index digest is the exact defect #1957 fixed, and
-// nothing else in the suite would catch it.
+// TestReleaseCosignAttestationsAreBounded pins the subject cardinality and the
+// predicate types as well as the timeout. Both per-platform documents describe
+// exactly one root filesystem, and a consumer that resolved linux/amd64
+// enumerates referrers on that child manifest, so each must be attested against
+// that platform's own manifest digest — an index-scoped copy is invisible from
+// where it is looked for. The two documents also have to stay in *different*
+// formats: a referrer descriptor carries no name, so two CycloneDX predicates
+// on one manifest are indistinguishable in a listing without fetching every
+// payload (#2426). Regressing a subject back to the index digest is the defect
+// #1957 fixed, and nothing else in the suite would catch either failure.
 func TestReleaseCosignAttestationsAreBounded(t *testing.T) {
 	doc := loadYAML(t, ".github/actions/sbom-and-attest/action.yml")
 	steps := sliceValue(t, mapValue(t, doc, "runs"), "steps")
 	for _, tc := range []struct {
-		name    string
-		subject string
+		name          string
+		subject       string
+		predicateType string
 	}{
-		{name: "Cosign amd64 SBOM attestation", subject: "${{ steps.validate.outputs.amd64_digest }}"},
-		{name: "Cosign arm64 SBOM attestation", subject: "${{ steps.validate.outputs.arm64_digest }}"},
-		{name: "Cosign OpenVEX attestation", subject: "${{ steps.validate.outputs.image_digest }}"},
+		{
+			name:          "Cosign amd64 SBOM attestation",
+			subject:       "${{ steps.validate.outputs.amd64_digest }}",
+			predicateType: "cyclonedx",
+		},
+		{
+			name:          "Cosign arm64 SBOM attestation",
+			subject:       "${{ steps.validate.outputs.arm64_digest }}",
+			predicateType: "cyclonedx",
+		},
+		{
+			name:          "Cosign amd64 OpenVEX attestation",
+			subject:       "${{ steps.validate.outputs.amd64_digest }}",
+			predicateType: "openvex",
+		},
+		{
+			name:          "Cosign arm64 OpenVEX attestation",
+			subject:       "${{ steps.validate.outputs.arm64_digest }}",
+			predicateType: "openvex",
+		},
 	} {
 		index := stepIndex(steps, tc.name)
 		if index < 0 {
@@ -257,6 +279,9 @@ func TestReleaseCosignAttestationsAreBounded(t *testing.T) {
 		if !strings.Contains(run, "--new-bundle-format=true") {
 			t.Errorf("%s must set --new-bundle-format=true explicitly", tc.name)
 		}
+		if !strings.Contains(run, "--type "+tc.predicateType+" ") {
+			t.Errorf("%s must attest with --type %s", tc.name, tc.predicateType)
+		}
 		variable := ""
 		for key, value := range mapValue(t, step, "env") {
 			if fmt.Sprint(value) == tc.subject {
@@ -269,6 +294,85 @@ func TestReleaseCosignAttestationsAreBounded(t *testing.T) {
 		}
 		if reference := "\"${IMAGE_NAME}@${" + variable + "}\""; !strings.Contains(run, reference) {
 			t.Errorf("%s must attest %s, want subject reference %s", tc.name, tc.subject, reference)
+		}
+	}
+
+	action := string(readFile(t, ".github/actions/sbom-and-attest/action.yml"))
+	// Exactly four: two SBOMs and two VEX documents. A fifth call would mean a
+	// document slipped back onto the index, or a second predicate of the same
+	// type landed on one manifest.
+	if got := strings.Count(action, "timeout --foreground 120s cosign attest"); got != 4 {
+		t.Errorf("sbom-and-attest issues %d cosign attest calls, want 4 (SBOM + VEX per platform)", got)
+	}
+	// The SPDX SBOM attestation was replaced by the CycloneDX one; publishing
+	// both would put two SBOMs on one subject for no added assurance.
+	if strings.Contains(action, "spdxjson") {
+		t.Error("the SPDX container SBOM attestation was removed; do not reintroduce --type spdxjson")
+	}
+	// Provenance is the only index-scoped attestation, and it is produced by
+	// actions/attest-build-provenance rather than by cosign.
+	if strings.Contains(action, "${IMAGE_DIGEST}\"") {
+		t.Error("no cosign attest call may take the multi-platform index digest as its subject")
+	}
+}
+
+// TestReleaseOpenVEXBindsToPlatformDigests pins the digest-binding step. A VEX
+// statement is only verifiable when its product identifier names the manifest
+// the claim covers, so the published document must be the projection
+// tools/openvex-bind produces, never the committed file with its bare
+// `pkg:oci/<image>` products.
+func TestReleaseOpenVEXBindsToPlatformDigests(t *testing.T) {
+	t.Parallel()
+	doc := loadYAML(t, ".github/actions/sbom-and-attest/action.yml")
+	steps := sliceValue(t, mapValue(t, doc, "runs"), "steps")
+
+	bindIndex := stepIndex(steps, "Bind OpenVEX to platform manifests")
+	if bindIndex < 0 {
+		t.Fatal("sbom-and-attest must bind the OpenVEX document to each platform manifest digest")
+	}
+	bind := steps[bindIndex].(map[string]any)
+	script := stringValue(t, bind, "run")
+	if !strings.Contains(script, "go run ./tools/openvex-bind") {
+		t.Error("binding must go through tools/openvex-bind, not an inline rewrite")
+	}
+	for _, variable := range []string{"AMD64_DIGEST", "ARM64_DIGEST"} {
+		if !strings.Contains(script, variable) {
+			t.Errorf("binding step must project onto %s", variable)
+		}
+	}
+	// The projection is what gets signed, so it has to clear the guard here.
+	// The source check upstream covers different bytes: binding rewrites
+	// `products` on every statement it keeps.
+	if !strings.Contains(script, "validate_openvex projection") {
+		t.Error("each generated projection must be validated before it can reach cosign attest")
+	}
+	written := strings.Index(script, "-out")
+	checked := strings.Index(script, "validate_openvex projection")
+	if written < 0 || written > checked {
+		t.Error("the projection must be validated after it is written, not before")
+	}
+
+	// Validation has to precede binding: a malformed source must stop the
+	// release before anything derived from it is written, let alone signed.
+	vexIndex := stepIndex(steps, "Verify OpenVEX document")
+	if vexIndex < 0 {
+		t.Fatal("sbom-and-attest must validate the OpenVEX document")
+	}
+	if vexIndex > bindIndex {
+		t.Error("OpenVEX validation must run before the document is bound to a digest")
+	}
+	for _, name := range []string{"Cosign amd64 OpenVEX attestation", "Cosign arm64 OpenVEX attestation"} {
+		index := stepIndex(steps, name)
+		if index < 0 {
+			t.Fatalf("missing step %q", name)
+		}
+		if index < bindIndex {
+			t.Errorf("%s must run after the binding step", name)
+		}
+		run := stringValue(t, steps[index].(map[string]any), "run")
+		// Attesting ${VEX_FILE} would publish the unbound committed document.
+		if strings.Contains(run, "${VEX_FILE}") {
+			t.Errorf("%s must attest the bound projection, not the committed .openvex.json", name)
 		}
 	}
 }
@@ -453,6 +557,13 @@ const openVEXContext = "https://openvex.dev/ns/v0.2.0"
 // the shapes that pass a naive presence check (an empty `statements` array, a
 // `{}` statement, a `not_affected` statement with no reason) are exactly the
 // ones that look healthy until a downstream consumer tries to use them.
+//
+// Two documents pass through the guard and every case below runs against both:
+// the committed source, and the per-platform projection, which is what actually
+// gets signed. Checking only the source would leave the signed bytes unchecked,
+// because binding rewrites `products` on every statement it keeps. Exactly one
+// rule differs between the modes; every other case asserts the same verdict on
+// both sides.
 func TestReleaseOpenVEXValidation(t *testing.T) {
 	t.Parallel()
 	doc := loadYAML(t, ".github/actions/sbom-and-attest/action.yml")
@@ -461,10 +572,29 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 	if index < 0 {
 		t.Fatal("sbom-and-attest must verify the OpenVEX document before attesting it")
 	}
-	step := steps[index].(map[string]any)
-	script := stringValue(t, step, "run")
-	if got := fmt.Sprint(mapValue(t, step, "env")["VEX_CONTEXT"]); got != openVEXContext {
-		t.Fatalf("VEX_CONTEXT = %q, want %q", got, openVEXContext)
+	script := stringValue(t, steps[index].(map[string]any), "run")
+
+	bindIndex := stepIndex(steps, "Bind OpenVEX to platform manifests")
+	if bindIndex < 0 {
+		t.Fatal("sbom-and-attest must bind the OpenVEX document to each platform manifest digest")
+	}
+	bindScript := stringValue(t, steps[bindIndex].(map[string]any), "run")
+
+	// The pinned @context lives in the shared guard, not in a step's `env:`.
+	// Two per-step pins could name two different spec versions, which would let
+	// a projection be validated against enums that no longer describe it.
+	guard := string(readFile(t, openVEXGuardPath))
+	if want := `OPENVEX_CONTEXT="` + openVEXContext + `"`; !strings.Contains(guard, want) {
+		t.Fatalf("%s must pin the OpenVEX namespace with %s", openVEXGuardPath, want)
+	}
+	if action := string(readFile(t, ".github/actions/sbom-and-attest/action.yml")); strings.Contains(action, "VEX_CONTEXT") {
+		t.Error("the OpenVEX @context must be pinned only in openvex-guard.sh, not in a step env")
+	}
+	// One jq program, two callers. Copy-pasting the rules per mode is the
+	// failure this guards against: the copies drift, and the projection
+	// silently stops enforcing whatever the source gained.
+	if got := strings.Count(guard, "def statement("); got != 1 {
+		t.Errorf("openvex-guard.sh defines the statement rules %d times, want exactly 1", got)
 	}
 
 	const validStatement = `{"vulnerability": {"name": "CVE-2026-0001"},
@@ -480,6 +610,10 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 		name     string
 		document string
 		wantErr  string
+		// projectionOK marks the single rule that is scoped to the source
+		// only: the case is expected to be rejected as a source and accepted
+		// as a projection.
+		projectionOK bool
 	}{
 		{name: "a complete document is accepted", document: document(validStatement)},
 		{
@@ -498,7 +632,16 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 			document: strings.Replace(document(validStatement), `"version": 1`, `"version": "1"`, 1),
 			wantErr:  "version must be a number",
 		},
-		{name: "empty statements", document: document(""), wantErr: "statements must not be empty"},
+		{
+			// The one rule that differs by intent. An empty committed source
+			// means someone truncated or mis-generated it. An empty projection
+			// means the image has no triaged CVE, which is the honest answer
+			// for six of the seven released images.
+			name:         "empty statements",
+			document:     document(""),
+			wantErr:      "statements must not be empty",
+			projectionOK: true,
+		},
 		{
 			name:     "statement with no fields",
 			document: document(`{}`),
@@ -548,12 +691,28 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 			document: document(`"CVE-2026-0001"`),
 			wantErr:  "statement 0 must be a JSON object",
 		},
+		{
+			// OpenVEX types each subcomponents entry as a Component object, so
+			// a scalar member has to be rejected before it is signed.
+			name: "subcomponents holding a scalar",
+			document: document(`{"vulnerability": {"name": "CVE-2026-0001"},
+				"products": [{"@id": "pkg:oci/aicr", "subcomponents": [42]}],
+				"status": "fixed"}`),
+			wantErr: "statement 0 has a product whose subcomponents is not an array of objects",
+		},
+		{
+			name: "subcomponents that is not an array",
+			document: document(`{"vulnerability": {"name": "CVE-2026-0001"},
+				"products": [{"@id": "pkg:oci/aicr", "subcomponents": "libssl3t64"}],
+				"status": "fixed"}`),
+			wantErr: "statement 0 has a product whose subcomponents is not an array of objects",
+		},
 		{name: "document that is not an object", document: `[]`, wantErr: "statements must be an array"},
 		{name: "document that is not JSON", document: `{`, wantErr: "not valid JSON"},
 		{name: "empty document", document: "", wantErr: "not found or empty"},
 	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run("source/"+tc.name, func(t *testing.T) {
 			t.Parallel()
 			workspace := t.TempDir()
 			vex := filepath.Join(workspace, ".openvex.json")
@@ -574,7 +733,41 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 				t.Errorf("accepted document did not publish the file output: %q", output)
 			}
 		})
+
+		// The projection is what gets signed, so it is held to the same rules.
+		// This runs the real binding step with the generator stubbed out, which
+		// is what proves the check is wired in ahead of every cosign attest
+		// call rather than merely available to be called.
+		t.Run("projection/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			wantErr := tc.wantErr
+			if tc.projectionOK {
+				wantErr = ""
+			}
+			output, result := runOpenVEXProjectionGuard(t, bindScript, tc.document, false)
+			if (result != nil) != (wantErr != "") {
+				t.Fatalf("binding guard error = %v, wantErr %q\n%s", result, wantErr, output)
+			}
+			if wantErr != "" && !strings.Contains(output, wantErr) {
+				t.Errorf("binding guard output = %q, want it to report %q", output, wantErr)
+			}
+		})
 	}
+
+	// The failure the projection rule exists to catch: binding did not happen,
+	// so the signed document would carry bare `pkg:oci/<image>` products that no
+	// consumer can tie back to a manifest. Every other rule passes here, which
+	// is exactly why the guard has to check binding specifically.
+	t.Run("projection/unbound products are rejected", func(t *testing.T) {
+		t.Parallel()
+		output, err := runOpenVEXProjectionGuard(t, bindScript, document(validStatement), true)
+		if err == nil {
+			t.Fatalf("an unbound projection reached cosign attest\n%s", output)
+		}
+		if !strings.Contains(output, "not bound to @") {
+			t.Errorf("guard output = %q, want it to name the unbound identifier", output)
+		}
+	})
 
 	// The shipped document has to survive the guard it is published through.
 	// A release cannot be the first place this is discovered.
@@ -592,9 +785,47 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 	})
 }
 
-// runOpenVEXGuard executes the extracted guard against a workspace holding a
-// candidate `.openvex.json`, returning the combined step output (its ::error::
-// annotations and the GITHUB_OUTPUT contents) alongside the exit status.
+// openVEXGuardPath is the shared validation library that both the source check
+// and the per-platform projection check run.
+const openVEXGuardPath = ".github/actions/sbom-and-attest/openvex-guard.sh"
+
+// fakeOpenVEXBind stands in for `go run ./tools/openvex-bind` so the binding
+// step can be driven with an arbitrary projection. The generator has its own
+// tests in tools/openvex-bind; what this covers is the step's handling of what
+// comes back, which is where the guard has to sit.
+//
+// It performs the one transformation the guard checks for — qualifying product
+// identifiers with the digest it was handed — so each platform in the step's
+// loop gets a projection bound to its own manifest. Setting
+// FAKE_BIND_SKIP_BINDING=1 suppresses that, which is how the test reproduces
+// the failure the projection rule exists to catch.
+const fakeOpenVEXBind = `#!/usr/bin/env bash
+set -euo pipefail
+out=""
+digest=""
+previous=""
+for argument in "$@"; do
+  case "${previous}" in
+    -out) out="${argument}" ;;
+    -digest) digest="${argument}" ;;
+  esac
+  previous="${argument}"
+done
+if [[ -z "${out}" || -z "${digest}" ]]; then
+  echo "fake go: the step did not pass both -out and -digest" >&2
+  exit 1
+fi
+if [[ "${FAKE_BIND_SKIP_BINDING:-0}" == "1" ]]; then
+  cat "${FAKE_BIND_FIXTURE}" > "${out}"
+else
+  sed "s|pkg:oci/aicr|pkg:oci/aicr@${digest}|g" "${FAKE_BIND_FIXTURE}" > "${out}"
+fi
+`
+
+// runOpenVEXGuard executes the extracted source-verification step against a
+// workspace holding a candidate `.openvex.json`, returning the combined step
+// output (its ::error:: annotations and the GITHUB_OUTPUT contents) alongside
+// the exit status.
 func runOpenVEXGuard(t *testing.T, script, workspace string) (string, error) {
 	t.Helper()
 	budget := scriptBudget(t)
@@ -603,9 +834,9 @@ func runOpenVEXGuard(t *testing.T, script, workspace string) (string, error) {
 	outputs := filepath.Join(t.TempDir(), "outputs")
 	command := exec.CommandContext(ctx, "bash", "-c", script)
 	command.Env = append(os.Environ(),
+		"GITHUB_ACTION_PATH="+filepath.Join(repositoryRoot(t), ".github/actions/sbom-and-attest"),
 		"GITHUB_WORKSPACE="+workspace,
 		"GITHUB_OUTPUT="+outputs,
-		"VEX_CONTEXT="+openVEXContext,
 	)
 	combined, err := command.CombinedOutput()
 	if ctx.Err() != nil {
@@ -616,6 +847,60 @@ func runOpenVEXGuard(t *testing.T, script, workspace string) (string, error) {
 		t.Fatalf("read step outputs: %v", readErr)
 	}
 	return string(combined) + string(written), err
+}
+
+// runOpenVEXProjectionGuard executes the extracted binding step with the
+// generator replaced by a stub that emits document, so the projection the step
+// validates is the one the caller chose. It returns the combined output and the
+// exit status; a non-nil error means the step refused to hand that projection
+// on to `cosign attest`.
+func runOpenVEXProjectionGuard(t *testing.T, bindScript, document string, skipBinding bool) (string, error) {
+	t.Helper()
+	budget := scriptBudget(t)
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0o700); err != nil {
+		t.Fatalf("create fake bin: %v", err)
+	}
+	writeExecutable(t, filepath.Join(bin, "go"), fakeOpenVEXBind)
+
+	fixture := filepath.Join(dir, "projection.json")
+	if err := os.WriteFile(fixture, []byte(document), 0o600); err != nil {
+		t.Fatalf("write projection fixture: %v", err)
+	}
+	// The step writes its projections into the working directory, so give it
+	// one of its own rather than the package directory.
+	workdir := filepath.Join(dir, "workspace")
+	if err := os.Mkdir(workdir, 0o700); err != nil {
+		t.Fatalf("create step workdir: %v", err)
+	}
+
+	skip := "0"
+	if skipBinding {
+		skip = "1"
+	}
+	command := exec.CommandContext(ctx, "bash", "-c", bindScript)
+	command.Dir = workdir
+	command.Env = append(os.Environ(),
+		"PATH="+bin+":"+os.Getenv("PATH"),
+		"GITHUB_ACTION_PATH="+filepath.Join(repositoryRoot(t), ".github/actions/sbom-and-attest"),
+		"FAKE_BIND_FIXTURE="+fixture,
+		"FAKE_BIND_SKIP_BINDING="+skip,
+		"IMAGE_NAME=ghcr.io/nvidia/aicr",
+		"AMD64_DIGEST=sha256:1111111111111111111111111111111111111111111111111111111111111111",
+		"ARM64_DIGEST=sha256:2222222222222222222222222222222222222222222222222222222222222222",
+		"VEX_FILE="+filepath.Join(repositoryRoot(t), ".openvex.json"),
+		"SAFE_NAME=aicr",
+	)
+	combined, err := command.CombinedOutput()
+	if ctx.Err() != nil {
+		t.Fatalf("OpenVEX binding guard exceeded %v budget (derived from -timeout): %v\n%s",
+			budget, ctx.Err(), combined)
+	}
+	return string(combined), err
 }
 
 // fakePlatformCrane answers `crane digest --platform <platform> <ref>` from a

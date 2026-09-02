@@ -28,9 +28,10 @@ AICR treats a deployment bundle as a closed-world inventory. `checksums.txt` con
 
 The artifacts above are the ones *you* produce with `aicr`. The container images
 NVIDIA publishes carry their own metadata, and all of it is retrievable from the
-registry as signed OCI referrers on the image: SLSA build provenance, an SPDX
-SBOM per platform, and an OpenVEX document recording the CVEs AICR has triaged
-as not affected. One command per kind:
+registry as signed OCI referrers on the image: SLSA build provenance on the
+multi-platform index, plus a CycloneDX SBOM and an OpenVEX document on each
+platform's own manifest digest, recording the CVEs AICR has triaged as not
+affected. One command per kind:
 
 ```shell
 # Extract under pipefail, and only write a predicate file once the whole
@@ -44,8 +45,8 @@ export IMAGE="ghcr.io/nvidia/aicr"
 export TAG=$(curl -s https://api.github.com/repos/NVIDIA/aicr/releases/latest | jq -r '.tag_name')
 export DIGEST=$(crane digest "${IMAGE}:${TAG}")
 # Resolve the platform digest from the pinned index, not from the tag: a tag
-# repointed between the two lookups would pair this SBOM with a different
-# release's index.
+# repointed between the two lookups would pair this SBOM and VEX with a
+# different release's index.
 export DIGEST_AMD64=$(crane digest --platform linux/amd64 "${IMAGE}@${DIGEST}")
 export AICR_ISSUER="https://token.actions.githubusercontent.com"
 export AICR_SIGNER="https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/${TAG}"
@@ -56,18 +57,18 @@ gh attestation verify "oci://${IMAGE}@${DIGEST}" --repo NVIDIA/aicr \
   --source-ref "refs/tags/${TAG}" \
   --bundle-from-oci
 
-# SPDX SBOM (attached to the per-platform manifest digest)
-sbom=$(cosign verify-attestation --type spdxjson \
+# CycloneDX SBOM (attached to the per-platform manifest digest)
+sbom=$(cosign verify-attestation --type cyclonedx \
   --certificate-oidc-issuer "${AICR_ISSUER}" \
   --certificate-identity "${AICR_SIGNER}" \
   "${IMAGE}@${DIGEST_AMD64}" | jq -r '.payload' | base64 -d | jq '.predicate') \
-  && printf '%s\n' "${sbom}" > sbom.spdx.json
+  && printf '%s\n' "${sbom}" > sbom.cdx.json
 
-# OpenVEX triage document (attached to the index digest)
+# OpenVEX triage document (attached to the same per-platform manifest digest)
 openvex=$(cosign verify-attestation --type openvex \
   --certificate-oidc-issuer "${AICR_ISSUER}" \
   --certificate-identity "${AICR_SIGNER}" \
-  "${IMAGE}@${DIGEST}" | jq -r '.payload' | base64 -d | jq '.predicate') \
+  "${IMAGE}@${DIGEST_AMD64}" | jq -r '.payload' | base64 -d | jq '.predicate') \
   && printf '%s\n' "${openvex}" > aicr-openvex.json
 ```
 
@@ -78,21 +79,41 @@ referrer push had silently failed. `--source-ref` and the exact
 `--certificate-identity` bind the result to release `${TAG}` rather than to any
 NVIDIA/aicr release.
 
+The SBOM and the VEX are attested to the platform manifest, not to the index,
+because each describes exactly one root filesystem, and because a consumer that
+has resolved `linux/amd64` enumerates referrers there. Repeat both commands
+against `linux/arm64` to retrieve that platform's pair. The two documents are in
+different formats on purpose: a referrer descriptor has no name field, so
+publishing the VEX as OpenVEX rather than as a second CycloneDX document is what
+lets you tell them apart in a listing without downloading both.
+
 Pass the VEX document to your scanner so it suppresses the same findings AICR's
 own release scan suppresses, instead of re-reporting CVEs that have already been
 analyzed as unreachable:
 
 ```shell
-grype "${IMAGE}@${DIGEST}" --vex aicr-openvex.json --only-fixed --fail-on high
-trivy image --vex aicr-openvex.json "${IMAGE}@${DIGEST}"
+grype "${IMAGE}@${DIGEST_AMD64}" --vex aicr-openvex.json --only-fixed --fail-on high
+trivy image --vex aicr-openvex.json "${IMAGE}@${DIGEST_AMD64}"
 ```
 
-Each statement carries a `justification` and an `impact_statement` explaining
-why the vulnerable code is not reachable. Read those before adopting a
-suppression: the analysis is specific to how AICR invokes the affected
-component. The two `cosign verify-attestation` commands above need Cosign
-v3.0.1 or newer; `gh attestation verify` ships with the GitHub CLI and does not
-use Cosign, so it carries no such floor. For
+Each statement names one product, `pkg:oci/<image>@sha256:<platform-digest>`, so
+it binds to the manifest it was triaged against; scan the same digest you
+retrieved it from. Each also carries a `justification` and an
+`impact_statement` explaining why the vulnerable code is not reachable. Read
+those before adopting a suppression: the analysis is specific to how AICR
+invokes the affected component.
+
+An empty `statements` array is a valid result, not a failure: it means AICR has
+triaged no CVE for that image. Most released images are in that state at any
+given time; which ones is a property of the release you are verifying, so read
+the document you retrieved rather than assuming. **An empty VEX means "no
+exceptions asserted", not "no vulnerabilities."** It says what AICR has claimed, not what a scanner would
+find, so do not read one as a clean bill of health, and do not read the absence
+of a statement about a CVE as a claim that the image is unaffected by it. Every
+released image carries a document so that "no exceptions asserted" stays
+distinguishable from evidence that never reached the registry. The two `cosign verify-attestation` commands
+above need Cosign v3.0.1 or newer; `gh attestation verify` ships with the GitHub
+CLI and does not use Cosign, so it carries no such floor. For
 the full walkthrough, including the remaining release images and the signed
 binary SBOMs, see
 [Supply Chain Verification](../integrator/supply-chain-verification.md#unified-metadata-retrieval).

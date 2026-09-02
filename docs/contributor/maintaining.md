@@ -436,10 +436,11 @@ Two things are deliberately out of scope, both tracked as follow-ups:
 - **Container-image OCI referrer attestations** (SBOM / OpenVEX / SLSA
   provenance, [#1982](https://github.com/NVIDIA/aicr/issues/1982)). Those live in
   ghcr.io's referrer store — a different system with a different retention and GC
-  model from GitHub Releases — and re-verifying seven images times three
-  predicate kinds would add roughly twenty registry round-trips per run,
-  multiplying operational noise against the one signal this job exists to keep
-  crisp. The images are already pulled and scanned weekly by
+  model from GitHub Releases — and re-verifying seven images times five
+  attestations each (provenance on the index, plus a CycloneDX SBOM and an
+  OpenVEX document on each of the two platform manifests) would add roughly
+  thirty-five registry round-trips per run, multiplying operational noise
+  against the one signal this job exists to keep crisp. The images are already pulled and scanned weekly by
   `vuln-scan-images.yaml`. A registry-side sibling check must use
   `gh attestation verify --bundle-from-oci`, otherwise it reads GitHub's
   attestations API and proves nothing about the registry copy's retrievability.
