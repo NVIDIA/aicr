@@ -1063,6 +1063,97 @@ func TestNcclExecutionLockHeldBy_LosesRaceToTakeover(t *testing.T) {
 	}
 }
 
+// TestClaimNCCLExecutionLock_CreateError checks that a Create failure other
+// than AlreadyExists surfaces as an error, instead of falling through to the
+// takeover path meant for an existing Lease.
+func TestClaimNCCLExecutionLock_CreateError(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	clientset := fake.NewClientset()
+	clientset.PrependReactor("create", "leases", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewServiceUnavailable("apiserver unavailable")
+	})
+
+	if _, err := claimNCCLExecutionLock(context.Background(), clientset, ns); err == nil {
+		t.Fatal("expected a Create failure to surface as an error")
+	}
+}
+
+// TestClaimNCCLExecutionLock_UpdateError checks that a CAS-Update failure
+// other than a Conflict surfaces as an error, not the same ErrCodeConflict a
+// losing takeover gets.
+func TestClaimNCCLExecutionLock_UpdateError(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	staleHolder := "stale-holder"
+	staleRenew := metav1.NewMicroTime(time.Now().Add(-2 * defaults.NCCLExecutionLockStaleAge))
+	clientset := fake.NewClientset(&coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns},
+		Spec:       coordinationv1.LeaseSpec{HolderIdentity: &staleHolder, RenewTime: &staleRenew},
+	})
+	clientset.PrependReactor("update", "leases", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewServiceUnavailable("apiserver unavailable")
+	})
+
+	_, err := claimNCCLExecutionLock(context.Background(), clientset, ns)
+	if err == nil {
+		t.Fatal("expected an Update failure to surface as an error")
+	}
+	if stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+		t.Errorf("expected a plain Update failure, not ErrCodeConflict, got: %v", err)
+	}
+}
+
+// TestNcclExecutionLockHeldBy_GetError checks that a Lease read failure
+// other than NotFound surfaces as an error, instead of being treated the
+// same as a missing lock.
+func TestNcclExecutionLockHeldBy_GetError(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	clientset := fake.NewClientset()
+	clientset.PrependReactor("get", "leases", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewServiceUnavailable("apiserver unavailable")
+	})
+
+	if _, err := ncclExecutionLockHeldBy(context.Background(), clientset, ns, testHolderID); err == nil {
+		t.Fatal("expected a Lease read failure to surface as an error")
+	}
+}
+
+// TestNcclExecutionLockHeldBy_RenewError checks that a renew failure other
+// than a Conflict surfaces as an error, instead of quietly reporting the
+// lock as not held.
+func TestNcclExecutionLockHeldBy_RenewError(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	holder := testHolderID
+	clientset := fake.NewClientset(&coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns},
+		Spec:       coordinationv1.LeaseSpec{HolderIdentity: &holder},
+	})
+	clientset.PrependReactor("update", "leases", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewServiceUnavailable("apiserver unavailable")
+	})
+
+	if _, err := ncclExecutionLockHeldBy(context.Background(), clientset, ns, testHolderID); err == nil {
+		t.Fatal("expected a renew failure to surface as an error")
+	}
+}
+
+// TestRollbackNCCLNamespace_ToleratesDeleteFailure checks that a rollback
+// delete failure is only logged, not propagated. This is a leak-avoidance
+// nicety, not correctness-critical, since pruneStaleNCCLNamespaces reclaims
+// an orphaned namespace on a later run regardless.
+func TestRollbackNCCLNamespace_ToleratesDeleteFailure(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	clientset := fake.NewClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
+	clientset.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(schema.GroupResource{Resource: "namespaces"}, ns, nil)
+	})
+
+	rollbackNCCLNamespace(clientset, ns, testNamespaceUID) // must not panic
+
+	if _, err := clientset.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{}); err != nil {
+		t.Errorf("expected the namespace to survive a failed rollback delete, got: %v", err)
+	}
+}
+
 // raceClaimNCCLExecutionLock calls claimNCCLExecutionLock concurrently from
 // n goroutines against the same namespace and returns the winning holder
 // IDs and the errors from the rest.
@@ -1158,6 +1249,26 @@ func TestVerifyNCCLNamespaceNotLive(t *testing.T) {
 				t.Errorf("expected ErrCodeConflict, got %v", err)
 			}
 		})
+	}
+}
+
+// TestVerifyNCCLNamespaceNotLive_ListError checks that a Pods().List
+// failure surfaces as a plain error, instead of being treated the same as
+// an empty, safe-to-adopt namespace.
+func TestVerifyNCCLNamespaceNotLive_ListError(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	activeNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+	client := fake.NewClientset(activeNS)
+	client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewServiceUnavailable("apiserver unavailable")
+	})
+
+	err := verifyNCCLNamespaceNotLive(context.Background(), client, activeNS)
+	if err == nil {
+		t.Fatal("expected a Pods().List failure to surface as an error")
+	}
+	if stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+		t.Errorf("expected a plain read failure, not ErrCodeConflict, got: %v", err)
 	}
 }
 
