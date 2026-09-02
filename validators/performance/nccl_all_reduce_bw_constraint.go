@@ -731,6 +731,11 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 	// namespace could still depend on Trainer.
 	otherNamespacesRemain := false
 	for _, ns := range namespaces.Items {
+		if err := ctx.Err(); err != nil {
+			// Canceled mid-sweep. Stop issuing more calls for the
+			// remaining namespaces instead of letting each one fail in turn.
+			return
+		}
 		if ns.Name == currentNamespace {
 			continue
 		}
