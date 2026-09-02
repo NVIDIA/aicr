@@ -711,6 +711,29 @@ components:
         tolerationPaths:
           - controllerManager.tolerations
 
+  - name: lws
+    displayName: lws
+    valueOverrideKeys:
+      - lws
+      - leaderworkerset
+    healthCheck:
+      assertFile: checks/lws/health-check.yaml
+    helm:
+      defaultRepository: oci://registry.k8s.io/lws/charts
+      defaultChart: lws
+      defaultVersion: v0.8.0
+      defaultNamespace: lws-system
+    nodeScheduling:
+      system:
+        # Chart v0.8.0 exposes scheduling for the single
+        # lws-controller-manager Deployment at top level (verified via
+        # `helm show values oci://registry.k8s.io/lws/charts/lws
+        # --version v0.8.0`). Re-verify on defaultVersion bump.
+        nodeSelectorPaths:
+          - nodeSelector
+        tolerationPaths:
+          - tolerations
+
   - name: kubeflow-trainer
     displayName: kubeflow-trainer
     valueOverrideKeys:
