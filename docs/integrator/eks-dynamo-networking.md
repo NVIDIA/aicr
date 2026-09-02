@@ -14,7 +14,7 @@ nodegroup, so traffic still crosses the same GPU↔system nodegroup SG
 boundary as before.
 
 **Confirmed on a live Dynamo 1.4.1 EKS deployment (`aicr-gb300`, 2026-09-01)
-and against upstream runtime source (`lib/runtime/src/pipeline/network/manager`
+and against upstream runtime source (`lib/runtime/src/pipeline/network/manager.rs`,
 `distributed.rs`).** The 1.4.2 chart pins the same `grove`/`kai-scheduler`
 dependency versions as 1.4.1, so this is not expected to change in 1.4.2.
 Traffic crossing the GPU↔system nodegroup boundary is **bidirectional**, by
@@ -25,8 +25,9 @@ connection initiator:
 - **GPU/worker → system/frontend** — response-stream connection to the
   frontend's `DYN_TCP_RESPONSE_STREAM_PORT`. OS-assigned by default.
 - **System/router → GPU/worker** — ZMQ subscriber connects to the worker's
-  bound port `5557` (offset by `+dp_rank` for dp_rank > 0). What's
-  bound port `5557` (offset by `+dp_rank` for dp_rank > 0).
+  bound port `5557` (offset by `+dp_rank` for dp_rank > 0). KV-event data
+  then flows back over that established connection, but the SG rule
+  follows the connecting side (system → GPU), not the data direction.
 
 If the GPU and system node groups sit in different security groups, these
 ports may be blocked from GPU nodes to the frontend's node (and vice versa).
@@ -78,11 +79,14 @@ SG rule below remains the reliable cluster-side guarantee.
 
 ## Required Security Group Rules
 
-Allow ingress from the GPU node security group to the system node security
-group on:
-- TCP `5557` - ZMQ KV-event plane, system→GPU (dynamo-platform)
-- TCP ephemeral range `1024-65535` - Dynamo request plane `DYN_TCP_RPC_PORT`, system→GPU (OS-assigned)
-- TCP ephemeral range `1024-65535` - Dynamo response-stream `DYN_TCP_RESPONSE_STREAM_PORT`, GPU→system (OS-assigned)
+Allow ingress from the **system node security group to the GPU node
+security group** on:
+- TCP `5557` - ZMQ KV-cache event plane (fixed port)
+- TCP ephemeral range `1024-65535` - Dynamo request plane `DYN_TCP_RPC_PORT` (OS-assigned)
+
+Allow ingress from the **GPU node security group to the system node
+security group** on:
+- TCP ephemeral range `1024-65535` - Dynamo response-stream `DYN_TCP_RESPONSE_STREAM_PORT` (OS-assigned)
 - TCP `9090` - Prometheus (required for the `ai-service-metrics` conformance check)
 
 The `9090` rule is required as a fallback guarantee: the orchestrator *prefers*
