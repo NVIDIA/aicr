@@ -47,13 +47,10 @@ import (
 // Privileged *bool -> defaulted bool) do not trip it. Value correctness is
 // the per-derivation tests' job.
 //
-// Coverage is partial by resolved type, too: this file guards
-// SnapshotResolved, ValidateResolved and BundleResolved, but VerifyResolved
-// and EvidenceAttestationResolved each have a working derivation
-// (BundleVerifyOptions, EvidenceAttestationOptions) with no assertProjected
-// guard at all. Extending coverage to those two, and closing the
-// name-collision gap above with a stronger mechanism, are follow-up work —
-// not done here.
+// Coverage spans all five resolved types this package derives from
+// (SnapshotResolved, ValidateResolved, BundleResolved, VerifyResolved,
+// EvidenceAttestationResolved). Closing the name-collision gap above with a
+// stronger mechanism remains follow-up work — not done here.
 func assertProjected(
 	t *testing.T,
 	resolved reflect.Type,
@@ -128,9 +125,46 @@ func TestValidateResolved_IsFullyProjected(t *testing.T) {
 			"NoCleanup": "Cleanup", // inverted
 		},
 		map[string]string{
-			"EvidenceCNCF":        "no facade method emits CNCF evidence, so a derivation would have no consumer",
+			"EvidenceCNCF":        "projected by Config.CNCFEvidenceOptions, not by ValidateSettings",
 			"EvidenceAttestation": "projected by Config.EvidenceAttestationOptions, not by ValidateSettings",
 		},
+	)
+}
+
+// VerifyResolved projects onto BundleVerifyOptions alone: the mapping is a
+// near-verbatim copy (see BundleVerifyOptions' own godoc), so there is no
+// second facade type to split across.
+func TestVerifyResolved_IsFullyProjected(t *testing.T) {
+	t.Parallel()
+
+	assertProjected(t,
+		reflect.TypeOf(appconfig.VerifyResolved{}),
+		[]reflect.Type{
+			reflect.TypeOf(aicr.BundleVerifyOptions{}),
+		},
+		map[string]string{
+			"VersionConstraint": "CLIVersionConstraint",
+		},
+		map[string]string{},
+	)
+}
+
+// EvidenceAttestationResolved projects onto EvidenceOptions, the type
+// EvidenceAttestationOptions derives. Every field projects; none are
+// declined.
+func TestEvidenceAttestationResolved_IsFullyProjected(t *testing.T) {
+	t.Parallel()
+
+	assertProjected(t,
+		reflect.TypeOf(appconfig.EvidenceAttestationResolved{}),
+		[]reflect.Type{
+			reflect.TypeOf(aicr.EvidenceOptions{}),
+		},
+		map[string]string{
+			"Out": "OutDir",
+			"BOM": "BOMPath",
+		},
+		map[string]string{},
 	)
 }
 

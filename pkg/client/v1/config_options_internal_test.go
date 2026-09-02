@@ -215,6 +215,50 @@ func TestConfig_ErrorBranches_ReachableThroughWrapConfig(t *testing.T) {
 				return err
 			},
 		},
+		{
+			// Resolve() deliberately does not parse requests/limits (raw
+			// pass-through — see SnapshotResolved.Requests), so a malformed
+			// value reaches SnapshotAgentConfig's own ParseResourceList call
+			// rather than failing inside Resolve like the other rows above.
+			name: "SnapshotAgentConfig rejects a malformed spec.snapshot.agent.requests",
+			spec: appconfig.Spec{
+				Snapshot: &appconfig.SnapshotSpec{
+					Agent: &appconfig.SnapshotAgentSpec{
+						Requests: "not-a-quantity",
+					},
+				},
+			},
+			call: func(c *Config) error {
+				agent, present, err := c.SnapshotAgentConfig()
+				if agent != nil {
+					t.Error("SnapshotAgentConfig returned a non-nil AgentConfig alongside an error")
+				}
+				if !present {
+					t.Error("SnapshotAgentConfig reported spec.snapshot absent for a document that sets spec.snapshot.agent.requests")
+				}
+				return err
+			},
+		},
+		{
+			name: "SnapshotAgentConfig rejects a malformed spec.snapshot.agent.limits",
+			spec: appconfig.Spec{
+				Snapshot: &appconfig.SnapshotSpec{
+					Agent: &appconfig.SnapshotAgentSpec{
+						Limits: "not-a-quantity",
+					},
+				},
+			},
+			call: func(c *Config) error {
+				agent, present, err := c.SnapshotAgentConfig()
+				if agent != nil {
+					t.Error("SnapshotAgentConfig returned a non-nil AgentConfig alongside an error")
+				}
+				if !present {
+					t.Error("SnapshotAgentConfig reported spec.snapshot absent for a document that sets spec.snapshot.agent.limits")
+				}
+				return err
+			},
+		},
 	}
 
 	for _, tt := range tests {

@@ -383,6 +383,74 @@ func TestMakeBundle_InjectedBinaryAttestation(t *testing.T) {
 	})
 }
 
+// TestMakeBundle_RejectsAttestGateMismatch pins the reconciliation MakeBundle
+// applies when Attester is nil (so OIDCResolve.Attest would actually be
+// consulted to derive one): a supplied Config whose baked-in Attest() gate
+// disagrees with OIDCResolve.Attest is rejected up front. Left unchecked,
+// Config.Attest()=true with OIDCResolve.Attest=false would silently produce
+// unsigned output that looks attested (no signer gets derived, so
+// attestBundle falls back to the bundler's no-op attester), and the reverse
+// would derive a real signer whose result Config.Attest()=false then
+// discards — both fail-open in a way a supply-chain-adjacent gate must not.
+func TestMakeBundle_RejectsAttestGateMismatch(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name          string
+		configAttest  bool
+		resolveAttest bool
+	}{
+		{"Config says attest, OIDCResolve says no", true, false},
+		{"Config says no, OIDCResolve says attest", false, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			client, rec := resolveEmbeddedTrainingRecipe(t)
+
+			_, err := client.MakeBundle(t.Context(), rec, aicr.BundleOptions{
+				Config: config.NewConfig(
+					config.WithVersion("v-test"),
+					config.WithAttest(tt.configAttest),
+				),
+				OIDCResolve: aicr.OIDCResolveOptions{Attest: tt.resolveAttest},
+				OutputDir:   t.TempDir(),
+				// Attester left nil: a caller-supplied Attester would win
+				// outright and never consult either gate, which is exactly
+				// why the check only fires here.
+			})
+			assertInvalidRequest(t, err)
+		})
+	}
+}
+
+// TestMakeBundle_AttestGateAgreementIsFine proves the reconciliation check
+// only rejects a DISAGREEMENT: Config and OIDCResolve.Attest set to the same
+// value (in either direction) must bundle successfully, matching how both
+// current callers (the CLI, which always supplies Attester so this path is
+// never reached, and the REST handler, which sets Config's Attest and
+// Attester together) already behave.
+func TestMakeBundle_AttestGateAgreementIsFine(t *testing.T) {
+	t.Parallel()
+
+	client, rec := resolveEmbeddedTrainingRecipe(t)
+
+	out, err := client.MakeBundle(t.Context(), rec, aicr.BundleOptions{
+		Config: config.NewConfig(
+			config.WithVersion("v-test"),
+			config.WithAttest(false),
+		),
+		OIDCResolve: aicr.OIDCResolveOptions{Attest: false},
+		OutputDir:   t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("MakeBundle: %v", err)
+	}
+	if out == nil || out.HasErrors() {
+		t.Fatalf("MakeBundle produced errors: %+v", out)
+	}
+}
+
 func assertInvalidRequest(t *testing.T, err error) {
 	t.Helper()
 	if err == nil {

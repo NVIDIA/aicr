@@ -580,9 +580,49 @@ func TestStability_Config(t *testing.T) {
 	requireSignature[func(*aicr.Config) (aicr.BundleInputOptions, error)]((*aicr.Config).BundleInputOptions)
 	requireSignature[func(*aicr.Config) (aicr.ValidateSettings, bool, error)]((*aicr.Config).ValidateSettings)
 	requireSignature[func(*aicr.Config) (aicr.ValidateInputOptions, error)]((*aicr.Config).ValidateInputOptions)
+	requireSignature[func(*aicr.Config) (aicr.CNCFEvidenceOptions, error)]((*aicr.Config).CNCFEvidenceOptions)
 	requireSignature[func(*aicr.Config) (*aicr.AgentConfig, bool, error)]((*aicr.Config).SnapshotAgentConfig)
 	requireSignature[func(*aicr.Config) (aicr.SnapshotOutputOptions, error)]((*aicr.Config).SnapshotOutputOptions)
 	requireSignature[func(*aicr.Config) aicr.RecipeOutputOptions]((*aicr.Config).RecipeOutputOptions)
+
+	// ValidateSettings and ValidateInputOptions pinned by field name AND type
+	// together, mirroring BundleInputOptions above (TestStability_Bundle): a
+	// bare read of each field would still compile through a retype (FailFast
+	// *bool -> bool, Timeout *time.Duration -> time.Duration, both of which
+	// destroy the nil-vs-explicit-zero distinction the design rests on) or a
+	// silently-flipped Cleanup polarity.
+	var vs aicr.ValidateSettings
+	_ = vs.Namespace
+	_ = vs.Image
+	_ = vs.ImagePullSecrets
+	_ = vs.JobName
+	_ = vs.ServiceAccountName
+	_ = vs.NodeSelector
+	_ = vs.Tolerations
+	_ = vs.RequireGPU
+	_ = vs.Phases
+	_ = vs.NoCluster
+	_ = vs.Cleanup
+	_ = vs.FailFast
+	_ = vs.Timeout
+	requireType[*bool](aicr.ValidateSettings{}.FailFast)
+	requireType[*time.Duration](aicr.ValidateSettings{}.Timeout)
+	requireType[bool](aicr.ValidateSettings{}.Cleanup)
+
+	var vi aicr.ValidateInputOptions
+	_ = vi.RecipePath
+	_ = vi.SnapshotPath
+	_ = vi.FailOnError
+	requireType[*bool](aicr.ValidateInputOptions{}.FailOnError)
+
+	// CNCFEvidenceOptions pinned the same way as its SnapshotOutputOptions
+	// sibling (TestStability_Bundle's aicr.BundleInputOptions block): field
+	// reads plus an explicit type pin on the one slice field.
+	var ce aicr.CNCFEvidenceOptions
+	_ = ce.Dir
+	_ = ce.CNCFSubmission
+	_ = ce.Features
+	requireType[[]string](aicr.CNCFEvidenceOptions{}.Features)
 	// The bool is load-bearing, not decoration: it separates "the document
 	// declined the bundle" from "the document fumbled it", which a zero
 	// EvidenceOptions alone cannot express. Dropping it would compile at every

@@ -19,6 +19,7 @@ import (
 	stderrors "errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -1012,7 +1013,13 @@ spec:
 	}{
 		{"kms alone is fine", head + "      signingKey: gcpkms://projects/p/k\n", false},
 		{"keyless alone is fine", head + "      oidcDeviceFlow: true\n      fulcioURL: https://fulcio.example.com\n", false},
-		{"kms plus device flow is rejected", head + "      signingKey: gcpkms://projects/p/k\n      oidcDeviceFlow: true\n", true},
+		// oidcDeviceFlow is deliberately NOT checked eagerly here (see the
+		// BundleOptions godoc): --oidc-device-flow=false must be able to
+		// correct a config that sets both, and this layer runs BEFORE the
+		// CLI's flag-over-config merge. validateSigningKeyExclusivity on the
+		// CLI's merged opts still rejects the config-only combination — see
+		// TestBundleCmd_SigningKeyFromConfig's rejectTests in pkg/cli.
+		{"kms plus device flow is allowed at this layer", head + "      signingKey: gcpkms://projects/p/k\n      oidcDeviceFlow: true\n", false},
 		{"kms plus fulcio is rejected", head + "      signingKey: gcpkms://projects/p/k\n      fulcioURL: https://fulcio.example.com\n", true},
 		// rekorURL is NOT a conflict; it has its own rule against signingConfig.
 		{"kms plus rekor is allowed", head + "      signingKey: gcpkms://projects/p/k\n      rekorURL: https://rekor.example.com\n", false},
@@ -1403,6 +1410,59 @@ func TestConfig_SnapshotOutputOptions_Absent(t *testing.T) {
 		t.Fatalf("SnapshotOutputOptions on nil Config: %v", err)
 	}
 	if got != (aicr.SnapshotOutputOptions{}) {
+		t.Errorf("got %+v, want zero value", got)
+	}
+}
+
+const cncfEvidenceConfig = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  validate:
+    evidence:
+      cncf:
+        dir: ./cncf-evidence
+        cncfSubmission: true
+        features:
+          - dra-support
+          - secure-access
+`
+
+// TestConfig_CNCFEvidenceOptions pins the three fields CNCFEvidenceOptions
+// projects, mirroring TestConfig_SnapshotOutputOptions for the sibling
+// caller-consumed (not Client-consumed) derivation.
+func TestConfig_CNCFEvidenceOptions(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, cncfEvidenceConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, err := cfg.CNCFEvidenceOptions()
+	if err != nil {
+		t.Fatalf("CNCFEvidenceOptions: %v", err)
+	}
+	if got.Dir != "./cncf-evidence" {
+		t.Errorf("Dir = %q, want ./cncf-evidence", got.Dir)
+	}
+	if !got.CNCFSubmission {
+		t.Error("CNCFSubmission = false, want true")
+	}
+	if want := []string{"dra-support", "secure-access"}; !slices.Equal(got.Features, want) {
+		t.Errorf("Features = %v, want %v", got.Features, want)
+	}
+}
+
+func TestConfig_CNCFEvidenceOptions_Absent(t *testing.T) {
+	t.Parallel()
+
+	var cfg *aicr.Config
+	got, err := cfg.CNCFEvidenceOptions()
+	if err != nil {
+		t.Fatalf("CNCFEvidenceOptions on nil Config: %v", err)
+	}
+	if got.Dir != "" || got.CNCFSubmission || got.Features != nil {
 		t.Errorf("got %+v, want zero value", got)
 	}
 }
