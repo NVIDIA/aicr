@@ -238,6 +238,28 @@ spec:
                         namespace: skyhook
                       status:
                         ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+      overrides:
+        controllerManager:
+          manager:
+            # Explicit floor on the manager container's resources, overriding
+            # the chart's estimatedNodeCount/estimatedPackageCount-derived
+            # auto-calculation. This leaf's rdma-netns-exclusive Skyhook CR
+            # is the last (alphabetically) of 14 components to install and
+            # reliably hits a 10s webhook timeout calling
+            # skyhook-operator-webhook-service in CI — consistent with the
+            # manager pod being CPU-throttled/undersized by the time 13
+            # other real Helm releases have accumulated on the shared
+            # KWOK/Kind test runner. Values match the chart's own
+            # documented "high load" tier (nodes > 1000 / packages >= 4)
+            # rather than the small-cluster tier this leaf would otherwise
+            # auto-calculate into.
+            resources:
+              requests:
+                cpu: 200m
+                memory: 64Mi
+              limits:
+                cpu: "1"
+                memory: 512Mi
 
     - name: nodewright-customizations
       type: Helm
