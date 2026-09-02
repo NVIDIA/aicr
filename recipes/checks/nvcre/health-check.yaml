@@ -12,11 +12,24 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Cluster Readiness Engine health check.
+# NVIDIA Cluster Readiness Engine (NVCRE) Health Check
 #
-# Asserts the Certification CRD is Established and the manager Deployment
-# has an available replica. Chart v0.1.0 renders Deployment nvcre-manager
-# in namespace nvcre (nameOverride: nvcre). Re-verify names on defaultVersion bump.
+# Validates that the controller manager is running, that the CRDs a
+# certification run depends on are Established (without them a WorkloadRun or
+# Certification create fails with "no matches for kind"), and that the
+# chart-shipped LogProfiles landed.
+#
+# The CRDs and the LogProfile are asserted explicitly rather than inferred from
+# pod health: the manager reports Ready long before a caller finds out that the
+# kind it submits is unregistered.
+#
+# readyReplicas is omitempty — absent (null) on a Deployment that has never had
+# a ready pod, so `readyReplicas > 0` fails closed rather than passing
+# vacuously the way `unavailableReplicas == 0` would.
+#
+# Resource names assume components/nvcre/values.yaml sets
+# `fullnameOverride: nvcre`; without it the Deployment carries the
+# aicr-stack- release prefix and these asserts do not match.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -25,18 +38,7 @@ spec:
   timeouts:
     assert: 5m
   steps:
-    - name: validate-certification-crd-established
-      try:
-        - assert:
-            resource:
-              apiVersion: apiextensions.k8s.io/v1
-              kind: CustomResourceDefinition
-              metadata:
-                name: certifications.nvcre.nvidia.com
-              status:
-                (conditions[?type == 'Established']):
-                  - status: "True"
-    - name: validate-manager-deployment
+    - name: validate-manager-deployment-ready
       try:
         - assert:
             resource:
@@ -46,7 +48,52 @@ spec:
                 name: nvcre-manager
                 namespace: nvcre
               status:
-                (availableReplicas > `0`): true
+                (readyReplicas > `0`): true
+                (readyReplicas == replicas): true
+
+    - name: validate-crds-established
+      try:
+        # The three kinds a certification run resolves. The other four
+        # (workflows, jobs, goodputmeasurements, logprofiles) ship in the same
+        # chart crds/ directory and land atomically with these, so asserting
+        # all seven adds runtime without adding signal.
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: certifications.nvcre.nvidia.com
+              status:
+                (conditions[?type == 'Established'] | [0].status): "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: workloadruns.nvcre.nvidia.com
+              status:
+                (conditions[?type == 'Established'] | [0].status): "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: bandwidthmeasurements.nvcre.nvidia.com
+              status:
+                (conditions[?type == 'Established'] | [0].status): "True"
+
+    - name: validate-nccl-logprofile-present
+      try:
+        # Cluster-scoped. WorkloadRun.spec.bandwidthMeasurement.logProfileRef
+        # names this profile; without it the BandwidthMeasurement controller
+        # has no parse rules and status.results[] stays empty.
+        - assert:
+            resource:
+              apiVersion: nvcre.nvidia.com/v1alpha1
+              kind: LogProfile
+              metadata:
+                name: nccl-bandwidth
+
     - name: validate-all-pods-healthy
       try:
         - error:
@@ -55,6 +102,8 @@ spec:
               kind: Pod
               metadata:
                 namespace: nvcre
+                labels:
+                  app.kubernetes.io/name: nvcre
               status:
                 phase: Pending
         - error:
@@ -63,6 +112,8 @@ spec:
               kind: Pod
               metadata:
                 namespace: nvcre
+                labels:
+                  app.kubernetes.io/name: nvcre
               status:
                 phase: Failed
         - error:
@@ -71,5 +122,27 @@ spec:
               kind: Pod
               metadata:
                 namespace: nvcre
+                labels:
+                  app.kubernetes.io/name: nvcre
               status:
                 phase: Unknown
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: nvcre
+                labels:
+                  app.kubernetes.io/name: nvcre
+              status:
+                ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: nvcre
+                labels:
+                  app.kubernetes.io/name: nvcre
+              status:
+                ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true

@@ -14,31 +14,75 @@
 
 package recipe
 
-import "testing"
+import (
+	"io/fs"
+	"strings"
+	"testing"
+
+	"github.com/NVIDIA/aicr/recipes"
+	"gopkg.in/yaml.v3"
+)
 
 // TestNVCRERegisteredWithoutOverlay keeps the public CRE chart installable
-// from the registry without making it part of any shipped recipe. Overlay
-// attachment is pinned separately by TestH100EKSTrainingCREStaysOptIn.
+// from the registry without making it part of any shipped overlay or mixin.
 func TestNVCRERegisteredWithoutOverlay(t *testing.T) {
+	t.Parallel()
+
 	registry, err := GetComponentRegistry()
 	if err != nil {
 		t.Fatalf("GetComponentRegistry: %v", err)
 	}
-	var found bool
-	for _, comp := range registry.Components {
-		if comp.Name != "nvcre" {
-			continue
-		}
-		found = true
-		if comp.Helm.DefaultChart != "cluster-readiness-engine" {
-			t.Errorf("nvcre helm chart = %q, want cluster-readiness-engine", comp.Helm.DefaultChart)
-		}
-		if comp.HealthCheck.AssertFile != "checks/nvcre/health-check.yaml" {
-			t.Errorf("nvcre assertFile = %q, want checks/nvcre/health-check.yaml", comp.HealthCheck.AssertFile)
-		}
-		break
-	}
-	if !found {
+	comp := registry.Get("nvcre")
+	if comp == nil {
 		t.Fatal("nvcre is missing from recipes/registry.yaml")
+	}
+	if !comp.OwnsCRDs {
+		t.Error("ownsCRDs must stay true: the chart ships nvcre.nvidia.com CRDs")
+	}
+	if !comp.HasSelfRefCRDs {
+		t.Error("hasSelfRefCRDs must stay true: templates/ render LogProfile CRs of a CRD the chart also ships")
+	}
+	if comp.HealthCheck.AssertFile != "checks/nvcre/health-check.yaml" {
+		t.Errorf("nvcre assertFile = %q, want checks/nvcre/health-check.yaml", comp.HealthCheck.AssertFile)
+	}
+	if got := comp.GetSystemNodeSelectorPaths(); len(got) != 0 {
+		t.Errorf("system nodeSelectorPaths = %v, want empty (chart has no manager.nodeSelector)", got)
+	}
+
+	type overlaySpec struct {
+		Spec struct {
+			ComponentRefs []struct {
+				Name string `yaml:"name"`
+			} `yaml:"componentRefs"`
+		} `yaml:"spec"`
+	}
+
+	for _, dir := range []string{"overlays", "mixins"} {
+		err := fs.WalkDir(recipes.FS, dir, func(path string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() || !strings.HasSuffix(path, ".yaml") {
+				return nil
+			}
+			raw, err := recipes.FS.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			var doc overlaySpec
+			if err := yaml.Unmarshal(raw, &doc); err != nil {
+				t.Errorf("%s: unmarshal: %v", path, err)
+				return nil
+			}
+			for _, ref := range doc.Spec.ComponentRefs {
+				if ref.Name == "nvcre" {
+					t.Errorf("%s declares componentRef nvcre; CRE must stay opt-in", path)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("walk %s: %v", dir, err)
+		}
 	}
 }

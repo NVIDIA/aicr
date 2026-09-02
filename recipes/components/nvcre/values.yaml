@@ -12,14 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# NVIDIA Cluster Readiness Engine (public chart).
-# Pin matches recipes/registry.yaml defaultVersion.
+# NVIDIA Cluster Readiness Engine (NVCRE) Helm values.
 #
-# The chart has no manager.nodeSelector; it already tolerates every taint.
-# ServiceMonitor requires prometheus-operator CRDs (EKS training ships them).
+# Upstream: https://github.com/NVIDIA/cluster-readiness-engine
+# Chart:    oci://ghcr.io/nvidia/cluster-readiness-engine
+#
+# Chart and controller image are public on GHCR and pull anonymously, so no
+# imagePullSecrets entry is needed (`manager.imagePullSecrets` defaults to []).
+#
+# Only deliberate differences from the chart defaults are set here; everything
+# else (replicas, reconcile concurrency, resources, metrics port) is left at
+# upstream values so a chart bump carries its own tuning.
 
-nameOverride: nvcre
+# Override the release-name prefix so resource names are nvcre-* rather than
+# aicr-stack-*. The health check asserts the Deployment by name, so this has to
+# stay in sync with checks/nvcre/health-check.yaml.
+fullnameOverride: nvcre
 
+# Chart default is true and requires prometheus-operator CRDs. NVCRE is not
+# on any shipped overlay, so keep the monitor off until a recipe that already
+# installs those CRDs opts in with --set cre:metrics.serviceMonitor.enabled=true.
 metrics:
   serviceMonitor:
-    enabled: true
+    enabled: false
