@@ -204,6 +204,27 @@ spec:
             limits:
               memory: 512Mi
 
+    # DraNet + RDMA netns-exclusive tuning — same rationale as the training
+    # leaf, restated here because clean multi-node GPUDirect/RDMA access over
+    # the ConnectX-9 fabric is a property of the NVL72 hardware, not of the
+    # training workload specifically. Any inference deployment that spans
+    # nodes over that fabric (e.g. Dynamo disaggregated prefill/decode with
+    # cross-node KV-cache transfer) needs it the same way training does; a
+    # purely single-node inference deployment doesn't exercise it either way.
+    # See vr200-rke2-ubuntu-training for the full mechanism and reboot
+    # rationale.
+    - name: dranet
+      type: Helm
+      manifestFiles:
+        - components/dranet/manifests/dranet.yaml
+
+    - name: rdma-netns-exclusive
+      type: Helm
+      manifestFiles:
+        - components/rdma-netns-exclusive/manifests/skyhook.yaml
+      dependencyRefs:
+        - nodewright-operator
+
   # pod-autoscaling / cluster-autoscaling conformance omitted: bare-metal
   # RKE2 has no cluster autoscaler.
   validation:
