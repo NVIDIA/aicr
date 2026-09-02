@@ -262,6 +262,27 @@ spec:
             limits:
               memory: 512Mi
 
+    # DraNet DRA network driver — evaluation alternative to the NVIDIA
+    # Network Operator for exposing the ConnectX-9 RDMA fabric to pods.
+    # Manifest-only; relies on host DOCA-OFED + containerd NRI (already
+    # present on rke2). Scoped to GPU workers via the DaemonSet
+    # nodeSelector.
+    - name: dranet
+      type: Helm
+      manifestFiles:
+        - components/dranet/manifests/dranet.yaml
+
+    # Host RDMA exclusive netns-mode (ib_core netns_mode=0) via Skyhook —
+    # pairs with dranet so each pod sees only its allocated HCA in
+    # /sys/class/infiniband (clean NCCL/GPUDirect). Reboots GPU workers one
+    # at a time to apply.
+    - name: rdma-netns-exclusive
+      type: Helm
+      manifestFiles:
+        - components/rdma-netns-exclusive/manifests/skyhook.yaml
+      dependencyRefs:
+        - nodewright-operator
+
   # Validation for VR200 on RKE2 training.
   #
   # Performance validation (NCCL all-reduce) is deferred: no VR200-measured

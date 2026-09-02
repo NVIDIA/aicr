@@ -184,6 +184,40 @@ components:
       defaultRepository: ""
       defaultNamespace: kube-system
 
+  # DraNet DRA network driver (kubernetes-sigs/dranet) for the ConnectX-9 RDMA
+  # fabric on VR200 (Vera Rubin NVL72) RKE2 clusters. Manifest-only (vendored
+  # dranet.yaml) — evaluated as a lean alternative to the NVIDIA Network
+  # Operator. Publishes the mlx5 NICs as ResourceSlices (driver dra.net) and
+  # injects them into pods via NRI; DeviceClass mlnx-cx9.
+  - name: dranet
+    displayName: dranet
+    valueOverrideKeys:
+      - dranet
+    healthCheck:
+      assertFile: checks/dranet/health-check.yaml
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
+      defaultNamespace: kube-system
+
+  # Host RDMA "exclusive" netns-mode Skyhook — pairs with dranet so pods see
+  # only their DRA-allocated HCA (clean NCCL/GPUDirect). Sets the ib_core
+  # netns_mode=0 module param via modprobe.d and reboots (the param can't be
+  # changed live). Requires the Skyhook operator (nodewright-operator) — a
+  # componentRef dep. Unlike nodewright-customizations, this CR has no
+  # value-gate that can suppress it, so the health check is a plain static
+  # assert against status.status (no render-aware suppression needed).
+  - name: rdma-netns-exclusive
+    displayName: rdma-netns-exclusive
+    valueOverrideKeys:
+      - rdmanetnsexclusive
+    healthCheck:
+      assertFile: checks/rdma-netns-exclusive/health-check.yaml
+    helm:
+      # Manifest-only component - no external Helm chart, uses manifestFiles
+      defaultRepository: ""
+      defaultNamespace: skyhook
+
   # GKE COS NVIDIA driver installer (issue #1716): Google's cos-gpu-installer
   # DaemonSet as an AICR-managed, values-gated component. Present
   # unconditionally in the gke-cos chain; renders nothing unless the gpuStack
