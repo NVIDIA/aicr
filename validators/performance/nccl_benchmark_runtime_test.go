@@ -528,7 +528,7 @@ spec:
 		// it if called this way — the recipe-supplied runtime owns its image.
 		if err := applyNCCLResources(ctx, fakeClient, config,
 			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
-			runtimeWithSelector, ""); err != nil {
+			runtimeWithSelector, "example.com/should-be-ignored:v1"); err != nil {
 			t.Fatalf("applyNCCLResources (custom runtime) failed: %v", err)
 		}
 
