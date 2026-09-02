@@ -40,8 +40,8 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 {/* BEGIN AICR-HEALTH */}
 ## Summary
 
-- Recipes: **48**
-- Pass: **48** · Warn: **0** · Fail: **0** · Unknown: **0**
+- Recipes: **49**
+- Pass: **49** · Warn: **0** · Fail: **0** · Unknown: **0**
 
 ## Recipes
 
@@ -53,6 +53,7 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | gb300-any | — | gb300 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
 | h100-any | — | h100 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
 | h200-any | — | h200 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
+| l40-any | — | l40 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
 | l40s-any | — | l40s | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
 | rtx-pro-6000-any | — | rtx-pro-6000 | — | — | — | pass | R:0 D:4 P:0 C:0 | pending |
 | monitoring-hpa | — | — | — | — | — | pass | R:0 D:0 P:0 C:0 | pending |

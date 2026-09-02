@@ -112,6 +112,9 @@ func TestStockRenderParityGolden(t *testing.T) {
 	}
 
 	if os.Getenv("AICR_UPDATE_GOLDEN") == "1" {
+		if t.Failed() {
+			t.Fatal("not writing golden: one or more leaves failed to resolve or render (see errors above)")
+		}
 		writeStockRenderGolden(t, got)
 		t.Logf("golden updated: %d leaves", len(got))
 		return
