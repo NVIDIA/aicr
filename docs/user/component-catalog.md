@@ -31,7 +31,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Installed by one stock recipe, `h100-gke-cos-inference`; every other stock recipe leaves it out. Decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
 | **kai-scheduler** | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. AICR pins `defaultQueue.createDefaultQueue: true`, so the chart creates the `default-parent-queue`/`default-queue` hierarchy on install. The `gang-scheduling` conformance check submits its synthetic test PodGroup to `default-queue` by name, so that queue is a hard dependency of validation, not an optional extra. Note the chart creates the queues only on first install and annotates them `helm.sh/resource-policy: keep` — a `helm upgrade` will not recreate them if they are deleted, so restore them manually (or reinstall the release) if that happens. Workloads are not restricted to this queue: Dynamo submits to its own `dynamo`/`dynamo-default` hierarchy, which its chart creates via post-install and post-upgrade hooks. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
-| **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. **Upgrading from `v0.1.0-alpha.8` (or earlier) to `v0.1.0-alpha.12`:** a plain `helm upgrade` (including the generated `install.sh`) does not install changed CRDs, so the operator crash-loops on `no matches for kind "ClusterTopologyBinding"` regardless. Required steps, in order, before re-running the install script: 1) `kubectl get clustertopologies.grove.io -A` — if any exist, stop for an explicit data migration; 2) if zero exist, `kubectl delete crd clustertopologies.grove.io` (alpha.8's CRD, superseded and shortname-colliding with alpha.12's `clustertopologybindings.grove.io`); 3) `kubectl apply --server-side -f <chart>/crds/` to install the new CRDs by hand; 4) then re-run the install script. Fresh installs are unaffected. | [Grove](https://github.com/ai-dynamo/grove) |
+| **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. | [Grove](https://github.com/ai-dynamo/grove) |
 | **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a ZMQ-based KV-cache event plane, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
 | **agentgateway-crds** | Custom Resource Definitions for agentgateway (Kubernetes Gateway API implementation for AI/ML inference). | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **agentgateway** | Kubernetes Gateway API implementation for AI/ML inference. Implements the Gateway API Inference Extension for model-aware ingress routing to InferencePool backends. | [agentgateway](https://github.com/agentgateway/agentgateway) |
@@ -694,3 +694,41 @@ kubectl get configmap dcgm-exporter -n gpu-operator \
   -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'
 # Expected: gpu-operator
 ```
+
+### `grove`: `v0.1.0-alpha.8` (or earlier) to `v0.1.0-alpha.12`
+
+alpha.8's `clustertopologies.grove.io` CRD (kind `ClusterTopology`, shortname
+`ct`) is dropped by alpha.12 in favor of `clustertopologybindings.grove.io`,
+which reuses shortname `ct`. `helm upgrade` never applies changed `crds/` (see
+the CRD-upgrade caveat above), so a plain chart bump alone never installs the
+new CRD and the operator crash-loops on `no matches for kind
+"ClusterTopologyBinding"` regardless of deployer. If the new CRD is applied
+before the old one is deleted, the shortname collision blocks it from ever
+reaching `Established`.
+
+Fresh installs are unaffected. To migrate an existing cluster:
+
+1. Check for any live `ClusterTopology` resources — if any exist, **stop**
+   for an explicit data migration before touching CRDs:
+   ```bash
+   kubectl get clustertopologies.grove.io -A
+   ```
+2. If zero exist, delete the obsolete CRD:
+   ```bash
+   kubectl delete crd clustertopologies.grove.io
+   ```
+3. Apply the new CRDs directly from the chart — this works from any
+   directory, no local checkout needed:
+   ```bash
+   helm show crds oci://ghcr.io/ai-dynamo/grove/grove-charts --version v0.1.0-alpha.12 \
+     | sed -n '/^---$/,$p' \
+     | kubectl apply --server-side --force-conflicts -f -
+   ```
+4. Resume whichever deployer you use (`helm`/`helmfile`: re-run `install.sh`
+   or `helmfile apply`; `flux`/`argocd`/`argocd-helm`: reconcile/sync as
+   usual). AICR's generated `install.sh` already passes `--force-conflicts`
+   on Helm 4.
+
+Verified live end-to-end on a real EKS cluster, 2026-09-02: dynamo-operator,
+grove-operator, and kai-scheduler gang-scheduling all confirmed healthy
+together post-migration.

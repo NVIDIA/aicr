@@ -589,21 +589,11 @@ components:
     displayName: grove
     valueOverrideKeys:
       - grove
-    # Upgrading from v0.1.0-alpha.8 (or earlier): alpha.8's clustertopologies.grove.io
-    # CRD (kind ClusterTopology, shortname `ct`) is dropped by alpha.12 in favor of
-    # clustertopologybindings.grove.io, which reuses shortname `ct`. Helm/Helmfile
-    # skip crds/ on upgrade, so a plain chart bump alone never installs the new CRD
-    # and the operator crash-loops on "no matches for kind ClusterTopologyBinding".
-    # If the new CRD is applied before the old one is deleted, the shortname
-    # collision blocks it from ever reaching Established. Required migration:
-    #   1. kubectl get clustertopologies.grove.io -A -- if any exist, STOP for an
-    #      explicit data migration before touching CRDs.
-    #   2. If zero exist: kubectl delete crd clustertopologies.grove.io
-    #   3. kubectl apply --server-side -f <chart>/crds/ -- helm upgrade will not
-    #      do this for you.
-    #   4. Then upgrade the release (pass --force-conflicts on Helm 4; AICR's
-    #      generated install.sh already does this conditionally).
-    # Verified live on aicr-gb300, 2026-09-02.
+    # Upgrading from v0.1.0-alpha.8 (or earlier) requires a CRD migration --
+    # see "Upgrade Notes" > grove in docs/user/component-catalog.md for the
+    # full, executable steps (helm upgrade/install.sh never applies changed
+    # crds/, and alpha.8's orphaned ClusterTopology CRD shortname-collides
+    # with alpha.12's replacement). Verified live on aicr-gb300, 2026-09-02.
     healthCheck:
       assertFile: checks/grove/health-check.yaml
     helm:
