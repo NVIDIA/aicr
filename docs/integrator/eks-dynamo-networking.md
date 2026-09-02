@@ -21,11 +21,12 @@ boundary as before.
 > (see `tests/manifests/dynamo-vllm-smoke-test.yaml`), offset by `+dp_rank`
 > for dp_rank > 0. The TCP request plane does not have one fixed,
 > documented port the way NATS had `4222` — confirm the actual listening
-> port(s) on a live cluster before finalizing the SG rule below:
-> ```shell
-> kubectl exec -n dynamo-system <frontend-pod> -- ss -tlnp
-> kubectl exec -n dynamo-system <worker-pod> -- ss -tlnp
-> ```
+> port(s) on a live cluster before finalizing the SG rule below.
+
+```shell
+kubectl exec -n dynamo-system <frontend-pod> -- ss -tlnp
+kubectl exec -n dynamo-system <worker-pod> -- ss -tlnp
+```
 
 If the GPU and system node groups sit in different security groups, these
 ports may be blocked from GPU nodes to the frontend's node (and vice versa).

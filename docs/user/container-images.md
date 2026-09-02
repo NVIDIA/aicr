@@ -20,6 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 - Components: **44**
 - Unique images: **100**
 - Distinct registries: **11**
@@ -28,8 +29,13 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 - Unique images: **88**
 - Distinct registries: **10**
 >>>>>>> 89db3978 (fix: address F1-F13 review findings — remove NATS test guards, bump UAT image, update NATS to ZMQ wording across docs and code, regenerate BOM)
+=======
+- Components: **44**
+- Unique images: **94**
+- Distinct registries: **11**
+>>>>>>> 6a9b5c4e (fix: bump to 1.4.2, MDX gate, DYN_EVENT_PLANE, dangling comment, regenerate BOM)
 
-Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
+Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
 
 _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recipes/components/<name>/values.yaml; per-recipe overlay overrides are not applied`
 
@@ -39,9 +45,10 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 |-----------|------|-------|----------------|--------|
 | agentgateway | helm | agentgateway | v1.3.1 | 1 |
 | agentgateway-crds | helm | agentgateway-crds | v1.3.1 | 0 |
-| aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 0 |
+| aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 6 |
 | aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.29 | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
+<<<<<<< HEAD
 <<<<<<< HEAD
 | cert-manager-ocp | manifest | — | — | 0 |
 | cert-manager-ocp-olm | manifest | — | — | 0 |
@@ -49,6 +56,11 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 =======
 | dynamo-platform | helm | dynamo-platform | 1.4.1 | 1 |
 >>>>>>> 89db3978 (fix: address F1-F13 review findings — remove NATS test guards, bump UAT image, update NATS to ZMQ wording across docs and code, regenerate BOM)
+=======
+| cert-manager-ocp | manifest | — | — | 0 |
+| cert-manager-ocp-olm | manifest | — | — | 0 |
+| dynamo-platform | helm | dynamo-platform | 1.4.2 | 1 |
+>>>>>>> 6a9b5c4e (fix: bump to 1.4.2, MDX gate, DYN_EVENT_PLANE, dangling comment, regenerate BOM)
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
@@ -61,7 +73,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
 | kai-scheduler | helm | kai-scheduler | v0.14.1 | 11 |
-| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
+| kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 0 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
 | kueue | helm | kueue | 0.18.2 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.6.0 | 1 |
@@ -76,14 +88,20 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nodewright-operator | helm | nodewright | v0.17.1 | 3 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.1 | 1 |
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 6a9b5c4e (fix: bump to 1.4.2, MDX gate, DYN_EVENT_PLANE, dangling comment, regenerate BOM)
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.4.1 | 1 |
 | nvsentinel | helm | nvsentinel | v1.20.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
+<<<<<<< HEAD
 =======
 | nvsentinel | helm | nvsentinel | v1.9.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 0 |
 >>>>>>> 89db3978 (fix: address F1-F13 review findings — remove NATS test guards, bump UAT image, update NATS to ZMQ wording across docs and code, regenerate BOM)
+=======
+>>>>>>> 6a9b5c4e (fix: bump to 1.4.2, MDX gate, DYN_EVENT_PLANE, dangling comment, regenerate BOM)
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
 | slinky-slurm | helm | slurm | 1.2.0 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
@@ -112,9 +130,12 @@ _No images extracted._
 
 ### aws-ebs-csi-driver
 
-> Warning: [INTERNAL] helm template failed: signal: killed
-
-_No images extracted._
+- `public.ecr.aws/csi-components/csi-attacher:v4.11.0-eksbuild.4`
+- `public.ecr.aws/csi-components/csi-node-driver-registrar:v2.16.0-eksbuild.4`
+- `public.ecr.aws/csi-components/csi-provisioner:v6.2.0-eksbuild.3`
+- `public.ecr.aws/csi-components/csi-resizer:v2.1.0-eksbuild.4`
+- `public.ecr.aws/csi-components/livenessprobe:v2.18.0-eksbuild.4`
+- `public.ecr.aws/ebs-csi-driver/aws-ebs-csi-driver:v1.59.0`
 
 ### aws-efa
 
@@ -137,7 +158,7 @@ _No images extracted._
 
 ### dynamo-platform
 
-- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.4.1`
+- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.4.2`
 
 ### gatekeeper
 
@@ -220,14 +241,9 @@ _No images extracted._
 
 ### kube-prometheus-stack
 
-- `docker.io/grafana/grafana:13.0.1`
-- `ghcr.io/jkroepke/kube-webhook-certgen:1.8.2`
-- `quay.io/kiwigrid/k8s-sidecar:2.7.1`
-- `quay.io/prometheus-operator/prometheus-operator:v0.90.1`
-- `quay.io/prometheus/alertmanager:v0.32.0`
-- `quay.io/prometheus/node-exporter:v1.11.1`
-- `quay.io/prometheus/prometheus:v3.11.3`
-- `registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.18.0`
+> Warning: [INTERNAL] helm template failed: signal: killed
+
+_No images extracted._
 
 ### kubeflow-trainer
 
@@ -308,9 +324,7 @@ _No images extracted._
 
 ### prometheus-adapter
 
-> Warning: [INTERNAL] helm template failed: signal: killed
-
-_No images extracted._
+- `registry.k8s.io/prometheus-adapter/prometheus-adapter:v0.12.0`
 
 ### prometheus-adapter-ocp
 

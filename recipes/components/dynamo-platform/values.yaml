@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Dynamo Platform Helm values (v1.4.1)
+# Dynamo Platform Helm values (v1.4.2)
 # NVIDIA Dynamo inference serving platform operator.
 # Provides OpenAI-compatible endpoints, KV-cache-aware routing,
 # disaggregated prefill/decode, and SLA-driven autoscaling.
