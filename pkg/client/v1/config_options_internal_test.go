@@ -171,6 +171,50 @@ func TestConfig_ErrorBranches_ReachableThroughWrapConfig(t *testing.T) {
 				return err
 			},
 		},
+		{
+			name: "BundleInputOptions propagates a malformed spec.bundle.output.target",
+			spec: appconfig.Spec{
+				Bundle: &appconfig.BundleSpec{
+					Output: &appconfig.BundleOutputSpec{
+						// Uppercase repository segments are rejected by the
+						// Docker reference grammar oci.ParseOutputTarget uses.
+						Target: "oci://ghcr.io/INVALID/Bundle:v1",
+					},
+				},
+			},
+			call: func(c *Config) error {
+				_, err := c.BundleInputOptions()
+				return err
+			},
+		},
+		{
+			name: "ValidateInputOptions propagates a malformed spec.validate.execution.phases",
+			spec: appconfig.Spec{
+				Validate: &appconfig.ValidateSpec{
+					Execution: &appconfig.ValidateExecutionSpec{
+						Phases: []string{"deploymnt"},
+					},
+				},
+			},
+			call: func(c *Config) error {
+				_, err := c.ValidateInputOptions()
+				return err
+			},
+		},
+		{
+			name: "SnapshotOutputOptions propagates a malformed spec.snapshot.execution.timeout",
+			spec: appconfig.Spec{
+				Snapshot: &appconfig.SnapshotSpec{
+					Execution: &appconfig.SnapshotExecutionSpec{
+						Timeout: "not-a-duration",
+					},
+				},
+			},
+			call: func(c *Config) error {
+				_, err := c.SnapshotOutputOptions()
+				return err
+			},
+		},
 	}
 
 	for _, tt := range tests {
