@@ -587,11 +587,48 @@ func (c *Config) ValidateOptions() ([]ValidateOption, error) {
 //     token is a short-lived secret and must not live in a version-controlled
 //     file. The caller resolves it at sign time.
 //   - NoSign and Full are command-line-only, for the same reason FailOnError
-//     and IgnoreTLog are. Both WEAKEN a run — NoSign pushes an unsigned
-//     bundle, Full ships unredacted payloads — and a checked-in file that can
+//     and IgnoreTLog are. Both weaken the ARTIFACT: NoSign pushes an unsigned
+//     bundle, Full ships unredacted payloads. A checked-in file that can
 //     quietly turn off signing is a supply-chain downgrade no reviewer would
-//     see in a diff. Adding spec fields for them would close a "gap" that is
-//     actually a control.
+//     see in a diff, so adding spec fields for them would close a "gap" that
+//     is actually a control.
+//
+// # Why plainHTTP and insecureTLS project anyway
+//
+// They weaken a run too, so the NoSign rule above is not "config may never
+// weaken anything" — stated that broadly it would be contradicted by the two
+// fields three lines into the return below. The line is the ARTIFACT versus
+// the HOP.
+//
+// PlainHTTP and InsecureTLS configure the transport to a registry the same
+// document already names in push. A document trusted to choose the push
+// destination is trusted to describe how to reach it, which is why
+// EvidenceOptions and SignOptions carry these at all while the bundler's own
+// options do not — MakeBundle never reaches a registry.
+//
+// Neither field changes what the bundle attests or whether it is signed, and
+// that is structural rather than a promise: both reach only the OCI transport,
+// never SignStatement's Fulcio/Rekor call and never predicate or redaction
+// construction.
+//
+// How the subject digest is pinned differs by path, and neither path reads it
+// back from the weakened hop. Emit-and-push binds the digest computed locally
+// while packaging, before any push begins. Signing an already-pushed artifact
+// resolves the digest at pull time instead, but the pull is content-addressed
+// and the materialized digest is checked for equality against the value the
+// original packaging run recorded, failing closed on mismatch.
+//
+// So a tampered hop can corrupt or break the transfer; it cannot make the
+// signature vouch for content that was never packaged.
+//
+// That is a narrower claim than "harmless". A committed plainHTTP or
+// insecureTLS does weaken that hop, and it widens the threat model rather than
+// just restating it: redirecting push needs a malicious document, whereas
+// downgrading TLS on a destination the operator believes is protected only
+// needs someone on the network path. It is accepted here because the
+// destination is already the document's call. Treat it as a reviewable
+// transport decision, not as evidence that excluding NoSign and Full is
+// arbitrary.
 //
 // # spec.validate.evidence.cncf is NOT projected
 //

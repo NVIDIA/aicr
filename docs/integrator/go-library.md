@@ -888,8 +888,8 @@ derive step rather than the load step.
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
 | `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.attestation` |
 | `ValidateOptions()` | `spec.validate.execution` + the agent fields the validator accepts as options |
-| `SnapshotAgentConfig()` | `spec.snapshot.agent` + `.execution` (**not** `.output`) |
 | `EvidenceAttestationOptions()` | `spec.validate.evidence.attestation` (**not** `.cncf`) |
+| `SnapshotAgentConfig()` | `spec.snapshot.agent` + `.execution` (**not** `.output`) |
 | `RecipeSource()` | `spec.recipe.data` |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
 | `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
@@ -1426,7 +1426,40 @@ rest of `EvidenceOptions` stays yours, and the reasons differ:
 |---|---|
 | `Commit` | Names the running binary, not the document. It selects the validator catalog the bundle's BOM is built against. Set it after deriving. |
 | `OIDCResolve` | Excluded by the spec itself. A keyless-signing identity token is a short-lived secret and must not sit in a version-controlled file; resolve it at sign time. |
-| `NoSign`, `Full` | Command-line-only, for the same reason as `IgnoreTLog` and `failOnError`. Both **weaken** a run — `NoSign` pushes an unsigned bundle, `Full` ships unredacted payloads — and a checked-in file that can silently disable signing is a supply-chain downgrade no reviewer would see in a diff. |
+| `NoSign`, `Full` | Command-line-only, for the same reason as `IgnoreTLog` and `failOnError`. Both weaken the **artifact** — `NoSign` pushes an unsigned bundle, `Full` ships unredacted payloads — and a checked-in file that can silently disable signing is a supply-chain downgrade no reviewer would see in a diff. |
+
+**Why `plainHTTP` and `insecureTLS` project anyway.** They weaken a run too, so
+the rule above is not "config may never weaken anything" — stated that broadly
+it would be contradicted by two of the five fields that do project. The line is
+the *artifact* versus the *hop*.
+
+Both configure the transport to a registry the same document already names in
+`push`. A document trusted to choose the destination is trusted to describe how
+to reach it, which is why `EvidenceOptions` and `SignOptions` carry these while
+the bundler's own options do not — `MakeBundle` never reaches a registry (see
+[`spec.bundle.registry`](#what-bundleoptions-does-and-does-not-carry)).
+
+Neither field changes what the bundle attests or whether it is signed, and that
+is structural rather than a promise: both reach only the OCI transport, never
+the Fulcio/Rekor signing call and never predicate or redaction construction.
+
+How the subject digest is pinned differs by path, and neither path reads it back
+from the weakened hop. Emit-and-push binds the digest computed locally while
+packaging, before any push begins. Signing an already-pushed artifact
+(`aicr evidence sign`) resolves the digest at pull time instead, but the pull is
+content-addressed and the materialized digest is checked for equality against
+the value the original packaging run recorded, failing closed on mismatch.
+
+So a tampered hop can corrupt or break the transfer; it cannot make the
+signature vouch for content that was never packaged.
+
+That is narrower than "harmless". A committed `plainHTTP` or `insecureTLS` does
+weaken that hop, and it widens the threat model rather than just restating it:
+redirecting `push` needs a malicious document, whereas downgrading TLS on a
+destination the operator believes is protected only needs someone on the
+network path. It is accepted because the destination is already the document's
+call. Treat it as a reviewable transport decision, not as evidence that
+excluding `NoSign` and `Full` is arbitrary.
 
 **`spec.validate.evidence.cncf` is not projected**, and this one is a genuine
 gap rather than a decision. There is no `Client.Emit*` that consumes
