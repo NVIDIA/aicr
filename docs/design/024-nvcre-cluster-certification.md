@@ -70,17 +70,29 @@ identity.
 
 ### 3. Ordering contract
 
-Two constraints are properties of the chart, not of any recipe, so they are
-recorded on the registry entry rather than left for each adopter to
-rediscover.
+Two constraints are properties of the chart, not of any recipe.
+
+A registry entry **records** these constraints; it cannot enforce them.
+`ComponentConfig` has no dependency or ordering field, and `hasSelfRefCRDs`
+does not help here — that flag covers a chart referencing CRDs it ships itself,
+whereas both constraints below are cross-chart. Ordering is enforced only by
+`ComponentRef.DependencyRefs`, declared on an overlay's `componentRefs` entry
+and read by the helmfile bundler's DAG-stratified sub-helmfile layout.
+
+**Any overlay referencing `nvcre` must therefore declare
+`dependencyRefs: [kubeflow-trainer, prometheus-operator-crds]` on that
+`componentRefs` entry**, dropping `prometheus-operator-crds` only where
+`metrics.serviceMonitor.enabled` is left at AICR's `false`. An overlay that
+omits them can render the `ServiceMonitor` before its CRDs exist, or submit a
+`TrainJob` before Trainer is installed.
 
 - **Kubeflow Trainer.** NVCRE creates `TrainJob`s against a `TrainingRuntime`
-  and the chart does not install Trainer. A referencing recipe must also carry
-  `kubeflow-trainer`, which AICR already supplies via
+  and the chart does not install Trainer. AICR already supplies it via
   `recipes/mixins/platform-kubeflow.yaml`.
 - **ServiceMonitor.** The chart renders one under
-  `metrics.serviceMonitor.enabled` (default `true`), so
-  `prometheus-operator-crds` must land first or the value must be `false`.
+  `metrics.serviceMonitor.enabled`, whose chart default is `true` and requires
+  the prometheus-operator CRDs. AICR values pin it to `false`, so a bare
+  install needs no monitoring CRDs.
 
 ### 4. Placement is limited to tolerations
 
@@ -111,6 +123,14 @@ The check is read-only and creates no benchmark workload.
 ## Adoption Gates
 
 Implementation is admitted once the selected release passes the following.
+
+The category structure follows
+[ADR-019](019-k8s-aibom-runtime-inventory.md), which set the
+registry-admission precedent. *Release and supply chain* and *AICR
+qualification* are relied on as ADR-019 defines them. *Chart and CRD
+lifecycle* and *Security* are narrowed to NVCRE's surface, dropping the
+AIBOM-specific data-handling clauses. *Benchmark execution safety* has no
+ADR-019 analogue — k8s-aibom observes workloads, while NVCRE creates them.
 
 **Release and supply chain**
 
