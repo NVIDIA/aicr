@@ -45,7 +45,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | gpu-operator | helm | nvidia/gpu-operator | v26.3.3 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
-| grove | helm | grove-charts | v0.1.0-alpha.8 | 1 |
+| grove | helm | grove-charts | v0.1.0-alpha.12 | 1 |
 | k8s-aibom | helm | k8s-aibom | 1.3.0 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
@@ -174,7 +174,7 @@ _No images extracted._
 
 ### grove
 
-- `ghcr.io/ai-dynamo/grove/grove-operator:v0.1.0-alpha.8`
+- `ghcr.io/ai-dynamo/grove/grove-operator:v0.1.0-alpha.12`
 
 ### k8s-aibom
 
