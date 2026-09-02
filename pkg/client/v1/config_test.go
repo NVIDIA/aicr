@@ -398,7 +398,12 @@ func TestConfig_RawAccessors(t *testing.T) {
 		t.Errorf("RecipeAccountingMode = %q, want disabled", mode)
 	}
 
-	// Both values present means the options form must carry both.
+	// Both values present means the options form must carry both. This
+	// package cannot see WHAT they carry — RecipeResolveOption is an opaque
+	// func, so a count is the most an external test can assert, and a count
+	// passes while a value is swapped or emptied. The folded values are
+	// pinned in TestConfig_RecipeResolveOptions_FoldsValuesNotJustCount,
+	// which applies them against the internal capture struct.
 	opts, err := cfg.RecipeResolveOptions()
 	if err != nil {
 		t.Fatalf("RecipeResolveOptions: %v", err)
@@ -1179,6 +1184,170 @@ func TestConfig_SnapshotAgentConfig_OSIsParsed(t *testing.T) {
 		}
 		if _, err := cfg.SnapshotAgentConfig(); err == nil {
 			t.Fatal("SnapshotAgentConfig accepted an undocumented OS value")
+		}
+	})
+}
+
+const evidenceAttestationConfig = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  validate:
+    evidence:
+      attestation:
+        out: ./evidence
+        bom: ./sbom.cdx.json
+        push: ghcr.io/example/evidence:run-1
+        plainHTTP: true
+        insecureTLS: true
+`
+
+// TestConfig_EvidenceAttestationOptions covers the five fields that project
+// and, just as importantly, the four that must NOT: Commit and OIDCResolve are
+// per-invocation, and NoSign/Full are command-line-only because both weaken a
+// run and a checked-in file must not be able to do that silently.
+func TestConfig_EvidenceAttestationOptions(t *testing.T) {
+	t.Parallel()
+
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, evidenceAttestationConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	opts, ok, err := cfg.EvidenceAttestationOptions()
+	if err != nil {
+		t.Fatalf("EvidenceAttestationOptions: %v", err)
+	}
+	if !ok {
+		t.Fatal("reported not configured, but the document sets attestation.out")
+	}
+
+	if opts.OutDir != "./evidence" {
+		t.Errorf("OutDir = %q, want ./evidence", opts.OutDir)
+	}
+	if opts.BOMPath != "./sbom.cdx.json" {
+		t.Errorf("BOMPath = %q, want ./sbom.cdx.json", opts.BOMPath)
+	}
+	if opts.Push != "ghcr.io/example/evidence:run-1" {
+		t.Errorf("Push = %q, want ghcr.io/example/evidence:run-1", opts.Push)
+	}
+	if !opts.PlainHTTP {
+		t.Error("PlainHTTP = false, want true")
+	}
+	if !opts.InsecureTLS {
+		t.Error("InsecureTLS = false, want true")
+	}
+
+	// The un-projected half. NoSign and Full staying false is a control, not
+	// an oversight: a document that could flip either would weaken signing or
+	// redaction without showing up as a flag in the run's command line.
+	if opts.NoSign {
+		t.Error("NoSign = true, but it has no spec counterpart and must stay command-line-only")
+	}
+	if opts.Full {
+		t.Error("Full = true, but it has no spec counterpart and must stay command-line-only")
+	}
+	if opts.Commit != "" {
+		t.Errorf("Commit = %q, want empty; it names the running binary, not the document", opts.Commit)
+	}
+	if opts.OIDCResolve.IdentityToken != "" {
+		t.Error("OIDCResolve.IdentityToken populated; a signing token is a secret " +
+			"and must never come from a version-controlled document")
+	}
+}
+
+// TestConfig_EvidenceAttestationOptions_OutIsTheGate pins the spec's own rule:
+// out enables the path, and an out-less section stays off no matter how much
+// else is filled in. Without the gate a document that set only `push` would
+// derive ok=true and hand EmitRecipeEvidence an empty OutDir, turning a
+// half-written section into an ErrCodeInvalidRequest at emit time instead of a
+// clean "not configured".
+func TestConfig_EvidenceAttestationOptions_OutIsTheGate(t *testing.T) {
+	t.Parallel()
+
+	const outless = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  validate:
+    evidence:
+      attestation:
+        push: ghcr.io/example/evidence:run-1
+        plainHTTP: true
+`
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, outless))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	opts, ok, err := cfg.EvidenceAttestationOptions()
+	if err != nil {
+		t.Fatalf("EvidenceAttestationOptions: %v", err)
+	}
+	if ok {
+		t.Error("reported configured with an empty out; the spec says out is the enable gate")
+	}
+	if opts != (aicr.EvidenceOptions{}) {
+		t.Errorf("opts = %+v, want the zero value when not enabled", opts)
+	}
+}
+
+// TestConfig_EvidenceAttestationOptions_Absent covers every route to "no
+// attestation configured": no document, no spec.validate, and a spec.validate
+// with no evidence section. All three must be a quiet false, not an error —
+// the CLI derives unconditionally, before it knows whether --config was given.
+func TestConfig_EvidenceAttestationOptions_Absent(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil config", func(t *testing.T) {
+		t.Parallel()
+		var cfg *aicr.Config
+		_, ok, err := cfg.EvidenceAttestationOptions()
+		if err != nil {
+			t.Fatalf("EvidenceAttestationOptions on nil Config: %v", err)
+		}
+		if ok {
+			t.Error("reported configured for a nil Config")
+		}
+	})
+
+	t.Run("no spec.validate", func(t *testing.T) {
+		t.Parallel()
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, recipeConfig))
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		_, ok, err := cfg.EvidenceAttestationOptions()
+		if err != nil {
+			t.Fatalf("EvidenceAttestationOptions: %v", err)
+		}
+		if ok {
+			t.Error("reported configured for a document with no spec.validate")
+		}
+	})
+
+	t.Run("spec.validate without evidence", func(t *testing.T) {
+		t.Parallel()
+		const noEvidence = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  validate:
+    execution:
+      timeout: 5m
+`
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, noEvidence))
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		_, ok, err := cfg.EvidenceAttestationOptions()
+		if err != nil {
+			t.Fatalf("EvidenceAttestationOptions: %v", err)
+		}
+		if ok {
+			t.Error("reported configured for a spec.validate with no evidence section")
 		}
 	})
 }

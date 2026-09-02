@@ -497,10 +497,12 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 //     failing run report success.
 //   - RecipePath and SnapshotPath name what to validate. The caller already
 //     passes both to ValidateState.
-//   - EvidenceCNCF and EvidenceAttestation configure evidence emission.
-//     EvidenceOptions is the shape they would map onto, but no derivation
-//     produces one yet, so reading them still needs Unwrap(). Tracked as a
-//     remaining gap rather than a decided exclusion.
+//   - EvidenceAttestation configures the recipe-evidence bundle.
+//     EvidenceAttestationOptions derives it; it is not folded in here because
+//     it targets Client.EmitRecipeEvidence rather than ValidateState.
+//   - EvidenceCNCF configures the CNCF AI Conformance markdown path, which has
+//     no facade emission method to receive it. See EvidenceAttestationOptions
+//     for why that half stays un-projected.
 //
 // # Two mappings that are not pass-throughs
 //
@@ -560,6 +562,78 @@ func (c *Config) ValidateOptions() ([]ValidateOption, error) {
 		opts = append(opts, WithValidationTimeout(*resolved.Timeout))
 	}
 	return opts, nil
+}
+
+// EvidenceAttestationOptions derives Client.EmitRecipeEvidence's options from
+// spec.validate.evidence.attestation, and reports whether the document asked
+// for a recipe-evidence bundle at all.
+//
+// Out is the enable gate, matching the spec field's own contract: an empty
+// out leaves the path off even when bom/push/plainHTTP/insecureTLS are
+// populated, so a half-filled section does not start emitting evidence. False
+// therefore means "not configured", not "misconfigured" — a malformed section
+// is an error instead. That is why this returns a bool rather than a
+// zero-value EvidenceOptions: EmitRecipeEvidence rejects an empty OutDir with
+// ErrCodeInvalidRequest, so a zero value alone could not tell a caller whether
+// the document declined the bundle or fumbled it.
+//
+// Five fields project (out, bom, push, plainHTTP, insecureTLS). The rest of
+// EvidenceOptions is deliberately caller-owned:
+//
+//   - Commit has no spec counterpart. It selects the validator catalog the
+//     bundle's BOM is built against, and it is a property of the running
+//     binary rather than of the document. Set it after deriving.
+//   - OIDCResolve is excluded by the spec itself: a keyless-signing identity
+//     token is a short-lived secret and must not live in a version-controlled
+//     file. The caller resolves it at sign time.
+//   - NoSign and Full are command-line-only, for the same reason FailOnError
+//     and IgnoreTLog are. Both WEAKEN a run — NoSign pushes an unsigned
+//     bundle, Full ships unredacted payloads — and a checked-in file that can
+//     quietly turn off signing is a supply-chain downgrade no reviewer would
+//     see in a diff. Adding spec fields for them would close a "gap" that is
+//     actually a control.
+//
+// # spec.validate.evidence.cncf is NOT projected
+//
+// The evidence section carries two kinds; this method covers one. CNCF AI
+// Conformance emission has no facade entry point at all — there is no
+// Client.Emit* that consumes dir/cncfSubmission/features — so there is
+// nothing for a derivation to feed. Projecting it would mean designing the
+// emission API, not mapping config onto an existing one. Reading that half
+// still needs Unwrap(), and this method is named for the half it carries so
+// the name cannot drift into covering both.
+//
+// Returns (zero, false, nil) for a nil Config, an absent spec.validate, an
+// absent evidence.attestation, or an empty out, and an error when the section
+// is present but malformed.
+func (c *Config) EvidenceAttestationOptions() (EvidenceOptions, bool, error) {
+	if c == nil || c.internal == nil {
+		return EvidenceOptions{}, false, nil
+	}
+	resolved, err := c.internal.Validation().Resolve()
+	if err != nil {
+		// Already coded, and the message carries the spec path that failed.
+		return EvidenceOptions{}, false, err
+	}
+	if resolved == nil || resolved.EvidenceAttestation == nil {
+		return EvidenceOptions{}, false, nil
+	}
+	att := resolved.EvidenceAttestation
+	// The spec's own gate, not an extra one: EvidenceAttestationSpec.Out
+	// documents that setting Out enables the path and an empty Out leaves it
+	// off regardless of the other fields. The CLI applies the same rule in
+	// buildRecipeEvidenceConfig, so honoring it here keeps a config-driven run
+	// and a flag-driven run from diverging on the same document.
+	if att.Out == "" {
+		return EvidenceOptions{}, false, nil
+	}
+	return EvidenceOptions{
+		OutDir:      att.Out,
+		BOMPath:     att.BOM,
+		Push:        att.Push,
+		PlainHTTP:   att.PlainHTTP,
+		InsecureTLS: att.InsecureTLS,
+	}, true, nil
 }
 
 // SnapshotAgentConfig derives Client.CollectSnapshot's AgentConfig from

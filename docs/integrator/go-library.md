@@ -889,6 +889,7 @@ derive step rather than the load step.
 | `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.attestation` |
 | `ValidateOptions()` | `spec.validate.execution` + the agent fields the validator accepts as options |
 | `SnapshotAgentConfig()` | `spec.snapshot.agent` + `.execution` (**not** `.output`) |
+| `EvidenceAttestationOptions()` | `spec.validate.evidence.attestation` (**not** `.cncf`) |
 | `RecipeSource()` | `spec.recipe.data` |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
 | `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
@@ -896,10 +897,13 @@ derive step rather than the load step.
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 
-All five spec sections now have a derivation. `spec.validate.evidence` is the
-remaining gap — `EvidenceOptions` is the shape it would map onto, but no
-`Config` method produces one, so reading it still needs `Unwrap()`. Needing it is worth reporting — it means a
-derivation is missing, and `pkg/config` carries no stability guarantee.
+All five spec sections now have a derivation. The one remaining gap is
+`spec.validate.evidence.cncf`: unlike every other un-projected field, it is not
+a deliberate exclusion but a missing *destination* — no facade method emits
+CNCF AI Conformance evidence, so there is no options type for a derivation to
+produce. Reading it still needs `Unwrap()`. Needing `Unwrap()` anywhere is worth
+reporting — it means a derivation is missing, and `pkg/config` carries no
+stability guarantee.
 
 ### What `BundleOptions()` does and does not carry
 
@@ -1385,11 +1389,50 @@ The rest of the section has other homes, and knowing which saves a search:
 | `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | `AgentConfig`. These configure the validator's Kubernetes Job; `pkg/validator` exposes no option for any of them, so a `WithValidation*` here would have nothing to translate into. |
 | `spec.validate.execution.failOnError` | Nowhere, deliberately. It decides whether a failed check makes the *caller* fail; the validator reports and does not act on it. Command-line-only for the same reason as `IgnoreTLog`: a checked-in file should not be able to make a failing run report success. |
 | `spec.validate.input.recipe`, `.snapshot` | Not projected — you already pass both to `ValidateState`. |
-| `spec.validate.evidence` | **Not projected.** `EvidenceOptions` is the shape it would map onto, but no `Config` derivation produces one yet, so reading it still needs `Unwrap()`. |
+| `spec.validate.evidence.attestation` | `EvidenceAttestationOptions()`, which targets `EmitRecipeEvidence` rather than `ValidateState` — see below. |
+| `spec.validate.evidence.cncf` | **Not projected.** No facade method emits CNCF AI Conformance evidence, so there is nothing for a derivation to feed. Reading it still needs `Unwrap()`. |
 
 One inversion worth knowing: config says `noCleanup`, the option says
 `cleanup`. `ValidateOptions()` flips it, so `noCleanup: true` becomes
 `WithValidationCleanup(false)`.
+
+### What `EvidenceAttestationOptions()` does and does not carry
+
+`spec.validate.evidence` carries two kinds of evidence. This method covers one
+of them, and the name says which, so it cannot quietly grow to imply both:
+
+```go
+opts, ok, err := cfg.EvidenceAttestationOptions()
+if err != nil {
+    return err
+}
+if ok {
+    opts.Commit = buildCommit  // caller-owned, no config counterpart
+    err = client.EmitRecipeEvidence(ctx, rec, snap, results, opts)
+}
+```
+
+**`out` is the enable gate.** An empty `out` leaves the path off even when
+`bom`/`push`/`plainHTTP`/`insecureTLS` are set, matching the spec field's own
+contract and what the CLI does. So `ok == false` means "not configured", never
+"misconfigured" — a malformed section returns an error instead. That is why
+there is a `bool` at all: `EmitRecipeEvidence` rejects an empty `OutDir`, so a
+zero-value `EvidenceOptions` could not tell you which of the two happened.
+
+Five fields project: `out`, `bom`, `push`, `plainHTTP`, `insecureTLS`. The
+rest of `EvidenceOptions` stays yours, and the reasons differ:
+
+| Field | Why it is not derived |
+|---|---|
+| `Commit` | Names the running binary, not the document. It selects the validator catalog the bundle's BOM is built against. Set it after deriving. |
+| `OIDCResolve` | Excluded by the spec itself. A keyless-signing identity token is a short-lived secret and must not sit in a version-controlled file; resolve it at sign time. |
+| `NoSign`, `Full` | Command-line-only, for the same reason as `IgnoreTLog` and `failOnError`. Both **weaken** a run — `NoSign` pushes an unsigned bundle, `Full` ships unredacted payloads — and a checked-in file that can silently disable signing is a supply-chain downgrade no reviewer would see in a diff. |
+
+**`spec.validate.evidence.cncf` is not projected**, and this one is a genuine
+gap rather than a decision. There is no `Client.Emit*` that consumes
+`dir`/`cncfSubmission`/`features`, so a derivation would have nothing to
+produce. Projecting it means designing the emission API first. Read that half
+through `Unwrap()` until then.
 
 ### What `SnapshotAgentConfig()` does and does not carry
 

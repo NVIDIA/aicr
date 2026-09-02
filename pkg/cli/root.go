@@ -395,7 +395,12 @@ func recipeClientFromCmd(
 	} else if configured, ok := aicr.WrapConfig(cfg).RecipeSource(); ok {
 		// spec.recipe.data, derived through the facade so an SDK caller
 		// building a Client from the same document gets the same source.
-		slog.Info("initializing external data provider", "source", "spec.recipe.data")
+		// Log the concrete directory as the --data branch does: the audit line
+		// exists so an operator can tell which catalog a run actually read, and
+		// naming only the spec field leaves that unanswered. Read from the same
+		// accessor RecipeSource() uses, so the two cannot disagree.
+		slog.Info("initializing external data provider",
+			"directory", cfg.Recipe().DataDir(), "source", "spec.recipe.data")
 		source = configured
 	}
 	client, err := aicr.NewClientContext(ctx,

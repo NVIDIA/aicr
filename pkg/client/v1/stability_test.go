@@ -522,6 +522,11 @@ func TestStability_Config(t *testing.T) {
 	requireSignature[func(*aicr.Config) (aicr.BundleOptions, error)]((*aicr.Config).BundleOptions)
 	requireSignature[func(*aicr.Config) ([]aicr.ValidateOption, error)]((*aicr.Config).ValidateOptions)
 	requireSignature[func(*aicr.Config) (*aicr.AgentConfig, error)]((*aicr.Config).SnapshotAgentConfig)
+	// The bool is load-bearing, not decoration: it separates "the document
+	// declined the bundle" from "the document fumbled it", which a zero
+	// EvidenceOptions alone cannot express. Dropping it would compile at every
+	// call site that ignores it.
+	requireSignature[func(*aicr.Config) (aicr.EvidenceOptions, bool, error)]((*aicr.Config).EvidenceAttestationOptions)
 	requireSignature[func(*aicr.Config) string]((*aicr.Config).RecipeProfile)
 	requireSignature[func(*aicr.Config) (string, bool, error)]((*aicr.Config).RecipeAccountingMode)
 	requireSignature[func(*aicr.Config) (aicr.RecipeSourceOption, bool)]((*aicr.Config).RecipeSource)
