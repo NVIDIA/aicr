@@ -122,9 +122,9 @@ spec:
         - gpu-operator-version
         - check-nvidia-smi
       constraints:
-        # See vr200-rke2-ubuntu-training for why this also gates
-        # nvidia-dra-driver-gpu by proxy (no dedicated deployment check
-        # exists for it).
+        # See vr200-rke2-ubuntu-training for why this does NOT actually
+        # gate nvidia-dra-driver-gpu's deployed version — it only covers
+        # what a freshly generated bundle would pull.
         - name: Deployment.gpu-operator.version
           value: ">= v26.7.0"
     conformance:

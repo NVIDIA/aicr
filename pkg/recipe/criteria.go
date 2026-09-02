@@ -365,10 +365,10 @@ func mergeCriteriaTypes(staticTypes, registered []string) []string {
 // Criteria represents the input parameters for recipe matching.
 // All fields are optional and default to "any" if not specified.
 type Criteria struct {
-	// Service is the Kubernetes service type (eks, gke, aks, oke, ocp, kind, lke, bcm, rke2).
+	// Service is the Kubernetes service type (eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2).
 	Service CriteriaServiceType `json:"service,omitempty" yaml:"service,omitempty"`
 
-	// Accelerator is the GPU/accelerator type (h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, vr200).
+	// Accelerator is the GPU/accelerator type (h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200).
 	Accelerator CriteriaAcceleratorType `json:"accelerator,omitempty" yaml:"accelerator,omitempty"`
 
 	// Intent is the workload intent (training, inference).
