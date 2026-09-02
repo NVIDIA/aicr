@@ -68,6 +68,16 @@ spec:
     # above. If NRI must be disabled, set nriPluginEnabled: false and add
     # CONTAINERD_SOCKET=/run/k3s/containerd/containerd.sock to the toolkit
     # env.
+    #
+    # Production support boundary: NVIDIA documents CDI+NRI as an
+    # experimental GPU Operator feature (not GA), and RKE2's own docs
+    # recommend it as the current guidance for gpu-operator on RKE2
+    # regardless. Setting it at this root, rather than per-leaf, is safe
+    # today only because every rke2-derived leaf so far is itself Preview
+    # (vr200) — if a future accelerator on rke2 needs a validated,
+    # non-experimental toolkit path before NRI reaches GA, override
+    # nriPluginEnabled: false on that leaf rather than assuming the root
+    # default is production-validated for it.
     - name: gpu-operator
       type: Helm
       overrides:

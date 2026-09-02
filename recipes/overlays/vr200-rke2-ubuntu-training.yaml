@@ -176,13 +176,19 @@ spec:
         - check-nvidia-smi
       constraints:
         # No deployment-phase version check exists for nvidia-dra-driver-gpu
-        # (only gpu-operator has one), so this gates that component too by
-        # proxy: gpu-operator v26.7.0 and nvidia-dra-driver-gpu 0.5.0 are
-        # bumped together in the same registry.yaml change, so a cluster
-        # that clears this floor also has the DRA driver line with formal
-        # Vera Rubin support (the 0.4.1 default crash-loops on VR200's
-        # NVML arch value — see the nvidia-dra-driver-gpu componentRef
-        # above).
+        # at all (only gpu-operator has one, and there is no generic
+        # per-component mechanism to add one for this PR). This constraint
+        # is NOT a real gate on the DRA driver's deployed version — it only
+        # guarantees that a bundle freshly generated from this recipe pulls
+        # both from the same registry.yaml, which #2439 bumps together
+        # (gpu-operator v26.7.0 / nvidia-dra-driver-gpu 0.5.0). A cluster
+        # whose nvidia-dra-driver-gpu was independently upgraded, downgraded,
+        # or deployed from an older bundle can pass this check while still
+        # running the 0.4.1 default, which crash-loops on VR200's NVML arch
+        # value (see the nvidia-dra-driver-gpu componentRef above). Closing
+        # that gap needs a real Deployment.nvidia-dra-driver-gpu.version
+        # check (out of scope here — no such per-component mechanism exists
+        # in the validator today for any component besides gpu-operator).
         - name: Deployment.gpu-operator.version
           value: ">= v26.7.0"
     conformance:
