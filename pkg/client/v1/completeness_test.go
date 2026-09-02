@@ -22,17 +22,38 @@ import (
 	appconfig "github.com/NVIDIA/aicr/pkg/config"
 )
 
-// assertProjected fails when a field of the resolved type is neither carried by
-// one of the facade types, nor renamed into one, nor explicitly declined.
+// assertProjected fails when a field of the resolved type does not have a
+// same-named (or explicitly renamed/declined) field on one of the facade
+// types.
 //
-// It fails CLOSED: adding a spec field without deciding its fate breaks the
-// build rather than silently dropping a user's configuration.
+// # What this does NOT prove
 //
-// It checks NAME PRESENCE, not type equality. Several projections are
-// deliberate transforms (Requests string -> corev1.ResourceList, NoCleanup ->
-// inverted Cleanup, Privileged *bool -> defaulted bool). Enforcing type
-// equality would flag all of them. Value correctness is the per-derivation
-// tests' job.
+// It checks field-NAME PRESENCE on the facade type's SHAPE — reflect.Type,
+// never a value — so it can never see whether a derivation method (e.g.
+// SnapshotAgentConfig) actually assigns the field at runtime. A resolved
+// field can pass this guard purely by colliding with an existing
+// caller-owned facade field that has no config counterpart: AgentConfig
+// already declares Kubeconfig, Debug, Output, TemplatePath, RunID, NameBase,
+// ClusterConfigPath, AKSGPUPoolsPath and DiscoverNetwork for reasons
+// unrelated to spec.snapshot. A future spec.snapshot.agent.debug added to
+// SnapshotResolved would satisfy this check the instant it is named "Debug",
+// with the guard staying green even if SnapshotAgentConfig() never reads it
+// — the setting would be dropped silently. Treat a pass here as "the field
+// has somewhere to go," not "the field is wired up"; the per-derivation
+// value tests are what prove the latter.
+//
+// It also checks NAME presence, not type equality, so deliberate transforms
+// (Requests string -> corev1.ResourceList, NoCleanup -> inverted Cleanup,
+// Privileged *bool -> defaulted bool) do not trip it. Value correctness is
+// the per-derivation tests' job.
+//
+// Coverage is partial by resolved type, too: this file guards
+// SnapshotResolved, ValidateResolved and BundleResolved, but VerifyResolved
+// and EvidenceAttestationResolved each have a working derivation
+// (BundleVerifyOptions, EvidenceAttestationOptions) with no assertProjected
+// guard at all. Extending coverage to those two, and closing the
+// name-collision gap above with a stronger mechanism, are follow-up work —
+// not done here.
 func assertProjected(
 	t *testing.T,
 	resolved reflect.Type,

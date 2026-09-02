@@ -460,8 +460,8 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 }
 
 // BundleInputOptions carries the spec.bundle fields the CALLER consumes, not
-// the bundler: which recipe to load, which image-refs file to read, and where
-// to push the finished bundle.
+// the bundler: which recipe to load, which image-refs file to write to, and
+// where to push the finished bundle.
 //
 // Separate from BundleOptions on purpose. MakeBundle takes an already-resolved
 // RecipeResult and does not push — the caller does, after it returns — so
@@ -507,12 +507,28 @@ func (c *Config) BundleInputOptions() (BundleInputOptions, error) {
 	}, nil
 }
 
-// ValidateSettings carries the spec.validate settings Client.ValidateState
-// accepts. Fields are exported so a caller derives, then overrides any of them
-// before the call — the same derive-don't-apply precedence the other
-// derivations use.
+// ValidateSettings carries settings from both spec.validate.agent and
+// spec.validate.execution. Fields are exported so a caller derives, then
+// overrides any of them before use — the same derive-don't-apply precedence
+// the other derivations use.
+//
+// Not every field reaches Client.ValidateState. Image, JobName,
+// ServiceAccountName and RequireGPU configure the validator's own
+// Kubernetes Job, but pkg/validator exposes no WithValidationImage,
+// WithValidationJobName, WithValidationServiceAccountName or
+// WithValidationRequireGPU option for ValidateState to accept them through —
+// see options.go. They are carried here anyway so a caller (the CLI's
+// parseValidateAgentConfig, in particular) can read spec.validate.agent with
+// its own flag-over-config precedence instead of reaching for Unwrap(). The
+// remaining nine fields (Namespace, ImagePullSecrets, NodeSelector,
+// Tolerations, Phases, NoCluster, Cleanup, FailFast, Timeout) do reach
+// ValidateState via a matching WithValidation* option.
 type ValidateSettings struct {
-	Namespace          string
+	Namespace string
+
+	// Image, JobName, ServiceAccountName and RequireGPU have no
+	// WithValidation* option — see the type godoc above. A caller feeds them
+	// into its own agent/Job construction instead of ValidateState.
 	Image              string
 	ImagePullSecrets   []string
 	JobName            string
@@ -535,14 +551,19 @@ type ValidateSettings struct {
 	Timeout  *time.Duration
 }
 
-// ValidateSettings derives the spec.validate settings Client.ValidateState
-// accepts, as a plain value rather than an opaque option slice — so a caller
-// (the CLI, in particular) can read and override individual fields with its
-// own flag precedence instead of replaying a built option list.
+// ValidateSettings derives settings from both spec.validate.agent and
+// spec.validate.execution, as a plain value rather than an opaque option
+// slice — so a caller (the CLI, in particular) can read and override
+// individual fields with its own flag precedence instead of replaying a
+// built option list.
 //
 // Thirteen settings project: namespace, image, image pull secrets, job name,
 // service account name, node selector, tolerations, require-GPU, phases,
-// no-cluster, cleanup, fail-fast and timeout.
+// no-cluster, cleanup, fail-fast and timeout. Only nine of them reach
+// Client.ValidateState — image, job name, service account name and
+// require-GPU have no WithValidation* counterpart and are carried purely for
+// the caller's own agent/Job construction. See the ValidateSettings type
+// godoc for which is which.
 //
 // # Where the rest of spec.validate goes
 //
@@ -760,9 +781,17 @@ func (c *Config) ValidateInputOptions() (ValidateInputOptions, error) {
 // still needs Unwrap(), and this method is named for the half it carries so
 // the name cannot drift into covering both.
 //
-// Returns (zero, false, nil) for a nil Config, an absent spec.validate, an
-// absent evidence.attestation, or an empty out, and an error when the section
-// is present but malformed.
+// Returns (zero, false, nil) for a nil Config, an absent spec.validate, or an
+// absent evidence.attestation. An empty out also returns ok=false, but unlike
+// those three absent cases the other four fields (BOMPath, Push, PlainHTTP,
+// InsecureTLS) still populate from the section — only OutDir stays empty.
+// That split matters because out can come from elsewhere: the CLI's
+// --emit-attestation flag can supply out itself while bom/push are
+// configured (buildRecipeEvidenceConfig reads att.BOMPath/att.Push
+// independently of att.OutDir). Zeroing the whole struct whenever out is
+// empty would silently drop that half of the configuration on every run
+// where out arrives some other way. Returns an error when the section is
+// present but malformed.
 func (c *Config) EvidenceAttestationOptions() (EvidenceOptions, bool, error) {
 	if c == nil || c.internal == nil {
 		return EvidenceOptions{}, false, nil
@@ -776,21 +805,27 @@ func (c *Config) EvidenceAttestationOptions() (EvidenceOptions, bool, error) {
 		return EvidenceOptions{}, false, nil
 	}
 	att := resolved.EvidenceAttestation
+	opts := EvidenceOptions{
+		BOMPath:     att.BOM,
+		Push:        att.Push,
+		PlainHTTP:   att.PlainHTTP,
+		InsecureTLS: att.InsecureTLS,
+	}
 	// The spec's own gate, not an extra one: EvidenceAttestationSpec.Out
 	// documents that setting Out enables the path and an empty Out leaves it
 	// off regardless of the other fields. The CLI applies the same rule in
 	// buildRecipeEvidenceConfig, so honoring it here keeps a config-driven run
 	// and a flag-driven run from diverging on the same document.
+	//
+	// The other four fields still populate above even in this branch: an
+	// empty out here means "config didn't enable the path," not "config said
+	// nothing about bom/push," and a caller resolving out from elsewhere
+	// (e.g. a CLI flag) still needs them.
 	if att.Out == "" {
-		return EvidenceOptions{}, false, nil
+		return opts, false, nil
 	}
-	return EvidenceOptions{
-		OutDir:      att.Out,
-		BOMPath:     att.BOM,
-		Push:        att.Push,
-		PlainHTTP:   att.PlainHTTP,
-		InsecureTLS: att.InsecureTLS,
-	}, true, nil
+	opts.OutDir = att.Out
+	return opts, true, nil
 }
 
 // SnapshotAgentConfig derives Client.CollectSnapshot's AgentConfig from

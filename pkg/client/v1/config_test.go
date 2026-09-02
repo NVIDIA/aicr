@@ -1532,8 +1532,71 @@ spec:
 	if ok {
 		t.Error("reported configured with an empty out; the spec says out is the enable gate")
 	}
-	if opts != (aicr.EvidenceOptions{}) {
-		t.Errorf("opts = %+v, want the zero value when not enabled", opts)
+	// out is the ENABLE gate, not a zeroing gate: OutDir stays empty, but the
+	// rest of the section that was set still populates. See
+	// TestConfig_EvidenceAttestationOptions_PopulatesWithoutOut for why —
+	// zeroing the whole struct here would drop a caller-supplied out (e.g.
+	// the CLI's --emit-attestation flag) from ever seeing push/plainHTTP.
+	if opts.OutDir != "" {
+		t.Errorf("OutDir = %q, want empty when out is unset", opts.OutDir)
+	}
+	if opts.Push != "ghcr.io/example/evidence:run-1" {
+		t.Errorf("Push = %q, want ghcr.io/example/evidence:run-1 even though out is unset", opts.Push)
+	}
+	if !opts.PlainHTTP {
+		t.Error("PlainHTTP = false, want true even though out is unset")
+	}
+	if opts.BOMPath != "" {
+		t.Errorf("BOMPath = %q, want empty; the document never set bom", opts.BOMPath)
+	}
+	if opts.InsecureTLS {
+		t.Error("InsecureTLS = true, want false; the document never set insecureTLS")
+	}
+}
+
+// TestConfig_EvidenceAttestationOptions_PopulatesWithoutOut is the regression
+// test for a config that enables bom/push but leaves out unset. out can
+// arrive from somewhere other than this document:
+// pkg/cli/validate_evidence.go's buildRecipeEvidenceConfig resolves it with
+// stringFlagOrConfig(cmd, "emit-attestation", att.OutDir), so the
+// --emit-attestation flag can supply out while bom/push come from config.
+// Before this fix, an empty out returned a fully zeroed EvidenceOptions,
+// which silently dropped bom/push in exactly that case. ok must still be
+// false — THIS document did not enable the path — but BOMPath and Push must
+// survive so a flag-supplied out does not lose them.
+func TestConfig_EvidenceAttestationOptions_PopulatesWithoutOut(t *testing.T) {
+	t.Parallel()
+
+	const noOut = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+metadata:
+  name: test
+spec:
+  validate:
+    evidence:
+      attestation:
+        bom: ./sbom.cdx.json
+        push: ghcr.io/example/evidence:run-1
+`
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, noOut))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	opts, ok, err := cfg.EvidenceAttestationOptions()
+	if err != nil {
+		t.Fatalf("EvidenceAttestationOptions: %v", err)
+	}
+	if ok {
+		t.Error("reported configured with an empty out; the spec says out is the enable gate")
+	}
+	if opts.OutDir != "" {
+		t.Errorf("OutDir = %q, want empty when out is unset", opts.OutDir)
+	}
+	if opts.BOMPath != "./sbom.cdx.json" {
+		t.Errorf("BOMPath = %q, want ./sbom.cdx.json to survive an empty out", opts.BOMPath)
+	}
+	if opts.Push != "ghcr.io/example/evidence:run-1" {
+		t.Errorf("Push = %q, want ghcr.io/example/evidence:run-1 to survive an empty out", opts.Push)
 	}
 }
 
