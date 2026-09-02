@@ -237,7 +237,7 @@ func unstructuredConditionTrue(obj *unstructured.Unstructured, condType string) 
 		if !ok {
 			continue
 		}
-		if fmt.Sprint(m["type"]) == condType && fmt.Sprint(m["status"]) == "True" {
+		if fmt.Sprint(m["type"]) == condType && fmt.Sprint(m["status"]) == conditionStatusTrue {
 			return true
 		}
 	}
