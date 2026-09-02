@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
@@ -961,4 +962,223 @@ spec:
 			}
 		})
 	}
+}
+
+// snapshotAgentConfig exercises every spec.snapshot field SnapshotAgentConfig
+// projects, with a value per field so a dropped or swapped mapping shows up as
+// a wrong value rather than a shorter struct.
+const snapshotAgentConfig = `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+spec:
+  snapshot:
+    agent:
+      namespace: aicr-system
+      image: nvcr.io/nvidia/aicr:v1.2.3
+      imagePullSecrets:
+        - regcred
+      jobName: snap-job
+      serviceAccountName: snap-sa
+      nodeSelector:
+        role: gpu
+      tolerations:
+        - "nvidia.com/gpu:NoSchedule"
+      requireGpu: true
+      runtimeClassName: nvidia
+      os: ubuntu
+      requests: cpu=100m,memory=256Mi
+      limits: cpu=2,memory=1Gi
+    execution:
+      timeout: 12m
+      maxNodesPerEntry: 7
+    output:
+      path: ./snap.yaml
+      template: ./tmpl.tmpl
+`
+
+func TestConfig_SnapshotAgentConfig(t *testing.T) {
+	cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, snapshotAgentConfig))
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	ac, err := cfg.SnapshotAgentConfig()
+	if err != nil {
+		t.Fatalf("SnapshotAgentConfig: %v", err)
+	}
+	if ac == nil {
+		t.Fatal("SnapshotAgentConfig returned nil for a populated spec.snapshot")
+	}
+
+	checks := []struct {
+		name string
+		got  any
+		want any
+	}{
+		{"Namespace", ac.Namespace, "aicr-system"},
+		{"Image", ac.Image, "nvcr.io/nvidia/aicr:v1.2.3"},
+		{"JobName", ac.JobName, "snap-job"},
+		{"ServiceAccountName", ac.ServiceAccountName, "snap-sa"},
+		{"RequireGPU", ac.RequireGPU, true},
+		{"RuntimeClassName", ac.RuntimeClassName, "nvidia"},
+		{"OS", ac.OS, "ubuntu"},
+		{"MaxNodesPerEntry", ac.MaxNodesPerEntry, 7},
+		{"Timeout", ac.Timeout, 12 * time.Minute},
+	}
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s = %v, want %v", c.name, c.got, c.want)
+		}
+	}
+	if len(ac.ImagePullSecrets) != 1 || ac.ImagePullSecrets[0] != "regcred" {
+		t.Errorf("ImagePullSecrets = %v, want [regcred]", ac.ImagePullSecrets)
+	}
+	if ac.NodeSelector["role"] != "gpu" {
+		t.Errorf("NodeSelector[role] = %q, want gpu", ac.NodeSelector["role"])
+	}
+	if len(ac.Tolerations) != 1 {
+		t.Errorf("Tolerations = %v, want 1 entry", ac.Tolerations)
+	}
+	// Raw "name=quantity,..." strings; Resolve does not parse them, so a
+	// dropped parse would surface as an empty ResourceList, not an error.
+	if ac.Requests.Cpu().String() != "100m" {
+		t.Errorf("Requests.cpu = %v, want 100m", ac.Requests.Cpu())
+	}
+	if ac.Limits.Memory().String() != "1Gi" {
+		t.Errorf("Limits.memory = %v, want 1Gi", ac.Limits.Memory())
+	}
+}
+
+// TestConfig_SnapshotAgentConfig_CleanupIsInverted covers the same trap
+// spec.validate has: config says "noCleanup", AgentConfig says "Cleanup".
+func TestConfig_SnapshotAgentConfig_CleanupIsInverted(t *testing.T) {
+	for _, tt := range []struct {
+		noCleanup   string
+		wantCleanup bool
+	}{{"true", false}, {"false", true}} {
+		t.Run("noCleanup="+tt.noCleanup, func(t *testing.T) {
+			body := "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  snapshot:\n    execution:\n      noCleanup: " + tt.noCleanup + "\n"
+			cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, body))
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			ac, err := cfg.SnapshotAgentConfig()
+			if err != nil {
+				t.Fatalf("SnapshotAgentConfig: %v", err)
+			}
+			if ac.Cleanup != tt.wantCleanup {
+				t.Errorf("Cleanup = %v, want %v (noCleanup: %s)", ac.Cleanup, tt.wantCleanup, tt.noCleanup)
+			}
+		})
+	}
+}
+
+// TestConfig_SnapshotAgentConfig_PrivilegedDefaultsTrue is the subtler of the
+// two traps. The resolved field is a pointer so unset stays distinct from an
+// explicit false, and the collector's default is privileged — dereferencing
+// nil to false would silently drop privileges and surface as missing data
+// rather than an error.
+func TestConfig_SnapshotAgentConfig_PrivilegedDefaultsTrue(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"unset defaults to privileged", "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  snapshot:\n    agent:\n      namespace: n\n", true},
+		{"explicit false is preserved", "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  snapshot:\n    execution:\n      privileged: false\n", false},
+		{"explicit true is preserved", "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  snapshot:\n    execution:\n      privileged: true\n", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, tt.body))
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			ac, err := cfg.SnapshotAgentConfig()
+			if err != nil {
+				t.Fatalf("SnapshotAgentConfig: %v", err)
+			}
+			if ac.Privileged != tt.want {
+				t.Errorf("Privileged = %v, want %v", ac.Privileged, tt.want)
+			}
+		})
+	}
+}
+
+// TestConfig_SnapshotAgentConfig_Absent covers BOTH routes to "no snapshot
+// configuration", which fail differently.
+//
+// A nil Config is caught by the receiver check. A document that simply omits
+// spec.snapshot is NOT: Resolve() returns a non-nil SnapshotResolved for an
+// absent section, so without the section-presence check the derivation falls
+// through and applies the in-section defaults — Cleanup and Privileged both
+// true — to a document that never opted into snapshot configuration.
+func TestConfig_SnapshotAgentConfig_Absent(t *testing.T) {
+	t.Run("document omits spec.snapshot", func(t *testing.T) {
+		body := `apiVersion: aicr.run/v1beta1
+kind: AICRConfig
+spec:
+  verify:
+    policy:
+      minTrustLevel: max
+`
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, body))
+		if err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		ac, err := cfg.SnapshotAgentConfig()
+		if err != nil {
+			t.Fatalf("SnapshotAgentConfig: %v", err)
+		}
+		if ac == nil {
+			t.Fatal("got nil; an absent section must still derive a zero value")
+		}
+		if ac.Cleanup || ac.Privileged {
+			t.Errorf("Cleanup=%v Privileged=%v; an absent section must not apply in-section defaults",
+				ac.Cleanup, ac.Privileged)
+		}
+	})
+
+	var cfg *aicr.Config
+	ac, err := cfg.SnapshotAgentConfig()
+	if err != nil {
+		t.Fatalf("SnapshotAgentConfig on nil Config: %v", err)
+	}
+	if ac == nil {
+		t.Fatal("got nil; a nil Config must still derive a zero-value AgentConfig")
+	}
+	// AgentConfig contains slices/maps, so compare the fields a derivation
+	// would have populated rather than the struct as a whole.
+	if ac.Namespace != "" || ac.Image != "" || ac.Cleanup || ac.Privileged ||
+		ac.Timeout != 0 || len(ac.ImagePullSecrets) != 0 || len(ac.NodeSelector) != 0 {
+
+		t.Errorf("got %+v, want a zero value", ac)
+	}
+}
+
+// TestConfig_SnapshotAgentConfig_OSIsParsed pins that OS goes through the
+// criteria registry rather than being copied. An unparsed "Talos" misses the
+// agent's exact "talos" match and selects incompatible host mounts, and an
+// undocumented value would travel instead of erroring.
+func TestConfig_SnapshotAgentConfig_OSIsParsed(t *testing.T) {
+	head := "apiVersion: aicr.run/v1beta1\nkind: AICRConfig\nspec:\n  snapshot:\n    agent:\n      os: "
+	t.Run("mixed case is normalized", func(t *testing.T) {
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, head+"Talos\n"))
+		if err != nil {
+			t.Skipf("loader rejected the value before the derivation: %v", err)
+		}
+		ac, err := cfg.SnapshotAgentConfig()
+		if err != nil {
+			t.Fatalf("SnapshotAgentConfig: %v", err)
+		}
+		if ac.OS != "talos" {
+			t.Errorf("OS = %q, want %q", ac.OS, "talos")
+		}
+	})
+	t.Run("undocumented value is rejected", func(t *testing.T) {
+		cfg, err := aicr.LoadConfig(context.Background(), writeConfig(t, head+"plan9\n"))
+		if err != nil {
+			return // rejected earlier, also fail-closed
+		}
+		if _, err := cfg.SnapshotAgentConfig(); err == nil {
+			t.Fatal("SnapshotAgentConfig accepted an undocumented OS value")
+		}
+	})
 }

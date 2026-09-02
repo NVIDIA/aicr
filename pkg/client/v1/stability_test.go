@@ -333,6 +333,19 @@ func TestStability_TypesAndAliases(t *testing.T) {
 	_ = aicr.Criteria{}
 	_ = aicr.AllowLists{}
 	_ = aicr.AgentConfig{}
+	// Pinned by name and type, not just shape: Config.SnapshotAgentConfig
+	// populates these, and the bare literal above would still compile
+	// through a rename or retype. Cleanup and Privileged especially --
+	// both are derived through a transform (an inversion and a
+	// defaults-to-true), so a silent flip has no other guard here.
+	_ = aicr.AgentConfig{
+		Namespace: "", Image: "", JobName: "", ServiceAccountName: "",
+		RuntimeClassName: "", OS: "", Output: "", TemplatePath: "",
+		MaxNodesPerEntry: 0, RequireGPU: false, Cleanup: false, Privileged: false,
+	}
+	requireType[bool](aicr.AgentConfig{}.Cleanup)
+	requireType[bool](aicr.AgentConfig{}.Privileged)
+	requireType[time.Duration](aicr.AgentConfig{}.Timeout)
 	_ = aicr.Snapshot{}
 	_ = aicr.Snapshot{}.Raw
 	_ = aicr.ReportSummary{}
@@ -508,6 +521,7 @@ func TestStability_Config(t *testing.T) {
 	requireSignature[func(*aicr.Config) (aicr.BundleVerifyOptions, error)]((*aicr.Config).BundleVerifyOptions)
 	requireSignature[func(*aicr.Config) (aicr.BundleOptions, error)]((*aicr.Config).BundleOptions)
 	requireSignature[func(*aicr.Config) ([]aicr.ValidateOption, error)]((*aicr.Config).ValidateOptions)
+	requireSignature[func(*aicr.Config) (*aicr.AgentConfig, error)]((*aicr.Config).SnapshotAgentConfig)
 	requireSignature[func(*aicr.Config) string]((*aicr.Config).RecipeProfile)
 	requireSignature[func(*aicr.Config) (string, bool, error)]((*aicr.Config).RecipeAccountingMode)
 	requireSignature[func(*aicr.Config) (aicr.RecipeSourceOption, bool)]((*aicr.Config).RecipeSource)

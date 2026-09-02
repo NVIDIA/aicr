@@ -888,6 +888,7 @@ derive step rather than the load step.
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
 | `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.attestation` |
 | `ValidateOptions()` | `spec.validate.execution` + the agent fields the validator accepts as options |
+| `SnapshotAgentConfig()` | `spec.snapshot.agent` + `.execution` + `.output` |
 | `RecipeSource()` | `spec.recipe.data` |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
 | `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
@@ -895,8 +896,9 @@ derive step rather than the load step.
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 
-`spec.snapshot` is not yet projected, and neither is `spec.validate.evidence`;
-`Unwrap()` reaches the raw document meanwhile. Needing it is worth reporting — it means a
+All five spec sections now have a derivation. `spec.validate.evidence` is the
+remaining gap — `EvidenceOptions` is the shape it would map onto, but no
+`Config` method produces one, so reading it still needs `Unwrap()`. Needing it is worth reporting — it means a
 derivation is missing, and `pkg/config` carries no stability guarantee.
 
 ### What `BundleOptions()` does and does not carry
@@ -1388,3 +1390,56 @@ The rest of the section has other homes, and knowing which saves a search:
 One inversion worth knowing: config says `noCleanup`, the option says
 `cleanup`. `ValidateOptions()` flips it, so `noCleanup: true` becomes
 `WithValidationCleanup(false)`.
+
+### What `SnapshotAgentConfig()` does and does not carry
+
+`AgentConfig`'s fields are exported, so unlike the bundle path there is no
+options slice — derive it, then set any field directly. It is never nil:
+
+```go
+agent, err := cfg.SnapshotAgentConfig()
+if err != nil {
+    return err
+}
+agent.Kubeconfig = kubeconfigPath  // caller-owned, no config counterpart
+snap, err := client.CollectSnapshot(ctx, agent)
+```
+
+Three mappings are transforms rather than copies, and two of them fail
+silently if you reimplement them by hand:
+
+| Field | Behavior |
+|---|---|
+| `noCleanup` → `Cleanup` | **Inverted**, same as `spec.validate` |
+| `privileged` → `Privileged` | **Defaults to true** when config says nothing. The resolved field is a pointer so unset stays distinct from an explicit `false`; treating nil as `false` drops privileges the collector needs, and it surfaces as missing data rather than an error |
+| `requests`, `limits` | Parsed from raw `name=quantity,...` strings. `Resolve()` deliberately leaves them unparsed, so a malformed value errors here instead of becoming an empty `ResourceList` |
+
+The whole `spec.snapshot.output` section is **not** projected, and that is
+deliberate. Output describes *delivery*; `AgentConfig` describes the collection
+Job.
+
+- `output.format` is applied at delivery. The Job always stages YAML in a
+  ConfigMap, so a format routed through `AgentConfig` would be silently ignored
+  (#2398).
+- `output.path` and `output.template` are **not** `AgentConfig.Output` and
+  `.TemplatePath`. Any `Output` value that is not a `cm://` URI stages to an
+  internal ConfigMap and delivery becomes yours, so projecting a file path
+  there would look configured and write nothing.
+
+Deliver with `snapshotter.DeliverSnapshot`, passing `Snapshot.Raw`.
+
+`OS` is parsed through the criteria registry rather than copied, matching what
+the CLI does with `--os`. An unparsed `Talos` would miss the agent's exact
+`talos` check and select incompatible host mounts, and an undocumented value
+errors here instead of traveling.
+
+`Kubeconfig`, `Debug`, `ClusterConfigPath`, `AKSGPUPoolsPath`,
+`DiscoverNetwork`, `RunID` and `NameBase` have no config counterpart and stay
+zero — they are per-invocation or caller-owned.
+
+**A document with no `spec.snapshot` yields a zero value, which is not a
+working configuration** — `Privileged` is false, which the collector generally
+needs true. That is deliberate: defaults apply when the section exists and is
+silent about a field, but a document that made no snapshot decisions at all
+does not get decisions invented for it. Supply your own defaults in that case,
+as the CLI does from its flag defaults.
