@@ -1031,17 +1031,19 @@ func persistTrainerInstallManifest(ctx context.Context, clientset kubernetes.Int
 }
 
 // mergeTrainerResourceRefs unions two resource lists by GVR/namespace/name,
-// keeping b's entry on a duplicate.
+// keeping b's entry on a duplicate. Preserves a's, then b's, first-seen
+// order, since deleteTrainer tears down in reverse list order and a random
+// map order could delete a CRD or webhook before its controller.
 func mergeTrainerResourceRefs(a, b []trainerResourceRef) []trainerResourceRef {
-	byKey := make(map[trainerResourceKey]trainerResourceRef, len(a)+len(b))
-	for _, ref := range a {
-		byKey[trainerResourceKeyOf(ref)] = ref
-	}
-	for _, ref := range b {
-		byKey[trainerResourceKeyOf(ref)] = ref
-	}
-	merged := make([]trainerResourceRef, 0, len(byKey))
-	for _, ref := range byKey {
+	index := make(map[trainerResourceKey]int, len(a)+len(b))
+	merged := make([]trainerResourceRef, 0, len(a)+len(b))
+	for _, ref := range append(append([]trainerResourceRef{}, a...), b...) {
+		key := trainerResourceKeyOf(ref)
+		if i, seen := index[key]; seen {
+			merged[i] = ref
+			continue
+		}
+		index[key] = len(merged)
 		merged = append(merged, ref)
 	}
 	return merged

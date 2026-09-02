@@ -83,6 +83,32 @@ func TestLoadTrainerInstallManifest_MissingIsNil(t *testing.T) {
 	}
 }
 
+// TestMergeTrainerResourceRefs_PreservesOrder checks that the merged list
+// keeps a's, then b's, first-seen order with a duplicate updated in place.
+// deleteTrainer tears down in reverse list order, so a random order here
+// could delete a CRD or webhook before its controller.
+func TestMergeTrainerResourceRefs_PreservesOrder(t *testing.T) {
+	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	ref := func(name string) trainerResourceRef {
+		return trainerResourceRef{GVR: gvr, Namespace: trainerNamespace, Name: name}
+	}
+
+	a := []trainerResourceRef{ref("crd"), ref("webhook"), ref("controller")}
+	b := []trainerResourceRef{ref("controller"), ref("service")}
+
+	got := mergeTrainerResourceRefs(a, b)
+
+	want := []string{"crd", "webhook", "controller", "service"}
+	if len(got) != len(want) {
+		t.Fatalf("mergeTrainerResourceRefs() = %v, want %d entries", got, len(want))
+	}
+	for i, name := range want {
+		if got[i].Name != name {
+			t.Errorf("entry %d = %q, want %q (full: %v)", i, got[i].Name, name, got)
+		}
+	}
+}
+
 // TestPersistTrainerInstallManifest_MergesConcurrentInstall checks that a
 // second install's manifest write merges with, rather than overwrites, one
 // already persisted by a concurrent installer.
