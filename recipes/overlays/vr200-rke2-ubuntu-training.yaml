@@ -103,6 +103,21 @@ spec:
       overrides:
         labeler:
           assumeDriverInstalled: true
+        # metadata-collector is disabled here, not patched. Its chart only
+        # gets GPU/NVML access two ways: a runtimeClassName matching a real
+        # containerd runtime handler (none exists on the host-managed-driver
+        # + CDI/NRI path this leaf uses — GPU Operator's CDI+NRI mode never
+        # registers one), or requesting the nvidia.com/gpu resource (works,
+        # but permanently reserves one GPU per node for the DaemonSet's
+        # lifetime — unacceptable on a training cluster). gpu-health-monitor
+        # avoids this entirely via direct hostPath device/driver mounts; the
+        # correct fix is the same mechanism added to metadata-collector's
+        # chart upstream (NVIDIA/nvsentinel#1717). Disabled here until that
+        # lands — assumeDriverInstalled above still fixes the two
+        # syslog-health-monitor DaemonSets, which don't need driver access.
+        global:
+          metadataCollector:
+            enabled: false
 
     # GPU-allocation policy is unchanged: resources.gpus stays disabled
     # (the gpu-operator device plugin remains the whole-GPU advertiser per
@@ -140,6 +155,90 @@ spec:
     # placeholder, and set the gb200 profile (service/accelerator) +
     # intent: multiNodeTraining + kernelAllowNewer: true (Vera's arm64
     # 64k-page kernel is newer than the pinned baseline).
+    # Health check override: the VR reference clusters carry an out-of-band
+    # nodewright install (hand-written values, no fullnameOverride), so the
+    # live Deployment is named nodewright-controller-manager rather than the
+    # embedded catalog's expected skyhook-operator-controller-manager
+    # (NVIDIA/aicr#1828). Inline override (rather than a checks/ file)
+    # because the expected-resources validator is a separate container
+    # image with its own compiled-in embedded catalog — it never reads
+    # --data, only the resolved recipe.yaml.
+    - name: nodewright-operator
+      type: Helm
+      healthCheckAsserts: |
+        apiVersion: chainsaw.kyverno.io/v1alpha1
+        kind: Test
+        metadata:
+          name: nodewright-operator-health-check
+        spec:
+          timeouts:
+            assert: 5m
+          steps:
+            - name: validate-skyhook-crd-established
+              try:
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: skyhooks.skyhook.nvidia.com
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+            - name: validate-deployment-exists
+              try:
+                - assert:
+                    resource:
+                      apiVersion: apps/v1
+                      kind: Deployment
+                      metadata:
+                        name: nodewright-controller-manager
+                        namespace: skyhook
+                      status:
+                        (availableReplicas > `0`): true
+            - name: validate-all-pods-healthy
+              try:
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        phase: Pending
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        phase: Failed
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        phase: Unknown
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+
     - name: nodewright-customizations
       type: Helm
       manifestFiles:
