@@ -2061,6 +2061,16 @@ func TestGenerate_IgnoreComputeDomainCRDDiff(t *testing.T) {
 	if !strings.Contains(got, "name: computedomains.resource.nvidia.com") {
 		t.Errorf("gpu-operator child template must ignoreDifferences on computedomains.resource.nvidia.com:\n%s", got)
 	}
+	for _, pointer := range []string{
+		"/spec/versions/0/schema/openAPIV3Schema/properties/spec/required",
+		"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/default",
+		"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/minimum",
+		"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/description",
+	} {
+		if !strings.Contains(got, pointer) {
+			t.Errorf("gpu-operator child template must ignore jsonPointer %q:\n%s", pointer, got)
+		}
+	}
 }
 
 // TestHelmTemplate_RendersWithSetRepoURL is the live-render counterpart to
