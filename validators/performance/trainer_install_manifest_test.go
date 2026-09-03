@@ -260,10 +260,12 @@ func TestReapOrphanedTrainerInstall_SkipsFreshManifest(t *testing.T) {
 // would otherwise leave behind.
 func TestReapOrphanedTrainerInstall_ReapsStaleAbandonedInstall(t *testing.T) {
 	client := fake.NewClientset()
-	dynamicClient := newTrainerFakeClient(readyTrainerDeployment())
+	deployment := readyTrainerDeployment()
+	deployment.SetUID(testNamespaceUID)
+	dynamicClient := newTrainerFakeClient(deployment)
 
 	persistTrainerInstallManifest(context.Background(), client, []trainerResourceRef{
-		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
+		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment, UID: testNamespaceUID},
 	})
 	backdateTrainerInstallManifest(t, client)
 
@@ -275,5 +277,81 @@ func TestReapOrphanedTrainerInstall_ReapsStaleAbandonedInstall(t *testing.T) {
 	}
 	if _, got, _ := loadTrainerInstallManifest(context.Background(), client); got != nil {
 		t.Error("expected the manifest to be deleted once the install was reaped")
+	}
+}
+
+// TestTrustworthyTrainerResourceRefs checks which manifest entries are kept
+// versus dropped, independent of the reap flow around it.
+func TestTrustworthyTrainerResourceRefs(t *testing.T) {
+	tests := []struct {
+		name string
+		ref  trainerResourceRef
+		want bool
+	}{
+		{"namespaced with UID is trusted", trainerResourceRef{
+			GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: "a", UID: testNamespaceUID}, true},
+		{"cluster-scoped with UID is trusted", trainerResourceRef{
+			GVR: trainerCRDGVR, Name: "a", UID: testNamespaceUID}, true},
+		{"missing UID is rejected", trainerResourceRef{
+			GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: "a"}, false},
+		{"namespace outside trainerNamespace is rejected", trainerResourceRef{
+			GVR: trainerDeploymentGVR, Namespace: "other", Name: "a", UID: testNamespaceUID}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := trustworthyTrainerResourceRefs([]trainerResourceRef{tt.ref})
+			if (len(got) == 1) != tt.want {
+				t.Errorf("trustworthyTrainerResourceRefs(%+v) = %v, want kept=%v", tt.ref, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestReapOrphanedTrainerInstall_RejectsEntryWithoutUID checks that a
+// manifest entry with no recorded UID is left alone instead of deleted. The
+// manifest ConfigMap is writable by anyone with access to trainerNamespace,
+// and a delete with no UID precondition would remove whatever currently
+// holds that name, not necessarily what this run installed.
+func TestReapOrphanedTrainerInstall_RejectsEntryWithoutUID(t *testing.T) {
+	client := fake.NewClientset()
+	deployment := readyTrainerDeployment()
+	deployment.SetUID(testNamespaceUID)
+	dynamicClient := newTrainerFakeClient(deployment)
+
+	persistTrainerInstallManifest(context.Background(), client, []trainerResourceRef{
+		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
+	})
+	backdateTrainerInstallManifest(t, client)
+
+	reapOrphanedTrainerInstall(context.Background(), client, dynamicClient, false)
+
+	if _, err := dynamicClient.Resource(trainerDeploymentGVR).Namespace(trainerNamespace).
+		Get(context.Background(), trainerControllerDeployment, metav1.GetOptions{}); err != nil {
+		t.Errorf("expected the Deployment to survive a UID-less manifest entry: %v", err)
+	}
+}
+
+// TestReapOrphanedTrainerInstall_RejectsEntryOutsideNamespace checks that a
+// manifest entry naming a namespace other than trainerNamespace is left
+// alone instead of deleted. A legitimate self-install never creates a
+// namespaced resource anywhere else, so such an entry can only be a
+// tampered or corrupted manifest.
+func TestReapOrphanedTrainerInstall_RejectsEntryOutsideNamespace(t *testing.T) {
+	client := fake.NewClientset()
+	const otherNamespace = "unrelated-namespace"
+	victim := newTestObject("apps/v1", "Deployment", otherNamespace, "someone-elses-deployment")
+	victim.SetUID(testNamespaceUID)
+	dynamicClient := newTrainerFakeClient(victim)
+
+	persistTrainerInstallManifest(context.Background(), client, []trainerResourceRef{
+		{GVR: trainerDeploymentGVR, Namespace: otherNamespace, Name: "someone-elses-deployment", UID: testNamespaceUID},
+	})
+	backdateTrainerInstallManifest(t, client)
+
+	reapOrphanedTrainerInstall(context.Background(), client, dynamicClient, false)
+
+	if _, err := dynamicClient.Resource(trainerDeploymentGVR).Namespace(otherNamespace).
+		Get(context.Background(), "someone-elses-deployment", metav1.GetOptions{}); err != nil {
+		t.Errorf("expected the out-of-namespace resource to survive: %v", err)
 	}
 }

@@ -1156,6 +1156,11 @@ func reapOrphanedTrainerInstall(ctx context.Context, clientset kubernetes.Interf
 		return
 	}
 
+	resources = trustworthyTrainerResourceRefs(resources)
+	if len(resources) == 0 {
+		return
+	}
+
 	// deleteTrainer's own retries use a fresh background context per call,
 	// same as its other callers.
 	if err := deleteTrainer(dynamicClient, resources); err != nil { //nolint:contextcheck
@@ -1164,6 +1169,33 @@ func reapOrphanedTrainerInstall(ctx context.Context, clientset kubernetes.Interf
 	}
 	slog.Info("Reaped a Trainer install orphaned by an abandoned execution")
 	deleteTrainerInstallManifest(ctx, clientset)
+}
+
+// trustworthyTrainerResourceRefs drops manifest entries reapOrphanedTrainerInstall
+// must not delete unconditionally. The manifest is a ConfigMap anyone with
+// write access to trainerNamespace can edit, and deleteTrainerResource skips
+// its UID delete precondition when UID is empty, so an entry with no UID, or
+// naming a namespace outside this install's own, could point a cluster-scoped
+// delete at any resource on the cluster. Every entry this package itself
+// persists always carries the real UID it got back from Create and stays
+// within trainerNamespace or cluster scope, so a rejected entry here is
+// never a legitimate one.
+func trustworthyTrainerResourceRefs(resources []trainerResourceRef) []trainerResourceRef {
+	trusted := make([]trainerResourceRef, 0, len(resources))
+	for _, ref := range resources {
+		if ref.UID == "" {
+			slog.Warn("Refusing to reap a Trainer install manifest entry with no recorded UID",
+				"resource", ref.String())
+			continue
+		}
+		if ref.Namespace != "" && ref.Namespace != trainerNamespace {
+			slog.Warn("Refusing to reap a Trainer install manifest entry outside the expected namespace",
+				"resource", ref.String())
+			continue
+		}
+		trusted = append(trusted, ref)
+	}
+	return trusted
 }
 
 // waitForTrainerReady blocks until a freshly applied Trainer is usable: the CRDs
