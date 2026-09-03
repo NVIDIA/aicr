@@ -156,6 +156,11 @@ RELEASE_NAME="${KWOK_RELEASE:-aicr-test}"
 WORK_DIR=""
 AICR_BIN=""
 KEEP_NAMESPACE=false
+# Recipe under test. Global (not just main()'s local) for the same reason
+# ARGOCD_ROOT_APP is: the EXIT trap needs to see it, and it keys the
+# diagnostic output directory so recipes can't overwrite each other's
+# capture when run-all-recipes.sh loops over several in one cluster.
+RECIPE_UNDER_TEST=""
 
 # Deployer selection (issue #843). Set by --deployer flag in main().
 # When DEPLOYER != "helm", generate_bundle pushes to OCI and deploy_bundle
@@ -273,7 +278,15 @@ resolve_flux_root_names() {
 # own helm-uninstall/namespace-delete below destroys the evidence first —
 # see NVIDIA/nodewright#571 for the incident that surfaced the gap.
 capture_failure_diagnostics() {
-    local out_dir="/tmp/kwok-debug-artifacts/pod-logs"
+    # Keyed on the recipe: run-all-recipes.sh loops over several recipes in
+    # one shared cluster (`make kwok-test-all` runs the whole set), each
+    # invoking this capture separately against a largely fixed namespace
+    # set. With a shared directory, a later recipe failing early — before
+    # its pods exist, or with the budget already spent — would leave
+    # zero-byte files (the `>` redirects below truncate before the command
+    # runs) on top of an earlier recipe's good capture, destroying the very
+    # evidence this function exists to preserve.
+    local out_dir="/tmp/kwok-debug-artifacts/pod-logs/${RECIPE_UNDER_TEST:-unknown-recipe}"
     mkdir -p "$out_dir" 2>/dev/null || return 0
 
     # Hard overall budget, not just per-call timeouts: a two-pod namespace
@@ -281,13 +294,16 @@ capture_failure_diagnostics() {
     # 30s(describe) = 150s, and a slow apiserver is exactly the failure mode
     # this runs under. Every namespace/pod iteration checks this before
     # starting, so a stall stops the whole pass rather than one command.
-    # This step runs before cleanup()'s own teardown and before the
-    # composite action's later failure() steps (debug-artifact collection,
-    # kind export logs, upload) — overrunning it risks the job's timeout
-    # killing all of that too, losing cleanup and artifact upload along
-    # with the diagnostics. 60s leaves headroom inside the 240s post-sync-
-    # gate diagnostics margin documented in kwok-test/action.yml.
-    local deadline=$(( $(date +%s) + 60 ))
+    #
+    # 30s, deliberately small: kwok-test/action.yml reserves a 240s margin,
+    # but only ~180s of that is post-gate work, and cleanup()'s own teardown
+    # below already draws on it unbounded (up to 120s for the Argo CD root
+    # Application delete, 60s per Helm uninstall across every release, plus
+    # the namespace sweep). This capture runs ahead of all of that, so its
+    # budget is not free — overrunning risks the job timeout killing
+    # teardown, `kind export logs`, AND the artifact upload, which would
+    # lose more evidence than this function captures.
+    local deadline=$(( $(date +%s) + 30 ))
     budget_left() { (( $(date +%s) < deadline )); }
     # Caps EVERY command to whatever's left of the overall budget, not just
     # its own default — so a command starting near the deadline can't run
@@ -356,6 +372,13 @@ capture_failure_diagnostics() {
         done
         run_capped 10 kubectl get endpointslices -n "$ns" -o yaml > "${out_dir}/${ns}-endpointslices.yaml" 2>/dev/null || true
         run_capped 15 kubectl describe pods -n "$ns" > "${out_dir}/${ns}-describe.txt" 2>/dev/null || true
+        # Namespace Events, not just the pod-scoped ones `describe pods`
+        # carries: a failed webhook call or Helm install surfaces as an
+        # Event on a non-pod object. The action's own
+        # `kubectl get events --all-namespaces` runs after this trap has
+        # already deleted the namespace, so this is the only chance to keep
+        # them.
+        run_capped 10 kubectl get events -n "$ns" --sort-by=.lastTimestamp > "${out_dir}/${ns}-events.txt" 2>/dev/null || true
     done
 }
 
@@ -2102,6 +2125,7 @@ main() {
     esac
 
     # Must run before cleanup trap so the trap sees the resolved root name.
+    RECIPE_UNDER_TEST="$recipe"
     resolve_argocd_root_app
     resolve_flux_root_names "$recipe"
 
