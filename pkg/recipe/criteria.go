@@ -43,21 +43,26 @@ import (
 const CriteriaAnyValue = "any"
 
 // CriteriaServiceType represents the Kubernetes service/platform type for criteria.
+//
+// CriteriaServiceGeneric is self-managed Kubernetes with no distinguishing
+// distro or provisioning system; unlike CriteriaServiceAny, it is a concrete
+// service, not the wildcard.
 type CriteriaServiceType string
 
 // CriteriaServiceType constants for supported Kubernetes services.
 const (
-	CriteriaServiceAny    CriteriaServiceType = "any"
-	CriteriaServiceEKS    CriteriaServiceType = "eks"
-	CriteriaServiceGKE    CriteriaServiceType = "gke"
-	CriteriaServiceAKS    CriteriaServiceType = "aks"
-	CriteriaServiceOKE    CriteriaServiceType = "oke"
-	CriteriaServiceKind   CriteriaServiceType = "kind"
-	CriteriaServiceLKE    CriteriaServiceType = "lke"
-	CriteriaServiceBCM    CriteriaServiceType = "bcm"
-	CriteriaServiceOCP    CriteriaServiceType = "ocp"
-	CriteriaServiceMetal3 CriteriaServiceType = "metal3"
-	CriteriaServiceRKE2   CriteriaServiceType = "rke2"
+	CriteriaServiceAny     CriteriaServiceType = "any"
+	CriteriaServiceEKS     CriteriaServiceType = "eks"
+	CriteriaServiceGKE     CriteriaServiceType = "gke"
+	CriteriaServiceAKS     CriteriaServiceType = "aks"
+	CriteriaServiceOKE     CriteriaServiceType = "oke"
+	CriteriaServiceKind    CriteriaServiceType = "kind"
+	CriteriaServiceLKE     CriteriaServiceType = "lke"
+	CriteriaServiceBCM     CriteriaServiceType = "bcm"
+	CriteriaServiceOCP     CriteriaServiceType = "ocp"
+	CriteriaServiceMetal3  CriteriaServiceType = "metal3"
+	CriteriaServiceRKE2    CriteriaServiceType = "rke2"
+	CriteriaServiceGeneric CriteriaServiceType = "generic"
 )
 
 // ParseService parses a string into a CriteriaServiceType against this
@@ -93,6 +98,8 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 		return CriteriaServiceMetal3, nil
 	case "rke2":
 		return CriteriaServiceRKE2, nil
+	case "generic":
+		return CriteriaServiceGeneric, nil
 	default:
 		if r.Has(FieldService, s) {
 			return CriteriaServiceType(normalizeCriteriaValue(s)), nil
@@ -106,7 +113,7 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 // across `--data` configurations; for the union of static + registry
 // (including values contributed by `--data`), use AllCriteriaServiceTypes.
 func GetCriteriaServiceTypes() []string {
-	return []string{"aks", "bcm", "eks", "gke", "kind", "lke", "metal3", "ocp", "oke", "rke2"}
+	return []string{"aks", "bcm", "eks", "generic", "gke", "kind", "lke", "metal3", "ocp", "oke", "rke2"}
 }
 
 // AllServiceTypes returns the union of the static OSS list and values

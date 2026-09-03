@@ -285,7 +285,8 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		// VR200 NVL72 on bare-metal RKE2: MNNVL across the IMEX domain, same
 		// shape as GB200 but with its own runtime (NGC pytorch image, distinct
 		// mpirun path) — see testdata/vr200/rke2/runtime-nvls.yaml.
-		recipe.CriteriaServiceRKE2: {recipe.CriteriaAcceleratorVR200},
+		recipe.CriteriaServiceRKE2:    {recipe.CriteriaAcceleratorVR200},
+		recipe.CriteriaServiceGeneric: {recipe.CriteriaAcceleratorGB300},
 	},
 }
 
@@ -970,11 +971,12 @@ const (
 // acceleratorProductMatchers maps a recipe Criteria.Accelerator to a predicate
 // that reports whether a given nvidia.com/gpu.product label value belongs to
 // that accelerator family. Exact matches are used where GFD emits a single
-// product string (GB200, B200, L40 family, RTX Pro 6000); prefix matches cover
+// product string (GB200, GB300, B200, L40 family, RTX Pro 6000); prefix matches cover
 // accelerators with multiple concrete SKUs (H100 SXM/PCIe/NVL, H200, A100 SXM/PCIe).
 // No entry for CriteriaAcceleratorAny — "any" deliberately skips the filter.
 var acceleratorProductMatchers = map[recipe.CriteriaAcceleratorType]func(string) bool{
 	recipe.CriteriaAcceleratorGB200:      func(s string) bool { return s == "NVIDIA-GB200" },
+	recipe.CriteriaAcceleratorGB300:      func(s string) bool { return s == "NVIDIA-GB300" },
 	recipe.CriteriaAcceleratorB200:       func(s string) bool { return s == "NVIDIA-B200" },
 	recipe.CriteriaAcceleratorH100:       func(s string) bool { return strings.HasPrefix(s, "NVIDIA-H100-") },
 	recipe.CriteriaAcceleratorH200:       func(s string) bool { return strings.HasPrefix(s, "NVIDIA-H200-") },
@@ -1855,22 +1857,16 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 			{Operator: v1.TolerationOpExists},
 			{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
 		}, nil
-	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS:
-		// OKE bare-metal GB200 pools are commonly tainted and may coexist
-		// with other GPU shapes under one control plane. Tolerate the pool
-		// taint (mirroring EKS/GKE) and pin workers to the same cohort the
-		// node count was sized against by reusing the GFD gpu.product label
-		// that resolveTargetGPUNodes -> narrowByAccelerator already filtered
-		// on. On non-GFD installs no shared product label exists, so emit no
-		// selector — matching the counting path's unfiltered fallback so the
-		// two stay aligned.
-		//
-		// AKS shares this shape: GPU pools carry the nvidia.com/gpu=present:
-		// NoSchedule taint and AICR recipes deploy the GPU Operator with GFD,
-		// so gpu.product (e.g. NVIDIA-H100-80GB-HBM3) is the discriminating
-		// label. The AKS-native kubernetes.azure.com/accelerator label is not
-		// used because its value is just "nvidia" — it cannot pin the H100
-		// cohort narrowByAccelerator sized the job against.
+	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS, recipe.CriteriaServiceGeneric:
+		// These services share one shape: tainted GPU pools whose nodes carry
+		// GFD labels. Tolerate the pool taint and pin workers to the
+		// gpu.product label that resolveTargetGPUNodes → narrowByAccelerator
+		// already filtered on, so placement matches the cohort WorkerCount
+		// was sized against. On non-GFD installs no shared product label
+		// exists; emit no selector, matching the counting path's unfiltered
+		// fallback so the two stay aligned. (AKS's native
+		// kubernetes.azure.com/accelerator label is just "nvidia" — it
+		// cannot pin a cohort.)
 		var nodeSelector map[string]string
 		if product := commonGPUProduct(nodes); product != "" {
 			nodeSelector = map[string]string{gpuProductLabel: product}

@@ -1,0 +1,114 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NicClusterPolicy for bare-metal GB300 — host-OFED InfiniBand.
+#
+# The network-operator Helm chart installs the operator + CRD but does not
+# template a NicClusterPolicy CR; this manifest creates it. The DOCA
+# ofedDriver installs host OFED, RDMA is exposed via rdmaSharedDevicePlugin
+# (shared HCA, resource rdma/ib), and nicConfigurationOperator manages NIC
+# firmware/config. vendor 15b3 = Mellanox; deviceIDs 1021/1023 = ConnectX-7 /
+# mlx5-generation NICs.
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  # Fabric DaemonSets run only on Mellanox-NIC nodes (labeled by the chart's
+  # NodeFeatureRule); tolerations alone would let them land on untainted
+  # CPU-only nodes.
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - key: feature.node.kubernetes.io/pci-15b3.present
+              operator: In
+              values:
+                - "true"
+  deploymentTolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+  # DOCA host OFED driver (nothing pre-installed on the nodes).
+  ofedDriver:
+    image: doca-driver
+    repository: nvcr.io/nvidia/mellanox
+    version: doca3.4.0-26.04-0.8.6.0-0
+    # Required on bare metal: DOCA exits if storage modules from a prior
+    # driver load are present unless told to unload them first.
+    env:
+      - name: UNLOAD_STORAGE_MODULES
+        value: "true"
+    forcePrecompiled: false
+    imagePullSecrets: []
+    terminationGracePeriodSeconds: 300
+    upgradePolicy:
+      autoUpgrade: true
+      maxParallelUpgrades: 1
+      safeLoad: false
+      drain:
+        enable: true
+        force: true
+        deleteEmptyDir: true
+        timeoutSeconds: 300
+  # Shared-HCA RDMA (not SR-IOV VFs). Advertises node resource rdma/ib.
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox
+    version: network-operator-v26.4.1
+    imagePullSecrets: []
+    config: |
+      {
+        "configList": [
+          {
+            "resourceName": "ib",
+            "rdmaHcaMax": 64,
+            "selectors": {
+              "vendors": ["15b3"],
+              "deviceIDs": ["1021", "1023"]
+            }
+          }
+        ]
+      }
+  # NIC firmware/config management.
+  nicConfigurationOperator:
+    logLevel: info
+    operator:
+      image: nic-configuration-operator
+      repository: ghcr.io/mellanox
+      version: v1.3.1
+    configurationDaemon:
+      image: nic-configuration-operator-daemon
+      repository: ghcr.io/mellanox
+      version: v1.3.1
+      imagePullSecrets: []
+      containerResources:
+        - name: nic-configuration-daemon
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+  # Fabric DaemonSets must land on tainted GPU nodes.
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+    - key: CriticalAddonsOnly
+      operator: Exists

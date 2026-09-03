@@ -51,7 +51,7 @@ ones) that match the target fabric:
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
 | `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when the NVIDIA driver is missing `NVreg_GrdmaPciTopoCheckOverride=1`. |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, and VR200 + RKE2. Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE) when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 (EKS, OKE); GB300 (generic); VR200 (RKE2). Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these

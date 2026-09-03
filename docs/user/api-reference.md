@@ -122,7 +122,7 @@ Generate an optimized configuration recipe based on environment parameters.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `any` |
+| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `any`. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; aliases: `self-managed`, `self`, `vanilla`); `any` is the wildcard and does not select `generic` recipes |
 | `accelerator` | string | any | GPU type: `h100`, `h200`, `gb200`, `gb300`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200`, `any` |
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
