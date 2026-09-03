@@ -98,6 +98,8 @@ navigation:
         path: integrator/gke-tcpxo-networking.md
       - page: GKE GB200 Networking
         path: integrator/gke-gb200-networking.md
+      - page: GKE A4X Max Networking
+        path: integrator/gke-a4x-max-networking.md
       - page: OpenShift Deployment
         path: integrator/openshift.md
       - page: Talos Integration
