@@ -52,11 +52,12 @@ func TestCompute_Structure(t *testing.T) {
 		{"gke", "a100", "h100", "", "nvidia-tuning-gke"},
 		{"gke", "b200", "-", "", "nvidia-tuning-gke"},
 		{"gke", "h100", "-", "", "nvidia-tuning-gke"},
-		// VR200 runs the bcm profile as a stopgap (kernel-headers aliasing
-		// only, accelerator-agnostic) until a vr200-native nodewright
-		// profile exists — same accelerator: h100 hardcode as bcm.yaml,
-		// since the bcm path filters on service only.
-		{"rke2", "vr200", "h100", "nvidia-setup", ""},
+		// VR200 runs its native rke2 tuning (nvidia-tuned's rke2 service,
+		// added in nodewright-packages 0.9.0), so the profile column is
+		// not-applicable: the override accelerator matches the criteria
+		// accelerator. No setup package — the kernel-headers aliasing the
+		// prior bcm stopgap provided is specific to the bcm path.
+		{"rke2", "vr200", "-", "", "nvidia-tuned"},
 	}
 	if len(report.Rows) != len(want) {
 		t.Fatalf("got %d rows, want %d: %+v", len(report.Rows), len(want), report.Rows)

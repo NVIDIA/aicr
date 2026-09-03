@@ -36,6 +36,7 @@ const nodewrightTuningManifest = "components/nodewright-customizations/manifests
 const (
 	nodewrightTuningGKEManifest     = "components/nodewright-customizations/manifests/tuning-gke.yaml"
 	nodewrightTuningGenericManifest = "components/nodewright-customizations/manifests/tuning-generic.yaml"
+	nodewrightTuningRKE2Manifest    = "components/nodewright-customizations/manifests/tuning-rke2.yaml"
 )
 
 // renderNodewrightTuning renders the tuning manifest with the given component
@@ -186,7 +187,8 @@ func renderNodewrightTuningRaw(t *testing.T, content []byte, values map[string]a
 
 // TestNodewrightTuningGateSinglePackageManifests pins the tuningEnabled
 // contract on the single-package tuning manifests (tuning-gke.yaml,
-// tuning-generic.yaml), for every catalog leaf that wires one:
+// tuning-generic.yaml, tuning-rke2.yaml), for every catalog leaf that wires
+// one:
 //
 //   - default (tuningEnabled absent, no leaf sets it on these manifests):
 //     the Skyhook CR renders — behavior identical to before the gate;
@@ -201,7 +203,11 @@ func TestNodewrightTuningGateSinglePackageManifests(t *testing.T) {
 		t.Fatalf("ResolveLeaves: %v", err)
 	}
 
-	singlePackageManifests := []string{nodewrightTuningGKEManifest, nodewrightTuningGenericManifest}
+	singlePackageManifests := []string{
+		nodewrightTuningGKEManifest,
+		nodewrightTuningGenericManifest,
+		nodewrightTuningRKE2Manifest,
+	}
 	seen := map[string]bool{}
 	for _, leaf := range leaves {
 		if leaf.Err != nil || leaf.Result == nil || leaf.Entry.Criteria == nil {

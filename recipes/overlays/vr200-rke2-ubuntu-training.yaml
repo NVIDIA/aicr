@@ -246,35 +246,34 @@ spec:
                         namespace: skyhook
                       status:
                         ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
-    # No vr200-native nodewright tuning profile exists yet (only
-    # bcm-h100/eks-gb200/bcm-gb200/eks-h100 are defined in
-    # nodewright-packages), so this leaf runs the bcm profile as a
-    # stopgap, matching bcm.yaml. Confirmed with the nodewright
-    # maintainer: the bcm profile's service=bcm path is
-    # accelerator-agnostic and only aliases the kernel-headers tree
-    # (#1093) — no hugepages/sysctl/GRUB — so it is safe to run alongside
-    # the existing out-of-band VR200 tuning (Skyhook CRs apply
-    # independently by priority; they don't merge/conflict). Validated
-    # live: no reboot, Skyhook CR reaches complete, kernel-headers
-    # symlink confirmed correct on-host; a full aicr validate re-run
-    # afterward stayed clean (deployment 4/4, conformance 5/5,
-    # performance/NCCL all-reduce 744 GB/s against the >= 600 GB/s
-    # threshold).
+    # Native vr200/rke2 node tuning, replacing the bcm-profile stopgap this
+    # leaf carried while nodewright-packages had no vr200/rke2 path
+    # (nvidia-tuned 0.9.0 added the rke2 service). tuning-rke2.yaml runs
+    # nvidia-tuned alone: unlike service=bcm, service=rke2 ships no profile
+    # overrides, so vr200 falls through to its own multiNodeTraining profile
+    # with the [bootloader] stanza (iommu.passthrough=1, init_on_alloc=0,
+    # numa_balancing=disable, hugepages, earlycon) intact, landed on the host
+    # through a /etc/default/grub.d drop-in.
     #
-    # accelerator: h100 is hardcoded intentionally, matching bcm.yaml —
-    # the bcm path filters on service only, so the accelerator value is
-    # inert (accelerator: vr200 fails fast with "Unsupported
-    # combination"; h100 is the only value tested against this path).
+    # This reboots the node — the cmdline is written at config and nothing is
+    # live until the reboot — and reboots again on any change to accelerator,
+    # intent or service. post-interrupt-bootloader-check then asserts every
+    # argument reached /proc/cmdline, so a node cannot come up labelled as
+    # tuned while running none of its tuning.
     #
-    # Switch to a real vr200/rke2 reboot-capable nodewright profile once
-    # one exists; this is a stopgap until it lands.
+    # nvidia-setup is intentionally not wired: its kernel-headers aliasing
+    # (#1093) is specific to the bcm path, and the VR NVL72 reference image
+    # provisions its own Ubuntu 26.04 arm64 64k-page kernel. The vr200
+    # profiles are Ubuntu 26.04 only, which this leaf's OS constraints
+    # already pin.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:
-        - components/nodewright-customizations/manifests/bcm-setup.yaml
+        - components/nodewright-customizations/manifests/tuning-rke2.yaml
       overrides:
-        service: bcm
-        accelerator: h100
+        service: rke2
+        accelerator: vr200
+        intent: multiNodeTraining
       dependencyRefs:
         - nodewright-operator
 

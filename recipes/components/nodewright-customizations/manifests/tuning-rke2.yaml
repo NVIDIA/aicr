@@ -1,0 +1,129 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Nodewright GPU customization that runs ONLY nvidia-tuned with the rke2
+# service profile (no nvidia-setup).
+#
+# Used by bare-metal RKE2 leaves whose accelerator profile carries a
+# [bootloader] stanza that has to reach the host kernel command line. Where
+# service=bcm re-roots the accelerator onto a bootloader-free base so nothing
+# needs a reboot, service=rke2 is the opposite trade: it ships no profile
+# overrides at all, so each accelerator falls through to its own workload
+# profile with the [bootloader] stanza intact (vr200: iommu.passthrough=1,
+# init_on_alloc=0, numa_balancing=disable, hugepages, earlycon) and the node
+# reboots to pick it up.
+#
+# Keeping the stanza is not enough on its own: tuned rewrites
+# /etc/default/grub, but Ubuntu assembles GRUB_CMDLINE_LINUX_DEFAULT from
+# /etc/default/grub.d/ instead, so nvidia-tuned's configure-bootloader step
+# writes a drop-in there and regenerates grub, appending rather than replacing
+# so the platform's own arguments (serial console) survive. After the reboot,
+# post-interrupt-bootloader-check asserts every argument in
+# /etc/tuned/bootcmdline reached /proc/cmdline, which is the check worth
+# having: grub quietly failing to pick the drop-in up is invisible from the
+# config stage.
+#
+# Scope: the bootloader step is Debian-family only (grub.d sourcing is a
+# Debian/Ubuntu patch to grub-mkconfig) and the vr200 profiles are Ubuntu
+# 26.04 only. nvidia-setup is deliberately absent — its kernel-headers
+# aliasing is a bcm-path concern, and the RKE2 reference image provisions its
+# own kernel.
+#
+# Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support.
+{{- $cust := index .Values "nodewright-customizations" }}
+{{- /* tuningEnabled (default true) disables node tuning uniformly across the */}}
+{{- /* nodewright tuning manifests (cf. tuning.yaml). Here nvidia-tuned is the */}}
+{{- /* CR's only package, so the gate suppresses the whole Skyhook CR. */}}
+{{- /* Sprig-safe: only an explicit false disables (absent/true render); a */}}
+{{- /* "| default true" would swallow an explicit false under --deployer flux. */}}
+{{- if and (ne (toString (index $cust "enabled")) "false") (ne (toString (index $cust "tuningEnabled")) "false") }}
+---
+apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Skyhook
+metadata:
+  annotations:
+    # No Helm hooks: this Skyhook CR is release-managed so that disabling tuning
+    # (tuningEnabled=false) actually retracts it. As a hook it would be orphaned
+    # under Flux on a true->false flip (before-hook-creation never fires once the
+    # CR leaves the render). Ordering after the Skyhook CRD is handled by the
+    # component dependency on nodewright-operator, not an intra-release hook;
+    # helm/argo already strip these hooks at bundle time.
+    aicr/skip-hook-validation: "true"
+  labels:
+    app.kubernetes.io/part-of: skyhook-operator
+    app.kubernetes.io/created-by: aicr
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+  name: tuning
+  namespace: {{ .Release.Namespace }}
+spec:
+  runtimeRequired: true
+  # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
+  {{- /* Sprig-safe: a "| default true" here would swallow an explicit false under --deployer flux. */}}
+  autoTaintNewNodes: {{ ne (toString (index $cust "autoTaintNewNodes")) "false" }}
+  # Dynamic: Supports --accelerated-node-toleration CLI flag
+  additionalTolerations:
+    {{- if $cust.acceleratedTolerations }}
+    {{- toYaml $cust.acceleratedTolerations | nindent 4 }}
+    {{- else }}
+    # Tolerate-all default, matching ParseTolerations()/DefaultTolerations()
+    # (operator Exists, no key). Only reached if no acceleratedTolerations are
+    # injected from scheduling defaults/flags.
+    - operator: Exists
+    {{- end }}
+  # Dynamic: Supports --accelerated-node-selector CLI flag
+  {{- if $cust.acceleratedNodeSelector }}
+  nodeSelectors:
+    matchLabels:
+      {{- toYaml $cust.acceleratedNodeSelector | nindent 6 }}
+  {{- end }}
+  # Dynamic: Supports --workload-selector CLI flag
+  {{- if $cust.workloadSelector }}
+  podNonInterruptLabels:
+    matchLabels:
+      {{- toYaml $cust.workloadSelector | nindent 6 }}
+  {{- end }}
+  # Tuning: nvidia-tuned rke2 service profile only (no nvidia-setup).
+  packages:
+    nvidia-tuned:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: "0.9.0"
+      containerSHA: sha256:a33d0d5e0a0c7f192a34042f7ff14b7a98f10bae97bb4cf820ea9cd0ce013320
+      # Required by the rke2 service: the accelerator's [bootloader] stanza is
+      # written during config and none of it is live until the node reboots.
+      interrupt:
+        type: reboot
+      # The cmdline is resolved from (accelerator, intent, service), so a change
+      # to any of them needs another reboot to take effect.
+      configInterrupts:
+        accelerator:
+          type: reboot
+        intent:
+          type: reboot
+        service:
+          type: reboot
+      env:
+        # Lets config-check tolerate the `tuned-adm verify` failures that only a
+        # reboot can resolve; post-interrupt-check still enforces them after it.
+        - name: INTERRUPT
+          value: "true"
+      configMap:
+        {{- if $cust.intent }}
+        intent: {{ $cust.intent }}
+        {{- end }}
+        accelerator: {{ $cust.accelerator }}
+        {{- if $cust.service }}
+        service: {{ $cust.service }}
+        {{- end }}
+{{- end }}
