@@ -21,16 +21,19 @@ import (
 	"log/slog"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 )
 
 const (
@@ -49,6 +52,19 @@ const (
 	// still terminating (finalizers). Bounded by DiagnosticTimeout on the
 	// parent context.
 	creGonePollInterval = 200 * time.Millisecond
+	// creWorkloadGonePollInterval paces the teardown proof. It is far coarser
+	// than creGonePollInterval because that wait is seconds against one object
+	// while this one can run for minutes against every Job's TrainJobs and
+	// pods.
+	creWorkloadGonePollInterval = 2 * time.Second
+
+	// CRE stamps the Certification name only on the Workflows it creates; Jobs
+	// carry the Workflow name, and TrainJobs and workload pods carry the Job
+	// name. Proving a Certification's GPU work stopped therefore means walking
+	// that chain, and walking it before the parent is deleted.
+	creLabelCertification = creAPIGroup + "/certification"
+	creLabelWorkflow      = creAPIGroup + "/workflow"
+	creLabelJob           = creAPIGroup + "/job"
 )
 
 var (
@@ -57,6 +73,12 @@ var (
 	}
 	bandwidthMeasurementGVR = schema.GroupVersionResource{
 		Group: creAPIGroup, Version: versionV1alpha1, Resource: "bandwidthmeasurements",
+	}
+	workflowGVR = schema.GroupVersionResource{
+		Group: creAPIGroup, Version: versionV1alpha1, Resource: "workflows",
+	}
+	creJobGVR = schema.GroupVersionResource{
+		Group: creAPIGroup, Version: versionV1alpha1, Resource: "jobs",
 	}
 )
 
@@ -385,20 +407,20 @@ func deleteCRECertification(ctx context.Context, client dynamic.Interface, names
 }
 
 // creCleanupFailure reports the error a CRE check returns once teardown of its
-// Certification has been attempted. A Certification that outlives the check
-// keeps holding GPU nodes, so a check that would otherwise pass must fail
-// instead of reporting success over a leak. An error the check already hit
-// wins, because it explains the run and the leak is a consequence of it.
+// Certification has been attempted. Work that outlives the check keeps holding
+// GPU nodes, so a check that would otherwise pass must fail instead of
+// reporting success over a leak. An error the check already hit wins, because
+// it explains the run and the leak is a consequence of it.
 func creCleanupFailure(label string, primary, deleteErr error) error {
 	if deleteErr == nil {
 		return primary
 	}
-	slog.Warn("failed to delete CRE Certification", "check", label, "error", deleteErr)
+	slog.Warn("CRE Certification teardown failed", "check", label, "error", deleteErr)
 	if primary != nil {
 		return primary
 	}
 	return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
-		label+" Certification may still be running: cleanup failed", deleteErr)
+		label+" workloads may still be running: teardown could not be confirmed", deleteErr)
 }
 
 func deleteCREResource(
@@ -410,21 +432,195 @@ func deleteCREResource(
 
 	delCtx, cancel := context.WithTimeout(ctx, defaults.CRECertificationDeleteTimeout)
 	defer cancel()
+	return deleteCREResourceWithin(delCtx, client, gvr, kind, namespace, name)
+}
+
+// deleteCREResourceWithin removes a CRE object under the caller's deadline so a
+// multi-phase teardown can hold one budget across every phase.
+//
+// Foreground propagation is requested, but the parent's disappearance is not
+// proof that the workloads stopped: CRE's Certification controller deletes its
+// child Workflows and drops its finalizer in the same reconcile without waiting
+// for them, and its Job drain barrier gives up after five minutes and proceeds
+// while pods are still running. Callers that need that proof must observe the
+// TrainJobs and pods directly — see waitForCREWorkloadsGone.
+func deleteCREResourceWithin(
+	ctx context.Context,
+	client dynamic.Interface,
+	gvr schema.GroupVersionResource,
+	kind, namespace, name string,
+) error {
+
 	res := client.Resource(gvr).Namespace(namespace)
-	// Foreground propagation retains the parent CR until CRE's Workflows,
-	// TrainJobs, and pods are gone, so waitForCREResourceGone observing the
-	// parent is evidence the GPU work actually stopped. Background propagation
-	// deletes the CR first and reaps dependents asynchronously, which would
-	// report a clean teardown while jobs still hold the GPUs.
 	policy := metav1.DeletePropagationForeground
-	err := res.Delete(delCtx, name, metav1.DeleteOptions{PropagationPolicy: &policy})
+	err := res.Delete(ctx, name, metav1.DeleteOptions{PropagationPolicy: &policy})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to delete "+kind, err)
 	}
-	return waitForCREResourceGone(delCtx, res, kind, name)
+	return waitForCREResourceGone(ctx, res, kind, name)
+}
+
+// teardownCRECertification removes a Certification and confirms the GPU work it
+// started actually stopped. A surviving TrainJob or pod keeps holding GPUs, so
+// an unconfirmed teardown is returned as an error rather than logged.
+func teardownCRECertification(
+	ctx context.Context,
+	client dynamic.Interface,
+	clientset kubernetes.Interface,
+	namespace, name string,
+) error {
+
+	tdCtx, cancel := context.WithTimeout(ctx, defaults.CRECertificationTeardownTimeout)
+	defer cancel()
+
+	// Enumerate first: the Job names that identify the TrainJobs and pods are
+	// reachable only through the Certification's Workflows, which the delete
+	// below takes with it.
+	jobNames, listErr := creCertificationJobNames(tdCtx, client, namespace, name)
+
+	if err := deleteCREResourceWithin(tdCtx, client, certificationGVR, "Certification", namespace, name); err != nil {
+		return err
+	}
+	if listErr != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+			"deleted Certification but could not enumerate its workloads to confirm they stopped", listErr)
+	}
+	return waitForCREWorkloadsGone(tdCtx, client, clientset, namespace, jobNames)
+}
+
+// creCertificationJobNames returns the names of the CRE Jobs a Certification
+// created, walking Certification → Workflows → Jobs by label.
+func creCertificationJobNames(
+	ctx context.Context,
+	client dynamic.Interface,
+	namespace, certName string,
+) ([]string, error) {
+
+	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	workflows, err := client.Resource(workflowGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{
+		LabelSelector: creLabelCertification + "=" + certName,
+	})
+	if err != nil {
+		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list CRE Workflows", err)
+	}
+
+	seen := map[string]struct{}{}
+	names := make([]string, 0, len(workflows.Items))
+	for i := range workflows.Items {
+		jobs, jobErr := client.Resource(creJobGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{
+			LabelSelector: creLabelWorkflow + "=" + workflows.Items[i].GetName(),
+		})
+		if jobErr != nil {
+			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list CRE Jobs", jobErr)
+		}
+		for j := range jobs.Items {
+			jobName := jobs.Items[j].GetName()
+			if _, dup := seen[jobName]; dup {
+				continue
+			}
+			seen[jobName] = struct{}{}
+			names = append(names, jobName)
+		}
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
+// waitForCREWorkloadsGone blocks until no TrainJob or live pod remains for any
+// of jobNames, and fails closed when the deadline expires with work still
+// running.
+func waitForCREWorkloadsGone(
+	ctx context.Context,
+	client dynamic.Interface,
+	clientset kubernetes.Interface,
+	namespace string,
+	jobNames []string,
+) error {
+
+	if len(jobNames) == 0 {
+		return nil
+	}
+	if clientset == nil {
+		return aicrErrors.New(aicrErrors.ErrCodeInternal,
+			"cannot confirm CRE workload pods stopped: no Kubernetes client")
+	}
+
+	ticker := time.NewTicker(creWorkloadGonePollInterval)
+	defer ticker.Stop()
+
+	var remaining []string
+	for {
+		var err error
+		remaining, err = creActiveWorkloads(ctx, client, clientset, namespace, jobNames)
+		if err != nil {
+			return err
+		}
+		if len(remaining) == 0 {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return aicrErrors.WrapWithContext(aicrErrors.ErrCodeTimeout,
+				"CRE workloads still running after Certification teardown", ctx.Err(),
+				map[string]interface{}{"namespace": namespace, "remaining": strings.Join(remaining, ",")})
+		case <-ticker.C:
+		}
+	}
+}
+
+// creActiveWorkloads reports the TrainJobs and non-terminal pods still present
+// for the given CRE Job names. Pods in Succeeded or Failed have exited and hold
+// no CUDA context, matching how CRE's own drain barrier decides what counts.
+func creActiveWorkloads(
+	ctx context.Context,
+	client dynamic.Interface,
+	clientset kubernetes.Interface,
+	namespace string,
+	jobNames []string,
+) ([]string, error) {
+
+	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+
+	var active []string
+	for _, jobName := range jobNames {
+		selector := creLabelJob + "=" + jobName
+
+		trainJobs, err := client.Resource(trainJobGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{
+			LabelSelector: selector,
+		})
+		switch {
+		// A missing TrainJob CRD means nothing of the kind can be running.
+		case apierrors.IsNotFound(err), meta.IsNoMatchError(err):
+		case err != nil:
+			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list TrainJobs", err)
+		default:
+			for i := range trainJobs.Items {
+				active = append(active, "TrainJob/"+trainJobs.Items[i].GetName())
+			}
+		}
+
+		pods, err := clientset.CoreV1().Pods(namespace).List(listCtx, metav1.ListOptions{
+			LabelSelector: selector,
+		})
+		if err != nil {
+			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list CRE workload pods", err)
+		}
+		for i := range pods.Items {
+			phase := pods.Items[i].Status.Phase
+			if phase == corev1.PodSucceeded || phase == corev1.PodFailed {
+				continue
+			}
+			active = append(active, "Pod/"+pods.Items[i].Name)
+		}
+	}
+	sort.Strings(active)
+	return active, nil
 }
 
 func waitForCREResourceGone(ctx context.Context, res dynamic.ResourceInterface, kind, name string) error {
