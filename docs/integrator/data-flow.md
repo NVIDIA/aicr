@@ -634,7 +634,7 @@ spec:
   sources:
     # Helm chart from upstream
     - repoURL: https://helm.ngc.nvidia.com/nvidia
-      targetRevision: v26.3.3
+      targetRevision: v26.7.0
       chart: gpu-operator
       helm:
         valueFiles:
