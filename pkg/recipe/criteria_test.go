@@ -713,7 +713,7 @@ func TestGetCriteriaServiceTypes(t *testing.T) {
 	types := GetCriteriaServiceTypes()
 
 	// Should return sorted list
-	expected := []string{"aks", "bcm", "eks", "gke", "kind", "lke", "metal3", "ocp", "oke", "rke2"}
+	expected := []string{"aks", "bcm", "eks", "generic", "gke", "kind", "lke", "metal3", "ocp", "oke", "rke2"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaServiceTypes() returned %d types, want %d", len(types), len(expected))
 	}

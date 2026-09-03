@@ -31,4 +31,10 @@
 # are the expected future occupants: they are planned narrowings of an enum,
 # and recording them here is what the acceptance criteria mean by representing
 # a transition explicitly rather than disabling the gate.
-acknowledgements: []
+acknowledgements:
+  - id: response-property-enum-value-added
+    path: /v1/recipe
+    reason: >-
+      Additive `generic` service criteria value (#2566); no existing value
+      changed or removed, so only clients strictly validating the response
+      enum are affected. Goes away when the baseline next moves.

@@ -489,7 +489,7 @@ Generate recipes using direct system parameters:
 **Flags:**
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2 |
+| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; `self-managed`, `self`, and `vanilla` are accepted aliases) — unlike the `any` wildcard, which matches every service and does not select `generic` recipes |
 | `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |

@@ -19,6 +19,7 @@ package recipes_test
 
 import (
 	"io/fs"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -50,7 +51,7 @@ import (
 func TestOKENetworkOperatorKeepsChartNodeFeatureRule(t *testing.T) {
 	t.Parallel()
 
-	overlays, err := fs.Glob(recipes.FS, "components/network-operator/values-oke-*.yaml")
+	overlays, err := fs.Glob(recipes.FS, "components/network-operator/values-*.yaml")
 	if err != nil {
 		t.Fatalf("glob OKE network-operator values overlays: %v", err)
 	}
@@ -60,6 +61,11 @@ func TestOKENetworkOperatorKeepsChartNodeFeatureRule(t *testing.T) {
 	}
 
 	for _, overlay := range overlays {
+		if strings.HasSuffix(overlay, "values-aks.yaml") {
+			// AKS is the deliberate exception documented above: it disables
+			// the chart rule and attaches its own targeted rule manifest.
+			continue
+		}
 		t.Run(overlay, func(t *testing.T) {
 			t.Parallel()
 
