@@ -1976,6 +1976,17 @@ func gpuHardwareSnapshotPools(poolMode string, driverLoaded bool) *aicr.Snapshot
 					measurement.NewSubtypeBuilder("server").
 						SetString("version", version),
 				).
+				// k8s.node.provider is the fingerprint source of truth for
+				// service (pkg/fingerprint.FromMeasurements), which
+				// NodeTopology.gpu-nodes.label reads to select its
+				// pre-deployment universe label per service (#2359). Real
+				// collector snapshots always include it; only the historical
+				// test fixtures didn't. Kept alongside "aks-gpu-pools" because
+				// both are AKS-shaped fixtures that also cover GKE flows.
+				WithSubtypeBuilder(
+					measurement.NewSubtypeBuilder("node").
+						SetString("provider", "gke"),
+				).
 				// The AKS gpuProfile.driver projection the pool-mode
 				// collector emits (Install = AKS preinstall, None =
 				// --gpu-driver none).

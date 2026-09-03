@@ -102,8 +102,17 @@ is dispatched by exact name in `constraints.Evaluate` *before*
 (`<label-key>=<value>` / `!<label-key>`, validated with the Kubernetes
 label validators), and quantifies the predicate over the GPU-node set
 synthesized from `NodeTopology.label` readings instead of comparing a
-single reading. See `pkg/constraints/gpu_nodes.go` for its fail-closed
-rules (truncation, empty universe, malformed or ambiguous encodings).
+single reading. The label that defines the GPU-node universe is
+**service-specific** — GKE's `cloud.google.com/gke-accelerator` today
+([#2359](https://github.com/NVIDIA/aicr/issues/2359)) — resolved from
+the snapshot's `k8s.node.provider` via `fingerprint.FromMeasurements`.
+Adding a new service means adding one entry to
+`gpuNodeUniverseLabels` in `pkg/constraints/gpu_nodes.go` and covering
+it in `gpu_nodes_test.go`; the label MUST be present on GPU nodes from
+pool creation, before the GPU Operator or NFD run (the constraint form
+is pre-deployment). See `pkg/constraints/gpu_nodes.go` for its
+fail-closed rules (truncation, empty universe, malformed or ambiguous
+encodings, unknown service, service with no declared universe label).
 
 **Adding a new operator:**
 

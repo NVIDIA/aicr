@@ -34,15 +34,43 @@ import (
 
 const optOutLabel = "gke-no-default-nvidia-gpu-device-plugin"
 
-// topologySnapshot builds a snapshot carrying a NodeTopology label subtype
-// with the given encoded entries (key -> "value|node1,node2,...").
+// providerMeasurement builds the K8s "node" subtype the fingerprint reads to
+// resolve service. Every helper in this file includes it because the
+// evaluator now requires a resolvable service to pick the GPU-node universe
+// label (issue #2359). Passing "" produces a K8s measurement with no
+// provider, so unknown-service failure modes stay reachable in tests.
+func providerMeasurement(provider string) *measurement.Measurement {
+	data := map[string]measurement.Reading{}
+	if provider != "" {
+		data["provider"] = measurement.Str(provider)
+	}
+	return &measurement.Measurement{
+		Type: measurement.TypeK8s,
+		Subtypes: []measurement.Subtype{
+			{Name: "node", Data: data},
+		},
+	}
+}
+
+// topologySnapshot builds a GKE-shaped snapshot carrying a NodeTopology label
+// subtype with the given encoded entries (key -> "value|node1,node2,...").
+// Delegates to topologySnapshotFor to keep the default path (GKE) and the
+// per-service path in one implementation.
 func topologySnapshot(labels map[string]string) *snapshotter.Snapshot {
+	return topologySnapshotFor("gke", labels)
+}
+
+// topologySnapshotFor builds a snapshot with the given service provider and
+// the given NodeTopology label entries. An empty provider omits the provider
+// key entirely — the shape the "service unknown" fail-closed test needs.
+func topologySnapshotFor(provider string, labels map[string]string) *snapshotter.Snapshot {
 	data := make(map[string]measurement.Reading, len(labels))
 	for k, v := range labels {
 		data[k] = measurement.Str(v)
 	}
 	return &snapshotter.Snapshot{
 		Measurements: []*measurement.Measurement{
+			providerMeasurement(provider),
 			{
 				Type: measurement.TypeNodeTopology,
 				Subtypes: []measurement.Subtype{
@@ -523,6 +551,107 @@ func TestEvaluateGPUNodesLabelUnavailableReadings(t *testing.T) {
 	}
 }
 
+// TestEvaluateGPUNodesLabelPerService pins the per-service fail-closed shapes
+// added by issue #2359. The universe label is resolved from the snapshot's
+// k8s.node.provider (via fingerprint.FromMeasurements), so a snapshot with no
+// resolvable provider or a service the table has no entry for must fail
+// closed with a service-named diagnostic — never as "empty universe", which
+// would masquerade as a snapshot problem.
+//
+// Kept separate from the main table so the "provider=gke" default there
+// stays implicit rather than being repeated on every case.
+func TestEvaluateGPUNodesLabelPerService(t *testing.T) {
+	t.Parallel()
+
+	// A well-formed GKE-shaped label subtype the provider variants share, so
+	// each failure mode is provably reached BEFORE decoding — no case can
+	// accidentally pass by tripping a decoder error first.
+	gkeLabels := map[string]string{
+		"cloud.google.com/gke-accelerator": "nvidia-h100-80gb|gpu-a,gpu-b",
+		optOutLabel:                        "true|gpu-a,gpu-b",
+	}
+
+	tests := []struct {
+		name        string
+		value       string
+		provider    string
+		labels      map[string]string
+		wantCode    errors.ErrorCode
+		wantMessage string // substring match on the error message
+	}{
+		{
+			name:        "unknown provider fails closed with a provider-shaped diagnostic",
+			value:       optOutLabel + "=true",
+			provider:    "",
+			labels:      gkeLabels,
+			wantCode:    errors.ErrCodeNotFound,
+			wantMessage: "no resolvable k8s.node.provider",
+		},
+		{
+			name:        "unknown provider on the negated form also fails closed",
+			value:       "!" + optOutLabel,
+			provider:    "",
+			labels:      gkeLabels,
+			wantCode:    errors.ErrCodeNotFound,
+			wantMessage: "no resolvable k8s.node.provider",
+		},
+		{
+			name:        "service without a declared universe label fails closed naming the service (eks)",
+			value:       optOutLabel + "=true",
+			provider:    "eks",
+			labels:      gkeLabels,
+			wantCode:    errors.ErrCodeNotFound,
+			wantMessage: `service "eks"`,
+		},
+		{
+			name:        "service without a declared universe label also fails the negated form (aks)",
+			value:       "!" + optOutLabel,
+			provider:    "aks",
+			labels:      gkeLabels,
+			wantCode:    errors.ErrCodeNotFound,
+			wantMessage: `service "aks"`,
+		},
+		{
+			name:        "OKE also fails closed until a profile declares its label",
+			value:       optOutLabel + "=true",
+			provider:    "oke",
+			labels:      gkeLabels,
+			wantCode:    errors.ErrCodeNotFound,
+			wantMessage: `service "oke"`,
+		},
+		{
+			name:     "declared service with the universe label absent from every node keeps the empty-universe diagnostic",
+			value:    optOutLabel + "=true",
+			provider: "gke",
+			// gke-accelerator absent; only the opt-out label is present, so the
+			// GPU universe is empty despite the service having a mapping.
+			labels: map[string]string{
+				optOutLabel: "true|node-a",
+			},
+			wantCode:    errors.ErrCodeNotFound,
+			wantMessage: "GPU-node universe is empty",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			c := recipe.Constraint{Name: GPUNodesLabelConstraintName, Value: tt.value}
+			result := Evaluate(c, topologySnapshotFor(tt.provider, tt.labels))
+
+			if result.Error == nil {
+				t.Fatalf("expected error, got passed=%v actual=%q", result.Passed, result.Actual)
+			}
+			if !stderrors.Is(result.Error, errors.New(tt.wantCode, "")) {
+				t.Fatalf("error code = %v, want %s", result.Error, tt.wantCode)
+			}
+			if !strings.Contains(result.Error.Error(), tt.wantMessage) {
+				t.Errorf("error message = %q, want substring %q", result.Error.Error(), tt.wantMessage)
+			}
+		})
+	}
+}
+
 // TestSummarizeNodesCapsList pins the failure-message cap so a large cluster
 // does not dump hundreds of node names into a diagnostic — including the
 // exact-cap boundary, where no "(+N more)" suffix may appear.
@@ -585,7 +714,9 @@ func TestGPUNodesLabelRoundTripsCollectorEncoding(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Collect() failed: %v", err)
 		}
-		return &snapshotter.Snapshot{Measurements: []*measurement.Measurement{m}}
+		return &snapshotter.Snapshot{Measurements: []*measurement.Measurement{
+			providerMeasurement("gke"), m,
+		}}
 	}
 	eval := func(snap *snapshotter.Snapshot, value string) EvalResult {
 		return Evaluate(recipe.Constraint{Name: GPUNodesLabelConstraintName, Value: value}, snap)
@@ -724,7 +855,9 @@ func TestGPUNodesLabelLosslessEncodingResolvesCollision(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Collect() failed: %v", err)
 		}
-		snap := &snapshotter.Snapshot{Measurements: []*measurement.Measurement{m}}
+		snap := &snapshotter.Snapshot{Measurements: []*measurement.Measurement{
+			providerMeasurement("gke"), m,
+		}}
 
 		// gpu-b carries "false", so "=true" must fail — deterministically,
 		// and for the right reason rather than by a lost reading.
@@ -785,7 +918,9 @@ func TestGPUNodesLabelLegacyDataSnapshotStillEvaluates(t *testing.T) {
 	for i := range m.Subtypes {
 		m.Subtypes[i].Items = nil
 	}
-	snap := &snapshotter.Snapshot{Measurements: []*measurement.Measurement{m}}
+	snap := &snapshotter.Snapshot{Measurements: []*measurement.Measurement{
+		providerMeasurement("gke"), m,
+	}}
 
 	result := Evaluate(recipe.Constraint{
 		Name:  GPUNodesLabelConstraintName,
@@ -818,10 +953,13 @@ func itemsSnapshot(items ...labelItem) *snapshotter.Snapshot {
 		})
 	}
 	return &snapshotter.Snapshot{
-		Measurements: []*measurement.Measurement{{
-			Type:     measurement.TypeNodeTopology,
-			Subtypes: []measurement.Subtype{{Name: "label", Items: entries}},
-		}},
+		Measurements: []*measurement.Measurement{
+			providerMeasurement("gke"),
+			{
+				Type:     measurement.TypeNodeTopology,
+				Subtypes: []measurement.Subtype{{Name: "label", Items: entries}},
+			},
+		},
 	}
 }
 
@@ -918,10 +1056,13 @@ func TestGPUNodesLabelRejectsNonPartitionedItems(t *testing.T) {
 // can express shapes itemsSnapshot's well-formed builder cannot.
 func rawItemsSnapshot(items ...measurement.ItemEntry) *snapshotter.Snapshot {
 	return &snapshotter.Snapshot{
-		Measurements: []*measurement.Measurement{{
-			Type:     measurement.TypeNodeTopology,
-			Subtypes: []measurement.Subtype{{Name: "label", Items: items}},
-		}},
+		Measurements: []*measurement.Measurement{
+			providerMeasurement("gke"),
+			{
+				Type:     measurement.TypeNodeTopology,
+				Subtypes: []measurement.Subtype{{Name: "label", Items: items}},
+			},
+		},
 	}
 }
 
