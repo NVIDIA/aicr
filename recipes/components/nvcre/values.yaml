@@ -17,8 +17,10 @@
 # Upstream: https://github.com/NVIDIA/cluster-readiness-engine
 # Chart:    oci://ghcr.io/nvidia/cluster-readiness-engine
 #
-# Chart and controller image are public on GHCR and pull anonymously, so no
-# imagePullSecrets entry is needed (`manager.imagePullSecrets` defaults to []).
+# Chart and controller image are public on GHCR. The controller image
+# pulls anonymously. Helm OCI chart pulls may require GHCR credentials
+# depending on registry policy; tag-based `helm install` of v0.1.0 has
+# worked without a pull secret in UAT.
 #
 # Only deliberate differences from the chart defaults are set here; everything
 # else (replicas, reconcile concurrency, resources, metrics port) is left at
