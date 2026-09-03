@@ -2692,11 +2692,12 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 // cleanupNCCLRun tears down everything runNCCLTrainJob created, in a fixed
 // order. It skips cleanup entirely if holderID no longer holds the
 // namespace's execution lock, since another execution has since taken it
-// over. Otherwise it deletes the per-run namespace first (cascading its
-// TrainJob/TrainingRuntime/ComputeDomain/RoCE-claim CRs), then, only on the
-// self-install fallback path, the Kubeflow Trainer installation, whose
-// removal would otherwise strand those CRs' finalizers if it ran first.
-// Trainer teardown only runs if the namespace delete succeeded.
+// over, or if that can't be confirmed either way. Otherwise it deletes the
+// per-run namespace first (cascading its TrainJob/TrainingRuntime/
+// ComputeDomain/RoCE-claim CRs), then, only on the self-install fallback
+// path, the Kubeflow Trainer installation, whose removal would otherwise
+// strand those CRs' finalizers if it ran first. Trainer teardown only runs
+// if the namespace delete succeeded.
 //
 // benchErr is the check's result so far. A cleanup failure only overrides
 // a nil benchErr, never masking a real benchmark failure (see
@@ -2704,7 +2705,14 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 func cleanupNCCLRun(clientset kubernetes.Interface, dynamicClient dynamic.Interface, namespace string, uid types.UID, holderID string, installedResources []trainerResourceRef, benchErr error) error {
 	held, lockErr := ncclExecutionLockHeldBy(context.Background(), clientset, namespace, holderID)
 	if lockErr != nil {
-		return foldCleanupError(benchErr, lockErr, "NCCL benchmark succeeded but its execution lock could not be checked")
+		// A transient read failure here (an apiserver blip, a timeout) is not
+		// proof the lock was actually taken over, but it's not proof it
+		// wasn't either. Treat it the same as a confirmed loss below rather
+		// than fail an otherwise-passing benchmark over a flaky lease read,
+		// or risk deleting a peer's live resources on a guess.
+		slog.Warn("Failed to verify the NCCL benchmark execution lock is still held; skipping cleanup",
+			"namespace", namespace, "error", lockErr)
+		return benchErr
 	}
 	if !held {
 		slog.Warn("NCCL benchmark execution lock was taken over by another execution; skipping cleanup", "namespace", namespace)

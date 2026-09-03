@@ -1105,6 +1105,49 @@ func TestCleanupNCCLRun_MissingLeaseSkipsDelete(t *testing.T) {
 	}
 }
 
+// TestCleanupNCCLRun_LockCheckErrorSkipsCleanupWithoutFailingBenchmark checks
+// that a lock-check error at cleanup is treated like a confirmed takeover,
+// skipping cleanup without failing a benchmark that already passed.
+func TestCleanupNCCLRun_LockCheckErrorSkipsCleanupWithoutFailingBenchmark(t *testing.T) {
+	benchFailure := aicrErrors.New(aicrErrors.ErrCodeInternal, "benchmark already failed")
+	tests := []struct {
+		name       string
+		benchErr   error
+		wantErrNil bool
+	}{
+		{"passing benchmark stays passing", nil, true},
+		{"failing benchmark keeps its own error", benchFailure, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			const ns = "aicr-nccl-perf-deadbeef"
+			holder := testHolderID
+			clientset := fake.NewClientset(
+				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}},
+				&coordinationv1.Lease{
+					ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns},
+					Spec:       coordinationv1.LeaseSpec{HolderIdentity: &holder},
+				},
+			)
+			dynamicClient := newTrainerFakeClient()
+			clientset.PrependReactor("get", "leases", func(k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, apierrors.NewServiceUnavailable("apiserver unavailable")
+			})
+
+			err := cleanupNCCLRun(clientset, dynamicClient, ns, testNamespaceUID, testHolderID, nil, tt.benchErr)
+			if tt.wantErrNil && err != nil {
+				t.Errorf("expected a transient lock-check error not to fail an otherwise-passing benchmark, got: %v", err)
+			}
+			if !tt.wantErrNil && !stderrors.Is(err, benchFailure) {
+				t.Errorf("expected the original benchmark failure to survive, got: %v", err)
+			}
+			if _, err := clientset.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{}); err != nil {
+				t.Errorf("expected the namespace to survive a lock-check error, got: %v", err)
+			}
+		})
+	}
+}
+
 // TestNcclExecutionLockHeldBy_ExpiredHolderCannotResumeAfterTakeover checks
 // that a holder whose lock went stale and was taken over by another caller
 // is correctly told it no longer holds the lock.
