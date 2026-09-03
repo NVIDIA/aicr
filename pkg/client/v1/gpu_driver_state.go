@@ -109,7 +109,7 @@ func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOS
 				"DaemonSet and pins the driver version — nothing to deploy " +
 				"by hand; see docs/integrator/gke-gpu-setup.md."
 		case recipe.CriteriaOSUbuntu:
-			// The pinned GPU Operator (v26.3.3) supports driver management
+			// The pinned GPU Operator supports driver management
 			// on GKE only on Ubuntu node images with containerd.
 			return "On GKE Ubuntu node images the GPU Operator can manage " +
 				"the driver: bundle in GPU-Operator-managed mode: " +

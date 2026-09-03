@@ -714,7 +714,7 @@ curl -X POST "http://localhost:8080/v1/bundle" \
     "apiVersion": "aicr.run/v1alpha2",
     "kind": "RecipeResult",
     "componentRefs": [
-      {"name": "gpu-operator", "type": "Helm", "chart": "gpu-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "v26.3.3", "namespace": "gpu-operator", "valuesFile": "components/gpu-operator/values.yaml"},
+      {"name": "gpu-operator", "type": "Helm", "chart": "gpu-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "v26.7.0", "namespace": "gpu-operator", "valuesFile": "components/gpu-operator/values.yaml"},
       {"name": "network-operator", "type": "Helm", "chart": "network-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "26.1.1", "namespace": "nvidia-network-operator", "valuesFile": "components/network-operator/values.yaml"}
     ],
     "deploymentOrder": ["gpu-operator", "network-operator"]

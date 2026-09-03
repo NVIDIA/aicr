@@ -721,6 +721,7 @@ func TestSlurmLeavesClearInheritedPerformancePhase(t *testing.T) {
 
 	for _, name := range []string{
 		"gb200-eks-ubuntu-training-slurm",
+		"gb300-eks-ubuntu-training-slurm",
 		"h100-aks-ubuntu-training-slurm",
 		"h100-eks-ubuntu-training-slurm",
 		"h100-gke-cos-training-slurm",
@@ -756,6 +757,7 @@ func TestSlurmLeavesIncludeSharedStoragePreManifest(t *testing.T) {
 	const wantManifest = "components/slinky-slurm/manifests/shared-storage-pvcs.yaml"
 	for _, name := range []string{
 		"gb200-eks-ubuntu-training-slurm",
+		"gb300-eks-ubuntu-training-slurm",
 		"h100-aks-ubuntu-training-slurm",
 		"h100-eks-ubuntu-training-slurm",
 		"h100-gke-cos-training-slurm",
@@ -789,6 +791,7 @@ func TestSlurmLeavesIncludeEnrootPreManifest(t *testing.T) {
 	const wantManifest = "components/slinky-slurm/manifests/enroot-config.yaml"
 	for _, name := range []string{
 		"gb200-eks-ubuntu-training-slurm",
+		"gb300-eks-ubuntu-training-slurm",
 		"h100-aks-ubuntu-training-slurm",
 		"h100-eks-ubuntu-training-slurm",
 		"h100-gke-cos-training-slurm",
@@ -963,6 +966,7 @@ func TestGPUSlurmLeavesConfigureGRESAndTaskCgroup(t *testing.T) {
 		wantGPUs int
 	}{
 		{name: "gb200-eks-ubuntu-training-slurm", wantGres: "gpu:gb200:4", wantGPUs: 4},
+		{name: "gb300-eks-ubuntu-training-slurm", wantGres: "gpu:gb300:4", wantGPUs: 4},
 		{name: "h100-aks-ubuntu-training-slurm", wantGres: "gpu:h100:8", wantGPUs: 8},
 		{name: "h100-eks-ubuntu-training-slurm", wantGres: "gpu:h100:8", wantGPUs: 8},
 		{name: "h100-gke-cos-training-slurm", wantGres: "gpu:h100:8", wantGPUs: 8},
@@ -1043,7 +1047,16 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"secure-accelerator-access",
 		"slinky-slurm-health",
 	}
-	gb200ConformanceChecks := []string{
+	// The gb200/gb300 EKS Slurm leaves differ from the h100 list above in two
+	// INDEPENDENT ways; do not collapse them into one explanation:
+	//   + slinky-slurm-imex-channel — added by the leaf, genuinely IMEX-specific.
+	//   - robust-controller, secure-accelerator-access — absent because
+	//     gb200-eks-training.yaml and gb300-eks-training.yaml do not declare
+	//     them while h100-eks-training.yaml does. That is a property of the
+	//     accelerator training bases, NOT of IMEX or of Slurm; gb300 is not
+	//     categorically excluded, since gb300-eks-ubuntu-inference-dynamo
+	//     declares both. Naming this fixture for IMEX would misattribute it.
+	gbEKSSlurmConformanceChecks := []string{
 		"platform-health",
 		"gpu-operator-health",
 		"dra-support",
@@ -1072,7 +1085,8 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		name string
 		want []string
 	}{
-		{name: "gb200-eks-ubuntu-training-slurm", want: gb200ConformanceChecks},
+		{name: "gb200-eks-ubuntu-training-slurm", want: gbEKSSlurmConformanceChecks},
+		{name: "gb300-eks-ubuntu-training-slurm", want: gbEKSSlurmConformanceChecks},
 		{name: "h100-aks-ubuntu-training-slurm", want: conformanceChecks},
 		{name: "h100-eks-ubuntu-training-slurm", want: conformanceChecks},
 		{name: "h100-gke-cos-training-slurm", want: conformanceChecks},
@@ -1099,16 +1113,42 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 	}
 }
 
-func TestGB200EKSSlurmWiresIMEXComputeDomain(t *testing.T) {
+// TestGPUSlurmLeavesWireIMEXComputeDomain covers every IMEX-capable Slurm leaf.
+// The wiring under test (SwitchType, the ComputeDomain pre-manifest, and the
+// NodeSet/ComputeDomain ResourceClaimTemplate identity match) is transposed
+// verbatim between leaves, so a new leaf that drops or typos any part of it
+// must fail here by name rather than only as an opaque golden-digest diff.
+func TestGPUSlurmLeavesWireIMEXComputeDomain(t *testing.T) {
 	ctx := context.Background()
 	store, err := loadMetadataStore(ctx)
 	if err != nil {
 		t.Fatalf("failed to load metadata store: %v", err)
 	}
 
-	leaf, ok := store.GetRecipeByName("gb200-eks-ubuntu-training-slurm")
+	tests := []struct {
+		name     string
+		wantGres string
+	}{
+		{name: "gb200-eks-ubuntu-training-slurm", wantGres: "gpu:gb200:4"},
+		{name: "gb300-eks-ubuntu-training-slurm", wantGres: "gpu:gb300:4"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertSlurmLeafWiresIMEXComputeDomain(t, ctx, store, tt.name, tt.wantGres)
+		})
+	}
+}
+
+//nolint:revive // ctx follows t, the conventional order for a t.Helper assertion.
+func assertSlurmLeafWiresIMEXComputeDomain(
+	t *testing.T, ctx context.Context, store *MetadataStore, leafName, wantGres string,
+) {
+
+	t.Helper()
+
+	leaf, ok := store.GetRecipeByName(leafName)
 	if !ok {
-		t.Fatal("overlay gb200-eks-ubuntu-training-slurm not found in store")
+		t.Fatalf("overlay %s not found in store", leafName)
 	}
 	result, err := store.BuildRecipeResult(ctx, leaf.Spec.Criteria)
 	if err != nil {
@@ -1139,15 +1179,15 @@ func TestGB200EKSSlurmWiresIMEXComputeDomain(t *testing.T) {
 		t.Errorf("slinky-slurm dependencyRefs = %v, want nvidia-dra-driver-gpu", slurm.DependencyRefs)
 	}
 
-	values, err := result.GetValuesForComponent("slinky-slurm")
+	values, err := result.GetValuesForComponentWithContext(ctx, "slinky-slurm")
 	if err != nil {
-		t.Fatalf("GetValuesForComponent(slinky-slurm) failed: %v", err)
+		t.Fatalf("GetValuesForComponentWithContext(slinky-slurm) failed: %v", err)
 	}
 	if got := valueAtPath[string](t, values, "controller", "extraConfMap", "SwitchType"); got != "switch/nvidia_imex" {
 		t.Errorf("controller.extraConfMap.SwitchType = %q, want switch/nvidia_imex", got)
 	}
-	if got := valueAtPath[string](t, values, "nodesets", "slinky", "extraConfMap", "Gres"); got != "gpu:gb200:4" {
-		t.Errorf("nodesets.slinky.extraConfMap.Gres = %q, want gpu:gb200:4", got)
+	if got := valueAtPath[string](t, values, "nodesets", "slinky", "extraConfMap", "Gres"); got != wantGres {
+		t.Errorf("nodesets.slinky.extraConfMap.Gres = %q, want %q", got, wantGres)
 	}
 
 	podClaims := valueAtPath[[]any](t, values, "nodesets", "slinky", "podSpec", "resourceClaims")

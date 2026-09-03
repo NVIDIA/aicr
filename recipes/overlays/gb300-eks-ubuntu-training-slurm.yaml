@@ -1,0 +1,166 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: gb300-eks-ubuntu-training-slurm
+
+spec:
+  # GB300 + EKS + Ubuntu + training with the Slinky operator and a
+  # Slinky-managed Slurm cluster. GB300 GPU GRES and task isolation are
+  # declared inline below; remaining EKS-specific tuning (gp3 storage,
+  # DCGM job-mapping) is layered at install time
+  # via `aicr bundle ... --set slinkyslurm:...` or a valuesFile.
+  #
+  # Topology is handled the same way as the gb200-eks sibling: IMEX via
+  # SwitchType=switch/nvidia_imex plus the ComputeDomain pre-manifest. No
+  # topograph component — no EKS Slurm leaf uses it today, and GB300 runs the
+  # same NVL72 MNNVL/IMEX fabric the gb200/eks path was built for.
+  base: gb300-eks-ubuntu-training
+
+  criteria:
+    service: eks
+    accelerator: gb300
+    os: ubuntu
+    intent: training
+    platform: slurm
+
+  mixins:
+    - os-ubuntu
+
+  constraints:
+    # The IMEX ComputeDomain reconciles a ResourceClaimTemplate through the
+    # GA resource.k8s.io/v1 DRA API, available from Kubernetes 1.34.
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  # The Slinky operator (CRDs + operator + cluster instance) is declared
+  # inline per slurm leaf, matching all six existing *-training-slurm leaves.
+  #
+  # This is duplication, not a necessity: recipes/mixins/platform-kubeflow.yaml
+  # shows a mixin CAN carry componentRefs with type/valuesFile/dependencyRefs,
+  # and the six Slurm components are absent from the base, so a platform-slurm
+  # mixin would add them wholesale the same way. What is untested is the last
+  # step -- this leaf puts `overrides` on slinky-slurm for GRES, and whether a
+  # leaf may override a mixin-supplied componentRef has not been established
+  # (see mixinComponentRefSafeForMerge in pkg/recipe/metadata_store.go, which
+  # rejects a mixin ref carrying `overrides` when it collides with a base ref).
+  # Factoring the block out is a cross-cutting change to seven leaves and does
+  # not belong in a leaf addition; this leaf follows the existing convention.
+  #
+  # GPU GRES and device isolation on slinky-slurm must be declared in four
+  # places because the chart does not derive GRES config in slurm.conf from
+  # pod resource limits
+  # (see comment in components/slinky-slurm/values.yaml):
+  #   1. controller.extraConfMap.GresTypes — enables the `gpu` GRES type.
+  #   2. controller.extraConfMap.TaskPlugin — activates task/cgroup so
+  #      cgroup.conf's ConstrainDevices setting enforces GPU allocations.
+  #   3. nodesets.slinky.extraConfMap.Gres — adds `Gres=gpu:gb300:4` to
+  #      slurmd's --conf so slurmctld knows it has GPUs to allocate via
+  #      `srun --gres=gpu:N`.
+  #   4. nodesets.slinky.slurmd.resources.limits.nvidia.com/gpu — reserves
+  #      4 GB300s on the slurmd pod so the NVIDIA device plugin injects
+  #      /dev/nvidia* into the container. Without this `gres.conf`'s
+  #      AutoDetect=nvidia finds nothing. `requests` is omitted: Kubernetes
+  #      auto-mirrors requests=limits for extended resources.
+  # The count is per Kubernetes GPU node / slurmd pod (the p6e-gb300r.36xlarge
+  # instance exposes nvidia.com/gpu.count=4), not cluster-total or rack-total
+  # capacity. The GRES type string must match what
+  # slurmd's AutoDetect=nvidia derives from NVML on the node; a mismatch makes
+  # slurmd refuse to start.
+  # Accelerated nodeSelector/tolerations on slurmd are injected via the
+  # registry's nodesets.slinky.podSpec.{nodeSelector,tolerations} paths.
+  componentRefs:
+    - name: mariadb-operator-crds
+      type: Helm
+      valuesFile: components/mariadb-operator-crds/values.yaml
+
+    - name: mariadb-operator
+      type: Helm
+      valuesFile: components/mariadb-operator/values.yaml
+      dependencyRefs:
+        - mariadb-operator-crds
+
+    - name: slurm-accounting-mariadb
+      type: Helm
+      valuesFile: components/slurm-accounting-mariadb/values.yaml
+      dependencyRefs:
+        - mariadb-operator
+        - mariadb-operator-crds
+
+    - name: slinky-slurm-operator-crds
+      type: Helm
+      valuesFile: components/slinky-slurm-operator-crds/values.yaml
+
+    - name: slinky-slurm-operator
+      type: Helm
+      valuesFile: components/slinky-slurm-operator/values.yaml
+      dependencyRefs:
+        - cert-manager
+        - slinky-slurm-operator-crds
+
+    - name: slinky-slurm
+      type: Helm
+      valuesFile: components/slinky-slurm/values.yaml
+      preManifestFiles:
+        - components/slinky-slurm/manifests/enroot-config.yaml
+        - components/slinky-slurm/manifests/shared-storage-pvcs.yaml
+        # Submit this immutable ComputeDomain after the NVIDIA DRA driver and
+        # before the Slinky chart creates NodeSet pods that consume its RCT.
+        # RCT reconciliation may complete asynchronously after this apply.
+        - components/slinky-slurm/manifests/compute-domain.yaml
+      dependencyRefs:
+        - slurm-accounting-mariadb
+        - nvidia-dra-driver-gpu
+        - slinky-slurm-operator
+        - slinky-slurm-operator-crds
+      overrides:
+        controller:
+          extraConfMap:
+            GresTypes: "gpu"
+            TaskPlugin: "task/cgroup,task/affinity"
+            SwitchType: "switch/nvidia_imex"
+        nodesets:
+          slinky:
+            extraConfMap:
+              Gres: "gpu:gb300:4"
+            podSpec:
+              resourceClaims:
+                # The claim name and ResourceClaimTemplate name are internal
+                # integration values and must not be overridden. They must
+                # stay aligned with the ComputeDomain pre-manifest; a mismatch
+                # can leave Slurm node pods Pending.
+                - name: imex-channels
+                  resourceClaimTemplateName: slinky-slurm-imex-channels
+            slurmd:
+              resources:
+                limits:
+                  nvidia.com/gpu: 4
+                claims:
+                  - name: imex-channels
+
+  # K8s-native nccl-all-reduce-bw checks are dropped on Slinky leaves:
+  # those checks launch Pods against the cluster scheduler, so on a
+  # Slinky-managed cluster they bypass slurmd entirely and measure the
+  # wrong path. Slurm-specific health is covered by the conformance check.
+  validation:
+    conformance:
+      checks:
+        - slinky-slurm-health
+        # Selected only by IMEX-capable Slinky Slurm recipes.
+        - slinky-slurm-imex-channel
+    performance:
+      checks: []
+      constraints: []

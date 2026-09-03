@@ -399,7 +399,7 @@ required so the device plugin's volume-mounts allocation strategy still works
 for legitimately allocated pods, but it leaves the **volume-mounts
 device-request path open** (a pod that declares a `/dev/null`-backed mount whose
 destination is under `/var/run/nvidia-container-devices` can still select
-devices — the pinned toolkit v1.19.1 accepts the volume-mount device request
+devices — the pinned toolkit v1.20.0 accepts the volume-mount device request
 only when the mount *source* is `/dev/null`). This is the same posture as
 GPU-Operator-managed mode — not a regression — but it means full multi-tenant
 isolation additionally requires an admission policy restricting a
