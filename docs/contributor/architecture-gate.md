@@ -182,3 +182,27 @@ refuses to write one.
 
 After regenerating and hand-editing, run `go test ./tests/architecture/`
 to confirm `TestFacadeBoundary` passes against the edited file.
+
+## Limitations
+
+The gate is precise about what it checks, but a green
+`TestFacadeBoundary` is not a claim of complete coverage. A reader
+should know what it doesn't see.
+
+- **Interface dispatch declared inside the analyzed set.** When
+  `pkg/cli` or `pkg/server` declares its own interface and calls a
+  method through a value of that interface type, the call resolves to
+  the local interface method, not to whichever concrete business type
+  implements it — so the call itself is not classified. This is
+  narrower than it sounds: the constructor or first reference that
+  produces the concrete business value is still a classified symbol
+  reference, and that's where the boundary actually holds in practice.
+- **Reflection.** Anything reached through `reflect` is outside the
+  gate's static reach — it type-checks source, it doesn't execute it.
+- **`infrastructure`-bucket membership.** Sorting a package into
+  `infrastructure` exempts it from all symbol, class, and staleness
+  tracking (see [The three buckets](#the-three-buckets) above). That
+  sorting decision is reviewer-gated, not mechanically enforced by
+  `checkAgainstPolicy` — `TestInfrastructureAllowlistIsClosed` pins
+  the current package set to a literal, so growing it requires a
+  deliberate test change instead of a silent policy-file edit.
