@@ -1016,7 +1016,7 @@ aicr query --service eks --accelerator gb200 --intent training \
   --selector components.nodewright-customizations.values
 
 # Watch constraints tighten as you add specificity
-# Just "EKS" → 1 constraint (K8s >= 1.28)
+# Just "EKS" → 1 constraint (K8s >= 1.32)
 aicr query --service eks --selector constraints
 # Add GPU + intent + OS → 4 constraints (K8s >= 1.32.4, Ubuntu 24.04, kernel >= 6.8)
 aicr query --service eks --accelerator h100 --intent training --os ubuntu \
@@ -1141,7 +1141,7 @@ Supported operators:
 
 | Operator | Example | Description |
 |----------|---------|-------------|
-| `>=` | `>= 1.30` | Greater than or equal (version comparison) |
+| `>=` | `>= 1.32` | Greater than or equal (version comparison) |
 | `<=` | `<= 1.33` | Less than or equal (version comparison) |
 | `>` | `> 1.30` | Greater than (version comparison) |
 | `<` | `< 2.0` | Less than (version comparison) |

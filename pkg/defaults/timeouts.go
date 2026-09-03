@@ -1272,7 +1272,7 @@ const (
 	//
 	// This is a render-safe floor, not a support floor. This constant must
 	// stay at or above the strictest kubeVersion any bundled chart declares.
-	// Do NOT lower it to match the ">= 1.25" recipe floor in
+	// Do NOT lower it to match the ">= 1.32" recipe floor in
 	// recipes/overlays/base.yaml: recipes are validated against their own
 	// constraints, while mirror discovery raises lower versions to this
 	// value solely for Helm rendering (see mirror.KubeVersionFromConstraints).

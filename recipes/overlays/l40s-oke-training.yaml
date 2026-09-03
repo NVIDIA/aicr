@@ -32,7 +32,7 @@ spec:
   # requirement, so the recipe keeps the OKE training baseline K8s floor.
   constraints:
     - name: K8s.server.version
-      value: ">= 1.30"
+      value: ">= 1.32"
 
   componentRefs:
     # L40S-specific GPU Operator overrides (inherits valuesFile from oke-training).
