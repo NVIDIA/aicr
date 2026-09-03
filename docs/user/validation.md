@@ -118,8 +118,15 @@ constraint (10 % tolerance) → cleanup.
 
 Each variant (`-net`, `-nvls`, default) gets its own namespace, deleted on
 exit along with its `TrainingRuntime`/`TrainJob`. A namespace left behind by
-an interrupted run is reclaimed by its next retry (same run ID) or pruned on
-a later run (standalone runs, no run ID).
+an interrupted run is reclaimed by a same-run-ID retry only if no
+`Pending`/`Running`/`Unknown` pod remains in it and its execution lock (a
+`Lease` named `aicr-nccl-run-lock` in that namespace) has gone stale, 20
+minutes past its last renewal. Otherwise the retry fails with a conflict
+rather than risk two executions sharing one namespace; check
+`kubectl get pods -n <namespace>` and the Lease's age to find and clear
+whichever is actually stuck. A standalone run (no run ID) is never retried
+into its old namespace; that namespace is only pruned automatically, on a
+later run once an hour has passed and both conditions above hold.
 
 A passing CTRF entry:
 
