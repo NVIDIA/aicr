@@ -42,7 +42,7 @@ import "testing"
 var auditedOwnsCRDs = map[string]string{
 	"gatekeeper": "3.22.2",
 	"k8s-aibom":  "1.3.0",
-	"nvcre":      "v0.1.0",
+	"nvcre":      "v0.2.0-rc.2",
 	"nvsentinel": "v1.20.0",
 }
 
