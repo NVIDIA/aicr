@@ -1330,7 +1330,7 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 			// the key together with its chart defaults, so .Values.driver
 			// is nil at render time and the chart's unconditional field
 			// accesses (_helpers.tpl .Values.driver.manager.repository,
-			// v26.3.3) fail at install. Reject rather than default. The
+			// v26.7.0) fail at install. Reject rather than default. The
 			// reachable vector is a top-level --set-json null: the typed
 			// merge assigns it verbatim (mergeTypedValueByPath), while the
 			// recipe-side overlay merge drops nil-valued keys before the
@@ -1357,7 +1357,7 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 			// hostPaths: null is the same hazard as a null driver/toolkit
 			// section: Helm null-coalescing deletes the chart defaults and
 			// clusterpolicy.yaml's unconditional .Values.hostPaths.rootFS
-			// access fails at install (v26.3.3).
+			// access fails at install (v26.7.0).
 			name:         "--set-json hostPaths=null → rejected",
 			recipeResult: result("", aks, gpuOpRef(driverOn())),
 			bundlerConfig: config.NewConfig(config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
