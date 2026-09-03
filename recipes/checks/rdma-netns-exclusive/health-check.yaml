@@ -32,7 +32,25 @@ metadata:
   name: rdma-netns-exclusive-health-check
 spec:
   timeouts:
-    assert: 15m
+    # 5m, matching every other in-tree check — NOT the ~15m a cold serial
+    # reboot convergence would want. An authored value can only SHORTEN the
+    # caller's budget, never extend it (pkg/chainsaw/inprocess.go:
+    # effectiveTimeout starts at the caller's defaults.ChainsawAssertTimeout
+    # = 6m and is lowered only if the authored value is smaller; a larger one
+    # is capped with a Debug log). The enclosing deployment validator job is
+    # itself 8m (validators/catalog.yaml). So a 15m value here was dead text
+    # that read as if 15 minutes were available.
+    #
+    # Consequence, deliberately not papered over: this CR reboots matching
+    # workers one at a time (interruptionBudget), so on a COLD cluster whose
+    # nodes have not yet converged, real convergence can exceed the 6m
+    # ceiling and this check can time out even though the rollout is healthy.
+    # Re-running once converged passes. Raising the ceiling means raising
+    # defaults.ChainsawAssertTimeout (shared by every component) and the
+    # deployment job envelope together, or moving this component to the
+    # longer readiness-poll path — infrastructure changes well outside this
+    # recipe port, tracked as follow-up work.
+    assert: 5m
   steps:
     - name: validate-skyhook-complete
       try:
