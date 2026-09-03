@@ -35,11 +35,13 @@
 // overlays it appears alongside. The wildcard is therefore the WEAKEST
 // position for a floor, not the broadest — the opposite of the intuition.
 //
-// Rule: declare a product-level fallback on an accelerator wildcard so
-// supported partial-criteria queries retain the floor, and repeat it on each
-// maximal service x accelerator x intent leaf so later overlays cannot weaken
-// it. Never declare a floor on a shared accelerator-unbound service overlay
-// (eks, gke-cos, aks, ...).
+// Rule: declare a product-level fallback on an accelerator wildcard only when
+// the documented minimum applies to every hardware variant normalized to that
+// accelerator. Repeat such a fallback on each maximal service x accelerator x
+// intent leaf so later overlays cannot weaken it. Provider-specific leaves may
+// carry a narrower edition-specific floor when the provider documents that
+// edition. Never declare a floor on a shared accelerator-unbound service
+// overlay (eks, gke-cos, aks, ...).
 //
 // The tests below enforce that rule for the current RTX PRO 6000 family and
 // constrain where future floors may be declared.
@@ -128,9 +130,9 @@ func deploymentHasCheck(deployment *ValidationPhase, name string) bool {
 // TestGPUDriverFloorEffectiveValue asserts the final effective host driver
 // floor for every resolved query affected by a declared floor.
 //
-// Coverage lists the 12 current RTX PRO 6000 resolutions: the accelerator-only
-// query, the four service x intent leaves that carry the constraint, and every
-// deeper OS and platform leaf that must inherit it.
+// Coverage lists the 11 current RTX PRO 6000 Server Edition resolutions: the
+// four service x intent leaves that carry the constraint and every deeper OS
+// and platform leaf that must inherit it.
 func TestGPUDriverFloorEffectiveValue(t *testing.T) {
 	t.Parallel()
 
@@ -139,14 +141,6 @@ func TestGPUDriverFloorEffectiveValue(t *testing.T) {
 		criteria *Criteria
 		want     string
 	}{
-		// Product-level fallback for the supported accelerator-only query.
-		{
-			name: "rtx-pro-6000 accelerator-only declares the floor",
-			criteria: &Criteria{
-				Accelerator: CriteriaAcceleratorRTXPro6000,
-			},
-			want: rtxProDriverFloor,
-		},
 		// EKS: the two overlays that declare the floor.
 		{
 			name: "rtx-pro-6000 eks training declares the floor",
@@ -275,14 +269,37 @@ func TestGPUDriverFloorEffectiveValue(t *testing.T) {
 	}
 }
 
+// TestGPUDriverFloorEditionAmbiguousQueryHasNoFloor prevents the Server
+// Edition minimum from leaking through the edition-collapsed accelerator
+// wildcard. The generic check remains present and validates the nvidia-smi
+// banner without imposing an edition-specific version floor.
+func TestGPUDriverFloorEditionAmbiguousQueryHasNoFloor(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	criteria := &Criteria{Accelerator: CriteriaAcceleratorRTXPro6000}
+	deployment := resolvedDeployment(ctx, t, criteria, "")
+
+	if got, found := driverFloorOf(deployment); found {
+		t.Errorf("%s resolves with %s = %q; the accelerator criterion represents "+
+			"Server, Workstation, and Max-Q Workstation editions, so a Server-only "+
+			"floor must remain on provider-specific leaves",
+			criteria.String(), gpuDriverFloorConstraint, got)
+	}
+	if !deploymentHasCheck(deployment, "check-nvidia-smi") {
+		t.Errorf("%s resolved without check-nvidia-smi; removing the edition-specific "+
+			"floor must not remove the generic driver-presence check", criteria.String())
+	}
+}
+
 // TestGPUDriverFloorWildcardIsWeakestPosition pins the ordering fact the
 // placement rule rests on: for a query that matches both an accelerator
 // wildcard and a service overlay chain, the wildcard is applied FIRST.
 //
-// This is why the product-level fallback on an `*-any` overlay must be repeated
-// on maximal leaves. If this test ever fails because the resolver's ordering
-// changed, the placement rule and the comments beside every declared floor
-// need rereading.
+// This is why any valid product-level fallback on an `*-any` overlay must be
+// repeated on maximal leaves. If this test ever fails because the resolver's
+// ordering changed, the placement rule and the comments beside every declared
+// floor need rereading.
 func TestGPUDriverFloorWildcardIsWeakestPosition(t *testing.T) {
 	t.Parallel()
 
@@ -333,9 +350,11 @@ func TestGPUDriverFloorWildcardIsWeakestPosition(t *testing.T) {
 // every overlay in the catalog, so a floor added in future lands somewhere it
 // cannot be silently downgraded.
 //
-// Permitted positions are either an accelerator-bound product fallback (both
-// service and intent wildcarded) or a concrete service x accelerator x intent
-// leaf. Forbidden positions are:
+// Structurally permitted positions are either an accelerator-bound product
+// fallback (both service and intent wildcarded) or a concrete service x
+// accelerator x intent leaf. A product fallback is semantically valid only
+// when its floor applies to every hardware variant normalized to its
+// accelerator criterion. Forbidden positions are:
 //
 //   - base.yaml, for the same reason, plus option B's lowest-common-
 //     denominator problem discussed in issue #2438;

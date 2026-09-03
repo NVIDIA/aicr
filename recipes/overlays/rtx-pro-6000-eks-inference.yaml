@@ -85,11 +85,13 @@ spec:
         # required."
         # https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/platform-support.html
         #
-        # This is a product-level minimum stated by NVIDIA and is independent
-        # of node OS and cloud provider, so it holds for every RTX PRO 6000
-        # leaf in this chain. It is deliberately NOT keyed to whatever driver
-        # the GPU Operator currently pins or to a version observed passing a
-        # test run: a shipped version proves sufficiency, not minimality.
+        # AWS documents G7e as using RTX PRO 6000 Blackwell Server Edition:
+        # https://aws.amazon.com/ec2/instance-types/g7e/
+        # The Server Edition minimum therefore holds for every deeper OS and
+        # platform leaf in this EKS chain. It is deliberately NOT keyed to
+        # whatever driver the GPU Operator currently pins or to a version
+        # observed passing a test run: a shipped version proves sufficiency,
+        # not minimality.
         #
         # Placement (issue #2438): deployment constraints merge last-wins by
         # name with no max comparison, and the accelerator wildcard

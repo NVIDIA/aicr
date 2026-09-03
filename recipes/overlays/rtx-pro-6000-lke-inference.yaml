@@ -57,9 +57,11 @@ spec:
         # required."
         # https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/platform-support.html
         #
-        # This is a product-level minimum stated by NVIDIA and is independent
-        # of node OS and cloud provider, so it holds for every RTX PRO 6000
-        # leaf in this chain. It is deliberately NOT keyed to whatever driver
+        # Akamai documents that its LKE GPU Linodes use RTX PRO 6000 Blackwell
+        # Server Edition:
+        # https://techdocs.akamai.com/cloud-computing/docs/gpus-on-lke
+        # The Server Edition minimum therefore holds for every deeper OS leaf
+        # in this LKE chain. It is deliberately NOT keyed to whatever driver
         # the GPU Operator currently pins or to a version observed passing a
         # test run: a shipped version proves sufficiency, not minimality.
         #
