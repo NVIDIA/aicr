@@ -50,22 +50,34 @@ Traffic between the Frontend/router role and the Worker role is
   → worker), not the data direction.
 
 If the Frontend/router and Worker roles sit in different security groups,
-these ports may be blocked in one or both directions. Typical symptoms:
-- Dynamo frontend and vLLM worker pods stuck in `CrashLoopBackOff`
-- The `inference-perf` performance validator failing while `deployment` and
-  `conformance` pass, and while the `DynamoGraphDeployment` itself reports
-  ready. **A pure SG block will usually pass the ~10 min
-  workload-readiness gate** — the Frontend and Worker's own readiness
-  probes are local-only HTTP checks against each pod's own `/health`
-  endpoint and don't exercise cross-pod networking at all (confirmed in
-  upstream's `component_worker.go`: *"ReadinessProbe in Dynamo worker
-  context doesn't determine that the worker is ready to receive
-  traffic"*). A blocked SG instead surfaces at the separate **~5 min
-  `/v1/chat/completions` health probe** that runs after DGD readiness —
-  the first real end-to-end request, which is what actually depends on
-  the request-plane and ZMQ connectivity above. Total time to failure is
-  roughly 15 min (readiness passes quickly, then the health probe times
-  out), not ~10 min.
+these ports may be blocked in one or both directions. **The two blocked
+transports fail very differently — don't conflate them:**
+
+- **Blocked TCP request/response plane (`DYN_TCP_RPC_PORT`,
+  `DYN_TCP_RESPONSE_STREAM_PORT`) breaks inference outright.** A dispatched
+  request that can't reach the worker (or a response that can't get back to
+  the frontend) surfaces as a **request error**, not a pod crash — Dynamo's
+  Rust TCP client returns connection failures as `Result` errors at the
+  call site, it does not panic the process. Neither the Frontend nor
+  Worker's own readiness probe exercises cross-pod networking at all
+  (confirmed in upstream's `component_worker.go`: *"ReadinessProbe in
+  Dynamo worker context doesn't determine that the worker is ready to
+  receive traffic"*), so a pure TCP-plane block does not by itself cause
+  `CrashLoopBackOff` or fail the DGD's own readiness gate — those pass
+  normally, then the `inference-perf` performance validator's separate
+  `/v1/chat/completions` health probe (up to ~5 min after normal DGD
+  startup, not a fixed extra 15 min) is what actually fails, since that's
+  the first real end-to-end request exercised.
+- **Blocked ZMQ (`5557`) does *not* break inference by itself** — Dynamo's
+  ZMQ event plane is deliberately best-effort/lossy (confirmed in upstream:
+  *"the event plane is already best-effort/lossy ... so a dropped event
+  costs routing-estimate freshness, not correctness"*), and the default
+  `dynamo-router` mode (`least-loaded`) doesn't consume KV-cache events at
+  all — only `DYN_ROUTER_MODE=kv` does. Blocking `5557` alone degrades
+  KV-aware routing quality (or is a complete no-op under `least-loaded`);
+  it will not fail the chat-completion health probe on its own. Verify it
+  with a dedicated reachability check, not by watching inference requests
+  fail.
 
 You can confirm reachability for the fixed ZMQ port directly from a node in
 the Frontend/router's security group before re-running. The probe pod needs
@@ -77,8 +89,9 @@ worker Service only forwards the health port (`9090`), not `5557`.
 
 ```shell
 # <workload-namespace> is wherever your DynamoGraphDeployment actually runs
-# (e.g. dynamo-workload for the demo, dynamo-system for a validator run) --
-# check `kubectl get dynamographdeployments -A` if unsure.
+# (e.g. dynamo-workload for the demo; aicr-inference-perf-<run-id> for the
+# inference-perf validator) -- check `kubectl get dynamographdeployments -A`
+# if unsure.
 kubectl get pod -n <workload-namespace> -l nvidia.com/dynamo-component-type=worker -o wide  # find the worker Pod IP
 kubectl run tcp-probe --rm -i --restart=Never --image=busybox:1.36 \
   --overrides='{"spec":{"nodeSelector":{"<frontend-node-label-key>":"<value>"},"tolerations":[{"operator":"Exists"}]}}' \
@@ -180,11 +193,17 @@ orchestrator — on a fallback placement it may land on any of them.
 ### Example
 
 Using AICR's own `--system-node-selector`/`--accelerated-node-selector`
-convention (Frontend on the system node group, Worker on the GPU node group)
-as a concrete instance of the frontend/router vs. worker roles above:
+convention (Frontend on the system node group, Worker on the GPU node
+group) as a concrete instance of the frontend/router vs. worker roles
+above. `kube-prometheus-stack` is a third, separate group in the general
+case — it lands on whatever `--system-node-selector` targets, which is
+often but not always the same group as your Frontend (e.g. the demo's
+Frontend runs on `cpu-worker`, not AICR's system group, so Prometheus
+there is a distinct SG). Don't assume `<frontend-sg-id>` and
+`<prometheus-sg-id>` are the same without checking:
 
 ```shell
-# 1) Find SG IDs for the Frontend/router and Worker nodegroups
+# 1) Find SG IDs for the Frontend/router, Worker, and Prometheus nodegroups
 aws ec2 describe-instances \
   --filters "Name=tag:eks:nodegroup-name,Values=<frontend-nodegroup>" \
   --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" \
@@ -192,6 +211,11 @@ aws ec2 describe-instances \
 
 aws ec2 describe-instances \
   --filters "Name=tag:eks:nodegroup-name,Values=<worker-nodegroup>" \
+  --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" \
+  --output text
+
+aws ec2 describe-instances \
+  --filters "Name=tag:eks:nodegroup-name,Values=<system-nodegroup>" \
   --query "Reservations[0].Instances[0].SecurityGroups[*].GroupId" \
   --output text
 
@@ -208,9 +232,14 @@ aws ec2 authorize-security-group-ingress --group-id <frontend-sg-id> \
   --protocol tcp --port 1024-65535 --source-group <worker-sg-id>
 
 # 3) Prometheus: always required, from every SG that can host the
-#    conformance orchestrator -- worker-sg here, but repeat for any other
-#    worker security group in the cluster (this rule applies even if
-#    Frontend and Worker are co-located and skip rules 2a-2c above)
-aws ec2 authorize-security-group-ingress --group-id <frontend-sg-id> \
+#    conformance orchestrator -- worker-sg and frontend-sg here, but
+#    repeat for any other worker security group in the cluster (this
+#    rule applies even if Frontend and Worker are co-located and skip
+#    rules 2a-2c above). <prometheus-sg-id> is NOT assumed to equal
+#    <frontend-sg-id> -- use the SG you found for <system-nodegroup> above.
+aws ec2 authorize-security-group-ingress --group-id <prometheus-sg-id> \
   --protocol tcp --port 9090 --source-group <worker-sg-id>
+
+aws ec2 authorize-security-group-ingress --group-id <prometheus-sg-id> \
+  --protocol tcp --port 9090 --source-group <frontend-sg-id>
 ```

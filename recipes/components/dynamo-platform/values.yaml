@@ -37,17 +37,23 @@ global:
   #
   # CRITICAL for standing clusters: this only restarts operator-managed
   # workload specs -- it does not touch the runtime IMAGE any existing
-  # DynamoGraphDeployment already pins. A workload still running an older
-  # runtime image (e.g. vllm-runtime:1.2.1, AICR's own prior pin) without
+  # DynamoGraphDeployment already pins. Bumping the runtime image to match
+  # the operator is REQUIRED, not optional: an older runtime (e.g.
+  # vllm-runtime:1.2.1, AICR's own prior pin) under a newer operator is
+  # exactly the version-skew class that caused the frontend discovery panic
+  # fixed in #1193 -- this is a broader hazard than just the event-plane
+  # default below, and setting DYN_EVENT_PLANE alone does not resolve it.
+  # Separately, and additionally: a workload on that older image without
   # DYN_EVENT_PLANE set relies on THAT image's own compiled-in default, not
   # this chart's. At 1.2.1 that default is nats for etcd/kubernetes
   # discovery (verified against upstream's resolve_event_transport_kind());
   # it only became zmq-for-every-backend later, by 1.4.2. So a restarted
   # 1.2.1 pod can silently keep trying to reach a NATS server this chart
-  # just removed. Before or alongside this platform upgrade, also bump any
-  # standing DynamoGraphDeployment's runtime image and/or set
-  # DYN_EVENT_PLANE=zmq explicitly -- don't rely on the platform upgrade
-  # alone to carry old workloads through.
+  # just removed. Before or alongside this platform upgrade: bump any
+  # standing DynamoGraphDeployment's runtime image to match the operator
+  # (required), and set DYN_EVENT_PLANE=zmq explicitly as defense in depth
+  # (does not substitute for the image bump) -- don't rely on the platform
+  # upgrade alone to carry old workloads through.
   #
   # To opt out of the NATS removal and avoid the restart instead: the
   # generated install.sh does NOT forward extra flags (no --set passthrough)
