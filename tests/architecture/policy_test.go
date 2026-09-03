@@ -17,7 +17,6 @@ package architecture
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -115,8 +114,8 @@ func (p policy) validate() []string {
 			problems = append(problems, name+": missing infrastructure reason")
 		}
 	}
-	if !slices.Contains(p.Facade, facadePackage) {
-		problems = append(problems, facadePackage+" must be in the facade bucket")
+	if len(p.Facade) != 1 || p.Facade[0] != facadePackage {
+		problems = append(problems, "the facade bucket must contain only "+facadePackage)
 	}
 	return problems
 }
@@ -146,6 +145,10 @@ func TestPolicyValidate(t *testing.T) {
 		// observed package -- including the facade itself -- into constrained
 		// and writes no facade bucket at all.
 		{"missing facade", constrainedPackage{Reason: "r", Permanent: true}, nil, "facade bucket"},
+		// Regression guard for a real hole: checkAgainstPolicy treats every
+		// p.Facade entry as clean, so a second facade package would exempt
+		// that package from the gate entirely while validate stayed green.
+		{"second facade package", constrainedPackage{Reason: "r", Permanent: true}, []string{facadePackage, "pkg/recipe"}, "facade bucket"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
