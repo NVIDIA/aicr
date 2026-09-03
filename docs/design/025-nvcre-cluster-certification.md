@@ -1,4 +1,4 @@
-# ADR-024: NVIDIA Cluster Readiness Engine Component
+# ADR-025: NVIDIA Cluster Readiness Engine Component
 
 ## Status
 
@@ -144,24 +144,42 @@ The check is read-only and creates no benchmark workload.
 
 ### 6. AICR bounds Certification execution
 
-NVCRE's API does not bound a certification run: `nodesPerJob` defaults to every
-matching node and has no maximum, and there is no total run deadline. Until
-upstream closes those, any AICR caller driving `Certification` supplies the
-bounds itself.
+NVCRE's API bounds neither the node footprint of a run nor its total duration,
+and deleting a `Certification` does not establish that its GPU workloads have
+stopped. Until upstream closes these, an AICR caller supplies the bounds and
+verifies the outcome itself.
 
-- **Always set `nodesPerJob` explicitly.** Never rely on the auto-select
-  default, which takes all matching nodes for non-training entries.
-- **Always pass `--cleanup`.** `--timeout` stops the CLI watch, not the run;
-  without `--cleanup` an expired deadline leaves the Certification and its
-  `TrainJob`s executing on GPU nodes.
-- **Bound the wait explicitly** rather than relying on the derived default.
+The rules below are stated against the **API**, because the opt-in validators
+this ADR places in scope create the CR directly. `nvcrectl` flags are a
+convenience wrapper over the same fields, not the contract.
 
-On success, failure, cancellation, or timeout the caller deletes the
-`Certification`, which garbage-collects the `TrainJob`s it created. A timeout
-yields a partial report and is reported as a failure, never as a pass.
+**Cap the footprint with `target.nodeNames`.** Setting `nodesPerJob` is not
+sufficient and does not bound anything at the run level: partitioning chunks
+the entire matched node list and adds an overflow group that borrows from the
+last full group, so `nodesPerJob` sizes each group while the run still spans
+every targeted node. `execution.maxConcurrent` defaults to `0`, meaning
+unlimited, so those groups can all run at once. On a 64-node target,
+`nodesPerJob: 2` yields 32 groups covering the fleet. An explicit
+`nodesPerJob` is clamped to `min(nodesPerJob, matchingNodes)`, which is a
+per-job ceiling, not a total-footprint bound. `target.nodeNames` is the only
+field that caps the total, so an AICR caller sets it to an explicit node list.
+
+**Bound the wait, and treat expiry as failure.** A timeout yields a partial
+report and is reported as a failure, never as a pass.
+
+**Verify the workloads actually stopped.** Deleting the `Certification` is not
+proof. The delete carries no propagation policy; the controller issues its
+child deletes and removes its own finalizer in the same reconcile without
+observing that they completed, so the parent can disappear while `TrainJob`s
+and pods still hold GPUs. The controller's drain barrier gives up by design
+after a five-minute grace period and proceeds with cleanup regardless. On
+success, failure, cancellation, or timeout the caller must therefore confirm
+directly that the run's `TrainJob`s and GPU pods are gone within a bounded
+wait, and report cleanup failure — not a warning, and never a pass — when they
+are not.
 
 An AICR check that omits any of these can strand GPU capacity indefinitely,
-which is why these are stated here rather than left to each caller.
+which is why they are stated here rather than left to each caller.
 
 ## Adoption Gates
 
@@ -214,6 +232,18 @@ ADR-019 analogue — k8s-aibom observes workloads, while NVCRE creates them.
   in both total runs and wall-clock.
 - The controller creates no workload without an explicit `Certification`,
   `WorkloadRun`, or `Workflow` resource.
+- **The workload runtime closure is inventoried, digest-qualified, and
+  relocatable.** The catalog is `go:embed`-compiled into the manager, so its
+  contents never appear in rendered chart output and AICR's mirror discovery —
+  which extracts images from rendered YAML — cannot see them. Catalog entries
+  carry tag-only images, including a `:latest` pin in the AWS GB300 RoCE
+  runtime patch, and the training entry clones Megatron-LM at pod start. Every
+  image, fetched source, and runtime download reachable from a supported
+  `Certification` category and platform path must be discoverable, pinned by
+  digest, and mirrorable. Scope is the supported paths, not every dormant
+  catalog entry. This does not bind registry-only admission — the controller
+  creates nothing without an explicit CR — but it binds before any opt-in
+  validator ships, which is why it sits in the gate set.
 
 **Security**
 
@@ -263,19 +293,28 @@ Supply chain — upstream release-workflow changes, not AICR work:
 Execution safety — these live in the `Certification` API, so driving
 `Certification` rather than `WorkloadRun` does not close them:
 
-3. **`nodesPerJob` has no upper bound.** `CategoryOptions.NodesPerJob` carries
-   `+kubebuilder:validation:Minimum=1` and no maximum. Left unset, the
-   controller auto-selects *all matching nodes* for every non-training entry,
-   and an explicit value is clamped to `min(nodesPerJob, matchingNodes)` —
-   a narrowing, not a ceiling.
-4. **No total run deadline.** `CertificationSpec` exposes only `timeoutPerJob`
-   and `measurementTimeout`; `ExecutionSpec` adds `maxConcurrent` but no
-   aggregate bound. `nvcrectl --timeout` bounds the CLI watch only: without
-   `--cleanup` the Certification keeps running after it fires.
+3. **No bound on a run's node footprint.** `CategoryOptions.NodesPerJob`
+   carries `Minimum=1` and no maximum, but it sizes each group rather than the
+   run: partitioning covers the whole matched node list, and
+   `execution.maxConcurrent` defaults to `0` (unlimited). Only
+   `target.nodeNames` caps the total.
+4. **No total run deadline, and no cleanup guarantee.** `CertificationSpec`
+   exposes only `timeoutPerJob` and `measurementTimeout`; `ExecutionSpec` adds
+   `maxConcurrent` but no aggregate bound. Deleting a `Certification` does not
+   confirm its workloads stopped — the delete carries no propagation policy,
+   the controller drops its finalizer without observing child deletion, and
+   the pod-drain barrier proceeds after a five-minute grace period regardless.
 
-AICR bounds both from the caller side per
+AICR bounds items 3 and 4 from the caller side per
 [Decision 6](#6-aicr-bounds-certification-execution), which is what makes them
 non-blocking here rather than merely deferred.
+
+This list is not a full adjudication. The remaining gate categories —
+Security, and the parts of Chart and CRD lifecycle and AICR qualification not
+named above — are neither verified nor listed as gaps; they are adjudicated at
+amendment time. Unassessed is not the same as passed. Nothing turns on this
+for registry-only admission, since the entry stays inert until an overlay
+references it.
 
 ## Non-Goals
 
@@ -309,11 +348,15 @@ not available to stock recipes yet.
 1. Upstream: add build provenance to the controller image, attributable to the
    release workflow and meeting a stated SLSA build level.
 2. Upstream: sign the Helm chart and publish chart SBOM and provenance.
-3. Upstream: bound `nodesPerJob` with a maximum, so a certification cannot
-   select an unbounded number of nodes.
-4. Upstream: add a total run deadline to `CertificationSpec`, so expiry stops
-   the run rather than only the CLI watch.
-5. AICR: record the qualified artifact set in this ADR's Status once items 1–4
+3. Upstream: add a run-level cap on the node footprint, so a `Certification`
+   cannot span every matched node without an explicit `target.nodeNames`.
+4. Upstream: add a total run deadline to `CertificationSpec`, and make
+   deletion establish that child workloads stopped — foreground propagation,
+   a finalizer held until children are gone, or an equivalent guarantee.
+5. Upstream: publish the workload runtime closure as digest-pinned,
+   discoverable artifacts, so the catalog's images and fetched source can be
+   inventoried and mirrored.
+6. AICR: record the qualified artifact set in this ADR's Status once items 1–5
    close, and re-run the gates against that pin.
-6. AICR: a separate amendment for any stock-recipe adoption, which requires
+7. AICR: a separate amendment for any stock-recipe adoption, which requires
    the full gate set to pass.
