@@ -110,10 +110,23 @@ can false-fail a healthy run. Making the NCCL gate fabric/transport-class
 aware is tracked in [#1256](https://github.com/NVIDIA/aicr/issues/1256).
 
 Expected flow (~5–10 min per variant): readiness pre-flight → deploy
-`TrainingRuntime` + `TrainJob` in `aicr-validation` → worker pods reach
-`Running` → run `all_reduce_perf` → parse peak bus bandwidth → verify the
-intended transport actually carried traffic (for `-net` / `-nvls`) → compare
-to recipe constraint (10 % tolerance) → cleanup.
+`TrainingRuntime` + `TrainJob` in a per-run namespace named
+`aicr-nccl-perf-<variant>-<run-id>` → worker pods reach `Running` → run
+`all_reduce_perf` → parse peak bus bandwidth → verify the intended transport
+actually carried traffic (for `-net` / `-nvls`) → compare to recipe
+constraint (10 % tolerance) → cleanup.
+
+Each variant (`-net`, `-nvls`, default) gets its own namespace, deleted on
+exit along with its `TrainingRuntime`/`TrainJob`. A namespace left behind by
+an interrupted run is reclaimed by a same-run-ID retry only if no
+`Pending`/`Running`/`Unknown` pod remains in it and its execution lock (a
+`Lease` named `aicr-nccl-run-lock` in that namespace) has gone stale, 20
+minutes past its last renewal. Otherwise the retry fails with a conflict
+rather than risk two executions sharing one namespace; check
+`kubectl get pods -n <namespace>` and the Lease's age to find and clear
+whichever is actually stuck. A standalone run (no run ID) is never retried
+into its old namespace; that namespace is only pruned automatically, on a
+later run once an hour has passed and both conditions above hold.
 
 A passing CTRF entry:
 
