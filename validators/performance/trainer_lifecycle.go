@@ -264,6 +264,15 @@ var (
 	trainerMutatingWebhookGVR = schema.GroupVersionResource{
 		Group: "admissionregistration.k8s.io", Version: "v1", Resource: "mutatingwebhookconfigurations",
 	}
+	trainerClusterRoleGVR = schema.GroupVersionResource{
+		Group: apiGroupRBAC, Version: "v1", Resource: "clusterroles",
+	}
+	trainerClusterRoleBindingGVR = schema.GroupVersionResource{
+		Group: apiGroupRBAC, Version: "v1", Resource: "clusterrolebindings",
+	}
+	trainerNamespaceGVR = schema.GroupVersionResource{
+		Version: "v1", Resource: "namespaces",
+	}
 
 	// requiredTrainerCRDs are the CRDs a usable Trainer install implies: the two the
 	// benchmark consumes directly, plus JobSet, which TrainJobs are executed as.
@@ -1171,15 +1180,31 @@ func reapOrphanedTrainerInstall(ctx context.Context, clientset kubernetes.Interf
 	deleteTrainerInstallManifest(ctx, clientset)
 }
 
+// trustedClusterScopedTrainerGVRs is every cluster-scoped GVR the Trainer
+// kustomize overlay can legitimately produce (see decodeTrainerObjects and
+// the manifest set built from trainerKustomizePath). Confines
+// trustworthyTrainerResourceRefs's cluster-scoped path to exactly these
+// kinds, so a manifest entry cannot name some unrelated cluster-scoped
+// resource, such as a Namespace this package never installed.
+var trustedClusterScopedTrainerGVRs = map[schema.GroupVersionResource]bool{
+	trainerCRDGVR:                true,
+	trainerValidatingWebhookGVR:  true,
+	trainerMutatingWebhookGVR:    true,
+	trainerClusterRoleGVR:        true,
+	trainerClusterRoleBindingGVR: true,
+	trainerNamespaceGVR:          true,
+}
+
 // trustworthyTrainerResourceRefs drops manifest entries reapOrphanedTrainerInstall
 // must not delete unconditionally. The manifest is a ConfigMap anyone with
 // write access to trainerNamespace can edit, and deleteTrainerResource skips
-// its UID delete precondition when UID is empty, so an entry with no UID, or
-// naming a namespace outside this install's own, could point a cluster-scoped
-// delete at any resource on the cluster. Every entry this package itself
-// persists always carries the real UID it got back from Create and stays
-// within trainerNamespace or cluster scope, so a rejected entry here is
-// never a legitimate one.
+// its UID delete precondition when UID is empty, so an entry with no UID, a
+// namespace outside this install's own, or a cluster-scoped kind this
+// package never installs could point a delete at any resource on the
+// cluster. Every entry this package itself persists always carries the real
+// UID it got back from Create and stays within trainerNamespace or one of
+// trustedClusterScopedTrainerGVRs, so a rejected entry here is never a
+// legitimate one.
 func trustworthyTrainerResourceRefs(resources []trainerResourceRef) []trainerResourceRef {
 	trusted := make([]trainerResourceRef, 0, len(resources))
 	for _, ref := range resources {
@@ -1188,8 +1213,14 @@ func trustworthyTrainerResourceRefs(resources []trainerResourceRef) []trainerRes
 				"resource", ref.String())
 			continue
 		}
-		if ref.Namespace != "" && ref.Namespace != trainerNamespace {
-			slog.Warn("Refusing to reap a Trainer install manifest entry outside the expected namespace",
+		if ref.Namespace != "" {
+			if ref.Namespace != trainerNamespace {
+				slog.Warn("Refusing to reap a Trainer install manifest entry outside the expected namespace",
+					"resource", ref.String())
+				continue
+			}
+		} else if !trustedClusterScopedTrainerGVRs[ref.GVR] {
+			slog.Warn("Refusing to reap a Trainer install manifest entry with an unexpected cluster-scoped resource type",
 				"resource", ref.String())
 			continue
 		}

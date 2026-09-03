@@ -296,6 +296,8 @@ func TestTrustworthyTrainerResourceRefs(t *testing.T) {
 			GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: "a"}, false},
 		{"namespace outside trainerNamespace is rejected", trainerResourceRef{
 			GVR: trainerDeploymentGVR, Namespace: "other", Name: "a", UID: testNamespaceUID}, false},
+		{"cluster-scoped kind outside the allowlist is rejected", trainerResourceRef{
+			GVR: trainerServiceGVR, Name: "a", UID: testNamespaceUID}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -353,5 +355,29 @@ func TestReapOrphanedTrainerInstall_RejectsEntryOutsideNamespace(t *testing.T) {
 	if _, err := dynamicClient.Resource(trainerDeploymentGVR).Namespace(otherNamespace).
 		Get(context.Background(), "someone-elses-deployment", metav1.GetOptions{}); err != nil {
 		t.Errorf("expected the out-of-namespace resource to survive: %v", err)
+	}
+}
+
+// TestReapOrphanedTrainerInstall_RejectsUntrustedClusterScopedKind checks
+// that a manifest entry naming a cluster-scoped kind outside
+// trustedClusterScopedTrainerGVRs is left alone instead of deleted. The
+// Trainer overlay never produces such a kind at cluster scope, so an entry
+// like this can only be a tampered or corrupted manifest.
+func TestReapOrphanedTrainerInstall_RejectsUntrustedClusterScopedKind(t *testing.T) {
+	client := fake.NewClientset()
+	victim := newTestObject("v1", "Service", "", "someone-elses-service")
+	victim.SetUID(testNamespaceUID)
+	dynamicClient := newTrainerFakeClient(victim)
+
+	persistTrainerInstallManifest(context.Background(), client, []trainerResourceRef{
+		{GVR: trainerServiceGVR, Name: "someone-elses-service", UID: testNamespaceUID},
+	})
+	backdateTrainerInstallManifest(t, client)
+
+	reapOrphanedTrainerInstall(context.Background(), client, dynamicClient, false)
+
+	if _, err := dynamicClient.Resource(trainerServiceGVR).
+		Get(context.Background(), "someone-elses-service", metav1.GetOptions{}); err != nil {
+		t.Errorf("expected the untrusted cluster-scoped resource to survive: %v", err)
 	}
 }
