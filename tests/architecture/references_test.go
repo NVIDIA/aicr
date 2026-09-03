@@ -246,3 +246,70 @@ func (f fixtureImporter) Import(path string) (*types.Package, error) {
 	}
 	return importer.Default().Import(path)
 }
+
+func TestForeignMethodRefs(t *testing.T) {
+	t.Parallel()
+
+	loaded := loadForAnalysis(t, "github.com/NVIDIA/aicr/pkg/server")
+	refs := foreignMethodRefs(loaded["github.com/NVIDIA/aicr/pkg/server"], "github.com/NVIDIA/aicr/")
+
+	if len(refs) == 0 {
+		t.Fatal("no foreign-type method calls found in pkg/server; the pass is not working")
+	}
+	for ref := range refs {
+		if ref.Class != classBehavioral {
+			t.Errorf("%s.%s classified %q, want behavioral", ref.Package, ref.Symbol, ref.Class)
+		}
+		if !strings.Contains(ref.Symbol, ".") {
+			t.Errorf("symbol %q is not in Type.Method form", ref.Symbol)
+		}
+	}
+}
+
+// foreignMethodRefs records method calls on types owned by a package under
+// modulePrefix, in Type.Method form. A method value or expression is always
+// behavioral: it runs code in the owning package.
+func foreignMethodRefs(lp loadedPackage, modulePrefix string) map[reference]bool {
+	refs := make(map[reference]bool)
+	for _, sel := range lp.Info.Selections {
+		if sel.Kind() != types.MethodVal && sel.Kind() != types.MethodExpr {
+			continue
+		}
+		obj := sel.Obj()
+		if obj == nil || obj.Pkg() == nil {
+			continue
+		}
+		owner := obj.Pkg().Path()
+		if !strings.HasPrefix(owner, modulePrefix) || owner == lp.Path {
+			continue
+		}
+		recv := receiverTypeName(sel.Recv())
+		if recv == "" {
+			continue
+		}
+		refs[reference{
+			Package: strings.TrimPrefix(owner, modulePrefix),
+			Symbol:  recv + "." + obj.Name(),
+			Class:   classBehavioral,
+		}] = true
+	}
+	return refs
+}
+
+// receiverTypeName reduces a receiver type to its bare named-type name,
+// unwrapping pointers and generic instantiations so that *recipe.Recipe and
+// recipe.Recipe produce the same policy key.
+func receiverTypeName(t types.Type) string {
+	for {
+		switch typ := t.(type) {
+		case *types.Pointer:
+			t = typ.Elem()
+		case *types.Named:
+			return typ.Obj().Name()
+		case *types.Alias:
+			t = types.Unalias(typ)
+		default:
+			return ""
+		}
+	}
+}
