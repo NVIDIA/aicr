@@ -247,6 +247,10 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 	},
 	variantNET: {
 		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200},
+		// OKE GB200 NVL72: IB east-west (rdma0-3) via the
+		// rdmaSharedDevicePlugin's nvidia.com/mlnxnics shared HCAs —
+		// see testdata/gb200/oke/runtime-net.yaml.
+		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
 	},
 	variantNVLS: {
 		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200},
@@ -393,11 +397,14 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 
 	// Preflight cluster-side prerequisites before spending TrainJob time.
-	// On GB200/EKS the NET variant needs NVreg_GrdmaPciTopoCheckOverride=1
-	// on the NVIDIA driver; without it, EFA can't attach dma-buf to GPU HBM
-	// and NCCL silently falls back to Socket. Preflights key off the
-	// benchmark target: opting into a profile opts into that profile's
-	// environment contract, preflights included.
+	// On GB200/EKS and GB200/OKE the NET variant needs
+	// NVreg_GrdmaPciTopoCheckOverride=1 on the NVIDIA driver; without it, the
+	// PCIe-attached NIC (EFA on EKS, ConnectX IB on OKE) can't attach dma-buf
+	// to GPU HBM and NCCL silently falls back to Socket. Preflights key off
+	// the benchmark target: opting into a profile opts into that profile's
+	// environment contract, preflights included. (OKE takes the default
+	// fabric env here — AICR_NCCL_FABRIC's roce override is an EKS-only
+	// template concern.)
 	if customRuntime == "" && fabric == fabricEFA && gb200NetPreflightApplies(variant, target.accelerator, target.service) {
 		if pfErr := preflightGB200NetNVregFlag(ctx, gpuConfig.Nodes); pfErr != nil {
 			return "", false, pfErr

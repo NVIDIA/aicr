@@ -39,9 +39,28 @@ spec:
       value: ">= 1.34"
 
   componentRefs:
-    # GB200-specific GPU Operator overrides (inherits valuesFile from oke-training)
+    # GB200-specific GPU Operator overrides (inherits valuesFile from oke-training).
+    # kernel-module-params sets NVreg_GrdmaPciTopoCheckOverride=1, required
+    # for dma-buf attach over the IB fabric (GPUDirect RDMA without
+    # nvidia-peermem, whose chroot modprobe fails to build against the -64k
+    # Grace kernel).
+    #
+    # driver.kernelModuleConfig is consumed ONLY when a GPU Operator driver
+    # DaemonSet runs, i.e. under gpuStack=operator-managed (#2355); under the
+    # default oci-managed profile (driver.enabled: false from values-oke.yaml,
+    # driver ships in the node image) this value is rendered but inert, and
+    # the image or node bootstrap must set the module parameter instead. It
+    # cannot live in the profile's operator-managed fragment: fragments are
+    # family-wide (recipes/overlays/oke-ol.yaml), and only this leaf ships the
+    # nvidia-kernel-module-params ConfigMap — a family-wide reference would
+    # dangle on every other OKE recipe. The NCCL -net preflight
+    # (validators/performance/nccl_preflight_nvreg.go) fails closed on either
+    # profile when the loaded driver is missing the flag, so an oci-managed
+    # image driver without it is caught before NCCL degrades to Socket.
     - name: gpu-operator
       type: Helm
+      preManifestFiles:
+        - components/gpu-operator/manifests/kernel-module-params.yaml
       dependencyRefs:
         - nfd
         - cert-manager
@@ -49,6 +68,9 @@ spec:
       overrides:
         gdrcopy:
           enabled: true
+        driver:
+          kernelModuleConfig:
+            name: nvidia-kernel-module-params
 
     - name: nfd
       type: Helm
@@ -56,13 +78,33 @@ spec:
         topologyUpdater:
           enable: true
 
+    # InfiniBand east-west fabric (NVL72 rdma0-3). rdmaSharedDevicePlugin
+    # advertises the shared HCAs as nvidia.com/mlnxnics; no SR-IOV/nv-ipam
+    # (that is the L40S RoCE path) and no ofedDriver (OCI nodes carry host
+    # MOFED). NicClusterPolicy is manifest-supplied (chart deployCR off).
+    # Present in every gpuStack value; incompatible with Oracle's opt-in
+    # NvidiaNetworkOperator add-on.
+    - name: network-operator
+      type: Helm
+      valuesFile: components/network-operator/values-oke-gb200.yaml
+      manifestFiles:
+        - components/network-operator/manifests/nic-cluster-policy-oke-gb200.yaml
+      dependencyRefs:
+        - nfd
+        - cert-manager
+
   validation:
     performance:
-      # NVLS runtime support is OKE-specific. NET/RDMA is intentionally left
-      # out until OCI-specific pod RDMA exposure is verified on the testbed.
+      # Both transport variants: NVLS (MNNVL across the NVL72 IMEX domain)
+      # and NET (the IB east-west fabric this leaf's NicClusterPolicy
+      # exposes — validated on a BM.GPU.GB200.4 NVL72 rack). Constraints
+      # match gb200-eks-training.
       checks:
+        - nccl-all-reduce-bw-net
         - nccl-all-reduce-bw-nvls
       constraints:
+        - name: nccl-all-reduce-bw-net
+          value: ">= 40"
         - name: nccl-all-reduce-bw-nvls
           value: ">= 500"
     conformance:

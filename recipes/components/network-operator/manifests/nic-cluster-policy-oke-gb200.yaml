@@ -1,0 +1,62 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NicClusterPolicy for GB200 OKE (OCI) — rdmaSharedDevicePlugin over InfiniBand.
+#
+# Mirrors the AOR OCI GB200 config validated on gb200-ew. No ofedDriver (host
+# MOFED), no SR-IOV: the NVL72 east-west fabric is IB on the rdma0-3 netdevs
+# (oci_hpc.rdma_device_names_mode=2 kernel cmdline names them deterministically).
+#
+# The IB devices are advertised as nvidia.com/mlnxnics — the same resource
+# name the L40S SR-IOV path uses, so workloads request RDMA uniformly
+# across OKE fabrics.
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  rdmaSharedDevicePlugin:
+    image: k8s-rdma-shared-dev-plugin
+    repository: nvcr.io/nvidia/mellanox
+    version: network-operator-v26.4.1
+    config: |
+      {
+        "configList": [
+          {
+            "resourcePrefix": "nvidia.com",
+            "resourceName": "mlnxnics",
+            "rdmaHcaMax": 63,
+            "selectors": {
+              "linkTypes": ["infiniband"],
+              "ifNames": ["rdma0", "rdma1", "rdma2", "rdma3"]
+            }
+          }
+        ]
+      }
+  deploymentTolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+  tolerations:
+    # RDMA DaemonSets must land on tainted GPU nodes.
+    - key: nvidia.com/gpu
+      operator: Exists
+    - key: CriticalAddonsOnly
+      operator: Exists
