@@ -13,10 +13,12 @@ follows acceptance as a separate change; see
 ## Decision Summary
 
 AICR admits `nvcre` as an optional, opt-in Helm component. The first
-implementation is **registry-only**: the entry exists, but no stock recipe
-references it, and custom or external recipes must declare a `ComponentRef`
-explicitly. Recipes that do not declare it — including every stock recipe —
-are unchanged and acquire none of its CRDs, RBAC, or runtime cost.
+implementation is **registry-only**: the entry will exist, but no stock recipe
+will reference it, and custom or external recipes must declare a
+`ComponentRef` explicitly. Recipes that do not declare it — including every
+stock recipe — are unchanged and acquire none of its CRDs, RBAC, or runtime
+cost. No registry entry is added by this ADR; it is proposed here and
+implemented separately.
 
 This ADR does not authorize stock-recipe adoption. That is a separate decision,
 recorded as an amendment.
@@ -36,12 +38,19 @@ The chart is `cluster-readiness-engine` at
 The named first consumer is the internal DGX Cloud recipes repository, which
 already runs NVCRE against AICR bundles through its own external overlay. A
 proof of concept there produced one finding this ADR carries forward: the tuned
-per-fabric configuration lives only in the Certification workload catalog, and
-a generic `WorkloadRun` path measured ~3 GB/s over TCP on the same AWS H100
-nodes where Certification measured 489 GB/s over EFA. NVCRE reported a
-well-formed number for a run silently on the wrong transport, so any future
-AICR check built on its output must assert the expected network plugin loaded,
-not merely that a number was produced.
+per-fabric configuration — image, `mpirun` path, fabric environment, and
+per-platform runtime patches — lives only in the Certification workload
+catalog. A generic `WorkloadRun` resolving through its own override set
+measured ~3 GB/s over TCP on the same AWS H100 nodes where Certification
+measured 489 GB/s over EFA; on AWS H100 that path did not use EFA at all.
+
+`Certification` is therefore the integration surface. `WorkloadRun` is a
+lower-level API for advanced cases and is not a certification path, so AICR
+drives `Certification` and reads its report.
+
+NVCRE reported a well-formed number for a run silently on the wrong transport,
+so any AICR check built on its output must assert the expected network plugin
+loaded, not merely that a number was produced.
 
 ## Decision
 
@@ -116,8 +125,12 @@ cluster-scoped `nccl-bandwidth` `LogProfile` is present — without it the
 BandwidthMeasurement controller has no parse rules and `status.results[]` stays
 empty.
 
-Readiness uses `readyReplicas > 0`, which fails closed on a Deployment that has
-never had a ready pod where `unavailableReplicas == 0` would pass vacuously.
+Readiness asserts both `readyReplicas > 0` and `readyReplicas == replicas`, so
+a partially rolled-out Deployment does not pass. The first conjunct is what
+fails closed: `readyReplicas` is `omitempty` and therefore absent on a
+Deployment that has never had a ready pod, where `unavailableReplicas == 0`
+would pass vacuously.
+
 The check is read-only and creates no benchmark workload.
 
 ## Adoption Gates
@@ -137,9 +150,11 @@ ADR-019 analogue — k8s-aibom observes workloads, while NVCRE creates them.
 - Source tag, chart, and image are one coherent release at the same version.
 - The image is immutable, multi-architecture, and selectable by digest through
   public values without patching the chart.
-- Signature, SBOM, and build provenance cover both the image and the chart,
-  bound to the image digest and source commit, and attributable to the upstream
-  release workflow.
+- Signature, SBOM, and build provenance cover both the image and the chart.
+  Image attestations bind the qualified image digest; chart attestations bind
+  the qualified chart digest — not a tag, and not the image digest. Each names
+  the source release it was built from and verifies against the upstream
+  release workflow's signer identity.
 - No floating tag, branch, `latest`, or locally built artifact appears in the
   component definition.
 
