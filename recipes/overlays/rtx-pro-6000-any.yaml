@@ -16,9 +16,9 @@
 #
 # This overlay is NOT referenced by any recipe via spec.base or spec.mixins.
 # The resolver picks it up for every RTX Pro 6000 query (any service, any
-# intent). It contributes the RTX Pro 6000-wide deployment-phase floor —
-# the 4 standard checks plus the gpu-operator version pin — without
-# duplicating it in every leaf.
+# intent). It contributes RTX Pro 6000-wide deployment validation — the four
+# standard checks, the gpu-operator version pin, and the product-level host
+# driver floor — without duplicating the shared checks in every leaf.
 #
 # Per-field union merge (see pkg/recipe/metadata.go) means concrete leaves
 # that declare their own `deployment:` block add to or override this floor
@@ -51,3 +51,8 @@ spec:
         # baseline as GB200. Tighten when an empirical floor is established.
         - name: Deployment.gpu-operator.version
           value: ">= v25.10.0"
+        # Product-level fallback for supported partial-criteria queries.
+        # Concrete service x intent leaves repeat this value so later overlay
+        # merges cannot weaken it for fully qualified recipes.
+        - name: Deployment.gpu-driver.version
+          value: ">= 575.57.08"
