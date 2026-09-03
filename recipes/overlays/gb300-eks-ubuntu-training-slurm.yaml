@@ -75,9 +75,9 @@ spec:
   #      /dev/nvidia* into the container. Without this `gres.conf`'s
   #      AutoDetect=nvidia finds nothing. `requests` is omitted: Kubernetes
   #      auto-mirrors requests=limits for extended resources.
-  # The count is per Kubernetes GPU node / slurmd pod (p6e-gb300r.36xlarge
-  # exposes nvidia.com/gpu.count=4, the same per-node count as p6e-gb200), not
-  # cluster-total or rack-total capacity. The GRES type string must match what
+  # The count is per Kubernetes GPU node / slurmd pod (the p6e-gb300r.36xlarge
+  # instance exposes nvidia.com/gpu.count=4), not cluster-total or rack-total
+  # capacity. The GRES type string must match what
   # slurmd's AutoDetect=nvidia derives from NVML on the node; a mismatch makes
   # slurmd refuse to start.
   # Accelerated nodeSelector/tolerations on slurmd are injected via the

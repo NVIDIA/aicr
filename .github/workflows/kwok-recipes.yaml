@@ -232,11 +232,22 @@ jobs:
             # catalog. A changed system profile affects every accelerator for
             # its provider; a changed GPU profile affects only its declared
             # (provider, accelerator) pair. Deleted profiles cannot be selected
-            # from the head tree and are therefore ignored here.
+            # from the head tree and are therefore not promotable, but they are
+            # announced below rather than skipped silently.
             declare -A changed_system_profile_services=()
             declare -A changed_gpu_profile_pairs=()
             while IFS= read -r changed_file; do
-              if [[ ! "$changed_file" =~ ^kwok/profiles/.+\.yaml$ ]] || [[ ! -f "$changed_file" ]]; then
+              if [[ ! "$changed_file" =~ ^kwok/profiles/.+\.yaml$ ]]; then
+                continue
+              fi
+
+              # A deleted profile has nothing to read, and the overlays it
+              # backed now fall out of the matrix through the NO_MATCH drop
+              # path instead of being promoted. That is a silent coverage
+              # loss, so make it loud — a removal should be a deliberate act,
+              # not something a reviewer discovers from a shrinking matrix.
+              if [[ ! -f "$changed_file" ]]; then
+                echo "::warning file=${changed_file}::KWOK profile removed — every overlay it backed drops out of the matrix. Confirm the coverage loss is intended."
                 continue
               fi
 

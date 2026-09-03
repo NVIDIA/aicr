@@ -124,7 +124,16 @@ Currently on disk:
 | eks | gb200 | `eks/system-m7i.yaml` | `eks/p6-gb200.yaml` |
 | eks | gb300 | `eks/system-m7i.yaml` | `eks/p6e-gb300.yaml` |
 
-**Cluster defaults:** 2 system nodes, 4 GPU nodes, Kubernetes v1.33.5, region `us-east-1`. The cluster's GPU total is `4 × spec.gpu.count` of the selected GPU profile, so it varies by accelerator — read the count from the profile rather than assuming a fixed total.
+**Cluster defaults:** 2 system nodes, 4 GPU nodes, region `us-east-1`. The cluster's GPU total is `4 × spec.gpu.count` of the selected GPU profile, so it varies by accelerator — read the count from the profile rather than assuming a fixed total.
+
+**Two Kubernetes versions are in play; recipe constraints are evaluated against the control plane, not the simulated nodes:**
+
+| Version | Set by | Is |
+|---------|--------|----|
+| `kindest/node:v1.36.1` | `kind_node_image` in `.settings.yaml` | the real Kind **control plane** — what `discoveryClient.ServerVersion()` reports, and therefore what `K8s.server.version` constraints are checked against |
+| `v1.33.5` | `DEFAULT_K8S_VERSION` in `kwok/scripts/apply-nodes.sh` | the **cosmetic** `kubeletVersion` stamped onto simulated nodes via `node.yaml.tmpl` |
+
+So a recipe requiring `K8s.server.version >= 1.34` is satisfied by the Kind image; the simulated `v1.33.5` is not the cluster's Kubernetes version and does not gate anything. (The two are several minors apart, outside the supported kubelet/API-server skew — harmless because no kubelet runs.)
 
 ## Makefile Targets
 
