@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -35,7 +36,17 @@ import (
 func creDynamicListKinds() map[schema.GroupVersionResource]string {
 	return map[schema.GroupVersionResource]string{
 		certificationGVR: "CertificationList",
-		workloadRunGVR:   "WorkloadRunList",
+	}
+}
+
+func twoNodeGPUConfig() *gpuConfiguration {
+	return &gpuConfiguration{
+		WorkerCount:     2,
+		GPUCountPerNode: 8,
+		Nodes: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "gpu-b"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "gpu-a"}},
+		},
 	}
 }
 
@@ -58,8 +69,7 @@ func TestUniqueCREResourceName(t *testing.T) {
 }
 
 func TestWaitForCRETerminalSeedsWatchResourceVersion(t *testing.T) {
-	cfg := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}
-	obj := buildCRENCCLCertification("ns", "aicr-cre-nccl-watch", cfg, nil)
+	obj := buildCRENCCLCertification("ns", "aicr-cre-nccl-watch", twoNodeGPUConfig())
 	obj.SetResourceVersion("10")
 
 	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds(), obj)
@@ -99,8 +109,7 @@ func TestWaitForCRETerminalSeedsWatchResourceVersion(t *testing.T) {
 }
 
 func TestWaitForCRETerminalReturnsInitialGetWhenAlreadyTerminal(t *testing.T) {
-	cfg := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}
-	obj := buildCRENCCLCertification("ns", "aicr-cre-nccl-done", cfg, nil)
+	obj := buildCRENCCLCertification("ns", "aicr-cre-nccl-done", twoNodeGPUConfig())
 	obj.Object["status"] = map[string]any{
 		"conditions": []any{
 			map[string]any{"type": "Failed", "status": "True"},
@@ -122,8 +131,7 @@ func TestWaitForCRETerminalReturnsInitialGetWhenAlreadyTerminal(t *testing.T) {
 }
 
 func TestDeleteCREResourceWaitsUntilGone(t *testing.T) {
-	cfg := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}
-	obj := buildCRENCCLCertification("ns", "aicr-cre-nccl-gone", cfg, nil)
+	obj := buildCRENCCLCertification("ns", "aicr-cre-nccl-gone", twoNodeGPUConfig())
 	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds(), obj)
 
 	if err := deleteCRECertification(context.Background(), client, "ns", obj.GetName()); err != nil {
@@ -136,8 +144,7 @@ func TestDeleteCREResourceWaitsUntilGone(t *testing.T) {
 }
 
 func TestDeleteCREResourceTimesOutWhenFinalizerHolds(t *testing.T) {
-	cfg := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}
-	obj := buildCRENCCLCertification("ns", "aicr-cre-nccl-stuck", cfg, nil)
+	obj := buildCRENCCLCertification("ns", "aicr-cre-nccl-stuck", twoNodeGPUConfig())
 	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds(), obj)
 
 	client.PrependReactor("delete", "certifications", func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -174,7 +181,7 @@ func TestDeleteCREResourceIgnoresAlreadyGone(t *testing.T) {
 }
 
 func TestBuildCRENCCLCertificationUsesCallerName(t *testing.T) {
-	obj := buildCRENCCLCertification("ns", "aicr-cre-nccl-abcd1234", &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
+	obj := buildCRENCCLCertification("ns", "aicr-cre-nccl-abcd1234", twoNodeGPUConfig())
 	if obj.GetName() != "aicr-cre-nccl-abcd1234" {
 		t.Fatalf("name = %q", obj.GetName())
 	}
@@ -188,5 +195,20 @@ func TestWaitForCREResourceGoneNotFound(t *testing.T) {
 	res := client.Resource(certificationGVR).Namespace("ns")
 	if err := waitForCREResourceGone(context.Background(), res, "Certification", "gone"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCapCRECertificationNodes(t *testing.T) {
+	nodes := []corev1.Node{
+		{ObjectMeta: metav1.ObjectMeta{Name: "z"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "a"}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "m"}},
+	}
+	got := capCRECertificationNodes(nodes)
+	if len(got) != creMaxNodesPerCertification {
+		t.Fatalf("len = %d, want %d", len(got), creMaxNodesPerCertification)
+	}
+	if got[0].Name != "a" || got[1].Name != "m" {
+		t.Fatalf("capped names = %q %q, want a m", got[0].Name, got[1].Name)
 	}
 }

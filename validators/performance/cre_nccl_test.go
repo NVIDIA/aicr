@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -84,8 +85,9 @@ func TestMaxBusBandwidthGBps(t *testing.T) {
 }
 
 func TestBuildCRENCCLCertification(t *testing.T) {
-	cfg := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8, Namespace: "ns"}
-	obj := buildCRENCCLCertification("ns", creNCCLRunName, cfg, map[string]string{"foo": "bar"})
+	cfg := twoNodeGPUConfig()
+	cfg.Nodes = append(cfg.Nodes, corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "gpu-z"}})
+	obj := buildCRENCCLCertification("ns", creNCCLRunName, cfg)
 	if obj.GetAPIVersion() != "nvcre.nvidia.com/v1alpha1" {
 		t.Errorf("apiVersion = %q", obj.GetAPIVersion())
 	}
@@ -98,16 +100,25 @@ func TestBuildCRENCCLCertification(t *testing.T) {
 	}
 	categories := spec["categories"].([]any)
 	category := categories[0].(map[string]any)
-	if category["domain"] != "communication" || category["variant"] != "nccl-all-reduce" {
+	if category["domain"] != creNCCLDomain || category["variant"] != creNCCLVariant {
 		t.Errorf("category = %#v", category)
 	}
 	target := spec["target"].(map[string]any)
-	selector := target["nodeSelector"].(map[string]any)
-	if selector["foo"] != "bar" {
-		t.Errorf("nodeSelector = %#v", selector)
+	names := target["nodeNames"].([]any)
+	if len(names) != 2 || names[0] != "gpu-a" || names[1] != "gpu-b" {
+		t.Errorf("nodeNames = %#v, want [gpu-a gpu-b]", names)
+	}
+	if _, ok := target["nodeSelector"]; ok {
+		t.Error("nodeSelector must not be set; it would expand past the node cap")
 	}
 	if spec["gpusPerNode"] != int64(8) {
 		t.Errorf("gpusPerNode = %#v", spec["gpusPerNode"])
+	}
+	if spec["nodesPerJob"] != int64(2) {
+		t.Errorf("nodesPerJob = %#v, want 2", spec["nodesPerJob"])
+	}
+	if spec["timeoutPerJob"] != defaults.CRECertificationTimeout.String() {
+		t.Errorf("timeoutPerJob = %#v, want %s", spec["timeoutPerJob"], defaults.CRECertificationTimeout)
 	}
 }
 
@@ -125,7 +136,7 @@ func TestBuildCRENCCLCertificationCopiesSharedGPUTaints(t *testing.T) {
 			{ObjectMeta: metav1.ObjectMeta{Name: "b"}, Spec: corev1.NodeSpec{Taints: []corev1.Taint{taint}}},
 		},
 	}
-	obj := buildCRENCCLCertification("ns", creNCCLRunName, cfg, nil)
+	obj := buildCRENCCLCertification("ns", creNCCLRunName, cfg)
 	spec := obj.Object["spec"].(map[string]any)
 	target := spec["target"].(map[string]any)
 	sels, ok := target["taintSelectors"].([]any)
@@ -139,7 +150,7 @@ func TestBuildCRENCCLCertificationCopiesSharedGPUTaints(t *testing.T) {
 }
 
 func TestUnstructuredConditionTrue(t *testing.T) {
-	obj := buildCRENCCLCertification("ns", creNCCLRunName, &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
+	obj := buildCRENCCLCertification("ns", creNCCLRunName, twoNodeGPUConfig())
 	obj.Object["status"] = map[string]any{
 		"conditions": []any{
 			map[string]any{"type": "Succeeded", "status": "True"},
@@ -154,7 +165,7 @@ func TestUnstructuredConditionTrue(t *testing.T) {
 }
 
 func TestCertificationWorkflowName(t *testing.T) {
-	obj := buildCRENCCLCertification("ns", creNCCLRunName, &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
+	obj := buildCRENCCLCertification("ns", creNCCLRunName, twoNodeGPUConfig())
 	obj.Object["status"] = map[string]any{
 		"categoryStatuses": []any{
 			map[string]any{
@@ -166,7 +177,7 @@ func TestCertificationWorkflowName(t *testing.T) {
 			},
 		},
 	}
-	got, err := certificationWorkflowName(obj)
+	got, err := certificationWorkflowName(obj, creNCCLDomain, creNCCLVariant)
 	if err != nil {
 		t.Fatalf("certificationWorkflowName() error = %v", err)
 	}
@@ -206,14 +217,14 @@ func TestYoungestLivePodSince(t *testing.T) {
 
 func TestMeasurementBelongsToRun(t *testing.T) {
 	createdAt := metav1.NewTime(time.Unix(100, 0))
-	obj := buildCRENCCLCertification("ns", creNCCLRunName, &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8}, nil)
+	obj := buildCRENCCLCertification("ns", creNCCLRunName, twoNodeGPUConfig())
 	obj.SetCreationTimestamp(metav1.NewTime(time.Unix(101, 0)))
 	obj.SetOwnerReferences([]metav1.OwnerReference{{Kind: "Workflow", Name: creNCCLRunName}})
 	if !measurementBelongsToRun(obj, creNCCLRunName, createdAt) {
 		t.Fatal("expected matching measurement")
 	}
 	if measurementBelongsToRun(obj, "aicr-cre-nemo", createdAt) {
-		t.Fatal("measurement from another WorkloadRun must not match")
+		t.Fatal("measurement from another Certification must not match")
 	}
 	obj.SetCreationTimestamp(metav1.NewTime(time.Unix(99, 0)))
 	if measurementBelongsToRun(obj, creNCCLRunName, createdAt) {

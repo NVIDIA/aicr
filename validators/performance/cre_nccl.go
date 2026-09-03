@@ -57,7 +57,7 @@ func validateCRENcclAllReduceBw(ctx *validators.Context, constraint recipe.Const
 	if err != nil {
 		return "", false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to determine GPU configuration", err)
 	}
-	if gpuConfig.WorkerCount < 2 {
+	if len(gpuConfig.Nodes) < 2 {
 		return skipMsgNCCLFewNodes, true, nil
 	}
 
@@ -70,7 +70,7 @@ func validateCRENcclAllReduceBw(ctx *validators.Context, constraint recipe.Const
 	if err != nil {
 		return "", false, err
 	}
-	obj := buildCRENCCLCertification(ctx.Namespace, objName, gpuConfig, ctx.NodeSelector)
+	obj := buildCRENCCLCertification(ctx.Namespace, objName, gpuConfig)
 
 	if deleteErr := deleteCRECertification(ctx.Ctx, dyn, ctx.Namespace, objName); deleteErr != nil {
 		return "", false, deleteErr
@@ -94,7 +94,7 @@ func validateCRENcclAllReduceBw(ctx *validators.Context, constraint recipe.Const
 		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal, "CRE Certification failed")
 	}
 
-	workflowName, err := certificationWorkflowName(run)
+	workflowName, err := certificationWorkflowName(run, creNCCLDomain, creNCCLVariant)
 	if err != nil {
 		return "", false, err
 	}

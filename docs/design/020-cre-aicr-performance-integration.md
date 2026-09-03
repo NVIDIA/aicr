@@ -104,7 +104,7 @@ This epic makes CRE the executor for AICR performance validation, starting with 
 
 ## Decisions already made
 
-1. **NCCL on public CRE uses `Certification`; goodput still uses `WorkloadRun`.** For EKS H100 NCCL, the OSS catalog already owns the EFA nccl-tests image and MPI command, so AICR creates `nvcre.nvidia.com/v1alpha1` `Certification` with `communication/nccl-all-reduce` and remains the judge. `WorkloadRun` stays the API for checks that must supply image, MPI, and fabric overrides (training/goodput, and any platform CRE does not already cover).
+1. **Both NCCL and training/goodput use `Certification`.** For EKS H100, AICR creates `nvcre.nvidia.com/v1alpha1` `Certification` with `communication/nccl-all-reduce` or `training/nemotron5-8b`, waits for a terminal condition, always deletes the CR, and remains the judge. `WorkloadRun` is CRE's ad-hoc API and is not used by these checks. Each Certification is capped at two named nodes (`nodesPerJob` and `target.nodeNames`) with `timeoutPerJob` equal to AICR's wait budget so a timed-out check does not leave work running.
 2. **AICR remains the judge.** Thresholds stay in the recipe's `performance.constraints`. CRE executes and reports; AICR evaluates.
 3. **The transport assertion stays in AICR.** CRE's log-parsing profiles extract values but cannot assert presence or reject a value. AICR's existing assertion, roughly 200 lines, is retained.
 4. **Each check gets its own constraint name.** The two checks will not report the same number, and sharing a name would permanently miscalibrate one of them. This is the least reversible decision here.
@@ -147,7 +147,7 @@ Install the published bundle on a cluster created by hand and confirm the contro
 
 Write the validator that creates a `nvcre.nvidia.com/v1alpha1` `Certification` with `communication/nccl-all-reduce`, watches it to a Succeeded or Failed condition, reads max `busBW` from the category Workflow's `BandwidthMeasurement` results, evaluates the result against a new recipe constraint name, and asserts transport from the launcher log inside AICR.
 
-The Certification owns the OSS catalog's EFA nccl-tests image and MPI command. AICR still supplies node targeting (selector, names, shared taints) and remains the judge. Training/goodput stays on `WorkloadRun` (task 4), which carries image, script, and goodput log-profile overrides.
+The Certification owns the OSS catalog's EFA nccl-tests image and MPI command. AICR still supplies a capped node list (`target.nodeNames`) and remains the judge. Training/goodput uses `Certification` `training/nemotron5-8b` (task 4).
 
 Most of this is patterned on existing files. The check reuses AICR's threshold parsing, log fetch, evidence emission, and validator Job scaffolding, so the genuinely new code is creating a resource, watching it, and reading its status. No RBAC change is needed, because AICR deliberately binds each run's validator service account to cluster-admin precisely so validators can reach CRDs that do not exist at compile time.
 
@@ -157,11 +157,11 @@ The check is written so overlays can opt in one combination at a time (Group B).
 
 #### Task 4 — Implement the AICR training and goodput check (opt in GPU types gradually)
 
-Write a second validator that drives a `WorkloadRun` for a multi-node training workload and reads `GoodputMeasurement` (TFLOPS per GPU, average step time, interruption count, lost work time, goodput ratio).
+Write a second validator that drives a `Certification` (`training/nemotron5-8b`) and reads `GoodputMeasurement` (TFLOPS per GPU, average step time, interruption count, lost work time, goodput ratio). Create the CR, wait with a timeout, and delete it on success or failure.
 
 **The implementation must let GPU types opt in gradually.** One check, recipe- or constraint-gated per accelerator (and overlay), so H100 can ship before GB200, and no seven-ticket training migration is required. Overlays that are not opted in must not run the check.
 
-**Done when** the check is implemented with tests, at least one GPU type can be opted in without enabling the rest, and a opted-in combination reports goodput as a constraint result. **Depends on** task 3 for the shared `WorkloadRun` plumbing.
+**Done when** the check is implemented with tests, at least one GPU type can be opted in without enabling the rest, and a opted-in combination reports goodput as a constraint result. **Depends on** task 3 for the shared Certification plumbing.
 
 #### Task 5 — Proof-of-concept correlation on `eks × h100`
 

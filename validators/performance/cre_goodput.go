@@ -64,58 +64,56 @@ func checkCRETrainingGoodput(ctx *validators.Context) error {
 	if err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to determine GPU configuration", err)
 	}
-	if gpuConfig.WorkerCount < 2 {
+	if len(gpuConfig.Nodes) < 2 {
 		return aicrErrors.New(aicrErrors.ErrCodeNotFound,
 			fmt.Sprintf("recipe declares %s but the cluster has fewer than 2 GPU nodes", checkNameCRETrainingGoodput))
 	}
 	if ctx.DynamicClient == nil {
-		return aicrErrors.New(aicrErrors.ErrCodeInternal, "dynamic client is required to create a WorkloadRun")
+		return aicrErrors.New(aicrErrors.ErrCodeInternal, "dynamic client is required to create a Certification")
 	}
 
-	runName, err := uniqueCREResourceName(creTrainingRunName)
+	objName, err := uniqueCREResourceName(creTrainingRunName)
 	if err != nil {
 		return err
 	}
-	runObj := buildCRETrainingWorkloadRun(ctx.Namespace, runName, gpuConfig, ctx.NodeSelector)
-	if deleteErr := deleteCREWorkloadRun(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, runName); deleteErr != nil {
+	obj := buildCRETrainingCertification(ctx.Namespace, objName, gpuConfig)
+	if deleteErr := deleteCRECertification(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, objName); deleteErr != nil {
 		return deleteErr
 	}
-	keepWorkloadRun := false
 	defer func() {
-		if keepWorkloadRun {
-			slog.Warn("leaving CRE training WorkloadRun for diagnosis", "workloadRun", runName)
-			return
-		}
-		if deleteErr := deleteCREWorkloadRun(
+		if deleteErr := deleteCRECertification(
 			context.Background(),
 			ctx.DynamicClient,
 			ctx.Namespace,
-			runName,
+			objName,
 		); deleteErr != nil {
-			slog.Warn("failed to delete CRE training WorkloadRun", "error", deleteErr)
+			slog.Warn("failed to delete CRE training Certification", "error", deleteErr)
 		}
 	}()
 
-	if createErr := createUnstructured(ctx.Ctx, ctx.DynamicClient, workloadRunGVR, ctx.Namespace, runObj); createErr != nil {
+	if createErr := createUnstructured(ctx.Ctx, ctx.DynamicClient, certificationGVR, ctx.Namespace, obj); createErr != nil {
 		return createErr
 	}
-	run, err := waitForWorkloadRunTerminal(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, runName)
+	run, err := waitForCertificationTerminal(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, objName)
 	if err != nil {
 		return err
 	}
 	if unstructuredConditionTrue(run, "Failed") {
-		keepWorkloadRun = true
 		summary := creTerminalConditionSummary(run)
-		slog.Error("CRE training WorkloadRun failed", "workloadRun", runName, "summary", summary)
+		slog.Error("CRE training Certification failed", "certification", objName, "summary", summary)
 		return aicrErrors.New(aicrErrors.ErrCodeInternal,
-			fmt.Sprintf("CRE training WorkloadRun failed: %s", summary))
+			fmt.Sprintf("CRE training Certification failed: %s", summary))
 	}
 
+	workflowName, err := certificationWorkflowName(run, creTrainingDomain, creTrainingVariant)
+	if err != nil {
+		return err
+	}
 	status, err := getGoodputStatus(
 		ctx.Ctx,
 		ctx.DynamicClient,
 		ctx.Namespace,
-		runName,
+		workflowName,
 		run.GetCreationTimestamp(),
 	)
 	if err != nil {
@@ -147,178 +145,10 @@ func checkCRETrainingGoodput(ctx *validators.Context) error {
 	return nil
 }
 
-const (
-	creTrainingRunName           = "aicr-cre-nemo"
-	creLogProfileTrainingGoodput = "megatron-training"
-	creTrainingImage             = "nvcr.io/nvidia/pytorch:25.08-py3"
-	// creTrainingScript is CRE's training/nemotron5-8b exec workload (not the
-	// public 56B WorkloadRun sample). 56B requires minGPUs=32; this check's
-	// eks×h100 gate is 2 nodes × 8 GPUs. H100 catalog TP is 2.
-	creTrainingScript = `#!/bin/bash
-set -euo pipefail
-
-WORKSPACE_DIR=${WORKSPACE_DIR:-/mnt/workspace}
-MEGATRON_PATH=${MEGATRON_PATH:-${WORKSPACE_DIR}/megatron-lm}
-CHECKPOINT_DIR=${CHECKPOINT_DIR:-${WORKSPACE_DIR}/checkpoints}
-TENSORBOARD_DIR=${TENSORBOARD_DIR:-${WORKSPACE_DIR}/tensorboard}
-mkdir -p "${CHECKPOINT_DIR}" "${TENSORBOARD_DIR}"
-
-if ! ls "${MEGATRON_PATH}"/megatron/core/datasets/helpers_cpp*.so 1>/dev/null 2>&1; then
-  echo "Building Megatron helpers_cpp..."
-  cd "${MEGATRON_PATH}"
-  pip install -e . --no-deps --no-build-isolation 2>&1 | tail -5
-  cd "${WORKSPACE_DIR}"
-fi
-
-TOTAL_GPUS=$((PET_NNODES * PET_NPROC_PER_NODE))
-TP=${TENSOR_PARALLELISM:-2}
-PP=${PIPELINE_PARALLELISM:-1}
-MBS=${MICRO_BATCH_SIZE:-1}
-GBS=${GLOBAL_BATCH_SIZE:-$TOTAL_GPUS}
-
-echo "TOTAL_GPUS=${TOTAL_GPUS} GBS=${GBS} MBS=${MBS} TP=${TP} PP=${PP}"
-
-exec torchrun \
-  --nnodes "${PET_NNODES}" \
-  --nproc-per-node "${PET_NPROC_PER_NODE}" \
-  "${MEGATRON_PATH}/pretrain_gpt.py" \
-  --attention-backend flash \
-  --distributed-timeout-minutes 230 \
-  --use-mcore-models \
-  --no-mmap-bin-files \
-  --sequence-parallel \
-  --untie-embeddings-and-output-weights \
-  --disable-bias-linear \
-  --init-method-std 0.014 \
-  --position-embedding-type rope \
-  --rotary-base 1000000 \
-  --rotary-percent 1.0 \
-  --squared-relu \
-  --group-query-attention \
-  --kv-channels 128 \
-  --normalization RMSNorm \
-  --attention-dropout 0.0 \
-  --hidden-dropout 0.0 \
-  --exit-duration-in-mins 30 \
-  --train-iters 50 \
-  --lr-decay-iters 1830030 \
-  --lr 6e-4 \
-  --min-lr 6e-6 \
-  --weight-decay 0.1 \
-  --clip-grad 1.0 \
-  --lr-decay-style cosine \
-  --lr-warmup-iters 5 \
-  --eval-iters 1 \
-  --eval-interval 50 \
-  --log-interval 10 \
-  --tokenizer-type NullTokenizer \
-  --vocab-size 131072 \
-  --mock-data \
-  --num-workers 1 \
-  --no-create-attention-mask-in-dataloader \
-  --log-progress \
-  --timing-log-option minmax \
-  --log-params-norm \
-  --log-num-zeros-in-grad \
-  --log-throughput \
-  --bf16 \
-  --adam-beta1 0.9 \
-  --adam-beta2 0.95 \
-  --use-distributed-optimizer \
-  --overlap-grad-reduce \
-  --overlap-param-gather \
-  --manual-gc \
-  --log-straggler \
-  --disable-straggler-on-startup \
-  --straggler-minmax-count 16 \
-  --check-weight-hash-across-dp-replicas-interval 20000 \
-  --ckpt-fully-parallel-save \
-  --ckpt-fully-parallel-load \
-  --async-save \
-  --ckpt-assume-constant-structure \
-  --ckpt-format torch_dist \
-  --num-layers 32 \
-  --hidden-size 4096 \
-  --ffn-hidden-size 21504 \
-  --num-attention-heads 32 \
-  --seq-length 8192 \
-  --max-position-embeddings 8192 \
-  --num-query-groups 8 \
-  --tensor-model-parallel-size "${TP}" \
-  --pipeline-model-parallel-size "${PP}" \
-  --micro-batch-size "${MBS}" \
-  --global-batch-size "${GBS}" \
-  --save-interval "${SAVE_INTERVAL:-250}" \
-  --save-retain-interval "${SAVE_RETAIN_INTERVAL:-1000}" \
-  --tensorboard-dir "${TENSORBOARD_DIR}"
-`
-	creTrainingCloneScript = `set -euo pipefail
-if [ ! -d "/mnt/workspace/megatron-lm/.git" ]; then
-  git clone --depth 1 -b core_v0.15.2 \
-    https://github.com/NVIDIA/Megatron-LM.git /mnt/workspace/megatron-lm
-fi
-`
-	creWorkspaceVolume = "workspace"
-)
+const creTrainingRunName = "aicr-cre-nemo"
 
 var goodputMeasurementGVR = schema.GroupVersionResource{
 	Group: creAPIGroup, Version: versionV1alpha1, Resource: "goodputmeasurements",
-}
-
-func buildCRETrainingWorkloadRun(namespace, name string, gpuConfig *gpuConfiguration, nodeSelector map[string]string) *unstructured.Unstructured {
-	spec := map[string]any{
-		"image":       creTrainingImage,
-		"numNodes":    int64(gpuConfig.WorkerCount),
-		"gpusPerNode": int64(gpuConfig.GPUCountPerNode),
-		"framework": map[string]any{
-			"exec": map[string]any{
-				"command": []any{"/bin/bash", "/config/train.sh"},
-			},
-		},
-		"config": map[string]any{
-			"inline": map[string]any{"train.sh": creTrainingScript},
-		},
-		"initContainers": []any{
-			map[string]any{
-				keyName:   "megatron-clone",
-				"image":   creTrainingImage,
-				"command": []any{"/bin/bash", "-c"},
-				"args":    []any{creTrainingCloneScript},
-				"volumeMounts": []any{
-					map[string]any{keyName: creWorkspaceVolume, keyMountPath: "/mnt/workspace"},
-				},
-			},
-		},
-		"volumes": []any{
-			map[string]any{
-				keyName:    creWorkspaceVolume,
-				"emptyDir": map[string]any{"medium": "Memory"},
-			},
-		},
-		"volumeMounts": []any{
-			map[string]any{keyName: creWorkspaceVolume, keyMountPath: "/mnt/workspace"},
-		},
-		"env": []any{
-			map[string]any{keyName: "PYTHONPATH", keyValue: "/mnt/workspace/megatron-lm"},
-			map[string]any{keyName: "CUDA_DEVICE_MAX_CONNECTIONS", keyValue: "1"},
-			map[string]any{keyName: "TENSOR_PARALLELISM", keyValue: "2"},
-			map[string]any{keyName: "PYTORCH_CUDA_ALLOC_CONF", keyValue: "expandable_segments:True"},
-			map[string]any{keyName: "NVTE_FWD_LAYERNORM_SM_MARGIN", keyValue: "16"},
-			map[string]any{keyName: "NVTE_BWD_LAYERNORM_SM_MARGIN", keyValue: "16"},
-			map[string]any{keyName: "NVTE_FUSED_ATTN", keyValue: "0"},
-			map[string]any{keyName: "TORCHINDUCTOR_WORKER_START", keyValue: "fork"},
-			map[string]any{keyName: "TORCH_NCCL_AVOID_RECORD_STREAMS", keyValue: "1"},
-			map[string]any{keyName: "TORCH_NCCL_HIGH_PRIORITY", keyValue: "1"},
-			map[string]any{keyName: "ENABLE_CHECKPOINT", keyValue: "false"},
-			map[string]any{keyName: "TRAIN_ITERS", keyValue: "50"},
-		},
-		"goodputMeasurement": map[string]any{
-			"logProfileRef":  creLogProfileTrainingGoodput,
-			"sampleInterval": "10s",
-		},
-	}
-	addCRETarget(spec, gpuConfig, nodeSelector)
-	return newCREWorkloadRun(namespace, name, spec)
 }
 
 func creTerminalConditionSummary(obj *unstructured.Unstructured) string {
@@ -386,7 +216,13 @@ func parseGoodputRatio(status map[string]any) (float64, error) {
 	}
 }
 
-func getGoodputStatus(ctx context.Context, client dynamic.Interface, namespace, runName string, createdAt metav1.Time) (map[string]any, error) {
+func getGoodputStatus(
+	ctx context.Context,
+	client dynamic.Interface,
+	namespace, workflowName string,
+	createdAt metav1.Time,
+) (map[string]any, error) {
+
 	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
 	list, err := client.Resource(goodputMeasurementGVR).Namespace(namespace).List(listCtx, metav1.ListOptions{})
@@ -394,7 +230,7 @@ func getGoodputStatus(ctx context.Context, client dynamic.Interface, namespace, 
 		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list GoodputMeasurements", err)
 	}
 	for i := range list.Items {
-		if !measurementBelongsToRun(&list.Items[i], runName, createdAt) {
+		if !measurementBelongsToRun(&list.Items[i], workflowName, createdAt) {
 			continue
 		}
 		status, found, nestedErr := unstructured.NestedMap(list.Items[i].Object, "status")
@@ -405,5 +241,5 @@ func getGoodputStatus(ctx context.Context, client dynamic.Interface, namespace, 
 			return status, nil
 		}
 	}
-	return nil, aicrErrors.New(aicrErrors.ErrCodeNotFound, "no GoodputMeasurement status for CRE training WorkloadRun")
+	return nil, aicrErrors.New(aicrErrors.ErrCodeNotFound, "no GoodputMeasurement status for CRE training Certification")
 }
