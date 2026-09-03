@@ -154,6 +154,14 @@ func packageQualifiedRefs(lp loadedPackage, modulePrefix string) map[reference]b
 		if fn, ok := obj.(*types.Func); ok && fn.Signature() != nil && fn.Signature().Recv() != nil {
 			continue
 		}
+		// Struct fields are *types.Var objects whose Pkg() is the declaring
+		// package, so a field read or composite-literal key would otherwise be
+		// recorded as if it named a package-level symbol. It doesn't: reading a
+		// field is type-only use of a permitted type, and the type itself is
+		// what the policy already records.
+		if v, ok := obj.(*types.Var); ok && v.IsField() {
+			continue
+		}
 		refs[reference{
 			Package: strings.TrimPrefix(owner, modulePrefix),
 			Symbol:  ident.Name,
@@ -161,6 +169,37 @@ func packageQualifiedRefs(lp loadedPackage, modulePrefix string) map[reference]b
 		}] = true
 	}
 	return refs
+}
+
+// TestPackageQualifiedRefsSkipsStructFields pins that reading a struct field
+// through a permitted type does not fabricate a package-level symbol entry.
+// A struct field's types.Object is a *types.Var whose Pkg() is the declaring
+// package, so a naive Uses scan records the field identifier exactly like a
+// package-level one — it isn't: the field read is type-only use of a
+// permitted type, and the type itself is what the policy already records.
+func TestPackageQualifiedRefsSkipsStructFields(t *testing.T) {
+	t.Parallel()
+
+	const businessSrc = `package business
+
+type Recipe struct{ Name string }
+`
+	const consumerSrc = `package consumer
+import "fixture/business"
+func F(r *business.Recipe) string { return r.Name }
+`
+	lp := checkTwoPackages(t, businessSrc, consumerSrc)
+	refs := packageQualifiedRefs(lp, "fixture/")
+
+	wantType := reference{Package: "business", Symbol: "Recipe", Class: classType}
+	if !refs[wantType] {
+		t.Errorf("missing type reference %+v in %+v", wantType, refs)
+	}
+	for ref := range refs {
+		if ref.Symbol == "Name" {
+			t.Errorf("struct field leaked into package-level refs: %+v", ref)
+		}
+	}
 }
 
 // TestImportFormsResolveIdentically pins that an aliased import and a
