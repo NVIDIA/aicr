@@ -31,8 +31,8 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Installed by one stock recipe, `h100-gke-cos-inference`; every other stock recipe leaves it out. Decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
 | **kai-scheduler** | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. AICR pins `defaultQueue.createDefaultQueue: true`, so the chart creates the `default-parent-queue`/`default-queue` hierarchy on install. The `gang-scheduling` conformance check submits its synthetic test PodGroup to `default-queue` by name, so that queue is a hard dependency of validation, not an optional extra. Note the chart creates the queues only on first install and annotates them `helm.sh/resource-policy: keep` — a `helm upgrade` will not recreate them if they are deleted, so restore them manually (or reinstall the release) if that happens. Workloads are not restricted to this queue: Dynamo submits to its own `dynamo`/`dynamo-default` hierarchy, which its chart creates via post-install and post-upgrade hooks. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
-| **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. | [Grove](https://github.com/ai-dynamo/grove) |
-| **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a NATS-backed Kubernetes event plane for KV-cache events, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
+| **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. | [Grove](https://github.com/ai-dynamo/grove) |
+| **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a ZMQ-based KV-cache event plane, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
 | **agentgateway-crds** | Custom Resource Definitions for agentgateway (Kubernetes Gateway API implementation for AI/ML inference). | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **agentgateway** | Kubernetes Gateway API implementation for AI/ML inference. Implements the Gateway API Inference Extension for model-aware ingress routing to InferencePool backends. | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **k8s-nim-operator** | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. AICR installs the operator only — it creates no `NIMService` and no credentials; see [NIM workload credentials](#nim-workload-credentials). | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
@@ -694,3 +694,115 @@ kubectl get configmap dcgm-exporter -n gpu-operator \
   -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'
 # Expected: gpu-operator
 ```
+
+### `grove`: `v0.1.0-alpha.8` (or earlier) to `v0.1.0-alpha.12`
+
+alpha.8's `clustertopologies.grove.io` CRD (kind `ClusterTopology`, shortname
+`ct`) is dropped by alpha.12 in favor of `clustertopologybindings.grove.io`,
+which reuses shortname `ct`. `helm upgrade` never applies changed `crds/` (see
+the CRD-upgrade caveat above), so a plain chart bump alone never installs the
+new CRD and the operator crash-loops on `no matches for kind
+"ClusterTopologyBinding"` regardless of deployer. If the new CRD is applied
+before the old one is deleted, the shortname collision blocks it from ever
+reaching `Established`.
+
+Fresh installs are unaffected. To migrate an existing cluster:
+
+1. Check for any live `ClusterTopology` resources — if any exist, **stop**
+   for an explicit data migration before touching CRDs:
+   ```bash
+   kubectl get clustertopologies.grove.io -A
+   ```
+2. If zero exist, delete the obsolete CRD:
+   ```bash
+   kubectl delete crd clustertopologies.grove.io
+   ```
+3. Apply the new CRDs directly from the chart — this works from any
+   directory, no local checkout needed:
+   ```bash
+   helm show crds oci://ghcr.io/ai-dynamo/grove/grove-charts --version v0.1.0-alpha.12 \
+     | sed -n '/^---$/,$p' \
+     | kubectl apply --server-side --force-conflicts -f -
+   ```
+4. Resume whichever deployer you use (`helm`/`helmfile`: re-run `install.sh`
+   or `helmfile apply`; `flux`/`argocd`/`argocd-helm`: reconcile/sync as
+   usual). AICR's generated `install.sh` already passes `--force-conflicts`
+   on Helm 4.
+
+Verified live end-to-end on a real EKS cluster, 2026-09-02: dynamo-operator,
+grove-operator, and kai-scheduler gang-scheduling all confirmed healthy
+together post-migration.
+
+### `dynamo-platform`: opting back into bundled NATS on a standing cluster
+
+Dynamo 1.4+ no longer installs bundled NATS by default (the request plane
+defaults to TCP and the KV event plane to ZMQ). Re-enabling it needs to be
+done by **regenerating the bundle**, not by hand-editing a generated
+bundle's `values.yaml` or `cluster-values.yaml` -- both are covered by the
+bundle's checksum manifest, and `aicr verify` fails closed on any modified
+file:
+
+```bash
+aicr verify ./bundle
+# ✓ Checksums verified (87 files)
+# Bundle verification: PASSED
+
+# Hand-edit 017-dynamo-platform/values.yaml, then:
+aicr verify ./bundle
+# ✗ Checksum verification failed
+# - [INVALID_REQUEST] checksum mismatch for "017-dynamo-platform/values.yaml"
+# Bundle verification: FAILED (exit 4)
+```
+
+A modified bundle also invalidates the binding of any existing attestation
+to the original checksum digest. Regenerate instead, using the same
+`aicr bundle` command and flags you used originally, with the NATS
+overrides added:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  <your original --accelerated-node-selector / --system-node-selector / etc. flags> \
+  --set dynamoplatform:global.nats.install=true \
+  --output ./bundle
+```
+
+If your system node group is tainted or the cluster has no default
+StorageClass, add the scheduling/storage overrides a re-enabled NATS also
+needs -- AICR no longer targets NATS with `--system-node-selector`,
+`--system-node-toleration`, or `--storage-class` at bundle-generation time
+(those registry paths were removed along with bundled-by-default NATS), so
+pass them explicitly or the NATS pod/PVC can stay `Pending`. Use
+`--set-json` for `nodeSelector` and `tolerations` -- the scalar `--set`
+dot-path parser rejects qualified Kubernetes label keys that contain a `/`
+(e.g. `eks.amazonaws.com/nodegroup`), and there is no scalar form for a
+tolerations list at all:
+
+```bash
+  --set-json 'dynamoplatform:nats.podTemplate.merge.spec.nodeSelector={"<key>":"<value>"}' \
+  --set-json 'dynamoplatform:nats.podTemplate.merge.spec.tolerations=[{"key":"<key>","operator":"Equal","value":"<value>","effect":"NoSchedule"}]' \
+  --set dynamoplatform:nats.config.jetstream.fileStore.pvc.storageClassName=<name>
+```
+
+Verified against this exact sequence (generate → `aicr verify` passes →
+hand-edit → `aicr verify` fails with exit 4 → regenerate with the overrides
+above → rendered `nats.podTemplate.merge.spec` carries both the qualified
+nodeSelector and the toleration → `aicr verify` passes again), 2026-09-02.
+A scalar `--set …nodeSelector.eks.amazonaws.com/nodegroup=<value>` was
+separately confirmed to fail with exit 2 (`INVALID_REQUEST: invalid path
+segment "com/nodegroup"`), and `--system-node-toleration` alone was
+confirmed to not reach NATS (`nats.podTemplate.merge.spec.tolerations`
+rendered empty; only the operator's `controllerManager.tolerations` was
+set) -- both are why the overrides above are required rather than optional.
+
+On an in-place `helm upgrade` from the regenerated bundle, disabling NATS
+removes its StatefulSet but does not delete its PVC; inspect
+`kubectl get pvc -n dynamo-system -l app.kubernetes.io/name=nats` before
+deciding whether to retain or delete it.
+
+**Separately, and more importantly than the NATS opt-out above:** bumping
+the operator without also bumping any standing `DynamoGraphDeployment`'s
+runtime image is its own hazard, independent of NATS. An older runtime
+under a newer operator is the same version-skew class that caused the
+frontend discovery panic fixed in #1193 -- setting `DYN_EVENT_PLANE=zmq`
+on the old workload is defense in depth, not a substitute for bumping its
+image to match the operator.

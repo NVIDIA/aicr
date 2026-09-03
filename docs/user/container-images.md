@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **44**
-- Unique images: **100**
+- Unique images: **98**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -38,14 +38,14 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
 | cert-manager-ocp | manifest | — | — | 0 |
 | cert-manager-ocp-olm | manifest | — | — | 0 |
-| dynamo-platform | helm | dynamo-platform | 1.2.1 | 3 |
+| dynamo-platform | helm | dynamo-platform | 1.4.2 | 1 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
 | gcp-driver-installer | manifest | — | — | 3 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
 | gpu-operator | helm | nvidia/gpu-operator | v26.3.3 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
-| grove | helm | grove-charts | v0.1.0-alpha.8 | 1 |
+| grove | helm | grove-charts | v0.1.0-alpha.12 | 1 |
 | k8s-aibom | helm | k8s-aibom | 1.3.0 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
@@ -125,9 +125,7 @@ _No images extracted._
 
 ### dynamo-platform
 
-- `nats:2.10.21-alpine`
-- `natsio/nats-server-config-reloader:0.16.0`
-- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.2.1`
+- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.4.2`
 
 ### gatekeeper
 
@@ -176,7 +174,7 @@ _No images extracted._
 
 ### grove
 
-- `ghcr.io/ai-dynamo/grove/grove-operator:v0.1.0-alpha.8`
+- `ghcr.io/ai-dynamo/grove/grove-operator:v0.1.0-alpha.12`
 
 ### k8s-aibom
 
