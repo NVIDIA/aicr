@@ -15,6 +15,7 @@
 package architecture
 
 import (
+	"sort"
 	"testing"
 )
 
@@ -44,5 +45,55 @@ func TestFacadeBoundary(t *testing.T) {
 		t.Logf("%d violation(s). pkg/cli and pkg/server must reach business logic "+
 			"through pkg/client/v1; if an exception is genuinely warranted, record it "+
 			"in tests/architecture/facade-policy.yaml with a reason.", len(violations))
+	}
+}
+
+// TestInfrastructureAllowlistIsClosed pins the infrastructure bucket's
+// package SET in the committed facade-policy.yaml to a sorted literal.
+//
+// Infrastructure packages are exempt from symbol/class/staleness tracking
+// entirely: unclassified, class-changed, and stale can never fire for them,
+// because checkAgainstPolicy treats any reference into an infrastructure
+// package as clean without ever consulting a symbols map. That makes
+// infrastructure membership the one boundary this gate does not mechanically
+// defend -- if business logic were later added to an infrastructure package,
+// or a business package relocated into this bucket, checkAgainstPolicy would
+// stay green with no other signal. This test exists so growing the
+// allowlist requires a deliberate change to this test (and the reviewer
+// sign-off that comes with reviewing it), not a silent policy-file edit that
+// sails through unremarked.
+func TestInfrastructureAllowlistIsClosed(t *testing.T) {
+	t.Parallel()
+
+	p := loadPolicy(t, "facade-policy.yaml")
+
+	want := []string{
+		"pkg/defaults",
+		"pkg/deprecation",
+		"pkg/errors",
+		"pkg/header",
+		"pkg/logging",
+		"pkg/serializer",
+	}
+
+	got := make([]string, 0, len(p.Infrastructure))
+	for name := range p.Infrastructure {
+		got = append(got, name)
+	}
+	sort.Strings(got)
+
+	same := len(got) == len(want)
+	if same {
+		for i := range want {
+			if got[i] != want[i] {
+				same = false
+				break
+			}
+		}
+	}
+	if !same {
+		t.Fatalf("infrastructure bucket = %v, want exactly %v -- infrastructure membership is "+
+			"reviewer-gated, not mechanically enforced by this gate (see TestInfrastructureAllowlistIsClosed "+
+			"doc comment); if this change is deliberate, update the expected set here", got, want)
 	}
 }
