@@ -384,6 +384,23 @@ func deleteCRECertification(ctx context.Context, client dynamic.Interface, names
 	return deleteCREResource(ctx, client, certificationGVR, "Certification", namespace, name)
 }
 
+// creCleanupFailure reports the error a CRE check returns once teardown of its
+// Certification has been attempted. A Certification that outlives the check
+// keeps holding GPU nodes, so a check that would otherwise pass must fail
+// instead of reporting success over a leak. An error the check already hit
+// wins, because it explains the run and the leak is a consequence of it.
+func creCleanupFailure(label string, primary, deleteErr error) error {
+	if deleteErr == nil {
+		return primary
+	}
+	slog.Warn("failed to delete CRE Certification", "check", label, "error", deleteErr)
+	if primary != nil {
+		return primary
+	}
+	return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
+		label+" Certification may still be running: cleanup failed", deleteErr)
+}
+
 func deleteCREResource(
 	ctx context.Context,
 	client dynamic.Interface,
@@ -391,10 +408,16 @@ func deleteCREResource(
 	kind, namespace, name string,
 ) error {
 
-	delCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	delCtx, cancel := context.WithTimeout(ctx, defaults.CRECertificationDeleteTimeout)
 	defer cancel()
 	res := client.Resource(gvr).Namespace(namespace)
-	err := res.Delete(delCtx, name, metav1.DeleteOptions{})
+	// Foreground propagation retains the parent CR until CRE's Workflows,
+	// TrainJobs, and pods are gone, so waitForCREResourceGone observing the
+	// parent is evidence the GPU work actually stopped. Background propagation
+	// deletes the CR first and reaps dependents asynchronously, which would
+	// report a clean teardown while jobs still hold the GPUs.
+	policy := metav1.DeletePropagationForeground
+	err := res.Delete(delCtx, name, metav1.DeleteOptions{PropagationPolicy: &policy})
 	if apierrors.IsNotFound(err) {
 		return nil
 	}

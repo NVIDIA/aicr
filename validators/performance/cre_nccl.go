@@ -17,7 +17,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strconv"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -38,7 +37,11 @@ func checkCRENCCLAllReduceBW(ctx *validators.Context) error {
 	return classifyNCCLAllReduceBWResult(checkNameCRENCCLAllReduceBW, constraint, actual, passed, err)
 }
 
-func validateCRENcclAllReduceBw(ctx *validators.Context, constraint recipe.Constraint) (string, bool, error) {
+func validateCRENcclAllReduceBw(
+	ctx *validators.Context,
+	constraint recipe.Constraint,
+) (actual string, passed bool, err error) {
+
 	if ctx.ValidationInput == nil {
 		return skipMsgNCCLNoInput, true, nil
 	}
@@ -77,8 +80,11 @@ func validateCRENcclAllReduceBw(ctx *validators.Context, constraint recipe.Const
 	}
 
 	defer func() {
-		if delErr := deleteCRECertification(context.Background(), dyn, ctx.Namespace, objName); delErr != nil {
-			slog.Warn("failed to delete CRE NCCL Certification", "error", delErr)
+		delErr := deleteCRECertification(context.Background(), dyn, ctx.Namespace, objName)
+		// A leak must not hide behind a passing bandwidth reading, so drop the
+		// measurement along with the pass when cleanup is what failed.
+		if leaked := creCleanupFailure(checkNameCRENCCLAllReduceBW, err, delErr); leaked != nil && err == nil {
+			actual, passed, err = "", false, leaked
 		}
 	}()
 
@@ -111,7 +117,7 @@ func validateCRENcclAllReduceBw(ctx *validators.Context, constraint recipe.Const
 		return "", false, err
 	}
 
-	actual := strconv.FormatFloat(bw, 'f', 2, 64)
+	actual = strconv.FormatFloat(bw, 'f', 2, 64)
 	return actual, bw >= threshold, nil
 }
 
