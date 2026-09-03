@@ -707,6 +707,12 @@ const (
 	// Failed. The same duration is written on spec.timeoutPerJob so CRE
 	// stops the job instead of leaving it running after AICR gives up.
 	CRECertificationTimeout = 30 * time.Minute
+
+	// CRECertificationDeleteTimeout bounds AICR's teardown of a Certification.
+	// Deletion uses foreground propagation, so it must outlast termination of
+	// CRE's Workflows, TrainJobs, and multi-node GPU pods; the shorter
+	// DiagnosticTimeout would expire mid-teardown and leak a running job.
+	CRECertificationDeleteTimeout = 5 * time.Minute
 )
 
 // Inference performance validation timeouts.

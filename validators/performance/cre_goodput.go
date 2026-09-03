@@ -31,7 +31,7 @@ import (
 	"k8s.io/client-go/dynamic"
 )
 
-func checkCRETrainingGoodput(ctx *validators.Context) error {
+func checkCRETrainingGoodput(ctx *validators.Context) (err error) {
 	constraint, found := findPerformanceConstraint(ctx, checkNameCRETrainingGoodput)
 	if !found {
 		return validators.Skip(fmt.Sprintf("no %s constraint in recipe", checkNameCRETrainingGoodput))
@@ -81,14 +81,12 @@ func checkCRETrainingGoodput(ctx *validators.Context) error {
 		return deleteErr
 	}
 	defer func() {
-		if deleteErr := deleteCRECertification(
+		err = creCleanupFailure(checkNameCRETrainingGoodput, err, deleteCRECertification(
 			context.Background(),
 			ctx.DynamicClient,
 			ctx.Namespace,
 			objName,
-		); deleteErr != nil {
-			slog.Warn("failed to delete CRE training Certification", "error", deleteErr)
-		}
+		))
 	}()
 
 	if createErr := createUnstructured(ctx.Ctx, ctx.DynamicClient, certificationGVR, ctx.Namespace, obj); createErr != nil {

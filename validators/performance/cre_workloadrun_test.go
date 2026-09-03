@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -170,6 +171,117 @@ func TestDeleteCREResourceTimesOutWhenFinalizerHolds(t *testing.T) {
 	}
 	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
 		t.Fatalf("error = %v, want ErrCodeTimeout", err)
+	}
+}
+
+// TestDeleteCREResourceUsesForegroundPropagation pins the propagation policy.
+// Under background propagation the API server removes the Certification first
+// and reaps CRE's Workflows, TrainJobs, and pods afterwards, so the parent
+// going away is no evidence the GPU work stopped — waitForCREResourceGone
+// would report a clean teardown over jobs still holding the GPUs.
+func TestDeleteCREResourceUsesForegroundPropagation(t *testing.T) {
+	obj := buildCRENCCLCertification("ns", "aicr-cre-nccl-policy", twoNodeGPUConfig())
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), creDynamicListKinds(), obj)
+
+	var got *metav1.DeletionPropagation
+	var sawDelete bool
+	client.PrependReactor("delete", "certifications", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		del, ok := action.(k8stesting.DeleteActionImpl)
+		if !ok {
+			t.Errorf("delete action has type %T, want DeleteActionImpl", action)
+			return false, nil, nil
+		}
+		sawDelete = true
+		got = del.DeleteOptions.PropagationPolicy
+		return false, nil, nil
+	})
+
+	if err := deleteCRECertification(context.Background(), client, "ns", obj.GetName()); err != nil {
+		t.Fatalf("deleteCRECertification() error = %v", err)
+	}
+	if !sawDelete {
+		t.Fatal("no delete reached the API server")
+	}
+	if got == nil {
+		t.Fatal("delete sent no PropagationPolicy, so dependents would be reaped in the background")
+	}
+	if *got != metav1.DeletePropagationForeground {
+		t.Errorf("PropagationPolicy = %q, want %q", *got, metav1.DeletePropagationForeground)
+	}
+}
+
+// TestCRECertificationDeleteTimeoutIsSizedForTeardown pins why teardown owns a
+// budget separate from the diagnostics one it used to borrow: foreground
+// propagation waits on multi-node GPU pods terminating, which the shorter
+// diagnostics budget would cut short and leak a running job. It still has to
+// stay under the run budget so cleanup cannot outlast the check it belongs to.
+func TestCRECertificationDeleteTimeoutIsSizedForTeardown(t *testing.T) {
+	if defaults.CRECertificationDeleteTimeout <= defaults.DiagnosticTimeout {
+		t.Errorf("CRECertificationDeleteTimeout = %s, must exceed DiagnosticTimeout %s",
+			defaults.CRECertificationDeleteTimeout, defaults.DiagnosticTimeout)
+	}
+	if defaults.CRECertificationDeleteTimeout >= defaults.CRECertificationTimeout {
+		t.Errorf("CRECertificationDeleteTimeout = %s, must stay under CRECertificationTimeout %s",
+			defaults.CRECertificationDeleteTimeout, defaults.CRECertificationTimeout)
+	}
+}
+
+// TestCreCleanupFailure covers the precedence rule both CRE checks rely on: a
+// leaked Certification must fail a check that would otherwise have passed, and
+// must never overwrite the error that actually explains the run.
+func TestCreCleanupFailure(t *testing.T) {
+	primary := errors.New(errors.ErrCodeNotFound, "no GoodputMeasurement")
+	deleteErr := errors.New(errors.ErrCodeTimeout, "finalizer still held")
+
+	tests := []struct {
+		name      string
+		primary   error
+		deleteErr error
+		wantCode  error
+		wantMsg   string
+	}{
+		{
+			name: "clean run and clean teardown pass",
+		},
+		{
+			name:      "teardown failure fails an otherwise passing check",
+			deleteErr: deleteErr,
+			wantCode:  errors.New(errors.ErrCodeInternal, ""),
+			wantMsg:   "may still be running",
+		},
+		{
+			name:     "primary error survives a clean teardown",
+			primary:  primary,
+			wantCode: errors.New(errors.ErrCodeNotFound, ""),
+			wantMsg:  "no GoodputMeasurement",
+		},
+		{
+			name:      "primary error wins over a teardown failure",
+			primary:   primary,
+			deleteErr: deleteErr,
+			wantCode:  errors.New(errors.ErrCodeNotFound, ""),
+			wantMsg:   "no GoodputMeasurement",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := creCleanupFailure(checkNameCRETrainingGoodput, tt.primary, tt.deleteErr)
+			if tt.wantCode == nil {
+				if got != nil {
+					t.Fatalf("error = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("error = nil, want %v", tt.wantMsg)
+			}
+			if !stderrors.Is(got, tt.wantCode) {
+				t.Errorf("error = %v, wrong code", got)
+			}
+			if !strings.Contains(got.Error(), tt.wantMsg) {
+				t.Errorf("error = %q, want it to contain %q", got.Error(), tt.wantMsg)
+			}
+		})
 	}
 }
 
