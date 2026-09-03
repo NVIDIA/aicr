@@ -103,19 +103,28 @@ omits them can render the `ServiceMonitor` before its CRDs exist, or submit a
   the prometheus-operator CRDs. AICR values pin it to `false`, so a bare
   install needs no monitoring CRDs.
 
-### 4. Placement is limited to tolerations
+### 4. The registry entry does not enforce manager placement
 
 The chart's Deployment template renders `affinity` and `tolerations` but has no
 `nodeSelector` block, so a system node selector would be silently dropped. The
-registry entry declares `nodeScheduling.system.tolerationPaths` only.
+registry entry therefore declares `nodeScheduling.system.tolerationPaths` only.
 
-This narrows placement rather than widening it: the chart default is a blanket
-`tolerations: [{operator: Exists}]`, which tolerates every taint in the cluster
-including tainted GPU nodes. Only the manager is covered — NVCRE's benchmarks
-belong on GPU nodes and must not inherit system placement.
+**Tolerations are taint compatibility, not placement.** They permit scheduling
+onto matching tainted nodes; they never select a node. The chart default is a
+blanket `tolerations: [{operator: Exists}]`, which tolerates every taint in the
+cluster — so by default nothing keeps the manager off GPU or general nodes.
+Replacing that default with the recipe's system tolerations narrows which
+taints are tolerated, but still does not confine the manager to system nodes.
 
-Hard placement stays available through component values or `--set-json`;
-`manager.affinity` is object-valued and is not settable through scalar `--set`.
+An adopter that requires system-node isolation must set `manager.affinity`
+explicitly, through component values or `--set-json` — it is object-valued and
+is not settable through scalar `--set`. AICR injects no such affinity, so
+placement isolation is the adopter's responsibility, not a property of the
+registry entry.
+
+Only the manager is in scope either way. NVCRE schedules its own benchmarks
+through Kubeflow Trainer onto GPU nodes, and those must not inherit system
+placement.
 
 ### 5. Non-vacuous health check
 
