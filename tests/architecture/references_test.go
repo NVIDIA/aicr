@@ -426,6 +426,18 @@ func F(r business.RecipeAlias) string { return r.Resolve() }
 `,
 			wantSymbol: "Recipe.Resolve",
 		},
+		{
+			name: "generic instantiation",
+			business: `package business
+type Box[T any] struct{ v T }
+func (b *Box[T]) Get() T { return b.v }
+`,
+			consumer: `package consumer
+import "fixture/business"
+func F(b *business.Box[int]) int { return b.Get() }
+`,
+			wantSymbol: "Box.Get",
+		},
 	}
 
 	for _, tt := range tests {
