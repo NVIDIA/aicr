@@ -2073,6 +2073,50 @@ func TestGenerate_IgnoreComputeDomainCRDDiff(t *testing.T) {
 	}
 }
 
+// TestGenerate_IgnoreComputeDomainCRDDiffAbsent is the negative counterpart
+// on the argocd-helm path. Without it, a regression that leaked the block
+// onto every transformed child would still pass the positive test above and
+// the argocd-side negative case, which inspects a different artifact
+// (NNN-gpu-operator/application.yaml rather than templates/*.yaml).
+// See NVIDIA/aicr#2546.
+func TestGenerate_IgnoreComputeDomainCRDDiffAbsent(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v26.7.0",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	})
+	rr.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult:    rr,
+		ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+		Version:         "v0.0.0-test",
+		RepoURL:         "https://github.com/example/aicr-bundles.git",
+		TargetRevision:  "main",
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	primary, err := os.ReadFile(filepath.Join(outputDir, "templates", "gpu-operator.yaml"))
+	if err != nil {
+		t.Fatalf("read gpu-operator child template: %v", err)
+	}
+	got := string(primary)
+	if strings.Contains(got, "RespectIgnoreDifferences") || strings.Contains(got, "ignoreDifferences") {
+		t.Errorf("gpu-operator child template without a DRA driver component must not mention ignoreDifferences:\n%s", got)
+	}
+}
+
 // TestHelmTemplate_RendersWithSetRepoURL is the live-render counterpart to
 // the golden tests: goldens freeze the pre-render template bytes, this
 // test verifies that running `helm template` against the generated bundle

@@ -2482,23 +2482,36 @@ func TestGenerate_IgnoreComputeDomainCRDDiff(t *testing.T) {
 	}
 
 	tests := []struct {
-		name          string
-		draDriverName string // "" = no DRA driver component in the bundle
-		wantIgnore    bool
+		name           string
+		draDriverName  string // "" = no DRA driver component in the bundle
+		gpuOperatorPin string // "" = v26.7.0, the first version shipping the contested CRD
+		wantIgnore     bool
 	}{
 		{name: "gpu-operator alone", draDriverName: "", wantIgnore: false},
 		{name: "gpu-operator with nvidia-dra-driver-gpu", draDriverName: "nvidia-dra-driver-gpu", wantIgnore: true},
 		{name: "gpu-operator with nvidia-dra-driver-gpu-ocp", draDriverName: "nvidia-dra-driver-gpu-ocp", wantIgnore: true},
+		// Version gate: below v26.7.0 gpu-operator's chart ships no
+		// computedomains CRD, so there is nothing to arbitrate and the
+		// Application-wide RespectIgnoreDifferences must not be emitted.
+		{name: "gpu-operator v26.3.3 with DRA driver", draDriverName: "nvidia-dra-driver-gpu", gpuOperatorPin: "v26.3.3", wantIgnore: false},
+		{name: "gpu-operator v27.0.0 with DRA driver", draDriverName: "nvidia-dra-driver-gpu", gpuOperatorPin: "v27.0.0", wantIgnore: true},
+		// A non-semver pin cannot be ordered against the threshold; the
+		// guard fails open so a custom chart still gets the mitigation.
+		{name: "gpu-operator unparseable pin with DRA driver", draDriverName: "nvidia-dra-driver-gpu", gpuOperatorPin: "custom-build", wantIgnore: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			gpuOperatorPin := tt.gpuOperatorPin
+			if gpuOperatorPin == "" {
+				gpuOperatorPin = "v26.7.0"
+			}
 			componentRefs := []recipe.ComponentRef{
 				{
 					Name:      "gpu-operator",
 					Namespace: "gpu-operator",
 					Chart:     "gpu-operator",
-					Version:   "v26.7.0",
+					Version:   gpuOperatorPin,
 					Type:      recipe.ComponentTypeHelm,
 					Source:    "https://helm.ngc.nvidia.com/nvidia",
 				},

@@ -49,6 +49,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
+
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
@@ -150,6 +152,41 @@ const (
 	computeDomainComponentDRADriver    = "nvidia-dra-driver-gpu"
 	computeDomainComponentDRADriverOCP = "nvidia-dra-driver-gpu-ocp"
 )
+
+// computeDomainConflictMinGPUOperator is the first gpu-operator chart
+// version whose crds/ ships resource.nvidia.com_computedomains.yaml, and
+// therefore the first version that can contend with the DRA driver's copy.
+// v26.3.3 ships only nvidia.com_clusterpolicies.yaml and
+// nvidia.com_nvidiadrivers.yaml — verified against both published charts.
+//
+// Gating on this matters because RespectIgnoreDifferences is an
+// Application-wide sync option: Argo builds the sync-time normalizer from
+// the Application's ignoreDifferences PLUS the cluster's
+// resource.customizations.ignoreDifferences.* in argocd-cm. Emitting it
+// below v26.7.0 would relax sync-time enforcement of any globally-ignored
+// field on gpu-operator's resources while buying no protection at all,
+// since gpu-operator does not ship the contested CRD yet.
+const computeDomainConflictMinGPUOperator = "26.7.0"
+
+// gpuOperatorShipsComputeDomainCRD reports whether the gpu-operator ref's
+// effective chart version is at or above the version that first ships the
+// contested CRD.
+//
+// An unparseable version fails OPEN (treated as affected): a custom or
+// non-semver pin is far more likely to be a newer chart than an older one,
+// and the cost of a needless ignoreDifferences entry is much lower than the
+// cost of missing the CRD flip-flop this guard exists to prevent.
+func gpuOperatorShipsComputeDomainCRD(ref *recipe.ComponentRef) bool {
+	if ref == nil {
+		return false
+	}
+	v, err := semver.NewVersion(ref.Version)
+	if err != nil {
+		return true
+	}
+	min := semver.MustParse(computeDomainConflictMinGPUOperator)
+	return !v.LessThan(min)
+}
 
 // AppOfAppsData contains data for rendering the App of Apps manifest.
 type AppOfAppsData struct {
@@ -610,11 +647,12 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 	}
 
-	// computeDomainConflict is true when the bundle contains both
-	// gpu-operator and a standalone DRA driver component, which as of
-	// gpu-operator v26.7.0 ship conflicting computedomains CRD schemas.
-	// See IgnoreComputeDomainCRDDiff and NVIDIA/aicr#2546.
-	computeDomainConflict := findComponentRef(components, computeDomainComponentGPUOperator) != nil &&
+	// computeDomainConflict is true when the bundle pairs a standalone DRA
+	// driver with a gpu-operator new enough to ship the contested
+	// computedomains CRD itself (>= v26.7.0). Below that the operator's
+	// chart has no copy to contend with, so the mitigation is not emitted
+	// at all. See IgnoreComputeDomainCRDDiff and NVIDIA/aicr#2546.
+	computeDomainConflict := gpuOperatorShipsComputeDomainCRD(findComponentRef(components, computeDomainComponentGPUOperator)) &&
 		(findComponentRef(components, computeDomainComponentDRADriver) != nil ||
 			findComponentRef(components, computeDomainComponentDRADriverOCP) != nil)
 

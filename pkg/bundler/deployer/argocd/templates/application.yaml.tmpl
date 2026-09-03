@@ -84,6 +84,15 @@ spec:
     # copy over the divergent fields; the DRA driver's copy is treated as
     # authoritative. Stopgap pending single CRD ownership or GPUCluster
     # consolidation. See NVIDIA/aicr#2546.
+    #
+    # versions/0 assumes the CRD ships exactly one version — true of both
+    # charts today (v1beta1 only, verified against gpu-operator v26.7.0 and
+    # dra-driver-nvidia-gpu 0.5.0). The CRD's own numNodes description
+    # anticipates a v1beta2 ("deprecated and will be removed in the next API
+    # version"); if either chart adds or reorders versions these pointers
+    # silently address the wrong entry and the selfHeal fight resumes.
+    # jqPathExpressions over .spec.versions[] would be index-independent —
+    # see the follow-ups on NVIDIA/aicr#2546.
     - group: apiextensions.k8s.io
       kind: CustomResourceDefinition
       name: computedomains.resource.nvidia.com
