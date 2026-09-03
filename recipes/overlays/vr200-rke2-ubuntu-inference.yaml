@@ -222,8 +222,14 @@ spec:
       dependencyRefs:
         - nodewright-operator
 
-  # pod-autoscaling / cluster-autoscaling conformance omitted: bare-metal
-  # RKE2 has no cluster autoscaler.
+  # cluster-autoscaling conformance omitted: bare-metal RKE2 has no cluster
+  # autoscaler, so there is nothing to exercise.
+  #
+  # pod-autoscaling and secure-accelerator-access ARE included — see
+  # vr200-rke2-ubuntu-training for the full rationale (this leaf does not
+  # DRA-allocate GPUs, so dcgm-exporter attribution is unaffected, and the
+  # secure-accelerator-access validator has been dual-mode since #1620).
+  # Both verified on vr200-aicr-cluster-2 (2026-09-03).
   validation:
     deployment:
       checks:
@@ -245,3 +251,5 @@ spec:
         - accelerator-metrics
         - ai-service-metrics
         - inference-gateway
+        - pod-autoscaling
+        - secure-accelerator-access
