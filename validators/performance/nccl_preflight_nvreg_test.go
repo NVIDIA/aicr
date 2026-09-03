@@ -94,8 +94,12 @@ func TestGB200NetPreflightApplies(t *testing.T) {
 			variantNET, recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceGKE, false,
 		},
 		{
-			"NET + GB200 + OKE → not required (no EFA on OKE)",
-			variantNET, recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE, false,
+			"NET + GB200 + OKE → check required (ConnectX IB dma-buf on Grace topology)",
+			variantNET, recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE, true,
+		},
+		{
+			"NVLS + GB200 + OKE → not required (NVLink-C2C, no PCIe dma-buf)",
+			variantNVLS, recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE, false,
 		},
 	}
 	for _, tt := range tests {

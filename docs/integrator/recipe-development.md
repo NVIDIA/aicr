@@ -493,7 +493,8 @@ not qualify").
 **Constraint names must be measurement paths a supported snapshot producer
 actually emits** — a collector, or a provider projection attached at the
 snapshot orchestration layer (e.g. `K8s.aks-gpu-pools.gpu-driver` from
-`aicr snapshot --aks-gpu-pools`) — in
+`aicr snapshot --aks-gpu-pools`, or `K8s.oke-addons.nvidia-gpu-plugin` from
+`aicr snapshot --oke-addons`) — in
 `{Type}.{Subtype}.{Key}` form. The type must be one the snapshot carries —
 `K8s`, `GPU`, `OS`, `SystemD`, `NodeTopology`, or `NetworkTopology`.
 
@@ -601,6 +602,13 @@ mixed pool values fail closed against either selection. ADR-015 resolves
 this signal. The AKS family above was the first embedded adopter; the GKE
 family's `gpuStack` (device-plugin ownership over the #1755 node-set form,
 with `advertiser: external` on `gke-default`) is the second.
+
+**OKE** projects the `NvidiaGpuPlugin` cluster add-on's control-plane state
+into a snapshot reading (`K8s.oke-addons.nvidia-gpu-plugin`, from the
+`--oke-addons` dump). The same qualification rules apply: `oci-managed`
+requires `installed`, `operator-managed` requires `absent`, and any other
+add-on lifecycle state — or a snapshot captured without the dump — fails
+closed against either selection.
 
 No equivalent reading exists for other services yet. Declare a
 driver-ownership profile only once the signal for that service exists, and

@@ -240,7 +240,9 @@ reported as no drift.
 // controller-side into the returned snapshot, and AKS profile-qualified
 // resolution from that snapshot REQUIRES the resulting
 // K8s.aks-gpu-pools.gpu-driver reading (a snapshot without it fails
-// closed).
+// closed). On OKE, OKEAddonsPath plays the same role from an
+// `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`
+// dump, merged as the K8s.oke-addons.nvidia-gpu-plugin reading.
 // Give the Job-backed snapshot its own deadline: contexts cap the
 // configured timeouts from the parent side, so reusing the 30-second
 // resolve ctx above would override the 5-minute AgentConfig.Timeout.
@@ -271,6 +273,7 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	Timeout:         5 * time.Minute,
 	Cleanup:         true,
 	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
+	OKEAddonsPath:   "/path/to/oke-addons.json",    // OKE only
 })
 if err != nil {
 	log.Fatalf("collect snapshot: %v", err)
