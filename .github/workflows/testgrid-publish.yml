@@ -31,11 +31,13 @@
 # Auth:
 #   WIF pool:  aicr-testgrid[-<env>]-github   (aicr-testgrid Terraform)
 #   SA:        aicr-testgrid[-<env>]-publish@<project>
-#   Scope:     objectCreator on gs://aicr-testgrid[-<env>]/groups/ prefix only
+#   Scope:     objectCreator on gs://dgxc-aicr-testgrid[-<env>]/groups/ prefix only
 #   For prod, <env> is empty (cluster_name = "aicr-testgrid", unsuffixed);
-#   for staging, <env> = "staging". This mirrors terraform/variables.tf and
-#   wif-publish.tf in the aicr-testgrid repo exactly — verify there before
-#   changing the naming logic in "Resolve GCP config" below.
+#   for staging, <env> = "staging". Buckets are named dgxc-<cluster> (renamed
+#   for the eidosx → nv-testgrid migration; GCS names are globally unique).
+#   This mirrors terraform/variables.tf in the testgrid repo
+#   (dgxcloud/release-automation/testgrid, aicr/terraform) — verify there
+#   before changing the naming logic in "Resolve GCP config" below.
 #
 # Configuration (GitHub repo variables — no secrets in source):
 #   vars.TESTGRID_PUBLISH_ENABLED   'true' to enable (see gate above)
@@ -129,14 +131,18 @@ jobs:
           else
             CLUSTER="aicr-testgrid-${TG_ENV}"
           fi
+          # Buckets were renamed for the eidosx → nv-testgrid migration
+          # (dgxc- prefix family, alongside dgxc-testgrid); clusters keep
+          # their names.
+          BUCKET="dgxc-${CLUSTER}"
           {
             echo "cluster=${CLUSTER}"
-            echo "bucket=${CLUSTER}"
+            echo "bucket=${BUCKET}"
             echo "wif_provider=projects/${GCP_PROJECT_NUMBER}/locations/global/workloadIdentityPools/${CLUSTER}-github/providers/github-actions"
             echo "wif_sa=${CLUSTER}-publish@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
           } >> "${GITHUB_OUTPUT}"
           # Note: `environment` is fully encoded in `bucket` (bucket ==
-          # cluster == aicr-testgrid[-<env>]) and is not passed to
+          # dgxc-aicr-testgrid[-<env>]) and is not passed to
           # testgrid-publish separately — the tool only needs --bucket.
 
       - name: Load versions
