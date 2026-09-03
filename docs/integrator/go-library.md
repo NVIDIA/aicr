@@ -35,6 +35,7 @@ than in yours.
 | `Example` | Quick start: client, resolve from criteria | yes |
 | `Example_errorCodes` | Matching structured error codes | yes |
 | `Example_bundleAndVerify` | Resolve → bundle → verify, hermetically | yes |
+| `Example_workflow` | Full Snapshot → Recipe → Bundle: load, derive criteria, resolve, bundle, verify | yes |
 | `Example_trustLevels` | The accepted trust levels, and their ordering trap | yes |
 | `Example_criteriaDimensions` | The coverage dimensions | yes |
 | `Example_committedConfig` | `AICRConfig` → source → catalog → criteria, in the required order | no |
@@ -88,10 +89,9 @@ import (
 
 func main() {
 	// FilesystemSource layers an external recipe directory over the
-	// embedded recipe data. Use this in production today; OCISource
-	// is reserved but not yet implemented (NewClient returns
-	// ErrCodeUnavailable when given one — see the constructor's
-	// godoc for the current state).
+	// embedded recipe data. OCISource pulls a digest-pinned recipe
+	// catalog from an OCI registry instead; see "Recipe sources" and
+	// "Digest-pinned OCI recipe sources" below for both.
 	client, err := aicr.NewClient(
 		aicr.WithRecipeSource(
 			aicr.FilesystemSource("/etc/aicr/recipes"),
@@ -606,31 +606,26 @@ must be honored by an applied overlay, or resolution fails with
 `ErrCodeInvalidRequest` and a `details.uncovered` payload.
 
 That is right for criteria a user typed, but wrong for criteria you *derived*
-from the snapshot fingerprint. An overlay tree can be deliberately agnostic to
-a dimension (Kind's overlays state no `os`) while the fingerprint still detects
-a concrete value on the node — nothing in the recipe distinguishes it, so
-failing there rejects a legitimate query.
+from the snapshot. An overlay tree can be deliberately agnostic to a dimension
+(Kind's overlays state no `os`) while `Client.CriteriaFromSnapshot` still
+detects a concrete value on the node — nothing in the recipe distinguishes it,
+so failing there rejects a legitimate query.
 
 Pass `aicr.WithSnapshotCriteriaRelaxation` and name the dimensions **you
 received explicitly**. Anything else is treated as derived, and a coverage
 failure limited to derived dimensions is retried once with those cleared:
 
 ```go
-import (
-    aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-
-    // Deriving criteria from a snapshot has no facade-owned helper yet, so
-    // this step reaches past the stable surface — see the caveat below.
-    "github.com/NVIDIA/aicr/pkg/fingerprint" // Internal
-    "github.com/NVIDIA/aicr/pkg/recipe"      // Public (evolving)
-)
-
-criteria := fingerprint.FromMeasurements(snap.Unwrap().Measurements).
-    ToCriteria(client.CriteriaRegistry())
-criteria.Intent = recipe.CriteriaIntentTraining // the user asked for this one
+// Every dimension the snapshot could not determine comes back as the "any"
+// wildcard; nothing is guessed.
+criteria, err := client.CriteriaFromSnapshot(snap)
+if err != nil {
+    log.Fatalf("derive criteria: %v", err)
+}
+criteria.Intent = "training" // the user asked for this one
 
 result, err := client.ResolveRecipeFromSnapshotWithOptions(
-    ctx, aicr.WrapCriteria(criteria), snap,
+    ctx, criteria, snap,
     aicr.WithSnapshotCriteriaRelaxation(aicr.DimensionIntent))
 if err != nil {
     log.Fatalf("resolve: %v", err)
@@ -640,14 +635,7 @@ for _, dim := range result.RelaxedDimensions {
 }
 ```
 
-> **The fingerprint step is an escape hatch, not stable API.** `pkg/fingerprint`
-> is [Internal](public-api.md#stability-tiers) and may change without notice;
-> `pkg/recipe` is Public (evolving) and may change in a minor bump. Only the
-> `aicr.*` calls above carry the facade's compatibility guarantee. Pin the AICR
-> version and re-audit this block on upgrade, or derive criteria yourself and
-> hand the facade an `*aicr.Criteria`. If you need this without the coupling,
-> say so on [#2016](https://github.com/NVIDIA/aicr/issues/2016) — a facade-owned
-> snapshot-to-criteria helper is the obvious gap it exposes.
+Runnable version: `ExampleClient_CriteriaFromSnapshot` in `pkg/client/v1/example_test.go`.
 
 Relaxation is deliberately narrow. Three cases propagate the original coverage
 error rather than retrying:
@@ -1377,10 +1365,8 @@ only its exported surface is checked by the API-diff gate on every PR. The
 it.** [Open an issue](https://github.com/NVIDIA/aicr/issues/new/choose)
 describing the capability. Reaching into an evolving subpackage works today
 and is the thing most likely to break you later, and we would rather extend
-the facade — that is how `LoadSnapshot`, `LoadConfig`, and the verification
-surface all arrived. Where this guide shows a deliberate escape hatch (the
-fingerprint step under [Criteria relaxation](#criteria-relaxation-on-the-snapshot-path)),
-it says so and explains the coupling you are accepting.
+the facade — that is how `LoadSnapshot`, `LoadConfig`,
+`Client.CriteriaFromSnapshot`, and the verification surface all arrived.
 
 **Breaking changes are detected, not merely intended.** `tools/api-diff`
 compares the facade and its transparent-alias targets against the last release
