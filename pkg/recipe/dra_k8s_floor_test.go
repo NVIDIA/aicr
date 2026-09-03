@@ -52,9 +52,9 @@ var auditedDRAChartFloors = map[string]struct {
 	minor   int
 }{
 	// oci://registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu
-	//   kubeVersion: ">=1.32.0-0"
-	"nvidia-dra-driver-gpu":     {version: "0.4.1", minor: 32},
-	"nvidia-dra-driver-gpu-ocp": {version: "0.4.1", minor: 32},
+	//   kubeVersion: ">=1.32.0-0" (unchanged from 0.4.1 to 0.5.0)
+	"nvidia-dra-driver-gpu":     {version: "0.5.0", minor: 32},
+	"nvidia-dra-driver-gpu-ocp": {version: "0.5.0", minor: 32},
 }
 
 // draChartKubeVersionMinor is the highest audited floor across the enrolled DRA
