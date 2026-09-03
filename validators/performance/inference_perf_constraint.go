@@ -1998,18 +1998,15 @@ func ensureHFTokenSecret(ctx *validators.Context, namespace string) error {
 // "... forbidden: ... because it is being terminated". Waiting here until the
 // prior Terminating instance is fully gone avoids that race.
 //
-// Stamps labels.ManagedBy and the given component value so
-// pruneStaleNCCLNamespaces can scope its List server-side to namespaces
-// this package actually created for one benchmark, not just ones matching
-// a naming convention.
+// The namespace is stamped with labels.ManagedBy and component so
+// pruneStaleNCCLNamespaces can scope its List server-side, instead of
+// matching a naming convention.
 //
-// Returns the resulting namespace object, UID included, so a caller
-// needing one (e.g. an owning-UID delete precondition) doesn't have to
-// issue a further Get. Also returns whether this call's own Create landed,
-// as opposed to reusing an existing namespace or adopting a concurrent
-// caller's race-winning Create, so a caller that wants to roll back a
-// namespace it alone is responsible for (e.g. on a later, unrelated
-// failure) doesn't tear down one it merely adopted.
+// The bool result reports whether this call's own Create landed, as
+// opposed to reusing or adopting a namespace that already existed, so a
+// caller rolling back on a later failure doesn't tear down one it merely
+// adopted. The namespace result carries its UID either way, for a caller
+// that needs one without a further Get.
 func ensureNamespace(ctx *validators.Context, namespace, component string) (*v1.Namespace, bool, error) {
 	nsCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.InferenceNamespaceTerminationWait)
 	defer cancel()

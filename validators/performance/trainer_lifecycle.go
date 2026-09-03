@@ -828,14 +828,14 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 	}
 }
 
-// foldCleanupError decides the check's verdict when teardown fails. A cleanup
-// failure leaks cluster-scoped CRDs, RBAC, and webhook configurations (or, for
-// the NCCL resource cleanup caller, poisons the next run's fixed-named
-// resources) that would silently break a later run, so it fails an
-// otherwise-passing check, but it never masks a real benchmark failure,
-// which is always the more useful signal. fallbackMsg is used only when
-// cleanupErr isn't already a *StructuredError (PropagateOrWrap preserves an
-// existing one's own message/code as-is).
+// foldCleanupError decides the check's verdict when teardown fails. A
+// cleanup failure leaks cluster-scoped CRDs, RBAC, and webhook
+// configurations (or, for the NCCL resource cleanup caller, poisons the
+// next run's fixed-named resources), so it fails an otherwise-passing
+// check without masking a real benchmark failure, the more useful signal.
+// fallbackMsg is used only when cleanupErr isn't already a
+// *StructuredError (PropagateOrWrap preserves an existing one's own
+// message/code as-is).
 func foldCleanupError(benchErr, cleanupErr error, fallbackMsg string) error {
 	if cleanupErr == nil || benchErr != nil {
 		return benchErr
@@ -995,12 +995,12 @@ func newTrainerInstallManifestConfigMap(resources []trainerResourceRef) (*corev1
 
 // persistTrainerInstallManifest durably records a fresh self-install's
 // resources, so reapOrphanedTrainerInstall can find and remove them if the
-// installing caller never reaches its own cleanup. Failures are logged and
-// swallowed. The caller's own cleanup path still works either way.
+// installing caller never reaches its own cleanup. Failures are only
+// logged, since the caller's own cleanup path still works either way.
 //
-// A concurrent installer's Create can lose to this one with AlreadyExists, so
-// the two lists are merged, retrying on conflict, instead of one overwriting
-// the other.
+// A concurrent installer's Create can lose to this one with AlreadyExists,
+// so the two lists are merged instead of one overwriting the other,
+// retrying on conflict.
 func persistTrainerInstallManifest(ctx context.Context, clientset kubernetes.Interface, resources []trainerResourceRef) {
 	cm, buildErr := newTrainerInstallManifestConfigMap(resources)
 	if buildErr != nil {
@@ -1098,7 +1098,7 @@ func deleteTrainerInstallManifest(ctx context.Context, clientset kubernetes.Inte
 // the persisted manifest, deleting it only once nothing remains. A
 // concurrent installer's resources may still be listed, so a full delete
 // here would drop them from tracking even though none were removed. A
-// missing manifest is a no-op. Retries on conflict.
+// missing manifest is a no-op, and conflicts are retried.
 func removeTrainerInstallManifestEntries(ctx context.Context, clientset kubernetes.Interface, resources []trainerResourceRef) {
 	toRemove := make(map[trainerResourceKey]bool, len(resources))
 	for _, ref := range resources {

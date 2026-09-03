@@ -542,11 +542,8 @@ const ncclRunLockName = "aicr-nccl-run-lock"
 // claimNCCLExecutionLock atomically admits exactly one execution into
 // namespace, closing the race where two callers (e.g. sharing one
 // AICR_RUN_ID) both pass verifyNCCLNamespaceNotLive before either creates a
-// pod. A missing Lease is claimed by Create, which only one caller can win.
-// An existing Lease is claimed by Update pinned to the resourceVersion just
-// read, so a racing takeover also loses to a Conflict, unless it was
-// renewed within NCCLExecutionLockStaleAge, in which case it's still live
-// and returns ErrCodeConflict instead.
+// pod. A stale, unrenewed lock past NCCLExecutionLockStaleAge can still be
+// taken over by a new caller.
 //
 // The returned holder ID is fresh per call, so cleanupNCCLRun can tell
 // whether it still holds the lock before deleting anything.
@@ -566,6 +563,7 @@ func claimNCCLExecutionLock(ctx context.Context, clientset kubernetes.Interface,
 			AcquireTime: &now, RenewTime: &now,
 		},
 	}
+	// A missing Lease is claimed by Create, which only one racing caller can win.
 	if _, err := leaseClient.Create(claimCtx, lease, metav1.CreateOptions{}); err == nil {
 		return holderID, nil
 	} else if !apierrors.IsAlreadyExists(err) {
@@ -583,6 +581,8 @@ func claimNCCLExecutionLock(ctx context.Context, clientset kubernetes.Interface,
 
 	existing.Spec.HolderIdentity, existing.Spec.LeaseDurationSeconds = &holderID, &leaseDurationSeconds
 	existing.Spec.AcquireTime, existing.Spec.RenewTime = &now, &now
+	// An existing Lease is claimed by Update pinned to the resourceVersion
+	// just read, so a racing takeover here also loses to a Conflict.
 	if _, err := leaseClient.Update(claimCtx, existing, metav1.UpdateOptions{}); err != nil {
 		if apierrors.IsConflict(err) {
 			return "", aicrErrors.New(aicrErrors.ErrCodeConflict,
@@ -609,14 +609,14 @@ func rollbackNCCLNamespace(clientset kubernetes.Interface, namespace string, uid
 	}
 }
 
-// releaseNCCLExecutionLockIfHeldBy best-effort deletes namespace's execution
-// lock, but only if it's still named holderID as the current holder.
+// releaseNCCLExecutionLockIfHeldBy best-effort deletes namespace's
+// execution lock, but only if holderID is still the current holder.
 // pruneStaleNCCLNamespaces calls this when its own namespace delete fails
-// transiently. Left in place, the fence Lease it just claimed would
-// otherwise sit there until it ages past NCCLExecutionLockStaleAge, failing
-// a same-run retry closed for up to that long. Checking the holder first,
-// rather than deleting outright, keeps this from removing a legitimate
-// claim that lands in between.
+// transiently, since the fence Lease it just claimed would otherwise sit
+// there until it ages past NCCLExecutionLockStaleAge, failing a same-run
+// retry closed for that long. Checking the holder first, instead of
+// deleting outright, avoids removing a legitimate claim that lands in
+// between.
 func releaseNCCLExecutionLockIfHeldBy(ctx context.Context, clientset kubernetes.Interface, namespace, holderID string) {
 	getCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
@@ -648,26 +648,21 @@ func generateExecutionID() string {
 	return hex.EncodeToString(buf)
 }
 
-// ncclExecutionLockHeldBy confirms namespace's execution lock still names
-// holderID as the current holder, and renews it in the same call. A plain
-// read-only check here would leave a gap between the read and
-// cleanupNCCLResources's delete for a takeover to land in: both executions
-// would then share the same namespace UID, and the stale holder's delete
-// would remove the new holder's live namespace. Renewing pinned to the
-// resourceVersion just read closes that gap the same way
-// claimNCCLExecutionLock's own takeover does. Renewing either succeeds,
-// proving nothing raced it, or loses to a Conflict, proving a takeover
-// already happened, in which case cleanup must not touch the namespace. A
-// missing lock reports false rather than true. It could mean this holder's
-// own lock was never created, but it could just as easily mean a replacement
-// is about to claim it, and treating the ambiguous case as authorization to
-// proceed risks deleting or mutating that replacement's live resources.
+// ncclExecutionLockHeldBy reports whether namespace's execution lock still
+// names holderID as the current holder, renewing it as part of the same
+// call. Renewing, rather than a plain read, closes the gap where a
+// takeover could land between this check and a subsequent delete, letting
+// the stale holder's delete remove the new holder's live namespace.
 //
-// Also used mid-run, right before mutating this namespace's fixed-name
-// resources, to revalidate a holder whose earlier pre-pod steps (Trainer
-// install, resource apply) ran long enough for a same-run retry to take the
-// lock over. The renewal doubles as a heartbeat in that case, since
-// succeeding extends the caller's own claim by another NCCLExecutionLockStaleAge.
+// A missing lock reports false, not true, since that could equally mean a
+// replacement is about to claim it, and treating the ambiguous case as
+// authorization to proceed risks deleting or mutating that replacement's
+// live resources.
+//
+// Called both right before cleanup's delete and mid-run before mutating
+// this namespace's fixed-name resources, where the renewal also acts as a
+// heartbeat, extending the caller's own claim by another
+// NCCLExecutionLockStaleAge.
 func ncclExecutionLockHeldBy(ctx context.Context, clientset kubernetes.Interface, namespace, holderID string) (bool, error) {
 	getCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
@@ -685,6 +680,9 @@ func ncclExecutionLockHeldBy(ctx context.Context, clientset kubernetes.Interface
 
 	now := metav1.NewMicroTime(time.Now())
 	lease.Spec.RenewTime = &now
+	// Pinned to the resourceVersion just read, so this either succeeds,
+	// proving nothing raced it, or loses to a Conflict, proving a takeover
+	// already happened.
 	if _, err := leaseClient.Update(getCtx, lease, metav1.UpdateOptions{}); err != nil {
 		if apierrors.IsConflict(err) {
 			return false, nil
@@ -696,24 +694,19 @@ func ncclExecutionLockHeldBy(ctx context.Context, clientset kubernetes.Interface
 
 // pruneStaleNCCLNamespaces best-effort deletes aicr-nccl-perf-* namespaces
 // left behind by a standalone (no AICR_RUN_ID) run killed before its own
-// deferred cleanup ran. The Job path doesn't need this. Its deterministic
-// run ID lets ensureNamespace/verifyNCCLNamespaceNotLive reclaim a stale
-// namespace on the next run, but a killed standalone run orphans one under
-// a random suffix no future run will ever name again.
+// deferred cleanup ran. The Job path doesn't need this, since its
+// deterministic run ID lets ensureNamespace/verifyNCCLNamespaceNotLive
+// reclaim a stale namespace on the next run, but a killed standalone run
+// orphans one under a random suffix no future run will ever name again.
 //
-// Scoped server-side to labels.ManagedBy=aicr-validator plus
-// labels.Component=nccl-perf, so this only sees namespaces this package
-// created, decoupled from ncclWorkloadNamespacePrefix staying in sync with
-// the naming logic.
-//
-// Fire-and-forget. It deletes and moves on without waiting for
-// termination, pinning a UID precondition to the instance this List
-// observed so a same-named namespace recreated in between is left alone.
-// currentNamespace, anything younger than
-// defaults.NCCLStaleNamespacePruneAge, and any aged namespace still holding
-// a live pod (via verifyNCCLNamespaceNotLive) are left alone too. Failures
-// are logged and ignored, since this is opportunistic cleanup a benchmark
-// run should never fail for.
+// Scoped server-side to labels.ManagedBy and labels.Component, so this only
+// sees namespaces this package created, decoupled from
+// ncclWorkloadNamespacePrefix staying in sync with the naming logic.
+// currentNamespace, anything too young, and anything still live are left
+// alone (see the checks below). Fire-and-forget: it deletes and moves on
+// without waiting for termination, and failures are logged and ignored,
+// since this is opportunistic cleanup a benchmark run should never fail
+// for.
 func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interface, dynamicClient dynamic.Interface, currentNamespace string) {
 	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 	defer cancel()
@@ -785,6 +778,8 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 
 		delCtx, delCancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
 		uid := ns.UID
+		// Pinned to the UID this List observed, so a same-named namespace
+		// recreated in between is left alone rather than deleted.
 		delErr := clientset.CoreV1().Namespaces().Delete(delCtx, ns.Name, metav1.DeleteOptions{
 			Preconditions: &metav1.Preconditions{UID: &uid},
 		})
@@ -2013,7 +2008,11 @@ func nestedMap(m map[string]any, keys ...string) (map[string]any, bool) {
 	return current, true
 }
 
-// waitForLauncherPodAndGetLogs waits for the launcher pod to be created and retrieves logs
+// waitForLauncherPodAndGetLogs waits for the launcher pod to be created,
+// waits for it to complete, and returns its logs. Revalidates that
+// holderID still holds the namespace's execution lock right after the pod
+// goes terminal, since a live pod only protects the namespace from a
+// same-run retry while it's still running.
 func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.PodLifecycle, holderID string) (string, error) {
 	slog.Info("Waiting for launcher pod to be created...")
 
@@ -2625,23 +2624,19 @@ func verifyTransportFromLogs(logs string, variant ncclVariant) error {
 // pattern. Nothing else ever shares this namespace, so there's no shared
 // state to pin deletes against.
 //
-// Delete only starts asynchronous deletion, so this waits via
-// waitForNamespaceGone for teardown observability, but only logs on
-// timeout rather than failing. Cascading GC completes server-side
-// regardless, and NVLS's DRA/IMEX finalizers can legitimately outlast the
-// wait bound on the dual-fabric GB200 path.
-//
 // Unlike cleanupInferenceWorkload, a Delete failure is itself returned, not
 // just logged, so foldCleanupError can still fail an otherwise-passing
-// check on it, the real "did cleanup happen" signal. NotFound is tolerated.
+// check on it. NotFound is tolerated.
 //
 // uid pins the delete to the exact namespace instance runNCCLTrainJob
 // created or reclaimed, so a recreated same-named namespace is left alone
-// instead of silently deleted. It must be non-empty, since the fake client
-// used in tests ignores delete preconditions and would otherwise silently
-// proceed on a caller bug that drops the UID.
+// instead of silently deleted (see the check below for why it must be
+// non-empty).
 func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid types.UID) error {
 	if uid == "" {
+		// Required, not just preferred: the fake client used in tests
+		// ignores delete preconditions and would otherwise silently
+		// proceed on a caller bug that drops the UID.
 		return aicrErrors.New(aicrErrors.ErrCodeInternal,
 			fmt.Sprintf("refusing to delete NCCL benchmark namespace %q without an owning UID", namespace))
 	}
