@@ -691,6 +691,21 @@ const (
 	// NCCLTrainJobTimeout is the maximum time to wait for the NCCL all-reduce TrainJob to complete.
 	NCCLTrainJobTimeout = 30 * time.Minute
 
+	// NCCLStaleNamespacePruneAge is how old a leftover aicr-nccl-perf-* namespace
+	// must be before the best-effort prune in runNCCLTrainJob deletes it. Sized
+	// well past NCCLTrainJobTimeout so a namespace still owned by an in-progress
+	// sibling variant, or a run that is simply slow, is never touched.
+	NCCLStaleNamespacePruneAge = 2 * NCCLTrainJobTimeout
+
+	// NCCLExecutionLockStaleAge is how long an unrenewed run execution lock
+	// (see claimNCCLExecutionLock) is honored before a new caller may take
+	// it over. It only needs to cover the gaps between renewals, not the
+	// full run, since a live pod protects the namespace on its own via
+	// verifyNCCLNamespaceNotLive regardless of lock staleness. Kept short
+	// so a retry after a hard kill isn't stuck waiting out
+	// NCCLStaleNamespacePruneAge instead.
+	NCCLExecutionLockStaleAge = 20 * time.Minute
+
 	// NCCLLauncherPodTimeout is the maximum time to wait for the NCCL launcher pod to be created.
 	NCCLLauncherPodTimeout = 5 * time.Minute
 
@@ -706,6 +721,13 @@ const (
 	// against a separate lister that lags that strongly-consistent read — a freshness the
 	// client cannot observe. This bounds how long we let the webhook cache catch up.
 	TrainJobAdmissionRetryTimeout = 1 * time.Minute
+
+	// NCCLResourceRecreateWait bounds waitForResourceGone in createUnstructured's
+	// same-run TrainJob reclaim. A controller-serviced finalizer (Trainer v2 /
+	// JobSet ownership) can hold the delete for a while, so this gets its own
+	// bound instead of the much shorter DiagnosticTimeout used for the rest of
+	// createUnstructured's calls.
+	NCCLResourceRecreateWait = 5 * time.Minute
 )
 
 // Inference performance validation timeouts.
