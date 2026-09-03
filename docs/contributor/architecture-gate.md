@@ -9,12 +9,17 @@ so the CLI and the API server share one code path instead of two
 drifting ones.
 
 `TestFacadeBoundary` in `tests/architecture/facade_boundary_test.go`
-enforces that boundary mechanically. It type-checks `pkg/cli` and
-`pkg/server` from source, walks every symbol they reference into a
-package under `github.com/NVIDIA/aicr/`, and compares that observed
-reference set against the committed policy in
-`tests/architecture/facade-policy.yaml`. A reference the policy
-doesn't account for fails the build.
+enforces that boundary mechanically. It resolves every package under
+`./pkg/cli/...` and `./pkg/server/...` (via `go list`, so a future
+split like `pkg/cli/foo` is covered automatically instead of needing
+to be added by hand), type-checks each one from source, walks every
+symbol they reference into a package under `github.com/NVIDIA/aicr/`,
+and compares that observed reference set against the committed policy
+in `tests/architecture/facade-policy.yaml`. A reference the policy
+doesn't account for fails the build. References between packages
+within the analyzed set itself (for example a call from `pkg/cli/foo`
+into `pkg/cli/bar`, or into `pkg/cli` itself) are internal wiring, not
+business-logic references, and are not recorded.
 
 The gate is deliberately not import-level. A package that is already
 allowlisted can still introduce a new violation by calling a new
