@@ -133,7 +133,7 @@ Currently on disk:
 | `kindest/node:v1.36.1` | `kind_node_image` in `.settings.yaml` | the real Kind **control plane** — what `discoveryClient.ServerVersion()` reports, and therefore what `K8s.server.version` constraints are checked against |
 | `v1.33.5` | `DEFAULT_K8S_VERSION` in `kwok/scripts/apply-nodes.sh` | the **cosmetic** `kubeletVersion` stamped onto simulated nodes via `node.yaml.tmpl` |
 
-So a recipe requiring `K8s.server.version >= 1.34` is satisfied by the Kind image; the simulated `v1.33.5` is not the cluster's Kubernetes version and does not gate anything. (The two are several minors apart, outside the supported kubelet/API-server skew — harmless because no kubelet runs.)
+So a recipe requiring `K8s.server.version >= 1.34` is satisfied by the Kind image; the simulated `v1.33.5` is not the cluster's Kubernetes version and does not gate anything. (The two are three minor versions apart — the maximum supported kubelet/API-server skew — but the policy is moot here because no kubelet runs.)
 
 ## Makefile Targets
 
