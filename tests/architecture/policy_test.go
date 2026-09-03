@@ -17,6 +17,8 @@ package architecture
 import (
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -85,11 +87,28 @@ func TestLoadPolicy(t *testing.T) {
 	}
 }
 
+// trackingPattern is the issue-reference shape required of a constrained
+// entry's tracking field: "#" followed by one or more digits. Anything else
+// -- a placeholder, a bare number, a URL -- fails to name a real issue whose
+// closure removes the exception.
+var trackingPattern = regexp.MustCompile(`^#\d+$`)
+
 // validate reports human-readable problems with the policy's own shape. Every
 // constrained package needs a reason and exactly one of tracking/permanent, so
 // an exception can never be silently permanent by omission.
 func (p policy) validate() []string {
 	var problems []string
+
+	// A package listed in more than one bucket must be reported here, by
+	// name, before anything else. checkAgainstPolicy checks facade, then
+	// infrastructure, then constrained, and `continue`s on the first match,
+	// so a package in both infrastructure and constrained never reaches the
+	// constrained loop's `seen` bookkeeping -- every one of its recorded
+	// symbols then surfaces as "stale ... remove the entry", which
+	// misdirects the author toward deleting live entries instead of
+	// pointing at the actual fault: the duplicate bucket listing.
+	problems = append(problems, duplicateBucketProblems(p)...)
+
 	for name, entry := range p.Constrained {
 		if entry.Reason == "" {
 			problems = append(problems, name+": missing reason")
@@ -100,6 +119,9 @@ func (p policy) validate() []string {
 		hasTracking := entry.Tracking != ""
 		if hasTracking == entry.Permanent {
 			problems = append(problems, name+": set exactly one of tracking or permanent")
+		}
+		if hasTracking && !trackingPattern.MatchString(entry.Tracking) {
+			problems = append(problems, name+": tracking must be an issue reference like \"#1234\", got \""+entry.Tracking+"\"")
 		}
 		for symbol, class := range entry.Symbols {
 			switch class {
@@ -120,6 +142,36 @@ func (p policy) validate() []string {
 	return problems
 }
 
+// duplicateBucketProblems reports every package name that appears in more
+// than one of the three buckets (facade, infrastructure, constrained).
+// Results are sorted so validate's output is stable.
+func duplicateBucketProblems(p policy) []string {
+	counts := make(map[string]int)
+	for _, name := range p.Facade {
+		counts[name]++
+	}
+	for name := range p.Infrastructure {
+		counts[name]++
+	}
+	for name := range p.Constrained {
+		counts[name]++
+	}
+
+	var dups []string
+	for name, count := range counts {
+		if count > 1 {
+			dups = append(dups, name)
+		}
+	}
+	sort.Strings(dups)
+
+	problems := make([]string, 0, len(dups))
+	for _, name := range dups {
+		problems = append(problems, name+": listed in multiple policy buckets")
+	}
+	return problems
+}
+
 func TestPolicyValidate(t *testing.T) {
 	t.Parallel()
 
@@ -129,31 +181,47 @@ func TestPolicyValidate(t *testing.T) {
 		name    string
 		entry   constrainedPackage
 		facade  []string
+		infra   map[string]string
 		wantSub string
 	}{
-		{"valid permanent", constrainedPackage{Reason: "r", Permanent: true}, validFacade, ""},
-		{"valid tracking", constrainedPackage{Reason: "r", Tracking: "#2025"}, validFacade, ""},
-		{"missing reason", constrainedPackage{Permanent: true}, validFacade, "missing reason"},
-		{"neither", constrainedPackage{Reason: "r"}, validFacade, "exactly one"},
-		{"both", constrainedPackage{Reason: "r", Tracking: "#1", Permanent: true}, validFacade, "exactly one"},
-		{"bad class", constrainedPackage{Reason: "r", Permanent: true, Symbols: map[string]symbolClass{"X": "nope"}}, validFacade, "unknown class"},
+		{"valid permanent", constrainedPackage{Reason: "r", Permanent: true}, validFacade, nil, ""},
+		{"valid tracking", constrainedPackage{Reason: "r", Tracking: "#2025"}, validFacade, nil, ""},
+		{"missing reason", constrainedPackage{Permanent: true}, validFacade, nil, "missing reason"},
+		{"neither", constrainedPackage{Reason: "r"}, validFacade, nil, "exactly one"},
+		{"both", constrainedPackage{Reason: "r", Tracking: "#1", Permanent: true}, validFacade, nil, "exactly one"},
+		{"bad class", constrainedPackage{Reason: "r", Permanent: true, Symbols: map[string]symbolClass{"X": "nope"}}, validFacade, nil, "unknown class"},
 		// Regression guard for the generator's raw output: every constrained
 		// reason it emits is the literal placeholder below, and validate must
 		// reject it rather than let an unfinished policy pass green.
-		{"todo reason", constrainedPackage{Reason: "TODO: state why this is not a facade gap", Permanent: true}, validFacade, "TODO"},
+		{"todo reason", constrainedPackage{Reason: "TODO: state why this is not a facade gap", Permanent: true}, validFacade, nil, "TODO"},
 		// Regression guard for the generator's other mistake: it sorts every
 		// observed package -- including the facade itself -- into constrained
 		// and writes no facade bucket at all.
-		{"missing facade", constrainedPackage{Reason: "r", Permanent: true}, nil, "facade bucket"},
+		{"missing facade", constrainedPackage{Reason: "r", Permanent: true}, nil, nil, "facade bucket"},
 		// Regression guard for a real hole: checkAgainstPolicy treats every
 		// p.Facade entry as clean, so a second facade package would exempt
 		// that package from the gate entirely while validate stayed green.
-		{"second facade package", constrainedPackage{Reason: "r", Permanent: true}, []string{facadePackage, "pkg/recipe"}, "facade bucket"},
+		{"second facade package", constrainedPackage{Reason: "r", Permanent: true}, []string{facadePackage, "pkg/recipe"}, nil, "facade bucket"},
+		// A malformed tracking value (a typo, a placeholder) satisfies the old
+		// "non-empty string" check but doesn't name an issue whose closure
+		// removes the exception.
+		{"malformed tracking", constrainedPackage{Reason: "r", Tracking: "TODO"}, validFacade, nil, "issue reference"},
+		{"well-formed tracking", constrainedPackage{Reason: "r", Tracking: "#2561"}, validFacade, nil, ""},
+		// Coverage for the untested infrastructure empty-reason branch: without
+		// this row, dropping the guard from validate would pass every other
+		// case in this table.
+		{"infrastructure empty reason", constrainedPackage{Reason: "r", Permanent: true}, validFacade, map[string]string{"pkg/y": ""}, "missing infrastructure reason"},
+		// Regression guard for the misdirected-stale-error bug: pkg/x listed in
+		// both infrastructure and constrained must be reported as a duplicate
+		// bucket listing, not (via checkAgainstPolicy's infrastructure
+		// short-circuit skipping the constrained `seen` bookkeeping) as every
+		// one of its constrained symbols going stale.
+		{"duplicate bucket", constrainedPackage{Reason: "r", Permanent: true}, validFacade, map[string]string{"pkg/x": "infra reason"}, "listed in multiple policy buckets"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			p := policy{Facade: tt.facade, Constrained: map[string]constrainedPackage{"pkg/x": tt.entry}}
+			p := policy{Facade: tt.facade, Infrastructure: tt.infra, Constrained: map[string]constrainedPackage{"pkg/x": tt.entry}}
 			problems := p.validate()
 			if tt.wantSub == "" {
 				if len(problems) != 0 {
