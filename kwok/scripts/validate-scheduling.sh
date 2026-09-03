@@ -282,16 +282,19 @@ capture_failure_diagnostics() {
         | tr ' ' '\n' | grep -vE "^(${system_ns})$" || true)
 
     for ns in $namespaces; do
-        kubectl get pods -n "$ns" -o wide > "${out_dir}/${ns}-pods.txt" 2>/dev/null || true
+        timeout 30s kubectl get pods -n "$ns" -o wide > "${out_dir}/${ns}-pods.txt" 2>/dev/null || true
         # Per-pod (not label-selected) so this works regardless of chart
-        # label conventions.
+        # label conventions. --tail caps a single pathological log; timeout
+        # caps a hung/slow apiserver — this is a failure-path diagnostic
+        # step, not the job's real work, and must never eat into the
+        # cleanup budget that actually tears the cluster down.
         local pod
         for pod in $(kubectl get pods -n "$ns" -o name 2>/dev/null); do
-            kubectl logs -n "$ns" "$pod" --all-containers --tail=-1 --prefix \
+            timeout 30s kubectl logs -n "$ns" "$pod" --all-containers --tail=1000 --prefix \
                 >> "${out_dir}/${ns}-logs.txt" 2>/dev/null || true
         done
-        kubectl get endpointslices -n "$ns" -o yaml > "${out_dir}/${ns}-endpointslices.yaml" 2>/dev/null || true
-        kubectl describe pods -n "$ns" > "${out_dir}/${ns}-describe.txt" 2>/dev/null || true
+        timeout 30s kubectl get endpointslices -n "$ns" -o yaml > "${out_dir}/${ns}-endpointslices.yaml" 2>/dev/null || true
+        timeout 30s kubectl describe pods -n "$ns" > "${out_dir}/${ns}-describe.txt" 2>/dev/null || true
     done
 }
 
