@@ -767,8 +767,11 @@ components:
   # `cre` and `cluster-readiness-engine`.
   #
   # NVCRE orchestrates benchmarks through Kubeflow Trainer (TrainJob /
-  # TrainingRuntime); the chart does not install Trainer, so a referencing
-  # recipe must also carry kubeflow-trainer.
+  # TrainingRuntime); the chart does not install Trainer. The registry
+  # cannot order charts — a referencing recipe's componentRefs entry
+  # must set dependencyRefs: [kubeflow-trainer]. If
+  # metrics.serviceMonitor.enabled is turned on, also depend on
+  # prometheus-operator-crds (AICR values leave the monitor off).
   #
   # AICR values disable metrics.serviceMonitor.enabled. Re-enable only when
   # prometheus-operator-crds are already on the cluster (base.yaml or a
@@ -790,7 +793,8 @@ components:
     # See https://github.com/NVIDIA/aicr/issues/914.
     hasSelfRefCRDs: true
     helm:
-      # Chart and controller image are public on GHCR and pull anonymously.
+      # Chart and controller image are public on GHCR. Image pull is
+      # anonymous; Helm OCI chart pulls may require GHCR credentials.
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: cluster-readiness-engine
       defaultVersion: v0.1.0

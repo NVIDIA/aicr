@@ -15,7 +15,7 @@
 # NVIDIA Cluster Readiness Engine (NVCRE) Health Check
 #
 # Validates that the controller manager is running, that the CRDs a
-# certification run depends on are Established (without them a WorkloadRun or
+# certification run depends on are Established (without them a
 # Certification create fails with "no matches for kind"), and that the
 # chart-shipped LogProfiles landed.
 #
