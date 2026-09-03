@@ -618,6 +618,35 @@ func TestPruneStaleNCCLNamespaces_OwnDeleteBlocksTrainerReap(t *testing.T) {
 	}
 }
 
+// TestPruneStaleNCCLNamespaces_LiveCurrentNamespaceBlocksTrainerReap checks
+// that a live current namespace blocks Trainer reaping, even though prune's
+// delete path never touches it. A retry sharing the same deterministic
+// namespace name as a still-running peer must not reap Trainer out from
+// under that peer's in-flight TrainJob.
+func TestPruneStaleNCCLNamespaces_LiveCurrentNamespaceBlocksTrainerReap(t *testing.T) {
+	old := metav1.NewTime(time.Now().Add(-2 * defaults.NCCLStaleNamespacePruneAge))
+	currentNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-currentrun", CreationTimestamp: old,
+		Labels: map[string]string{labels.ManagedBy: labels.ValueValidator, labels.Component: labels.ValueNCCLPerf},
+	}}
+	livePod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "launcher-0", Namespace: currentNS.Name},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+
+	client := fake.NewClientset(currentNS, livePod)
+	persistTrainerInstallManifest(context.Background(), client, []trainerResourceRef{
+		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
+	})
+	backdateTrainerInstallManifest(t, client)
+
+	pruneStaleNCCLNamespaces(context.Background(), client, newTrainerFakeClient(), currentNS.Name)
+
+	if _, resources, _ := loadTrainerInstallManifest(context.Background(), client); resources == nil {
+		t.Error("expected the Trainer install manifest to survive while the current namespace is live")
+	}
+}
+
 // TestPruneStaleNCCLNamespaces_SkipsDeleteOnConcurrentClaim checks that
 // prune backs off if a caller claims the namespace's lock in the instant
 // between prune's own liveness check and its delete, instead of deleting

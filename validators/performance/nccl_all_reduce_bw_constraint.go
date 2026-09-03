@@ -737,6 +737,11 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 			return
 		}
 		if ns.Name == currentNamespace {
+			// This namespace existing at all means this run, or a peer
+			// sharing the same deterministic name, may still need
+			// Trainer. Reaping it out from under a live peer would fail
+			// that peer's in-flight TrainJob.
+			otherNamespacesRemain = true
 			continue
 		}
 		if ns.DeletionTimestamp != nil {
