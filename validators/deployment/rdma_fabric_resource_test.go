@@ -73,9 +73,11 @@ func TestRDMAFabricResource_RealManifests(t *testing.T) {
 }
 
 // TestRDMAFabricResource_FailsClosed proves derivation failures are errors,
-// never a silent skip: a fabric-declaring ref whose policy yields no resource,
-// distinct resources across manifests, and an unreadable manifest path all
-// fail.
+// never a silent skip: an unreadable manifest path and distinct resources
+// across manifests both fail. (The zero-derivable-resources branch is
+// exercised at the parser level in TestNICClusterPolicyResources_ParseShapes
+// — no embedded marker-named manifest without a device-plugin block exists
+// to drive it end to end.)
 func TestRDMAFabricResource_FailsClosed(t *testing.T) {
 	t.Parallel()
 
@@ -157,6 +159,15 @@ metadata:
   name: unrelated
 `,
 			want: nil,
+		},
+		{
+			name: "config entry without resourceName fails closed",
+			rendered: `kind: NicClusterPolicy
+spec:
+  rdmaSharedDevicePlugin:
+    config: '{"configList":[{"resourcePrefix":"rdma"}]}'
+`,
+			wantErrSub: "declares no resourceName",
 		},
 		{
 			name: "malformed config JSON fails closed",

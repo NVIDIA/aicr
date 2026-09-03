@@ -28,6 +28,13 @@
 # the only place the OCI VF selectors 101a/101e can be expressed); the operator
 # reconciles nv-ipam + secondaryNetwork + sriovDevicePlugin from that CR regardless.
 # nfd.enabled: false — GPU Operator's NFD is used; no second NFD.
+# deployNodeFeatureRules stays at the chart default (true): the chart's
+# nvidia-nics-rules NodeFeatureRule labels vendor-15b3 class-0200/0207 nodes
+# feature.node.kubernetes.io/pci-15b3.present=true, which the deployment
+# validator's RDMA readiness gate uses as its node cohort. Do NOT copy AKS's
+# deployNodeFeatureRules: false here — AKS disables it only because it ships
+# its own targeted rule manifest; without either source the gate's cohort is
+# empty and it fails closed on every deploy.
 deployCR: false
 nvIpam:
   enabled: false

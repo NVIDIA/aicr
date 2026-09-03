@@ -54,9 +54,8 @@ func parseNVregFromParams(content string) bool {
 
 const (
 	// preflightPodNamePrefix is the generateName seed for the per-node probe
-	// pods. Short so the full name (including node hash + rand suffix) fits
-	// inside the 63-character DNS-1123 label limit on all realistic node
-	// names.
+	// pods. Short so the full name (with the apiserver's random generateName
+	// suffix) stays well inside the 63-character DNS-1123 label limit.
 	preflightPodNamePrefix = "nccl-nvreg-probe-"
 
 	// nvregDocsHint is the cluster-operator-facing message the preflight

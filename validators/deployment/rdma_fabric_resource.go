@@ -182,7 +182,11 @@ func nicClusterPolicyResources(rendered []byte) ([]string, error) {
 					"failed to decode rdmaSharedDevicePlugin config JSON", err)
 			}
 			for _, e := range cfg.ConfigList {
-				out = append(out, qualifiedNICResource(e, rdmaSharedDefaultResourcePrefix))
+				r, rerr := qualifiedNICResource(e, rdmaSharedDefaultResourcePrefix)
+				if rerr != nil {
+					return nil, rerr
+				}
+				out = append(out, r)
 			}
 		}
 		if p := ncp.Spec.SriovDevicePlugin; p != nil {
@@ -194,7 +198,11 @@ func nicClusterPolicyResources(rendered []byte) ([]string, error) {
 					"failed to decode sriovDevicePlugin config JSON", err)
 			}
 			for _, e := range cfg.ResourceList {
-				out = append(out, qualifiedNICResource(e, sriovDefaultResourcePrefix))
+				r, rerr := qualifiedNICResource(e, sriovDefaultResourcePrefix)
+				if rerr != nil {
+					return nil, rerr
+				}
+				out = append(out, r)
 			}
 		}
 	}
@@ -203,11 +211,18 @@ func nicClusterPolicyResources(rendered []byte) ([]string, error) {
 
 // qualifiedNICResource joins a config entry into the "<prefix>/<name>"
 // extended-resource form, applying the plugin's documented default prefix
-// when the entry omits one.
-func qualifiedNICResource(e nicResourceEntry, defaultPrefix string) string {
+// when the entry omits one. An entry with no resourceName is an error —
+// "<prefix>/" is not a resource any plugin will ever advertise, and letting
+// it through would make the readiness gate poll a phantom until timeout
+// instead of naming the malformed config.
+func qualifiedNICResource(e nicResourceEntry, defaultPrefix string) (string, error) {
+	if e.ResourceName == "" {
+		return "", errors.New(errors.ErrCodeInternal,
+			"device-plugin config entry declares no resourceName")
+	}
 	prefix := e.ResourcePrefix
 	if prefix == "" {
 		prefix = defaultPrefix
 	}
-	return prefix + "/" + e.ResourceName
+	return prefix + "/" + e.ResourceName, nil
 }
