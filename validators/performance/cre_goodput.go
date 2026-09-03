@@ -81,9 +81,10 @@ func checkCRETrainingGoodput(ctx *validators.Context) (err error) {
 		return deleteErr
 	}
 	defer func() {
-		err = creCleanupFailure(checkNameCRETrainingGoodput, err, deleteCRECertification(
+		err = creCleanupFailure(checkNameCRETrainingGoodput, err, teardownCRECertification(
 			context.Background(),
 			ctx.DynamicClient,
+			ctx.Clientset,
 			ctx.Namespace,
 			objName,
 		))
