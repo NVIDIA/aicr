@@ -258,10 +258,52 @@ resolve_flux_root_names() {
     esac
 }
 
+# Dump pod logs/describe/endpointslices for every non-system namespace before
+# cleanup() tears them down. Best-effort and namespace-agnostic (no
+# component-specific selectors) so it stays useful for any future operator
+# failure under KWOK, not just today's incident.
+#
+# Writes into /tmp/kwok-debug-artifacts/pod-logs/, the same well-known path
+# the calling GitHub Action's "Collect debug artifacts" step already
+# mkdir -p's and "Upload debug artifacts" already uploads on failure — no
+# workflow changes needed for this to reach the artifact.
+#
+# Runs from inside cleanup()'s EXIT trap, which fires before the
+# composite action's failure() steps ever execute. Without this, cleanup()'s
+# own helm-uninstall/namespace-delete below destroys the evidence first —
+# see NVIDIA/nodewright#571 for the incident that surfaced the gap.
+capture_failure_diagnostics() {
+    local out_dir="/tmp/kwok-debug-artifacts/pod-logs"
+    mkdir -p "$out_dir" 2>/dev/null || return 0
+
+    local system_ns="${SYSTEM_NS_PATTERN}"
+    local namespaces
+    namespaces=$(kubectl get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
+        | tr ' ' '\n' | grep -vE "^(${system_ns})$" || true)
+
+    for ns in $namespaces; do
+        kubectl get pods -n "$ns" -o wide > "${out_dir}/${ns}-pods.txt" 2>/dev/null || true
+        # Per-pod (not label-selected) so this works regardless of chart
+        # label conventions.
+        local pod
+        for pod in $(kubectl get pods -n "$ns" -o name 2>/dev/null); do
+            kubectl logs -n "$ns" "$pod" --all-containers --tail=-1 --prefix \
+                >> "${out_dir}/${ns}-logs.txt" 2>/dev/null || true
+        done
+        kubectl get endpointslices -n "$ns" -o yaml > "${out_dir}/${ns}-endpointslices.yaml" 2>/dev/null || true
+        kubectl describe pods -n "$ns" > "${out_dir}/${ns}-describe.txt" 2>/dev/null || true
+    done
+}
+
 # Cleanup function
 cleanup() {
     local exit_code=$?
     log_info "Cleaning up..."
+
+    if [[ "$exit_code" -ne 0 ]]; then
+        log_info "Non-zero exit ($exit_code) — capturing pod diagnostics before teardown..."
+        capture_failure_diagnostics
+    fi
 
     if [[ -n "$WORK_DIR" ]] && [[ -d "$WORK_DIR" ]]; then
         rm -rf "$WORK_DIR"
