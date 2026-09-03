@@ -69,9 +69,11 @@ spec:
       # RespectIgnoreDifferences: required for the ignoreDifferences block
       # below to take effect during sync, not just status/diff display. See
       # https://argo-cd.readthedocs.io/en/stable/user-guide/sync-options/#respect-ignore-difference-configs
+      #
+      # One guard covers both halves deliberately: the syncOption and the
+      # ignoreDifferences block are only ever correct together — emitting
+      # either alone is a silent no-op.
       - RespectIgnoreDifferences=true
-{{- end }}
-{{- if .IgnoreComputeDomainCRDDiff }}
   ignoreDifferences:
     # gpu-operator and nvidia-dra-driver-gpu both install
     # computedomains.resource.nvidia.com, and as of gpu-operator v26.7.0

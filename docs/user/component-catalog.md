@@ -806,7 +806,8 @@ under a newer operator is the same version-skew class that caused the
 frontend discovery panic fixed in #1193 -- setting `DYN_EVENT_PLANE=zmq`
 on the old workload is defense in depth, not a substitute for bumping its
 image to match the operator.
-### `gpu-operator` + `nvidia-dra-driver-gpu`: ComputeDomain CRD ownership on Argo CD
+
+### `gpu-operator` and `nvidia-dra-driver-gpu`: ComputeDomain CRD ownership on Argo CD
 
 `gpu-operator` and `nvidia-dra-driver-gpu` (and `nvidia-dra-driver-gpu-ocp`) both
 ship the `computedomains.resource.nvidia.com` CRD. As of `gpu-operator`
@@ -825,5 +826,7 @@ is needed, and bundles with only one of the two components are unaffected.
 This is a stopgap, not a durable fix. `Helm` and `Flux` bundles are not
 affected (both install CRDs once and never re-apply them), and the
 OLM-based OCP path (`gpu-operator-ocp`, `gpu-operator-ocp-olm`) is not
-covered — CRD reconciliation there is owned by OLM, not an AICR-generated
-Argo `Application`. See [NVIDIA/aicr#2546](https://github.com/NVIDIA/aicr/issues/2546).
+covered — those components install no chart `crds/` of their own, so their
+CRDs come from the OLM `Subscription`/CSV and an `Application`-level
+`ignoreDifferences` has nothing to arbitrate. That conflict is tracked
+separately. See [NVIDIA/aicr#2546](https://github.com/NVIDIA/aicr/issues/2546).

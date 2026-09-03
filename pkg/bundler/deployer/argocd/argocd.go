@@ -130,24 +130,26 @@ type ApplicationData struct {
 
 // Components involved in the computedomains.resource.nvidia.com CRD
 // ownership conflict between gpu-operator and the standalone DRA driver.
-// See NVIDIA/aicr#2546. Scoped to the Helm-based components only —
-// gpu-operator-ocp/-ocp-olm are OLM CR-pattern components with no
-// AICR-authored Argo Application, so this mitigation does not apply there.
+// See NVIDIA/aicr#2546.
+//
+// Scoped to the Helm-based gpu-operator: its chart installs the CRD from
+// crds/, which is what Argo CD then reconciles against the DRA driver's
+// copy. gpu-operator-ocp/-ocp-olm are OLM CR-pattern components
+// (registry defaultRepository: "") whose CRDs come from the
+// Subscription/CSV rather than a chart's crds/, so an Application-level
+// ignoreDifferences has nothing to arbitrate there — the OLM conflict is
+// a separate, unresolved problem.
+//
+// The -ocp DRA alternative below is not reachable from the shipped OSS
+// overlays (recipes/overlays/ocp.yaml disables plain gpu-operator and
+// substitutes gpu-operator-ocp, and disabled refs are filtered out before
+// the deployer runs). It is retained because external recipe layers can
+// compose component sets the OSS overlays do not.
 const (
 	computeDomainComponentGPUOperator  = "gpu-operator"
 	computeDomainComponentDRADriver    = "nvidia-dra-driver-gpu"
 	computeDomainComponentDRADriverOCP = "nvidia-dra-driver-gpu-ocp"
 )
-
-// hasComponent reports whether components contains a ref named name.
-func hasComponent(components []recipe.ComponentRef, name string) bool {
-	for _, c := range components {
-		if c.Name == name {
-			return true
-		}
-	}
-	return false
-}
 
 // AppOfAppsData contains data for rendering the App of Apps manifest.
 type AppOfAppsData struct {
@@ -612,9 +614,9 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// gpu-operator and a standalone DRA driver component, which as of
 	// gpu-operator v26.7.0 ship conflicting computedomains CRD schemas.
 	// See IgnoreComputeDomainCRDDiff and NVIDIA/aicr#2546.
-	computeDomainConflict := hasComponent(components, computeDomainComponentGPUOperator) &&
-		(hasComponent(components, computeDomainComponentDRADriver) ||
-			hasComponent(components, computeDomainComponentDRADriverOCP))
+	computeDomainConflict := findComponentRef(components, computeDomainComponentGPUOperator) != nil &&
+		(findComponentRef(components, computeDomainComponentDRADriver) != nil ||
+			findComponentRef(components, computeDomainComponentDRADriverOCP) != nil)
 
 	// Build ApplicationData per folder and write application.yaml inside the
 	// NNN-<name>/ directory. Branching on FolderKind selects the Application
