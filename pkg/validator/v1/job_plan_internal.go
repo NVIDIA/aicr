@@ -66,8 +66,9 @@ const (
 	CRENCCLAllReduceBWCheckName = "nccl-cre-all-reduce-bw"
 
 	// CRETrainingGoodputCheckName is the catalog name of the CRE-driven
-	// NeMo/Megatron training check. It is limited to EKS H100 while CRE
-	// integration is validated, and no embedded overlay enables it.
+	// NeMo training check (Certification training/nemotron5-8b). It is
+	// limited to EKS H100 while CRE integration is validated, and no
+	// embedded overlay enables it.
 	CRETrainingGoodputCheckName = "cre-training-goodput"
 
 	// ncclFabricEnv selects the NET fabric (efa default | roce). Forwarded to

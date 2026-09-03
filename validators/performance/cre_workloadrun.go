@@ -34,8 +34,17 @@ import (
 )
 
 const (
-	creAPIGroup    = "nvcre.nvidia.com"
-	creNCCLRunName = "aicr-cre-nccl"
+	creAPIGroup        = "nvcre.nvidia.com"
+	creNCCLRunName     = "aicr-cre-nccl"
+	creNCCLDomain      = "communication"
+	creNCCLVariant     = "nccl-all-reduce"
+	creTrainingDomain  = "training"
+	creTrainingVariant = "nemotron5-8b"
+	// creMaxNodesPerCertification caps both spec.nodesPerJob and
+	// spec.target.nodeNames. Omitting nodesPerJob makes CRE use every
+	// matching node; setting it without capping nodeNames still fans out
+	// one job group per pair across the whole GPU pool.
+	creMaxNodesPerCertification = 2
 	// creGonePollInterval is how often deleteCREResource re-Gets a CR that is
 	// still terminating (finalizers). Bounded by DiagnosticTimeout on the
 	// parent context.
@@ -43,9 +52,6 @@ const (
 )
 
 var (
-	workloadRunGVR = schema.GroupVersionResource{
-		Group: creAPIGroup, Version: versionV1alpha1, Resource: "workloadruns",
-	}
 	certificationGVR = schema.GroupVersionResource{
 		Group: creAPIGroup, Version: versionV1alpha1, Resource: "certifications",
 	}
@@ -62,18 +68,33 @@ func uniqueCREResourceName(prefix string) (string, error) {
 	return fmt.Sprintf("%s-%x", prefix, nonce), nil
 }
 
-func buildCRENCCLCertification(namespace, name string, gpuConfig *gpuConfiguration, nodeSelector map[string]string) *unstructured.Unstructured {
+func buildCRENCCLCertification(namespace, name string, gpuConfig *gpuConfiguration) *unstructured.Unstructured {
+	return buildCRECertification(namespace, name, gpuConfig, creNCCLDomain, creNCCLVariant)
+}
+
+func buildCRETrainingCertification(namespace, name string, gpuConfig *gpuConfiguration) *unstructured.Unstructured {
+	return buildCRECertification(namespace, name, gpuConfig, creTrainingDomain, creTrainingVariant)
+}
+
+func buildCRECertification(
+	namespace, name string,
+	gpuConfig *gpuConfiguration,
+	domain, variant string,
+) *unstructured.Unstructured {
+
+	nodes := capCRECertificationNodes(gpuConfig.Nodes)
 	spec := map[string]any{
 		"categories": []any{
 			map[string]any{
-				"domain":  "communication",
-				"variant": "nccl-all-reduce",
+				"domain":  domain,
+				"variant": variant,
 			},
 		},
-		"gpusPerNode": int64(gpuConfig.GPUCountPerNode),
+		"gpusPerNode":   int64(gpuConfig.GPUCountPerNode),
+		"nodesPerJob":   int64(len(nodes)),
+		"timeoutPerJob": defaults.CRECertificationTimeout.String(),
 	}
-
-	addCRETarget(spec, gpuConfig, nodeSelector)
+	addCRETarget(spec, nodes)
 
 	return &unstructured.Unstructured{
 		Object: map[string]any{
@@ -88,25 +109,33 @@ func buildCRENCCLCertification(namespace, name string, gpuConfig *gpuConfigurati
 	}
 }
 
-func addCRETarget(spec map[string]any, gpuConfig *gpuConfiguration, nodeSelector map[string]string) {
-	target := map[string]any{}
-	if len(nodeSelector) > 0 {
-		target["nodeSelector"] = stringMapToAny(nodeSelector)
-	} else if len(gpuConfig.Nodes) > 0 {
-		names := make([]any, 0, len(gpuConfig.Nodes))
-		for _, n := range gpuConfig.Nodes {
-			names = append(names, n.Name)
-		}
-		target["nodeNames"] = names
+func capCRECertificationNodes(nodes []corev1.Node) []corev1.Node {
+	if len(nodes) == 0 {
+		return nil
 	}
+	out := append([]corev1.Node(nil), nodes...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	if len(out) > creMaxNodesPerCertification {
+		out = out[:creMaxNodesPerCertification]
+	}
+	return out
+}
+
+func addCRETarget(spec map[string]any, nodes []corev1.Node) {
+	if len(nodes) == 0 {
+		return
+	}
+	names := make([]any, 0, len(nodes))
+	for i := range nodes {
+		names = append(names, nodes[i].Name)
+	}
+	target := map[string]any{"nodeNames": names}
 	// Intersect NoSchedule/NoExecute taints so CRE can select the intended
 	// GPU nodes and inject matching tolerations.
-	if sels := commonNodeTaintSelectors(gpuConfig.Nodes); len(sels) > 0 {
+	if sels := commonNodeTaintSelectors(nodes); len(sels) > 0 {
 		target["taintSelectors"] = sels
 	}
-	if len(target) > 0 {
-		spec["target"] = target
-	}
+	spec["target"] = target
 }
 
 func taintKey(t corev1.Taint) string {
@@ -155,28 +184,6 @@ func commonNodeTaintSelectors(nodes []corev1.Node) []any {
 		}
 		sel["effect"] = string(t.Effect)
 		out = append(out, sel)
-	}
-	return out
-}
-
-func newCREWorkloadRun(namespace, name string, spec map[string]any) *unstructured.Unstructured {
-	return &unstructured.Unstructured{
-		Object: map[string]any{
-			keyAPIVersion: creAPIGroup + "/" + versionV1alpha1,
-			keyKind:       "WorkloadRun",
-			keyMetadata: map[string]any{
-				keyName:      name,
-				keyNamespace: namespace,
-			},
-			keySpec: spec,
-		},
-	}
-}
-
-func stringMapToAny(in map[string]string) map[string]any {
-	out := make(map[string]any, len(in))
-	for k, v := range in {
-		out[k] = v
 	}
 	return out
 }
@@ -244,10 +251,6 @@ func unstructuredConditionTrue(obj *unstructured.Unstructured, condType string) 
 	return false
 }
 
-func waitForWorkloadRunTerminal(ctx context.Context, client dynamic.Interface, namespace, name string) (*unstructured.Unstructured, error) {
-	return waitForCRETerminal(ctx, client, workloadRunGVR, "WorkloadRun", namespace, name)
-}
-
 func waitForCertificationTerminal(ctx context.Context, client dynamic.Interface, namespace, name string) (*unstructured.Unstructured, error) {
 	return waitForCRETerminal(ctx, client, certificationGVR, "Certification", namespace, name)
 }
@@ -259,7 +262,7 @@ func waitForCRETerminal(
 	kind, namespace, name string,
 ) (*unstructured.Unstructured, error) {
 
-	waitCtx, cancel := context.WithTimeout(ctx, defaults.CREWorkloadRunTimeout)
+	waitCtx, cancel := context.WithTimeout(ctx, defaults.CRECertificationTimeout)
 	defer cancel()
 
 	res := client.Resource(gvr).Namespace(namespace)
@@ -308,7 +311,7 @@ func waitForCRETerminal(
 	}
 }
 
-func certificationWorkflowName(obj *unstructured.Unstructured) (string, error) {
+func certificationWorkflowName(obj *unstructured.Unstructured, domain, variant string) (string, error) {
 	statuses, found, err := unstructured.NestedSlice(obj.Object, "status", "categoryStatuses")
 	if err != nil {
 		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read Certification category statuses", err)
@@ -318,19 +321,21 @@ func certificationWorkflowName(obj *unstructured.Unstructured) (string, error) {
 	}
 	for _, raw := range statuses {
 		status, ok := raw.(map[string]any)
-		if !ok || fmt.Sprint(status["domain"]) != "communication" ||
-			fmt.Sprint(status["variant"]) != "nccl-all-reduce" {
+		if !ok || fmt.Sprint(status["domain"]) != domain ||
+			fmt.Sprint(status["variant"]) != variant {
 
 			continue
 		}
 
 		ref, ok := status["workflowRef"].(map[string]any)
 		if !ok || fmt.Sprint(ref["name"]) == "" {
-			return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "Certification NCCL workflow reference is empty")
+			return "", aicrErrors.New(aicrErrors.ErrCodeNotFound,
+				fmt.Sprintf("Certification %s/%s workflow reference is empty", domain, variant))
 		}
 		return fmt.Sprint(ref["name"]), nil
 	}
-	return "", aicrErrors.New(aicrErrors.ErrCodeNotFound, "Certification NCCL category status not found")
+	return "", aicrErrors.New(aicrErrors.ErrCodeNotFound,
+		fmt.Sprintf("Certification %s/%s category status not found", domain, variant))
 }
 
 func listMaxBusBandwidth(ctx context.Context, client dynamic.Interface, namespace, workflowName string, createdAt metav1.Time) (float64, error) {
@@ -373,10 +378,6 @@ func measurementBelongsToRun(obj *unstructured.Unstructured, runName string, cre
 		}
 	}
 	return false
-}
-
-func deleteCREWorkloadRun(ctx context.Context, client dynamic.Interface, namespace, name string) error {
-	return deleteCREResource(ctx, client, workloadRunGVR, "WorkloadRun", namespace, name)
 }
 
 func deleteCRECertification(ctx context.Context, client dynamic.Interface, namespace, name string) error {
