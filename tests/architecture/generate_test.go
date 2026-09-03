@@ -62,6 +62,13 @@ func TestGeneratePolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal policy: %v", err)
 	}
+	// Destructive full regen, not a merge: this overwrites the entire committed
+	// file with every observed package sorted into constrained, discarding the
+	// facade/infrastructure bucketing and every curated reason/tracking value
+	// in the file being replaced. Whoever runs this to capture one new symbol
+	// must hand-reapply all of that curation before the result can be
+	// committed -- see "Regenerating the policy" in
+	// docs/contributor/architecture-gate.md.
 	if err := os.WriteFile("facade-policy.yaml", data, 0o600); err != nil {
 		t.Fatalf("write policy: %v", err)
 	}
