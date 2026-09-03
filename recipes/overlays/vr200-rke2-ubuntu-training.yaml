@@ -317,10 +317,32 @@ spec:
 
   # Validation for VR200 on RKE2 training.
   #
-  # pod-autoscaling / cluster-autoscaling conformance omitted: bare-metal
-  # RKE2 has no cluster autoscaler, and DRA-allocated GPUs currently break
-  # the dcgm-exporter exported_pod attribution that pod-autoscaling relies
-  # on.
+  # cluster-autoscaling conformance omitted: bare-metal RKE2 has no cluster
+  # autoscaler, so there is nothing to exercise (gb200-eks carries it
+  # because EKS provides one).
+  #
+  # pod-autoscaling IS included. It was previously omitted alongside
+  # cluster-autoscaling on the grounds that DRA-allocated GPUs break the
+  # dcgm-exporter exported_pod attribution it relies on; that does not
+  # apply here, on two counts:
+  #   1. This recipe does not DRA-allocate GPUs. resources.gpus stays
+  #      disabled (#1327), so the device plugin remains the whole-GPU
+  #      advertiser and dcgm-exporter attributes them normally; DRA only
+  #      serves ComputeDomains/IMEX. gb200-eks resolves to the identical
+  #      allocation model and ships the check.
+  #   2. The check no longer gates on pod-scoped metrics regardless: since
+  #      #1408 they are best-effort, and the capability is proven by the
+  #      external-metrics API plus the HPA behavioral test.
+  #
+  # secure-accelerator-access IS included, matching this family's
+  # inference-dynamo leaf. The validator has been dual-mode since #1620: it
+  # detects the allocation mode and exercises the device-plugin path when no
+  # gpu.nvidia.com DeviceClass exists — exactly the ComputeDomain-only
+  # configuration these NVL72 platforms use.
+  #
+  # Both verified on vr200-aicr-cluster-2 (2026-09-03): pod-autoscaling
+  # passes incl. HPA scale-up (1->3)/scale-down (3->1);
+  # secure-accelerator-access passes in device-plugin mode.
   validation:
     # NCCL all-reduce (MNNVL across the NVL72 IMEX domain). First measured on
     # the reference cluster: 744.71 GB/s busbw at the 16 GiB message size;
@@ -375,3 +397,5 @@ spec:
         - accelerator-metrics
         - ai-service-metrics
         - gang-scheduling
+        - pod-autoscaling
+        - secure-accelerator-access
