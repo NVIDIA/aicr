@@ -309,7 +309,7 @@ capture_failure_diagnostics() {
     namespaces=$(run_capped 10 kubectl get ns -o jsonpath='{.items[*].metadata.name}' \
         2>"${out_dir}/_namespace-discovery.stderr") || ns_rc=$?
     if (( ns_rc != 0 )); then
-        echo "[namespace discovery FAILED or timed out, rc=${ns_rc}]" >> "${out_dir}/_namespace-discovery.stderr"
+        echo "[namespace discovery FAILED or timed out, rc=${ns_rc}]" >> "${out_dir}/_namespace-discovery.stderr" || true
     fi
     namespaces=$(printf '%s' "$namespaces" | tr ' ' '\n' | grep -vE "^(${system_ns})$" || true)
 
@@ -327,7 +327,7 @@ capture_failure_diagnostics() {
         pod_list=$(run_capped 10 kubectl get pods -n "$ns" -o name \
             2>"${out_dir}/${ns}-pod-discovery.stderr") || pod_rc=$?
         if (( pod_rc != 0 )); then
-            echo "[pod discovery FAILED or timed out, rc=${pod_rc}]" >> "${out_dir}/${ns}-pod-discovery.stderr"
+            echo "[pod discovery FAILED or timed out, rc=${pod_rc}]" >> "${out_dir}/${ns}-pod-discovery.stderr" || true
         fi
 
         # Per-pod (not label-selected) so this works regardless of chart
