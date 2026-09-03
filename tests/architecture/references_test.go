@@ -283,7 +283,19 @@ func foreignMethodRefs(lp loadedPackage, modulePrefix string) map[reference]bool
 		if !strings.HasPrefix(owner, modulePrefix) || owner == lp.Path {
 			continue
 		}
-		recv := receiverTypeName(sel.Recv())
+		// Use the declared receiver type from the method's signature, not from
+		// the selection's receiver expression. When a local type embeds a foreign
+		// type and calls a promoted method, sel.Recv() returns the outer local
+		// type; the declared receiver is the actual method owner.
+		var recv string
+		if fn, ok := obj.(*types.Func); ok && fn.Signature() != nil && fn.Signature().Recv() != nil {
+			declaredRecv := fn.Signature().Recv().Type()
+			recv = receiverTypeName(declaredRecv)
+		}
+		// Fall back to the selection's receiver expression if declared receiver is unavailable.
+		if recv == "" {
+			recv = receiverTypeName(sel.Recv())
+		}
 		if recv == "" {
 			continue
 		}
@@ -311,5 +323,82 @@ func receiverTypeName(t types.Type) string {
 		default:
 			return ""
 		}
+	}
+}
+
+// TestForeignMethodRefsFixtures validates that foreignMethodRefs uses declared
+// receiver types, not selection receiver expressions, and correctly handles
+// embedded methods, pointers, aliases, and generics.
+func TestForeignMethodRefsFixtures(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		business   string
+		consumer   string
+		wantSymbol string
+	}{
+		{
+			name: "embedded method",
+			business: `package business
+type Recipe struct{ Name string }
+func (r Recipe) Resolve() string { return r.Name }
+`,
+			consumer: `package consumer
+import "fixture/business"
+type Wrapper struct { business.Recipe }
+func (w Wrapper) Use() string { return w.Resolve() }
+`,
+			wantSymbol: "Recipe.Resolve",
+		},
+		{
+			name: "pointer receiver",
+			business: `package business
+type Recipe struct{ Name string }
+func (r *Recipe) Resolve() string { return r.Name }
+`,
+			consumer: `package consumer
+import "fixture/business"
+func F(r *business.Recipe) string { return r.Resolve() }
+`,
+			wantSymbol: "Recipe.Resolve",
+		},
+		{
+			name: "alias receiver",
+			business: `package business
+type Recipe struct{ Name string }
+type RecipeAlias = Recipe
+func (r RecipeAlias) Resolve() string { return r.Name }
+`,
+			consumer: `package consumer
+import "fixture/business"
+func F(r business.RecipeAlias) string { return r.Resolve() }
+`,
+			wantSymbol: "Recipe.Resolve",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			lp := checkTwoPackages(t, tt.business, tt.consumer)
+			refs := foreignMethodRefs(lp, "fixture/")
+
+			var found bool
+			for ref := range refs {
+				if ref.Symbol == tt.wantSymbol {
+					found = true
+					if ref.Package != "business" {
+						t.Errorf("%s package = %q, want business", tt.wantSymbol, ref.Package)
+					}
+					if ref.Class != classBehavioral {
+						t.Errorf("%s class = %q, want behavioral", tt.wantSymbol, ref.Class)
+					}
+				}
+			}
+			if !found {
+				t.Errorf("did not find %s in foreign method refs: %+v", tt.wantSymbol, refs)
+			}
+		})
 	}
 }
