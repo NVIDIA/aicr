@@ -797,7 +797,7 @@ components:
       # anonymous; Helm OCI chart pulls may require GHCR credentials.
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: cluster-readiness-engine
-      defaultVersion: v0.1.0
+      defaultVersion: v0.2.0-rc.2
       defaultNamespace: nvcre
     nodeScheduling:
       # tolerationPaths only: the Deployment template has no nodeSelector
