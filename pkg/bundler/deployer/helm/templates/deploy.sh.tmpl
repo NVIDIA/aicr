@@ -474,7 +474,14 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
       echo "  Waiting for gpu-operator driver migration on ${MANAGED_NODES} managed GPU node(s) to reach upgrade-done (ns=${DRIVER_DS_NS:-<unresolved>})..."
       if ! kubectl wait --for=jsonpath='{.metadata.labels.nvidia\.com/gpu-driver-upgrade-state}=upgrade-done' \
            nodes -l nvidia.com/gpu.deploy.driver=true --timeout=15m; then
-        echo "  WARNING: not all managed GPU nodes reached upgrade-done within 15m; proceeding with restart anyway"
+        # Fail closed, same reasoning as the unobservable-gate branch
+        # above: a migration wait that times out means some managed node
+        # has NOT reached upgrade-done, so restarting the DRA plugin now
+        # risks the exact mid-migration invalid-CDI/ContainerCreating
+        # failure (#973) this block exists to prevent.
+        echo "  WARNING: not all managed GPU nodes reached upgrade-done within 15m; blocking the DRA plugin restart until the migration completes (retry the deploy)"
+        SKIP_RESTART=true
+        NEEDS_RETRY="${NEEDS_RETRY} {{ .Name }}"
       fi
     else
       # DaemonSet present but no node carries the label yet (e.g. still

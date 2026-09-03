@@ -350,6 +350,7 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 				`SKIP_RESTART=true`,
 				`if [[ -n "${DRA_DS}" && "${SKIP_RESTART}" != "true" ]]; then`,
 				`no nodes labeled nvidia.com/gpu.deploy.driver=true yet; skipping migration wait and DRA restart`,
+				`blocking the DRA plugin restart until the migration completes`,
 			},
 			wantNotContains: []string{
 				`nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"`,
@@ -365,6 +366,7 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 			},
 			wantContains: []string{
 				`nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"`,
+				`blocking the DRA plugin restart until the migration completes`,
 			},
 			wantNotContains: []string{
 				`blocking the DRA plugin restart until the driver rollout is detectable`,
@@ -384,6 +386,7 @@ func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing
 				`SKIP_RESTART="false"`,
 				`blocking the DRA plugin restart until the driver rollout is detectable`,
 				`SKIP_RESTART=true`,
+				`blocking the DRA plugin restart until the migration completes`,
 			},
 			wantNotContains: []string{
 				`if [[ "${name}" == "nvidia-dra-driver-gpu" ]]; then`,
