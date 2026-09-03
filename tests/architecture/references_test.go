@@ -66,6 +66,70 @@ func (w Widget) Render() string { return w.Name }
 			t.Errorf("classify(%s) = %q, want %q", name, got, expected)
 		}
 	}
+
+	// A method is a *types.Func like a package-level function, but it isn't
+	// found via pkg.Scope().Lookup -- methods live on the receiver type's
+	// method set, not the package scope. Resolve Widget.Render through
+	// types.LookupFieldOrMethod so the receiver-method case of the *types.Func
+	// branch is pinned explicitly, not merely implied by the free-function case.
+	widgetObj := pkg.Scope().Lookup("Widget")
+	if widgetObj == nil {
+		t.Fatal("Widget type not found in checked package")
+	}
+	methodObj, _, _ := types.LookupFieldOrMethod(widgetObj.Type(), false, pkg, "Render")
+	if methodObj == nil {
+		t.Fatal("Widget.Render method not found via LookupFieldOrMethod")
+	}
+	if _, ok := methodObj.(*types.Func); !ok {
+		t.Fatalf("Widget.Render resolved to %T, want *types.Func", methodObj)
+	}
+	if got := classify(methodObj); got != classBehavioral {
+		t.Errorf("classify(Widget.Render) = %q, want %q", got, classBehavioral)
+	}
+}
+
+// TestClassifyDefaultBranch pins classify's fail-closed default: an object
+// kind none of the explicit cases name still comes back classBehavioral
+// (earning review) rather than silently classType or classVar. *types.PkgName
+// -- the name bound by an import declaration -- is such a kind, obtained here
+// from a real type-checked fixture rather than fabricated by hand.
+func TestClassifyDefaultBranch(t *testing.T) {
+	t.Parallel()
+
+	const src = `package importfixture
+
+import osalias "os"
+
+var _ = osalias.Args
+`
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "importfixture.go", src, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	info := &types.Info{
+		Defs: make(map[*ast.Ident]types.Object),
+	}
+	conf := types.Config{Importer: importer.Default()}
+	if _, err := conf.Check("importfixture", fset, []*ast.File{file}, info); err != nil {
+		t.Fatalf("type-check: %v", err)
+	}
+
+	var pkgNameObj types.Object
+	for ident, obj := range info.Defs {
+		if ident.Name == "osalias" {
+			pkgNameObj = obj
+		}
+	}
+	if pkgNameObj == nil {
+		t.Fatal("did not resolve a types.Object for the osalias import")
+	}
+	if _, ok := pkgNameObj.(*types.PkgName); !ok {
+		t.Fatalf("osalias resolved to %T, want *types.PkgName", pkgNameObj)
+	}
+	if got := classify(pkgNameObj); got != classBehavioral {
+		t.Errorf("classify(*types.PkgName) = %q, want %q (fail-closed default)", got, classBehavioral)
+	}
 }
 
 // checkSource type-checks a single self-contained source file with no imports.
