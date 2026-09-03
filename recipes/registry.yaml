@@ -100,7 +100,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/gpu-operator
-      defaultVersion: v26.3.3
+      defaultVersion: v26.7.0
       defaultNamespace: gpu-operator
     nodeScheduling:
       system:
@@ -396,7 +396,7 @@ components:
     helm:
       defaultRepository: oci://registry.k8s.io/dra-driver-nvidia/charts
       defaultChart: dra-driver-nvidia-gpu
-      defaultVersion: "0.4.1"
+      defaultVersion: "0.5.0"
       defaultNamespace: nvidia-dra-driver
     nodeScheduling:
       system:
@@ -1102,7 +1102,7 @@ components:
     helm:
       defaultRepository: oci://registry.k8s.io/dra-driver-nvidia/charts
       defaultChart: dra-driver-nvidia-gpu
-      defaultVersion: "0.4.1"
+      defaultVersion: "0.5.0"
       defaultNamespace: nvidia-dra-driver
     nodeScheduling:
       system:
