@@ -8,7 +8,7 @@ Reviews upstream
 [`NVIDIA/cluster-readiness-engine`](https://github.com/NVIDIA/cluster-readiness-engine)
 v0.1.0, published 2026-09-01 at source commit `45726bfe`. Implementation
 follows acceptance as a separate change; see
-[PR #2523](https://github.com/NVIDIA/aicr/pull/2523).
+[PR #2524](https://github.com/NVIDIA/aicr/pull/2524).
 
 ## Decision Summary
 
@@ -133,9 +133,38 @@ would pass vacuously.
 
 The check is read-only and creates no benchmark workload.
 
+### 6. AICR bounds Certification execution
+
+NVCRE's API does not bound a certification run: `nodesPerJob` defaults to every
+matching node and has no maximum, and there is no total run deadline. Until
+upstream closes those, any AICR caller driving `Certification` supplies the
+bounds itself.
+
+- **Always set `nodesPerJob` explicitly.** Never rely on the auto-select
+  default, which takes all matching nodes for non-training entries.
+- **Always pass `--cleanup`.** `--timeout` stops the CLI watch, not the run;
+  without `--cleanup` an expired deadline leaves the Certification and its
+  `TrainJob`s executing on GPU nodes.
+- **Bound the wait explicitly** rather than relying on the derived default.
+
+On success, failure, cancellation, or timeout the caller deletes the
+`Certification`, which garbage-collects the `TrainJob`s it created. A timeout
+yields a partial report and is reported as a failure, never as a pass.
+
+An AICR check that omits any of these can strand GPU capacity indefinitely,
+which is why these are stated here rather than left to each caller.
+
 ## Adoption Gates
 
-Implementation is admitted once the selected release passes the following.
+These gates bound **stock-overlay adoption**, not registry-only admission.
+
+Registry-only admission proceeds on the current pin: the entry is inert until
+an overlay declares a `ComponentRef`, so an unmet gate cannot reach a stock
+recipe. Gates not yet met on the reviewed pin are recorded in
+[Status](#status-against-v010) and tracked in
+[Follow-Up Decisions](#follow-up-decisions); none of them blocks the
+registry-only implementation. The full set must pass before the stock-adoption
+amendment.
 
 The category structure follows
 [ADR-019](019-k8s-aibom-runtime-inventory.md), which set the
@@ -209,8 +238,11 @@ chart `version` and `appVersion`; digest pinning through public values by
 setting `manager.image.tag` to `v0.1.0@sha256:ed1e5928…`; and anonymous public
 pull for both chart and image.
 
-Two supply-chain items are open, both upstream release-workflow changes rather
-than AICR work:
+Four gates are unmet on this pin. None blocks registry-only admission; all are
+tracked in [Follow-Up Decisions](#follow-up-decisions) and must close before
+the stock-adoption amendment.
+
+Supply chain — upstream release-workflow changes, not AICR work:
 
 1. **No build provenance on the image.** The only attestation predicates
    present are `cyclonedx.org/bom` and `sigstore.dev/cosign/sign/v1`; a
@@ -219,34 +251,60 @@ than AICR work:
    reports none — no signature, SBOM, or provenance. The chart is published by
    a `helm push` with no signing step.
 
-Both are tracked in [Follow-Up Decisions](#follow-up-decisions).
+Execution safety — these live in the `Certification` API, so driving
+`Certification` rather than `WorkloadRun` does not close them:
+
+3. **`nodesPerJob` has no upper bound.** `CategoryOptions.NodesPerJob` carries
+   `+kubebuilder:validation:Minimum=1` and no maximum. Left unset, the
+   controller auto-selects *all matching nodes* for every non-training entry,
+   and an explicit value is clamped to `min(nodesPerJob, matchingNodes)` —
+   a narrowing, not a ceiling.
+4. **No total run deadline.** `CertificationSpec` exposes only `timeoutPerJob`
+   and `measurementTimeout`; `ExecutionSpec` adds `maxConcurrent` but no
+   aggregate bound. `nvcrectl --timeout` bounds the CLI watch only: without
+   `--cleanup` the Certification keeps running after it fires.
+
+AICR bounds both from the caller side per
+[Decision 6](#6-aicr-bounds-certification-execution), which is what makes them
+non-blocking here rather than merely deferred.
 
 ## Non-Goals
 
 - Adding `nvcre` to any stock recipe.
 - Introducing certification results into [ADR-007](007-recipe-evidence.md)
   recipe evidence.
-- Building an AICR-side validator that drives NVCRE.
 - Vendoring, patching, or republishing the upstream chart.
 - Replacing the existing NCCL bandwidth checks on the current TrainJob path.
+
+Opt-in AICR validators that drive `Certification` are **in scope** and are not
+a non-goal. They stay off stock overlays, assert the expected transport per
+[Context](#context), and observe Decision 6. Flipping any overlay to them is
+the separate stock-adoption amendment.
 
 ## Consequences
 
 **Positive.** Stock recipes are unchanged, so no existing user acquires
-NVCRE's CRDs, cluster-scoped RBAC, or runtime cost. The internal DGX Cloud
-consumer keeps its current external-overlay path and is not blocked. The two
-supply-chain gaps are named concretely with a verifiable close condition.
+NVCRE's CRDs, cluster-scoped RBAC, or runtime cost. Registry-only admission
+does not wait on upstream, so opt-in adopters get the component now. All four
+open gaps are named concretely with verifiable close conditions.
 
-**Negative.** Implementation is gated on upstream release-workflow changes AICR
-does not control, so the PoC's measured value is not available through AICR
-until they close.
+**Negative.** AICR carries a component whose pin does not yet pass every gate.
+Two of the four gaps are mitigated only by caller discipline (Decision 6), so
+an opt-in validator that ignores it can strand GPU capacity — a risk that
+exists until upstream bounds `nodesPerJob` and adds a run deadline. Stock
+adoption stays blocked until all four close, so the PoC's measured value is
+not available to stock recipes yet.
 
 ## Follow-Up Decisions
 
 1. Upstream: add build provenance to the controller image, attributable to the
    release workflow and meeting a stated SLSA build level.
 2. Upstream: sign the Helm chart and publish chart SBOM and provenance.
-3. AICR: on close, land the implementation in
-   [PR #2523](https://github.com/NVIDIA/aicr/pull/2523) and record the
-   qualified artifact set in this ADR's Status.
-4. AICR: a separate amendment for any stock-recipe adoption.
+3. Upstream: bound `nodesPerJob` with a maximum, so a certification cannot
+   select an unbounded number of nodes.
+4. Upstream: add a total run deadline to `CertificationSpec`, so expiry stops
+   the run rather than only the CLI watch.
+5. AICR: record the qualified artifact set in this ADR's Status once items 1–4
+   close, and re-run the gates against that pin.
+6. AICR: a separate amendment for any stock-recipe adoption, which requires
+   the full gate set to pass.
