@@ -2337,6 +2337,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"gb300-eks-ubuntu-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
 		{"gb300-eks-ubuntu-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},
 		{"gb300-eks-ubuntu-training-kubeflow", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
+		{"gb300-eks-ubuntu-training-slurm", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
 		{"gb300-eks-ubuntu-inference-dynamo", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB300, CriteriaOSUbuntu, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		// GB200 OKE Ubuntu variants
 		{"gb200-oke-ubuntu-training", criteria{CriteriaServiceOKE, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
