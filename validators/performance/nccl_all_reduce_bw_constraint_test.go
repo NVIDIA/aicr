@@ -867,6 +867,47 @@ func TestCleanupNCCLRun_SkipsTrainerTeardownOnNamespaceDeleteFailure(t *testing.
 	}
 }
 
+// TestCleanupNCCLRun_SkipsTrainerTeardownWhenOtherNCCLNamespaceExists checks
+// that cleanupNCCLRun leaves a self-installed Trainer alone while another
+// AICR-owned NCCL benchmark namespace exists. A concurrent run using a
+// different AICR_RUN_ID gets its own namespace but can still be using this
+// same shared Trainer install, since ensureTrainerInstalled's reuse path
+// returns no resources for that peer to track and delete on its own.
+func TestCleanupNCCLRun_SkipsTrainerTeardownWhenOtherNCCLNamespaceExists(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	peerNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:   "aicr-nccl-perf-other-cafef00d",
+		Labels: map[string]string{labels.ManagedBy: labels.ValueValidator, labels.Component: labels.ValueNCCLPerf},
+	}}
+	holder := testHolderID
+	clientset := fake.NewClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}},
+		peerNS,
+		&coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns},
+			Spec:       coordinationv1.LeaseSpec{HolderIdentity: &holder},
+		},
+	)
+	dynamicClient := newTrainerFakeClient(readyTrainerDeployment())
+
+	resources := []trainerResourceRef{
+		{GVR: trainerDeploymentGVR, Namespace: trainerNamespace, Name: trainerControllerDeployment},
+	}
+	persistTrainerInstallManifest(context.Background(), clientset, resources)
+
+	if err := cleanupNCCLRun(clientset, dynamicClient, ns, testNamespaceUID, testHolderID, resources, nil); err != nil {
+		t.Fatalf("cleanupNCCLRun failed: %v", err)
+	}
+
+	if _, err := dynamicClient.Resource(trainerDeploymentGVR).Namespace(trainerNamespace).
+		Get(context.Background(), trainerControllerDeployment, metav1.GetOptions{}); err != nil {
+		t.Errorf("expected the Trainer Deployment to survive while a peer namespace exists: %v", err)
+	}
+	if _, got, _ := loadTrainerInstallManifest(context.Background(), clientset); got == nil {
+		t.Error("expected the Trainer install manifest to survive while a peer namespace exists")
+	}
+}
+
 // TestClaimNCCLExecutionLock_ConcurrentCallersOneWins verifies that when
 // several callers race to claim a namespace with no existing lock, exactly
 // one wins and the rest get ErrCodeConflict.

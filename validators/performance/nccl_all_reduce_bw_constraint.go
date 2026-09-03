@@ -2702,11 +2702,50 @@ func cleanupNCCLRun(clientset kubernetes.Interface, dynamicClient dynamic.Interf
 		return err
 	}
 	if len(installedResources) > 0 {
-		if trainerErr := deleteTrainer(dynamicClient, installedResources); trainerErr != nil {
+		// A concurrent run with a different AICR_RUN_ID gets its own
+		// namespace, but the two can still share this same self-installed
+		// Trainer: ensureTrainerInstalled's reuse path returns no
+		// resources for the peer, so only this run's cleanup ever sees
+		// installedResources non-empty. Deleting Trainer here regardless
+		// of that peer would fail its still-running TrainJob out from
+		// under it. On a List failure, leave Trainer installed rather
+		// than risk deleting it out from under a peer this call could
+		// not rule out.
+		othersRemain, listErr := otherNCCLNamespacesExist(context.Background(), clientset, namespace)
+		if listErr != nil {
+			slog.Warn("Failed to check for other NCCL benchmark namespaces; leaving Trainer installed for a later cleanup",
+				"namespace", namespace, "error", listErr)
+		} else if othersRemain {
+			slog.Info("Other NCCL benchmark namespaces remain; leaving the self-installed Trainer for a later cleanup",
+				"namespace", namespace)
+		} else if trainerErr := deleteTrainer(dynamicClient, installedResources); trainerErr != nil {
 			err = foldCleanupError(err, trainerErr, "NCCL benchmark succeeded but Kubeflow Trainer cleanup failed")
 		} else {
 			removeTrainerInstallManifestEntries(context.Background(), clientset, installedResources)
 		}
 	}
 	return err
+}
+
+// otherNCCLNamespacesExist reports whether any AICR-owned NCCL benchmark
+// namespace other than namespace currently exists. cleanupNCCLRun checks
+// this before eagerly deleting a self-installed Trainer, since a
+// concurrent run with a different run ID can share that same install and
+// still be using it.
+func otherNCCLNamespacesExist(ctx context.Context, clientset kubernetes.Interface, namespace string) (bool, error) {
+	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	namespaces, err := clientset.CoreV1().Namespaces().List(listCtx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("%s=%s,%s=%s",
+			labels.ManagedBy, labels.ValueValidator, labels.Component, labels.ValueNCCLPerf),
+	})
+	if err != nil {
+		return false, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to list NCCL benchmark namespaces", err)
+	}
+	for _, ns := range namespaces.Items {
+		if ns.Name != namespace {
+			return true, nil
+		}
+	}
+	return false, nil
 }
