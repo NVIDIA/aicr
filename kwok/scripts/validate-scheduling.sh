@@ -320,6 +320,25 @@ capture_failure_diagnostics() {
         timeout "${cap}s" "$@"
     }
 
+    # Preserve partial stdout in the primary artifact, while recording
+    # stderr and a non-zero status in a companion file. This keeps an empty
+    # successful response distinguishable from an API error or timeout.
+    # Always returns success: diagnostics must never interrupt teardown or
+    # replace the script's original exit code.
+    capture_to_file() {
+        local default_t=$1
+        local output_file=$2
+        shift 2
+        local stderr_file="${output_file%.*}.stderr"
+        local rc=0
+
+        run_capped "$default_t" "$@" > "$output_file" 2> "$stderr_file" || rc=$?
+        if (( rc != 0 )); then
+            printf '[diagnostic fetch FAILED or timed out, rc=%d]\n' "$rc" >> "$stderr_file" || true
+        fi
+        return 0
+    }
+
     local system_ns="${SYSTEM_NS_PATTERN}"
     local namespaces ns_rc=0
     namespaces=$(run_capped 10 kubectl get ns -o jsonpath='{.items[*].metadata.name}' \
@@ -331,7 +350,7 @@ capture_failure_diagnostics() {
 
     for ns in $namespaces; do
         budget_left || { log_info "Diagnostic capture budget exhausted — stopping"; break; }
-        run_capped 10 kubectl get pods -n "$ns" -o wide > "${out_dir}/${ns}-pods.txt" 2>/dev/null || true
+        capture_to_file 10 "${out_dir}/${ns}-pods.txt" kubectl get pods -n "$ns" -o wide
         # run-all-recipes.sh reuses a fixed namespace (KWOK_NAMESPACE,
         # default aicr-kwok-test) across every recipe in its loop, each
         # invoking this script — and this capture — separately. Truncate
@@ -370,15 +389,15 @@ capture_failure_diagnostics() {
                 fi
             } >> "${out_dir}/${ns}-logs.txt" || true
         done
-        run_capped 10 kubectl get endpointslices -n "$ns" -o yaml > "${out_dir}/${ns}-endpointslices.yaml" 2>/dev/null || true
-        run_capped 15 kubectl describe pods -n "$ns" > "${out_dir}/${ns}-describe.txt" 2>/dev/null || true
+        capture_to_file 10 "${out_dir}/${ns}-endpointslices.yaml" kubectl get endpointslices -n "$ns" -o yaml
+        capture_to_file 15 "${out_dir}/${ns}-describe.txt" kubectl describe pods -n "$ns"
         # Namespace Events, not just the pod-scoped ones `describe pods`
         # carries: a failed webhook call or Helm install surfaces as an
         # Event on a non-pod object. The action's own
         # `kubectl get events --all-namespaces` runs after this trap has
         # already deleted the namespace, so this is the only chance to keep
         # them.
-        run_capped 10 kubectl get events -n "$ns" --sort-by=.lastTimestamp > "${out_dir}/${ns}-events.txt" 2>/dev/null || true
+        capture_to_file 10 "${out_dir}/${ns}-events.txt" kubectl get events -n "$ns" --sort-by=.lastTimestamp
     done
 }
 
