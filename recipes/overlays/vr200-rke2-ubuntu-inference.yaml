@@ -169,19 +169,21 @@ spec:
                       status:
                         ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
 
-    # Same bcm-profile stopgap as vr200-rke2-ubuntu-training (kernel-headers
-    # aliasing only, accelerator-agnostic, no reboot) — the recipe catalog
-    # requires every leaf sharing (service, accelerator) to carry the same
-    # tuning configuration, so this base leaf (and its inference-dynamo
-    # child) must match the training leaf's choice. See
-    # vr200-rke2-ubuntu-training for the full rationale.
+    # Same native vr200/rke2 tuning as vr200-rke2-ubuntu-training — the recipe
+    # catalog requires every leaf sharing (service, accelerator) to apply the
+    # same tuning manifest and pins, so this base leaf (and its
+    # inference-dynamo child) matches the training leaf. Only the intent
+    # differs, which the catalog permits and which selects vr200's inference
+    # profile rather than multiNodeTraining. See vr200-rke2-ubuntu-training
+    # for the reboot semantics and the full rationale.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:
-        - components/nodewright-customizations/manifests/bcm-setup.yaml
+        - components/nodewright-customizations/manifests/tuning-rke2.yaml
       overrides:
-        service: bcm
-        accelerator: h100
+        service: rke2
+        accelerator: vr200
+        intent: inference
       dependencyRefs:
         - nodewright-operator
 
