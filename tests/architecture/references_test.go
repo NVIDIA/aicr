@@ -37,6 +37,8 @@ const Limit = 10
 
 var Registry = map[string]int{}
 
+var Hook = func() string { return "" }
+
 func Build() Widget { return Widget{} }
 
 func (w Widget) Render() string { return w.Name }
@@ -47,6 +49,7 @@ func (w Widget) Render() string { return w.Name }
 		"Widget":   classType,
 		"Limit":    classConst,
 		"Registry": classVar,
+		"Hook":     classBehavioral,
 		"Build":    classBehavioral,
 	}
 	for name, expected := range want {
@@ -84,9 +87,14 @@ func checkSource(t *testing.T, name, src string) (*types.Package, *types.Info, *
 
 // classify maps a resolved object to its policy class. Funcs are behavioral —
 // calling one drives work in the owning package. Everything else is inert
-// structure the caller merely holds, names, or reads.
+// structure the caller merely holds, names, or reads. A package-level var
+// whose type is a func signature (e.g. `var Hook = func() {...}`) is also
+// behavioral: calling it drives work exactly like a func declaration does.
+// Struct fields never reach this branch as *types.Var — they are filtered
+// earlier by the IsField() guard in packageQualifiedRefs — so this only
+// affects package-level vars.
 func classify(obj types.Object) symbolClass {
-	switch obj.(type) {
+	switch o := obj.(type) {
 	case *types.Func:
 		return classBehavioral
 	case *types.TypeName:
@@ -94,6 +102,9 @@ func classify(obj types.Object) symbolClass {
 	case *types.Const:
 		return classConst
 	case *types.Var:
+		if _, ok := types.Unalias(o.Type()).(*types.Signature); ok {
+			return classBehavioral
+		}
 		return classVar
 	default:
 		return classBehavioral // fail closed: an unrecognized object earns review
