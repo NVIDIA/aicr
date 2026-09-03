@@ -237,7 +237,14 @@ jobs:
             declare -A changed_system_profile_services=()
             declare -A changed_gpu_profile_pairs=()
             while IFS= read -r changed_file; do
-              if [[ ! "$changed_file" =~ ^kwok/profiles/.+\.yaml$ ]]; then
+              # Match the runtime selector's shape exactly: select_profiles only
+              # reads kwok/profiles/<provider>/<name>.yaml, one directory deep.
+              # A looser pattern is wrong in both directions -- a stray
+              # kwok/profiles/template.yaml or kwok/profiles/eks/testdata/x.yaml
+              # would either hard-fail discovery on a missing provider label, or
+              # (if it happens to carry labels) promote overlays that can never
+              # select it.
+              if [[ ! "$changed_file" =~ ^kwok/profiles/[^/]+/[^/]+\.yaml$ ]]; then
                 continue
               fi
 
