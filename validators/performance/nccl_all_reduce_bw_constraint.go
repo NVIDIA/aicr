@@ -880,7 +880,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// installs an ephemeral fixture only when nothing is. Anything we install is
 	// ours to clean up after the test completes.
 	recipeDeclaresTrainer := validators.RecipeDeclares(ctx, kubeflowTrainerComponent)
-	installedResources, err = ensureTrainerInstalled(ctx.Ctx, dynamicClient,
+	installedResources, err = ensureTrainerInstalled(ctx.Ctx, dynamicClient, ctx.Clientset,
 		ctx.Clientset.Discovery(), recipeDeclaresTrainer)
 	if err != nil {
 		return "", err

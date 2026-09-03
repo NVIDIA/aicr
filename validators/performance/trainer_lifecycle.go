@@ -580,7 +580,7 @@ func trainerResourceClient(dynamicClient dynamic.Interface,
 // happens to be on the cluster. Execution still differs across the undeclared rows —
 // a pre-existing Trainer is reused, an absent one is installed — which is why the
 // earlier "behaves identically regardless of live state" wording was withdrawn.
-func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface,
+func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface, clientset kubernetes.Interface,
 	discoveryClient discovery.DiscoveryInterface, recipeDeclaresTrainer bool) ([]trainerResourceRef, error) {
 
 	install, installed, err := isTrainerInstalled(ctx, dynamicClient)
@@ -637,7 +637,7 @@ func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface
 		slog.Info("Kubeflow Trainer not found or incomplete, installing...")
 		// installTrainer rolls back its own resources on failure, so there is
 		// nothing to clean up on the error path.
-		created, installErr := installTrainer(ctx, dynamicClient, discoveryClient)
+		created, installErr := installTrainer(ctx, dynamicClient, clientset, discoveryClient)
 		if installErr != nil {
 			return nil, aicrErrors.PropagateOrWrap(installErr, aicrErrors.ErrCodeInternal,
 				"failed to install Kubeflow Trainer")
@@ -841,7 +841,9 @@ func foldCleanupError(benchErr, cleanupErr error, fallbackMsg string) error {
 // Installation is transactional: on success it returns the resources it created so
 // the caller can defer deleteTrainer for cleanup; on any failure it rolls those
 // resources back itself and returns none.
-func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, discoveryClient discovery.DiscoveryInterface) ([]trainerResourceRef, error) {
+func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, clientset kubernetes.Interface,
+	discoveryClient discovery.DiscoveryInterface) ([]trainerResourceRef, error) {
+
 	slog.Info("Downloading Kubeflow Trainer archive", "url", trainerArchiveURL)
 
 	extractedDir, cleanup, err := downloadAndExtractGitHubArchive(ctx, trainerArchiveURL)
@@ -873,7 +875,7 @@ func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, discov
 	// Build a REST mapper from live discovery so we can resolve GVK → GVR for each resource.
 	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(discoveryClient))
 
-	return installTrainerResources(ctx, dynamicClient, mapper, objs)
+	return installTrainerResources(ctx, dynamicClient, clientset, mapper, objs)
 }
 
 // decodeTrainerObjects converts kustomize build output into unstructured objects,
@@ -936,10 +938,10 @@ func decodeTrainerObjects(resources []*resource.Resource) ([]*unstructured.Unstr
 // On success it returns the resources it created, for the caller to delete once
 // the benchmark finishes. On failure it returns no resources: rollback already
 // removed them, so the caller has nothing left to clean up.
-func installTrainerResources(ctx context.Context, dynamicClient dynamic.Interface,
+func installTrainerResources(ctx context.Context, dynamicClient dynamic.Interface, clientset kubernetes.Interface,
 	mapper apimeta.RESTMapper, objs []*unstructured.Unstructured) ([]trainerResourceRef, error) {
 
-	created, err := applyTrainerResources(ctx, dynamicClient, mapper, objs)
+	created, err := applyTrainerResources(ctx, dynamicClient, clientset, mapper, objs)
 	if err == nil {
 		// No discovered name here: these objects were just applied from the overlay,
 		// so the controller carries its fixed self-install name.
@@ -1275,7 +1277,7 @@ func findDeploymentByLabels(ctx context.Context, dynamicClient dynamic.Interface
 // The returned list holds only the resources this call actually created. Objects
 // that were already present are updated but deliberately excluded, so a rollback
 // never deletes a Trainer another owner installed.
-func applyTrainerResources(ctx context.Context, dynamicClient dynamic.Interface,
+func applyTrainerResources(ctx context.Context, dynamicClient dynamic.Interface, clientset kubernetes.Interface,
 	mapper apimeta.RESTMapper, objs []*unstructured.Unstructured) ([]trainerResourceRef, error) {
 
 	attemptID, err := newInstallAttemptID()
@@ -1326,6 +1328,11 @@ func applyTrainerResources(ctx context.Context, dynamicClient dynamic.Interface,
 		case err == nil:
 			ref.UID = createdObj.GetUID()
 			created = append(created, ref)
+			// Persisted as each resource is created, not once the whole
+			// install returns. A kill in between would leave this on the
+			// cluster with no record for reapOrphanedTrainerInstall to
+			// find, leaking it indefinitely.
+			persistTrainerInstallManifest(ctx, clientset, []trainerResourceRef{ref})
 			slog.Info("Applied Trainer resource", "kind", gvk.Kind, "name", ref.Name, "namespace", ref.Namespace)
 		case k8serrors.IsAlreadyExists(err):
 			// Enforce current resource state even when left from a prior partial
@@ -1342,6 +1349,11 @@ func applyTrainerResources(ctx context.Context, dynamicClient dynamic.Interface,
 			// cannot remove it and we leak exactly what this change exists to stop.
 			if claimed, ok := claimAmbiguousCreate(ctx, client, ref, attemptID, err); ok {
 				created = append(created, claimed)
+				// ctx may itself be the reason Create was ambiguous, so
+				// persisting under it here risks silently skipping the
+				// write. A fresh context keeps this claimed resource's
+				// record from leaking untracked.
+				persistTrainerInstallManifest(context.Background(), clientset, []trainerResourceRef{claimed}) //nolint:contextcheck
 			}
 			return created, aicrErrors.Wrap(trainerAPIErrorCode(err),
 				fmt.Sprintf("failed to create %s %q", gvk.Kind, ref.Name), err)
