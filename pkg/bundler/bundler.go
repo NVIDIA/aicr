@@ -2845,15 +2845,17 @@ const draChartVersionAnnotation = header.Domain + "/gpu-operator-chart-version"
 // filtered resolved recipe before derived values are written; recipes that
 // disable either remain untouched.
 const (
-	gpuOperatorComponentName      = "gpu-operator"
-	draComponentName              = "nvidia-dra-driver-gpu"
-	draEvictionEnvName            = "NODE_LABEL_FOR_GPU_POD_EVICTION"
-	draEvictionNodeSelectorPath   = "kubeletPlugin.nodeSelector"
-	gpuOperatorDRAEvictionEnvPath = "driver.manager.env"
+	gpuOperatorComponentName       = "gpu-operator"
+	gpuOperatorOCPComponentName    = "gpu-operator-ocp"
+	gpuOperatorOCPOLMComponentName = "gpu-operator-ocp-olm"
+	draComponentName               = "nvidia-dra-driver-gpu"
+	draEvictionEnvName             = "NODE_LABEL_FOR_GPU_POD_EVICTION"
+	draEvictionNodeSelectorPath    = "kubeletPlugin.nodeSelector"
+	gpuOperatorDRAEvictionEnvPath  = "driver.manager.env"
 )
 
 var (
-	gpuOperatorComponentNames = []string{gpuOperatorComponentName, "gpu-operator-ocp"}
+	gpuOperatorComponentNames = []string{gpuOperatorComponentName, gpuOperatorOCPComponentName}
 	draComponentNames         = []string{draComponentName, "nvidia-dra-driver-gpu-ocp"}
 )
 
