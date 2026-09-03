@@ -21,7 +21,7 @@ infrastructure:
   pkg/errors: "Structured error codes and wrapping used throughout the codebase; carries no business logic."
   pkg/header: "HTTP header and profile-API-version constants/helpers; carries no business logic."
   pkg/logging: "slog logger construction and configuration (level, format, color); carries no business logic."
-  pkg/serializer: "Shared output-format marshaling (YAML/JSON/table) and deterministic YAML encoding; carries no business logic."
+  pkg/serializer: "Output marshaling (YAML/JSON/table), deterministic encoding, and output-destination plumbing including ConfigMap writing; makes no recipe/bundle/validation decisions."
 constrained:
   pkg/bundler:
     reason: >-
