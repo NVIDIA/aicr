@@ -960,6 +960,14 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			service: recipe.CriteriaServiceOKE,
 			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
 		},
+		{
+			// This table asserts only on explicitly listed service keys, so a
+			// new matrix entry passes silently unless a case is added here.
+			name:    "NVLS RKE2 VR200",
+			variant: variantNVLS,
+			service: recipe.CriteriaServiceRKE2,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorVR200},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

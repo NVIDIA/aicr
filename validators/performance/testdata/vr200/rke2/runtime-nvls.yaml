@@ -12,8 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# NCCL all-reduce TrainingRuntime for VR200 on RKE2 (recipe-supplied via the
-# nccl-benchmark-runtime-ref constraint in vr200-rke2-ubuntu-training).
+# NCCL all-reduce TrainingRuntime for VR200 on RKE2, NVLS variant.
+# Selected by supportedNCCLCombinations[variantNVLS][rke2] = [vr200]; the
+# nccl-all-reduce-bw-nvls check resolves this path via templatePath().
 #
 # Measures MNNVL (multi-node NVLink) across the VR NVL72 IMEX domain.
 # First measured on the reference cluster (2026-07-21, 2 nodes x 4 GPUs,
@@ -26,27 +27,17 @@
 # against the nccl-all-reduce-imex ResourceClaimTemplate, NCCL_NVLS_ENABLE=1).
 # The CUDA 12.x image runs on Rubin via PTX JIT forward-compatibility.
 #
-# OPERATOR PREREQUISITES (runtime-ref runtimes own their fabric wiring —
-# the validator's applyNCCLComputeDomain() is skipped for supplied runtimes):
-#   1. Pre-create the ComputeDomain before EACH validate run:
-#        apiVersion: resource.nvidia.com/v1beta1
-#        kind: ComputeDomain
-#        metadata: {name: nccl-all-reduce-cd, namespace: aicr-validation}
-#        spec: {numNodes: 2, channel: {resourceClaimTemplate: {name: nccl-all-reduce-imex}}}
-#      The validator's cleanup DELETES this CD (by its well-known name) when
-#      the run ends, so it must be re-created per run. Never overlap two
-#      validate runs: the first one's cleanup starves the second's workers.
-#   2. Pass --node-selector nvidia.com/gpu.present=true (VR pre-GA nodes
-#      carry the placeholder GFD product name, so no accelerator matcher fits).
-#   3. aicr CLI must include NVIDIA/aicr#1805 (post-v0.17.0): the CLI lowers
-#      nccl-benchmark-runtime-ref into the validator input; v0.17.0 fails with
-#      "reached the validator unresolved".
+# The validator provisions the ComputeDomain and waits for the IMEX
+# ResourceClaimTemplate in the per-run benchmark namespace, exactly as it
+# does for gb200/eks|oke — this runtime declares no fabric wiring of its own
+# and needs no operator setup before a run.
 #
-# UPSTREAMING: when a future AICR release registers rke2/vr200 in the
-# compiled catalog, promote this file to the embedded template set with a
-# supportedNCCLCombinations[variantNVLS] entry — the validator then provisions
-# the ComputeDomain automatically (as on gb200/eks|oke) and the runtime-ref
-# constraint and prerequisites above disappear.
+# NODE SELECTION: VR pre-GA nodes report a placeholder nvidia.com/gpu.product
+# value, so acceleratorProductMatchers deliberately has no vr200 entry and the
+# product filter is skipped. On a homogeneous VR cluster that is correct — all
+# schedulable GPU nodes are eligible. On a HETEROGENEOUS cluster it means every
+# GPU family is eligible, so pass --node-selector with a label that actually
+# distinguishes the VR pool. Revisit once GFD emits a stable VR product name.
 
 apiVersion: trainer.kubeflow.org/v1alpha1
 kind: TrainingRuntime

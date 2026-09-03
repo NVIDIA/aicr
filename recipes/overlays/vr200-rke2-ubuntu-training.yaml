@@ -348,23 +348,26 @@ spec:
     # the reference cluster: 744.71 GB/s busbw at the 16 GiB message size;
     # floor set at 600 for headroom on pre-release silicon.
     #
-    # The benchmark is recipe-supplied (nccl-benchmark-runtime-ref) because
-    # rke2/vr200 is not in the validator's compiled applicability matrix yet
-    # — see recipes/validators/performance/testdata/vr200/rke2/runtime.yaml
-    # (embedded in the recipe data tree, so the ref resolves without --data)
-    # for the runtime and its operator prerequisites (pre-create the
-    # nccl-all-reduce-cd ComputeDomain per run; --node-selector
-    # nvidia.com/gpu.present=true; an aicr CLI build including NVIDIA/aicr#1805).
-    # Promote to an embedded template with a compiled applicability entry
-    # once rke2/vr200 is registered in the public catalog's binary matrix —
-    # the runtime file's own header documents this as future work.
+    # rke2/vr200 is registered in the validator's compiled applicability
+    # matrix (supportedNCCLCombinations[variantNVLS]) and its runtime ships
+    # as an embedded template at
+    # validators/performance/testdata/vr200/rke2/runtime-nvls.yaml, so the
+    # validator provisions the ComputeDomain and IMEX ResourceClaimTemplate
+    # itself, in whatever namespace it derives for the run. No operator
+    # prerequisites, and no recipe-supplied runtime.
     performance:
+      # The NVLS variant, not the generic check: VR200 measures MNNVL across
+      # the NVL72 IMEX domain. The check name is what selects the variant and
+      # its template (validators/performance: main.go dispatch ->
+      # constraintNameForVariant -> templatePath), so the check and its
+      # threshold constraint must both carry the -nvls suffix. Using the bare
+      # nccl-all-reduce-bw here would dispatch the default variant, whose
+      # applicability matrix has no rke2/vr200 entry, and the gate would
+      # report SKIPPED rather than failing — a silent pass.
       checks:
-        - nccl-all-reduce-bw
+        - nccl-all-reduce-bw-nvls
       constraints:
-        - name: nccl-benchmark-runtime-ref
-          value: vr200/rke2
-        - name: nccl-all-reduce-bw
+        - name: nccl-all-reduce-bw-nvls
           value: ">= 600"
     deployment:
       checks:

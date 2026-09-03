@@ -282,6 +282,10 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 	variantNVLS: {
 		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200},
 		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
+		// VR200 NVL72 on bare-metal RKE2: MNNVL across the IMEX domain, same
+		// shape as GB200 but with its own runtime (NGC pytorch image, distinct
+		// mpirun path) — see testdata/vr200/rke2/runtime-nvls.yaml.
+		recipe.CriteriaServiceRKE2: {recipe.CriteriaAcceleratorVR200},
 	},
 }
 
