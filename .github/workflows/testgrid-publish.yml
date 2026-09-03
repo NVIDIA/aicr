@@ -131,9 +131,10 @@ jobs:
           else
             CLUSTER="aicr-testgrid-${TG_ENV}"
           fi
-          # Buckets were renamed for the eidosx → nv-testgrid migration
-          # (dgxc- prefix family, alongside dgxc-testgrid); clusters keep
-          # their names.
+          # Buckets were renamed for the eidosx → nv-testgrid migration:
+          # nv-aicr-testgrid[-<env>] (nv- prefix, NVIDIA-neutral — the old
+          # aicr-testgrid[-<env>] names stay in eidosx). Clusters keep their
+          # names.
           BUCKET="nv-${CLUSTER}"
           {
             echo "cluster=${CLUSTER}"
