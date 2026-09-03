@@ -732,3 +732,65 @@ Fresh installs are unaffected. To migrate an existing cluster:
 Verified live end-to-end on a real EKS cluster, 2026-09-02: dynamo-operator,
 grove-operator, and kai-scheduler gang-scheduling all confirmed healthy
 together post-migration.
+
+### `dynamo-platform`: opting back into bundled NATS on a standing cluster
+
+Dynamo 1.4+ no longer installs bundled NATS by default (the request plane
+defaults to TCP and the KV event plane to ZMQ). Re-enabling it needs to be
+done by **regenerating the bundle**, not by hand-editing a generated
+bundle's `values.yaml` or `cluster-values.yaml` -- both are covered by the
+bundle's checksum manifest, and `aicr verify` fails closed on any modified
+file:
+
+```bash
+aicr verify ./bundle
+# ✓ Checksums verified (87 files)
+# Bundle verification: PASSED
+
+# Hand-edit 017-dynamo-platform/values.yaml, then:
+aicr verify ./bundle
+# ✗ Checksum verification failed
+# - [INVALID_REQUEST] checksum mismatch for "017-dynamo-platform/values.yaml"
+# Bundle verification: FAILED (exit 4)
+```
+
+A modified bundle also invalidates the binding of any existing attestation
+to the original checksum digest. Regenerate instead, using the same
+`aicr bundle` command and flags you used originally, with the NATS
+overrides added:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  <your original --accelerated-node-selector / --system-node-selector / etc. flags> \
+  --set dynamoplatform:global.nats.install=true \
+  --output ./bundle
+```
+
+If your system node group is tainted or the cluster has no default
+StorageClass, add the scheduling/storage overrides a re-enabled NATS also
+needs -- AICR no longer targets NATS with `--system-node-selector` or
+`--storage-class` at bundle-generation time (those registry paths were
+removed along with bundled-by-default NATS), so pass them explicitly or
+the NATS pod/PVC can stay `Pending`:
+
+```bash
+  --set dynamoplatform:nats.podTemplate.merge.spec.nodeSelector.<key>=<value> \
+  --set dynamoplatform:nats.config.jetstream.fileStore.pvc.storageClassName=<name>
+```
+
+Verified against this exact sequence (generate → `aicr verify` passes →
+hand-edit → `aicr verify` fails with exit 4 → regenerate with `--set` →
+`aicr verify` passes again), 2026-09-03.
+
+On an in-place `helm upgrade` from the regenerated bundle, disabling NATS
+removes its StatefulSet but does not delete its PVC; inspect
+`kubectl get pvc -n dynamo-system -l app.kubernetes.io/name=nats` before
+deciding whether to retain or delete it.
+
+**Separately, and more importantly than the NATS opt-out above:** bumping
+the operator without also bumping any standing `DynamoGraphDeployment`'s
+runtime image is its own hazard, independent of NATS. An older runtime
+under a newer operator is the same version-skew class that caused the
+frontend discovery panic fixed in #1193 -- setting `DYN_EVENT_PLANE=zmq`
+on the old workload is defense in depth, not a substitute for bumping its
+image to match the operator.

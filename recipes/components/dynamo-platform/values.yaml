@@ -26,53 +26,14 @@ global:
   # Dynamo 1.4+ defaults the request plane to TCP and the KV event plane to
   # ZMQ, so the bundled NATS chart is no longer needed for AICR's defaults.
   # global.nats.install is intentionally left unset (chart default: false).
-  # Re-enable only if a workload explicitly opts into a NATS-based transport
-  # (legacy DYN_REQUEST_PLANE=nats, DYN_EVENT_PLANE=nats, or a NATS
-  # request-trace sink), via global.nats.install: true.
   #
-  # Upgrade note: on an in-place `helm upgrade` of a standing cluster,
-  # accepting this default removes bundled NATS and drops NATS_SERVER from
-  # operator-managed workload specs, which triggers rolling restarts. Fresh
-  # bundle installs are unaffected.
-  #
-  # CRITICAL for standing clusters: this only restarts operator-managed
-  # workload specs -- it does not touch the runtime IMAGE any existing
-  # DynamoGraphDeployment already pins. Bumping the runtime image to match
-  # the operator is REQUIRED, not optional: an older runtime (e.g.
-  # vllm-runtime:1.2.1, AICR's own prior pin) under a newer operator is
-  # exactly the version-skew class that caused the frontend discovery panic
-  # fixed in #1193 -- this is a broader hazard than just the event-plane
-  # default below, and setting DYN_EVENT_PLANE alone does not resolve it.
-  # Separately, and additionally: a workload on that older image without
-  # DYN_EVENT_PLANE set relies on THAT image's own compiled-in default, not
-  # this chart's. At 1.2.1 that default is nats for etcd/kubernetes
-  # discovery (verified against upstream's resolve_event_transport_kind());
-  # it only became zmq-for-every-backend later, by 1.4.2. So a restarted
-  # 1.2.1 pod can silently keep trying to reach a NATS server this chart
-  # just removed. Before or alongside this platform upgrade: bump any
-  # standing DynamoGraphDeployment's runtime image to match the operator
-  # (required), and set DYN_EVENT_PLANE=zmq explicitly as defense in depth
-  # (does not substitute for the image bump) -- don't rely on the platform
-  # upgrade alone to carry old workloads through.
-  #
-  # To opt out of the NATS removal and avoid the restart instead: the
-  # generated install.sh does NOT forward extra flags (no --set passthrough)
-  # -- edit this component's rendered values.yaml (or cluster-values.yaml)
-  # in the bundle directly, setting global.nats.install: true, before
-  # re-running install.sh.
-  #
-  # AICR no longer targets NATS with --system-node-selector/--storage-class
-  # at bundle-generation time (the registry's nodeSelectorPaths/
-  # tolerationPaths/storageClassPaths for nats.* were removed along with
-  # bundled-by-default NATS). If you opt back in on a tainted system
-  # nodegroup or a cluster with no default StorageClass, also set
-  # nats.podTemplate.merge.spec.nodeSelector/tolerations and
-  # nats.config.jetstream.fileStore.pvc.storageClassName by hand in the
-  # same values.yaml edit, or the NATS pod/PVC can stay Pending.
-  #
-  # Disabling NATS removes its StatefulSet but does not delete its PVC.
-  # Inspect `kubectl get pvc -n dynamo-system -l app.kubernetes.io/name=nats`
-  # before deciding whether to retain or delete it.
+  # Upgrading a standing cluster (opting back into NATS, and the separate,
+  # more important runtime-image-vs-operator version-skew hazard): see
+  # "Upgrade Notes" > dynamo-platform in docs/user/component-catalog.md.
+  # Do not hand-edit a generated bundle's values.yaml/cluster-values.yaml --
+  # both are covered by the bundle's checksum manifest and aicr verify
+  # fails closed on any modified file; regenerate with `aicr bundle --set`
+  # instead, per that doc.
   # Disable kai-scheduler sub-chart install — managed as a separate AICR component.
   # Keep enabled: true so the Dynamo operator detects and uses the external scheduler.
   kai-scheduler:
