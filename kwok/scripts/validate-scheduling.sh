@@ -289,41 +289,73 @@ capture_failure_diagnostics() {
     # gate diagnostics margin documented in kwok-test/action.yml.
     local deadline=$(( $(date +%s) + 60 ))
     budget_left() { (( $(date +%s) < deadline )); }
+    # Caps EVERY command to whatever's left of the overall budget, not just
+    # its own default — so a command starting near the deadline can't run
+    # past it (checked once at loop-entry is not enough: the last commands
+    # in a namespace's pass, endpointslices/describe, ran after the pod
+    # loop with no further check). Returns 124 immediately, without
+    # running anything, once the budget is gone.
+    run_capped() {
+        local default_t=$1; shift
+        local remaining=$(( deadline - $(date +%s) ))
+        (( remaining <= 0 )) && return 124
+        local cap=$default_t
+        (( remaining < cap )) && cap=$remaining
+        timeout "${cap}s" "$@"
+    }
 
     local system_ns="${SYSTEM_NS_PATTERN}"
-    local namespaces
-    namespaces=$(timeout 10s kubectl get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
-        | tr ' ' '\n' | grep -vE "^(${system_ns})$" || true)
+    local namespaces ns_rc=0
+    namespaces=$(run_capped 10 kubectl get ns -o jsonpath='{.items[*].metadata.name}' \
+        2>"${out_dir}/_namespace-discovery.stderr") || ns_rc=$?
+    if (( ns_rc != 0 )); then
+        echo "[namespace discovery FAILED or timed out, rc=${ns_rc}]" >> "${out_dir}/_namespace-discovery.stderr"
+    fi
+    namespaces=$(printf '%s' "$namespaces" | tr ' ' '\n' | grep -vE "^(${system_ns})$" || true)
 
     for ns in $namespaces; do
         budget_left || { log_info "Diagnostic capture budget exhausted — stopping"; break; }
-        timeout 10s kubectl get pods -n "$ns" -o wide > "${out_dir}/${ns}-pods.txt" 2>/dev/null || true
+        run_capped 10 kubectl get pods -n "$ns" -o wide > "${out_dir}/${ns}-pods.txt" 2>/dev/null || true
         # run-all-recipes.sh reuses a fixed namespace (KWOK_NAMESPACE,
         # default aicr-kwok-test) across every recipe in its loop, each
         # invoking this script — and this capture — separately. Truncate
         # before the pod loop so a second failing recipe in the same job
         # doesn't append onto the first failure's log.
         : > "${out_dir}/${ns}-logs.txt" 2>/dev/null || true
+
+        local pod_list pod_rc=0
+        pod_list=$(run_capped 10 kubectl get pods -n "$ns" -o name \
+            2>"${out_dir}/${ns}-pod-discovery.stderr") || pod_rc=$?
+        if (( pod_rc != 0 )); then
+            echo "[pod discovery FAILED or timed out, rc=${pod_rc}]" >> "${out_dir}/${ns}-pod-discovery.stderr"
+        fi
+
         # Per-pod (not label-selected) so this works regardless of chart
         # label conventions. Merge stderr into the log file with a
         # success/failure marker per pod — an absent log line must be
         # distinguishable from a failed/timed-out fetch (NVIDIA/nodewright#571
-        # hinges on exactly that distinction).
+        # hinges on exactly that distinction). The redirect itself is
+        # guarded with `|| true`: an unguarded `>>` failure here (e.g. the
+        # output dir vanishing mid-run) would abort cleanup() under
+        # `set -euo pipefail` before it reaches the real teardown below,
+        # AND overwrite the script's real exit code (e.g. an
+        # EXIT_ARGOCD_SYNC_TIMEOUT=50 that run-all-recipes.sh's 3-strike
+        # counter depends on) with whatever this redirect failed with.
         local pod pod_out
-        for pod in $(timeout 10s kubectl get pods -n "$ns" -o name 2>/dev/null); do
+        for pod in $pod_list; do
             budget_left || { log_info "Diagnostic capture budget exhausted — stopping"; break 2; }
             {
                 echo "=== ${pod} ==="
-                if pod_out=$(timeout 15s kubectl logs -n "$ns" "$pod" --all-containers --tail=1000 --prefix 2>&1); then
+                if pod_out=$(run_capped 15 kubectl logs -n "$ns" "$pod" --all-containers --tail=1000 --prefix 2>&1); then
                     printf '%s\n' "$pod_out"
                 else
                     echo "[log fetch FAILED or timed out, rc=$?]"
                     printf '%s\n' "$pod_out"
                 fi
-            } >> "${out_dir}/${ns}-logs.txt"
+            } >> "${out_dir}/${ns}-logs.txt" || true
         done
-        timeout 10s kubectl get endpointslices -n "$ns" -o yaml > "${out_dir}/${ns}-endpointslices.yaml" 2>/dev/null || true
-        timeout 15s kubectl describe pods -n "$ns" > "${out_dir}/${ns}-describe.txt" 2>/dev/null || true
+        run_capped 10 kubectl get endpointslices -n "$ns" -o yaml > "${out_dir}/${ns}-endpointslices.yaml" 2>/dev/null || true
+        run_capped 15 kubectl describe pods -n "$ns" > "${out_dir}/${ns}-describe.txt" 2>/dev/null || true
     done
 }
 
