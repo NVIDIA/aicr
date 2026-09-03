@@ -44,13 +44,7 @@ func numNodesChildRE(indent string) *regexp.Regexp {
 // A full YAML parse is unavailable — the manifests are Helm templates containing
 // {{ }} expressions that no YAML parser accepts — so this walks indentation.
 func specHasNumNodes(doc string) bool {
-	var lines []string
-	for _, line := range strings.Split(doc, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "#") || strings.TrimSpace(line) == "" {
-			continue
-		}
-		lines = append(lines, line)
-	}
+	lines := strings.Split(stripYAMLComments(doc), "\n")
 	for i, line := range lines {
 		m := specKeyRE.FindStringSubmatch(line)
 		if m == nil {
@@ -85,7 +79,13 @@ func specHasNumNodes(doc string) bool {
 func computeDomainDocsMissingNumNodes(content string) []int {
 	var missing []int
 	for i, doc := range strings.Split(content, "\n---") {
-		if !strings.Contains(doc, "kind: ComputeDomain") {
+		// Detect on comment-stripped content, matching specHasNumNodes below.
+		// Checking the raw doc instead flags any file that merely DOCUMENTS a
+		// ComputeDomain in prose — e.g. a recipe-supplied NCCL runtime whose
+		// header records the CD an operator must pre-create — while the
+		// numNodes those same comments show is stripped before verification.
+		// That asymmetry reports a file as shipping a CR it does not ship.
+		if !strings.Contains(stripYAMLComments(doc), "kind: ComputeDomain") {
 			continue
 		}
 		if !specHasNumNodes(doc) {
@@ -93,6 +93,20 @@ func computeDomainDocsMissingNumNodes(content string) []int {
 		}
 	}
 	return missing
+}
+
+// stripYAMLComments drops whole-line comments and blank lines. It is
+// deliberately line-based, not a YAML parse: these files are templates
+// carrying ${VAR} placeholders that a strict parser would reject.
+func stripYAMLComments(doc string) string {
+	var lines []string
+	for _, line := range strings.Split(doc, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") || strings.TrimSpace(line) == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // TestComputeDomainManifestsSetNumNodes guards the fresh-install CRD-overlap
