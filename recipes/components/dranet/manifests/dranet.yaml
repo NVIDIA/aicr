@@ -26,8 +26,14 @@
 # them as ResourceSlices, and uses NRI to move the netdev + RDMA device into the
 # pod netns at container creation. No host driver/containerd/kubelet mutation:
 # it relies on the host DOCA-OFED stack and the already-enabled containerd NRI
-# plugin (containerd 2.x on rke2). Runs shared RDMA mode (host `rdma system` =
-# netns shared).
+# plugin (containerd 2.x on rke2).
+#
+# DraNet does not set or require a particular host RDMA namespace mode — it
+# works under whichever mode `ib_core`'s netns_mode leaves in place, and never
+# mutates it. Which mode a given deployment runs is therefore decided by the
+# recipe, not here: on a host left at the default the subsystem stays shared,
+# while the VR200 leaves pair this component with rdma-netns-exclusive, which
+# sets netns_mode=0 and reboots so each pod netns gets its own RDMA view.
 ---
 apiVersion: v1
 kind: ServiceAccount
