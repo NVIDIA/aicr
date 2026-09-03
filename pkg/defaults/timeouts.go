@@ -701,6 +701,25 @@ const (
 	// against a separate lister that lags that strongly-consistent read — a freshness the
 	// client cannot observe. This bounds how long we let the webhook cache catch up.
 	TrainJobAdmissionRetryTimeout = 1 * time.Minute
+
+	// CRECertificationTimeout is AICR's wait budget for a Cluster Readiness
+	// Engine Certification (NCCL or training/goodput) to reach Succeeded or
+	// Failed. The same duration is written on spec.timeoutPerJob so CRE
+	// stops the job instead of leaving it running after AICR gives up.
+	CRECertificationTimeout = 30 * time.Minute
+
+	// CRECertificationDeleteTimeout bounds the removal of the Certification
+	// object itself. The shorter DiagnosticTimeout would expire while the CR is
+	// still held by finalizers.
+	CRECertificationDeleteTimeout = 5 * time.Minute
+
+	// CRECertificationTeardownTimeout bounds the whole teardown: removing the
+	// Certification and then confirming the TrainJobs and GPU pods it started
+	// are gone. It must outlast CRE's own drain barrier, which waits up to five
+	// minutes for workload pods to exit and then proceeds regardless
+	// (podDrainGracePeriod in pkg/controller/pod_drain.go), plus the
+	// termination grace of the multi-node GPU pods left behind.
+	CRECertificationTeardownTimeout = 10 * time.Minute
 )
 
 // Inference performance validation timeouts.

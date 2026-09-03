@@ -286,3 +286,23 @@ validators:
     timeout: 30m
     args: ["nccl-all-reduce-bw-nvls"]
     env: []
+  # CRE-driven EKS H100 NCCL check. Opt-in only: no embedded overlay
+  # references this check. Shipped EKS H100 training keeps TrainJob
+  # nccl-all-reduce-bw.
+  # Live UAT 2026-09-02 (2× p5.48xlarge, public CRE v0.1.0): 489.80 GB/s vs >= 300.
+  - name: nccl-cre-all-reduce-bw
+    phase: performance
+    description: "Verify EKS H100 NCCL All Reduce Bus Bandwidth via a Cluster Readiness Engine Certification"
+    image: ghcr.io/nvidia/aicr-validators/performance:latest
+    timeout: 30m
+    args: ["nccl-cre-all-reduce-bw"]
+    env: []
+  # Live UAT 2026-09-02 (same 2× p5 cluster): Nemotron-5 8B catalog Certification, goodput 0.7671 vs >= 0.5.
+  # training/nemotron5-56b needs minGPUs=32 and fails on this SKU.
+  - name: cre-training-goodput
+    phase: performance
+    description: "Verify EKS H100 NeMo training goodput via a Cluster Readiness Engine Certification"
+    image: ghcr.io/nvidia/aicr-validators/performance:latest
+    timeout: 30m
+    args: ["cre-training-goodput"]
+    env: []

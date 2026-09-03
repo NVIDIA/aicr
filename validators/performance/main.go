@@ -20,6 +20,8 @@
 //	performance nccl-all-reduce-bw
 //	performance nccl-all-reduce-bw-net
 //	performance nccl-all-reduce-bw-nvls
+//	performance nccl-cre-all-reduce-bw
+//	performance cre-training-goodput
 package main
 
 import (
@@ -28,9 +30,11 @@ import (
 
 func main() {
 	validators.Run(map[string]validators.CheckFunc{
-		checkNameNCCLAllReduceBW:  checkNCCLAllReduceBW,
-		"nccl-all-reduce-bw-net":  checkNCCLAllReduceBWNET,
-		"nccl-all-reduce-bw-nvls": checkNCCLAllReduceBWNVLS,
-		"inference-perf":          checkInferencePerf,
+		checkNameNCCLAllReduceBW:    checkNCCLAllReduceBW,
+		"nccl-all-reduce-bw-net":    checkNCCLAllReduceBWNET,
+		"nccl-all-reduce-bw-nvls":   checkNCCLAllReduceBWNVLS,
+		checkNameCRENCCLAllReduceBW: checkCRENCCLAllReduceBW,
+		checkNameCRETrainingGoodput: checkCRETrainingGoodput,
+		"inference-perf":            checkInferencePerf,
 	})
 }

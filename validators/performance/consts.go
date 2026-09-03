@@ -16,14 +16,24 @@ package main
 
 // Cross-file string constants for the performance validator.
 const (
-	apiGroupAPIExtensions    = "apiextensions.k8s.io"
-	apiGroupApps             = "apps"
-	resourceCRDs             = "customresourcedefinitions"
-	versionV1alpha1          = "v1alpha1"
-	versionV1beta1           = "v1beta1"
-	keyName                  = "name"
-	keyOperator              = "operator"
-	checkNameNCCLAllReduceBW = "nccl-all-reduce-bw"
+	apiGroupAPIExtensions       = "apiextensions.k8s.io"
+	apiGroupApps                = "apps"
+	resourceCRDs                = "customresourcedefinitions"
+	versionV1alpha1             = "v1alpha1"
+	versionV1beta1              = "v1beta1"
+	keyName                     = "name"
+	keyOperator                 = "operator"
+	keyAPIVersion               = "apiVersion"
+	keyKind                     = "kind"
+	keyMetadata                 = "metadata"
+	keyNamespace                = "namespace"
+	keySpec                     = "spec"
+	keyMountPath                = "mountPath"
+	keyValue                    = "value"
+	checkNameNCCLAllReduceBW    = "nccl-all-reduce-bw"
+	checkNameCRENCCLAllReduceBW = "nccl-cre-all-reduce-bw"
+	checkNameCRETrainingGoodput = "cre-training-goodput"
+	conditionStatusTrue         = "True"
 
 	// nodeJobName is the name of both the NCCL worker replicatedJob and its
 	// primary container in testdata/{accelerator}/{service}/runtime.yaml.

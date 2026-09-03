@@ -59,6 +59,18 @@ const (
 	// would otherwise silently no-op RoCE forwarding with no test failing.
 	NCCLAllReduceBWNetCheckName = "nccl-all-reduce-bw-net"
 
+	// CRENCCLAllReduceBWCheckName is the catalog name of the CRE-driven NCCL
+	// all-reduce check (Certification). Overlays opt in by listing this check and
+	// a same-named performance constraint. It is limited to EKS H100 while CRE
+	// integration is validated, and no embedded overlay enables it.
+	CRENCCLAllReduceBWCheckName = "nccl-cre-all-reduce-bw"
+
+	// CRETrainingGoodputCheckName is the catalog name of the CRE-driven
+	// NeMo training check (Certification training/nemotron5-8b). It is
+	// limited to EKS H100 while CRE integration is validated, and no
+	// embedded overlay enables it.
+	CRETrainingGoodputCheckName = "cre-training-goodput"
+
 	// ncclFabricEnv selects the NET fabric (efa default | roce). Forwarded to
 	// the NET check pod so the in-Job validator can observe it. This is the
 	// orchestrator (forwarding) end; the validator-pod (reading) end defines the
