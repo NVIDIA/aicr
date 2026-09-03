@@ -806,3 +806,41 @@ under a newer operator is the same version-skew class that caused the
 frontend discovery panic fixed in #1193 -- setting `DYN_EVENT_PLANE=zmq`
 on the old workload is defense in depth, not a substitute for bumping its
 image to match the operator.
+
+### `gpu-operator` and `nvidia-dra-driver-gpu`: ComputeDomain CRD ownership on Argo CD
+
+`gpu-operator` and `nvidia-dra-driver-gpu` (and `nvidia-dra-driver-gpu-ocp`) both
+ship the `computedomains.resource.nvidia.com` CRD. As of `gpu-operator`
+v26.7.0 the two chart copies disagree on schema (`spec.numNodes` required vs.
+optional with a default), so on `--deployer argocd` and `--deployer
+argocd-helm` — where every generated `Application` syncs with
+`automated.selfHeal: true` — Argo CD perpetually reconciles the CRD toward
+whichever `Application` last synced.
+
+When a bundle pairs a standalone DRA driver with `gpu-operator` **v26.7.0 or
+newer**, AICR scopes an `ignoreDifferences` entry to the divergent fields on
+the `gpu-operator` `Application`, so the DRA driver's copy stays the effective
+owner and the reconcile loop stops. This is generated automatically — no flag
+or override is needed. Bundles with only one of the two components, or with a
+`gpu-operator` older than v26.7.0 (whose chart ships no `computedomains` CRD
+to contend with), are unaffected and carry no such entry.
+
+**One side effect worth knowing about.** The entry is paired with the
+`RespectIgnoreDifferences=true` sync option, without which Argo CD would
+exclude the fields from its diff but still re-apply them on every sync. That
+option is *Application-wide*, not per-entry: Argo builds the sync-time
+normalizer from this `Application`'s `ignoreDifferences` **plus** any
+`resource.customizations.ignoreDifferences.*` configured cluster-wide in
+`argocd-cm`. So on an Argo instance carrying global ignore rules (webhook
+`caBundle`, HPA-managed `replicas`, aggregated ClusterRole rules), those
+fields also stop being enforced at sync time for the `gpu-operator`
+`Application` specifically — drift in them is preserved rather than corrected
+by `selfHeal`. Argo CD offers no way to scope the option to a single entry.
+
+This is a stopgap, not a durable fix. `Helm` and `Flux` bundles are not
+affected (both install CRDs once and never re-apply them), and the
+OLM-based OCP path (`gpu-operator-ocp`, `gpu-operator-ocp-olm`) is not
+covered — those components install no chart `crds/` of their own, so their
+CRDs come from the OLM `Subscription`/CSV and an `Application`-level
+`ignoreDifferences` has nothing to arbitrate. That conflict is tracked
+separately. See [NVIDIA/aicr#2546](https://github.com/NVIDIA/aicr/issues/2546).

@@ -156,6 +156,11 @@ RELEASE_NAME="${KWOK_RELEASE:-aicr-test}"
 WORK_DIR=""
 AICR_BIN=""
 KEEP_NAMESPACE=false
+# Recipe under test. Global (not just main()'s local) for the same reason
+# ARGOCD_ROOT_APP is: the EXIT trap needs to see it, and it keys the
+# diagnostic output directory so recipes can't overwrite each other's
+# capture when run-all-recipes.sh loops over several in one cluster.
+RECIPE_UNDER_TEST=""
 
 # Deployer selection (issue #843). Set by --deployer flag in main().
 # When DEPLOYER != "helm", generate_bundle pushes to OCI and deploy_bundle
@@ -258,10 +263,153 @@ resolve_flux_root_names() {
     esac
 }
 
+# Dump pod logs/describe/endpointslices for every non-system namespace before
+# cleanup() tears them down. Best-effort and namespace-agnostic (no
+# component-specific selectors) so it stays useful for any future operator
+# failure under KWOK, not just today's incident.
+#
+# Writes into /tmp/kwok-debug-artifacts/pod-logs/, the same well-known path
+# the calling GitHub Action's "Collect debug artifacts" step already
+# mkdir -p's and "Upload debug artifacts" already uploads on failure — no
+# workflow changes needed for this to reach the artifact.
+#
+# Runs from inside cleanup()'s EXIT trap, which fires before the
+# composite action's failure() steps ever execute. Without this, cleanup()'s
+# own helm-uninstall/namespace-delete below destroys the evidence first —
+# see NVIDIA/nodewright#571 for the incident that surfaced the gap.
+capture_failure_diagnostics() {
+    # Keyed on the recipe: run-all-recipes.sh loops over several recipes in
+    # one shared cluster (`make kwok-test-all` runs the whole set), each
+    # invoking this capture separately against a largely fixed namespace
+    # set. With a shared directory, a later recipe failing early — before
+    # its pods exist, or with the budget already spent — would leave
+    # zero-byte files (the `>` redirects below truncate before the command
+    # runs) on top of an earlier recipe's good capture, destroying the very
+    # evidence this function exists to preserve.
+    local out_dir="/tmp/kwok-debug-artifacts/pod-logs/${RECIPE_UNDER_TEST:-unknown-recipe}"
+    mkdir -p "$out_dir" 2>/dev/null || return 0
+
+    # Hard overall budget, not just per-call timeouts: a two-pod namespace
+    # alone could otherwise burn 30s(list) + 2*30s(logs) + 30s(endpoints) +
+    # 30s(describe) = 150s, and a slow apiserver is exactly the failure mode
+    # this runs under. Every namespace/pod iteration checks this before
+    # starting, so a stall stops the whole pass rather than one command.
+    #
+    # 30s, deliberately small: kwok-test/action.yml reserves a 240s margin,
+    # but only ~180s of that is post-gate work, and cleanup()'s own teardown
+    # below already draws on it unbounded (up to 120s for the Argo CD root
+    # Application delete, 60s per Helm uninstall across every release, plus
+    # the namespace sweep). This capture runs ahead of all of that, so its
+    # budget is not free — overrunning risks the job timeout killing
+    # teardown, `kind export logs`, AND the artifact upload, which would
+    # lose more evidence than this function captures.
+    local deadline=$(( $(date +%s) + 30 ))
+    budget_left() { (( $(date +%s) < deadline )); }
+    # Caps EVERY command to whatever's left of the overall budget, not just
+    # its own default — so a command starting near the deadline can't run
+    # past it (checked once at loop-entry is not enough: the last commands
+    # in a namespace's pass, endpointslices/describe, ran after the pod
+    # loop with no further check). Returns 124 immediately, without
+    # running anything, once the budget is gone.
+    run_capped() {
+        local default_t=$1; shift
+        local remaining=$(( deadline - $(date +%s) ))
+        (( remaining <= 0 )) && return 124
+        local cap=$default_t
+        (( remaining < cap )) && cap=$remaining
+        timeout "${cap}s" "$@"
+    }
+
+    # Preserve partial stdout in the primary artifact, while recording
+    # stderr and a non-zero status in a companion file. This keeps an empty
+    # successful response distinguishable from an API error or timeout.
+    # Always returns success: diagnostics must never interrupt teardown or
+    # replace the script's original exit code.
+    capture_to_file() {
+        local default_t=$1
+        local output_file=$2
+        shift 2
+        local stderr_file="${output_file%.*}.stderr"
+        local rc=0
+
+        run_capped "$default_t" "$@" > "$output_file" 2> "$stderr_file" || rc=$?
+        if (( rc != 0 )); then
+            printf '[diagnostic fetch FAILED or timed out, rc=%d]\n' "$rc" >> "$stderr_file" || true
+        fi
+        return 0
+    }
+
+    local system_ns="${SYSTEM_NS_PATTERN}"
+    local namespaces ns_rc=0
+    namespaces=$(run_capped 10 kubectl get ns -o jsonpath='{.items[*].metadata.name}' \
+        2>"${out_dir}/_namespace-discovery.stderr") || ns_rc=$?
+    if (( ns_rc != 0 )); then
+        echo "[namespace discovery FAILED or timed out, rc=${ns_rc}]" >> "${out_dir}/_namespace-discovery.stderr" || true
+    fi
+    namespaces=$(printf '%s' "$namespaces" | tr ' ' '\n' | grep -vE "^(${system_ns})$" || true)
+
+    for ns in $namespaces; do
+        budget_left || { log_info "Diagnostic capture budget exhausted — stopping"; break; }
+        capture_to_file 10 "${out_dir}/${ns}-pods.txt" kubectl get pods -n "$ns" -o wide
+        # run-all-recipes.sh reuses a fixed namespace (KWOK_NAMESPACE,
+        # default aicr-kwok-test) across every recipe in its loop, each
+        # invoking this script — and this capture — separately. Truncate
+        # before the pod loop so a second failing recipe in the same job
+        # doesn't append onto the first failure's log.
+        : > "${out_dir}/${ns}-logs.txt" 2>/dev/null || true
+
+        local pod_list pod_rc=0
+        pod_list=$(run_capped 10 kubectl get pods -n "$ns" -o name \
+            2>"${out_dir}/${ns}-pod-discovery.stderr") || pod_rc=$?
+        if (( pod_rc != 0 )); then
+            echo "[pod discovery FAILED or timed out, rc=${pod_rc}]" >> "${out_dir}/${ns}-pod-discovery.stderr" || true
+        fi
+
+        # Per-pod (not label-selected) so this works regardless of chart
+        # label conventions. Merge stderr into the log file with a
+        # success/failure marker per pod — an absent log line must be
+        # distinguishable from a failed/timed-out fetch (NVIDIA/nodewright#571
+        # hinges on exactly that distinction). The redirect itself is
+        # guarded with `|| true`: an unguarded `>>` failure here (e.g. the
+        # output dir vanishing mid-run) would abort cleanup() under
+        # `set -euo pipefail` before it reaches the real teardown below,
+        # AND overwrite the script's real exit code (e.g. an
+        # EXIT_ARGOCD_SYNC_TIMEOUT=50 that run-all-recipes.sh's 3-strike
+        # counter depends on) with whatever this redirect failed with.
+        local pod pod_out
+        for pod in $pod_list; do
+            budget_left || { log_info "Diagnostic capture budget exhausted — stopping"; break 2; }
+            {
+                echo "=== ${pod} ==="
+                if pod_out=$(run_capped 15 kubectl logs -n "$ns" "$pod" --all-containers --tail=1000 --prefix 2>&1); then
+                    printf '%s\n' "$pod_out"
+                else
+                    echo "[log fetch FAILED or timed out, rc=$?]"
+                    printf '%s\n' "$pod_out"
+                fi
+            } >> "${out_dir}/${ns}-logs.txt" || true
+        done
+        capture_to_file 10 "${out_dir}/${ns}-endpointslices.yaml" kubectl get endpointslices -n "$ns" -o yaml
+        capture_to_file 15 "${out_dir}/${ns}-describe.txt" kubectl describe pods -n "$ns"
+        # Namespace Events, not just the pod-scoped ones `describe pods`
+        # carries: a failed webhook call or Helm install surfaces as an
+        # Event on a non-pod object. The action's own
+        # `kubectl get events --all-namespaces` runs after this trap has
+        # already deleted the namespace, so this is the only chance to keep
+        # them.
+        capture_to_file 10 "${out_dir}/${ns}-events.txt" kubectl get events -n "$ns" --sort-by=.lastTimestamp
+    done
+}
+
 # Cleanup function
 cleanup() {
     local exit_code=$?
     log_info "Cleaning up..."
+
+    if [[ "$exit_code" -ne 0 ]]; then
+        log_info "Non-zero exit ($exit_code) — capturing pod diagnostics before teardown..."
+        capture_failure_diagnostics
+    fi
 
     if [[ -n "$WORK_DIR" ]] && [[ -d "$WORK_DIR" ]]; then
         rm -rf "$WORK_DIR"
@@ -1996,6 +2144,7 @@ main() {
     esac
 
     # Must run before cleanup trap so the trap sees the resolved root name.
+    RECIPE_UNDER_TEST="$recipe"
     resolve_argocd_root_app
     resolve_flux_root_names "$recipe"
 
