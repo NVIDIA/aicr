@@ -17,11 +17,19 @@ package architecture
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
 )
+
+// facadePackage is pkg/client/v1's module-relative import path, the one
+// package every reference into is always clean. validate requires it be
+// listed in the facade bucket so the generator's raw output -- which dumps
+// every observed package, including the facade itself, into constrained --
+// cannot be committed as-is.
+const facadePackage = "pkg/client/v1"
 
 type symbolClass string
 
@@ -87,6 +95,9 @@ func (p policy) validate() []string {
 		if entry.Reason == "" {
 			problems = append(problems, name+": missing reason")
 		}
+		if strings.Contains(entry.Reason, "TODO") {
+			problems = append(problems, name+": reason still contains a TODO placeholder")
+		}
 		hasTracking := entry.Tracking != ""
 		if hasTracking == entry.Permanent {
 			problems = append(problems, name+": set exactly one of tracking or permanent")
@@ -104,28 +115,42 @@ func (p policy) validate() []string {
 			problems = append(problems, name+": missing infrastructure reason")
 		}
 	}
+	if !slices.Contains(p.Facade, facadePackage) {
+		problems = append(problems, facadePackage+" must be in the facade bucket")
+	}
 	return problems
 }
 
 func TestPolicyValidate(t *testing.T) {
 	t.Parallel()
 
+	validFacade := []string{facadePackage}
+
 	tests := []struct {
 		name    string
 		entry   constrainedPackage
+		facade  []string
 		wantSub string
 	}{
-		{"valid permanent", constrainedPackage{Reason: "r", Permanent: true}, ""},
-		{"valid tracking", constrainedPackage{Reason: "r", Tracking: "#2025"}, ""},
-		{"missing reason", constrainedPackage{Permanent: true}, "missing reason"},
-		{"neither", constrainedPackage{Reason: "r"}, "exactly one"},
-		{"both", constrainedPackage{Reason: "r", Tracking: "#1", Permanent: true}, "exactly one"},
-		{"bad class", constrainedPackage{Reason: "r", Permanent: true, Symbols: map[string]symbolClass{"X": "nope"}}, "unknown class"},
+		{"valid permanent", constrainedPackage{Reason: "r", Permanent: true}, validFacade, ""},
+		{"valid tracking", constrainedPackage{Reason: "r", Tracking: "#2025"}, validFacade, ""},
+		{"missing reason", constrainedPackage{Permanent: true}, validFacade, "missing reason"},
+		{"neither", constrainedPackage{Reason: "r"}, validFacade, "exactly one"},
+		{"both", constrainedPackage{Reason: "r", Tracking: "#1", Permanent: true}, validFacade, "exactly one"},
+		{"bad class", constrainedPackage{Reason: "r", Permanent: true, Symbols: map[string]symbolClass{"X": "nope"}}, validFacade, "unknown class"},
+		// Regression guard for the generator's raw output: every constrained
+		// reason it emits is the literal placeholder below, and validate must
+		// reject it rather than let an unfinished policy pass green.
+		{"todo reason", constrainedPackage{Reason: "TODO: state why this is not a facade gap", Permanent: true}, validFacade, "TODO"},
+		// Regression guard for the generator's other mistake: it sorts every
+		// observed package -- including the facade itself -- into constrained
+		// and writes no facade bucket at all.
+		{"missing facade", constrainedPackage{Reason: "r", Permanent: true}, nil, "facade bucket"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			p := policy{Constrained: map[string]constrainedPackage{"pkg/x": tt.entry}}
+			p := policy{Facade: tt.facade, Constrained: map[string]constrainedPackage{"pkg/x": tt.entry}}
 			problems := p.validate()
 			if tt.wantSub == "" {
 				if len(problems) != 0 {
