@@ -250,7 +250,7 @@ type Recipe struct{ Name string }
 func (r *Recipe) Resolve() string { return r.Name }
 `
 	// The consumer holds a Recipe (permitted as a type) and calls Resolve on
-	// it. There is no ` + "`business.`" + ` selector on that call anywhere.
+	// it. There is no "business." selector on that call anywhere.
 	const consumerSrc = `package consumer
 
 import "fixture/business"
