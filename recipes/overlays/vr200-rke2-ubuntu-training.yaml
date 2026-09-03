@@ -150,14 +150,28 @@ spec:
     # nodewright-customizations componentRef below for the full rationale
     # (kernel-headers aliasing only, accelerator-agnostic, no reboot) and
     # the switch-to-a-native-vr200-profile follow-up.
-    # Health check override: the VR reference clusters carry an out-of-band
-    # nodewright install (hand-written values, no fullnameOverride), so the
-    # live Deployment is named nodewright-controller-manager rather than the
-    # embedded catalog's expected skyhook-operator-controller-manager
-    # (NVIDIA/aicr#1828). Inline override (rather than a checks/ file)
-    # because the expected-resources validator is a separate container
-    # image with its own compiled-in embedded catalog — it never reads
-    # --data, only the resolved recipe.yaml.
+    # Health check override: the operator Deployment's name depends on how
+    # nodewright got installed, and both paths are real here. The VR
+    # reference clusters carry an out-of-band install (hand-written values,
+    # no fullnameOverride) that renders nodewright-controller-manager, while
+    # a cluster deployed from this recipe's own bundle picks up
+    # components/nodewright-operator/values.yaml's
+    # `fullnameOverride: skyhook-operator` and renders
+    # skyhook-operator-controller-manager (NVIDIA/aicr#1828).
+    #
+    # So the Deployment assert is deliberately name-agnostic, matching the
+    # same rationale as the Skyhook CR assert in
+    # checks/nodewright-customizations/health-check.yaml: pinning either
+    # name asserts a Deployment that does not exist under the other install
+    # path. A nameless assert takes the executor's list-and-match path
+    # (pkg/chainsaw/inprocess.go), which fails closed on an empty or
+    # all-terminating collection (ErrCodeNotFound, not a vacuous pass), and
+    # the skyhook namespace holds only the operator.
+    #
+    # Inline override (rather than a checks/ file) because the
+    # expected-resources validator is a separate container image with its
+    # own compiled-in embedded catalog — it never reads --data, only the
+    # resolved recipe.yaml.
     - name: nodewright-operator
       type: Helm
       healthCheckAsserts: |
@@ -187,7 +201,6 @@ spec:
                       apiVersion: apps/v1
                       kind: Deployment
                       metadata:
-                        name: nodewright-controller-manager
                         namespace: skyhook
                       status:
                         (availableReplicas > `0`): true
