@@ -98,6 +98,6 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | l40s-oke-inference | oke | l40s | ol | inference | — | pass | R:0 D:4 P:0 C:8 | pending |
 | l40s-oke-training | oke | l40s | ol | training | — | pass | R:0 D:4 P:0 C:8 | pending |
 | vr200-rke2-ubuntu-inference-dynamo | rke2 | vr200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:10 | [rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
-| vr200-rke2-ubuntu-training-kubeflow | rke2 | vr200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:9 | pending |
+| vr200-rke2-ubuntu-training | rke2 | vr200 | ubuntu | training | — | pass | R:0 D:4 P:1 C:8 | [rke2/vr200-ubuntu/training](https://validation.aicr.run/#/rke2/vr200-ubuntu/training) |
 
 {/* END AICR-HEALTH */}
