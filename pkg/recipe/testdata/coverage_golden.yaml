@@ -1577,6 +1577,7 @@ criteria(service=, accelerator=gb300, intent=training, os=, platform=slurm):
             - service=eks
             - service=lke
             - service=ocp
+            - service=rke2
             - service=gke, os=cos
             - service=oke, os=ol
         platform:
@@ -1627,6 +1628,7 @@ criteria(service=, accelerator=gb300, intent=training, os=ubuntu, platform=slurm
             - service=eks
             - service=lke
             - service=ocp
+            - service=rke2
         os:
             - service=eks
         platform:
