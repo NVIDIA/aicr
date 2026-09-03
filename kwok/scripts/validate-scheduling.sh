@@ -298,6 +298,12 @@ capture_failure_diagnostics() {
     for ns in $namespaces; do
         budget_left || { log_info "Diagnostic capture budget exhausted — stopping"; break; }
         timeout 10s kubectl get pods -n "$ns" -o wide > "${out_dir}/${ns}-pods.txt" 2>/dev/null || true
+        # run-all-recipes.sh reuses a fixed namespace (KWOK_NAMESPACE,
+        # default aicr-kwok-test) across every recipe in its loop, each
+        # invoking this script — and this capture — separately. Truncate
+        # before the pod loop so a second failing recipe in the same job
+        # doesn't append onto the first failure's log.
+        : > "${out_dir}/${ns}-logs.txt" 2>/dev/null || true
         # Per-pod (not label-selected) so this works regardless of chart
         # label conventions. Merge stderr into the log file with a
         # success/failure marker per pod — an absent log line must be
