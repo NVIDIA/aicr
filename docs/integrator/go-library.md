@@ -635,7 +635,11 @@ for _, dim := range result.RelaxedDimensions {
 }
 ```
 
-Runnable version: `ExampleClient_CriteriaFromSnapshot` in `pkg/client/v1/example_test.go`.
+Runnable version: `Example_workflow` in `pkg/client/v1/example_test.go`, which
+loads a snapshot, derives criteria from it, resolves, bundles and verifies —
+and carries an `Output:` block, so it executes on every test run rather than
+only compiling. `ExampleClient_CriteriaFromSnapshot` shows this step on its own,
+but reads a snapshot path it does not ship and so is compile-only.
 
 Relaxation is deliberately narrow. Three cases propagate the original coverage
 error rather than retrying:
