@@ -41,17 +41,26 @@ func TestCheckAgainstPolicy(t *testing.T) {
 	}
 
 	tests := []struct {
-		name     string
-		refs     []reference
-		wantKind string
+		name      string
+		refs      []reference
+		wantKind  string
+		wantCount int // defaults to 1 when wantKind is set; use to assert more than one violation
 	}{
 		{
 			name: "facade use is always clean",
-			refs: []reference{{Package: "pkg/client/v1", Symbol: "NewClient", Class: classBehavioral}},
+			refs: []reference{
+				{Package: "pkg/client/v1", Symbol: "NewClient", Class: classBehavioral},
+				{Package: "pkg/recipe", Symbol: "Recipe", Class: classType},
+				{Package: "pkg/recipe", Symbol: "Recipe.Resolved", Class: classBehavioral},
+			},
 		},
 		{
 			name: "infrastructure needs no symbol entry",
-			refs: []reference{{Package: "pkg/errors", Symbol: "Wrap", Class: classBehavioral}},
+			refs: []reference{
+				{Package: "pkg/errors", Symbol: "Wrap", Class: classBehavioral},
+				{Package: "pkg/recipe", Symbol: "Recipe", Class: classType},
+				{Package: "pkg/recipe", Symbol: "Recipe.Resolved", Class: classBehavioral},
+			},
 		},
 		{
 			name: "recorded symbol at recorded class is clean",
@@ -94,6 +103,18 @@ func TestCheckAgainstPolicy(t *testing.T) {
 			},
 			wantKind: "unknown-package",
 		},
+		{
+			// Regression guard: a constrained package referenced nowhere in this
+			// pass must still surface every one of its recorded symbols as stale.
+			// A guard that skips untouched packages would make this case, the
+			// largest form of "stale exception protects nothing", unreportable.
+			name: "unreferenced constrained package is fully stale",
+			refs: []reference{
+				{Package: "pkg/client/v1", Symbol: "NewClient", Class: classBehavioral},
+			},
+			wantKind:  "stale",
+			wantCount: 2,
+		},
 	}
 
 	for _, tt := range tests {
@@ -110,11 +131,17 @@ func TestCheckAgainstPolicy(t *testing.T) {
 				}
 				return
 			}
-			if len(got) != 1 {
-				t.Fatalf("checkAgainstPolicy() = %+v, want exactly one %s violation", got, tt.wantKind)
+			wantCount := tt.wantCount
+			if wantCount == 0 {
+				wantCount = 1
 			}
-			if got[0].Kind != tt.wantKind {
-				t.Errorf("Kind = %q, want %q", got[0].Kind, tt.wantKind)
+			if len(got) != wantCount {
+				t.Fatalf("checkAgainstPolicy() = %+v, want exactly %d %s violation(s)", got, wantCount, tt.wantKind)
+			}
+			for _, v := range got {
+				if v.Kind != tt.wantKind {
+					t.Errorf("Kind = %q, want %q", v.Kind, tt.wantKind)
+				}
 			}
 		})
 	}
@@ -181,15 +208,8 @@ func checkAgainstPolicy(refs map[reference]bool, p policy) []violation {
 	}
 
 	for name, entry := range p.Constrained {
-		touched, ok := seen[name]
-		if !ok {
-			// No reference in this pass touched the package at all, so there is
-			// nothing to compare its recorded symbols against; skip rather than
-			// flag every symbol stale.
-			continue
-		}
 		for symbol := range entry.Symbols {
-			if touched[symbol] {
+			if seen[name][symbol] {
 				continue
 			}
 			violations = append(violations, violation{
