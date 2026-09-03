@@ -226,7 +226,7 @@ constrained:
       cncf.New, and runCNCFSubmission read the config and run the collector
       directly because nothing else exists to call. That is a self-declared
       absence of facade coverage, not a permanent exclusion.
-    tracking: "#2016"
+    tracking: "#2561"
     symbols:
       Collector.Run: behavioral
       CollectorOption: type
