@@ -69,6 +69,13 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   runtimeRequired: true
+  # Serialize reboots. This CR reboots to apply its kernel cmdline, and an
+  # omitted budget defaults to 100% — every matched node at once, which on a
+  # stock bundle is a whole-cluster concurrent reboot. Unconditional (not
+  # flag-gated) for the same reason rdma-netns-exclusive sets it: the safe
+  # value must not depend on the caller passing optional flags.
+  interruptionBudget:
+    count: 1
   # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
   {{- /* Sprig-safe: a "| default true" here would swallow an explicit false under --deployer flux. */}}
   autoTaintNewNodes: {{ ne (toString (index $cust "autoTaintNewNodes")) "false" }}
@@ -82,12 +89,19 @@ spec:
     # injected from scheduling defaults/flags.
     - operator: Exists
     {{- end }}
-  # Dynamic: Supports --accelerated-node-selector CLI flag
-  {{- if $cust.acceleratedNodeSelector }}
+  # Dynamic: Supports --accelerated-node-selector CLI flag.
+  # An ABSENT selector matches every node in nodewright, so omitting the block
+  # entirely would let a reboot-carrying CR target control-plane nodes on a
+  # stock bundle — generation only warns when the flag is unset, it does not
+  # fail. Fall back to the GPU-node label instead, as rdma-netns-exclusive
+  # does; an explicit --accelerated-node-selector still overrides it.
   nodeSelectors:
     matchLabels:
+      {{- if $cust.acceleratedNodeSelector }}
       {{- toYaml $cust.acceleratedNodeSelector | nindent 6 }}
-  {{- end }}
+      {{- else }}
+      nvidia.com/gpu.present: "true"
+      {{- end }}
   # Dynamic: Supports --workload-selector CLI flag
   {{- if $cust.workloadSelector }}
   podNonInterruptLabels:

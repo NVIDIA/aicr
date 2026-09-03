@@ -143,9 +143,10 @@ spec:
           spec:
             template:
               spec:
-                # IMEX channel claim — ComputeDomain nccl-all-reduce-cd is
-                # pre-created by the operator in the validation namespace
-                # (runtime-ref runtimes own their fabric wiring).
+                # IMEX channel claim. The validator provisions the
+                # ComputeDomain and waits for this ResourceClaimTemplate in
+                # the per-run benchmark namespace before the TrainJob fires —
+                # nothing is operator-precreated.
                 resourceClaims:
                 - name: imex-channel
                   resourceClaimTemplateName: nccl-all-reduce-imex

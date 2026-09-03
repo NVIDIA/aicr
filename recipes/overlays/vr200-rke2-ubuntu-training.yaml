@@ -146,10 +146,10 @@ spec:
       overrides:
         nvidiaDriverRoot: /
 
-    # VR200 node tuning runs the bcm-profile stopgap — see the
-    # nodewright-customizations componentRef below for the full rationale
-    # (kernel-headers aliasing only, accelerator-agnostic, no reboot) and
-    # the switch-to-a-native-vr200-profile follow-up.
+    # VR200 node tuning runs the native vr200/rke2 nvidia-tuned profile —
+    # see the nodewright-customizations componentRef below for the full
+    # rationale, including that it applies its kernel cmdline through a
+    # reboot (serialized by interruptionBudget).
     # Health check override: the operator Deployment's name depends on how
     # nodewright got installed, and both paths are real here. The VR
     # reference clusters carry an out-of-band install (hand-written values,
