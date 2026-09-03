@@ -768,19 +768,31 @@ aicr bundle --recipe recipe.yaml \
 
 If your system node group is tainted or the cluster has no default
 StorageClass, add the scheduling/storage overrides a re-enabled NATS also
-needs -- AICR no longer targets NATS with `--system-node-selector` or
-`--storage-class` at bundle-generation time (those registry paths were
-removed along with bundled-by-default NATS), so pass them explicitly or
-the NATS pod/PVC can stay `Pending`:
+needs -- AICR no longer targets NATS with `--system-node-selector`,
+`--system-node-toleration`, or `--storage-class` at bundle-generation time
+(those registry paths were removed along with bundled-by-default NATS), so
+pass them explicitly or the NATS pod/PVC can stay `Pending`. Use
+`--set-json` for `nodeSelector` and `tolerations` -- the scalar `--set`
+dot-path parser rejects qualified Kubernetes label keys that contain a `/`
+(e.g. `eks.amazonaws.com/nodegroup`), and there is no scalar form for a
+tolerations list at all:
 
 ```bash
-  --set dynamoplatform:nats.podTemplate.merge.spec.nodeSelector.<key>=<value> \
+  --set-json 'dynamoplatform:nats.podTemplate.merge.spec.nodeSelector={"<key>":"<value>"}' \
+  --set-json 'dynamoplatform:nats.podTemplate.merge.spec.tolerations=[{"key":"<key>","operator":"Equal","value":"<value>","effect":"NoSchedule"}]' \
   --set dynamoplatform:nats.config.jetstream.fileStore.pvc.storageClassName=<name>
 ```
 
 Verified against this exact sequence (generate → `aicr verify` passes →
-hand-edit → `aicr verify` fails with exit 4 → regenerate with `--set` →
-`aicr verify` passes again), 2026-09-03.
+hand-edit → `aicr verify` fails with exit 4 → regenerate with the overrides
+above → rendered `nats.podTemplate.merge.spec` carries both the qualified
+nodeSelector and the toleration → `aicr verify` passes again), 2026-09-02.
+A scalar `--set …nodeSelector.eks.amazonaws.com/nodegroup=<value>` was
+separately confirmed to fail with exit 2 (`INVALID_REQUEST: invalid path
+segment "com/nodegroup"`), and `--system-node-toleration` alone was
+confirmed to not reach NATS (`nats.podTemplate.merge.spec.tolerations`
+rendered empty; only the operator's `controllerManager.tolerations` was
+set) -- both are why the overrides above are required rather than optional.
 
 On an in-place `helm upgrade` from the regenerated bundle, disabling NATS
 removes its StatefulSet but does not delete its PVC; inspect
