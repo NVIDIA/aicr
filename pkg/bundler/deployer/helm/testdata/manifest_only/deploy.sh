@@ -40,6 +40,7 @@ HELM_TIMEOUT="10m"
 NO_WAIT=false
 BEST_EFFORT=false
 FAILED_COMPONENTS=""
+NEEDS_RETRY=""
 MAX_RETRIES=5
 
 while [[ $# -gt 0 ]]; do
@@ -377,6 +378,16 @@ if [[ -n "${FAILED_COMPONENTS}" ]]; then
 else
   _ok "All components installed successfully."
 fi
+if [[ -n "${NEEDS_RETRY}" ]]; then
+  # Distinct from FAILED_COMPONENTS/helm_failed so --best-effort semantics
+  # are unaffected: helm itself succeeded, but the DRA kubelet-plugin
+  # restart was deliberately withheld because the driver-migration gate
+  # was not yet observable when this deploy ran (see the WARNING above).
+  # Surfaced with its own non-zero exit below so automated callers (UAT,
+  # ArgoCD hooks, CI) get an actionable non-success signal instead of
+  # reading "All components installed successfully." as fully done.
+  _warn_line "DRA kubelet plugin restart blocked, retry needed for:${NEEDS_RETRY} — re-run this deploy once the operator has converged (driver DaemonSet present or a node carries nvidia.com/gpu.deploy.driver=true)."
+fi
 echo
 echo "NOTE: The above status reflects Helm install and manifest apply results,"
 echo "not whether the cluster is ready for GPU workloads. On fresh"
@@ -387,3 +398,7 @@ echo "  - GPU operator operand rollout (driver, toolkit, device-plugin DS)"
 echo "  - NVIDIA DRA kubelet plugin registration"
 echo
 echo "See: https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#deploy-script-behavior-deploysh"
+
+if [[ -n "${NEEDS_RETRY}" ]]; then
+  exit 2
+fi

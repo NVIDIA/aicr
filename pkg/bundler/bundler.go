@@ -3354,10 +3354,17 @@ const (
 	// (issue #2846). The bundler flips it true here in the same opt-in path
 	// that keeps the component in the bundle, so bundle and gate never drift.
 	draNodeLabelerEnabledPath = "enabled"
+	gpuOperatorComponentName       = "gpu-operator"
+	gpuOperatorOCPComponentName    = "gpu-operator-ocp"
+	gpuOperatorOCPOLMComponentName = "gpu-operator-ocp-olm"
+	draComponentName               = "nvidia-dra-driver-gpu"
+	draEvictionEnvName             = "NODE_LABEL_FOR_GPU_POD_EVICTION"
+	draEvictionNodeSelectorPath    = "kubeletPlugin.nodeSelector"
+	gpuOperatorDRAEvictionEnvPath  = "driver.manager.env"
 )
 
 var (
-	gpuOperatorComponentNames = []string{gpuOperatorComponentName, "gpu-operator-ocp"}
+	gpuOperatorComponentNames = []string{gpuOperatorComponentName, gpuOperatorOCPComponentName}
 	draComponentNames         = []string{draComponentName, "nvidia-dra-driver-gpu-ocp"}
 )
 
