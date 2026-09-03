@@ -232,3 +232,64 @@ func checkAgainstPolicy(refs map[reference]bool, p policy) []violation {
 	})
 	return violations
 }
+
+// TestGateCatchesBehavioralBypass is the regression fixture required by #2028.
+//
+// The bypass being simulated is the subtle one: a package that is ALREADY
+// allowlisted, and a type that is ALREADY permitted, gaining a new behavioral
+// method call. No new import appears, so an import-level gate sees nothing.
+func TestGateCatchesBehavioralBypass(t *testing.T) {
+	t.Parallel()
+
+	// A stand-in business package. Self-contained so the fixture needs no
+	// export data and stays fast.
+	const businessSrc = `package business
+
+type Recipe struct{ Name string }
+
+func (r *Recipe) Resolve() string { return r.Name }
+`
+	// The consumer holds a Recipe (permitted as a type) and calls Resolve on
+	// it. There is no ` + "`business.`" + ` selector on that call anywhere.
+	const consumerSrc = `package consumer
+
+import "fixture/business"
+
+func Render(r *business.Recipe) string {
+	return r.Resolve()
+}
+`
+	lp := checkTwoPackages(t, businessSrc, consumerSrc)
+
+	refs := make(map[reference]bool)
+	for ref := range packageQualifiedRefs(lp, "fixture/") {
+		refs[ref] = true
+	}
+	for ref := range foreignMethodRefs(lp, "fixture/") {
+		refs[ref] = true
+	}
+
+	// The policy permits the type and nothing else.
+	p := policy{
+		Version: 1,
+		Constrained: map[string]constrainedPackage{
+			"business": {
+				Reason:    "wire type rendered by the consumer",
+				Permanent: true,
+				Symbols:   map[string]symbolClass{"Recipe": classType},
+			},
+		},
+	}
+
+	violations := checkAgainstPolicy(refs, p)
+
+	var caught bool
+	for _, v := range violations {
+		if v.Kind == "unclassified" && v.Symbol == "Recipe.Resolve" {
+			caught = true
+		}
+	}
+	if !caught {
+		t.Fatalf("gate did not catch the behavioral bypass; violations = %+v", violations)
+	}
+}
