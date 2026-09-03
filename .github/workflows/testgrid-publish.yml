@@ -31,9 +31,9 @@
 # Auth:
 #   WIF pool:  aicr-testgrid[-<env>]-github   (aicr-testgrid Terraform)
 #   SA:        aicr-testgrid[-<env>]-publish@<project>
-#   Scope:     objectCreator on gs://dgxc-aicr-testgrid[-<env>]/groups/ prefix only
+#   Scope:     objectCreator on gs://nv-aicr-testgrid[-<env>]/groups/ prefix only
 #   For prod, <env> is empty (cluster_name = "aicr-testgrid", unsuffixed);
-#   for staging, <env> = "staging". Buckets are named dgxc-<cluster> (renamed
+#   for staging, <env> = "staging". Buckets are named nv-<cluster> (renamed
 #   for the eidosx → nv-testgrid migration; GCS names are globally unique).
 #   This mirrors terraform/variables.tf in the testgrid repo
 #   (dgxcloud/release-automation/testgrid, aicr/terraform) — verify there
@@ -134,7 +134,7 @@ jobs:
           # Buckets were renamed for the eidosx → nv-testgrid migration
           # (dgxc- prefix family, alongside dgxc-testgrid); clusters keep
           # their names.
-          BUCKET="dgxc-${CLUSTER}"
+          BUCKET="nv-${CLUSTER}"
           {
             echo "cluster=${CLUSTER}"
             echo "bucket=${BUCKET}"
@@ -142,7 +142,7 @@ jobs:
             echo "wif_sa=${CLUSTER}-publish@${GCP_PROJECT_ID}.iam.gserviceaccount.com"
           } >> "${GITHUB_OUTPUT}"
           # Note: `environment` is fully encoded in `bucket` (bucket ==
-          # dgxc-aicr-testgrid[-<env>]) and is not passed to
+          # nv-aicr-testgrid[-<env>]) and is not passed to
           # testgrid-publish separately — the tool only needs --bucket.
 
       - name: Load versions
