@@ -169,9 +169,6 @@ spec:
                       status:
                         ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
 
-    # VR200 node tuning is applied out-of-band today — same no-op scaffold
-    # as the training leaf; see vr200-rke2-ubuntu-training for the
-    # enable-later steps.
     # Same bcm-profile stopgap as vr200-rke2-ubuntu-training (kernel-headers
     # aliasing only, accelerator-agnostic, no reboot) — the recipe catalog
     # requires every leaf sharing (service, accelerator) to carry the same
