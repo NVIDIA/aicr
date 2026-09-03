@@ -430,7 +430,10 @@ func TestMakeBundle_RejectsAttestGateMismatch(t *testing.T) {
 // current callers (the CLI, which always supplies Attester so this path is
 // never reached, and the REST handler, which sets Config's Attest and
 // Attester together) already behave.
-func TestMakeBundle_AttestGateAgreementIsFine(t *testing.T) {
+// Named for the case it actually covers. The true/true agreement is NOT
+// exercised here: it derives a real attester through ResolveAttesterLazy,
+// which needs a signing identity this test cannot supply deterministically.
+func TestMakeBundle_AttestGateDisabledAgreementIsFine(t *testing.T) {
 	t.Parallel()
 
 	client, rec := resolveEmbeddedTrainingRecipe(t)
@@ -448,6 +451,49 @@ func TestMakeBundle_AttestGateAgreementIsFine(t *testing.T) {
 	}
 	if out == nil || out.HasErrors() {
 		t.Fatalf("MakeBundle produced errors: %+v", out)
+	}
+}
+
+// The mismatch must be rejected on the FLAT-field path too, not only when a
+// pre-built Config is supplied. Attest:true with OIDCResolve.Attest:false
+// derives no signer, so the bundler would fall back to the no-op attester and
+// emit an unsigned bundle that looks attested.
+func TestMakeBundle_AttestGateMismatchRejected(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		opts aicr.BundleOptions
+	}{
+		{
+			name: "flat Attest true, OIDCResolve false",
+			opts: aicr.BundleOptions{Attest: true},
+		},
+		{
+			name: "flat Attest false, OIDCResolve true",
+			opts: aicr.BundleOptions{
+				OIDCResolve: aicr.OIDCResolveOptions{Attest: true},
+			},
+		},
+		{
+			name: "Config says false, OIDCResolve says true",
+			opts: aicr.BundleOptions{
+				Config:      config.NewConfig(config.WithAttest(false)),
+				OIDCResolve: aicr.OIDCResolveOptions{Attest: true},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client, rec := resolveEmbeddedTrainingRecipe(t)
+			opts := tt.opts
+			opts.OutputDir = t.TempDir()
+
+			_, err := client.MakeBundle(t.Context(), rec, opts)
+			assertInvalidRequest(t, err)
+		})
 	}
 }
 

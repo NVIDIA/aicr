@@ -622,6 +622,11 @@ func TestStability_Config(t *testing.T) {
 	_ = ce.Dir
 	_ = ce.CNCFSubmission
 	_ = ce.Features
+	// Pin the scalars by TYPE too, not only by presence: a bare `_ = ce.Dir`
+	// keeps compiling if Dir becomes a named string type or CNCFSubmission
+	// becomes a *bool, which would silently change the nil-vs-set contract.
+	requireType[string](aicr.CNCFEvidenceOptions{}.Dir)
+	requireType[bool](aicr.CNCFEvidenceOptions{}.CNCFSubmission)
 	requireType[[]string](aicr.CNCFEvidenceOptions{}.Features)
 	// The bool is load-bearing, not decoration: it separates "the document
 	// declined the bundle" from "the document fumbled it", which a zero

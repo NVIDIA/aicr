@@ -530,12 +530,21 @@ func (c *Client) MakeBundle(ctx context.Context, recipe *RecipeResult, opts Bund
 		// either gate, which is why neither current caller (the CLI always
 		// supplies Attester; the REST handler sets Config's Attest and
 		// Attester together) can trip this.
-		if opts.Config != nil && cfg.Attest() != opts.OIDCResolve.Attest {
+		// Applies to BOTH ways of supplying the gate, not just Config. With
+		// flat fields alone, Attest:true makes cfg.Attest() true via
+		// WithAttest while an OIDCResolve.Attest of false derives no signer —
+		// the same silent no-op-attester outcome, reached without Config
+		// being set at all.
+		if cfg.Attest() != opts.OIDCResolve.Attest {
+			source := "BundleOptions.Attest"
+			if opts.Config != nil {
+				source = "BundleOptions.Config.Attest()"
+			}
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("BundleOptions.Config.Attest()=%t disagrees with "+
+				fmt.Sprintf("%s=%t disagrees with "+
 					"BundleOptions.OIDCResolve.Attest=%t; set both to the same "+
 					"value or supply BundleOptions.Attester directly",
-					cfg.Attest(), opts.OIDCResolve.Attest))
+					source, cfg.Attest(), opts.OIDCResolve.Attest))
 		}
 		if opts.OIDCResolve.Attest {
 			resolved, rerr := attestation.ResolveAttesterLazy(ctx, opts.OIDCResolve)
