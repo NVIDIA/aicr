@@ -146,15 +146,10 @@ spec:
       overrides:
         nvidiaDriverRoot: /
 
-    # VR200 node tuning is applied out-of-band today (gb200-equivalent
-    # nodewright profile), so this recipe wires the documented no-op
-    # placeholder — it establishes the Skyhook CR (autoTaint, tolerations,
-    # node selectors from the --accelerated-node-* flags) while applying no
-    # tuning packages, mirroring gb300-eks-training. To turn training
-    # tuning on later, swap the manifest for tuning.yaml, drop the no-op
-    # placeholder, and set the gb200 profile (service/accelerator) +
-    # intent: multiNodeTraining + kernelAllowNewer: true (Vera's arm64
-    # 64k-page kernel is newer than the pinned baseline).
+    # VR200 node tuning runs the bcm-profile stopgap — see the
+    # nodewright-customizations componentRef below for the full rationale
+    # (kernel-headers aliasing only, accelerator-agnostic, no reboot) and
+    # the switch-to-a-native-vr200-profile follow-up.
     # Health check override: the VR reference clusters carry an out-of-band
     # nodewright install (hand-written values, no fullnameOverride), so the
     # live Deployment is named nodewright-controller-manager rather than the
@@ -320,8 +315,9 @@ spec:
     #
     # The benchmark is recipe-supplied (nccl-benchmark-runtime-ref) because
     # rke2/vr200 is not in the validator's compiled applicability matrix yet
-    # — see validators/performance/testdata/vr200/rke2/runtime.yaml in this
-    # repo for the runtime and its operator prerequisites (pre-create the
+    # — see recipes/validators/performance/testdata/vr200/rke2/runtime.yaml
+    # (embedded in the recipe data tree, so the ref resolves without --data)
+    # for the runtime and its operator prerequisites (pre-create the
     # nccl-all-reduce-cd ComputeDomain per run; --node-selector
     # nvidia.com/gpu.present=true; an aicr CLI build including NVIDIA/aicr#1805).
     # Promote to an embedded template with a compiled applicability entry
