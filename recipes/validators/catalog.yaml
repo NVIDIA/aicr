@@ -297,11 +297,11 @@ validators:
     timeout: 30m
     args: ["nccl-cre-all-reduce-bw"]
     env: []
-  # Live UAT 2026-09-02 (same 2× p5 cluster): Nemotron-5 8B, TP=2, goodput 0.7671 vs >= 0.5.
-  # The public CRE 56B WorkloadRun sample needs minGPUs=32 and fails on this SKU.
+  # Live UAT 2026-09-02 (same 2× p5 cluster): Nemotron-5 8B catalog Certification, goodput 0.7671 vs >= 0.5.
+  # training/nemotron5-56b needs minGPUs=32 and fails on this SKU.
   - name: cre-training-goodput
     phase: performance
-    description: "Verify EKS H100 NeMo training goodput via a Cluster Readiness Engine WorkloadRun"
+    description: "Verify EKS H100 NeMo training goodput via a Cluster Readiness Engine Certification"
     image: ghcr.io/nvidia/aicr-validators/performance:latest
     timeout: 30m
     args: ["cre-training-goodput"]

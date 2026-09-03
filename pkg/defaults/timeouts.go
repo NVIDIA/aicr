@@ -702,9 +702,11 @@ const (
 	// client cannot observe. This bounds how long we let the webhook cache catch up.
 	TrainJobAdmissionRetryTimeout = 1 * time.Minute
 
-	// CREWorkloadRunTimeout is the maximum time to wait for a Cluster Readiness
-	// Engine WorkloadRun (NCCL or training/goodput) to reach a terminal condition.
-	CREWorkloadRunTimeout = 30 * time.Minute
+	// CRECertificationTimeout is AICR's wait budget for a Cluster Readiness
+	// Engine Certification (NCCL or training/goodput) to reach Succeeded or
+	// Failed. The same duration is written on spec.timeoutPerJob so CRE
+	// stops the job instead of leaving it running after AICR gives up.
+	CRECertificationTimeout = 30 * time.Minute
 )
 
 // Inference performance validation timeouts.

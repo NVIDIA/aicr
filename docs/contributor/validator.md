@@ -693,8 +693,9 @@ silently fall back.
 Full list (defaults, semantics) is in the `validators/performance`
 package godoc. NCCL variants exposed today: `nccl-all-reduce-bw`,
 `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls`. Opt-in public CRE
-checks for EKS H100: `nccl-cre-all-reduce-bw` (`Certification`) and
-`cre-training-goodput` (`WorkloadRun`). Inference:
+checks for EKS H100: `nccl-cre-all-reduce-bw` (`Certification` `communication/nccl-all-reduce`) and
+`cre-training-goodput` (`Certification` `training/nemotron5-8b`). Both create the
+CR, wait with a timeout, and delete it on success or failure. Inference:
 `inference-perf` (Dynamo + AIPerf).
 
 > **Constraint-name contract.** Each NCCL variant looks up a

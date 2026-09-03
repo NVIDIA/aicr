@@ -62,7 +62,7 @@ same-named constraint:
 | Check | What it measures |
 |---|---|
 | `nccl-cre-all-reduce-bw` | EFA bus bandwidth from a CRE `Certification` (`communication/nccl-all-reduce`) `BandwidthMeasurement`; AICR still asserts the transport from launcher logs |
-| `cre-training-goodput` | Runtime goodput from a CRE `WorkloadRun` running Nemotron-5 8B (fits two 8-GPU H100 nodes; CRE catalog `training/nemotron5-8b`) |
+| `cre-training-goodput` | Runtime goodput from a CRE `Certification` (`training/nemotron5-8b`) `GoodputMeasurement` on two 8-GPU H100 nodes |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these

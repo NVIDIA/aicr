@@ -51,7 +51,7 @@ Applied by `catalog.Load` (`pkg/validator/catalog/catalog.go`) in order:
 | `nccl-all-reduce-bw-net` | Verify NCCL All Reduce Bus Bandwidth on the NET transport (EFA on EKS; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`) | 30m |
 | `nccl-all-reduce-bw-nvls` | Verify NCCL All Reduce Bus Bandwidth on the NVLS transport (MNNVL across an NVL72 IMEX domain) | 30m |
 | `nccl-cre-all-reduce-bw` | EKS H100 NCCL via CRE `Certification` (`communication/nccl-all-reduce`) (opt-in). Live UAT 2026-09-02 2× p5.48xlarge: 489.80 GB/s vs `>= 300`. | 30m |
-| `cre-training-goodput` | EKS H100 Nemotron-5 8B goodput via CRE `WorkloadRun` (opt-in; TP=2). Live UAT 2026-09-02 2× p5.48xlarge: ratio 0.7671 vs `>= 0.5`. | 30m |
+| `cre-training-goodput` | EKS H100 Nemotron-5 8B goodput via CRE `Certification` (`training/nemotron5-8b`) (opt-in). Live UAT 2026-09-02 2× p5.48xlarge: ratio 0.7671 vs `>= 0.5`. | 30m |
 
 The NCCL checks derive applicability from the recipe's `criteria` by default;
 a recipe outside the embedded service + accelerator matrix (e.g. registered
