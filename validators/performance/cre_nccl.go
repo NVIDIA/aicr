@@ -80,7 +80,7 @@ func validateCRENcclAllReduceBw(
 	}
 
 	defer func() {
-		delErr := deleteCRECertification(context.Background(), dyn, ctx.Namespace, objName)
+		delErr := teardownCRECertification(context.Background(), dyn, ctx.Clientset, ctx.Namespace, objName)
 		// A leak must not hide behind a passing bandwidth reading, so drop the
 		// measurement along with the pass when cleanup is what failed.
 		if leaked := creCleanupFailure(checkNameCRENCCLAllReduceBW, err, delErr); leaked != nil && err == nil {
