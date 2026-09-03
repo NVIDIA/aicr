@@ -714,6 +714,46 @@ func TestPruneStaleNCCLNamespaces_ReleasesLockOnFailedDelete(t *testing.T) {
 	}
 }
 
+// TestPruneStaleNCCLNamespaces_StopsOnContextCancelMidSweep checks that a
+// context canceled partway through the sweep stops it from issuing calls
+// for the remaining namespaces, instead of continuing regardless.
+func TestPruneStaleNCCLNamespaces_StopsOnContextCancelMidSweep(t *testing.T) {
+	old := metav1.NewTime(time.Now().Add(-2 * defaults.NCCLStaleNamespacePruneAge))
+	ownedLabels := map[string]string{labels.ManagedBy: labels.ValueValidator, labels.Component: labels.ValueNCCLPerf}
+	nsA := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-aaaaaaaa", CreationTimestamp: old, Labels: ownedLabels,
+	}}
+	nsB := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: "aicr-nccl-perf-default-bbbbbbbb", CreationTimestamp: old, Labels: ownedLabels,
+	}}
+
+	client := fake.NewClientset(nsA, nsB)
+	ctx, cancel := context.WithCancel(context.Background())
+	var podListCalls, nsDeleteCalls int
+	client.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		podListCalls++
+		if podListCalls == 1 {
+			// Cancel partway through processing the first namespace, before
+			// the loop reaches the second.
+			cancel()
+		}
+		return false, nil, nil
+	})
+	client.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		nsDeleteCalls++
+		return false, nil, nil
+	})
+
+	pruneStaleNCCLNamespaces(ctx, client, newTrainerFakeClient(), "aicr-nccl-perf-default-currentrun")
+
+	if podListCalls != 1 {
+		t.Errorf("expected the sweep to stop after checking one namespace's pods, checked %d", podListCalls)
+	}
+	if nsDeleteCalls != 1 {
+		t.Errorf("expected exactly one namespace deleted before the canceled context stopped the sweep, got %d", nsDeleteCalls)
+	}
+}
+
 // TestWaitForPodByLabelSelector_IgnoresStaleDeletedLauncher is the regression
 // guard for the finding that any watch event, including a Deleted event for a
 // stale pod, was returned as-is. applyNCCLResources's TrainJob admission
