@@ -699,8 +699,10 @@ const (
 
 	// NCCLExecutionLockStaleAge is how long an unrenewed run execution lock
 	// (see claimNCCLExecutionLock) is honored before a new caller may take
-	// it over. Only needs to cover claim-to-first-pod, not the full run, so
-	// a retry after a hard kill isn't stuck waiting out
+	// it over. Only needs to cover the gaps between renewals, not the full
+	// run. A live pod protects the namespace on its own via
+	// verifyNCCLNamespaceNotLive, regardless of lock staleness. Kept short
+	// so a retry after a hard kill isn't stuck waiting out
 	// NCCLStaleNamespacePruneAge instead.
 	NCCLExecutionLockStaleAge = 20 * time.Minute
 

@@ -29,6 +29,7 @@ import (
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	"github.com/NVIDIA/aicr/validators"
+	"github.com/NVIDIA/aicr/validators/helper"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -766,6 +767,72 @@ func TestWaitForPodByLabelSelector_IgnoresStaleDeletedLauncher(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("waitForPodByLabelSelector did not return after the replacement launcher appeared")
+	}
+}
+
+// TestWaitForLauncherPodAndGetLogs_TakenOverLockFailsClosed checks that a
+// lock lost while the pod ran is caught right after it goes terminal,
+// instead of being left until cleanup runs minutes later. A live pod
+// already blocks a same-run retry on its own, but that protection ends
+// once the pod finishes, so ownership needs revalidating here.
+func TestWaitForLauncherPodAndGetLogs_TakenOverLockFailsClosed(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	launcherLabels := map[string]string{
+		"jobset.sigs.k8s.io/jobset-name":        "nccl-all-reduce-tj",
+		"jobset.sigs.k8s.io/replicatedjob-name": "launcher",
+	}
+	launcherPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "nccl-all-reduce-tj-launcher-0", Namespace: ns, Labels: launcherLabels},
+		Status:     corev1.PodStatus{Phase: corev1.PodPending},
+	}
+
+	otherHolder := "some-other-holder"
+	clientset := fake.NewClientset(launcherPod, &coordinationv1.Lease{
+		ObjectMeta: metav1.ObjectMeta{Name: ncclRunLockName, Namespace: ns},
+		Spec:       coordinationv1.LeaseSpec{HolderIdentity: &otherHolder},
+	})
+	fakeWatch := watch.NewFake()
+	clientset.PrependWatchReactor("pods", k8stesting.DefaultWatchReactor(fakeWatch, nil))
+
+	// Flip the tracked pod to Succeeded up front, since
+	// waitForPodByLabelSelector only reads phase off the watch event below.
+	// WaitForPodSuccess re-Gets by name afterward and sees this update
+	// directly, no second watch needed.
+	succeeded := launcherPod.DeepCopy()
+	succeeded.Status.Phase = corev1.PodSucceeded
+	if _, err := clientset.CoreV1().Pods(ns).Update(context.Background(), succeeded, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("failed to mark launcher pod succeeded: %v", err)
+	}
+
+	podHelper := &helper.PodLifecycle{ClientSet: clientset, Namespace: ns}
+	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
+
+	type waitResult struct {
+		logs string
+		err  error
+	}
+	resultCh := make(chan waitResult, 1)
+	go func() {
+		logs, err := waitForLauncherPodAndGetLogs(ctx, podHelper, testHolderID)
+		resultCh <- waitResult{logs, err}
+	}()
+
+	// Give the goroutine above time to establish its watch, then hand it the
+	// launcher pod. Its phase here only needs to pass the non-terminal
+	// filter, the state that actually matters was already set above.
+	time.Sleep(50 * time.Millisecond)
+	fakeWatch.Add(launcherPod)
+
+	select {
+	case res := <-resultCh:
+		if res.logs != "" {
+			t.Errorf("expected no logs once the lock was taken over, got %q", res.logs)
+		}
+		if !stderrors.Is(res.err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
+			t.Errorf("expected ErrCodeConflict for a taken-over lock, got: %v", res.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitForLauncherPodAndGetLogs did not return")
 	}
 }
 

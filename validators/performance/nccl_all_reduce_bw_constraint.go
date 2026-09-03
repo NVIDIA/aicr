@@ -916,7 +916,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	}
 
 	// Wait for launcher pod and get logs.
-	logs, err = waitForLauncherPodAndGetLogs(ctx, podHelper)
+	logs, err = waitForLauncherPodAndGetLogs(ctx, podHelper, holderID)
 	if err != nil {
 		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get launcher logs", err)
 	}
@@ -2014,7 +2014,7 @@ func nestedMap(m map[string]any, keys ...string) (map[string]any, bool) {
 }
 
 // waitForLauncherPodAndGetLogs waits for the launcher pod to be created and retrieves logs
-func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.PodLifecycle) (string, error) {
+func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.PodLifecycle, holderID string) (string, error) {
 	slog.Info("Waiting for launcher pod to be created...")
 
 	// Wait for launcher pod to be created (pattern: nccl-all-reduce-tj-launcher-*)
@@ -2033,6 +2033,21 @@ func waitForLauncherPodAndGetLogs(ctx *validators.Context, podHelper *helper.Pod
 
 	// Wait for pod to complete using helper method
 	err = podHelper.WaitForPodSuccess(ctx.Ctx, launcherPod, defaults.NCCLTrainJobTimeout)
+
+	// This wait can run past NCCLExecutionLockStaleAge with no renewal. A
+	// live pod protects this namespace from a same-run retry on its own,
+	// but that ends the moment it goes terminal. Renew right here, before
+	// the diagnostic gathering below adds more unrenewed time, so a retry
+	// can't take the lock while cleanup still has work to do.
+	held, lockErr := ncclExecutionLockHeldBy(ctx.Ctx, ctx.Clientset, podHelper.Namespace, holderID)
+	if lockErr != nil {
+		return "", lockErr
+	}
+	if !held {
+		return "", aicrErrors.New(aicrErrors.ErrCodeConflict,
+			fmt.Sprintf("NCCL benchmark execution lock for namespace %q was taken over by another execution; refusing to proceed", podHelper.Namespace))
+	}
+
 	if err != nil {
 		// Get logs even if pod failed for debugging. Surface (not discard) a
 		// log-fetch error: an empty launcher log with no explanation is exactly
