@@ -29,7 +29,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -72,9 +74,59 @@ type loadedPackage struct {
 // dependency closure can take minutes on a cold or contended CI runner.
 const goListTimeout = 5 * time.Minute
 
+// loadCache memoizes loadForAnalysis by its sorted, joined package-path set.
+// Four call sites across this package request overlapping package sets while
+// running in parallel (t.Parallel()), and each cache miss reruns
+// `go list -json -export -deps` plus a from-source type-check of the whole
+// dependency closure -- the single largest cost in this package's test run.
+// A repeat request for the same set reuses the prior result instead of
+// redoing that work; callers only read Info/Pkg/Fset, so sharing the
+// returned map across tests is safe.
+var loadCache sync.Map // key: cacheKey(packagePaths) -> *loadCacheEntry
+
+// loadCacheEntry guards a single package-set's load with a sync.Once, plus an
+// ok flag checked after Do returns. testing.T.Fatalf unwinds via
+// runtime.Goexit, which still runs Once's internal "mark done" defer, so a
+// populating call that fails leaves the entry permanently "done" but with ok
+// still false. Every other goroutine waiting on that same key must notice ok
+// is false and fail loudly on its own *testing.T rather than silently
+// returning a zero-value result.
+type loadCacheEntry struct {
+	once   sync.Once
+	result map[string]loadedPackage
+	ok     bool
+}
+
+// cacheKey sorts and joins packagePaths so that request order never produces
+// a spurious cache miss.
+func cacheKey(packagePaths []string) string {
+	sorted := append([]string(nil), packagePaths...)
+	sort.Strings(sorted)
+	return strings.Join(sorted, "\x00")
+}
+
 // loadForAnalysis type-checks each requested package from source, resolving its
 // dependencies from gc export data produced by `go list -export -deps`.
+// Results are memoized per package set; see loadCache.
 func loadForAnalysis(t *testing.T, packagePaths ...string) map[string]loadedPackage {
+	t.Helper()
+
+	entryAny, _ := loadCache.LoadOrStore(cacheKey(packagePaths), &loadCacheEntry{})
+	entry := entryAny.(*loadCacheEntry)
+
+	entry.once.Do(func() {
+		entry.result = loadForAnalysisUncached(t, packagePaths...)
+		entry.ok = true
+	})
+	if !entry.ok {
+		t.Fatalf("loadForAnalysis(%v): a concurrent call for the same package set already failed", packagePaths)
+	}
+	return entry.result
+}
+
+// loadForAnalysisUncached does the actual `go list` + from-source type-check
+// work for loadForAnalysis. Split out so loadForAnalysis can memoize it.
+func loadForAnalysisUncached(t *testing.T, packagePaths ...string) map[string]loadedPackage {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(t.Context(), goListTimeout)
