@@ -887,46 +887,91 @@ derive step rather than the load step.
 |---|---|
 | `BundleVerifyOptions()` | `spec.verify.policy` + `spec.verify.trust` |
 | `BundleOptions()` | `spec.bundle.deployment` + `spec.bundle.scheduling` + `spec.bundle.attestation` |
-| `ValidateOptions()` | `spec.validate.execution` + the agent fields the validator accepts as options |
-| `EvidenceAttestationOptions()` | `spec.validate.evidence.attestation` (**not** `.cncf`) |
+| `BundleInputOptions()` | `spec.bundle.input` + `.output` + `.registry` |
+| `ValidateSettings()` | `spec.validate.agent` + `.execution` |
+| `ValidateInputOptions()` | `spec.validate.input` + `.execution.failOnError` |
+| `EvidenceAttestationOptions()` | `spec.validate.evidence.attestation` |
+| `CNCFEvidenceOptions()` | `spec.validate.evidence.cncf` |
 | `SnapshotAgentConfig()` | `spec.snapshot.agent` + `.execution` (**not** `.output`) |
+| `SnapshotOutputOptions()` | `spec.snapshot.output` |
 | `RecipeSource()` | `spec.recipe.data` |
 | `RecipeCriteria(reg)` | `spec.recipe.criteria` |
 | `RecipeResolveOptions()` | `spec.recipe.profile`, `spec.recipe.configuration.slurm.accounting.mode`, `spec.recipe.configuration.runtimeInventory.mode` |
 | `RecipeProfile()` / `RecipeAccountingMode()` / `RecipeRuntimeInventoryMode()` | the same three, raw, for callers applying their own precedence first |
+| `RecipeOutputOptions()` | `spec.recipe.output` |
 | `SnapshotPath()` | `spec.recipe.input.snapshot` |
 | `IsCriteriaStrict()` | `spec.recipe.criteriaStrict` |
 
-All five spec sections now have a derivation. The one remaining gap is
-`spec.validate.evidence.cncf`: unlike every other un-projected field, it is not
-a deliberate exclusion but a missing *destination* — no facade method emits
-CNCF AI Conformance evidence, so there is no options type for a derivation to
-produce. Reading it still needs `Unwrap()`. Needing `Unwrap()` anywhere is worth
-reporting — it means a derivation is missing, and `pkg/config` carries no
-stability guarantee.
+All five spec sections have a derivation, and every one of them has a
+destination — including `spec.validate.evidence.cncf`, which
+`CNCFEvidenceOptions()` carries even though no `Client` method consumes CNCF
+AI Conformance evidence directly; the caller does (the CLI's
+`validateFlagCombinations`, `cncf.New`, and `runCNCFSubmission`). That mirrors
+`SnapshotOutputOptions()`, which projects `spec.snapshot.output` for the same
+reason: `Client.CollectSnapshot` does not consume it either, but the caller
+performing delivery does. Needing `Unwrap()` anywhere is worth reporting — it
+means a derivation is missing, and `pkg/config` carries no stability
+guarantee.
 
 ### What `BundleOptions()` does and does not carry
 
-`BundleOptions()` returns a populated `Config` (the 18 bundler settings
-`spec.bundle.deployment` and `spec.bundle.scheduling` configure, plus the two
-attestation flags the bundler itself reads) and `OIDCResolve` (the four signing
-settings that reach the attester rather than the bundler).
+`BundleOptions()` returns the 18 bundler settings `spec.bundle.deployment` and
+`spec.bundle.scheduling` configure (plus the two attestation flags the bundler
+itself reads) as plain fields — not a built `Config` — so you read and
+override individual settings directly, the same as `ValidateSettings()`. It
+also returns `OIDCResolve` (the four signing settings that reach the attester
+rather than the bundler):
 
-Six resolved fields have no counterpart, by design rather than omission:
+```go
+opts, err := cfg.BundleOptions()
+if err != nil {
+    return err
+}
+opts.Nodes = 32 // caller wins, visibly
+```
 
-| Field | Why not projected |
-|---|---|
-| `spec.bundle.input.recipe` | You already pass the recipe to `MakeBundle`; projecting it would give the same decision two homes. |
-| `spec.bundle.output.target` (and its raw form), `.imageRefs` | Output destinations chosen per invocation. `OutputDir` is the analog `MakeBundle` honors. |
-| `spec.bundle.registry.insecureTLS`, `.plainHTTP` | OCI transport. `MakeBundle` does not push — the caller does, afterward — so a field here would be surface nothing reads. `EvidenceOptions` and `SignOptions` carry them because those operations do reach a registry. |
+`Config` is still on the struct, as an escape hatch: when you already have a
+fully built `*BundleConfig` from something the flat fields cannot express (a
+CLI-flag-only setting such as `Version` or `Serial`, or a config object you
+mutate in place), set it and it wins outright over the 18 bundler-config flat
+fields (`Deployer` through `AppName`) — `BundleOptions()` itself never
+populates it. `Config` does NOT override `Attester`, `OIDCResolve`,
+`BinaryAttestation`, `OutputDir` or `Timeout`: those five stay
+caller-supplied regardless of `Config`, which is why the REST `/v1/bundle`
+handler can set `Config` and `OutputDir`/`Timeout` in the same struct
+literal and have all three take effect.
+
+The six caller-side fields have their own type, `BundleInputOptions()`, not
+because they are declined but because `MakeBundle` never reads them — see the
+next section.
 
 Signing follows the same derive-don't-apply rule as everything else: a non-nil
 `Attester` wins over `OIDCResolve`, so an explicitly supplied signer is never
-silently rebuilt from config.
+silently rebuilt from config. When `Attester` is nil, `MakeBundle` also
+requires `Config.Attest()` (when `Config` is set) and `OIDCResolve.Attest` to
+agree — a hand-built `BundleOptions` that sets both and disagrees (say,
+`config.WithAttest(false)` baked into `Config` while `OIDCResolve.Attest` is
+`true`) is rejected with `ErrCodeInvalidRequest` rather than silently
+producing unsigned output that looks attested, or deriving a real signer
+whose result `Config.Attest()` then discards. `BundleOptions()` itself always
+keeps the two in agreement (`opts.Attest` and `opts.OIDCResolve.Attest` come
+from the same `spec.bundle.attestation.enabled` value), so this only matters
+for a caller who assembles `BundleOptions` by hand.
 
-A KMS key and keyless OIDC are mutually exclusive, and `BundleOptions()`
-rejects a document setting both rather than letting `signingKey` quietly win —
-the same rule the CLI enforces.
+A KMS key and keyless OIDC are mutually exclusive. `BundleOptions()` rejects a
+whitespace-only `signingKey` (must not be blank after trimming) and rejects
+`signingKey` combined with `fulcioURL`. It deliberately does NOT reject
+`signingKey` combined with `oidcDeviceFlow` at this layer: `BundleOptions()`
+runs before the CLI's flag-over-config merge, so an eager rejection here would
+make `--oidc-device-flow=false` unable to correct a document that sets both —
+the error would fire before that flag is ever read. The CLI's
+`validateSigningKeyExclusivity`, run on the flag-merged options, is what
+catches the `signingKey` + `oidcDeviceFlow` combination for CLI invocations.
+An SDK caller deriving `BundleOptions()` directly and calling `MakeBundle`
+with no flag merge gets no equivalent guard for that specific pair — the
+resulting bundle still signs with the KMS key (`ResolveAttesterLazy` picks KMS
+whenever `SigningKey` is non-empty), matching the pre-#2245 behavior; avoid
+setting both in a document consumed outside the CLI.
 
 **Device flow needs a prompt writer.** `spec.bundle.attestation.oidcDeviceFlow`
 sets `OIDCResolve.DeviceFlow`, but config cannot carry an `io.Writer`, so the
@@ -954,6 +999,32 @@ Check that first error rather than letting the second assignment overwrite it.
 `BundleOptions()` returns a zero value alongside its error, so a swallowed
 failure bundles with defaults — no deployer, no overrides, no attestation —
 from a document that looked configured.
+
+### What `BundleInputOptions()` does and does not carry
+
+`MakeBundle` takes an already-resolved `RecipeResult` and does not push its
+own result anywhere — the caller does, after it returns. `BundleInputOptions()`
+carries the `spec.bundle` fields that describe that caller-side work instead:
+which recipe to bundle, which image-refs file to write to, where to push the
+finished bundle, and how to reach that registry:
+
+```go
+input, err := cfg.BundleInputOptions()
+if err != nil {
+    return err
+}
+rec, err := client.LoadRecipe(ctx, input.RecipePath, "")
+```
+
+| Field | Source |
+|---|---|
+| `RecipePath` | `spec.bundle.input.recipe` |
+| `ImageRefsPath` | `spec.bundle.output.imageRefs` |
+| `OutputTarget`, `OutputTargetRaw` | `spec.bundle.output.target`, parsed and raw |
+| `InsecureTLS`, `PlainHTTP` | `spec.bundle.registry.insecureTLS`, `.plainHTTP` — the document already chose the push destination in `OutputTarget`, so it is trusted to describe how to reach it too, the same reasoning `EvidenceOptions` and `SignOptions` apply to their own transport fields |
+
+None of these six reach `MakeBundle`; `BundleOptions()` carries what the
+bundler itself reads.
 
 One asymmetry worth knowing: `IgnoreTLog` has no config counterpart, so
 `BundleVerifyOptions()` always leaves it false. It weakens the trust floor by
@@ -1374,27 +1445,97 @@ active deprecations across all surfaces is in
 
 [semver]: https://semver.org/spec/v2.0.0.html
 
-### What `ValidateOptions()` does and does not carry
+### What `ValidateSettings()` does and does not carry
 
 `spec.validate` is the one section that does not map to a single destination,
-so `ValidateOptions()` carries only the part the validator accepts as options:
-namespace, image pull secrets, node selector, tolerations, no-cluster, cleanup,
-phases, fail-fast, and timeout. The slice is appendable — layer your own
-options after the derived ones and the later value wins.
+so `ValidateSettings()` carries settings from both `spec.validate.agent` and
+`spec.validate.execution` as a plain value, not an option slice, so you read
+and override individual fields directly — but not every field it carries
+reaches `Client.ValidateState`.
+Nine do, via a matching `WithValidation*` option: namespace, image pull
+secrets, node selector, tolerations, no-cluster, cleanup, phases, fail-fast,
+and timeout. Four do not: image, job name, service account name and
+require-GPU have no `WithValidationImage`, `WithValidationJobName`,
+`WithValidationServiceAccountName` or `WithValidationRequireGPU` for
+`ValidateState` to accept them through. They ride on `ValidateSettings()`
+anyway so a caller building its own validator agent config (the CLI's
+`parseValidateAgentConfig`, in particular) can read them with its own
+flag-over-config precedence instead of reaching for `Unwrap()` — see the
+table below.
+
+```go
+opts, ok, err := cfg.ValidateSettings()
+if err != nil {
+    return err
+}
+if !ok {
+    opts.Cleanup = true // no spec.validate at all: supply a safe default
+}
+results, err := client.ValidateState(ctx, rec, snap,
+    aicr.WithValidationNamespace(opts.Namespace),
+    aicr.WithValidationImagePullSecrets(opts.ImagePullSecrets),
+    aicr.WithValidationNodeSelector(opts.NodeSelector),
+    aicr.WithValidationTolerations(opts.Tolerations),
+    aicr.WithValidationNoCluster(opts.NoCluster),
+    aicr.WithValidationCleanup(opts.Cleanup),
+)
+```
+
+**The second return is a presence signal, not decoration — skipping it is the
+failure mode.** The zero value's `Cleanup: false` is not a safe default: it is
+the opposite of the CLI's own default (clean up). A caller that cannot
+distinguish "no `spec.validate` at all, supply your own defaults" from
+"`spec.validate` is present but silent about cleanup", and always applies the
+returned value as-is, leaves the cluster-admin `ClusterRoleBinding` and
+validator Jobs active on a plain, no-config invocation — silently, since
+nothing errors. That is why the sample above guards the default rather than
+the override: `ok` must gate what `Cleanup` becomes when the section is
+absent, not whether the caller's own choice is applied — the two look similar
+but only one avoids the leak. `ok` is `true` when the section exists at all
+(even if silent about every field) and `false` for a nil `Config`, a nil
+internal document, or a document that omits the section entirely.
+`SnapshotAgentConfig()` returns the same signal for the same reason, guarding
+`Privileged` instead of `Cleanup`; see
+[below](#what-snapshotagentconfig-does-and-does-not-carry).
 
 The rest of the section has other homes, and knowing which saves a search:
 
 | Field | Home |
 |---|---|
-| `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | `AgentConfig`. These configure the validator's Kubernetes Job; `pkg/validator` exposes no option for any of them, so a `WithValidation*` here would have nothing to translate into. |
-| `spec.validate.execution.failOnError` | Nowhere, deliberately. It decides whether a failed check makes the *caller* fail; the validator reports and does not act on it. Command-line-only for the same reason as `IgnoreTLog`: a checked-in file should not be able to make a failing run report success. |
-| `spec.validate.input.recipe`, `.snapshot` | Not projected — you already pass both to `ValidateState`. |
+| `spec.validate.agent.image`, `.jobName`, `.serviceAccountName`, `.requireGpu` | Still on `ValidateSettings()` (`Image`, `JobName`, `ServiceAccountName`, `RequireGPU`), but not passed to `ValidateState` — `pkg/validator` exposes no option for any of them, so a `WithValidation*` here would have nothing to translate into. The CLI reads them directly to build the validator's own agent Job. |
+| `spec.validate.input.recipe`, `.snapshot`, `spec.validate.execution.failOnError` | `ValidateInputOptions()`, which targets the CALLER rather than `ValidateState` — see below. |
 | `spec.validate.evidence.attestation` | `EvidenceAttestationOptions()`, which targets `EmitRecipeEvidence` rather than `ValidateState` — see below. |
-| `spec.validate.evidence.cncf` | **Not projected.** No facade method emits CNCF AI Conformance evidence, so there is nothing for a derivation to feed. Reading it still needs `Unwrap()`. |
+| `spec.validate.evidence.cncf` | `CNCFEvidenceOptions()`, which targets the CALLER — there is no `Client.Emit*` for CNCF AI Conformance evidence — see below. |
 
-One inversion worth knowing: config says `noCleanup`, the option says
-`cleanup`. `ValidateOptions()` flips it, so `noCleanup: true` becomes
-`WithValidationCleanup(false)`.
+One inversion worth knowing: config says `noCleanup`, the field says
+`Cleanup`. `ValidateSettings()` flips it, so `noCleanup: true` becomes
+`Cleanup: false`.
+
+### What `ValidateInputOptions()` does and does not carry
+
+`ValidateState` takes an already-resolved recipe and snapshot and reports
+check results without acting on them, so the three `spec.validate` fields a
+CALLER needs — which recipe and snapshot to validate, and whether a failed
+check should fail the caller — have no home on `ValidateSettings()`.
+`ValidateInputOptions()` carries them instead, so a caller applying its own
+flag-over-config precedence does not need `Unwrap()` to read them:
+
+```go
+input, err := cfg.ValidateInputOptions()
+if err != nil {
+    return err
+}
+rec, err := client.LoadRecipe(ctx, input.RecipePath, "")
+```
+
+| Field | Source |
+|---|---|
+| `RecipePath` | `spec.validate.input.recipe` |
+| `SnapshotPath` | `spec.validate.input.snapshot` |
+| `FailOnError` | `spec.validate.execution.failOnError` — a pointer so "config said nothing" stays distinct from an explicit `false`, letting the caller's own default apply, the same pattern the CLI's `--fail-on-error` flag uses to win over a configured value |
+
+None of these three reach `ValidateState`; `ValidateSettings()` carries what
+the validator itself accepts.
 
 ### What `EvidenceAttestationOptions()` does and does not carry
 
@@ -1412,12 +1553,20 @@ if ok {
 }
 ```
 
-**`out` is the enable gate.** An empty `out` leaves the path off even when
-`bom`/`push`/`plainHTTP`/`insecureTLS` are set, matching the spec field's own
-contract and what the CLI does. So `ok == false` means "not configured", never
-"misconfigured" — a malformed section returns an error instead. That is why
-there is a `bool` at all: `EmitRecipeEvidence` rejects an empty `OutDir`, so a
-zero-value `EvidenceOptions` could not tell you which of the two happened.
+**`out` is the enable gate, not a zeroing gate.** An empty `out` leaves the
+path off (`ok == false`) even when `bom`/`push`/`plainHTTP`/`insecureTLS` are
+set, matching the spec field's own contract and what the CLI does — but those
+four still populate on the returned `EvidenceOptions`; only `OutDir` stays
+empty. `out` can come from somewhere other than this document — the CLI's
+`--emit-attestation` flag can supply it while `bom`/`push` are configured —
+so zeroing the whole struct whenever `out` is empty would silently drop that
+half of the configuration on every run where `out` arrives another way. So
+`ok == false` means "config didn't enable the path," never "misconfigured"
+and never "config said nothing else" — a malformed section returns an error
+instead. That is why there is a `bool` at all: `EmitRecipeEvidence` rejects an
+empty `OutDir`, so a zero-value `EvidenceOptions` could not tell you which of
+the two happened, and it also could not carry a partially-configured section
+for a caller resolving `out` itself to finish.
 
 Five fields project: `out`, `bom`, `push`, `plainHTTP`, `insecureTLS`. The
 rest of `EvidenceOptions` stays yours, and the reasons differ:
@@ -1461,23 +1610,46 @@ network path. It is accepted because the destination is already the document's
 call. Treat it as a reviewable transport decision, not as evidence that
 excluding `NoSign` and `Full` is arbitrary.
 
-**`spec.validate.evidence.cncf` is not projected**, and this one is a genuine
-gap rather than a decision. There is no `Client.Emit*` that consumes
-`dir`/`cncfSubmission`/`features`, so a derivation would have nothing to
-produce. Projecting it means designing the emission API first. Read that half
-through `Unwrap()` until then.
+### What `CNCFEvidenceOptions()` does and does not carry
+
+`spec.validate.evidence` carries two kinds of evidence; `CNCFEvidenceOptions()`
+covers the other one — CNCF AI Conformance markdown, gated behind
+`--evidence-dir` / `--cncf-submission` / `--feature`:
+
+```go
+cncfOpts, err := cfg.CNCFEvidenceOptions()
+if err != nil {
+    return err
+}
+evidenceDir := cncfOpts.Dir // caller applies its own flag-over-config precedence
+```
+
+Unlike `EvidenceAttestationOptions()`, this one has no `Client.Emit*`
+counterpart at all: there is no `Client.EmitCNCFEvidence` for
+`CNCFEvidenceOptions()` to feed. The caller — the CLI's
+`validateFlagCombinations`, `cncf.New`, and `runCNCFSubmission` — consumes the
+three fields (`Dir`, `CNCFSubmission`, `Features`) directly, applying its own
+flag-over-config precedence the same way `SnapshotOutputOptions()` and
+`ValidateInputOptions()` already do for their own caller-consumed fields.
+`CNCFEvidenceOptions()` returns the zero value (never an error) for an absent
+section, and an error only when `spec.validate` is present but malformed.
 
 ### What `SnapshotAgentConfig()` does and does not carry
 
 `AgentConfig`'s fields are exported, so unlike the bundle path there is no
-options slice — derive it, then set any field directly. It is never nil:
+options slice — derive it, then set any field directly. The returned
+`*AgentConfig` is never nil, even for a nil `Config`:
 
 ```go
-agent, err := cfg.SnapshotAgentConfig()
+agent, ok, err := cfg.SnapshotAgentConfig()
 if err != nil {
     return err
 }
-agent.Kubeconfig = kubeconfigPath  // caller-owned, no config counterpart
+agent.Kubeconfig = kubeconfigPath // caller-owned, no config counterpart —
+                                  // set unconditionally, not gated on ok
+if !ok {
+    agent.Privileged = true // no spec.snapshot at all: supply a safe default
+}
 snap, err := client.CollectSnapshot(ctx, agent)
 ```
 
@@ -1519,3 +1691,71 @@ needs true. That is deliberate: defaults apply when the section exists and is
 silent about a field, but a document that made no snapshot decisions at all
 does not get decisions invented for it. Supply your own defaults in that case,
 as the CLI does from its flag defaults.
+
+**The second return, `ok`, is the presence signal that resolves this — skip it
+and the failure mode is silent.** `ok` is `true` when `spec.snapshot` exists at
+all (even if silent about every field) and `false` for a nil `Config`, a nil
+internal document, or a document that omits the section. A caller that always
+applies the returned `*AgentConfig` as-is, without checking `ok`, cannot tell
+"no `spec.snapshot`, supply your own defaults" from "`spec.snapshot` decided
+every field, apply them as-is" — both produce a populated, non-nil
+`*AgentConfig` — and silently drops privileges the collector needs on the
+common no-config case. `ValidateSettings()` returns the same signal for the
+same reason, guarding `Cleanup` instead of `Privileged`; see
+[above](#what-validatesettings-does-and-does-not-carry).
+
+### What `SnapshotOutputOptions()` does and does not carry
+
+`CollectSnapshot` never reads `spec.snapshot.output` — the whole section
+describes *delivery*, which `SnapshotAgentConfig()` deliberately excludes (see
+above): the Job always stages YAML in a ConfigMap, so a format routed through
+`AgentConfig` would be silently ignored (#2398). `SnapshotOutputOptions()`
+carries the three fields a caller needs AFTER `CollectSnapshot` returns, to
+write the snapshot where the document asked:
+
+```go
+out, err := cfg.SnapshotOutputOptions()
+if err != nil {
+    return err
+}
+err = snapshotter.DeliverSnapshot(ctx, snap.Raw, snapshotter.SnapshotDelivery{
+    Output:       out.Path,
+    Format:       serializer.Format(out.Format),
+    TemplatePath: out.Template,
+})
+```
+
+| Field | Source |
+|---|---|
+| `Path` | `spec.snapshot.output.path` |
+| `Format` | `spec.snapshot.output.format` (`yaml`, `json`, or `table`), validated by the loader |
+| `Template` | `spec.snapshot.output.template`, a Go template rendered instead of the structured formats; requires `Format` `yaml` |
+
+Returns the zero value — never an error — for a nil `Config`, an absent
+`spec.snapshot`, or an absent `output` block, since delivery is optional. None
+of these three reach `CollectSnapshot`; `SnapshotAgentConfig()` carries what
+the collection Job itself reads.
+
+### What `RecipeOutputOptions()` does and does not carry
+
+`ResolveRecipe` and `LoadRecipe` never see `spec.recipe.output` either, for the
+same reason `CollectSnapshot` never sees `spec.snapshot.output`: writing the
+resolved recipe is a caller decision made AFTER resolution returns, not part
+of resolving it. `RecipeOutputOptions()` carries the two fields:
+
+```go
+out := cfg.RecipeOutputOptions()
+if out.Path != "" {
+    // write rec to out.Path in out.Format, mirroring `aicr recipe --output`
+}
+```
+
+| Field | Source |
+|---|---|
+| `Path` | `spec.recipe.output.path`. Empty when unset. |
+| `Format` | `spec.recipe.output.format`. Empty when unset, leaving the caller's own default in place. |
+
+Unlike every other derivation on `Config`, `RecipeOutputOptions()` returns no
+error: the underlying accessors are nil-safe and perform no parsing, so
+nothing here can fail. A nil `Config` or an absent `spec.recipe.output` each
+yield the zero value.

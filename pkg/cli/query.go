@@ -24,7 +24,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -99,7 +98,7 @@ Use in shell scripts:
 				return err
 			}
 
-			cfg, err := loadCmdConfig(ctx, cmd)
+			cfg, err := loadFacadeConfig(ctx, cmd)
 			if err != nil {
 				return err
 			}
@@ -160,9 +159,9 @@ Use in shell scripts:
 // overlay validates against the same DataProvider the Client resolves with.
 // The Client's catalog must already be loaded (LoadCatalog) so that registry
 // is seeded.
-func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*aicr.RecipeResult, error) {
+func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, client *aicr.Client) (*aicr.RecipeResult, error) {
 	reg := client.CriteriaRegistry()
-	profile := stringFlagOrConfig(cmd, flagProfile, aicr.WrapConfig(cfg).RecipeProfile())
+	profile := stringFlagOrConfig(cmd, flagProfile, cfg.RecipeProfile())
 	resolveOpts, err := buildSelectionResolveOptions(cmd, cfg)
 	if err != nil {
 		return nil, err
@@ -171,7 +170,7 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		resolveOpts = append(resolveOpts, aicr.WithProfile(profile))
 	}
 
-	snapFilePath := stringFlagOrConfig(cmd, "snapshot", aicr.WrapConfig(cfg).SnapshotPath())
+	snapFilePath := stringFlagOrConfig(cmd, "snapshot", cfg.SnapshotPath())
 
 	if snapFilePath != "" {
 		slog.Info("loading snapshot from", "uri", snapFilePath)
@@ -246,13 +245,13 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 	return client.ResolveRecipeFromCriteriaWithOptions(ctx, aicr.WrapCriteria(criteria), resolveOpts...)
 }
 
-func accountingResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.RecipeResolveOption, error) {
+func accountingResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aicr.RecipeResolveOption, error) {
 	value := cmd.String(flagSlurmAccountingMode)
 	if !cmd.IsSet(flagSlurmAccountingMode) {
 		if cfg == nil {
 			return nil, nil
 		}
-		mode, present, err := aicr.WrapConfig(cfg).RecipeAccountingMode()
+		mode, present, err := cfg.RecipeAccountingMode()
 		if err != nil {
 			return nil, err
 		}
@@ -271,13 +270,13 @@ func accountingResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.
 // equivalent AICRConfig field, into a resolve option. Mirrors
 // accountingResolveOptions: the flag wins, the config file is the fallback,
 // and an absent selection leaves the recipe's own declaration alone.
-func runtimeInventoryResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.RecipeResolveOption, error) {
+func runtimeInventoryResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aicr.RecipeResolveOption, error) {
 	value := cmd.String(flagRuntimeInventory)
 	if !cmd.IsSet(flagRuntimeInventory) {
 		if cfg == nil {
 			return nil, nil
 		}
-		mode, present, err := aicr.WrapConfig(cfg).RecipeRuntimeInventoryMode()
+		mode, present, err := cfg.RecipeRuntimeInventoryMode()
 		if err != nil {
 			return nil, err
 		}
@@ -294,7 +293,7 @@ func runtimeInventoryResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([
 
 // buildSelectionResolveOptions gathers every generation-time selection into one
 // option slice, so callers cannot wire one and forget the other.
-func buildSelectionResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.RecipeResolveOption, error) {
+func buildSelectionResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aicr.RecipeResolveOption, error) {
 	opts, err := accountingResolveOptions(cmd, cfg)
 	if err != nil {
 		return nil, err

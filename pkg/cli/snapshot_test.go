@@ -25,7 +25,7 @@ import (
 	"github.com/urfave/cli/v3"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/NVIDIA/aicr/pkg/config"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
@@ -187,7 +187,7 @@ func TestSnapshotTemplateFlagCombinations(t *testing.T) {
 			// rules during the ConfigMap-rejection addition.
 			cmd := buildSnapshotCmdForTemplateTest(t, tt.templatePath, tt.format, tt.formatSet, tt.output)
 			outFormat := serializer.Format(tt.format)
-			_, err := parseSnapshotTemplateOptions(cmd, outFormat, &config.SnapshotResolved{})
+			_, err := parseSnapshotTemplateOptions(cmd, outFormat, aicr.SnapshotOutputOptions{})
 
 			if tt.wantErr {
 				if err == nil {

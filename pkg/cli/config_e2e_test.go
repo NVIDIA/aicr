@@ -172,7 +172,7 @@ func tryCaptureBundleOpts(t *testing.T, args []string) (*bundleCmdOptions, error
 	var captured *bundleCmdOptions
 	cmd := bundleCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}
@@ -393,6 +393,50 @@ spec:
 				t.Errorf("error %q must contain %q", err.Error(), tt.wantErrSub)
 			}
 		})
+	}
+}
+
+// TestBundleCmd_OIDCDeviceFlowFlagOverridesConfigSigningKeyConflict is the
+// regression test for the eager-exclusivity review finding on
+// Config.BundleOptions: that method used to reject a document setting both
+// signingKey and oidcDeviceFlow: true BEFORE the CLI ever read
+// --oidc-device-flow, so a caller trying to correct a self-contradictory
+// config with --oidc-device-flow=false got the error anyway — the flag was
+// never given a chance to be read. Config.BundleOptions no longer checks
+// oidcDeviceFlow eagerly (see its godoc); only the merged-opts
+// validateSigningKeyExclusivity does, so the flag now wins as every other
+// per-field override does. TestBundleCmd_SigningKeyFromConfig's rejectTests
+// above still prove the config-only combination (no flag) is rejected.
+func TestBundleCmd_OIDCDeviceFlowFlagOverridesConfigSigningKeyConflict(t *testing.T) {
+	const configKey = "awskms://alias/aicr-signing"
+
+	tmp := t.TempDir()
+	recipePath := filepath.Join(tmp, "recipe.yaml")
+	if err := os.WriteFile(recipePath, []byte("kind: Recipe\n"), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+	cfgPath := filepath.Join(tmp, "config.yaml")
+	cfg := fmt.Sprintf(`kind: AICRConfig
+apiVersion: aicr.run/v1alpha2
+spec:
+  bundle:
+    input:
+      recipe: %s
+    attestation:
+      enabled: true
+      signingKey: %s
+      oidcDeviceFlow: true
+`, recipePath, configKey)
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	opts := captureBundleOpts(t, []string{"--config", cfgPath, "--oidc-device-flow=false"})
+	if opts.signingKey != configKey {
+		t.Errorf("signingKey = %q, want %q", opts.signingKey, configKey)
+	}
+	if opts.oidcDeviceFlow {
+		t.Error("oidcDeviceFlow = true, want false: --oidc-device-flow=false must override the config value")
 	}
 }
 

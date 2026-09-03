@@ -85,14 +85,15 @@ func myCmdAction(ctx context.Context, cmd *cli.Command) error {
         return err
     }
 
-    // 2. Optional: load --config file. (nil, nil) when --config not set.
-    cfg, err := loadCmdConfig(ctx, cmd)
+    // 2. Optional: load --config file as the facade type. (nil, nil) when
+    //    --config not set.
+    cfg, err := loadFacadeConfig(ctx, cmd)
     if err != nil {
         return err
     }
 
     // 3. Build a per-command Client. Owns its own DataProvider; must Close.
-    client, err := recipeClientFromCmd(cmd, cfg)
+    client, err := recipeClientFromCmd(ctx, cmd, cfg)
     if err != nil {
         return err
     }
@@ -145,11 +146,13 @@ packages (`pkg/recipe`, `pkg/bundler`, `pkg/snapshotter`,
 | `CollectSnapshot(ctx, *AgentConfig)` | `snapshot`, `validate` (Job-mode capture only; local `AICR_AGENT_MODE` collection deploys no Job and stays on `snapshotter.NodeSnapshotter`) |
 | `ValidateState(ctx, ...)` | `validate` |
 
-Construction in CLI happens via `recipeClientFromCmd(cmd, cfg)` in
-`root.go` — it reads `--data` (or `cfg.Recipe().DataDir()`), picks
-`FilesystemSource` vs `EmbeddedSource`, and threads `version` through
-to `Metadata.Version`. Callers **must** `defer client.Close()`; the
-client owns goroutines that drain on Close.
+Construction in CLI happens via `recipeClientFromCmd(ctx, cmd, cfg)` in
+`root.go` — it reads `--data` (or `cfg.RecipeSource()`, i.e.
+`spec.recipe.data`), picks `FilesystemSource` vs `EmbeddedSource`, and
+threads `version` through to `Metadata.Version`. `cfg` is the facade
+`*aicr.Config` returned by `loadFacadeConfig`; `recipeClientFromCmd` never
+holds the raw `*config.AICRConfig`. Callers **must** `defer
+client.Close()`; the client owns goroutines that drain on Close.
 
 Adding business logic in the handler — recipe resolution loops, bundle
 rendering, validator orchestration, OCI pushes — is a boundary
@@ -207,14 +210,19 @@ Flag names, category labels (`catInput`, `catOutput`, `catScheduling`,
 flags any literal repeated ≥ 3 times across the package — extract it
 there.
 
-## `--config` and `loadCmdConfig`
+## `--config` and `loadFacadeConfig`
 
 Commands that accept a config file declare `configFlag()` and call
-`loadCmdConfig(ctx, cmd)`. The loader returns `(*config.AICRConfig,
-nil)` when `--config` is set, `(nil, nil)` when it is not. Errors from
-`config.Load` are returned unchanged so their `pkg/errors` codes
-(`ErrCodeNotFound`, `ErrCodeInvalidRequest`, `ErrCodeUnavailable`)
-survive to the exit-code mapper.
+`loadFacadeConfig(ctx, cmd)`. The loader returns `(*aicr.Config, nil)`
+when `--config` is set, `(nil, nil)` when it is not — every derivation
+on a nil `*aicr.Config` is nil-safe, so callers need no branch. Errors
+from `aicr.LoadConfig` are returned unchanged so their `pkg/errors`
+codes (`ErrCodeNotFound`, `ErrCodeInvalidRequest`, `ErrCodeUnavailable`)
+survive to the exit-code mapper. A command derives options through the
+facade's `Config` methods (`ValidateSettings()`, `BundleOptions()`, …);
+reach for `cfg.Unwrap()` only when a spec field has no facade
+derivation yet, which the `pkg/client/v1` docstrings call out per
+method.
 
 Precedence is **CLI flag > config file > flag default**, implemented
 by three helpers in `root.go`:

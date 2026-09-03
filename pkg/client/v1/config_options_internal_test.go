@@ -171,6 +171,94 @@ func TestConfig_ErrorBranches_ReachableThroughWrapConfig(t *testing.T) {
 				return err
 			},
 		},
+		{
+			name: "BundleInputOptions propagates a malformed spec.bundle.output.target",
+			spec: appconfig.Spec{
+				Bundle: &appconfig.BundleSpec{
+					Output: &appconfig.BundleOutputSpec{
+						// Uppercase repository segments are rejected by the
+						// Docker reference grammar oci.ParseOutputTarget uses.
+						Target: "oci://ghcr.io/INVALID/Bundle:v1",
+					},
+				},
+			},
+			call: func(c *Config) error {
+				_, err := c.BundleInputOptions()
+				return err
+			},
+		},
+		{
+			name: "ValidateInputOptions propagates a malformed spec.validate.execution.phases",
+			spec: appconfig.Spec{
+				Validate: &appconfig.ValidateSpec{
+					Execution: &appconfig.ValidateExecutionSpec{
+						Phases: []string{"deploymnt"},
+					},
+				},
+			},
+			call: func(c *Config) error {
+				_, err := c.ValidateInputOptions()
+				return err
+			},
+		},
+		{
+			name: "SnapshotOutputOptions propagates a malformed spec.snapshot.execution.timeout",
+			spec: appconfig.Spec{
+				Snapshot: &appconfig.SnapshotSpec{
+					Execution: &appconfig.SnapshotExecutionSpec{
+						Timeout: "not-a-duration",
+					},
+				},
+			},
+			call: func(c *Config) error {
+				_, err := c.SnapshotOutputOptions()
+				return err
+			},
+		},
+		{
+			// Resolve() deliberately does not parse requests/limits (raw
+			// pass-through — see SnapshotResolved.Requests), so a malformed
+			// value reaches SnapshotAgentConfig's own ParseResourceList call
+			// rather than failing inside Resolve like the other rows above.
+			name: "SnapshotAgentConfig rejects a malformed spec.snapshot.agent.requests",
+			spec: appconfig.Spec{
+				Snapshot: &appconfig.SnapshotSpec{
+					Agent: &appconfig.SnapshotAgentSpec{
+						Requests: "not-a-quantity",
+					},
+				},
+			},
+			call: func(c *Config) error {
+				agent, present, err := c.SnapshotAgentConfig()
+				if agent != nil {
+					t.Error("SnapshotAgentConfig returned a non-nil AgentConfig alongside an error")
+				}
+				if !present {
+					t.Error("SnapshotAgentConfig reported spec.snapshot absent for a document that sets spec.snapshot.agent.requests")
+				}
+				return err
+			},
+		},
+		{
+			name: "SnapshotAgentConfig rejects a malformed spec.snapshot.agent.limits",
+			spec: appconfig.Spec{
+				Snapshot: &appconfig.SnapshotSpec{
+					Agent: &appconfig.SnapshotAgentSpec{
+						Limits: "not-a-quantity",
+					},
+				},
+			},
+			call: func(c *Config) error {
+				agent, present, err := c.SnapshotAgentConfig()
+				if agent != nil {
+					t.Error("SnapshotAgentConfig returned a non-nil AgentConfig alongside an error")
+				}
+				if !present {
+					t.Error("SnapshotAgentConfig reported spec.snapshot absent for a document that sets spec.snapshot.agent.limits")
+				}
+				return err
+			},
+		},
 	}
 
 	for _, tt := range tests {

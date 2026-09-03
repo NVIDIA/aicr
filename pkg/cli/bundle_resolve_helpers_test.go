@@ -23,7 +23,8 @@ import (
 	"github.com/urfave/cli/v3"
 
 	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
-	appcfg "github.com/NVIDIA/aicr/pkg/config"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
+	"github.com/NVIDIA/aicr/pkg/oci"
 )
 
 // === resolveDeployer ===
@@ -331,11 +332,23 @@ func TestResolveTaint_InvalidFlagReturnsError(t *testing.T) {
 
 // === resolveOutputTarget ===
 
+// mustBundleInputWithTarget builds an aicr.BundleInputOptions carrying a
+// parsed target the same way Config.BundleInputOptions derives one from
+// spec.bundle.output.target — parsing raw once, up front, at the same
+// boundary the derivation uses.
+func mustBundleInputWithTarget(t *testing.T, raw string) aicr.BundleInputOptions {
+	t.Helper()
+	ref, err := oci.ParseOutputTarget(raw)
+	if err != nil {
+		t.Fatalf("ParseOutputTarget(%q): %v", raw, err)
+	}
+	return aicr.BundleInputOptions{OutputTarget: ref, OutputTargetRaw: raw}
+}
+
 func TestResolveOutputTarget_FlagSetParsesCLI(t *testing.T) {
 	flags := []cli.Flag{&cli.StringFlag{Name: "output"}}
-	resolved := &appcfg.BundleResolved{}
 	runWith(t, flags, []string{"--output", "./mybundle"}, func(c *cli.Command) {
-		ref, err := resolveOutputTarget(c, resolved)
+		ref, err := resolveOutputTarget(c, aicr.BundleInputOptions{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -347,13 +360,9 @@ func TestResolveOutputTarget_FlagSetParsesCLI(t *testing.T) {
 
 func TestResolveOutputTarget_NoFlagUsesResolvedTarget(t *testing.T) {
 	flags := []cli.Flag{&cli.StringFlag{Name: "output"}}
-	b := &appcfg.BundleSpec{Output: &appcfg.BundleOutputSpec{Target: "./from-config"}}
-	resolved, err := b.Resolve()
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
+	input := mustBundleInputWithTarget(t, "./from-config")
 	runWith(t, flags, []string{}, func(c *cli.Command) {
-		ref, err := resolveOutputTarget(c, resolved)
+		ref, err := resolveOutputTarget(c, input)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -368,9 +377,8 @@ func TestResolveOutputTarget_NoFlagUsesResolvedTarget(t *testing.T) {
 
 func TestResolveOutputTarget_NoFlagNoResolvedDefaultsToCurrentDir(t *testing.T) {
 	flags := []cli.Flag{&cli.StringFlag{Name: "output"}}
-	resolved := &appcfg.BundleResolved{}
 	runWith(t, flags, []string{}, func(c *cli.Command) {
-		ref, err := resolveOutputTarget(c, resolved)
+		ref, err := resolveOutputTarget(c, aicr.BundleInputOptions{})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -382,9 +390,8 @@ func TestResolveOutputTarget_NoFlagNoResolvedDefaultsToCurrentDir(t *testing.T) 
 
 func TestResolveOutputTarget_InvalidFlagReturnsError(t *testing.T) {
 	flags := []cli.Flag{&cli.StringFlag{Name: "output"}}
-	resolved := &appcfg.BundleResolved{}
 	runWith(t, flags, []string{"--output", "oci://"}, func(c *cli.Command) {
-		_, err := resolveOutputTarget(c, resolved)
+		_, err := resolveOutputTarget(c, aicr.BundleInputOptions{})
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -399,13 +406,9 @@ func TestResolveOutputTarget_FlagSetEmptyDefaultsToCurrentDir(t *testing.T) {
 	// string was substituted with "." before parsing rather than
 	// passed through (which would have produced LocalPath: "").
 	flags := []cli.Flag{&cli.StringFlag{Name: "output"}}
-	b := &appcfg.BundleSpec{Output: &appcfg.BundleOutputSpec{Target: "./from-config"}}
-	resolved, err := b.Resolve()
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
+	input := mustBundleInputWithTarget(t, "./from-config")
 	runWith(t, flags, []string{"--output", ""}, func(c *cli.Command) {
-		ref, err := resolveOutputTarget(c, resolved)
+		ref, err := resolveOutputTarget(c, input)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -420,13 +423,9 @@ func TestResolveOutputTarget_FlagSetEmptyDefaultsToCurrentDir(t *testing.T) {
 
 func TestResolveOutputTarget_FlagOverridesNonEmptyConfigLogs(t *testing.T) {
 	flags := []cli.Flag{&cli.StringFlag{Name: "output"}}
-	b := &appcfg.BundleSpec{Output: &appcfg.BundleOutputSpec{Target: "./old"}}
-	resolved, err := b.Resolve()
-	if err != nil {
-		t.Fatalf("Resolve: %v", err)
-	}
+	input := mustBundleInputWithTarget(t, "./old")
 	runWith(t, flags, []string{"--output", "./new"}, func(c *cli.Command) {
-		ref, err := resolveOutputTarget(c, resolved)
+		ref, err := resolveOutputTarget(c, input)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
