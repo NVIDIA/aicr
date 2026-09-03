@@ -276,25 +276,48 @@ capture_failure_diagnostics() {
     local out_dir="/tmp/kwok-debug-artifacts/pod-logs"
     mkdir -p "$out_dir" 2>/dev/null || return 0
 
+    # Hard overall budget, not just per-call timeouts: a two-pod namespace
+    # alone could otherwise burn 30s(list) + 2*30s(logs) + 30s(endpoints) +
+    # 30s(describe) = 150s, and a slow apiserver is exactly the failure mode
+    # this runs under. Every namespace/pod iteration checks this before
+    # starting, so a stall stops the whole pass rather than one command.
+    # This step runs before cleanup()'s own teardown and before the
+    # composite action's later failure() steps (debug-artifact collection,
+    # kind export logs, upload) — overrunning it risks the job's timeout
+    # killing all of that too, losing cleanup and artifact upload along
+    # with the diagnostics. 60s leaves headroom inside the 240s post-sync-
+    # gate diagnostics margin documented in kwok-test/action.yml.
+    local deadline=$(( $(date +%s) + 60 ))
+    budget_left() { (( $(date +%s) < deadline )); }
+
     local system_ns="${SYSTEM_NS_PATTERN}"
     local namespaces
-    namespaces=$(kubectl get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
+    namespaces=$(timeout 10s kubectl get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
         | tr ' ' '\n' | grep -vE "^(${system_ns})$" || true)
 
     for ns in $namespaces; do
-        timeout 30s kubectl get pods -n "$ns" -o wide > "${out_dir}/${ns}-pods.txt" 2>/dev/null || true
+        budget_left || { log_info "Diagnostic capture budget exhausted — stopping"; break; }
+        timeout 10s kubectl get pods -n "$ns" -o wide > "${out_dir}/${ns}-pods.txt" 2>/dev/null || true
         # Per-pod (not label-selected) so this works regardless of chart
-        # label conventions. --tail caps a single pathological log; timeout
-        # caps a hung/slow apiserver — this is a failure-path diagnostic
-        # step, not the job's real work, and must never eat into the
-        # cleanup budget that actually tears the cluster down.
-        local pod
-        for pod in $(kubectl get pods -n "$ns" -o name 2>/dev/null); do
-            timeout 30s kubectl logs -n "$ns" "$pod" --all-containers --tail=1000 --prefix \
-                >> "${out_dir}/${ns}-logs.txt" 2>/dev/null || true
+        # label conventions. Merge stderr into the log file with a
+        # success/failure marker per pod — an absent log line must be
+        # distinguishable from a failed/timed-out fetch (NVIDIA/nodewright#571
+        # hinges on exactly that distinction).
+        local pod pod_out
+        for pod in $(timeout 10s kubectl get pods -n "$ns" -o name 2>/dev/null); do
+            budget_left || { log_info "Diagnostic capture budget exhausted — stopping"; break 2; }
+            {
+                echo "=== ${pod} ==="
+                if pod_out=$(timeout 15s kubectl logs -n "$ns" "$pod" --all-containers --tail=1000 --prefix 2>&1); then
+                    printf '%s\n' "$pod_out"
+                else
+                    echo "[log fetch FAILED or timed out, rc=$?]"
+                    printf '%s\n' "$pod_out"
+                fi
+            } >> "${out_dir}/${ns}-logs.txt"
         done
-        timeout 30s kubectl get endpointslices -n "$ns" -o yaml > "${out_dir}/${ns}-endpointslices.yaml" 2>/dev/null || true
-        timeout 30s kubectl describe pods -n "$ns" > "${out_dir}/${ns}-describe.txt" 2>/dev/null || true
+        timeout 10s kubectl get endpointslices -n "$ns" -o yaml > "${out_dir}/${ns}-endpointslices.yaml" 2>/dev/null || true
+        timeout 15s kubectl describe pods -n "$ns" > "${out_dir}/${ns}-describe.txt" 2>/dev/null || true
     done
 }
 
