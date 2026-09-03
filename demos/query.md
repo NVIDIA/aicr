@@ -50,10 +50,10 @@ aicr query \
 
 ```yaml
 enabled: true
+kernelModuleType: auto
 maxParallelUpgrades: 5
 rdma:
   enabled: false
-useOpenKernelModules: true
 version: 580.173.02
 ```
 

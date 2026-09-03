@@ -147,16 +147,60 @@ gfd:
   enabled: true
 
 driver:
-  # NVIDIA's recommended driver for the v26.3.3 chart; matches the
-  # GB200+EFA floor so a single global pin covers H100/B200/GB200 EKS.
+  # HELD at 580.173.02 — deliberately BEHIND the v26.7.0 chart default of
+  # 595.91.07. Do not advance without EFA validation on P6e hardware.
+  #
+  # NVIDIA documents R595 as backward incompatible with P6e-GB200 EFA. R595
+  # drops NVreg_GrdmaPciTopoCheckOverride (the R580-era escape hatch) and
+  # substitutes a topology check: EFA must sit in an IOMMU group, or GPU and
+  # EFA must share a root port. p6e-gb200/gb300 satisfies neither — measured
+  # on p6e-gb300r.36xlarge, where EFA (0000:97:00.0) has no iommu_group and
+  # sits under pci0000:84 while the GPU (0000:9d:00.0) is in group 0 under
+  # pci0000:98.
+  #
+  # The failure is proven, not inferred. Running the NCCL NET workload under
+  # 595 with the preflight bypassed, both nodes selected aws-ofi-nccl/EFA/RDMA
+  # and then aborted, with the kernel logging:
+  #   NVRM: dma-buf attach failed: topology not supported for mapping type FORCE_PCIE
+  # Under 580.173.02 on the same two nodes, NCCL NET passed at 43.16 GB/s.
+  #
+  # Scope: the AWS P6e Grace-Blackwell + EFA GPUDirect path specifically. NVLS
+  # passed under 595 (840 GB/s), as did deployment and conformance; NVLink
+  # never touches EFA.
+  #
+  # Holding here is a supported combination, not an untested one: GPU Operator
+  # v26.7.0 lists 580.173.02 as supported (595.91.07 is merely its default),
+  # and DRA driver 0.5.0 requires >= 580. Pinned rather than inherited so a
+  # chart bump is an explicit driver decision, and so BOM/attestation inputs
+  # stay deterministic.
+  #
+  # Do not substitute a newer R580 patch without re-validating EFA —
+  # 580.173.02 is the exact measured baseline. Per-family overrides, so
+  # non-P6e families can advance independently, are tracked separately.
   version: 580.173.02
   enabled: true
-  useOpenKernelModules: true
+  # Replaces useOpenKernelModules, which the chart deprecated and made a
+  # no-op (identical NOTE in v26.3.3 and v26.7.0 values.yaml), so the old
+  # key had already stopped having any effect before this pin moved.
+  #
+  # "auto" pins today's effective behaviour, not a change: it is the chart
+  # default both before and after this bump, and it is what the OCP
+  # ClusterPolicy template already falls back to
+  # (components/gpu-operator-ocp/manifests/clusterpolicy.yaml). Per the
+  # ClusterPolicy CRD, auto selects the recommended module type from the
+  # host's GPU devices and driver branch — which yields open modules on
+  # Blackwell/Grace, where they are required.
+  #
+  # Setting "open" instead would pin the intent the dead key expressed, but
+  # that IS a behaviour change on any hardware where auto currently selects
+  # proprietary, so it needs its own validation rather than riding a version
+  # bump.
+  kernelModuleType: auto
   maxParallelUpgrades: 5
   rdma:
     # Default off: nvidia_peermem only loads against Mellanox MOFED
     # symbols. AWS EFA (EKS p4d/p5/p5e) and Linode have no MOFED, so
-    # peermem fails to load and v26.3.3's stricter driver-validation
+    # peermem fails to load and the chart's stricter driver-validation
     # init container blocks the rest of the GPU stack. Overlays that
     # ship MOFED (AKS via network-operator) explicitly re-enable this.
     enabled: false
@@ -189,8 +233,9 @@ validator:
 nfd:
   enabled: false
 
-# Confidential Compute Manager defaults to enabled in chart v26.3.x; keep
-# it off until AICR has explicit CC-capable hardware support.
+# Confidential Compute Manager defaults to enabled in the upstream chart
+# (verified still true in v26.7.0); keep it off until AICR has explicit
+# CC-capable hardware support.
 ccManager:
   enabled: false
 

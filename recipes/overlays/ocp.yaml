@@ -22,7 +22,7 @@ spec:
     service: ocp
 
   constraints:
-    # nvidia-dra-driver-gpu-ocp (chart 0.4.1) declares kubeVersion:
+    # nvidia-dra-driver-gpu-ocp (chart 0.5.0) declares kubeVersion:
     # '>=1.32.0-0'. Raised from >= 1.29 so DRA's floor doesn't silently
     # pass recipe-time constraint checks and then fail at `helm install`.
     # This effectively requires OCP 4.19+ (first OCP minor shipping k8s 1.32).

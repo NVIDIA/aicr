@@ -2115,7 +2115,7 @@ The `--vendor-charts` flag pulls upstream Helm chart bytes into the bundle at bu
 my-bundle/
   001-gpu-operator/
     Chart.yaml                     # wrapper, declares the vendored subchart
-    charts/gpu-operator-v26.3.3.tgz # vendored upstream tarball
+    charts/gpu-operator-v26.7.0.tgz # vendored upstream tarball
     values.yaml                    # values nested under the subchart name
     cluster-values.yaml            # dynamic values, also nested
     install.sh                     # helm upgrade --install <name> ./<dir> ...
@@ -2144,10 +2144,10 @@ kind: BundleProvenance
 vendoredCharts:
   - name: gpu-operator
     chart: gpu-operator
-    version: v26.3.3
+    version: v26.7.0
     repository: https://helm.ngc.nvidia.com/nvidia
     sha256: abc123...
-    tarballName: gpu-operator-v26.3.3.tgz
+    tarballName: gpu-operator-v26.7.0.tgz
     pullerVersion: helm-cli v3.20.2
 ```
 
