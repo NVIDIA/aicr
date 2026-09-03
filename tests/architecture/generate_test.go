@@ -171,22 +171,24 @@ func dropInternalRefs(refs map[reference]bool) map[reference]bool {
 // TestAnalyzedPackagePathsCoversWholeSubtree pins that the analyzed set is
 // resolved via `go list ./pkg/cli/... ./pkg/server/...`, not a hardcoded
 // two-package list — so a future `pkg/cli/foo` split is picked up
-// automatically instead of silently escaping the gate. There is no
-// subpackage today, so this also documents (and would immediately notice)
-// the day one appears.
+// automatically instead of silently escaping the gate. It only asserts that
+// pkg/cli and pkg/server are included, not that they are the only entries:
+// a subpackage split is a supported architecture change (the very thing the
+// subtree expansion exists to handle), so this test must keep passing when
+// one appears rather than breaking on a legitimate refactor.
 func TestAnalyzedPackagePathsCoversWholeSubtree(t *testing.T) {
 	t.Parallel()
 
 	const prefix = "github.com/NVIDIA/aicr/"
 	paths := analyzedPackagePaths(t, prefix)
 
-	want := map[string]bool{prefix + "pkg/cli": true, prefix + "pkg/server": true}
-	if len(paths) != len(want) {
-		t.Fatalf("analyzedPackagePaths() = %v, want exactly %v (no subpackages exist yet)", paths, want)
-	}
+	got := make(map[string]bool, len(paths))
 	for _, path := range paths {
-		if !want[path] {
-			t.Errorf("analyzedPackagePaths() returned unexpected package %q", path)
+		got[path] = true
+	}
+	for _, want := range []string{prefix + "pkg/cli", prefix + "pkg/server"} {
+		if !got[want] {
+			t.Errorf("analyzedPackagePaths() = %v, missing %q", paths, want)
 		}
 	}
 }
