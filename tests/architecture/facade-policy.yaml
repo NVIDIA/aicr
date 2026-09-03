@@ -203,16 +203,16 @@ constrained:
       ValidateSignablePointer: behavioral
   pkg/evidence/cncf:
     reason: >-
-      CNCF AI Conformance evidence-markdown generation (the
-      --emit-attestation CNCF submission path). pkg/client/v1's own doc
-      comment on Config.CNCFEvidenceOptions states plainly that there is no
-      Client.Emit* for CNCF evidence and that validateFlagCombinations,
-      cncf.New, and runCNCFSubmission read the config directly by design --
-      mirroring the already-accepted SnapshotOutputOptions split, where the
-      facade carries settings for a caller-owned side mechanism it
-      deliberately does not wrap. A consistent, documented pattern rather
-      than an oversight; the server has no CNCF-evidence surface at all.
-    permanent: true
+      Acknowledged gap, not a settled design. cncf.Collector.Run is
+      cluster-touching business logic -- kubeconfig handling, feature
+      sections, a --no-cluster short-circuit -- invoked directly from
+      pkg/cli. pkg/client/v1's own doc comment on Config.CNCFEvidenceOptions
+      states plainly that there is no Client.Emit* for CNCF evidence today:
+      the facade emits no CNCF evidence at all, and validateFlagCombinations,
+      cncf.New, and runCNCFSubmission read the config and run the collector
+      directly because nothing else exists to call. That is a self-declared
+      absence of facade coverage, not a permanent exclusion.
+    tracking: "#2016"
     symbols:
       Collector.Run: behavioral
       CollectorOption: type
@@ -414,8 +414,8 @@ constrained:
       Client.ValidateState so the same ID also drives its own progress and
       log-tail UX (it is then supplied back to the facade via
       WithValidationRunID). ResolveGPUAllocationPolicy feeds the CNCF
-      evidence collector's WithAllocationPolicy -- the same already-accepted
-      CLI-owned CNCF-evidence path documented under pkg/evidence/cncf above.
+      evidence collector's WithAllocationPolicy -- the same CLI-only
+      CNCF-evidence path tracked under pkg/evidence/cncf above (#2016).
     permanent: true
     symbols:
       GenerateRunID: behavioral
