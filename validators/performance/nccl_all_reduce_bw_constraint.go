@@ -1831,7 +1831,7 @@ func waitForResourceGone(ctx context.Context, client dynamic.ResourceInterface, 
 // platformWorkerScheduling returns the default nodeSelector and tolerations
 // for NCCL worker pods on the given service. instanceType is only used for EKS;
 // nodes (the accelerator-narrowed target set from resolveTargetGPUNodes) is
-// used for GKE (the gke-accelerator label) and OKE/AKS (the shared
+// used for GKE (the gke-accelerator label) and OKE/AKS/generic (the shared
 // nvidia.com/gpu.product label).
 func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType string, nodes []v1.Node) (map[string]string, []v1.Toleration, error) {
 	switch service {

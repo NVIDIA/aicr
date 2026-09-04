@@ -15,7 +15,8 @@
 # NCCL all-reduce TrainingRuntime for GB300 on generic bare-metal clusters,
 # NVLS variant. Measures MNNVL (multi-node NVLink) across the GB300 NVL72
 # IMEX domain: NVLS is forced on and the transport is confirmed from the
-# NCCL "NVLS multicast support is available" banner in the launcher logs.
+# "NVLS comm 0x<addr>" communicator-init line in the launcher logs (the
+# "NVLS multicast support is available" banner reports hardware only).
 # Baseline: 895.08 GB/s busbw at the 16 GiB message size (3 nodes x 4 GPUs,
 # driver 580.126.20); the recipe floors at 823.
 #
@@ -131,9 +132,9 @@ spec:
                 # GPU nodes are commonly tainted (nvidia.com/gpu=present:NoSchedule).
                 tolerations:
                 - operator: Exists
-                # IMEX channel claim — ComputeDomain nccl-all-reduce-cd is
-                # pre-created by the operator in the validation namespace
-                # (runtime-ref runtimes own their fabric wiring).
+                # IMEX channel claim — the validator provisions the
+                # ComputeDomain and this ResourceClaimTemplate for embedded
+                # NVLS templates (nccl_all_reduce_bw_constraint.go).
                 resourceClaims:
                 - name: imex-channel
                   resourceClaimTemplateName: nccl-all-reduce-imex

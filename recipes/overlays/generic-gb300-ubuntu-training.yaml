@@ -56,6 +56,17 @@ spec:
           enabled: true
         devicePlugin:
           enabled: true
+          # Helm replaces lists: the first two entries restate the component
+          # base values.yaml; this override exists to pin MOFED_ENABLED off.
+          # The fabric's device plugin owns RDMA injection; an omitted key is
+          # inferred true when GDS enablement loads nvidia_fs.
+          env:
+            - name: DP_DISABLE_HEALTHCHECKS
+              value: "109"
+            - name: DEVICE_LIST_STRATEGY
+              value: cdi-cri,cdi-annotations,volume-mounts
+            - name: MOFED_ENABLED
+              value: "false"
 
     # No validated GB300 bare-metal tuning profile yet.
     - name: nodewright-customizations
