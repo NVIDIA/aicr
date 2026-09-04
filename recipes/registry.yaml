@@ -638,10 +638,17 @@ components:
     # via its templates, so agentgateway must declare this chart as a
     # DependencyRef for the DAG-stratified helmfile layout to install
     # CRDs first. Issue #914.
+    #
+    # Floor is v1.4.0, which bounded the CEL-validated string fields with
+    # `maxLength`. Earlier charts leave them unbounded and a Kubernetes 1.37
+    # apiserver rejects the CRDs ("estimated rule cost exceeds budget").
+    # The v2.2.x tags this registry once used are an older schema line that
+    # still ships unbounded fields, so they are a downgrade, not an upgrade
+    # (#1476).
     helm:
       defaultRepository: oci://cr.agentgateway.dev/charts
       defaultChart: agentgateway-crds
-      defaultVersion: v1.3.1
+      defaultVersion: v1.5.0
       defaultNamespace: agentgateway-system
 
   - name: agentgateway
@@ -653,7 +660,9 @@ components:
     helm:
       defaultRepository: oci://cr.agentgateway.dev/charts
       defaultChart: agentgateway
-      defaultVersion: v1.3.1
+      # Keep in lockstep with agentgateway-crds above; see the version floor
+      # note there before changing this pin.
+      defaultVersion: v1.5.0
       defaultNamespace: agentgateway-system
     nodeScheduling:
       system:
