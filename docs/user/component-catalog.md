@@ -879,17 +879,22 @@ migrate them. Before applying a bundle whose agentgateway pin moved, check
 whether you have any:
 
 ```bash
-kinds=$(kubectl api-resources --api-group=agentgateway.dev -o name) || exit 1
-for kind in $kinds; do
-  kubectl get "$kind" -A || exit 1
-done
+if ! kinds=$(kubectl api-resources --api-group=agentgateway.dev -o name); then
+  echo "discovery incomplete — retry; do not read this as clear" >&2
+elif [ -z "$kinds" ]; then
+  echo "no agentgateway.dev kinds registered — the chart is not installed" >&2
+else
+  for kind in $kinds; do
+    kubectl get "$kind" -A || echo "listing $kind failed — retry" >&2
+  done
+fi
 ```
 
 The kinds are discovered rather than named because the API group grows across
 chart versions — `AgentgatewayModel` only exists from v1.4.0 — so naming them
 would fail with `the server doesn't have a resource type` on exactly the older
-pins whose operators most need to run this. The `|| exit 1` guards matter for
-the same reason: an unhealthy aggregated APIService (a down metrics-server or
+pins whose operators most need to run this. The status checks matter for the
+same reason: an unhealthy aggregated APIService (a down metrics-server or
 custom-metrics adapter, and `prometheus-adapter` is in AICR's own component
 set) makes `kubectl api-resources` exit non-zero, the substitution yields an
 empty list, and the loop would silently report clean. Empty output *plus* an
@@ -901,7 +906,8 @@ what the cross-namespace route delegation change affects:
 
 ```bash
 kubectl get httproutes,grpcroutes -A \
-  -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PARENTS:.spec.parentRefs[*].name' || exit 1
+  -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PARENTS:.spec.parentRefs[*].name' \
+  || echo "route listing failed — retry" >&2
 ```
 
 Any row whose `PARENTS` names `inference-gateway` is yours. A row whose
@@ -932,12 +938,16 @@ namespace it provisions the `inference-gateway` Gateway in. The chart's own
 default is an empty list, which binds the write role (Deployments, DaemonSets,
 Secrets, ServiceAccounts, ConfigMaps, Services, HPAs, PDBs) with a
 *ClusterRoleBinding*, letting a network-facing controller write those objects
-and read every Secret in every namespace on the cluster.
+in every namespace on the cluster.
 
-Scoping narrows the blast radius to the namespaces you name. It does not make
-the controller unprivileged: the role still grants `daemonsets`, and a
+Scoping narrows that **write** reach to the namespaces you name, and nothing
+else. Two things it does not contain. The controller's read role is a separate
+`ClusterRole` bound cluster-wide regardless of this value, and it carries
+`get`/`list`/`watch` on Secrets — so a scoped controller can still read every
+Secret in the cluster. And the write role still grants `daemonsets`, so a
 DaemonSet created in a permitted namespace still schedules pods onto every
-node. Treat the controller's namespace as privileged rather than contained.
+node. Treat the controller as privileged rather than contained; scoping is
+worth doing, but it is not the control that keeps it away from your Secrets.
 
 The consequence for you is that **only Gateways in the listed namespaces are
 provisioned**. A Gateway elsewhere is accepted by the API server but never gets
@@ -952,7 +962,8 @@ its namespace, so inventory what you have before upgrading:
 
 ```bash
 kubectl get gateways.gateway.networking.k8s.io -A \
-  -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,CLASS:.spec.gatewayClassName' || exit 1
+  -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,CLASS:.spec.gatewayClassName' \
+  || echo "Gateway listing failed — retry" >&2
 ```
 
 Every namespace holding a Gateway with `CLASS: agentgateway` belongs in the
