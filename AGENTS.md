@@ -521,6 +521,19 @@ ${AICR_BIN} validate -r recipe.yaml -s snapshot.yaml --no-cluster
 
 **Anchor link hygiene.** Broken anchors are caught in CI by lychee on any PR touching `docs/**` (`.github/workflows/fern-docs-ci.yaml`, config `.lychee.toml`) — `make qualify` does NOT run it. When renaming/removing a heading, grep for `<filename>.md#<old-slug>` across the repo first (other docs, Helm templates, and `SECURITY.md` link into user-facing anchors), and update any inbound link in the same PR.
 
+## Code Comment Style
+
+**Go: follow [Go doc comment conventions](https://go.dev/doc/comment).** The violations that most often produce verbose comments:
+
+- Repo policy (stricter than Go's guidance, which permits short per-member comments under a group doc): a const/var group documented once at the top keeps its members bare — a lone multi-line comment on one member breaks the group.
+- A comparison between two values ("X is concrete, unlike wildcard Y") belongs on the *type's* doc comment, where readers of both see it — not on one member.
+- Don't document another subsystem's behavior in a declaration's comment, and don't restate an already-documented concept to set up a contrast — one defining sentence that references it is enough.
+- Keep enumerations inside existing doc comments accurate when adding values, instead of commenting the new line.
+
+**Python: conform to [PEP 8](https://peps.python.org/pep-0008/) with a 120-character line limit** (`pycodestyle --max-line-length=120` is the reference check), and follow [PEP 257](https://peps.python.org/pep-0257/) for docstrings on new or changed modules and functions — no retrofit of existing helpers is implied.
+
+**All languages:** a comment states what the code cannot show — a constraint, an absence ("no X because Y"), or provenance for a magic value. Comments that narrate the next line, restate the identifier, or justify the change to a reviewer are noise.
+
 ## Anti-Patterns (Do Not Do)
 
 Process and unique findings below; the rule sections above (Error Wrapping, Context Propagation, HTTP Client/Server, Logging, Constants, Kubernetes Patterns, Test Isolation) are authoritative for everything they cover and are not repeated here.
