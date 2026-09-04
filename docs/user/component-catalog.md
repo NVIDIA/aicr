@@ -340,6 +340,30 @@ aicr bundle -r recipe.yaml \
 
 This setting filters by source IP only; it does not add TLS or authentication to the gateway listener.
 
+### Upgrading agentgateway across breaking releases
+
+AICR pins the `agentgateway` and `agentgateway-crds` charts in `recipes/registry.yaml`, and a pin bump can cross an upstream release that documents breaking changes. What that means for you depends entirely on whether you author your own agentgateway resources.
+
+**AICR-generated bundles are unaffected.** AICR creates exactly two agentgateway resources: an `AgentgatewayParameters` carrying deployment and service shape only (`loadBalancerSourceRanges`, `nodeSelector`, `tolerations`, labels), and the `inference-gateway` `Gateway` itself. It ships no `AgentgatewayPolicy`, `AgentgatewayBackend`, or `AgentgatewayModel`, and no `HTTPRoute`. Upstream breaking changes to JWT claim enforcement, LLM token accounting, policy merging, cross-namespace route delegation, managed API-key metadata, and Istio identity all land on that unconfigured surface, so a regenerated bundle does not carry them.
+
+**Resources you author yourself are your responsibility.** If you have applied your own `AgentgatewayPolicy` or `AgentgatewayBackend` against an AICR-deployed gateway — to add authentication, rate limiting, prompt guarding, or model routing — those objects sit outside AICR's managed set. AICR can neither detect nor migrate them, and an upstream breaking change can silently alter their behavior when you apply a bundle built on a newer pin.
+
+Before adopting a bundle that bumps the agentgateway pin:
+
+1. Check whether you have any agentgateway resources AICR did not create:
+
+   ```shell
+   kubectl get agentgatewaypolicies,agentgatewaybackends,agentgatewaymodels -A
+   ```
+
+   If that returns nothing, the upgrade needs no action from you.
+
+2. If it returns anything, read the [upstream release notes](https://github.com/agentgateway/agentgateway/releases) for every version between your current pin and the new one, and validate those resources in a non-production cluster first.
+
+Check the pinned version for any release with `aicr query --selector components.agentgateway.version`, and see [Component Version Matrix](component-version-matrix.md) for the per-release history.
+
+**Note on validation coverage:** AICR's CI exercises fresh installs of the pinned chart, not in-place upgrades from an older pin. A green release validates that the new version deploys and passes health checks; it does not certify an in-place upgrade of an existing cluster.
+
 ### Exposure guardrails
 
 AICR enforces and surfaces inference-gateway exposure in two places:
