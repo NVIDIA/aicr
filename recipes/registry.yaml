@@ -170,8 +170,12 @@ components:
       system:
         nodeSelectorPaths:
           - operator.nodeSelector
+          # The maintenance-operator subchart's deployment reads its own
+          # scoped operator.* placement values.
+          - maintenance-operator.operator.nodeSelector
         tolerationPaths:
           - operator.tolerations
+          - maintenance-operator.operator.tolerations
 
   - name: gke-nccl-tcpxo
     displayName: gke-nccl-tcpxo
