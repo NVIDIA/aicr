@@ -171,11 +171,12 @@ components:
         nodeSelectorPaths:
           - operator.nodeSelector
           # The maintenance-operator subchart's deployment reads its own
-          # scoped operator.* placement values.
-          - maintenance-operator.operator.nodeSelector
+          # scoped operator.* placement values; the values key is the
+          # dependency name (maintenance-operator-chart, unaliased).
+          - maintenance-operator-chart.operator.nodeSelector
         tolerationPaths:
           - operator.tolerations
-          - maintenance-operator.operator.tolerations
+          - maintenance-operator-chart.operator.tolerations
 
   - name: gke-nccl-tcpxo
     displayName: gke-nccl-tcpxo
