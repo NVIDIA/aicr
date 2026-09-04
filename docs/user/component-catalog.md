@@ -350,13 +350,15 @@ AICR pins the `agentgateway` and `agentgateway-crds` charts in `recipes/registry
 
 Before adopting a bundle that bumps the agentgateway pin:
 
-1. Check whether you have any agentgateway resources AICR did not create:
+1. Check whether you have any agentgateway resources AICR did not create. Ask the cluster which kinds exist rather than naming them, since the set grows across chart versions — `AgentgatewayModel`, for one, only exists from chart v1.4.0 onward, and naming it explicitly makes the command fail on older pins:
 
    ```shell
-   kubectl get agentgatewaypolicies,agentgatewaybackends,agentgatewaymodels -A
+   for kind in $(kubectl api-resources --api-group=agentgateway.dev -o name); do
+     kubectl get "$kind" -A
+   done
    ```
 
-   If that returns nothing, the upgrade needs no action from you.
+   AICR's own `AgentgatewayParameters` named `system-proxy` in `agentgateway-system` is expected in that output. If nothing else appears, the upgrade needs no action from you.
 
 2. If it returns anything, read the [upstream release notes](https://github.com/agentgateway/agentgateway/releases) for every version between your current pin and the new one, and validate those resources in a non-production cluster first.
 
