@@ -154,9 +154,9 @@ spec:
     # budget. Under the default sequencing: node, IsNodeReadyForSkyhook
     # checks per-node completion, so one node may start tuning while
     # another is still on the RDMA CR — concurrent reboots across the two
-    # are possible on a multi-node cluster. Install order compounds it:
-    # this component lands well before rdma-netns-exclusive, so at creation
-    # time there is no predecessor CR to order against at all.
+    # are possible on a multi-node cluster. There is also no dependency
+    # edge between the two components, so nothing guarantees the RDMA CR
+    # exists when this one becomes runnable.
     # Sequence deliberately on a live cluster. Tracked as a follow-up.
     # Health check override: the operator Deployment's name depends on how
     # nodewright got installed, and both paths are real here. The VR
