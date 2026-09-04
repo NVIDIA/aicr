@@ -184,6 +184,12 @@ spec:
     # while another is still rebooting for RDMA. Explicit Preview risk
     # acceptance — sequence deliberately on a live cluster. Tracked in
     # NVIDIA/aicr#2572.
+    #
+    # Node targeting also differs between the two: --accelerated-node-selector
+    # reaches the tuning CR but not dranet or rdma-netns-exclusive, which
+    # hardcode nodeSelector nvidia.com/gpu.present. Identical on the
+    # NFD-labeled reference clusters; only diverges if you narrow the GPU node
+    # set. See vr200-rke2-ubuntu-training for the full note.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:

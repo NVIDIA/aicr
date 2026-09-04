@@ -914,9 +914,17 @@ func TestNVLSRuntimeYAMLReferencesIMEXClaim(t *testing.T) {
 	// creates via buildComputeDomain. If these drift, the DRA driver
 	// generates one name and the worker pods reference another, and
 	// pod admission fails with an opaque "claim not found" error.
-	paths := []string{
-		filepath.Join("testdata", "gb200", "eks", "runtime-nvls.yaml"),
-		filepath.Join("testdata", "gb200", "oke", "runtime-nvls.yaml"),
+	// Derived by globbing rather than listed, so a new accelerator/service
+	// runtime is covered the moment its template lands. An explicit list
+	// silently excludes anything added later, which is how vr200/rke2 was
+	// left uncovered when it was introduced.
+	paths, err := filepath.Glob(filepath.Join("testdata", "*", "*", "runtime-nvls.yaml"))
+	if err != nil {
+		t.Fatalf("glob runtime-nvls templates: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no runtime-nvls.yaml templates found — the glob matched nothing, " +
+			"so this guard would pass without checking anything")
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
