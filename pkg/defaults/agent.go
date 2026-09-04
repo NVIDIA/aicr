@@ -38,6 +38,14 @@ const (
 	// DevVersion is the version string of an unstamped build — the value
 	// left in place when the release ldflags did not run.
 	DevVersion = "dev"
+
+	// DevChartVersion is what DevVersion becomes when it has to be written
+	// into a Helm Chart.yaml `version:`. Helm validates that field as
+	// SemVer 2 and rejects "dev" outright, so every generated chart whose
+	// version tracks the AICR build needs a valid stand-in. The
+	// "0.0.0-<pre-release>" shape sorts below every real release, which is
+	// the correct ordering for an unstamped build.
+	DevChartVersion = "0.0.0-dev"
 )
 
 // AgentImageForVersion returns the agent container image matching a build

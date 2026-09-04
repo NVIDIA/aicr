@@ -198,9 +198,9 @@ build:
 # Testing Configuration
 testing:
   # renovate: datasource=docker depName=kindest/node depType=testing
-  kind_node_image: 'kindest/node:v1.36.1'
+  kind_node_image: 'kindest/node:v1.37.0'
   # renovate: datasource=docker depName=kindest/node depType=testing
-  h100_kind_node_image: 'kindest/node:v1.36.1'
+  h100_kind_node_image: 'kindest/node:v1.37.0'
 
   # GPU CI runtime pins consumed through .github/actions/load-versions.
   # renovate: datasource=helm depName=gpu-operator depType=testing
