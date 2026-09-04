@@ -33,6 +33,6 @@ spec:
   # Inference specific constraints for GKE workloads
   constraints:
     - name: K8s.server.version
-      value: ">= 1.30"
+      value: ">= 1.32"
 
   componentRefs: []

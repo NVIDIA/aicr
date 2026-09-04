@@ -22,7 +22,7 @@ spec:
     service: ocp
 
   constraints:
-    # nvidia-dra-driver-gpu-ocp (chart 0.4.1) declares kubeVersion:
+    # nvidia-dra-driver-gpu-ocp (chart 0.5.0) declares kubeVersion:
     # '>=1.32.0-0'. Raised from >= 1.29 so DRA's floor doesn't silently
     # pass recipe-time constraint checks and then fail at `helm install`.
     # This effectively requires OCP 4.19+ (first OCP minor shipping k8s 1.32).
@@ -75,6 +75,10 @@ spec:
         - components/gpu-operator-ocp/manifests/clusterpolicy.yaml
       dependencyRefs:
         - gpu-operator-ocp-olm
+        # The OCP ClusterPolicy enables the legacy nvidia-peermem route.
+        # Deploy Network Operator's NicClusterPolicy (and, when requested,
+        # its DOCA/OFED readiness gate) before the GPU driver stack (#2499).
+        - network-operator-ocp
 
     # Network Operator via OLM for RDMA/InfiniBand networking
     - name: network-operator-ocp-olm

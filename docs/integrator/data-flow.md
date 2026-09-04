@@ -52,6 +52,11 @@ Each stage transforms input data into a different format:
   attached to the snapshot after the parallel collectors finish (local
   mode) or merged into the snapshot the Job returns after retrieval
   (Job mode)
+- **oke-addons**: Orchestration-layer projection, not a collector —
+  produced from the explicit operator-supplied add-on dump passed to
+  `aicr snapshot --oke-addons <file>` (the `NvidiaGpuPlugin` add-on's
+  control-plane state). Same up-front validation and attach/merge flow
+  as `aks-gpu-pools`
 
 **GPU Hardware:**
 - Source: NFD/PCI enumeration via sysfs (driver-free; no `nvidia-smi`)
@@ -80,7 +85,8 @@ Each stage transforms input data into a different format:
 │   ├─ K8s                                                │
 │   │   └─ subtypes: [server, image, policy, node,        │
 │   │                 slinky-slurm, mariadb-operator,      │
-│   │                 aks-gpu-pools (with --aks-gpu-pools)]│
+│   │                 aks-gpu-pools (with --aks-gpu-pools),│
+│   │                 oke-addons (with --oke-addons)]      │
 │   │       ├─ data: map[string]Reading                   │
 │   │       └─ slinky-slurm.items: []ItemEntry            │
 │   │             (allowlisted resource context + data)   │
@@ -175,8 +181,9 @@ type Reading interface {
   cancel-on-error collector is supported, but today per-collector errors
   are swallowed.)
 - Provider projections follow the opposite failure policy: the
-  `aks-gpu-pools` projection is explicit operator input, so a malformed
-  pool file ABORTS the snapshot before any collector runs
+  `aks-gpu-pools` and `oke-addons` projections are explicit operator
+  input, so a malformed pool or add-on file ABORTS the snapshot before
+  any collector runs
   (`pkg/snapshotter/snapshot.go`) — it must never ride the
   degrade-to-warning path and masquerade as a snapshot whose reading is
   merely unavailable.
@@ -634,7 +641,7 @@ spec:
   sources:
     # Helm chart from upstream
     - repoURL: https://helm.ngc.nvidia.com/nvidia
-      targetRevision: v26.3.3
+      targetRevision: v26.7.0
       chart: gpu-operator
       helm:
         valueFiles:

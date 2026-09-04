@@ -26,7 +26,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -74,7 +73,8 @@ type validateAgentConfig struct {
 	// by the caller of parseValidateAgentConfig) so ADR-020 run isolation
 	// scopes every resource this command creates to a single run rather
 	// than splitting it across two independently generated ids.
-	runID string
+	runID         string
+	okeAddonsPath string
 }
 
 // parseValidateAgentConfig builds the snapshot-capture agent's deployment
@@ -90,7 +90,7 @@ type validateAgentConfig struct {
 // RunID.
 func parseValidateAgentConfig(
 	cmd *cli.Command,
-	resolved *config.ValidateResolved,
+	opts aicr.ValidateSettings,
 	shared validateSharedResolved,
 	runID string,
 ) *validateAgentConfig {
@@ -103,18 +103,19 @@ func parseValidateAgentConfig(
 	return &validateAgentConfig{
 		kubeconfig:         cmd.String("kubeconfig"),
 		namespace:          shared.namespace,
-		image:              stringFlagOrConfig(cmd, "image", resolved.Image),
+		image:              stringFlagOrConfig(cmd, "image", opts.Image),
 		imagePullSecrets:   shared.imagePullSecrets,
-		jobName:            explicitStringFlagOrConfig(cmd, "job-name", resolved.JobName),
-		serviceAccountName: explicitStringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
+		jobName:            explicitStringFlagOrConfig(cmd, "job-name", opts.JobName),
+		serviceAccountName: explicitStringFlagOrConfig(cmd, "service-account-name", opts.ServiceAccountName),
 		nodeSelector:       shared.nodeSelector,
 		tolerations:        shared.tolerations,
-		timeout:            durationFlagOrConfig(cmd, "timeout", resolved.Timeout),
+		timeout:            durationFlagOrConfig(cmd, "timeout", opts.Timeout),
 		cleanup:            !shared.noCleanup,
 		debug:              cmd.Bool("debug"),
-		requireGPU:         boolFlagOrConfig(cmd, "require-gpu", resolved.RequireGPU),
+		requireGPU:         boolFlagOrConfig(cmd, "require-gpu", opts.RequireGPU),
 		aksGPUPoolsPath:    cmd.String("aks-gpu-pools"),
 		runID:              runID,
+		okeAddonsPath:      cmd.String("oke-addons"),
 	}
 }
 
@@ -142,23 +143,97 @@ func derefBoolOr(p *bool, fallback bool) bool {
 	return *p
 }
 
+// phaseStringsFallback casts opts.Phases ([]aicr.Phase, cast rather than
+// re-parsed by ValidateSettings) back to []string for
+// validator.ParsePhaseSelection / stringSliceFlagOrConfig, which both operate
+// on the raw wire form. Returns nil when config set no phases, matching the
+// zero-value fallback stringSliceFlagOrConfig expects.
+func phaseStringsFallback(opts aicr.ValidateSettings) []string {
+	if len(opts.Phases) == 0 {
+		return nil
+	}
+	out := make([]string, len(opts.Phases))
+	for i, p := range opts.Phases {
+		out[i] = string(p)
+	}
+	return out
+}
+
+// validateCleanupFallback picks the cleanup-polarity default
+// validateSharedResolved.noCleanup merges against --no-cleanup.
+//
+// opts.Cleanup is false both when spec.validate is silent about cleanup AND
+// when spec.validate is absent entirely — ValidateSettings' own "zero value
+// is not a safe default" godoc. present is what tells the two apart: only
+// when the section is present does opts.Cleanup reflect a real
+// (possibly-defaulted) config decision worth trusting as a fallback; absent
+// — including the plain no-`--config` invocation, the common case — the
+// CLI's own default (clean up) must apply instead, mirroring
+// parseSnapshotCmdOptions' cleanupFallback for the sibling command.
+//
+// Extracted as its own function (rather than inlined in the Action) so a
+// test can call it directly without needing a live cluster: this is the
+// exact computation whose absence let a plain `aicr validate` leave the
+// cluster-admin ClusterRoleBinding and validator Jobs active by default (see
+// TestValidateCmd_NoConfigDefaultsToCleanup).
+func validateCleanupFallback(opts aicr.ValidateSettings, present bool) bool {
+	if !present {
+		return true
+	}
+	return opts.Cleanup
+}
+
+// validateFlagCombinations rejects the validate command's mutually
+// inconsistent flag pairings before any I/O runs. Split out of the Action
+// closure so the guard logic can be read (and length-budgeted) independently
+// of the rest of the command's orchestration.
+func validateFlagCombinations(cncfSubmission bool, evidenceDir string, features []string, noCluster, explicitAttest bool) error {
+	if cncfSubmission && evidenceDir == "" {
+		return errors.New(errors.ErrCodeInvalidRequest, "--cncf-submission requires --evidence-dir")
+	}
+	if len(features) > 0 && !cncfSubmission {
+		return errors.New(errors.ErrCodeInvalidRequest, "--feature requires --cncf-submission")
+	}
+	// --cncf-submission deploys GPU workloads and collects behavioral evidence
+	// against the active kube-context, so it is incompatible with the offline
+	// --no-cluster dry-run. The Action's short-circuit reaches the live-cluster
+	// collector directly, bypassing the noCluster handling further down, so
+	// reject the combination here rather than silently contacting the cluster.
+	if cncfSubmission && noCluster {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--cncf-submission cannot be combined with --no-cluster: the behavioral evidence collector requires a live cluster")
+	}
+	// An explicit --emit-attestation/--push is a request to sign and
+	// (optionally) push an attestation; --no-cluster is an offline dry-run
+	// whose checks are all skipped, so the two conflict. Reject the explicit
+	// combination rather than warn-and-ignore an explicit CLI flag (repo rule)
+	// — consistent with the --cncf-submission guard above. A config-driven
+	// spec.validate.evidence.attestation is still silently suppressed in
+	// --no-cluster mode by evidenceConfigForRunMode.
+	if noCluster && explicitAttest {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--emit-attestation/--push cannot be combined with --no-cluster: an offline dry-run must not sign or push an attestation")
+	}
+	return nil
+}
+
 // resolveValidateNodeSelector resolves the validation node selector with
 // CLI-overrides-config precedence. The CLI flag is a repeated string in
 // key=value form; the config value is already a typed map. Either source
 // can be empty; the result preserves the same nil-vs-empty semantics.
-func resolveValidateNodeSelector(cmd *cli.Command, resolved *config.ValidateResolved) (map[string]string, error) {
+func resolveValidateNodeSelector(cmd *cli.Command, opts aicr.ValidateSettings) (map[string]string, error) {
 	if cmd.IsSet("node-selector") {
 		ns, err := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", err)
 		}
-		if resolved.NodeSelector != nil {
+		if opts.NodeSelector != nil {
 			slog.Info("CLI flag overriding config value", "flag", "node-selector",
-				"config", resolved.NodeSelector, "override", ns)
+				"config", opts.NodeSelector, "override", ns)
 		}
 		return ns, nil
 	}
-	return resolved.NodeSelector, nil
+	return opts.NodeSelector, nil
 }
 
 // resolveValidateTolerations resolves the validation toleration list,
@@ -172,19 +247,19 @@ func resolveValidateNodeSelector(cmd *cli.Command, resolved *config.ValidateReso
 // keeps the env var unset, so the inner validator context sees nil. The live
 // snapshot path consumes that same nil as its signal to apply the agent's
 // tolerate-all default at the Job projection boundary.
-func resolveValidateTolerations(cmd *cli.Command, resolved *config.ValidateResolved) ([]corev1.Toleration, error) {
+func resolveValidateTolerations(cmd *cli.Command, opts aicr.ValidateSettings) ([]corev1.Toleration, error) {
 	if cmd.IsSet("toleration") {
 		tols, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
 		}
-		if resolved.Tolerations != nil {
+		if opts.Tolerations != nil {
 			slog.Info("CLI flag overriding config value", "flag", "toleration",
-				"config", resolved.Tolerations, "override", tols)
+				"config", opts.Tolerations, "override", tols)
 		}
 		return tols, nil
 	}
-	return resolved.Tolerations, nil
+	return opts.Tolerations, nil
 }
 
 // toAgentConfig projects the validate command's resolved flags onto the
@@ -213,6 +288,7 @@ func (c *validateAgentConfig) toAgentConfig() *aicr.AgentConfig {
 		AKSGPUPoolsPath:    c.aksGPUPoolsPath,
 		RunID:              c.runID,
 		NameBase:           validateNameBase,
+		OKEAddonsPath:      c.okeAddonsPath,
 	}
 }
 
@@ -546,6 +622,12 @@ func validateCmdFlags() []cli.Flag {
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
+			Name:     "oke-addons",
+			Usage:    "Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem. When validate captures a live snapshot, the NvidiaGpuPlugin add-on's control-plane state is projected into the K8s oke-addons subtype so profile constraints recorded in OKE recipes can evaluate. The --all flag on the oci command is required: without it removed and non-ACTIVE add-ons are omitted from the dump and would read as absent instead of failing closed. Ignored when --snapshot supplies a pre-captured snapshot.",
+			Sources:  cli.EnvVars("AICR_OKE_ADDONS_PATH"),
+			Category: catAgentDeployment,
+		},
+		&cli.StringFlag{
 			Name:     "aks-gpu-pools",
 			Usage:    "Path to an `az aks nodepool list -o json` dump on the local filesystem. When validate captures a live snapshot, the GPU pools' gpuProfile.driver values are projected into the K8s aks-gpu-pools subtype (ADR-015 DD3) so profile constraints recorded in AKS recipes can evaluate. Ignored when --snapshot supplies a pre-captured snapshot.",
 			Sources:  cli.EnvVars("AICR_AKS_GPU_POOLS_PATH"),
@@ -646,13 +728,22 @@ func validateCmdFlags() []cli.Flag {
 // AICR_AKS_GPU_POOLS_PATH job-wide whose snapshots WERE captured with the
 // reading), log at debug — it is not an explicit per-invocation request.
 func warnIgnoredAKSGPUPools(cmd *cli.Command, snapshotFilePath string) {
-	shouldLog, atWarn := classifyIgnoredAKSGPUPools(
-		os.Args[1:], os.Getenv("AICR_AKS_GPU_POOLS_PATH"),
-		cmd.String("aks-gpu-pools"), snapshotFilePath)
+	warnIgnoredProjection(cmd, snapshotFilePath, "aks-gpu-pools", "AICR_AKS_GPU_POOLS_PATH")
+}
+
+// warnIgnoredOKEAddons is the OKE analog of warnIgnoredAKSGPUPools.
+func warnIgnoredOKEAddons(cmd *cli.Command, snapshotFilePath string) {
+	warnIgnoredProjection(cmd, snapshotFilePath, "oke-addons", "AICR_OKE_ADDONS_PATH")
+}
+
+func warnIgnoredProjection(cmd *cli.Command, snapshotFilePath, flagName, envVar string) {
+	shouldLog, atWarn := classifyIgnoredProjection(
+		os.Args[1:], os.Getenv(envVar),
+		cmd.String(flagName), snapshotFilePath, flagName)
 	if !shouldLog {
 		return
 	}
-	msg := "--aks-gpu-pools does not apply to a pre-captured --snapshot; " +
+	msg := "--" + flagName + " does not apply to a pre-captured --snapshot; " +
 		"the reading must already be in that snapshot (capture it with the same flag if missing)"
 	if atWarn {
 		slog.Warn(msg)
@@ -667,13 +758,13 @@ func warnIgnoredAKSGPUPools(cmd *cli.Command, snapshotFilePath string) {
 // invocation. Only a purely ambient env source (e.g. a CI lane exporting
 // AICR_AKS_GPU_POOLS_PATH job-wide whose snapshots WERE captured with the
 // reading) is demoted to debug. Pure function for testability.
-func classifyIgnoredAKSGPUPools(args []string, envValue, poolsPath, snapshotFilePath string) (shouldLog, atWarn bool) {
+func classifyIgnoredProjection(args []string, envValue, poolsPath, snapshotFilePath, flagName string) (shouldLog, atWarn bool) {
 	if snapshotFilePath == "" || poolsPath == "" {
 		return false, false
 	}
 	explicit := false
 	for _, arg := range args {
-		if arg == "--aks-gpu-pools" || strings.HasPrefix(arg, "--aks-gpu-pools=") {
+		if arg == "--"+flagName || strings.HasPrefix(arg, "--"+flagName+"=") {
 			explicit = true
 			break
 		}
@@ -721,59 +812,45 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 `,
 		Flags: validateCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", flagPush, flagIdentityToken); err != nil {
+			if err := validateSingleValueFlags(cmd, "recipe", "snapshot", "output", "config", "namespace", "image", "job-name", "service-account-name", "timeout", "data", "evidence-dir", "emit-attestation", "bom", "aks-gpu-pools", "oke-addons", flagPush, flagIdentityToken); err != nil {
 				return err
 			}
 
-			cfg, err := loadCmdConfig(ctx, cmd)
+			cfg, err := loadFacadeConfig(ctx, cmd)
 			if err != nil {
 				return err
 			}
-			resolved, err := cfg.Validation().Resolve()
+			opts, validatePresent, err := cfg.ValidateSettings()
+			if err != nil {
+				return err
+			}
+			input, err := cfg.ValidateInputOptions()
 			if err != nil {
 				return err
 			}
 
-			cncfCfg := resolved.EvidenceCNCF
-			if cncfCfg == nil {
-				cncfCfg = &config.EvidenceCNCFResolved{}
+			cncfOpts, err := cfg.CNCFEvidenceOptions()
+			if err != nil {
+				return err
 			}
-			evidenceDir := stringFlagOrConfig(cmd, "evidence-dir", cncfCfg.Dir)
-			cncfSubmission := boolFlagOrConfig(cmd, "cncf-submission", cncfCfg.CNCFSubmission)
-			features := stringSliceFlagOrConfig(cmd, "feature", cncfCfg.Features)
+			evidenceDir := stringFlagOrConfig(cmd, "evidence-dir", cncfOpts.Dir)
+			cncfSubmission := boolFlagOrConfig(cmd, "cncf-submission", cncfOpts.CNCFSubmission)
+			features := stringSliceFlagOrConfig(cmd, "feature", cncfOpts.Features)
 			// Resolved once here (flag > config) and reused by the guards below and
 			// the mode banner further down.
-			noCluster := boolFlagOrConfig(cmd, "no-cluster", resolved.NoCluster)
+			noCluster := boolFlagOrConfig(cmd, "no-cluster", opts.NoCluster)
 			explicitAttest := cmd.IsSet("emit-attestation") || cmd.IsSet(flagPush)
 
-			// Validate flag combinations.
-			if cncfSubmission && evidenceDir == "" {
-				return errors.New(errors.ErrCodeInvalidRequest, "--cncf-submission requires --evidence-dir")
+			if err = validateFlagCombinations(cncfSubmission, evidenceDir, features, noCluster, explicitAttest); err != nil {
+				return err
 			}
-			if len(features) > 0 && !cncfSubmission {
-				return errors.New(errors.ErrCodeInvalidRequest, "--feature requires --cncf-submission")
-			}
-			// --cncf-submission deploys GPU workloads and collects behavioral
-			// evidence against the active kube-context, so it is incompatible with
-			// the offline --no-cluster dry-run. The short-circuit below reaches the
-			// live-cluster collector directly, bypassing the noCluster handling
-			// further down, so reject the combination here rather than silently
-			// contacting the cluster.
-			if cncfSubmission && noCluster {
-				return errors.New(errors.ErrCodeInvalidRequest,
-					"--cncf-submission cannot be combined with --no-cluster: the behavioral evidence collector requires a live cluster")
-			}
-			// An explicit --emit-attestation/--push is a request to sign and
-			// (optionally) push an attestation; --no-cluster is an offline dry-run
-			// whose checks are all skipped, so the two conflict. Reject the
-			// explicit combination rather than warn-and-ignore an explicit CLI flag
-			// (repo rule) — consistent with the --cncf-submission guard above. A
-			// config-driven spec.validate.evidence.attestation is still silently
-			// suppressed in --no-cluster mode by evidenceConfigForRunMode below.
-			if noCluster && explicitAttest {
-				return errors.New(errors.ErrCodeInvalidRequest,
-					"--emit-attestation/--push cannot be combined with --no-cluster: an offline dry-run must not sign or push an attestation")
-			}
+
+			// recipeFilePath is resolved once here (flag > config) so both the
+			// --cncf-submission short-circuit below and the normal validation path
+			// further down consume the same value, rather than each resolving it
+			// independently (which would also double the CLI-overrides-config log
+			// line when a flag is set).
+			recipeFilePath := stringFlagOrConfig(cmd, "recipe", input.RecipePath)
 
 			// Short-circuit: --cncf-submission bypasses normal validation and runs
 			// the behavioral evidence collector directly. When recipe context is
@@ -783,21 +860,21 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// standalone runs pass no policy and keep capability-driven
 			// detection (#1327 contract).
 			if cncfSubmission {
-				policy, policyErr := resolveCNCFAllocationPolicy(ctx, cmd, cfg, resolved)
+				policy, policyErr := resolveCNCFAllocationPolicy(ctx, cmd, cfg, recipeFilePath)
 				if policyErr != nil {
 					return policyErr
 				}
 				return runCNCFSubmission(ctx, evidenceDir, features, cmd.String("kubeconfig"), policy)
 			}
 
-			phases, err := validator.ParsePhaseSelection(stringSliceFlagOrConfig(cmd, "phase", resolved.Phases))
+			phases, err := validator.ParsePhaseSelection(stringSliceFlagOrConfig(cmd, "phase", phaseStringsFallback(opts)))
 			if err != nil {
 				return err
 			}
 
-			recipeFilePath := stringFlagOrConfig(cmd, "recipe", resolved.RecipePath)
-			snapshotFilePath := stringFlagOrConfig(cmd, "snapshot", resolved.SnapshotPath)
+			snapshotFilePath := stringFlagOrConfig(cmd, "snapshot", input.SnapshotPath)
 			warnIgnoredAKSGPUPools(cmd, snapshotFilePath)
+			warnIgnoredOKEAddons(cmd, snapshotFilePath)
 			kubeconfig := cmd.String("kubeconfig")
 
 			if recipeFilePath == "" {
@@ -805,8 +882,8 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 					"--recipe is required (or set spec.validate.input.recipe in --config)")
 			}
 
-			failOnError := boolFlagOrConfig(cmd, "fail-on-error", derefBoolOr(resolved.FailOnError, true))
-			failFast := boolFlagOrConfig(cmd, "fail-fast", derefBoolOr(resolved.FailFast, false))
+			failOnError := boolFlagOrConfig(cmd, "fail-on-error", derefBoolOr(input.FailOnError, true))
+			failFast := boolFlagOrConfig(cmd, "fail-fast", derefBoolOr(opts.FailFast, false))
 
 			// Mode banner: make it explicit whether this run touches a live
 			// cluster (issue #1383). --no-cluster is an offline dry-run that
@@ -822,20 +899,24 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// CLI-overrides-config log lines fire exactly once per field even
 			// when both the agent-deploy path and the validator Job want the
 			// same value.
-			tolerations, err := resolveValidateTolerations(cmd, resolved)
+			tolerations, err := resolveValidateTolerations(cmd, opts)
 			if err != nil {
 				return err
 			}
-			nodeSelector, err := resolveValidateNodeSelector(cmd, resolved)
+			nodeSelector, err := resolveValidateNodeSelector(cmd, opts)
 			if err != nil {
 				return err
 			}
+			cleanupFallback := validateCleanupFallback(opts, validatePresent)
 			shared := validateSharedResolved{
-				namespace:        stringFlagOrConfig(cmd, "namespace", resolved.Namespace),
-				imagePullSecrets: stringSliceFlagOrConfig(cmd, "image-pull-secret", resolved.ImagePullSecrets),
+				namespace:        stringFlagOrConfig(cmd, "namespace", opts.Namespace),
+				imagePullSecrets: stringSliceFlagOrConfig(cmd, "image-pull-secret", opts.ImagePullSecrets),
 				nodeSelector:     nodeSelector,
 				tolerations:      tolerations,
-				noCleanup:        boolFlagOrConfig(cmd, "no-cleanup", resolved.NoCleanup),
+				// cleanupFallback is cleanup-polarity (adjusted for absence above);
+				// invert it to noCleanup-polarity to merge with --no-cleanup, which is
+				// the polarity validateSharedResolved.noCleanup stores.
+				noCleanup: boolFlagOrConfig(cmd, "no-cleanup", !cleanupFallback),
 			}
 
 			// Build the Client from the resolved data source (--data flag,
@@ -911,7 +992,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			} else {
 				slog.Info("deploying agent to capture snapshot")
 
-				agentCfg := parseValidateAgentConfig(cmd, resolved, shared, runID)
+				agentCfg := parseValidateAgentConfig(cmd, opts, shared, runID)
 
 				var deployErr error
 				snap, deployErr = deployAgentForValidation(ctx, client, agentCfg)
@@ -942,7 +1023,11 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 					"cleanupHint", "kubectl delete clusterrolebinding -l app.kubernetes.io/name=aicr-validator")
 			}
 
-			evidenceCfg := evidenceConfigForRunMode(noCluster, buildRecipeEvidenceConfig(cmd, resolved))
+			attOpts, _, err := cfg.EvidenceAttestationOptions()
+			if err != nil {
+				return err
+			}
+			evidenceCfg := evidenceConfigForRunMode(noCluster, buildRecipeEvidenceConfig(cmd, attOpts))
 
 			return runValidation(ctx, client, rec, snap, validationConfig{
 				phases:                phases,
@@ -968,14 +1053,14 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 }
 
 // resolveCNCFAllocationPolicy resolves the recipe-configured GPU allocation
-// policy for --cncf-submission runs. Without recipe context (no --recipe flag
-// and no config recipe input) it returns "" — a standalone run keeps the
-// evidence script's capability-driven detection, mirroring the #1327 contract
-// ("only recipe-less standalone runs select automatically"). With recipe
-// context, load/resolution errors fail closed: an invalid allocation
-// configuration must not silently collect evidence for the wrong mechanism.
-func resolveCNCFAllocationPolicy(ctx context.Context, cmd *cli.Command, cfg *config.AICRConfig, resolved *config.ValidateResolved) (string, error) {
-	recipeFilePath := stringFlagOrConfig(cmd, "recipe", resolved.RecipePath)
+// policy for --cncf-submission runs. recipeFilePath is the caller's already
+// resolved (flag > config) --recipe value; without one (no --recipe flag and
+// no config recipe input) it returns "" — a standalone run keeps the evidence
+// script's capability-driven detection, mirroring the #1327 contract ("only
+// recipe-less standalone runs select automatically"). With recipe context,
+// load/resolution errors fail closed: an invalid allocation configuration
+// must not silently collect evidence for the wrong mechanism.
+func resolveCNCFAllocationPolicy(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, recipeFilePath string) (string, error) {
 	if recipeFilePath == "" {
 		return "", nil
 	}

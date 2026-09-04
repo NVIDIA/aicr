@@ -22,8 +22,14 @@
 #
 # A per-operation timeout would not be enough: three stalled pulls plus a stalled
 # load still multiply out. The budget is checked before each operation and passed
-# to `timeout`, and the retry backoff is clamped to it as well, so the function
-# cannot outlive it by more than scheduling noise no matter how many steps run.
+# to `timeout`, and the retry backoff is clamped to it as well, so no number of
+# retries can make the function outlive it.
+#
+# The one deliberate exception is the final "is it cached" probe, which is given
+# at least PRELOAD_PROBE_TIMEOUT even once the deadline is spent (see
+# preload_image_cached). The real ceiling is therefore the budget plus at most
+# one probe floor. That is one probe per call, not per retry, so it does not
+# scale with the retry count.
 # 180s is generous for two small images and leaves the 20-minute KWOK job budget
 # essentially intact even if both preloads time out completely.
 #
@@ -36,6 +42,18 @@ KWOK_PRELOAD_BUDGET_DEFAULT=180
 # leave no attempt near the end of the window.
 PRELOAD_BACKOFF_START=5
 PRELOAD_BACKOFF_MAX=30
+
+# FLOOR for a single "is this image cached" probe (see preload_image_cached).
+# A probe gets at least this long even when the run budget is spent, and more
+# when the budget still has more to give. It is a floor and not a cap precisely
+# so it cannot narrow the allowance a busy daemon would otherwise have had.
+#
+# It therefore bounds a wedged Docker Engine only on the budget-spent path;
+# while budget remains the probe may wait for most of it, exactly as the
+# deadline-bound check it replaced always did. The ceiling that matters to a
+# lane is the run budget, and this constant is what keeps a spent one from
+# collapsing the probe to zero.
+PRELOAD_PROBE_TIMEOUT=5
 
 # Side-load an image into the Kind node so the kubelet never pulls it.
 #
@@ -77,12 +95,41 @@ preload_remaining() {
 # retry loop it would stall once per attempt before the kubelet fallback could
 # run — the same unbounded-wait failure this function exists to remove.
 #
-# A spent budget reports "not cached", which is the safe reading: the caller
-# then either bails on its own budget check or reports the pull as unsuccessful.
+# A spent budget reports "not cached", which is the right reading INSIDE the
+# loop: there is no time left to pull, so the loop must stop. It is the wrong
+# reading for a final verdict — see preload_image_cached.
 preload_have_image() {
     local image="$1" deadline="$2" remaining
     remaining=$(preload_remaining "${deadline}") || return 1
     timeout "${remaining}" docker image inspect "${image}" &>/dev/null
+}
+
+# preload_image_cached answers "is the image on this host", and unlike
+# preload_have_image a spent DEADLINE does not make it answer no.
+#
+# The budget governs how long we spend TRYING to get the image, not how long we
+# may take to OBSERVE the result. Gating a verdict on it conflates the two: a
+# pull that succeeds with the last of the budget leaves the image cached and the
+# deadline passed, and a budget-bounded check then reports the image as missing,
+# so the log blames a pull that actually worked.
+#
+# Bounded by the LARGER of the remaining budget and PRELOAD_PROBE_TIMEOUT. The
+# constant is a floor, not a cap: it guarantees a fair chance to answer once the
+# deadline is spent, without narrowing the allowance a busy daemon would
+# otherwise have had. Capping at the constant would trade the budget-spent false
+# miss for a slow-daemon one. So this still reads the budget -- it just cannot
+# be silenced by an exhausted one.
+#
+# Callers that need to know whether there is time left to do more WORK ask
+# preload_remaining instead.
+preload_image_cached() {
+    local image="$1" deadline="$2" bound="${PRELOAD_PROBE_TIMEOUT}" remaining
+    if remaining=$(preload_remaining "${deadline}"); then
+        if (( remaining > bound )); then
+            bound="${remaining}"
+        fi
+    fi
+    timeout "${bound}" docker image inspect "${image}" &>/dev/null
 }
 
 # preload_pull_retry gets IMAGE into the host's Docker cache before DEADLINE,
@@ -112,6 +159,7 @@ preload_pull_retry() {
     local image="$1" deadline="$2"
 
     local attempt=0 remaining backoff="${PRELOAD_BACKOFF_START}" pull_err last_err=""
+    local last_rc=0
     pull_err="$(mktemp)"
     while :; do
         if preload_have_image "${image}" "${deadline}"; then
@@ -123,13 +171,26 @@ preload_pull_retry() {
 
         attempt=$(( attempt + 1 ))
         log_info "Pulling ${image} on the host (attempt ${attempt}, ${remaining}s left)..."
-        if timeout "${remaining}" docker pull --quiet "${image}" >/dev/null 2>"${pull_err}"; then
+        # Capture the exit code rather than branching on it directly: `timeout`
+        # reports 124 when it killed the command, which is the only reliable way
+        # to tell a budget kill from a pull that simply failed. Inferring it
+        # from empty stderr is wrong -- docker can exit nonzero and silent.
+        local pull_rc=0
+        timeout "${remaining}" docker pull --quiet "${image}" >/dev/null 2>"${pull_err}" || pull_rc=$?
+        if (( pull_rc == 0 )); then
+            # Clear the carried cause. A failed attempt that a later attempt
+            # superseded must not be reported as the reason the run ended --
+            # that is the same misattribution as reading a timeout kill out of
+            # empty stderr, just one loop iteration further back.
+            last_err=""
+            last_rc=0
             break
         fi
         # Capture the cause the moment it happens, so it survives every later
         # exit from this loop. Reading the file at the reporting site instead
         # would lose it on any path that breaks out and deletes the file first.
         last_err="$(tr '\n' ' ' < "${pull_err}" | tail -c 300)"
+        last_rc="${pull_rc}"
 
         # Clamp the backoff to the budget. Sleeping past the deadline is pure
         # dead time: it cannot buy another attempt, and it delays the kubelet
@@ -154,13 +215,45 @@ preload_pull_retry() {
     # consumed the last of the budget lost its own error message. Reporting
     # here, from a variable captured at failure time, is what makes that
     # impossible rather than merely fixed.
-    if preload_have_image "${image}" "${deadline}"; then
+    #
+    # The verdict asks only whether the image is on the host. Asking it through
+    # the budget as well made a pull that succeeded with the last of the budget
+    # report as a miss, so the log blamed a pull that had worked.
+    #
+    # This corrects the REPORT, not the outcome: preload_image's next step is
+    # its own budget check, so a genuinely exhausted budget still ends in the
+    # kubelet pull. Side-loading a ~250MB image with no time left is not
+    # something this function can or should attempt (#2502 is diagnostics-only).
+    if preload_image_cached "${image}" "${deadline}"; then
         return 0
     fi
-    if [[ -n "${last_err}" ]]; then
-        log_warn "${image} is not cached after ${attempt} attempt(s); last error: ${last_err}"
-    else
+    # Select the message on what was actually observed -- the attempt counter
+    # and the exit code -- never on inference. A pull killed by `timeout` writes
+    # nothing to stderr, so keying on empty stderr printed "no pull was
+    # attempted" beneath the line announcing the attempt; keying the opposite
+    # way would claim a budget kill for any silent nonzero exit, which docker
+    # can produce on its own. Only rc 124 actually means `timeout` killed it.
+    #
+    # Ordered by how much each condition tells the reader. A real cause from
+    # docker outranks any exit code -- a pull can report "toomanyrequests" and
+    # THEN be killed, and that cause is the useful half. The exit code only has
+    # to answer when no cause was captured.
+    #
+    # Emptiness is tested on a whitespace-stripped copy: `tr` above turns a
+    # killed docker's partial or blank line into a space, which is non-empty,
+    # so testing the raw string would print an empty "last error:" and hide the
+    # rc-based diagnosis behind it.
+    local last_err_trimmed="${last_err//[[:space:]]/}"
+    if (( attempt == 0 )); then
         log_warn "${image} is not cached and no pull was attempted (the budget ran out first)"
+    elif (( last_rc == 0 )); then
+        log_warn "${image} is not cached after ${attempt} attempt(s); the last reported success but the image is not present"
+    elif [[ -n "${last_err_trimmed}" ]]; then
+        log_warn "${image} is not cached after ${attempt} attempt(s); last error: ${last_err}"
+    elif (( last_rc == 124 )); then
+        log_warn "${image} is not cached after ${attempt} attempt(s); the last was killed by the budget timeout before it reported a cause"
+    else
+        log_warn "${image} is not cached after ${attempt} attempt(s); the last exited ${last_rc} without writing an error"
     fi
     return 1
 }

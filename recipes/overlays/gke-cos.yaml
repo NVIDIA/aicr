@@ -28,7 +28,7 @@ spec:
   # GKE-specific constraints
   constraints:
     - name: K8s.server.version
-      value: ">= 1.28"
+      value: ">= 1.32"
 
   # The GPU stack shape is a configuration profile (ADR-015, issue
   # #1761): one qualified GKE cluster state per value — how the driver is

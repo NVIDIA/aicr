@@ -13,22 +13,42 @@
 # limitations under the License.
 
 name: 'Generate SBOM and Attest'
-description: 'Generates SBOM, OpenVEX and build provenance attestations for container images'
+description: 'Generates CycloneDX SBOM, OpenVEX and build provenance attestations for container images'
 
-# Attestation subject policy (see NVIDIA/aicr#1957):
+# Attestation subject policy (see NVIDIA/aicr#1957 and #2426):
 #
-#   SPDX SBOM  -> the PER-PLATFORM manifest digest. An SBOM describes one
+#   CycloneDX SBOM -> the PER-PLATFORM manifest digest. An SBOM describes one
 #                 root filesystem, so attaching both platform SBOMs to the
 #                 shared index digest made them indistinguishable without
 #                 parsing the predicate body.
-#   OpenVEX    -> the INDEX digest. `.openvex.json` is a single, platform
-#                 independent document whose statements are keyed by product
-#                 PURL (`pkg:oci/<image>`), not by architecture, so one copy
-#                 per released image is the correct cardinality. Consumers
-#                 resolve a tag with `crane digest` (which returns the index
-#                 digest) and query VEX there.
+#   OpenVEX    -> the PER-PLATFORM manifest digest, alongside the SBOM. VEX
+#                 is only verifiable when its product identifier binds to the
+#                 manifest the claim covers, and a consumer that resolved
+#                 linux/amd64 enumerates referrers *there*, so the index copy
+#                 we used to publish was invisible from that vantage point.
+#                 `.openvex.json` carries bare `pkg:oci/<image>` products, so
+#                 tools/openvex-bind rewrites them to
+#                 `pkg:oci/<image>@<platform-digest>` per platform. That
+#                 projection exists only at release time; the committed
+#                 document stays the reviewed source of truth and is not
+#                 modified.
 #   Provenance -> the INDEX digest, via actions/attest-build-provenance. It
 #                 describes the build that produced the whole release image.
+#
+# The two per-platform documents are deliberately in different formats.
+# `cosign attest --type cyclonedx` stamps predicate type
+# https://cyclonedx.org/bom on whatever it is handed, and a referrer descriptor
+# has no name field (only digest, mediaType, size, artifactType, annotations),
+# so two CycloneDX documents on one manifest are indistinguishable in a
+# referrers listing without pulling every payload. OpenVEX gets
+# https://openvex.dev/ns, which makes the listing self-describing and is also
+# the type Trivy's `--vex oci` path documents. Do not unify them.
+#
+# No vulnerability report is published: scan results are derivable by anyone
+# holding the image, go stale the moment a vulnerability database updates, and
+# would put signed evidence on a republish treadmill. Grype stays where it is,
+# gating releases with `.openvex.json` as `--vex` input (on-tag.yaml,
+# vuln-scan-images.yaml).
 #
 # ghcr.io does not implement the OCI 1.1 `/v2/<name>/referrers/<digest>`
 # endpoint (it answers 404 MANIFEST_UNKNOWN), so every one of these lands
@@ -42,13 +62,13 @@ inputs:
     description: 'Full image name (without tag or digest)'
     required: true
   image_digest:
-    description: 'Multi-platform index digest (sha256:...); subject for VEX and provenance'
+    description: 'Multi-platform index digest (sha256:...); subject for provenance'
     required: true
   amd64_digest:
-    description: 'linux/amd64 manifest digest (sha256:...); subject for the amd64 SBOM'
+    description: 'linux/amd64 manifest digest (sha256:...); subject for the amd64 SBOM and VEX'
     required: true
   arm64_digest:
-    description: 'linux/arm64 manifest digest (sha256:...); subject for the arm64 SBOM'
+    description: 'linux/arm64 manifest digest (sha256:...); subject for the arm64 SBOM and VEX'
     required: true
 
 runs:
@@ -121,15 +141,18 @@ runs:
         SAFE="$(basename "${IMAGE%%:*}")"  # strip tag if present, then basename
         echo "safe=$SAFE" >> "$GITHUB_OUTPUT"
 
+    # Syft's cyclonedx-json output defaults to CycloneDX spec 1.6 and emits no
+    # `vulnerabilities` key, so the SBOM needs no post-processing: what syft
+    # writes is what gets attested.
     - name: Generate amd64 SBOM
       uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
       env:
         SYFT_PLATFORM: linux/amd64
       with:
         image: "${{ steps.validate.outputs.image_name }}@${{ steps.validate.outputs.amd64_digest }}"
-        format: spdx-json
-        artifact-name: sbom-${{ steps.name.outputs.safe }}-linux-amd64-attempt-${{ github.run_attempt }}.spdx.json
-        output-file: sbom-${{ steps.name.outputs.safe }}-linux-amd64.spdx.json
+        format: cyclonedx-json
+        artifact-name: sbom-${{ steps.name.outputs.safe }}-linux-amd64-attempt-${{ github.run_attempt }}.cdx.json
+        output-file: sbom-${{ steps.name.outputs.safe }}-linux-amd64.cdx.json
         upload-artifact: true
         upload-release-assets: false
 
@@ -139,12 +162,15 @@ runs:
         SYFT_PLATFORM: linux/arm64
       with:
         image: "${{ steps.validate.outputs.image_name }}@${{ steps.validate.outputs.arm64_digest }}"
-        format: spdx-json
-        artifact-name: sbom-${{ steps.name.outputs.safe }}-linux-arm64-attempt-${{ github.run_attempt }}.spdx.json
-        output-file: sbom-${{ steps.name.outputs.safe }}-linux-arm64.spdx.json
+        format: cyclonedx-json
+        artifact-name: sbom-${{ steps.name.outputs.safe }}-linux-arm64-attempt-${{ github.run_attempt }}.cdx.json
+        output-file: sbom-${{ steps.name.outputs.safe }}-linux-arm64.cdx.json
         upload-artifact: true
         upload-release-assets: false
 
+    # A silently-wrong SBOM format is worse than a missing one: cosign would
+    # still stamp https://cyclonedx.org/bom on it and the referrers listing
+    # would read as correct. Assert bomFormat before anything is signed.
     - name: Verify platform SBOM files
       shell: bash
       env:
@@ -152,9 +178,14 @@ runs:
       run: |
         set -euo pipefail
         for platform in amd64 arm64; do
-          sbom_file="sbom-${SAFE_NAME}-linux-${platform}.spdx.json"
+          sbom_file="sbom-${SAFE_NAME}-linux-${platform}.cdx.json"
           if [[ ! -s "${sbom_file}" ]]; then
             echo "::error::SBOM file not found or empty: ${sbom_file}"
+            exit 1
+          fi
+          bom_format="$(jq -r '.bomFormat // ""' "${sbom_file}")"
+          if [[ "${bom_format}" != "CycloneDX" ]]; then
+            echo "::error::${sbom_file} has bomFormat ${bom_format:-<absent>}, want CycloneDX"
             exit 1
           fi
         done
@@ -162,6 +193,16 @@ runs:
     - name: Load versions
       id: versions
       uses: ./.github/actions/load-versions
+
+    # tools/openvex-bind is a Go program in this module with no third-party
+    # dependencies, so this only needs a toolchain, not a module download.
+    - name: Setup Go
+      uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
+      with:
+        go-version: '${{ steps.versions.outputs.go }}'
+        cache: true
+        cache-dependency-path: |
+          go.sum
 
     - name: Install Cosign
       uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
@@ -174,100 +215,65 @@ runs:
         cosign-release: ${{ steps.versions.outputs.cosign }}
 
     # Fail closed on a malformed document rather than publishing a VEX
-    # attestation that no scanner can apply. The rules below are the OpenVEX
-    # v0.2.0 contract:
-    #
-    #   document   -> @context, @id, author, timestamp, version, statements
-    #   statement  -> vulnerability.name, status from the four-label enum, and
-    #                 at least one identifiable product. The spec marks
-    #                 `products` optional only because it can cascade from an
-    #                 encapsulating format; this document defines no such
-    #                 product tree, and grype/trivy match statements by
-    #                 products[].purl, so a statement without products is
-    #                 unusable here.
-    #   not_affected -> MUST carry a justification or an impact_statement, and
-    #                 a justification present at all MUST be one of the five
-    #                 v0.2.0 labels.
-    #   affected   -> MUST carry an action_statement.
-    #
-    # The @context equality check is what pins the version: it is a local,
-    # network-free way to assert the enums below still describe the document.
-    # This step runs after image promotion, so fetching a schema or installing
-    # a validator here would add a new failure mode at the point in the release
-    # where a failure is most expensive. jq is already a dependency.
+    # attestation that no scanner can apply. The rules, the pinned v0.2.0
+    # @context, and the one rule that differs between the committed source and
+    # a generated projection all live in openvex-guard.sh, so the two callers
+    # cannot drift apart. Only the source is checked here; each projection is
+    # checked in the binding step below, before it can reach `cosign attest`.
     - name: Verify OpenVEX document
       id: vex
       shell: bash
-      env:
-        VEX_CONTEXT: https://openvex.dev/ns/v0.2.0
       run: |
         set -euo pipefail
+        # shellcheck source=.github/actions/sbom-and-attest/openvex-guard.sh
+        source "${GITHUB_ACTION_PATH}/openvex-guard.sh"
         vex_file="${GITHUB_WORKSPACE}/.openvex.json"
-        if [[ ! -s "${vex_file}" ]]; then
-          echo "::error::OpenVEX document not found or empty: ${vex_file}"
-          exit 1
-        fi
-        if ! problems="$(jq -r --arg context "${VEX_CONTEXT}" '
-          def statuses: ["not_affected", "affected", "fixed", "under_investigation"];
-          def justifications: [
-            "component_not_present",
-            "vulnerable_code_not_present",
-            "vulnerable_code_not_in_execute_path",
-            "vulnerable_code_cannot_be_controlled_by_adversary",
-            "inline_mitigations_already_exist"
-          ];
-          def field($object; $key): if ($object | type) == "object" then $object[$key] else null end;
-          def filled($value): ($value | type) == "string" and ($value | test("[^[:space:]]"));
-          def listing($value): if ($value | type) == "array" then $value else [] end;
-          def statement($index; $s):
-            if ($s | type) != "object" then ["statement \($index) must be a JSON object"]
-            else
-              [ (if filled(field(field($s; "vulnerability"); "name")) then empty
-                 else "statement \($index) must set vulnerability.name to a non-empty string" end),
-                (if (field($s; "products") | type) == "array" and (listing(field($s; "products")) | length) > 0 then empty
-                 else "statement \($index) must list at least one product" end),
-                (if listing(field($s; "products"))
-                    | all(filled(field(.; "@id")) or filled(field(field(.; "identifiers"); "purl"))) then empty
-                 else "statement \($index) has a product with neither @id nor identifiers.purl" end),
-                (if (statuses | index(field($s; "status"))) != null then empty
-                 else "statement \($index) status \(field($s; "status") | tojson) is not one of \(statuses | join(", "))" end),
-                (if field($s; "status") == "not_affected"
-                    and (filled(field($s; "justification")) | not)
-                    and (filled(field($s; "impact_statement")) | not)
-                 then "statement \($index) is not_affected and must carry a justification or an impact_statement"
-                 else empty end),
-                (if field($s; "justification") != null
-                    and (justifications | index(field($s; "justification"))) == null
-                 then "statement \($index) justification \(field($s; "justification") | tojson) is not one of \(justifications | join(", "))"
-                 else empty end),
-                (if field($s; "status") == "affected" and (filled(field($s; "action_statement")) | not)
-                 then "statement \($index) is affected and must carry an action_statement"
-                 else empty end)
-              ]
-            end;
-          [ (if field(.; "@context") == $context then empty
-             else "@context must be \($context), got \(field(.; "@context") | tojson)" end),
-            (if filled(field(.; "@id")) then empty else "@id must be a non-empty string" end),
-            (if filled(field(.; "author")) then empty else "author must be a non-empty string" end),
-            (if filled(field(.; "timestamp")) then empty else "timestamp must be a non-empty string" end),
-            (if (field(.; "version") | type) == "number" then empty else "version must be a number" end),
-            (if (field(.; "statements") | type) != "array" then "statements must be an array"
-             elif (listing(field(.; "statements")) | length) == 0 then "statements must not be empty"
-             else empty end)
-          ]
-          + (listing(field(.; "statements")) | to_entries | map(statement(.key; .value)) | add // [])
-          | .[]
-        ' "${vex_file}")"; then
-          echo "::error::OpenVEX document is not valid JSON: ${vex_file}"
-          exit 1
-        fi
-        if [[ -n "${problems}" ]]; then
-          while IFS= read -r problem; do
-            echo "::error::OpenVEX document violates the v0.2.0 contract: ${problem}"
-          done <<< "${problems}"
-          exit 1
-        fi
+        validate_openvex source "${vex_file}"
         echo "file=${vex_file}" >> "$GITHUB_OUTPUT"
+
+    # Bind the validated document to each platform manifest, then validate what
+    # came out. Binding rewrites `products` on every statement it keeps, so the
+    # source check does not cover the bytes that get signed; each projection is
+    # re-validated here, before any `cosign attest` call can reach it.
+    #
+    # Projection mode relaxes one rule and adds another. An empty `statements`
+    # array is accepted, because an image with no triaged CVE projects to `[]`
+    # and that is the truthful answer for most of the released set. In exchange,
+    # every product identifier must end in the platform digest, which is the one
+    # failure this whole change exists to prevent.
+    #
+    # The generator is deterministic (no wall clock, no UUID: the source
+    # timestamp and version pass through), so re-running a release reproduces
+    # byte-identical evidence. It also drops statements scoped to a different
+    # image rather than re-pointing them at this digest. Publishing a signed
+    # claim about a product we never triaged here would be worse than
+    # publishing none.
+    - name: Bind OpenVEX to platform manifests
+      shell: bash
+      env:
+        IMAGE_NAME: ${{ steps.validate.outputs.image_name }}
+        AMD64_DIGEST: ${{ steps.validate.outputs.amd64_digest }}
+        ARM64_DIGEST: ${{ steps.validate.outputs.arm64_digest }}
+        VEX_FILE: ${{ steps.vex.outputs.file }}
+        SAFE_NAME: ${{ steps.name.outputs.safe }}
+        GOFLAGS: -mod=readonly
+      run: |
+        set -euo pipefail
+        # shellcheck source=.github/actions/sbom-and-attest/openvex-guard.sh
+        source "${GITHUB_ACTION_PATH}/openvex-guard.sh"
+        for platform in amd64 arm64; do
+          case "${platform}" in
+            amd64) platform_digest="${AMD64_DIGEST}" ;;
+            arm64) platform_digest="${ARM64_DIGEST}" ;;
+          esac
+          out="vex-${SAFE_NAME}-linux-${platform}.openvex.json"
+          go run ./tools/openvex-bind \
+            -in "${VEX_FILE}" \
+            -out "${out}" \
+            -image "${IMAGE_NAME}" \
+            -digest "${platform_digest}"
+          validate_openvex projection "${out}" "${platform_digest}"
+        done
 
     # --new-bundle-format is set explicitly on every attest call: it is what
     # publishes the attestation through the OCI referrers API (tag fallback on
@@ -284,8 +290,8 @@ runs:
         timeout --foreground 120s cosign attest \
           --yes \
           --new-bundle-format=true \
-          --predicate "sbom-${SAFE_NAME}-linux-amd64.spdx.json" \
-          --type spdxjson \
+          --predicate "sbom-${SAFE_NAME}-linux-amd64.cdx.json" \
+          --type cyclonedx \
           "${IMAGE_NAME}@${PLATFORM_DIGEST}"
 
     - name: Cosign arm64 SBOM attestation
@@ -299,29 +305,45 @@ runs:
         timeout --foreground 120s cosign attest \
           --yes \
           --new-bundle-format=true \
-          --predicate "sbom-${SAFE_NAME}-linux-arm64.spdx.json" \
-          --type spdxjson \
+          --predicate "sbom-${SAFE_NAME}-linux-arm64.cdx.json" \
+          --type cyclonedx \
           "${IMAGE_NAME}@${PLATFORM_DIGEST}"
 
-    # Publish the triaged vulnerability posture alongside the SBOM. `openvex`
-    # is a natively supported cosign predicate type (predicateType
-    # https://openvex.dev/ns), so no custom URI is needed. The same document is
-    # still fed to Grype as scanner input in on-tag.yaml and
-    # vuln-scan-images.yaml; this step only publishes it.
-    - name: Cosign OpenVEX attestation
+    # Publish the triaged vulnerability posture alongside the SBOM, on the same
+    # subject. `openvex` is a natively supported cosign predicate type
+    # (predicateType https://openvex.dev/ns), so no custom URI is needed. The
+    # committed document is still fed to Grype as scanner input in on-tag.yaml
+    # and vuln-scan-images.yaml; these steps only publish its digest-bound
+    # projection.
+    - name: Cosign amd64 OpenVEX attestation
       shell: bash
       env:
         IMAGE_NAME: ${{ steps.validate.outputs.image_name }}
-        IMAGE_DIGEST: ${{ steps.validate.outputs.image_digest }}
-        VEX_FILE: ${{ steps.vex.outputs.file }}
+        PLATFORM_DIGEST: ${{ steps.validate.outputs.amd64_digest }}
+        SAFE_NAME: ${{ steps.name.outputs.safe }}
       run: |
         set -euo pipefail
         timeout --foreground 120s cosign attest \
           --yes \
           --new-bundle-format=true \
-          --predicate "${VEX_FILE}" \
+          --predicate "vex-${SAFE_NAME}-linux-amd64.openvex.json" \
           --type openvex \
-          "${IMAGE_NAME}@${IMAGE_DIGEST}"
+          "${IMAGE_NAME}@${PLATFORM_DIGEST}"
+
+    - name: Cosign arm64 OpenVEX attestation
+      shell: bash
+      env:
+        IMAGE_NAME: ${{ steps.validate.outputs.image_name }}
+        PLATFORM_DIGEST: ${{ steps.validate.outputs.arm64_digest }}
+        SAFE_NAME: ${{ steps.name.outputs.safe }}
+      run: |
+        set -euo pipefail
+        timeout --foreground 120s cosign attest \
+          --yes \
+          --new-bundle-format=true \
+          --predicate "vex-${SAFE_NAME}-linux-arm64.openvex.json" \
+          --type openvex \
+          "${IMAGE_NAME}@${PLATFORM_DIGEST}"
 
     - name: Attest build provenance
       uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f  # v3.2.0

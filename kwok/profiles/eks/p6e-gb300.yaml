@@ -1,0 +1,87 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# EKS Accelerated Node Profile: p6e-gb300r.36xlarge (GB300 NVL72)
+#
+# NVIDIA GB300 Grace Blackwell Ultra node as the gb300 EKS overlays target it:
+# - 4x NVIDIA GB300 GPUs per Kubernetes node
+# - Grace CPU (ARM64) host
+# - NVL72 MNNVL/IMEX fabric for scale-up, EFA for scale-out
+#
+# The per-node GPU count is 4, matching the `Gres: "gpu:gb300:4"` and
+# `limits.nvidia.com/gpu: 4` the gb300 Slurm leaf declares. NVL72 refers to the
+# rack-level domain, not the per-node count -- a profile advertising 72 (or the
+# 8 that the older p6-gb200 profile carries) would let a recipe schedule in the
+# simulator against a node shape that does not exist on the real instance.
+#
+# Driver matches the pin the gb300 chain ships in
+# recipes/components/gpu-operator/values.yaml -- keep the path on one line so a
+# grep for that file before a driver bump finds this profile. R580 is
+# deliberate: R595 is documented as backward incompatible with P6e EFA, see
+# issues #2383 and #2459.
+
+apiVersion: aicr.run/v1alpha2
+kind: KWOKNodeProfile
+metadata:
+  name: p6e-gb300
+  labels:
+    provider: eks
+    nodeType: accelerated
+    accelerator: gb300
+
+spec:
+  # Instance specifications
+  #
+  # osImage diverges from the sibling EKS profiles, which all say "Amazon Linux
+  # 2023", because five of the seven gb300 EKS overlays this profile backs are
+  # `os: ubuntu` leaves and GB300 is qualified on Ubuntu 24.04. The divergence
+  # is descriptive only -- nothing consumes it. It lands in
+  # status.nodeInfo.osImage on the simulated GPU nodes and nothing reads it
+  # back: the KWOK lanes run `aicr recipe`/`aicr bundle` plus scheduling
+  # assertions, never `aicr validate` or evidence collection, and the CNCF
+  # collector reads `.items[0]`, which sorts to the kind control-plane node.
+  # Accuracy is still the right default for a file people read to learn what
+  # the hardware looks like.
+  instanceType: p6e-gb300r.36xlarge
+  arch: arm64  # Grace CPU is ARM-based
+  osImage: Ubuntu 24.04
+
+  # Resource capacity
+  #
+  # AWS publishes no p6e-gb300r.36xlarge specification, so these are estimates,
+  # not datasheet values, and they are derived two different ways:
+  #   cpu 144     -- 2x72 Grace cores, the NVL72 compute-tray figure. Matches no
+  #                  sibling (p5-h100 is 192, p6-gb200 is 288); do not "correct"
+  #                  it toward one.
+  #   memory      -- carried over from p5-h100 as headroom, not a hardware claim.
+  #   storage     -- carried over from p6-gb200 likewise.
+  # KWOK exposes all three as node allocatable, so treat them as an upper bound.
+  # They are safe at this magnitude because the largest memory request in any
+  # component values file is 8Gi, so no bundle can schedule here yet fail on
+  # real hardware for lack of CPU or RAM. The two fields that DO carry hardware
+  # meaning and are load-bearing for scheduling are gpu.count and arch, both
+  # verified against the gb300 overlays.
+  resources:
+    cpu: "144"
+    memory: 2048Gi
+    storage: 7600Gi
+
+  # GPU specifications
+  gpu:
+    product: NVIDIA-GB300-288GB-HBM3e
+    count: 4
+    memory: 294912  # MiB per GPU (288GB)
+    driver: "580.173.02"
+    driverMajor: "580"
+    driverMinor: "173"

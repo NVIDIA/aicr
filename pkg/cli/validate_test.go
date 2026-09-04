@@ -79,15 +79,16 @@ func TestResolveCNCFAllocationPolicy(t *testing.T) {
 			var gotPolicy string
 			cmd := validateCmd()
 			cmd.Action = func(ctx context.Context, c *cli.Command) error {
-				cfg, err := loadCmdConfig(ctx, c)
+				cfg, err := loadFacadeConfig(ctx, c)
 				if err != nil {
 					return err
 				}
-				resolved, err := cfg.Validation().Resolve()
+				resolved, err := cfg.Unwrap().Validation().Resolve()
 				if err != nil {
 					return err
 				}
-				gotPolicy, err = resolveCNCFAllocationPolicy(ctx, c, cfg, resolved)
+				recipeFilePath := stringFlagOrConfig(c, "recipe", resolved.RecipePath)
+				gotPolicy, err = resolveCNCFAllocationPolicy(ctx, c, cfg, recipeFilePath)
 				return err
 			}
 			err := cmd.Run(t.Context(), args)
@@ -524,16 +525,16 @@ func TestParseValidateAgentConfig_ForwardsCallerRunID(t *testing.T) {
 	var captured *validateAgentConfig
 	cmd := validateCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}
-		resolved, err := cfg.Validation().Resolve()
+		opts, _, err := cfg.ValidateSettings()
 		if err != nil {
 			return err
 		}
 		shared := validateSharedResolved{namespace: "aicr-validation-test"}
-		captured = parseValidateAgentConfig(c, resolved, shared, wantRunID)
+		captured = parseValidateAgentConfig(c, opts, shared, wantRunID)
 		return nil
 	}
 	if err := cmd.Run(t.Context(), []string{"validate", "--no-cluster"}); err != nil {
@@ -542,6 +543,74 @@ func TestParseValidateAgentConfig_ForwardsCallerRunID(t *testing.T) {
 
 	if captured.runID != wantRunID {
 		t.Errorf("validateAgentConfig.runID = %q, want %q", captured.runID, wantRunID)
+	}
+}
+
+// TestValidateCmd_NoConfigDefaultsToCleanup is the regression test for the
+// fix-round-2 security defect: a plain `aicr validate` — no --config, no
+// --no-cleanup, which is the common invocation — must clean up by default.
+//
+// Before the fix, ValidateSettings() returned only (ValidateSettings, error),
+// and its zero value (Cleanup: false, returned for both a nil Config and an
+// absent spec.validate) was trusted directly as the fallback for
+// --no-cleanup. That silently flipped the CLI's own default: a plain
+// invocation left the cluster-admin ClusterRoleBinding and validator Jobs
+// active. The Action is overridden here to isolate exactly the computation
+// that broke — loadFacadeConfig, ValidateSettings' presence bool,
+// validateCleanupFallback, then the same boolFlagOrConfig call the
+// production Action makes — without needing a live cluster to reach it.
+func TestValidateCmd_NoConfigDefaultsToCleanup(t *testing.T) {
+	var gotNoCleanup bool
+	cmd := validateCmd()
+	cmd.Action = func(ctx context.Context, c *cli.Command) error {
+		cfg, err := loadFacadeConfig(ctx, c)
+		if err != nil {
+			return err
+		}
+		opts, present, err := cfg.ValidateSettings()
+		if err != nil {
+			return err
+		}
+		cleanupFallback := validateCleanupFallback(opts, present)
+		gotNoCleanup = boolFlagOrConfig(c, "no-cleanup", !cleanupFallback)
+		return nil
+	}
+	if err := cmd.Run(t.Context(), []string{"validate"}); err != nil {
+		t.Fatalf("validate run: %v", err)
+	}
+
+	if gotNoCleanup {
+		t.Error("noCleanup = true, want false: a plain `aicr validate` " +
+			"(no --config, no --no-cleanup) must clean up by default")
+	}
+}
+
+// TestValidateCleanupFallback drives validateCleanupFallback directly for
+// both branches. present=false is also exercised indirectly by
+// TestValidateCmd_NoConfigDefaultsToCleanup through a full command run; the
+// two present=true rows here are not exercised by any other test — present's
+// whole point is to gate ONLY when spec.validate was actually evaluated, so
+// a present=true document that decided Cleanup=false must flow through
+// unmodified rather than being silently overridden by the CLI's own
+// clean-up-by-default.
+func TestValidateCleanupFallback(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    aicr.ValidateSettings
+		present bool
+		want    bool
+	}{
+		{"absent spec.validate defaults to cleanup", aicr.ValidateSettings{Cleanup: false}, false, true},
+		{"present spec.validate with cleanup true", aicr.ValidateSettings{Cleanup: true}, true, true},
+		{"present spec.validate with cleanup false", aicr.ValidateSettings{Cleanup: false}, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := validateCleanupFallback(tt.opts, tt.present); got != tt.want {
+				t.Errorf("validateCleanupFallback(%+v, present=%t) = %t, want %t",
+					tt.opts, tt.present, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -571,16 +640,16 @@ func TestValidateCmd_DeclaredNameDefaultsNeverReachTheAgent(t *testing.T) {
 		var captured *validateAgentConfig
 		c := validateCmd()
 		c.Action = func(ctx context.Context, cc *cli.Command) error {
-			cfg, err := loadCmdConfig(ctx, cc)
+			cfg, err := loadFacadeConfig(ctx, cc)
 			if err != nil {
 				return err
 			}
-			resolved, err := cfg.Validation().Resolve()
+			opts, _, err := cfg.ValidateSettings()
 			if err != nil {
 				return err
 			}
 			shared := validateSharedResolved{namespace: "aicr-validation-test"}
-			captured = parseValidateAgentConfig(cc, resolved, shared, "20260821-142233-9f3a1c0b7e2d4a55")
+			captured = parseValidateAgentConfig(cc, opts, shared, "20260821-142233-9f3a1c0b7e2d4a55")
 			return nil
 		}
 		if err := c.Run(t.Context(), append([]string{"validate", "--no-cluster"}, args...)); err != nil {
@@ -629,6 +698,7 @@ func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
 		envValue      string
 		poolsPath     string
 		snapshotPath  string
+		flagName      string // empty means aks-gpu-pools
 		wantShouldLog bool
 		wantAtWarn    bool
 	}{
@@ -677,6 +747,25 @@ func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
 			wantAtWarn:    true,
 		},
 		{
+			name:          "oke-addons explicit flag: warn",
+			args:          []string{"validate", "--oke-addons", "a.json", "-s", "snap.yaml"},
+			poolsPath:     "a.json",
+			snapshotPath:  "snap.yaml",
+			flagName:      "oke-addons",
+			wantShouldLog: true,
+			wantAtWarn:    true,
+		},
+		{
+			name:          "oke-addons ambient env only (AICR_OKE_ADDONS_PATH): debug",
+			args:          []string{"validate", "-s", "snap.yaml"},
+			envValue:      "a.json",
+			poolsPath:     "a.json",
+			snapshotPath:  "snap.yaml",
+			flagName:      "oke-addons",
+			wantShouldLog: true,
+			wantAtWarn:    false,
+		},
+		{
 			name: "similarly-prefixed flag is not a false positive",
 			args: []string{"validate", "--aks-gpu-pools-extra", "x", "-s", "snap.yaml"},
 			// pools path resolvable only via env in this shape.
@@ -690,7 +779,11 @@ func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			shouldLog, atWarn := classifyIgnoredAKSGPUPools(tt.args, tt.envValue, tt.poolsPath, tt.snapshotPath)
+			flagName := tt.flagName
+			if flagName == "" {
+				flagName = "aks-gpu-pools"
+			}
+			shouldLog, atWarn := classifyIgnoredProjection(tt.args, tt.envValue, tt.poolsPath, tt.snapshotPath, flagName)
 			if shouldLog != tt.wantShouldLog || atWarn != tt.wantAtWarn {
 				t.Fatalf("classify = (log=%v, warn=%v), want (log=%v, warn=%v)",
 					shouldLog, atWarn, tt.wantShouldLog, tt.wantAtWarn)

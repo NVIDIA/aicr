@@ -29,7 +29,6 @@ import (
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/collector"
-	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -41,19 +40,19 @@ import (
 // CLI-overrides-config precedence. The CLI flag is a repeated string in
 // key=value form; the config value is already a typed map. Either source
 // can be empty; the result preserves the same nil-vs-empty semantics.
-func resolveSnapshotNodeSelector(cmd *cli.Command, resolved *config.SnapshotResolved) (map[string]string, error) {
+func resolveSnapshotNodeSelector(cmd *cli.Command, agent *aicr.AgentConfig) (map[string]string, error) {
 	if cmd.IsSet("node-selector") {
 		ns, err := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", err)
 		}
-		if resolved.NodeSelector != nil {
+		if agent.NodeSelector != nil {
 			slog.Info("CLI flag overriding config value", "flag", "node-selector",
-				"config", resolved.NodeSelector, "override", ns)
+				"config", agent.NodeSelector, "override", ns)
 		}
 		return ns, nil
 	}
-	return resolved.NodeSelector, nil
+	return agent.NodeSelector, nil
 }
 
 // resolveSnapshotTolerations resolves the snapshot toleration list with
@@ -67,20 +66,20 @@ func resolveSnapshotNodeSelector(cmd *cli.Command, resolved *config.SnapshotReso
 //     (the legacy snapshot behavior — without it, an aicr snapshot
 //     invocation that does not pass --toleration would suddenly stop
 //     tolerating tainted nodes).
-func resolveSnapshotTolerations(cmd *cli.Command, resolved *config.SnapshotResolved) ([]corev1.Toleration, error) {
+func resolveSnapshotTolerations(cmd *cli.Command, agent *aicr.AgentConfig) ([]corev1.Toleration, error) {
 	if cmd.IsSet("toleration") {
 		tols, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
 		}
-		if resolved.Tolerations != nil {
+		if agent.Tolerations != nil {
 			slog.Info("CLI flag overriding config value", "flag", "toleration",
-				"config", resolved.Tolerations, "override", tols)
+				"config", agent.Tolerations, "override", tols)
 		}
 		return tols, nil
 	}
-	if resolved.Tolerations != nil {
-		return resolved.Tolerations, nil
+	if agent.Tolerations != nil {
+		return agent.Tolerations, nil
 	}
 	return snapshotter.DefaultTolerations(), nil
 }
@@ -115,6 +114,11 @@ type snapshotCmdOptions struct {
 	// layer. Works in both agent Job mode (controller-side merge) and
 	// local mode; the file never enters the pod.
 	aksGPUPoolsPath string
+
+	// okeAddonsPath, when non-empty, projects an OKE cluster add-ons
+	// dump into the oke-addons subtype at the snapshot orchestration
+	// layer — same contract as aksGPUPoolsPath.
+	okeAddonsPath string
 	// discoverNetwork enables the network collector's live-discovery
 	// path. The collector calls l8k.Discover against the resolved
 	// kubeconfig; discovery is NOT read-only.
@@ -159,6 +163,7 @@ func (o *snapshotCmdOptions) toAgentConfig() *aicr.AgentConfig {
 		OS:                 o.os,
 		ClusterConfigPath:  o.clusterConfigPath,
 		AKSGPUPoolsPath:    o.aksGPUPoolsPath,
+		OKEAddonsPath:      o.okeAddonsPath,
 		DiscoverNetwork:    o.discoverNetwork,
 		Requests:           o.requests,
 		Limits:             o.limits,
@@ -184,20 +189,42 @@ func (o *snapshotCmdOptions) toSnapshotDelivery() snapshotter.SnapshotDelivery {
 // flags with the optional --config (AICRConfig) source. CLI flags always win
 // over config values. Returns a fully-typed snapshotCmdOptions that callers
 // can pass to the snapshotter without further parsing.
-func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapshotCmdOptions, error) {
-	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", flagAddRolesToSA, "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config", "aks-gpu-pools"); err != nil {
+func parseSnapshotCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*snapshotCmdOptions, error) {
+	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", flagAddRolesToSA, "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config", "aks-gpu-pools", "oke-addons"); err != nil {
 		return nil, err
 	}
 
-	resolved, err := cfg.Snapshot().Resolve()
+	agent, present, err := cfg.SnapshotAgentConfig()
 	if err != nil {
 		return nil, err
+	}
+	out, err := cfg.SnapshotOutputOptions()
+	if err != nil {
+		return nil, err
+	}
+
+	// SnapshotAgentConfig returns a bare zero-value AgentConfig — Cleanup and
+	// Privileged both false — when spec.snapshot is absent entirely (no
+	// --config, or a document that never mentions the section), because a
+	// document that made no snapshot decisions gets none invented for it (see
+	// the method's own godoc, and the "present" bool it returns for exactly
+	// this). That zero value is "not a working configuration": Cleanup=false
+	// and Privileged=false are the opposite of the CLI's own flag defaults
+	// (clean up; run privileged). When the section IS present, the derivation
+	// already applies those defaults (NoCleanup inverted, Privileged defaulted
+	// true), so agent.Cleanup and agent.Privileged are trustworthy fallbacks in
+	// that case.
+	cleanupFallback := agent.Cleanup
+	privilegedFallback := agent.Privileged
+	if !present {
+		cleanupFallback = true
+		privilegedFallback = true
 	}
 
 	// Normalize/validate the --os value via the recipe parser so that
 	// only documented OS criteria values reach the agent and the
 	// in-pod collector factory.
-	osVal := stringFlagOrConfig(cmd, "os", resolved.OS)
+	osVal := stringFlagOrConfig(cmd, "os", agent.OS)
 	if osVal != "" {
 		parsedOS, parseErr := recipe.NewCriteriaRegistry().ParseOS(osVal)
 		if parseErr != nil {
@@ -206,8 +233,8 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 		osVal = string(parsedOS)
 	}
 
-	requireGPU := boolFlagOrConfig(cmd, "require-gpu", resolved.RequireGPU)
-	runtimeClass := stringFlagOrConfig(cmd, "runtime-class", resolved.RuntimeClassName)
+	requireGPU := boolFlagOrConfig(cmd, "require-gpu", agent.RequireGPU)
+	runtimeClass := stringFlagOrConfig(cmd, "runtime-class", agent.RuntimeClassName)
 
 	// Mutual exclusion: --require-gpu and --runtime-class cannot be used together
 	if requireGPU && runtimeClass != "" {
@@ -219,8 +246,8 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 	// Parse output format. The config-provided format only kicks in
 	// when the CLI flag is not explicitly set; otherwise the CLI
 	// value wins. Validation of unknown formats happens here.
-	if !cmd.IsSet("format") && resolved.OutputFormat != "" {
-		if setErr := cmd.Set("format", resolved.OutputFormat); setErr != nil {
+	if !cmd.IsSet("format") && out.Format != "" {
+		if setErr := cmd.Set("format", out.Format); setErr != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.snapshot.output.format", setErr)
 		}
 	}
@@ -229,27 +256,54 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 		return nil, err
 	}
 
-	tmplOpts, err := parseSnapshotTemplateOptions(cmd, outFormat, resolved)
+	tmplOpts, err := parseSnapshotTemplateOptions(cmd, outFormat, out)
 	if err != nil {
 		return nil, err
 	}
 
-	nodeSelector, err := resolveSnapshotNodeSelector(cmd, resolved)
+	nodeSelector, err := resolveSnapshotNodeSelector(cmd, agent)
 	if err != nil {
 		return nil, err
 	}
-	tolerations, err := resolveSnapshotTolerations(cmd, resolved)
+	tolerations, err := resolveSnapshotTolerations(cmd, agent)
 	if err != nil {
 		return nil, err
 	}
 
-	resourceRequests, err := snapshotter.ParseResourceList(stringFlagOrConfig(cmd, "requests", resolved.Requests))
-	if err != nil {
-		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --requests")
+	// agent.Requests/Limits are already parsed corev1.ResourceList (the
+	// facade derivation parses spec.snapshot.agent.requests/limits itself),
+	// so a CLI-set flag is parsed here and the two are merged post-parse
+	// rather than merging the raw strings and parsing once.
+	resourceRequests := agent.Requests
+	if cmd.IsSet("requests") {
+		v, perr := snapshotter.ParseResourceList(cmd.String("requests"))
+		if perr != nil {
+			return nil, errors.PropagateOrWrap(perr, errors.ErrCodeInvalidRequest, "invalid --requests")
+		}
+		if len(agent.Requests) > 0 {
+			slog.Info("CLI flag overriding config value", "flag", "requests", "config", agent.Requests, "override", v)
+		}
+		resourceRequests = v
 	}
-	resourceLimits, err := snapshotter.ParseResourceList(stringFlagOrConfig(cmd, "limits", resolved.Limits))
-	if err != nil {
-		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --limits")
+	resourceLimits := agent.Limits
+	if cmd.IsSet("limits") {
+		v, perr := snapshotter.ParseResourceList(cmd.String("limits"))
+		if perr != nil {
+			return nil, errors.PropagateOrWrap(perr, errors.ErrCodeInvalidRequest, "invalid --limits")
+		}
+		if len(agent.Limits) > 0 {
+			slog.Info("CLI flag overriding config value", "flag", "limits", "config", agent.Limits, "override", v)
+		}
+		resourceLimits = v
+	}
+
+	// Timeout's config-set/unset distinction lives in *time.Duration
+	// upstream, but AgentConfig.Timeout is a plain time.Duration (zero for
+	// both "unset" and an explicit 0). Treat zero as "config did not set
+	// it" so an absent config still yields the flag's own default.
+	var timeoutFallback *time.Duration
+	if agent.Timeout != 0 {
+		timeoutFallback = &agent.Timeout
 	}
 
 	// jobName and serviceAccountName resolve through
@@ -259,27 +313,30 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 	// toAgentConfig's NameBase for what supplies the prefix instead.
 	return &snapshotCmdOptions{
 		kubeconfig:         cmd.String("kubeconfig"),
-		namespace:          stringFlagOrConfig(cmd, "namespace", resolved.Namespace),
-		image:              stringFlagOrConfig(cmd, "image", resolved.Image),
-		imagePullSecrets:   stringSliceFlagOrConfig(cmd, "image-pull-secret", resolved.ImagePullSecrets),
-		jobName:            explicitStringFlagOrConfig(cmd, "job-name", resolved.JobName),
-		serviceAccountName: explicitStringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
+		namespace:          stringFlagOrConfig(cmd, "namespace", agent.Namespace),
+		image:              stringFlagOrConfig(cmd, "image", agent.Image),
+		imagePullSecrets:   stringSliceFlagOrConfig(cmd, "image-pull-secret", agent.ImagePullSecrets),
+		jobName:            explicitStringFlagOrConfig(cmd, "job-name", agent.JobName),
+		serviceAccountName: explicitStringFlagOrConfig(cmd, "service-account-name", agent.ServiceAccountName),
 		nodeSelector:       nodeSelector,
 		tolerations:        tolerations,
-		timeout:            durationFlagOrConfig(cmd, "timeout", resolved.Timeout),
-		cleanup:            !boolFlagOrConfig(cmd, "no-cleanup", resolved.NoCleanup),
-		debug:              cmd.Bool("debug"),
-		privileged:         boolFlagOrConfig(cmd, "privileged", derefBoolOr(resolved.Privileged, true)),
-		requireGPU:         requireGPU,
-		runtimeClass:       runtimeClass,
-		os:                 osVal,
-		maxNodesPerEntry:   intFlagOrConfig(cmd, "max-nodes-per-entry", resolved.MaxNodesPerEntry),
-		clusterConfigPath:  cmd.String("cluster-config"),
-		aksGPUPoolsPath:    cmd.String("aks-gpu-pools"),
-		discoverNetwork:    cmd.Bool("discover-network"),
-		requests:           resourceRequests,
-		limits:             resourceLimits,
-		tmplOpts:           tmplOpts,
+		timeout:            durationFlagOrConfig(cmd, "timeout", timeoutFallback),
+		// cleanupFallback is already the inverted spec.snapshot.execution.noCleanup;
+		// invert it back to merge with --no-cleanup, then invert once more.
+		cleanup:           !boolFlagOrConfig(cmd, "no-cleanup", !cleanupFallback),
+		debug:             cmd.Bool("debug"),
+		privileged:        boolFlagOrConfig(cmd, "privileged", privilegedFallback),
+		requireGPU:        requireGPU,
+		runtimeClass:      runtimeClass,
+		os:                osVal,
+		maxNodesPerEntry:  intFlagOrConfig(cmd, "max-nodes-per-entry", agent.MaxNodesPerEntry),
+		clusterConfigPath: cmd.String("cluster-config"),
+		aksGPUPoolsPath:   cmd.String("aks-gpu-pools"),
+		okeAddonsPath:     cmd.String("oke-addons"),
+		discoverNetwork:   cmd.Bool("discover-network"),
+		requests:          resourceRequests,
+		limits:            resourceLimits,
+		tmplOpts:          tmplOpts,
 	}, nil
 }
 
@@ -384,9 +441,9 @@ type snapshotTemplateOptions struct {
 	format       serializer.Format
 }
 
-func parseSnapshotTemplateOptions(cmd *cli.Command, outFormat serializer.Format, resolved *config.SnapshotResolved) (*snapshotTemplateOptions, error) {
-	templatePath := stringFlagOrConfig(cmd, "template", resolved.OutputTemplate)
-	outputPath := stringFlagOrConfig(cmd, "output", resolved.OutputPath)
+func parseSnapshotTemplateOptions(cmd *cli.Command, outFormat serializer.Format, out aicr.SnapshotOutputOptions) (*snapshotTemplateOptions, error) {
+	templatePath := stringFlagOrConfig(cmd, "template", out.Template)
+	outputPath := stringFlagOrConfig(cmd, "output", out.Path)
 
 	if templatePath != "" {
 		// Validate format is YAML when using template
@@ -549,6 +606,12 @@ func snapshotCmdFlags() []cli.Flag {
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
+			Name:     "oke-addons",
+			Usage:    "Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem. Projects the NvidiaGpuPlugin add-on's control-plane state into the K8s oke-addons subtype (installed/absent; any other lifecycle state projects a value no profile constraint accepts). The --all flag on the oci command is required: without it removed and non-ACTIVE add-ons are omitted from the dump and would read as absent instead of failing closed. The projection runs controller-side in both agent Job mode (merged into the returned snapshot) and local mode, and a bad file fails the snapshot before any cluster work.",
+			Sources:  cli.EnvVars("AICR_OKE_ADDONS_PATH"),
+			Category: catAgentDeployment,
+		},
+		&cli.StringFlag{
 			Name:     "aks-gpu-pools",
 			Usage:    "Path to an `az aks nodepool list -o json` dump on the local filesystem. Projects each GPU agent pool's gpuProfile.driver into the K8s aks-gpu-pools subtype (Install/None; mixed or AKS-managed pools project a value no profile constraint accepts, ADR-015 DD3). The projection runs controller-side in both agent Job mode (merged into the returned snapshot) and local mode, and a bad file fails the snapshot before any cluster work.",
 			Sources:  cli.EnvVars("AICR_AKS_GPU_POOLS_PATH"),
@@ -638,7 +701,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 `,
 		Flags: snapshotCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			cfg, err := loadCmdConfig(ctx, cmd)
+			cfg, err := loadFacadeConfig(ctx, cmd)
 			if err != nil {
 				return err
 			}
@@ -709,6 +772,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 					Serializer:      ser,
 					RequireGPU:      opts.requireGPU,
 					AKSGPUPoolsPath: opts.aksGPUPoolsPath,
+					OKEAddonsPath:   opts.okeAddonsPath,
 				}
 				return ns.Measure(ctx)
 			}

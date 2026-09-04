@@ -47,7 +47,7 @@ import (
 // in-process in local mode. What IS shared across providers:
 //   - this bounded, fail-loud file reader;
 //   - the orchestration-layer project-then-attach flow in pkg/snapshotter
-//     (attachAKSGPUPools / mergeAKSGPUPools), which keeps explicit operator
+//     (attachProviderProjection / the per-provider merge helpers), which keeps explicit operator
 //     input out of the snapshotter's degrade-to-warning collector policy;
 //   - additive sibling CLI flags per provider (--aks-gpu-pools, ...), never
 //     a generic flag with a provider discriminator.

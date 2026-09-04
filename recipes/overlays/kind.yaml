@@ -27,7 +27,7 @@ spec:
   # Kind-specific constraints
   constraints:
     - name: K8s.server.version
-      value: ">= 1.25"
+      value: ">= 1.32"
 
   # Kind-specific component overrides
   componentRefs:

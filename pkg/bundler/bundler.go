@@ -343,6 +343,9 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	if evictionErr := b.injectDRAEvictionLabel(componentValues, recipeResult); evictionErr != nil {
 		return nil, evictionErr
 	}
+	if warningErr := b.warnPeermemReadinessDisabled(ctx, recipeResult, componentValues); warningErr != nil {
+		return nil, warningErr
+	}
 
 	if warningErr := b.warnMissingStorageClassForPVCs(ctx, recipeResult, componentValues); warningErr != nil {
 		return nil, warningErr

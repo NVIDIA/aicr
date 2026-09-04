@@ -21,6 +21,7 @@ import (
 	"context"
 	cryptorand "crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -35,6 +36,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -45,6 +47,7 @@ import (
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/kustomize/api/krusty"
@@ -164,6 +167,14 @@ const (
 	// production registry. The same tag (e.g. v0.11.0) exists here, so rewriting the repo
 	// prefix is sufficient to make the controller pullable.
 	jobSetPromotedImageRepo = "registry.k8s.io/jobset/jobset"
+
+	// trainerInstallManifestName is a ConfigMap in trainerNamespace recording a
+	// self-install's resource list, durably, so reapOrphanedTrainerInstall can
+	// still find and remove it if the installer never reaches its own cleanup.
+	trainerInstallManifestName = "aicr-trainer-self-install-manifest"
+
+	// trainerInstallManifestKey holds the JSON-encoded []trainerResourceRef.
+	trainerInstallManifestKey = "resources"
 )
 
 // controllerTolerateAll lets a Trainer/JobSet controller-manager Deployment
@@ -252,6 +263,15 @@ var (
 	}
 	trainerMutatingWebhookGVR = schema.GroupVersionResource{
 		Group: "admissionregistration.k8s.io", Version: "v1", Resource: "mutatingwebhookconfigurations",
+	}
+	trainerClusterRoleGVR = schema.GroupVersionResource{
+		Group: apiGroupRBAC, Version: "v1", Resource: "clusterroles",
+	}
+	trainerClusterRoleBindingGVR = schema.GroupVersionResource{
+		Group: apiGroupRBAC, Version: "v1", Resource: "clusterrolebindings",
+	}
+	trainerNamespaceGVR = schema.GroupVersionResource{
+		Version: "v1", Resource: "namespaces",
 	}
 
 	// requiredTrainerCRDs are the CRDs a usable Trainer install implies: the two the
@@ -569,7 +589,7 @@ func trainerResourceClient(dynamicClient dynamic.Interface,
 // happens to be on the cluster. Execution still differs across the undeclared rows —
 // a pre-existing Trainer is reused, an absent one is installed — which is why the
 // earlier "behaves identically regardless of live state" wording was withdrawn.
-func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface,
+func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface, clientset kubernetes.Interface,
 	discoveryClient discovery.DiscoveryInterface, recipeDeclaresTrainer bool) ([]trainerResourceRef, error) {
 
 	install, installed, err := isTrainerInstalled(ctx, dynamicClient)
@@ -626,7 +646,7 @@ func ensureTrainerInstalled(ctx context.Context, dynamicClient dynamic.Interface
 		slog.Info("Kubeflow Trainer not found or incomplete, installing...")
 		// installTrainer rolls back its own resources on failure, so there is
 		// nothing to clean up on the error path.
-		created, installErr := installTrainer(ctx, dynamicClient, discoveryClient)
+		created, installErr := installTrainer(ctx, dynamicClient, clientset, discoveryClient)
 		if installErr != nil {
 			return nil, aicrErrors.PropagateOrWrap(installErr, aicrErrors.ErrCodeInternal,
 				"failed to install Kubeflow Trainer")
@@ -808,16 +828,19 @@ func waitForDeclaredTrainer(ctx context.Context, dynamicClient dynamic.Interface
 	}
 }
 
-// foldCleanupError decides the check's verdict when teardown fails. A cleanup
-// failure leaks cluster-scoped CRDs, RBAC, and webhook configurations that would
-// silently poison the next run, so it fails an otherwise-passing check — but it
-// never masks a real benchmark failure, which is always the more useful signal.
-func foldCleanupError(benchErr, cleanupErr error) error {
+// foldCleanupError decides the check's verdict when teardown fails. A
+// cleanup failure leaks cluster-scoped CRDs, RBAC, and webhook
+// configurations (or, for the NCCL resource cleanup caller, poisons the
+// next run's fixed-named resources), so it fails an otherwise-passing
+// check without masking a real benchmark failure, the more useful signal.
+// fallbackMsg is used only when cleanupErr isn't already a
+// *StructuredError (PropagateOrWrap preserves an existing one's own
+// message/code as-is).
+func foldCleanupError(benchErr, cleanupErr error, fallbackMsg string) error {
 	if cleanupErr == nil || benchErr != nil {
 		return benchErr
 	}
-	return aicrErrors.PropagateOrWrap(cleanupErr, aicrErrors.ErrCodeInternal,
-		"NCCL benchmark succeeded but Kubeflow Trainer cleanup failed")
+	return aicrErrors.PropagateOrWrap(cleanupErr, aicrErrors.ErrCodeInternal, fallbackMsg)
 }
 
 // installTrainer downloads the Kubeflow Trainer v2.2.0 archive from GitHub, builds the
@@ -827,7 +850,9 @@ func foldCleanupError(benchErr, cleanupErr error) error {
 // Installation is transactional: on success it returns the resources it created so
 // the caller can defer deleteTrainer for cleanup; on any failure it rolls those
 // resources back itself and returns none.
-func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, discoveryClient discovery.DiscoveryInterface) ([]trainerResourceRef, error) {
+func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, clientset kubernetes.Interface,
+	discoveryClient discovery.DiscoveryInterface) ([]trainerResourceRef, error) {
+
 	slog.Info("Downloading Kubeflow Trainer archive", "url", trainerArchiveURL)
 
 	extractedDir, cleanup, err := downloadAndExtractGitHubArchive(ctx, trainerArchiveURL)
@@ -859,7 +884,7 @@ func installTrainer(ctx context.Context, dynamicClient dynamic.Interface, discov
 	// Build a REST mapper from live discovery so we can resolve GVK → GVR for each resource.
 	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(discoveryClient))
 
-	return installTrainerResources(ctx, dynamicClient, mapper, objs)
+	return installTrainerResources(ctx, dynamicClient, clientset, mapper, objs)
 }
 
 // decodeTrainerObjects converts kustomize build output into unstructured objects,
@@ -922,10 +947,10 @@ func decodeTrainerObjects(resources []*resource.Resource) ([]*unstructured.Unstr
 // On success it returns the resources it created, for the caller to delete once
 // the benchmark finishes. On failure it returns no resources: rollback already
 // removed them, so the caller has nothing left to clean up.
-func installTrainerResources(ctx context.Context, dynamicClient dynamic.Interface,
+func installTrainerResources(ctx context.Context, dynamicClient dynamic.Interface, clientset kubernetes.Interface,
 	mapper apimeta.RESTMapper, objs []*unstructured.Unstructured) ([]trainerResourceRef, error) {
 
-	created, err := applyTrainerResources(ctx, dynamicClient, mapper, objs)
+	created, err := applyTrainerResources(ctx, dynamicClient, clientset, mapper, objs)
 	if err == nil {
 		// No discovered name here: these objects were just applied from the overlay,
 		// so the controller carries its fixed self-install name.
@@ -939,6 +964,269 @@ func installTrainerResources(ctx context.Context, dynamicClient dynamic.Interfac
 	}
 
 	return created, nil
+}
+
+// trainerResourceKey identifies one tracked resource for manifest merge and
+// removal, regardless of kind.
+type trainerResourceKey struct {
+	gvr             schema.GroupVersionResource
+	namespace, name string
+}
+
+func trainerResourceKeyOf(ref trainerResourceRef) trainerResourceKey {
+	return trainerResourceKey{ref.GVR, ref.Namespace, ref.Name}
+}
+
+// newTrainerInstallManifestConfigMap encodes resources into a fresh manifest object.
+func newTrainerInstallManifestConfigMap(resources []trainerResourceRef) (*corev1.ConfigMap, error) {
+	data, err := json.Marshal(resources)
+	if err != nil {
+		return nil, err
+	}
+	return &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      trainerInstallManifestName,
+			Namespace: trainerNamespace,
+			Labels:    map[string]string{labels.ManagedBy: labels.ValueValidator, labels.Component: labels.ValueNCCLPerf},
+		},
+		Data: map[string]string{trainerInstallManifestKey: string(data)},
+	}, nil
+}
+
+// persistTrainerInstallManifest durably records a fresh self-install's
+// resources, so reapOrphanedTrainerInstall can find and remove them if the
+// installing caller never reaches its own cleanup. Failures are only
+// logged, since the caller's own cleanup path still works either way.
+//
+// A concurrent installer's Create can lose to this one with AlreadyExists,
+// so the two lists are merged instead of one overwriting the other,
+// retrying on conflict.
+func persistTrainerInstallManifest(ctx context.Context, clientset kubernetes.Interface, resources []trainerResourceRef) {
+	cm, buildErr := newTrainerInstallManifestConfigMap(resources)
+	if buildErr != nil {
+		slog.Warn("Failed to encode Trainer install manifest", "error", buildErr)
+		return
+	}
+
+	putCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	if _, err := clientset.CoreV1().ConfigMaps(trainerNamespace).Create(putCtx, cm, metav1.CreateOptions{}); err == nil {
+		return
+	} else if !k8serrors.IsAlreadyExists(err) {
+		slog.Warn("Failed to persist Trainer install manifest", "error", err)
+		return
+	}
+
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		existingCM, existing, loadErr := loadTrainerInstallManifest(ctx, clientset)
+		if loadErr != nil {
+			return loadErr
+		}
+		if existingCM == nil {
+			// Deleted between the failed Create above and this read. Recreate it
+			// with just this installer's own resources.
+			_, createErr := clientset.CoreV1().ConfigMaps(trainerNamespace).Create(putCtx, cm, metav1.CreateOptions{})
+			return createErr
+		}
+		merged, mergeErr := json.Marshal(mergeTrainerResourceRefs(existing, resources))
+		if mergeErr != nil {
+			return mergeErr
+		}
+		existingCM.Data = map[string]string{trainerInstallManifestKey: string(merged)}
+		_, updateErr := clientset.CoreV1().ConfigMaps(trainerNamespace).Update(putCtx, existingCM, metav1.UpdateOptions{})
+		return updateErr
+	})
+	if err != nil {
+		slog.Warn("Failed to merge Trainer install manifest with a concurrent installer's", "error", err)
+	}
+}
+
+// mergeTrainerResourceRefs unions two resource lists by GVR/namespace/name,
+// keeping b's entry on a duplicate. Preserves a's, then b's, first-seen
+// order, since deleteTrainer tears down in reverse list order and a random
+// map order could delete a CRD or webhook before its controller.
+func mergeTrainerResourceRefs(a, b []trainerResourceRef) []trainerResourceRef {
+	index := make(map[trainerResourceKey]int, len(a)+len(b))
+	merged := make([]trainerResourceRef, 0, len(a)+len(b))
+	for _, ref := range append(append([]trainerResourceRef{}, a...), b...) {
+		key := trainerResourceKeyOf(ref)
+		if i, seen := index[key]; seen {
+			merged[i] = ref
+			continue
+		}
+		index[key] = len(merged)
+		merged = append(merged, ref)
+	}
+	return merged
+}
+
+// loadTrainerInstallManifest reads back a persisted self-install manifest. A
+// missing ConfigMap means nothing is tracked, and both return values are nil.
+func loadTrainerInstallManifest(ctx context.Context, clientset kubernetes.Interface) (*corev1.ConfigMap, []trainerResourceRef, error) {
+	getCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	cm, err := clientset.CoreV1().ConfigMaps(trainerNamespace).Get(getCtx, trainerInstallManifestName, metav1.GetOptions{})
+	if k8serrors.IsNotFound(err) {
+		return nil, nil, nil
+	}
+	if err != nil {
+		return nil, nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to read Trainer install manifest", err)
+	}
+	raw, ok := cm.Data[trainerInstallManifestKey]
+	if !ok || raw == "" {
+		return cm, nil, nil
+	}
+	var resources []trainerResourceRef
+	if err := json.Unmarshal([]byte(raw), &resources); err != nil {
+		return cm, nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to decode Trainer install manifest", err)
+	}
+	return cm, resources, nil
+}
+
+// deleteTrainerInstallManifest best-effort removes the manifest once its
+// resources are gone, so a future run's prune sweep no longer finds it.
+func deleteTrainerInstallManifest(ctx context.Context, clientset kubernetes.Interface) {
+	delCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	err := clientset.CoreV1().ConfigMaps(trainerNamespace).Delete(delCtx, trainerInstallManifestName, metav1.DeleteOptions{})
+	if err != nil && !k8serrors.IsNotFound(err) {
+		slog.Warn("Failed to delete Trainer install manifest", "error", err)
+	}
+}
+
+// removeTrainerInstallManifestEntries removes this run's own resources from
+// the persisted manifest, deleting it only once nothing remains. A
+// concurrent installer's resources may still be listed, so a full delete
+// here would drop them from tracking even though none were removed. A
+// missing manifest is a no-op, and conflicts are retried.
+func removeTrainerInstallManifestEntries(ctx context.Context, clientset kubernetes.Interface, resources []trainerResourceRef) {
+	toRemove := make(map[trainerResourceKey]bool, len(resources))
+	for _, ref := range resources {
+		toRemove[trainerResourceKeyOf(ref)] = true
+	}
+
+	opCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
+	defer cancel()
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		cm, existing, loadErr := loadTrainerInstallManifest(ctx, clientset)
+		if loadErr != nil {
+			return loadErr
+		}
+		if cm == nil {
+			return nil
+		}
+
+		remaining := make([]trainerResourceRef, 0, len(existing))
+		for _, ref := range existing {
+			if !toRemove[trainerResourceKeyOf(ref)] {
+				remaining = append(remaining, ref)
+			}
+		}
+		if len(remaining) == 0 {
+			delErr := clientset.CoreV1().ConfigMaps(trainerNamespace).Delete(opCtx, trainerInstallManifestName,
+				metav1.DeleteOptions{Preconditions: &metav1.Preconditions{ResourceVersion: &cm.ResourceVersion}})
+			if k8serrors.IsNotFound(delErr) {
+				return nil
+			}
+			return delErr
+		}
+
+		data, marshalErr := json.Marshal(remaining)
+		if marshalErr != nil {
+			return marshalErr
+		}
+		cm.Data = map[string]string{trainerInstallManifestKey: string(data)}
+		_, updateErr := clientset.CoreV1().ConfigMaps(trainerNamespace).Update(opCtx, cm, metav1.UpdateOptions{})
+		return updateErr
+	})
+	if err != nil {
+		slog.Warn("Failed to remove this run's entries from the Trainer install manifest", "error", err)
+	}
+}
+
+// reapOrphanedTrainerInstall best-effort deletes a self-installed Trainer
+// abandoned when its installer lost the execution lock before reaching its
+// own cleanup. otherNamespacesRemain means another execution might still
+// depend on Trainer, so reaping is skipped. A manifest younger than
+// NCCLExecutionLockStaleAge might still be mid-install, so that's skipped too.
+func reapOrphanedTrainerInstall(ctx context.Context, clientset kubernetes.Interface, dynamicClient dynamic.Interface, otherNamespacesRemain bool) {
+	if otherNamespacesRemain {
+		return
+	}
+	cm, resources, err := loadTrainerInstallManifest(ctx, clientset)
+	if err != nil {
+		slog.Warn("Failed to check for an orphaned Trainer install", "error", err)
+		return
+	}
+	if cm == nil {
+		return
+	}
+	if time.Since(cm.CreationTimestamp.Time) < defaults.NCCLExecutionLockStaleAge {
+		return
+	}
+
+	resources = trustworthyTrainerResourceRefs(resources)
+	if len(resources) == 0 {
+		return
+	}
+
+	// deleteTrainer's own retries use a fresh background context per call,
+	// same as its other callers.
+	if err := deleteTrainer(dynamicClient, resources); err != nil { //nolint:contextcheck
+		slog.Warn("Failed to reap an orphaned Trainer install", "error", err)
+		return
+	}
+	slog.Info("Reaped a Trainer install orphaned by an abandoned execution")
+	deleteTrainerInstallManifest(ctx, clientset)
+}
+
+// trustedClusterScopedTrainerGVRs is every cluster-scoped GVR the Trainer
+// kustomize overlay can legitimately produce (see decodeTrainerObjects and
+// the manifest set built from trainerKustomizePath). Confines
+// trustworthyTrainerResourceRefs's cluster-scoped path to exactly these
+// kinds, so a manifest entry cannot name some unrelated cluster-scoped
+// resource, such as a Namespace this package never installed.
+var trustedClusterScopedTrainerGVRs = map[schema.GroupVersionResource]bool{
+	trainerCRDGVR:                true,
+	trainerValidatingWebhookGVR:  true,
+	trainerMutatingWebhookGVR:    true,
+	trainerClusterRoleGVR:        true,
+	trainerClusterRoleBindingGVR: true,
+	trainerNamespaceGVR:          true,
+}
+
+// trustworthyTrainerResourceRefs drops manifest entries reapOrphanedTrainerInstall
+// must not delete unconditionally. The manifest is a ConfigMap anyone with
+// write access to trainerNamespace can edit, and deleteTrainerResource skips
+// its UID delete precondition when UID is empty, so an entry with no UID, a
+// namespace outside this install's own, or a cluster-scoped kind this
+// package never installs could point a delete at any resource on the
+// cluster. Every entry this package itself persists always carries the real
+// UID it got back from Create and stays within trainerNamespace or one of
+// trustedClusterScopedTrainerGVRs, so a rejected entry here is never a
+// legitimate one.
+func trustworthyTrainerResourceRefs(resources []trainerResourceRef) []trainerResourceRef {
+	trusted := make([]trainerResourceRef, 0, len(resources))
+	for _, ref := range resources {
+		if ref.UID == "" {
+			slog.Warn("Refusing to reap a Trainer install manifest entry with no recorded UID",
+				"resource", ref.String())
+			continue
+		}
+		if ref.Namespace != "" {
+			if ref.Namespace != trainerNamespace {
+				slog.Warn("Refusing to reap a Trainer install manifest entry outside the expected namespace",
+					"resource", ref.String())
+				continue
+			}
+		} else if !trustedClusterScopedTrainerGVRs[ref.GVR] {
+			slog.Warn("Refusing to reap a Trainer install manifest entry with an unexpected cluster-scoped resource type",
+				"resource", ref.String())
+			continue
+		}
+		trusted = append(trusted, ref)
+	}
+	return trusted
 }
 
 // waitForTrainerReady blocks until a freshly applied Trainer is usable: the CRDs
@@ -1052,7 +1340,7 @@ func findDeploymentByLabels(ctx context.Context, dynamicClient dynamic.Interface
 // The returned list holds only the resources this call actually created. Objects
 // that were already present are updated but deliberately excluded, so a rollback
 // never deletes a Trainer another owner installed.
-func applyTrainerResources(ctx context.Context, dynamicClient dynamic.Interface,
+func applyTrainerResources(ctx context.Context, dynamicClient dynamic.Interface, clientset kubernetes.Interface,
 	mapper apimeta.RESTMapper, objs []*unstructured.Unstructured) ([]trainerResourceRef, error) {
 
 	attemptID, err := newInstallAttemptID()
@@ -1103,6 +1391,11 @@ func applyTrainerResources(ctx context.Context, dynamicClient dynamic.Interface,
 		case err == nil:
 			ref.UID = createdObj.GetUID()
 			created = append(created, ref)
+			// Persisted as each resource is created, not once the whole
+			// install returns. A kill in between would leave this on the
+			// cluster with no record for reapOrphanedTrainerInstall to
+			// find, leaking it indefinitely.
+			persistTrainerInstallManifest(ctx, clientset, []trainerResourceRef{ref})
 			slog.Info("Applied Trainer resource", "kind", gvk.Kind, "name", ref.Name, "namespace", ref.Namespace)
 		case k8serrors.IsAlreadyExists(err):
 			// Enforce current resource state even when left from a prior partial
@@ -1119,6 +1412,11 @@ func applyTrainerResources(ctx context.Context, dynamicClient dynamic.Interface,
 			// cannot remove it and we leak exactly what this change exists to stop.
 			if claimed, ok := claimAmbiguousCreate(ctx, client, ref, attemptID, err); ok {
 				created = append(created, claimed)
+				// ctx may itself be the reason Create was ambiguous, so
+				// persisting under it here risks silently skipping the
+				// write. A fresh context keeps this claimed resource's
+				// record from leaking untracked.
+				persistTrainerInstallManifest(context.Background(), clientset, []trainerResourceRef{claimed}) //nolint:contextcheck
 			}
 			return created, aicrErrors.Wrap(trainerAPIErrorCode(err),
 				fmt.Sprintf("failed to create %s %q", gvk.Kind, ref.Name), err)

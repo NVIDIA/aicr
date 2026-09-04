@@ -37,28 +37,27 @@
 # the separate network-operator-ocp component with its own NCP
 # manifest and gate mechanism, and are not affected by this file.
 #
-# Design mirrors recipes/components/gpu-operator/readiness.yaml — a
-# single aggregate-state assert per the DGXC precedent referenced in the
-# issue. Per-operand DaemonSet checks are deliberately elided: the
-# operator's aggregate is authoritative, so an explicit DS list would
-# either duplicate that signal or drift from it (name/OS variance across
-# overlays), and the gate CLI's --stability-window (see
-# defaults.ReadinessGateStabilityWindow) already provides the sleep +
-# re-assert cadence for catching transient flaps during driver deploy.
+# The gate uses the operator's aggregate state rather than enumerating operand
+# DaemonSets, which would duplicate that authoritative signal and drift across
+# names and OS variants. Unlike the gpu-operator gate's single positive assert,
+# this gate pairs its positive assertion with a negative assertion so every
+# live NicClusterPolicy must be ready. The gate CLI's --stability-window (see
+# defaults.ReadinessGateStabilityWindow) provides the sleep and re-assert
+# cadence for catching transient flaps during driver deployment.
 #
 # NicClusterPolicy is cluster-scoped, so the assertion is
 # namespace-agnostic; the gate's --namespace flag (set to the resolved
 # component namespace by the bundler) governs only namespaced lookups,
 # of which this test has none.
 #
-# The assert matches every NicClusterPolicy instance by state rather
-# than by name, mirroring the gpu-operator ClusterPolicy readiness
-# gate. An overlay that renames the NCP (or a downstream override that
-# does the same) still gates correctly. The primary "no NCP exists"
-# failure mode is already covered by the recipeDeclaresRDMAFabric
-# emission gate — this Test is not loaded when the resolved recipe
-# attaches no NCP CR, so match-any cannot fire on a recipe with no
-# operand.
+# The positive assert requires at least one ready NicClusterPolicy. The
+# following negative assert rejects any live policy whose state is not ready,
+# supplying all-items semantics because an unnamed positive Chainsaw assert
+# otherwise passes when any one item matches. An overlay that renames the NCP
+# (or a downstream override that does the same) still gates correctly. The
+# primary "no NCP exists" failure mode is also covered by the positive assert
+# and by the recipeDeclaresRDMAFabric emission gate — this Test is not loaded
+# when the resolved recipe attaches no NCP CR.
 #
 # Verified against network-operator chart 26.4.1 (recipes/registry.yaml).
 # Re-verify on defaultVersion bump — the aggregate status.state field is
@@ -81,13 +80,12 @@ spec:
             resource:
               apiVersion: mellanox.com/v1alpha1
               kind: NicClusterPolicy
-              # Match every NicClusterPolicy instance; overlays create
-              # one named "nic-cluster-policy" by default, but match by
-              # state rather than name so an overlay-renamed policy
-              # (or a downstream override) still gates correctly. The
-              # recipeDeclaresRDMAFabric emission gate already ensures
-              # this Test only runs for recipes that attach an NCP CR,
-              # so match-any cannot fire on a recipe with no operand.
-              # Mirrors recipes/components/gpu-operator/readiness.yaml.
+              # Require at least one ready policy. The error operation below
+              # rejects every non-ready policy that may coexist with it.
               status:
                 state: ready
+        - error:
+            resource:
+              apiVersion: mellanox.com/v1alpha1
+              kind: NicClusterPolicy
+              (status.state != 'ready'): true

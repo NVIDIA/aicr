@@ -32,7 +32,7 @@ spec:
   # Constraints for A100 on GKE COS for Kubeflow training workloads
   constraints:
     - name: K8s.server.version
-      value: ">= 1.30"
+      value: ">= 1.32"
 
   # Kubeflow Training Operator for TrainJob support.
   # Declared inline (not via the platform-kubeflow mixin) to match the GKE COS

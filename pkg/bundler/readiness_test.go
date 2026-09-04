@@ -378,6 +378,167 @@ func TestRecipeAttachesNicClusterPolicy(t *testing.T) {
 	}
 }
 
+func TestWarnPeermemReadinessDisabled(t *testing.T) {
+	tests := []struct {
+		name            string
+		criteria        recipe.Criteria
+		profile         string
+		readinessHooks  bool
+		removeComponent string
+		wantWarning     bool
+		wantGPUOperator string
+		wantNetworkOp   string
+	}{
+		{
+			name: "AKS operator-managed peermem warns",
+			criteria: recipe.Criteria{
+				Service: recipe.CriteriaServiceAKS, Accelerator: recipe.CriteriaAcceleratorH100,
+				Intent: recipe.CriteriaIntentTraining,
+			},
+			profile:         "gpuStack=operator-managed",
+			wantWarning:     true,
+			wantGPUOperator: gpuOperatorComponentName,
+			wantNetworkOp:   networkOperatorComponentName,
+		},
+		{
+			name: "AKS azure-managed driver is unaffected",
+			criteria: recipe.Criteria{
+				Service: recipe.CriteriaServiceAKS, Accelerator: recipe.CriteriaAcceleratorH100,
+				Intent: recipe.CriteriaIntentTraining,
+			},
+			profile: "gpuStack=azure-managed",
+		},
+		{
+			name: "AKS operator-managed with readiness hooks is gated",
+			criteria: recipe.Criteria{
+				Service: recipe.CriteriaServiceAKS, Accelerator: recipe.CriteriaAcceleratorH100,
+				Intent: recipe.CriteriaIntentTraining,
+			},
+			profile:        "gpuStack=operator-managed",
+			readinessHooks: true,
+		},
+		{
+			name: "OCP peermem warns",
+			criteria: recipe.Criteria{
+				Service: recipe.CriteriaServiceOCP,
+				Intent:  recipe.CriteriaIntentTraining,
+			},
+			wantWarning:     true,
+			wantGPUOperator: "gpu-operator-ocp",
+			wantNetworkOp:   networkOperatorOCPComponentName,
+		},
+		{
+			name: "OCP with readiness hooks is gated",
+			criteria: recipe.Criteria{
+				Service: recipe.CriteriaServiceOCP,
+				Intent:  recipe.CriteriaIntentTraining,
+			},
+			readinessHooks: true,
+		},
+		{
+			name: "DMA-BUF EKS recipe is unaffected",
+			criteria: recipe.Criteria{
+				Service: recipe.CriteriaServiceEKS, Accelerator: recipe.CriteriaAcceleratorH100,
+				OS: recipe.CriteriaOSUbuntu, Intent: recipe.CriteriaIntentTraining,
+			},
+		},
+		{
+			name: "subset without Network Operator is externally satisfied",
+			criteria: recipe.Criteria{
+				Service: recipe.CriteriaServiceOCP,
+				Intent:  recipe.CriteriaIntentTraining,
+			},
+			removeComponent: networkOperatorOCPComponentName,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			criteria := tt.criteria
+			result, err := recipe.NewBuilder().BuildFromCriteriaWithProfile(
+				t.Context(), &criteria, tt.profile)
+			if err != nil {
+				t.Fatalf("BuildFromCriteriaWithProfile() error = %v", err)
+			}
+
+			cfg := config.NewConfig(config.WithReadinessHooks(tt.readinessHooks))
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			values, err := b.extractComponentValues(t.Context(), result)
+			if err != nil {
+				t.Fatalf("extractComponentValues() error = %v", err)
+			}
+			delete(values, tt.removeComponent)
+
+			if err := b.warnPeermemReadinessDisabled(t.Context(), result, values); err != nil {
+				t.Fatalf("warnPeermemReadinessDisabled() error = %v", err)
+			}
+
+			if got := len(b.warnings); got != boolCount(tt.wantWarning) {
+				t.Fatalf("warnings = %v, want warning=%v", b.warnings, tt.wantWarning)
+			}
+			if !tt.wantWarning {
+				return
+			}
+			warning := b.warnings[0]
+			for _, want := range []string{
+				"Warning: ", tt.wantGPUOperator, tt.wantNetworkOp,
+				gpuDriverEnabledValuePath + "=true",
+				gpuDriverRDMAEnabledValuePath + "=true",
+				"dependencyRefs only orders manifest submission",
+				"NicClusterPolicy.status.state=ready",
+				"--readiness-hooks", "Flux", "Helmfile", "REST API", "#2499",
+			} {
+				if !strings.Contains(warning, want) {
+					t.Errorf("warning = %q, want substring %q", warning, want)
+				}
+			}
+		})
+	}
+}
+
+func TestMakePeermemRecipeWithoutReadinessHooksSurfacesWarning(t *testing.T) {
+	criteria := &recipe.Criteria{
+		Service: recipe.CriteriaServiceOCP,
+		Intent:  recipe.CriteriaIntentInference,
+	}
+	resolved, err := recipe.NewBuilder().BuildFromCriteria(t.Context(), criteria)
+	if err != nil {
+		t.Fatalf("BuildFromCriteria() error = %v", err)
+	}
+	b, err := New(WithConfig(config.NewConfig(config.WithVersion("v-test"))))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	output, err := b.Make(t.Context(), resolved, t.TempDir())
+	if err != nil {
+		t.Fatalf("Make() error = %v", err)
+	}
+	if output.Deployment == nil {
+		t.Fatal("Make() returned nil deployment info")
+	}
+
+	joined := strings.Join(output.Deployment.Notes, "\n")
+	for _, want := range []string{
+		"gpu-operator-ocp", "network-operator-ocp",
+		"NicClusterPolicy.status.state=ready", "--readiness-hooks",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("deployment notes = %q, want substring %q", joined, want)
+		}
+	}
+}
+
+func boolCount(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
 // TestRecipeAttachesNicClusterPolicy_CanceledContext confirms an already-
 // canceled ctx is surfaced as ErrCodeCanceled through wrapCtxErr rather
 // than swallowed into a false-negative "no NCP" answer that would silently

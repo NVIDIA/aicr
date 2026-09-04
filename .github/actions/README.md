@@ -202,20 +202,26 @@ resolve its per-platform manifest digests, and generate SBOM + VEX + provenance
 
 #### `sbom-and-attest/`
 
-**Purpose**: Generate the SPDX SBOM, OpenVEX and SLSA provenance attestations
-for an image whose digests are already known
+**Purpose**: Generate the CycloneDX SBOM, OpenVEX and SLSA provenance
+attestations for an image whose digests are already known
 **When to use**: When you already have the digests (e.g., from build output)
 **Inputs**:
 - `image_name` (required): One of the seven fixed AICR release image names
-- `image_digest` (required): Multi-platform index digest; subject for the VEX and provenance attestations
-- `amd64_digest` (required): `linux/amd64` manifest digest; subject for the amd64 SBOM
-- `arm64_digest` (required): `linux/arm64` manifest digest; subject for the arm64 SBOM
+- `image_digest` (required): Multi-platform index digest; subject for the provenance attestation
+- `amd64_digest` (required): `linux/amd64` manifest digest; subject for the amd64 SBOM and VEX
+- `arm64_digest` (required): `linux/arm64` manifest digest; subject for the arm64 SBOM and VEX
 
 Cosign is pinned from `.settings.yaml` via `load-versions`, and every
 `cosign attest` call sets `--new-bundle-format=true` explicitly so the
 attestations land through the OCI referrers path by our decision rather than by
-an installer default. Per-platform SBOM subjects and index-level VEX subjects
-are explained in the action's header comment.
+an installer default. The SBOM and the VEX share a per-platform subject and are
+deliberately in different formats so a referrers listing can tell them apart;
+`tools/openvex-bind` rewrites `.openvex.json` product identifiers to the
+platform manifest digest before the VEX is signed. Both the committed source and
+every generated projection are validated by `openvex-guard.sh`, which holds the
+rules and the pinned v0.2.0 `@context` once so the two checks cannot drift; the
+only rule that differs is that a projection may carry an empty `statements`
+array. The action's header comment explains the full subject policy.
 
 **Example**:
 

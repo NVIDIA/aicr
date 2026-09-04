@@ -1932,6 +1932,148 @@ componentRefs: []
 	}
 }
 
+// TestResolveRecipeFromSnapshot_OKEGpuStackQualification proves the OKE
+// gpuStack profile qualifies fail-closed end to end against a snapshot: the
+// add-on projection is the canonical signal for both values, and the legacy
+// device-plugin tripwire (in-cluster reading) additionally guards
+// operator-managed — a legacy cluster (add-on absent, legacy DaemonSet
+// active) can qualify NEITHER value, and a snapshot missing either reading
+// fails with "reading … is unavailable" rather than passing open.
+func TestResolveRecipeFromSnapshot_OKEGpuStackQualification(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		profile string
+		snap    *aicr.Snapshot
+		wantErr string // "" => resolution succeeds
+	}{
+		{
+			name:    "add-on installed qualifies the default oci-managed",
+			profile: "",
+			snap:    okeQualificationSnapshot("installed", "none"),
+		},
+		{
+			name:    "add-on installed fails operator-managed closed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("installed", "active"),
+			wantErr: `constraint "K8s.oke-addons.nvidia-gpu-plugin" failed`,
+		},
+		{
+			name:    "add-on absent with no legacy plugin qualifies operator-managed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("absent", "none"),
+		},
+		{
+			name:    "add-on absent fails the default oci-managed closed",
+			profile: "",
+			snap:    okeQualificationSnapshot("absent", "none"),
+			wantErr: `constraint "K8s.oke-addons.nvidia-gpu-plugin" failed`,
+		},
+		{
+			name:    "non-ACTIVE lifecycle marker fails oci-managed closed",
+			profile: "",
+			snap:    okeQualificationSnapshot("addon-deleting", "none"),
+			wantErr: `constraint "K8s.oke-addons.nvidia-gpu-plugin" failed`,
+		},
+		{
+			name:    "non-ACTIVE lifecycle marker fails operator-managed closed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("addon-deleting", "none"),
+			wantErr: `constraint "K8s.oke-addons.nvidia-gpu-plugin" failed`,
+		},
+		{
+			name:    "legacy plugin active trips operator-managed (double-advertisement guard)",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("absent", "active"),
+			wantErr: `constraint "K8s.oke-legacy-plugin.nvidia-gpu-device-plugin" failed`,
+		},
+		{
+			name:    "legacy plugin unknown (clientless snapshot) fails operator-managed closed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("absent", "unknown"),
+			wantErr: `constraint "K8s.oke-legacy-plugin.nvidia-gpu-device-plugin" failed`,
+		},
+		{
+			name:    "legacy plugin active does not gate oci-managed (the add-on manages the same DaemonSet)",
+			profile: "",
+			snap:    okeQualificationSnapshot("installed", "active"),
+		},
+		{
+			name:    "snapshot without the add-on projection fails closed (reading unavailable)",
+			profile: "",
+			snap:    okeQualificationSnapshot("", "none"),
+			wantErr: `reading "K8s.oke-addons.nvidia-gpu-plugin" is unavailable`,
+		},
+		{
+			name:    "snapshot without the legacy-plugin reading fails operator-managed closed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("absent", ""),
+			wantErr: `reading "K8s.oke-legacy-plugin.nvidia-gpu-device-plugin" is unavailable`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+			t.Cleanup(func() { _ = c.Close() })
+
+			crit, err := recipe.BuildCriteriaWithRegistry(nil,
+				recipe.WithServiceRegistry("oke"),
+				recipe.WithAcceleratorRegistry("l40s"),
+				recipe.WithIntentRegistry("training"),
+				recipe.WithOSRegistry("ol"),
+			)
+			if err != nil {
+				t.Fatalf("BuildCriteria: %v", err)
+			}
+
+			_, err = c.ResolveRecipeFromSnapshotWithProfile(t.Context(), aicr.WrapCriteria(crit), tt.snap, tt.profile)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ResolveRecipeFromSnapshotWithProfile error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveRecipeFromSnapshotWithProfile: %v", err)
+			}
+		})
+	}
+}
+
+// okeQualificationSnapshot builds a Snapshot for the OKE l40s/ol training
+// chain: the K8s server version plus the two gpuStack qualification readings.
+// An empty addonState or legacyState OMITS that subtype entirely, producing
+// the "reading … is unavailable" fail-closed path.
+func okeQualificationSnapshot(addonState, legacyState string) *aicr.Snapshot {
+	k8s := measurement.NewMeasurement(measurement.TypeK8s).
+		WithSubtypeBuilder(
+			measurement.NewSubtypeBuilder("server").
+				SetString(measurement.KeyVersion, "v1.34.0"),
+		)
+	if addonState != "" {
+		k8s = k8s.WithSubtypeBuilder(
+			measurement.NewSubtypeBuilder("oke-addons").
+				SetString("nvidia-gpu-plugin", addonState),
+		)
+	}
+	if legacyState != "" {
+		k8s = k8s.WithSubtypeBuilder(
+			measurement.NewSubtypeBuilder("oke-legacy-plugin").
+				SetString("nvidia-gpu-device-plugin", legacyState),
+		)
+	}
+	return aicr.WrapSnapshot(&snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{k8s.Build()},
+	})
+}
+
 // k8sVersionSnapshot builds a minimal Snapshot whose K8s/server/version
 // reading satisfies the readiness constraints carried by the embedded
 // h100-eks-training chain (the strictest is ">= 1.32.4").

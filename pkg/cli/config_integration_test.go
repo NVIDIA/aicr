@@ -23,6 +23,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -48,7 +49,7 @@ func TestApplyCriteriaFromConfig_OverridesSnapshot(t *testing.T) {
 	criteria.Intent = recipe.CriteriaIntentType("training")
 	criteria.OS = recipe.CriteriaOSType("ubuntu")
 
-	cfg := &appcfg.AICRConfig{
+	cfg := aicr.WrapConfig(&appcfg.AICRConfig{
 		Spec: appcfg.Spec{
 			Recipe: &appcfg.RecipeSpec{
 				Criteria: &appcfg.CriteriaSpec{
@@ -58,7 +59,7 @@ func TestApplyCriteriaFromConfig_OverridesSnapshot(t *testing.T) {
 				},
 			},
 		},
-	}
+	})
 
 	if err := applyCriteriaFromConfig(criteria, cfg, recipe.NewCriteriaRegistry(), nil); err != nil {
 		t.Fatalf("apply: %v", err)
@@ -82,7 +83,7 @@ func TestApplyCriteriaFromConfig_OverridesSnapshot(t *testing.T) {
 // the criteria starts as NewCriteria (all "any") and config populates it.
 func TestApplyCriteriaFromConfig_FillsEmptyCriteria(t *testing.T) {
 	criteria := recipe.NewCriteria()
-	cfg := &appcfg.AICRConfig{
+	cfg := aicr.WrapConfig(&appcfg.AICRConfig{
 		Spec: appcfg.Spec{
 			Recipe: &appcfg.RecipeSpec{
 				Criteria: &appcfg.CriteriaSpec{
@@ -90,7 +91,7 @@ func TestApplyCriteriaFromConfig_FillsEmptyCriteria(t *testing.T) {
 				},
 			},
 		},
-	}
+	})
 	if err := applyCriteriaFromConfig(criteria, cfg, recipe.NewCriteriaRegistry(), nil); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -220,7 +221,7 @@ func tryRunBundleParse(t *testing.T, args []string) (*bundleCmdOptions, error) {
 	var captured *bundleCmdOptions
 	cmd := bundleCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}
@@ -444,7 +445,7 @@ spec:
 `)
 	cmd := bundleCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}

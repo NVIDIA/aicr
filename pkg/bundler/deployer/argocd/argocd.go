@@ -49,6 +49,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
+
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	bundlercfg "github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
@@ -117,6 +119,73 @@ type ApplicationData struct {
 	// delete-and-recreate unconditionally. See #2367 and the CodeRabbit finding on
 	// PR #2408.
 	ApplyOutOfSyncOnly bool
+
+	// IgnoreComputeDomainCRDDiff scopes an ignoreDifferences entry to the
+	// gpu-operator Application when the bundle also ships
+	// nvidia-dra-driver-gpu or nvidia-dra-driver-gpu-ocp. Both charts
+	// install computedomains.resource.nvidia.com, and as of gpu-operator
+	// v26.7.0 the two copies disagree on schema. Under automated
+	// selfHeal, Argo CD perpetually reconciles the CRD toward whichever
+	// Application synced last. Stopgap; see NVIDIA/aicr#2546.
+	IgnoreComputeDomainCRDDiff bool
+}
+
+// Components involved in the computedomains.resource.nvidia.com CRD
+// ownership conflict between gpu-operator and the standalone DRA driver.
+// See NVIDIA/aicr#2546.
+//
+// Scoped to the Helm-based gpu-operator: its chart installs the CRD from
+// crds/, which is what Argo CD then reconciles against the DRA driver's
+// copy. gpu-operator-ocp/-ocp-olm are OLM CR-pattern components
+// (registry defaultRepository: "") whose CRDs come from the
+// Subscription/CSV rather than a chart's crds/, so an Application-level
+// ignoreDifferences has nothing to arbitrate there — the OLM conflict is
+// a separate, unresolved problem.
+//
+// The -ocp DRA alternative below is not reachable from the shipped OSS
+// overlays (recipes/overlays/ocp.yaml disables plain gpu-operator and
+// substitutes gpu-operator-ocp, and disabled refs are filtered out before
+// the deployer runs). It is retained because external recipe layers can
+// compose component sets the OSS overlays do not.
+const (
+	computeDomainComponentGPUOperator  = "gpu-operator"
+	computeDomainComponentDRADriver    = "nvidia-dra-driver-gpu"
+	computeDomainComponentDRADriverOCP = "nvidia-dra-driver-gpu-ocp"
+)
+
+// computeDomainConflictMinGPUOperator is the first gpu-operator chart
+// version whose crds/ ships resource.nvidia.com_computedomains.yaml, and
+// therefore the first version that can contend with the DRA driver's copy.
+// v26.3.3 ships only nvidia.com_clusterpolicies.yaml and
+// nvidia.com_nvidiadrivers.yaml — verified against both published charts.
+//
+// Gating on this matters because RespectIgnoreDifferences is an
+// Application-wide sync option: Argo builds the sync-time normalizer from
+// the Application's ignoreDifferences PLUS the cluster's
+// resource.customizations.ignoreDifferences.* in argocd-cm. Emitting it
+// below v26.7.0 would relax sync-time enforcement of any globally-ignored
+// field on gpu-operator's resources while buying no protection at all,
+// since gpu-operator does not ship the contested CRD yet.
+const computeDomainConflictMinGPUOperator = "26.7.0"
+
+// gpuOperatorShipsComputeDomainCRD reports whether the gpu-operator ref's
+// effective chart version is at or above the version that first ships the
+// contested CRD.
+//
+// An unparseable version fails OPEN (treated as affected): a custom or
+// non-semver pin is far more likely to be a newer chart than an older one,
+// and the cost of a needless ignoreDifferences entry is much lower than the
+// cost of missing the CRD flip-flop this guard exists to prevent.
+func gpuOperatorShipsComputeDomainCRD(ref *recipe.ComponentRef) bool {
+	if ref == nil {
+		return false
+	}
+	v, err := semver.NewVersion(ref.Version)
+	if err != nil {
+		return true
+	}
+	min := semver.MustParse(computeDomainConflictMinGPUOperator)
+	return !v.LessThan(min)
 }
 
 // AppOfAppsData contains data for rendering the App of Apps manifest.
@@ -520,6 +589,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	writeResult, lfErr := localformat.Write(ctx, localformat.Options{
 		OutputDir:              outputDir,
 		Components:             lfComponents,
+		AICRVersion:            g.Version,
 		ComponentPreManifests:  g.ComponentPreManifests,
 		ComponentPostManifests: g.ComponentPostManifests,
 		ComponentReadiness:     g.ComponentReadiness,
@@ -578,6 +648,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 	}
 
+	// computeDomainConflict is true when the bundle pairs a standalone DRA
+	// driver with a gpu-operator new enough to ship the contested
+	// computedomains CRD itself (>= v26.7.0). Below that the operator's
+	// chart has no copy to contend with, so the mitigation is not emitted
+	// at all. See IgnoreComputeDomainCRDDiff and NVIDIA/aicr#2546.
+	computeDomainConflict := gpuOperatorShipsComputeDomainCRD(findComponentRef(components, computeDomainComponentGPUOperator)) &&
+		(findComponentRef(components, computeDomainComponentDRADriver) != nil ||
+			findComponentRef(components, computeDomainComponentDRADriverOCP) != nil)
+
 	// Build ApplicationData per folder and write application.yaml inside the
 	// NNN-<name>/ directory. Branching on FolderKind selects the Application
 	// shape (path-based single-source vs multi-source upstream-helm).
@@ -633,6 +712,13 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		appData.DestinationServer = g.destinationServer()
 		appData.Project = g.project()
 		appData.CascadeDelete = g.CascadeDelete
+		// Scoped to gpu-operator's primary folder only (f.Name == f.Parent):
+		// the -pre/-post/-readiness sidecar folders don't ship the
+		// upstream chart's CRDs, so ignoreDifferences would be a no-op
+		// there. See computeDomainConflict above and NVIDIA/aicr#2546.
+		if computeDomainConflict && comp.Name == computeDomainComponentGPUOperator && f.Name == f.Parent {
+			appData.IgnoreComputeDomainCRDDiff = true
+		}
 		appDataList = append(appDataList, appData)
 
 		folderDir, joinErr := deployer.SafeJoin(outputDir, f.Dir)

@@ -28,11 +28,12 @@ spec:
     intent: training
 
   # Specific constraints for A100 on GKE COS training workloads.
-  # A100 has no IMEX/NVLink ComputeDomain requirement, so the recipe keeps
-  # the GKE COS training baseline rather than the H100 1.32 floor.
+  # A100 has no IMEX/NVLink ComputeDomain requirement, so this floor is not
+  # driven by a ComputeDomain need as the H100 recipes' is; it simply carries
+  # the catalog-wide 1.32 baseline the DRA driver chart's kubeVersion sets.
   constraints:
     - name: K8s.server.version
-      value: ">= 1.30"
+      value: ">= 1.32"
 
   componentRefs:
     # A100-specific GPU Operator overrides (inherits valuesFile from gke-cos-training).

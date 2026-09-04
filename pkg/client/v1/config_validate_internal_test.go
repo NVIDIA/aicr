@@ -24,11 +24,13 @@ import (
 	appconfig "github.com/NVIDIA/aicr/pkg/config"
 )
 
-// ValidateOptions returns opaque functional options, so asserting what it
-// folded needs the internal capture struct — hence this file rather than the
-// external aicr_test package. Counting the returned options would pass while
-// a value was inverted or two fields were swapped, which is the whole failure
-// mode this derivation has.
+// ValidateSettings is a plain value, so most of its coverage lives in the
+// external aicr_test package (config_test.go,
+// TestConfig_ValidateSettings_FoldsValues). This file covers the two fields
+// that test does not (ImagePullSecrets, NodeSelector) plus the
+// mutation-critical Cleanup inversion, the pointer-stays-unset guard, the
+// unknown-phase rejection path, and nil-Config handling — cases that predate
+// the value-shape change and still apply to it.
 
 func writeInternalConfig(t *testing.T, body string) string {
 	t.Helper()
@@ -58,45 +60,44 @@ spec:
         - deployment
 `
 
-func TestConfig_ValidateOptions_FoldsValues(t *testing.T) {
+func TestConfig_ValidateSettings_FoldsAgentAndSchedulingValues(t *testing.T) {
 	cfg, err := LoadConfig(context.Background(), writeInternalConfig(t, validateSpecConfig))
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	opts, err := cfg.ValidateOptions()
+	got, _, err := cfg.ValidateSettings()
 	if err != nil {
-		t.Fatalf("ValidateOptions: %v", err)
+		t.Fatalf("ValidateSettings: %v", err)
 	}
-	vc := buildValidateConfig(opts)
 
-	if vc.namespace == nil || *vc.namespace != "aicr-validate" {
-		t.Errorf("namespace = %v, want aicr-validate", vc.namespace)
+	if got.Namespace != "aicr-validate" {
+		t.Errorf("Namespace = %q, want aicr-validate", got.Namespace)
 	}
-	if len(vc.imagePullSecrets) != 1 || vc.imagePullSecrets[0] != "regcred" {
-		t.Errorf("imagePullSecrets = %v, want [regcred]", vc.imagePullSecrets)
+	if len(got.ImagePullSecrets) != 1 || got.ImagePullSecrets[0] != "regcred" {
+		t.Errorf("ImagePullSecrets = %v, want [regcred]", got.ImagePullSecrets)
 	}
-	if vc.nodeSelector["role"] != "gpu" {
-		t.Errorf("nodeSelector[role] = %q, want gpu", vc.nodeSelector["role"])
+	if got.NodeSelector["role"] != "gpu" {
+		t.Errorf("NodeSelector[role] = %q, want gpu", got.NodeSelector["role"])
 	}
-	if vc.noCluster == nil || !*vc.noCluster {
-		t.Errorf("noCluster = %v, want true", vc.noCluster)
+	if !got.NoCluster {
+		t.Error("NoCluster = false, want true")
 	}
-	if vc.failFast == nil || !*vc.failFast {
-		t.Errorf("failFast = %v, want true", vc.failFast)
+	if got.FailFast == nil || !*got.FailFast {
+		t.Errorf("FailFast = %v, want true", got.FailFast)
 	}
-	if vc.timeout == nil || *vc.timeout != 15*time.Minute {
-		t.Errorf("timeout = %v, want 15m", vc.timeout)
+	if got.Timeout == nil || *got.Timeout != 15*time.Minute {
+		t.Errorf("Timeout = %v, want 15m", got.Timeout)
 	}
-	if len(vc.phases) != 1 || vc.phases[0] != Phase("deployment") {
-		t.Errorf("phases = %v, want [deployment]", vc.phases)
+	if len(got.Phases) != 1 || got.Phases[0] != Phase("deployment") {
+		t.Errorf("Phases = %v, want [deployment]", got.Phases)
 	}
 }
 
-// TestConfig_ValidateOptions_CleanupIsInverted is the case most likely to ship
-// wrong: spec.validate says "noCleanup", the option says "cleanup". A
+// TestConfig_ValidateSettings_CleanupIsInverted is the case most likely to
+// ship wrong: spec.validate says "noCleanup", the field says "cleanup". A
 // pass-through reverses it, and nothing else in the suite would notice —
 // artifacts would be deleted exactly when a post-mortem asked to keep them.
-func TestConfig_ValidateOptions_CleanupIsInverted(t *testing.T) {
+func TestConfig_ValidateSettings_CleanupIsInverted(t *testing.T) {
 	tests := []struct {
 		name        string
 		noCleanup   string
@@ -117,25 +118,21 @@ spec:
 			if err != nil {
 				t.Fatalf("LoadConfig: %v", err)
 			}
-			opts, err := cfg.ValidateOptions()
+			got, _, err := cfg.ValidateSettings()
 			if err != nil {
-				t.Fatalf("ValidateOptions: %v", err)
+				t.Fatalf("ValidateSettings: %v", err)
 			}
-			vc := buildValidateConfig(opts)
-			if vc.cleanup == nil {
-				t.Fatal("cleanup was not set; the derivation must always emit it")
-			}
-			if *vc.cleanup != tt.wantCleanup {
-				t.Errorf("cleanup = %v, want %v (noCleanup: %s)", *vc.cleanup, tt.wantCleanup, tt.noCleanup)
+			if got.Cleanup != tt.wantCleanup {
+				t.Errorf("Cleanup = %v, want %v (noCleanup: %s)", got.Cleanup, tt.wantCleanup, tt.noCleanup)
 			}
 		})
 	}
 }
 
-// TestConfig_ValidateOptions_UnsetStaysUnset guards the pointer fields: config
-// saying nothing must not become an explicit choice that overrides the
+// TestConfig_ValidateSettings_UnsetStaysUnset guards the pointer fields:
+// config saying nothing must not become an explicit choice that overrides the
 // validator's own default.
-func TestConfig_ValidateOptions_UnsetStaysUnset(t *testing.T) {
+func TestConfig_ValidateSettings_UnsetStaysUnset(t *testing.T) {
 	body := `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
 spec:
@@ -147,32 +144,31 @@ spec:
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	opts, err := cfg.ValidateOptions()
+	got, _, err := cfg.ValidateSettings()
 	if err != nil {
-		t.Fatalf("ValidateOptions: %v", err)
+		t.Fatalf("ValidateSettings: %v", err)
 	}
-	vc := buildValidateConfig(opts)
 
-	if vc.failFast != nil {
-		t.Errorf("failFast = %v, want nil (config said nothing)", *vc.failFast)
+	if got.FailFast != nil {
+		t.Errorf("FailFast = %v, want nil (config said nothing)", *got.FailFast)
 	}
-	if vc.timeout != nil {
-		t.Errorf("timeout = %v, want nil (config said nothing)", *vc.timeout)
+	if got.Timeout != nil {
+		t.Errorf("Timeout = %v, want nil (config said nothing)", *got.Timeout)
 	}
-	if len(vc.phases) != 0 {
-		t.Errorf("phases = %v, want none (config said nothing)", vc.phases)
+	if len(got.Phases) != 0 {
+		t.Errorf("Phases = %v, want none (config said nothing)", got.Phases)
 	}
 }
 
-// TestConfig_ValidateOptions_RejectsUnknownPhase pins WHERE an unknown phase
+// TestConfig_ValidateSettings_RejectsUnknownPhase pins WHERE an unknown phase
 // is caught, which is what lets the derivation cast instead of re-parsing.
 //
 // The check lives in Validation().Resolve(), not in the loader, so it holds on
 // the WrapConfig path too — a hand-built document no loader has seen. If that
-// ever moved into LoadConfig, the WrapConfig case here would start returning
-// options built from an unvalidated phase, and the cast would need to become a
+// ever moved into LoadConfig, the WrapConfig case here would start returning a
+// value built from an unvalidated phase, and the cast would need to become a
 // parse again.
-func TestConfig_ValidateOptions_RejectsUnknownPhase(t *testing.T) {
+func TestConfig_ValidateSettings_RejectsUnknownPhase(t *testing.T) {
 	t.Run("LoadConfig rejects it first", func(t *testing.T) {
 		body := `apiVersion: aicr.run/v1beta1
 kind: AICRConfig
@@ -197,21 +193,24 @@ spec:
 				},
 			},
 		})
-		if _, err := cfg.ValidateOptions(); err == nil {
-			t.Fatal("ValidateOptions accepted an unknown phase from an unvalidated document")
+		if _, _, err := cfg.ValidateSettings(); err == nil {
+			t.Fatal("ValidateSettings accepted an unknown phase from an unvalidated document")
 		}
 	})
 }
 
-func TestConfig_ValidateOptions_Absent(t *testing.T) {
+func TestConfig_ValidateSettings_Absent(t *testing.T) {
 	t.Run("nil config", func(t *testing.T) {
 		var cfg *Config
-		opts, err := cfg.ValidateOptions()
+		got, present, err := cfg.ValidateSettings()
 		if err != nil {
-			t.Fatalf("ValidateOptions on nil Config: %v", err)
+			t.Fatalf("ValidateSettings on nil Config: %v", err)
 		}
-		if len(opts) != 0 {
-			t.Errorf("got %d options, want none", len(opts))
+		if present {
+			t.Error("present = true, want false for a nil Config")
+		}
+		if got.Namespace != "" || got.Cleanup || got.NoCluster || len(got.Phases) != 0 {
+			t.Errorf("got %+v, want zero value", got)
 		}
 	})
 }

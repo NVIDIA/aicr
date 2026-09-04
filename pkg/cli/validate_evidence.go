@@ -22,7 +22,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/config"
 )
 
 // recipeEvidenceConfig groups the inputs to `aicr validate --emit-attestation`.
@@ -56,21 +55,20 @@ type recipeEvidenceConfig struct {
 }
 
 // buildRecipeEvidenceConfig parses the --emit-attestation flag family with
-// CLI > config precedence. Returns nil when neither the flag nor
-// spec.validate.evidence.attestation.out is set, signaling the validate
-// run should not produce a recipe-evidence bundle.
-func buildRecipeEvidenceConfig(cmd *cli.Command, resolved *config.ValidateResolved) *recipeEvidenceConfig {
-	att := resolved.EvidenceAttestation
-	if att == nil {
-		att = &config.EvidenceAttestationResolved{}
-	}
-	out := stringFlagOrConfig(cmd, "emit-attestation", att.Out)
+// CLI > config precedence. att is the facade projection of
+// spec.validate.evidence.attestation (Config.EvidenceAttestationOptions);
+// its zero value is a valid "config configured nothing" input, matching what
+// that method returns for an absent section. Returns nil when neither the
+// flag nor att.OutDir is set, signaling the validate run should not produce a
+// recipe-evidence bundle.
+func buildRecipeEvidenceConfig(cmd *cli.Command, att aicr.EvidenceOptions) *recipeEvidenceConfig {
+	out := stringFlagOrConfig(cmd, "emit-attestation", att.OutDir)
 	if out == "" {
 		return nil
 	}
 	return &recipeEvidenceConfig{
 		OutDir:      out,
-		BOMPath:     stringFlagOrConfig(cmd, "bom", att.BOM),
+		BOMPath:     stringFlagOrConfig(cmd, "bom", att.BOMPath),
 		Push:        stringFlagOrConfig(cmd, flagPush, att.Push),
 		PlainHTTP:   boolFlagOrConfig(cmd, flagPlainHTTP, att.PlainHTTP),
 		InsecureTLS: boolFlagOrConfig(cmd, flagInsecureTLS, att.InsecureTLS),

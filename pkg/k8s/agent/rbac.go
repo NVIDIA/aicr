@@ -235,6 +235,15 @@ func clusterRules(discoverNetwork bool) []rbacv1.PolicyRule {
 			Resources: []string{mariaDBResource},
 			Verbs:     []string{verbList},
 		},
+		{
+			// OKE legacy device-plugin conflict evidence: the K8s collector
+			// reads kube-system/nvidia-gpu-device-plugin (a single namespaced
+			// Get; list kept for parity with the other read-only rules) —
+			// pkg/collector/k8s/okelegacyplugin.go.
+			APIGroups: []string{"apps"},
+			Resources: []string{"daemonsets"},
+			Verbs:     []string{verbGet, verbList},
+		},
 	}
 
 	// Live l8k network discovery stands up a nic-configuration-daemon

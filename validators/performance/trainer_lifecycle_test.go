@@ -19,6 +19,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/kustomize/api/hasher"
 	"sigs.k8s.io/kustomize/api/resource"
@@ -380,5 +381,24 @@ spec:
 
 	if _, err := decodeTrainerObjects(resources); err == nil {
 		t.Fatal("decodeTrainerObjects() expected error for a malformed tolerations field, got nil")
+	}
+}
+
+// TestNCCLExecutionLockStaleAge_CoversSelfInstallWorstCase checks that
+// NCCLExecutionLockStaleAge stays ahead of the self-install path's own
+// worst case: the archive download, then waitForTrainerReady's CRD wait
+// and its two controller-ready waits (Trainer's own controller, then
+// JobSet's), all run before runNCCLTrainJob's first post-install lock
+// renewal. A change to any of those timeouts that closes this margin
+// should fail here, rather than let a same-run retry steal the lock from
+// an install that is still in progress.
+func TestNCCLExecutionLockStaleAge_CoversSelfInstallWorstCase(t *testing.T) {
+	worstCase := defaults.NCCLTrainerArchiveDownloadTimeout +
+		defaults.TrainerCRDEstablishedTimeout +
+		2*defaults.TrainerControllerReadyTimeout
+
+	if defaults.NCCLExecutionLockStaleAge <= worstCase {
+		t.Errorf("NCCLExecutionLockStaleAge (%s) must exceed the self-install worst case (%s)",
+			defaults.NCCLExecutionLockStaleAge, worstCase)
 	}
 }

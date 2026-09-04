@@ -87,25 +87,43 @@ func TestComponentManifestImagesAreFullyQualified(t *testing.T) {
 // these refs is delivered by admission-time digest or signature
 // verification at deploy time (#745) plus the upstream signing requests
 // filed under the supply-chain epic (#739).
-var imageDigestExemptions = map[string]string{
+// imageDigestExemption scopes an exemption to the manifest that carries
+// the reference: the exemption applies only when the walked path contains
+// Manifest, so another resource reusing the same tag elsewhere cannot ride
+// an existing exemption past the digest check.
+type imageDigestExemption struct {
+	// Manifest is a path substring under components/ that must appear in
+	// the manifest path for the exemption to apply.
+	Manifest string
+	Reason   string
+}
+
+var imageDigestExemptions = map[string]imageDigestExemption{
 	// NicClusterPolicy (network-operator AKS): repository/image/version
 	// triplet schema; no digest field.
-	"nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2":               "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555",
-	"nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.4.1": "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555",
-	"nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host":                    "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555",
+	"nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2":               {"network-operator/manifests/nic-cluster-policy-aks", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
+	"nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.4.1": {"network-operator/manifests/nic-cluster-policy-", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
+	"nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host":                    {"network-operator/manifests/nic-cluster-policy-aks", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
 
 	// Skyhook Package (nodewright-customizations no-op): shellscript package
 	// is pinned by tag only — `containerSHA` is not surfaced for this
 	// upstream image. nodewright-packages/* refs are digest-pinned via the
 	// Skyhook Package `containerSHA` field (issue #1031), folded into the
 	// extracted image ref as `@sha256:...` by pkg/bom.ExtractImagesFromYAML.
-	"ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1": "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224",
+	"ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1": {"nodewright-customizations/manifests/", "Skyhook Package CRD does not accept image digests; tracked via #745 and NVIDIA/nodewright#224"},
 
 	// cos-gpu-installer (gcp-driver-installer): node-local image preloaded on
 	// every COS node and referenced with imagePullPolicy: Never — there is no
 	// registry to pin a digest against, the "digest" differs per COS build,
 	// and the ref must never be mirrored or pulled. Issue #1716.
-	"cos-nvidia-installer:fixed": "COS-node-local preloaded image (imagePullPolicy: Never); no registry digest exists and it must not be mirrored; issue #1716",
+	"cos-nvidia-installer:fixed": {"gcp-driver-installer/manifests/", "COS-node-local preloaded image (imagePullPolicy: Never); no registry digest exists and it must not be mirrored; issue #1716"},
+
+	// NicClusterPolicy (network-operator OKE): same repository/image/version
+	// triplet schema as the AKS entries above — no digest field in the CRD.
+	"ghcr.io/mellanox/nvidia-k8s-ipam:v0.2.0":                         {"network-operator/manifests/nic-cluster-policy-oke-", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
+	"ghcr.io/k8snetworkplumbingwg/multus-cni:v4.2.1":                  {"network-operator/manifests/nic-cluster-policy-oke-", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
+	"ghcr.io/k8snetworkplumbingwg/plugins:v1.6.2-update.1":            {"network-operator/manifests/nic-cluster-policy-oke-", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
+	"ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin:v3.9.0": {"network-operator/manifests/nic-cluster-policy-oke-", "NicClusterPolicy CRD does not accept image digests; tracked via #745 and Mellanox/network-operator#2555"},
 }
 
 // TestComponentManifestImagesAreDigestPinned asserts that every image
@@ -151,8 +169,8 @@ func TestComponentManifestImagesAreDigestPinned(t *testing.T) {
 				t.Errorf("%s: image %q uses non-sha256 digest %q; ADR-006 requires @sha256:<digest>", p, img, ref.Digest)
 				continue
 			}
-			if reason, ok := imageDigestExemptions[img]; ok {
-				t.Logf("exempted: %s — %s", img, reason)
+			if exemption, ok := imageDigestExemptions[img]; ok && strings.Contains(p, exemption.Manifest) {
+				t.Logf("exempted: %s (%s) — %s", img, exemption.Manifest, exemption.Reason)
 				continue
 			}
 			t.Errorf("%s: image %q is not digest-pinned and not in the documented exemption set (recipes/manifest_images_test.go::imageDigestExemptions); per ADR-006 layer 2, append an @sha256:<digest> or add an exemption with a reason", p, img)
