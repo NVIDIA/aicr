@@ -69,11 +69,21 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   runtimeRequired: true
-  # Serialize reboots. This CR reboots to apply its kernel cmdline, and an
-  # omitted budget defaults to 100% — every matched node at once, which on a
-  # stock bundle is a whole-cluster concurrent reboot. Unconditional (not
-  # flag-gated) for the same reason rdma-netns-exclusive sets it: the safe
-  # value must not depend on the caller passing optional flags.
+  # Serialize this CR's reboots to one node at a time. An omitted budget
+  # defaults to 100% (createLegacyDefaultCompartment), i.e. every matched
+  # node rebooting together. Unconditional rather than flag-gated, for the
+  # same reason rdma-netns-exclusive sets it: the safe value must not
+  # depend on the caller passing an optional flag.
+  #
+  # SCALE LIMITATION: count: 1 costs N x (reboot time) to converge, which
+  # is fine for the small NVL72 clusters VR200 Preview targets and for
+  # rolling out gradually on a cluster already running work, but does not
+  # scale to hundreds of nodes. The nodewright maintainer's guidance for
+  # that case is a ramping deployment policy with a failure threshold
+  # rather than a fixed count — noting that runtimeRequired: true means
+  # workloads stay blocked on the last node for the whole rollout, so a
+  # ramp trades convergence time against how long that blocking lasts.
+  # Revisit if VR200 deployments grow past a rack.
   interruptionBudget:
     count: 1
   # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
