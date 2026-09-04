@@ -357,6 +357,7 @@ func TestEmbeddedAICRProvidedAccountingContract(t *testing.T) {
 			Value:    "system",
 			Effect:   corev1.TaintEffectNoSchedule,
 		}}),
+		config.WithAcceleratedNodeSelector(map[string]string{"nvidia.com/gpu.present": "true"}),
 	)))
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

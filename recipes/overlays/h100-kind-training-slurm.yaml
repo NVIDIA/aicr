@@ -63,6 +63,11 @@ spec:
       dependencyRefs:
         - mariadb-operator
         - mariadb-operator-crds
+      overrides:
+        # Kind is a single node with no distinct system/accelerated pools to
+        # select between (see the matching slinky-slurm override below).
+        mariadb:
+          nodeSelector: {}
 
     - name: slinky-slurm-operator-crds
       type: Helm
@@ -253,6 +258,31 @@ spec:
           # Topograph's topology.conf updates never reach the running
           # slurmctld and topology-aware placement stays inactive.
           inplaceReconfigure: true
+          # Kind is a single node with no distinct system/accelerated pools
+          # to select between, so registry.yaml's requireNodeSelector guard
+          # (added for real multi-zone clouds) would otherwise force
+          # --system-node-selector/--accelerated-node-selector on a bundle
+          # where neither can mean anything. Opt out per component/
+          # bundler.go's classifySchedulingPaths: an explicit empty override
+          # on every declared nodeScheduling path (system below, accelerated
+          # via nodesets.slinky further down) is treated as "no selector
+          # needed here", not "forgot one".
+          podSpec:
+            nodeSelector: {}
+        restapi:
+          podSpec:
+            nodeSelector: {}
+        loginsets:
+          slinky:
+            podSpec:
+              nodeSelector: {}
+        accounting:
+          podSpec:
+            nodeSelector: {}
+        nodesets:
+          slinky:
+            podSpec:
+              nodeSelector: {}
 
   validation:
     conformance:
