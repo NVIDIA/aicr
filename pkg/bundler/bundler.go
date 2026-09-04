@@ -2845,15 +2845,17 @@ const draChartVersionAnnotation = header.Domain + "/gpu-operator-chart-version"
 // filtered resolved recipe before derived values are written; recipes that
 // disable either remain untouched.
 const (
-	gpuOperatorComponentName      = "gpu-operator"
-	draComponentName              = "nvidia-dra-driver-gpu"
-	draEvictionEnvName            = "NODE_LABEL_FOR_GPU_POD_EVICTION"
-	draEvictionNodeSelectorPath   = "kubeletPlugin.nodeSelector"
-	gpuOperatorDRAEvictionEnvPath = "driver.manager.env"
+	gpuOperatorComponentName       = "gpu-operator"
+	gpuOperatorOCPComponentName    = "gpu-operator-ocp"
+	gpuOperatorOCPOLMComponentName = "gpu-operator-ocp-olm"
+	draComponentName               = "nvidia-dra-driver-gpu"
+	draEvictionEnvName             = "NODE_LABEL_FOR_GPU_POD_EVICTION"
+	draEvictionNodeSelectorPath    = "kubeletPlugin.nodeSelector"
+	gpuOperatorDRAEvictionEnvPath  = "driver.manager.env"
 )
 
 var (
-	gpuOperatorComponentNames = []string{gpuOperatorComponentName, "gpu-operator-ocp"}
+	gpuOperatorComponentNames = []string{gpuOperatorComponentName, gpuOperatorOCPComponentName}
 	draComponentNames         = []string{draComponentName, "nvidia-dra-driver-gpu-ocp"}
 )
 
@@ -3261,6 +3263,31 @@ func (b *DefaultBundler) injectDRAChartVersionAnnotation(
 		// matches the "no chart pin, no rollout trigger" semantic and
 		// is exercised by the disabled-component unit tests.
 		return
+	}
+	if gpuOperatorComponentName == gpuOperatorOCPComponentName && gpuOperatorVersion == "" {
+		// gpu-operator-ocp is a ClusterPolicy CR, not a Helm chart, so
+		// ComponentRef.Version is never populated for it — the empty
+		// check below would always skip injection on OCP. Fall back to
+		// the OLM Subscription channel (gpu-operator-ocp-olm) as the
+		// rollout-trigger value instead.
+		//
+		// KNOWN LIMITATION: the channel pin (e.g. "v25.10") only
+		// changes on a channel re-pin, not on every operator update.
+		// With installPlanApproval: Automatic (the default —
+		// components/gpu-operator-ocp-olm/values.yaml), OLM can
+		// upgrade to newer CSVs inside the same channel — reloading
+		// the driver — without the channel string changing, so this
+		// annotation catches bundle-driven operator bumps (a recipe
+		// regenerated against a different channel) but NOT in-channel
+		// auto-upgrades. The stale-NVML gap this annotation exists to
+		// close (#973) remains open for that case on OCP. See #2135.
+		if olmValues, ok := componentValues[gpuOperatorOCPOLMComponentName]; ok {
+			if sub, ok := olmValues["subscription"].(map[string]any); ok {
+				if channel, ok := sub["channel"].(string); ok {
+					gpuOperatorVersion = channel
+				}
+			}
+		}
 	}
 	if gpuOperatorVersion == "" {
 		// gpu-operator is enabled but the resolver produced an empty
