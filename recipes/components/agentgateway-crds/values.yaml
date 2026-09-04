@@ -13,8 +13,9 @@
 # limitations under the License.
 
 # agentgateway CRDs Helm values
-# Installs agentgateway-specific CRDs (AgentgatewayBackend, AgentgatewayPolicy,
-# AgentgatewayParameters) in the agentgateway.dev/v1alpha1 API group.
+# Installs agentgateway-specific CRDs (AgentgatewayBackend, AgentgatewayModel,
+# AgentgatewayParameters, AgentgatewayPolicy) in the agentgateway.dev/v1alpha1
+# API group.
 #
 # Note: Standard Gateway API CRDs (GatewayClass, Gateway, HTTPRoute, GRPCRoute,
 # ReferenceGrant) and Gateway API Inference Extension CRDs (InferencePool,

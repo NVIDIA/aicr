@@ -34,6 +34,15 @@ resources:
 inferenceExtension:
   enabled: true
 
+# Must stay non-empty: the chart's default empty list binds its write role
+# (Deployments, DaemonSets, Secrets, ServiceAccounts) with a ClusterRoleBinding,
+# granting this network-facing controller privileged-DaemonSet-on-every-node
+# reach. AICR provisions one Gateway, in agentgateway-system, so scoping to it
+# costs nothing. Add any namespace where you place additional Gateways.
+rbac:
+  gatewayNamespaces:
+    - agentgateway-system
+
 # Source IP CIDRs allowed to reach the inference-gateway's public LoadBalancer.
 # When non-empty, these CIDRs are rendered into the generated Service's
 # spec.loadBalancerSourceRanges, which is honored by the AWS, GCP, Azure, and

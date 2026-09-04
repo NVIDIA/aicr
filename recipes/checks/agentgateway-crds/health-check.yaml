@@ -81,7 +81,9 @@ spec:
                   - status: "True"
     - name: validate-agentgateway-crds-established
       # agentgateway.dev/v1alpha1 CRDs installed by the agentgateway-crds
-      # Helm chart.
+      # Helm chart. AgentgatewayModel is asserted despite the app chart's
+      # `agentgatewayModels.enabled: false` default: that value gates the
+      # controller's support for the kind, not installation of the CRD.
       try:
         - assert:
             resource:
@@ -89,6 +91,15 @@ spec:
               kind: CustomResourceDefinition
               metadata:
                 name: agentgatewaybackends.agentgateway.dev
+              status:
+                (conditions[?type == 'Established']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: apiextensions.k8s.io/v1
+              kind: CustomResourceDefinition
+              metadata:
+                name: agentgatewaymodels.agentgateway.dev
               status:
                 (conditions[?type == 'Established']):
                   - status: "True"
