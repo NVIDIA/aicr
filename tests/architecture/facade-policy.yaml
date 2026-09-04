@@ -1,0 +1,436 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+version: 1
+facade:
+  - pkg/client/v1
+infrastructure:
+  pkg/defaults: "Centralized timeout, size, and configuration constants; carries no business logic."
+  pkg/deprecation: "Deprecation-notice HTTP header helpers; carries no business logic."
+  pkg/errors: "Structured error codes and wrapping used throughout the codebase; carries no business logic."
+  pkg/header: "HTTP header and profile-API-version constants/helpers; carries no business logic."
+  pkg/logging: "slog logger construction and configuration (level, format, color); carries no business logic."
+  pkg/serializer: "Output marshaling (YAML/JSON/table), deterministic encoding, and output-destination plumbing including ConfigMap writing; makes no recipe/bundle/validation decisions."
+constrained:
+  pkg/bundler:
+    reason: >-
+      HTTP wire-format helpers for the REST /v1/bundle endpoint: decoding the
+      bundle request body, streaming the zip response, and enumerating
+      allowed query parameters. This is request/response marshaling for one
+      HTTP handler, not recipe or bundle resolution -- the facade's
+      MakeBundle takes already-decoded Go values, not an *http.Request.
+    permanent: true
+    symbols:
+      ParseBundleConfig: behavioral
+      StreamZipResponseContext: behavioral
+      SupportedBundleQueryParameters: behavioral
+  pkg/bundler/attestation:
+    reason: >-
+      Two legitimate uses. First, pkg/client/v1.BundleAttester and
+      BundleOptions.OIDCResolve are transparent aliases of this package's
+      Attester and OIDC-resolve types, so any caller populating those facade
+      fields calls the concrete constructors (ResolveAttesterLazy,
+      ResolveAttester, SelectOIDCSource, FindBinaryAttestation) directly --
+      that is Go alias identity, not a bypass, and it is the same pattern as
+      pkg/bundler/result below. Second, the CLI's pre-signing keyless-OIDC
+      disclosure banner needs the same OIDC-source classification before
+      MakeBundle runs, which is inherently interactive CLI UX the facade has
+      no reason to expose.
+    permanent: true
+    symbols:
+      Attester: type
+      BundleMetadataPaths: behavioral
+      FindBinaryAttestation: behavioral
+      OIDCSourceKind.Interactive: behavioral
+      ResolveAttester: behavioral
+      ResolveAttesterLazy: behavioral
+      ResolveOptions: type
+      SelectOIDCSource: behavioral
+  pkg/bundler/checksum:
+    reason: >-
+      Local-disk staging and verification of an already-generated, on-disk
+      bundle directory before it is copied into a caller-visible output path
+      or OCI workspace (stage, verify, copy, re-verify, publish).
+      MakeBundle returns an in-memory/on-disk artifact; reconciling exactly
+      what MakeBundle wrote with what later gets attested and published is
+      filesystem safety the facade's callers own, not recipe or bundle
+      resolution.
+    permanent: true
+    symbols:
+      Inventory: type
+      Inventory.Open: behavioral
+      Inventory.RelativeDirectories: behavioral
+      Inventory.RelativeFiles: behavioral
+      InventoryOptions: type
+      ReadAndVerifyBundle: behavioral
+      SHA256RawContext: behavioral
+      StageVerifiedBundle: behavioral
+  pkg/bundler/config:
+    reason: >-
+      Not a facade gap, on inspection of every one of the 53 call sites. Two
+      legitimate uses account for all of them. First, CLI and HTTP
+      flag/string parsing with no facade equivalent -- ParseDeployerType,
+      ParseNodeLabel, ParseTypedOverrides, ParseValueOverrides,
+      ParseValueOverridesJSON, ParseDynamicValues, ValidateAppName,
+      ValidateHTTPSURL, and GetDeployerTypes (for --deployer help text) --
+      converting raw --flag or query-param strings into typed values is
+      presentation-layer input parsing, not resolution. Second,
+      pkg/client/v1.BundleOptions.Config (aliased as BundleConfig) is a
+      documented escape hatch: see the "Two ways to supply the bundler
+      configuration" comment in pkg/client/v1/bundle.go. The facade's 18 flat
+      BundleOptions fields cover everything spec.bundle can express, but the
+      CLI has flags with no spec.bundle counterpart (Version, TargetRevision,
+      ReadinessHooks, Serial, Flux/OCI naming, typed value overrides), so it
+      builds a full *bundlercfg.Config via NewConfig(With*...) and hands it
+      to BundleOptions.Config, which wins outright over the flat fields by
+      design. Closing this would mean either adding a facade field for every
+      CLI-only flag with no spec.bundle equivalent, or giving up flag-string
+      parsing symmetry between the CLI and the config-driven path -- neither
+      is a resolution gap; both are tradeoffs already reasoned through when
+      BundleOptions was designed.
+    permanent: true
+    symbols:
+      ComponentEnabledKey: const
+      ComponentPath: type
+      Config: type
+      Config.VendorCharts: behavioral
+      DefaultFluxNamespace: const
+      DeployerArgoCD: const
+      DeployerArgoCDHelm: const
+      DeployerFlux: const
+      DeployerHelm: const
+      DeployerHelmfile: const
+      DeployerType: type
+      DeployerType.String: behavioral
+      GetDeployerTypes: behavioral
+      NewConfig: behavioral
+      NodeLabel: type
+      NodeLabel.String: behavioral
+      ParseDeployerType: behavioral
+      ParseDynamicValues: behavioral
+      ParseNodeLabel: behavioral
+      ParseTypedOverrides: behavioral
+      ParseValueOverrides: behavioral
+      ParseValueOverridesJSON: behavioral
+      TypedComponentPath: type
+      ValidateAppName: behavioral
+      ValidateHTTPSURL: behavioral
+      WithAcceleratedNodeSelector: behavioral
+      WithAcceleratedNodeTolerations: behavioral
+      WithAppName: behavioral
+      WithAttest: behavioral
+      WithBundleChartName: behavioral
+      WithBundleChartVersion: behavioral
+      WithCertificateIdentityRegexp: behavioral
+      WithDRAEvictionNodeLabel: behavioral
+      WithDeployer: behavioral
+      WithDynamicValuePaths: behavioral
+      WithEstimatedNodeCount: behavioral
+      WithFluxNamespace: behavioral
+      WithOCIParentNamespace: behavioral
+      WithOCISourceName: behavioral
+      WithReadinessHooks: behavioral
+      WithRepoURL: behavioral
+      WithSerial: behavioral
+      WithSharedStorageClass: behavioral
+      WithStorageClass: behavioral
+      WithSystemNodeSelector: behavioral
+      WithSystemNodeTolerations: behavioral
+      WithTargetRevision: behavioral
+      WithValueOverridePaths: behavioral
+      WithValueOverridesTypedPaths: behavioral
+      WithVendorCharts: behavioral
+      WithVersion: behavioral
+      WithWorkloadGateTaint: behavioral
+      WithWorkloadSelector: behavioral
+  pkg/bundler/result:
+    reason: >-
+      pkg/client/v1.BundleArtifact is a transparent alias of *result.Output
+      (type BundleArtifact = *result.Output), so calling Output.HasErrors()
+      or mutating Result.SetOCIMetadata() on the value MakeBundle returned is
+      calling the facade's own declared return type, not reaching around it.
+    permanent: true
+    symbols:
+      Output: type
+      Output.HasErrors: behavioral
+      Result.SetOCIMetadata: behavioral
+  pkg/collector:
+    reason: >-
+      In-pod agent-mode collection path only (AICR_AGENT_MODE=true). When the
+      CLI process IS the collection agent running inside the Job, it builds a
+      collector.Factory directly instead of orchestrating another Job --
+      Client.CollectSnapshot deploys a Job and deliberately does not expose
+      the collector internals a Job would need to run itself; this is
+      documented on the call site referencing "the Client.CollectSnapshot
+      godoc". Deploying a Job from inside a Job would nest indefinitely.
+    permanent: true
+    symbols:
+      NewDefaultFactory: behavioral
+      WithClusterConfigPath: behavioral
+      WithDiscoverNetwork: behavioral
+      WithKubeconfigPath: behavioral
+      WithMaxNodesPerEntry: behavioral
+      WithOS: behavioral
+  pkg/config:
+    reason: >-
+      A single audit-log line. root.go logs the concrete --data directory
+      resolved from spec.recipe.data via cfg.Unwrap().Recipe().DataDir(),
+      reading the exact field RecipeSource() (the facade method actually
+      used for resolution) already reads, so the log line can never disagree
+      with the source in use. Documented on the call site as
+      Config.Unwrap's raw-document escape hatch; adding a facade
+      RecipeDataDir() accessor for one log line was rejected as new public
+      API for a cleanup commit.
+    permanent: true
+    symbols:
+      AICRConfig.Recipe: behavioral
+      RecipeSpec.DataDir: behavioral
+  pkg/evidence/attestation:
+    reason: >-
+      Backs `aicr evidence sign <pointer>`, the second leg of a deliberate
+      two-phase publish/sign split for CI OIDC permission boundaries: a
+      contributor's CI job commits an unsigned pointer (via `--no-sign`)
+      without Fulcio egress, and a separately-scoped signing job later pulls
+      the referenced bundle, verifies the pointer, signs it, and patches the
+      pointer in place. This is a narrow, self-contained CI-permission
+      operation with no server counterpart; the facade's PublishEvidence
+      signs a bundle it just emitted in the same call, which is a different
+      operation from re-signing an already-pushed one from a committed
+      pointer.
+    permanent: true
+    symbols:
+      MainArtifactDescriptor: type
+      RelocatePointerToCanonicalContext: behavioral
+      SignExisting: behavioral
+      SignExistingOptions: type
+      ValidateSignablePointer: behavioral
+  pkg/evidence/cncf:
+    reason: >-
+      Acknowledged gap, not a settled design. cncf.Collector.Run is
+      cluster-touching business logic -- kubeconfig handling, feature
+      sections, a --no-cluster short-circuit -- invoked directly from
+      pkg/cli. pkg/client/v1's own doc comment on Config.CNCFEvidenceOptions
+      states plainly that there is no Client.Emit* for CNCF evidence today:
+      the facade emits no CNCF evidence at all, and validateFlagCombinations,
+      cncf.New, and runCNCFSubmission read the config and run the collector
+      directly because nothing else exists to call. That is a self-declared
+      absence of facade coverage, not a permanent exclusion.
+    tracking: "#2561"
+    symbols:
+      Collector.Run: behavioral
+      CollectorOption: type
+      IsValidFeature: behavioral
+      New: behavioral
+      NewCollector: behavioral
+      Renderer.Render: behavioral
+      ValidFeatures: var
+      WithAllocationPolicy: behavioral
+      WithFeatures: behavioral
+      WithKubeconfig: behavioral
+      WithOutputDir: behavioral
+  pkg/evidence/verifier:
+    reason: >-
+      Same `aicr evidence sign <pointer>` two-phase CI publish/sign split as
+      pkg/evidence/attestation above: pulling and materializing the bundle a
+      committed pointer references (LoadAndValidatePointerContext,
+      MaterializeBundle) so it can be verified and re-signed. Narrow,
+      self-contained, no server counterpart.
+    permanent: true
+    symbols:
+      InputFormPointer: const
+      LoadAndValidatePointerContext: behavioral
+      MaterializeBundle: behavioral
+      MaterializedBundle.Cleanup: behavioral
+      VerifyOptions: type
+  pkg/health:
+    reason: >-
+      Client.ComputeHealth returns *health.Report un-wrapped (no facade
+      DTO), so the CLI's catalog-listing table formatter (healthStatus,
+      healthCoverage, compactCoverage) reads health.StructureHealth and
+      health.DeclaredCoverage fields directly to render it -- the same
+      "facade returns the underlying package's own type" pattern as
+      BundleArtifact and BundleAttester above, just without a declared type
+      alias.
+    permanent: true
+    symbols:
+      DeclaredCoverage: type
+      DeclaredCoverage.Compact: behavioral
+      StructureHealth: type
+  pkg/mirror:
+    reason: >-
+      Mirror-inventory listing and rendering (`aicr mirror list`) has no
+      facade equivalent. This is the epic's named open exception.
+    tracking: "#2025"
+    symbols:
+      ChartRef: type
+      ComponentImages: type
+      Format: type
+      FormatYAML: const
+      MirrorList: type
+      MirrorListMetadata: type
+      Render: behavioral
+      SupportedFormats: behavioral
+  pkg/oci:
+    reason: >-
+      The CLI's own OCI push/publish pipeline for `--output oci://...`:
+      parsing the --output target, allocating a private workspace, and
+      packaging and pushing the generated bundle directory as an OCI
+      artifact after MakeBundle returns it. MakeBundle's job ends at
+      producing the on-disk artifact; pushing that artifact to a registry is
+      an output-target concern parallel to writing a zip file or a plain
+      directory, which the CLI's bundle-output-target abstraction already
+      owns for every output kind.
+    permanent: true
+    symbols:
+      EnsureScheme: behavioral
+      HelmChartOptions: type
+      HelmChartVersionFromTag: behavioral
+      NewPrivateWorkspace: behavioral
+      OutputConfig: type
+      PackageAndPush: behavioral
+      PackageAndPushHelmChart: behavioral
+      PackageAndPushResult: type
+      ParseOutputTarget: behavioral
+      Reference: type
+      Reference.ChartName: behavioral
+      Reference.ParentNamespace: behavioral
+      Reference.WithTag: behavioral
+      URIScheme: const
+      Workspace: type
+      Workspace.Close: behavioral
+      Workspace.Path: behavioral
+  pkg/recipe:
+    reason: >-
+      Two deliberate, documented patterns, not a gap. First, wire-format
+      stability: the REST recipe request/response bodies, the bundle
+      request body, and recipe.yaml's own shape are kept as the literal
+      upstream pkg/recipe.Criteria / RecipeResult / QueryRequest types --
+      comments call this out explicitly ("the upstream pkg/recipe.RecipeResult
+      JSON", "operate on the upstream pkg/recipe.RecipeResult") -- so the CLI
+      and server build, decode, and validate them directly rather than
+      through a redundant facade DTO that could drift from the wire schema.
+      pkg/client/v1.CriteriaRegistry is even a transparent alias of
+      recipe.CriteriaRegistry for exactly this reason, distinct from
+      pkg/client/v1's own non-aliased Criteria struct used for the
+      resolution entry points. Second, CLI flag-string parsing with no
+      facade equivalent -- GetCriteria*Types (flag help/choices),
+      ParseAccountingMode, ParseRuntimeInventoryMode, AccountingModes,
+      RuntimeInventoryModes. Wrapping either would add a parallel type or a
+      parsing shim purely to satisfy this gate, at the cost of the
+      wire-format guarantee the current design buys.
+    permanent: true
+    symbols:
+      AccountingModes: behavioral
+      AllowLists.ValidateCriteria: behavioral
+      Criteria: type
+      Criteria.FillUnsetWithAny: behavioral
+      Criteria.Specificity: behavioral
+      Criteria.String: behavioral
+      Criteria.ValidateWithRegistry: behavioral
+      CriteriaRegistry: type
+      CriteriaRegistry.ParseAccelerator: behavioral
+      CriteriaRegistry.ParseIntent: behavioral
+      CriteriaRegistry.ParseOS: behavioral
+      CriteriaRegistry.ParsePlatform: behavioral
+      CriteriaRegistry.ParseService: behavioral
+      CriteriaRegistry.SetStrict: behavioral
+      DecodeRecipeResult: behavioral
+      GetCriteriaAcceleratorTypes: behavioral
+      GetCriteriaIntentTypes: behavioral
+      GetCriteriaOSTypes: behavioral
+      GetCriteriaPlatformTypes: behavioral
+      GetCriteriaServiceTypes: behavioral
+      NewCriteria: behavioral
+      NewCriteriaRegistry: behavioral
+      ParseAccountingMode: behavioral
+      ParseCriteriaFromRequest: behavioral
+      ParseRuntimeInventoryMode: behavioral
+      QueryRequest: type
+      RecipeResult: type
+      RecipeResultKind: const
+      RuntimeInventoryModes: behavioral
+  pkg/snapshotter:
+    reason: >-
+      Three uses, none a resolution gap. First, CLI flag-string parsing with
+      no facade equivalent (ParseNodeSelectors, ParseTolerations, ParseTaint,
+      ParseResourceList, DefaultTolerations). Second, the same in-pod
+      agent-mode collection path as pkg/collector (AgentConfig,
+      SnapshotDelivery, NodeSnapshotter, DeliverSnapshot) that
+      Client.CollectSnapshot deliberately does not expose. Third,
+      `--add-roles-to-service-account`, a standalone RBAC-manifest-writing
+      utility (AgentRolesConfig, AgentRolesResult, WriteAgentRoleManifests)
+      that touches no cluster and performs no recipe or bundle resolution.
+    permanent: true
+    symbols:
+      AgentRolesConfig: type
+      AgentRolesResult: type
+      DefaultTolerations: behavioral
+      DeliverSnapshot: behavioral
+      NodeSnapshotter: type
+      NodeSnapshotter.Measure: behavioral
+      ParseNodeSelectors: behavioral
+      ParseResourceList: behavioral
+      ParseTaint: behavioral
+      ParseTolerations: behavioral
+      SnapshotDelivery: type
+      WriteAgentRoleManifests: behavioral
+  pkg/trust:
+    reason: >-
+      `aicr trust` manages local Sigstore trust-root material and signing
+      config directly; not modeled by the facade. Grouped with pkg/mirror
+      under the epic's #2025 open exception.
+    tracking: "#2025"
+    symbols:
+      GetSigningConfig: behavioral
+      SigningConfigJSON: behavioral
+      Update: behavioral
+  pkg/validator:
+    reason: >-
+      CLI-only. ParsePhaseSelection and Phase parse the --phase flag (no
+      facade equivalent for flag-string parsing), and WarnPhasesAgainstRecipe
+      is an advisory pre-flight warning printed before Client.ValidateState
+      runs, not a validation decision itself.
+    permanent: true
+    symbols:
+      ParsePhaseSelection: behavioral
+      Phase: type
+      WarnPhasesAgainstRecipe: behavioral
+  pkg/validator/ctrf:
+    reason: >-
+      IsFailingStatus classifies a CTRF (ctrf.io) test-report status string
+      for the CLI's --output ctrf report writer -- output-format-specific
+      rendering, not validation logic.
+    permanent: true
+    symbols:
+      IsFailingStatus: behavioral
+  pkg/validator/labels:
+    reason: >-
+      RunID is a Kubernetes label key used only to compose a
+      copy-pasteable `kubectl logs -l <key>=<runID>` hint in a log line --
+      CLI UX, not a validation decision.
+    permanent: true
+    symbols:
+      RunID: const
+  pkg/validator/v1:
+    reason: >-
+      GenerateRunID lets the CLI mint the validation run ID before calling
+      Client.ValidateState so the same ID also drives its own progress and
+      log-tail UX (it is then supplied back to the facade via
+      WithValidationRunID). ResolveGPUAllocationPolicy feeds the CNCF
+      evidence collector's WithAllocationPolicy -- the same CLI-only
+      CNCF-evidence path tracked under pkg/evidence/cncf above (#2561).
+    permanent: true
+    symbols:
+      GenerateRunID: behavioral
+      ResolveGPUAllocationPolicy: behavioral

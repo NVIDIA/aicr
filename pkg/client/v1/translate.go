@@ -69,6 +69,7 @@ func toInternalAgentConfig(cfg *AgentConfig) *snapshotter.AgentConfig {
 		AKSGPUPoolsPath:    cfg.AKSGPUPoolsPath,
 		RunID:              cfg.RunID,
 		NameBase:           cfg.NameBase,
+		OKEAddonsPath:      cfg.OKEAddonsPath,
 	}
 }
 

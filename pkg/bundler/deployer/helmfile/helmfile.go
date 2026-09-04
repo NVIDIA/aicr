@@ -145,6 +145,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	writeResult, err := localformat.Write(ctx, localformat.Options{
 		OutputDir:              outputDir,
 		Components:             lfComponents,
+		AICRVersion:            g.Version,
 		ComponentPreManifests:  g.ComponentPreManifests,
 		ComponentPostManifests: g.ComponentPostManifests,
 		VendorCharts:           g.VendorCharts,

@@ -46,8 +46,20 @@ runs:
         # --auto: Non-interactive mode (auto-yes to all prompts)
         # --skip-go: Go is set up by actions/setup-go
         # --skip-docker: Docker is pre-installed on GitHub runners
+        # --upgrade: CI must run the versions pinned in .settings.yaml, not
+        #   whatever binary happens to be on the box. Without it, setup-tools'
+        #   guards are presence-only (`command_exists kind`) and keep any
+        #   existing binary regardless of version. Two sources feed those
+        #   stale binaries: the runner image, and the `restore-keys:` prefix
+        #   fallback above, which restores tools from an older cache whenever
+        #   .settings.yaml changes the exact key. That silently pinned E2E to
+        #   kind v0.31.0 against a v0.33.0 pin, and v0.31.0 emits a
+        #   kubeadm.k8s.io/v1beta3 ClusterConfiguration that kubeadm 1.37 (in
+        #   kindest/node:v1.37.0) rejects -- breaking cluster-create on main.
+        #   Six other pins were being ignored the same way, including helm
+        #   v3.20.0 against the v4.2.4 pin.
         chmod +x tools/setup-tools
-        AUTO_MODE=true ./tools/setup-tools --skip-go --skip-docker
+        AUTO_MODE=true ./tools/setup-tools --skip-go --skip-docker --upgrade
 
     - name: Report tool installations
       shell: bash

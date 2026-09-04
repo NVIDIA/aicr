@@ -31,6 +31,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/internal/allocmode"
@@ -1838,6 +1839,170 @@ func TestEnsureHFTokenSecret(t *testing.T) {
 		}
 		if _, err := client.CoreV1().Secrets(ns).Get(context.Background(), hfTokenSecretName, metav1.GetOptions{}); err == nil {
 			t.Error("stale HF token secret should be deleted when HF_TOKEN is unset")
+		}
+	})
+}
+
+// TestEnsureNamespace covers namespace adoption: a fresh namespace is
+// created and labeled, an existing one is reused only if it carries our
+// ownership labels, and a create-race winner (AlreadyExists) is read back
+// and held to the same ownership check, including waiting out a winner
+// that's already terminating.
+func TestEnsureNamespace(t *testing.T) {
+	const ns = "aicr-inference-perf-deadbeef"
+	const component = labels.ValueInferencePerf
+
+	t.Run("creates a fresh namespace", func(t *testing.T) {
+		client := fake.NewClientset()
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Labels[labels.ManagedBy] != labels.ValueValidator || got.Labels[labels.Component] != component {
+			t.Errorf("created namespace labels = %v, want ManagedBy/Component set", got.Labels)
+		}
+		if !created {
+			t.Error("expected created=true for a brand new namespace")
+		}
+	})
+
+	t.Run("reuses an existing namespace it owns", func(t *testing.T) {
+		owned := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{
+			labels.ManagedBy: labels.ValueValidator, labels.Component: component,
+		}}}
+		client := fake.NewClientset(owned)
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Name != ns {
+			t.Errorf("got namespace %q, want %q", got.Name, ns)
+		}
+		if created {
+			t.Error("expected created=false for a reused namespace")
+		}
+	})
+
+	t.Run("refuses to adopt an existing namespace it doesn't own", func(t *testing.T) {
+		foreign := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+		client := fake.NewClientset(foreign)
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		if _, _, err := ensureNamespace(ctx, ns, component); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+			t.Errorf("got %v, want ErrCodeConflict", err)
+		}
+	})
+
+	t.Run("refuses to adopt an unowned create-race winner", func(t *testing.T) {
+		client := fake.NewClientset()
+		client.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			createAction, ok := action.(k8stesting.CreateAction)
+			obj, objOK := createAction.GetObject().(*v1.Namespace)
+			if !ok || !objOK || obj.Name != ns {
+				return false, nil, nil
+			}
+			// A concurrent, unrelated caller won the race to create ns first.
+			winner := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+			if err := client.Tracker().Add(winner); err != nil {
+				return true, nil, err
+			}
+			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
+		})
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		if _, _, err := ensureNamespace(ctx, ns, component); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+			t.Errorf("got %v, want ErrCodeConflict", err)
+		}
+	})
+
+	t.Run("adopts an owned create-race winner without claiming to have created it", func(t *testing.T) {
+		client := fake.NewClientset()
+		client.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			createAction, ok := action.(k8stesting.CreateAction)
+			obj, objOK := createAction.GetObject().(*v1.Namespace)
+			if !ok || !objOK || obj.Name != ns {
+				return false, nil, nil
+			}
+			// A concurrent caller using the same labels won the race.
+			winner := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{
+				labels.ManagedBy: labels.ValueValidator, labels.Component: component,
+			}}}
+			if err := client.Tracker().Add(winner); err != nil {
+				return true, nil, err
+			}
+			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
+		})
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Name != ns {
+			t.Errorf("got namespace %q, want %q", got.Name, ns)
+		}
+		if created {
+			t.Error("expected created=false: a concurrent caller's Create won the race, not ours")
+		}
+	})
+
+	t.Run("waits for a terminating create-race winner then creates its own", func(t *testing.T) {
+		client := fake.NewClientset()
+		var seeded bool
+		client.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			createAction, ok := action.(k8stesting.CreateAction)
+			obj, objOK := createAction.GetObject().(*v1.Namespace)
+			if !ok || !objOK || obj.Name != ns || seeded {
+				return false, nil, nil // seeded: the winner is gone, let the retry Create through.
+			}
+			seeded = true
+			now := metav1.Now()
+			winner := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name: ns, DeletionTimestamp: &now, Finalizers: []string{"kubernetes"},
+			}}
+			if err := client.Tracker().Add(winner); err != nil {
+				return true, nil, err
+			}
+			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
+		})
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			_ = client.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
+		}()
+
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("expected the retry to succeed once the winner finished terminating, got: %v", err)
+		}
+		if got.DeletionTimestamp != nil {
+			t.Error("returned namespace is still terminating")
+		}
+		if !created {
+			t.Error("expected created=true: our own Create landed after the prior winner finished terminating")
+		}
+	})
+
+	t.Run("waits for a pre-existing terminating namespace then creates its own", func(t *testing.T) {
+		now := metav1.Now()
+		terminating := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name: ns, DeletionTimestamp: &now, Finalizers: []string{"kubernetes"},
+		}}
+		client := fake.NewClientset(terminating)
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			_ = client.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
+		}()
+
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("expected creation to succeed once the terminating namespace finished deleting, got: %v", err)
+		}
+		if got.Labels[labels.ManagedBy] != labels.ValueValidator || got.Labels[labels.Component] != component {
+			t.Errorf("created namespace labels = %v, want ManagedBy/Component set", got.Labels)
+		}
+		if !created {
+			t.Error("expected created=true: our own Create landed after the pre-existing namespace finished terminating")
 		}
 	})
 }

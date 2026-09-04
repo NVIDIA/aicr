@@ -164,7 +164,13 @@ func TestGenerate_Scenarios(t *testing.T) {
 				},
 				Version: testBundlerVersion,
 			},
-			goldens: []string{"helmfile.yaml"},
+			// The generated Chart.yaml is pinned too: it is the only
+			// artifact carrying testBundlerVersion, so a regression that
+			// stopped forwarding Generator.Version into
+			// localformat.Options.AICRVersion would silently downgrade
+			// every wrapper to the dev chart version with no other
+			// golden moving. See ADR-021 Decision 7.
+			goldens: []string{"helmfile.yaml", filepath.Join("001-node-prep", "Chart.yaml")},
 		},
 	}
 	for _, tc := range scenarios {

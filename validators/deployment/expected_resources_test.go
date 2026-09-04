@@ -23,6 +23,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
+	"github.com/NVIDIA/aicr/validators/helper"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -1566,7 +1567,7 @@ func TestRDMAFabricProbeCoverage_DisclosesCordoned(t *testing.T) {
 	)
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err != nil {
 		t.Fatalf("rdmaFabricProbeCoverage() error = %v, want nil (the one schedulable RDMA node carries the fabric)", err)
 	}
@@ -1595,7 +1596,7 @@ func TestRDMAFabricProbeCoverage_CountsCordonedOnFailClosed(t *testing.T) {
 	)
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err == nil {
 		t.Fatal("expected a fail-closed error while the fabric is absent, got nil")
 	}

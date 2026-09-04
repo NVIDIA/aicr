@@ -57,12 +57,14 @@ import (
 //
 // idx is the NNN- prefix index. ctx threads through the puller call;
 // puller is REQUIRED to be non-nil — caller picks the implementation.
+// stamp carries the two versions written into the wrapper Chart.yaml.
 func writeVendoredHelmFolder(
 	ctx context.Context,
 	outputDir, dir string,
 	idx int,
 	c Component,
 	puller ChartPuller,
+	stamp chartStamp,
 ) (Folder, VendorRecord, error) {
 
 	if puller == nil {
@@ -118,7 +120,12 @@ func writeVendoredHelmFolder(
 	if subchart == "" {
 		subchart = c.Name
 	}
-	chartYAML, err := renderWrapperChartYAML(c.Name, c.Name, subchart, deployer.NormalizeVersionWithDefault(c.Version))
+	chartYAML, err := renderWrapperChartYAML(wrapperSubchart{
+		Name:         c.Name,
+		Parent:       c.Name,
+		ChartName:    subchart,
+		ChartVersion: deployer.NormalizeVersionWithDefault(c.Version),
+	}, stamp)
 	if err != nil {
 		return Folder{}, VendorRecord{}, err
 	}

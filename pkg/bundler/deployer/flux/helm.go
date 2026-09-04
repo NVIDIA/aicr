@@ -200,8 +200,37 @@ func (g *Generator) generateHelmComponent(ref recipe.ComponentRef, compDir strin
 
 // ChartData carries data for generating a local Chart.yaml.
 type ChartData struct {
-	Name    string
-	Version string
+	Name string
+	// AICRVersion is the AICR build that produced the chart; it lands in
+	// `version:` and the aicr.run/generated-by annotation. Set it through
+	// deployer.NormalizeChartVersion — Helm validates `version:` as SemVer 2
+	// and rejects the "dev" an unstamped build reports.
+	AICRVersion string
+	// ComponentVersion is the free-form version of the payload the chart
+	// carries; it lands in `appVersion:` and the aicr.run/component-version
+	// annotation. See ADR-021 Decision 7 for why the two are separate.
+	ComponentVersion string
+}
+
+// chartDataFor builds the Chart.yaml stamp for a generated chart named
+// dirName that carries content pinned at payloadVersion.
+//
+// Mirrors localformat's stampFor, which does the same job for the other four
+// deployers: `version:` tracks the AICR build that generated the wrapper,
+// while appVersion and the aicr.run/component-version annotation track the
+// payload. A chart whose component has no upstream pin — a manifest-only
+// component, or a -pre / -post wrapper of one — carries only AICR-authored
+// recipe content, so AICR's version is the honest answer for both.
+func (g *Generator) chartDataFor(dirName, payloadVersion string) ChartData {
+	aicrVersion := deployer.NormalizeChartVersion(g.Version)
+	if payloadVersion == "" {
+		payloadVersion = aicrVersion
+	}
+	return ChartData{
+		Name:             dirName,
+		AICRVersion:      aicrVersion,
+		ComponentVersion: payloadVersion,
+	}
 }
 
 // generateManifestHelmChart packages manifest templates as a local Helm chart
@@ -210,7 +239,11 @@ type ChartData struct {
 // it emits an ArtifactGenerator + ExternalArtifact pair and uses spec.chartRef.
 // Returns (wroteConfigMap, extraResourcePaths, error). extraResourcePaths
 // contains the ArtifactGenerator file path when in OCI mode, nil otherwise.
-func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, compDir string,
+//
+// payloadVersion is the originating component's upstream pin, stamped into
+// the generated chart's appVersion and aicr.run/component-version. Empty for
+// a manifest-only component, which has no upstream pin — see chartDataFor.
+func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, compDir, payloadVersion string,
 	manifests map[string][]byte, gitSources map[string]*GitRepoSourceData,
 	dependsOn []DependsOnRef, output *deployer.Output) (bool, []string, error) {
 
@@ -251,7 +284,7 @@ func (g *Generator) generateManifestHelmChart(compName, dirName, namespace, comp
 	}
 
 	// Write Chart.yaml.
-	if err := writeTemplate(output, chartTemplate, ChartData{Name: dirName, Version: "0.1.0"},
+	if err := writeTemplate(output, chartTemplate, g.chartDataFor(dirName, payloadVersion),
 		compDir, fileChart,
 		fmt.Sprintf("failed to write %s for %s", fileChart, compName)); err != nil {
 		return false, nil, err
@@ -383,7 +416,14 @@ func (g *Generator) generateVendoredHelmComponent(ctx context.Context, ref recip
 
 	// Write wrapper Chart.yaml declaring the upstream as a dependency.
 	version := deployer.NormalizeVersionWithDefault(ref.Version)
-	wrapperYAML, err := localformat.RenderWrapperChartYAML(ref.Name, ref.Name, chartName, version)
+	wrapperYAML, err := localformat.RenderWrapperChartYAML(localformat.WrapperChartInput{
+		Name:           ref.Name,
+		Parent:         ref.Name,
+		ChartName:      chartName,
+		ChartVersion:   version,
+		AICRVersion:    g.Version,
+		PayloadVersion: ref.Version,
+	})
 	if err != nil {
 		return false, localformat.VendorRecord{}, nil, err
 	}

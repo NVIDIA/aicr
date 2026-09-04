@@ -46,7 +46,7 @@ For pipelines and platforms that call AICR programmatically or host
 | Add or modify recipe metadata | [Recipe Development](integrator/recipe-development.md) |
 | Verify artifacts (SLSA, SBOM, attestations) | [Supply Chain Verification](integrator/supply-chain-verification.md) |
 | Ship custom validators via `--data` | [Validator Extension](integrator/validator-extension.md) |
-| Cloud-specific GPU setup | [AKS](integrator/aks-gpu-setup.md), [GKE](integrator/gke-gpu-setup.md), [EKS networking](integrator/eks-dynamo-networking.md), [GKE networking](integrator/gke-tcpxo-networking.md), [Talos](integrator/talos-integration.md) |
+| Cloud-specific GPU setup | [AKS](integrator/aks-gpu-setup.md), [GKE](integrator/gke-gpu-setup.md), [OKE](integrator/oke-gpu-setup.md), [EKS networking](integrator/eks-dynamo-networking.md), [GKE networking](integrator/gke-tcpxo-networking.md), [Talos](integrator/talos-integration.md) |
 
 ### Contributor Guide
 

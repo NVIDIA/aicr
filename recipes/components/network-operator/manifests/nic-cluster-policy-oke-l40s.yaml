@@ -1,0 +1,87 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NicClusterPolicy for L40S OKE (OCI) SR-IOV RoCE.
+#
+# The network-operator Helm chart installs the operator + CRD but does not template
+# a NicClusterPolicy CR (values-oke-l40s.yaml sets deployCR: false). This manifest
+# creates it so the operator reconciles the RoCE fabric stack. Hand-rendered from
+# AOR's network-operator/nicclusterpolicy.yaml.tmpl (provider: oci branch, with
+# network.type == roce → nvIpam + secondaryNetwork included).
+#
+# OCI specifics (vs Forge IB): NO ofedDriver — OCI nodes carry host MOFED, consumed
+# by the GPU Operator driver via driver.rdma.useHostMofed (l40s-oke-ubuntu leaf). One
+# sriovDevicePlugin resource, nvidia.com/mlnxnics, selecting the OCI ConnectX VF
+# device IDs (101a = ConnectX-5 Ex VF, 101e = mlx5Gen VF). RoCE also needs nv-ipam
+# (VF IP allocation) + secondaryNetwork/multus (attach the VF into workload pods).
+# vendor 15b3 = Mellanox.
+apiVersion: mellanox.com/v1alpha1
+kind: NicClusterPolicy
+metadata:
+  name: nic-cluster-policy
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "5"
+    helm.sh/hook-delete-policy: before-hook-creation
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+spec:
+  # RoCE: allocate IPs for the RDMA VFs and wire them into pods via multus.
+  nvIpam:
+    image: nvidia-k8s-ipam
+    repository: ghcr.io/mellanox
+    version: v0.2.0
+    enableWebhook: false
+    containerResources:
+      - name: nv-ipam-node
+        requests:
+          cpu: 500m
+          memory: 1Gi
+        limits:
+          cpu: "1"
+          memory: 2Gi
+  secondaryNetwork:
+    cniPlugins:
+      image: plugins
+      repository: ghcr.io/k8snetworkplumbingwg
+      version: v1.6.2-update.1
+    multus:
+      image: multus-cni
+      repository: ghcr.io/k8snetworkplumbingwg
+      version: v4.2.1
+  sriovDevicePlugin:
+    image: sriov-network-device-plugin
+    repository: ghcr.io/k8snetworkplumbingwg
+    version: v3.9.0
+    config: |
+      {
+        "resourceList": [
+          {
+            "resourcePrefix": "nvidia.com",
+            "resourceName": "mlnxnics",
+            "selectors": {"isRdma":true,"vendors":["15b3"],"devices":["101a","101e"]}
+          }
+        ]
+      }
+  # Operator DaemonSet placement: system/monitoring nodes only (matches AOR).
+  deploymentTolerations:
+    - key: CriticalAddonsOnly
+      operator: Exists
+  tolerations:
+    # RDMA DaemonSets must land on tainted GPU nodes.
+    - key: nvidia.com/gpu
+      operator: Exists
+    - key: CriticalAddonsOnly
+      operator: Exists

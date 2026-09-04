@@ -34,22 +34,25 @@ func TestOKEPerformanceGoalsFollowTrainingInferencePattern(t *testing.T) {
 	}{
 		{
 			name:       "gb200-oke-training",
-			wantChecks: []string{"nccl-all-reduce-bw-nvls"},
+			wantChecks: []string{"nccl-all-reduce-bw-net", "nccl-all-reduce-bw-nvls"},
 			wantConstraints: map[string]string{
+				"nccl-all-reduce-bw-net":  ">= 40",
 				"nccl-all-reduce-bw-nvls": ">= 500",
 			},
 		},
 		{
 			name:       "gb200-oke-ubuntu-training",
-			wantChecks: []string{"nccl-all-reduce-bw-nvls"},
+			wantChecks: []string{"nccl-all-reduce-bw-net", "nccl-all-reduce-bw-nvls"},
 			wantConstraints: map[string]string{
+				"nccl-all-reduce-bw-net":  ">= 40",
 				"nccl-all-reduce-bw-nvls": ">= 500",
 			},
 		},
 		{
 			name:       "gb200-oke-ubuntu-training-kubeflow",
-			wantChecks: []string{"nccl-all-reduce-bw-nvls"},
+			wantChecks: []string{"nccl-all-reduce-bw-net", "nccl-all-reduce-bw-nvls"},
 			wantConstraints: map[string]string{
+				"nccl-all-reduce-bw-net":  ">= 40",
 				"nccl-all-reduce-bw-nvls": ">= 500",
 			},
 		},

@@ -300,6 +300,92 @@ The constraint path is `K8s.aks-gpu-pools.gpu-driver` in profile value
 constraints; `K8s.aks-gpu-pools.gpu-pool-count` and
 `K8s.aks-gpu-pools.gpu-pools` use the same non-item path form.
 
+## K8s oke-addons shape
+
+`K8s.oke-addons` projects the OKE `NvidiaGpuPlugin` cluster add-on's
+control-plane state for `gpuStack` profile qualification on the OKE family.
+Like `aks-gpu-pools`, it is not produced by a cluster collector: the
+projection is attached at the snapshot orchestration layer from the
+operator-supplied dump
+(`oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`)
+passed to `aicr snapshot --oke-addons` (merged
+controller-side in both agent Job mode and local mode). A missing, truncated,
+or malformed dump fails the command — a file error is never degraded into a
+"reading unavailable" measurement.
+
+```yaml
+type: K8s
+subtypes:
+  - subtype: oke-addons
+    data:
+      addon-count: 3
+      nvidia-gpu-plugin: installed
+```
+
+The fields are:
+
+- `nvidia-gpu-plugin` (`string`) — the add-on's normalized control-plane
+  state: `installed` (present with lifecycle state `ACTIVE`), `absent`
+  (missing from the dump — the shape produced when the add-on is removed),
+  or, for any other lifecycle state, the state preserved verbatim, lowercased
+  with an `addon-` prefix (e.g. `addon-deleting`, `addon-needs_attention`).
+  Always emitted.
+- `addon-count` (`int`) — the number of add-ons in the dump. Always emitted,
+  including `0`.
+
+Interpretation is fail-closed: `installed` and `absent` are the only values a
+declared `gpuStack` profile constraint accepts (`installed` qualifies
+`oci-managed`, `absent` qualifies `operator-managed`). The `addon-*` markers
+match no constraint, so profile-qualified resolution fails closed with the
+observed lifecycle state as the actual. When the subtype is absent (no
+`--oke-addons` dump), constraint evaluation reports the reading unavailable
+and fails closed rather than guessing an ownership mode.
+
+The constraint path is `K8s.oke-addons.nvidia-gpu-plugin` in profile value
+constraints; `K8s.oke-addons.addon-count` uses the same non-item path form.
+
+## K8s oke-legacy-plugin shape
+
+`K8s.oke-legacy-plugin` records in-cluster conflict evidence for OKE's
+legacy (pre-add-on) NVIDIA device plugin: the `nvidia-gpu-device-plugin`
+DaemonSet the OKE control plane ships into `kube-system` via the legacy
+Kubernetes addon-manager. Unlike `oke-addons`, this IS a cluster collector
+reading — the legacy DaemonSet is invisible to `oci ce cluster list-addons`,
+so the only way to observe it is the Kubernetes API (a read-only
+`apps/daemonsets` get in the agent's default ClusterRole).
+
+```yaml
+type: K8s
+subtypes:
+  - subtype: oke-legacy-plugin
+    data:
+      nvidia-gpu-device-plugin: none
+      daemonset: absent
+```
+
+The fields are:
+
+- `nvidia-gpu-device-plugin` (`string`) — the collapsed constraint reading:
+  `none` (the DaemonSet is absent, present without the
+  `addonmanager.kubernetes.io/mode: Reconcile` label, or present with
+  `desiredNumberScheduled: 0`), `active` (the labeled DaemonSet targets at
+  least one node), or `unknown` (the API could not be consulted — including
+  a snapshot taken without cluster access). Always emitted.
+- `daemonset` (`string`) — the uncollapsed detail: `absent`, `unlabeled`,
+  `disabled`, `active`, or `unknown`. Always emitted.
+
+Interpretation is fail-closed: `none` is the only value the `gpuStack`
+`operator-managed` constraint accepts — `active` means Oracle's legacy
+plugin would double-advertise `nvidia.com/gpu` alongside the GPU Operator's,
+and `unknown` means "could not look", which must never read as "not
+present". The `oci-managed` value deliberately carries no constraint on this
+reading: when the managed add-on is installed it reconciles the same
+DaemonSet name. When the subtype is absent entirely (a snapshot from an
+older aicr), constraint evaluation reports the reading unavailable and fails
+closed.
+
+The constraint path is `K8s.oke-legacy-plugin.nvidia-gpu-device-plugin`.
+
 ## NodeTopology shape
 
 `TypeNodeTopology` is a cluster-wide aggregate: one reading per distinct taint

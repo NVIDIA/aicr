@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **44**
-- Unique images: **98**
+- Unique images: **101**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -56,14 +56,14 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kueue | helm | kueue | 0.18.2 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.6.0 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.6.0 | 0 |
-| network-operator | helm | nvidia/network-operator | 26.4.1 | 5 |
+| network-operator | helm | nvidia/network-operator | 26.4.1 | 9 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.19.0 | 1 |
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
 | nodewright-customizations | manifest | — | — | 5 |
-| nodewright-operator | helm | nodewright | v0.17.1 | 3 |
+| nodewright-operator | helm | nodewright | v0.18.0 | 2 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
 | nvsentinel | helm | nvsentinel | v1.20.0 | 6 |
@@ -238,6 +238,10 @@ _No images extracted._
 ### network-operator
 
 - `docker.io/library/busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616`
+- `ghcr.io/k8snetworkplumbingwg/multus-cni:v4.2.1`
+- `ghcr.io/k8snetworkplumbingwg/plugins:v1.6.2-update.1`
+- `ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin:v3.9.0`
+- `ghcr.io/mellanox/nvidia-k8s-ipam:v0.2.0`
 - `nvcr.io/nvidia/cloud-native/network-operator:v26.4.1`
 - `nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
@@ -273,9 +277,8 @@ _No images extracted._
 
 ### nodewright-operator
 
-- `alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
-- `ghcr.io/nvidia/nodewright/operator:v0.17.0@sha256:1511449bf51f2844b6bb3a03bde3d5590caf2ca283e3e39c0745a8016af2132f`
-- `quay.io/brancz/kube-rbac-proxy:v0.15.0@sha256:2c7b120590cbe9f634f5099f2cbb91d0b668569023a81505ca124a5c437e7663`
+- `docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
+- `ghcr.io/nvidia/nodewright/operator:v0.18.0@sha256:49ace92de35703f6da84c75147e2f93803d8b70f4f48dc9ae5213f7a6788ddfb`
 
 ### nvidia-dra-driver-gpu
 

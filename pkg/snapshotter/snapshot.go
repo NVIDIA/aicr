@@ -63,6 +63,12 @@ type NodeSnapshotter struct {
 	// warning policy). Agent Job mode carries the equivalent field on
 	// AgentConfig and merges controller-side after retrieval.
 	AKSGPUPoolsPath string
+
+	// OKEAddonsPath, when set, points at an operator-supplied
+	// `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump. Same
+	// contract as AKSGPUPoolsPath: projected fail-loud into the K8s
+	// measurement's oke-addons subtype before any collector runs.
+	OKEAddonsPath string
 }
 
 // Measure collects configuration measurements and serializes the snapshot.
@@ -146,13 +152,20 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 	// any collector runs so a bad file fails the snapshot immediately —
 	// it must never ride the collectSafe degrade-to-warning policy below
 	// and masquerade as a snapshot whose reading is merely unavailable.
-	var aksGPUPools *measurement.Subtype
+	var projections []measurement.Subtype
 	if n.AKSGPUPoolsPath != "" {
 		subtype, err := k8s.ProjectAKSGPUPools(ctx, n.AKSGPUPoolsPath)
 		if err != nil {
 			return err
 		}
-		aksGPUPools = &subtype
+		projections = append(projections, subtype)
+	}
+	if n.OKEAddonsPath != "" {
+		subtype, err := k8s.ProjectOKEAddons(ctx, n.OKEAddonsPath)
+		if err != nil {
+			return err
+		}
+		projections = append(projections, subtype)
 	}
 
 	if n.Factory == nil {
@@ -254,8 +267,8 @@ func (n *NodeSnapshotter) measure(ctx context.Context) error {
 
 	_ = g.Wait() // Individual collector errors are logged and swallowed today; reserved for future cancel-on-error.
 
-	if aksGPUPools != nil {
-		attachAKSGPUPools(snap, *aksGPUPools)
+	for _, projection := range projections {
+		attachProviderProjection(snap, projection)
 	}
 
 	// Enforce GPU requirement if requested
@@ -366,11 +379,12 @@ func warnOnGPUPlacementMismatch(snap *Snapshot) {
 	)
 }
 
-// attachAKSGPUPools merges the operator-supplied AKS GPU pool projection
-// into the snapshot's K8s measurement. The projection is explicit input,
-// not cluster state, so a degraded collection (no K8s measurement at all)
-// still carries it — a minimal K8s measurement is created if needed.
-func attachAKSGPUPools(snap *Snapshot, subtype measurement.Subtype) {
+// attachProviderProjection merges an operator-supplied provider projection
+// (aks-gpu-pools, oke-addons) into the snapshot's K8s measurement. The
+// projection is explicit input, not cluster state, so a degraded
+// collection (no K8s measurement at all) still carries it — a minimal K8s
+// measurement is created if needed.
+func attachProviderProjection(snap *Snapshot, subtype measurement.Subtype) {
 	for _, m := range snap.Measurements {
 		if m != nil && m.Type == measurement.TypeK8s {
 			m.Subtypes = append(m.Subtypes, subtype)

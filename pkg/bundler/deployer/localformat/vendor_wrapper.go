@@ -37,6 +37,7 @@ import (
 	"embed"
 	"text/template"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -45,32 +46,80 @@ import (
 var wrapperChartTemplates embed.FS
 
 var wrapperChartTmpl = template.Must(
-	template.ParseFS(wrapperChartTemplates, "templates/wrapper-chart.yaml.tmpl"),
+	template.New("wrapper-chart.yaml.tmpl").
+		Funcs(deployer.TemplateFuncs).
+		ParseFS(wrapperChartTemplates, "templates/wrapper-chart.yaml.tmpl"),
 )
+
+// WrapperChartInput carries the fields stamped into a vendored component's
+// wrapper Chart.yaml. Grouped into a struct rather than passed positionally
+// because six same-typed strings are easy to transpose at a call site.
+type WrapperChartInput struct {
+	// Name is the wrapper chart name (== folder name without the NNN- prefix).
+	Name string
+	// Parent is the originating component name (== Name today, but kept
+	// distinct for symmetry with writeLocalHelmFolder).
+	Parent string
+	// ChartName and ChartVersion identify the vendored subchart and feed
+	// the wrapper's dependencies: entry.
+	ChartName    string
+	ChartVersion string
+	// AICRVersion is the raw AICR build version; it is normalized to a
+	// Helm-valid SemVer here, so callers may pass "dev" unchanged.
+	AICRVersion string
+	// PayloadVersion is the free-form version of the content the wrapper
+	// carries. Empty falls back to the normalized AICRVersion. See
+	// chartStamp for why the two are separate.
+	PayloadVersion string
+}
 
 // RenderWrapperChartYAML produces the wrapper Chart.yaml content for a
 // vendored component. Exported for deployers that build their own
 // vendored folder layout (e.g., flux).
-func RenderWrapperChartYAML(name, parent, chartName, chartVersion string) ([]byte, error) {
-	return renderWrapperChartYAML(name, parent, chartName, chartVersion)
+func RenderWrapperChartYAML(in WrapperChartInput) ([]byte, error) {
+	stamp := chartStamp{
+		AICRVersion:    deployer.NormalizeChartVersion(in.AICRVersion),
+		PayloadVersion: in.PayloadVersion,
+	}
+	if stamp.PayloadVersion == "" {
+		stamp.PayloadVersion = stamp.AICRVersion
+	}
+	return renderWrapperChartYAML(wrapperSubchart{
+		Name:         in.Name,
+		Parent:       in.Parent,
+		ChartName:    in.ChartName,
+		ChartVersion: in.ChartVersion,
+	}, stamp)
 }
 
-// renderWrapperChartYAML produces the wrapper Chart.yaml content for a
-// vendored component. Name is the wrapper chart name (== folder name
-// without the NNN- prefix); ChartName/ChartVersion identify the vendored
-// subchart; Parent is the originating component name (== Name today, but
-// kept distinct for symmetry with writeLocalHelmFolder).
-func renderWrapperChartYAML(name, parent, chartName, chartVersion string) ([]byte, error) {
+// wrapperSubchart is the identity half of WrapperChartInput — everything the
+// wrapper template needs that is not a version stamp.
+type wrapperSubchart struct {
+	Name         string
+	Parent       string
+	ChartName    string
+	ChartVersion string
+}
+
+// renderWrapperChartYAML executes the wrapper template against the subchart
+// identity plus an already-normalized stamp. Split from the exported entry
+// point so callers that derived the stamp from a Component (stampFor) do not
+// re-normalize it.
+func renderWrapperChartYAML(sub wrapperSubchart, stamp chartStamp) ([]byte, error) {
 	data := struct {
-		Name         string
-		Parent       string
-		ChartName    string
-		ChartVersion string
+		Name             string
+		Parent           string
+		ChartName        string
+		ChartVersion     string
+		AICRVersion      string
+		ComponentVersion string
 	}{
-		Name:         name,
-		Parent:       parent,
-		ChartName:    chartName,
-		ChartVersion: chartVersion,
+		Name:             sub.Name,
+		Parent:           sub.Parent,
+		ChartName:        sub.ChartName,
+		ChartVersion:     sub.ChartVersion,
+		AICRVersion:      stamp.AICRVersion,
+		ComponentVersion: stamp.PayloadVersion,
 	}
 	var buf bytes.Buffer
 	if err := wrapperChartTmpl.Execute(&buf, data); err != nil {

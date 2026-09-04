@@ -1,0 +1,18 @@
+# Test fixture for Example_workflow (issue #2029): a minimal snapshot whose
+# measurements are just enough for Client.CriteriaFromSnapshot to derive
+# service=eks (from K8s node.provider) and accelerator=h100 (from GPU
+# hardware.model). Intent is a recipe-author choice the cluster cannot
+# reveal, so the example layers it on top explicitly.
+kind: Snapshot
+apiVersion: aicr.run/v1alpha2
+measurements:
+  - type: K8s
+    subtypes:
+      - subtype: node
+        data:
+          provider: eks
+  - type: GPU
+    subtypes:
+      - subtype: hardware
+        data:
+          model: h100

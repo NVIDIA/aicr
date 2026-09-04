@@ -183,7 +183,7 @@ func TestVerifyRDMAFabricReady_Poll(t *testing.T) {
 			})
 			ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-			err := verifyRDMAFabricReady(ctx)
+			err := verifyRDMAFabricReady(ctx, helper.AKSRdmaSharedResource)
 			if tt.wantErrSub != "" {
 				if err == nil {
 					t.Fatalf("verifyRDMAFabricReady() error = nil, want error containing %q", tt.wantErrSub)
@@ -255,7 +255,7 @@ func TestVerifyRDMAFabricReady_EagerDisclosureFloor(t *testing.T) {
 			// pollUntilStable runs the probe synchronously in this goroutine, so
 			// the injected emit is never called concurrently — no lock needed.
 			var calls []emitCall
-			err := verifyRDMAFabricReadyEmit(ctx, func(validated, total int) {
+			err := verifyRDMAFabricReadyEmit(ctx, helper.AKSRdmaSharedResource, func(validated, total int) {
 				calls = append(calls, emitCall{validated, total})
 			})
 
@@ -290,7 +290,7 @@ func TestRDMAFabricProbe_FailsClosedOnListError(t *testing.T) {
 	})
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err == nil {
 		t.Fatal("expected an error when listing nodes fails, got nil (must fail closed)")
 	}
@@ -323,7 +323,7 @@ func TestRDMAFabricProbe_FailsClosedWithoutRDMANodes(t *testing.T) {
 	)
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err == nil {
 		t.Fatal("expected an error when no RDMA GPU nodes are present, got nil (must fail closed)")
 	}
@@ -352,7 +352,7 @@ func TestRDMAFabricProbe_ExcludesCordonedNonRDMAAndCPU(t *testing.T) {
 	)
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err != nil {
 		t.Fatalf("rdmaFabricProbeCoverage() error = %v, want nil (only the schedulable RDMA GPU node is required to carry the fabric)", err)
 	}
@@ -373,7 +373,7 @@ func TestRDMAFabricProbe_NonUniformCountFails(t *testing.T) {
 	)
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err == nil {
 		t.Fatal("expected an error on non-uniform fabric counts, got nil")
 	}
@@ -396,7 +396,7 @@ func TestRDMAFabricProbe_PassesWhenUniform(t *testing.T) {
 	)
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err != nil {
 		t.Fatalf("rdmaFabricProbeCoverage() error = %v, want nil (fabric uniform on all RDMA GPU nodes)", err)
 	}

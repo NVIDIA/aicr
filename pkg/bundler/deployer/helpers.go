@@ -16,12 +16,17 @@ package deployer
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"text/template"
 
+	"github.com/Masterminds/semver/v3"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -91,6 +96,20 @@ func WriteValuesFile(values map[string]any, baseDir, filename string) (string, i
 	return outputPath, int64(len(content)), nil
 }
 
+// TemplateFuncs is the FuncMap available to every deployer template,
+// including those rendered through GenerateFromTemplate.
+//
+// `q` emits a YAML double-quoted scalar. Quoting matters for any field Helm
+// unmarshals as a string: an unquoted `appVersion: 1.2` parses as a float and
+// fails the unmarshal, and a value carrying a quote character would break out
+// of a hand-written literal. strconv.Quote's escape vocabulary (\", \\, \n,
+// \xNN, \uNNNN) is a subset of what YAML's double-quoted style accepts, so
+// the result round-trips. Same reasoning as the %q quoting in the argocd-helm
+// deployer's Chart.yaml writer (#1034).
+var TemplateFuncs = template.FuncMap{
+	"q": strconv.Quote,
+}
+
 // GenerateFromTemplate renders a template and writes it to baseDir/filename.
 // It uses SafeJoin to verify the output path stays within baseDir.
 func GenerateFromTemplate(tmplContent string, data any, baseDir, filename string) (string, int64, error) {
@@ -99,7 +118,7 @@ func GenerateFromTemplate(tmplContent string, data any, baseDir, filename string
 		return "", 0, err
 	}
 
-	tmpl, err := template.New("template").Parse(tmplContent)
+	tmpl, err := template.New("template").Funcs(TemplateFuncs).Parse(tmplContent)
 	if err != nil {
 		return "", 0, errors.Wrap(errors.ErrCodeInternal, "failed to parse template", err)
 	}
@@ -130,6 +149,40 @@ func NormalizeVersionWithDefault(v string) string {
 	v = strings.TrimPrefix(v, "v")
 	if v == "" {
 		return "0.1.0"
+	}
+	return v
+}
+
+// NormalizeChartVersion coerces an AICR build version into a value Helm
+// accepts for a Chart.yaml `version:` field, stripping the 'v' prefix that
+// release tags carry inconsistently.
+//
+// Helm validates that field as SemVer 2 (chart.Metadata.Validate) and refuses
+// to load a chart whose version does not parse. An unstamped build reports
+// defaults.DevVersion ("dev"), which does not, so every non-SemVer input —
+// "dev", "stock-render-golden", "" — folds to defaults.DevChartVersion rather
+// than shipping a chart Helm will reject. Without that fold, `make dev-env`
+// and Tilt break on the first `helm install`.
+//
+// The parse is deliberately the lenient semver.NewVersion rather than
+// StrictNewVersion: it is the same call Helm makes when loading a chart, so
+// anything returned here will load. (helm lint is stricter and warns on a
+// partial version like "1.2"; AICR release tags are always full X.Y.Z, so
+// that case is theoretical.)
+func NormalizeChartVersion(v string) string {
+	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	if _, err := semver.NewVersion(v); err != nil {
+		// The fold is lossy: an unstamped build and a corrupted or
+		// hand-edited version both come out as DevChartVersion, so the
+		// stamped chart cannot tell them apart afterwards. Erroring here
+		// would block bundling over cosmetic metadata, so log instead —
+		// but only for the unexpected shapes, since "" and "dev" are the
+		// documented sentinels and warning on those would be noise.
+		if v != "" && v != defaults.DevVersion {
+			slog.Warn("chart version is not SemVer; stamping the dev placeholder instead",
+				"version", v, "stamped", defaults.DevChartVersion)
+		}
+		return defaults.DevChartVersion
 	}
 	return v
 }

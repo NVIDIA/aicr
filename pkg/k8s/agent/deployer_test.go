@@ -176,10 +176,11 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 			t.Fatalf("ClusterRole not found: %v", err)
 		}
 
-		// Default: nodes, pods, clusterpolicies, read-only Slinky CRs, and
-		// official MariaDB CRs.
-		if len(cr.Rules) != 5 {
-			t.Errorf("expected 5 rules, got %d", len(cr.Rules))
+		// Default: nodes, pods, clusterpolicies, read-only Slinky CRs,
+		// official MariaDB CRs, and read-only apps/daemonsets (OKE legacy
+		// device-plugin conflict evidence).
+		if len(cr.Rules) != 6 {
+			t.Errorf("expected 6 rules, got %d", len(cr.Rules))
 		}
 		ruleTests := []struct {
 			name      string
@@ -204,6 +205,12 @@ func TestDeployer_EnsureRBAC(t *testing.T) {
 				apiGroups: []string{mariaDBAPIGroup},
 				resources: []string{mariaDBResource},
 				verbs:     []string{verbList},
+			},
+			{
+				name:      "DaemonSets",
+				apiGroups: []string{"apps"},
+				resources: []string{"daemonsets"},
+				verbs:     []string{verbGet, verbList},
 			},
 		}
 		for _, tt := range ruleTests {

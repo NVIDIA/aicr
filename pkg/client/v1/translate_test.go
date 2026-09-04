@@ -259,9 +259,13 @@ func TestToInternalAgentConfig_ProjectsAKSGPUPoolsPath(t *testing.T) {
 	got := toInternalAgentConfig(&AgentConfig{
 		Namespace:       "gpu-operator",
 		AKSGPUPoolsPath: "/tmp/pools.json",
+		OKEAddonsPath:   "/tmp/addons.json",
 	})
 	if got.AKSGPUPoolsPath != "/tmp/pools.json" {
 		t.Fatalf("AKSGPUPoolsPath = %q, want /tmp/pools.json", got.AKSGPUPoolsPath)
+	}
+	if got.OKEAddonsPath != "/tmp/addons.json" {
+		t.Fatalf("OKEAddonsPath = %q, want /tmp/addons.json", got.OKEAddonsPath)
 	}
 	if got.Namespace != "gpu-operator" {
 		t.Fatalf("Namespace = %q, want gpu-operator", got.Namespace)

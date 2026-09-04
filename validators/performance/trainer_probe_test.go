@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -329,7 +330,7 @@ func TestApplyTrainerResources_RefusesForeignWebhookConfig(t *testing.T) {
 			trainerValidatingWebhookConfig, trainerValidatingWebhookName),
 	}
 
-	_, err := applyTrainerResources(context.Background(), client, newTrainerTestMapper(), objs)
+	_, err := applyTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs)
 	if err == nil {
 		t.Fatal("expected install to refuse overwriting a foreign webhook configuration")
 	}
@@ -362,7 +363,7 @@ func TestApplyTrainerResources_UpdatesOwnWebhookConfig(t *testing.T) {
 			trainerValidatingWebhookConfig, trainerValidatingWebhookName),
 	}
 
-	if _, err := applyTrainerResources(context.Background(), client, newTrainerTestMapper(), objs); err != nil {
+	if _, err := applyTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs); err != nil {
 		t.Fatalf("re-applying our own webhook configuration should succeed, got: %v", err)
 	}
 }

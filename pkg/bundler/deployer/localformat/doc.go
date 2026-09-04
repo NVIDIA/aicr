@@ -37,6 +37,25 @@
 // which bled component-type classification into every deployer. Chart.yaml
 // presence reduces that to a single on-disk signal every deployer honors.
 //
+// # Generated chart versions
+//
+// A generated Chart.yaml answers two questions that the single version: field
+// cannot answer at once, so they are split (ADR-021 Decision 7):
+//
+//   - version: and the AnnotationGeneratedBy annotation carry the AICR build
+//     that produced the wrapper — its content is AICR's, so AICR's version is
+//     what identifies the artifact. Normalized through
+//     deployer.NormalizeChartVersion, because Helm validates the field as
+//     SemVer 2 and would reject the "dev" of an unstamped build.
+//
+//   - appVersion: and the AnnotationComponentVersion annotation carry the
+//     payload version — the upstream chart pin, or a Kustomize git ref. Left
+//     free-form so a ref like "release-1.4" need not look like SemVer.
+//
+// See stampFor for the per-folder derivation. KindUpstreamHelm folders have
+// no Chart.yaml at all; the release simply reports the upstream chart's own
+// version, which is already the payload version.
+//
 // # Classification
 //
 // Recipe shape determines the folder kind:

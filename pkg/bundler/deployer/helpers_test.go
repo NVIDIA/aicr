@@ -21,6 +21,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Masterminds/semver/v3"
+
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -344,6 +347,43 @@ func TestNormalizeVersionWithDefault(t *testing.T) {
 			result := NormalizeVersionWithDefault(tt.input)
 			if result != tt.expected {
 				t.Errorf("NormalizeVersionWithDefault(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestNormalizeChartVersion pins the contract every generated Chart.yaml
+// depends on: whatever comes out MUST parse as SemVer, because Helm refuses
+// to load a chart whose version does not. The "dev" case is the one that
+// breaks `make dev-env` and Tilt if it regresses.
+func TestNormalizeChartVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"release tag with v prefix", "v1.0.0", "1.0.0"},
+		{"release tag without prefix", "1.0.0", "1.0.0"},
+		{"pre-release", "v1.2.0-rc.1", "1.2.0-rc.1"},
+		{"build metadata", "1.2.3+build.5", "1.2.3+build.5"},
+		{"partial version helm still loads", "1.2", "1.2"},
+		{"surrounding whitespace", "  v1.0.0  ", "1.0.0"},
+		{"unstamped dev build", defaults.DevVersion, defaults.DevChartVersion},
+		{"empty", "", defaults.DevChartVersion},
+		{"non-semver label", "stock-render-golden", defaults.DevChartVersion},
+		{"branch-style ref", "release-1.4", defaults.DevChartVersion},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := NormalizeChartVersion(tt.input)
+			if got != tt.expected {
+				t.Errorf("NormalizeChartVersion(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+			// The invariant, independent of the expectation above: Helm
+			// validates Chart.yaml `version:` with this exact parse.
+			if _, err := semver.NewVersion(got); err != nil {
+				t.Errorf("NormalizeChartVersion(%q) = %q, which Helm rejects: %v", tt.input, got, err)
 			}
 		})
 	}
