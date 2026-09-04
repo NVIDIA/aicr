@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **46**
-- Unique images: **105**
+- Unique images: **104**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -85,8 +85,6 @@ from the component's registry default above.
 
 | Component | Variant Version | Declared By | Images |
 |-----------|-----------------|-------------|--------|
-| agentgateway | v2.2.1 | rke2-inference | 1 |
-| agentgateway-crds | v2.2.1 | rke2-inference | 0 |
 | kube-prometheus-stack | 83.7.0 | aks | 8 |
 
 ## Images by component
@@ -344,14 +342,6 @@ _No images extracted._
 - `ghcr.io/nvidia/topograph:v1.0.0`
 
 ### slurm-accounting-mariadb
-
-_No images extracted._
-
-### agentgateway@v2.2.1 (variant)
-
-- `cr.agentgateway.dev/controller:v2.2.1`
-
-### agentgateway-crds@v2.2.1 (variant)
 
 _No images extracted._
 

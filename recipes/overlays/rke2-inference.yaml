@@ -57,7 +57,6 @@ spec:
     - name: agentgateway-crds
       type: Helm
       source: oci://cr.agentgateway.dev/charts
-      version: v2.2.1
       valuesFile: components/agentgateway-crds/values.yaml
       # RKE2-scoped health check: declared INLINE so the TLSRoute v1alpha2
       # served-version gate applies only to rke2 recipes. A
@@ -68,7 +67,7 @@ spec:
       # all — their validation would fail. Content = the embedded OSS
       # check (CRDs Established) plus the RKE2-specific step asserting
       # tlsroutes exists, is Established, and SERVES v1alpha2 (agentgateway
-      # v2.2.1's compiled watch requirement, satisfied by the vendored
+      # the chart's compiled watch requirement, satisfied by the vendored
       # tlsroute-crd.yaml manifest below on the supported < 1.36 default;
       # a cluster that instead runs RKE2's bundled Traefik hits the
       # documented CRD-ownership conflict, not a served-version gap).
@@ -219,9 +218,9 @@ spec:
                         (conditions[?type == 'Established']):
                           - status: "True"
             - name: validate-tlsroute-v1alpha2-served
-              # agentgateway v2.2.1 (Gateway API v1.2.x client) watches TLSRoute
-              # v1alpha2. The CRD must exist AND serve v1alpha2 (projection must
-              # match exactly one served entry).
+              # agentgateway watches TLSRoute at v1alpha2. The CRD must exist
+              # AND serve v1alpha2 (projection must match exactly one served
+              # entry).
               try:
                 - assert:
                     resource:
@@ -243,10 +242,9 @@ spec:
         # packaged ingress is rke2-ingress-nginx (through the rke2 root's
         # K8s.server.version >= 1.34.1 floor; Traefik becomes default only
         # at RKE2 v1.36+), so nothing else on a default cluster provides
-        # any of these CRDs. agentgateway v2.2.1 compiles its watch against
-        # Gateway API v1.2.x and additionally needs TLSRoute served at
-        # v1alpha2, which tlsroute-crd.yaml provides directly rather than
-        # depending on a bundled Traefik release for it.
+        # any of these CRDs. agentgateway needs TLSRoute served at v1alpha2,
+        # which tlsroute-crd.yaml provides directly rather than depending on a
+        # bundled Traefik release for it.
         #
         # KNOWN CONFLICT: if the cluster instead runs RKE2's bundled
         # rke2-traefik-crd Helm release (opt-in before v1.36, default at
@@ -266,7 +264,6 @@ spec:
     - name: agentgateway
       type: Helm
       source: oci://cr.agentgateway.dev/charts
-      version: v2.2.1
       valuesFile: components/agentgateway/values.yaml
       manifestFiles:
         - components/agentgateway/manifests/inference-gateway.yaml
