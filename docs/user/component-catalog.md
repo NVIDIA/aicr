@@ -879,13 +879,39 @@ migrate them. Before applying a bundle whose agentgateway pin moved, check
 whether you have any:
 
 ```bash
-kubectl get agentgatewaypolicies,agentgatewaybackends,agentgatewaymodels -A
+kinds=$(kubectl api-resources --api-group=agentgateway.dev -o name) || exit 1
+for kind in $kinds; do
+  kubectl get "$kind" -A || exit 1
+done
 ```
 
-Empty output means the upgrade needs nothing from you. Anything returned means
-read the upstream release notes for every version between the old and new pin
-and validate off-production first — a multi-version jump has to absorb every
-breaking change in between, not just the newest one. Use the
+The kinds are discovered rather than named because the API group grows across
+chart versions — `AgentgatewayModel` only exists from v1.4.0 — so naming them
+would fail with `the server doesn't have a resource type` on exactly the older
+pins whose operators most need to run this. The `|| exit 1` guards matter for
+the same reason: an unhealthy aggregated APIService (a down metrics-server or
+custom-metrics adapter, and `prometheus-adapter` is in AICR's own component
+set) makes `kubectl api-resources` exit non-zero, the substitution yields an
+empty list, and the loop would silently report clean. Empty output *plus* an
+error means retry, not clear.
+
+Routes you authored live in the Gateway API group rather than
+`agentgateway.dev`, so the sweep above does not see them — and they are exactly
+what the cross-namespace route delegation change affects:
+
+```bash
+kubectl get httproutes,grpcroutes -A \
+  -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PARENTS:.spec.parentRefs[*].name' || exit 1
+```
+
+Any row whose `PARENTS` names `inference-gateway` is yours.
+
+AICR's own `AgentgatewayParameters` named `system-proxy` in
+`agentgateway-system` is expected. If nothing else appears, the upgrade needs
+nothing from you. Anything else returned means read the upstream release notes
+for every version between the old and new pin and validate off-production
+first — a multi-version jump has to absorb every breaking change in between,
+not just the newest one. Use the
 [component version matrix](component-version-matrix.md) to find which versions
 those are.
 
@@ -893,3 +919,49 @@ One limit worth stating plainly: AICR CI exercises **fresh installs** of a
 pinned chart, not in-place upgrades from an older pin. A green release
 validates that the new version deploys and passes its health checks. It is not
 an in-place upgrade certification.
+
+### `agentgateway`: which namespaces the controller may provision Gateways in
+
+From chart v1.5.0 the controller's write permissions are scoped by
+`rbac.gatewayNamespaces`, and AICR sets it to `agentgateway-system` — the one
+namespace it provisions the `inference-gateway` Gateway in. The chart's own
+default is an empty list, which binds the write role (Deployments, DaemonSets,
+Secrets, ServiceAccounts, ConfigMaps, Services, HPAs, PDBs) with a
+*ClusterRoleBinding*, letting a network-facing controller write those objects
+and read every Secret in every namespace on the cluster.
+
+Scoping narrows the blast radius to the namespaces you name. It does not make
+the controller unprivileged: the role still grants `daemonsets`, and a
+DaemonSet created in a permitted namespace still schedules pods onto every
+node. Treat the controller's namespace as privileged rather than contained.
+
+The consequence for you is that **only Gateways in the listed namespaces are
+provisioned**. A Gateway elsewhere is accepted by the API server but never gets
+an address — the controller cannot create its Deployment or Service there, so
+the failure is silent apart from `forbidden` in the controller log. This is
+about where the *Gateway* lives; routes are unaffected, and `HTTPRoute`s in any
+namespace still attach to the AICR gateway.
+
+Upgrading an existing cluster is where this bites. A Gateway that reconciles
+today under the chart's unscoped default stops once the list is scoped without
+its namespace, so inventory what you have before upgrading:
+
+```bash
+kubectl get gateways.gateway.networking.k8s.io -A \
+  -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,CLASS:.spec.gatewayClassName' || exit 1
+```
+
+Every namespace holding a Gateway with `CLASS: agentgateway` belongs in the
+list. To add them:
+
+```bash
+aicr bundle -r recipe.yaml \
+  --set-json agentgateway:rbac.gatewayNamespaces='["agentgateway-system","my-gateways"]'
+```
+
+Two constraints on that edit. The namespaces **must already exist** — the chart
+creates a `RoleBinding` in each, and naming one that has not been created fails
+the install. And the key is a list, so it needs `--set-json`: a plain
+`--set agentgateway:rbac.gatewayNamespaces=my-gateways` writes a bare string and
+the chart's `range` over it fails at render, the same list-versus-string trap
+described for `allowedSourceRanges` above.
