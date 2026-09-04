@@ -34,7 +34,7 @@ linting:
   # renovate: datasource=github-releases depName=oasdiff/oasdiff depType=linting
   oasdiff: 'v1.30.0'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
-  golangci_lint: 'v2.13.1'
+  golangci_lint: 'v2.13.2'
   # renovate: datasource=pypi depName=yamllint depType=linting
   yamllint: '1.38.0'
   # renovate: datasource=github-releases depName=google/addlicense depType=linting
