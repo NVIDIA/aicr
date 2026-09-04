@@ -176,6 +176,14 @@ spec:
     # differs, which the catalog permits and which selects vr200's inference
     # profile rather than multiNodeTraining. See vr200-rke2-ubuntu-training
     # for the reboot semantics and the full rationale.
+    #
+    # This leaf carries the same two rebooting Skyhook CRs as the training
+    # leaf (this one and rdma-netns-exclusive below), so it inherits the same
+    # limitation: interruptionBudget is per-CR and does not compose across
+    # them, and under the default sequencing: node a node may start tuning
+    # while another is still rebooting for RDMA. Explicit Preview risk
+    # acceptance — sequence deliberately on a live cluster. Tracked in
+    # NVIDIA/aicr#2572.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:

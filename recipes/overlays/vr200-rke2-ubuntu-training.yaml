@@ -157,7 +157,12 @@ spec:
     # are possible on a multi-node cluster. There is also no dependency
     # edge between the two components, so nothing guarantees the RDMA CR
     # exists when this one becomes runnable.
-    # Sequence deliberately on a live cluster. Tracked as a follow-up.
+    # Sequence deliberately on a live cluster. This is an explicit Preview
+    # risk acceptance — the reference rollout is manually controlled, and it
+    # must be resolved before VR200/RKE2 is treated as ready for unattended
+    # lifecycle operations. Tracked in NVIDIA/aicr#2572, which carries the
+    # pinned-v0.18 source trace and the candidate fixes (merge both packages
+    # into one Skyhook CR vs. sequencing: "all" plus a dependency edge).
     # Health check override: the operator Deployment's name depends on how
     # nodewright got installed, and both paths are real here. The VR
     # reference clusters carry an out-of-band install (hand-written values,
