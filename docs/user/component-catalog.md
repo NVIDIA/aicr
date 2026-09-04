@@ -340,6 +340,26 @@ aicr bundle -r recipe.yaml \
 
 This setting filters by source IP only; it does not add TLS or authentication to the gateway listener.
 
+### Which namespaces the controller may provision Gateways in
+
+From agentgateway chart v1.5.0 the controller's write permissions are scoped by `rbac.gatewayNamespaces`, and AICR sets it to `agentgateway-system` — the single namespace it provisions the `inference-gateway` Gateway in.
+
+This matters if you add a Gateway of your own. Leaving the list empty is the chart's default and binds the controller's write role (Deployments, DaemonSets, Secrets, ServiceAccounts, ConfigMaps, Services, HPAs, PDBs) with a *ClusterRoleBinding*, giving a network-facing controller write access in every namespace — enough to create a privileged DaemonSet on every node. Scoping it costs nothing for AICR's own topology, so AICR scopes it.
+
+The consequence is that **only Gateways in the listed namespaces are provisioned**. A Gateway you place in another namespace is accepted by the API server but never gets an address: the controller cannot create its Deployment or Service there, so the failure is silent apart from `forbidden` errors in the controller log. Note this is about where the *Gateway* lives — routes are unaffected, and `HTTPRoute`s in any namespace may still attach to the AICR gateway.
+
+To place additional Gateways, add their namespaces:
+
+```shell
+aicr bundle -r recipe.yaml \
+  --set-json agentgateway:rbac.gatewayNamespaces='["agentgateway-system","my-gateways"]'
+```
+
+Two constraints on that edit:
+
+- **The namespaces must already exist.** The chart creates a `RoleBinding` in each one, and naming a namespace that has not been created yet fails the install.
+- **Use `--set-json`, not `--set`.** The key is a list; a plain `--set agentgateway:rbac.gatewayNamespaces=my-gateways` writes a bare string and the chart's `range` over it fails at render. This is the same list-versus-string trap described for `allowedSourceRanges` above.
+
 ### Upgrading agentgateway across breaking releases
 
 AICR pins the `agentgateway` and `agentgateway-crds` charts in `recipes/registry.yaml`, and a pin bump can cross an upstream release that documents breaking changes. What that means for you depends entirely on whether you author your own agentgateway resources.
