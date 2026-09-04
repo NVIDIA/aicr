@@ -373,16 +373,35 @@ Before adopting a bundle that bumps the agentgateway pin:
 1. Check whether you have any agentgateway resources AICR did not create. Ask the cluster which kinds exist rather than naming them, since the set grows across chart versions — `AgentgatewayModel`, for one, only exists from chart v1.4.0 onward, and naming it explicitly makes the command fail on older pins:
 
    ```shell
-   for kind in $(kubectl api-resources --api-group=agentgateway.dev -o name); do
-     kubectl get "$kind" -A
+   kinds=$(kubectl api-resources --api-group=agentgateway.dev -o name) || exit 1
+   for kind in $kinds; do
+     kubectl get "$kind" -A || exit 1
    done
    ```
 
-   AICR's own `AgentgatewayParameters` named `system-proxy` in `agentgateway-system` is expected in that output. If nothing else appears, the upgrade needs no action from you.
+   The `|| exit 1` guards matter: if an aggregated APIService is unhealthy — a down metrics-server or custom-metrics adapter, and `prometheus-adapter` is in AICR's own component set — `kubectl api-resources` exits non-zero and the substitution yields an empty list. Without the guard the loop body would never run and the check would report clean, which is the dangerous direction for a check whose whole purpose is to find something. Empty output *plus* an error means retry, not clear.
 
-2. If it returns anything, read the [upstream release notes](https://github.com/agentgateway/agentgateway/releases) for every version between your current pin and the new one, and validate those resources in a non-production cluster first.
+   AICR's own `AgentgatewayParameters` named `system-proxy` in `agentgateway-system` is expected. Anything else is yours.
 
-Check the pinned version for any release with `aicr query --selector components.agentgateway.version`, and see [Component Version Matrix](component-version-matrix.md) for the per-release history.
+2. Check for routes you attached to the AICR gateway. These live in the Gateway API group rather than `agentgateway.dev`, so the previous step does not see them — and they are exactly what the cross-namespace route delegation change affects:
+
+   ```shell
+   kubectl get httproutes,grpcroutes -A \
+     -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PARENTS:.spec.parentRefs[*].name' || exit 1
+   ```
+
+   Any row whose `PARENTS` names `inference-gateway` is a route you authored against the AICR gateway.
+
+3. If either step returns anything of yours, read the [upstream release notes](https://github.com/agentgateway/agentgateway/releases) for every version between your current pin and the new one, and validate those resources in a non-production cluster first.
+
+To see the pinned version for a release, query a recipe that includes the component — `agentgateway` is only present in inference recipes, so the criteria must resolve one:
+
+```shell
+aicr query --service eks --accelerator h100 --intent inference \
+  --selector components.agentgateway.version
+```
+
+`aicr query` rejects a command with no criteria, so the selector alone is not enough. See [Component Version Matrix](component-version-matrix.md) for the per-release history.
 
 **Note on validation coverage:** AICR's CI exercises fresh installs of the pinned chart, not in-place upgrades from an older pin. A green release validates that the new version deploys and passes health checks; it does not certify an in-place upgrade of an existing cluster.
 
