@@ -930,7 +930,7 @@ Read the rows by their parent:
 One caveat on the command: a route with several `parentRefs` where only some
 set `namespace` will have its `PNS` column misalign, because JSONPath omits the
 missing entries rather than padding them. Describe those routes individually
-with `kubectl get httproute,grpcroute <name> -n <ns> -o yaml` rather than
+with `kubectl get <httproute-or-grpcroute> <name> -n <ns> -o yaml` rather than
 trusting the columns.
 
 AICR's own `AgentgatewayParameters` named `system-proxy` in
