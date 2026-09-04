@@ -46,9 +46,11 @@ func TestParseCriteriaServiceType(t *testing.T) {
 		{"ocp", "ocp", CriteriaServiceOCP, false},
 		{"OCP uppercase", "OCP", CriteriaServiceOCP, false},
 		{"openshift alias", "openshift", CriteriaServiceOCP, false},
-		{"self-managed", "self-managed", CriteriaServiceAny, false},
-		{"self", "self", CriteriaServiceAny, false},
-		{"vanilla", "vanilla", CriteriaServiceAny, false},
+		// Self-managed spellings alias the concrete generic service (they
+		// historically normalized to the any wildcard).
+		{"self-managed", "self-managed", CriteriaServiceGeneric, false},
+		{"self", "self", CriteriaServiceGeneric, false},
+		{"vanilla", "vanilla", CriteriaServiceGeneric, false},
 		{"invalid", "invalid", CriteriaServiceAny, true},
 	}
 

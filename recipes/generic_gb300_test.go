@@ -22,13 +22,13 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
-// TestGenericGB300DevicePluginMOFEDStaysOff pins MOFED_ENABLED off in the
-// generic GB300 recipe's effective device-plugin env. The network-operator's
-// device plugin owns RDMA injection on this bare-metal shape; MOFED_ENABLED
-// on the GPU Operator's plugin would inject every host ibverbs device into
-// GPU pods alongside it. The recipe relies on the plugin default (off), so a
-// future base-values or overlay edit that sets it true must fail here, not
-// on a cluster.
+// TestGenericGB300DevicePluginMOFEDStaysOff pins MOFED_ENABLED to an
+// explicit "false" in the generic GB300 recipe's effective device-plugin
+// env. The network-operator's device plugin owns RDMA injection on this
+// bare-metal shape; MOFED_ENABLED on the GPU Operator's plugin would inject
+// every host ibverbs device into GPU pods alongside it. An ABSENT key also
+// fails: the GPU Operator infers an omitted MOFED_ENABLED to true when GDS
+// enablement loads nvidia_fs, so only the explicit pin is fail-closed.
 func TestGenericGB300DevicePluginMOFEDStaysOff(t *testing.T) {
 	t.Parallel()
 
@@ -54,13 +54,23 @@ func TestGenericGB300DevicePluginMOFEDStaysOff(t *testing.T) {
 		}
 		dp, _ := values["devicePlugin"].(map[string]any)
 		env, _ := dp["env"].([]any)
+		pinnedOff := false
 		for _, e := range env {
 			entry, _ := e.(map[string]any)
-			if entry["name"] == "MOFED_ENABLED" && entry["value"] != "false" {
+			if entry["name"] != "MOFED_ENABLED" {
+				continue
+			}
+			if entry["value"] != "false" {
 				t.Fatalf("gpu-operator devicePlugin.env sets MOFED_ENABLED=%v: the "+
 					"network-operator's device plugin owns RDMA injection on generic "+
 					"bare metal — keep it off", entry["value"])
 			}
+			pinnedOff = true
+		}
+		if !pinnedOff {
+			t.Fatal("gpu-operator devicePlugin.env does not pin MOFED_ENABLED=\"false\": " +
+				"an omitted key is inferred true when GDS enablement loads nvidia_fs — " +
+				"the explicit pin is required")
 		}
 		return
 	}

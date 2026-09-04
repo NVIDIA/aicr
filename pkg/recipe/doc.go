@@ -71,6 +71,7 @@
 //   - CriteriaServiceOCP: Red Hat OpenShift Container Platform
 //   - CriteriaServiceMetal3: Metal3 bare-metal provisioning
 //   - CriteriaServiceRKE2: Rancher Kubernetes Engine 2 (bare-metal)
+//   - CriteriaServiceGeneric: generic self-managed Kubernetes (no distinguishing distro or provisioner)
 //   - CriteriaServiceAny: Any service (wildcard)
 //
 // Accelerator types for GPU selection:

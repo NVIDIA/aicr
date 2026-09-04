@@ -18,8 +18,8 @@
 # template a NicClusterPolicy CR; this manifest creates it. The DOCA
 # ofedDriver installs host OFED, RDMA is exposed via rdmaSharedDevicePlugin
 # (shared HCA, resource rdma/ib), and nicConfigurationOperator manages NIC
-# firmware/config. vendor 15b3 = Mellanox; deviceIDs 1021/1023 = ConnectX-7 /
-# mlx5-generation NICs.
+# firmware/config. vendor 15b3 = Mellanox; deviceID 1021 = ConnectX-7,
+# 1023 = ConnectX-8.
 apiVersion: mellanox.com/v1alpha1
 kind: NicClusterPolicy
 metadata:
@@ -85,6 +85,7 @@ spec:
             "resourceName": "ib",
             "rdmaHcaMax": 64,
             "selectors": {
+              "linkTypes": ["infiniband"],
               "vendors": ["15b3"],
               "deviceIDs": ["1021", "1023"]
             }

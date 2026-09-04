@@ -23,15 +23,19 @@ secondaryNetwork:
 # The GPU Operator's NFD is used. deployNodeFeatureRules must stay at the
 # chart default (true): the chart's NodeFeatureRule supplies the RDMA
 # readiness gate's node cohort label (enforced by
-# TestOKENetworkOperatorKeepsChartNodeFeatureRule).
+# TestNetworkOperatorKeepsChartNodeFeatureRule).
 nfd:
   enabled: false
-# Coordinated OFED driver upgrades on bare metal.
+# Coordinated OFED driver upgrades on bare metal. Deploying the subchart is
+# not enough: the operator only delegates to it when
+# operator.maintenanceOperator.useRequestor is true (chart default false).
 maintenanceOperator:
   enabled: true
 # Operator placement comes from the bundler's system-node scheduling
 # injection (registry nodeScheduling) — no hardcoded affinity here.
 operator:
+  maintenanceOperator:
+    useRequestor: true
   resources:
     limits:
       cpu: "1"

@@ -76,8 +76,13 @@ const (
 // binary rebuild.
 func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", CriteriaAnyValue, "self-managed", "self", "vanilla":
+	case "", CriteriaAnyValue:
 		return CriteriaServiceAny, nil
+	case "generic", "self-managed", "self", "vanilla":
+		// The self-managed spellings historically normalized to the "any"
+		// wildcard; with generic as a concrete service they alias it instead,
+		// so `--service self-managed` selects generic recipes.
+		return CriteriaServiceGeneric, nil
 	case string(CriteriaServiceEKS):
 		return CriteriaServiceEKS, nil
 	case "gke":
@@ -98,8 +103,6 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 		return CriteriaServiceMetal3, nil
 	case "rke2":
 		return CriteriaServiceRKE2, nil
-	case "generic":
-		return CriteriaServiceGeneric, nil
 	default:
 		if r.Has(FieldService, s) {
 			return CriteriaServiceType(normalizeCriteriaValue(s)), nil
