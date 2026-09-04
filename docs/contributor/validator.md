@@ -870,14 +870,14 @@ run-to-run TTFT fluctuation (see NVIDIA/aicr#1192):
   worker's active in-flight load so a transiently-slow worker stops receiving
   its full share — mitigating the stochastic EKS H100 worker-stall / throughput
   degradation at the saturation knee (issue #1197). Frontend-to-worker
-  requests use Dynamo's request plane (Dynamo 1.2 defaults to TCP; AICR does
-  not set `DYN_REQUEST_PLANE=nats`). Workers still publish local vLLM KV-cache
-  events through their ZMQ publisher (relayed onto the NATS event plane), but
-  least-loaded routing does not consume them.
+  requests use Dynamo's request plane (Dynamo 1.4+ defaults to TCP; AICR does
+  not set `DYN_REQUEST_PLANE=nats`). Workers publish KV-cache events directly
+  over ZMQ; the KV router consumes them end-to-end with no NATS relay.
+  Least-loaded routing does not consume those events.
   The `inference-routing-mode` recipe input defaults to `dynamo-router`; set
   `gateway-epp` to validate the GAIE/EPP path through agentgateway with worker
   frontend sidecars in direct mode. The direct-mode sidecars honor EPP routing
-  headers; they do not perform the ZMQ-to-NATS KV-event relay.
+  headers; they do not relay KV events.
 - **The AIPerf load generator co-locates with the GPU workers, but that is not
   resource contention.** It is CPU-only and the GPU node has ample CPU headroom
   (measured node CPU pressure ≈ 0 across runs); co-location does not starve the

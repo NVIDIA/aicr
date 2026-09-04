@@ -31,7 +31,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/oci"
@@ -171,43 +170,48 @@ type verifiedBundleSource struct {
 	inventory *checksum.Inventory
 }
 
-// parseBundleCmdOptions parses and validates command options. The wire
-// config is converted to a typed *config.BundleResolved up-front via
-// (*config.BundleSpec).Resolve so this function only layers CLI flag
+// parseBundleCmdOptions parses and validates command options. spec.bundle is
+// derived up-front through the facade — cfg.BundleOptions for the settings
+// the bundler itself reads, cfg.BundleInputOptions for the settings the CLI
+// (not the bundler) consumes — so this function only layers CLI flag
 // overrides onto already-typed values. All string→typed conversion of
-// config-supplied fields happens at the conversion boundary in Resolve;
-// errors from that boundary carry "spec.bundle.<path>" attribution.
+// config-supplied fields happens at that derivation boundary; errors from it
+// carry "spec.bundle.<path>" attribution.
 //
 //nolint:gocyclo,funlen // option resolution is inherently long but linear
-func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmdOptions, error) {
-	resolved, err := cfg.Bundle().Resolve()
+func parseBundleCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*bundleCmdOptions, error) {
+	bundleOpts, err := cfg.BundleOptions()
+	if err != nil {
+		return nil, err
+	}
+	bundleInput, err := cfg.BundleInputOptions()
 	if err != nil {
 		return nil, err
 	}
 
 	opts := &bundleCmdOptions{
-		recipeFilePath:            stringFlagOrConfig(cmd, "recipe", resolved.RecipeInput),
+		recipeFilePath:            stringFlagOrConfig(cmd, "recipe", bundleInput.RecipePath),
 		kubeconfig:                cmd.String("kubeconfig"),
-		repoURL:                   stringFlagOrConfig(cmd, "repo", resolved.Repo),
-		attest:                    boolFlagOrConfig(cmd, "attest", resolved.Attest),
-		vendorCharts:              boolFlagOrConfig(cmd, "vendor-charts", resolved.VendorCharts),
+		repoURL:                   stringFlagOrConfig(cmd, "repo", bundleOpts.Repo),
+		attest:                    boolFlagOrConfig(cmd, "attest", bundleOpts.Attest),
+		vendorCharts:              boolFlagOrConfig(cmd, "vendor-charts", bundleOpts.VendorCharts),
 		readinessHooks:            cmd.Bool("readiness-hooks"),
 		serial:                    cmd.Bool("serial"),
-		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", resolved.CertIDRegexp),
+		certificateIdentityRegexp: stringFlagOrConfig(cmd, "certificate-identity-regexp", bundleOpts.CertIDRegexp),
 		identityToken:             cmd.String(flagIdentityToken),
-		signingKey:                stringFlagOrConfig(cmd, flagSigningKey, resolved.SigningKey),
+		signingKey:                stringFlagOrConfig(cmd, flagSigningKey, bundleOpts.OIDCResolve.SigningKey),
 		// tlogUpload reads the flag directly (not via boolFlagOrConfig): a config
 		// default of false would silently disable the transparency log for every
 		// bundle, the exact fail-open this flag exists to prevent. Keep it flag-only.
 		tlogUpload:        cmd.Bool(flagTLogUpload),
-		oidcDeviceFlow:    boolFlagOrConfig(cmd, flagOIDCDeviceFlow, resolved.OIDCDeviceFlow),
+		oidcDeviceFlow:    boolFlagOrConfig(cmd, flagOIDCDeviceFlow, bundleOpts.OIDCResolve.DeviceFlow),
 		assumeYes:         cmd.Bool(flagAssumeYes),
-		fulcioURL:         stringFlagOrConfig(cmd, flagFulcioURL, resolved.FulcioURL),
-		rekorURL:          stringFlagOrConfig(cmd, flagRekorURL, resolved.RekorURL),
+		fulcioURL:         stringFlagOrConfig(cmd, flagFulcioURL, bundleOpts.OIDCResolve.FulcioURL),
+		rekorURL:          stringFlagOrConfig(cmd, flagRekorURL, bundleOpts.OIDCResolve.RekorURL),
 		signingConfigPath: cmd.String(flagSigningConfig),
-		insecureTLS:       boolFlagOrConfig(cmd, flagInsecureTLS, resolved.InsecureTLS),
-		plainHTTP:         boolFlagOrConfig(cmd, flagPlainHTTP, resolved.PlainHTTP),
-		imageRefsPath:     stringFlagOrConfig(cmd, "image-refs", resolved.ImageRefs),
+		insecureTLS:       boolFlagOrConfig(cmd, flagInsecureTLS, bundleInput.InsecureTLS),
+		plainHTTP:         boolFlagOrConfig(cmd, flagPlainHTTP, bundleInput.PlainHTTP),
+		imageRefsPath:     stringFlagOrConfig(cmd, "image-refs", bundleInput.ImageRefsPath),
 	}
 
 	// Rekor v2 is the default for both keyless and KMS --attest signing: the
@@ -245,11 +249,11 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		opts.recipeFilePath = absPath
 	}
 
-	if opts.deployer, err = resolveDeployer(cmd, resolved.Deployer); err != nil {
+	if opts.deployer, err = resolveDeployer(cmd, bundleOpts.Deployer); err != nil {
 		return nil, err
 	}
 
-	ref, err := resolveOutputTarget(cmd, resolved)
+	ref, err := resolveOutputTarget(cmd, bundleInput)
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +349,7 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 	// --app-name applies to argocd-helm and argocd only. Reject on other
 	// deployers so a user passing it on --deployer helm/flux gets a clear
 	// error instead of silent acceptance with no effect.
-	opts.appName = stringFlagOrConfig(cmd, "app-name", resolved.AppName)
+	opts.appName = stringFlagOrConfig(cmd, "app-name", bundleOpts.AppName)
 	if opts.appName != "" {
 		if opts.deployer != config.DeployerArgoCD && opts.deployer != config.DeployerArgoCDHelm {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
@@ -364,43 +368,43 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 		}
 	}
 
-	if opts.valueOverrides, err = resolveComponentPaths(cmd, "set", resolved.ValueOverrides, config.ParseValueOverrides); err != nil {
+	if opts.valueOverrides, err = resolveComponentPaths(cmd, "set", bundleOpts.ValueOverrides, config.ParseValueOverrides); err != nil {
 		return nil, err
 	}
 	if opts.valueOverridesTyped, err = resolveTypedOverrides(cmd); err != nil {
 		return nil, err
 	}
-	if opts.dynamicValues, err = resolveComponentPaths(cmd, "dynamic", resolved.DynamicValues, config.ParseDynamicValues); err != nil {
+	if opts.dynamicValues, err = resolveComponentPaths(cmd, "dynamic", bundleOpts.DynamicValues, config.ParseDynamicValues); err != nil {
 		return nil, err
 	}
 
-	if opts.systemNodeSelector, err = resolveNodeSelector(cmd, "system-node-selector", resolved.SystemNodeSelector); err != nil {
+	if opts.systemNodeSelector, err = resolveNodeSelector(cmd, "system-node-selector", bundleOpts.SystemNodeSelector); err != nil {
 		return nil, err
 	}
-	if opts.acceleratedNodeSelector, err = resolveNodeSelector(cmd, "accelerated-node-selector", resolved.AcceleratedNodeSelector); err != nil {
-		return nil, err
-	}
-
-	if opts.systemNodeTolerations, err = resolveTolerations(cmd, "system-node-toleration", resolved.SystemNodeTolerations); err != nil {
-		return nil, err
-	}
-	if opts.acceleratedNodeTolerations, err = resolveTolerations(cmd, "accelerated-node-toleration", resolved.AcceleratedNodeTolerations); err != nil {
-		return nil, err
-	}
-	if opts.draEvictionNodeLabel, err = resolveDRAEvictionNodeLabel(cmd, resolved.DRAEvictionNodeLabel); err != nil {
+	if opts.acceleratedNodeSelector, err = resolveNodeSelector(cmd, "accelerated-node-selector", bundleOpts.AcceleratedNodeSelector); err != nil {
 		return nil, err
 	}
 
-	if opts.workloadGateTaint, err = resolveTaint(cmd, "workload-gate", resolved.WorkloadGate); err != nil {
+	if opts.systemNodeTolerations, err = resolveTolerations(cmd, "system-node-toleration", bundleOpts.SystemNodeTolerations); err != nil {
+		return nil, err
+	}
+	if opts.acceleratedNodeTolerations, err = resolveTolerations(cmd, "accelerated-node-toleration", bundleOpts.AcceleratedNodeTolerations); err != nil {
+		return nil, err
+	}
+	if opts.draEvictionNodeLabel, err = resolveDRAEvictionNodeLabel(cmd, bundleOpts.DRAEvictionNodeLabel); err != nil {
 		return nil, err
 	}
 
-	if opts.workloadSelector, err = resolveNodeSelector(cmd, "workload-selector", resolved.WorkloadSelector); err != nil {
+	if opts.workloadGateTaint, err = resolveTaint(cmd, "workload-gate", bundleOpts.WorkloadGate); err != nil {
+		return nil, err
+	}
+
+	if opts.workloadSelector, err = resolveNodeSelector(cmd, "workload-selector", bundleOpts.WorkloadSelector); err != nil {
 		return nil, err
 	}
 
 	// Estimated node count for bundle; 0 = unset.
-	n := intFlagOrConfig(cmd, "nodes", resolved.Nodes)
+	n := intFlagOrConfig(cmd, "nodes", bundleOpts.Nodes)
 	if n < 0 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "--nodes must be >= 0")
 	}
@@ -412,8 +416,13 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 			return nil, errors.New(errors.ErrCodeInvalidRequest, "--storage-class cannot be blank when specified")
 		}
 		opts.storageClass = sc
-	} else if resolved.StorageClass != "" {
-		opts.storageClass = resolved.StorageClass
+	} else if bundleOpts.StorageClass != "" {
+		sc := strings.TrimSpace(bundleOpts.StorageClass)
+		if sc == "" {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"spec.bundle.scheduling.storageClass cannot be blank")
+		}
+		opts.storageClass = sc
 	}
 
 	if cmd.IsSet("shared-storage-class") {
@@ -423,8 +432,8 @@ func parseBundleCmdOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) (*bundleCmd
 				"--shared-storage-class cannot be blank when specified")
 		}
 		opts.sharedStorageClass = sc
-	} else if resolved.SharedStorageClass != "" {
-		sc := strings.TrimSpace(resolved.SharedStorageClass)
+	} else if bundleOpts.SharedStorageClass != "" {
+		sc := strings.TrimSpace(bundleOpts.SharedStorageClass)
 		if sc == "" {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"spec.bundle.scheduling.sharedStorageClass cannot be blank")
@@ -579,21 +588,21 @@ func signingTargetFromFlags(rekorURL, signingConfigPath string) (useTUF bool, er
 }
 
 // resolveOutputTarget returns the parsed *oci.Reference for --output,
-// preferring CLI input over the typed fallback in resolved. When the
+// preferring CLI input over the typed fallback in input. When the
 // CLI flag is set to an empty string OR neither source supplies a
 // value, defaults to the current directory ("."). The empty-CLI case
 // matches pre-refactor behavior where stringFlagOrConfig surfaced ""
 // and the caller substituted "." before parsing.
-func resolveOutputTarget(cmd *cli.Command, resolved *appcfg.BundleResolved) (*oci.Reference, error) {
+func resolveOutputTarget(cmd *cli.Command, input aicr.BundleInputOptions) (*oci.Reference, error) {
 	const flagName = "output"
 	if cmd.IsSet(flagName) {
 		target := cmd.String(flagName)
 		if target == "" {
 			target = "."
 		}
-		if resolved.OutputTargetRaw != "" && resolved.OutputTargetRaw != target {
+		if input.OutputTargetRaw != "" && input.OutputTargetRaw != target {
 			slog.Info("CLI flag overriding config value", "flag", flagName,
-				"config", resolved.OutputTargetRaw, "override", target)
+				"config", input.OutputTargetRaw, "override", target)
 		}
 		ref, err := oci.ParseOutputTarget(target)
 		if err != nil {
@@ -601,8 +610,8 @@ func resolveOutputTarget(cmd *cli.Command, resolved *appcfg.BundleResolved) (*oc
 		}
 		return ref, nil
 	}
-	if resolved.OutputTarget != nil {
-		return resolved.OutputTarget, nil
+	if input.OutputTarget != nil {
+		return input.OutputTarget, nil
 	}
 	ref, err := oci.ParseOutputTarget(".")
 	if err != nil {
@@ -1087,7 +1096,7 @@ func runBundleCmdWithDependencies(
 		return err
 	}
 
-	cfg, err := loadCmdConfig(ctx, cmd)
+	cfg, err := loadFacadeConfig(ctx, cmd)
 	if err != nil {
 		return err
 	}

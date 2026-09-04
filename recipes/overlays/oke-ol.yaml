@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1alpha3
 metadata:
   name: oke-ol
 
@@ -26,7 +26,7 @@ spec:
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
-      value: ">= 1.28"
+      value: ">= 1.32"
 
   # OKE-specific components
   componentRefs:
@@ -39,6 +39,23 @@ spec:
     - name: gpu-operator
       type: Helm
       valuesFile: components/gpu-operator/values-oke.yaml
+      # Universal OKE bare-metal device-plugin env lives in ref OVERRIDES,
+      # not only the valuesFile: descendant overlays (oke-ol-training)
+      # supersede this ref with their own valuesFile, which REPLACES —
+      # not stacks on — values-oke.yaml, silently dropping anything that
+      # lives there alone. Overrides survive that supersession. Rationale
+      # for the entries is in values-oke.yaml; Helm replaces lists, so an
+      # overlay overriding devicePlugin.env must restate them.
+      overrides:
+        devicePlugin:
+          env:
+            # Restated from the base values.yaml (Helm replaces lists).
+            - name: DP_DISABLE_HEALTHCHECKS
+              value: "109"
+            - name: DEVICE_LIST_STRATEGY
+              value: cdi-annotations,cdi-cri,volume-mounts
+            - name: MOFED_ENABLED
+              value: "false"
 
     # Prometheus persistent storage (provide --storage-class at bundle time, e.g. oci-bv)
     - name: kube-prometheus-stack
@@ -54,23 +71,14 @@ spec:
                   resources:
                     requests:
                       storage: 50Gi
-    # NVSentinel on OKE: the node image supplies the driver, so no driver pod
-    # exists for the labeler to watch. Without assumeDriverInstalled the
-    # nvsentinel.dgxc.nvidia.com/driver.installed label is never applied and
-    # metadata-collector plus both syslog-health-monitor DaemonSets sit at zero
-    # desired pods — silently, with no error and no event (#2175).
-    #
-    # OKE has no gpuStack profile, so this value is overlay-level and is NOT
-    # profile-owned: it does not receive the generated install-time profile
-    # lock that protects the equivalent AKS and GKE-COS values. The NVSentinel
-    # driver-label bundle gate still rejects bundle-time and declared-dynamic
-    # changes that would recreate #2175, but a manual post-generation edit to
-    # the rendered Helm values is outside that guarantee.
+    # NVSentinel's labeler.assumeDriverInstalled is owned by the gpuStack
+    # profile below (#2175): whether a driver pod exists for the labeler to
+    # watch depends on the selected value, so the polarity is per value —
+    # true where the driver ships in the node image (oci-managed), false
+    # where the operator's driver pod is the evidence (operator-managed).
+    # No overlay-level value here.
     - name: nvsentinel
       type: Helm
-      overrides:
-        labeler:
-          assumeDriverInstalled: true
 
     # OKE DRA driver: host-installed driver root, compute domains enabled
     - name: nvidia-dra-driver-gpu
@@ -80,6 +88,169 @@ spec:
         controller:
           affinity:
             nodeAffinity: null
+
+  # GPU stack shape for OKE GPU node pools (ADR-015). OKE auto-installs
+  # NVIDIA's device plugin via the NvidiaGpuPlugin cluster add-on, and
+  # Oracle's GPU node images preinstall the driver, container toolkit, and
+  # host MOFED. The two values below name the qualified combinations; in
+  # the two-value model both ownership axes move together, so ONE
+  # control-plane signal qualifies a selection.
+  #
+  # Qualification (#2363, decided): the NvidiaGpuPlugin add-on's
+  # control-plane state, supplied as an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all
+  # --output json` dump via --oke-addons at BOTH phases (snapshot-based
+  # generation and the aicr validate pre-flight re-capture). installed →
+  # oci-managed; absent → operator-managed; any other lifecycle state, a
+  # mixed dump, or a missing reading fails closed naming the observed
+  # state. Per-node label disablement is out of contract (it leaves the
+  # add-on installed); a supported-image consistency check is tracked as
+  # follow-up in #2363.
+  #
+  # Every leaf OKE overlay (OL and Ubuntu) inherits this declaration
+  # unchanged.
+  profile:
+    name: gpuStack
+    description: >-
+      Who owns the GPU stack on OKE node pools. "oci-managed" (the
+      default) is the Oracle-managed cluster: the GPU node image supplies
+      the driver and toolkit, and OKE's NvidiaGpuPlugin add-on advertises
+      nvidia.com/gpu — the GPU Operator installs none of the three.
+      "operator-managed" is a bring-your-own driverless image with the
+      add-on removed: the GPU Operator installs driver, toolkit, and
+      device plugin, and the DRA driver reads the operator install path.
+      MOFED is host-supplied in both values (Oracle and BYO images alike)
+      — network-operator never deploys ofedDriver on OKE. The hybrid
+      image-driver + operator-plugin shape is deliberately not declared
+      (no consumer; the two-value model lets one control-plane signal
+      qualify both axes).
+    default: oci-managed
+    values:
+      # Oracle-managed: Oracle GPU image + OKE's NvidiaGpuPlugin add-on.
+      # The external plugin is THE nvidia.com/gpu advertiser in the #1327
+      # exactly-one invariant; the operator's plugin must be off or the two
+      # double-advertise.
+      oci-managed:
+        advertiser: external
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: false
+                useOpenKernelModules: false
+              toolkit:
+                enabled: false
+              devicePlugin:
+                enabled: false
+              hostPaths:
+                driverInstallDir: /run/nvidia/driver
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: /
+          - name: nvsentinel
+            overrides:
+              labeler: {assumeDriverInstalled: true}
+        # The canonical qualification signal (#2363): the NvidiaGpuPlugin
+        # add-on's control-plane state, projected from an operator-supplied
+        # `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump via
+        # `aicr snapshot --oke-addons` / `aicr validate --oke-addons`.
+        # Externally grounded (the control plane, not the bundle's output),
+        # durable at both phases, fail-closed on any other lifecycle state
+        # and on a snapshot captured without the flag (reading
+        # unavailable). Per-node label disablement
+        # (oci.oraclecloud.com/disable-gpu-device-plugin) is OUT OF
+        # CONTRACT: it leaves the add-on installed, which reads as
+        # oci-managed — clusters using it must migrate to add-on removal.
+        # Criteria-only generation (no --snapshot) selects explicitly and
+        # records the constraint without evaluating it; the validate
+        # pre-flight enforces it. A supported-image consistency check is
+        # tracked as follow-up in #2363.
+        constraints:
+          - name: K8s.oke-addons.nvidia-gpu-plugin
+            value: installed
+            remediation: >-
+              The OKE NvidiaGpuPlugin add-on is not installed and ACTIVE on
+              this cluster, but the oci-managed profile expects Oracle's
+              add-on to be the sole nvidia.com/gpu advertiser. For clusters
+              with the add-on removed (bring-your-own driverless pools),
+              regenerate with --profile gpuStack=operator-managed. Clusters
+              still running the legacy addon-manager device plugin (the
+              pre-add-on kube-system/nvidia-gpu-device-plugin DaemonSet,
+              which list-addons cannot see) must migrate to the managed
+              add-on before qualifying oci-managed. Capture
+              the signal with: aicr snapshot --oke-addons <path to
+              `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump>.
+      # Bring-your-own driverless image: the GPU Operator installs driver,
+      # toolkit, and device plugin; the DRA kubelet plugin reads the driver
+      # userspace from the operator install path (TestDriverRootLockstep,
+      # issue #1087).
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver:
+                enabled: true
+                # AOR-aligned: proprietary kernel modules on OKE.
+                useOpenKernelModules: false
+              toolkit:
+                enabled: true
+              devicePlugin:
+                enabled: true
+              hostPaths:
+                driverInstallDir: /run/nvidia/driver
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: /run/nvidia/driver
+          # The operator's driver pod is the labeler's evidence — assuming a
+          # preinstalled driver here would label GPU nodes before the driver
+          # is actually ready.
+          - name: nvsentinel
+            overrides:
+              labeler: {assumeDriverInstalled: false}
+        # Mirror of oci-managed's canonical signal: the add-on must be
+        # ABSENT (the terraform-oci-okecluster shape, NvidiaGpuPlugin =
+        # { remove = true }). No driver-state gate in either phase: the
+        # add-on projection qualifies both axes at once in the two-value
+        # model, and driver health is the gpu-operator health checks'
+        # job, not qualification.
+        constraints:
+          - name: K8s.oke-addons.nvidia-gpu-plugin
+            value: absent
+            remediation: >-
+              The OKE NvidiaGpuPlugin add-on is installed on this cluster,
+              but the operator-managed profile expects the GPU Operator's
+              device plugin to be the sole nvidia.com/gpu advertiser —
+              remove the add-on (clusters that only disable it via the
+              oci.oraclecloud.com/disable-gpu-device-plugin node label are
+              out of contract and must migrate to add-on removal), or for
+              Oracle-managed pools regenerate with the default
+              (--profile gpuStack=oci-managed). Capture the signal with:
+              aicr snapshot --oke-addons <path to
+              `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump>.
+          # Tripwire for OKE's LEGACY device plugin: older clusters ship a
+          # kube-system/nvidia-gpu-device-plugin DaemonSet via the legacy
+          # Kubernetes addon-manager, which `oci ce cluster list-addons`
+          # cannot see — so the add-on constraint above reads absent while
+          # Oracle's plugin still advertises nvidia.com/gpu (#1327). The
+          # snapshot's in-cluster reading (pkg/collector/k8s/
+          # okelegacyplugin.go) collapses to none/active/unknown; only
+          # "none" (absent, unrelated same-name workload, or fully disabled
+          # with desiredNumberScheduled=0) qualifies. This tripwire is
+          # operator-managed-only by design: when the managed add-on IS
+          # installed, it manages the same DaemonSet name, so oci-managed
+          # would observe "active" on every healthy cluster.
+          - name: K8s.oke-legacy-plugin.nvidia-gpu-device-plugin
+            value: none
+            remediation: >-
+              OKE's legacy addon-manager device plugin (the kube-system
+              nvidia-gpu-device-plugin DaemonSet) still targets GPU nodes on
+              this cluster; deploying the GPU Operator's device plugin
+              alongside it would double-advertise nvidia.com/gpu. Disable it
+              on every GPU node pool via the
+              oci.oraclecloud.com/disable-gpu-device-plugin=true node label,
+              or migrate the cluster to the managed NvidiaGpuPlugin add-on
+              (and then use the default --profile gpuStack=oci-managed).
+              Re-run aicr snapshot after the change so the reading reflects
+              the new state.
 
   validation:
     conformance:

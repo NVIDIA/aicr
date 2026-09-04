@@ -32,7 +32,7 @@ spec:
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
-      value: ">= 1.30"
+      value: ">= 1.32"
 
   componentRefs:
     # A100-specific GPU Operator overrides (inherits valuesFile from eks-training).

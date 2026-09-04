@@ -76,6 +76,39 @@ spec:
           enable: true
 
   validation:
+    deployment:
+      constraints:
+        # Host GPU driver floor for RTX PRO 6000 Blackwell Server Edition.
+        #
+        # NVIDIA GPU Operator platform support, "NVIDIA RTX PRO 6000 Blackwell
+        # Server Edition notes": "Driver versions 575.57.08 or later is
+        # required."
+        # https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/platform-support.html
+        #
+        # AWS documents G7e as using RTX PRO 6000 Blackwell Server Edition:
+        # https://aws.amazon.com/ec2/instance-types/g7e/
+        # The Server Edition minimum therefore holds for every deeper OS and
+        # platform leaf in this EKS chain. It is deliberately NOT keyed to
+        # whatever driver the GPU Operator currently pins or to a version
+        # observed passing a test run: a shipped version proves sufficiency,
+        # not minimality.
+        #
+        # Placement (issue #2438): deployment constraints merge last-wins by
+        # name with no max comparison, and the accelerator wildcard
+        # rtx-pro-6000-any is applied BEFORE the service overlays it composes
+        # with, so a floor declared there could be silently downgraded by any
+        # same-name constraint added later in the chain.
+        # This service x intent overlay is the last applied for its own query
+        # and sits in the chain of every deeper OS/platform leaf, so the floor
+        # reaches them all and cannot be overwritten from above. See
+        # TestGPUDriverFloorEffectiveValue and
+        # TestGPUDriverFloorPlacementInvariant in pkg/recipe.
+        #
+        # The check-nvidia-smi check that evaluates this is inherited from
+        # rtx-pro-6000-any; declaring the constraint here unions into that
+        # phase without dropping the inherited checks.
+        - name: Deployment.gpu-driver.version
+          value: ">= 575.57.08"
     conformance:
       checks:
         - platform-health

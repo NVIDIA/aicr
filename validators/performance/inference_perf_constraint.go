@@ -35,6 +35,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
@@ -1617,8 +1618,8 @@ func buildTolerations(node v1.Node) []v1.Toleration {
 // deferred cleanup in the caller always runs — even if later steps fail.
 func deployInferenceWorkload(ctx *validators.Context, config *inferenceWorkloadConfig) error {
 	// Create namespace (idempotent).
-	if err := ensureNamespace(ctx, config.namespace); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+	if _, _, err := ensureNamespace(ctx, config.namespace, labels.ValueInferencePerf); err != nil {
+		return err
 	}
 
 	// Mark deployed early (namespace now exists) so cleanup tears down the
@@ -1996,7 +1997,17 @@ func ensureHFTokenSecret(ctx *validators.Context, namespace string) error {
 // AlreadyExists, but subsequent resource creates inside it fail with
 // "... forbidden: ... because it is being terminated". Waiting here until the
 // prior Terminating instance is fully gone avoids that race.
-func ensureNamespace(ctx *validators.Context, namespace string) error {
+//
+// The namespace is stamped with labels.ManagedBy and component so
+// pruneStaleNCCLNamespaces can scope its List server-side, instead of
+// matching a naming convention.
+//
+// The bool result reports whether this call's own Create landed, as
+// opposed to reusing or adopting a namespace that already existed, so a
+// caller rolling back on a later failure doesn't tear down one it merely
+// adopted. The namespace result carries its UID either way, for a caller
+// that needs one without a further Get.
+func ensureNamespace(ctx *validators.Context, namespace, component string) (*v1.Namespace, bool, error) {
 	nsCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.InferenceNamespaceTerminationWait)
 	defer cancel()
 
@@ -2007,24 +2018,72 @@ func ensureNamespace(ctx *validators.Context, namespace string) error {
 	case apierrors.IsNotFound(err):
 		// Namespace doesn't exist — Create below will succeed.
 	case err != nil:
-		return errors.Wrap(errors.ErrCodeInternal, "failed to check namespace", err)
+		return nil, false, errors.Wrap(errors.ErrCodeInternal, "failed to check namespace", err)
 	case existing.DeletionTimestamp != nil:
 		slog.Info("Namespace is terminating from a prior run; waiting for full deletion",
 			"namespace", namespace)
 		if waitErr := waitForNamespaceGone(nsCtx, clients, namespace); waitErr != nil {
-			return waitErr
+			return nil, false, waitErr
 		}
+	case !namespaceOwnedBy(existing, component):
+		// Don't adopt a namespace we didn't create.
+		return nil, false, errors.New(errors.ErrCodeConflict, fmt.Sprintf(
+			"namespace %q already exists without the expected %s=%s,%s=%s labels; refusing to adopt a namespace this package did not create",
+			namespace, labels.ManagedBy, labels.ValueValidator, labels.Component, component))
 	default:
-		// Already exists and is usable — nothing to do.
-		return nil
+		// Already exists, owned by us, and usable. Nothing to do.
+		return existing, false, nil
 	}
 
-	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: namespace}}
-	_, err = clients.Create(nsCtx, ns, metav1.CreateOptions{})
-	if err != nil && !apierrors.IsAlreadyExists(err) {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+	ns := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: namespace,
+		Labels: map[string]string{
+			labels.ManagedBy: labels.ValueValidator,
+			labels.Component: component,
+		},
+	}}
+	created, err := clients.Create(nsCtx, ns, metav1.CreateOptions{})
+	if err == nil {
+		return created, true, nil
 	}
-	return nil
+	if !apierrors.IsAlreadyExists(err) {
+		return nil, false, errors.Wrap(errors.ErrCodeInternal, "failed to create namespace", err)
+	}
+	// Lost a create race to a concurrent caller. Fetch the winning object
+	// rather than returning nil, so a UID-precondition caller still gets
+	// something to pin its later delete to.
+	winner, err := clients.Get(nsCtx, namespace, metav1.GetOptions{})
+	if err != nil {
+		return nil, false, errors.Wrap(errors.ErrCodeInternal, "failed to read namespace created by a concurrent caller", err)
+	}
+	if winner.DeletionTimestamp != nil {
+		// Wait for the terminating winner to fully disappear, then create
+		// ours, instead of handing back a namespace that would reject
+		// resource creation.
+		slog.Info("Namespace from a concurrent create race is terminating; waiting for full deletion",
+			"namespace", namespace)
+		if waitErr := waitForNamespaceGone(nsCtx, clients, namespace); waitErr != nil {
+			return nil, false, waitErr
+		}
+		created, createErr := clients.Create(nsCtx, ns, metav1.CreateOptions{})
+		if createErr != nil {
+			return nil, false, errors.Wrap(errors.ErrCodeInternal,
+				"failed to create namespace after a concurrent owner finished terminating", createErr)
+		}
+		return created, true, nil
+	}
+	if !namespaceOwnedBy(winner, component) {
+		return nil, false, errors.New(errors.ErrCodeConflict, fmt.Sprintf(
+			"namespace %q was created by a concurrent caller without the expected %s=%s,%s=%s labels; refusing to adopt it",
+			namespace, labels.ManagedBy, labels.ValueValidator, labels.Component, component))
+	}
+	return winner, false, nil
+}
+
+// namespaceOwnedBy reports whether ns carries the labels ensureNamespace
+// stamps on create for the given component.
+func namespaceOwnedBy(ns *v1.Namespace, component string) bool {
+	return ns.Labels[labels.ManagedBy] == labels.ValueValidator && ns.Labels[labels.Component] == component
 }
 
 // waitForNamespaceGone watches the given namespace until it is removed.
@@ -2748,7 +2807,7 @@ func resolveModel(ctx *validators.Context) string {
 // `gateway-epp` switches to Gateway API Inference Extension: EPP
 // performs KV-aware endpoint selection and worker frontend sidecars run in
 // direct mode so they honor EPP's routing headers. The sidecars do not relay
-// local vLLM ZMQ KV events onto NATS; that relay is handled by the worker
+// KV events; workers publish ZMQ KV events directly to the KV router.
 // runtime.
 func resolveRoutingMode(ctx *validators.Context) (inferenceRoutingMode, error) {
 	if c, ok := findPerformanceConstraint(ctx, perfConstraintRoutingMode); ok {

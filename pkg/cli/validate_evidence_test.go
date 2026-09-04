@@ -21,14 +21,15 @@ import (
 	"github.com/urfave/cli/v3"
 
 	bundleattest "github.com/NVIDIA/aicr/pkg/bundler/attestation"
-	"github.com/NVIDIA/aicr/pkg/config"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 )
 
 // runEvidenceCmd builds a minimal cli.Command that exposes the
 // flag-set buildRecipeEvidenceConfig reads, runs it with the supplied
 // args, and returns the resolved *recipeEvidenceConfig (or nil) plus
-// any action error.
-func runEvidenceCmd(t *testing.T, args []string, resolved *config.ValidateResolved) (*recipeEvidenceConfig, error) {
+// any action error. att stands in for what Config.EvidenceAttestationOptions
+// would derive from spec.validate.evidence.attestation.
+func runEvidenceCmd(t *testing.T, args []string, att aicr.EvidenceOptions) (*recipeEvidenceConfig, error) {
 	t.Helper()
 	var got *recipeEvidenceConfig
 	cmd := &cli.Command{
@@ -44,7 +45,7 @@ func runEvidenceCmd(t *testing.T, args []string, resolved *config.ValidateResolv
 			&cli.BoolFlag{Name: "full"},
 		},
 		Action: func(_ context.Context, c *cli.Command) error {
-			got = buildRecipeEvidenceConfig(c, resolved)
+			got = buildRecipeEvidenceConfig(c, att)
 			return nil
 		},
 	}
@@ -56,17 +57,17 @@ func runEvidenceCmd(t *testing.T, args []string, resolved *config.ValidateResolv
 
 func TestBuildRecipeEvidenceConfig(t *testing.T) {
 	tests := []struct {
-		name     string
-		args     []string
-		resolved *config.ValidateResolved
-		wantNil  bool
-		want     *recipeEvidenceConfig
+		name    string
+		args    []string
+		att     aicr.EvidenceOptions
+		wantNil bool
+		want    *recipeEvidenceConfig
 	}{
 		{
-			name:     "neither flag nor config returns nil",
-			args:     nil,
-			resolved: &config.ValidateResolved{},
-			wantNil:  true,
+			name:    "neither flag nor config returns nil",
+			args:    nil,
+			att:     aicr.EvidenceOptions{},
+			wantNil: true,
 		},
 		{
 			name: "flag-only populates from flags",
@@ -78,7 +79,7 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 				"--identity-token", "tok",
 				"--oidc-device-flow",
 			},
-			resolved: &config.ValidateResolved{},
+			att: aicr.EvidenceOptions{},
 			want: &recipeEvidenceConfig{
 				OutDir:    "/tmp/out",
 				BOMPath:   "/tmp/bom.json",
@@ -93,14 +94,12 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 		{
 			name: "config-only fallback when flags unset",
 			args: nil,
-			resolved: &config.ValidateResolved{
-				EvidenceAttestation: &config.EvidenceAttestationResolved{
-					Out:         "/cfg/out",
-					BOM:         "/cfg/bom.json",
-					Push:        "ttl.sh/cfg:1h",
-					PlainHTTP:   true,
-					InsecureTLS: true,
-				},
+			att: aicr.EvidenceOptions{
+				OutDir:      "/cfg/out",
+				BOMPath:     "/cfg/bom.json",
+				Push:        "ttl.sh/cfg:1h",
+				PlainHTTP:   true,
+				InsecureTLS: true,
 			},
 			want: &recipeEvidenceConfig{
 				OutDir:      "/cfg/out",
@@ -111,18 +110,18 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 			},
 		},
 		{
-			name:     "full flag sets Full",
-			args:     []string{"--emit-attestation", "/tmp/out", "--full"},
-			resolved: &config.ValidateResolved{},
+			name: "full flag sets Full",
+			args: []string{"--emit-attestation", "/tmp/out", "--full"},
+			att:  aicr.EvidenceOptions{},
 			want: &recipeEvidenceConfig{
 				OutDir: "/tmp/out",
 				Full:   true,
 			},
 		},
 		{
-			name:     "minimal by default (full unset)",
-			args:     []string{"--emit-attestation", "/tmp/out"},
-			resolved: &config.ValidateResolved{},
+			name: "minimal by default (full unset)",
+			args: []string{"--emit-attestation", "/tmp/out"},
+			att:  aicr.EvidenceOptions{},
 			want: &recipeEvidenceConfig{
 				OutDir: "/tmp/out",
 				Full:   false,
@@ -131,12 +130,10 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 		{
 			name: "flag overrides config when both set",
 			args: []string{"--emit-attestation", "/flag/out", "--push", "ttl.sh/flag:1h"},
-			resolved: &config.ValidateResolved{
-				EvidenceAttestation: &config.EvidenceAttestationResolved{
-					Out:  "/cfg/out",
-					Push: "ttl.sh/cfg:1h",
-					BOM:  "/cfg/bom.json",
-				},
+			att: aicr.EvidenceOptions{
+				OutDir:  "/cfg/out",
+				Push:    "ttl.sh/cfg:1h",
+				BOMPath: "/cfg/bom.json",
 			},
 			want: &recipeEvidenceConfig{
 				OutDir:  "/flag/out",
@@ -147,7 +144,7 @@ func TestBuildRecipeEvidenceConfig(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := runEvidenceCmd(t, tt.args, tt.resolved)
+			got, err := runEvidenceCmd(t, tt.args, tt.att)
 			if err != nil {
 				t.Fatalf("cmd.Run: %v", err)
 			}

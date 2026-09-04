@@ -32,7 +32,7 @@ spec:
   # requirement, so the recipe keeps the OKE training baseline K8s floor.
   constraints:
     - name: K8s.server.version
-      value: ">= 1.30"
+      value: ">= 1.32"
 
   componentRefs:
     # L40S-specific GPU Operator overrides (inherits valuesFile from oke-training).
@@ -53,6 +53,26 @@ spec:
       overrides:
         topologyUpdater:
           enable: true
+
+    # RDMA fabric (RoCE over SR-IOV VFs). Every L40S OCI cluster runs RoCE;
+    # the SR-IOV VF device plugin advertises nvidia.com/mlnxnics RDMA VFs,
+    # with nv-ipam + multus attaching the VFs into workload pods. The
+    # NicClusterPolicy is supplied by the manifest (the chart's deployCR is
+    # off — the manifest is the only place the OCI VF selectors 101a/101e
+    # can be expressed). OCI nodes carry host MOFED, so there is no
+    # ofedDriver in any configuration. GPUDirect RDMA works via DMA-BUF;
+    # nvidia-peermem stays off (base default) — inert on this topology.
+    # Present in every gpuStack value: the fabric is orthogonal to GPU
+    # driver/plugin ownership. Incompatible with Oracle's opt-in
+    # NvidiaNetworkOperator add-on (two lifecycle managers, one release).
+    - name: network-operator
+      type: Helm
+      valuesFile: components/network-operator/values-oke-l40s.yaml
+      manifestFiles:
+        - components/network-operator/manifests/nic-cluster-policy-oke-l40s.yaml
+      dependencyRefs:
+        - nfd
+        - cert-manager
 
   # Validation checks for L40S on OKE training workloads.
   # Defined at the intent layer (not OS-specific) so all OS variants inherit them.

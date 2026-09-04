@@ -416,7 +416,7 @@ jobs:
       # default, so we deliberately do NOT set role-duration-seconds here.
       - name: Configure AWS credentials
         id: auth
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
@@ -717,7 +717,7 @@ jobs:
       # paths, matching the install step's own gate.
       - name: Refresh AWS credentials before install
         if: steps.prep.outcome == 'success'
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
@@ -765,7 +765,7 @@ jobs:
       # daytime-up stops after install and leaves the cluster up for handoff.
       - name: Refresh AWS credentials before validate
         if: steps.install.outcome == 'success' && inputs.lifecycle != 'daytime-up'
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
@@ -797,7 +797,7 @@ jobs:
       # re-enabled it shares this same gate, so exactly one CUJ runs per intent.
       - name: Refresh AWS credentials before CUJ
         if: steps.conformance.outcome == 'success'
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
@@ -888,7 +888,7 @@ jobs:
       # configure-aws-credentials can re-assume here.
       - name: Refresh AWS credentials before debug collection
         if: failure() && steps.prep.outcome != 'skipped'
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
@@ -1031,7 +1031,7 @@ jobs:
             (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped') ||
             (inputs.lifecycle == 'daytime-up' && (failure() || cancelled()) && steps.infra.outcome != 'skipped')
           )
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}

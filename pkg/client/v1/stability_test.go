@@ -43,6 +43,7 @@ import (
 	appconfig "github.com/NVIDIA/aicr/pkg/config"
 	evverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/health"
+	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
@@ -248,6 +249,66 @@ func TestStability_Bundle(t *testing.T) {
 	t.Parallel()
 
 	_ = aicr.BundleOptions{}
+	// OIDCResolve lets a committed spec.bundle.attestation reach the
+	// bundler without the caller constructing an Attester. Pinned by name
+	// and type: a bare composite literal above would still compile if the
+	// field were renamed or retyped.
+	_ = aicr.BundleOptions{OIDCResolve: aicr.OIDCResolveOptions{}}
+	requireType[aicr.OIDCResolveOptions](aicr.BundleOptions{}.OIDCResolve)
+	// Config is the escape hatch a caller-built *BundleConfig still wins
+	// through (see BundleOptions' "Two ways to supply the bundler
+	// configuration" godoc); the CLI's own bundle-generation call and the
+	// aicrd /v1/bundle handler both rely on it.
+	requireType[*aicr.BundleConfig](aicr.BundleOptions{}.Config)
+	// The 18 flat fields Config.BundleOptions derives from spec.bundle.
+	// Pinned by name and type together: a bare zero-value literal above
+	// would still compile through a rename or retype of any one of them.
+	_ = aicr.BundleOptions{
+		Deployer:                   bundlerconfig.DeployerHelm,
+		Repo:                       "",
+		ValueOverrides:             nil,
+		DynamicValues:              nil,
+		SystemNodeSelector:         nil,
+		SystemNodeTolerations:      nil,
+		AcceleratedNodeSelector:    nil,
+		AcceleratedNodeTolerations: nil,
+		DRAEvictionNodeLabel:       nil,
+		WorkloadGate:               nil,
+		WorkloadSelector:           nil,
+		Nodes:                      0,
+		StorageClass:               "",
+		SharedStorageClass:         "",
+		Attest:                     false,
+		CertIDRegexp:               "",
+		VendorCharts:               false,
+		AppName:                    "",
+	}
+	requireType[bundlerconfig.DeployerType](aicr.BundleOptions{}.Deployer)
+	requireType[[]bundlerconfig.ComponentPath](aicr.BundleOptions{}.ValueOverrides)
+	requireType[[]bundlerconfig.ComponentPath](aicr.BundleOptions{}.DynamicValues)
+	requireType[[]corev1.Toleration](aicr.BundleOptions{}.SystemNodeTolerations)
+	requireType[[]corev1.Toleration](aicr.BundleOptions{}.AcceleratedNodeTolerations)
+	requireType[*bundlerconfig.NodeLabel](aicr.BundleOptions{}.DRAEvictionNodeLabel)
+	requireType[*corev1.Taint](aicr.BundleOptions{}.WorkloadGate)
+	// The three selectors are pinned by TYPE, not only by the nil literals in
+	// the struct above: an untyped nil satisfies any map or pointer, so the
+	// literal alone would keep compiling if one of these were retyped.
+	requireType[map[string]string](aicr.BundleOptions{}.SystemNodeSelector)
+	requireType[map[string]string](aicr.BundleOptions{}.AcceleratedNodeSelector)
+	requireType[map[string]string](aicr.BundleOptions{}.WorkloadSelector)
+	requireType[int](aicr.BundleOptions{}.Nodes)
+	requireType[bool](aicr.BundleOptions{}.Attest)
+	requireType[bool](aicr.BundleOptions{}.VendorCharts)
+
+	var bi aicr.BundleInputOptions
+	_ = bi.RecipePath
+	_ = bi.ImageRefsPath
+	_ = bi.OutputTarget
+	_ = bi.OutputTargetRaw
+	_ = bi.InsecureTLS
+	_ = bi.PlainHTTP
+	requireType[*oci.Reference](aicr.BundleInputOptions{}.OutputTarget)
+
 	requireSignature[func(*aicr.Client, context.Context, *recipe.RecipeResult) (*aicr.RecipeResult, error)]((*aicr.Client).AdoptRecipe)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, aicr.BundleOptions) (aicr.BundleArtifact, error)]((*aicr.Client).MakeBundle)
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult) ([]aicr.ComponentBundle, error)]((*aicr.Client).BundleComponents)
@@ -327,6 +388,21 @@ func TestStability_TypesAndAliases(t *testing.T) {
 	_ = aicr.Criteria{}
 	_ = aicr.AllowLists{}
 	_ = aicr.AgentConfig{}
+	// Pinned by name and type, not just shape: Config.SnapshotAgentConfig
+	// populates these, and the bare literal above would still compile
+	// through a rename or retype. Cleanup and Privileged especially --
+	// both are derived through a transform (an inversion and a
+	// defaults-to-true), so a silent flip has no other guard here.
+	_ = aicr.AgentConfig{
+		Namespace: "", Image: "", JobName: "", ServiceAccountName: "",
+		RuntimeClassName: "", OS: "", Output: "", TemplatePath: "",
+		MaxNodesPerEntry: 0, RequireGPU: false, Cleanup: false, Privileged: false,
+	}
+	requireType[bool](aicr.AgentConfig{}.Cleanup)
+	requireType[bool](aicr.AgentConfig{}.Privileged)
+	requireType[time.Duration](aicr.AgentConfig{}.Timeout)
+	_ = aicr.SnapshotOutputOptions{Path: "", Format: "", Template: ""}
+	_ = aicr.RecipeOutputOptions{Path: "", Format: ""}
 	_ = aicr.Snapshot{}
 	_ = aicr.Snapshot{}.Raw
 	_ = aicr.ReportSummary{}
@@ -500,6 +576,63 @@ func TestStability_Config(t *testing.T) {
 	requireSignature[func(*aicr.Config) *appconfig.AICRConfig]((*aicr.Config).Unwrap)
 
 	requireSignature[func(*aicr.Config) (aicr.BundleVerifyOptions, error)]((*aicr.Config).BundleVerifyOptions)
+	requireSignature[func(*aicr.Config) (aicr.BundleOptions, error)]((*aicr.Config).BundleOptions)
+	requireSignature[func(*aicr.Config) (aicr.BundleInputOptions, error)]((*aicr.Config).BundleInputOptions)
+	requireSignature[func(*aicr.Config) (aicr.ValidateSettings, bool, error)]((*aicr.Config).ValidateSettings)
+	requireSignature[func(*aicr.Config) (aicr.ValidateInputOptions, error)]((*aicr.Config).ValidateInputOptions)
+	requireSignature[func(*aicr.Config) (aicr.CNCFEvidenceOptions, error)]((*aicr.Config).CNCFEvidenceOptions)
+	requireSignature[func(*aicr.Config) (*aicr.AgentConfig, bool, error)]((*aicr.Config).SnapshotAgentConfig)
+	requireSignature[func(*aicr.Config) (aicr.SnapshotOutputOptions, error)]((*aicr.Config).SnapshotOutputOptions)
+	requireSignature[func(*aicr.Config) aicr.RecipeOutputOptions]((*aicr.Config).RecipeOutputOptions)
+
+	// ValidateSettings and ValidateInputOptions pinned by field name AND type
+	// together, mirroring BundleInputOptions above (TestStability_Bundle): a
+	// bare read of each field would still compile through a retype (FailFast
+	// *bool -> bool, Timeout *time.Duration -> time.Duration, both of which
+	// destroy the nil-vs-explicit-zero distinction the design rests on) or a
+	// silently-flipped Cleanup polarity.
+	var vs aicr.ValidateSettings
+	_ = vs.Namespace
+	_ = vs.Image
+	_ = vs.ImagePullSecrets
+	_ = vs.JobName
+	_ = vs.ServiceAccountName
+	_ = vs.NodeSelector
+	_ = vs.Tolerations
+	_ = vs.RequireGPU
+	_ = vs.Phases
+	_ = vs.NoCluster
+	_ = vs.Cleanup
+	_ = vs.FailFast
+	_ = vs.Timeout
+	requireType[*bool](aicr.ValidateSettings{}.FailFast)
+	requireType[*time.Duration](aicr.ValidateSettings{}.Timeout)
+	requireType[bool](aicr.ValidateSettings{}.Cleanup)
+
+	var vi aicr.ValidateInputOptions
+	_ = vi.RecipePath
+	_ = vi.SnapshotPath
+	_ = vi.FailOnError
+	requireType[*bool](aicr.ValidateInputOptions{}.FailOnError)
+
+	// CNCFEvidenceOptions pinned the same way as its SnapshotOutputOptions
+	// sibling (TestStability_Bundle's aicr.BundleInputOptions block): field
+	// reads plus an explicit type pin on the one slice field.
+	var ce aicr.CNCFEvidenceOptions
+	_ = ce.Dir
+	_ = ce.CNCFSubmission
+	_ = ce.Features
+	// Pin the scalars by TYPE too, not only by presence: a bare `_ = ce.Dir`
+	// keeps compiling if Dir becomes a named string type or CNCFSubmission
+	// becomes a *bool, which would silently change the nil-vs-set contract.
+	requireType[string](aicr.CNCFEvidenceOptions{}.Dir)
+	requireType[bool](aicr.CNCFEvidenceOptions{}.CNCFSubmission)
+	requireType[[]string](aicr.CNCFEvidenceOptions{}.Features)
+	// The bool is load-bearing, not decoration: it separates "the document
+	// declined the bundle" from "the document fumbled it", which a zero
+	// EvidenceOptions alone cannot express. Dropping it would compile at every
+	// call site that ignores it.
+	requireSignature[func(*aicr.Config) (aicr.EvidenceOptions, bool, error)]((*aicr.Config).EvidenceAttestationOptions)
 	requireSignature[func(*aicr.Config) string]((*aicr.Config).RecipeProfile)
 	requireSignature[func(*aicr.Config) (string, bool, error)]((*aicr.Config).RecipeAccountingMode)
 	requireSignature[func(*aicr.Config) (aicr.RecipeSourceOption, bool)]((*aicr.Config).RecipeSource)

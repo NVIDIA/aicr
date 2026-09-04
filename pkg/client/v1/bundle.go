@@ -16,7 +16,10 @@ package aicr
 
 import (
 	"context"
+	"fmt"
 	"time"
+
+	corev1 "k8s.io/api/core/v1"
 
 	"github.com/NVIDIA/aicr/pkg/bundler"
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
@@ -54,18 +57,153 @@ type BundleArtifact = *result.Output
 // bundler.New / (*DefaultBundler).Make accept so the facade reproduces
 // the same full deployer-mode bundle artifact the CLI bundle command
 // and REST /v1/bundle handler produce today.
+//
+// # Two ways to supply the bundler configuration
+//
+// The 18 flat fields below (Deployer through AppName) are what
+// Config.BundleOptions derives from spec.bundle, field by field, so a
+// config-driven caller (the CLI in particular) can read and override
+// individual settings with its own flag precedence instead of reaching into
+// an opaque built Config. bundlerConfig assembles them into a *BundleConfig
+// via the same bundlerconfig.With* options the CLI and the REST handler use.
+//
+// Config remains as an escape hatch for a caller that already has a fully
+// built *BundleConfig from a source the flat fields cannot express — the
+// CLI's own bundle-generation call (Version, TargetRevision, ReadinessHooks,
+// Serial, Flux/OCI naming, typed value overrides — all CLI-flag-only, no
+// spec.bundle counterpart) and the aicrd /v1/bundle handler (built from HTTP
+// query parameters via bundler.ParseBundleConfig, then mutated in place with
+// bundlercfg.WithAttest once the request's signing decision is known). When
+// Config is non-nil, it WINS outright over the 18 flat fields it supersedes
+// (Deployer through AppName — bundlerConfig's own inputs) — the same
+// derive-don't-apply precedence Attester already documents against
+// OIDCResolve. Config.BundleOptions never sets Config, so a config-driven
+// derivation always routes through the flat fields.
+//
+// Config does NOT reach Attester, OIDCResolve, BinaryAttestation, OutputDir
+// or Timeout: bundlerConfig() only ever reads Config in place of the 18
+// bundler-config fields, so these five stay caller-supplied regardless of
+// Config. The REST /v1/bundle handler depends on this split — it sets Config
+// and OutputDir/Timeout in the same BundleOptions literal and requires both
+// to take effect.
+//
+// # Config's Attest must agree with OIDCResolve.Attest
+//
+// The split above has one guarded exception. Config's baked-in Attest and
+// OIDCResolve.Attest are independent gates — one reaches the bundler's
+// attestBundle check, the other decides whether MakeBundle derives a signer
+// — and when Attester is nil (so OIDCResolve is actually consulted) MakeBundle
+// rejects a Config and OIDCResolve.Attest that disagree, with
+// ErrCodeInvalidRequest naming both values, rather than silently producing
+// unsigned "signed" output or burning an OIDC/KMS round trip whose result
+// Config then discards. Supplying Attester directly sidesteps the check
+// entirely — it wins outright and neither gate is consulted. Both current
+// callers keep the two in lockstep already: the CLI always supplies Attester
+// (so OIDCResolve is never consulted), and the REST handler sets Config's
+// Attest and Attester together.
 type BundleOptions struct {
-	// Config carries the bundler configuration (deployer mode, value
-	// overrides, node selectors/tolerations, vendoring, app/chart
-	// names). When nil, MakeBundle uses config.NewConfig() — the same
-	// default bundler.New applies (Helm deployer, no overrides).
+	// Config carries an already-built bundler configuration and, when
+	// non-nil, wins over the 18 flat fields below (Deployer through AppName).
+	// It does NOT override Attester, OIDCResolve, BinaryAttestation,
+	// OutputDir or Timeout — see "Two ways to supply the bundler
+	// configuration" above. When both Config and every flat field are unset,
+	// MakeBundle uses config.NewConfig() — the same default bundler.New
+	// applies (Helm deployer, no overrides).
 	Config *BundleConfig
 
-	// Attester signs bundle content. When nil, MakeBundle uses the
-	// no-op attester (matching bundler.New's default when --attest is
-	// not set). The CLI builds this via attestation.ResolveAttesterLazy
-	// when --attest is passed.
+	// Deployer selects the bundle output format (Helm, Argo CD, Argo CD Helm
+	// chart, Flux, or Helmfile). The zero value is DeployerType(""), which
+	// bundlerConfig treats as "not set" and leaves at bundler config.NewConfig's
+	// own default (Helm) — unlike every other flat field here, an empty
+	// DeployerType is not a safe pass-through: WithDeployer("") would
+	// overwrite that default with an empty deployer, which fails bundling
+	// with "unsupported deployer type" instead of defaulting to Helm.
+	Deployer config.DeployerType
+
+	// Repo is the deployment repository URL: the Argo CD Application source,
+	// or (for --deployer argocd with OCI output) the origin baked into
+	// argocd-helm's values.yaml default repoURL.
+	Repo string
+
+	// ValueOverrides are parsed "component:path=value" Helm value overrides.
+	ValueOverrides []config.ComponentPath
+
+	// DynamicValues declares component:path value paths supplied at install
+	// time rather than baked into the bundle.
+	DynamicValues []config.ComponentPath
+
+	// SystemNodeSelector / SystemNodeTolerations schedule non-accelerated
+	// (system) component workloads.
+	SystemNodeSelector    map[string]string
+	SystemNodeTolerations []corev1.Toleration
+
+	// AcceleratedNodeSelector / AcceleratedNodeTolerations schedule
+	// GPU-accelerated component workloads.
+	AcceleratedNodeSelector    map[string]string
+	AcceleratedNodeTolerations []corev1.Toleration
+
+	// DRAEvictionNodeLabel is the singular DRA eviction contract label. Nil
+	// means "not requested" — bundlerConfig leaves the bundler's own
+	// NVIDIA-documented default in place rather than overwriting it with a
+	// zero label. See issue #2469.
+	DRAEvictionNodeLabel *config.NodeLabel
+
+	// WorkloadGate is the taint applied to prevent eviction of running
+	// workloads while the gate is active. Nil means no gate is configured;
+	// WithWorkloadGateTaint treats nil as a no-op, so passing it through
+	// unconditionally is safe.
+	WorkloadGate *corev1.Taint
+
+	// WorkloadSelector labels the workloads WorkloadGate protects.
+	WorkloadSelector map[string]string
+
+	// Nodes is the estimated node count used for capacity-aware rendering.
+	// 0 means unset.
+	Nodes int
+
+	// StorageClass / SharedStorageClass name the Kubernetes StorageClasses
+	// components request for local and RWX-shared volumes respectively.
+	StorageClass       string
+	SharedStorageClass string
+
+	// Attest enables bundle attestation and binary verification. Off
+	// (false) by default — the same default bundler.New applies when
+	// --attest is not passed, so the zero value stays a true no-op.
+	Attest bool
+
+	// CertIDRegexp overrides the expected certificate identity pattern for
+	// binary attestation verification.
+	CertIDRegexp string
+
+	// VendorCharts pulls upstream Helm chart bytes into the bundle so the
+	// artifact is air-gap deployable. Off (false) by default.
+	VendorCharts bool
+
+	// AppName overrides the parent Argo Application's metadata.name. Empty
+	// means each deployer applies its own default. See #1011.
+	AppName string
+
+	// Attester signs bundle content. When nil, MakeBundle derives one from
+	// OIDCResolve; when both are unset, the no-op attester applies (matching
+	// bundler.New's default when --attest is not set).
+	//
+	// A non-nil Attester WINS over OIDCResolve. That precedence is the
+	// facade's derive-don't-apply rule applied to signing: an explicitly
+	// supplied signer is a caller decision, and silently rebuilding one from
+	// config would discard it. The aicrd server relies on this to inject its
+	// own attester; the CLI sets it via attestation.ResolveAttesterLazy when
+	// --attest is passed, so both keep working unchanged.
 	Attester BundleAttester
+
+	// OIDCResolve configures keyless/KMS signing when Attester is nil and
+	// OIDCResolve.Attest is true, letting a committed spec.bundle.attestation
+	// reach the bundler without the caller constructing an Attester itself.
+	// Config.BundleOptions derives it.
+	//
+	// Ignored when Attest is false, so the zero value stays a true no-op
+	// rather than resolving a signer nobody asked for. Mirrors the
+	// OIDCResolve field EvidenceOptions and SignOptions already carry.
+	OIDCResolve OIDCResolveOptions
 
 	// BinaryAttestation, when non-empty, is a pre-verified binary attestation
 	// (Sigstore bundle bytes) embedded into attested bundles as tool provenance.
@@ -90,6 +228,61 @@ type BundleOptions struct {
 	// defaults.BundleHandlerTimeout to preserve its 60s request boundary;
 	// the CLI bundle command leaves it 0 so long bundles are uncapped.
 	Timeout time.Duration
+}
+
+// bundlerConfig converts BundleOptions into the bundler's own config. It is
+// the single place the facade's field names meet bundlerconfig's With*
+// options; MakeBundle and Config.BundleOptions both route through it (the
+// latter indirectly, by deriving the flat fields this reads) so the two
+// cannot disagree about what a field means.
+//
+// A non-nil Config wins outright — see "Two ways to supply the bundler
+// configuration" on BundleOptions. That escape hatch is why this method
+// exists at all: the CLI's own bundle-generation call and the aicrd
+// /v1/bundle handler both need settings (Version, Serial, ReadinessHooks,
+// Flux/OCI naming, typed value overrides, ...) that have no spec.bundle
+// counterpart and so cannot be flat BundleOptions fields, and the server
+// additionally mutates its Config in place after construction. Falling
+// through to the flat fields when Config is set would silently discard a
+// fully-built configuration a caller explicitly supplied.
+func (o BundleOptions) bundlerConfig() *BundleConfig {
+	if o.Config != nil {
+		return o.Config
+	}
+
+	opts := []config.Option{
+		config.WithRepoURL(o.Repo),
+		config.WithValueOverridePaths(o.ValueOverrides),
+		config.WithDynamicValuePaths(o.DynamicValues),
+		config.WithSystemNodeSelector(o.SystemNodeSelector),
+		config.WithSystemNodeTolerations(o.SystemNodeTolerations),
+		config.WithAcceleratedNodeSelector(o.AcceleratedNodeSelector),
+		config.WithAcceleratedNodeTolerations(o.AcceleratedNodeTolerations),
+		config.WithWorkloadGateTaint(o.WorkloadGate),
+		config.WithWorkloadSelector(o.WorkloadSelector),
+		config.WithEstimatedNodeCount(o.Nodes),
+		config.WithStorageClass(o.StorageClass),
+		config.WithSharedStorageClass(o.SharedStorageClass),
+		config.WithVendorCharts(o.VendorCharts),
+		config.WithAppName(o.AppName),
+		config.WithAttest(o.Attest),
+		config.WithCertificateIdentityRegexp(o.CertIDRegexp),
+	}
+	// Deployer is the one flat field whose zero value is NOT the same as
+	// "unset": NewConfig defaults to DeployerHelm, but WithDeployer("") sets
+	// the deployer to the empty string unconditionally, and an empty deployer
+	// fails bundling with "unsupported deployer type" rather than falling
+	// back to Helm. Appending only when set preserves NewConfig's default for
+	// a caller — direct or config-derived — that never chose a deployer.
+	if o.Deployer != "" {
+		opts = append(opts, config.WithDeployer(o.Deployer))
+	}
+	// Pointer field: nil means the document said nothing, and passing a zero
+	// NodeLabel would write an empty label rather than leaving the default.
+	if o.DRAEvictionNodeLabel != nil {
+		opts = append(opts, config.WithDRAEvictionNodeLabel(*o.DRAEvictionNodeLabel))
+	}
+	return config.NewConfig(opts...)
 }
 
 // adoptRecipe wraps a raw, externally-supplied pkg/recipe.RecipeResult (e.g.
@@ -310,14 +503,60 @@ func (c *Client) MakeBundle(ctx context.Context, recipe *RecipeResult, opts Bund
 		}
 	}
 
-	cfg := opts.Config
-	if cfg == nil {
-		cfg = config.NewConfig()
-	}
+	cfg := opts.bundlerConfig()
 
 	bundlerOpts := []bundler.Option{bundler.WithConfig(cfg)}
-	if opts.Attester != nil {
-		bundlerOpts = append(bundlerOpts, bundler.WithAttester(opts.Attester))
+	// Attester wins when supplied; otherwise derive one from OIDCResolve. The
+	// Attest gate matters: ResolveAttesterLazy returns a no-op attester when
+	// it is false, so deriving unconditionally would replace "caller wants no
+	// signing" with an attester that merely behaves like none — same result
+	// today, but it makes the zero value depend on resolver internals.
+	attester := opts.Attester
+	if attester == nil {
+		// Reconcile the two independent Attest gates before deriving. cfg
+		// (== opts.Config when it is set — bundlerConfig() returns it
+		// outright) is what actually reaches the bundler's attestBundle
+		// gate; OIDCResolve.Attest is what decides, right here, whether a
+		// signer gets derived at all. A hand-built BundleOptions that sets
+		// both and disagrees — e.g. WithAttest(false) baked into Config
+		// while OIDCResolve.Attest is true — would otherwise fail silently
+		// in either direction: Config says sign but no signer is derived
+		// (attestBundle falls back to the no-op attester, producing
+		// unsigned output that looks attested), or OIDCResolve derives a
+		// real signer that Config's Attest()==false then discards (a
+		// wasted OIDC/KMS round trip). Fail closed instead — this is a
+		// supply-chain-adjacent signal, and only reachable when Attester is
+		// nil: a caller-supplied Attester wins outright and never consults
+		// either gate, which is why neither current caller (the CLI always
+		// supplies Attester; the REST handler sets Config's Attest and
+		// Attester together) can trip this.
+		// Applies to BOTH ways of supplying the gate, not just Config. With
+		// flat fields alone, Attest:true makes cfg.Attest() true via
+		// WithAttest while an OIDCResolve.Attest of false derives no signer —
+		// the same silent no-op-attester outcome, reached without Config
+		// being set at all.
+		if cfg.Attest() != opts.OIDCResolve.Attest {
+			source := "BundleOptions.Attest"
+			if opts.Config != nil {
+				source = "BundleOptions.Config.Attest()"
+			}
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("%s=%t disagrees with "+
+					"BundleOptions.OIDCResolve.Attest=%t; set both to the same "+
+					"value or supply BundleOptions.Attester directly",
+					source, cfg.Attest(), opts.OIDCResolve.Attest))
+		}
+		if opts.OIDCResolve.Attest {
+			resolved, rerr := attestation.ResolveAttesterLazy(ctx, opts.OIDCResolve)
+			if rerr != nil {
+				// Already coded; the message names the signing input that failed.
+				return nil, rerr
+			}
+			attester = resolved
+		}
+	}
+	if attester != nil {
+		bundlerOpts = append(bundlerOpts, bundler.WithAttester(attester))
 	}
 	if len(opts.BinaryAttestation) > 0 {
 		bundlerOpts = append(bundlerOpts, bundler.WithVerifiedBinaryAttestation(opts.BinaryAttestation))

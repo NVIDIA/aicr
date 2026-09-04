@@ -87,6 +87,48 @@ Two kinds of name appear in these trees, and only one is a promise:
   change with the recipe. Discover them by listing the directory rather than
   hardcoding a name.
 
+### Generated chart versions
+
+Not every chart in a bundle comes from upstream. AICR generates one for each
+Kustomize-derived component, each manifest-only component, each injected
+`-pre` / `-post` / `-readiness` release, and — under `--vendor-charts` — as a
+wrapper around every vendored upstream chart. A generated `Chart.yaml` has to
+answer two different questions, so it answers them in separate fields:
+
+| Field | Carries | Why |
+|-------|---------|-----|
+| `version` | the AICR version that produced the bundle | The chart's content is AICR's own, so AICR's version identifies the artifact. This is the `aicr` binary that ran `bundle`, which is not necessarily the one that generated the recipe. |
+| `appVersion` | the payload version | The upstream chart pin for a Helm component, the git ref for a Kustomize one. Free-form, so a ref like `release-1.4` need not look like SemVer. |
+| `aicr.run/component-version` annotation | the payload version | The same value as `appVersion`, under a stable key to read from a live release. |
+| `aicr.run/generated-by` annotation | the AICR version | The same value as `version`. |
+
+To read the payload version back out of a cluster, the rule is: **use
+`aicr.run/component-version` when it is present, otherwise use the release's
+own chart version.** A component installed straight from its upstream chart
+carries neither annotation, and its release version already *is* the payload
+version. The annotation's presence is exactly the signal that the chart
+version describes the wrapper instead of what it wraps.
+
+So for the `gpu-operator-post` release generated alongside gpu-operator, a
+`helm list` reports chart `gpu-operator-post-1.4.0` — the AICR version — while
+its app version and `aicr.run/component-version` both read `v25.3.0`, the
+gpu-operator pin those manifests accompany.
+
+A component with no upstream pin — a manifest-only component, and the injected
+releases belonging to one — ships only AICR-authored content, so `appVersion`
+and the annotation report the AICR version too.
+
+A build that is not release-stamped (`aicr --version` reports `dev`) reports
+`0.0.0-dev`. Helm validates `version:` as SemVer 2 and refuses to load a chart
+whose version is not, so `dev` cannot be written through verbatim.
+
+The root chart `argocd-helm` renders is not one of these generated wrappers and
+carries neither annotation. Its `version:` tracks the recipe's
+`metadata.version` — the AICR build that generated the *recipe*, not the one
+that ran `bundle` — so on a two-step workflow where the two binaries differ, it
+will not match the wrappers alongside it. Only the `0.0.0-dev` substitution
+above is shared.
+
 Verify a bundle you received with `aicr verify` — see
 [Artifact verification](artifact-verification.md).
 

@@ -27,6 +27,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -36,7 +37,7 @@ import (
 func TestEnsureTrainerInstalled_CompleteInstallIsLeftAlone(t *testing.T) {
 	client := newTrainerFakeClient(completeTrainerInstall()...)
 
-	refs, err := ensureTrainerInstalled(context.Background(), client, nil, false)
+	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -83,7 +84,7 @@ func TestEnsureTrainerInstalled_WaitsOnDiscoveredControllerName(t *testing.T) {
 		return false, nil, nil
 	})
 
-	refs, err := ensureTrainerInstalled(ctx, client, nil, false)
+	refs, err := ensureTrainerInstalled(ctx, client, fake.NewClientset(), nil, false)
 	if err != nil {
 		t.Fatalf("unexpected error waiting on the discovered controller %q (polled %v): %v",
 			discoveredName, polled, err)
@@ -128,7 +129,7 @@ func TestEnsureTrainerInstalled_WaitsForPreexistingController(t *testing.T) {
 	})
 	defer cancel()
 
-	refs, err := ensureTrainerInstalled(ctx, client, nil, false)
+	refs, err := ensureTrainerInstalled(ctx, client, fake.NewClientset(), nil, false)
 	if err == nil {
 		t.Fatal("expected a not-ready pre-existing controller to fail, got nil error")
 	}
@@ -158,7 +159,7 @@ func TestEnsureTrainerInstalled_RefusesToInstallOverForeignNamespace(t *testing.
 			trainerValidatingWebhookName, "kubeflow"),
 	)
 
-	refs, err := ensureTrainerInstalled(context.Background(), client, nil, false)
+	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false)
 	if err == nil {
 		t.Fatal("expected the installer to refuse installing over an installation in another namespace")
 	}
@@ -182,7 +183,7 @@ func TestEnsureTrainerInstalled_PreservesProbeErrorCode(t *testing.T) {
 		return true, nil, apierrors.NewServiceUnavailable("apiserver is down")
 	})
 
-	_, err := ensureTrainerInstalled(context.Background(), client, nil, false)
+	_, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, false)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -212,7 +213,7 @@ func TestFoldCleanupError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := foldCleanupError(tt.bench, tt.cleanup)
+			got := foldCleanupError(tt.bench, tt.cleanup, "NCCL benchmark succeeded but Kubeflow Trainer cleanup failed")
 			if tt.want == nil {
 				if got != nil {
 					t.Fatalf("got %v, want nil", got)
@@ -231,7 +232,7 @@ func TestFoldCleanupError(t *testing.T) {
 func TestFoldCleanupError_PreservesCleanupCode(t *testing.T) {
 	cleanupErr := aicrErrors.New(aicrErrors.ErrCodeUnavailable, "apiserver is down")
 
-	got := foldCleanupError(nil, cleanupErr)
+	got := foldCleanupError(nil, cleanupErr, "fallback message")
 	if !stderrors.Is(got, aicrErrors.New(aicrErrors.ErrCodeUnavailable, "")) {
 		t.Errorf("cleanup error code was flattened: %v", got)
 	}
@@ -285,7 +286,7 @@ func TestEnsureTrainerInstalled_RecipeDrivenLifecycle(t *testing.T) {
 			defer withShortTrainerWait(t)()
 			client := newTrainerFakeClient(tt.objects...)
 
-			refs, err := ensureTrainerInstalled(context.Background(), client, nil, tt.declared)
+			refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, tt.declared)
 
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
@@ -417,7 +418,7 @@ func TestEnsureTrainerInstalled_DeclaredRolloutDoesNotFallThrough(t *testing.T) 
 	// machine with egress a fall-through would download tens of megabytes first. The
 	// assertions below are what catch it — no error, no claimed resources, and a
 	// probe count proving the wait was entered.
-	refs, err := ensureTrainerInstalled(context.Background(), client, nil, true)
+	refs, err := ensureTrainerInstalled(context.Background(), client, fake.NewClientset(), nil, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

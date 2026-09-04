@@ -230,6 +230,37 @@ make bump-rc                         # v1.3.0-rc1 → v1.3.0-rc2
 make bump-promote TAG=v1.3.0-rc2    # → v1.3.0 on same commit
 ```
 
+**One-time check on the first RC after the notices change.**
+`THIRD_PARTY_NOTICES.md` is no longer committed — `make release` regenerates it
+from the tag being released and goreleaser uploads it. An RC runs the same
+`on-tag.yaml` → `go-build-release` → `make release` path as a stable release
+(the `Build and Release` step is not gated on `is_prerelease`), so the first RC
+is where that path is proven. Confirm the release job's output matches a local
+run:
+
+Both inputs have to match what the release job used, or the comparison measures
+drift rather than reproducibility. The release generated from the RC tag's tree
+with the toolchain pinned in `.settings.yaml`, so pin both locally: run from a
+worktree at the tag rather than the ambient checkout, and confirm the local
+`go` and `go-licenses` match their pins first.
+
+```bash
+git worktree add /tmp/rc-verify vX.Y.Z-rc1
+cd /tmp/rc-verify
+make tools-check   # go and go_licenses must match .settings.yaml
+gh release download vX.Y.Z-rc1 -p THIRD_PARTY_NOTICES.md -D /tmp/rc
+make notices
+diff /tmp/rc/THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.md
+```
+
+Identical output confirms both that the asset was attached and that generation
+is host-independent, which is what the generator's fixed platform matrix and
+`LC_ALL=C` sort exist to guarantee. A missing asset means the `extra_files` glob
+found nothing. A diff means generation is not reproducible and the release
+should not be promoted until it is understood — but check `make tools-check`
+first: a `⚠` on `go` or `go_licenses` means the local toolchain, not the
+generator, explains the difference.
+
 Pre-releases exercise the full build/test/scan/attest pipeline. After those
 gates pass, their version aliases are promoted to the exact candidate digests,
 but they do not update:
@@ -332,7 +363,7 @@ Published to GitHub Container Registry (`ghcr.io/nvidia/aicr-validators/`):
 | `deployment` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Deployment validator |
 | `performance` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Performance validator |
 | `conformance` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Conformance validator |
-| `aiperf-bench` | `nvcr.io/nvidia/distroless/python:3.13-v4.1.1` | AIPerf benchmark runner (built from `python:3.13-slim`) |
+| `aiperf-bench` | `nvcr.io/nvidia/distroless/python:3.13-v4.1.2` | AIPerf benchmark runner (built from `python:3.13-slim`) |
 
 Stable releases promote `vX.Y.Z` and `latest`; prereleases promote their
 `vX.Y.Z-rcN` version tags but never `latest`. The release workflow also retains
@@ -344,7 +375,8 @@ for audit, diagnosis, and recovery.
 Every release includes:
 
 - **SLSA Build Level 3 Provenance** — verifiable image build attestations (provenance v1), generated from a reusable workflow
-- **SBOM** — Software Bill of Materials (SPDX format)
+- **SBOM** — Software Bill of Materials (SPDX for the release binaries, CycloneDX for the container images)
+- **OpenVEX** — per-platform vulnerability triage, attested alongside each container image SBOM
 - **Sigstore Signatures** — keyless signing via Fulcio + Rekor
 - **Checksums** — SHA256 for all binaries
 - **Third-party notices** — `THIRD_PARTY_NOTICES.md` listing every
@@ -362,9 +394,11 @@ Every release includes:
   module cache means it fetches. The Go half
   is the union of the dependency graph across every released OS/arch
   target, generated deterministically so it is byte-identical on macOS and
-  Linux; the `notices-freshness` merge-gate job fails any PR whose
-  dependency changes leave the committed file stale (run `make notices`
-  and commit)
+  Linux. The file is not committed: `make release` depends on `make
+  notices`, so it is regenerated from the tag being released and uploaded
+  by goreleaser's `release.extra_files`. The `notices-generator`
+  merge-gate job runs the generator on dependency changes so a break
+  surfaces on that PR rather than blocking a release at tag time
 
 ## Versioning
 
@@ -386,11 +420,11 @@ digest you verify against depends on what you are asking for:
 | Predicate | Attached to | Verify against |
 |-----------|-------------|----------------|
 | SLSA provenance (`slsaprovenance1`) | multi-arch index | `crane digest <image>:<tag>` |
-| OpenVEX (`openvex`) | multi-arch index | `crane digest <image>:<tag>` |
-| SBOM (`spdxjson`) | per-platform child manifest | `crane digest --platform <os>/<arch> <image>:<tag>` |
+| SBOM (`cyclonedx`) | per-platform child manifest | `crane digest --platform <os>/<arch> <image>:<tag>` |
+| OpenVEX (`openvex`) | per-platform child manifest | `crane digest --platform <os>/<arch> <image>:<tag>` |
 
-Asking for `spdxjson` against the index digest fails with `none of the
-attestations matched the predicate type`.
+Asking for `cyclonedx` or `openvex` against the index digest fails with `none of
+the attestations matched the predicate type`.
 
 ```bash
 set -euo pipefail
@@ -418,30 +452,30 @@ gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/performance@${PERF_I
 gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/conformance@${CONF_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/aiperf-bench@${AIPERF_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
-# Cosign — provenance and OpenVEX are on the index. Pin the workflow *and*
-# the exact tag ref (same binding as --source-ref above): without
+# Cosign — only provenance is on the index. Pin the workflow *and* the exact
+# tag ref (same binding as --source-ref above): without
 # --certificate-github-workflow-ref, the identity regexp alone would accept
 # an attestation signed for any release tag on a digest this tag was
 # rewritten to point at.
 IDENTITY='^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$'
-for predicate in slsaprovenance1 openvex; do
+cosign verify-attestation \
+  --type slsaprovenance1 \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp "${IDENTITY}" \
+  --certificate-github-workflow-ref "refs/tags/${TAG}" \
+  "ghcr.io/nvidia/aicr@${AICR_INDEX}" >/dev/null
+
+# Cosign — the SBOM and the VEX are both on the per-platform child manifest
+platform="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+AICR_CHILD=$(crane digest --platform "${platform}" "ghcr.io/nvidia/aicr@${AICR_INDEX}")
+for predicate in cyclonedx openvex; do
   cosign verify-attestation \
     --type "${predicate}" \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
     --certificate-identity-regexp "${IDENTITY}" \
     --certificate-github-workflow-ref "refs/tags/${TAG}" \
-    "ghcr.io/nvidia/aicr@${AICR_INDEX}" >/dev/null
+    "ghcr.io/nvidia/aicr@${AICR_CHILD}" >/dev/null
 done
-
-# Cosign — the SBOM is on the per-platform child manifest
-platform="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
-AICR_CHILD=$(crane digest --platform "${platform}" "ghcr.io/nvidia/aicr@${AICR_INDEX}")
-cosign verify-attestation \
-  --type spdxjson \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate-identity-regexp "${IDENTITY}" \
-  --certificate-github-workflow-ref "refs/tags/${TAG}" \
-  "ghcr.io/nvidia/aicr@${AICR_CHILD}" >/dev/null
 ```
 
 ### Binary Checksums

@@ -227,6 +227,64 @@ jobs:
               echo "registry.yaml or base.yaml changed — all accelerator overlays promoted to Tier 2"
             fi
 
+            # Resolve changed profile labels once. Re-running select_profiles
+            # for every recipe roughly doubles classification time on the full
+            # catalog. A changed system profile affects every accelerator for
+            # its provider; a changed GPU profile affects only its declared
+            # (provider, accelerator) pair. Deleted profiles cannot be selected
+            # from the head tree and are therefore not promotable, but they are
+            # announced below rather than skipped silently.
+            declare -A changed_system_profile_services=()
+            declare -A changed_gpu_profile_pairs=()
+            while IFS= read -r changed_file; do
+              # Match the runtime selector's shape exactly: select_profiles only
+              # reads kwok/profiles/<provider>/<name>.yaml, one directory deep.
+              # A looser pattern is wrong in both directions -- a stray
+              # kwok/profiles/template.yaml or kwok/profiles/eks/testdata/x.yaml
+              # would either hard-fail discovery on a missing provider label, or
+              # (if it happens to carry labels) promote overlays that can never
+              # select it.
+              if [[ ! "$changed_file" =~ ^kwok/profiles/[^/]+/[^/]+\.yaml$ ]]; then
+                continue
+              fi
+
+              # A deleted profile has nothing to read, and the overlays it
+              # backed now fall out of the matrix through the NO_MATCH drop
+              # path instead of being promoted. That is a silent coverage
+              # loss, so make it loud — a removal should be a deliberate act,
+              # not something a reviewer discovers from a shrinking matrix.
+              if [[ ! -f "$changed_file" ]]; then
+                echo "::warning file=${changed_file}::KWOK profile removed — every overlay it backed drops out of the matrix. Confirm the coverage loss is intended."
+                continue
+              fi
+
+              profile_path="${GITHUB_WORKSPACE}/${changed_file}"
+              profile_provider=$(_read_profile_label "$profile_path" provider "$PROFILES_ROOT") || exit 1
+              profile_node_type=$(_read_profile_label "$profile_path" nodeType "$PROFILES_ROOT") || exit 1
+              if [[ -z "$profile_provider" ]]; then
+                echo "::error file=${changed_file}::changed KWOK profile is missing metadata.labels.provider"
+                exit 1
+              fi
+
+              case "$profile_node_type" in
+                system)
+                  changed_system_profile_services["$profile_provider"]=1
+                  ;;
+                accelerated)
+                  profile_accel=$(_read_profile_label "$profile_path" accelerator "$PROFILES_ROOT") || exit 1
+                  if [[ -z "$profile_accel" ]]; then
+                    echo "::error file=${changed_file}::changed accelerated KWOK profile is missing metadata.labels.accelerator"
+                    exit 1
+                  fi
+                  changed_gpu_profile_pairs["${profile_provider}:${profile_accel}"]=1
+                  ;;
+                *)
+                  echo "::error file=${changed_file}::changed KWOK profile has invalid metadata.labels.nodeType='${profile_node_type}'"
+                  exit 1
+                  ;;
+              esac
+            done <<< "$changed_files"
+
             # Build set of affected accelerator-specific overlays
             for overlay in recipes/overlays/*.yaml; do
               name=$(basename "$overlay" .yaml)
@@ -265,7 +323,19 @@ jobs:
                 include=true
               fi
 
-              # Rule 2: check if any ancestor overlay in the base chain changed
+              # Rule 2: either KWOK profile selected by this overlay changed.
+              # Profiles are shared inputs: adding/changing one profile affects
+              # every overlay that matches its selector labels, not only
+              # overlays changed in the same PR.
+              profile_key="${service}:${accel}"
+              if [[ "$include" == "false" ]] && \
+                 { [[ -n "${changed_system_profile_services[$service]:-}" ]] || \
+                   [[ -n "${changed_gpu_profile_pairs[$profile_key]:-}" ]]; }; then
+                include=true
+                echo "${name}: selected KWOK profile changed — promoted to Tier 2"
+              fi
+
+              # Rule 3: check if any ancestor overlay in the base chain changed
               if [[ "$include" == "false" ]]; then
                 current="$overlay"
                 while true; do
@@ -284,7 +354,7 @@ jobs:
                 done
               fi
 
-              # Rule 3: a component values file referenced by this overlay changed
+              # Rule 4: a component values file referenced by this overlay changed
               if [[ "$include" == "false" ]]; then
                 # Collect valuesFile references from this overlay and its base chain
                 values_files=""

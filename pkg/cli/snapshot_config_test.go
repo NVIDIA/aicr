@@ -57,7 +57,7 @@ func captureSnapshotOpts(t *testing.T, args []string) *snapshotCmdOptions {
 	var captured *snapshotCmdOptions
 	cmd := snapshotCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}
@@ -80,7 +80,7 @@ func runSnapshotCmdExpectErr(t *testing.T, args []string) error {
 	t.Helper()
 	cmd := snapshotCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}
@@ -590,6 +590,7 @@ func TestSnapshotCmdOptions_ToAgentConfig(t *testing.T) {
 		{"ClusterConfigPath", ac.ClusterConfigPath, "/l8k/cluster-config.yaml"},
 		{"AKSGPUPoolsPath", ac.AKSGPUPoolsPath, "/aks/pools.json"},
 		{"DiscoverNetwork", ac.DiscoverNetwork, true},
+		{"NameBase", ac.NameBase, name},
 	}
 	for _, w := range wants {
 		if !reflect.DeepEqual(w.got, w.want) {
@@ -726,6 +727,22 @@ func TestSnapshotCmd_NoConfigPrivilegedDefaultsTrue(t *testing.T) {
 	opts := captureSnapshotOpts(t, []string{"-o", "-"})
 	if !opts.privileged {
 		t.Error("expected privileged=true by default (CLI flag default)")
+	}
+}
+
+// TestSnapshotCmd_NoConfigCleanupDefaultsTrue is the Cleanup sibling of
+// TestSnapshotCmd_NoConfigPrivilegedDefaultsTrue. SnapshotAgentConfig returns
+// a zero-value AgentConfig (Cleanup=false) when spec.snapshot is absent
+// entirely, which is "not a working configuration" per its own godoc — a
+// caller that used that zero value as the CLI-merge fallback without also
+// consulting the presence bool would silently default to leaving the Job and
+// RBAC behind (cluster-admin binding included) on every plain `aicr snapshot`
+// invocation. Without --no-cleanup and without --config, cleanup must still
+// default to true.
+func TestSnapshotCmd_NoConfigCleanupDefaultsTrue(t *testing.T) {
+	opts := captureSnapshotOpts(t, []string{"-o", "-"})
+	if !opts.cleanup {
+		t.Error("expected cleanup=true by default (CLI flag default)")
 	}
 }
 

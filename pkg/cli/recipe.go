@@ -23,7 +23,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -162,7 +161,7 @@ Override snapshot-detected criteria:
 				return err
 			}
 
-			cfg, err := loadCmdConfig(ctx, cmd)
+			cfg, err := loadFacadeConfig(ctx, cmd)
 			if err != nil {
 				return err
 			}
@@ -263,16 +262,16 @@ Override snapshot-detected criteria:
 // registry is constructed, so only the flag and config need handling here.
 // Keep recipe and query on this shared path so both commands enforce the same
 // criteria policy for external filesystem and OCI catalogs.
-func applyClientCriteriaStrictMode(cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) {
-	if cmd.Bool("criteria-strict") || aicr.WrapConfig(cfg).IsCriteriaStrict() {
+func applyClientCriteriaStrictMode(cmd *cli.Command, cfg *aicr.Config, client *aicr.Client) {
+	if cmd.Bool("criteria-strict") || cfg.IsCriteriaStrict() {
 		client.CriteriaRegistry().SetStrict(true)
 	}
 }
 
 // recipeOutputPath returns the recipe output destination, with the CLI flag
 // overriding spec.recipe.output.path.
-func recipeOutputPath(cmd *cli.Command, cfg *appcfg.AICRConfig) string {
-	return stringFlagOrConfig(cmd, "output", cfg.Recipe().OutputPath())
+func recipeOutputPath(cmd *cli.Command, cfg *aicr.Config) string {
+	return stringFlagOrConfig(cmd, "output", cfg.RecipeOutputOptions().Path)
 }
 
 // parseRecipeOutputFormat reads --format with precedence
@@ -281,8 +280,8 @@ func recipeOutputPath(cmd *cli.Command, cfg *appcfg.AICRConfig) string {
 // non-empty config value over the flag's Value: default, and falls
 // through to cmd.String(flag) (which surfaces the Value: default) only
 // when both CLI and config are empty.
-func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializer.Format, error) {
-	raw := stringFlagOrConfig(cmd, "format", cfg.Recipe().OutputFormat())
+func parseRecipeOutputFormat(cmd *cli.Command, cfg *aicr.Config) (serializer.Format, error) {
+	raw := stringFlagOrConfig(cmd, "format", cfg.RecipeOutputOptions().Format)
 	out := serializer.Format(raw)
 	if out.IsUnknown() {
 		return "", errors.New(errors.ErrCodeInvalidRequest,
@@ -309,8 +308,8 @@ func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializ
 // user-stated rather than snapshot-derived. Callers not tracking that
 // distinction (e.g. the no-snapshot criteria path) may pass nil; marks are
 // then no-ops.
-func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig, reg *recipe.CriteriaRegistry, touched map[aicr.CriteriaDimension]bool) error {
-	derived, err := aicr.WrapConfig(cfg).RecipeCriteria(reg)
+func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *aicr.Config, reg *recipe.CriteriaRegistry, touched map[aicr.CriteriaDimension]bool) error {
+	derived, err := cfg.RecipeCriteria(reg)
 	if err != nil {
 		return err
 	}
@@ -377,7 +376,7 @@ func logCriteriaOverride(field, prior, override string) {
 // (when cfg is non-nil) and overlays CLI flag values on top. Every enum value
 // — config-sourced and flag-sourced alike — is resolved against the supplied
 // per-provider registry so a `--data` overlay's non-OSS values validate.
-func mergeCriteriaFromCmdAndConfig(cmd *cli.Command, cfg *appcfg.AICRConfig, reg *recipe.CriteriaRegistry) (*recipe.Criteria, error) {
+func mergeCriteriaFromCmdAndConfig(cmd *cli.Command, cfg *aicr.Config, reg *recipe.CriteriaRegistry) (*recipe.Criteria, error) {
 	criteria := recipe.NewCriteria()
 	if err := applyCriteriaFromConfig(criteria, cfg, reg, nil); err != nil {
 		return nil, err

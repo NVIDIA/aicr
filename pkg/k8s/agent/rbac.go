@@ -17,9 +17,9 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/k8s"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -79,101 +79,139 @@ func (d *Deployer) ensureNamespace(ctx context.Context) error {
 	return nil
 }
 
-// ensureServiceAccount creates the ServiceAccount for the agent.
-// If the ServiceAccount already exists, this is a no-op (idempotent).
+// resolveServiceAccount decides, once per Deploy, whether this run creates
+// and owns its own run-scoped ServiceAccount or runs as an
+// already-existing one the operator named exactly.
+//
+// Config.ServiceAccountName is exact-if-exists. When it is set and a
+// ServiceAccount of exactly that name already exists in the namespace, the
+// agent pod runs as that ServiceAccount verbatim and this run creates NO
+// ServiceAccount, Role, RoleBinding, ClusterRole or ClusterRoleBinding —
+// aicr manages no permissions for an identity it did not create. That is
+// what keeps a pre-created ServiceAccount carrying IRSA
+// (eks.amazonaws.com/role-arn) or GKE Workload Identity
+// (iam.gke.io/gcp-service-account) annotations usable: both providers pin
+// trust to the ServiceAccount NAME, so a per-run name can never be trusted
+// by either and copying the annotations onto one would not help.
+//
+// When the name does not exist, the value stays a prefix and the run
+// creates <prefix>-<RunID> plus its RBAC, exactly as before. An unset
+// Config.ServiceAccountName is never probed: the fallback base ("aicr") is
+// aicr's own default, not something the operator asked for, so a stray
+// ServiceAccount sitting at that name must not silently capture the run.
+//
+// It is called from CheckPermissions, not from Deploy directly: the verb set
+// the pre-flight demands depends on which of the two modes this run is in,
+// so the gate has to resolve before it can finish. The Get is read-only, so
+// resolving inside the gate does not weaken fail-before-mutate — no write is
+// issued until Deploy's ensure* chain, which runs only once the gate passes.
+//
+// Every error fails closed, Forbidden included. `serviceaccounts: get` is a
+// REQUIRED check in CheckPermissions, evaluated before this runs, so a
+// caller that reaches here has been told by the apiserver's own authorizer
+// that it may read ServiceAccounts; a Forbidden anyway means the answer and
+// the behavior disagree, which is not a state to guess through. The
+// previous downgrade — log at debug, continue in prefix mode — is the exact
+// credential-loss seam this package exists to close: an operator who passed
+// --service-account-name pointing at their IRSA or Workload Identity
+// ServiceAccount would silently run under a fresh "<prefix>-<runID>" account
+// carrying none of its cloud annotations, with no visible signal.
+func (d *Deployer) resolveServiceAccount(ctx context.Context) error {
+	name := d.config.ServiceAccountName
+	if name == "" {
+		return nil
+	}
+
+	switch _, err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Get(ctx, name, metav1.GetOptions{}); {
+	case err == nil:
+		d.setExistingServiceAccount(name)
+		slog.Info("using the existing ServiceAccount named by --service-account-name; aicr manages no RBAC for this run",
+			attrServiceAccount, name,
+			attrNamespace, d.config.Namespace,
+			attrRunID, d.config.RunID,
+			"note", "no ServiceAccount, Role, RoleBinding, ClusterRole or ClusterRoleBinding is created or deleted; generate this ServiceAccount's RBAC manifests with 'aicr snapshot --add-roles-to-service-account "+name+"' and apply them yourself")
+	case apierrors.IsNotFound(err):
+		// Normal path: the value is a prefix and this run creates its own
+		// run-scoped ServiceAccount below.
+	case apierrors.IsForbidden(err):
+		return errors.WrapWithContext(errors.ErrCodeUnauthorized,
+			fmt.Sprintf("cannot read ServiceAccount %q in namespace %q, so it is impossible to tell whether "+
+				"--service-account-name names an existing ServiceAccount to run as verbatim or is a prefix "+
+				"for one this run creates; refusing to guess, because guessing \"prefix\" would run the agent "+
+				"under a generated ServiceAccount carrying none of that account's cloud credentials. "+
+				"Grant 'get serviceaccounts' in this namespace and re-run", name, d.config.Namespace),
+			err, map[string]any{attrName: name, attrNamespace: d.config.Namespace})
+	default:
+		return errors.Wrap(errors.ErrCodeInternal, "failed to check for an existing ServiceAccount", err)
+	}
+	return nil
+}
+
+// ensureServiceAccount creates the run-scoped ServiceAccount for the agent.
+// Deploy calls it only in prefix mode; see resolveServiceAccount.
 func (d *Deployer) ensureServiceAccount(ctx context.Context) error {
+	name := d.saName()
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      d.config.ServiceAccountName,
+			Name:      name,
 			Namespace: d.config.Namespace,
+			Labels:    d.objectLabels(),
 		},
 	}
 
-	_, err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Create(ctx, sa, metav1.CreateOptions{})
-	return k8s.IgnoreAlreadyExists(err)
-}
-
-// ensureRole creates or updates the Role for ConfigMap access.
-func (d *Deployer) ensureRole(ctx context.Context) error {
-	role := &rbacv1.Role{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      d.config.ServiceAccountName,
-			Namespace: d.config.Namespace,
-		},
-		Rules: []rbacv1.PolicyRule{
-			{
-				APIGroups: []string{""},
-				Resources: []string{resourceCM},
-				Verbs:     []string{verbCreate, verbGet, "update", "patch"},
-			},
-			{
-				APIGroups: []string{""},
-				Resources: []string{"pods"},
-				Verbs:     []string{"get", verbList},
-			},
-		},
-	}
-
-	_, err := d.clientset.RbacV1().Roles(d.config.Namespace).Create(ctx, role, metav1.CreateOptions{})
+	// Record the intent before the Create so a committed create whose
+	// response is lost still enters Cleanup's delete list (see recordIntent).
+	d.recordIntent(kindServiceAccount, name)
+	created, err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).Create(ctx, sa, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
-		_, err = d.clientset.RbacV1().Roles(d.config.Namespace).Update(ctx, role, metav1.UpdateOptions{})
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update Role", err)
-		}
-		return nil
+		d.discardIntent(kindServiceAccount, name)
+		return errors.Wrap(errors.ErrCodeInternal, "ServiceAccount already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create Role", err)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create ServiceAccount", err)
 	}
+	d.recordCreated(kindServiceAccount, created.Name, created.UID)
 	return nil
 }
 
-// ensureRoleBinding creates or updates the RoleBinding to bind the Role to the ServiceAccount.
-func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
-	rb := &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      d.config.ServiceAccountName,
-			Namespace: d.config.Namespace,
+// namespacedRules returns the namespace-scoped policy rules the agent needs:
+// writing its snapshot result into a staging ConfigMap, and reading pods.
+//
+// It is the single definition consumed by both the run-scoped Role
+// ensureRole creates and the Role BuildServiceAccountRoleManifests renders
+// for an operator-supplied ServiceAccount, so the two can never drift.
+func namespacedRules() []rbacv1.PolicyRule {
+	return []rbacv1.PolicyRule{
+		{
+			APIGroups: []string{""},
+			Resources: []string{resourceCM},
+			Verbs:     []string{verbCreate, verbGet, verbUpdate, verbPatch},
 		},
-		Subjects: []rbacv1.Subject{
-			{
-				Kind:      "ServiceAccount",
-				Name:      d.config.ServiceAccountName,
-				Namespace: d.config.Namespace,
-			},
-		},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: rbacAPIGroup,
-			Kind:     "Role",
-			Name:     d.config.ServiceAccountName,
+		{
+			APIGroups: []string{""},
+			Resources: []string{resourcePods},
+			Verbs:     []string{verbGet, verbList},
 		},
 	}
-
-	_, err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).Create(ctx, rb, metav1.CreateOptions{})
-	if apierrors.IsAlreadyExists(err) {
-		_, err = d.clientset.RbacV1().RoleBindings(d.config.Namespace).Update(ctx, rb, metav1.UpdateOptions{})
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update RoleBinding", err)
-		}
-		return nil
-	}
-	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create RoleBinding", err)
-	}
-	return nil
 }
 
-// ensureClusterRole creates or updates the ClusterRole for node and cluster-wide resource access.
-func (d *Deployer) ensureClusterRole(ctx context.Context) error {
+// clusterRules returns the cluster-scoped policy rules the agent needs. The
+// baseline set is read-only; discoverNetwork appends the mutating rules live
+// l8k network discovery requires (see discoverNetworkClusterRules).
+//
+// It is the single definition consumed by both the run-scoped ClusterRole
+// ensureClusterRole creates and the ClusterRole
+// BuildServiceAccountRoleManifests renders.
+func clusterRules(discoverNetwork bool) []rbacv1.PolicyRule {
 	rules := []rbacv1.PolicyRule{
 		{
 			APIGroups: []string{""},
-			Resources: []string{"nodes"},
+			Resources: []string{resourceNodes},
 			Verbs:     []string{verbGet, verbList},
 		},
 		{
 			APIGroups: []string{""},
-			Resources: []string{"pods"},
+			Resources: []string{resourcePods},
 			Verbs:     []string{verbGet, verbList},
 		},
 		{
@@ -197,111 +235,192 @@ func (d *Deployer) ensureClusterRole(ctx context.Context) error {
 			Resources: []string{mariaDBResource},
 			Verbs:     []string{verbList},
 		},
+		{
+			// OKE legacy device-plugin conflict evidence: the K8s collector
+			// reads kube-system/nvidia-gpu-device-plugin (a single namespaced
+			// Get; list kept for parity with the other read-only rules) —
+			// pkg/collector/k8s/okelegacyplugin.go.
+			APIGroups: []string{"apps"},
+			Resources: []string{"daemonsets"},
+			Verbs:     []string{verbGet, verbList},
+		},
 	}
 
 	// Live l8k network discovery stands up a nic-configuration-daemon
 	// DaemonSet in its own namespace, exec's into the daemon pods,
 	// writes nvidia.kubernetes-launch-kit.{machine,gpu} labels onto
 	// nodes, and patches mellanox.com NicClusterPolicy via server-side
-	// apply. Grant the extra cluster-scoped rules only when the snapshot
-	// opted into discovery so non-network snapshots stay minimal-priv.
-	if d.config.DiscoverNetwork {
+	// apply. Grant the extra cluster-scoped rules only when discovery was
+	// opted into so non-network snapshots stay minimal-priv.
+	if discoverNetwork {
 		rules = append(rules, discoverNetworkClusterRules()...)
 	}
+	return rules
+}
 
-	cr := &rbacv1.ClusterRole{
+// ensureRole creates the run-scoped Role for ConfigMap access.
+func (d *Deployer) ensureRole(ctx context.Context) error {
+	name := d.roleName()
+	role := &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: clusterRoleName,
+			Name:      name,
+			Namespace: d.config.Namespace,
+			Labels:    d.objectLabels(),
 		},
-		Rules: rules,
+		Rules: namespacedRules(),
 	}
 
-	_, err := d.clientset.RbacV1().ClusterRoles().Create(ctx, cr, metav1.CreateOptions{})
+	d.recordIntent(kindRole, name)
+	created, err := d.clientset.RbacV1().Roles(d.config.Namespace).Create(ctx, role, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
-		_, err = d.clientset.RbacV1().ClusterRoles().Update(ctx, cr, metav1.UpdateOptions{})
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update ClusterRole", err)
-		}
-		return nil
+		d.discardIntent(kindRole, name)
+		return errors.Wrap(errors.ErrCodeInternal, "Role already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to create ClusterRole", err)
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create Role", err)
 	}
+	d.recordCreated(kindRole, created.Name, created.UID)
 	return nil
 }
 
-// ensureClusterRoleBinding creates or updates the ClusterRoleBinding to bind the ClusterRole to the ServiceAccount.
-func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
-	crb := &rbacv1.ClusterRoleBinding{
+// ensureRoleBinding creates the run-scoped RoleBinding binding the Role to the ServiceAccount.
+func (d *Deployer) ensureRoleBinding(ctx context.Context) error {
+	name := d.roleName()
+	rb := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: clusterRoleName,
+			Name:      name,
+			Namespace: d.config.Namespace,
+			Labels:    d.objectLabels(),
 		},
 		Subjects: []rbacv1.Subject{
 			{
-				Kind:      "ServiceAccount",
-				Name:      d.config.ServiceAccountName,
+				Kind:      kindServiceAccount,
+				Name:      d.saName(),
 				Namespace: d.config.Namespace,
 			},
 		},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: rbacAPIGroup,
-			Kind:     "ClusterRole",
-			Name:     clusterRoleName,
+			Kind:     kindRole,
+			Name:     d.roleName(),
 		},
 	}
 
-	_, err := d.clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
+	d.recordIntent(kindRoleBinding, name)
+	created, err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).Create(ctx, rb, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
-		_, err = d.clientset.RbacV1().ClusterRoleBindings().Update(ctx, crb, metav1.UpdateOptions{})
-		if err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to update ClusterRoleBinding", err)
-		}
-		return nil
+		d.discardIntent(kindRoleBinding, name)
+		return errors.Wrap(errors.ErrCodeInternal, "RoleBinding already exists under run-scoped name (duplicate RunID?)", err)
+	}
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create RoleBinding", err)
+	}
+	d.recordCreated(kindRoleBinding, created.Name, created.UID)
+	return nil
+}
+
+// ensureClusterRole creates the run-scoped ClusterRole for node and cluster-wide resource access.
+func (d *Deployer) ensureClusterRole(ctx context.Context) error {
+	name := d.clusterRoleName()
+	cr := &rbacv1.ClusterRole{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: d.objectLabels(),
+		},
+		Rules: clusterRules(d.config.DiscoverNetwork),
+	}
+
+	d.recordIntent(kindClusterRole, name)
+	created, err := d.clientset.RbacV1().ClusterRoles().Create(ctx, cr, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		d.discardIntent(kindClusterRole, name)
+		return errors.Wrap(errors.ErrCodeInternal, "ClusterRole already exists under run-scoped name (duplicate RunID?)", err)
+	}
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to create ClusterRole", err)
+	}
+	d.recordCreated(kindClusterRole, created.Name, created.UID)
+	return nil
+}
+
+// ensureClusterRoleBinding creates the run-scoped ClusterRoleBinding binding the ClusterRole to the ServiceAccount.
+func (d *Deployer) ensureClusterRoleBinding(ctx context.Context) error {
+	name := d.clusterRoleName()
+	crb := &rbacv1.ClusterRoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: d.objectLabels(),
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      kindServiceAccount,
+				Name:      d.saName(),
+				Namespace: d.config.Namespace,
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacAPIGroup,
+			Kind:     kindClusterRole,
+			Name:     d.clusterRoleName(),
+		},
+	}
+
+	d.recordIntent(kindClusterRoleBinding, name)
+	created, err := d.clientset.RbacV1().ClusterRoleBindings().Create(ctx, crb, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		d.discardIntent(kindClusterRoleBinding, name)
+		return errors.Wrap(errors.ErrCodeInternal, "ClusterRoleBinding already exists under run-scoped name (duplicate RunID?)", err)
 	}
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to create ClusterRoleBinding", err)
 	}
+	d.recordCreated(kindClusterRoleBinding, created.Name, created.UID)
 	return nil
 }
 
-// deleteServiceAccount deletes the ServiceAccount.
-// If the ServiceAccount doesn't exist, this is a no-op (idempotent).
-func (d *Deployer) deleteServiceAccount(ctx context.Context) error {
+// deleteServiceAccount deletes the ServiceAccount, pinning the delete to uid
+// so a same-named ServiceAccount belonging to a different run is never
+// collected. If the ServiceAccount is already gone, or uid no longer
+// matches (already replaced, not ours), this is a no-op (idempotent).
+func (d *Deployer) deleteServiceAccount(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.CoreV1().ServiceAccounts(d.config.Namespace).
-		Delete(ctx, d.config.ServiceAccountName, metav1.DeleteOptions{})
-	return k8s.IgnoreNotFound(err)
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: uidPreconditions(uid)})
+	return ignoreNotFoundOrConflict(err)
 }
 
-// deleteRole deletes the Role.
-// If the Role doesn't exist, this is a no-op (idempotent).
-func (d *Deployer) deleteRole(ctx context.Context) error {
+// deleteRole deletes the Role, pinning the delete to uid. If the Role is
+// already gone, or uid no longer matches, this is a no-op (idempotent).
+func (d *Deployer) deleteRole(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.RbacV1().Roles(d.config.Namespace).
-		Delete(ctx, d.config.ServiceAccountName, metav1.DeleteOptions{})
-	return k8s.IgnoreNotFound(err)
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: uidPreconditions(uid)})
+	return ignoreNotFoundOrConflict(err)
 }
 
-// deleteRoleBinding deletes the RoleBinding.
-// If the RoleBinding doesn't exist, this is a no-op (idempotent).
-func (d *Deployer) deleteRoleBinding(ctx context.Context) error {
+// deleteRoleBinding deletes the RoleBinding, pinning the delete to uid. If
+// the RoleBinding is already gone, or uid no longer matches, this is a
+// no-op (idempotent).
+func (d *Deployer) deleteRoleBinding(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.RbacV1().RoleBindings(d.config.Namespace).
-		Delete(ctx, d.config.ServiceAccountName, metav1.DeleteOptions{})
-	return k8s.IgnoreNotFound(err)
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: uidPreconditions(uid)})
+	return ignoreNotFoundOrConflict(err)
 }
 
-// deleteClusterRole deletes the ClusterRole.
-// If the ClusterRole doesn't exist, this is a no-op (idempotent).
-func (d *Deployer) deleteClusterRole(ctx context.Context) error {
+// deleteClusterRole deletes the ClusterRole, pinning the delete to uid. If
+// the ClusterRole is already gone, or uid no longer matches, this is a
+// no-op (idempotent).
+func (d *Deployer) deleteClusterRole(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.RbacV1().ClusterRoles().
-		Delete(ctx, clusterRoleName, metav1.DeleteOptions{})
-	return k8s.IgnoreNotFound(err)
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: uidPreconditions(uid)})
+	return ignoreNotFoundOrConflict(err)
 }
 
-// deleteClusterRoleBinding deletes the ClusterRoleBinding.
-// If the ClusterRoleBinding doesn't exist, this is a no-op (idempotent).
-func (d *Deployer) deleteClusterRoleBinding(ctx context.Context) error {
+// deleteClusterRoleBinding deletes the ClusterRoleBinding, pinning the
+// delete to uid. If the ClusterRoleBinding is already gone, or uid no
+// longer matches, this is a no-op (idempotent).
+func (d *Deployer) deleteClusterRoleBinding(ctx context.Context, name string, uid types.UID) error {
 	err := d.clientset.RbacV1().ClusterRoleBindings().
-		Delete(ctx, clusterRoleName, metav1.DeleteOptions{})
-	return k8s.IgnoreNotFound(err)
+		Delete(ctx, name, metav1.DeleteOptions{Preconditions: uidPreconditions(uid)})
+	return ignoreNotFoundOrConflict(err)
 }
 
 // discoverNetworkClusterRules returns the cluster-scoped policy rules
@@ -324,7 +443,6 @@ func (d *Deployer) deleteClusterRoleBinding(ctx context.Context) error {
 //   - nicclusterpolicies: l8k patches the user's NicClusterPolicy
 //     (NicConfigurationOperator section) via server-side apply.
 func discoverNetworkClusterRules() []rbacv1.PolicyRule {
-	const verbUpdate, verbPatch, verbWatch, verbDelete = "update", "patch", "watch", "delete"
 	return []rbacv1.PolicyRule{
 		{
 			APIGroups: []string{"apiextensions.k8s.io"},
@@ -343,22 +461,22 @@ func discoverNetworkClusterRules() []rbacv1.PolicyRule {
 		},
 		{
 			APIGroups: []string{""},
-			Resources: []string{"serviceaccounts", "configmaps"},
+			Resources: []string{resourceServiceAccounts, resourceCM},
 			Verbs:     []string{verbGet, verbCreate, verbDelete},
 		},
 		{
 			APIGroups: []string{rbacAPIGroup},
-			Resources: []string{"roles", "rolebindings"},
+			Resources: []string{resourceRoles, resourceRoleBindings},
 			Verbs:     []string{verbGet, verbCreate, verbDelete},
 		},
 		{
 			APIGroups: []string{""},
-			Resources: []string{"pods/exec"},
+			Resources: []string{resourcePods + "/exec"},
 			Verbs:     []string{verbCreate},
 		},
 		{
 			APIGroups: []string{""},
-			Resources: []string{"nodes"},
+			Resources: []string{resourceNodes},
 			Verbs:     []string{verbPatch},
 		},
 		{

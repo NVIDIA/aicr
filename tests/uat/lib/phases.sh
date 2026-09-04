@@ -162,7 +162,7 @@ SERVE_NAMESPACE="${SERVE_NAMESPACE:-dynamo-workload}"
 SERVE_NAME="${SERVE_NAME:-vllm-agg}"
 SERVE_QUEUE="${SERVE_QUEUE:-dynamo}"
 SERVE_MODEL="${SERVE_MODEL:-Qwen/Qwen3-0.6B}"
-SERVE_RUNTIME_IMAGE="${SERVE_RUNTIME_IMAGE:-nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1}"
+SERVE_RUNTIME_IMAGE="${SERVE_RUNTIME_IMAGE:-nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.2}"
 # GPU pool placement, applied to BOTH graph components (#1644 — it keeps the
 # Frontend off the small CPU nodes, where its ~12GB image pull blew the
 # readiness budget). The demo pins nodeGroup=gpu-worker; every UAT cluster
@@ -1372,6 +1372,7 @@ spec:
               env:
                 - {name: SERVED_MODEL_NAME, value: ${SERVE_MODEL}}
                 - {name: DYN_ROUTER_MODE, value: kv}
+                - {name: DYN_EVENT_PLANE, value: zmq}
     - name: VllmDecodeWorker
       type: worker
       replicas: 1
@@ -1407,6 +1408,8 @@ spec:
                 - -c
                 - export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:+\${LD_LIBRARY_PATH}:}/usr/local/nvidia/lib64"; exec python3 -m dynamo.vllm "\$@"
                 - dynamo.vllm
+              env:
+                - {name: DYN_EVENT_PLANE, value: zmq}
               args:
                 - --model
                 - ${SERVE_MODEL}

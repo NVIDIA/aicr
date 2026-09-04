@@ -16,14 +16,20 @@
 #
 # This overlay is NOT referenced by any recipe via spec.base or spec.mixins.
 # The resolver picks it up for every RTX Pro 6000 query (any service, any
-# intent). It contributes the RTX Pro 6000-wide deployment-phase floor —
-# the 4 standard checks plus the gpu-operator version pin — without
-# duplicating it in every leaf.
+# intent). It contributes RTX Pro 6000-wide deployment validation — the four
+# standard checks and the gpu-operator version pin — without duplicating the
+# shared checks in every leaf.
 #
 # Per-field union merge (see pkg/recipe/metadata.go) means concrete leaves
-# that declare their own `deployment:` block add to or override this floor
-# without dropping its inherited checks — same-name constraints from the
-# leaf win, additional checks are appended.
+# that declare their own `deployment:` block add to or override these
+# constraints without dropping the inherited checks — same-name constraints
+# from the leaf win, additional checks are appended.
+#
+# This wildcard deliberately carries no host driver floor. The
+# `rtx-pro-6000` criterion represents Server, Workstation, and Max-Q
+# Workstation editions, while the documented 575.57.08 minimum applies only
+# to Server Edition. Provider-specific leaves add that floor where their
+# hardware is documented as Server Edition.
 #
 # See docs/contributor/recipe.md#criteria-wildcard-overlays for details.
 

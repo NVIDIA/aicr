@@ -39,6 +39,12 @@ const (
 	flagSlurmAccountingMode = "slurm-accounting-mode"
 	flagRuntimeInventory    = "runtime-inventory"
 	flagNoHealth            = "no-health"
+
+	// flagAddRolesToSA switches `aicr snapshot` into a generate-and-exit
+	// invocation that WRITES the RBAC manifests granting the agent's
+	// permissions to a named ServiceAccount and applies none of them. No
+	// cluster is contacted and no snapshot is taken.
+	flagAddRolesToSA = "add-roles-to-service-account"
 )
 
 // criteriaAny is the wildcard value for any criteria dimension.
