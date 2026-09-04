@@ -1,0 +1,99 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: gb200-gke-cos-inference-dynamo
+
+spec:
+  # Inherits from gb200-gke-cos-inference (GB200 + GKE COS inference settings)
+  # Adds Dynamo inference platform components.
+  base: gb200-gke-cos-inference
+
+  criteria:
+    service: gke
+    accelerator: gb200
+    os: cos
+    intent: inference
+    platform: dynamo
+
+  # DRA requires Kubernetes 1.34+ (GA)
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs:
+    - name: grove
+      type: Helm
+      source: oci://ghcr.io/ai-dynamo/grove
+      valuesFile: components/grove/values.yaml
+
+    - name: dynamo-platform
+      type: Helm
+      source: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
+      valuesFile: components/dynamo-platform/values.yaml
+      dependencyRefs:
+        - grove
+        - cert-manager
+        - kube-prometheus-stack
+        - gpu-operator
+        - kai-scheduler
+
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v25.10.0"
+    performance:
+      checks:
+        - inference-perf
+      # Gate thresholds mirrored from the GB200 EKS/OKE Dynamo overlays
+      # (same accelerator, same 4-GPU-per-node shape) until a GKE-specific
+      # measured baseline is published. Model + concurrency are pinned so
+      # the gate stays valid independent of the compiled defaults.
+      #
+      # NOTE: this throughput floor is a fixed absolute full-node value (here a
+      # 4-GPU GB200 node) and is not normalized for GPU count, so a smaller SKU
+      # of this accelerator can false-fail a healthy run. A normalized per-GPU
+      # floor is tracked in https://github.com/NVIDIA/aicr/issues/1254.
+      constraints:
+        - name: inference-model
+          value: Qwen/Qwen3-8B
+        - name: inference-concurrency-per-gpu
+          value: "256"
+        - name: inference-routing-mode
+          value: dynamo-router
+        - name: inference-throughput
+          value: ">= 50000"
+        - name: inference-ttft-p99
+          value: "<= 2000"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - inference-gateway
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling
+        - robust-controller
+        - secure-accelerator-access

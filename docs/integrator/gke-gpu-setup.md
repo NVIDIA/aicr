@@ -219,6 +219,21 @@ the request against the COS build's curated per-GPU-type list and rejects
 unqualified versions. Version bumps take effect on replaced or rebooted
 nodes only (the installer skips nodes with a loaded nvidia module).
 
+On A4X/GB200 (`a4x-highgpu-4g`, arm64) nodes, one override is required: the
+component's default `partitionGpuImage` (the `partition-gpus` init
+container) is an amd64-only digest and fails with `exec format error` on
+arm64. AICR's GB200 GKE recipes set `gcp-driver-installer.partitionGpuImage`
+to a multi-arch digest automatically — see
+[GKE GB200 Networking › Driver Installer](gke-gb200-networking.md#driver-installer)
+for why and the exact digest.
+
+Before deploying the rest of the bundle, confirm the driver actually landed:
+`aicr validate --recipe recipe.yaml --phase deployment --fail-fast` runs
+`check-nvidia-smi`, which only needs the GPU nodes to exist, not the rest of
+the bundle deployed, so a missing driver fails in seconds instead of
+surfacing later as the GPU Operator's toolkit/driver-validation init
+containers looping forever.
+
 Set the label when you create the GPU node pool, alongside the disabled
 managed install:
 
@@ -470,3 +485,4 @@ confirm exactly which advertiser owns each node.
 - [Component Catalog › GKE Device-Plugin Ownership](../user/component-catalog.md#gke-device-plugin-ownership)
 - [Validation readiness gate](../user/validation.md)
 - [GKE TCPXO Networking](gke-tcpxo-networking.md)
+- [GKE GB200 Networking](gke-gb200-networking.md)

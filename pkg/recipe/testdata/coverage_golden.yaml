@@ -11,6 +11,7 @@ criteria(service=, accelerator=, intent=, os=, platform=dynamo):
             - service=eks, accelerator=h100, intent=inference, os=ubuntu
             - service=eks, accelerator=rtx-pro-6000, intent=inference, os=ubuntu
             - service=gke, accelerator=b200, intent=inference, os=cos
+            - service=gke, accelerator=gb200, intent=inference, os=cos
             - service=gke, accelerator=h100, intent=inference, os=cos
             - service=oke, accelerator=gb200, intent=inference, os=ubuntu
             - service=rke2, accelerator=vr200, intent=inference, os=ubuntu
@@ -30,6 +31,7 @@ criteria(service=, accelerator=, intent=, os=, platform=kubeflow):
             - service=eks, accelerator=rtx-pro-6000, intent=training, os=ubuntu
             - service=gke, accelerator=a100, intent=training, os=cos
             - service=gke, accelerator=b200, intent=training, os=cos
+            - service=gke, accelerator=gb200, intent=training, os=cos
             - service=gke, accelerator=h100, intent=training, os=cos
             - service=oke, accelerator=a100, intent=training, os=ubuntu
             - service=oke, accelerator=gb200, intent=training, os=ubuntu
@@ -53,6 +55,7 @@ criteria(service=, accelerator=, intent=, os=, platform=slurm):
             - service=eks, accelerator=gb200, intent=training, os=ubuntu
             - service=eks, accelerator=gb300, intent=training, os=ubuntu
             - service=eks, accelerator=h100, intent=training, os=ubuntu
+            - service=gke, accelerator=gb200, intent=training, os=cos
             - service=gke, accelerator=h100, intent=training, os=cos
 criteria(service=, accelerator=, intent=, os=cos, platform=):
     outcome: error
@@ -71,6 +74,7 @@ criteria(service=, accelerator=, intent=, os=cos, platform=dynamo):
             - service=gke
         platform:
             - service=gke, accelerator=b200, intent=inference
+            - service=gke, accelerator=gb200, intent=inference
             - service=gke, accelerator=h100, intent=inference
             - service=kind, accelerator=h100, intent=inference
 criteria(service=, accelerator=, intent=, os=cos, platform=kubeflow):
@@ -84,6 +88,7 @@ criteria(service=, accelerator=, intent=, os=cos, platform=kubeflow):
         platform:
             - service=gke, accelerator=a100, intent=training
             - service=gke, accelerator=b200, intent=training
+            - service=gke, accelerator=gb200, intent=training
             - service=gke, accelerator=h100, intent=training
             - service=kind, accelerator=h100, intent=training
 criteria(service=, accelerator=, intent=, os=cos, platform=slurm):
@@ -95,6 +100,7 @@ criteria(service=, accelerator=, intent=, os=cos, platform=slurm):
         os:
             - service=gke
         platform:
+            - service=gke, accelerator=gb200, intent=training
             - service=gke, accelerator=h100, intent=training
             - service=kind, accelerator=h100, intent=training
 criteria(service=, accelerator=, intent=, os=ol, platform=):
@@ -309,6 +315,7 @@ criteria(service=, accelerator=, intent=inference, os=, platform=dynamo):
             - service=eks, accelerator=h100, os=ubuntu
             - service=eks, accelerator=rtx-pro-6000, os=ubuntu
             - service=gke, accelerator=b200, os=cos
+            - service=gke, accelerator=gb200, os=cos
             - service=gke, accelerator=h100, os=cos
             - service=oke, accelerator=gb200, os=ubuntu
             - service=rke2, accelerator=vr200, os=ubuntu
@@ -370,6 +377,7 @@ criteria(service=, accelerator=, intent=inference, os=cos, platform=dynamo):
             - service=gke
         platform:
             - service=gke, accelerator=b200
+            - service=gke, accelerator=gb200
             - service=gke, accelerator=h100
             - service=kind, accelerator=h100
 criteria(service=, accelerator=, intent=inference, os=ol, platform=):
@@ -522,6 +530,7 @@ criteria(service=, accelerator=, intent=training, os=, platform=kubeflow):
             - service=eks, accelerator=rtx-pro-6000, os=ubuntu
             - service=gke, accelerator=a100, os=cos
             - service=gke, accelerator=b200, os=cos
+            - service=gke, accelerator=gb200, os=cos
             - service=gke, accelerator=h100, os=cos
             - service=oke, accelerator=a100, os=ubuntu
             - service=oke, accelerator=gb200, os=ubuntu
@@ -549,6 +558,7 @@ criteria(service=, accelerator=, intent=training, os=, platform=slurm):
             - service=eks, accelerator=gb200, os=ubuntu
             - service=eks, accelerator=gb300, os=ubuntu
             - service=eks, accelerator=h100, os=ubuntu
+            - service=gke, accelerator=gb200, os=cos
             - service=gke, accelerator=h100, os=cos
 criteria(service=, accelerator=, intent=training, os=cos, platform=):
     outcome: error
@@ -588,6 +598,7 @@ criteria(service=, accelerator=, intent=training, os=cos, platform=kubeflow):
         platform:
             - service=gke, accelerator=a100
             - service=gke, accelerator=b200
+            - service=gke, accelerator=gb200
             - service=gke, accelerator=h100
             - service=kind, accelerator=h100
 criteria(service=, accelerator=, intent=training, os=cos, platform=slurm):
@@ -609,6 +620,7 @@ criteria(service=, accelerator=, intent=training, os=cos, platform=slurm):
         os:
             - service=gke
         platform:
+            - service=gke, accelerator=gb200
             - service=gke, accelerator=h100
             - service=kind, accelerator=h100
 criteria(service=, accelerator=, intent=training, os=ol, platform=):
@@ -1109,6 +1121,7 @@ criteria(service=, accelerator=gb200, intent=, os=, platform=dynamo):
     validCompletions:
         platform:
             - service=eks, intent=inference, os=ubuntu
+            - service=gke, intent=inference, os=cos
             - service=oke, intent=inference, os=ubuntu
 criteria(service=, accelerator=gb200, intent=, os=, platform=kubeflow):
     outcome: error
@@ -1117,6 +1130,7 @@ criteria(service=, accelerator=gb200, intent=, os=, platform=kubeflow):
     validCompletions:
         platform:
             - service=eks, intent=training, os=ubuntu
+            - service=gke, intent=training, os=cos
             - service=oke, intent=training, os=ubuntu
 criteria(service=, accelerator=gb200, intent=, os=, platform=slurm):
     outcome: error
@@ -1125,6 +1139,44 @@ criteria(service=, accelerator=gb200, intent=, os=, platform=slurm):
     validCompletions:
         platform:
             - service=eks, intent=training, os=ubuntu
+            - service=gke, intent=training, os=cos
+criteria(service=, accelerator=gb200, intent=, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - service=gke
+criteria(service=, accelerator=gb200, intent=, os=cos, platform=dynamo):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+    validCompletions:
+        os:
+            - service=gke
+        platform:
+            - service=gke, intent=inference
+criteria(service=, accelerator=gb200, intent=, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+    validCompletions:
+        os:
+            - service=gke
+        platform:
+            - service=gke, intent=training
+criteria(service=, accelerator=gb200, intent=, os=cos, platform=slurm):
+    outcome: error
+    uncovered:
+        - os
+        - platform
+    validCompletions:
+        os:
+            - service=gke
+        platform:
+            - service=gke, intent=training
 criteria(service=, accelerator=gb200, intent=, os=ol, platform=):
     outcome: error
     uncovered:
@@ -1218,7 +1270,45 @@ criteria(service=, accelerator=gb200, intent=inference, os=, platform=dynamo):
             - service=oke, os=ubuntu
         platform:
             - service=eks, os=ubuntu
+            - service=gke, os=cos
             - service=oke, os=ubuntu
+criteria(service=, accelerator=gb200, intent=inference, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+    validCompletions:
+        intent:
+            - service=aks
+            - service=bcm
+            - service=eks
+            - service=gke
+            - service=kind
+            - service=lke
+            - service=ocp
+            - service=rke2
+        os:
+            - service=gke
+criteria(service=, accelerator=gb200, intent=inference, os=cos, platform=dynamo):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+    validCompletions:
+        intent:
+            - service=aks
+            - service=bcm
+            - service=eks
+            - service=gke
+            - service=kind
+            - service=lke
+            - service=ocp
+            - service=rke2
+        os:
+            - service=gke
+        platform:
+            - service=gke
 criteria(service=, accelerator=gb200, intent=inference, os=ol, platform=):
     outcome: error
     uncovered:
@@ -1309,6 +1399,7 @@ criteria(service=, accelerator=gb200, intent=training, os=, platform=kubeflow):
             - service=oke, os=ubuntu
         platform:
             - service=eks, os=ubuntu
+            - service=gke, os=cos
             - service=oke, os=ubuntu
 criteria(service=, accelerator=gb200, intent=training, os=, platform=slurm):
     outcome: error
@@ -1328,6 +1419,61 @@ criteria(service=, accelerator=gb200, intent=training, os=, platform=slurm):
             - service=oke, os=ubuntu
         platform:
             - service=eks, os=ubuntu
+            - service=gke, os=cos
+criteria(service=, accelerator=gb200, intent=training, os=cos, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+    validCompletions:
+        intent:
+            - service=aks
+            - service=bcm
+            - service=eks
+            - service=gke
+            - service=lke
+            - service=ocp
+            - service=rke2
+        os:
+            - service=gke
+criteria(service=, accelerator=gb200, intent=training, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+    validCompletions:
+        intent:
+            - service=aks
+            - service=bcm
+            - service=eks
+            - service=gke
+            - service=lke
+            - service=ocp
+            - service=rke2
+        os:
+            - service=gke
+        platform:
+            - service=gke
+criteria(service=, accelerator=gb200, intent=training, os=cos, platform=slurm):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+        - platform
+    validCompletions:
+        intent:
+            - service=aks
+            - service=bcm
+            - service=eks
+            - service=gke
+            - service=lke
+            - service=ocp
+            - service=rke2
+        os:
+            - service=gke
+        platform:
+            - service=gke
 criteria(service=, accelerator=gb200, intent=training, os=ol, platform=):
     outcome: error
     uncovered:
@@ -3697,6 +3843,7 @@ criteria(service=gke, accelerator=, intent=, os=, platform=dynamo):
     validCompletions:
         platform:
             - accelerator=b200, intent=inference, os=cos
+            - accelerator=gb200, intent=inference, os=cos
             - accelerator=h100, intent=inference, os=cos
         service:
             - os=cos
@@ -3709,6 +3856,7 @@ criteria(service=gke, accelerator=, intent=, os=, platform=kubeflow):
         platform:
             - accelerator=a100, intent=training, os=cos
             - accelerator=b200, intent=training, os=cos
+            - accelerator=gb200, intent=training, os=cos
             - accelerator=h100, intent=training, os=cos
         service:
             - os=cos
@@ -3719,6 +3867,7 @@ criteria(service=gke, accelerator=, intent=, os=, platform=slurm):
         - platform
     validCompletions:
         platform:
+            - accelerator=gb200, intent=training, os=cos
             - accelerator=h100, intent=training, os=cos
         service:
             - os=cos
@@ -3731,6 +3880,7 @@ criteria(service=gke, accelerator=, intent=, os=cos, platform=dynamo):
     validCompletions:
         platform:
             - accelerator=b200, intent=inference
+            - accelerator=gb200, intent=inference
             - accelerator=h100, intent=inference
 criteria(service=gke, accelerator=, intent=, os=cos, platform=kubeflow):
     outcome: error
@@ -3740,6 +3890,7 @@ criteria(service=gke, accelerator=, intent=, os=cos, platform=kubeflow):
         platform:
             - accelerator=a100, intent=training
             - accelerator=b200, intent=training
+            - accelerator=gb200, intent=training
             - accelerator=h100, intent=training
 criteria(service=gke, accelerator=, intent=, os=cos, platform=slurm):
     outcome: error
@@ -3747,6 +3898,7 @@ criteria(service=gke, accelerator=, intent=, os=cos, platform=slurm):
         - platform
     validCompletions:
         platform:
+            - accelerator=gb200, intent=training
             - accelerator=h100, intent=training
 criteria(service=gke, accelerator=, intent=inference, os=, platform=):
     outcome: error
@@ -3769,6 +3921,7 @@ criteria(service=gke, accelerator=, intent=inference, os=, platform=dynamo):
             - os=cos
         platform:
             - accelerator=b200, os=cos
+            - accelerator=gb200, os=cos
             - accelerator=h100, os=cos
         service:
             - os=cos
@@ -3781,6 +3934,7 @@ criteria(service=gke, accelerator=, intent=inference, os=cos, platform=dynamo):
     validCompletions:
         platform:
             - accelerator=b200
+            - accelerator=gb200
             - accelerator=h100
 criteria(service=gke, accelerator=, intent=training, os=, platform=):
     outcome: error
@@ -3804,6 +3958,7 @@ criteria(service=gke, accelerator=, intent=training, os=, platform=kubeflow):
         platform:
             - accelerator=a100, os=cos
             - accelerator=b200, os=cos
+            - accelerator=gb200, os=cos
             - accelerator=h100, os=cos
         service:
             - os=cos
@@ -3817,6 +3972,7 @@ criteria(service=gke, accelerator=, intent=training, os=, platform=slurm):
         intent:
             - os=cos
         platform:
+            - accelerator=gb200, os=cos
             - accelerator=h100, os=cos
         service:
             - os=cos
@@ -3830,6 +3986,7 @@ criteria(service=gke, accelerator=, intent=training, os=cos, platform=kubeflow):
         platform:
             - accelerator=a100
             - accelerator=b200
+            - accelerator=gb200
             - accelerator=h100
 criteria(service=gke, accelerator=, intent=training, os=cos, platform=slurm):
     outcome: error
@@ -3837,6 +3994,7 @@ criteria(service=gke, accelerator=, intent=training, os=cos, platform=slurm):
         - platform
     validCompletions:
         platform:
+            - accelerator=gb200
             - accelerator=h100
 criteria(service=gke, accelerator=a100, intent=, os=, platform=):
     outcome: error
@@ -3987,6 +4145,135 @@ criteria(service=gke, accelerator=b200, intent=training, os=, platform=kubeflow)
 criteria(service=gke, accelerator=b200, intent=training, os=cos, platform=):
     outcome: success
 criteria(service=gke, accelerator=b200, intent=training, os=cos, platform=kubeflow):
+    outcome: success
+criteria(service=gke, accelerator=gb200, intent=, os=, platform=):
+    outcome: error
+    uncovered:
+        - service
+    validCompletions:
+        service:
+            - os=cos
+criteria(service=gke, accelerator=gb200, intent=, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - service
+        - platform
+    validCompletions:
+        platform:
+            - intent=inference, os=cos
+        service:
+            - os=cos
+criteria(service=gke, accelerator=gb200, intent=, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - service
+        - platform
+    validCompletions:
+        platform:
+            - intent=training, os=cos
+        service:
+            - os=cos
+criteria(service=gke, accelerator=gb200, intent=, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - service
+        - platform
+    validCompletions:
+        platform:
+            - intent=training, os=cos
+        service:
+            - os=cos
+criteria(service=gke, accelerator=gb200, intent=, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=gb200, intent=, os=cos, platform=dynamo):
+    outcome: error
+    uncovered:
+        - platform
+    validCompletions:
+        platform:
+            - intent=inference
+criteria(service=gke, accelerator=gb200, intent=, os=cos, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - platform
+    validCompletions:
+        platform:
+            - intent=training
+criteria(service=gke, accelerator=gb200, intent=, os=cos, platform=slurm):
+    outcome: error
+    uncovered:
+        - platform
+    validCompletions:
+        platform:
+            - intent=training
+criteria(service=gke, accelerator=gb200, intent=inference, os=, platform=):
+    outcome: error
+    uncovered:
+        - service
+        - intent
+    validCompletions:
+        intent:
+            - os=cos
+        service:
+            - os=cos
+criteria(service=gke, accelerator=gb200, intent=inference, os=, platform=dynamo):
+    outcome: error
+    uncovered:
+        - service
+        - intent
+        - platform
+    validCompletions:
+        intent:
+            - os=cos
+        platform:
+            - os=cos
+        service:
+            - os=cos
+criteria(service=gke, accelerator=gb200, intent=inference, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=gb200, intent=inference, os=cos, platform=dynamo):
+    outcome: success
+criteria(service=gke, accelerator=gb200, intent=training, os=, platform=):
+    outcome: error
+    uncovered:
+        - service
+        - intent
+    validCompletions:
+        intent:
+            - os=cos
+        service:
+            - os=cos
+criteria(service=gke, accelerator=gb200, intent=training, os=, platform=kubeflow):
+    outcome: error
+    uncovered:
+        - service
+        - intent
+        - platform
+    validCompletions:
+        intent:
+            - os=cos
+        platform:
+            - os=cos
+        service:
+            - os=cos
+criteria(service=gke, accelerator=gb200, intent=training, os=, platform=slurm):
+    outcome: error
+    uncovered:
+        - service
+        - intent
+        - platform
+    validCompletions:
+        intent:
+            - os=cos
+        platform:
+            - os=cos
+        service:
+            - os=cos
+criteria(service=gke, accelerator=gb200, intent=training, os=cos, platform=):
+    outcome: success
+criteria(service=gke, accelerator=gb200, intent=training, os=cos, platform=kubeflow):
+    outcome: success
+criteria(service=gke, accelerator=gb200, intent=training, os=cos, platform=slurm):
     outcome: success
 criteria(service=gke, accelerator=h100, intent=, os=, platform=):
     outcome: error

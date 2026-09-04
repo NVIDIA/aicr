@@ -1,0 +1,123 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# GKE GB200 (A4X): RDMA/RoCE networking.
+#
+# GCP reference: "Create a custom AI-optimized GKE cluster which uses A4X"
+# https://docs.cloud.google.com/ai-hypercomputer/docs/create/gke-ai-hypercompute-custom-a4x
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: gb200-gke-cos-training
+
+spec:
+  base: gke-cos-training
+
+  criteria:
+    service: gke
+    accelerator: gb200
+    os: cos
+    intent: training
+
+  constraints:
+    # >= 1.34: GB200 NVLS provisions the IMEX channel through a DRA
+    # ComputeDomain that requires the GA resource.k8s.io/v1 API.
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs:
+    - name: gpu-operator
+      type: Helm
+      preManifestFiles:
+        # NVreg flag required for dma-buf attach over the RoCE fabric.
+        - components/gpu-operator/manifests/kernel-module-params.yaml
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+        - nodewright-customizations
+      overrides:
+        cdi:
+          enabled: true
+        gdrcopy:
+          enabled: true
+        driver:
+          kernelModuleConfig:
+            name: nvidia-kernel-module-params
+
+    # gcp-driver-installer's pinned partition-gpus init container image is
+    # amd64-only and fails with "exec format error" on arm64 (found via live
+    # GB200 GKE validation) — override with a multi-arch digest. Only takes
+    # effect under --profile gpuStack=bundle-installer (installer.enabled);
+    # a no-op under the gke-default profile.
+    - name: gcp-driver-installer
+      type: Helm
+      overrides:
+        partitionGpuImage: "gcr.io/gke-release/nvidia-partition-gpu@sha256:de12f85ebfb4fb6c1893cd30c23aab662a72fa0448f97ef74fccb82d7522ef17"
+
+    # The GKENetworkParamSet/Network CRs (gvnic-1, rdma-0..3) are a cluster
+    # provisioning prerequisite, not created by this component; see
+    # docs/integrator/gke-gb200-networking.md.
+    - name: gke-gb200-rdma
+      type: Helm
+      manifestFiles:
+        - components/gke-gb200-rdma/manifests/nccl-gib-installer-arm64.yaml
+
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/tuning-gke.yaml
+      overrides:
+        accelerator: gb200
+        intent: multiNodeTraining
+      dependencyRefs:
+        - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+
+  validation:
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        - name: Deployment.gpu-operator.version
+          value: ">= v25.10.0"
+    performance:
+      checks:
+        - nccl-all-reduce-bw-nvls
+      # Calibrated on a4x-highgpu-4g (4x GB200/node): 2-node/8-GPU
+      # all_reduce_perf measured 281.936 GB/s avg bus bandwidth.
+      constraints:
+        - name: nccl-all-reduce-bw-nvls
+          value: ">= 250"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - pod-autoscaling
+        - cluster-autoscaling
+        - robust-controller
+        - secure-accelerator-access

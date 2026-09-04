@@ -13,12 +13,13 @@
 // limitations under the License.
 
 // nccl_bandwidth_floor_test.go pins the production-resolved value of the
-// H100 GKE COS `nccl-all-reduce-bw` performance gate. The K8s-native check
-// runs on the parent leaf and its kubeflow sibling at a fixed busBW floor;
-// the Slinky (slurm) leaf intentionally clears the performance phase
-// (checks/constraints empty) because the K8s-launched check bypasses
-// slurmd and measures the wrong path. Exact-value coverage so a future
-// floor edit cannot silently drift these three overlays apart.
+// GKE COS all-reduce performance gate, per accelerator family (H100's
+// `nccl-all-reduce-bw`, GB200's NVLS-variant `nccl-all-reduce-bw-nvls`).
+// The K8s-native check runs on the parent leaf and its kubeflow sibling at
+// a fixed busBW floor; the Slinky (slurm) leaf intentionally clears the
+// performance phase (checks/constraints empty) because the K8s-launched
+// check bypasses slurmd and measures the wrong path. Exact-value coverage
+// so a future floor edit cannot silently drift these leaves apart.
 
 package recipe
 
@@ -49,6 +50,23 @@ func performanceCheckPresent(v *ValidationConfig, name string) bool {
 		return false
 	}
 	return slices.Contains(v.Performance.Checks, name)
+}
+
+// assertPerformancePhaseEmpty fails the test if the resolved performance
+// phase carries any checks or constraints. A leaf that clears the phase
+// (e.g. Slinky/slurm, or plain inference with no performance gate) must
+// resolve to none of either, not merely lack the one check under test.
+func assertPerformancePhaseEmpty(t *testing.T, v *ValidationConfig) {
+	t.Helper()
+	if v == nil || v.Performance == nil {
+		return
+	}
+	if len(v.Performance.Checks) != 0 {
+		t.Errorf("performance checks should be empty, got %v", v.Performance.Checks)
+	}
+	if len(v.Performance.Constraints) != 0 {
+		t.Errorf("performance constraints should be empty, got %v", v.Performance.Constraints)
+	}
 }
 
 // TestH100GKENCCLBandwidthFloor asserts the production resolver yields the
@@ -129,7 +147,7 @@ func TestH100GKENCCLBandwidthFloor(t *testing.T) {
 					t.Fatalf("performance constraint %q not found; expected value %q", checkName, tt.wantValue)
 				}
 				if gotValue != tt.wantValue {
-					t.Errorf("nccl-all-reduce-bw = %q, want %q", gotValue, tt.wantValue)
+					t.Errorf("%s = %q, want %q", checkName, gotValue, tt.wantValue)
 				}
 			} else {
 				if checkPresent {
@@ -138,6 +156,106 @@ func TestH100GKENCCLBandwidthFloor(t *testing.T) {
 				if found {
 					t.Errorf("performance constraint %q should be cleared but resolved to %q", checkName, gotValue)
 				}
+				assertPerformancePhaseEmpty(t, result.Validation)
+			}
+		})
+	}
+}
+
+// TestGB200GKENCCLBandwidthFloor asserts the production resolver yields the
+// expected nccl-all-reduce-bw-nvls floor for the GB200 GKE COS training
+// family.
+func TestGB200GKENCCLBandwidthFloor(t *testing.T) {
+	const checkName = "nccl-all-reduce-bw-nvls"
+
+	tests := []struct {
+		name      string
+		criteria  *Criteria
+		wantValue string
+		wantPerf  bool
+	}{
+		{
+			name: "gb200-gke-cos-training",
+			criteria: &Criteria{
+				Service:     CriteriaServiceGKE,
+				Accelerator: CriteriaAcceleratorGB200,
+				OS:          CriteriaOSCOS,
+				Intent:      CriteriaIntentTraining,
+				Platform:    CriteriaPlatformAny,
+			},
+			wantValue: ">= 250",
+			wantPerf:  true,
+		},
+		{
+			name: "gb200-gke-cos-training-kubeflow",
+			criteria: &Criteria{
+				Service:     CriteriaServiceGKE,
+				Accelerator: CriteriaAcceleratorGB200,
+				OS:          CriteriaOSCOS,
+				Intent:      CriteriaIntentTraining,
+				Platform:    CriteriaPlatformKubeflow,
+			},
+			wantValue: ">= 250",
+			wantPerf:  true,
+		},
+		{
+			name: "gb200-gke-cos-training-slurm",
+			criteria: &Criteria{
+				Service:     CriteriaServiceGKE,
+				Accelerator: CriteriaAcceleratorGB200,
+				OS:          CriteriaOSCOS,
+				Intent:      CriteriaIntentTraining,
+				Platform:    CriteriaPlatformSlurm,
+			},
+			wantPerf: false,
+		},
+		{
+			name: "gb200-gke-cos-inference",
+			criteria: &Criteria{
+				Service:     CriteriaServiceGKE,
+				Accelerator: CriteriaAcceleratorGB200,
+				OS:          CriteriaOSCOS,
+				Intent:      CriteriaIntentInference,
+				Platform:    CriteriaPlatformAny,
+			},
+			wantPerf: false,
+		},
+	}
+
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("loadMetadataStore: %v", err)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := store.BuildRecipeResult(ctx, tt.criteria)
+			if err != nil {
+				t.Fatalf("BuildRecipeResult: %v", err)
+			}
+
+			gotValue, found := findPerformanceConstraint(result.Validation, checkName)
+			checkPresent := performanceCheckPresent(result.Validation, checkName)
+
+			if tt.wantPerf {
+				if !checkPresent {
+					t.Errorf("performance check %q not present in resolved checks", checkName)
+				}
+				if !found {
+					t.Fatalf("performance constraint %q not found; expected value %q", checkName, tt.wantValue)
+				}
+				if gotValue != tt.wantValue {
+					t.Errorf("%s = %q, want %q", checkName, gotValue, tt.wantValue)
+				}
+			} else {
+				if checkPresent {
+					t.Errorf("performance check %q should be cleared but is present", checkName)
+				}
+				if found {
+					t.Errorf("performance constraint %q should be cleared but resolved to %q", checkName, gotValue)
+				}
+				assertPerformancePhaseEmpty(t, result.Validation)
 			}
 		})
 	}
