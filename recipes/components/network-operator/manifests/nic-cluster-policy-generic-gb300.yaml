@@ -25,9 +25,13 @@ kind: NicClusterPolicy
 metadata:
   name: nic-cluster-policy
   annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: "5"
-    helm.sh/hook-delete-policy: before-hook-creation
+    # Deliberately NOT a Helm hook: this CR is long-lived cluster networking
+    # and must be updated in place — hook-delete-policy would delete the live
+    # policy on every upgrade, tearing down OFED/RDMA pods before the
+    # replacement reconciles. CRD-before-CR ordering is provided by the
+    # bundler's post-bundle sequencing (this manifest ships in the
+    # network-operator-post bundle, after the operator's CRDs).
+    aicr/skip-hook-validation: "true"
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
