@@ -50,7 +50,7 @@ func TestWriteLocalHelmFolder_AllManifestsEmpty(t *testing.T) {
 	}
 
 	folder, err := writeLocalHelmFolder(outDir, dir, 4, c, manifests, renderInput,
-		"nodewright-customizations", "nodewright-customizations", false)
+		"nodewright-customizations", "nodewright-customizations", false, stampFor(c, "v1.2.3"))
 	if err != nil {
 		t.Fatalf("writeLocalHelmFolder returned error for all-empty render: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestWriteLocalHelmFolder_AllMixedManifestsEmpty(t *testing.T) {
 	c := Component{Name: "network-operator", Namespace: "nvidia-network-operator"}
 
 	folder, err := writeLocalHelmFolder(outDir, dir, 3, c, manifests, renderInputFor(c),
-		"network-operator-post", "network-operator", true)
+		"network-operator-post", "network-operator", true, stampFor(c, "v1.2.3"))
 	if err != nil {
 		t.Fatalf("writeLocalHelmFolder returned error for all-empty render: %v", err)
 	}
