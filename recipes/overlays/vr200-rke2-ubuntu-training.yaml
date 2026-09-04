@@ -149,12 +149,15 @@ spec:
     # VR200 node tuning runs the native vr200/rke2 nvidia-tuned profile —
     # see the nodewright-customizations componentRef below for the full
     # rationale, including that it applies its kernel cmdline through a
-    # reboot. interruptionBudget serializes this CR to one node at a time.
-    # Nodewright also runs only one Skyhook at a time, ordered by priority
-    # then name, so rdma-netns-exclusive (same default priority, earlier
-    # name) completes before this one starts — two sequential reboots per
-    # node, not concurrent ones. Merging both into a single CR would cut
-    # that to one reboot; tracked as a follow-up.
+    # reboot. interruptionBudget serializes THIS CR to one node at a time,
+    # but it is per-CR and does not compose with rdma-netns-exclusive's own
+    # budget. Under the default sequencing: node, IsNodeReadyForSkyhook
+    # checks per-node completion, so one node may start tuning while
+    # another is still on the RDMA CR — concurrent reboots across the two
+    # are possible on a multi-node cluster. Install order compounds it:
+    # this component lands well before rdma-netns-exclusive, so at creation
+    # time there is no predecessor CR to order against at all.
+    # Sequence deliberately on a live cluster. Tracked as a follow-up.
     # Health check override: the operator Deployment's name depends on how
     # nodewright got installed, and both paths are real here. The VR
     # reference clusters carry an out-of-band install (hand-written values,
