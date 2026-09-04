@@ -344,7 +344,9 @@ This setting filters by source IP only; it does not add TLS or authentication to
 
 From agentgateway chart v1.5.0 the controller's write permissions are scoped by `rbac.gatewayNamespaces`, and AICR sets it to `agentgateway-system` — the single namespace it provisions the `inference-gateway` Gateway in.
 
-This matters if you add a Gateway of your own. Leaving the list empty is the chart's default and binds the controller's write role (Deployments, DaemonSets, Secrets, ServiceAccounts, ConfigMaps, Services, HPAs, PDBs) with a *ClusterRoleBinding*, giving a network-facing controller write access in every namespace — enough to create a privileged DaemonSet on every node. Scoping it costs nothing for AICR's own topology, so AICR scopes it.
+This matters if you add a Gateway of your own. Leaving the list empty is the chart's default and binds the controller's write role (Deployments, DaemonSets, Secrets, ServiceAccounts, ConfigMaps, Services, HPAs, PDBs) with a *ClusterRoleBinding*, so a network-facing controller can create and modify those objects, and read every Secret, in **every namespace on the cluster**. Scoping the list narrows that to the namespaces you name, which costs nothing for AICR's own topology.
+
+Be precise about what the scoping does and does not buy. It reduces the blast radius to a namespace set; it does not remove the node-wide primitive, because the role still grants `daemonsets` and a DaemonSet created in a permitted namespace still schedules pods onto every node. Scoping is worth doing — an unscoped binding also exposes Secrets cluster-wide — but treat the controller's namespace as privileged rather than as contained.
 
 The consequence is that **only Gateways in the listed namespaces are provisioned**. A Gateway you place in another namespace is accepted by the API server but never gets an address: the controller cannot create its Deployment or Service there, so the failure is silent apart from `forbidden` errors in the controller log. Note this is about where the *Gateway* lives — routes are unaffected, and `HTTPRoute`s in any namespace may still attach to the AICR gateway.
 
@@ -354,6 +356,15 @@ To place additional Gateways, add their namespaces:
 aicr bundle -r recipe.yaml \
   --set-json agentgateway:rbac.gatewayNamespaces='["agentgateway-system","my-gateways"]'
 ```
+
+**Before upgrading an existing cluster onto a scoped pin, inventory the Gateways you already have.** A Gateway that works today under the chart's unscoped default will stop reconciling once the list is scoped and its namespace is not on it — the controller loses write on the generated Deployment, Service, Secret and ServiceAccount, and the Gateway reports a failed reconciliation:
+
+```shell
+kubectl get gateways.gateway.networking.k8s.io -A \
+  -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,CLASS:.spec.gatewayClassName' || exit 1
+```
+
+Every namespace holding a Gateway with `CLASS: agentgateway` must appear in the list, not just `agentgateway-system`.
 
 Two constraints on that edit:
 
