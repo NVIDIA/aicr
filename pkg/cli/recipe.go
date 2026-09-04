@@ -116,11 +116,15 @@ func recipeCmd() *cli.Command {
 		Name:     cmdNameRecipe,
 		Category: functionalCategoryName,
 		Usage:    "Create optimized recipe for given intent and environment parameters.",
-		Description: `Generate configuration recipe based on specified environment parameters including:
-  - Kubernetes service type (e.g. eks, gke, aks, oke, kind, lke, bcm)
-  - Accelerator type (e.g. h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000)
-  - Workload intent (e.g. training, inference)
-  - GPU node operating system (e.g. ubuntu, rhel, cos, amazonlinux, ol, talos)
+		// Value lists are derived from the canonical criteria registry (the
+		// same source the --service/--accelerator/--intent/--os flag usage
+		// strings use) so a new criteria value cannot silently leave this
+		// help text advertising a supported coordinate as unsupported.
+		Description: fmt.Sprintf(`Generate configuration recipe based on specified environment parameters including:
+  - Kubernetes service type (e.g. %s)
+  - Accelerator type (e.g. %s)
+  - Workload intent (e.g. %s)
+  - GPU node operating system (e.g. %s)
   - Number of GPU nodes in the cluster
 
 The recipe returns a list of components with deployment order based on dependencies.
@@ -148,6 +152,11 @@ Override config file values with flags:
 
 Override snapshot-detected criteria:
   aicr recipe --snapshot cm://gpu-operator/aicr-snapshot --service gke`,
+			strings.Join(recipe.GetCriteriaServiceTypes(), ", "),
+			strings.Join(recipe.GetCriteriaAcceleratorTypes(), ", "),
+			strings.Join(recipe.GetCriteriaIntentTypes(), ", "),
+			strings.Join(recipe.GetCriteriaOSTypes(), ", "),
+		),
 		Commands: []*cli.Command{
 			recipeListCmd(),
 			recipeSignCatalogCmd(),
