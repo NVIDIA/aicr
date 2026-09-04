@@ -37,6 +37,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/gatemanifest"
 	"github.com/NVIDIA/aicr/pkg/component"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -642,6 +643,14 @@ func TestGenerate_ChartVersion(t *testing.T) {
 			recipeVersion:      "v9.9.9",
 			bundleChartVersion: "1.2.3+build.5",
 			want:               "1.2.3+build.5",
+		},
+		{
+			// Helm rejects "dev" for Chart.yaml version:, which made every
+			// argocd-helm bundle from an unstamped build unloadable — the
+			// README's own `helm install .` failed. See ADR-021 Decision 7.
+			name:          "unstamped dev build folds to a Helm-valid version",
+			recipeVersion: defaults.DevVersion,
+			want:          defaults.DevChartVersion,
 		},
 	}
 	for _, tt := range tests {
