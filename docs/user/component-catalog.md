@@ -906,15 +906,28 @@ what the cross-namespace route delegation change affects:
 
 ```bash
 kubectl get httproutes,grpcroutes -A \
-  -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PARENTS:.spec.parentRefs[*].name' \
+  -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PKIND:.spec.parentRefs[*].kind,PNS:.spec.parentRefs[*].namespace,PARENTS:.spec.parentRefs[*].name' \
   || echo "route listing failed — retry" >&2
 ```
 
-Any row whose `PARENTS` names `inference-gateway` is yours. A row whose
-`PARENTS` names another `HTTPRoute` rather than a Gateway is a delegated route:
-from v1.5.0 those need a `ReferenceGrant` in the child's namespace authorizing
-the parent's namespace, where previously none was required, so check
-`kubectl get referencegrants -A` covers each one before upgrading.
+Read the rows by their parent:
+
+- `PKIND: Gateway` naming `inference-gateway` — a route you attached to the
+  AICR gateway.
+- `PKIND: HTTPRoute` with a `PNS` that differs from `NS` — cross-namespace
+  route-to-route delegation. From v1.5.0 this requires a `ReferenceGrant` in
+  the child's namespace authorizing the parent's namespace, where previously
+  none was needed. Confirm `kubectl get referencegrants -A` covers each one
+  before upgrading, or the delegation stops being accepted.
+- `PKIND: HTTPRoute` with an empty `PNS` — same-namespace delegation, which the
+  change does not affect. `parentRefs[].namespace` is optional and defaults to
+  the route's own namespace, so empty is the same-namespace signal.
+
+One caveat on the command: a route with several `parentRefs` where only some
+set `namespace` will have its `PNS` column misalign, because JSONPath omits the
+missing entries rather than padding them. Describe those routes individually
+with `kubectl get httproute <name> -n <ns> -o yaml` rather than trusting the
+columns.
 
 AICR's own `AgentgatewayParameters` named `system-proxy` in
 `agentgateway-system` is expected. If nothing else appears, the upgrade needs
