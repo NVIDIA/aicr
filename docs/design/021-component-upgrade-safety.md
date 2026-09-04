@@ -4,6 +4,8 @@
 
 **Proposed** — 2026-08-21.
 
+Implementation status: [Decision 7](#decision-7-generated-wrappers-carry-two-versions) shipped in [#2526](https://github.com/NVIDIA/aicr/issues/2526); generated wrappers now stamp both versions. Everything else below remains proposed. The problem statements are left as written at proposal time — they describe the state the ADR was reasoning about, not the state of `main`.
+
 Numbering note: 020 is double-claimed at time of writing. Branch `docs/adr-020-resolution-policy` carries `020-recipe-resolution-policy.md`, and [#2334](https://github.com/NVIDIA/aicr/pull/2334) proposes ADR-020 for snapshot agent run isolation. Renumber at merge if 021 is also taken.
 
 Builds on the registry-declared component facts established by `ownsCRDs` ([#2264](https://github.com/NVIDIA/aicr/issues/2264)) and the uniform local-chart bundle layout in `pkg/bundler/deployer/localformat`. It does not change recipe resolution or the deployer contract. It does change bundle layout in two bounded ways: [Decision 4](#decision-4-migration-content-ships-as-an-adjacent-generated-release) adds an optional `-premigrate` folder, and [Decision 7](#decision-7-generated-wrappers-carry-two-versions) adds fields to generated wrapper `Chart.yaml`.
@@ -785,7 +787,7 @@ Preconditions are structured prose today, rendered and not evaluated. Making the
 Ordered so each step is independently useful and independently revertible.
 
 1. **`ownsCRDs` deployer gap** (Decision 8). First, because it is a prerequisite for a verdict meaning what it says: a `safe` transition whose CRDs changed is not safe on a deployer that leaves CRDs at their day-one schema, which today is four of five. Independent of everything below, so it can ship as its own PR in parallel.
-2. **Wrapper chart versioning** (Decision 7). Template change, dev-build normalization, golden updates. No new feature depends on it landing first, but online mode is wrong without it.
+2. **Wrapper chart versioning** (Decision 7) — **shipped** ([#2526](https://github.com/NVIDIA/aicr/issues/2526)). Template change, dev-build normalization, golden updates. No new feature depends on it landing first, but online mode is wrong without it.
 3. **Transition record schema and loader.** `recipes/upgrades/<component>.yaml`, the `upgrades.file` registry field, semver range matching with strict directionality, and a lint gate rejecting a record that matches in reverse. The loader calls the `apiVersion` gate and fails closed on an unrecognized value; it does not skip and does not degrade to `unknown`.
 4. **Offline check.** `--from`/`--to` over recipes and bundles, table and JSON output, non-zero exit by default via `--fail-on-error`. This is the whole feature for CI and GitOps.
 5. **Bundle rendering.** Transition records for the resolved component set render into the bundle README, filtered to the bundle's deployer, so operators who never run the command still see the steps that apply to them.
