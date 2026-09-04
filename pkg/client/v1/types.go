@@ -224,6 +224,12 @@ type AgentConfig struct {
 	// when no ServiceAccount of that exact name exists; see its own
 	// documentation above.
 	NameBase string
+
+	// OKEAddonsPath points at an operator-supplied
+	// `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump. Same
+	// contract as AKSGPUPoolsPath: projected controller-side and merged
+	// into the snapshot as the oke-addons subtype.
+	OKEAddonsPath string
 }
 
 // Criteria is the facade-owned, semver-stable shape of a recipe-resolution

@@ -156,7 +156,7 @@ func TestNCCLCombinationSupported(t *testing.T) {
 		{"default B200 any", variantDefault, fabricEFA, target(recipe.CriteriaAcceleratorB200, recipe.CriteriaServiceAny), true},
 		{"default GB200 EKS not covered", variantDefault, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceEKS), false},
 		{"NET GB200 EKS", variantNET, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceEKS), true},
-		{"NET GB200 OKE not covered", variantNET, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE), false},
+		{"NET GB200 OKE (IB via rdmaSharedDevicePlugin)", variantNET, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE), true},
 		{"NVLS GB200 EKS", variantNVLS, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceEKS), true},
 		{"NVLS GB200 OKE", variantNVLS, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE), true},
 		{"unknown service", variantNVLS, fabricEFA, target(recipe.CriteriaAcceleratorGB200, "custom-svc"), false},

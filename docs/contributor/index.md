@@ -169,6 +169,8 @@ output. **They contain no business logic.** All business logic lives
 in functional packages, composed by the `pkg/client/v1` facade so
 both entry points share it. Adding business logic to `pkg/cli` or
 `pkg/server` handlers is a boundary violation and will be rejected.
+This boundary is enforced mechanically by a CI gate — see
+[architecture-gate.md](architecture-gate.md).
 
 ## Packages
 
@@ -308,6 +310,7 @@ By contributor task:
 - **Adding an HTTP endpoint** → [api-server.md](api-server.md)
 - **Adding a snapshot collector** → [collector.md](collector.md)
 - **Adding a validator check** → [validator.md](validator.md)
+- **Understanding or fixing a facade boundary gate failure** → [architecture-gate.md](architecture-gate.md)
 - **Adding a bundle-time component validation** → [validator.md](validator.md#component-validations-bundle-time)
 - **Producing and signing recipe evidence** → [evidence-publishing.md](evidence-publishing.md)
 - **Ingesting published evidence into the source-keyed tree (GP2)** → [evidence-ingest.md](evidence-ingest.md)

@@ -50,8 +50,8 @@ ones) that match the target fabric:
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`) | GB200 + EKS. Asserts EFA actually carried traffic — catches silent fallback to Socket when the NVIDIA driver is missing `NVreg_GrdmaPciTopoCheckOverride=1`. |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, and GB200 + OKE. Asserts the NVLS communicator actually initialized — catches silent fallback to EFA (EKS) or Socket (OKE) when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when the NVIDIA driver is missing `NVreg_GrdmaPciTopoCheckOverride=1`. |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, and GB200 + OKE. Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE) when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
@@ -61,7 +61,7 @@ whose fabric matches its hardware, or, for a private service whose fabric
 matches no embedded template, by
 [supplying its own benchmark runtime](#supplying-a-benchmark-runtime-for-a-private-service).
 
-The `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster
+On EKS, the `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster
 (e.g. DGXC GB300 `p6e-gb300r`), set `AICR_NCCL_FABRIC=roce` in the `aicr
 validate` environment to run the NET test over NCCL's built-in IB/verbs
 transport across `roce.networking.k8s.aws` DRA devices instead. The value is
@@ -78,9 +78,13 @@ GB200/EKS recipes (both `training` and `inference` intents) enable `-net` and
 expose two inter-node fabrics simultaneously and a single auto-detect test
 would only exercise one of them.
 
-GB200/OKE recipes enable `-nvls` only: OKE NET/RDMA stays out of the support
-matrix until the OCI testbed proves a non-Socket NCCL transport end to end, so
-OKE validates the NVL72 IMEX fabric without an EFA/NET counterpart.
+GB200/OKE training recipes follow the same pattern and enable `-net` and
+`-nvls` together, with the same `>= 40` / `>= 500` GB/s floors as GB200/EKS.
+On OKE, `-net` exercises the NVL72 rack's InfiniBand east-west fabric
+(`rdma0-3`, advertised as `nvidia.com/mlnxnics` by the recipe's
+`rdmaSharedDevicePlugin` NicClusterPolicy) over NCCL's built-in IB/verbs
+transport — no EFA or RoCE plumbing is involved. Both variants were validated
+end to end on a `BM.GPU.GB200.4` NVL72 rack.
 
 ```bash
 # Capture snapshot, generate training recipe, validate the performance phase.
@@ -106,10 +110,23 @@ can false-fail a healthy run. Making the NCCL gate fabric/transport-class
 aware is tracked in [#1256](https://github.com/NVIDIA/aicr/issues/1256).
 
 Expected flow (~5–10 min per variant): readiness pre-flight → deploy
-`TrainingRuntime` + `TrainJob` in `aicr-validation` → worker pods reach
-`Running` → run `all_reduce_perf` → parse peak bus bandwidth → verify the
-intended transport actually carried traffic (for `-net` / `-nvls`) → compare
-to recipe constraint (10 % tolerance) → cleanup.
+`TrainingRuntime` + `TrainJob` in a per-run namespace named
+`aicr-nccl-perf-<variant>-<run-id>` → worker pods reach `Running` → run
+`all_reduce_perf` → parse peak bus bandwidth → verify the intended transport
+actually carried traffic (for `-net` / `-nvls`) → compare to recipe
+constraint (10 % tolerance) → cleanup.
+
+Each variant (`-net`, `-nvls`, default) gets its own namespace, deleted on
+exit along with its `TrainingRuntime`/`TrainJob`. A namespace left behind by
+an interrupted run is reclaimed by a same-run-ID retry only if no
+`Pending`/`Running`/`Unknown` pod remains in it and its execution lock (a
+`Lease` named `aicr-nccl-run-lock` in that namespace) has gone stale, 20
+minutes past its last renewal. Otherwise the retry fails with a conflict
+rather than risk two executions sharing one namespace; check
+`kubectl get pods -n <namespace>` and the Lease's age to find and clear
+whichever is actually stuck. A standalone run (no run ID) is never retried
+into its old namespace; that namespace is only pruned automatically, on a
+later run once an hour has passed and both conditions above hold.
 
 A passing CTRF entry:
 

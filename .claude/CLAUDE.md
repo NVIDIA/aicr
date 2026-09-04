@@ -677,6 +677,10 @@ aicr snapshot --output snapshot.yaml
 # generation / validate readiness fails closed (ADR-015 gpuStack profile):
 #   az aks nodepool list -g <rg> --cluster-name <cluster> -o json > pools.json
 #   aicr snapshot --aks-gpu-pools pools.json --output snapshot.yaml
+# OKE only: include the add-on projection or snapshot-qualified recipe
+# generation / validate readiness fails closed (gpuStack profile):
+#   oci ce cluster list-addons --cluster-id <ocid> --all --output json > addons.json
+#   aicr snapshot --oke-addons addons.json --output snapshot.yaml
 
 # Generate recipe from snapshot
 aicr recipe --snapshot snapshot.yaml --intent training --output recipe.yaml

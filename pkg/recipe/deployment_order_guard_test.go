@@ -175,12 +175,43 @@ func TestDeploymentOrderGuards(t *testing.T) {
 				{"gpu-operator", "nvsentinel"},
 			},
 		},
+		// The two IMEX-capable Slurm leaves below carry identical dependency
+		// and ordering expectations; only the accelerator differs. The
+		// load-bearing edge in both is nvidia-dra-driver-gpu -> slinky-slurm:
+		// the IMEX ComputeDomain pre-manifest rides with slinky-slurm and
+		// consumes the DRA driver's ResourceClaimTemplate, so the driver must
+		// land first or the NodeSet pods stay Pending. Do not prune it from
+		// either case.
 		{
 			name: "gb200-eks-ubuntu-training-slurm",
 			criteria: func() *Criteria {
 				c := NewCriteria()
 				c.Service = CriteriaServiceEKS
 				c.Accelerator = CriteriaAcceleratorGB200
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformSlurm
+				return c
+			},
+			requiredDeps: map[string][]string{
+				"slinky-slurm-operator": {"cert-manager", "slinky-slurm-operator-crds"},
+				"slinky-slurm":          {"nvidia-dra-driver-gpu", "slinky-slurm-operator", "slinky-slurm-operator-crds"},
+			},
+			requiredOrdering: [][2]string{
+				{"nvidia-dra-driver-gpu", "slinky-slurm"},
+				{"cert-manager", "slinky-slurm-operator"},
+				{"slinky-slurm-operator-crds", "slinky-slurm-operator"},
+				{"slinky-slurm-operator", "slinky-slurm"},
+				{"slinky-slurm-operator-crds", "slinky-slurm"},
+				{"gpu-operator", "nvsentinel"},
+			},
+		},
+		{
+			name: "gb300-eks-ubuntu-training-slurm",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorGB300
 				c.OS = CriteriaOSUbuntu
 				c.Intent = CriteriaIntentTraining
 				c.Platform = CriteriaPlatformSlurm

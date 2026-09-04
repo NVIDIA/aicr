@@ -698,6 +698,7 @@ func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
 		envValue      string
 		poolsPath     string
 		snapshotPath  string
+		flagName      string // empty means aks-gpu-pools
 		wantShouldLog bool
 		wantAtWarn    bool
 	}{
@@ -746,6 +747,25 @@ func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
 			wantAtWarn:    true,
 		},
 		{
+			name:          "oke-addons explicit flag: warn",
+			args:          []string{"validate", "--oke-addons", "a.json", "-s", "snap.yaml"},
+			poolsPath:     "a.json",
+			snapshotPath:  "snap.yaml",
+			flagName:      "oke-addons",
+			wantShouldLog: true,
+			wantAtWarn:    true,
+		},
+		{
+			name:          "oke-addons ambient env only (AICR_OKE_ADDONS_PATH): debug",
+			args:          []string{"validate", "-s", "snap.yaml"},
+			envValue:      "a.json",
+			poolsPath:     "a.json",
+			snapshotPath:  "snap.yaml",
+			flagName:      "oke-addons",
+			wantShouldLog: true,
+			wantAtWarn:    false,
+		},
+		{
 			name: "similarly-prefixed flag is not a false positive",
 			args: []string{"validate", "--aks-gpu-pools-extra", "x", "-s", "snap.yaml"},
 			// pools path resolvable only via env in this shape.
@@ -759,7 +779,11 @@ func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			shouldLog, atWarn := classifyIgnoredAKSGPUPools(tt.args, tt.envValue, tt.poolsPath, tt.snapshotPath)
+			flagName := tt.flagName
+			if flagName == "" {
+				flagName = "aks-gpu-pools"
+			}
+			shouldLog, atWarn := classifyIgnoredProjection(tt.args, tt.envValue, tt.poolsPath, tt.snapshotPath, flagName)
 			if shouldLog != tt.wantShouldLog || atWarn != tt.wantAtWarn {
 				t.Fatalf("classify = (log=%v, warn=%v), want (log=%v, warn=%v)",
 					shouldLog, atWarn, tt.wantShouldLog, tt.wantAtWarn)
