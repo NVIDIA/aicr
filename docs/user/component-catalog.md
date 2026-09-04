@@ -879,15 +879,17 @@ migrate them. Before applying a bundle whose agentgateway pin moved, check
 whether you have any:
 
 ```bash
-if ! kinds=$(kubectl api-resources --api-group=agentgateway.dev -o name); then
-  echo "discovery incomplete — retry; do not read this as clear" >&2
-elif [ -z "$kinds" ]; then
-  echo "no agentgateway.dev kinds registered — the chart is not installed" >&2
-else
+(
+  if ! kinds=$(kubectl api-resources --api-group=agentgateway.dev -o name); then
+    echo "discovery incomplete — retry; do not read this as clear" >&2; exit 1
+  fi
+  if [ -z "$kinds" ]; then
+    echo "no agentgateway.dev kinds registered — the chart is not installed" >&2; exit 0
+  fi
   for kind in $kinds; do
-    kubectl get "$kind" -A || echo "listing $kind failed — retry" >&2
+    kubectl get "$kind" -A || { echo "listing $kind failed — retry" >&2; exit 1; }
   done
-fi
+)
 ```
 
 The kinds are discovered rather than named because the API group grows across
@@ -905,9 +907,11 @@ Routes you authored live in the Gateway API group rather than
 what the cross-namespace route delegation change affects:
 
 ```bash
-kubectl get httproutes,grpcroutes -A \
-  -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PKIND:.spec.parentRefs[*].kind,PNS:.spec.parentRefs[*].namespace,PARENTS:.spec.parentRefs[*].name' \
-  || echo "route listing failed — retry" >&2
+(
+  kubectl get httproutes,grpcroutes -A \
+    -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PKIND:.spec.parentRefs[*].kind,PNS:.spec.parentRefs[*].namespace,PARENTS:.spec.parentRefs[*].name' \
+    || { echo "route listing failed — retry" >&2; exit 1; }
+)
 ```
 
 Read the rows by their parent:
@@ -926,12 +930,18 @@ Read the rows by their parent:
 One caveat on the command: a route with several `parentRefs` where only some
 set `namespace` will have its `PNS` column misalign, because JSONPath omits the
 missing entries rather than padding them. Describe those routes individually
-with `kubectl get httproute <name> -n <ns> -o yaml` rather than trusting the
-columns.
+with `kubectl get httproute,grpcroute <name> -n <ns> -o yaml` rather than
+trusting the columns.
 
 AICR's own `AgentgatewayParameters` named `system-proxy` in
-`agentgateway-system` is expected. If nothing else appears, the upgrade needs
-nothing from you. Anything else returned means read the upstream release notes
+`agentgateway-system` is expected. If nothing else appears here, nothing you
+authored in the `agentgateway.dev` group is affected — but that is not the
+whole check. A cluster with no custom agentgateway resources and no routes can
+still hold an `agentgateway` Gateway outside `agentgateway-system`, which stops
+reconciling once the namespace list is scoped. Finish with the Gateway
+inventory in
+[which namespaces the controller may provision Gateways in](#agentgateway-which-namespaces-the-controller-may-provision-gateways-in)
+before concluding the upgrade needs nothing from you. Anything else returned means read the upstream release notes
 for every version between the old and new pin and validate off-production
 first — a multi-version jump has to absorb every breaking change in between,
 not just the newest one. Use the
@@ -964,8 +974,11 @@ worth doing, but it is not the control that keeps it away from your Secrets.
 
 The consequence for you is that **only Gateways in the listed namespaces are
 provisioned**. A Gateway elsewhere is accepted by the API server but never gets
-an address — the controller cannot create its Deployment or Service there, so
-the failure is silent apart from `forbidden` in the controller log. This is
+an address — the controller cannot create its Deployment or Service there. The
+Gateway reports it: v1.5.0 sets `Programmed=False` with reason
+`DeploymentFailed` when those writes are denied, so
+`kubectl get gateway <name> -n <ns> -o yaml` shows the cause in `status.conditions`,
+with matching `forbidden` errors in the controller log. This is
 about where the *Gateway* lives; routes are unaffected, and `HTTPRoute`s in any
 namespace still attach to the AICR gateway.
 
@@ -974,9 +987,11 @@ today under the chart's unscoped default stops once the list is scoped without
 its namespace, so inventory what you have before upgrading:
 
 ```bash
-kubectl get gateways.gateway.networking.k8s.io -A \
-  -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,CLASS:.spec.gatewayClassName' \
-  || echo "Gateway listing failed — retry" >&2
+(
+  kubectl get gateways.gateway.networking.k8s.io -A \
+    -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,CLASS:.spec.gatewayClassName' \
+    || { echo "Gateway listing failed — retry" >&2; exit 1; }
+)
 ```
 
 Every namespace holding a Gateway with `CLASS: agentgateway` belongs in the
