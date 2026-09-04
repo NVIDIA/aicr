@@ -2634,9 +2634,11 @@ func verifyTransportFromLogs(logs string, variant ncclVariant) error {
 //
 // uid pins the delete to the exact namespace instance runNCCLTrainJob
 // created or reclaimed, so a recreated same-named namespace is left alone
-// instead of silently deleted (see the check below for why it must be
-// non-empty).
-func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid types.UID) error {
+// instead of silently deleted.
+//
+// terminationWait bounds how long this waits for the namespace to actually
+// disappear before failing.
+func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid types.UID, terminationWait time.Duration) error {
 	if uid == "" {
 		// Required, not just preferred: the fake client used in tests
 		// ignores delete preconditions and would otherwise silently
@@ -2670,18 +2672,18 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 			fmt.Sprintf("failed to delete NCCL benchmark namespace %q", namespace), err)
 	}
 
-	// Same bound as ensureNamespace's wait on the create side. Only logged
-	// on timeout, not returned, since the Delete call above already
-	// succeeded, so a slow-but-real teardown (e.g. NVLS's DRA/IMEX
-	// finalizers) must not fail an otherwise-passing benchmark just because
-	// this observability wait ran out first.
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), defaults.InferenceNamespaceTerminationWait)
+	// Unlike inference-perf's fixed-name namespace, this run's namespace is
+	// never reused by name, so there is no later "next run waits out the
+	// prior one's Terminating namespace" safety net to fall back on. A
+	// ComputeDomain or RoCE ResourceClaimTemplate stuck on a finalizer here
+	// would otherwise leak silently forever, with the log line claiming a
+	// clean "Deleted". Fail the check instead so a stuck DRA/IMEX teardown
+	// surfaces immediately rather than as an unexplained resource leak an
+	// operator has to find by hand.
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), terminationWait)
 	defer waitCancel()
 	if err := waitForNamespaceGone(waitCtx, nsClient, namespace); err != nil {
-		slog.Warn("NCCL benchmark namespace did not finish terminating within the wait bound, "+
-			"deletion was accepted and its cascading GC continues in the background",
-			"namespace", namespace, "error", err)
-		return nil
+		return err
 	}
 
 	slog.Info("Deleted NCCL benchmark namespace", "namespace", namespace)
@@ -2718,7 +2720,7 @@ func cleanupNCCLRun(clientset kubernetes.Interface, dynamicClient dynamic.Interf
 		return benchErr
 	}
 
-	nsErr := cleanupNCCLResources(clientset, namespace, uid)
+	nsErr := cleanupNCCLResources(clientset, namespace, uid, defaults.InferenceNamespaceTerminationWait)
 	err := foldCleanupError(benchErr, nsErr, "NCCL benchmark succeeded but NCCL resource cleanup failed")
 	if nsErr != nil {
 		return err
