@@ -163,6 +163,16 @@ spec:
     # lifecycle operations. Tracked in NVIDIA/aicr#2572, which carries the
     # pinned-v0.18 source trace and the candidate fixes (merge both packages
     # into one Skyhook CR vs. sequencing: "all" plus a dependency edge).
+    #
+    # Node targeting differs between the two rebooting CRs, which matters if
+    # you narrow the GPU node set. nodewright-customizations declares
+    # nodeScheduling.accelerated, so --accelerated-node-selector flows into
+    # the tuning CR; dranet and rdma-netns-exclusive declare no scheduling
+    # block and hardcode nodeSelector nvidia.com/gpu.present in their
+    # manifests, so those flags bypass them. On the NFD-labeled reference
+    # clusters all three agree and nothing changes. Narrow the selector and
+    # the tuning reboot retargets to the subset while the RDMA reboot and
+    # DraNet still fan out to every gpu.present node.
     # Health check override: the operator Deployment's name depends on how
     # nodewright got installed, and both paths are real here. The VR
     # reference clusters carry an out-of-band install (hand-written values,

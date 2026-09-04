@@ -1,8 +1,8 @@
 # TLSRoute CRD (Gateway API v1.2.1 experimental channel)
 # Source: https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.2.1/experimental-install.yaml
-# Required by agentgateway v2.2.1 on RKE2: TLSRoute is not part of the
+# Required by agentgateway on RKE2: TLSRoute is not part of the
 # "standard" Gateway API channel vendored in gateway-api-crds.yaml, but
-# agentgateway v2.2.1's compiled watch requires it, serving v1alpha2. RKE2
+# agentgateway's compiled watch requires it, serving v1alpha2. RKE2
 # ships no LoadBalancer/Traefik-independent source for this CRD, so it is
 # vendored separately here rather than pulled in via the full experimental
 # bundle (which would also install backendlbpolicies, backendtlspolicies,
