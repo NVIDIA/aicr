@@ -16,5 +16,8 @@ apiVersion: v2
 name: skyhook-customizations
 description: Generated wrapper chart for skyhook-customizations local content.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: "1.0.0"
+appVersion: "1.0.0"
+annotations:
+  aicr.run/component-version: "1.0.0"
+  aicr.run/generated-by: "1.0.0"

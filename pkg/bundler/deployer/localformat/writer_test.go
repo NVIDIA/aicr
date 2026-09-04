@@ -198,7 +198,8 @@ func TestWrite_LocalHelmManifestOnly(t *testing.T) {
 	outDir := t.TempDir()
 
 	res, err := localformat.Write(context.Background(), localformat.Options{
-		OutputDir: outDir,
+		OutputDir:   outDir,
+		AICRVersion: "v1.0.0",
 		Components: []localformat.Component{{
 			Name:       "skyhook-customizations",
 			Namespace:  "skyhook",
