@@ -13,11 +13,11 @@
 # limitations under the License.
 
 apiVersion: v2
-name: gpu-operator-post
-description: Generated wrapper chart for gpu-operator local content.
+name: node-prep
+description: Generated wrapper chart for node-prep local content.
 type: application
 version: "1.0.0"
-appVersion: "v25.3.3"
+appVersion: "1.0.0"
 annotations:
-  aicr.run/component-version: "v25.3.3"
+  aicr.run/component-version: "1.0.0"
   aicr.run/generated-by: "1.0.0"
