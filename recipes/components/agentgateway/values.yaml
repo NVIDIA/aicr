@@ -36,9 +36,11 @@ inferenceExtension:
 
 # Must stay non-empty: the chart's default empty list binds its write role
 # (Deployments, DaemonSets, Secrets, ServiceAccounts) with a ClusterRoleBinding,
-# granting this network-facing controller privileged-DaemonSet-on-every-node
-# reach. AICR provisions one Gateway, in agentgateway-system, so scoping to it
-# costs nothing. Add any namespace where you place additional Gateways.
+# so a compromised controller could write those in any namespace. Scoping to the
+# one namespace AICR puts a Gateway in confines that reach. It does not confine
+# pod privileges or node placement — a DaemonSet created here still lands on
+# every node — which is admission control's job, not RBAC's. Add any namespace
+# where you place additional Gateways.
 rbac:
   gatewayNamespaces:
     - agentgateway-system

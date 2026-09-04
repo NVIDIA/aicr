@@ -856,3 +856,40 @@ covered — those components install no chart `crds/` of their own, so their
 CRDs come from the OLM `Subscription`/CSV and an `Application`-level
 `ignoreDifferences` has nothing to arbitrate. That conflict is tracked
 separately. See [NVIDIA/aicr#2546](https://github.com/NVIDIA/aicr/issues/2546).
+
+### `agentgateway`: upgrading across breaking releases
+
+AICR pins the `agentgateway` and `agentgateway-crds` charts in the component
+registry, and a pin bump can cross upstream releases that document breaking
+changes — to JWT claim enforcement, LLM token accounting, policy merging,
+cross-namespace route delegation, managed API-key metadata, Istio identity,
+Gateway API and `TCPRoute` handling, MCP guardrails, standalone auth, and image
+base. Whether any of that reaches you depends entirely on which agentgateway
+resources exist in your cluster, and the answer differs sharply between what
+AICR generates and what you author yourself.
+
+**AICR-generated bundles are unaffected.** A bundle creates exactly two
+agentgateway resources: an `AgentgatewayParameters` that carries deployment and
+service shape only, and the `inference-gateway` `Gateway`. It ships no
+`AgentgatewayPolicy`, `AgentgatewayBackend`, `AgentgatewayModel`, or
+`HTTPRoute` — so the breaking changes land on surface AICR never populates.
+
+**Resources you author yourself are exposed**, and AICR can neither detect nor
+migrate them. Before applying a bundle whose agentgateway pin moved, check
+whether you have any:
+
+```bash
+kubectl get agentgatewaypolicies,agentgatewaybackends,agentgatewaymodels -A
+```
+
+Empty output means the upgrade needs nothing from you. Anything returned means
+read the upstream release notes for every version between the old and new pin
+and validate off-production first — a multi-version jump has to absorb every
+breaking change in between, not just the newest one. Use the
+[component version matrix](component-version-matrix.md) to find which versions
+those are.
+
+One limit worth stating plainly: AICR CI exercises **fresh installs** of a
+pinned chart, not in-place upgrades from an older pin. A green release
+validates that the new version deploys and passes its health checks. It is not
+an in-place upgrade certification.
