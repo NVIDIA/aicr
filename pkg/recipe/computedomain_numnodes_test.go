@@ -44,13 +44,7 @@ func numNodesChildRE(indent string) *regexp.Regexp {
 // A full YAML parse is unavailable — the manifests are Helm templates containing
 // {{ }} expressions that no YAML parser accepts — so this walks indentation.
 func specHasNumNodes(doc string) bool {
-	var lines []string
-	for _, line := range strings.Split(doc, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "#") || strings.TrimSpace(line) == "" {
-			continue
-		}
-		lines = append(lines, line)
-	}
+	lines := strings.Split(stripYAMLComments(doc), "\n")
 	for i, line := range lines {
 		m := specKeyRE.FindStringSubmatch(line)
 		if m == nil {
@@ -85,7 +79,13 @@ func specHasNumNodes(doc string) bool {
 func computeDomainDocsMissingNumNodes(content string) []int {
 	var missing []int
 	for i, doc := range strings.Split(content, "\n---") {
-		if !strings.Contains(doc, "kind: ComputeDomain") {
+		// Detect on comment-stripped content, matching specHasNumNodes below.
+		// Checking the raw doc instead flags any file that merely DOCUMENTS a
+		// ComputeDomain in prose — e.g. a recipe-supplied NCCL runtime whose
+		// header records the CD an operator must pre-create — while the
+		// numNodes those same comments show is stripped before verification.
+		// That asymmetry reports a file as shipping a CR it does not ship.
+		if !strings.Contains(stripYAMLComments(doc), "kind: ComputeDomain") {
 			continue
 		}
 		if !specHasNumNodes(doc) {
@@ -93,6 +93,20 @@ func computeDomainDocsMissingNumNodes(content string) []int {
 		}
 	}
 	return missing
+}
+
+// stripYAMLComments drops whole-line comments and blank lines. It is
+// deliberately line-based, not a YAML parse: these files are templates
+// carrying ${VAR} placeholders that a strict parser would reject.
+func stripYAMLComments(doc string) string {
+	var lines []string
+	for _, line := range strings.Split(doc, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") || strings.TrimSpace(line) == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // TestComputeDomainManifestsSetNumNodes guards the fresh-install CRD-overlap
@@ -140,7 +154,11 @@ func TestComputeDomainManifestsSetNumNodes(t *testing.T) {
 			return readErr
 		}
 		content := string(raw)
-		if !strings.Contains(content, "kind: ComputeDomain") {
+		// Comment-stripped, like the per-document predicate: `checked` feeds
+		// the vacuous-pass guard below, so counting a file that only mentions
+		// a ComputeDomain in prose would let that guard pass on a catalog
+		// carrying no real manifest at all.
+		if !strings.Contains(stripYAMLComments(content), "kind: ComputeDomain") {
 			return nil
 		}
 		checked++
@@ -229,6 +247,47 @@ func TestComputeDomainScannerCases(t *testing.T) {
 					got, tt.wantMissing, tt.doc)
 			}
 		})
+	}
+}
+
+// TestComputeDomainDetectionIgnoresProse guards the counterpart to the
+// comment-stripping in specHasNumNodes: a file that only DOCUMENTS a
+// ComputeDomain must not be treated as shipping one.
+//
+// Both predicates matter, for different reasons. Per document, a prose match
+// with no real spec would be reported as a CR missing numNodes — a false
+// failure. At file level, a prose match inflates `checked`, which feeds the
+// vacuous-pass guard; if the catalog's only real manifest were removed, that
+// guard would still see a non-zero count and pass while verifying nothing.
+//
+// The live case is the VR200 NCCL runtime, whose header records the
+// ComputeDomain an operator must pre-create before a runtime-ref validate run
+// — numNodes and all — while the file itself ships only a TrainingRuntime.
+func TestComputeDomainDetectionIgnoresProse(t *testing.T) {
+	t.Parallel()
+
+	proseOnly := "# Pre-create the ComputeDomain before each run:\n" +
+		"#   apiVersion: resource.nvidia.com/v1beta1\n" +
+		"#   kind: ComputeDomain\n" +
+		"#   spec: {numNodes: 2}\n" +
+		"apiVersion: trainer.kubeflow.org/v1alpha1\n" +
+		"kind: TrainingRuntime\n" +
+		"spec:\n  mlPolicy:\n    mpi:\n      numProcPerNode: 4\n"
+
+	if got := computeDomainDocsMissingNumNodes(proseOnly); got != nil {
+		t.Errorf("prose-only mention reported as a ComputeDomain missing numNodes: docs %v", got)
+	}
+	if strings.Contains(stripYAMLComments(proseOnly), "kind: ComputeDomain") {
+		t.Error("stripYAMLComments left a commented kind: ComputeDomain behind, so the " +
+			"file-level counter would still count this file toward the vacuous-pass guard")
+	}
+
+	// Control: the same file with a real ComputeDomain must still be caught,
+	// so the fix cannot pass by disabling detection outright.
+	withReal := proseOnly + "---\napiVersion: resource.nvidia.com/v1beta1\n" +
+		"kind: ComputeDomain\nmetadata:\n  name: cd\nspec:\n  channel:\n    allocationMode: All\n"
+	if got := computeDomainDocsMissingNumNodes(withReal); len(got) != 1 {
+		t.Errorf("real ComputeDomain missing numNodes not caught: got %v, want exactly one", got)
 	}
 }
 

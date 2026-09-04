@@ -1,0 +1,30 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: rke2-training
+
+spec:
+  # Inherits from rke2 recipe (RKE2-specific settings)
+  base: rke2
+
+  # No training-specific component overrides yet. The eks-training layer
+  # swaps in a training-optimized gpu-operator values file
+  # (values-eks-training.yaml); an rke2 equivalent can be added here once
+  # training-specific tuning for bare-metal RKE2 is baselined.
+  criteria:
+    service: rke2
+    intent: training

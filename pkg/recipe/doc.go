@@ -25,8 +25,8 @@
 // Criteria: Specifies target deployment parameters
 //
 //	type Criteria struct {
-//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, any
-//	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any
+//	    Service     CriteriaServiceType     // eks, gke, aks, oke, kind, lke, bcm, ocp, metal3, rke2, any
+//	    Accelerator CriteriaAcceleratorType // h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200, any
 //	    Intent      CriteriaIntentType      // training, inference, any
 //	    OS          CriteriaOSType          // ubuntu, rhel, cos, amazonlinux, ol, talos, any
 //	    Platform    CriteriaPlatformType    // dynamo, kubeflow, nim, runai, slurm, any
@@ -69,17 +69,21 @@
 //   - CriteriaServiceLKE: Linode LKE
 //   - CriteriaServiceBCM: NVIDIA Base Command Manager
 //   - CriteriaServiceOCP: Red Hat OpenShift Container Platform
+//   - CriteriaServiceMetal3: Metal3 bare-metal provisioning
+//   - CriteriaServiceRKE2: Rancher Kubernetes Engine 2 (bare-metal)
 //   - CriteriaServiceAny: Any service (wildcard)
 //
 // Accelerator types for GPU selection:
 //   - CriteriaAcceleratorH100: NVIDIA H100
 //   - CriteriaAcceleratorH200: NVIDIA H200
 //   - CriteriaAcceleratorGB200: NVIDIA GB200
+//   - CriteriaAcceleratorGB300: NVIDIA GB300
 //   - CriteriaAcceleratorB200: NVIDIA B200
 //   - CriteriaAcceleratorA100: NVIDIA A100
 //   - CriteriaAcceleratorL40: NVIDIA L40
 //   - CriteriaAcceleratorL40S: NVIDIA L40S
 //   - CriteriaAcceleratorRTXPro6000: NVIDIA RTX PRO 6000
+//   - CriteriaAcceleratorVR200: NVIDIA VR200 (Vera Rubin)
 //   - CriteriaAcceleratorAny: Any accelerator (wildcard)
 //
 // Intent types for workload optimization:
@@ -182,8 +186,8 @@
 // # Query Parameters (HTTP API - GET)
 //
 // The HTTP handler accepts these query parameters for GET requests:
-//   - service: eks, gke, aks, oke, kind, lke, bcm, ocp, any (default: any)
-//   - accelerator: h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000, any (default: any)
+//   - service: eks, gke, aks, oke, kind, lke, bcm, ocp, metal3, rke2, any (default: any)
+//   - accelerator: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200, any (default: any)
 //   - gpu: alias for accelerator (backwards compatibility)
 //   - intent: training, inference, any (default: any)
 //   - os: ubuntu, rhel, cos, amazonlinux, ol, talos, any (default: any)

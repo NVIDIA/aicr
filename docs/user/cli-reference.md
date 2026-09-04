@@ -489,8 +489,8 @@ Generate recipes using direct system parameters:
 **Flags:**
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3 |
-| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000 |
+| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2 |
+| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
@@ -511,6 +511,8 @@ node shape the resolved recipe targets. See
 [Qualified Machine Types](#qualified-machine-types) below.
 
 > **Service / Accelerator / OS / Intent / Platform value listings above are the OSS-embedded set.** When `--data` registers additional values (e.g., undisclosed providers, proprietary platforms), the CLI admits them at runtime through the criteria registry — see [Data Extension](../integrator/data-extension.md). `--criteria-strict` restores the OSS-only set regardless of what `--data` contributes.
+
+> **`--service rke2` and `--accelerator vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence at [validation.aicr.run](https://validation.aicr.run/) for current coverage.
 
 **Examples:**
 ```shell

@@ -1,0 +1,416 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: vr200-rke2-ubuntu-training
+
+spec:
+  # PREVIEW: publishes an early-adopter VR200 (Vera Rubin) recipe path
+  # without the full production support and lifecycle qualification
+  # required for Supported status. See validation.aicr.run for published
+  # evidence for this Preview coordinate — the recipe has since changed
+  # (aicr evidence digest reports a mismatch against the linked pointer's
+  # predicate.recipe.digest), so treat that evidence as historical
+  # precedent, not as validating the current recipe content. Fresh
+  # hardware validation is pending VR cluster access.
+  #
+  # Inherits from rke2-training recipe (RKE2 + training settings)
+  base: rke2-training
+
+  criteria:
+    service: rke2
+    accelerator: vr200
+    os: ubuntu
+    intent: training
+
+  # SKU auto-detection cannot identify vr200 yet: the pre-release driver
+  # reports the generic "NVIDIA Graphics Device" placeholder rather than a
+  # Vera Rubin marketing name, and pkg/fingerprint/gpu_sku.go has no vr200
+  # token to match against until a driver drop exposes one. Until then,
+  # snapshot-backed recipe generation on VR200 hardware resolves
+  # accelerator: any and this leaf must be selected explicitly with
+  # --accelerator vr200 (or --service rke2 --accelerator vr200 by query).
+
+  # The os-ubuntu mixin is NOT used: it pins VERSION_ID "24.04" / kernel
+  # >= 6.8, while the Vera Rubin NVL72 reference image ships Ubuntu 26.04
+  # with the Vera-optimized arm64 64k-page kernel
+  # (7.0.0-*-nvidia-bos-64k). Constraint names use fully qualified
+  # measurement paths: {type}.{subtype}.{key}
+  constraints:
+    # >= 1.34.1: ComputeDomains/IMEX for the NVL72 MNNVL fabric use the GA
+    # DRA API resource.k8s.io/v1 (K8s >= 1.34, same rationale as
+    # gb300-eks-training), and the rke2 root's CDI/NRI toolkit path needs
+    # containerd 2.1 (>= v1.34.1+rke2r1) — kept aligned with the root floor
+    # so this leaf never weakens it.
+    - name: K8s.server.version
+      value: ">= 1.34.1"
+    - name: OS.release.ID
+      value: ubuntu
+    - name: OS.release.VERSION_ID
+      value: "26.04"
+    - name: OS.sysctl./proc/sys/kernel/osrelease
+      value: ">= 7.0"
+  # NOTE: the 615-branch host-driver floor is deliberately NOT expressed as
+  # a constraint. AICR snapshots carry no driver-version measurement today
+  # — the GPU collector emits only GPU.hardware (gpu-present/gpu-count/
+  # driver-loaded/model) — so any GPU.* driver constraint would exclude
+  # this leaf from snapshot-backed generation and fail validate readiness
+  # with NOT_FOUND before any phase runs. Enforce >= 615 out-of-band until
+  # a driver-version measurement or deployment validator exists.
+
+  componentRefs:
+    # VR200 driver strategy: the reference image pre-bakes the Vera Rubin
+    # bring-up driver (615-branch open kernel module, aarch64). Host-managed
+    # driver is the only path exercised on VR200 hardware today, so
+    # driver.enabled: false; the container toolkit is operator-managed
+    # (recommended over a host install), and the CDI/NRI configuration
+    # comes from the rke2 service root (no containerd config mutation on
+    # RKE2).
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+        - nodewright-customizations
+      overrides:
+        driver:
+          enabled: false
+
+    # The reference image preinstalls the driver on the host
+    # (gpu-operator driver.enabled is false above), so there is no driver
+    # pod for the NVSentinel labeler to watch. Without
+    # assumeDriverInstalled the nvsentinel.dgxc.nvidia.com/driver.installed
+    # label is never applied and metadata-collector plus both
+    # syslog-health-monitor DaemonSets sit at zero desired pods — silently,
+    # with no error and no event (mirrors the kind.yaml/oke-ol.yaml
+    # host-managed-driver pattern, #2175/#2181).
+    - name: nvsentinel
+      type: Helm
+      overrides:
+        labeler:
+          assumeDriverInstalled: true
+        # metadata-collector is disabled here, not patched. Its chart only
+        # gets GPU/NVML access two ways: a runtimeClassName matching a real
+        # containerd runtime handler (none exists on the host-managed-driver
+        # + CDI/NRI path this leaf uses — GPU Operator's CDI+NRI mode never
+        # registers one), or requesting the nvidia.com/gpu resource (works,
+        # but permanently reserves one GPU per node for the DaemonSet's
+        # lifetime — unacceptable on a training cluster). gpu-health-monitor
+        # avoids this entirely via direct hostPath device/driver mounts; the
+        # correct fix is the same mechanism added to metadata-collector's
+        # chart upstream (NVIDIA/nvsentinel#1717). Disabled here until that
+        # lands — assumeDriverInstalled above still fixes the two
+        # syslog-health-monitor DaemonSets, which don't need driver access.
+        global:
+          metadataCollector:
+            enabled: false
+
+    # GPU-allocation policy is unchanged: resources.gpus stays disabled
+    # (the gpu-operator device plugin remains the whole-GPU advertiser per
+    # #1327); ComputeDomains/IMEX are the embedded defaults (#1327/#1671)
+    # and are what this componentRef brings up for the NVL72 fabric.
+    #
+    # Keep nvidiaDriverRoot: / — host-managed driver lockstep: with
+    # gpu-operator driver.enabled: false, the DRA driver must read the
+    # driver userspace from the host root, not /run/nvidia/driver.
+    #
+    # HOST IMEX CONFLICT: the Vera Rubin reference image installs the
+    # host-managed 615 driver stack, which includes an nvidia-imex systemd
+    # service (enabled by default) that owns the GPU driver's single IMEX
+    # session. The DRA ComputeDomain daemon starts its own nvidia-imex and
+    # cannot allocate the session ("Failed to allocate Imex session ...
+    # NV_ERR_IN_USE"), so the daemon never goes Ready and ComputeDomain
+    # workloads hang on NodePrepareResources. Host static IMEX and
+    # DRA-managed ComputeDomains are mutually exclusive. Nodes running DRA
+    # ComputeDomains MUST have the host service disabled AND masked — a
+    # disable-only leaves systemd free to reactivate it (e.g. on a
+    # dependency pull-in or a package upgrade), reproducing the same
+    # NV_ERR_IN_USE conflict:
+    #   systemctl disable --now nvidia-imex.service && systemctl mask nvidia-imex.service
+    - name: nvidia-dra-driver-gpu
+      type: Helm
+      overrides:
+        nvidiaDriverRoot: /
+
+    # VR200 node tuning runs the native vr200/rke2 nvidia-tuned profile —
+    # see the nodewright-customizations componentRef below for the full
+    # rationale, including that it applies its kernel cmdline through a
+    # reboot. interruptionBudget serializes THIS CR to one node at a time,
+    # but it is per-CR and does not compose with rdma-netns-exclusive's own
+    # budget. Under the default sequencing: node, IsNodeReadyForSkyhook
+    # checks per-node completion, so one node may start tuning while
+    # another is still on the RDMA CR — concurrent reboots across the two
+    # are possible on a multi-node cluster. There is also no dependency
+    # edge between the two components, so nothing guarantees the RDMA CR
+    # exists when this one becomes runnable.
+    # Sequence deliberately on a live cluster. This is an explicit Preview
+    # risk acceptance — the reference rollout is manually controlled, and it
+    # must be resolved before VR200/RKE2 is treated as ready for unattended
+    # lifecycle operations. Tracked in NVIDIA/aicr#2572, which carries the
+    # pinned-v0.18 source trace and the candidate fixes (merge both packages
+    # into one Skyhook CR vs. sequencing: "all" plus a dependency edge).
+    # Health check override: the operator Deployment's name depends on how
+    # nodewright got installed, and both paths are real here. The VR
+    # reference clusters carry an out-of-band install (hand-written values,
+    # no fullnameOverride) that renders nodewright-controller-manager, while
+    # a cluster deployed from this recipe's own bundle picks up
+    # components/nodewright-operator/values.yaml's
+    # `fullnameOverride: skyhook-operator` and renders
+    # skyhook-operator-controller-manager (NVIDIA/aicr#1828).
+    #
+    # So the Deployment assert is deliberately name-agnostic, matching the
+    # same rationale as the Skyhook CR assert in
+    # checks/nodewright-customizations/health-check.yaml: pinning either
+    # name asserts a Deployment that does not exist under the other install
+    # path. A nameless assert takes the executor's list-and-match path
+    # (pkg/chainsaw/inprocess.go), which fails closed on an empty or
+    # all-terminating collection (ErrCodeNotFound, not a vacuous pass), and
+    # the skyhook namespace holds only the operator.
+    #
+    # Inline override (rather than a checks/ file) because the
+    # expected-resources validator is a separate container image with its
+    # own compiled-in embedded catalog — it never reads --data, only the
+    # resolved recipe.yaml.
+    - name: nodewright-operator
+      type: Helm
+      healthCheckAsserts: |
+        apiVersion: chainsaw.kyverno.io/v1alpha1
+        kind: Test
+        metadata:
+          name: nodewright-operator-health-check
+        spec:
+          timeouts:
+            assert: 5m
+          steps:
+            - name: validate-skyhook-crd-established
+              try:
+                - assert:
+                    resource:
+                      apiVersion: apiextensions.k8s.io/v1
+                      kind: CustomResourceDefinition
+                      metadata:
+                        name: skyhooks.skyhook.nvidia.com
+                      status:
+                        (conditions[?type == 'Established']):
+                          - status: "True"
+            - name: validate-deployment-exists
+              try:
+                - assert:
+                    resource:
+                      apiVersion: apps/v1
+                      kind: Deployment
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        (availableReplicas > `0`): true
+            - name: validate-all-pods-healthy
+              try:
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        phase: Pending
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        phase: Failed
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        phase: Unknown
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        ((containerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+                - error:
+                    resource:
+                      apiVersion: v1
+                      kind: Pod
+                      metadata:
+                        namespace: skyhook
+                      status:
+                        ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
+    # Native vr200/rke2 node tuning, replacing the bcm-profile stopgap this
+    # leaf carried while nodewright-packages had no vr200/rke2 path
+    # (nvidia-tuned 0.9.0 added the rke2 service). tuning-rke2.yaml runs
+    # nvidia-tuned alone: unlike service=bcm, service=rke2 ships no profile
+    # overrides, so vr200 falls through to its own multiNodeTraining profile
+    # with the [bootloader] stanza (iommu.passthrough=1, init_on_alloc=0,
+    # numa_balancing=disable, hugepages, earlycon) intact, landed on the host
+    # through a /etc/default/grub.d drop-in.
+    #
+    # This reboots the node — the cmdline is written at config and nothing is
+    # live until the reboot — and reboots again on any change to accelerator,
+    # intent or service. post-interrupt-bootloader-check then asserts every
+    # argument reached /proc/cmdline, so a node cannot come up labelled as
+    # tuned while running none of its tuning.
+    #
+    # nvidia-setup is intentionally not wired: its kernel-headers aliasing
+    # (#1093) is specific to the bcm path, and the VR NVL72 reference image
+    # provisions its own Ubuntu 26.04 arm64 64k-page kernel. The vr200
+    # profiles are Ubuntu 26.04 only, which this leaf's OS constraints
+    # already pin.
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/tuning-rke2.yaml
+      overrides:
+        service: rke2
+        accelerator: vr200
+        intent: multiNodeTraining
+      dependencyRefs:
+        - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+          # The chart's default TU memory limit (60Mi) OOM-kills the
+          # topology updater on large-memory NVL72 workers (exit-137 crash
+          # loops on multi-TiB nodes; working set scales with node
+          # inventory). Leaf-scoped so no other platform is affected.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+
+    # DraNet DRA network driver — evaluation alternative to the NVIDIA
+    # Network Operator for exposing the ConnectX-9 RDMA fabric to pods.
+    # Manifest-only; relies on host DOCA-OFED + containerd NRI (already
+    # present on rke2). Scoped to GPU workers via the DaemonSet
+    # nodeSelector.
+    - name: dranet
+      type: Helm
+      manifestFiles:
+        - components/dranet/manifests/dranet.yaml
+
+    # Host RDMA exclusive netns-mode (ib_core netns_mode=0) via Skyhook —
+    # pairs with dranet so each pod sees only its allocated HCA in
+    # /sys/class/infiniband (clean NCCL/GPUDirect). Reboots GPU workers one
+    # at a time to apply.
+    - name: rdma-netns-exclusive
+      type: Helm
+      manifestFiles:
+        - components/rdma-netns-exclusive/manifests/skyhook.yaml
+      dependencyRefs:
+        - nodewright-operator
+
+  # Validation for VR200 on RKE2 training.
+  #
+  # cluster-autoscaling conformance omitted: bare-metal RKE2 has no cluster
+  # autoscaler, so there is nothing to exercise (gb200-eks carries it
+  # because EKS provides one).
+  #
+  # pod-autoscaling IS included. It was previously omitted alongside
+  # cluster-autoscaling on the grounds that DRA-allocated GPUs break the
+  # dcgm-exporter exported_pod attribution it relies on; that does not
+  # apply here, on two counts:
+  #   1. This recipe does not DRA-allocate GPUs. resources.gpus stays
+  #      disabled (#1327), so the device plugin remains the whole-GPU
+  #      advertiser and dcgm-exporter attributes them normally; DRA only
+  #      serves ComputeDomains/IMEX. gb200-eks resolves to the identical
+  #      allocation model and ships the check.
+  #   2. The check no longer gates on pod-scoped metrics regardless: since
+  #      #1408 they are best-effort, and the capability is proven by the
+  #      external-metrics API plus the HPA behavioral test.
+  #
+  # secure-accelerator-access IS included, matching this family's
+  # inference-dynamo leaf. The validator has been dual-mode since #1620: it
+  # detects the allocation mode and exercises the device-plugin path when no
+  # gpu.nvidia.com DeviceClass exists — exactly the ComputeDomain-only
+  # configuration these NVL72 platforms use.
+  #
+  # Both verified on vr200-aicr-cluster-2 (2026-09-03): pod-autoscaling
+  # passes incl. HPA scale-up (1->3)/scale-down (3->1);
+  # secure-accelerator-access passes in device-plugin mode.
+  validation:
+    # NCCL all-reduce (MNNVL across the NVL72 IMEX domain). First measured on
+    # the reference cluster: 744.71 GB/s busbw at the 16 GiB message size;
+    # floor set at 600 for headroom on pre-release silicon.
+    #
+    # rke2/vr200 is registered in the validator's compiled applicability
+    # matrix (supportedNCCLCombinations[variantNVLS]) and its runtime ships
+    # as an embedded template at
+    # validators/performance/testdata/vr200/rke2/runtime-nvls.yaml, so the
+    # validator provisions the ComputeDomain and IMEX ResourceClaimTemplate
+    # itself, in whatever namespace it derives for the run. No operator
+    # prerequisites, and no recipe-supplied runtime.
+    performance:
+      # The NVLS variant, not the generic check: VR200 measures MNNVL across
+      # the NVL72 IMEX domain. The check name is what selects the variant and
+      # its template (validators/performance: main.go dispatch ->
+      # constraintNameForVariant -> templatePath), so the check and its
+      # threshold constraint must both carry the -nvls suffix. Using the bare
+      # nccl-all-reduce-bw here would dispatch the default variant, whose
+      # applicability matrix has no rke2/vr200 entry, and the gate would
+      # report SKIPPED rather than failing — a silent pass.
+      checks:
+        - nccl-all-reduce-bw-nvls
+      constraints:
+        - name: nccl-all-reduce-bw-nvls
+          value: ">= 600"
+    deployment:
+      checks:
+        - operator-health
+        - expected-resources
+        - gpu-operator-version
+        - check-nvidia-smi
+      constraints:
+        # No deployment-phase version check exists for nvidia-dra-driver-gpu
+        # at all (only gpu-operator has one, and there is no generic
+        # per-component mechanism to add one for this PR). This constraint
+        # is NOT a real gate on the DRA driver's deployed version — it only
+        # guarantees that a bundle freshly generated from this recipe pulls
+        # both from the same registry.yaml, which #2439 bumps together
+        # (gpu-operator v26.7.0 / nvidia-dra-driver-gpu 0.5.0). A cluster
+        # whose nvidia-dra-driver-gpu was independently upgraded, downgraded,
+        # or deployed from an older bundle can pass this check while still
+        # running the 0.4.1 default, which crash-loops on VR200's NVML arch
+        # value (see the nvidia-dra-driver-gpu componentRef above). Closing
+        # that gap needs a real Deployment.nvidia-dra-driver-gpu.version
+        # check (out of scope here — no such per-component mechanism exists
+        # in the validator today for any component besides gpu-operator).
+        - name: Deployment.gpu-operator.version
+          value: ">= v26.7.0"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics
+        - gang-scheduling
+        - pod-autoscaling
+        - secure-accelerator-access

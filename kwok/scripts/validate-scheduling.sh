@@ -933,6 +933,22 @@ generate_bundle() {
     # Disable features not needed for scheduling validation:
     # - PrometheusRules and AlertManager (slow to create)
     # - Nodewright customization (creates CRs that depend on operator CRDs)
+    # - Nodewright's admission webhook: same failure mode as the
+    #   slinky-slurm-operator webhook below. The operator Deployment is a
+    #   system workload, so it carries the fake-node toleration and lands on
+    #   a KWOK node, which reports its pod Ready without ever running a
+    #   container. The webhook Service therefore has endpoints that nothing
+    #   is actually serving, and every admission call to
+    #   mutate-skyhook.nvidia.com hits its 10s deadline (failurePolicy: Fail,
+    #   and the chart hardcodes timeoutSeconds with no values knob). Any
+    #   recipe that bundles a Skyhook CR alongside the operator — e.g. the
+    #   VR200 leaves' always-on rdma-netns-exclusive, which unlike
+    #   nodewright-customizations is not disabled above — then fails to
+    #   install that CR. `webhook.enable=false` drops the webhook wiring, so
+    #   admission is skipped; harmless under KWOK, where the handler is a
+    #   no-op defaulter and no CR is really reconciled. Do NOT carry this to
+    #   a real cluster: the chart documents the webhook as required for
+    #   production.
     # - slinky-slurm-operator webhook + cert-manager wiring: the operator's
     #   webhook validates Slurm CRs through a Service whose pod runs on a
     #   KWOK fake (Ready without container). Both certManager.enabled and
@@ -970,6 +986,9 @@ generate_bundle() {
     fi
     if grep -qx "nodewright-customizations" <<< "$bundled_components"; then
         conditional_sets+=(--set "nodewright-customizations:enabled=false")
+    fi
+    if grep -qx "nodewright-operator" <<< "$bundled_components"; then
+        conditional_sets+=(--set "nodewright:webhook.enable=false")
     fi
     if grep -qx "slinky-slurm-operator" <<< "$bundled_components"; then
         conditional_sets+=(

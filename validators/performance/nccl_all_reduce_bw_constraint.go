@@ -282,6 +282,10 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 	variantNVLS: {
 		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200},
 		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
+		// VR200 NVL72 on bare-metal RKE2: MNNVL across the IMEX domain, same
+		// shape as GB200 but with its own runtime (NGC pytorch image, distinct
+		// mpirun path) — see testdata/vr200/rke2/runtime-nvls.yaml.
+		recipe.CriteriaServiceRKE2: {recipe.CriteriaAcceleratorVR200},
 	},
 }
 
@@ -1872,7 +1876,7 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 			nodeSelector = map[string]string{gpuProductLabel: product}
 		}
 		return nodeSelector, []v1.Toleration{{Operator: v1.TolerationOpExists}}, nil
-	case recipe.CriteriaServiceAny, recipe.CriteriaServiceOCP, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM, recipe.CriteriaServiceMetal3:
+	case recipe.CriteriaServiceAny, recipe.CriteriaServiceOCP, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM, recipe.CriteriaServiceMetal3, recipe.CriteriaServiceRKE2:
 		return nil, nil, nil
 	default:
 		return nil, nil, nil

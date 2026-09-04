@@ -159,6 +159,10 @@ func TestNCCLCombinationSupported(t *testing.T) {
 		{"NET GB200 OKE (IB via rdmaSharedDevicePlugin)", variantNET, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE), true},
 		{"NVLS GB200 EKS", variantNVLS, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceEKS), true},
 		{"NVLS GB200 OKE", variantNVLS, fabricEFA, target(recipe.CriteriaAcceleratorGB200, recipe.CriteriaServiceOKE), true},
+		{"NVLS VR200 RKE2", variantNVLS, fabricEFA, target(recipe.CriteriaAcceleratorVR200, recipe.CriteriaServiceRKE2), true},
+		// VR200 is NVLS-only: the default variant has no rke2 entry, so the
+		// generic nccl-all-reduce-bw check would report skipped, not fail.
+		{"default VR200 RKE2 not covered", variantDefault, fabricEFA, target(recipe.CriteriaAcceleratorVR200, recipe.CriteriaServiceRKE2), false},
 		{"unknown service", variantNVLS, fabricEFA, target(recipe.CriteriaAcceleratorGB200, "custom-svc"), false},
 		{"unknown accelerator", variantNET, fabricEFA, target("gb300", recipe.CriteriaServiceEKS), false},
 		// RoCE NET is service-keyed and accelerator-agnostic.
@@ -192,6 +196,7 @@ func TestKnownBenchmarkProfiles(t *testing.T) {
 		"h100/eks",
 		"h100/gke",
 		"h200/eks",
+		"vr200/rke2",
 	}
 	if got := knownBenchmarkProfiles(); !reflect.DeepEqual(got, want) {
 		t.Errorf("knownBenchmarkProfiles() = %v, want %v", got, want)

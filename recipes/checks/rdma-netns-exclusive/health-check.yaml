@@ -1,0 +1,65 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# rdma-netns-exclusive Health Check
+#
+# Validates that the Skyhook custom resource deployed by this component has
+# completed successfully. The Skyhook CR status.status (see
+# github.com/NVIDIA/nodewright/chart/templates/skyhook-crd.yaml) is one of:
+# unknown, complete, blocked, waiting, disabled, paused, in_progress,
+# erroring. This check asserts status.status is "complete" so that the
+# ib_core netns_mode=0 modprobe.d change (and the reboot that applies it)
+# has finished on all matching nodes.
+#
+# Unlike nodewright-customizations, this component has no value-gate that
+# suppresses the CR entirely (it is always applied when the component is
+# enabled), so no render-aware suppression logic is needed here — a static
+# assert against the CR name is sufficient.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: rdma-netns-exclusive-health-check
+spec:
+  timeouts:
+    # 6m: exactly the caller's budget, which is the largest value that
+    # actually takes effect here. An authored value can only SHORTEN the
+    # caller's budget, never extend it — pkg/chainsaw/inprocess.go sets
+    # effectiveTimeout to defaults.ChainsawAssertTimeout (6m) and lowers it
+    # only when the authored value is strictly smaller, capping anything
+    # larger with a Debug log. So the previous 15m was dead text reading as
+    # if 15 minutes were available, while anything below 6m would silently
+    # give this check LESS time than it has today. The enclosing deployment
+    # validator job is itself 8m (recipes/validators/catalog.yaml).
+    #
+    # Consequence, deliberately not papered over: this CR reboots matching
+    # workers one at a time (interruptionBudget), so on a COLD cluster whose
+    # nodes have not yet converged, real convergence can exceed this 6m
+    # ceiling and the check can time out even though the rollout is healthy.
+    # Re-running once converged passes. Lifting the ceiling means raising
+    # defaults.ChainsawAssertTimeout (shared by every component) and the
+    # deployment job envelope together, or moving this component to the
+    # longer readiness-poll path — infrastructure work outside this recipe
+    # port, tracked in #2473.
+    assert: 6m
+  steps:
+    - name: validate-skyhook-complete
+      try:
+        - assert:
+            resource:
+              apiVersion: skyhook.nvidia.com/v1alpha1
+              kind: Skyhook
+              metadata:
+                name: rdma-netns-exclusive
+              status:
+                status: complete
