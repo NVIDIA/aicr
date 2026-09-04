@@ -40,11 +40,13 @@ than in yours.
 | `Example_criteriaDimensions` | The coverage dimensions | yes |
 | `Example_committedConfig` | `AICRConfig` → source → catalog → criteria, in the required order | no |
 | `Example_resolveFromSnapshot` | `LoadSnapshot` plus snapshot criteria relaxation | no |
+| `ExampleClient_CriteriaFromSnapshot` | Deriving criteria from a snapshot; undetermined dimensions stay `any` | no |
 | `ExampleClient_DiffSnapshots` | In-memory drift detection between two loaded snapshots | no |
 | `ExampleClient_LoadRecipe` | Reading a previously emitted recipe | no |
 | `ExampleClient_CollectSnapshot` | Capturing cluster state via the snapshotter Job | no |
 | `ExampleClient_ValidateState` | Selecting validation phases, and `--no-cluster` mode | no |
 | `ExampleClient_RecipeDigest` | The digest a CI staleness gate compares | no |
+| `ExampleClient_MirrorInventory` | The images and charts to stage into an air-gapped registry | no |
 | `ExampleClient_VerifyEvidence` | Evidence verification and exit classes | no |
 | `ExampleClient_VerifyCatalog` / `ExampleClient_SignCatalog` | Checking and producing the catalog signature | no |
 | `ExampleClient_PublishEvidence` | Signing and pushing an evidence bundle | no |
