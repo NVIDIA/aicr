@@ -904,7 +904,11 @@ kubectl get httproutes,grpcroutes -A \
   -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PARENTS:.spec.parentRefs[*].name' || exit 1
 ```
 
-Any row whose `PARENTS` names `inference-gateway` is yours.
+Any row whose `PARENTS` names `inference-gateway` is yours. A row whose
+`PARENTS` names another `HTTPRoute` rather than a Gateway is a delegated route:
+from v1.5.0 those need a `ReferenceGrant` in the child's namespace authorizing
+the parent's namespace, where previously none was required, so check
+`kubectl get referencegrants -A` covers each one before upgrading.
 
 AICR's own `AgentgatewayParameters` named `system-proxy` in
 `agentgateway-system` is expected. If nothing else appears, the upgrade needs
