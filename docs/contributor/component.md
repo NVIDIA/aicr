@@ -215,8 +215,9 @@ exclusive on the same scheduling group, and
 `ComponentRegistry.Validate` rejects a registry entry that violates either
 rule. `--dynamic` is rejected the same way as for `requireNodeSelector`,
 regardless of whether a storage class is configured yet, since one could be
-added later without rebuilding the bundle. No registry entry sets it yet;
-component opt-ins land as their own commits.
+added later without rebuilding the bundle. `kube-prometheus-stack` is the
+example in `registry.yaml`. Its Prometheus StatefulSet uses `emptyDir`
+until `--storage-class` (or an overlay override) sets `storageClassPaths`.
 
 ## `valueOverrideKeys`
 

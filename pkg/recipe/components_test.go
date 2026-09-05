@@ -552,6 +552,44 @@ func TestComponentRegistry_SlurmAccountingMariaDB_NodeSchedulingPaths(t *testing
 	}
 }
 
+func TestComponentRegistry_KubePrometheusStack_NodeSchedulingPaths(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	prom := registry.Get("kube-prometheus-stack")
+	if prom == nil {
+		t.Fatal("kube-prometheus-stack not found in registry")
+	}
+	if got := prom.GetSystemNodeSelectorPaths(); !slices.Contains(got, "prometheus.prometheusSpec.nodeSelector") {
+		t.Errorf("kube-prometheus-stack system node selector paths missing %q (got %v)",
+			"prometheus.prometheusSpec.nodeSelector", got)
+	}
+	if got := prom.GetSystemTolerationPaths(); !slices.Contains(got, "prometheus.prometheusSpec.tolerations") {
+		t.Errorf("kube-prometheus-stack system toleration paths missing %q (got %v)",
+			"prometheus.prometheusSpec.tolerations", got)
+	}
+	// Regression guard. Once --storage-class gives it a PVC, an unpinned
+	// prometheus pod can land on a GPU node and strand a later reschedule
+	// the same way slinky-slurm's pods can. This must stay a bundle-time
+	// failure, not a silent no-op, if requireNodeSelectorIfStorageClassSet
+	// is ever dropped from the registry entry. Unconditional
+	// requireNodeSelector must stay off, since the chart defaults to
+	// emptyDir, so this base component appears in nearly every bundle
+	// regardless of whether a PVC is ever in play.
+	if !prom.RequireSystemNodeSelectorIfStorageClassSet() {
+		t.Error("kube-prometheus-stack nodeScheduling.system.requireNodeSelectorIfStorageClassSet must stay true (see registry.yaml comment)")
+	}
+	if prom.RequireSystemNodeSelector() {
+		t.Error("kube-prometheus-stack nodeScheduling.system.requireNodeSelector must stay false; use requireNodeSelectorIfStorageClassSet instead")
+	}
+	if got := prom.GetStorageClassPaths(); !slices.Contains(got, "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName") {
+		t.Errorf("kube-prometheus-stack storageClassPaths missing %q (got %v); requireNodeSelectorIfStorageClassSet has nothing to condition on",
+			"prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName", got)
+	}
+}
+
 func TestComponentRegistry_TaintStrPaths(t *testing.T) {
 	registry, err := GetComponentRegistry()
 	if err != nil {
