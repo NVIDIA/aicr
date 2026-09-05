@@ -1936,8 +1936,10 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 }
 
 // validateRequiredNodeSelectors returns an error if a component's registry
-// entry sets requireNodeSelector (SchedulingPaths) but the resolved value at
-// one of its non-opted-out node-selector paths is empty or missing.
+// entry sets requireNodeSelector, or sets requireNodeSelectorIfStorageClassSet
+// with a storage class already configured (SchedulingPaths), but the
+// resolved value at one of its non-opted-out node-selector paths is empty
+// or missing.
 //
 // Must run after every override in extractComponentValues, including
 // --set-json/--set-file, which can null out a selector that
@@ -1959,14 +1961,18 @@ func (b *DefaultBundler) validateRequiredNodeSelectors(componentName string, val
 		return nil
 	}
 
-	if comp.RequireSystemNodeSelector() {
+	if comp.RequireSystemNodeSelector() ||
+		(comp.RequireSystemNodeSelectorIfStorageClassSet() && componentHasConfiguredStorageClass(comp, values)) {
+
 		if err := requireNonEmptyNodeSelectors(componentName, values,
 			filterPaths(comp.GetSystemNodeSelectorPaths(), policy.optOut),
 			"--system-node-selector"); err != nil {
 			return err
 		}
 	}
-	if comp.RequireAcceleratedNodeSelector() {
+	if comp.RequireAcceleratedNodeSelector() ||
+		(comp.RequireAcceleratedNodeSelectorIfStorageClassSet() && componentHasConfiguredStorageClass(comp, values)) {
+
 		if err := requireNonEmptyNodeSelectors(componentName, values,
 			filterPaths(comp.GetAcceleratedNodeSelectorPaths(), policy.optOut),
 			"--accelerated-node-selector"); err != nil {
@@ -1974,6 +1980,27 @@ func (b *DefaultBundler) validateRequiredNodeSelectors(componentName string, val
 		}
 	}
 	return nil
+}
+
+// componentHasConfiguredStorageClass reports whether any of comp's
+// StorageClassPaths or SharedStorageClassPaths resolved to a non-empty
+// string in values, gating RequireNodeSelectorIfStorageClassSet for a
+// chart that defaults to ephemeral storage (e.g. emptyDir) and only
+// creates the zone-pinning PVC once --storage-class or
+// --shared-storage-class (or an equivalent overlay override) sets one of
+// these paths.
+func componentHasConfiguredStorageClass(comp *recipe.ComponentConfig, values map[string]any) bool {
+	paths := make([]string, 0, len(comp.GetStorageClassPaths())+len(comp.GetSharedStorageClassPaths()))
+	paths = append(paths, comp.GetStorageClassPaths()...)
+	paths = append(paths, comp.GetSharedStorageClassPaths()...)
+	for _, path := range paths {
+		if val, ok := component.GetValueByPath(values, path); ok {
+			if s, isStr := val.(string); isStr && s != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // requireNonEmptyNodeSelectors returns an error naming every path in paths
@@ -2111,10 +2138,16 @@ func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName st
 			conflicts = append(conflicts, p)
 		}
 	}
-	if comp.RequireSystemNodeSelector() {
+	// Reject regardless of whether a storage class ends up configured for
+	// RequireNodeSelectorIfStorageClassSet. A --dynamic path bypasses
+	// validateRequiredNodeSelectors unconditionally by merging into
+	// policy.optOut, so this is the only gate closing that loophole if a
+	// storage class is configured now or added later without rebuilding
+	// the bundle.
+	if comp.RequireSystemNodeSelector() || comp.RequireSystemNodeSelectorIfStorageClassSet() {
 		addConflicts(comp.GetSystemNodeSelectorPaths())
 	}
-	if comp.RequireAcceleratedNodeSelector() {
+	if comp.RequireAcceleratedNodeSelector() || comp.RequireAcceleratedNodeSelectorIfStorageClassSet() {
 		addConflicts(comp.GetAcceleratedNodeSelectorPaths())
 	}
 	if len(conflicts) == 0 {

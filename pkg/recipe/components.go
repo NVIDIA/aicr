@@ -246,6 +246,14 @@ type SchedulingPaths struct {
 	// to a node's zone).
 	RequireNodeSelector bool `yaml:"requireNodeSelector,omitempty"`
 
+	// RequireNodeSelectorIfStorageClassSet is RequireNodeSelector's
+	// conditional counterpart, applying only once a storage class is
+	// configured (ComponentConfig's StorageClassPaths or
+	// SharedStorageClassPaths resolve non-empty) and leaving a chart that
+	// still defaults to ephemeral storage unenforced. Mutually exclusive
+	// with RequireNodeSelector.
+	RequireNodeSelectorIfStorageClassSet bool `yaml:"requireNodeSelectorIfStorageClassSet,omitempty"`
+
 	// TolerationPaths are paths where tolerations are injected.
 	TolerationPaths []string `yaml:"tolerationPaths,omitempty"`
 
@@ -589,17 +597,43 @@ func (r *ComponentRegistry) Validate() []error {
 		}
 	}
 
-	// requireNodeSelector with no paths to enforce is always a config
-	// mistake: a typo'd path list, or the flag left on after paths were
-	// removed.
+	// requireNodeSelector (or its requireNodeSelectorIfStorageClassSet
+	// counterpart) with no paths to enforce is always a config mistake, a
+	// typo'd path list, or the flag left on after paths were removed. The
+	// two are also mutually exclusive, since a group is either
+	// unconditionally required or conditional on storage, never both.
 	for _, comp := range r.Components {
-		if comp.NodeScheduling.System.RequireNodeSelector && len(comp.NodeScheduling.System.NodeSelectorPaths) == 0 {
+		if comp.NodeScheduling.System.RequireNodeSelector && comp.NodeScheduling.System.RequireNodeSelectorIfStorageClassSet {
 			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("component %q: nodeScheduling.system.requireNodeSelector is true but nodeSelectorPaths is empty", comp.Name)))
+				fmt.Sprintf("component %q: nodeScheduling.system.requireNodeSelector and requireNodeSelectorIfStorageClassSet are mutually exclusive", comp.Name)))
 		}
-		if comp.NodeScheduling.Accelerated.RequireNodeSelector && len(comp.NodeScheduling.Accelerated.NodeSelectorPaths) == 0 {
+		if (comp.NodeScheduling.System.RequireNodeSelector || comp.NodeScheduling.System.RequireNodeSelectorIfStorageClassSet) &&
+			len(comp.NodeScheduling.System.NodeSelectorPaths) == 0 {
+
 			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("component %q: nodeScheduling.accelerated.requireNodeSelector is true but nodeSelectorPaths is empty", comp.Name)))
+				fmt.Sprintf("component %q: nodeScheduling.system requires a node selector but nodeSelectorPaths is empty", comp.Name)))
+		}
+		if comp.NodeScheduling.System.RequireNodeSelectorIfStorageClassSet &&
+			len(comp.StorageClassPaths) == 0 && len(comp.SharedStorageClassPaths) == 0 {
+
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: nodeScheduling.system.requireNodeSelectorIfStorageClassSet is true but the component has no storageClassPaths or sharedStorageClassPaths to condition on", comp.Name)))
+		}
+		if comp.NodeScheduling.Accelerated.RequireNodeSelector && comp.NodeScheduling.Accelerated.RequireNodeSelectorIfStorageClassSet {
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: nodeScheduling.accelerated.requireNodeSelector and requireNodeSelectorIfStorageClassSet are mutually exclusive", comp.Name)))
+		}
+		if (comp.NodeScheduling.Accelerated.RequireNodeSelector || comp.NodeScheduling.Accelerated.RequireNodeSelectorIfStorageClassSet) &&
+			len(comp.NodeScheduling.Accelerated.NodeSelectorPaths) == 0 {
+
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: nodeScheduling.accelerated requires a node selector but nodeSelectorPaths is empty", comp.Name)))
+		}
+		if comp.NodeScheduling.Accelerated.RequireNodeSelectorIfStorageClassSet &&
+			len(comp.StorageClassPaths) == 0 && len(comp.SharedStorageClassPaths) == 0 {
+
+			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("component %q: nodeScheduling.accelerated.requireNodeSelectorIfStorageClassSet is true but the component has no storageClassPaths or sharedStorageClassPaths to condition on", comp.Name)))
 		}
 	}
 
@@ -634,6 +668,16 @@ func (c *ComponentConfig) RequireSystemNodeSelector() bool {
 	return c.NodeScheduling.System.RequireNodeSelector
 }
 
+// RequireSystemNodeSelectorIfStorageClassSet reports whether the component
+// requires a non-empty --system-node-selector once a storage class is
+// configured (SchedulingPaths.RequireNodeSelectorIfStorageClassSet).
+func (c *ComponentConfig) RequireSystemNodeSelectorIfStorageClassSet() bool {
+	if c == nil {
+		return false
+	}
+	return c.NodeScheduling.System.RequireNodeSelectorIfStorageClassSet
+}
+
 // GetSystemTolerationPaths returns all system toleration paths for a component.
 func (c *ComponentConfig) GetSystemTolerationPaths() []string {
 	if c == nil {
@@ -658,6 +702,17 @@ func (c *ComponentConfig) RequireAcceleratedNodeSelector() bool {
 		return false
 	}
 	return c.NodeScheduling.Accelerated.RequireNodeSelector
+}
+
+// RequireAcceleratedNodeSelectorIfStorageClassSet reports whether the
+// component requires a non-empty --accelerated-node-selector once a
+// storage class is configured
+// (SchedulingPaths.RequireNodeSelectorIfStorageClassSet).
+func (c *ComponentConfig) RequireAcceleratedNodeSelectorIfStorageClassSet() bool {
+	if c == nil {
+		return false
+	}
+	return c.NodeScheduling.Accelerated.RequireNodeSelectorIfStorageClassSet
 }
 
 // GetAcceleratedTolerationPaths returns all accelerated toleration paths for a component.
