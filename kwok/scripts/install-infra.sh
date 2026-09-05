@@ -123,6 +123,7 @@
 #   21  registry not reachable on host port within 60s
 #   30  Argo CD Helm install failed
 #   31  `applications.argoproj.io` CRD not Established in 120s
+#   32  argocd-cm diff-customization patch failed
 #   40  Repository secret apply failed
 #   60  Flux install manifest apply failed
 #   61  Flux controller (source/kustomize/helm) not Ready in 180s
@@ -424,7 +425,35 @@ install_argocd() {
         exit 31
     fi
 
+    configure_argocd_diff_customizations
+
     log_info "Argo CD ready"
+}
+
+# kind_node_image tracks Renovate's "testing" datasource (pre-release
+# Kubernetes), so it routinely ships storage/v1 CSIDriver fields newer than
+# the k8s.io/api schema argocd_chart's gitops-engine hard-codes for
+# structured-merge-diff (Argo CD FAQ: "How do I fix `field not declared in
+# schema`?"). Any CSIDriver, including aws-ebs-csi-driver's, then fails every
+# diff attempt with "field not declared in schema", and its Application's
+# sync.status wedges at Unknown forever. Unknown is neither Synced nor
+# OutOfSync, the only two states the argocd-*-sync chainsaw gate's pass
+# predicate accepts, so the gate polls out its full budget and reports a
+# GitOps sync timeout unrelated to the recipe under test.
+#
+# The ignoreDifferences jqPathExpressions form, unlike managedFieldsManagers,
+# strips the offending field from both sides before Argo CD's structured
+# comparison runs, sidestepping the broken code path instead of hitting it.
+# System-level (argocd-cm) rather than per-Application covers every
+# Application this Argo CD instance manages, not just the one under test.
+configure_argocd_diff_customizations() {
+    log_info "Patching argocd-cm: ignore CSIDriver.spec.preventPodSchedulingIfMissing (Argo CD schema-lag workaround)..."
+    if ! kc patch configmap argocd-cm -n "${ARGOCD_NAMESPACE}" --type merge -p \
+            '{"data":{"resource.customizations.ignoreDifferences.storage.k8s.io_CSIDriver":"jqPathExpressions:\n- .spec.preventPodSchedulingIfMissing\n"}}'; then
+        log_error "Failed to patch argocd-cm with CSIDriver diff customization"
+        dump_argocd_diagnostics
+        exit 32
+    fi
 }
 
 # -------------------------------------------------------------------
