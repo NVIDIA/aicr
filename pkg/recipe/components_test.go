@@ -926,8 +926,8 @@ func TestComponentRegistry_Validate_EdgeCases(t *testing.T) {
 		}
 		errs := registry.Validate()
 		wantSubstrings := []string{
-			`component "comp1": nodeScheduling.system.requireNodeSelector is true but nodeSelectorPaths is empty`,
-			`component "comp2": nodeScheduling.accelerated.requireNodeSelector is true but nodeSelectorPaths is empty`,
+			`component "comp1": nodeScheduling.system requires a node selector but nodeSelectorPaths is empty`,
+			`component "comp2": nodeScheduling.accelerated requires a node selector but nodeSelectorPaths is empty`,
 		}
 		for _, want := range wantSubstrings {
 			found := false
@@ -961,6 +961,88 @@ func TestComponentRegistry_Validate_EdgeCases(t *testing.T) {
 		errs := registry.Validate()
 		if len(errs) != 0 {
 			t.Errorf("expected no validation errors, got: %v", errs)
+		}
+	})
+
+	t.Run("requireNodeSelectorIfStorageClassSet without storage class paths is invalid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:        "comp1",
+					DisplayName: "Comp 1",
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{
+							RequireNodeSelectorIfStorageClassSet: true,
+							NodeSelectorPaths:                    []string{"controller.podSpec.nodeSelector"},
+						},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		want := `component "comp1": nodeScheduling.system.requireNodeSelectorIfStorageClassSet is true but the component has no storageClassPaths or sharedStorageClassPaths to condition on`
+		found := false
+		for _, e := range errs {
+			if strings.Contains(e.Error(), want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected an error containing %q, got: %v", want, errs)
+		}
+	})
+
+	t.Run("requireNodeSelectorIfStorageClassSet with storage class paths is valid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:              "comp1",
+					DisplayName:       "Comp 1",
+					StorageClassPaths: []string{"controller.storage.storageClassName"},
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{
+							RequireNodeSelectorIfStorageClassSet: true,
+							NodeSelectorPaths:                    []string{"controller.podSpec.nodeSelector"},
+						},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		if len(errs) != 0 {
+			t.Errorf("expected no validation errors, got: %v", errs)
+		}
+	})
+
+	t.Run("requireNodeSelector and requireNodeSelectorIfStorageClassSet together is invalid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:              "comp1",
+					DisplayName:       "Comp 1",
+					StorageClassPaths: []string{"controller.storage.storageClassName"},
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{
+							RequireNodeSelector:                  true,
+							RequireNodeSelectorIfStorageClassSet: true,
+							NodeSelectorPaths:                    []string{"controller.podSpec.nodeSelector"},
+						},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		want := `component "comp1": nodeScheduling.system.requireNodeSelector and requireNodeSelectorIfStorageClassSet are mutually exclusive`
+		found := false
+		for _, e := range errs {
+			if strings.Contains(e.Error(), want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected an error containing %q, got: %v", want, errs)
 		}
 	})
 
