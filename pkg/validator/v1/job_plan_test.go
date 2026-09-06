@@ -624,6 +624,103 @@ func TestBuildJobPlan_ForwardsNCCLFabricEnv(t *testing.T) {
 	})
 }
 
+// TestBuildJobPlan_ForwardsNCCLRuntimeImageEnv verifies the NCCL workload-image
+// override is carried from the CLI process into all three NCCL all-reduce
+// check Jobs (default, NET, NVLS) — mirroring TestBuildJobPlan_ForwardsNCCLFabricEnv
+// above — and that a catalog-pinned value can never shadow or substitute for
+// the forwarded one.
+func TestBuildJobPlan_ForwardsNCCLRuntimeImageEnv(t *testing.T) {
+	build := func(entry ValidatorEntry) map[string]string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		m := make(map[string]string)
+		for _, e := range plan.Env {
+			m[e.Name] = e.Value
+		}
+		return m
+	}
+
+	defaultEntry := ValidatorEntry{Name: NCCLAllReduceBWCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute}
+	netEntry := ValidatorEntry{Name: NCCLAllReduceBWNetCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute}
+	nvlsEntry := ValidatorEntry{Name: NCCLAllReduceBWNvlsCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute}
+
+	const testImage = "nvcr.io/nvidia/pytorch:26.01-py3"
+
+	t.Run("forwarded verbatim to all three NCCL variants", func(t *testing.T) {
+		t.Setenv(ncclRuntimeImageEnv, testImage)
+		for _, entry := range []ValidatorEntry{defaultEntry, netEntry, nvlsEntry} {
+			if got := build(entry)[ncclRuntimeImageEnv]; got != testImage {
+				t.Errorf("%s env for %q = %q, want %q", ncclRuntimeImageEnv, entry.Name, got, testImage)
+			}
+		}
+	})
+	t.Run("empty value omitted", func(t *testing.T) {
+		t.Setenv(ncclRuntimeImageEnv, "")
+		if _, present := build(defaultEntry)[ncclRuntimeImageEnv]; present {
+			t.Errorf("%s should not be in Job env when empty", ncclRuntimeImageEnv)
+		}
+	})
+	t.Run("unset omitted", func(t *testing.T) {
+		t.Setenv(ncclRuntimeImageEnv, "")
+		if err := os.Unsetenv(ncclRuntimeImageEnv); err != nil {
+			t.Fatalf("unsetenv: %v", err)
+		}
+		if _, present := build(defaultEntry)[ncclRuntimeImageEnv]; present {
+			t.Errorf("%s should not be in Job env when unset", ncclRuntimeImageEnv)
+		}
+	})
+	t.Run("not forwarded to other validators", func(t *testing.T) {
+		t.Setenv(ncclRuntimeImageEnv, testImage)
+		other := ValidatorEntry{Name: InferencePerfCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute}
+		if _, present := build(other)[ncclRuntimeImageEnv]; present {
+			t.Errorf("%s must not be forwarded to a non-NCCL validator", ncclRuntimeImageEnv)
+		}
+	})
+	t.Run("env-name literal locked", func(t *testing.T) {
+		if ncclRuntimeImageEnv != "AICR_NCCL_RUNTIME_IMAGE" {
+			t.Errorf("ncclRuntimeImageEnv = %q, want AICR_NCCL_RUNTIME_IMAGE (keep in sync with the pod-side const)", ncclRuntimeImageEnv)
+		}
+	})
+
+	values := func(entry ValidatorEntry) []string {
+		plan, err := BuildJobPlan(entry, "run-1", "ns", "1.0.0", "abc123", "sa", nil, nil, nil, "", "", nil)
+		if err != nil {
+			t.Fatalf("BuildJobPlan error: %v", err)
+		}
+		var got []string
+		for _, e := range plan.Env {
+			if e.Name == ncclRuntimeImageEnv {
+				got = append(got, e.Value)
+			}
+		}
+		return got
+	}
+
+	t.Run("catalog value cannot override forwarded value", func(t *testing.T) {
+		t.Setenv(ncclRuntimeImageEnv, testImage)
+		entry := ValidatorEntry{
+			Name: NCCLAllReduceBWCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute,
+			Env: []EnvVar{{Name: ncclRuntimeImageEnv, Value: "other:v0"}},
+		}
+		if got := values(entry); len(got) != 1 || got[0] != testImage {
+			t.Errorf("%s env = %v, want exactly [%s] (catalog value must be dropped)", ncclRuntimeImageEnv, got, testImage)
+		}
+	})
+
+	t.Run("catalog value alone cannot select an image", func(t *testing.T) {
+		t.Setenv(ncclRuntimeImageEnv, "")
+		entry := ValidatorEntry{
+			Name: NCCLAllReduceBWCheckName, Phase: "performance", Image: "img:v1", Timeout: time.Minute,
+			Env: []EnvVar{{Name: ncclRuntimeImageEnv, Value: testImage}},
+		}
+		if got := values(entry); len(got) != 0 {
+			t.Errorf("%s env = %v, want none (catalog must not select an image without shell env)", ncclRuntimeImageEnv, got)
+		}
+	})
+}
+
 func TestBuildJobPlanWithDefaults(t *testing.T) {
 	// Test with minimal entry (no custom resources, no tolerations, no node selector)
 	entry := ValidatorEntry{

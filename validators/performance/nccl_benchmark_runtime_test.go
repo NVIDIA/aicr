@@ -442,7 +442,7 @@ spec:
 	// job. No --node-selector override, so the runtime's own selector must win.
 	if err := applyNCCLResources(ctx, fakeClient, config,
 		recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
-		runtimeWithSelector); err != nil {
+		runtimeWithSelector, ""); err != nil {
 		t.Fatalf("applyNCCLResources (custom runtime) failed: %v", err)
 	}
 
@@ -458,6 +458,90 @@ spec:
 	if sel["my.io/private-gpu"] != "true" {
 		t.Errorf("runtime's own nodeSelector not preserved: %v", sel)
 	}
+}
+
+// TestApplyNCCLResourcesRuntimeImageOverride is the CodeRabbit-requested
+// regression test: it exercises the actual override contract end to end,
+// distinct from TestApplyNCCLResourcesCustomRuntimeEKSNoClobber above, which
+// only ever passes "" for runtimeImage.
+func TestApplyNCCLResourcesRuntimeImageOverride(t *testing.T) {
+	const ns = "aicr-validation"
+	const runtimeWithSelector = `apiVersion: trainer.kubeflow.org/v1alpha1
+kind: TrainingRuntime
+metadata:
+  name: author-chose-this
+spec:
+  template:
+    spec:
+      replicatedJobs:
+        - name: node
+          template:
+            spec:
+              template:
+                spec:
+                  containers:
+                    - name: node
+                      image: example.com/nccl:latest
+`
+	// discoverEKSNodeConfig (called on the embedded-template/EKS path) requires
+	// at least one node with the instance-type label; a uniform zero EFA count
+	// (unset Allocatable) is valid and selects the TCP fallback.
+	eksNode := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "eks-node-0",
+			Labels: map[string]string{"node.kubernetes.io/instance-type": "p5.48xlarge"},
+		},
+	}
+	config := &gpuConfiguration{
+		WorkerCount: 2, GPUCountPerNode: 8, TotalGPUCount: 16, Namespace: ns,
+		Nodes: []corev1.Node{eksNode},
+	}
+
+	t.Run("embedded template: override applied to every workload container", func(t *testing.T) {
+		fakeClient := newFakeDynamicClient()
+		ctx := &validators.Context{Ctx: context.Background(), DynamicClient: fakeClient, Namespace: ns}
+
+		if err := applyNCCLResources(ctx, fakeClient, config,
+			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
+			"", "example.com/qualify/nccl:cuda13"); err != nil {
+			t.Fatalf("applyNCCLResources (embedded, override) failed: %v", err)
+		}
+
+		got, err := fakeClient.Resource(trainingRuntimeGVR).Namespace(ns).
+			Get(context.Background(), ncclTrainingRuntimeName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("TrainingRuntime not created: %v", err)
+		}
+		image := firstContainerImage(t, workerPodSpec(t, got))
+		if image != "example.com/qualify/nccl:cuda13" {
+			t.Errorf("worker container image = %q, want override applied", image)
+		}
+	})
+
+	t.Run("custom runtime: override ignored, runtime's own image wins", func(t *testing.T) {
+		fakeClient := newFakeDynamicClient()
+		ctx := &validators.Context{Ctx: context.Background(), DynamicClient: fakeClient, Namespace: ns}
+
+		// A non-empty runtimeImage alongside a non-empty customRuntime should
+		// never happen in production (validateNcclAllReduceBw gates resolution
+		// on customRuntime == ""), but applyNCCLResources itself must not apply
+		// it if called this way — the recipe-supplied runtime owns its image.
+		if err := applyNCCLResources(ctx, fakeClient, config,
+			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
+			runtimeWithSelector, "example.com/should-be-ignored:v1"); err != nil {
+			t.Fatalf("applyNCCLResources (custom runtime) failed: %v", err)
+		}
+
+		got, err := fakeClient.Resource(trainingRuntimeGVR).Namespace(ns).
+			Get(context.Background(), ncclTrainingRuntimeName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("TrainingRuntime not created: %v", err)
+		}
+		image := firstContainerImage(t, workerPodSpec(t, got))
+		if image != "example.com/nccl:latest" {
+			t.Errorf("worker container image = %q, want runtime's own image preserved", image)
+		}
+	})
 }
 
 // workerPodSpec navigates a rendered NCCL TrainingRuntime to the "node"
@@ -485,4 +569,22 @@ func workerPodSpec(t *testing.T, obj *unstructured.Unstructured) map[string]any 
 	}
 	t.Fatalf("no %q replicatedJob in runtime", nodeJobName)
 	return nil
+}
+
+// firstContainerImage returns podSpec.containers[0].image, or "" if the shape
+// doesn't match. unstructured.NestedString cannot index into a []interface{}
+// with a string key, so callers must walk the slice manually rather than
+// passing a numeric-looking path segment like "0".
+func firstContainerImage(t *testing.T, podSpec map[string]interface{}) string {
+	t.Helper()
+	containers, found, err := unstructured.NestedSlice(podSpec, "containers")
+	if err != nil || !found || len(containers) == 0 {
+		t.Fatalf("podSpec.containers not found or empty (found=%v err=%v)", found, err)
+	}
+	c, ok := containers[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("podSpec.containers[0] is %T, want map", containers[0])
+	}
+	image, _, _ := unstructured.NestedString(c, "image")
+	return image
 }

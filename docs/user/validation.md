@@ -51,7 +51,7 @@ ones) that match the target fabric:
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
 | `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when the NVIDIA driver is missing `NVreg_GrdmaPciTopoCheckOverride=1`. |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, and VR200 + RKE2. Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE) when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, and GB200 + OKE. Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE) when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
@@ -72,6 +72,33 @@ on an air-gapped cluster the RoCE NET test cannot bootstrap. This env override i
 interim — snapshot-based fabric auto-detection (and removing the runtime
 package install once a CUDA-13 image ships sshd) is tracked in
 [NVIDIA/aicr#1413](https://github.com/NVIDIA/aicr/issues/1413).
+
+**Overriding the NCCL workload image with `AICR_NCCL_RUNTIME_IMAGE`.** Each
+embedded `nccl-all-reduce-bw` / `-net` / `-nvls` template pins a specific
+launcher/worker workload image — the CUDA/NCCL/MPI/SSH/transport runtime that
+`all_reduce_perf` actually runs in, distinct per platform (e.g. GKE H100/TCPXO
+ships a CUDA 12.9 image today). To qualify a different CUDA/NCCL combination —
+for example CUDA 13 on GKE TCPXO with an R580-or-newer driver — set
+`AICR_NCCL_RUNTIME_IMAGE=<image ref>` in the `aicr validate` environment. The
+resolved image is rendered into every container that carries the workload
+(the launcher's SSH-setup init container and both the launcher's and worker's
+main containers), so a run can never end up on a mixed image set; a
+platform-specific sidecar unrelated to the NCCL workload itself (e.g. GKE's
+`tcpxo-daemon` transport daemon) is left untouched. A malformed image
+reference fails the check immediately, before cluster discovery or NCCL
+benchmark resources are created, rather than silently falling back to the
+compiled default.
+
+This is a different setting from `aicr validate --image` /
+`AICR_VALIDATOR_IMAGE_*` (see [Validator image
+tags](../contributor/validator.md#validator-image-tags)): those control the
+**validator's own** container image (the snapshot/orchestration binary),
+never the inner NCCL workload. `AICR_NCCL_RUNTIME_IMAGE` only applies to the
+three NCCL all-reduce checks, and only to their embedded templates — it has
+no effect when a recipe [supplies its own benchmark
+runtime](#supplying-a-benchmark-runtime-for-a-private-service), since that
+runtime already owns its image end to end. For reproducible qualification
+runs, prefer pinning by digest (`name@sha256:...`) over a mutable tag.
 
 GB200/EKS recipes (both `training` and `inference` intents) enable `-net` and
 `-nvls` together rather than the auto-detect variant, because those nodes
@@ -194,7 +221,7 @@ is passed it replaces the automatic filters rather than narrowing them.
 
 Valid profiles are the pairs in the applicability table above: `b200/any`,
 `gb200/any`, `gb200/eks`, `gb200/oke`, `h100/aks`, `h100/eks`, `h100/gke`,
-`h200/eks`, `vr200/rke2`. A
+`h200/eks`. A
 malformed or unknown value **fails** the check rather than silently skipping
 it. A valid profile that doesn't implement a requested variant (e.g.
 `gb200/eks` with the auto-detect `nccl-all-reduce-bw` check) skips just that
