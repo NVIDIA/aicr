@@ -24,11 +24,22 @@ controllerManager:
   tolerations:
     - operator: Exists
 
-# Pinned copy of the chart 0.18.2 default controllerManagerConfigYaml with
+# Pinned copy of the chart 0.19.3 default controllerManagerConfigYaml with
 # ONE deliberate change: integrations.frameworks is trimmed to the
 # frameworks AICR manages (batch/job, JobSet, TrainJob). The chart default
-# also enables pod/deployment/statefulset/ray/kubeflow-v1/leaderworkerset
-# integrations — webhook interception surface we do not ship by default.
+# also enables mpijob/ray (rayjob, rayservice, raycluster)/appwrapper/pod/
+# deployment/statefulset/leaderworkerset integrations, webhook interception
+# surface we do not ship by default. The kubeflow v1 jobs (paddlejob,
+# pytorchjob, tfjob, xgboostjob, jaxjob) are commented out upstream as of
+# 0.19.x, so they are not part of the trim.
+#
+# Upstream defaults accepted at the 0.19.3 bump, deliberately NOT pinned:
+# groupKindConcurrency Workload 5->10 and LocalQueue/ClusterQueue 1->5, and
+# clientConnection qps 50->300 with burst 100->500. WaitForPodsReady is also
+# enabled by default from 0.19 (30m timeout, blockAdmission false); a kind
+# experiment confirmed it releases quota on timeout and does not block the
+# queue, so it is inherited rather than overridden. See
+# docs/plans/2026-09-06-kueue-recipe-0193-design.md.
 # MAINTENANCE: this is a string blob (Helm does not merge it). On every
 # chart version bump, re-diff against
 #   helm show values oci://registry.k8s.io/kueue/charts/kueue --version <new>
@@ -51,13 +62,13 @@ managerConfig:
       groupKindConcurrency:
         Job.batch: 5
         Pod: 5
-        Workload.kueue.x-k8s.io: 5
-        LocalQueue.kueue.x-k8s.io: 1
-        ClusterQueue.kueue.x-k8s.io: 1
+        Workload.kueue.x-k8s.io: 10
+        LocalQueue.kueue.x-k8s.io: 5
+        ClusterQueue.kueue.x-k8s.io: 5
         ResourceFlavor.kueue.x-k8s.io: 1
     clientConnection:
-      qps: 50
-      burst: 100
+      qps: 300
+      burst: 500
     #pprofBindAddress: :8083
     #waitForPodsReady:
     #  timeout: 5m

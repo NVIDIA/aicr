@@ -54,7 +54,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kai-scheduler | helm | kai-scheduler | v0.14.1 | 11 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
-| kueue | helm | kueue | 0.18.2 | 1 |
+| kueue | helm | kueue | 0.19.3 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.6.0 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.6.0 | 0 |
 | network-operator | helm | nvidia/network-operator | 26.4.1 | 9 |
@@ -231,7 +231,7 @@ _No images extracted._
 
 ### kueue
 
-- `registry.k8s.io/kueue/kueue:v0.18.2`
+- `registry.k8s.io/kueue/kueue:v0.19.3`
 
 ### mariadb-operator
 
