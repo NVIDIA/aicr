@@ -31,6 +31,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/manifest"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/snapshotter"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/helper"
 	appsv1 "k8s.io/api/apps/v1"
@@ -61,32 +62,6 @@ const (
 
 	nodewrightCompleteState = "complete"
 
-	// runtimeRequiredTaintKey / runtimeRequiredTaintValue identify the
-	// workload-gate taint the nodewright (skyhook) operator manages for Skyhook
-	// CRs with runtimeRequired: true (see tuning.yaml `runtimeRequired: true`).
-	//
-	// Why gate on this taint and not status.status: a GPU node joins carrying
-	// this NoSchedule taint, and the operator removes it once *all*
-	// runtime-required Skyhooks targeting that node are complete *on that node*
-	// (per-node, not per-package). Unlike status.status — an aggregate over
-	// (packages × matching nodes) that re-opens to in_progress on every package
-	// reboot and each newly-joined node — the taint is applied once and removed
-	// once as the monotone terminal step, so "taint absent" is a durable
-	// "done, won't reboot again" signal rather than a probabilistic settling
-	// heuristic (see issue #1775). Note the operator re-applies the taint across
-	// reboots only when configured with REAPPLY_ON_REBOOT/reapplyOnReboot=true
-	// (the gke-cos and bcm overlays); on those the taint flaps like the status
-	// and the stability window rides through it, so gating on the taint is never
-	// weaker than gating on the status.
-	//
-	// Values match the skyhook chart's default
-	// controllerManager.manager.env.runtimeRequiredTaint
-	// (skyhook.nvidia.com=runtime-required:NoSchedule), which AICR ships
-	// unchanged and the UAT GPU node pools pre-taint with verbatim
-	// (tests/uat/aws/cluster-config.yaml).
-	runtimeRequiredTaintKey   = "skyhook.nvidia.com"
-	runtimeRequiredTaintValue = "runtime-required"
-
 	// nicClusterPolicyManifestMarker identifies a NicClusterPolicy manifest
 	// (nic-cluster-policy-aks.yaml, nic-cluster-policy-oke-{gb200,l40s}.yaml
 	// under recipes/components/network-operator/manifests/) among a
@@ -103,9 +78,34 @@ const (
 	nicClusterPolicyManifestMarker = "nic-cluster-policy"
 )
 
+// The nodewright operator's controller-manager Deployment (name fixed by
+// fullnameOverride in recipes/components/nodewright-operator/values.yaml) and
+// the container env carrying its configured workload-gate taint.
+const (
+	nodewrightOperatorComponent  = "nodewright-operator"
+	nodewrightOperatorDeployment = "skyhook-operator-controller-manager"
+	runtimeRequiredTaintEnv      = "RUNTIME_REQUIRED_TAINT"
+)
+
 var (
+	// nodewrightGVR is the CR kind nodewright-operator v0.18.0+ reconciles and
+	// writes status on; legacySkyhookGVR is the pre-rename kind, mirrored from
+	// but never written to, and removed upstream in v0.20.0.
 	nodewrightGVR = schema.GroupVersionResource{
+		Group: "nodewright.nvidia.com", Version: "v1alpha1", Resource: "nodewrights",
+	}
+	legacySkyhookGVR = schema.GroupVersionResource{
 		Group: "skyhook.nvidia.com", Version: "v1alpha1", Resource: "skyhooks",
+	}
+
+	// defaultRuntimeRequiredTaint is the chart's runtimeRequiredTaint default
+	// from v0.18.0; legacyRuntimeRequiredTaint is the pre-rename default, which
+	// the operator still removes on completion but never applies.
+	defaultRuntimeRequiredTaint = corev1.Taint{
+		Key: "nodewright.nvidia.com", Value: "runtime-required", Effect: corev1.TaintEffectNoSchedule,
+	}
+	legacyRuntimeRequiredTaint = corev1.Taint{
+		Key: "skyhook.nvidia.com", Value: "runtime-required", Effect: corev1.TaintEffectNoSchedule,
 	}
 
 	// GPU readiness poll tunables shared by verifyNodewrightReady and
@@ -427,7 +427,12 @@ func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentR
 	}
 
 	if ref, ok := findEnabledComponent(refs, nodewrightCustomizationsComponent); ok {
-		capture(verifyNodewrightReady(ctx, ref))
+		// A gate-derivation failure fails closed — never "skip the taint".
+		if gate, gerr := runtimeRequiredTaints(ctx, refs, ref.Namespace); gerr != nil {
+			capture(gerr)
+		} else {
+			capture(verifyNodewrightReady(ctx, ref, gate))
+		}
 	}
 
 	if ref, ok := findEnabledComponent(refs, draDriverComponent); ok {
@@ -459,7 +464,8 @@ func findEnabledComponent(refs []recipe.ComponentRef, name string) (recipe.Compo
 }
 
 // verifyNodewrightReady checks that the specific Nodewright CR(s) this recipe
-// declares are present and have reached status.status == "complete".
+// declares are present and have reached status.status == "complete", and that
+// no node still carries any taint in gate (see runtimeRequiredTaints).
 //
 // Deployer-neutrality stance: no Helm API calls, no reads of release
 // metadata, no dependence on release-scoped labels. The set of Nodewright CRs
@@ -469,7 +475,7 @@ func findEnabledComponent(refs []recipe.ComponentRef, name string) (recipe.Compo
 // those exact names up on the cluster via the Kubernetes API. Unrelated
 // Nodewright CRs on the cluster (stale from previous deploys, or from other
 // tenants) are explicitly ignored.
-func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) error {
+func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gate []corev1.Taint) error {
 	expectedNames, err := expectedNodewrightNames(ref)
 	if err != nil {
 		return err
@@ -495,22 +501,16 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 		return nil
 	}
 
-	// Discovery-gate the CRD before attempting Get by name: CRD not
-	// registered → skip per #607; any other discovery error (RBAC, 5xx,
-	// timeout) → fail closed so a transient discovery failure cannot mask
-	// readiness.
-	gv := nodewrightGVR.GroupVersion().String()
-	_, discErr := ctx.Clientset.Discovery().ServerResourcesForGroupVersion(gv)
-	switch {
-	case discErr == nil:
-		// fall through to per-CR checks
-	case apierrors.IsNotFound(discErr):
-		fmt.Printf("  Nodewright: %s not registered, skipping\n", gv)
-		return nil
-	default:
-		return errors.Wrap(errors.ErrCodeInternal,
-			fmt.Sprintf("failed to discover %s resources (is the API server reachable and RBAC in order?)", gv), discErr)
+	gvr, registered, err := resolveNodewrightGVR(ctx)
+	if err != nil {
+		return err
 	}
+	if !registered {
+		fmt.Printf("  Nodewright: neither %s nor %s registered, skipping\n",
+			nodewrightGVR.GroupVersion(), legacySkyhookGVR.GroupVersion())
+		return nil
+	}
+	fmt.Printf("  Nodewright: polling %s\n", gvr.GroupResource())
 
 	dynClient, err := getDynamicClient(ctx)
 	if err != nil {
@@ -520,9 +520,9 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 	// Poll two signals until both hold continuously for the stability window, or
 	// the budget elapses:
 	//
-	//  1. Every expected Skyhook CR reports status.status == "complete".
-	//  2. No node still carries the runtime-required NoSchedule taint the
-	//     operator removes as its monotone terminal step.
+	//  1. Every expected Nodewright CR reports status.status == "complete".
+	//  2. No node still carries a runtime-required taint the operator removes
+	//     as its monotone terminal step.
 	//
 	// status.status alone is non-monotonic during tuning: a reboot (or a
 	// newly-joined GPU node) re-opens it to in_progress, and — worse — it can
@@ -537,20 +537,20 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 	return pollUntilStable(ctx,
 		fmt.Sprintf("%d expected Nodewright(s) + runtime-required taint clearance", len(expectedNames)),
 		func() error {
-			// The Skyhook status Gets and the node-list taint scan are
-			// independent read-only calls, so fan them out (per repo CLAUDE.md
-			// "Sequential calls to N independent read-only K8s APIs → fan-out
-			// with errgroup") rather than paying both round-trips serially every
+			// The CR status Gets and the node-list taint scan are independent
+			// read-only calls, so fan them out (per repo CLAUDE.md "Sequential
+			// calls to N independent read-only K8s APIs → fan-out with
+			// errgroup") rather than paying both round-trips serially every
 			// poll iteration.
 			var statusFailures, taintFailures []string
 			var taintErr error
 			g := new(errgroup.Group)
 			g.Go(func() error {
-				statusFailures = nodewrightStatusFailures(ctx, dynClient, expectedNames)
+				statusFailures = nodewrightStatusFailures(ctx, dynClient, gvr, expectedNames)
 				return nil
 			})
 			g.Go(func() error {
-				taintFailures, taintErr = runtimeRequiredTaintFailures(ctx)
+				taintFailures, taintErr = runtimeRequiredTaintFailures(ctx, gate)
 				return nil
 			})
 			_ = g.Wait()
@@ -575,26 +575,48 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef) err
 			for _, name := range expectedNames {
 				fmt.Printf("  Nodewright %s: %s (stable ≥%s)\n", name, nodewrightCompleteState, gpuReadinessStabilityWindow)
 			}
-			fmt.Printf("  Nodewright runtime-required taint (%s=%s:%s): cleared from all nodes (stable ≥%s)\n",
-				runtimeRequiredTaintKey, runtimeRequiredTaintValue, corev1.TaintEffectNoSchedule, gpuReadinessStabilityWindow)
+			fmt.Printf("  Nodewright runtime-required taint (%s): cleared from all nodes (stable ≥%s)\n",
+				taintStrings(gate), gpuReadinessStabilityWindow)
 		})
 }
 
-// nodewrightStatusFailures does one pass over the expected Skyhook CRs and
+// resolveNodewrightGVR discovery-gates the Nodewright CR kinds before any Get
+// by name, preferring nodewrightGVR and falling back to legacySkyhookGVR for
+// older operators. registered is false when neither group is served (the
+// caller skips per #607). Any discovery error other than NotFound fails closed
+// so a transient discovery failure cannot mask readiness.
+func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResource, registered bool, err error) {
+	for _, candidate := range []schema.GroupVersionResource{nodewrightGVR, legacySkyhookGVR} {
+		gv := candidate.GroupVersion().String()
+		_, discErr := ctx.Clientset.Discovery().ServerResourcesForGroupVersion(gv)
+		switch {
+		case discErr == nil:
+			return candidate, true, nil
+		case apierrors.IsNotFound(discErr):
+			continue
+		default:
+			return schema.GroupVersionResource{}, false, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to discover %s resources (is the API server reachable and RBAC in order?)", gv), discErr)
+		}
+	}
+	return schema.GroupVersionResource{}, false, nil
+}
+
+// nodewrightStatusFailures does one pass over the expected Nodewright CRs and
 // returns a human-readable failure string for each that is missing, unreadable,
 // or not yet status.status == "complete". An empty slice means all are complete.
 //
 // The per-name Gets are independent read-only calls, so they fan out
 // concurrently (errgroup) and each keeps its own ResourceVerificationTimeout;
 // results are written to a fixed-index slice to preserve deterministic order.
-func nodewrightStatusFailures(ctx *validators.Context, dynClient dynamic.Interface, expectedNames []string) []string {
+func nodewrightStatusFailures(ctx *validators.Context, dynClient dynamic.Interface, gvr schema.GroupVersionResource, expectedNames []string) []string {
 	results := make([]string, len(expectedNames))
 	g, gctx := errgroup.WithContext(ctx.Ctx)
 	for i, name := range expectedNames {
 		g.Go(func() error {
 			verifyCtx, cancel := context.WithTimeout(gctx, defaults.ResourceVerificationTimeout)
 			defer cancel()
-			results[i] = nodewrightStatusFailure(verifyCtx, dynClient, name)
+			results[i] = nodewrightStatusFailure(verifyCtx, dynClient, gvr, name)
 			return nil
 		})
 	}
@@ -611,10 +633,10 @@ func nodewrightStatusFailures(ctx *validators.Context, dynClient dynamic.Interfa
 	return failures
 }
 
-// nodewrightStatusFailure checks one Skyhook CR and returns a failure string, or
-// "" when it is present and status.status == "complete".
-func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interface, name string) string {
-	sk, getErr := dynClient.Resource(nodewrightGVR).Get(verifyCtx, name, metav1.GetOptions{})
+// nodewrightStatusFailure checks one Nodewright CR and returns a failure string,
+// or "" when it is present and status.status == "complete".
+func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interface, gvr schema.GroupVersionResource, name string) string {
+	sk, getErr := dynClient.Resource(gvr).Get(verifyCtx, name, metav1.GetOptions{})
 	if getErr != nil {
 		if apierrors.IsNotFound(getErr) {
 			return fmt.Sprintf("Nodewright %s: not found (recipe declared it but the cluster has no such CR)", name)
@@ -622,13 +644,13 @@ func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interf
 		return fmt.Sprintf("Nodewright %s: failed to get: %v", name, getErr)
 	}
 	// Reject a CR that is on its way out even when it still reports complete.
-	// Nodewright uses a deletion finalizer, so an expected Skyhook can sit
+	// Nodewright uses a deletion finalizer, so an expected CR can sit
 	// Terminating for a while with status.status untouched. Accepting it would
 	// report readiness on the strength of state that is about to disappear —
 	// the same false-PASS direction the Chainsaw executor already guards
 	// against by skipping ghosts on positive assertions (#2041). The nameless
 	// assert in the component health check cannot cover this: it is satisfied
-	// by any live complete Skyhook, including a stale or unrelated one, so this
+	// by any live complete CR, including a stale or unrelated one, so this
 	// per-name check is the only gate that binds liveness to the CR the recipe
 	// actually declared.
 	if sk.GetDeletionTimestamp() != nil {
@@ -647,18 +669,107 @@ func nodewrightStatusFailure(verifyCtx context.Context, dynClient dynamic.Interf
 	return ""
 }
 
+// runtimeRequiredTaints returns the workload-gate taints the deployment gate
+// waits to see cleared: the operator's configured taint, read from the
+// runtimeRequiredTaintEnv on its controller-manager Deployment, plus
+// legacyRuntimeRequiredTaint. Reading the live Deployment is what lets a
+// --workload-gate value reach the gate: the bundler writes it into the
+// operator's values, never into the recipe the validator Job is handed. The
+// Deployment is looked up in the nodewright-operator component's namespace
+// when the recipe carries that component, else in fallbackNamespace.
+//
+// When the Deployment or the env is absent the gate falls back to
+// defaultRuntimeRequiredTaint and legacyRuntimeRequiredTaint. Any other Get
+// error fails closed: "could not read the operator's config" must never be
+// read as "no taint to wait for".
+func runtimeRequiredTaints(ctx *validators.Context, refs []recipe.ComponentRef, fallbackNamespace string) ([]corev1.Taint, error) {
+	namespace := fallbackNamespace
+	if opRef, ok := findEnabledComponent(refs, nodewrightOperatorComponent); ok && opRef.Namespace != "" {
+		namespace = opRef.Namespace
+	}
+	deployRef := namespace + "/" + nodewrightOperatorDeployment
+
+	chartDefaults := func(reason string) []corev1.Taint {
+		gate := dedupeTaints(defaultRuntimeRequiredTaint, legacyRuntimeRequiredTaint)
+		fmt.Printf("  Nodewright runtime-required taint gate: %s (%s; using chart defaults)\n", taintStrings(gate), reason)
+		return gate
+	}
+
+	getCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
+	defer cancel()
+	deploy, err := ctx.Clientset.AppsV1().Deployments(namespace).Get(getCtx, nodewrightOperatorDeployment, metav1.GetOptions{})
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return nil, errors.Wrap(errors.ErrCodeInternal,
+				fmt.Sprintf("failed to read Deployment %s for the nodewright runtime-required taint gate", deployRef), err)
+		}
+		return chartDefaults("Deployment " + deployRef + " not found"), nil
+	}
+
+	for i := range deploy.Spec.Template.Spec.Containers {
+		for _, env := range deploy.Spec.Template.Spec.Containers[i].Env {
+			if env.Name != runtimeRequiredTaintEnv {
+				continue
+			}
+			configured, perr := snapshotter.ParseTaint(env.Value)
+			if perr != nil {
+				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("Deployment %s env %s=%q is not a valid taint", deployRef, runtimeRequiredTaintEnv, env.Value), perr)
+			}
+			gate := dedupeTaints(*configured, legacyRuntimeRequiredTaint)
+			fmt.Printf("  Nodewright runtime-required taint gate: %s (from Deployment %s env %s)\n",
+				taintStrings(gate), deployRef, runtimeRequiredTaintEnv)
+			return gate, nil
+		}
+	}
+	return chartDefaults("Deployment " + deployRef + " has no " + runtimeRequiredTaintEnv + " env"), nil
+}
+
+// dedupeTaints returns taints with exact duplicates (key, value, effect)
+// removed, preserving first-seen order.
+func dedupeTaints(taints ...corev1.Taint) []corev1.Taint {
+	out := make([]corev1.Taint, 0, len(taints))
+	for _, t := range taints {
+		if !isRuntimeRequiredTaint(&t, out) {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// taintStrings renders taints in kubectl's key=value:effect form for gate
+// output.
+func taintStrings(taints []corev1.Taint) string {
+	parts := make([]string, 0, len(taints))
+	for _, t := range taints {
+		parts = append(parts, t.ToString())
+	}
+	return strings.Join(parts, ", ")
+}
+
 // runtimeRequiredTaintFailures lists cluster nodes and returns a failure string
-// for each that still carries the nodewright (skyhook) runtime-required
-// NoSchedule taint — the durable "tuning not yet complete on this node" signal
-// (see runtimeRequiredTaintKey). An empty slice means the taint is cleared from
-// every node (or was never applied, e.g. a Skyhook without runtimeRequired:
-// true), so this gate is a no-op when the recipe does not opt into the feature.
+// for each that still carries any taint in gate. An empty slice means the
+// taint is cleared from every node (or was never applied, e.g. a Nodewright
+// without runtimeRequired: true), so this gate is a no-op when the recipe does
+// not opt into the feature.
+//
+// Why gate on the taint and not status.status alone: a GPU node joins carrying
+// the taint, and the operator removes it once *all* runtime-required
+// Nodewrights targeting that node are complete *on that node* (per-node, not
+// per-package). Unlike status.status — an aggregate over (packages × matching
+// nodes) that re-opens to in_progress on every package reboot and each
+// newly-joined node — the taint is applied once and removed once as the
+// monotone terminal step, so "taint absent" is a durable "done, won't reboot
+// again" signal (see issue #1775). The operator re-applies it across reboots
+// only under REAPPLY_ON_REBOOT (the gke-cos and bcm overlays); there the taint
+// flaps like the status and the stability window rides through it, so gating
+// on the taint is never weaker than gating on the status.
 //
 // A List error (transient apiserver failure, RBAC gap) is returned so the
 // caller fails closed: "could not list nodes" must never be read as "taint
 // absent". The error rides through the poll's dwell reset like any other
 // unhealthy sample.
-func runtimeRequiredTaintFailures(ctx *validators.Context) ([]string, error) {
+func runtimeRequiredTaintFailures(ctx *validators.Context, gate []corev1.Taint) ([]string, error) {
 	listCtx, cancel := ctx.Timeout(defaults.ResourceVerificationTimeout)
 	defer cancel()
 
@@ -680,10 +791,10 @@ func runtimeRequiredTaintFailures(ctx *validators.Context) ([]string, error) {
 		}
 		node := &nodes.Items[i]
 		for j := range node.Spec.Taints {
-			if isRuntimeRequiredTaint(&node.Spec.Taints[j]) {
+			if isRuntimeRequiredTaint(&node.Spec.Taints[j], gate) {
 				failures = append(failures, fmt.Sprintf(
-					"node %s: still carries the runtime-required taint %s=%s:%s (nodewright tuning not complete on this node)",
-					node.Name, runtimeRequiredTaintKey, runtimeRequiredTaintValue, corev1.TaintEffectNoSchedule))
+					"node %s: still carries the runtime-required taint %s (nodewright tuning not complete on this node)",
+					node.Name, node.Spec.Taints[j].ToString()))
 				break
 			}
 		}
@@ -691,14 +802,16 @@ func runtimeRequiredTaintFailures(ctx *validators.Context) ([]string, error) {
 	return failures, nil
 }
 
-// isRuntimeRequiredTaint reports whether t is the nodewright (skyhook)
-// runtime-required workload-gate taint. It matches on key+value and requires the
-// NoSchedule effect so an unrelated taint that happens to share the key cannot
-// mask an in-flight tuning.
-func isRuntimeRequiredTaint(t *corev1.Taint) bool {
-	return t.Key == runtimeRequiredTaintKey &&
-		t.Value == runtimeRequiredTaintValue &&
-		t.Effect == corev1.TaintEffectNoSchedule
+// isRuntimeRequiredTaint reports whether t exactly matches (key, value and
+// effect) any taint in gate. Requiring the effect too means an unrelated taint
+// that happens to share the key cannot mask an in-flight tuning.
+func isRuntimeRequiredTaint(t *corev1.Taint, gate []corev1.Taint) bool {
+	for i := range gate {
+		if t.Key == gate[i].Key && t.Value == gate[i].Value && t.Effect == gate[i].Effect {
+			return true
+		}
+	}
+	return false
 }
 
 // gatedHealthCheckSuppressed dispatches the render-aware static-assert
@@ -895,14 +1008,14 @@ func expectedNodewrightNames(ref recipe.ComponentRef) ([]string, error) {
 // These patterns make three chart-shape assumptions that hold across every
 // manifest AICR ships today (tuning, no-op, tuning-gke in
 // recipes/components/nodewright-customizations/manifests/):
-//   - "kind: Skyhook" sits at column 0.
+//   - "kind: Skyhook" (or its v0.18.0 rename "kind: NodeWright") sits at column 0.
 //   - The metadata.name of each Nodewright is a literal string (not templated)
 //     at exactly 2-space indent under a top-level "metadata:" block.
 //   - Document separators use a bare "---" on its own line.
 //
 // If those shapes change, the helper's direct unit tests fail loudly.
 var (
-	nodewrightKindRE         = regexp.MustCompile(`(?m)^kind:\s*Skyhook\s*$`)
+	nodewrightKindRE         = regexp.MustCompile(`(?m)^kind:\s*(Skyhook|NodeWright)\s*$`)
 	nodewrightDocSeparatorRE = regexp.MustCompile(`(?m)^---\s*$`)
 	nodewrightMetadataNameRE = regexp.MustCompile(`(?m)^  name:\s+(\S+)\s*$`)
 )

@@ -734,6 +734,18 @@ spec:
 			want: []string{"tuning"},
 		},
 		{
+			name: "renamed kind (nodewright-operator v0.18.0) is captured too",
+			content: []byte(`---
+apiVersion: nodewright.nvidia.com/v1alpha1
+kind: NodeWright
+metadata:
+  name: tuning
+spec:
+  runtimeRequired: true
+`),
+			want: []string{"tuning"},
+		},
+		{
 			name: "multi-document manifest — both Skyhook names captured",
 			content: []byte(`---
 apiVersion: skyhook.nvidia.com/v1alpha1
@@ -981,17 +993,22 @@ func TestVerifyNodewrightReady_TolerantWhenAllCRsSuppressed(t *testing.T) {
 	ctx := newDeploymentTestContext(t, []runtime.Object{activeNamespace("skyhook")}, nil,
 		[]recipe.ComponentRef{ref})
 
-	if err := verifyNodewrightReady(ctx, ref); err != nil {
+	if err := verifyNodewrightReady(ctx, ref, []corev1.Taint{legacyRuntimeRequiredTaint}); err != nil {
 		t.Fatalf("verifyNodewrightReady() error = %v, want nil (all CRs suppressed by effective values)", err)
 	}
 }
 
-// TestIsRuntimeRequiredTaint pins the matcher: only the exact key+value with the
-// NoSchedule effect gates. A taint that shares the key but differs in value or
-// effect must not be mistaken for an in-flight tuning (or the gate would block
-// forever on an unrelated taint).
+// TestIsRuntimeRequiredTaint pins the matcher: only an exact key+value+effect
+// match against the gate counts. A taint that shares the key but differs in
+// value or effect must not be mistaken for an in-flight tuning (or the gate
+// would block forever on an unrelated taint).
 func TestIsRuntimeRequiredTaint(t *testing.T) {
 	t.Parallel()
+
+	// A custom configured taint (as --workload-gate would set) plus the legacy
+	// default: the shape runtimeRequiredTaints produces.
+	custom := corev1.Taint{Key: "custom.io/gate", Value: "true", Effect: corev1.TaintEffectNoExecute}
+	gate := []corev1.Taint{custom, legacyRuntimeRequiredTaint}
 
 	tests := []struct {
 		name  string
@@ -999,18 +1016,28 @@ func TestIsRuntimeRequiredTaint(t *testing.T) {
 		want  bool
 	}{
 		{
-			name:  "exact runtime-required NoSchedule",
-			taint: corev1.Taint{Key: runtimeRequiredTaintKey, Value: runtimeRequiredTaintValue, Effect: corev1.TaintEffectNoSchedule},
+			name:  "exact legacy runtime-required NoSchedule",
+			taint: legacyRuntimeRequiredTaint,
 			want:  true,
 		},
 		{
-			name:  "right key+value but NoExecute effect",
-			taint: corev1.Taint{Key: runtimeRequiredTaintKey, Value: runtimeRequiredTaintValue, Effect: corev1.TaintEffectNoExecute},
+			name:  "exact configured taint, including its non-NoSchedule effect",
+			taint: custom,
+			want:  true,
+		},
+		{
+			name:  "legacy key+value but NoExecute effect",
+			taint: corev1.Taint{Key: legacyRuntimeRequiredTaint.Key, Value: legacyRuntimeRequiredTaint.Value, Effect: corev1.TaintEffectNoExecute},
 			want:  false,
 		},
 		{
-			name:  "right key but different value",
-			taint: corev1.Taint{Key: runtimeRequiredTaintKey, Value: "something-else", Effect: corev1.TaintEffectNoSchedule},
+			name:  "legacy key but different value",
+			taint: corev1.Taint{Key: legacyRuntimeRequiredTaint.Key, Value: "something-else", Effect: corev1.TaintEffectNoSchedule},
+			want:  false,
+		},
+		{
+			name:  "chart default is not gated once a custom taint is configured",
+			taint: defaultRuntimeRequiredTaint,
 			want:  false,
 		},
 		{
@@ -1023,8 +1050,237 @@ func TestIsRuntimeRequiredTaint(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := isRuntimeRequiredTaint(&tt.taint); got != tt.want {
+			if got := isRuntimeRequiredTaint(&tt.taint, gate); got != tt.want {
 				t.Errorf("isRuntimeRequiredTaint(%+v) = %v, want %v", tt.taint, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRuntimeRequiredTaints pins the gate derivation: the operator Deployment's
+// RUNTIME_REQUIRED_TAINT env plus the legacy default; the chart defaults when
+// the Deployment or env is absent; fail closed on any other read error or an
+// unparseable value.
+func TestRuntimeRequiredTaints(t *testing.T) {
+	t.Parallel()
+
+	const ns = "skyhook"
+	custom := corev1.Taint{Key: "custom.io/gate", Value: "true", Effect: corev1.TaintEffectNoExecute}
+	defaultsGate := []corev1.Taint{defaultRuntimeRequiredTaint, legacyRuntimeRequiredTaint}
+
+	tests := []struct {
+		name       string
+		objects    []runtime.Object
+		refs       []recipe.ComponentRef
+		getErr     error
+		want       []corev1.Taint
+		wantErrSub string
+	}{
+		{
+			name:    "custom env value gates that taint plus the legacy default",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv(ns, custom.ToString())},
+			refs:    []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want:    []corev1.Taint{custom, legacyRuntimeRequiredTaint},
+		},
+		{
+			name:    "legacy env value is not duplicated",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv(ns, legacyRuntimeRequiredTaint.ToString())},
+			refs:    []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want:    []corev1.Taint{legacyRuntimeRequiredTaint},
+		},
+		{
+			name:    "operator ref namespace wins over the fallback namespace",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv("operator-ns", custom.ToString())},
+			refs:    []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: "operator-ns"}},
+			want:    []corev1.Taint{custom, legacyRuntimeRequiredTaint},
+		},
+		{
+			name:    "no operator ref falls back to the customizations namespace",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv(ns, custom.ToString())},
+			want:    []corev1.Taint{custom, legacyRuntimeRequiredTaint},
+		},
+		{
+			name:    "env absent uses the chart defaults",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnv(ns, "")},
+			refs:    []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want:    defaultsGate,
+		},
+		{
+			name: "deployment absent uses the chart defaults",
+			refs: []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want: defaultsGate,
+		},
+		{
+			name:       "unparseable env value fails closed",
+			objects:    []runtime.Object{nodewrightOperatorDeploymentWithEnv(ns, "not-a-taint")},
+			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			wantErrSub: "is not a valid taint",
+		},
+		{
+			name:       "non-NotFound read error fails closed",
+			getErr:     apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, nodewrightOperatorDeployment, stderrors.New("forbidden")),
+			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			wantErrSub: "failed to read Deployment",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			clientset := k8sfake.NewClientset(tt.objects...)
+			if tt.getErr != nil {
+				clientset.PrependReactor("get", "deployments", func(clienttesting.Action) (bool, runtime.Object, error) {
+					return true, nil, tt.getErr
+				})
+			}
+			ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
+
+			got, err := runtimeRequiredTaints(ctx, tt.refs, ns)
+			if tt.wantErrSub != "" {
+				if err == nil {
+					t.Fatalf("runtimeRequiredTaints() error = nil, want error containing %q", tt.wantErrSub)
+				}
+				if !strings.Contains(err.Error(), tt.wantErrSub) {
+					t.Fatalf("runtimeRequiredTaints() error = %v, want substring %q", err, tt.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("runtimeRequiredTaints() error = %v, want nil", err)
+			}
+			if len(got) != len(tt.want) {
+				t.Fatalf("runtimeRequiredTaints() = %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("runtimeRequiredTaints()[%d] = %+v, want %+v", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestCheckExpectedResources_GatesOnConfiguredTaint proves the end-to-end
+// wiring: with the operator configured for a custom --workload-gate taint, a
+// node carrying that taint keeps the gate closed even though the CR is
+// complete, and a node carrying only the (now unconfigured) chart default does
+// not.
+func TestCheckExpectedResources_GatesOnConfiguredTaint(t *testing.T) {
+	t.Parallel()
+
+	custom := corev1.Taint{Key: "custom.io/gate", Value: "true", Effect: corev1.TaintEffectNoSchedule}
+	refs := []recipe.ComponentRef{
+		{Name: nodewrightOperatorComponent, Namespace: "skyhook"},
+		{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
+	}
+
+	tests := []struct {
+		name       string
+		node       *corev1.Node
+		wantErrSub string
+	}{
+		{
+			name:       "node carrying the configured taint blocks",
+			node:       nodeWithTaints("gpu-node-0", custom),
+			wantErrSub: "node gpu-node-0: still carries the runtime-required taint custom.io/gate=true:NoSchedule",
+		},
+		{
+			name:       "node carrying the legacy taint still blocks",
+			node:       nodeWithRuntimeRequiredTaint("gpu-node-0"),
+			wantErrSub: "node gpu-node-0: still carries the runtime-required taint",
+		},
+		{
+			name: "node carrying only the unconfigured chart default passes",
+			node: nodeWithTaints("gpu-node-0", defaultRuntimeRequiredTaint),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := newDeploymentTestContext(t,
+				[]runtime.Object{
+					activeNamespace("skyhook"),
+					nodewrightOperatorDeploymentWithEnv("skyhook", custom.ToString()),
+					tt.node,
+				},
+				[]runtime.Object{nodeWrightWithStatus("tuning", nodewrightCompleteState)},
+				refs,
+			)
+
+			err := checkExpectedResources(ctx)
+			if tt.wantErrSub == "" {
+				if err != nil {
+					t.Fatalf("checkExpectedResources() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("checkExpectedResources() error = nil, want error containing %q", tt.wantErrSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantErrSub) {
+				t.Fatalf("checkExpectedResources() error = %v, want substring %q", err, tt.wantErrSub)
+			}
+		})
+	}
+}
+
+// TestVerifyNodewrightReady_PrefersNodeWrightOverLegacySkyhook pins the #2593
+// fix. nodewright-operator v0.18.0 mirrors each legacy Skyhook into a
+// NodeWright and writes status only there; the legacy status stays empty. With
+// both groups registered the gate must read the NodeWright, so a fully tuned
+// cluster passes instead of timing out on the never-populated legacy status.
+// The legacy-only row proves the fallback for older operators.
+func TestVerifyNodewrightReady_PrefersNodeWrightOverLegacySkyhook(t *testing.T) {
+	t.Parallel()
+
+	ref := recipe.ComponentRef{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}}
+
+	tests := []struct {
+		name       string
+		objects    []runtime.Object
+		wantErrSub string
+	}{
+		{
+			name: "v0.18.0 shape: NodeWright complete, legacy Skyhook status empty",
+			objects: []runtime.Object{
+				nodeWrightWithStatus("tuning", nodewrightCompleteState),
+				nodewrightWithStatus("tuning", ""),
+			},
+		},
+		{
+			name: "v0.18.0 shape: NodeWright in_progress is what gates, not the legacy copy",
+			objects: []runtime.Object{
+				nodeWrightWithStatus("tuning", "in_progress"),
+				nodewrightWithStatus("tuning", nodewrightCompleteState),
+			},
+			wantErrSub: "Nodewright tuning: status=in_progress (want complete)",
+		},
+		{
+			name:    "legacy-only operator: falls back to the Skyhook",
+			objects: []runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := newDeploymentTestContext(t, []runtime.Object{activeNamespace("skyhook")}, tt.objects, []recipe.ComponentRef{ref})
+			err := verifyNodewrightReady(ctx, ref, []corev1.Taint{legacyRuntimeRequiredTaint})
+			if tt.wantErrSub == "" {
+				if err != nil {
+					t.Fatalf("verifyNodewrightReady() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("verifyNodewrightReady() error = nil, want error containing %q", tt.wantErrSub)
+			}
+			if !strings.Contains(err.Error(), tt.wantErrSub) {
+				t.Fatalf("verifyNodewrightReady() error = %v, want substring %q", err, tt.wantErrSub)
 			}
 		})
 	}
@@ -1172,8 +1428,10 @@ func newFakeDynamicClient(objects []runtime.Object, unregistered ...schema.Group
 
 func gvrForTestObject(gvk schema.GroupVersionKind) schema.GroupVersionResource {
 	switch {
-	case gvk.Group == nodewrightGVR.Group && gvk.Version == nodewrightGVR.Version && gvk.Kind == "Skyhook":
+	case gvk.Group == nodewrightGVR.Group && gvk.Version == nodewrightGVR.Version && gvk.Kind == "NodeWright":
 		return nodewrightGVR
+	case gvk.Group == legacySkyhookGVR.Group && gvk.Version == legacySkyhookGVR.Version && gvk.Kind == "Skyhook":
+		return legacySkyhookGVR
 	default:
 		return schema.GroupVersionResource{
 			Group:    gvk.Group,
@@ -1201,7 +1459,8 @@ func (f *fakeDynamicClient) Resource(resource schema.GroupVersionResource) dynam
 // (which real k8s answers with a 404 "server could not find the requested
 // resource", not a silently empty list).
 var clusterScopedGVRs = map[schema.GroupVersionResource]bool{
-	nodewrightGVR: true,
+	nodewrightGVR:    true,
+	legacySkyhookGVR: true,
 }
 
 type fakeResourceClient struct {
@@ -1397,19 +1656,26 @@ func nodeWithTaints(name string, taints ...corev1.Taint) *corev1.Node {
 	}
 }
 
-// nodeWithRuntimeRequiredTaint builds a Node fixture carrying the nodewright
-// runtime-required NoSchedule taint the readiness gate blocks on.
+// nodeWithRuntimeRequiredTaint builds a Node fixture carrying the legacy
+// nodewright runtime-required NoSchedule taint the readiness gate blocks on.
 func nodeWithRuntimeRequiredTaint(name string) *corev1.Node {
-	return nodeWithTaints(name, corev1.Taint{
-		Key:    runtimeRequiredTaintKey,
-		Value:  runtimeRequiredTaintValue,
-		Effect: corev1.TaintEffectNoSchedule,
-	})
+	return nodeWithTaints(name, legacyRuntimeRequiredTaint)
 }
 
-// nodewrightWithStatus builds a Nodewright fixture. Nodewright is a cluster-scoped CR,
-// so metadata.namespace is intentionally not set.
-// nodewrightTerminatingWithStatus builds a Skyhook that is mid-deletion
+// nodewrightOperatorDeploymentWithEnv builds the operator's controller-manager
+// Deployment fixture with the given RUNTIME_REQUIRED_TAINT env value; an empty
+// value omits the env entirely (an older chart).
+func nodewrightOperatorDeploymentWithEnv(namespace, taintStr string) *appsv1.Deployment {
+	d := readyDeployment(namespace, nodewrightOperatorDeployment, 1)
+	container := corev1.Container{Name: "manager"}
+	if taintStr != "" {
+		container.Env = []corev1.EnvVar{{Name: runtimeRequiredTaintEnv, Value: taintStr}}
+	}
+	d.Spec.Template.Spec.Containers = []corev1.Container{container}
+	return d
+}
+
+// nodewrightTerminatingWithStatus builds a legacy Skyhook that is mid-deletion
 // (deletionTimestamp set, as Nodewright's finalizer leaves it) while still
 // reporting the given status. The combination is the trap: status.status alone
 // says "ready" about a CR that is on its way out.
@@ -1421,10 +1687,22 @@ func nodewrightTerminatingWithStatus(name, status string) *unstructured.Unstruct
 	return sk
 }
 
+// nodeWrightWithStatus builds a nodewright.nvidia.com NodeWright fixture (the
+// kind nodewright-operator v0.18.0+ writes status on). Cluster-scoped, so
+// metadata.namespace is intentionally not set.
+func nodeWrightWithStatus(name, status string) *unstructured.Unstructured {
+	nw := nodewrightWithStatus(name, status)
+	nw.Object["apiVersion"] = nodewrightGVR.GroupVersion().String()
+	nw.Object["kind"] = "NodeWright"
+	return nw
+}
+
+// nodewrightWithStatus builds a legacy skyhook.nvidia.com Skyhook fixture.
+// Cluster-scoped, so metadata.namespace is intentionally not set.
 func nodewrightWithStatus(name, status string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
 		Object: map[string]any{
-			"apiVersion": "skyhook.nvidia.com/v1alpha1",
+			"apiVersion": legacySkyhookGVR.GroupVersion().String(),
 			"kind":       "Skyhook",
 			"metadata": map[string]any{
 				"name": name,

@@ -275,8 +275,10 @@ nodewright_available=$(kubectl get deploy -n {{ .Namespace }} -l app.kubernetes.
 if [[ "${nodewright_available}" == "0" || -z "${nodewright_available}" ]]; then
   # Extract the taint key from bundle values. The YAML value is a taint string
   # like "custom.io/gate=true:NoSchedule" — extract the key before the first "=".
-  # If runtimeRequiredTaint is not set, use the default skyhook.nvidia.com.
-  NODEWRIGHT_TAINT_KEY="skyhook.nvidia.com"
+  # If runtimeRequiredTaint is not set, cover both keys the operator recognises:
+  # its chart default (nodewright.nvidia.com, v0.18.0+) and the legacy default
+  # (skyhook.nvidia.com) node pools may still pre-taint with.
+  NODEWRIGHT_TAINT_KEYS="nodewright.nvidia.com skyhook.nvidia.com"
   # Locate nodewright-operator's NNN-prefixed directory at runtime.
   nodewright_dir="$(ls -d "${SCRIPT_DIR}"/[0-9][0-9][0-9]-nodewright-operator 2>/dev/null | head -1)"
   if [[ -n "${nodewright_dir}" && -f "${nodewright_dir}/values.yaml" ]]; then
@@ -285,19 +287,21 @@ if [[ "${nodewright_available}" == "0" || -z "${nodewright_available}" ]]; then
       taint_value=$(echo "${custom_taint_line}" | sed 's/.*runtimeRequiredTaint:[[:space:]]*//' | tr -d '"' | tr -d "'")
       if [[ -n "${taint_value}" ]]; then
         # Handle both key=value:effect and key:effect formats
-        NODEWRIGHT_TAINT_KEY="${taint_value%%=*}"
-        NODEWRIGHT_TAINT_KEY="${NODEWRIGHT_TAINT_KEY%%:*}"
+        NODEWRIGHT_TAINT_KEYS="${taint_value%%=*}"
+        NODEWRIGHT_TAINT_KEYS="${NODEWRIGHT_TAINT_KEYS%%:*}"
       fi
     fi
   fi
-  stale_nodewright=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.taints[*]}{.key}{" "}{end}{"\n"}{end}' 2>/dev/null | grep "${NODEWRIGHT_TAINT_KEY}" | awk '{print $1}' || true)
-  if [[ -n "${stale_nodewright}" ]]; then
-    echo "WARNING: nodes with stale ${NODEWRIGHT_TAINT_KEY} taints (no running nodewright-operator): ${stale_nodewright}"
-    echo "  Removing stale taints to unblock scheduling..."
-    for node in ${stale_nodewright}; do
-      kubectl taint node "${node}" "${NODEWRIGHT_TAINT_KEY}-" 2>/dev/null || true
-    done
-  fi
+  for NODEWRIGHT_TAINT_KEY in ${NODEWRIGHT_TAINT_KEYS}; do
+    stale_nodewright=$(kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{" "}{range .spec.taints[*]}{.key}{" "}{end}{"\n"}{end}' 2>/dev/null | grep "${NODEWRIGHT_TAINT_KEY}" | awk '{print $1}' || true)
+    if [[ -n "${stale_nodewright}" ]]; then
+      echo "WARNING: nodes with stale ${NODEWRIGHT_TAINT_KEY} taints (no running nodewright-operator): ${stale_nodewright}"
+      echo "  Removing stale taints to unblock scheduling..."
+      for node in ${stale_nodewright}; do
+        kubectl taint node "${node}" "${NODEWRIGHT_TAINT_KEY}-" 2>/dev/null || true
+      done
+    fi
+  done
 fi
 {{- end }}
 {{- end }}

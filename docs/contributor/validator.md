@@ -1190,7 +1190,7 @@ cannot see the component's effective Helm values. That is a problem for a
 manifest whose whole resource is gated behind a value: e.g.
 `--set nodewrightcustomizations:tuningEnabled=false` on a single-package
 tuning manifest (`tuning-gke.yaml` / `tuning-generic.yaml`) suppresses the
-entire `tuning` Skyhook CR, so an unconditional
+entire `tuning` Nodewright CR, so an unconditional
 `assert status.status: complete` would fail on a deliberately-untuned
 cluster. The deployment validator resolves this by rendering the
 component's manifests with the effective values
@@ -1223,6 +1223,17 @@ into the validator image):
   overlay/inline override is the only channel.) `Overrides` resolved from a
   `--data` overlay *are* honored, because recipe resolution runs CLI-side and
   bakes them into the serialized recipe before the Job receives it.
+- **`--workload-gate` is the exception, honored via the cluster.** The bundler
+  writes the taint into the nodewright-operator values
+  (`controllerManager.manager.env.runtimeRequiredTaint`), which the chart
+  renders as the `RUNTIME_REQUIRED_TAINT` env on the
+  `skyhook-operator-controller-manager` Deployment. The Go readiness check
+  reads that env from the live Deployment (`runtimeRequiredTaints`) and gates
+  on exactly that taint plus the legacy `skyhook.nvidia.com=runtime-required:NoSchedule`
+  the operator still removes during its deprecation window, so an arbitrary
+  key, value, or effect passed at bundle time is what the validator waits to
+  see cleared. When the Deployment or env is absent it falls back to the two
+  chart defaults; any other read error fails closed.
 - **`--data`-external files referenced by path are not readable in the Job.**
   A component whose `manifestFiles` or base `valuesFile` exist only in an
   external `--data` directory cannot be read by the embedded-only validator
