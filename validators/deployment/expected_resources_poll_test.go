@@ -86,7 +86,7 @@ func TestVerifyNodewrightReady_Poll(t *testing.T) {
 			ctx := newDeploymentTestContextWithDynamic(t,
 				[]runtime.Object{activeNamespace("skyhook")}, dyn, []recipe.ComponentRef{ref})
 
-			err := verifyNodewrightReady(ctx, ref)
+			err := verifyNodewrightReady(ctx, ref, []corev1.Taint{legacyRuntimeRequiredTaint})
 			if tt.wantErrSub != "" {
 				if err == nil {
 					t.Fatalf("verifyNodewrightReady() error = nil, want error containing %q", tt.wantErrSub)
@@ -157,7 +157,7 @@ func TestVerifyNodewrightReady_RidesThroughRuntimeRequiredTaint(t *testing.T) {
 				return true, &corev1.NodeList{Items: []corev1.Node{*node}}, nil
 			})
 
-			err := verifyNodewrightReady(ctx, ref)
+			err := verifyNodewrightReady(ctx, ref, []corev1.Taint{legacyRuntimeRequiredTaint})
 			if tt.wantErrSub != "" {
 				if err == nil {
 					t.Fatalf("verifyNodewrightReady() error = nil, want error containing %q", tt.wantErrSub)
@@ -189,7 +189,7 @@ func TestRuntimeRequiredTaintFailures_FailsClosedOnListError(t *testing.T) {
 	})
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	failures, err := runtimeRequiredTaintFailures(ctx)
+	failures, err := runtimeRequiredTaintFailures(ctx, []corev1.Taint{legacyRuntimeRequiredTaint})
 	if err == nil {
 		t.Fatal("expected an error when listing nodes fails, got nil (must fail closed)")
 	}
@@ -337,8 +337,8 @@ func TestPollUntilStable_TimesOutWhenNeverHoldsWindow(t *testing.T) {
 }
 
 // newDeploymentTestContextWithDynamic builds a validators.Context with the
-// skyhook GroupVersion registered in discovery and a caller-supplied dynamic
-// client, so tests can drive time-varying Skyhook status.
+// nodewright GroupVersion registered in discovery and a caller-supplied dynamic
+// client, so tests can drive time-varying Nodewright status.
 func newDeploymentTestContextWithDynamic(
 	t *testing.T,
 	kubeObjects []runtime.Object,
@@ -361,7 +361,7 @@ func newDeploymentTestContextWithDynamic(
 	}
 }
 
-// flippingDynamicClient returns a Skyhook CR whose status.status advances
+// flippingDynamicClient returns a Nodewright CR whose status.status advances
 // through a scripted sequence on successive Get calls (the last entry repeats),
 // simulating the complete→in_progress→complete flaps a reboot introduces. It is
 // safe for concurrent use.

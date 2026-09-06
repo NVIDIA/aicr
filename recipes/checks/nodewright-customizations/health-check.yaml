@@ -14,19 +14,29 @@
 
 # Nodewright Customizations Health Check
 #
-# Validates that the Skyhook custom resource(s) deployed by the nodewright-customizations
-# component have completed successfully. The Skyhook CR status.status (see
-# github.com/NVIDIA/nodewright/chart/templates/skyhook-crd.yaml) is one of: unknown,
+# Validates that the NodeWright custom resource(s) deployed by the nodewright-customizations
+# component have completed successfully. The NodeWright CR status.status (see
+# github.com/NVIDIA/nodewright/chart/templates/nodewright-crd.yaml) is one of: unknown,
 # complete, blocked, waiting, disabled, paused, in_progress, erroring. This check
 # asserts status.status is "complete" so that node-level customizations (e.g. tuning)
 # have been applied to all matching nodes.
 #
+# Kind (#2593): nodewright-operator v0.18.0 (the registry pin) renamed
+# skyhook.nvidia.com Skyhook to nodewright.nvidia.com NodeWright. The operator
+# mirrors each legacy Skyhook into a NodeWright and writes status ONLY on the
+# NodeWright, so asserting the legacy kind never sees "complete" even on a fully
+# tuned cluster. The manifests may still declare Skyhook; the mirrored NodeWright
+# of the same name is what carries the status. A static assert cannot fall back,
+# so this check follows the pinned operator; the Go readiness check
+# (verifyNodewrightReady) reads NodeWright and falls back to Skyhook for older
+# operators.
+#
 # Value-gate awareness (#1844): this static assert cannot see the component's
-# effective Helm values, so it would fail when the whole `tuning` Skyhook CR is
+# effective Helm values, so it would fail when the whole `tuning` CR is
 # deliberately suppressed — e.g. `--set nodewrightcustomizations:tuningEnabled=false`
 # on a single-package tuning manifest (tuning-gke.yaml / tuning-generic.yaml). The
 # deployment validator therefore renders the component's manifests with the
-# effective values and skips this assert when they yield no Skyhook CR (see
+# effective values and skips this assert when they yield no Nodewright CR (see
 # nodewrightHealthCheckSuppressed in validators/deployment/expected_resources.go).
 # The skip is fail-closed: whenever the values keep the CR, the render still lists
 # it and this assert runs — only an intentionally-absent CR is tolerated. The
@@ -48,10 +58,10 @@ spec:
   timeouts:
     assert: 5m
   steps:
-    - name: validate-skyhook-cr-complete
+    - name: validate-nodewright-cr-complete
       try:
-        # Assert a Skyhook CR has status.status == "complete" per the Skyhook
-        # CRD schema. Skyhook is cluster-scoped.
+        # Assert a NodeWright CR has status.status == "complete" per the
+        # NodeWright CRD schema. NodeWright is cluster-scoped.
         #
         # Deliberately name-agnostic. The manifests do not agree on a name —
         # tuning.yaml / tuning-gke.yaml / tuning-generic.yaml render "tuning"
@@ -60,7 +70,7 @@ spec:
         # manifest. A nameless assert uses the executor's list-and-match path
         # (pkg/chainsaw/inprocess.go): it fails closed when the collection is
         # empty (ErrCodeNotFound, not a vacuous pass) and passes when a live,
-        # non-terminating Skyhook reports complete.
+        # non-terminating NodeWright reports complete.
         #
         # Per-CR completeness is not weakened by this: the render-aware Go
         # readiness check (verifyNodewrightReady) derives the expected CR names
@@ -68,10 +78,10 @@ spec:
         # them to be live (not Terminating) and complete, reporting each failure
         # by name. That per-name gate is what binds readiness to the CRs the
         # recipe declared — this assert alone would accept a stale or unrelated
-        # complete Skyhook.
+        # complete NodeWright.
         - assert:
             resource:
-              apiVersion: skyhook.nvidia.com/v1alpha1
-              kind: Skyhook
+              apiVersion: nodewright.nvidia.com/v1alpha1
+              kind: NodeWright
               status:
                 status: complete
