@@ -606,15 +606,16 @@ the Helm uninstall in its namespace, the CRD pattern match, and the namespace
 deletion. Fence it out of all three phases:
 
 ```bash
-tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com
+tools/cleanup --exclude-ns skyhook --exclude-crd skyhook.nvidia.com,nodewright.nvidia.com
 ```
 
 Both flags are repeatable and accept comma-separated values. `--exclude-ns`
 protects a namespace from Helm uninstall and namespace deletion; `--exclude-crd`
 protects CRDs whose name contains the given match from deletion, applied *after*
 pattern matching so a broad pattern (`nvidia.com`) cannot pull an excluded
-group's CRDs (`skyhook.nvidia.com`) back in. Run with `--dry-run` first to
-confirm what will and will not be removed.
+group's CRDs (`skyhook.nvidia.com`, and its v0.18.0 rename
+`nodewright.nvidia.com`) back in. Run with `--dry-run` first to confirm what
+will and will not be removed.
 
 ### Debugging Tests
 

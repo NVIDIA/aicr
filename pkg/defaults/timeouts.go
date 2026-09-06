@@ -441,12 +441,12 @@ const (
 )
 
 // GPU deployment-readiness poll configuration. The deployment-phase Go checks
-// verifyNodewrightReady (Skyhook status.status == "complete") and
+// verifyNodewrightReady (NodeWright status.status == "complete") and
 // verifyDRAKubeletPluginReady (DRA kubelet-plugin DaemonSet fully rolled out)
 // poll their signal until it is healthy *continuously* for the stability
 // window, or the timeout elapses.
 //
-// Rationale: Skyhook node tuning reboots the GPU node one or more times (the
+// Rationale: Nodewright node tuning reboots the GPU node one or more times (the
 // tuning packages carry interrupt: reboot) and re-opens status=in_progress
 // after each reboot and for each newly-joined GPU node. While a GPU node is
 // draining/rebooting/rejoining, the DRA kubelet-plugin DaemonSet also churns:
