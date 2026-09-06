@@ -289,6 +289,21 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 	},
 }
 
+// resolveRuntimeImageForBakedInPath resolves the AICR_NCCL_RUNTIME_IMAGE
+// override, but only for the baked-in template path — mirroring the
+// AICR_NCCL_FABRIC gate: a recipe-supplied runtime owns its own workload
+// image end to end (issue #1751), so a malformed override must not fail
+// it. Validated up front — before any cluster discovery or TrainJob spend
+// — so a typo'd image reference fails fast rather than after minutes of
+// setup. Extracted out of validateNcclAllReduceBw to keep that function
+// under the funlen statement limit.
+func resolveRuntimeImageForBakedInPath(customRuntime string) (string, error) {
+	if customRuntime != "" {
+		return "", nil
+	}
+	return resolveNCCLRuntimeImage()
+}
+
 // validateNcclAllReduceBw validates NCCL All Reduce bandwidth using Kubeflow TrainJob + MPI.
 // Each platform has its own TrainingRuntime; the TrainJob is shared (just runtimeRef + numNodes).
 // The variant selects a transport-class template (NET, NVLS) when the recipe needs per-fabric
@@ -349,6 +364,11 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 		if err != nil {
 			return "", false, err
 		}
+	}
+
+	runtimeImage, err := resolveRuntimeImageForBakedInPath(customRuntime)
+	if err != nil {
+		return "", false, err
 	}
 
 	if profile != nil {
@@ -458,7 +478,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Run the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
 	// Each platform has a per-platform TrainingRuntime with all platform-specific
 	// configuration (image, mpirun args, resources, sidecars). The TrainJob is shared.
-	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime)
+	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime, runtimeImage)
 	if err != nil {
 		return "", false, err
 	}
@@ -497,6 +517,12 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Check if bandwidth meets threshold (within 10% tolerance)
 	passed := bandwidth >= (threshold * 0.9)
 	actualValue := fmt.Sprintf("%.2f GB/s", bandwidth)
+	// Surface the resolved workload image in the structured evidence, not just
+	// slog output — issue #1751 criterion (c) asks for both. Omitted when the
+	// override wasn't set (the common case) to avoid noising every result.
+	if runtimeImage != "" {
+		actualValue = fmt.Sprintf("%.2f GB/s (runtime image: %s)", bandwidth, runtimeImage)
+	}
 
 	if passed {
 		slog.Info("Bandwidth validation passed", "bandwidth", bandwidth, "threshold", threshold*0.9, "tolerance", "10%")
@@ -813,7 +839,7 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 // pod to complete, and returns the benchmark logs.
 func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType,
-	customRuntime string) (logs string, err error) {
+	customRuntime string, runtimeImage string) (logs string, err error) {
 
 	dynamicClient := ctx.DynamicClient
 
@@ -905,7 +931,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// Apply runtime and trainjob resources. Propagate an inner code rather than
 	// forcing ErrCodeInternal — a recipe-supplied runtime that fails to render is
 	// an ErrCodeInvalidRequest (recipe-authoring error), not an internal fault.
-	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service, variant, fabric, customRuntime); applyErr != nil {
+	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service, variant, fabric, customRuntime, runtimeImage); applyErr != nil {
 		return "", aicrErrors.PropagateOrWrap(applyErr, aicrErrors.ErrCodeInternal, "failed to apply NCCL resources")
 	}
 
@@ -1219,8 +1245,8 @@ func uniformGPUCountPerNode(nodes []v1.Node) (int, error) {
 // YAML files with template substitution using the dynamic client.
 // Runtime: testdata/{accelerator}/{service}/runtime[-{variant}].yaml (per-platform+variant)
 // TrainJob: testdata/trainjob.yaml (shared, just runtimeRef + numNodes)
-func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface, config *gpuConfiguration, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType, customRuntime string) error {
-	slog.Info("Applying NCCL test resources...", "accelerator", accelerator, "service", service, "variant", string(variant), "fabric", string(fabric), "customRuntime", customRuntime != "")
+func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface, config *gpuConfiguration, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType, customRuntime string, runtimeImage string) error {
+	slog.Info("Applying NCCL test resources...", "accelerator", accelerator, "service", service, "variant", string(variant), "fabric", string(fabric), "customRuntime", customRuntime != "", "runtimeImageOverride", runtimeImage != "")
 
 	templateData := map[string]string{
 		"NAMESPACE":          config.Namespace,
@@ -1326,8 +1352,26 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	if err != nil {
 		return err
 	}
-	if err = applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", err)
+	// Render the resolved workload image into every launcher/worker container
+	// this override governs (issue #1751). No-op when runtimeImage == "";
+	// applyNCCLResources is only called with a non-empty override on the
+	// baked-in template path — a recipe-supplied runtime (customRuntime != "")
+	// is never reachable here with runtimeImage set, since the resolve site in
+	// validateNcclAllReduceBw gates resolution on customRuntime == "".
+	// Defense in depth: even though the only current caller
+	// (validateNcclAllReduceBw) already gates runtimeImage resolution on
+	// customRuntime == "", applyNCCLResources must not silently overwrite a
+	// recipe-supplied image if ever called with both non-empty — the
+	// recipe-supplied runtime owns its image, full stop. This is the guard
+	// TestApplyNCCLResourcesRuntimeImageOverride's custom-runtime subtest
+	// (mchmarny, 691b3b3 review) asserts.
+	if customRuntime == "" {
+		if overrideErr := applyNCCLRuntimeImageOverride(runtimeObj, runtimeImage); overrideErr != nil {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL runtime image override", overrideErr)
+		}
+	}
+	if schedErr := applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); schedErr != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", schedErr)
 	}
 	if err = createUnstructured(ctx.Ctx, dynamicClient, trainingRuntimeGVR, config.Namespace, runtimeObj); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply training runtime", err)
@@ -2634,11 +2678,9 @@ func verifyTransportFromLogs(logs string, variant ncclVariant) error {
 //
 // uid pins the delete to the exact namespace instance runNCCLTrainJob
 // created or reclaimed, so a recreated same-named namespace is left alone
-// instead of silently deleted.
-//
-// terminationWait bounds how long this waits for the namespace to actually
-// disappear before failing.
-func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid types.UID, terminationWait time.Duration) error {
+// instead of silently deleted (see the check below for why it must be
+// non-empty).
+func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid types.UID) error {
 	if uid == "" {
 		// Required, not just preferred: the fake client used in tests
 		// ignores delete preconditions and would otherwise silently
@@ -2672,18 +2714,18 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 			fmt.Sprintf("failed to delete NCCL benchmark namespace %q", namespace), err)
 	}
 
-	// Unlike inference-perf's fixed-name namespace, this run's namespace is
-	// never reused by name, so there is no later "next run waits out the
-	// prior one's Terminating namespace" safety net to fall back on. A
-	// ComputeDomain or RoCE ResourceClaimTemplate stuck on a finalizer here
-	// would otherwise leak silently forever, with the log line claiming a
-	// clean "Deleted". Fail the check instead so a stuck DRA/IMEX teardown
-	// surfaces immediately rather than as an unexplained resource leak an
-	// operator has to find by hand.
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), terminationWait)
+	// Same bound as ensureNamespace's wait on the create side. Only logged
+	// on timeout, not returned, since the Delete call above already
+	// succeeded, so a slow-but-real teardown (e.g. NVLS's DRA/IMEX
+	// finalizers) must not fail an otherwise-passing benchmark just because
+	// this observability wait ran out first.
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), defaults.InferenceNamespaceTerminationWait)
 	defer waitCancel()
 	if err := waitForNamespaceGone(waitCtx, nsClient, namespace); err != nil {
-		return err
+		slog.Warn("NCCL benchmark namespace did not finish terminating within the wait bound, "+
+			"deletion was accepted and its cascading GC continues in the background",
+			"namespace", namespace, "error", err)
+		return nil
 	}
 
 	slog.Info("Deleted NCCL benchmark namespace", "namespace", namespace)
@@ -2720,7 +2762,7 @@ func cleanupNCCLRun(clientset kubernetes.Interface, dynamicClient dynamic.Interf
 		return benchErr
 	}
 
-	nsErr := cleanupNCCLResources(clientset, namespace, uid, defaults.InferenceNamespaceTerminationWait)
+	nsErr := cleanupNCCLResources(clientset, namespace, uid)
 	err := foldCleanupError(benchErr, nsErr, "NCCL benchmark succeeded but NCCL resource cleanup failed")
 	if nsErr != nil {
 		return err
