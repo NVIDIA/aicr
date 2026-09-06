@@ -38,7 +38,7 @@ func TestResolveNCCLRuntimeImage(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "unset returns empty, no error", setEnv: false, want: ""},
-		{name: "blank returns empty, no error", env: "   ", setEnv: true, want: ""},
+		{name: "whitespace-only is set but blank — fails closed", env: "   ", setEnv: true, wantErr: true},
 		{name: "bare repo:tag accepted", env: "nvcr.io/nvidia/pytorch:26.01-py3", setEnv: true, want: "nvcr.io/nvidia/pytorch:26.01-py3"},
 		{name: "multi-arch tag suffix accepted", env: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1-cuda13", setEnv: true, want: "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1-cuda13"},
 		{name: "digest reference accepted", env: "nvcr.io/nvidia/pytorch@sha256:" + strings.Repeat("a", 64), setEnv: true, want: "nvcr.io/nvidia/pytorch@sha256:" + strings.Repeat("a", 64)},
@@ -82,8 +82,8 @@ func TestApplyNCCLRuntimeImageOverride_NoopWhenEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if err := applyNCCLRuntimeImageOverride(obj, ""); err != nil {
-		t.Fatalf("applyNCCLRuntimeImageOverride() error: %v", err)
+	if applyErr := applyNCCLRuntimeImageOverride(obj, ""); applyErr != nil {
+		t.Fatalf("applyNCCLRuntimeImageOverride() error: %v", applyErr)
 	}
 	after, err := yaml.Marshal(obj.Object)
 	if err != nil {

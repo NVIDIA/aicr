@@ -66,9 +66,21 @@ var ncclWorkloadContainerNames = map[string]bool{
 // the env var and surfaced operationally by the worker pods failing to start
 // or the launcher's mpirun/ssh steps failing, not by a pre-flight probe here.
 func resolveNCCLRuntimeImage() (string, error) {
-	v := strings.TrimSpace(os.Getenv(ncclRuntimeImageEnv))
-	if v == "" {
+	raw := os.Getenv(ncclRuntimeImageEnv)
+	v := strings.TrimSpace(raw)
+	if raw == "" {
+		// Genuinely unset — keep the compiled-in default.
 		return "", nil
+	}
+	if v == "" {
+		// The orchestrator forwards on a raw non-empty value (see
+		// job_plan_internal.go), so a whitespace-only value reaches here
+		// looking "set" from the Job env — but silently falling back to
+		// the default here would report success for a run that never
+		// exercised the override. Reject it the same way a malformed
+		// reference is rejected, per #1751's fail-closed requirement.
+		return "", aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s is set but blank after trimming whitespace", ncclRuntimeImageEnv))
 	}
 	if _, err := reference.ParseNormalizedNamed(v); err != nil {
 		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInvalidRequest,

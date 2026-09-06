@@ -85,8 +85,9 @@ resolved image is rendered into every container that carries the workload
 main containers), so a run can never end up on a mixed image set; a
 platform-specific sidecar unrelated to the NCCL workload itself (e.g. GKE's
 `tcpxo-daemon` transport daemon) is left untouched. A malformed image
-reference fails the check immediately, before any cluster resources are
-created, rather than silently falling back to the compiled default.
+reference fails the check immediately, before cluster discovery or NCCL
+benchmark resources are created, rather than silently falling back to the
+compiled default.
 
 This is a different setting from `aicr validate --image` /
 `AICR_VALIDATOR_IMAGE_*` (see [Validator image

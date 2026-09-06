@@ -285,6 +285,21 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 	},
 }
 
+// resolveRuntimeImageForBakedInPath resolves the AICR_NCCL_RUNTIME_IMAGE
+// override, but only for the baked-in template path — mirroring the
+// AICR_NCCL_FABRIC gate: a recipe-supplied runtime owns its own workload
+// image end to end (issue #1751), so a malformed override must not fail
+// it. Validated up front — before any cluster discovery or TrainJob spend
+// — so a typo'd image reference fails fast rather than after minutes of
+// setup. Extracted out of validateNcclAllReduceBw to keep that function
+// under the funlen statement limit.
+func resolveRuntimeImageForBakedInPath(customRuntime string) (string, error) {
+	if customRuntime != "" {
+		return "", nil
+	}
+	return resolveNCCLRuntimeImage()
+}
+
 // validateNcclAllReduceBw validates NCCL All Reduce bandwidth using Kubeflow TrainJob + MPI.
 // Each platform has its own TrainingRuntime; the TrainJob is shared (just runtimeRef + numNodes).
 // The variant selects a transport-class template (NET, NVLS) when the recipe needs per-fabric
@@ -347,17 +362,9 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 		}
 	}
 
-	// AICR_NCCL_RUNTIME_IMAGE governs only the baked-in template path, mirroring
-	// AICR_NCCL_FABRIC above: a recipe-supplied runtime owns its own workload
-	// image end to end (issue #1751), so a malformed override must not fail it.
-	// Validated up front — before any cluster discovery or TrainJob spend — so
-	// a typo'd image reference fails fast rather than after minutes of setup.
-	runtimeImage := ""
-	if customRuntime == "" {
-		runtimeImage, err = resolveNCCLRuntimeImage()
-		if err != nil {
-			return "", false, err
-		}
+	runtimeImage, err := resolveRuntimeImageForBakedInPath(customRuntime)
+	if err != nil {
+		return "", false, err
 	}
 
 	if profile != nil {
@@ -1355,12 +1362,12 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// TestApplyNCCLResourcesRuntimeImageOverride's custom-runtime subtest
 	// (mchmarny, 691b3b3 review) asserts.
 	if customRuntime == "" {
-		if err := applyNCCLRuntimeImageOverride(runtimeObj, runtimeImage); err != nil {
-			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL runtime image override", err)
+		if overrideErr := applyNCCLRuntimeImageOverride(runtimeObj, runtimeImage); overrideErr != nil {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL runtime image override", overrideErr)
 		}
 	}
-	if err := applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", err)
+	if schedErr := applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); schedErr != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", schedErr)
 	}
 	if err = createUnstructured(ctx.Ctx, dynamicClient, trainingRuntimeGVR, config.Namespace, runtimeObj); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply training runtime", err)

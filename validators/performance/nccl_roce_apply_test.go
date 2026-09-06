@@ -47,9 +47,9 @@ var ncclGVRListKinds = map[schema.GroupVersionResource]string{
 	computeDomainGVR:         "ComputeDomainList",
 }
 
-func newFakeDynamicClient(objs ...runtime.Object) dynamic.Interface {
+func newFakeDynamicClient() dynamic.Interface {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
-		runtime.NewScheme(), ncclGVRListKinds, objs...)
+		runtime.NewScheme(), ncclGVRListKinds)
 }
 
 // roceClaimCount walks the RoCE ResourceClaimTemplate to the templated device
