@@ -747,7 +747,7 @@ components:
     helm:
       defaultRepository: oci://registry.k8s.io/kueue/charts
       defaultChart: kueue
-      defaultVersion: "0.18.2"
+      defaultVersion: "0.19.3"
       defaultNamespace: kueue-system
     nodeScheduling:
       system:
