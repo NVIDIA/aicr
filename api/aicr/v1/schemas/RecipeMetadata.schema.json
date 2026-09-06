@@ -199,6 +199,7 @@
                 "any",
                 "bcm",
                 "eks",
+                "generic",
                 "gke",
                 "kind",
                 "lke",

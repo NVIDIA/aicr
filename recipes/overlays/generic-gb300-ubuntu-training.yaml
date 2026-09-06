@@ -1,0 +1,110 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: generic-gb300-ubuntu-training
+
+spec:
+  # Bare-metal GB300 NVL72 on self-managed Kubernetes; nothing is pre-installed.
+  base: base
+
+  criteria:
+    service: generic
+    accelerator: gb300
+    os: ubuntu
+    intent: training
+
+  mixins:
+    - os-ubuntu
+
+  constraints:
+    # Keeps the GA DRA API (resource.k8s.io/v1, Kubernetes 1.34+) available
+    # for the NVLS/IMEX performance check.
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs:
+    # GPUDirect RDMA runs over DMA-BUF: no driver.rdma/nvidia-peermem (no
+    # build exists for the 64k-page Grace kernel) and no NVreg
+    # kernel-module-params ConfigMap (a GB200-on-EFA requirement only).
+    - name: gpu-operator
+      type: Helm
+      dependencyRefs:
+        - nfd
+        - cert-manager
+        - kube-prometheus-stack
+        - nodewright-customizations
+      overrides:
+        gdrcopy:
+          enabled: true
+        driver:
+          enabled: true
+        toolkit:
+          enabled: true
+        devicePlugin:
+          enabled: true
+          # Helm replaces lists: the first two entries restate the component
+          # base values.yaml; this override exists to pin MOFED_ENABLED off.
+          # The fabric's device plugin owns RDMA injection; an omitted key is
+          # inferred true when GDS enablement loads nvidia_fs.
+          env:
+            - name: DP_DISABLE_HEALTHCHECKS
+              value: "109"
+            - name: DEVICE_LIST_STRATEGY
+              value: cdi-cri,cdi-annotations,volume-mounts
+            - name: MOFED_ENABLED
+              value: "false"
+
+    # No validated GB300 bare-metal tuning profile yet.
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/no-op.yaml
+      dependencyRefs:
+        - nodewright-operator
+
+    - name: nfd
+      type: Helm
+      overrides:
+        topologyUpdater:
+          enable: true
+
+    - name: network-operator
+      type: Helm
+      valuesFile: components/network-operator/values-generic-gb300.yaml
+      manifestFiles:
+        - components/network-operator/manifests/nic-cluster-policy-generic-gb300.yaml
+      dependencyRefs:
+        - nfd
+        - cert-manager
+
+  # Deployment checks come from the gb300-any criteria-wildcard overlay.
+  validation:
+    performance:
+      # Floor from the validated baseline: 895 GB/s busbw at the 16 GiB
+      # message size, 4 GPUs per node.
+      checks:
+        - nccl-all-reduce-bw-nvls
+      constraints:
+        - name: nccl-all-reduce-bw-nvls
+          value: ">= 823"
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - dra-support
+        - accelerator-metrics
+        - ai-service-metrics

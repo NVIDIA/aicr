@@ -46,9 +46,11 @@ func TestParseCriteriaServiceType(t *testing.T) {
 		{"ocp", "ocp", CriteriaServiceOCP, false},
 		{"OCP uppercase", "OCP", CriteriaServiceOCP, false},
 		{"openshift alias", "openshift", CriteriaServiceOCP, false},
-		{"self-managed", "self-managed", CriteriaServiceAny, false},
-		{"self", "self", CriteriaServiceAny, false},
-		{"vanilla", "vanilla", CriteriaServiceAny, false},
+		// Self-managed spellings alias the concrete generic service (they
+		// historically normalized to the any wildcard).
+		{"self-managed", "self-managed", CriteriaServiceGeneric, false},
+		{"self", "self", CriteriaServiceGeneric, false},
+		{"vanilla", "vanilla", CriteriaServiceGeneric, false},
 		{"invalid", "invalid", CriteriaServiceAny, true},
 	}
 
@@ -713,7 +715,7 @@ func TestGetCriteriaServiceTypes(t *testing.T) {
 	types := GetCriteriaServiceTypes()
 
 	// Should return sorted list
-	expected := []string{"aks", "bcm", "eks", "gke", "kind", "lke", "metal3", "ocp", "oke", "rke2"}
+	expected := []string{"aks", "bcm", "eks", "generic", "gke", "kind", "lke", "metal3", "ocp", "oke", "rke2"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaServiceTypes() returned %d types, want %d", len(types), len(expected))
 	}

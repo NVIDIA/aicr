@@ -19,16 +19,18 @@ package recipes_test
 
 import (
 	"io/fs"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/recipes"
 )
 
-// TestOKENetworkOperatorKeepsChartNodeFeatureRule pins the label supply chain
-// behind the deployment validator's RDMA readiness gate: the gate's node
-// cohort is nodes labeled feature.node.kubernetes.io/pci-15b3.present=true
-// (validators/helper.PCIMellanoxPresentLabel). On OKE that label comes from
+// TestNetworkOperatorKeepsChartNodeFeatureRule pins the label supply chain
+// behind the deployment validator's RDMA readiness gate for every
+// network-operator values overlay: the gate's node cohort is nodes labeled
+// feature.node.kubernetes.io/pci-15b3.present=true
+// (validators/helper.PCIMellanoxPresentLabel). That label comes from
 // the network-operator chart's own nvidia-nics-rules NodeFeatureRule, which
 // renders whenever `nfd.deployNodeFeatureRules` is left at the chart default
 // (true) — the OKE values disable the chart's NFD deployment (nfd.enabled:
@@ -37,22 +39,23 @@ import (
 // nfd.deployNodeFeatureRules: false and attaches its own targeted rule
 // manifest (nfd-network-rule.yaml) instead.
 //
-// A contributor copying AKS's `deployNodeFeatureRules: false` into an OKE
+// A contributor copying AKS's `deployNodeFeatureRules: false` into another
 // values file — or flipping it in the shared component base values.yaml —
 // without also attaching a rule manifest would leave no producer for the
 // cohort label, and the RDMA gate would fail closed on every OKE fabric
-// deploy ("no schedulable Mellanox RDMA-capable GPU nodes observed"). This
-// test turns that mistake into an immediate failure.
+// deploy ("no schedulable Mellanox RDMA-capable GPU nodes observed") on the
+// affected fabric recipes. This test turns that mistake into an immediate
+// failure.
 //
 // It asserts on MERGED effective values (base values.yaml → overlay), exactly
 // as bundle rendering resolves them, and derives the overlay set by glob so a
 // future OKE fabric leaf is covered without editing this test.
-func TestOKENetworkOperatorKeepsChartNodeFeatureRule(t *testing.T) {
+func TestNetworkOperatorKeepsChartNodeFeatureRule(t *testing.T) {
 	t.Parallel()
 
-	overlays, err := fs.Glob(recipes.FS, "components/network-operator/values-oke-*.yaml")
+	overlays, err := fs.Glob(recipes.FS, "components/network-operator/values-*.yaml")
 	if err != nil {
-		t.Fatalf("glob OKE network-operator values overlays: %v", err)
+		t.Fatalf("glob network-operator values overlays: %v", err)
 	}
 	if len(overlays) == 0 {
 		t.Fatal("no components/network-operator/values-oke-*.yaml overlays found; " +
@@ -60,6 +63,11 @@ func TestOKENetworkOperatorKeepsChartNodeFeatureRule(t *testing.T) {
 	}
 
 	for _, overlay := range overlays {
+		if strings.HasSuffix(overlay, "values-aks.yaml") {
+			// AKS is the deliberate exception documented above: it disables
+			// the chart rule and attaches its own targeted rule manifest.
+			continue
+		}
 		t.Run(overlay, func(t *testing.T) {
 			t.Parallel()
 
@@ -82,8 +90,8 @@ func TestOKENetworkOperatorKeepsChartNodeFeatureRule(t *testing.T) {
 			enabled, ok := v.(bool)
 			if !ok || !enabled {
 				t.Fatalf("effective values for %s set nfd.deployNodeFeatureRules=%v: the RDMA "+
-					"readiness gate's cohort label (pci-15b3.present) has no other producer on "+
-					"OKE — either leave the chart default or attach a targeted NodeFeatureRule "+
+					"readiness gate's cohort label (pci-15b3.present) has no other producer "+
+					"for these fabric recipes — either leave the chart default or attach a targeted NodeFeatureRule "+
 					"manifest like AKS does", overlay, v)
 			}
 		})

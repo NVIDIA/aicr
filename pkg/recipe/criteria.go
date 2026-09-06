@@ -43,21 +43,26 @@ import (
 const CriteriaAnyValue = "any"
 
 // CriteriaServiceType represents the Kubernetes service/platform type for criteria.
+//
+// CriteriaServiceGeneric is self-managed Kubernetes with no distinguishing
+// distro or provisioning system; unlike CriteriaServiceAny, it is a concrete
+// service, not the wildcard.
 type CriteriaServiceType string
 
 // CriteriaServiceType constants for supported Kubernetes services.
 const (
-	CriteriaServiceAny    CriteriaServiceType = "any"
-	CriteriaServiceEKS    CriteriaServiceType = "eks"
-	CriteriaServiceGKE    CriteriaServiceType = "gke"
-	CriteriaServiceAKS    CriteriaServiceType = "aks"
-	CriteriaServiceOKE    CriteriaServiceType = "oke"
-	CriteriaServiceKind   CriteriaServiceType = "kind"
-	CriteriaServiceLKE    CriteriaServiceType = "lke"
-	CriteriaServiceBCM    CriteriaServiceType = "bcm"
-	CriteriaServiceOCP    CriteriaServiceType = "ocp"
-	CriteriaServiceMetal3 CriteriaServiceType = "metal3"
-	CriteriaServiceRKE2   CriteriaServiceType = "rke2"
+	CriteriaServiceAny     CriteriaServiceType = "any"
+	CriteriaServiceEKS     CriteriaServiceType = "eks"
+	CriteriaServiceGKE     CriteriaServiceType = "gke"
+	CriteriaServiceAKS     CriteriaServiceType = "aks"
+	CriteriaServiceOKE     CriteriaServiceType = "oke"
+	CriteriaServiceKind    CriteriaServiceType = "kind"
+	CriteriaServiceLKE     CriteriaServiceType = "lke"
+	CriteriaServiceBCM     CriteriaServiceType = "bcm"
+	CriteriaServiceOCP     CriteriaServiceType = "ocp"
+	CriteriaServiceMetal3  CriteriaServiceType = "metal3"
+	CriteriaServiceRKE2    CriteriaServiceType = "rke2"
+	CriteriaServiceGeneric CriteriaServiceType = "generic"
 )
 
 // ParseService parses a string into a CriteriaServiceType against this
@@ -71,8 +76,13 @@ const (
 // binary rebuild.
 func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", CriteriaAnyValue, "self-managed", "self", "vanilla":
+	case "", CriteriaAnyValue:
 		return CriteriaServiceAny, nil
+	case "generic", "self-managed", "self", "vanilla":
+		// The self-managed spellings historically normalized to the "any"
+		// wildcard; with generic as a concrete service they alias it instead,
+		// so `--service self-managed` selects generic recipes.
+		return CriteriaServiceGeneric, nil
 	case string(CriteriaServiceEKS):
 		return CriteriaServiceEKS, nil
 	case "gke":
@@ -106,7 +116,7 @@ func (r *CriteriaRegistry) ParseService(s string) (CriteriaServiceType, error) {
 // across `--data` configurations; for the union of static + registry
 // (including values contributed by `--data`), use AllCriteriaServiceTypes.
 func GetCriteriaServiceTypes() []string {
-	return []string{"aks", "bcm", "eks", "gke", "kind", "lke", "metal3", "ocp", "oke", "rke2"}
+	return []string{"aks", "bcm", "eks", "generic", "gke", "kind", "lke", "metal3", "ocp", "oke", "rke2"}
 }
 
 // AllServiceTypes returns the union of the static OSS list and values
