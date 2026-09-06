@@ -271,7 +271,7 @@ done
 {{- if eq .Name "nodewright-operator" }}
 # Only remove taints if nodewright-operator is not running with available replicas.
 # A crashlooping or scaled-to-zero operator still leaves stale taints.
-nodewright_available=$(kubectl get deploy -n {{ .Namespace }} -l app.kubernetes.io/name=skyhook-operator -o jsonpath='{.items[0].status.availableReplicas}' 2>/dev/null || echo "0")
+nodewright_available=$(kubectl get deploy -n {{ .Namespace }} -l app.kubernetes.io/name=nodewright,control-plane=controller-manager -o jsonpath='{.items[0].status.availableReplicas}' 2>/dev/null || echo "0")
 if [[ "${nodewright_available}" == "0" || -z "${nodewright_available}" ]]; then
   # Extract the taint key from bundle values. The YAML value is a taint string
   # like "custom.io/gate=true:NoSchedule" — extract the key before the first "=".
@@ -286,9 +286,15 @@ if [[ "${nodewright_available}" == "0" || -z "${nodewright_available}" ]]; then
     if [[ -n "${custom_taint_line}" ]]; then
       taint_value=$(echo "${custom_taint_line}" | sed 's/.*runtimeRequiredTaint:[[:space:]]*//' | tr -d '"' | tr -d "'")
       if [[ -n "${taint_value}" ]]; then
-        # Handle both key=value:effect and key:effect formats
-        NODEWRIGHT_TAINT_KEYS="${taint_value%%=*}"
-        NODEWRIGHT_TAINT_KEYS="${NODEWRIGHT_TAINT_KEYS%%:*}"
+        # Handle both key=value:effect and key:effect formats. The legacy key
+        # stays in the set: the operator still removes it, and the validator's
+        # taint gate waits on it alongside the configured key.
+        custom_key="${taint_value%%=*}"
+        custom_key="${custom_key%%:*}"
+        NODEWRIGHT_TAINT_KEYS="${custom_key}"
+        if [[ "${custom_key}" != "skyhook.nvidia.com" ]]; then
+          NODEWRIGHT_TAINT_KEYS="${custom_key} skyhook.nvidia.com"
+        fi
       fi
     fi
   fi
