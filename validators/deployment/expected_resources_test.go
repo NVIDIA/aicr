@@ -1227,6 +1227,86 @@ func TestCheckExpectedResources_GatesOnConfiguredTaint(t *testing.T) {
 	}
 }
 
+// testNodewrightAssertYAML is the shape of the registry health check for
+// nodewright-customizations: a nameless assert on the NodeWright kind.
+const testNodewrightAssertYAML = `apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: nodewright-customizations-health-check
+spec:
+  steps:
+    - name: validate-nodewright-cr-complete
+      try:
+        - assert:
+            resource:
+              apiVersion: nodewright.nvidia.com/v1alpha1
+              kind: NodeWright
+              status:
+                status: complete
+`
+
+// TestCheckExpectedResources_LegacyOperatorSkipsNodeWrightAssert is the exact
+// pre-v0.18.0 regression: the registry assert is hydrated independently of the
+// resolved chart version and names the NodeWright kind, which a v0.17.x
+// operator does not serve. On such a cluster the static assert must be skipped
+// (the Go check verifies the Skyhook by name) so a healthy legacy cluster
+// passes; on a v0.18.0 cluster the assert stays queued; and a discovery
+// failure fails closed rather than skipping.
+func TestCheckExpectedResources_LegacyOperatorSkipsNodeWrightAssert(t *testing.T) {
+	t.Parallel()
+
+	ref := recipe.ComponentRef{
+		Name:               nodewrightCustomizationsComponent,
+		Namespace:          "skyhook",
+		ManifestFiles:      []string{testNodewrightManifest},
+		HealthCheckAsserts: testNodewrightAssertYAML,
+	}
+
+	t.Run("legacy-only cluster passes with the assert skipped", func(t *testing.T) {
+		t.Parallel()
+		// Only skyhook.nvidia.com is registered (inferred from the Skyhook
+		// object); a queued chainsaw assert would need a fetcher and fail.
+		ctx := newDeploymentTestContext(t,
+			[]runtime.Object{activeNamespace("skyhook")},
+			[]runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
+			[]recipe.ComponentRef{ref})
+		if err := checkExpectedResources(ctx); err != nil {
+			t.Fatalf("checkExpectedResources() error = %v, want nil on a healthy v0.17 cluster", err)
+		}
+	})
+
+	t.Run("v0.18 cluster keeps the assert queued", func(t *testing.T) {
+		t.Parallel()
+		ctx := newDeploymentTestContext(t,
+			[]runtime.Object{activeNamespace("skyhook")},
+			[]runtime.Object{nodeWrightWithStatus("tuning", nodewrightCompleteState)},
+			[]recipe.ComponentRef{ref})
+		suppressed, _, err := gatedHealthCheckSuppressed(ctx, ref)
+		if err != nil {
+			t.Fatalf("gatedHealthCheckSuppressed() error = %v", err)
+		}
+		if suppressed {
+			t.Fatal("assert must stay queued when the cluster serves nodewright.nvidia.com")
+		}
+	})
+
+	t.Run("discovery failure fails closed", func(t *testing.T) {
+		t.Parallel()
+		ctx := newDeploymentTestContext(t,
+			[]runtime.Object{activeNamespace("skyhook")},
+			[]runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
+			[]recipe.ComponentRef{ref})
+		// FakeDiscovery synthesizes the action with Resource "resource"; see
+		// TestCheckExpectedResources_FailsWhenDiscoveryReturnsNonNotFoundError.
+		ctx.Clientset.(*k8sfake.Clientset).PrependReactor("get", "resource", func(clienttesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewForbidden(schema.GroupResource{Group: nodewrightGVR.Group}, "", stderrors.New("forbidden"))
+		})
+		if _, _, err := gatedHealthCheckSuppressed(ctx, ref); err == nil {
+			t.Fatal("gatedHealthCheckSuppressed() error = nil, want the discovery failure (must not skip)")
+		}
+	})
+}
+
 // TestVerifyNodewrightReady_PrefersNodeWrightOverLegacySkyhook pins the #2593
 // fix. nodewright-operator v0.18.0 mirrors each legacy Skyhook into a
 // NodeWright and writes status only there; the legacy status stays empty. With
@@ -1690,6 +1770,8 @@ func nodewrightTerminatingWithStatus(name, status string) *unstructured.Unstruct
 // nodeWrightWithStatus builds a nodewright.nvidia.com NodeWright fixture (the
 // kind nodewright-operator v0.18.0+ writes status on). Cluster-scoped, so
 // metadata.namespace is intentionally not set.
+//
+//nolint:unparam // name is a meaningful test input even if current call sites all use the manifest's "tuning"
 func nodeWrightWithStatus(name, status string) *unstructured.Unstructured {
 	nw := nodewrightWithStatus(name, status)
 	nw.Object["apiVersion"] = nodewrightGVR.GroupVersion().String()
@@ -1967,7 +2049,8 @@ func TestGatedHealthCheckSuppressed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			suppressed, reason, err := gatedHealthCheckSuppressed(t.Context(), tt.ref)
+			suppressed, reason, err := gatedHealthCheckSuppressed(
+				&validators.Context{Ctx: t.Context(), Clientset: k8sfake.NewClientset()}, tt.ref)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatalf("gatedHealthCheckSuppressed() error = nil, want failure")
@@ -1990,7 +2073,7 @@ func TestGatedHealthCheckSuppressed(t *testing.T) {
 		t.Parallel()
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
-		_, _, err := gatedHealthCheckSuppressed(ctx, recipe.ComponentRef{
+		_, _, err := gatedHealthCheckSuppressed(&validators.Context{Ctx: ctx, Clientset: k8sfake.NewClientset()}, recipe.ComponentRef{
 			Name:          "gcp-driver-installer",
 			Type:          recipe.ComponentTypeHelm,
 			ManifestFiles: []string{installerManifest},

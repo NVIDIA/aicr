@@ -1202,8 +1202,14 @@ whenever the values keep the CR, the render still lists it and the assert
 runs, so only an intentionally-absent CR is tolerated (a CR that *should*
 deploy but is missing on the cluster still fails). The same render drives
 the Go readiness check `verifyNodewrightReady`, so both surfaces agree on
-which CRs to expect. This skip is scoped to `nodewright-customizations`;
-every other component's assert queues unconditionally.
+which CRs to expect. The same dispatch skips the `nodewright-customizations`
+assert on a cluster whose operator predates the `NodeWright` kind the assert
+names (only `skyhook.nvidia.com` served, i.e. nodewright-operator < v0.18.0):
+`verifyNodewrightReady` falls back to the legacy `Skyhook` by name there, so
+a healthy legacy cluster passes without a static assert that can never match.
+A discovery error fails closed rather than skipping. This skip is scoped to
+`nodewright-customizations`; every other component's assert queues
+unconditionally.
 
 The suppression must be expressed **in the recipe** — an overlay-declared
 component `overrides:` (how `tuningEnabled: false` ships as the AKS default)

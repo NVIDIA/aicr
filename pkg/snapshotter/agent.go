@@ -40,6 +40,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // logWriter returns an io.Writer for streaming agent logs.
@@ -1025,8 +1026,10 @@ func ParseTolerations(tolerations []string) ([]corev1.Toleration, error) {
 	return result, nil
 }
 
-// ParseTaint parses a single taint string in format "key=value:effect" or "key:effect".
-// Returns a corev1.Taint struct.
+// ParseTaint parses a single taint string in format "key=value:effect" or
+// "key:effect". The key and value must satisfy the Kubernetes taint rules
+// (qualified name, label-value syntax), so a malformed string is rejected here
+// rather than reaching the API server or the generated deploy script.
 func ParseTaint(taintStr string) (*corev1.Taint, error) {
 	if taintStr == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "taint string cannot be empty")
@@ -1055,6 +1058,14 @@ func ParseTaint(taintStr string) (*corev1.Taint, error) {
 	// Validate key is not empty
 	if key == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid format %q, key cannot be empty", taintStr))
+	}
+	if errs := validation.IsQualifiedName(key); len(errs) > 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid taint key %q: %s", key, strings.Join(errs, "; ")))
+	}
+	if errs := validation.IsValidLabelValue(value); len(errs) > 0 {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid taint value %q: %s", value, strings.Join(errs, "; ")))
 	}
 
 	if err := validateTaintEffect(corev1.TaintEffect(effect)); err != nil {

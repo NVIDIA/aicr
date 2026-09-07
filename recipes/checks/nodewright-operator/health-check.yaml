@@ -18,12 +18,13 @@
 # skyhook namespace:
 # 1. skyhooks.skyhook.nvidia.com CRD Established=True (the apiserver
 #    will accept Skyhook CRs that nodewright-customizations declares).
-# 2. nodewrights.nodewright.nvidia.com CRD Established=True (the kind the
-#    operator mirrors each Skyhook into and writes status on from v0.18.0;
-#    the nodewright-customizations health check asserts it).
-# 3. skyhook-operator-controller-manager Deployment has at least one
+#    Both the pre- and post-rename charts render this CRD; the v0.18.0
+#    nodewrights.nodewright.nvidia.com CRD is deliberately not asserted
+#    here so a v0.17.x operator still passes — the nodewright-customizations
+#    check and the Go readiness gate fail closed if it is missing on v0.18.0.
+# 2. skyhook-operator-controller-manager Deployment has at least one
 #    available replica.
-# 4. No pods stuck in Pending/Failed/Unknown phases or known-bad
+# 3. No pods stuck in Pending/Failed/Unknown phases or known-bad
 #    container-waiting states.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
@@ -41,17 +42,6 @@ spec:
               kind: CustomResourceDefinition
               metadata:
                 name: skyhooks.skyhook.nvidia.com
-              status:
-                (conditions[?type == 'Established']):
-                  - status: "True"
-    - name: validate-nodewright-crd-established
-      try:
-        - assert:
-            resource:
-              apiVersion: apiextensions.k8s.io/v1
-              kind: CustomResourceDefinition
-              metadata:
-                name: nodewrights.nodewright.nvidia.com
               status:
                 (conditions[?type == 'Established']):
                   - status: "True"

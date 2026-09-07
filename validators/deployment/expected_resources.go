@@ -248,7 +248,7 @@ func checkExpectedResources(ctx *validators.Context) error {
 			// in that case, mirroring the render-aware Go readiness check. Only
 			// nodewright-customizations is subject to this; a render/read error
 			// propagates rather than silently skipping. See #1844.
-			suppressed, reason, suppressErr := gatedHealthCheckSuppressed(ctx.Ctx, ref)
+			suppressed, reason, suppressErr := gatedHealthCheckSuppressed(ctx, ref)
 			if suppressErr != nil {
 				return suppressErr
 			}
@@ -814,20 +814,39 @@ func isRuntimeRequiredTaint(t *corev1.Taint, gate []corev1.Taint) bool {
 	return false
 }
 
-// gatedHealthCheckSuppressed dispatches the render-aware static-assert
-// suppression for the small set of values-gated components whose registry
-// health check targets objects the effective values may legitimately
-// suppress. Every other component's assert queues unconditionally.
-// Fail-closed throughout: a render or read error propagates so a broken
-// template is never mistaken for "nothing to assert".
-func gatedHealthCheckSuppressed(goCtx context.Context, ref recipe.ComponentRef) (bool, string, error) {
+// gatedHealthCheckSuppressed dispatches the static-assert suppression for the
+// small set of components whose registry health check targets objects that
+// may legitimately be absent: values-gated renders, and for
+// nodewright-customizations a cluster whose operator predates the NodeWright
+// kind the assert names. Every other component's assert queues
+// unconditionally. Fail-closed throughout: a render, read, or discovery error
+// propagates so a broken template or an unreachable API server is never
+// mistaken for "nothing to assert".
+func gatedHealthCheckSuppressed(ctx *validators.Context, ref recipe.ComponentRef) (bool, string, error) {
 	switch ref.Name {
 	case nodewrightCustomizationsComponent:
 		//nolint:contextcheck // pre-existing ctx-less chain (expectedNodewrightNames); threading ctx through it is tracked separately from this dispatch.
 		suppressed, err := nodewrightHealthCheckSuppressed(ref)
-		return suppressed, "effective values suppress the tuning Skyhook CR (see #1844)", err
+		if err != nil || suppressed {
+			return suppressed, "effective values suppress the tuning Nodewright CR (see #1844)", err
+		}
+		// The assert names the NodeWright kind (nodewright-operator v0.18.0+).
+		// A pre-v0.18.0 operator serves only the legacy Skyhook group, where
+		// the Go readiness check (verifyNodewrightReady) already verifies each
+		// declared CR's status by name, so the static assert has nothing valid
+		// to target. A cluster serving neither group keeps the assert so its
+		// own failure surfaces the missing operator.
+		gvr, registered, err := resolveNodewrightGVR(ctx)
+		if err != nil {
+			return false, "", err
+		}
+		if registered && gvr == legacySkyhookGVR {
+			return true, fmt.Sprintf("cluster serves only the legacy %s group; the %s readiness check covers the Skyhook CRs by name",
+				legacySkyhookGVR.Group, nodewrightGVR.Group), nil
+		}
+		return false, "", nil
 	case gcpDriverInstallerComponent:
-		suppressed, err := emptyRenderHealthCheckSuppressed(goCtx, ref)
+		suppressed, err := emptyRenderHealthCheckSuppressed(ctx.Ctx, ref)
 		return suppressed, "effective values gate the component off (installer.enabled=false); it renders no objects", err
 	default:
 		return false, "", nil
