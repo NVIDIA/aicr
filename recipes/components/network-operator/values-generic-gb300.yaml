@@ -26,16 +26,25 @@ secondaryNetwork:
 # TestNetworkOperatorKeepsChartNodeFeatureRule).
 nfd:
   enabled: false
-# Coordinated OFED driver upgrades on bare metal. Deploying the subchart is
-# not enough: the operator only delegates to it when
-# operator.maintenanceOperator.useRequestor is true (chart default false).
+# Required by nicConfigurationOperator, which prepares a node through the
+# maintenance operator before applying NIC configuration. OFED upgrades use
+# ofedDriver.upgradePolicy in the NicClusterPolicy, not this operator.
 maintenanceOperator:
   enabled: true
+maintenance-operator-chart:
+  operator:
+    # The subchart's 128Mi default limit is below the operator's working set,
+    # which scales with node count (about 1Gi per 1000 nodes).
+    resources:
+      limits:
+        cpu: 500m
+        memory: 1Gi
+      requests:
+        cpu: 10m
+        memory: 256Mi
 # Operator placement comes from the bundler's system-node scheduling
 # injection (registry nodeScheduling) — no hardcoded affinity here.
 operator:
-  maintenanceOperator:
-    useRequestor: true
   resources:
     limits:
       cpu: "1"

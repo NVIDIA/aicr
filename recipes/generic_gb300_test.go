@@ -76,3 +76,60 @@ func TestGenericGB300DevicePluginMOFEDStaysOff(t *testing.T) {
 	}
 	t.Fatal("gpu-operator component not found in the resolved generic GB300 recipe")
 }
+
+// TestGenericGB300MaintenanceOperatorSizing pins the network-operator values
+// that the generic GB300 recipe owns for the maintenance operator: the
+// subchart deployment is sized above its 128Mi default, and the network
+// operator keeps its own node-drain path (operator.maintenanceOperator stays
+// at chart defaults). The operator is enabled for nicConfigurationOperator,
+// not to take over OFED upgrades from ofedDriver.upgradePolicy.
+func TestGenericGB300MaintenanceOperatorSizing(t *testing.T) {
+	t.Parallel()
+
+	criteria := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceGeneric,
+		Accelerator: recipe.CriteriaAcceleratorGB300,
+		OS:          recipe.CriteriaOSUbuntu,
+		Intent:      recipe.CriteriaIntentTraining,
+	}
+	result, err := recipe.NewBuilder().BuildFromCriteriaWithProfile(t.Context(), criteria, "")
+	if err != nil {
+		t.Fatalf("BuildFromCriteriaWithProfile: %v", err)
+	}
+
+	for i := range result.ComponentRefs {
+		ref := &result.ComponentRefs[i]
+		if ref.Name != "network-operator" {
+			continue
+		}
+		values, err := recipe.GetComponentValuesWithContext(t.Context(), nil, ref)
+		if err != nil {
+			t.Fatalf("resolve effective network-operator values: %v", err)
+		}
+
+		mo, _ := values["maintenanceOperator"].(map[string]any)
+		if mo["enabled"] != true {
+			t.Fatalf("maintenanceOperator.enabled = %v, want true (nicConfigurationOperator requires it)", mo["enabled"])
+		}
+
+		sub, _ := values["maintenance-operator-chart"].(map[string]any)
+		subOp, _ := sub["operator"].(map[string]any)
+		res, _ := subOp["resources"].(map[string]any)
+		limits, _ := res["limits"].(map[string]any)
+		if limits["memory"] != "1Gi" {
+			t.Fatalf("maintenance-operator-chart.operator.resources.limits.memory = %v, want 1Gi "+
+				"(the subchart default 128Mi is below the operator's working set)", limits["memory"])
+		}
+
+		op, _ := values["operator"].(map[string]any)
+		if opMO, ok := op["maintenanceOperator"].(map[string]any); ok {
+			if _, set := opMO["useRequestor"]; set {
+				t.Fatalf("operator.maintenanceOperator.useRequestor = %v: the recipe must leave "+
+					"node-drain ownership at the chart default; OFED upgrades use ofedDriver.upgradePolicy",
+					opMO["useRequestor"])
+			}
+		}
+		return
+	}
+	t.Fatal("network-operator component not found in the resolved generic GB300 recipe")
+}
