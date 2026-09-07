@@ -15,11 +15,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: 🔒 Security Issue
-    url: https://github.com/NVIDIA/aicr/security/advisories/new
-    about: Report a security vulnerability (private disclosure)
-  - name: 💬 Discussions
-    url: https://github.com/NVIDIA/aicr/discussions
-    about: Ask questions, share ideas, and discuss with the community
+    url: https://www.nvidia.com/object/submit-security-vulnerability.html
+    about: Report a security vulnerability to NVIDIA PSIRT (not through GitHub)
+  - name: 💬 Questions
+    url: https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+label%3Aquestion
+    about: Browse answered questions, or open an issue with the question label
   - name: 📖 Documentation
     url: https://github.com/NVIDIA/aicr/blob/main/README.md
     about: Read the documentation and guides
