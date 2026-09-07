@@ -16,13 +16,13 @@ Releases follow a **bi-weekly cadence**. A new release is cut every two weeks.
 ## Supported Versions
 
 AICR is pre-1.0 and ships from a single active release line. Only the latest
-released minor receives bug fixes and security patches. Earlier minors are
-end-of-life: fixes are not backported to them, and the upgrade path is forward
-to the latest release.
+released minor receives security fixes. Earlier minors are end-of-life: fixes
+are not backported to them, and the upgrade path is forward to the latest
+release.
 
 | Version | Status |
 |---------|--------|
-| `0.20.x` (latest released minor) | Supported: receives bug fixes and security patches |
+| `0.20.x` (latest released minor) | Supported: receives security fixes |
 | `< 0.20` | End-of-life: upgrade to the latest release |
 
 A fix ships in a new patch or minor release cut from `main` under the cadence

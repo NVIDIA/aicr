@@ -16,6 +16,7 @@ package releasepolicy
 
 import (
 	"regexp"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -36,6 +37,12 @@ var supportedMinorCell = regexp.MustCompile("`([0-9]+\\.[0-9]+)\\.x`")
 
 // endOfLifeCell matches the end-of-life row's version cell, e.g. `< 0.19`.
 var endOfLifeCell = regexp.MustCompile("`< *([0-9]+\\.[0-9]+)`")
+
+// fixTypePhrase captures what a supported version is promised, e.g.
+// "security fixes" out of "receives security fixes". Both the prose sentence
+// and the table's status cell are phrased around "receives", which is what
+// makes one pattern enough for both.
+var fixTypePhrase = regexp.MustCompile(`(?i)receives\s+([a-z][a-z ]*?)\s*(?:[.;,|]|$)`)
 
 func TestSupportedVersionsMatchSecurityPolicy(t *testing.T) {
 	releaseSupported, releaseEndOfLife := supportedVersionPolicy(t, "RELEASE.md")
@@ -71,6 +78,66 @@ func TestSupportedVersionsMatchSecurityPolicy(t *testing.T) {
 				doc.path, doc.supported+".x", "< "+doc.endOfLife, doc.endOfLife+".x")
 		}
 	}
+
+	// Agreeing on the version number is not the same as agreeing on the
+	// promise. RELEASE.md shipped saying a supported minor "receives bug fixes
+	// and security patches" while SECURITY.md said "receives security fixes" —
+	// a wider public commitment than the security policy makes, and the
+	// number-only comparison above sailed straight past it.
+	releaseFixes := supportedFixTypes(t, "RELEASE.md")
+	securityFixes := supportedFixTypes(t, "SECURITY.md")
+
+	if strings.Join(releaseFixes, ", ") != strings.Join(securityFixes, ", ") {
+		t.Errorf("supported-versions promise has drifted: RELEASE.md promises %q, "+
+			"SECURITY.md promises %q. RELEASE.md must not publish a wider commitment "+
+			"than SECURITY.md, which is authoritative on what a supported version receives",
+			strings.Join(releaseFixes, ", "), strings.Join(securityFixes, ", "))
+	}
+
+	for _, doc := range []struct {
+		path  string
+		fixes []string
+	}{
+		{"RELEASE.md", releaseFixes},
+		{"SECURITY.md", securityFixes},
+	} {
+		if len(doc.fixes) > 1 {
+			t.Errorf("%s supported-versions section promises %d different fix types (%s); "+
+				"its prose and its table must say the same thing",
+				doc.path, len(doc.fixes), strings.Join(doc.fixes, ", "))
+		}
+	}
+}
+
+// supportedFixTypes returns the distinct fix types path's supported-versions
+// section promises, lowercased and sorted. Every "receives ..." in the section
+// is collected, not just the first, so a table cell that disagrees with the
+// prose above it shows up as two entries rather than being silently dropped.
+func supportedFixTypes(t *testing.T, path string) []string {
+	t.Helper()
+
+	// Fold the section onto one line first: the prose wraps, and a promise
+	// split across a newline would otherwise not match.
+	section := strings.Join(strings.Fields(supportedVersionsSection(t, path)), " ")
+
+	matches := fixTypePhrase.FindAllStringSubmatch(section, -1)
+	if matches == nil {
+		t.Fatalf("%s %s section never says what a supported version receives; "+
+			"without that phrase this comparison would pass vacuously",
+			path, supportedVersionsHeading)
+	}
+
+	seen := make(map[string]bool, len(matches))
+	unique := make([]string, 0, len(matches))
+	for _, match := range matches {
+		phrase := strings.ToLower(match[1])
+		if !seen[phrase] {
+			seen[phrase] = true
+			unique = append(unique, phrase)
+		}
+	}
+	sort.Strings(unique)
+	return unique
 }
 
 // supportedVersionPolicy returns the supported minor and the end-of-life

@@ -19,7 +19,7 @@ contact_links:
     about: Report a security vulnerability to NVIDIA PSIRT (not through GitHub)
   - name: 💬 Questions
     url: https://github.com/NVIDIA/aicr/issues?q=is%3Aissue+label%3Aquestion
-    about: Browse answered questions, or open an issue with the question label
+    about: Browse issues already labelled question for an existing answer
   - name: 📖 Documentation
     url: https://github.com/NVIDIA/aicr/blob/main/README.md
     about: Read the documentation and guides
