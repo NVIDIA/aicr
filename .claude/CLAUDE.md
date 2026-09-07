@@ -96,6 +96,16 @@ workspace paths. Use local file paths only when explicitly requested.
 - Sign every commit with both `-S` (cryptographic signature) and `-s` (DCO sign-off), authored as the human (the configured `git config user.name`/`user.email`), not the agent
 - Do NOT add `Co-Authored-By` lines or any agent attribution (e.g. Claude Code, Codex) — organization policy
 
+## Secrets and Credentials
+
+**Never commit a secret.** Credentials, API keys, tokens, passwords, private keys, certificates, kubeconfigs, and cloud service-account JSON do not belong in this repository: not in source, not in test fixtures, not in recipe or Helm values, not baked into a container image, and not in a commit message. That includes values you are only using locally, such as `GITHUB_TOKEN`, `GITLAB_TOKEN`, and `NGC_API_KEY`.
+
+**Never paste one where it is recorded.** Issues, pull requests, review comments, CI logs, `slog` output, error strings, and terminal transcripts copied into a report are all durable and mostly public. Redact before pasting: a token in a debug log is a leaked token.
+
+**Where a secret belongs instead.** Read it at run time from an environment variable, a Kubernetes Secret, or an external secret operator. Commit the *reference* (the env var name, or the Secret name and key), never the value. `.env` and `*.pem` are already gitignored; a kubeconfig or a downloaded service-account JSON is not, so keep those outside the working tree. Test fixtures use obviously fake values.
+
+**If a secret does get committed, rotate it.** Deleting the file or amending the commit is not a fix: the value is in the git history, in every clone that fetched it, and possibly in CI logs and forks. Revoke and reissue the credential first, then tell a maintainer, then clean the history. Report it even when the commit never left your machine, because you cannot prove that it did not.
+
 ## Key Packages
 
 | Package | Purpose | Business Logic? |
