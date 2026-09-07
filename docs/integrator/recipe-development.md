@@ -337,6 +337,48 @@ A component must have either `helm` OR `kustomize` configuration, not both.
 > recipe resolution (rather than silently producing an unpatched bundle), so do
 > not use it. See [#1588](https://github.com/NVIDIA/aicr/issues/1588).
 
+## Preview recipes
+
+Recipe coordinates in AICR carry a maturity classification. The definitions
+are governed by [ROADMAP.md](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#maturity):
+
+- **Supported** — the upstream recipe resolves and bundles, deploys on real
+  hardware, passes its declared validation phases, and has published,
+  verifiable evidence.
+- **Preview** — the recipe path and evidence are useful for early adoption,
+  but AICR does not yet make the complete production support and lifecycle
+  commitment required for Supported status.
+
+A Preview coordinate promises that:
+
+- The recipe resolves for the exact coordinate declared as Preview.
+- `aicr bundle` generates deployable artifacts for it.
+- It passes the repository's static, render, and KWOK coverage gates on
+  every merge to `main`.
+- Evidence has been published at [validation.aicr.run](https://validation.aicr.run/); freshness may lag recipe iteration, so consult each coordinate's row in the table below for its evidence status.
+
+A Preview coordinate deliberately does **not** promise broader coverage.
+Per the [VR200 Preview epic (#2326)](https://github.com/NVIDIA/aicr/issues/2326),
+Preview status carries no commitment to full multi-cloud, DPF / BlueField,
+observability, upgrade, or operational-lifecycle support. Any of those may
+land later; none is implied by Preview alone.
+
+### Current Preview coordinates
+
+| Coordinate | Setup guide | Evidence |
+|---|---|---|
+| `rke2 / vr200 / ubuntu / training` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/training](https://validation.aicr.run/#/rke2/vr200-ubuntu/training) |
+| `rke2 / vr200 / ubuntu / inference` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/inference](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference) |
+| `rke2 / vr200 / ubuntu / inference / dynamo` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
+
+The platform-neutral `inference` row is the base the Dynamo leaf inherits from; it exists so that resolving `rke2/vr200/ubuntu/inference` **without** `--platform` resolves to the VR200-safe overlay rather than falling through to the generic `rke2-inference` base.
+
+> **Evidence status (all VR200 rows).** The recipes have changed since evidence publication (`aicr evidence digest` reports a mismatch against each pointer's `predicate.recipe.digest`); treat the linked evidence as historical precedent for the recipe content at publication time, not as validating the current recipe. Fresh hardware validation is pending VR cluster access.
+
+Promotion from Preview to Supported is tracked as its own separately-scoped
+work with fresh evidence; a Preview coordinate does not auto-promote by
+accumulating passing runs.
+
 ## Component Configuration
 
 ### Chart Version Pinning
