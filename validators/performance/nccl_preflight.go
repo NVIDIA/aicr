@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"slices"
 	"sync"
 
@@ -65,9 +66,10 @@ func runPerNodeResultProbe[T any](
 	for _, n := range nodes {
 		// Stop scheduling once the group context is canceled — a sibling probe's
 		// hard failure or a parent-context deadline — rather than queuing work
-		// that would only run against an already-canceled context. Any nodes not
-		// yet probed are irrelevant: g.Wait below returns the cancellation error,
-		// so the partial result map is never consumed.
+		// that would only run against an already-canceled context. Wait does NOT
+		// report that on its own: it returns whatever a goroutine returned, which
+		// is nil when none ever ran. The completeness check after Wait is what
+		// keeps a partial result map from being consumed.
 		if gctx.Err() != nil {
 			break
 		}
@@ -89,6 +91,29 @@ func runPerNodeResultProbe[T any](
 	}
 	if err := g.Wait(); err != nil {
 		return nil, err
+	}
+
+	// Every node must have produced a result. The loop above stops scheduling
+	// once the group context is canceled, and a context ALREADY canceled on
+	// entry means no goroutine ever ran — so Wait returns nil over an empty map
+	// and the caller reads "no node reported a problem" as a pass. A preflight
+	// that examines nothing must not look like success.
+	//
+	// The cause comes from ctx.Ctx, not the errgroup's derived context:
+	// errgroup.Wait cancels the latter when it returns, so gctx.Err() is always
+	// non-nil here and would attach a spurious "context canceled" to every case.
+	if len(results) != len(nodes) {
+		// A deadline and an operator cancellation are different outcomes: the
+		// first is retryable, the second is not, and flattening both to one code
+		// misleads whoever reads the verdict.
+		cause := ctx.Ctx.Err()
+		code := aicrErrors.ErrCodeCanceled
+		if stderrors.Is(cause, context.DeadlineExceeded) {
+			code = aicrErrors.ErrCodeTimeout
+		}
+		return nil, aicrErrors.WrapWithContext(code,
+			probeLabel+" preflight did not probe every target node", cause,
+			map[string]any{"probed": len(results), "nodes": len(nodes)})
 	}
 
 	return results, nil

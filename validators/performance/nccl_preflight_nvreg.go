@@ -174,9 +174,9 @@ func splitNVregProbeOutput(out string) (versionFile, paramsFile string) {
 // in place. Called only for the NET variant on GB200/EKS and GB200/OKE; NVLS
 // traffic stays on NVLink-C2C and does not need it.
 //
-// The requirement is driver-version dependent: up to R580 it is the
-// NVreg_GrdmaPciTopoCheckOverride=1 module parameter, and R595 removed that
-// parameter entirely (#2459).
+// The requirement is driver-version dependent: before R595 it is the
+// NVreg_GrdmaPciTopoCheckOverride=1 module parameter (R580 is the version AICR
+// pins); R595 removed that parameter entirely (#2459).
 //
 // One short-lived Pod per node reads /proc/driver/nvidia via a read-only
 // hostPath; results are consolidated into a single error.
@@ -478,7 +478,7 @@ func waitForPreflightPodPhase(ctx context.Context, clientset kubernetes.Interfac
 //
 // EKS and OKE are the two GB200 NET fabrics that traverse a PCIe-attached NIC
 // (EFA and ConnectX IB respectively), so both need the dma-buf prerequisite —
-// the module flag up to R580, and on R595+ a topology property this preflight
+// the module flag before R595, and on R595+ a topology property this preflight
 // cannot check, where it fails rather than assume.
 // On OKE the flag reaches the driver only under gpuStack=operator-managed
 // (the leaf's kernel-module-params ConfigMap needs a driver DaemonSet to

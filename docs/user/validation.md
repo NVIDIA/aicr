@@ -50,7 +50,7 @@ ones) that match the target fabric:
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A preflight gates the benchmark: up to driver R580 it requires `NVreg_GrdmaPciTopoCheckOverride=1`; R595+ removed that parameter, so the preflight can no longer verify GPUDirect RDMA and fails naming the driver rather than the flag (on EKS p6e-gb200/gb300 the replacement PCIe-topology requirement is measured to fail; on OKE it is unmeasured). |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A preflight gates the benchmark: before driver R595 it requires `NVreg_GrdmaPciTopoCheckOverride=1` (R580 is the version AICR pins); R595+ removed that parameter, so the preflight can no longer verify GPUDirect RDMA and fails naming the driver rather than the flag (on EKS p6e-gb200/gb300 the replacement PCIe-topology requirement is measured to fail; on OKE it is unmeasured). |
 | `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, and VR200 + RKE2. Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE) when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
@@ -165,8 +165,8 @@ still reports a bandwidth figure, just one measured on the wrong path.
 
 The requirement depends on the NVIDIA driver version.
 
-**Up to R580** the driver must be loaded with
-`NVreg_GrdmaPciTopoCheckOverride=1`. Grace hosts present a PCIe layout the
+**Before R595** — which includes `580.173.02`, the version AICR pins — the
+driver must be loaded with `NVreg_GrdmaPciTopoCheckOverride=1`. Grace hosts present a PCIe layout the
 driver does not recognise, so it refuses to let a PCIe-attached NIC (EFA on
 EKS, ConnectX IB on OKE) attach dma-buf handles to GPU memory, logging:
 
