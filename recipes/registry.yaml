@@ -810,15 +810,37 @@ components:
   # `cre` and `cluster-readiness-engine`.
   #
   # NVCRE orchestrates benchmarks through Kubeflow Trainer (TrainJob /
-  # TrainingRuntime); the chart does not install Trainer. The registry
-  # cannot order charts — a referencing recipe's componentRefs entry
-  # must set dependencyRefs: [kubeflow-trainer]. If
-  # metrics.serviceMonitor.enabled is turned on, also depend on
-  # prometheus-operator-crds (AICR values leave the monitor off).
+  # TrainingRuntime); the chart does not install Trainer. A referencing
+  # recipe therefore needs two things this registry entry cannot supply:
   #
-  # AICR values disable metrics.serviceMonitor.enabled. Re-enable only when
-  # prometheus-operator-crds are already on the cluster (base.yaml or a
-  # dependencyRef).
+  #   1. kubeflow-trainer in componentRefs — via the platform-kubeflow
+  #      mixin, or a base that already carries it. dependencyRefs only
+  #      orders components that are already present; it does not add one,
+  #      and naming an absent component fails resolution outright
+  #      (ValidateDependencies: "references unknown dependency").
+  #      dependencyRefs: [kubeflow-trainer] is still required, since the
+  #      registry cannot order charts on its own.
+  #
+  #   2. valuesFile: components/nvcre/values.yaml on the componentRef.
+  #      Component values are never auto-discovered by name — a ref with
+  #      no valuesFile and no overrides resolves to an empty map. Omit it
+  #      and the chart defaults win: metrics.serviceMonitor.enabled is
+  #      true (requiring prometheus-operator-crds) and fullnameOverride
+  #      is unset, so the Deployment carries the release prefix and the
+  #      health check above cannot match it.
+  #
+  # See "Enabling NVCRE" in docs/user/component-catalog.md for a
+  # copy-pasteable overlay fragment.
+  #
+  # With that values file referenced, metrics.serviceMonitor.enabled is
+  # off. Re-enable it only when prometheus-operator-crds are already on
+  # the cluster (base.yaml or a dependencyRef).
+  #
+  # NVCRE v0.2.0 pins kubeflowTrainerVersion = "v2.2.1" and its
+  # `setup status` reports the 2.2.0 this registry defaults to as
+  # unsupported. No functional break is known between the two: the CRD
+  # delta is documentation text plus one embedded PodSpec field NVCRE does
+  # not set. Aligning the global Trainer default is tracked separately.
   #
   # No shipped overlay references this component (TestNVCRERegisteredWithoutOverlay).
   - name: nvcre
@@ -840,13 +862,20 @@ components:
       # anonymous; Helm OCI chart pulls may require GHCR credentials.
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: cluster-readiness-engine
-      defaultVersion: v0.2.0-rc.2
+      defaultVersion: v0.2.0
       defaultNamespace: nvcre
     nodeScheduling:
       # tolerationPaths only: the Deployment template has no nodeSelector
-      # block, so a system selector in values would be dropped. Chart default
-      # tolerations are [{operator: Exists}]; replacing them with recipe
-      # system tolerations keeps the manager off GPU nodes. Benchmarks are
+      # block, so a system selector in values would be dropped.
+      #
+      # This path applies only when the recipe actually supplies system
+      # tolerations — applyNodeSchedulingOverrides gates it on a non-empty
+      # SystemNodeTolerations, so with no --system-toleration the chart
+      # default [{operator: Exists}] stands, which tolerates every taint.
+      #
+      # Either way this does not enforce placement: a toleration permits
+      # scheduling onto a tainted node, it does not keep the pod off one.
+      # Use manager.affinity for that (see the catalog row). Benchmarks are
       # scheduled by CRE itself onto GPU nodes and must not inherit this.
       system:
         tolerationPaths:

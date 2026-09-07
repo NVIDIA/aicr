@@ -23,13 +23,16 @@
 # pod health: the manager reports Ready long before a caller finds out that the
 # kind it submits is unregistered.
 #
-# Compare status.readyReplicas to spec.replicas (not status.replicas).
-# status.replicas is the observed pod count and can match a partial
-# rollout (one ready replica of a spec of two). readyReplicas is
-# omitempty — absent (null) until a pod has been ready — so the equality
-# fails closed rather than passing vacuously the way
-# `unavailableReplicas == 0` would. spec.replicas > 0 rejects a
-# zero-replica Deployment.
+# The manager rollout is gated by the same predicate
+# checks/k8s-aibom/health-check.yaml uses, for the same reason: the chart
+# default is manager.replicas: 1, and at one replica the default 25%
+# maxUnavailable rounds to 0, so a stalled upgrade keeps the old pod alive
+# and satisfies any predicate lacking a generation term. Every status field
+# read is omitempty and therefore absent on a freshly created Deployment,
+# so each defaults to zero — absence must fail, not compare as null.
+# status.replicas is the term that sees the leftover pod from a stalled
+# rollout (2 != 1); observedGeneration is the term that rejects a status
+# describing the previous spec. Neither subsumes the other.
 #
 # Resource names assume components/nvcre/values.yaml sets
 # `fullnameOverride: nvcre`; without it the Deployment carries the
@@ -51,9 +54,11 @@ spec:
               metadata:
                 name: nvcre-manager
                 namespace: nvcre
-              spec:
-                (replicas > `0`): true
-              (status.readyReplicas == spec.replicas): true
+              ((spec.replicas || `0`) > `0`): true
+              ((status.replicas || `0`) == spec.replicas): true
+              ((status.availableReplicas || `0`) == spec.replicas): true
+              ((status.updatedReplicas || `0`) == spec.replicas): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
 
     - name: validate-crds-established
       try:

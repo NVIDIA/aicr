@@ -19,8 +19,14 @@
 #
 # Chart and controller image are public on GHCR. The controller image
 # pulls anonymously. Helm OCI chart pulls may require GHCR credentials
-# depending on registry policy; tag-based `helm install` of v0.2.0-rc.2 has
+# depending on registry policy; tag-based `helm install` of v0.2.0 has
 # worked without a pull secret in UAT.
+#
+# This file applies only when a componentRef names it explicitly as
+# `valuesFile: components/nvcre/values.yaml`. Component values are not
+# auto-discovered from the component name, so a ref that omits it renders
+# the chart defaults instead — including the ServiceMonitor and the
+# release-prefixed resource names the health check cannot match.
 #
 # Only deliberate differences from the chart defaults are set here; everything
 # else (replicas, reconcile concurrency, resources, metrics port) is left at
