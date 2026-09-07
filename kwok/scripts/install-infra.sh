@@ -406,10 +406,18 @@ install_argocd() {
     # "true" in the `argocd-cmd-params-cm` ConfigMap — `configs.params` is a
     # stringly-typed map and the chart's `tpl` step drops bool-typed values,
     # which would leave the API server without `--insecure`.
+    #
+    # `controller.diff.server.side=true` makes the API server compute the merge
+    # rather than the controller's compiled-in schema. Chart 9.5.x predates
+    # Kubernetes 1.37 and so does not declare
+    # `CSIDriver.spec.preventPodSchedulingIfMissing`, which the 1.37 API server
+    # defaults onto the live object; without server-side diff every Argo CD lane
+    # fails comparison on aws-ebs-csi-driver (#2602).
     if ! hc upgrade --install "${ARGOCD_RELEASE}" "${ARGOCD_REPO_NAME}/argo-cd" \
             --namespace "${ARGOCD_NAMESPACE}" --create-namespace \
             --version "${chart_version}" \
             --set-string 'configs.params.server\.insecure=true' \
+            --set-string 'configs.params.controller\.diff\.server\.side=true' \
             --wait --timeout "${ARGOCD_HELM_TIMEOUT}"; then
         log_error "Argo CD Helm install failed"
         dump_argocd_diagnostics
