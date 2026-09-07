@@ -639,7 +639,7 @@ CI also posts per-package deltas post-push via `go-coverage-report` (`on-push-co
 |------|---------|
 | `CONTRIBUTING.md` | Contribution guidelines, PR process, DCO |
 | `DEVELOPMENT.md` | Development setup, architecture, Make targets |
-| `RELEASING.md` | Release process for maintainers |
+| `RELEASE.md` | Release process for maintainers |
 | `.settings.yaml` | Project settings: tool versions, quality thresholds, build/test config (single source of truth) |
 | `recipes/registry.yaml` | Declarative component configuration |
 | `recipes/overlays/*.yaml` | Recipe overlay definitions |
@@ -721,7 +721,7 @@ aicr bundle -r recipe.yaml \
 
 ## Full Reference
 
-See `CONTRIBUTING.md`, `DEVELOPMENT.md`, `RELEASING.md`, and the `docs/` tree (`docs/contributor/` for architecture) for extended documentation including:
+See `CONTRIBUTING.md`, `DEVELOPMENT.md`, `RELEASE.md`, and the `docs/` tree (`docs/contributor/` for architecture) for extended documentation including:
 - Detailed code examples for collectors, bundlers, API endpoints
 - GitHub Actions architecture (three-layer composite actions)
 - CI/CD workflows, supply chain security (SLSA, SBOM, Cosign)

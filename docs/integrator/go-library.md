@@ -1409,7 +1409,7 @@ Versioning][semver]:
 
 Nothing in `pkg/client/v1` is removed without first being marked deprecated for
 the notice period in
-[`RELEASING.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md#deprecation-policy)
+[`RELEASE.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#deprecation-policy)
 — two minor releases before v1.0, and after v1.0 the next major.
 
 The marker is a standard Go `// Deprecated:` godoc paragraph on the identifier:

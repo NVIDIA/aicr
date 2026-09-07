@@ -161,7 +161,7 @@ The sequence is bound to concrete AICR releases:
 | N+2 — v0.23 | target only | target | [#2417](https://github.com/NVIDIA/aicr/issues/2417) |
 
 Releases before N accept only the alpha values, so a target-stamped artifact
-does not load on v0.20 or earlier. `RELEASING.md` and
+does not load on v0.20 or earlier. `RELEASE.md` and
 [`docs/integrator/data-extension.md`](../integrator/data-extension.md#catalog-and-binary-compatibility)
 carry the consumer-facing form of this table.
 
@@ -225,7 +225,7 @@ The window owed is a function of the maturity of the version being removed:
 | GA | Not removed within a major version of the **AICR release**, i.e. no earlier than the next `vMAJOR` |
 
 "Release" and "major version" here mean the **AICR release axis**
-(`vMAJOR.MINOR.PATCH` per `RELEASING.md`), not the artifact version. §1 separates
+(`vMAJOR.MINOR.PATCH` per `RELEASE.md`), not the artifact version. §1 separates
 the two axes; this window is measured on the project's release axis, because
 that is the clock a consumer upgrades against. Concretely: an `aicr.run/v1`
 kind deprecated during `v1.x` may first be removed in `v2.0.0`.

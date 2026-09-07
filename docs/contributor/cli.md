@@ -401,7 +401,7 @@ so `go test ./... -update` fails in every other package.
 **If you removed or renamed a command, flag, or alias, or changed a default,**
 the test reports it as `BREAKING` rather than telling you to regenerate. That is
 a breaking change to a frozen surface and it owes the notice period in
-[`RELEASING.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md#deprecation-policy): ship the deprecation
+[`RELEASE.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#deprecation-policy): ship the deprecation
 with a warning first, remove it only after the window, and add an entry to
 [`docs/user/deprecations.md`](../user/deprecations.md). Regenerate the golden
 only once the removal is actually due.

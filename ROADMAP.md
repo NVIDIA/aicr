@@ -51,7 +51,7 @@ project's v1 release remain separate axes.
 - An integrator can implement the complete workflow using
   `github.com/NVIDIA/aicr/pkg/client/v1` plus standard-library and explicitly
   stable third-party types, without importing another AICR `pkg/*` package.
-- `RELEASING.md` defines breaking changes and the deprecation policy for every
+- `RELEASE.md` defines breaking changes and the deprecation policy for every
   surface. Breaking changes after v1 require a major version bump.
 
 ## 2. Sufficient validated coverage
