@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/NVIDIA/aicr/pkg/chainsaw"
@@ -86,6 +87,10 @@ const (
 	nodewrightOperatorDeployment = "skyhook-operator-controller-manager"
 	runtimeRequiredTaintEnv      = "RUNTIME_REQUIRED_TAINT"
 )
+
+// nodewrightRenameVersion is the first nodewright-operator release that serves
+// nodewright.nvidia.com and writes status only there.
+const nodewrightRenameVersion = "0.18.0"
 
 var (
 	// nodewrightGVR is the CR kind nodewright-operator v0.18.0+ reconciles and
@@ -581,25 +586,63 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 }
 
 // resolveNodewrightGVR discovery-gates the Nodewright CR kinds before any Get
-// by name, preferring nodewrightGVR and falling back to legacySkyhookGVR for
-// older operators. registered is false when neither group is served (the
-// caller skips per #607). Any discovery error other than NotFound fails closed
-// so a transient discovery failure cannot mask readiness.
+// by name, preferring nodewrightGVR. The legacySkyhookGVR fallback is taken
+// only when legacySkyhookAllowed permits it: a recipe that pins the operator at
+// nodewrightRenameVersion or later must serve the new group, so a legacy-only
+// cluster there is a broken install (or stale Skyhooks from a prior operator)
+// and fails closed rather than being read as ready. registered is false when
+// neither group is served (the caller skips per #607). Any discovery error
+// other than NotFound fails closed so a transient failure cannot mask
+// readiness.
 func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResource, registered bool, err error) {
-	for _, candidate := range []schema.GroupVersionResource{nodewrightGVR, legacySkyhookGVR} {
+	served := func(candidate schema.GroupVersionResource) (bool, error) {
 		gv := candidate.GroupVersion().String()
 		_, discErr := ctx.Clientset.Discovery().ServerResourcesForGroupVersion(gv)
 		switch {
 		case discErr == nil:
-			return candidate, true, nil
+			return true, nil
 		case apierrors.IsNotFound(discErr):
-			continue
+			return false, nil
 		default:
-			return schema.GroupVersionResource{}, false, errors.Wrap(errors.ErrCodeInternal,
+			return false, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to discover %s resources (is the API server reachable and RBAC in order?)", gv), discErr)
 		}
 	}
-	return schema.GroupVersionResource{}, false, nil
+
+	ok, err := served(nodewrightGVR)
+	if err != nil || ok {
+		return nodewrightGVR, ok, err
+	}
+	ok, err = served(legacySkyhookGVR)
+	if err != nil || !ok {
+		return schema.GroupVersionResource{}, false, err
+	}
+	if allowed, pin := legacySkyhookAllowed(ctx); !allowed {
+		return schema.GroupVersionResource{}, false, errors.New(errors.ErrCodeNotFound,
+			fmt.Sprintf("%s is not served but the recipe pins %s %s (>= %s serves it); refusing the legacy %s fallback — check the operator install rather than a stale Skyhook",
+				nodewrightGVR.GroupVersion(), nodewrightOperatorComponent, pin, nodewrightRenameVersion, legacySkyhookGVR.GroupVersion()))
+	}
+	return legacySkyhookGVR, true, nil
+}
+
+// legacySkyhookAllowed reports whether the recipe gives a pre-rename signal
+// that permits reading the legacy Skyhook kind: a nodewright-operator ref
+// pinned below nodewrightRenameVersion. A recipe without that component, or
+// with an unparseable version, carries no signal either way and keeps the
+// fallback (there is nothing to refuse on). pin is the version string seen.
+func legacySkyhookAllowed(ctx *validators.Context) (allowed bool, pin string) {
+	if ctx.ValidationInput == nil {
+		return true, ""
+	}
+	ref, ok := findEnabledComponent(ctx.ValidationInput.ComponentRefs, nodewrightOperatorComponent)
+	if !ok || ref.Version == "" {
+		return true, ""
+	}
+	v, err := semver.NewVersion(ref.Version)
+	if err != nil {
+		return true, ref.Version
+	}
+	return v.LessThan(semver.MustParse(nodewrightRenameVersion)), ref.Version
 }
 
 // nodewrightStatusFailures does one pass over the expected Nodewright CRs and
@@ -831,11 +874,12 @@ func gatedHealthCheckSuppressed(ctx *validators.Context, ref recipe.ComponentRef
 			return suppressed, "effective values suppress the tuning Nodewright CR (see #1844)", err
 		}
 		// The assert names the NodeWright kind (nodewright-operator v0.18.0+).
-		// A pre-v0.18.0 operator serves only the legacy Skyhook group, where
-		// the Go readiness check (verifyNodewrightReady) already verifies each
-		// declared CR's status by name, so the static assert has nothing valid
-		// to target. A cluster serving neither group keeps the assert so its
-		// own failure surfaces the missing operator.
+		// When resolveNodewrightGVR accepts the legacy fallback (operator
+		// pinned below the rename), the Go readiness check verifies each
+		// declared Skyhook by name, so the static assert has nothing valid to
+		// target. A cluster serving neither group keeps the assert so its own
+		// failure surfaces the missing operator; a v0.18.0 pin on a legacy-only
+		// cluster is the resolver's fail-closed error.
 		gvr, registered, err := resolveNodewrightGVR(ctx)
 		if err != nil {
 			return false, "", err

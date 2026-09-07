@@ -27,10 +27,13 @@
 # NodeWright, so asserting the legacy kind never sees "complete" even on a fully
 # tuned cluster. The manifests may still declare Skyhook; the mirrored NodeWright
 # of the same name is what carries the status. A static assert cannot fall back,
-# so this check follows the pinned operator. On a pre-v0.18.0 operator (only the
-# skyhook.nvidia.com group served) the deployment validator skips this assert
-# (gatedHealthCheckSuppressed) and the Go readiness check verifies the Skyhook
-# CRs by name instead, so a healthy legacy cluster still passes.
+# so this check follows the pinned operator. When the recipe pins the operator
+# below v0.18.0 and the cluster serves only skyhook.nvidia.com, the deployment
+# validator skips this assert (gatedHealthCheckSuppressed) and the Go readiness
+# check verifies the Skyhook CRs by name instead, so a healthy legacy cluster
+# still passes. A v0.18.0+ pin on a cluster that does not serve
+# nodewright.nvidia.com fails closed: that is a broken operator install, and a
+# stale legacy Skyhook must not stand in for the missing NodeWright.
 #
 # Value-gate awareness (#1844): this static assert cannot see the component's
 # effective Helm values, so it would fail when the whole `tuning` CR is

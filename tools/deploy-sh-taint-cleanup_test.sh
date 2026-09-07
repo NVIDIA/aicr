@@ -132,6 +132,19 @@ check_taint       "custom-legacy-still-removed"  "taint node gpu-2 skyhook.nvidi
 check_no_taint    "custom-default-not-removed"   "gpu-3"
 check_taint_count "custom-exactly-two-calls"     2
 
+# 5b. Fresh deploy (no Deployment) with a configured custom key: the previous
+#     install may have tainted with either default key, so both defaults are
+#     cleaned alongside the custom key — the incoming operator would never
+#     remove a stale nodewright.nvidia.com taint itself.
+STUB_DEPLOY_OUT='' \
+STUB_NODES_OUT=$'gpu-0 custom.io/gate\ngpu-1 custom.io/gate2\ngpu-2 skyhook.nvidia.com\ngpu-3 nodewright.nvidia.com\n' \
+run "${WORK}/values.yaml"
+check_taint       "fresh-custom-key-removed"      "taint node gpu-0 custom.io/gate-"
+check_no_taint    "fresh-custom-prefix-not-matched" "gpu-1"
+check_taint       "fresh-custom-legacy-removed"   "taint node gpu-2 skyhook.nvidia.com-"
+check_taint       "fresh-custom-default-removed"  "taint node gpu-3 nodewright.nvidia.com-"
+check_taint_count "fresh-custom-exactly-three-calls" 3
+
 # 6. A configured key that contains whitespace (rejected by ParseTaint, but
 #    guarded here too) must stay one token: nodes carrying `foo` or `bar`
 #    taints are not selected.

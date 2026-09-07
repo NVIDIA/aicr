@@ -1204,10 +1204,15 @@ deploy but is missing on the cluster still fails). The same render drives
 the Go readiness check `verifyNodewrightReady`, so both surfaces agree on
 which CRs to expect. The same dispatch skips the `nodewright-customizations`
 assert on a cluster whose operator predates the `NodeWright` kind the assert
-names (only `skyhook.nvidia.com` served, i.e. nodewright-operator < v0.18.0):
-`verifyNodewrightReady` falls back to the legacy `Skyhook` by name there, so
-a healthy legacy cluster passes without a static assert that can never match.
-A discovery error fails closed rather than skipping. This skip is scoped to
+names. The signal is the recipe's own `nodewright-operator` pin
+(`resolveNodewrightGVR`): a pin below v0.18.0 (or no usable pin) with only
+`skyhook.nvidia.com` served takes the legacy path, where
+`verifyNodewrightReady` verifies each `Skyhook` by name, so a healthy legacy
+cluster passes without a static assert that can never match. A v0.18.0+ pin
+on a cluster that does not serve `nodewright.nvidia.com` fails closed — that
+is a broken operator install, and a stale legacy `Skyhook` must not stand in
+for the missing `NodeWright`. A discovery error also fails closed rather than
+skipping. This skip is scoped to
 `nodewright-customizations`; every other component's assert queues
 unconditionally.
 

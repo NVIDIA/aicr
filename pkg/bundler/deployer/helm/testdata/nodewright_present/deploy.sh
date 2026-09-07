@@ -269,9 +269,13 @@ done
 #
 # Keys cleaned: the bundle-configured runtimeRequiredTaint key plus the legacy
 # skyhook.nvidia.com key (the operator still removes it and the validator gate
-# waits on it); with no configured value, both operator defaults. Keys are held
-# in an array and matched exactly against each taint key so a key can neither
-# word-split nor prefix-match an unrelated taint.
+# waits on it); with no configured value, both operator defaults. On a fresh
+# deploy (no Deployment at all) the previous install may have used either
+# default key, so both defaults are cleaned alongside the configured key —
+# the incoming operator recognises only its own key and the legacy one, so a
+# stale nodewright.nvidia.com taint would otherwise never be removed. Keys are
+# held in an array and matched exactly against each taint key so a key can
+# neither word-split nor prefix-match an unrelated taint.
 function remove_stale_nodewright_taints() {
   local ns="$1" values_file="$2"
   local available
@@ -281,6 +285,10 @@ function remove_stale_nodewright_taints() {
   fi
   if [[ -n "${available}" && "${available}" != "0" ]]; then
     return 0
+  fi
+  local fresh_deploy=false
+  if [[ -z "${available}" ]]; then
+    fresh_deploy=true
   fi
 
   local -a keys=("nodewright.nvidia.com" "skyhook.nvidia.com")
@@ -292,6 +300,9 @@ function remove_stale_nodewright_taints() {
       local custom_key="${taint_value%%=*}"
       custom_key="${custom_key%%:*}"
       keys=("${custom_key}")
+      if [[ "${fresh_deploy}" == "true" && "${custom_key}" != "nodewright.nvidia.com" ]]; then
+        keys+=("nodewright.nvidia.com")
+      fi
       if [[ "${custom_key}" != "skyhook.nvidia.com" ]]; then
         keys+=("skyhook.nvidia.com")
       fi

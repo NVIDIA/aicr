@@ -20,8 +20,10 @@
 #    will accept Skyhook CRs that nodewright-customizations declares).
 #    Both the pre- and post-rename charts render this CRD; the v0.18.0
 #    nodewrights.nodewright.nvidia.com CRD is deliberately not asserted
-#    here so a v0.17.x operator still passes — the nodewright-customizations
-#    check and the Go readiness gate fail closed if it is missing on v0.18.0.
+#    here so a v0.17.x operator still passes. The Go readiness gate
+#    (resolveNodewrightGVR) fails closed when the recipe pins v0.18.0+ and
+#    that group is not served, so its absence is never mistaken for a
+#    legacy operator.
 # 2. skyhook-operator-controller-manager Deployment has at least one
 #    available replica.
 # 3. No pods stuck in Pending/Failed/Unknown phases or known-bad

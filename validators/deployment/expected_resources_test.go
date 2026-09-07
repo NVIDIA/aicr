@@ -1261,17 +1261,39 @@ func TestCheckExpectedResources_LegacyOperatorSkipsNodeWrightAssert(t *testing.T
 		ManifestFiles:      []string{testNodewrightManifest},
 		HealthCheckAsserts: testNodewrightAssertYAML,
 	}
+	legacyOperator := recipe.ComponentRef{Name: nodewrightOperatorComponent, Namespace: "skyhook", Version: "v0.17.1"}
 
 	t.Run("legacy-only cluster passes with the assert skipped", func(t *testing.T) {
 		t.Parallel()
 		// Only skyhook.nvidia.com is registered (inferred from the Skyhook
-		// object); a queued chainsaw assert would need a fetcher and fail.
+		// object); a queued chainsaw assert would need a fetcher and fail. The
+		// v0.17.1 operator pin is the explicit pre-rename signal.
 		ctx := newDeploymentTestContext(t,
 			[]runtime.Object{activeNamespace("skyhook")},
 			[]runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
-			[]recipe.ComponentRef{ref})
+			[]recipe.ComponentRef{legacyOperator, ref})
 		if err := checkExpectedResources(ctx); err != nil {
 			t.Fatalf("checkExpectedResources() error = %v, want nil on a healthy v0.17 cluster", err)
+		}
+	})
+
+	t.Run("v0.18 pin on a legacy-only cluster fails closed", func(t *testing.T) {
+		t.Parallel()
+		// A stale complete Skyhook must not certify readiness when the recipe
+		// pins an operator that is required to serve nodewright.nvidia.com.
+		ctx := newDeploymentTestContext(t,
+			[]runtime.Object{activeNamespace("skyhook")},
+			[]runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)},
+			[]recipe.ComponentRef{
+				{Name: nodewrightOperatorComponent, Namespace: "skyhook", Version: "v0.18.0"},
+				ref,
+			})
+		err := checkExpectedResources(ctx)
+		if err == nil {
+			t.Fatal("checkExpectedResources() error = nil, want the fail-closed legacy refusal")
+		}
+		if !strings.Contains(err.Error(), "refusing the legacy") {
+			t.Fatalf("expected the legacy-fallback refusal, got: %v", err)
 		}
 	})
 
@@ -1305,6 +1327,62 @@ func TestCheckExpectedResources_LegacyOperatorSkipsNodeWrightAssert(t *testing.T
 			t.Fatal("gatedHealthCheckSuppressed() error = nil, want the discovery failure (must not skip)")
 		}
 	})
+}
+
+// TestResolveNodewrightGVR_VersionGate pins the fallback contract: the new
+// group always wins when served; the legacy group is read only when the recipe
+// pins nodewright-operator below the rename, or carries no usable pin at all;
+// a rename-or-later pin on a legacy-only cluster fails closed; neither group
+// served skips (#607).
+func TestResolveNodewrightGVR_VersionGate(t *testing.T) {
+	t.Parallel()
+
+	operator := func(version string) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: nodewrightOperatorComponent, Namespace: "skyhook", Version: version}
+	}
+	legacyOnly := []runtime.Object{nodewrightWithStatus("tuning", nodewrightCompleteState)}
+	bothGroups := []runtime.Object{
+		nodewrightWithStatus("tuning", nodewrightCompleteState),
+		nodeWrightWithStatus("tuning", nodewrightCompleteState),
+	}
+
+	tests := []struct {
+		name           string
+		objects        []runtime.Object
+		refs           []recipe.ComponentRef
+		wantGVR        schema.GroupVersionResource
+		wantRegistered bool
+		wantErrSub     string
+	}{
+		{name: "both served, v0.18.0 pin → NodeWright", objects: bothGroups, refs: []recipe.ComponentRef{operator("v0.18.0")}, wantGVR: nodewrightGVR, wantRegistered: true},
+		{name: "both served, v0.17.1 pin → NodeWright still preferred", objects: bothGroups, refs: []recipe.ComponentRef{operator("v0.17.1")}, wantGVR: nodewrightGVR, wantRegistered: true},
+		{name: "legacy only, v0.17.1 pin → Skyhook", objects: legacyOnly, refs: []recipe.ComponentRef{operator("v0.17.1")}, wantGVR: legacySkyhookGVR, wantRegistered: true},
+		{name: "legacy only, no operator ref → Skyhook", objects: legacyOnly, wantGVR: legacySkyhookGVR, wantRegistered: true},
+		{name: "legacy only, unparseable pin → Skyhook", objects: legacyOnly, refs: []recipe.ComponentRef{operator("latest")}, wantGVR: legacySkyhookGVR, wantRegistered: true},
+		{name: "legacy only, v0.18.0 pin → fail closed", objects: legacyOnly, refs: []recipe.ComponentRef{operator("v0.18.0")}, wantErrSub: "refusing the legacy"},
+		{name: "legacy only, v0.19.2 pin → fail closed", objects: legacyOnly, refs: []recipe.ComponentRef{operator("v0.19.2")}, wantErrSub: "refusing the legacy"},
+		{name: "neither served, v0.18.0 pin → skip", refs: []recipe.ComponentRef{operator("v0.18.0")}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := newDeploymentTestContext(t, []runtime.Object{activeNamespace("skyhook")}, tt.objects, tt.refs)
+			gvr, registered, err := resolveNodewrightGVR(ctx)
+			if tt.wantErrSub != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrSub) {
+					t.Fatalf("resolveNodewrightGVR() error = %v, want substring %q", err, tt.wantErrSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveNodewrightGVR() error = %v", err)
+			}
+			if registered != tt.wantRegistered || gvr != tt.wantGVR {
+				t.Fatalf("resolveNodewrightGVR() = (%v, %v), want (%v, %v)", gvr, registered, tt.wantGVR, tt.wantRegistered)
+			}
+		})
+	}
 }
 
 // TestVerifyNodewrightReady_PrefersNodeWrightOverLegacySkyhook pins the #2593
