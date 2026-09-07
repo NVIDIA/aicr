@@ -50,7 +50,7 @@ ones) that match the target fabric:
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A preflight gates the benchmark: before driver R595 it requires `NVreg_GrdmaPciTopoCheckOverride=1` (R580 is the version AICR pins); R595+ removed that parameter, so the preflight can no longer verify GPUDirect RDMA and fails naming the driver rather than the flag (on EKS p6e-gb200/gb300 the replacement PCIe-topology requirement is measured to fail; on OKE it is unmeasured). |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A preflight gates the benchmark on the default fabric (EFA on EKS, IB on OKE) — the `AICR_NCCL_FABRIC=roce` override skips it. Before driver R595 the preflight requires `NVreg_GrdmaPciTopoCheckOverride=1` (R580 is the version AICR pins); R595+ removed that parameter, so it can no longer verify GPUDirect RDMA and fails naming the driver rather than the flag (on EKS p6e-gb200/gb300 the replacement PCIe-topology requirement is measured to fail; on OKE it is unmeasured). |
 | `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, and VR200 + RKE2. Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE) when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
@@ -156,12 +156,16 @@ aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
 
 ### GB200 NET preflight: GPUDirect RDMA prerequisites
 
-Before running `nccl-all-reduce-bw-net` on GB200 (EKS or OKE), a preflight checks
-each GPU node for the driver-side prerequisite of GPUDirect RDMA. It does not
-prove RDMA works end to end — it establishes that the one setting AICR controls
-is in place. Without that setting NCCL falls back to the Socket transport
-**silently** — the benchmark still completes and
-still reports a bandwidth figure, just one measured on the wrong path.
+Before running `nccl-all-reduce-bw-net` on GB200 (EKS or OKE), a preflight
+checks each GPU node for the driver-side prerequisite of GPUDirect RDMA. It does
+not prove RDMA works end to end — it establishes that the one setting AICR
+controls is in place. Without that setting NCCL falls back to the Socket
+transport **silently** — the benchmark still completes and still reports a
+bandwidth figure, just one measured on the wrong path.
+
+The preflight runs on the default fabric only: EFA on EKS, built-in IB/verbs on
+OKE. `AICR_NCCL_FABRIC=roce` selects a different EKS template and skips the
+preflight, so the benchmark runs ungated there.
 
 The requirement depends on the NVIDIA driver version.
 

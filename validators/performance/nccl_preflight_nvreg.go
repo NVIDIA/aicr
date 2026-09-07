@@ -81,10 +81,10 @@ func parseNVRMVersion(content string) (full string, major int, ok bool) {
 type nvregVerdict int
 
 const (
-	// nvregVersionUnknown: version unreadable, so nothing is established.
-	// Deliberately the ZERO VALUE so an accidentally-empty result fails closed
-	// rather than reading as a pass.
-	nvregVersionUnknown nvregVerdict = iota
+	// nvregUndetermined: the driver state could not be established — the version
+	// banner or the params file was unreadable. Deliberately the ZERO VALUE so
+	// an accidentally-empty result fails closed rather than reading as a pass.
+	nvregUndetermined nvregVerdict = iota
 	// nvregOK: pre-R595 driver with the override set.
 	nvregOK
 	// nvregFlagMissing: pre-R595 driver, override absent. The operator can set it.
@@ -106,13 +106,18 @@ type nvregResult struct {
 // evaluateNVregPreflight decides a node's verdict from the two probed files.
 // Version is consulted FIRST: on R595+ the flag cannot exist, so looking for it
 // could only produce the misleading "set the flag" advice (#2459).
-func evaluateNVregPreflight(versionFile, paramsFile string) nvregResult {
+func evaluateNVregPreflight(versionFile, paramsFile string, paramsOK bool) nvregResult {
 	full, major, ok := parseNVRMVersion(versionFile)
 	if !ok {
-		return nvregResult{verdict: nvregVersionUnknown}
+		return nvregResult{verdict: nvregUndetermined}
 	}
 	if major >= nvregR595Major {
+		// params is irrelevant here: the parameter cannot exist on this driver.
 		return nvregResult{verdict: nvregOverrideRemoved, version: full}
+	}
+	if !paramsOK {
+		// Absent content is not evidence the flag is unset.
+		return nvregResult{verdict: nvregUndetermined, version: full}
 	}
 	if parseNVregFromParams(paramsFile) {
 		return nvregResult{verdict: nvregOK, version: full}
@@ -128,6 +133,13 @@ const (
 
 	// nvregProbeSeparator delimits the two files in the probe pod's stdout.
 	nvregProbeSeparator = "===AICR-NVREG-SPLIT==="
+
+	// nvregParamsOKMarker is emitted only when the params read SUCCEEDED. Its
+	// absence distinguishes "the flag is not set" from "we could not read
+	// whether it is set" — without it an unreadable params file yields empty
+	// content, which would be reported as a missing flag and send the operator
+	// after remediation for something never established.
+	nvregParamsOKMarker = "===AICR-NVREG-PARAMS-OK==="
 
 	// nvregDocsHint is emitted when the flag is missing on a pre-R595 driver.
 	// Covers both driver-ownership modes, and corrects the reload instruction:
@@ -150,22 +162,29 @@ const (
 		`or via the node image where the GPU Operator does not own the driver. ` +
 		`See docs/user/validation.md.`
 
-	// nvregUnknownVersionHint is emitted when the version banner is unreadable.
-	nvregUnknownVersionHint = `/proc/driver/nvidia/version could not be read, so neither the override nor the ` +
-		`driver version could be established and the preflight fails rather than ` +
-		`assume. Confirm the NVIDIA kernel module is loaded on every target node. ` +
-		`See docs/user/validation.md.`
+	// nvregUndeterminedHint is emitted when either probed file is unreadable.
+	nvregUndeterminedHint = `/proc/driver/nvidia/version or params could not be read, so neither the ` +
+		`driver version nor the override could be established and the preflight ` +
+		`fails rather than assume. Confirm the NVIDIA kernel module is loaded on ` +
+		`every target node. See docs/user/validation.md.`
 )
 
 // splitNVregProbeOutput splits the probe pod's stdout into the version and
-// params contents. A missing separator yields two empty strings, which
-// evaluateNVregPreflight resolves to nvregVersionUnknown (fail-closed).
-func splitNVregProbeOutput(out string) (versionFile, paramsFile string) {
+// params contents, reporting whether the params read succeeded. A missing
+// separator or params marker yields empty content, which evaluateNVregPreflight
+// resolves to nvregUndetermined (fail-closed).
+func splitNVregProbeOutput(out string) (versionFile, paramsFile string, paramsOK bool) {
 	before, after, found := strings.Cut(out, nvregProbeSeparator)
 	if !found {
-		return "", ""
+		return "", "", false
 	}
-	return before, after
+	params, _, ok := strings.Cut(after, nvregParamsOKMarker)
+	if !ok {
+		// The read failed; the content before the missing marker is not a
+		// trustworthy "flag absent".
+		return before, "", false
+	}
+	return before, params, true
 }
 
 // preflightGB200NetNVregFlag checks each target GPU node for the driver-side
@@ -218,10 +237,10 @@ func nvregPreflightOutcome(results map[string]nvregResult) error {
 			"GPUDirect RDMA cannot be verified on GPU nodes running driver R%d or later: %s. %s",
 			nvregR595Major, describeNVregNodes(results, removed), nvregOverrideRemovedHint))
 	}
-	if unknown := nodesWithVerdict(results, nvregVersionUnknown); len(unknown) > 0 {
+	if unknown := nodesWithVerdict(results, nvregUndetermined); len(unknown) > 0 {
 		sections = append(sections, fmt.Sprintf(
-			"NVIDIA driver version could not be determined on GPU nodes: %s. %s",
-			describeNVregNodes(results, unknown), nvregUnknownVersionHint))
+			"NVIDIA driver state could not be determined on GPU nodes: %s. %s",
+			describeNVregNodes(results, unknown), nvregUndeterminedHint))
 	}
 	if missing := nodesWithVerdict(results, nvregFlagMissing); len(missing) > 0 {
 		sections = append(sections, fmt.Sprintf(
@@ -321,14 +340,15 @@ func checkNVregOnNode(ctx context.Context, clientset kubernetes.Interface, names
 				Image:   defaults.ProbeImage,
 				Command: []string{shellBin, "-c"},
 				// Emit both files with a sentinel between them and ALWAYS exit 0:
-				// an exit status cannot distinguish "flag absent, go set it" from
-				// "flag cannot exist on this driver" (#2459). A missing file
-				// contributes empty content, which resolves to the fail-closed
-				// nvregVersionUnknown.
+				// a single exit status cannot distinguish "flag absent, go set
+				// it" from "flag cannot exist on this driver" (#2459). Per-file
+				// readability is carried by markers instead, so an unreadable
+				// file is never mistaken for an empty one.
 				Args: []string{
 					"cat /host-proc-nvidia/version 2>/dev/null; " +
 						"echo '" + nvregProbeSeparator + "'; " +
-						"cat /host-proc-nvidia/params 2>/dev/null; " +
+						"cat /host-proc-nvidia/params 2>/dev/null && " +
+						"echo '" + nvregParamsOKMarker + "'; " +
 						"exit 0",
 				},
 				VolumeMounts: []corev1.VolumeMount{{
@@ -382,8 +402,8 @@ func checkNVregOnNode(ctx context.Context, clientset kubernetes.Interface, names
 			"NVreg preflight pod succeeded but logs were unreadable", logErr)
 	}
 
-	versionFile, paramsFile := splitNVregProbeOutput(logs)
-	return evaluateNVregPreflight(versionFile, paramsFile), nil
+	versionFile, paramsFile, paramsOK := splitNVregProbeOutput(logs)
+	return evaluateNVregPreflight(versionFile, paramsFile, paramsOK), nil
 }
 
 // waitForPreflightPodPhase watches a pod until it reaches a terminal phase

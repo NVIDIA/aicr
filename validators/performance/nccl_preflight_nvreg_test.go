@@ -197,25 +197,44 @@ func TestEvaluateNVregPreflight(t *testing.T) {
 		name        string
 		versionFile string
 		paramsFile  string
+		paramsOK    bool
 		want        nvregVerdict
 	}{
-		{"R580 + flag set → OK", realNVRMBanner, paramsWithFlag, nvregOK},
-		{"R580 + flag absent → actionable", realNVRMBanner, paramsWithoutFlag, nvregFlagMissing},
+		{"R580 + flag set → OK", realNVRMBanner, paramsWithFlag, true, nvregOK},
+		{"R580 + flag absent → actionable", realNVRMBanner, paramsWithoutFlag, true, nvregFlagMissing},
 		{
 			"R580 + flag explicitly 0 → actionable",
-			realNVRMBanner, "GrdmaPciTopoCheckOverride: 0\n", nvregFlagMissing,
+			realNVRMBanner, "GrdmaPciTopoCheckOverride: 0\n", true, nvregFlagMissing,
 		},
-		{"R595 + flag absent → override removed", r595, paramsWithoutFlag, nvregOverrideRemoved},
-		{"unreadable version → fails closed", "", paramsWithFlag, nvregVersionUnknown},
-		{"both files empty → fails closed", "", "", nvregVersionUnknown},
+		{"R595 + flag absent → override removed", r595, paramsWithoutFlag, true, nvregOverrideRemoved},
+		{"unreadable version → fails closed", "", paramsWithFlag, true, nvregUndetermined},
+		{"both files empty → fails closed", "", "", true, nvregUndetermined},
+		// An unreadable params file is NOT evidence the flag is unset: reporting
+		// nvregFlagMissing would send the operator to edit ClusterPolicy for a
+		// setting nothing ever established was absent.
+		{"R580 + params unreadable → fails closed", realNVRMBanner, "", false, nvregUndetermined},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := evaluateNVregPreflight(tt.versionFile, tt.paramsFile); got.verdict != tt.want {
+			if got := evaluateNVregPreflight(tt.versionFile, tt.paramsFile, tt.paramsOK); got.verdict != tt.want {
 				t.Errorf("verdict = %v, want %v", got.verdict, tt.want)
 			}
 		})
 	}
+}
+
+// An R595 node needs no params file at all — the parameter cannot exist there,
+// so an unreadable params must not downgrade the definitive "override removed"
+// verdict into "undetermined" and lose the actionable message.
+func TestEvaluateNVregPreflightR595IgnoresUnreadableParams(t *testing.T) {
+	got := evaluateNVregPreflight(r595Banner(), "", false)
+	if got.verdict != nvregOverrideRemoved {
+		t.Errorf("verdict = %v, want nvregOverrideRemoved", got.verdict)
+	}
+}
+
+func r595Banner() string {
+	return "NVRM version: NVIDIA UNIX aarch64 Kernel Module  595.91.07  Mon\n"
 }
 
 // TestEvaluateNVregPreflightR595NeverPasses is the core #2459 regression. On
@@ -226,7 +245,7 @@ func TestEvaluateNVregPreflightR595NeverPasses(t *testing.T) {
 	for _, version := range []string{"595.91.07", "600.10.01", "601.0.0"} {
 		t.Run(version, func(t *testing.T) {
 			banner := "NVRM version: NVIDIA UNIX aarch64 Kernel Module  " + version + "  Mon\n"
-			got := evaluateNVregPreflight(banner, paramsWithFlag)
+			got := evaluateNVregPreflight(banner, paramsWithFlag, true)
 			if got.verdict != nvregOverrideRemoved {
 				t.Errorf("verdict = %v, want nvregOverrideRemoved (flag set must not rescue R595+)", got.verdict)
 			}
@@ -247,7 +266,7 @@ func TestEvaluateNVregPreflightVersionCheckedFirst(t *testing.T) {
 	}
 	for version, want := range boundary {
 		banner := "NVRM version: NVIDIA UNIX aarch64 Kernel Module  " + version + "  Mon\n"
-		if got := evaluateNVregPreflight(banner, paramsWithoutFlag); got.verdict != want {
+		if got := evaluateNVregPreflight(banner, paramsWithoutFlag, true); got.verdict != want {
 			t.Errorf("%s: verdict = %v, want %v", version, got.verdict, want)
 		}
 	}
@@ -255,10 +274,13 @@ func TestEvaluateNVregPreflightVersionCheckedFirst(t *testing.T) {
 
 func TestSplitNVregProbeOutput(t *testing.T) {
 	t.Run("round-trips both files", func(t *testing.T) {
-		out := realNVRMBanner + nvregProbeSeparator + "\n" + paramsWithFlag
-		version, params := splitNVregProbeOutput(out)
+		out := realNVRMBanner + nvregProbeSeparator + "\n" + paramsWithFlag + nvregParamsOKMarker + "\n"
+		version, params, paramsOK := splitNVregProbeOutput(out)
 		if _, _, ok := parseNVRMVersion(version); !ok {
 			t.Errorf("version half did not parse: %q", version)
+		}
+		if !paramsOK {
+			t.Error("paramsOK = false, want true — the marker was present")
 		}
 		if !parseNVregFromParams(params) {
 			t.Errorf("params half did not parse: %q", params)
@@ -267,12 +289,40 @@ func TestSplitNVregProbeOutput(t *testing.T) {
 
 	// A truncated or unexpected probe output must fail closed, not pass.
 	t.Run("missing separator yields empty halves", func(t *testing.T) {
-		version, params := splitNVregProbeOutput("some unexpected output")
-		if version != "" || params != "" {
-			t.Errorf("got (%q, %q), want both empty", version, params)
+		version, params, paramsOK := splitNVregProbeOutput("some unexpected output")
+		if version != "" || params != "" || paramsOK {
+			t.Errorf("got (%q, %q, %v), want empty halves and paramsOK=false", version, params, paramsOK)
 		}
-		if got := evaluateNVregPreflight(version, params); got.verdict != nvregVersionUnknown {
-			t.Errorf("verdict = %v, want nvregVersionUnknown", got.verdict)
+		if got := evaluateNVregPreflight(version, params, paramsOK); got.verdict != nvregUndetermined {
+			t.Errorf("verdict = %v, want nvregUndetermined", got.verdict)
+		}
+	})
+
+	// The version half read fine but the params cat failed, so no marker was
+	// emitted. Without the marker the empty params half is indistinguishable
+	// from "the flag is not set" — the check must report undetermined instead
+	// of prescribing a ClusterPolicy edit.
+	t.Run("missing params marker is not a missing flag", func(t *testing.T) {
+		out := realNVRMBanner + nvregProbeSeparator + "\n"
+		version, params, paramsOK := splitNVregProbeOutput(out)
+		if paramsOK {
+			t.Error("paramsOK = true, want false — no marker was emitted")
+		}
+		if params != "" {
+			t.Errorf("params = %q, want empty", params)
+		}
+		if got := evaluateNVregPreflight(version, params, paramsOK); got.verdict != nvregUndetermined {
+			t.Errorf("verdict = %v, want nvregUndetermined (not nvregFlagMissing)", got.verdict)
+		}
+	})
+
+	// Content printed before a failed cat must not be trusted either: a partial
+	// read that happens to lack the flag would otherwise read as "flag absent".
+	t.Run("unmarked params content is discarded", func(t *testing.T) {
+		out := realNVRMBanner + nvregProbeSeparator + "\n" + paramsWithFlag
+		_, params, paramsOK := splitNVregProbeOutput(out)
+		if paramsOK || params != "" {
+			t.Errorf("got (%q, %v), want discarded content and paramsOK=false", params, paramsOK)
 		}
 	})
 }
@@ -288,7 +338,7 @@ func TestNodesWithVerdict(t *testing.T) {
 	if len(got) != 2 || got[0] != "node-a" || got[1] != "node-z" {
 		t.Errorf("got %v, want sorted [node-a node-z]", got)
 	}
-	if none := nodesWithVerdict(results, nvregVersionUnknown); len(none) != 0 {
+	if none := nodesWithVerdict(results, nvregUndetermined); len(none) != 0 {
 		t.Errorf("got %v, want empty", none)
 	}
 }
@@ -296,7 +346,7 @@ func TestNodesWithVerdict(t *testing.T) {
 func TestDescribeNVregNodes(t *testing.T) {
 	results := map[string]nvregResult{
 		"node-a": {verdict: nvregOverrideRemoved, version: "595.91.07"},
-		"node-b": {verdict: nvregVersionUnknown},
+		"node-b": {verdict: nvregUndetermined},
 	}
 	if got := describeNVregNodes(results, []string{"node-a"}); got != "node-a (driver 595.91.07)" {
 		t.Errorf("got %q, want the version named", got)
@@ -384,7 +434,7 @@ func TestPreflightAggregationReportsEveryCategory(t *testing.T) {
 	results := map[string]nvregResult{
 		"old-node":  {verdict: nvregFlagMissing, version: "580.173.02"},
 		"new-node":  {verdict: nvregOverrideRemoved, version: "595.91.07"},
-		"dark-node": {verdict: nvregVersionUnknown},
+		"dark-node": {verdict: nvregUndetermined},
 	}
 	err := runNVregAggregation(t, nvregNodes("old-node", "new-node", "dark-node"), results)
 	if err == nil {
@@ -432,7 +482,7 @@ func TestPreflightAggregationVerdicts(t *testing.T) {
 		},
 		{
 			name:        "unknown version → fails closed, never passes",
-			results:     map[string]nvregResult{"n1": {verdict: nvregVersionUnknown}},
+			results:     map[string]nvregResult{"n1": {verdict: nvregUndetermined}},
 			wantErr:     true,
 			wantContain: "could not be determined",
 		},
@@ -482,7 +532,7 @@ func TestNvregUnknownVersionHintFailsClosedAndPointsSomewhere(t *testing.T) {
 	// ownership modes; the doc it points at does. What it must do is say the
 	// preflight fails rather than assumes, and give somewhere to go.
 	for _, want := range []string{"fails rather than", "kernel module is loaded", "validation.md"} {
-		if !strings.Contains(nvregUnknownVersionHint, want) {
+		if !strings.Contains(nvregUndeterminedHint, want) {
 			t.Errorf("unknown-version hint missing %q", want)
 		}
 	}
@@ -496,8 +546,8 @@ func TestNvregZeroValueFailsClosed(t *testing.T) {
 	if zero.verdict == nvregOK {
 		t.Fatal("zero-value nvregResult must not be nvregOK")
 	}
-	if zero.verdict != nvregVersionUnknown {
-		t.Errorf("zero verdict = %v, want nvregVersionUnknown", zero.verdict)
+	if zero.verdict != nvregUndetermined {
+		t.Errorf("zero verdict = %v, want nvregUndetermined", zero.verdict)
 	}
 	// And the aggregation must reject a map holding only zero values.
 	if err := nvregPreflightOutcome(map[string]nvregResult{"n1": {}}); err == nil {
@@ -556,7 +606,7 @@ func TestCheckNVregOnNodeFailedPhaseIsHardError(t *testing.T) {
 }
 
 // Probe output without the sentinel — here the fake clientset's canned log body
-// — must resolve to nvregVersionUnknown, not a pass. Pins the splitNVregProbeOutput
+// — must resolve to nvregUndetermined, not a pass. Pins the splitNVregProbeOutput
 // wiring inside the pod path, not just the pure function.
 func TestCheckNVregOnNodeUnparseableOutputFailsClosed(t *testing.T) {
 	c, _ := nvregProbeClient(t, corev1.PodSucceeded)
@@ -564,7 +614,7 @@ func TestCheckNVregOnNodeUnparseableOutputFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if res.verdict != nvregVersionUnknown {
+	if res.verdict != nvregUndetermined {
 		t.Errorf("unparseable probe output must fail closed, got %v", res.verdict)
 	}
 }
@@ -595,8 +645,10 @@ func TestCheckNVregOnNodeProbeSpec(t *testing.T) {
 	for _, want := range []string{
 		mount + "/version", // both files are read...
 		mount + "/params",
-		nvregProbeSeparator, // ...separated by the sentinel the parser splits on...
-		"exit 0",            // ...and the script never reports its answer via exit status
+		nvregProbeSeparator,           // ...separated by the sentinel the parser splits on...
+		nvregParamsOKMarker,           // ...the params read confirms itself readable...
+		"/params 2>/dev/null && echo", // ...only on success (&& — a failed cat stays silent)...
+		"exit 0",                      // ...and the script never reports its answer via exit status
 	} {
 		if !strings.Contains(args, want) {
 			t.Errorf("probe args missing %q; got: %s", want, args)
@@ -670,7 +722,7 @@ func TestPreflightOutcomeFitsTerminationMsgCap(t *testing.T) {
 				case 1:
 					results[name] = nvregResult{verdict: nvregFlagMissing, version: "580.173.02"}
 				default:
-					results[name] = nvregResult{verdict: nvregVersionUnknown}
+					results[name] = nvregResult{verdict: nvregUndetermined}
 				}
 			}
 
