@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -227,14 +226,11 @@ func TestEvaluateNVregPreflight(t *testing.T) {
 // so an unreadable params must not downgrade the definitive "override removed"
 // verdict into "undetermined" and lose the actionable message.
 func TestEvaluateNVregPreflightR595IgnoresUnreadableParams(t *testing.T) {
-	got := evaluateNVregPreflight(r595Banner(), "", false)
+	banner := "NVRM version: NVIDIA UNIX aarch64 Kernel Module  595.91.07  Mon\n"
+	got := evaluateNVregPreflight(banner, "", false)
 	if got.verdict != nvregOverrideRemoved {
 		t.Errorf("verdict = %v, want nvregOverrideRemoved", got.verdict)
 	}
-}
-
-func r595Banner() string {
-	return "NVRM version: NVIDIA UNIX aarch64 Kernel Module  595.91.07  Mon\n"
 }
 
 // TestEvaluateNVregPreflightR595NeverPasses is the core #2459 regression. On
@@ -274,7 +270,8 @@ func TestEvaluateNVregPreflightVersionCheckedFirst(t *testing.T) {
 
 func TestSplitNVregProbeOutput(t *testing.T) {
 	t.Run("round-trips both files", func(t *testing.T) {
-		out := markedProbeOutput(realNVRMBanner, paramsWithFlag)
+		out := realNVRMBanner + nvregVersionOKMarker + "\n" +
+			nvregProbeSeparator + "\n" + paramsWithFlag + nvregParamsOKMarker + "\n"
 		version, params, paramsOK := splitNVregProbeOutput(out)
 		if _, _, ok := parseNVRMVersion(version); !ok {
 			t.Errorf("version half did not parse: %q", version)
@@ -346,14 +343,6 @@ func TestSplitNVregProbeOutput(t *testing.T) {
 			t.Errorf("got (%q, %v), want discarded content and paramsOK=false", params, paramsOK)
 		}
 	})
-}
-
-// markedProbeOutput builds probe stdout as the pod emits it on a clean read of
-// both files.
-func markedProbeOutput(version, params string) string {
-	return version + nvregVersionOKMarker + "\n" +
-		nvregProbeSeparator + "\n" +
-		params + nvregParamsOKMarker + "\n"
 }
 
 func TestNodesWithVerdict(t *testing.T) {
@@ -435,26 +424,14 @@ func TestNvregOverrideRemovedHintPointsAtTheDriver(t *testing.T) {
 	}
 }
 
-// runNVregAggregation exercises the reporting rules directly. The fan-out is
-// covered by TestRunPerNodeProbe; what matters here is which verdict wins and
-// which remediation the operator is handed.
-func runNVregAggregation(t *testing.T, _ []corev1.Node, results map[string]nvregResult) error {
-	t.Helper()
-	return nvregPreflightOutcome(results)
-}
-
-func nvregNodes(names ...string) []corev1.Node {
-	out := make([]corev1.Node, 0, len(names))
-	for _, n := range names {
-		out = append(out, corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: n}})
-	}
-	return out
-}
-
 func nvregCtx() *validators.Context {
 	return &validators.Context{Ctx: context.Background(), Clientset: fake.NewClientset(), Namespace: "ns"}
 }
 
+// These aggregation tests call nvregPreflightOutcome directly — the fan-out is
+// covered by TestRunPerNodeProbe; what matters here is which verdict wins and
+// which remediation the operator is handed.
+//
 // TestPreflightAggregationReportsEveryCategory: a mid-rollout cluster can hold
 // R595 and R580 nodes at once. Reporting only the first category would send the
 // operator round the loop again after fixing it. Both must appear, with the
@@ -465,7 +442,7 @@ func TestPreflightAggregationReportsEveryCategory(t *testing.T) {
 		"new-node":  {verdict: nvregOverrideRemoved, version: "595.91.07"},
 		"dark-node": {verdict: nvregUndetermined},
 	}
-	err := runNVregAggregation(t, nvregNodes("old-node", "new-node", "dark-node"), results)
+	err := nvregPreflightOutcome(results)
 	if err == nil {
 		t.Fatal("expected failure")
 	}
@@ -524,7 +501,7 @@ func TestPreflightAggregationVerdicts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := runNVregAggregation(t, nvregNodes("n1"), tt.results)
+			err := nvregPreflightOutcome(tt.results)
 			if tt.wantErr && err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -556,11 +533,11 @@ func TestPreflightRejectsEmptyNodeList(t *testing.T) {
 // oci-managed profile has no driver DaemonSet at all, so advice that only
 // names the GPU Operator would be a dead end on half the supported platforms.
 func TestNvregUnknownVersionHintFailsClosedAndPointsSomewhere(t *testing.T) {
-	// The remediation here is mode-agnostic — "is the module loaded?" reads the
+	// The remediation here is mode-agnostic — reading the version file reads the
 	// same however the driver got there — so this hint need not enumerate the
 	// ownership modes; the doc it points at does. What it must do is say the
 	// preflight fails rather than assumes, and give somewhere to go.
-	for _, want := range []string{"fails rather than", "kernel module is loaded", "validation.md"} {
+	for _, want := range []string{"fails rather than", "/proc/driver/nvidia/version", "validation.md"} {
 		if !strings.Contains(nvregUndeterminedHint, want) {
 			t.Errorf("unknown-version hint missing %q", want)
 		}
@@ -595,6 +572,47 @@ func TestNvregParamsUnreadableMessageDoesNotContradictItself(t *testing.T) {
 	// And it must not be mistaken for the actionable "go set the flag" case.
 	if strings.Contains(msg, "missing on GPU nodes") {
 		t.Error("params-unreadable must not read as the flag being absent")
+	}
+}
+
+// A version file can be read cleanly and still not parse — an empty /proc read,
+// or a banner format a later driver changes. The probe reached the file in that
+// case, so remediation that says "confirm the module is loaded" sends the
+// operator after something the successful read already argues against. The hint
+// must not swap in the opposite claim either: an empty read is not evidence the
+// module is unloaded.
+func TestNvregUnparseableBannerIsNotReportedAsUnloaded(t *testing.T) {
+	const marked = "some unexpected content\n"
+	out := marked + nvregVersionOKMarker + "\n" +
+		nvregProbeSeparator + "\n" + paramsWithFlag + nvregParamsOKMarker + "\n"
+
+	version, _, _ := splitNVregProbeOutput(out)
+	if version == "" {
+		t.Fatal("a marked version read must survive the split; the banner is readable, just unparseable")
+	}
+	got := evaluateNVregPreflight(splitNVregProbeOutput(out))
+	if got.verdict != nvregUndetermined {
+		t.Fatalf("verdict = %v, want nvregUndetermined", got.verdict)
+	}
+
+	err := nvregPreflightOutcome(map[string]nvregResult{"n1": got})
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "Confirm the NVIDIA kernel module is loaded") {
+		t.Error("a readable banner argues the module is already loaded")
+	}
+	// Nor may it assert the converse: a successful read that came back empty
+	// does not establish an unloaded module.
+	if strings.Contains(msg, "module is not loaded") {
+		t.Error("an empty read is not evidence the module is unloaded")
+	}
+	// It must name both causes and the one action that tells them apart.
+	for _, want := range []string{"could not be read or", "could not be parsed", "Inspect /proc/driver/nvidia/version"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message missing %q; got: %s", want, msg)
+		}
 	}
 }
 

@@ -47,10 +47,9 @@ const (
 // infrastructure fault is never misreported as a node-level misconfiguration.
 //
 // Generic over the result type because the two preflights need different
-// verdict shapes: TCPXO's question is boolean (is the plugin installed?),
-// while NVreg's has three outcomes once the driver version is consulted — the
-// flag is set, the flag is absent but settable, or the driver removed the flag
-// entirely (#2459). A bool cannot carry that third state.
+// verdict shapes: TCPXO's question is boolean (is the plugin installed?), while
+// NVreg's has several once the driver version is consulted — see nvregVerdict,
+// whose values a bool cannot carry (#2459).
 func runPerNodeResultProbe[T any](
 	ctx *validators.Context,
 	nodes []corev1.Node,

@@ -81,9 +81,9 @@ func parseNVRMVersion(content string) (full string, major int, ok bool) {
 type nvregVerdict int
 
 const (
-	// nvregUndetermined: the version banner was unreadable, so nothing about the
-	// driver is established. Deliberately the ZERO VALUE so an accidentally-empty
-	// result fails closed rather than reading as a pass.
+	// nvregUndetermined: the version banner was unreadable or did not parse, so
+	// nothing about the driver is established. Deliberately the ZERO VALUE so an
+	// accidentally-empty result fails closed rather than reading as a pass.
 	nvregUndetermined nvregVerdict = iota
 	// nvregOK: pre-R595 driver with the override set.
 	nvregOK
@@ -172,11 +172,19 @@ const (
 		`or via the node image where the GPU Operator does not own the driver. ` +
 		`See docs/user/validation.md.`
 
-	// nvregUndeterminedHint is emitted when the version banner is unreadable.
-	nvregUndeterminedHint = `/proc/driver/nvidia/version could not be read, so neither the ` +
-		`driver version nor the override could be established and the preflight ` +
-		`fails rather than assume. Confirm the NVIDIA kernel module is loaded on ` +
-		`every target node. See docs/user/validation.md.`
+	// nvregUndeterminedHint covers both ways the version can go undetermined: the
+	// file was unreadable, or it was read and its banner did not parse. It stays
+	// neutral on what either outcome proves — "confirm the module is loaded" is
+	// wrong for a readable banner, and an empty read is not evidence of an
+	// unloaded module either, since the probe reached the file at all. Inspecting
+	// the file is the one action that separates the two, so the hint names it and
+	// leaves the conclusion to what the operator finds.
+	nvregUndeterminedHint = `/proc/driver/nvidia/version could not be read or its NVRM banner ` +
+		`could not be parsed, so neither the driver version nor the override could ` +
+		`be established and the preflight fails rather than assume. Inspect ` +
+		`/proc/driver/nvidia/version on a target node to tell which: whether the ` +
+		`file is unreadable, or holds a banner this check does not recognise. ` +
+		`See docs/user/validation.md.`
 
 	// nvregParamsUnreadableHint is emitted when the version was read but params
 	// was not. It must not repeat the module-loaded advice: the version banner
@@ -299,15 +307,15 @@ func nodesWithVerdict(results map[string]nvregResult, want nvregVerdict) []strin
 // Node lists are bounded by BOTH a count and a byte budget. The result flows
 // into a termination message capped at ValidatorMaxTerminationMsgBytes, and a
 // count alone is not enough: a Kubernetes node name may be up to 253
-// characters, so ten of them across three categories can blow the cap on their
-// own and truncate the remediation — the actionable half of the message. The
-// omitted remainder is always COUNTED, never silently dropped.
+// characters, so ten of them per category can blow the cap on their own and
+// truncate the remediation — the actionable half of the message. The omitted
+// remainder is always COUNTED, never silently dropped.
 const (
 	maxListedNodes = 10
 
 	// maxListedNodeBytes is the per-category budget for the rendered node list.
-	// Three categories plus the hints (~1.2 KiB) and headlines stay comfortably
-	// inside ValidatorMaxTerminationMsgBytes.
+	// Every category at full budget, plus the hints (~1.3 KiB) and headlines,
+	// measures ~3 KiB against the 4 KiB ValidatorMaxTerminationMsgBytes.
 	maxListedNodeBytes = 512
 )
 
