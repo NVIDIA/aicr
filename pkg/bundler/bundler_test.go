@@ -2997,6 +2997,46 @@ func TestApplyNodeSchedulingOverrides_RequireNodeSelectorIfStorageClassSet(t *te
 		}
 	})
 
+	// A blank string is the value an operator gets from a --set override
+	// or overlay field left empty; it carries no storage class and must
+	// not be misread as configured.
+	t.Run("blank overlay storage class value is treated as unset", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{
+			"controller": map[string]any{
+				"storage": map[string]any{"storageClassName": "   "},
+			},
+		}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("a blank storage class value should not activate the requirement, got: %v", err)
+		}
+	})
+
+	// A malformed non-string value at the storage class path (e.g. a
+	// misconfigured overlay) must fail closed rather than silently
+	// skip the requirement.
+	t.Run("non-string overlay storage class value fails closed", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{
+			"controller": map[string]any{
+				"storage": map[string]any{"storageClassName": true},
+			},
+		}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{}); err == nil {
+			t.Fatal("expected an error: a non-string storage class value should still activate the requirement")
+		}
+	})
+
 	// Regression for the same --dynamic bypass covered for the
 	// unconditional flag, rejected regardless of whether a storage class
 	// is configured now, since one could be added later without
