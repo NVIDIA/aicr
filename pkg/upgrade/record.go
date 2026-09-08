@@ -35,9 +35,11 @@ const (
 
 // Authorable reports whether v may appear in a record file.
 func (v Verdict) Authorable() bool {
-	switch v { //nolint:exhaustive // unknown and unversioned are computed, never authored; see the Verdict doc comment
+	switch v {
 	case VerdictSafe, VerdictManual, VerdictBlocked:
 		return true
+	case VerdictUnknown, VerdictUnversioned:
+		return false
 	default:
 		return false
 	}
