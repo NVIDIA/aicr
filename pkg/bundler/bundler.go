@@ -2149,6 +2149,14 @@ func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName st
 	if comp.RequireAcceleratedNodeSelector() || comp.RequireAcceleratedNodeSelectorIfStorageClassSet() {
 		addConflicts(comp.GetAcceleratedNodeSelectorPaths())
 	}
+	// A --dynamic override on the storage-class path removes its value
+	// from values before componentHasConfiguredStorageClass evaluates it,
+	// so the conditional flags could never fire once an operator defers
+	// the storage class to install time.
+	if comp.RequireSystemNodeSelectorIfStorageClassSet() || comp.RequireAcceleratedNodeSelectorIfStorageClassSet() {
+		addConflicts(comp.GetStorageClassPaths())
+		addConflicts(comp.GetSharedStorageClassPaths())
+	}
 	if len(conflicts) == 0 {
 		return nil
 	}

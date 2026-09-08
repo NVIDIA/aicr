@@ -3013,6 +3013,23 @@ func TestApplyNodeSchedulingOverrides_RequireNodeSelectorIfStorageClassSet(t *te
 			t.Fatal("expected an error, --dynamic targeted a requireNodeSelectorIfStorageClassSet path")
 		}
 	})
+
+	// A --dynamic override on the storage-class path removes the value
+	// componentHasConfiguredStorageClass reads, letting an operator defer
+	// the storage class to install time and bypass the requirement
+	// entirely.
+	t.Run("dynamic override on the conditioning storage class path is rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.storage.storageClassName": {}}
+		err = b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorIfStorageClassSetFixtureComponent, provider, dynPaths)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted the storage class path that conditions requireNodeSelectorIfStorageClassSet")
+		}
+	})
 }
 
 // TestClassifySchedulingPaths covers the helper that splits scheduling
