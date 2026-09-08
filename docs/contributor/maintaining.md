@@ -7,14 +7,14 @@ Runbook for AICR maintainers. Two surfaces:
   including the forthcoming evidence-backed flow from ADR-007.
 
 For end-user release verification, see
-[RELEASING.md](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md).
+[RELEASE.md](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md).
 For contribution mechanics (DCO, CI, signing), see
 [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md).
 
 ## Cutting a Release
 
 The full release procedure lives in
-[RELEASING.md](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md).
+[RELEASE.md](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md).
 The short form:
 
 | Step | Command | Notes |
@@ -22,7 +22,7 @@ The short form:
 | 1. Pre-flight | `make qualify` on `main` | Must pass. Tests + lint + e2e + scan. |
 | 2. Bump | `make bump-patch` (or `bump-minor`/`bump-rc`) | Tags HEAD and pushes the tag. To promote a pre-release to stable on the same SHA, use `make bump-promote TAG=<rc-tag>` (e.g. `TAG=v1.3.0-rc2`). |
 | 3. Push | `git push origin <tag>` (done by the bump target) | Triggers the `On Tag Release` (`on-tag.yaml`) workflow. |
-| 4. Verify | `gh release view <tag>` + `cosign verify-attestation ...` | See RELEASING.md §Verification. |
+| 4. Verify | `gh release view <tag>` + `cosign verify-attestation ...` | See RELEASE.md §Verification. |
 | 5. Demo | Cloud Run deploy auto-triggers on tag push | Inspect `aicrd.demo` health. |
 
 Bi-weekly cadence; hotfix between cycles when a fix is critical.
@@ -89,7 +89,7 @@ re-push from a fresh shell. If the workflow ran but failed, fix on
 **Attestation verification fails for users.** Confirm the GitHub
 attestation predicate type matches `https://slsa.dev/provenance/v1`
 and that the user's `gh` is recent enough (`gh attestation verify` is
-v2.49+). RELEASING.md §Container Attestations has both `gh` and
+v2.49+). RELEASE.md §Container Attestations has both `gh` and
 `cosign` flows.
 
 **Cloud Run demo deploy fails after tag push.** Check the demo deploy

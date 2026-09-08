@@ -1435,7 +1435,7 @@ func TestReleaseArtifactNamesAreRerunSafe(t *testing.T) {
 }
 
 func TestReleaseDocumentationCoversRecoveryLimits(t *testing.T) {
-	releasing := string(readFile(t, "RELEASING.md"))
+	releasing := string(readFile(t, "RELEASE.md"))
 	releasing = strings.Join(strings.Fields(releasing), " ")
 	for _, required := range []string{
 		"candidate-<run-id>-<run-attempt>",
@@ -1446,7 +1446,7 @@ func TestReleaseDocumentationCoversRecoveryLimits(t *testing.T) {
 		"intentionally retained",
 	} {
 		if !strings.Contains(releasing, required) {
-			t.Errorf("RELEASING.md missing recovery or operational limit %q", required)
+			t.Errorf("RELEASE.md missing recovery or operational limit %q", required)
 		}
 	}
 	validator := string(readFile(t, "docs/contributor/validator.md"))

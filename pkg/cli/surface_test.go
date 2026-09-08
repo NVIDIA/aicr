@@ -39,7 +39,7 @@ import (
 //
 // The gate classifies its own failure. An added command or flag is additive and
 // the fix is to regenerate; a removed or altered one is breaking and owes the
-// deprecation window in RELEASING.md. Reporting those identically would train
+// deprecation window in RELEASE.md. Reporting those identically would train
 // everyone to run -update reflexively, which is exactly the reflex that lets a
 // rename reach main.
 
@@ -57,7 +57,7 @@ const surfaceHeader = `# aicr CLI surface baseline — do NOT hand-edit.
 # Adding a command or flag is additive: regenerate and commit in the same PR.
 # Removing or renaming a command, flag, or alias, or changing a default, is a
 # breaking change to a frozen v1 surface and owes the notice period in
-# RELEASING.md § Deprecation Policy.
+# RELEASE.md § Deprecation Policy.
 `
 
 // flagFacts is the slice of a flag this baseline pins. Usage text is
@@ -200,7 +200,7 @@ func TestCLISurface(t *testing.T) {
 		}
 		b.WriteString("\nRemoving or renaming a command, flag, or alias, or changing a\n" +
 			"default, breaks a surface frozen at v1. It owes the notice period in\n" +
-			"RELEASING.md § Deprecation Policy: ship the deprecation with a warning\n" +
+			"RELEASE.md § Deprecation Policy: ship the deprecation with a warning\n" +
 			"first, and remove it only after the window. If this removal is\n" +
 			"intentional and the window has passed, regenerate the golden.\n\n")
 	}
@@ -213,7 +213,7 @@ func TestCLISurface(t *testing.T) {
 			fmt.Fprintf(&b, "  ! %s\n", line)
 		}
 		b.WriteString("\nAdding a required flag to an existing command makes previously valid\n" +
-			"invocations fail, which RELEASING.md § Deprecation Policy classifies as\n" +
+			"invocations fail, which RELEASE.md § Deprecation Policy classifies as\n" +
 			"breaking. Give the flag a default that preserves current behavior, or\n" +
 			"ship it through the deprecation window.\n\n")
 	}
@@ -441,7 +441,7 @@ func TestFlagFactsRendersDashPrefixByNameLength(t *testing.T) {
 //
 // Not every addition is compatible. A flag arriving already required on a
 // command that already existed invalidates invocations that were valid before,
-// which RELEASING.md classifies as breaking — only a new flag whose default
+// which RELEASE.md classifies as breaking — only a new flag whose default
 // preserves behavior is additive. On a brand-new command there is no prior
 // invocation to break, so requiredness there is additive; the split is by
 // whether the command was already in the baseline.

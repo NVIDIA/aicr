@@ -38,7 +38,7 @@ type config struct {
 
 	// DeprecatedRoutes marks registered routes as deprecated, keyed by the
 	// exact path in Handlers. Matching responses carry the Deprecation,
-	// Sunset, and Link headers described in RELEASING.md's deprecation
+	// Sunset, and Link headers described in RELEASE.md's deprecation
 	// policy. Empty by default: no REST path family has been deprecated yet,
 	// and the /v1/* disposition is still open (#2112).
 	DeprecatedRoutes map[string]deprecation.Notice

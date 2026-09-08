@@ -27,7 +27,7 @@ body:
           required: true
         - label: I can reproduce this issue consistently
           required: true
-        - label: This is not a security vulnerability (use [Security Advisories](https://github.com/NVIDIA/aicr/security/advisories/new) instead)
+        - label: This is not a security vulnerability (report those to [NVIDIA PSIRT](https://www.nvidia.com/object/submit-security-vulnerability.html), not through GitHub)
           required: true
 
   - type: textarea
