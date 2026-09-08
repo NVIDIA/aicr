@@ -50,7 +50,7 @@ ones) that match the target fabric:
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A preflight gates the benchmark on the default fabric (EFA on EKS, IB on OKE) — the `AICR_NCCL_FABRIC=roce` override skips it. Before driver R595 the preflight requires `NVreg_GrdmaPciTopoCheckOverride=1` (R580 is the version AICR pins); R595+ removed that parameter, so it can no longer verify GPUDirect RDMA and fails naming the driver rather than the flag (on EKS p6e-gb200/gb300 the replacement PCIe-topology requirement is measured to fail; on OKE it is unmeasured). |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the default fabric — see [GB200 NET preflight](#gb200-net-preflight-gpudirect-rdma-prerequisites). |
 | `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, GB200 + OKE, and VR200 + RKE2. Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric (EFA on EKS, InfiniBand on OKE) when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
@@ -157,57 +157,46 @@ aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
 ### GB200 NET preflight: GPUDirect RDMA prerequisites
 
 Before running `nccl-all-reduce-bw-net` on GB200 (EKS or OKE), a preflight
-checks each GPU node for the driver-side prerequisite of GPUDirect RDMA. It does
-not prove RDMA works end to end — it establishes that the one setting AICR
-controls is in place. Without that setting NCCL falls back to the Socket
-transport **silently** — the benchmark still completes and still reports a
-bandwidth figure, just one measured on the wrong path.
+checks each GPU node for the driver-side prerequisite of GPUDirect RDMA.
+Without it NCCL falls back to the Socket transport **silently** — the benchmark
+still completes and still reports a bandwidth figure, just one measured on the
+wrong path.
 
 The preflight runs on the default fabric only: EFA on EKS, built-in IB/verbs on
 OKE. `AICR_NCCL_FABRIC=roce` selects a different EKS template and skips the
 preflight, so the benchmark runs ungated there.
 
-The requirement depends on the NVIDIA driver version.
-
 **Before R595** — which includes `580.173.02`, the version AICR pins — the
-driver must be loaded with `NVreg_GrdmaPciTopoCheckOverride=1`. Grace hosts present a PCIe layout the
-driver does not recognise, so it refuses to let a PCIe-attached NIC (EFA on
-EKS, ConnectX IB on OKE) attach dma-buf handles to GPU memory, logging:
+driver must be loaded with `NVreg_GrdmaPciTopoCheckOverride=1`. Without it the
+driver refuses to let a PCIe-attached NIC (EFA on EKS, ConnectX IB on OKE)
+attach dma-buf handles to GPU memory, and the kernel logs:
 
 ```text
 NVRM: dma-buf attach failed: topology not supported for mapping type FORCE_PCIE
 ```
 
-Where the GPU Operator owns the driver, set it through the ClusterPolicy —
-`spec.driver.kernelModuleConfig.name` pointing at a ConfigMap in `gpu-operator`
-containing `nvidia.conf: options nvidia NVreg_GrdmaPciTopoCheckOverride=1`.
+Set the parameter according to who owns the driver:
 
-**Deleting the `nvidia-driver` DaemonSet pods does not apply the change.**
-`k8s-driver-manager` decides whether to reload by comparing
-`DRIVER_CONFIG_DIGEST`, which is derived from the ClusterPolicy spec rather than
-from the ConfigMap's contents — so an unchanged spec makes it skip the reload
-and log that it is leaving the driver alone. The spec itself has to change
-(setting `kernelModuleConfig.name` is such a change). Confirm afterwards with
-`grep GrdmaPciTopoCheckOverride /proc/driver/nvidia/params` on a node.
+| Driver owner | How to set it |
+|---|---|
+| GPU Operator | Point ClusterPolicy `spec.driver.kernelModuleConfig.name` at a ConfigMap in `gpu-operator` containing `nvidia.conf: options nvidia NVreg_GrdmaPciTopoCheckOverride=1` |
+| Node image (OKE default `gpuStack=oci-managed`) | Set the module parameter in the image or node bootstrap (`/etc/modprobe.d`), then reboot the GPU nodes |
 
-Where the driver ships in the node image instead (OKE's default
-`gpuStack=oci-managed`) there is no driver DaemonSet: set the module parameter
-in the image or node bootstrap (`/etc/modprobe.d`) and reboot the GPU nodes.
+**Deleting the `nvidia-driver` DaemonSet pods does not apply the change, and
+neither does editing only the ConfigMap.** The reload decision is keyed off the
+ClusterPolicy spec, so the spec itself has to change — setting
+`kernelModuleConfig.name` is such a change. Confirm on a node afterwards:
 
-**On R595 and later** the parameter no longer exists. NVIDIA documents R595 as
-backward incompatible with P6e-GB200 EFA specifically, replacing the override
-with a topology requirement — the EFA must sit in an IOMMU group, or the GPU and
-EFA must share a PCIe root port. The preflight does not check that property, so
-on R595+ it cannot verify GPUDirect RDMA and fails rather than assume. Setting
-the parameter has no effect; the kernel silently ignores unknown module options.
+```shell
+grep GrdmaPciTopoCheckOverride /proc/driver/nvidia/params
+```
 
-On EKS `p6e-gb200`/`gb300` the replacement requirement is measured to fail: on a
-`p6e-gb300r.36xlarge` the EFA (`0000:97:00.0`) has no IOMMU group and sits under
-a different root port from the GPU (`0000:9d:00.0`). Under R595 with the
-preflight bypassed the NET benchmark aborted with the `FORCE_PCIE` message
-above; the same two nodes passed at 43.16 GB/s on `580.173.02`. The full record
-sits with the driver pin in `recipes/components/gpu-operator/values.yaml`. On
-OKE the requirement is unmeasured.
+**On R595 and later** the parameter no longer exists, and setting it has no
+effect because the kernel silently ignores unknown module options. R595 replaced
+it with a PCIe topology requirement the preflight cannot check, so validation
+fails closed instead of assuming. On EKS `p6e-gb200`/`gb300` that requirement is
+known not to be satisfied — the measurement is recorded alongside the driver pin
+in `recipes/components/gpu-operator/values.yaml`; on OKE it is unmeasured.
 
 Either way the remedy is a driver at R580 — AICR ships `580.173.02` — pinned
 through the ClusterPolicy where the GPU Operator owns the driver, or through the
