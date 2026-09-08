@@ -1654,3 +1654,40 @@ func TestComponentRegistry_ManifestFilesResolve(t *testing.T) {
 			kueue.ManifestFiles, wantManifests)
 	}
 }
+
+func TestComponentConfigUpgradesFile(t *testing.T) {
+	registryYAML := []byte("apiVersion: " + ComponentRegistryAPIVersion + "\n" +
+		"kind: " + ComponentRegistryKind + "\n" +
+		"components:\n" +
+		"  - name: nodewright-operator\n" +
+		"    displayName: NodeWright Operator\n" +
+		"    upgrades:\n" +
+		"      file: upgrades/nodewright-operator.yaml\n")
+
+	var registry ComponentRegistry
+	if err := yaml.Unmarshal(registryYAML, &registry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(registry.Components) != 1 {
+		t.Fatalf("components = %d, want 1", len(registry.Components))
+	}
+	if got := registry.Components[0].Upgrades.File; got != "upgrades/nodewright-operator.yaml" {
+		t.Errorf("Upgrades.File = %q, want %q", got, "upgrades/nodewright-operator.yaml")
+	}
+}
+
+func TestComponentConfigUpgradesAbsent(t *testing.T) {
+	registryYAML := []byte("apiVersion: " + ComponentRegistryAPIVersion + "\n" +
+		"kind: " + ComponentRegistryKind + "\n" +
+		"components:\n" +
+		"  - name: nfd\n" +
+		"    displayName: Node Feature Discovery\n")
+
+	var registry ComponentRegistry
+	if err := yaml.Unmarshal(registryYAML, &registry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := registry.Components[0].Upgrades.File; got != "" {
+		t.Errorf("Upgrades.File = %q, want empty for a component with no upgrades key", got)
+	}
+}
