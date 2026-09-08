@@ -195,9 +195,10 @@ and strands it there on a later reschedule (see `slinky-slurm` and
 `slurm-accounting-mariadb` in `registry.yaml`). An overlay can still opt a
 component's paths out of the requirement with an explicit empty
 `nodeSelector: {}` override, same as it opts out of toleration injection.
-`--dynamic` is not an equivalent escape hatch: it is rejected on a required
-path outright, since deferring the value to install time is the same
-unpinned state the requirement exists to reject.
+`--dynamic` is not an equivalent escape hatch: it is rejected on a path that
+equals, contains, or is contained by a required path, since deferring any of
+those to install time is the same unpinned state the requirement exists to
+reject.
 
 **`requireNodeSelectorIfStorageClassSet`.** `requireNodeSelector`'s
 conditional counterpart, for a chart whose zone-pinning PVC only exists once

@@ -2111,9 +2111,9 @@ func (b *DefaultBundler) dynamicPathSetFor(componentName string, provider recipe
 }
 
 // rejectDynamicRequiredNodeSelectorPaths returns an error if a path in
-// dynPaths is also one of componentName's requireNodeSelector paths.
-// --dynamic leaves a path out of the bundle for an operator to supply
-// later, the same unpinned state requireNodeSelector exists to reject.
+// dynPaths equals, contains, or is contained by one of componentName's
+// required node selector paths, since --dynamic would defer that path to
+// install time.
 func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName string, provider recipe.DataProvider, dynPaths map[string]struct{}) error {
 	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
@@ -2129,6 +2129,11 @@ func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName st
 
 	var conflicts []string
 	seen := make(map[string]struct{})
+	// A dynamic override on an ancestor (e.g. prometheus.prometheusSpec) or a
+	// descendant (e.g. prometheus.prometheusSpec.nodeSelector.disktype) of a
+	// required path moves the required value into install-time control the
+	// same way an exact-path override does, so intersectingPaths treats
+	// either direction as a conflict, not just an exact match.
 	addConflicts := func(paths []string) {
 		for _, p := range intersectingPaths(paths, dynPaths) {
 			if _, ok := seen[p]; ok {
@@ -2159,16 +2164,20 @@ func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName st
 		componentName, strings.Join(conflicts, ", ")))
 }
 
-// intersectingPaths returns the paths present in both paths and set,
-// preserving paths' order. Returns nil if either is empty.
+// intersectingPaths returns the paths in paths that equal, contain, or are
+// contained by a path in set, preserving paths' order. Returns nil if
+// either is empty.
 func intersectingPaths(paths []string, set map[string]struct{}) []string {
 	if len(paths) == 0 || len(set) == 0 {
 		return nil
 	}
 	var out []string
 	for _, p := range paths {
-		if _, ok := set[p]; ok {
-			out = append(out, p)
+		for dyn := range set {
+			if valuePathsIntersect(p, dyn) {
+				out = append(out, p)
+				break
+			}
 		}
 	}
 	return out

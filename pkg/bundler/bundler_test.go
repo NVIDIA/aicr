@@ -2787,8 +2787,32 @@ func TestApplyNodeSchedulingOverrides_RequireNodeSelector(t *testing.T) {
 		}
 	})
 
-	// extractComponentValues rejects a --dynamic path that conflicts with
-	// a requireNodeSelector path.
+	t.Run("dynamic override on an ancestor of a required selector path is rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.podSpec": {}}
+		err = b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorFixtureComponent, provider, dynPaths)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted an ancestor of a requireNodeSelector path")
+		}
+	})
+
+	t.Run("dynamic override on a descendant of a required selector path is rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.podSpec.nodeSelector.nodeGroup": {}}
+		err = b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorFixtureComponent, provider, dynPaths)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted a descendant of a requireNodeSelector path")
+		}
+	})
+
 	t.Run("extractComponentValues rejects a dynamic required selector path", func(t *testing.T) {
 		cfg := config.NewConfig(config.WithDynamicValues(map[string][]string{
 			requireNodeSelectorFixtureComponent: {"controller.podSpec.nodeSelector"},
@@ -2809,6 +2833,46 @@ func TestApplyNodeSchedulingOverrides_RequireNodeSelector(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "controller.podSpec.nodeSelector") {
 			t.Errorf("error should name the conflicting path, got: %v", err)
+		}
+	})
+
+	t.Run("extractComponentValues rejects a dynamic ancestor of a required selector path", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithDynamicValues(map[string][]string{
+			requireNodeSelectorFixtureComponent: {"controller.podSpec"},
+		}))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{Name: requireNodeSelectorFixtureComponent, Type: "helm"}},
+		}
+		recipeResult.BindDataProvider(provider)
+
+		_, err = b.extractComponentValues(context.Background(), recipeResult)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted an ancestor of a requireNodeSelector path")
+		}
+	})
+
+	t.Run("extractComponentValues rejects a dynamic descendant of a required selector path", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithDynamicValues(map[string][]string{
+			requireNodeSelectorFixtureComponent: {"controller.podSpec.nodeSelector.nodeGroup"},
+		}))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{Name: requireNodeSelectorFixtureComponent, Type: "helm"}},
+		}
+		recipeResult.BindDataProvider(provider)
+
+		_, err = b.extractComponentValues(context.Background(), recipeResult)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted a descendant of a requireNodeSelector path")
 		}
 	})
 
