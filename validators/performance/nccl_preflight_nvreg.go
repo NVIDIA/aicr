@@ -164,11 +164,12 @@ const (
 
 	// nvregOverrideRemovedHint is emitted on R595+. It states only what the code
 	// established — the override is gone — and does not assert the hardware is
-	// incompatible: that is measured on EKS p6e and unmeasured on OKE.
+	// incompatible: that is measured on EKS p6e and unmeasured on OKE. The R580
+	// pin it points operators at is #2383.
 	nvregOverrideRemovedHint = `NVIDIA driver R595 removed NVreg_GrdmaPciTopoCheckOverride, replacing it with a ` +
 		`PCIe topology requirement this preflight does not check — so RDMA cannot be ` +
 		`verified here. Measured to fail on EKS p6e; unmeasured on OKE. Remedy is a ` +
-		`driver at R580 (AICR ships 580.173.02, #2383) — pinned via the ClusterPolicy, ` +
+		`driver at R580 (AICR ships 580.173.02) — pinned via the ClusterPolicy, ` +
 		`or via the node image where the GPU Operator does not own the driver. ` +
 		`See docs/user/validation.md.`
 
@@ -311,6 +312,15 @@ func nodesWithVerdict(results map[string]nvregResult, want nvregVerdict) []strin
 // truncate the remediation — the actionable half of the message. The omitted
 // remainder is always COUNTED, never silently dropped.
 const (
+	// probeContainerName must match the probe container's Name below; log reads
+	// address the container by name.
+	probeContainerName = "probe"
+
+	// maxProbeErrorOutputBytes bounds probe output appended to a phase error, so
+	// a chatty failure cannot crowd out the remediation under the termination
+	// message cap.
+	maxProbeErrorOutputBytes = 256
+
 	maxListedNodes = 10
 
 	// maxListedNodeBytes is the per-category budget for the rendered node list.
@@ -373,7 +383,7 @@ func checkNVregOnNode(ctx context.Context, clientset kubernetes.Interface, names
 			// places us on the target node.
 			Tolerations: []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
 			Containers: []corev1.Container{{
-				Name:    "probe",
+				Name:    probeContainerName,
 				Image:   defaults.ProbeImage,
 				Command: []string{shellBin, "-c"},
 				// Emit both files with a sentinel between them and ALWAYS exit 0:
@@ -427,18 +437,33 @@ func checkNVregOnNode(ctx context.Context, clientset kubernetes.Interface, names
 		return nvregResult{}, err
 	}
 
-	// The script ends in `exit 0`, so a non-Succeeded phase means the body never
-	// ran. Nothing is established, so this is an error rather than a verdict.
+	// The script ends in `exit 0`, so a non-Succeeded phase means the probe did
+	// not finish. Nothing is established, so this is an error, not a verdict.
 	if phase != corev1.PodSucceeded {
-		return nvregResult{}, aicrErrors.New(aicrErrors.ErrCodeInternal,
-			"NVreg preflight pod on node "+nodeName+" terminated in phase "+string(phase)+
-				" without running the probe")
+		msg := "NVreg preflight pod on node " + nodeName + " terminated in phase " + string(phase) +
+			" before completing the probe"
+		// Best effort: on eviction, OOM-kill or an exec failure the container may
+		// still have said why, and the deferred cleanup deletes the pod straight
+		// after. A failure to read it must not replace the phase error.
+		if out, outErr := k8spod.GetPodLogs(ctx, clientset, namespace, created.Name, probeContainerName); outErr == nil {
+			if trimmed := strings.TrimSpace(out); trimmed != "" {
+				if len(trimmed) > maxProbeErrorOutputBytes {
+					trimmed = trimmed[:maxProbeErrorOutputBytes] + "..."
+				}
+				msg += ": " + trimmed
+			}
+		}
+		return nvregResult{}, aicrErrors.New(aicrErrors.ErrCodeInternal, msg)
 	}
 
-	logs, logErr := k8spod.GetPodLogs(ctx, clientset, namespace, created.Name, "probe")
+	logs, logErr := k8spod.GetPodLogs(ctx, clientset, namespace, created.Name, probeContainerName)
 	if logErr != nil {
-		return nvregResult{}, aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
-			"NVreg preflight pod succeeded but logs were unreadable", logErr)
+		// GetPodLogs codes its own failures, so propagate rather than re-wrap:
+		// the outermost code is what verdict consumers read, and re-coding a
+		// mid-scan cancellation as Internal would report a retryable timeout as
+		// a fault.
+		return nvregResult{}, aicrErrors.PropagateOrWrap(logErr, aicrErrors.ErrCodeInternal,
+			"NVreg preflight pod succeeded but logs were unreadable")
 	}
 
 	versionFile, paramsFile, paramsOK := splitNVregProbeOutput(logs)

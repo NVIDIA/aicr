@@ -27,6 +27,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 )
@@ -639,6 +640,9 @@ func TestNvregZeroValueFailsClosed(t *testing.T) {
 // captures the created pod so the probe's Args and hostPath mount can be
 // asserted — the wiring between the tested decision layer and the pod that
 // feeds it is otherwise entirely untested.
+// nvregProbeClientLogBody is what the fake clientset returns for a log read.
+const nvregProbeClientLogBody = "fake logs"
+
 func nvregProbeClient(t *testing.T, phase corev1.PodPhase) (*fake.Clientset, func() *corev1.Pod) {
 	t.Helper()
 	c := fake.NewClientset()
@@ -714,7 +718,9 @@ func TestCheckNVregOnNodeProbeSpec(t *testing.T) {
 	if p.Spec.NodeName != "n1" {
 		t.Errorf("probe must be pinned to the target node, got %q", p.Spec.NodeName)
 	}
-	if len(p.Spec.Containers) != 1 || len(p.Spec.Containers[0].Args) != 1 {
+	if len(p.Spec.Containers) != 1 || len(p.Spec.Containers[0].Args) != 1 ||
+		len(p.Spec.Containers[0].VolumeMounts) != 1 {
+
 		t.Fatalf("unexpected container shape: %+v", p.Spec.Containers)
 	}
 
@@ -762,11 +768,42 @@ func TestCheckNVregOnNodeUnreadableLogsIsHardError(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected an error when logs are unreadable, got verdict %v", res.verdict)
 	}
-	if !strings.Contains(err.Error(), "logs were unreadable") {
-		t.Errorf("error should name the cause, got: %v", err)
+	// GetPodLogs codes its own failures, so checkNVregOnNode propagates rather
+	// than re-wrapping (the repo's no-double-wrap rule). Its message reaches the
+	// caller in place of the preflight's own.
+	if !strings.Contains(err.Error(), "failed to get pod logs") {
+		t.Errorf("error should carry GetPodLogs' cause, got: %v", err)
+	}
+	// errors.Is matches a code anywhere in the chain, so it cannot tell a
+	// propagated code from a re-assigned one — the blind spot #2323 describes.
+	// Verdict consumers read the OUTERMOST code, so assert on that.
+	se, ok := stderrors.AsType[*aicrErrors.StructuredError](err)
+	if !ok {
+		t.Fatalf("expected a StructuredError, got %T", err)
+	}
+	if se.Code != aicrErrors.ErrCodeInternal {
+		t.Errorf("outermost code = %s, want %s (GetPodLogs' own)", se.Code, aicrErrors.ErrCodeInternal)
 	}
 	if res.verdict == nvregOK {
 		t.Errorf("verdict on error must not be nvregOK, got %v", res.verdict)
+	}
+}
+
+// A pod that never ran the probe still often says why — evicted, OOM-killed,
+// exec failure — and the deferred cleanup deletes it immediately after, so the
+// phase error is the only place that output can survive.
+func TestCheckNVregOnNodePhaseErrorCarriesProbeOutput(t *testing.T) {
+	c, _ := nvregProbeClient(t, corev1.PodFailed)
+	_, err := checkNVregOnNode(context.Background(), c, "ns", "n1")
+	if err == nil {
+		t.Fatal("expected an error for a pod that never ran the probe")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "terminated in phase Failed") {
+		t.Errorf("error should name the phase, got: %v", msg)
+	}
+	if !strings.Contains(msg, nvregProbeClientLogBody) {
+		t.Errorf("error should carry the probe container output, got: %v", msg)
 	}
 }
 
@@ -869,7 +906,7 @@ func TestDescribeNVregNodesHonoursBothBounds(t *testing.T) {
 			t.Errorf("rendered list is %d bytes, byte bound did not bite", len(out))
 		}
 		if !strings.Contains(out, "more)") {
-			t.Errorf("omitted count missing: %s", out[:80])
+			t.Errorf("omitted count missing: %s", out)
 		}
 	})
 }
