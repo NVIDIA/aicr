@@ -301,9 +301,12 @@ function remove_stale_nodewright_taints() {
   if [[ -z "${deploys//[[:space:]]/}" ]]; then
     fresh_deploy=true
   else
-    local available
-    available=$(awk 'NF >= 2 { print $2; exit } { print 0; exit }' <<<"${deploys}")
-    if [[ "${available}" != "0" ]]; then
+    # Any matching Deployment with an available replica owns the gate, so every
+    # row is inspected: a zero or omitted count on one row must not hide an
+    # active operator on another.
+    local active
+    active=$(awk 'NF >= 2 && $2 != 0 { print "yes"; exit }' <<<"${deploys}")
+    if [[ -n "${active}" ]]; then
       return 0
     fi
   fi

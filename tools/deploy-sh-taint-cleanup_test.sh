@@ -102,6 +102,26 @@ STUB_DEPLOY_OUT=$'skyhook-operator-controller-manager 1\n' STUB_NODES_OUT="${NOD
 check_rc0       "operator-running-rc0"
 check_no_taints "operator-running-no-taint-calls"
 
+# 2a. Several matching Deployments where only one is available: an active
+#     operator owns the gate regardless of row order or of a zero / omitted
+#     count on the other rows.
+STUB_DEPLOY_OUT=$'nodewright-controller-manager 0\nskyhook-operator-controller-manager 1\n' \
+STUB_NODES_OUT="${NODES_LEGACY_TAINTED}" run "${NO_VALUES}"
+check_rc0       "mixed-zero-then-active-rc0"
+check_no_taints "mixed-zero-then-active-no-taint-calls"
+STUB_DEPLOY_OUT=$'skyhook-operator-controller-manager 1\nnodewright-controller-manager \n' \
+STUB_NODES_OUT="${NODES_LEGACY_TAINTED}" run "${NO_VALUES}"
+check_rc0       "mixed-active-then-omitted-rc0"
+check_no_taints "mixed-active-then-omitted-no-taint-calls"
+
+# 2b. Several matching Deployments, none available: stale taints are cleaned
+#     with the existing-operator key set (configured + legacy only).
+STUB_DEPLOY_OUT=$'nodewright-controller-manager 0\nskyhook-operator-controller-manager \n' \
+STUB_NODES_OUT="${NODES_LEGACY_TAINTED}" run "${NO_VALUES}"
+check_taint       "mixed-none-active-legacy-removed" "taint node gpu-0 skyhook.nvidia.com-"
+check_taint       "mixed-none-active-default-removed" "taint node gpu-1 nodewright.nvidia.com-"
+check_taint_count "mixed-none-active-two-calls" 2
+
 # 3. A failed `kubectl get nodes` must also skip, not treat "no output" as clean.
 STUB_DEPLOY_OUT='' STUB_NODES_RC=1 STUB_NODES_OUT='forbidden' run "${NO_VALUES}"
 check_out       "nodes-read-error-warns" "skipping stale-taint cleanup"
