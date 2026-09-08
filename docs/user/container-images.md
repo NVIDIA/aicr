@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **47**
-- Unique images: **108**
+- Unique images: **109**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -64,7 +64,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
 | nodewright-customizations | manifest | — | — | 6 |
-| nodewright-operator | helm | nodewright | v0.18.0 | 2 |
+| nodewright-operator | helm | nodewright | v0.17.1 | 3 |
 | nvcre | helm | cluster-readiness-engine | v0.2.0 | 1 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
@@ -289,7 +289,8 @@ _No images extracted._
 ### nodewright-operator
 
 - `docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
-- `ghcr.io/nvidia/nodewright/operator:v0.18.0@sha256:49ace92de35703f6da84c75147e2f93803d8b70f4f48dc9ae5213f7a6788ddfb`
+- `ghcr.io/nvidia/nodewright/operator:v0.17.0@sha256:1511449bf51f2844b6bb3a03bde3d5590caf2ca283e3e39c0745a8016af2132f`
+- `quay.io/brancz/kube-rbac-proxy:v0.15.0@sha256:2c7b120590cbe9f634f5099f2cbb91d0b668569023a81505ca124a5c437e7663`
 
 ### nvcre
 
