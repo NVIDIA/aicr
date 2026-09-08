@@ -463,3 +463,90 @@ func TestDocsClaimWalkAttributesFlagsToTheRightCommand(t *testing.T) {
 		})
 	}
 }
+
+// docsPriorityLabelClaims matches prose asserting that P0/P1/P2 are labels.
+//
+// They are not. P0/P1/P2 are options on the AICR Project board's Priority
+// field, and the board is not the repository: `gh label list --repo NVIDIA/aicr
+// --limit 200` returns 40 labels, none of them P-prefixed. Setting the field
+// needs a project-scoped token, which is why contributors cannot set it and why
+// calling it a label sends them looking for something that is not there.
+//
+// This is gated rather than merely fixed because the same false sentence was
+// published in three files at once: CONTRIBUTING.md, AGENTS.md, and
+// .claude/CLAUDE.md. AGENTS.md even contradicted itself, describing the board
+// field correctly ten lines below the bullet calling it an issue label.
+//
+// Match the ASSERTION, not the tokens. The obvious pattern,
+// `priority label.*(P0|P1|P2)`, is WRONG: it matches the CORRECTED text three
+// times over, because the correction itself has to name the thing it forbids.
+// Those three false positives are CONTRIBUTING.md ("Do not add a priority label
+// (`P0`, `P1`, `P2`) to the PR"), AGENTS.md ("Do NOT add a priority label
+// (`P0`, `P1`, `P2`) to PRs"), and .claude/CLAUDE.md, which mirrors AGENTS.md
+// byte for byte. A gate built on token co-occurrence fails on the exact wording
+// it exists to protect, so do not "simplify" these patterns into one.
+//
+// .claude/CLAUDE.md is not reachable from docsClaimRoots, whose repo-root entry
+// is not recursive. It does not need to be: tools/check-agents-sync fails
+// whenever it diverges from AGENTS.md, so the claim cannot come back there
+// alone, and if it comes back in both then AGENTS.md trips this gate.
+var docsPriorityLabelClaims = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(issue|repo|repository) priority labels?`),
+	regexp.MustCompile(`(?i)reserved for issues`),
+}
+
+// TestDocsDoNotCallPriorityALabel is the gate.
+func TestDocsDoNotCallPriorityALabel(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := docsRepoRoot(t)
+
+	files := make([]string, 0, len(docsClaimRoots)*32)
+	for _, root := range docsClaimRoots {
+		files = append(files, markdownFiles(t, repoRoot, root)...)
+	}
+	if len(files) == 0 {
+		t.Fatal("found no Markdown to scan; the roots are wrong")
+	}
+
+	var mentions int
+	for _, path := range files {
+		data, err := os.ReadFile(path) //nolint:gosec // in-repo doc, path derived from the module root
+		if err != nil {
+			t.Errorf("read %s: %v", path, err)
+			continue
+		}
+		rel, relErr := filepath.Rel(repoRoot, path)
+		if relErr != nil {
+			rel = path
+		}
+
+		for i, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(strings.ToLower(line), "priority") {
+				mentions++
+			}
+			for _, re := range docsPriorityLabelClaims {
+				if !re.MatchString(line) {
+					continue
+				}
+				t.Errorf("%s:%d: describes issue priority as a label: %q\n"+
+					"        P0/P1/P2 are options on the AICR Project board's Priority\n"+
+					"        field, not repository labels. Say that priority is a board\n"+
+					"        field instead, as CONTRIBUTING.md's Issue Priority section does.",
+					rel, i+1, strings.TrimSpace(line))
+				// One report per offending line: both patterns match the same
+				// sentence, and naming it twice buries the file list.
+				break
+			}
+		}
+	}
+
+	// mentions counts lines that talk about priority at all. Without it a broken
+	// corpus walk would report success by scanning nothing relevant, and this
+	// gate would pass forever while guarding an empty set.
+	if mentions == 0 {
+		t.Fatal("no scanned file mentions priority; the corpus walk is broken " +
+			"and this gate is inert")
+	}
+	t.Logf("scanned %d files, %d lines mentioning priority", len(files), mentions)
+}
