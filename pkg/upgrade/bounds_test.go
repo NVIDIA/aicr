@@ -15,6 +15,7 @@
 package upgrade
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/Masterminds/semver/v3"
@@ -24,24 +25,29 @@ func TestParseBoundsAccepted(t *testing.T) {
 	tests := []struct {
 		name       string
 		constraint string
+		pre        prereleasePolicy
 		wantLower  string // "" means unbounded
 		lowerIncl  bool
 		wantUpper  string
 		upperIncl  bool
 	}{
-		{"upper exclusive only", "<0.18.0", "", false, "0.18.0", false},
-		{"lower inclusive only", ">=0.16.0", "0.16.0", true, "", false},
-		{"both, space separated", ">=0.18.0 <0.20.0", "0.18.0", true, "0.20.0", false},
-		{"both, comma separated", ">=0.18.0, <0.20.0", "0.18.0", true, "0.20.0", false},
-		{"both inclusive", ">=0.18.0 <=0.18.0", "0.18.0", true, "0.18.0", true},
-		{"exact via =", "=0.18.0", "0.18.0", true, "0.18.0", true},
-		{"exact bare", "0.18.0", "0.18.0", true, "0.18.0", true},
-		{"v prefix normalizes", ">=v0.18.0 <v0.20.0", "0.18.0", true, "0.20.0", false},
-		{"lower exclusive", ">0.18.0 <0.20.0", "0.18.0", false, "0.20.0", false},
+		{"upper exclusive only", "<0.18.0", prereleaseForbidden, "", false, "0.18.0", false},
+		{"lower inclusive only", ">=0.16.0", prereleaseForbidden, "0.16.0", true, "", false},
+		{"both, space separated", ">=0.18.0 <0.20.0", prereleaseForbidden, "0.18.0", true, "0.20.0", false},
+		{"both, comma separated", ">=0.18.0, <0.20.0", prereleaseForbidden, "0.18.0", true, "0.20.0", false},
+		{"both inclusive", ">=0.18.0 <=0.18.0", prereleaseForbidden, "0.18.0", true, "0.18.0", true},
+		{"exact via =", "=0.18.0", prereleaseForbidden, "0.18.0", true, "0.18.0", true},
+		{"exact bare", "0.18.0", prereleaseForbidden, "0.18.0", true, "0.18.0", true},
+		{"v prefix normalizes", ">=v0.18.0 <v0.20.0", prereleaseForbidden, "0.18.0", true, "0.20.0", false},
+		{"lower exclusive", ">0.18.0 <0.20.0", prereleaseForbidden, "0.18.0", false, "0.20.0", false},
+		// "hotfix" contains an x/X; the wildcard check must look only at the
+		// release segment (1.2.3), not the whole token, or a legal
+		// prerelease tag gets misclassified as a wildcard.
+		{"prerelease tag containing x is not a wildcard", "<=1.2.3-hotfix.1", prereleaseAllowed, "", false, "1.2.3-hotfix.1", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b, err := parseBounds(tt.constraint, prereleaseForbidden)
+			b, err := parseBounds(tt.constraint, tt.pre)
 			if err != nil {
 				t.Fatalf("parseBounds(%q) error = %v", tt.constraint, err)
 			}
@@ -92,6 +98,11 @@ func TestParseBoundsRejected(t *testing.T) {
 		{"two lower bounds", ">=0.18.0 >=0.19.0", prereleaseForbidden},
 		{"two upper bounds", "<0.20.0 <0.21.0", prereleaseForbidden},
 		{"garbage", "not-a-constraint", prereleaseForbidden},
+		{"exact version after a comparator", "<0.20.0 0.18.0", prereleaseForbidden},
+		{"exact version before a lower-bound comparator", "0.18.0 >=0.19.0", prereleaseForbidden},
+		{"space between operator and version", ">= 0.18.0", prereleaseForbidden},
+		{"trailing dot is not a valid version", "1.2.", prereleaseForbidden},
+		{"uppercase V prefix does not normalize", "V1.2.3", prereleaseForbidden},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -99,6 +110,100 @@ func TestParseBoundsRejected(t *testing.T) {
 				t.Errorf("parseBounds(%q) = nil error, want rejection", tt.constraint)
 			}
 		})
+	}
+}
+
+// Every parseBounds rejection must name the full constraint text it came
+// from: Task 5 aggregates these into a per-record list where an
+// unattributed message is useless.
+func TestParseBoundsErrorMessagesNameConstraint(t *testing.T) {
+	tests := []struct {
+		name       string
+		constraint string
+		pre        prereleasePolicy
+	}{
+		{"OR", ">=0.18.0 || >=0.20.0", prereleaseForbidden},
+		{"hyphen range", "0.18.0 - 0.20.0", prereleaseForbidden},
+		{"unsupported operator", "^0.18.0", prereleaseForbidden},
+		{"empty range", "", prereleaseForbidden},
+		{"missing version after operator", ">= 0.18.0", prereleaseForbidden},
+		{"wildcard", "0.18.x", prereleaseForbidden},
+		{"partial version", ">=0.18", prereleaseForbidden},
+		{"build metadata", "<=0.18.0+build.5", prereleaseAllowed},
+		{"unparseable version", "V1.2.3", prereleaseForbidden},
+		{"prerelease forbidden", "<0.18.0-rc.1", prereleaseForbidden},
+		{"two lower bounds", ">=0.18.0 >=0.19.0", prereleaseForbidden},
+		{"exact version after a comparator", "<0.20.0 0.18.0", prereleaseForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parseBounds(tt.constraint, tt.pre)
+			if err == nil {
+				t.Fatalf("parseBounds(%q) = nil error, want rejection", tt.constraint)
+			}
+			if !strings.Contains(err.Error(), tt.constraint) {
+				t.Errorf("error %q does not name the constraint %q", err.Error(), tt.constraint)
+			}
+		})
+	}
+}
+
+// The most likely authoring slip - a space after the operator - must not be
+// silently accepted (that would widen the grammar) but must tell the author
+// exactly what to write instead.
+func TestParseBoundsMissingVersionSuggestsJoinedForm(t *testing.T) {
+	_, err := parseBounds(">= 0.18.0", prereleaseForbidden)
+	if err == nil {
+		t.Fatal("parseBounds(\">= 0.18.0\") = nil error, want rejection")
+	}
+	msg := err.Error()
+	for _, want := range []string{"space", ">=0.18.0"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error %q does not contain %q", msg, want)
+		}
+	}
+}
+
+// A bare (exact) version followed by another comparator must be reported as
+// an exact-version conflict regardless of which side appears first; the
+// exact-version branch sets both bounds, so a naive twice-check on whichever
+// bound the second comparator targets reports the wrong reason.
+func TestParseBoundsExactVersionFirstReportsConflict(t *testing.T) {
+	_, err := parseBounds("0.18.0 <0.20.0", prereleaseForbidden)
+	if err == nil {
+		t.Fatal("parseBounds(\"0.18.0 <0.20.0\") = nil error, want rejection")
+	}
+	if !strings.Contains(err.Error(), "combines an exact version") {
+		t.Errorf("error = %q, want a message about combining an exact version", err.Error())
+	}
+}
+
+// newConstraint must surface a semver.NewConstraint failure rather than
+// panic or silently succeed on ungrammatical input.
+func TestNewConstraintError(t *testing.T) {
+	if _, err := newConstraint("not-a-constraint"); err == nil {
+		t.Error("newConstraint(\"not-a-constraint\") = nil error, want error")
+	}
+}
+
+// Every parseBounds error returns the zero-value bounds{}, whose sides are
+// bounded (unbounded: false) with a nil ver. A caller that logs the error
+// and calls contains anyway must get false, not a nil-pointer panic.
+func TestBoundsZeroValueContainsIsFalse(t *testing.T) {
+	v, err := semver.NewVersion("1.0.0")
+	if err != nil {
+		t.Fatalf("semver.NewVersion error = %v", err)
+	}
+	var zero bounds
+	if zero.contains(v) {
+		t.Error("zero-value bounds.contains = true, want false")
+	}
+	// The zero-value check above short-circuits on the lower side before
+	// ever reaching the upper side's nil guard; exercise that guard
+	// directly with an otherwise-unbounded lower side.
+	upperOnly := bounds{lower: bound{unbounded: true}, upper: bound{unbounded: false, ver: nil}}
+	if upperOnly.contains(v) {
+		t.Error("bounds with nil upper.ver: contains = true, want false")
 	}
 }
 

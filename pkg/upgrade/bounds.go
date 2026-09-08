@@ -49,7 +49,9 @@ func newConstraint(s string) (*semver.Constraints, error) {
 }
 
 // bound is one side of a range. An unbounded side has no limit in that
-// direction; ver is nil there.
+// direction; ver is nil there. A bounded side with a nil ver is the
+// zero-value result of a rejected parseBounds call and is treated as
+// unsatisfiable rather than dereferenced.
 type bound struct {
 	ver       *semver.Version
 	inclusive bool
@@ -62,15 +64,25 @@ type bounds struct {
 	upper bound
 }
 
-// contains reports whether v falls inside the interval.
+// contains reports whether v falls inside the interval. The zero value of
+// bounds (both sides bounded with a nil ver, the shape returned alongside
+// every parseBounds error) contains nothing, so a caller that logs a
+// parseBounds error and calls contains anyway gets a safe "no match" instead
+// of a nil-pointer panic.
 func (b bounds) contains(v *semver.Version) bool {
 	if !b.lower.unbounded {
+		if b.lower.ver == nil {
+			return false
+		}
 		cmp := v.Compare(b.lower.ver)
 		if cmp < 0 || (cmp == 0 && !b.lower.inclusive) {
 			return false
 		}
 	}
 	if !b.upper.unbounded {
+		if b.upper.ver == nil {
+			return false
+		}
 		cmp := v.Compare(b.upper.ver)
 		if cmp > 0 || (cmp == 0 && !b.upper.inclusive) {
 			return false
@@ -82,7 +94,9 @@ func (b bounds) contains(v *semver.Version) bool {
 // parseBounds extracts the interval of a constraint written in the restricted
 // grammar: a single AND-group of simple comparators. Anything whose bounds are
 // ambiguous is rejected rather than approximated, because a wrong structural
-// check is worse than a rejected record.
+// check is worse than a rejected record. Every rejection names the full
+// constraint text, since callers (Task 5's aggregation) surface these
+// messages without the surrounding record context.
 func parseBounds(constraint string, pre prereleasePolicy) (bounds, error) {
 	if strings.Contains(constraint, "||") {
 		return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
@@ -97,31 +111,55 @@ func parseBounds(constraint string, pre prereleasePolicy) (bounds, error) {
 		return r == ' ' || r == ',' || r == '\t'
 	})
 	if len(fields) == 0 {
-		return bounds{}, errors.New(errors.ErrCodeInvalidRequest, "range is empty")
+		return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("range %q is empty", constraint))
 	}
 
 	var b bounds
 	b.lower.unbounded = true
 	b.upper.unbounded = true
+	exactSet := false
 
-	for _, f := range fields {
+	for i, f := range fields {
 		op, verStr := splitComparator(f)
 		if op == "" {
 			return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("range %q contains unsupported comparator %q; allowed: <, <=, >, >=, = or a bare version", constraint, f))
 		}
-		v, err := parseRangeVersion(verStr, pre)
+		if verStr == "" {
+			// A space between the operator and the version (">= 0.18.0")
+			// splits into two fields; the operator alone reaches here with
+			// no version attached. This is not a grammar we widen to accept
+			// (Masterminds does, but bounds does not) — instead the message
+			// shows the join an author almost certainly meant.
+			suggestion := f
+			if i+1 < len(fields) {
+				suggestion = f + fields[i+1]
+			}
+			return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("range %q: comparator %q is missing a version; the operator and version must not be separated by a space (write %q)",
+					constraint, f, suggestion))
+		}
+		v, err := parseRangeVersion(constraint, verStr, pre)
 		if err != nil {
 			return bounds{}, err
 		}
 		switch op {
 		case ">", ">=":
+			if exactSet {
+				return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("range %q combines an exact version with another comparator", constraint))
+			}
 			if !b.lower.unbounded {
 				return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("range %q sets a lower bound twice", constraint))
 			}
 			b.lower = bound{ver: v, inclusive: op == ">="}
 		case "<", "<=":
+			if exactSet {
+				return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("range %q combines an exact version with another comparator", constraint))
+			}
 			if !b.upper.unbounded {
 				return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
 					fmt.Sprintf("range %q sets an upper bound twice", constraint))
@@ -134,6 +172,7 @@ func parseBounds(constraint string, pre prereleasePolicy) (bounds, error) {
 			}
 			b.lower = bound{ver: v, inclusive: true}
 			b.upper = bound{ver: v, inclusive: true}
+			exactSet = true
 		}
 	}
 	return b, nil
@@ -158,35 +197,38 @@ func splitComparator(tok string) (op, ver string) {
 
 // parseRangeVersion parses one bound's version under the grammar's rules:
 // full X.Y.Z, no wildcard, no build metadata, and a prerelease only where the
-// policy allows one.
-func parseRangeVersion(s string, pre prereleasePolicy) (*semver.Version, error) {
-	if s == "" {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "comparator is missing a version")
-	}
-	if strings.ContainsAny(s, "*xX") {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("version %q uses a wildcard; write explicit comparators instead", s))
-	}
+// policy allows one. constraint is the full range text the version came
+// from, carried only so rejections can name it.
+func parseRangeVersion(constraint, s string, pre prereleasePolicy) (*semver.Version, error) {
 	if strings.Contains(s, "+") {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("version %q carries build metadata, which semver orders as equal; a bump that changes only build metadata would move past no ceiling", s))
+			fmt.Sprintf("range %q: version %q carries build metadata, which semver orders as equal; "+
+				"a bump that changes only build metadata would move past no ceiling", constraint, s))
 	}
+	// The wildcard check runs on core (the release segment only), not the
+	// raw token: a prerelease tag legal under pre may itself contain an x or
+	// X (e.g. "1.2.3-hotfix.1"), which is not a wildcard.
 	core := strings.TrimPrefix(s, "v")
 	if idx := strings.IndexAny(core, "-+"); idx >= 0 {
 		core = core[:idx]
 	}
+	if strings.ContainsAny(core, "*xX") {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("range %q: version %q uses a wildcard; write explicit comparators instead", constraint, s))
+	}
 	if strings.Count(core, ".") != 2 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("version %q is not a full X.Y.Z version; a partial version silently expands and reads as approximate", s))
+			fmt.Sprintf("range %q: version %q is not a full X.Y.Z version; "+
+				"a partial version silently expands and reads as approximate", constraint, s))
 	}
 	v, err := semver.NewVersion(s)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("invalid version %q in range", s), err)
+			fmt.Sprintf("range %q: invalid version %q", constraint, s), err)
 	}
 	if v.Prerelease() != "" && pre == prereleaseForbidden {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("version %q names a prerelease, which is not allowed here", s))
+			fmt.Sprintf("range %q: version %q names a prerelease, which is not allowed here", constraint, s))
 	}
 	return v, nil
 }
