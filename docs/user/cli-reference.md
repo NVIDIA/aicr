@@ -360,7 +360,11 @@ aicr snapshot -o cm://default/snapshot      # captures the cluster (deploys the 
 aicr recipe   -s cm://default/snapshot --intent training
 ```
 
-When both a snapshot and explicit criteria are given, the explicit values win (e.g. `--snapshot … --service gke` overrides the detected service).
+When both a snapshot and explicit criteria are given, the explicit values win (e.g. `--snapshot … --service gke` overrides the detected service). This is also the only way to select a `generic` recipe from a snapshot: a bare-metal cluster fingerprints as its provisioner (`metal3`, `rke2`), never as `generic`, so pass the override explicitly:
+
+```bash
+aicr recipe --snapshot snapshot.yaml --service generic --intent training
+```
 
 **Configuration profiles:** an overlay composition may declare one named
 configuration choice. Select a non-default value with
@@ -489,7 +493,7 @@ Generate recipes using direct system parameters:
 **Flags:**
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; `self-managed`, `self`, and `vanilla` are accepted aliases) — unlike the `any` wildcard, which matches every service and does not select `generic` recipes |
+| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; `self-managed`, `self`, and `vanilla` are accepted aliases) — unlike the `any` wildcard, which matches every service and does not select `generic` recipes. `generic` is never detected from a snapshot (the fingerprint reports the provisioner it sees, such as `metal3` or `rke2`), so `generic` recipes require this flag as an explicit opt-in, also alongside `--snapshot` |
 | `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |

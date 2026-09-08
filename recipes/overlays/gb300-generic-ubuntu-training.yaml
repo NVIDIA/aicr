@@ -15,10 +15,14 @@
 kind: RecipeMetadata
 apiVersion: aicr.run/v1alpha2
 metadata:
-  name: generic-gb300-ubuntu-training
+  name: gb300-generic-ubuntu-training
 
 spec:
   # Bare-metal GB300 NVL72 on self-managed Kubernetes; nothing is pre-installed.
+  # `generic` is a concrete service, not the wildcard, and a snapshot never
+  # detects it (the fingerprint reports the provisioner it sees, e.g. metal3
+  # or rke2), so this leaf is selected only by an explicit opt-in:
+  #   aicr recipe --snapshot snapshot.yaml --service generic --intent training
   base: base
 
   criteria:
