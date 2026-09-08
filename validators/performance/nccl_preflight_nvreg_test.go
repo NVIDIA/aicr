@@ -212,7 +212,7 @@ func TestEvaluateNVregPreflight(t *testing.T) {
 		// An unreadable params file is NOT evidence the flag is unset: reporting
 		// nvregFlagMissing would send the operator to edit ClusterPolicy for a
 		// setting nothing ever established was absent.
-		{"R580 + params unreadable → fails closed", realNVRMBanner, "", false, nvregUndetermined},
+		{"R580 + params unreadable → fails closed", realNVRMBanner, "", false, nvregParamsUnreadable},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -311,8 +311,8 @@ func TestSplitNVregProbeOutput(t *testing.T) {
 		if params != "" {
 			t.Errorf("params = %q, want empty", params)
 		}
-		if got := evaluateNVregPreflight(version, params, paramsOK); got.verdict != nvregUndetermined {
-			t.Errorf("verdict = %v, want nvregUndetermined (not nvregFlagMissing)", got.verdict)
+		if got := evaluateNVregPreflight(version, params, paramsOK); got.verdict != nvregParamsUnreadable {
+			t.Errorf("verdict = %v, want nvregParamsUnreadable (not nvregFlagMissing)", got.verdict)
 		}
 	})
 
@@ -567,6 +567,37 @@ func TestNvregUnknownVersionHintFailsClosedAndPointsSomewhere(t *testing.T) {
 	}
 }
 
+// A params-read failure is a different problem from an unreadable version, and
+// saying otherwise misdirects: the message would print the driver version while
+// claiming it is unknown, and send the operator to check a kernel module the
+// version read already proved loaded.
+func TestNvregParamsUnreadableMessageDoesNotContradictItself(t *testing.T) {
+	err := nvregPreflightOutcome(map[string]nvregResult{
+		"n1": {verdict: nvregParamsUnreadable, version: "580.173.02"},
+	})
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	msg := err.Error()
+
+	if strings.Contains(msg, "driver version could not be determined") {
+		t.Error("message claims the version is unknown, but the result carries one")
+	}
+	if strings.Contains(msg, "Confirm the NVIDIA kernel module is loaded") {
+		t.Error("the readable version file already proved the module is loaded")
+	}
+	// It must still name the version it did read, and point at the real problem.
+	for _, want := range []string{"580.173.02", "params could not be read", "/proc/driver/nvidia"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message missing %q; got: %s", want, msg)
+		}
+	}
+	// And it must not be mistaken for the actionable "go set the flag" case.
+	if strings.Contains(msg, "missing on GPU nodes") {
+		t.Error("params-unreadable must not read as the flag being absent")
+	}
+}
+
 // TestNvregZeroValueFailsClosed pins the zero-value choice. An empty
 // nvregResult — a map miss, or a value returned alongside an error a caller
 // forgot to check — must never read as a pass.
@@ -747,11 +778,13 @@ func TestPreflightOutcomeFitsTerminationMsgCap(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			results := make(map[string]nvregResult, tc.nodes)
 			for i := range tc.nodes {
-				switch name := tc.gen(i); i % 3 {
+				switch name := tc.gen(i); i % 4 {
 				case 0:
 					results[name] = nvregResult{verdict: nvregOverrideRemoved, version: "595.91.07"}
 				case 1:
 					results[name] = nvregResult{verdict: nvregFlagMissing, version: "580.173.02"}
+				case 2:
+					results[name] = nvregResult{verdict: nvregParamsUnreadable, version: "580.173.02"}
 				default:
 					results[name] = nvregResult{verdict: nvregUndetermined}
 				}
@@ -773,7 +806,7 @@ func TestPreflightOutcomeFitsTerminationMsgCap(t *testing.T) {
 			}
 			// Every category survives the bounding, remediation included.
 			for _, want := range []string{
-				"R595 removed", "could not be read", "silently falls back",
+				"R595 removed", "could not be read", "silently falls back", "module is loaded —",
 			} {
 				if !strings.Contains(msg, want) {
 					t.Errorf("bounding dropped a category or its remediation; missing %q", want)

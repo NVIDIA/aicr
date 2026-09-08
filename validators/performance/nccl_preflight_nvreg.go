@@ -81,9 +81,9 @@ func parseNVRMVersion(content string) (full string, major int, ok bool) {
 type nvregVerdict int
 
 const (
-	// nvregUndetermined: the driver state could not be established — the version
-	// banner or the params file was unreadable. Deliberately the ZERO VALUE so
-	// an accidentally-empty result fails closed rather than reading as a pass.
+	// nvregUndetermined: the version banner was unreadable, so nothing about the
+	// driver is established. Deliberately the ZERO VALUE so an accidentally-empty
+	// result fails closed rather than reading as a pass.
 	nvregUndetermined nvregVerdict = iota
 	// nvregOK: pre-R595 driver with the override set.
 	nvregOK
@@ -94,6 +94,13 @@ const (
 	// establishes only that the parameter is gone. Whether the replacement
 	// topology requirement is met is measured on EKS p6e and unmeasured on OKE.
 	nvregOverrideRemoved
+	// nvregParamsUnreadable: pre-R595 driver identified, but the params file was
+	// unreadable, so whether the override is set is unknown. Distinct from
+	// nvregFlagMissing because absent content is not an absent flag, and from
+	// nvregUndetermined because the driver version IS known here — reporting it
+	// as unknown would contradict the version this result carries and send the
+	// operator after a kernel module the version read already proved loaded.
+	nvregParamsUnreadable
 )
 
 // nvregResult pairs a verdict with the driver version that produced it, so the
@@ -117,7 +124,7 @@ func evaluateNVregPreflight(versionFile, paramsFile string, paramsOK bool) nvreg
 	}
 	if !paramsOK {
 		// Absent content is not evidence the flag is unset.
-		return nvregResult{verdict: nvregUndetermined, version: full}
+		return nvregResult{verdict: nvregParamsUnreadable, version: full}
 	}
 	if parseNVregFromParams(paramsFile) {
 		return nvregResult{verdict: nvregOK, version: full}
@@ -165,11 +172,20 @@ const (
 		`or via the node image where the GPU Operator does not own the driver. ` +
 		`See docs/user/validation.md.`
 
-	// nvregUndeterminedHint is emitted when either probed file is unreadable.
-	nvregUndeterminedHint = `/proc/driver/nvidia/version or params could not be read, so neither the ` +
+	// nvregUndeterminedHint is emitted when the version banner is unreadable.
+	nvregUndeterminedHint = `/proc/driver/nvidia/version could not be read, so neither the ` +
 		`driver version nor the override could be established and the preflight ` +
 		`fails rather than assume. Confirm the NVIDIA kernel module is loaded on ` +
 		`every target node. See docs/user/validation.md.`
+
+	// nvregParamsUnreadableHint is emitted when the version was read but params
+	// was not. It must not repeat the module-loaded advice: the version banner
+	// already proved the module is loaded, so that would misdirect.
+	nvregParamsUnreadableHint = `/proc/driver/nvidia/params could not be read, so whether the ` +
+		`override is set could not be established and the preflight fails rather ` +
+		`than assume. The version file was readable, so the module is loaded — ` +
+		`check that the probe can read /proc/driver/nvidia on these nodes. ` +
+		`See docs/user/validation.md.`
 )
 
 // splitNVregProbeOutput splits the probe pod's stdout into the version and
@@ -247,8 +263,13 @@ func nvregPreflightOutcome(results map[string]nvregResult) error {
 	}
 	if unknown := nodesWithVerdict(results, nvregUndetermined); len(unknown) > 0 {
 		sections = append(sections, fmt.Sprintf(
-			"NVIDIA driver state could not be determined on GPU nodes: %s. %s",
+			"NVIDIA driver version could not be determined on GPU nodes: %s. %s",
 			describeNVregNodes(results, unknown), nvregUndeterminedHint))
+	}
+	if unreadable := nodesWithVerdict(results, nvregParamsUnreadable); len(unreadable) > 0 {
+		sections = append(sections, fmt.Sprintf(
+			"NVreg_GrdmaPciTopoCheckOverride state could not be determined on GPU nodes: %s. %s",
+			describeNVregNodes(results, unreadable), nvregParamsUnreadableHint))
 	}
 	if missing := nodesWithVerdict(results, nvregFlagMissing); len(missing) > 0 {
 		sections = append(sections, fmt.Sprintf(
