@@ -288,17 +288,24 @@ done
 # neither word-split nor prefix-match an unrelated taint.
 function remove_stale_nodewright_taints() {
   local ns="$1" values_file="$2"
-  local available
-  if ! available=$(kubectl get deploy -n "${ns}" -l app.kubernetes.io/name=nodewright,control-plane=controller-manager -o jsonpath='{.items[0].status.availableReplicas}' 2>&1); then
-    _warn_line "could not query the nodewright-operator Deployment in ${ns}; skipping stale-taint cleanup: ${available}"
-    return 0
-  fi
-  if [[ -n "${available}" && "${available}" != "0" ]]; then
+  # One "<name> <availableReplicas>" line per matching Deployment. The name is
+  # queried alongside the count because status.availableReplicas is omitempty:
+  # an existing Deployment with nothing available prints no count, which must
+  # not be mistaken for no Deployment at all.
+  local deploys
+  if ! deploys=$(kubectl get deploy -n "${ns}" -l app.kubernetes.io/name=nodewright,control-plane=controller-manager -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.availableReplicas}{"\n"}{end}' 2>&1); then
+    _warn_line "could not query the nodewright-operator Deployment in ${ns}; skipping stale-taint cleanup: ${deploys}"
     return 0
   fi
   local fresh_deploy=false
-  if [[ -z "${available}" ]]; then
+  if [[ -z "${deploys//[[:space:]]/}" ]]; then
     fresh_deploy=true
+  else
+    local available
+    available=$(awk 'NF >= 2 { print $2; exit } { print 0; exit }' <<<"${deploys}")
+    if [[ "${available}" != "0" ]]; then
+      return 0
+    fi
   fi
 
   local -a keys=("nodewright.nvidia.com" "skyhook.nvidia.com")

@@ -42,6 +42,8 @@ fi
 # --- Stub kubectl on PATH -----------------------------------------------------
 # Behaviour is driven by env vars so each case sets its own cluster shape:
 #   STUB_DEPLOY_RC / STUB_DEPLOY_OUT  -> `kubectl get deploy` exit code / stdout
+#     (stdout is "<name> <availableReplicas>" per Deployment; the count is
+#     empty when availableReplicas is omitted, i.e. zero available)
 #   STUB_NODES_RC  / STUB_NODES_OUT   -> `kubectl get nodes`  exit code / stdout
 # Every `kubectl taint` call is appended to $KLOG.
 cat >"${WORK}/kubectl" <<'STUB'
@@ -96,7 +98,7 @@ check_out       "deploy-read-error-warns" "skipping stale-taint cleanup"
 check_no_taints "deploy-read-error-no-taint-calls"
 
 # 2. A running operator (available replicas > 0) owns the taints: no cleanup.
-STUB_DEPLOY_OUT='1' STUB_NODES_OUT="${NODES_LEGACY_TAINTED}" run "${NO_VALUES}"
+STUB_DEPLOY_OUT=$'skyhook-operator-controller-manager 1\n' STUB_NODES_OUT="${NODES_LEGACY_TAINTED}" run "${NO_VALUES}"
 check_rc0       "operator-running-rc0"
 check_no_taints "operator-running-no-taint-calls"
 
@@ -123,7 +125,7 @@ controllerManager:
     env:
       runtimeRequiredTaint: "custom.io/gate=true:NoSchedule"
 EOF
-STUB_DEPLOY_OUT='0' \
+STUB_DEPLOY_OUT=$'skyhook-operator-controller-manager 0\n' \
 STUB_NODES_OUT=$'gpu-0 custom.io/gate\ngpu-1 custom.io/gate2\ngpu-2 skyhook.nvidia.com\ngpu-3 nodewright.nvidia.com\n' \
 run "${WORK}/values.yaml"
 check_taint       "custom-key-removed"           "taint node gpu-0 custom.io/gate-"
@@ -131,6 +133,17 @@ check_no_taint    "custom-prefix-not-matched"    "gpu-1"
 check_taint       "custom-legacy-still-removed"  "taint node gpu-2 skyhook.nvidia.com-"
 check_no_taint    "custom-default-not-removed"   "gpu-3"
 check_taint_count "custom-exactly-two-calls"     2
+
+# 5a. Same, but the existing Deployment omits availableReplicas entirely (the
+#     field is omitempty, so zero available prints nothing). This is an existing
+#     operator, not a fresh deploy: the unconfigured default key must be kept.
+STUB_DEPLOY_OUT=$'skyhook-operator-controller-manager \n' \
+STUB_NODES_OUT=$'gpu-0 custom.io/gate\ngpu-2 skyhook.nvidia.com\ngpu-3 nodewright.nvidia.com\n' \
+run "${WORK}/values.yaml"
+check_taint       "omitted-count-custom-removed"       "taint node gpu-0 custom.io/gate-"
+check_taint       "omitted-count-legacy-removed"       "taint node gpu-2 skyhook.nvidia.com-"
+check_no_taint    "omitted-count-default-not-removed"  "gpu-3"
+check_taint_count "omitted-count-exactly-two-calls"    2
 
 # 5b. Fresh deploy (no Deployment) with a configured custom key: the previous
 #     install may have tainted with either default key, so both defaults are
