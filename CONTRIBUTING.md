@@ -50,10 +50,10 @@ Before contributing:
 #### Start with an issue for substantial changes
 
 Open an issue before writing code for anything substantial: a new feature, a
-change to existing behavior, a new dependency, or any change whose approach is
-worth agreeing on first. Describe the problem and the approach you have in mind,
-and give maintainers a chance to respond. Settling the design in an issue costs
-less than reworking a finished pull request.
+change to existing behavior, or any change whose approach is worth agreeing on
+first. Describe the problem and the approach you have in mind, and give
+maintainers a chance to respond. Settling the design in an issue costs less than
+reworking a finished pull request.
 
 Bug fixes, typos, and documentation can go straight to a pull request, as can any
 small self-contained change where the approach is not in question. If you are not
@@ -259,9 +259,16 @@ exempts pull requests.
 Maintainers track priority as a `Priority` field on the AICR Project board, with
 the values `P0`, `P1`, and `P2`. It is a board field, not a repository label, so
 it does not show up in an issue's labels and setting it needs a project-scoped
-token. Contributors cannot set it, and there is no `P0`/`P1`/`P2` label to apply:
-the PR Label Guard workflow removes any `P<number>` label that lands on a pull
-request.
+token. Contributors cannot set that field, and there is no `P0`/`P1`/`P2` label
+to apply instead: the PR Label Guard workflow removes any `P<number>` label that
+lands on a pull request.
+
+Two of the issue templates also ask for a Priority, and that one is yours to set.
+The feature request scale runs from `Nice to have` up to `Critical`, and the
+documentation request scale from `Low` up to `Critical`. The dropdown records how
+important the change is to you, and triage reads it with the rest of the issue
+body. It is not the board field: the values differ, and the `P0` to `P2` below is
+set by maintainers.
 
 What the values mean when maintainers triage:
 
@@ -273,11 +280,12 @@ What the values mean when maintainers triage:
 
 When the choice is between `P0` and `P1`, triage uses `P1`.
 
-To argue for a different priority, comment on the issue and say what the impact
-is: that it is a confirmed regression, that it carries security impact, or that
-it is blocking your work. Triage reads an issue's full comment thread before
-changing a priority that is already set, so the case belongs there rather than in
-a label or a pull request.
+To argue for a different priority, say what the impact is: that it is a confirmed
+regression, that it carries security impact, or that it is blocking your work. On
+a new issue that goes in the template's Priority dropdown and in the body; on an
+issue that already exists, comment on it. Triage reads the full comment thread
+before changing a priority that is already set, so the case belongs there rather
+than in a label or a pull request.
 
 ### Claiming an Issue
 
