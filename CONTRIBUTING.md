@@ -185,7 +185,7 @@ Trust is established through evidence, not assertions. Every released artifact c
    - **Type of Change**: Bug fix, feature, breaking change, etc.
    - **Testing**: What testing was performed
    - **Checklist**: Verify all items
-3. Do not use the issue priority labels `P0`, `P1`, or `P2` on PRs. They are reserved for issues and are automatically removed from pull requests by automation.
+3. Do not add a priority label (`P0`, `P1`, `P2`) to the PR. Priority is a field on the AICR Project board rather than a repository label, and the PR Label Guard workflow strips any `P<number>` label from a pull request. See [Issue Priority](#issue-priority).
 
 ### Review Process
 
@@ -253,6 +253,31 @@ rather than the moment a threshold is crossed — expect up to ~24 hours of lag.
 Exempt items are never marked `lifecycle/stale` in the first place, not merely
 spared from closing. `good first issue` also exempts issues, and `do-not-merge`
 exempts pull requests.
+
+#### Issue Priority
+
+Maintainers track priority as a `Priority` field on the AICR Project board, with
+the values `P0`, `P1`, and `P2`. It is a board field, not a repository label, so
+it does not show up in an issue's labels and setting it needs a project-scoped
+token. Contributors cannot set it, and there is no `P0`/`P1`/`P2` label to apply:
+the PR Label Guard workflow removes any `P<number>` label that lands on a pull
+request.
+
+What the values mean when maintainers triage:
+
+| Value | Applies to |
+|-------|------------|
+| `P0` | Active incidents only: data loss, a broken CI gate, or a security breach |
+| `P1` | Confirmed regressions, security issues, and anything blocking a contributor or an imminent release |
+| `P2` | The default for everything else |
+
+When the choice is between `P0` and `P1`, triage uses `P1`.
+
+To argue for a different priority, comment on the issue and say what the impact
+is: that it is a confirmed regression, that it carries security impact, or that
+it is blocking your work. Triage reads an issue's full comment thread before
+changing a priority that is already set, so the case belongs there rather than in
+a label or a pull request.
 
 ### Claiming an Issue
 
