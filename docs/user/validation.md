@@ -201,11 +201,17 @@ EFA must share a PCIe root port. The preflight does not check that property, so
 on R595+ it cannot verify GPUDirect RDMA and fails rather than assume. Setting
 the parameter has no effect; the kernel silently ignores unknown module options.
 
-On EKS `p6e-gb200`/`gb300` the replacement requirement is measured to fail (the
-EFA has no IOMMU group and sits under a different root port from the GPU). On
-OKE it is unmeasured. Either way the remedy is a driver at R580 — AICR ships
-`580.173.02` — pinned through the ClusterPolicy where the GPU Operator owns the
-driver, or through the node image where it does not.
+On EKS `p6e-gb200`/`gb300` the replacement requirement is measured to fail: on a
+`p6e-gb300r.36xlarge` the EFA (`0000:97:00.0`) has no IOMMU group and sits under
+a different root port from the GPU (`0000:9d:00.0`). Under R595 with the
+preflight bypassed the NET benchmark aborted with the `FORCE_PCIE` message
+above; the same two nodes passed at 43.16 GB/s on `580.173.02`. The full record
+sits with the driver pin in `recipes/components/gpu-operator/values.yaml`. On
+OKE the requirement is unmeasured.
+
+Either way the remedy is a driver at R580 — AICR ships `580.173.02` — pinned
+through the ClusterPolicy where the GPU Operator owns the driver, or through the
+node image where it does not.
 
 ### Opting external recipes into a benchmark profile
 

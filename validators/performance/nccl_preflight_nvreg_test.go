@@ -274,7 +274,7 @@ func TestEvaluateNVregPreflightVersionCheckedFirst(t *testing.T) {
 
 func TestSplitNVregProbeOutput(t *testing.T) {
 	t.Run("round-trips both files", func(t *testing.T) {
-		out := realNVRMBanner + nvregProbeSeparator + "\n" + paramsWithFlag + nvregParamsOKMarker + "\n"
+		out := markedProbeOutput(realNVRMBanner, paramsWithFlag)
 		version, params, paramsOK := splitNVregProbeOutput(out)
 		if _, _, ok := parseNVRMVersion(version); !ok {
 			t.Errorf("version half did not parse: %q", version)
@@ -303,7 +303,7 @@ func TestSplitNVregProbeOutput(t *testing.T) {
 	// from "the flag is not set" — the check must report undetermined instead
 	// of prescribing a ClusterPolicy edit.
 	t.Run("missing params marker is not a missing flag", func(t *testing.T) {
-		out := realNVRMBanner + nvregProbeSeparator + "\n"
+		out := realNVRMBanner + nvregVersionOKMarker + "\n" + nvregProbeSeparator + "\n"
 		version, params, paramsOK := splitNVregProbeOutput(out)
 		if paramsOK {
 			t.Error("paramsOK = true, want false — no marker was emitted")
@@ -316,15 +316,44 @@ func TestSplitNVregProbeOutput(t *testing.T) {
 		}
 	})
 
+	// A version read that emits a parseable banner and THEN fails leaves no
+	// marker. Trusting that partial content would let a fully-readable params
+	// file carrying the flag produce nvregOK, running the benchmark on a driver
+	// version nothing confirmed. Truncation cannot currently corrupt the parsed
+	// major, but that is a property of the regex rather than of this check.
+	t.Run("unmarked version content is discarded", func(t *testing.T) {
+		out := realNVRMBanner + nvregProbeSeparator + "\n" +
+			paramsWithFlag + nvregParamsOKMarker + "\n"
+		version, _, paramsOK := splitNVregProbeOutput(out)
+		if version != "" {
+			t.Errorf("version = %q, want empty — no marker was emitted", version)
+		}
+		if !paramsOK {
+			t.Error("paramsOK = false; the params half was fully marked")
+		}
+		if got := evaluateNVregPreflight(splitNVregProbeOutput(out)); got.verdict != nvregUndetermined {
+			t.Errorf("verdict = %v, want nvregUndetermined (not nvregOK)", got.verdict)
+		}
+	})
+
 	// Content printed before a failed cat must not be trusted either: a partial
 	// read that happens to lack the flag would otherwise read as "flag absent".
 	t.Run("unmarked params content is discarded", func(t *testing.T) {
-		out := realNVRMBanner + nvregProbeSeparator + "\n" + paramsWithFlag
+		out := realNVRMBanner + nvregVersionOKMarker + "\n" +
+			nvregProbeSeparator + "\n" + paramsWithFlag
 		_, params, paramsOK := splitNVregProbeOutput(out)
 		if paramsOK || params != "" {
 			t.Errorf("got (%q, %v), want discarded content and paramsOK=false", params, paramsOK)
 		}
 	})
+}
+
+// markedProbeOutput builds probe stdout as the pod emits it on a clean read of
+// both files.
+func markedProbeOutput(version, params string) string {
+	return version + nvregVersionOKMarker + "\n" +
+		nvregProbeSeparator + "\n" +
+		params + nvregParamsOKMarker + "\n"
 }
 
 func TestNodesWithVerdict(t *testing.T) {
@@ -645,10 +674,12 @@ func TestCheckNVregOnNodeProbeSpec(t *testing.T) {
 	for _, want := range []string{
 		mount + "/version", // both files are read...
 		mount + "/params",
-		nvregProbeSeparator,           // ...separated by the sentinel the parser splits on...
-		nvregParamsOKMarker,           // ...the params read confirms itself readable...
-		"/params 2>/dev/null && echo", // ...only on success (&& — a failed cat stays silent)...
-		"exit 0",                      // ...and the script never reports its answer via exit status
+		nvregProbeSeparator,            // ...separated by the sentinel the parser splits on...
+		nvregVersionOKMarker,           // ...each read confirms itself complete...
+		nvregParamsOKMarker,            //
+		"/version 2>/dev/null && echo", // ...only on a clean exit (&& — a failed cat stays silent)...
+		"/params 2>/dev/null && echo",  //
+		"exit 0",                       // ...and the script never reports its answer via exit status
 	} {
 		if !strings.Contains(args, want) {
 			t.Errorf("probe args missing %q; got: %s", want, args)

@@ -134,12 +134,15 @@ const (
 	// nvregProbeSeparator delimits the two files in the probe pod's stdout.
 	nvregProbeSeparator = "===AICR-NVREG-SPLIT==="
 
-	// nvregParamsOKMarker is emitted only when the params read SUCCEEDED. Its
-	// absence distinguishes "the flag is not set" from "we could not read
-	// whether it is set" — without it an unreadable params file yields empty
-	// content, which would be reported as a missing flag and send the operator
-	// after remediation for something never established.
-	nvregParamsOKMarker = "===AICR-NVREG-PARAMS-OK==="
+	// nvregVersionOKMarker and nvregParamsOKMarker are emitted only when their
+	// respective read SUCCEEDED, so a truncated read is never mistaken for the
+	// whole file. For params the marker also carries meaning the content cannot:
+	// it distinguishes "the flag is not set" from "we could not read whether it
+	// is set", and without it an unreadable file would be reported as a missing
+	// flag, sending the operator after remediation for something never
+	// established.
+	nvregVersionOKMarker = "===AICR-NVREG-VERSION-OK==="
+	nvregParamsOKMarker  = "===AICR-NVREG-PARAMS-OK==="
 
 	// nvregDocsHint is emitted when the flag is missing on a pre-R595 driver.
 	// Covers both driver-ownership modes, and corrects the reload instruction:
@@ -170,21 +173,26 @@ const (
 )
 
 // splitNVregProbeOutput splits the probe pod's stdout into the version and
-// params contents, reporting whether the params read succeeded. A missing
-// separator or params marker yields empty content, which evaluateNVregPreflight
-// resolves to nvregUndetermined (fail-closed).
+// params contents, reporting whether the params read succeeded. Content whose
+// marker is absent is discarded rather than returned: a truncated read is not a
+// trustworthy sample of the file. Discarding is enough to fail the version half
+// closed, because a verdict there requires a version to be parsed and an empty
+// string parses as nothing; params needs the flag reported separately, since
+// empty content there would otherwise read as "the flag is not set".
 func splitNVregProbeOutput(out string) (versionFile, paramsFile string, paramsOK bool) {
 	before, after, found := strings.Cut(out, nvregProbeSeparator)
 	if !found {
 		return "", "", false
 	}
-	params, _, ok := strings.Cut(after, nvregParamsOKMarker)
-	if !ok {
-		// The read failed; the content before the missing marker is not a
-		// trustworthy "flag absent".
-		return before, "", false
+	version, _, versionOK := strings.Cut(before, nvregVersionOKMarker)
+	if !versionOK {
+		version = ""
 	}
-	return before, params, true
+	params, _, paramsOK := strings.Cut(after, nvregParamsOKMarker)
+	if !paramsOK {
+		return version, "", false
+	}
+	return version, params, true
 }
 
 // preflightGB200NetNVregFlag checks each target GPU node for the driver-side
@@ -342,10 +350,12 @@ func checkNVregOnNode(ctx context.Context, clientset kubernetes.Interface, names
 				// Emit both files with a sentinel between them and ALWAYS exit 0:
 				// a single exit status cannot distinguish "flag absent, go set
 				// it" from "flag cannot exist on this driver" (#2459). Per-file
-				// readability is carried by markers instead, so an unreadable
-				// file is never mistaken for an empty one.
+				// readability is carried by a trailing marker instead, emitted
+				// only on a clean read, so neither a failed nor a truncated read
+				// is mistaken for the whole file.
 				Args: []string{
-					"cat /host-proc-nvidia/version 2>/dev/null; " +
+					"cat /host-proc-nvidia/version 2>/dev/null && " +
+						"echo '" + nvregVersionOKMarker + "'; " +
 						"echo '" + nvregProbeSeparator + "'; " +
 						"cat /host-proc-nvidia/params 2>/dev/null && " +
 						"echo '" + nvregParamsOKMarker + "'; " +
