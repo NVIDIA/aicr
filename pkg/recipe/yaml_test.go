@@ -1064,6 +1064,52 @@ To skip this validation (not recommended), add:
 	}
 }
 
+// TestManifestSkipHookOptOutExcludesHooks guards #2585: a manifest is hook-free
+// if it declares the opt-out, or if its kind must never be a hook.
+// TestManifestHelmHooksRequired cannot catch either case — it stops at the
+// opt-out, and is satisfied by hooks when the opt-out is gone.
+func TestManifestSkipHookOptOutExcludesHooks(t *testing.T) {
+	helmHookPattern := regexp.MustCompile(`(?m)^\s*["']?helm\.sh/hook[\w-]*["']?:\s*\S`)
+	skipValidationPattern := regexp.MustCompile(`(?m)["']?aicr/skip-hook-validation["']?:\s*["']?true["']?`)
+	// Deleting these dismantles live networking. Extend by kind, not by filename.
+	neverHookKindPattern := regexp.MustCompile(`(?m)^kind:\s*(NicClusterPolicy|NodeFeatureRule)\s*$`)
+
+	manifestFiles := collectManifestFiles(t)
+	if len(manifestFiles) == 0 {
+		t.Fatal("no manifest files found in components/*/manifests/ — the guard would pass vacuously")
+	}
+
+	for _, path := range manifestFiles {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			content, err := GetEmbeddedFS().ReadFile(path)
+			if err != nil {
+				t.Fatalf("read %s: %v", path, err)
+			}
+			contentStr := string(content)
+
+			// Kind is checked too, so a full revert (marker removed, hooks
+			// restored) still fails rather than slipping past both gates.
+			declaresOptOut := skipValidationPattern.MatchString(contentStr)
+			isNeverHookKind := neverHookKindPattern.MatchString(contentStr)
+			if !declaresOptOut && !isNeverHookKind {
+				return // TestManifestHelmHooksRequired governs this file
+			}
+			if loc := helmHookPattern.FindStringIndex(contentStr); loc != nil {
+				reason := `declares aicr/skip-hook-validation: "true"`
+				if isNeverHookKind {
+					reason = "is a NicClusterPolicy/NodeFeatureRule"
+				}
+				t.Errorf(`manifest %q %s but still carries %q.
+
+before-hook-creation deletes the live resource on upgrade, and the flux lane does
+not strip hooks (#2585). Remove the helm.sh/hook* annotations and keep
+aicr/skip-hook-validation: "true"; ordering comes from dependencyRefs.`,
+					filepath.Base(path), reason, strings.TrimSpace(contentStr[loc[0]:loc[1]]))
+			}
+		})
+	}
+}
+
 // TestManifestHelmHooksValidation tests the validation logic with controlled inputs
 // to ensure missing annotations are caught and skip annotations work correctly.
 func TestManifestHelmHooksValidation(t *testing.T) {

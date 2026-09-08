@@ -18,9 +18,9 @@ kind: NicClusterPolicy
 metadata:
   name: {{ $v.name }}
   annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: "10"
-    helm.sh/hook-delete-policy: before-hook-creation
+    # Not a Helm hook: hook-delete-policy would delete the live NCP on upgrade,
+    # tearing down OFED/RDMA pods. Ordering comes from dependencyRefs.
+    aicr/skip-hook-validation: "true"
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:

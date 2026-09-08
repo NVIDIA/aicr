@@ -33,9 +33,9 @@ kind: NodeFeatureRule
 metadata:
   name: nfd-network-rule
   annotations:
-    helm.sh/hook: post-install,post-upgrade
-    helm.sh/hook-weight: "1"
-    helm.sh/hook-delete-policy: before-hook-creation
+    # Not a Helm hook: deleting this rule on upgrade unlabels nodes, so the NCP
+    # nodeAffinity that selects on them matches nothing until NFD re-labels.
+    aicr/skip-hook-validation: "true"
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
     helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
