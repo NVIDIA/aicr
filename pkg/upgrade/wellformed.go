@@ -54,6 +54,7 @@ func validateRecord(u *ComponentUpgrades) []string {
 	for i := range u.Transitions {
 		where := fmt.Sprintf("component %q transition %d", u.Component, i)
 		v = append(v, checkVerdictFields(where, &u.Transitions[i])...)
+		v = append(v, checkStepGroups(where, &u.Transitions[i])...)
 	}
 	return v
 }
@@ -110,6 +111,73 @@ func checkVerdictFields(where string, t *Transition) []string {
 			seen[st.ID] = true
 			if st.Description == "" {
 				v = append(v, fmt.Sprintf("%s group %d step %q has no description", where, gi, st.ID))
+			}
+		}
+	}
+	return v
+}
+
+// canonicalDeployers mirrors config.GetDeployerTypes(), sorted. It is declared
+// here rather than imported: pkg/bundler/config transitively pulls 621
+// packages, 245 of them k8s.io/client-go, which is the wrong price for five
+// strings. wellformed_test.go carries that import and fails on drift.
+//
+// localformat is deliberately absent — it is the internal bundle-layout package
+// every deployer consumes, not a selectable deployer.
+var canonicalDeployers = []string{"argocd", "argocd-helm", "flux", "helm", "helmfile"}
+
+// checkStepGroups implements rule 6. Groups partition the deployers: no two
+// explicit groups may claim the same one, at most one group may omit deployers
+// (it is *the* remainder), and a manual or blocked verdict must cover every
+// deployer, or an operator receives a verdict promising steps with none for them.
+func checkStepGroups(where string, t *Transition) []string {
+	var v []string
+	known := make(map[string]bool, len(canonicalDeployers))
+	for _, d := range canonicalDeployers {
+		known[d] = true
+	}
+
+	claimed := make(map[string]bool)
+	remainders := 0
+	for gi, g := range t.StepsByDeployer {
+		// yaml.v3 distinguishes an absent key (nil) from `deployers: []`
+		// (non-nil, empty). Only the absent form is the remainder group;
+		// an explicit empty list almost certainly means the opposite of
+		// what it would otherwise do.
+		if g.Deployers == nil {
+			remainders++
+			continue
+		}
+		if len(g.Deployers) == 0 {
+			v = append(v, fmt.Sprintf(
+				"%s group %d sets deployers to an empty list; omit the key entirely to mean the remainder", where, gi))
+			continue
+		}
+		inGroup := make(map[string]bool, len(g.Deployers))
+		for _, d := range g.Deployers {
+			switch {
+			case !known[d]:
+				v = append(v, fmt.Sprintf("%s group %d names %q, which is not a selectable deployer (want one of %v)",
+					where, gi, d, canonicalDeployers))
+			case inGroup[d]:
+				v = append(v, fmt.Sprintf("%s group %d has deployer %q listed twice", where, gi, d))
+			case claimed[d]:
+				v = append(v, fmt.Sprintf("%s deployer %q is claimed by more than one group", where, d))
+			default:
+				claimed[d] = true
+			}
+			inGroup[d] = true
+		}
+	}
+	if remainders > 1 {
+		v = append(v, fmt.Sprintf(
+			"%s has %d groups omitting deployers; more than one group omits deployers, but there is exactly one remainder",
+			where, remainders))
+	}
+	if remainders == 0 && (t.Verdict == VerdictManual || t.Verdict == VerdictBlocked) {
+		for _, d := range canonicalDeployers {
+			if !claimed[d] {
+				v = append(v, fmt.Sprintf("%s is %s but has no steps for deployer %q", where, t.Verdict, d))
 			}
 		}
 	}

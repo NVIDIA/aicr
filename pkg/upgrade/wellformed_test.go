@@ -15,8 +15,11 @@
 package upgrade
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 )
 
 // tr builds a minimally valid transition for mutation in tests.
@@ -133,5 +136,94 @@ func TestValidateAggregatesViolations(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("aggregate error %q does not mention %q", err.Error(), want)
 		}
+	}
+}
+
+// The heavy import lives here, never in the package itself.
+func TestCanonicalDeployersMatchBundlerConfig(t *testing.T) {
+	if got, want := canonicalDeployers, config.GetDeployerTypes(); !reflect.DeepEqual(got, want) {
+		t.Errorf("canonicalDeployers = %v, want %v (a new deployer must be added here too)", got, want)
+	}
+}
+
+func TestValidateStepGroups(t *testing.T) {
+	group := func(deployers []string) StepGroup {
+		return StepGroup{Deployers: deployers, Steps: []Step{{ID: "s", Description: "d"}}}
+	}
+	tests := []struct {
+		name     string
+		groups   []StepGroup
+		wantErr  bool
+		wantText string
+	}{
+		{"single remainder group covers everything", []StepGroup{group(nil)}, false, ""},
+		{
+			"explicit groups covering all five pass",
+			[]StepGroup{group([]string{"argocd", "argocd-helm", "flux"}), group([]string{"helm", "helmfile"})},
+			false, "",
+		},
+		{
+			"explicit group plus remainder passes",
+			[]StepGroup{group([]string{"argocd"}), group(nil)},
+			false, "",
+		},
+		{
+			"two remainder groups fail",
+			[]StepGroup{group(nil), group(nil)},
+			true, "more than one group omits deployers",
+		},
+		{
+			"overlapping explicit groups fail",
+			[]StepGroup{group([]string{"argocd", "flux"}), group([]string{"flux", "helm"})},
+			true, "claimed by more than one group",
+		},
+		{
+			"duplicate deployer within one group fails",
+			[]StepGroup{group([]string{"flux", "flux"}), group(nil)},
+			true, "listed twice",
+		},
+		{
+			"unknown deployer fails",
+			[]StepGroup{group([]string{"argo"}), group(nil)},
+			true, "not a selectable deployer",
+		},
+		{
+			"localformat is not selectable",
+			[]StepGroup{group([]string{"localformat"}), group(nil)},
+			true, "not a selectable deployer",
+		},
+		{
+			"manual verdict leaving a deployer uncovered fails",
+			[]StepGroup{group([]string{"argocd", "flux"})},
+			true, "no steps for deployer",
+		},
+		{
+			// Rule 5 counted a per-transition total, so this passed while a
+			// helm operator got a manual verdict with an empty step list.
+			"covered group with an empty steps list fails",
+			[]StepGroup{
+				group([]string{"argocd", "argocd-helm", "flux"}),
+				{Deployers: []string{"helm", "helmfile"}, Steps: nil},
+			},
+			true, "carries no steps",
+		},
+		{
+			"explicitly empty deployers list is not the remainder",
+			[]StepGroup{group([]string{"argocd", "argocd-helm", "flux"}),
+				{Deployers: []string{}, Steps: []Step{{ID: "s", Description: "d"}}}},
+			true, "omit the key entirely",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set, comps := rec("v0.18.0", tr(func(x *Transition) { x.StepsByDeployer = tt.groups }))
+			err := set.Validate(comps)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), tt.wantText) {
+				t.Errorf("error %q does not mention %q", err.Error(), tt.wantText)
+			}
+		})
 	}
 }
