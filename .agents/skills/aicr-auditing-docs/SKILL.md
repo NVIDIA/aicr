@@ -38,7 +38,7 @@ default to a findings report; only edit when explicitly asked.
 | Integration / embedding | `docs/integrator/` | Resolver internals belong in `contributor/`, not here. |
 | Project internals | `docs/contributor/` | Architecture overview = `contributor/index.md`. |
 | Demos / runbooks | `demos/` | GitHub-only (not in `fern/docs.yml` nav). Terse names hurt discovery. |
-| Governance | `CONTRIBUTING.md`, `DEVELOPMENT.md`, `RELEASING.md`, `SECURITY.md` | Each owns one concern; cross-link instead of repeating. |
+| Governance | `CONTRIBUTING.md`, `DEVELOPMENT.md`, `RELEASE.md`, `SECURITY.md` | Each owns one concern; cross-link instead of repeating. |
 | Agent rules | `.claude/CLAUDE.md` (canonical) → `AGENTS.md` (CI-synced mirror — never flag) | `.github/copilot-instructions.md` should be a pointer, not a copy. |
 
 ## Sources of Truth (drift hotspots — check these first)

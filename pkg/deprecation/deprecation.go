@@ -14,7 +14,7 @@
 
 // Package deprecation implements the runtime half of the AICR deprecation
 // channel. The policy half — what counts as breaking on each of the four
-// frozen surfaces, and the notice a removal owes — lives in RELEASING.md; the
+// frozen surfaces, and the notice a removal owes — lives in RELEASE.md; the
 // user-facing register of active deprecations is docs/user/deprecations.md.
 //
 // Three of the four surfaces warn through this package:

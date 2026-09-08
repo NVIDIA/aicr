@@ -327,7 +327,7 @@ By reference:
 
 - [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md) — contribution process, DCO, CI/CD, E2E testing
 - [DEVELOPMENT.md](https://github.com/NVIDIA/aicr/blob/main/DEVELOPMENT.md) — dev environment setup and Make targets
-- [RELEASING.md](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md) — release process for maintainers
+- [RELEASE.md](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md) — release process for maintainers
 - [SECURITY.md](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md) — supply-chain security, attestation verification
 - [CLAUDE.md](https://github.com/NVIDIA/aicr/blob/main/.claude/CLAUDE.md) — coding rules, error wrapping, context, HTTP, logging, K8s patterns
 - [docs/design/](https://github.com/NVIDIA/aicr/tree/main/docs/design) — accepted ADRs

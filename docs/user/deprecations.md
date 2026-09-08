@@ -7,7 +7,7 @@ several versions can still find out what happened.
 
 The policy behind this page — what counts as a breaking change on each surface,
 and the notice a removal owes — is in
-[`RELEASING.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md#deprecation-policy).
+[`RELEASE.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#deprecation-policy).
 
 ## How you will find out
 

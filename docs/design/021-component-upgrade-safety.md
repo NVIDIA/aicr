@@ -553,7 +553,7 @@ A semver-keyed record cannot express such a hop, and a matcher comparing version
 
 **Stepping forward still works where AICR pinned the intermediates.** A cluster several pins behind upgrades in hops, which is what [Decision 2](#decision-2-transition-records)'s block rule already forces. Each intermediate bundle comes from the AICR release that pinned those versions: releases are immutable and remain available, and **records travel with the release that pinned them**, so v0.16's tree still describes transitions into v0.16's pins.
 
-**Scope.** None of this creates a project-wide support policy. AICR has none today, and a general statement about supported releases belongs in `RELEASING.md`.
+**Scope.** None of this creates a project-wide support policy. AICR has none today, and a general statement about supported releases belongs in `RELEASE.md`.
 
 ## Example
 

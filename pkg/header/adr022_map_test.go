@@ -186,7 +186,7 @@ func TestADR022EmittersAreStillOnAlpha(t *testing.T) {
 			if !alpha[row.emitted] {
 				t.Errorf("emitted apiVersion %q is not an alpha value; if this is the "+
 					"ADR-022 emitter switch, update this test and the migration table "+
-					"in RELEASING.md together", row.emitted)
+					"in RELEASE.md together", row.emitted)
 			}
 			if row.emitted == row.target {
 				t.Errorf("emitted apiVersion equals the target %q; emitters do not "+

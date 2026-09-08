@@ -190,7 +190,7 @@ var docsClaimRoots = []string{
 	filepath.Join("docs", "user"),
 	filepath.Join("docs", "integrator"),
 	filepath.Join("docs", "contributor"),
-	".", // repo-root Markdown: README, RELEASING, CONTRIBUTING
+	".", // repo-root Markdown: README, RELEASE, CONTRIBUTING
 }
 
 // docsClaimSkip names files excluded by path. AGENTS.local.md is a gitignored
