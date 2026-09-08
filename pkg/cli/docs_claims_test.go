@@ -517,6 +517,33 @@ var docsPriorityLabelClaims = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bP[012]\b[^.\n]{0,80}?\b(?:are|is)\b[^.\n]{0,40}?\blabels?\b`),
 }
 
+// docsPriorityNegations mark a candidate as a DENIAL rather than a claim.
+// "P0/P1/P2 are not repository labels" is the correct statement, and a gate
+// that blocks a maintainer from writing it is worse than one that misses a
+// phrasing. Extend this list rather than complicating the patterns above.
+//
+// This exists as a second pass because Go's regexp is RE2: there is no
+// lookbehind, so "`are` not preceded by `not`" cannot be written as a pattern
+// at all. Match first, filter second.
+//
+// The filter runs on the MATCHED SPAN, never the whole line. A real claim may
+// carry a negation elsewhere in the same sentence ("P0/P1/P2 are repository
+// labels, not board fields"), and the span stops at the first label noun, so
+// filtering by line would silently drop that one.
+//
+// Known limit, accepted deliberately: the first two patterns match a bare noun
+// phrase, so a negation sitting just outside it ("are not issue priority
+// labels") is not visible in the span and still reports. Seeing it would take
+// a per-pattern lookback window, and a window wide enough to help also
+// suppresses real claims whose previous clause happens to contain "not". The
+// gate is meant to be high-precision on the phrasing that actually regressed,
+// not to parse English.
+var docsPriorityNegations = []string{
+	`\bnot\b`, `\bnever\b`, `n't`, `\brather than\b`, `\binstead of\b`,
+}
+
+var docsPriorityNegated = regexp.MustCompile(`(?i)` + strings.Join(docsPriorityNegations, "|"))
+
 // TestDocsDoNotCallPriorityALabel is the gate.
 func TestDocsDoNotCallPriorityALabel(t *testing.T) {
 	t.Parallel()
@@ -548,7 +575,16 @@ func TestDocsDoNotCallPriorityALabel(t *testing.T) {
 				mentions++
 			}
 			for _, re := range docsPriorityLabelClaims {
-				if !re.MatchString(line) {
+				// Every span is checked, not just the first: a line may deny
+				// the claim and then assert it.
+				claim := ""
+				for _, span := range re.FindAllString(line, -1) {
+					if !docsPriorityNegated.MatchString(span) {
+						claim = span
+						break
+					}
+				}
+				if claim == "" {
 					continue
 				}
 				t.Errorf("%s:%d: describes issue priority as a label: %q\n"+
