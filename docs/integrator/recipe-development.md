@@ -697,6 +697,21 @@ Profile declarations are intentionally narrow:
   for later validation. This qualification rule is enforced during catalog
   review; core admission does not infer whether arbitrary readings
   semantically distinguish two modes.
+- A profile constraint may reuse a constraint name the composition already
+  carries **only to tighten it**. Both expressions must be version ranges
+  written as a single clause of `>=`, `>`, `<=`, `<` terms; the composition
+  then takes their intersection, so a chain floor of `>= 1.32` under a value
+  declaring `>= 1.35` resolves to `>= 1.35`, and `>= 1.34.1 < 1.36.0` under
+  `>= 1.35` resolves to `>= 1.35 < 1.36.0`. Use this when a value is gated on
+  a feature with its own floor (DRA on GKE) that the other values do not
+  need. Three cases keep failing closed: a candidate that would widen the
+  range is ignored, an empty intersection is rejected, and any pair that does
+  not order — an exact match, `!=`, a node-set label predicate, or an
+  expression with `||` alternatives — is rejected as a collision. Two
+  same-direction bounds written at different precisions (`>= 1.34` against
+  `>= 1.34.1`) are rejected too, with their own message: versions compare at
+  the lower precision, so those two read as equal and neither can be called
+  stricter. Restate one at the other's precision when you mean to tighten.
 - A profile value may declare `advertiser: external` (the GKE `gke-default`
   shape) to record a provider-managed plugin outside the recipe as THE
   `nvidia.com/gpu` advertiser; the vocabulary is closed (empty or

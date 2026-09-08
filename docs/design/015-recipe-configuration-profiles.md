@@ -4,7 +4,8 @@
 
 **Accepted** — 2026-07-21 (proposed 2026-07-14). Amended
 2026-07-27 to stage the service-agnostic mechanism through an AKS-first,
-GKE-second rollout.
+GKE-second rollout; amended 2026-09-08 (#2512) to intersect, rather than
+reject, a profile constraint that tightens a composed version range.
 
 Originated from an internal GKE device-plugin ownership discussion
 (2026-07-14) and
@@ -488,7 +489,27 @@ to the surviving composition:
    collides with a chain or mixin constraint rejects at resolution —
    constraints don't compose, the same rule `mergeMixins` already
    enforces. Values of one declaration may reuse a constraint name
-   across values (only one is ever selected). Then evaluate
+   across values (only one is ever selected).
+
+   *Amended 2026-09-08
+   ([#2512](https://github.com/NVIDIA/aicr/issues/2512)): version ranges
+   intersect.* The blanket rejection left a value gated on a feature with
+   its own Kubernetes floor — DRA on GKE requires `>= 1.35` — with nowhere
+   to state it. The chain already carries `K8s.server.version`, and raising
+   it there raises it for every value of the declaration, where a later
+   overlay can restate and lower it again. Where the composed expression
+   and the profile's are **both version ranges** — one clause of `>=`, `>`,
+   `<=`, `<` terms — resolution now replaces the composed entry with the
+   intersection of the two, and the profile may only narrow it. Three cases
+   keep failing closed: a candidate that would widen the range is dropped
+   rather than applied; an intersection no version can satisfy is rejected;
+   and a pair with no ordering to intersect — an exact match, `!=`, a
+   node-set label predicate, or an expression carrying `||` alternatives —
+   is rejected as a collision, as are two same-direction bounds written at
+   different precisions, which `pkg/version` compares at the lower of the
+   two so that neither can be called stricter. `mergeMixins` is unchanged.
+
+   Then evaluate
    **profile-contributed constraints** fail-closed: under a
    provided snapshot, a failing profile constraint fails recipe generation
    with the constraint diagnostics — it does not exclude anything or fall
@@ -1353,7 +1374,8 @@ recurrence — the shape the Problem section expects.
     declaration or drop it — external `--data` overlays inheriting the
     converted base need the same review by their owners. The same
     review covers constraint names a value reuses (the mixin collision
-    rule rejects those loudly at resolution).
+    rule rejects those loudly at resolution, except where step 5's
+    amendment intersects two version ranges).
   - **Declaration survival (step 2)**: a snapshot that excludes every
     declaring chain now fails generation instead of silently emitting
     the base configuration.

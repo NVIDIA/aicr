@@ -16,10 +16,12 @@ package recipe
 
 import (
 	"fmt"
+	"log/slog"
 	"maps"
 	"slices"
 	"sort"
 
+	"github.com/NVIDIA/aicr/pkg/constraints/expr"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -121,6 +123,145 @@ func (s *MetadataStore) resolveAppliedProfileDeclaration(
 	return s.resolveProfileDeclaration(survivingOverlays)
 }
 
+// tightenProfileConstraint resolves a profile-value constraint whose name the
+// composed recipe already carries.
+//
+// Constraints are keyed by name and one name holds one expression, so the two
+// cannot simply coexist. Where both sides are bounded version ranges the
+// intersection is well defined and the composition takes it: a profile value
+// gated on a feature with its own Kubernetes floor (DRA on GKE, issue #2512)
+// can raise the floor for itself alone without the chain having to raise it
+// for every value. Everything else — the node-set label predicates, exact
+// matches, "!=" — has no ordering to intersect, so it keeps failing closed.
+//
+// The profile only ever narrows. A candidate that would widen the composed
+// range is dropped, not applied, because a value fragment must not relax a
+// requirement the recipe states for every value of the declaration.
+func tightenProfileConstraint(profileName, valueName string, existing, candidate Constraint) (Constraint, error) {
+	tightened, outcome := expr.Tighten(existing.Value, candidate.Value)
+
+	switch outcome {
+	case expr.TightenNarrowed:
+		merged := existing
+		merged.Value = tightened
+		// The profile's guidance is the specific one: it explains the value
+		// the operator selected, not the baseline every value shares.
+		if candidate.Remediation != "" {
+			merged.Remediation = candidate.Remediation
+		}
+		if candidate.Severity != "" {
+			merged.Severity = candidate.Severity
+		}
+		if candidate.Unit != "" {
+			merged.Unit = candidate.Unit
+		}
+		slog.Debug("profile constraint tightened the composed recipe",
+			"profile", profileName, "value", valueName, "constraint", existing.Name,
+			"was", existing.Value, "now", merged.Value)
+		return merged, nil
+
+	case expr.TightenUnchanged:
+		slog.Debug("profile constraint is already covered by the composed recipe",
+			"profile", profileName, "value", valueName, "constraint", existing.Name,
+			"recipe", existing.Value, "profile constraint", candidate.Value)
+		return existing, nil
+
+	case expr.TightenUnsatisfiable:
+		return Constraint{}, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("profile %q value %q constraint %q requires %q, which no version can satisfy "+
+				"alongside the composed recipe's %q",
+				profileName, valueName, candidate.Name, candidate.Value, existing.Value))
+
+	case expr.TightenPrecisionMismatch:
+		return Constraint{}, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("profile %q value %q constraint %q states %q against the composed recipe's %q; "+
+				"same-direction bounds written at different precisions cannot be ordered "+
+				"(versions compare at the lower precision, so 1.34 and 1.34.1 read as equal). "+
+				"Restate one of them at the other's precision",
+				profileName, valueName, candidate.Name, candidate.Value, existing.Value))
+
+	case expr.TightenIncomparable:
+		return Constraint{}, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("profile %q value %q constraint %q collides with the composed recipe: "+
+				"%q and %q are not both version ranges, so there is no intersection to take",
+				profileName, valueName, candidate.Name, candidate.Value, existing.Value))
+
+	default:
+		return Constraint{}, errors.NewWithContext(errors.ErrCodeInternal,
+			"unknown constraint intersection outcome",
+			map[string]any{"profile": profileName, keyValue: valueName, constraintContextKey: candidate.Name})
+	}
+}
+
+// mergeProfileConstraints folds the selected value's constraints into the
+// composition, resolving a name the composition already carries through
+// tightenProfileConstraint, and evaluates each resolved constraint fail
+// closed. A rejection returns immediately, so mergedSpec may already carry
+// the constraints resolved before it; callers discard the spec on error.
+func mergeProfileConstraints(
+	mergedSpec *RecipeMetadataSpec,
+	profileName, valueName string,
+	declaredConstraints []Constraint,
+	evaluator ConstraintEvaluatorFunc,
+) error {
+
+	constraintIndex := make(map[string]int, len(mergedSpec.Constraints))
+	for i, constraint := range mergedSpec.Constraints {
+		constraintIndex[constraint.Name] = i
+	}
+	for _, declared := range declaredConstraints {
+		existingIndex, collision := constraintIndex[declared.Name]
+		constraint := declared
+		if collision {
+			resolved, err := tightenProfileConstraint(
+				profileName, valueName,
+				mergedSpec.Constraints[existingIndex], declared)
+			if err != nil {
+				return err
+			}
+			constraint = resolved
+		}
+		if evaluator != nil {
+			result := evaluator(constraint)
+			switch {
+			case result.Error != nil && isNotFoundEvalError(result.Error):
+				return errors.NewWithContext(
+					errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("profile %s=%s cannot be validated because reading %q is unavailable",
+						profileName, valueName, constraint.Name),
+					map[string]any{
+						constraintContextKey: constraint.Name,
+						"expected":           constraint.Value,
+						"actual":             result.Actual,
+						"cause":              result.Error.Error(),
+					},
+				)
+			case result.Error != nil:
+				return errors.PropagateOrWrap(result.Error, errors.ErrCodeInternal,
+					fmt.Sprintf("failed to evaluate profile constraint %q", constraint.Name))
+			case !result.Passed:
+				return errors.NewWithContext(
+					errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("profile %s=%s constraint %q failed",
+						profileName, valueName, constraint.Name),
+					map[string]any{
+						constraintContextKey: constraint.Name,
+						"expected":           constraint.Value,
+						"actual":             result.Actual,
+					},
+				)
+			}
+		}
+		if collision {
+			mergedSpec.Constraints[existingIndex] = constraint
+			continue
+		}
+		constraintIndex[constraint.Name] = len(mergedSpec.Constraints)
+		mergedSpec.Constraints = append(mergedSpec.Constraints, constraint)
+	}
+	return nil
+}
+
 func applyEffectiveProfile(
 	mergedSpec *RecipeMetadataSpec,
 	effective *effectiveProfileDeclaration,
@@ -179,49 +320,9 @@ func applyEffectiveProfile(
 		}
 	}
 
-	constraintNames := make(map[string]struct{}, len(mergedSpec.Constraints))
-	for _, constraint := range mergedSpec.Constraints {
-		constraintNames[constraint.Name] = struct{}{}
-	}
-	for _, constraint := range value.Constraints {
-		if _, collision := constraintNames[constraint.Name]; collision {
-			return nil, errors.New(errors.ErrCodeInvalidRequest,
-				fmt.Sprintf("profile %q value %q constraint %q collides with the composed recipe",
-					effective.Declaration.Name, valueName, constraint.Name))
-		}
-		constraintNames[constraint.Name] = struct{}{}
-		if evaluator != nil {
-			result := evaluator(constraint)
-			switch {
-			case result.Error != nil && isNotFoundEvalError(result.Error):
-				return nil, errors.NewWithContext(
-					errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("profile %s=%s cannot be validated because reading %q is unavailable",
-						effective.Declaration.Name, valueName, constraint.Name),
-					map[string]any{
-						constraintContextKey: constraint.Name,
-						"expected":           constraint.Value,
-						"actual":             result.Actual,
-						"cause":              result.Error.Error(),
-					},
-				)
-			case result.Error != nil:
-				return nil, errors.PropagateOrWrap(result.Error, errors.ErrCodeInternal,
-					fmt.Sprintf("failed to evaluate profile constraint %q", constraint.Name))
-			case !result.Passed:
-				return nil, errors.NewWithContext(
-					errors.ErrCodeInvalidRequest,
-					fmt.Sprintf("profile %s=%s constraint %q failed",
-						effective.Declaration.Name, valueName, constraint.Name),
-					map[string]any{
-						constraintContextKey: constraint.Name,
-						"expected":           constraint.Value,
-						"actual":             result.Actual,
-					},
-				)
-			}
-		}
-		mergedSpec.Constraints = append(mergedSpec.Constraints, constraint)
+	if err := mergeProfileConstraints(
+		mergedSpec, effective.Declaration.Name, valueName, value.Constraints, evaluator); err != nil {
+		return nil, err
 	}
 	sort.Slice(mergedSpec.Constraints, func(i, j int) bool {
 		return mergedSpec.Constraints[i].Name < mergedSpec.Constraints[j].Name
