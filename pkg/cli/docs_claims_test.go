@@ -544,6 +544,37 @@ var docsPriorityNegations = []string{
 
 var docsPriorityNegated = regexp.MustCompile(`(?i)` + strings.Join(docsPriorityNegations, "|"))
 
+// docsPriorityNotOnly is the one anti-marker: "not only" and "not just" are
+// AFFIRMATIVE. "P0/P1/P2 are not only issue labels" says they ARE labels, among
+// other things, yet it contains `not` and would otherwise be suppressed. The
+// span is stripped of these before the negation test, which is cheaper and far
+// more predictable than trying to classify the sentence.
+var docsPriorityNotOnly = regexp.MustCompile(`(?i)\bnot\s+(?:only|just)\b`)
+
+// Where this gate stops, on purpose.
+//
+// It is a regression guard for one claim that shipped wrong in three files at
+// once, not a natural-language classifier. It catches the historical label-first
+// phrasing and the common subject-first phrasings, and it does not attempt to
+// resolve arbitrary English. Two residuals are known and accepted; they are
+// recorded here so the next maintainer inherits knowledge rather than a puzzle,
+// and neither is a TODO:
+//
+//   (a) A negation sitting outside the matched span still reports. "These are
+//       not issue priority labels." is flagged, because the label-first pattern
+//       matches the bare noun phrase and the `not` is never inside it. Fixing
+//       this needs a lookback window, and any window wide enough to help also
+//       suppresses real claims whose previous clause happens to contain "not",
+//       which trades a visible false positive for a silent false negative.
+//
+//   (b) Affirmative phrasings outside the patterns are missed. "P0/P1/P2
+//       function as labels." passes, since the copula pattern requires
+//       `are`/`is`. ("P0 is a label." IS caught; the singular copula is
+//       covered.) Widening to arbitrary verbs is where precision collapses.
+//
+// If a new false positive appears, prefer adding a marker to
+// docsPriorityNegations over reworking the patterns.
+
 // TestDocsDoNotCallPriorityALabel is the gate.
 func TestDocsDoNotCallPriorityALabel(t *testing.T) {
 	t.Parallel()
@@ -579,7 +610,8 @@ func TestDocsDoNotCallPriorityALabel(t *testing.T) {
 				// the claim and then assert it.
 				claim := ""
 				for _, span := range re.FindAllString(line, -1) {
-					if !docsPriorityNegated.MatchString(span) {
+					probe := docsPriorityNotOnly.ReplaceAllString(span, " ")
+					if !docsPriorityNegated.MatchString(probe) {
 						claim = span
 						break
 					}
