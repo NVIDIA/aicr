@@ -49,6 +49,8 @@ func TestCompute_Structure(t *testing.T) {
 		{"eks", "h100", "-", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "h200", "h100", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "rtx-pro-6000", "generic", "", "nvidia-tuned"},
+		// Generic bare-metal GB300 wires the no-op placeholder, same as EKS.
+		{"generic", "gb300", "-", "", ""},
 		{"gke", "a100", "h100", "", "nvidia-tuning-gke"},
 		{"gke", "b200", "-", "", "nvidia-tuning-gke"},
 		{"gke", "h100", "-", "", "nvidia-tuning-gke"},

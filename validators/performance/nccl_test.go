@@ -363,6 +363,9 @@ func TestAcceleratorProductMatchers(t *testing.T) {
 		{recipe.CriteriaAcceleratorGB200, "NVIDIA-GB200", true},
 		{recipe.CriteriaAcceleratorGB200, "NVIDIA-GB200-96GB", false}, // exact-match guard
 		{recipe.CriteriaAcceleratorGB200, "NVIDIA-H100-80GB-HBM3", false},
+		{recipe.CriteriaAcceleratorGB300, "NVIDIA-GB300", true},
+		{recipe.CriteriaAcceleratorGB300, "NVIDIA-GB300-288GB", false}, // exact-match guard
+		{recipe.CriteriaAcceleratorGB300, "NVIDIA-GB200", false},
 		{recipe.CriteriaAcceleratorB200, "NVIDIA-B200", true},
 		{recipe.CriteriaAcceleratorB200, "NVIDIA-GB200", false},
 		{recipe.CriteriaAcceleratorH100, "NVIDIA-H100-80GB-HBM3", true},
