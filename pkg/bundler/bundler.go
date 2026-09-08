@@ -1983,21 +1983,15 @@ func (b *DefaultBundler) validateRequiredNodeSelectors(componentName string, val
 }
 
 // componentHasConfiguredStorageClass reports whether any of comp's
-// StorageClassPaths or SharedStorageClassPaths resolved to a non-empty
-// string in values, gating RequireNodeSelectorIfStorageClassSet for a
-// chart that defaults to ephemeral storage (e.g. emptyDir) and only
-// creates the zone-pinning PVC once --storage-class or
-// --shared-storage-class (or an equivalent overlay override) sets one of
-// these paths.
+// StorageClassPaths or SharedStorageClassPaths paths resolve to a
+// configured value in values.
 func componentHasConfiguredStorageClass(comp *recipe.ComponentConfig, values map[string]any) bool {
 	paths := make([]string, 0, len(comp.GetStorageClassPaths())+len(comp.GetSharedStorageClassPaths()))
 	paths = append(paths, comp.GetStorageClassPaths()...)
 	paths = append(paths, comp.GetSharedStorageClassPaths()...)
 	for _, path := range paths {
-		if val, ok := component.GetValueByPath(values, path); ok {
-			if s, isStr := val.(string); isStr && s != "" {
-				return true
-			}
+		if hasConfiguredStorageClass(values, path) {
+			return true
 		}
 	}
 	return false
