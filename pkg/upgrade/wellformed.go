@@ -19,6 +19,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
+
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -39,7 +41,7 @@ func (s Set) Validate(comps []Component) error {
 
 	violations := make([]string, 0, len(names))
 	for _, name := range names {
-		violations = append(violations, validateRecord(s[name])...)
+		violations = append(violations, validateRecord(s[name], pins[name])...)
 	}
 	if len(violations) == 0 {
 		return nil
@@ -49,12 +51,13 @@ func (s Set) Validate(comps []Component) error {
 		len(violations), strings.Join(violations, "\n  - ")))
 }
 
-func validateRecord(u *ComponentUpgrades) []string {
+func validateRecord(u *ComponentUpgrades, pin string) []string {
 	v := make([]string, 0, len(u.Transitions))
 	for i := range u.Transitions {
 		where := fmt.Sprintf("component %q transition %d", u.Component, i)
 		v = append(v, checkVerdictFields(where, &u.Transitions[i])...)
 		v = append(v, checkStepGroups(where, &u.Transitions[i])...)
+		v = append(v, checkPinCeiling(where, &u.Transitions[i], pin)...)
 	}
 	return v
 }
@@ -180,6 +183,51 @@ func checkStepGroups(where string, t *Transition) []string {
 				v = append(v, fmt.Sprintf("%s is %s but has no steps for deployer %q", where, t.Verdict, d))
 			}
 		}
+	}
+	return v
+}
+
+// checkPinCeiling implements rule 2. It fires per transition, so a record
+// carrying only a replaces block is untouched: it has no `to` to compare.
+//
+// The non-comparable-pin failure is an addition to ADR-021 rather than a
+// transcription of it. The ADR assigns such a pin the unversioned verdict at
+// check time and does not make it an authoring error; failing closed here means
+// a record cannot make version claims nobody can verify. Relaxing this later is
+// the cheap direction if it proves wrong.
+func checkPinCeiling(where string, t *Transition, pin string) []string {
+	b, err := parseBounds(t.To, prereleaseAllowed)
+	if err != nil {
+		// Not "already reported by the loader": Validate is exported on an
+		// exported map type, so a Set can be built without ever going
+		// through Load. Skipping here would fail open on rules 2, 3 and 7.
+		return []string{where + " has an unparseable to range: " + err.Error()}
+	}
+	var v []string
+	if b.upper.unbounded {
+		v = append(v, where+" has a to range with no upper bound; a record must name the ceiling of the block it describes")
+	}
+	if b.lower.unbounded {
+		v = append(v, where+" has a to range with no lower bound; without one the record would apply to every target version")
+	}
+	if b.upper.unbounded {
+		return v
+	}
+	if strings.Contains(pin, "+") {
+		return append(v, fmt.Sprintf(
+			"%s is pinned at %q, which carries build metadata; semver orders build metadata as equal, so such a bump would move past no ceiling",
+			where, pin))
+	}
+	pinVer, perr := semver.NewVersion(pin)
+	if perr != nil {
+		return append(v, fmt.Sprintf(
+			"%s is pinned at %q, which is not a comparable version, so no ceiling can be checked against it",
+			where, pin))
+	}
+	if b.upper.ver.Compare(pinVer) > 0 {
+		v = append(v, fmt.Sprintf(
+			"%s has a to ceiling of %s which reaches past the pinned version %s; widen from backward instead",
+			where, b.upper.ver, pinVer))
 	}
 	return v
 }

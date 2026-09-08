@@ -227,3 +227,60 @@ func TestValidateStepGroups(t *testing.T) {
 		})
 	}
 }
+
+func TestValidatePinCeiling(t *testing.T) {
+	tests := []struct {
+		name     string
+		to       string
+		pin      string
+		wantErr  bool
+		wantText string
+	}{
+		{"ceiling equals the pin", ">=0.18.0 <=0.18.0", "v0.18.0", false, ""},
+		{"ceiling below the pin", ">=0.17.0 <=0.17.9", "v0.18.0", false, ""},
+		{"ADR ordinary idiom", ">=25.0.0 <=25.3.0", "v25.3.0", false, ""},
+		{"ceiling above the pin", ">=0.18.0 <=0.20.0", "v0.18.0", true, "reaches past"},
+		{"exclusive ceiling above the pin", ">=0.18.0 <0.20.0", "v0.18.0", true, "reaches past"},
+		{"unbounded above fails", ">=0.18.0", "v0.18.0", true, "upper bound"},
+		{"unbounded below fails", "<=0.18.0", "v0.18.0", true, "lower bound"},
+		{"non-semver pin fails", ">=0.18.0 <=0.18.0", "main", true, "not a comparable version"},
+		{"commit sha pin fails", ">=0.18.0 <=0.18.0", "9f8e7d6c5b4a", true, "not a comparable version"},
+		{"build metadata pin fails", ">=0.18.0 <=0.18.0", "v0.18.0+build.5", true, "build metadata"},
+		{"prerelease pin with matching prerelease ceiling passes",
+			">=0.1.0-alpha.1 <=0.1.0-alpha.12", "v0.1.0-alpha.12", false, ""},
+		{"prerelease pin with release ceiling fails",
+			">=0.1.0-alpha.1 <=0.1.0", "v0.1.0-alpha.12", true, "reaches past"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set, comps := rec(tt.pin, tr(func(x *Transition) {
+				x.To = tt.to
+				x.From = "<0.0.1"
+			}))
+			err := set.Validate(comps)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), tt.wantText) {
+				t.Errorf("error %q does not mention %q", err.Error(), tt.wantText)
+			}
+		})
+	}
+}
+
+// Rule 2 fires per transition. A record carrying only a `replaces` block has no `to` to compare
+// and must not be failed for lacking one.
+func TestValidatePinCeilingSkipsReplacesOnlyRecord(t *testing.T) {
+	u := &ComponentUpgrades{
+		Component: "c",
+		Replaces: &Replaces{
+			Component: "old", Verdict: VerdictManual, Summary: "superseded",
+			StepsByDeployer: []StepGroup{{Steps: []Step{{ID: "swap", Description: "swap it"}}}},
+		},
+	}
+	set := Set{"c": u}
+	comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "main"}}
+	if err := set.Validate(comps); err != nil {
+		t.Errorf("Validate error = %v, want nil for a replaces-only record", err)
+	}
+}
