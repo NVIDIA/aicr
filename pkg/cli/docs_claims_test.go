@@ -490,9 +490,31 @@ func TestDocsClaimWalkAttributesFlagsToTheRightCommand(t *testing.T) {
 // is not recursive. It does not need to be: tools/check-agents-sync fails
 // whenever it diverges from AGENTS.md, so the claim cannot come back there
 // alone, and if it comes back in both then AGENTS.md trips this gate.
+//
+// The first two patterns are label-first ("the issue priority labels P0, P1,
+// or P2"). They miss the subject-first form, so "P0/P1/P2 are repository
+// labels" used to pass. The third pattern covers that direction, and getting it
+// right is the whole difficulty here, because ASSERTION and NEGATION share
+// every keyword:
+//
+//	assert (must fail):  P0, P1, and P2 are priority labels for issues.
+//	negate (must pass):  Do not add a priority label (`P0`, `P1`, `P2`) to the
+//	                     PR. Priority is a field on the AICR Project board
+//	                     rather than a repository label, ...
+//
+// Both contain P-tokens, "priority label" and "labels". What separates them is
+// the copula: an assertion says the tokens ARE labels, whereas the correction
+// forbids adding one and then, in a SEPARATE SENTENCE, says what priority
+// actually is. So the pattern requires `are`/`is` between the P-token and the
+// label noun, and its gap classes exclude `.` so a match cannot run across a
+// sentence boundary. That single exclusion is what keeps CONTRIBUTING.md:188
+// and AGENTS.md:634 green: in both, a period sits between the P-tokens and the
+// next copula. Widen those classes to `.` and the gate starts failing on the
+// very wording it protects.
 var docsPriorityLabelClaims = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(issue|repo|repository) priority labels?`),
 	regexp.MustCompile(`(?i)reserved for issues`),
+	regexp.MustCompile(`(?i)\bP[012]\b[^.\n]{0,80}?\b(?:are|is)\b[^.\n]{0,40}?\blabels?\b`),
 }
 
 // TestDocsDoNotCallPriorityALabel is the gate.
