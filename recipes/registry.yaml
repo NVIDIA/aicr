@@ -170,8 +170,13 @@ components:
       system:
         nodeSelectorPaths:
           - operator.nodeSelector
+          # The maintenance-operator subchart's deployment reads its own
+          # scoped operator.* placement values; the values key is the
+          # dependency name (maintenance-operator-chart, unaliased).
+          - maintenance-operator-chart.operator.nodeSelector
         tolerationPaths:
           - operator.tolerations
+          - maintenance-operator-chart.operator.tolerations
 
   - name: gke-nccl-tcpxo
     displayName: gke-nccl-tcpxo
@@ -295,7 +300,10 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/nvidia/nodewright/charts
       defaultChart: nodewright
-      defaultVersion: v0.18.0
+      # v0.18.0 renames Skyhook to NodeWright and writes status only on the new
+      # kind; do not bump past v0.17.x until the upgrade guidance (design 021)
+      # lands. See #2595.
+      defaultVersion: v0.17.1
       defaultNamespace: skyhook
     nodeScheduling:
       nodeCountPaths:

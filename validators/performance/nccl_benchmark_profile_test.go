@@ -192,6 +192,7 @@ func TestKnownBenchmarkProfiles(t *testing.T) {
 		"gb200/any",
 		"gb200/eks",
 		"gb200/oke",
+		"gb300/generic",
 		"h100/aks",
 		"h100/eks",
 		"h100/gke",
