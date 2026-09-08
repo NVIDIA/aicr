@@ -5,7 +5,7 @@
 # Adding a command or flag is additive: regenerate and commit in the same PR.
 # Removing or renaming a command, flag, or alias, or changing a default, is a
 # breaking change to a frozen v1 surface and owes the notice period in
-# RELEASING.md § Deprecation Policy.
+# RELEASE.md § Deprecation Policy.
 command aicr  aliases= hidden=false
 command aicr bundle  aliases= hidden=false
 command aicr diff  aliases= hidden=false
