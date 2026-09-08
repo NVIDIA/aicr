@@ -2568,6 +2568,8 @@ components:
     displayName: Require Node Selector If Storage Class Set Fixture
     storageClassPaths:
       - controller.storage.storageClassName
+    sharedStorageClassPaths:
+      - controller.sharedStorage.storageClassName
     nodeScheduling:
       system:
         nodeSelectorPaths:
@@ -2947,6 +2949,30 @@ func TestApplyNodeSchedulingOverrides_RequireNodeSelectorIfStorageClassSet(t *te
 		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
 		if err := b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
 			t.Fatalf("unexpected error with both flags set: %v", err)
+		}
+	})
+
+	// applySharedStorageClassOverride injects --shared-storage-class into
+	// SharedStorageClassPaths, which requireNodeSelectorIfStorageClassSet
+	// evaluates to decide whether to enforce a selector.
+	t.Run("shared storage class configured without a selector fails closed", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithSharedStorageClass("efs-sc"))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if sharedErr := b.applySharedStorageClassOverride(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider); sharedErr != nil {
+			t.Fatalf("applySharedStorageClassOverride() error = %v", sharedErr)
+		}
+		err = b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err == nil {
+			t.Fatal("expected an error: --shared-storage-class was set with no --system-node-selector")
+		}
+		if !strings.Contains(err.Error(), "system-node-selector") {
+			t.Errorf("error should name the missing flag, got: %v", err)
 		}
 	})
 
