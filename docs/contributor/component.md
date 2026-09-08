@@ -138,7 +138,7 @@ One-liner per field:
 | `nodeScheduling.system` | Helm value paths that receive the **control-plane** node selector / tolerations / taints |
 | `nodeScheduling.accelerated` | Helm value paths that receive the **GPU node** selector / tolerations / taints |
 | `nodeScheduling.system.requireNodeSelector`, `nodeScheduling.accelerated.requireNodeSelector` | Fail the bundle instead of silently skipping injection when the corresponding `--system-node-selector`/`--accelerated-node-selector` flag is omitted and no overlay opts the paths out (see [below](#nodeschedulingsystem-vs-accelerated)) |
-| `nodeScheduling.system.requireNodeSelectorIfStorageClassSet`, `nodeScheduling.accelerated.requireNodeSelectorIfStorageClassSet` | Conditional counterpart to `requireNodeSelector`: same enforcement, but only once `storageClassPaths`/`sharedStorageClassPaths` resolves non-empty (see [below](#nodeschedulingsystem-vs-accelerated)) |
+| `nodeScheduling.system.requireNodeSelectorIfStorageClassSet`, `nodeScheduling.accelerated.requireNodeSelectorIfStorageClassSet` | Conditional counterpart to `requireNodeSelector`: same enforcement, but only once a `storageClassPaths`/`sharedStorageClassPaths` path resolves to a non-empty value (see [below](#nodeschedulingsystem-vs-accelerated)) |
 | `nodeScheduling.nodeCountPaths` | Where `--nodes` is written |
 | `podScheduling.workload.workloadSelectorPaths` | Workload-pod placement |
 | `storageClassPaths` | Where `--storage-class` is written |
@@ -205,20 +205,21 @@ conditional counterpart, for a chart whose zone-pinning PVC only exists once
 a storage class is configured, not by default. Set
 `nodeScheduling.system.requireNodeSelectorIfStorageClassSet: true` (or the
 `accelerated` counterpart) when the component's chart defaults to ephemeral
-storage (e.g. `emptyDir`), but a `storageClassPaths` or
-`sharedStorageClassPaths` entry can switch it to a PVC at bundle time; a
-bare bundle of such a component with no storage class configured stays
-unaffected, and `--system-node-selector`/`--accelerated-node-selector` is
-required only once that PVC is actually in play. The two flags are mutually
-exclusive on the same scheduling group, and
+storage (e.g. `emptyDir`), but a non-empty value at one of its
+`storageClassPaths` or `sharedStorageClassPaths` paths can switch it to a PVC
+at bundle time; a bare bundle of such a component with no storage class
+configured stays unaffected, and `--system-node-selector`/
+`--accelerated-node-selector` is required only once that PVC is actually in
+play. The two flags are mutually exclusive on the same scheduling group, and
 `requireNodeSelectorIfStorageClassSet` requires at least one
 `storageClassPaths` or `sharedStorageClassPaths` entry to condition on;
 `ComponentRegistry.Validate` rejects a registry entry that violates either
 rule. `--dynamic` is rejected the same way as for `requireNodeSelector`,
 regardless of whether a storage class is configured yet, since one could be
 added later without rebuilding the bundle. `kube-prometheus-stack` is the
-example in `registry.yaml`. Its Prometheus StatefulSet uses `emptyDir`
-until `--storage-class` (or an overlay override) sets `storageClassPaths`.
+example in `registry.yaml`. Its Prometheus StatefulSet uses `emptyDir` until
+`--storage-class` (or `--set` / an overlay override) puts a non-empty value
+at its `storageClassPaths` entry.
 
 ## `valueOverrideKeys`
 
