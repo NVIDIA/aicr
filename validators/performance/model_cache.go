@@ -19,6 +19,8 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -69,6 +71,14 @@ const (
 	// performance constraint, which takes precedence (see
 	// resolveModelCacheStorageClass).
 	envModelCacheStorageClass = "AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS"
+
+	// envModelCacheExtraCompatibleTypes extends storageCompatibilityRules'
+	// compiled type allowlists with a comma-separated list of extra
+	// parameters.type values, without an AICR code change. Applies across
+	// every rule. Use it when a cloud provider ships a new disk type that is
+	// actually compatible with a restricted machine family before AICR's
+	// allowlist is updated to include it.
+	envModelCacheExtraCompatibleTypes = "AICR_INFERENCE_PERF_MODEL_CACHE_EXTRA_COMPATIBLE_TYPES"
 
 	// envModelCachePopulateTimeout overrides the wait bound for the one-time
 	// model-cache populate Job (default defaults.ModelCachePopulateTimeout). It is
@@ -131,26 +141,27 @@ const (
 
 // storageCompatibilityRule declares that on a given CSI provisioner, the
 // listed machine families can only attach a StorageClass whose
-// parameters.type either carries compatibleTypePrefix or exactly matches
-// autoSelectType (a driver-specific value that resolves to a compatible disk
-// per-node rather than naming one directly, e.g. GKE's "dynamic"; leave empty
+// parameters.type is in compatibleTypes, is named by
+// envModelCacheExtraCompatibleTypes, or exactly matches autoSelectType (a
+// driver-specific value that resolves to a compatible disk per-node rather
+// than naming one directly, e.g. GKE's "dynamic". Leave autoSelectType empty
 // for a provisioner with no such value). Anything else provisioned by that
 // driver is rejected at attach time. Add a rule here for any other
-// cloud/provisioner with the same shape of restriction; nothing else in this
-// file needs to change.
+// cloud/provisioner with the same shape of restriction. No other code in
+// this file needs to change.
 type storageCompatibilityRule struct {
-	provisioner          string
-	families             map[string]bool // node.kubernetes.io/instance-type family segment, e.g. "a4x" for "a4x-highgpu-4g"
-	compatibleTypePrefix string
-	autoSelectType       string
-	docsRef              string
+	provisioner     string
+	families        map[string]bool // node.kubernetes.io/instance-type family segment, e.g. "a4x" for "a4x-highgpu-4g"
+	compatibleTypes []string        // exact parameters.type values this family can attach, see docsRef
+	autoSelectType  string
+	docsRef         string
 }
 
 var storageCompatibilityRules = []storageCompatibilityRule{
 	{
-		provisioner:          "pd.csi.storage.gke.io", // GKE Persistent Disk CSI driver (also provisions Hyperdisk)
-		families:             map[string]bool{"a4x": true},
-		compatibleTypePrefix: "hyperdisk-",
+		provisioner:     "pd.csi.storage.gke.io", // GKE Persistent Disk CSI driver (also provisions Hyperdisk)
+		families:        map[string]bool{"a4x": true},
+		compatibleTypes: []string{"hyperdisk-balanced", "hyperdisk-ml", "hyperdisk-extreme"},
 		// "dynamic" auto-selects Hyperdisk vs Persistent Disk per the node's
 		// machine type (GKE 1.35.3-gke.1290000+); a4x can't attach Persistent
 		// Disk at all, so on a4x nodes it always resolves to Hyperdisk.
@@ -252,10 +263,16 @@ func checkStorageClassNodeCompatibility(instanceType string, sc *storagev1.Stora
 			continue
 		}
 		typ := sc.Parameters["type"]
-		if strings.HasPrefix(typ, rule.compatibleTypePrefix) || (rule.autoSelectType != "" && typ == rule.autoSelectType) {
+		compatible := rule.compatibleTypes
+		for v := range strings.SplitSeq(os.Getenv(envModelCacheExtraCompatibleTypes), ",") {
+			if trimmed := strings.TrimSpace(v); trimmed != "" {
+				compatible = append(compatible, trimmed)
+			}
+		}
+		if slices.Contains(compatible, typ) || (rule.autoSelectType != "" && typ == rule.autoSelectType) {
 			continue
 		}
-		typeGuidance := fmt.Sprintf("parameters.type starts with %q", rule.compatibleTypePrefix)
+		typeGuidance := fmt.Sprintf("parameters.type is one of %s", strings.Join(compatible, ", "))
 		if rule.autoSelectType != "" {
 			typeGuidance += fmt.Sprintf(" (or is %q)", rule.autoSelectType)
 		}
@@ -264,9 +281,9 @@ func checkStorageClassNodeCompatibility(instanceType string, sc *storagev1.Stora
 			fixGuidance = fmt.Sprintf("change or remove the %q recipe constraint to select", perfConstraintModelCacheStorageClass)
 		}
 		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-			"model-weights cache PVC would bind to StorageClass %q (provisioner %s), which node machine family %q can't attach; "+
-				"%s a StorageClass whose %s, or disable the cache with %s=off; see %s",
-			sc.Name, sc.Provisioner, family, fixGuidance, typeGuidance, envModelCacheSize, rule.docsRef))
+			"model-weights cache PVC would bind to StorageClass %q (provisioner %s), which node machine family %q can't attach. "+
+				"%s a StorageClass whose %s, list it in %s if it is actually compatible, or disable the cache with %s=off. See %s.",
+			sc.Name, sc.Provisioner, family, fixGuidance, typeGuidance, envModelCacheExtraCompatibleTypes, envModelCacheSize, rule.docsRef))
 	}
 	return nil
 }
