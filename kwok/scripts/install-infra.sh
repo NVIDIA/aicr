@@ -408,12 +408,11 @@ install_argocd() {
     # stringly-typed map and the chart's `tpl` step drops bool-typed values,
     # which would leave the API server without `--insecure`.
     #
-    # `controller.diff.server.side=true` makes the API server compute the merge
-    # rather than the controller's compiled-in schema. Chart 9.5.x predates
-    # Kubernetes 1.37 and so does not declare
-    # `CSIDriver.spec.preventPodSchedulingIfMissing`, which the 1.37 API server
-    # defaults onto the live object; without server-side diff every Argo CD lane
-    # fails comparison on aws-ebs-csi-driver (#2602).
+    # controller.diff.server.side=true offloads the merge to the live API
+    # server. Chart 9.5.x predates Kubernetes 1.37 and doesn't declare
+    # CSIDriver.spec.preventPodSchedulingIfMissing, so without it every lane
+    # fails comparison on aws-ebs-csi-driver. This doesn't clear the field on
+    # every lane by itself, so an ignoreDifferences patch is also required.
     if ! hc upgrade --install "${ARGOCD_RELEASE}" "${ARGOCD_REPO_NAME}/argo-cd" \
             --namespace "${ARGOCD_NAMESPACE}" --create-namespace \
             --version "${chart_version}" \
@@ -438,22 +437,21 @@ install_argocd() {
     log_info "Argo CD ready"
 }
 
-# kind_node_image tracks Renovate's "testing" datasource (pre-release
-# Kubernetes), so it routinely ships storage/v1 CSIDriver fields newer than
-# the k8s.io/api schema argocd_chart's gitops-engine hard-codes for
-# structured-merge-diff (Argo CD FAQ: "How do I fix `field not declared in
-# schema`?"). Any CSIDriver, including aws-ebs-csi-driver's, then fails every
-# diff attempt with "field not declared in schema", and its Application's
-# sync.status wedges at Unknown forever. Unknown is neither Synced nor
-# OutOfSync, the only two states the argocd-*-sync chainsaw gate's pass
-# predicate accepts, so the gate polls out its full budget and reports a
-# GitOps sync timeout unrelated to the recipe under test.
+# configure_argocd_diff_customizations patches argocd-cm so Argo CD ignores
+# CSIDriver.spec.preventPodSchedulingIfMissing during comparisons.
 #
+# Kind's pre-release node image reports this field before the pinned Argo CD
+# chart's bundled schema declares it, so structured-merge-diff rejects it as
+# undeclared and the affected Application's sync.status wedges at Unknown
+# forever. The chainsaw sync gate treats that as a timeout unrelated to the
+# recipe under test. Enabling server-side diff for the controller doesn't
+# clear the field on every lane by itself, so this patch is still required.
 # The ignoreDifferences jqPathExpressions form, unlike managedFieldsManagers,
 # strips the offending field from both sides before Argo CD's structured
 # comparison runs, sidestepping the broken code path instead of hitting it.
-# System-level (argocd-cm) rather than per-Application covers every
-# Application this Argo CD instance manages, not just the one under test.
+# Drop it once the chart's schema declares the field. Applied system-level so
+# it covers every Application this instance manages, not just the one under
+# test.
 configure_argocd_diff_customizations() {
     log_info "Patching argocd-cm: ignore CSIDriver.spec.preventPodSchedulingIfMissing (Argo CD schema-lag workaround)..."
     if ! kc patch configmap argocd-cm -n "${ARGOCD_NAMESPACE}" --type merge -p \
