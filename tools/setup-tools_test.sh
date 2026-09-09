@@ -21,19 +21,40 @@ SETUP_TOOLS="${SCRIPT_DIR}/setup-tools"
 
 bash -n "${SETUP_TOOLS}"
 
-expected_installs=(
-    'github.com/tilt-dev/ctlptl/cmd/ctlptl@v"${CTLPTL_VERSION}"'
-    'github.com/goreleaser/goreleaser/v2@"${GORELEASER_VERSION}"'
-    'golang.org/x/exp/cmd/apidiff@"${APIDIFF_VERSION}"'
-    'github.com/google/addlicense@"${ADDLICENSE_VERSION}"'
-    'github.com/google/go-licenses/v2@"${GO_LICENSES_VERSION}"'
+# Scan every `go install` rather than checking a named list. A positive list
+# goes stale in the direction that matters: it cannot catch a *new* install
+# added without the GOFLAGS reset, which is the regression this guards against.
+# It also fails whenever an install is legitimately removed -- as #2664 did,
+# replacing three of them with binary-release downloads.
+#
+# Anchor on start-of-line or whitespace before `go`, not on "some character then
+# whitespace": the latter cannot see an unindented `go install` at column 1,
+# which is exactly the shape this guard exists to catch. Requiring whitespace
+# (rather than any non-`#` character) also keeps `cargo install` from matching.
+#
+# Comment lines are excluded so prose mentioning `go install` does not trip it.
+mapfile -t install_lines < <(
+    grep -nE '(^|[[:space:]])go install ' "${SETUP_TOOLS}" \
+        | grep -vE '^[0-9]+:[[:space:]]*#' || true
 )
 
-for install_target in "${expected_installs[@]}"; do
-    if ! grep -Fq "GOFLAGS= go install ${install_target}" "${SETUP_TOOLS}"; then
-        echo "FAIL: versioned go install does not clear GOFLAGS: ${install_target}" >&2
-        exit 1
+# A floor, so removing every `go install` cannot make this pass vacuously.
+# Three remain: apidiff, addlicense, and go-licenses, none of which publishes a
+# binary release (see .github/actions/install-go-licenses for that contract).
+readonly MIN_INSTALLS=3
+if [[ "${#install_lines[@]}" -lt "${MIN_INSTALLS}" ]]; then
+    echo "FAIL: found ${#install_lines[@]} 'go install' lines, expected at least ${MIN_INSTALLS};" >&2
+    echo "      if an install was intentionally removed, lower MIN_INSTALLS with it" >&2
+    exit 1
+fi
+
+failed=0
+for line in "${install_lines[@]}"; do
+    if [[ "${line}" != *"GOFLAGS= go install "* ]]; then
+        echo "FAIL: 'go install' does not clear GOFLAGS: ${line}" >&2
+        failed=1
     fi
 done
+[[ "${failed}" -eq 0 ]] || exit 1
 
-echo "All versioned Go tool installs clear GOFLAGS"
+echo "All ${#install_lines[@]} versioned Go tool installs clear GOFLAGS"
