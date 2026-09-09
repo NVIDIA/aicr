@@ -109,13 +109,16 @@ quality thresholds; not every settings key is exposed) — see
 ### Build & Release Actions
 
 #### `setup-build-tools/`
-**Purpose**: Install container build tools (ko, syft, crane, goreleaser)  
+**Purpose**: Install container build tools (ko, syft, crane, oras, goreleaser)  
 **When to use**: When you need specific build tools without full build pipeline  
 **Inputs**:
 - `install_ko` (optional): Install ko (default: "false")
 - `install_syft` (optional): Install syft (default: "false")
 - `install_crane` (optional): Install crane (default: "false")
 - `crane_version` (optional): crane version (default: "v0.21.0")
+- `install_oras` (optional): Install oras (default: "false")
+- `oras_version` (required when `install_oras: "true"`): oras version from `load-versions`, without the leading `v`
+- `oras_sha256` (required when `install_oras: "true"`): oras linux/amd64 SHA256 from `load-versions`
 - `install_goreleaser` (optional): Install goreleaser (default: "false")
 - `goreleaser_version` (required when `install_goreleaser: "true"`): GoReleaser version from `load-versions`
 
