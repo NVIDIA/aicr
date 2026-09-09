@@ -329,6 +329,18 @@
       },
     },
 
+    // ---- oras bumps refresh the pinned linux/amd64 SHA256 via post-upgrade script ----
+    // Without this the version moves and the pin does not, so the release job's
+    // checksum verify fails closed on the next bump rather than at release time.
+    {
+      matchDepNames: ["oras-project/oras"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-oras-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
     // ---- aiperf-bench base image is capped below python 3.14 ----
     // PR #1906 auto-bumped this to 3.14 and broke the UAT validator image
     // build (aiperf's pyzmq/uvloop had no cp314 wheels, and the single-stage

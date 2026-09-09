@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Refresh the pinned linux/amd64 SHA256 in .settings.yaml after an oras version
+# bump. Invoked by Renovate via postUpgradeTasks (.github/renovate.json5)
+# whenever security_tools.oras is updated.
+#
+# Usage: tools/update-oras-checksums <oras-version>
+#   e.g. tools/update-oras-checksums 1.3.4
+#
+# Idempotent: re-running with the currently-pinned version produces no diff.
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $0 <oras-version>" >&2
+  exit 64
+fi
+
+VERSION="$1"
+# Accept both "v1.3.4" and "1.3.4"; oras release assets embed the bare form.
+VERSION_NO_V="${VERSION#v}"
+
+SETTINGS_FILE=".settings.yaml"
+if [[ ! -f "${SETTINGS_FILE}" ]]; then
+  echo "ERROR: ${SETTINGS_FILE} not found (run from repo root)" >&2
+  exit 1
+fi
+
+KEY="oras_sha256_linux_amd64"
+TAR="oras_${VERSION_NO_V}_linux_amd64.tar.gz"
+CHECKSUMS_URL="https://github.com/oras-project/oras/releases/download/v${VERSION_NO_V}/oras_${VERSION_NO_V}_checksums.txt"
+
+WORKDIR=$(mktemp -d)
+trap 'rm -rf "${WORKDIR}"' EXIT
+
+echo "Fetching ${CHECKSUMS_URL}"
+# Retry on transient failures (5xx, 408/429, connection refused, network
+# blips). --retry-delay 0 lets curl pick an exponential backoff; the total
+# retry window is capped at 180s.
+if ! curl --fail --silent --show-error --location \
+      --connect-timeout 10 --max-time 60 \
+      --retry 5 --retry-delay 0 --retry-max-time 180 \
+      --retry-connrefused \
+      --output "${WORKDIR}/checksums.txt" \
+      "${CHECKSUMS_URL}"; then
+  echo "ERROR: failed to download ${CHECKSUMS_URL} after retries" >&2
+  exit 1
+fi
+
+# Each line is "<sha256>  oras_<ver>_<os>_<arch>.tar.gz". Anchor on end-of-line
+# so the .sbom.json sibling entry for the same platform cannot match.
+LINE=$(grep -E "  ${TAR//./\\.}\$" "${WORKDIR}/checksums.txt" || true)
+if [[ -z "${LINE}" ]]; then
+  echo "ERROR: no checksum entry matching ${TAR} in ${CHECKSUMS_URL}" >&2
+  exit 1
+fi
+SHA="${LINE%% *}"
+if [[ ! "${SHA}" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "ERROR: extracted value is not a sha256: '${SHA}'" >&2
+  exit 1
+fi
+echo "  ${KEY}: ${SHA}"
+
+# Targeted sed rather than yq: mikefarah/yq drops blank lines between top-level
+# mappings, which would reformat the whole file on every Renovate PR (see the
+# failure-modes note in .github/RENOVATE.md).
+#
+# The key is unique across the file by construction, so this needs no block
+# scoping — unlike the sibling <tool>_checksums blocks, whose shared sub-keys
+# make their refresh scripts overwrite one another (#2658).
+sed_inplace() {
+  if sed --version >/dev/null 2>&1; then
+    sed -E -i "$@"          # GNU sed (Linux / Renovate runner)
+  else
+    sed -E -i '' "$@"       # BSD sed (macOS)
+  fi
+}
+
+# Pre-check: the key must exist in the expected shape, otherwise the sed below
+# silently no-ops and we ship a stale checksum.
+if ! grep -Eq "^[[:space:]]+${KEY}:[[:space:]]*'[0-9a-f]{64}'[[:space:]]*\$" "${SETTINGS_FILE}"; then
+  echo "ERROR: key '${KEY}' not found (or wrong shape) in ${SETTINGS_FILE}" >&2
+  exit 1
+fi
+
+# Guard the uniqueness the no-scoping decision rests on.
+OCCURRENCES=$(grep -Ec "^[[:space:]]+${KEY}:" "${SETTINGS_FILE}")
+if [[ "${OCCURRENCES}" -ne 1 ]]; then
+  echo "ERROR: expected exactly 1 '${KEY}' line, found ${OCCURRENCES}" >&2
+  exit 1
+fi
+
+sed_inplace \
+  -e "s|^([[:space:]]+${KEY}:[[:space:]]*)'[0-9a-f]{64}'\$|\1'${SHA}'|" \
+  "${SETTINGS_FILE}"
+
+# Post-check: confirm the new value landed on that key.
+if ! grep -Eq "^[[:space:]]+${KEY}:[[:space:]]*'${SHA}'[[:space:]]*\$" "${SETTINGS_FILE}"; then
+  echo "ERROR: ${KEY} did not update to '${SHA}' in ${SETTINGS_FILE}" >&2
+  exit 1
+fi
+
+echo "Updated ${SETTINGS_FILE} for oras v${VERSION_NO_V}"
