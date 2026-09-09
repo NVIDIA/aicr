@@ -463,3 +463,180 @@ func TestDocsClaimWalkAttributesFlagsToTheRightCommand(t *testing.T) {
 		})
 	}
 }
+
+// docsPriorityLabelClaims matches prose asserting that P0/P1/P2 are labels.
+//
+// They are not. P0/P1/P2 are options on the AICR Project board's Priority
+// field, and the board is not the repository: `gh label list --repo NVIDIA/aicr
+// --limit 200` returns 40 labels, none of them P-prefixed. Setting the field
+// needs a project-scoped token, which is why contributors cannot set it and why
+// calling it a label sends them looking for something that is not there.
+//
+// This is gated rather than merely fixed because the same false sentence was
+// published in three files at once: CONTRIBUTING.md, AGENTS.md, and
+// .claude/CLAUDE.md. AGENTS.md even contradicted itself, describing the board
+// field correctly ten lines below the bullet calling it an issue label.
+//
+// Match the ASSERTION, not the tokens. The obvious pattern,
+// `priority label.*(P0|P1|P2)`, is WRONG: it matches the CORRECTED text three
+// times over, because the correction itself has to name the thing it forbids.
+// Those three false positives are CONTRIBUTING.md ("Do not add a priority label
+// (`P0`, `P1`, `P2`) to the PR"), AGENTS.md ("Do NOT add a priority label
+// (`P0`, `P1`, `P2`) to PRs"), and .claude/CLAUDE.md, which mirrors AGENTS.md
+// byte for byte. A gate built on token co-occurrence fails on the exact wording
+// it exists to protect, so do not "simplify" these patterns into one.
+//
+// .claude/CLAUDE.md is not reachable from docsClaimRoots, whose repo-root entry
+// is not recursive. It does not need to be: tools/check-agents-sync fails
+// whenever it diverges from AGENTS.md, so the claim cannot come back there
+// alone, and if it comes back in both then AGENTS.md trips this gate.
+//
+// The first two patterns are label-first ("the issue priority labels P0, P1,
+// or P2"). They miss the subject-first form, so "P0/P1/P2 are repository
+// labels" used to pass. The third pattern covers that direction, and getting it
+// right is the whole difficulty here, because ASSERTION and NEGATION share
+// every keyword:
+//
+//	assert (must fail):  P0, P1, and P2 are priority labels for issues.
+//	negate (must pass):  Do not add a priority label (`P0`, `P1`, `P2`) to the
+//	                     PR. Priority is a field on the AICR Project board
+//	                     rather than a repository label, ...
+//
+// Both contain P-tokens, "priority label" and "labels". What separates them is
+// the copula: an assertion says the tokens ARE labels, whereas the correction
+// forbids adding one and then, in a SEPARATE SENTENCE, says what priority
+// actually is. So the pattern requires `are`/`is` between the P-token and the
+// label noun, and its gap classes exclude `.` so a match cannot run across a
+// sentence boundary. That single exclusion is what keeps CONTRIBUTING.md:188
+// and AGENTS.md:634 green: in both, a period sits between the P-tokens and the
+// next copula. Widen those classes to `.` and the gate starts failing on the
+// very wording it protects.
+var docsPriorityLabelClaims = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)(issue|repo|repository) priority labels?`),
+	regexp.MustCompile(`(?i)reserved for issues`),
+	regexp.MustCompile(`(?i)\bP[012]\b[^.\n]{0,80}?\b(?:are|is)\b[^.\n]{0,40}?\blabels?\b`),
+}
+
+// docsPriorityNegations mark a candidate as a DENIAL rather than a claim.
+// "P0/P1/P2 are not repository labels" is the correct statement, and a gate
+// that blocks a maintainer from writing it is worse than one that misses a
+// phrasing. Extend this list rather than complicating the patterns above.
+//
+// This exists as a second pass because Go's regexp is RE2: there is no
+// lookbehind, so "`are` not preceded by `not`" cannot be written as a pattern
+// at all. Match first, filter second.
+//
+// The filter runs on the MATCHED SPAN, never the whole line. A real claim may
+// carry a negation elsewhere in the same sentence ("P0/P1/P2 are repository
+// labels, not board fields"), and the span stops at the first label noun, so
+// filtering by line would silently drop that one.
+//
+// Known limit, accepted deliberately: the first two patterns match a bare noun
+// phrase, so a negation sitting just outside it ("are not issue priority
+// labels") is not visible in the span and still reports. Seeing it would take
+// a per-pattern lookback window, and a window wide enough to help also
+// suppresses real claims whose previous clause happens to contain "not". The
+// gate is meant to be high-precision on the phrasing that actually regressed,
+// not to parse English.
+var docsPriorityNegations = []string{
+	`\bnot\b`, `\bnever\b`, `n't`, `\brather than\b`, `\binstead of\b`,
+}
+
+var docsPriorityNegated = regexp.MustCompile(`(?i)` + strings.Join(docsPriorityNegations, "|"))
+
+// docsPriorityNotOnly is the one anti-marker: "not only" and "not just" are
+// AFFIRMATIVE. "P0/P1/P2 are not only issue labels" says they ARE labels, among
+// other things, yet it contains `not` and would otherwise be suppressed. The
+// span is stripped of these before the negation test, which is cheaper and far
+// more predictable than trying to classify the sentence.
+var docsPriorityNotOnly = regexp.MustCompile(`(?i)\bnot\s+(?:only|just)\b`)
+
+// Where this gate stops, on purpose.
+//
+// It is a regression guard for one claim that shipped wrong in three files at
+// once, not a natural-language classifier. It catches the historical label-first
+// phrasing and the common subject-first phrasings, and it does not attempt to
+// resolve arbitrary English. Two residuals are known and accepted; they are
+// recorded here so the next maintainer inherits knowledge rather than a puzzle,
+// and neither is a TODO:
+//
+//   (a) A negation sitting outside the matched span still reports. "These are
+//       not issue priority labels." is flagged, because the label-first pattern
+//       matches the bare noun phrase and the `not` is never inside it. Fixing
+//       this needs a lookback window, and any window wide enough to help also
+//       suppresses real claims whose previous clause happens to contain "not",
+//       which trades a visible false positive for a silent false negative.
+//
+//   (b) Affirmative phrasings outside the patterns are missed. "P0/P1/P2
+//       function as labels." passes, since the copula pattern requires
+//       `are`/`is`. ("P0 is a label." IS caught; the singular copula is
+//       covered.) Widening to arbitrary verbs is where precision collapses.
+//
+// If a new false positive appears, prefer adding a marker to
+// docsPriorityNegations over reworking the patterns.
+
+// TestDocsDoNotCallPriorityALabel is the gate.
+func TestDocsDoNotCallPriorityALabel(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := docsRepoRoot(t)
+
+	files := make([]string, 0, len(docsClaimRoots)*32)
+	for _, root := range docsClaimRoots {
+		files = append(files, markdownFiles(t, repoRoot, root)...)
+	}
+	if len(files) == 0 {
+		t.Fatal("found no Markdown to scan; the roots are wrong")
+	}
+
+	var mentions int
+	for _, path := range files {
+		data, err := os.ReadFile(path) //nolint:gosec // in-repo doc, path derived from the module root
+		if err != nil {
+			t.Errorf("read %s: %v", path, err)
+			continue
+		}
+		rel, relErr := filepath.Rel(repoRoot, path)
+		if relErr != nil {
+			rel = path
+		}
+
+		for i, line := range strings.Split(string(data), "\n") {
+			if strings.Contains(strings.ToLower(line), "priority") {
+				mentions++
+			}
+			for _, re := range docsPriorityLabelClaims {
+				// Every span is checked, not just the first: a line may deny
+				// the claim and then assert it.
+				claim := ""
+				for _, span := range re.FindAllString(line, -1) {
+					probe := docsPriorityNotOnly.ReplaceAllString(span, " ")
+					if !docsPriorityNegated.MatchString(probe) {
+						claim = span
+						break
+					}
+				}
+				if claim == "" {
+					continue
+				}
+				t.Errorf("%s:%d: describes issue priority as a label: %q\n"+
+					"        P0/P1/P2 are options on the AICR Project board's Priority\n"+
+					"        field, not repository labels. Say that priority is a board\n"+
+					"        field instead, as CONTRIBUTING.md's Issue Priority section does.",
+					rel, i+1, strings.TrimSpace(line))
+				// One report per offending line: both patterns match the same
+				// sentence, and naming it twice buries the file list.
+				break
+			}
+		}
+	}
+
+	// mentions counts lines that talk about priority at all. Without it a broken
+	// corpus walk would report success by scanning nothing relevant, and this
+	// gate would pass forever while guarding an empty set.
+	if mentions == 0 {
+		t.Fatal("no scanned file mentions priority; the corpus walk is broken " +
+			"and this gate is inert")
+	}
+	t.Logf("scanned %d files, %d lines mentioning priority", len(files), mentions)
+}

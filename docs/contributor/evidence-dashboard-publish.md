@@ -82,7 +82,7 @@ in `merge-gate.yaml`.
 ## Forward limitations
 
 - The read SA's impersonation is repository-scoped (the shared
-  `github-actions-pool` provider, owned by `infra/demo-api-server`, maps only
+  `github-actions-pool` provider, owned by `infra/gcp-shared`, maps only
   the repository attribute). It is least-privilege on the resource side
   (`objectViewer` on one bucket); GP3's `infra/evidence-dashboard` may tighten
   the subject condition further.

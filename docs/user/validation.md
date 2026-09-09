@@ -181,6 +181,67 @@ driver, and Kubeflow Trainer are installed and healthy before the benchmark):
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
 ```
 
+### GB200 NET preflight: GPUDirect RDMA prerequisites
+
+Before running `nccl-all-reduce-bw-net` on GB200 (EKS or OKE), a preflight
+checks each GPU node for the driver-side prerequisite of GPUDirect RDMA.
+Without it NCCL falls back to the Socket transport. The `-net` check catches
+that on its own — it fails on a `Using network Socket` banner rather than
+reporting a figure — so the preflight exists to fail fast, naming the driver,
+instead of after a full benchmark run.
+
+The preflight runs on the default fabric only: EFA on EKS, built-in IB/verbs on
+OKE. `AICR_NCCL_FABRIC=roce` is EKS-only: there it selects a different template
+and skips the preflight, so the benchmark runs ungated. On OKE the RoCE
+combination is unsupported, so carrying the variable over makes the declared
+`-net` check skip entirely rather than run.
+
+**Before R595** — which includes `580.173.02`, the version AICR pins — the
+driver must be loaded with `NVreg_GrdmaPciTopoCheckOverride=1`. Without it the
+driver refuses to let a PCIe-attached NIC (EFA on EKS, ConnectX IB on OKE)
+attach dma-buf handles to GPU memory, and the kernel logs:
+
+```text
+NVRM: dma-buf attach failed: topology not supported for mapping type FORCE_PCIE
+```
+
+Set the parameter according to who owns the driver:
+
+| Driver owner | How to set it |
+|---|---|
+| GPU Operator | Point ClusterPolicy `spec.driver.kernelModuleConfig.name` at a ConfigMap in `gpu-operator` containing `nvidia.conf: options nvidia NVreg_GrdmaPciTopoCheckOverride=1` |
+| Node image (OKE default `gpuStack=oci-managed`) | Set the module parameter in the image or node bootstrap (`/etc/modprobe.d`), then reboot the GPU nodes |
+
+**Deleting the `nvidia-driver` DaemonSet pods does not apply the change, and
+neither does editing only the ConfigMap.** The reload decision is keyed off the
+ClusterPolicy spec, so the spec itself has to change. Setting
+`kernelModuleConfig.name` is such a change, but AICR's GB200/GB300 overlays
+already set it — where it is present, point it at a differently-named ConfigMap
+so the spec actually differs. Confirm on a node afterwards:
+
+```shell
+grep GrdmaPciTopoCheckOverride /proc/driver/nvidia/params
+```
+
+**On R595 and later** the parameter no longer exists, and setting it has no
+effect because the kernel silently ignores unknown module options. R595 replaced
+it with a PCIe topology requirement the preflight cannot check, so validation
+fails closed instead of assuming. On EKS `p6e-gb200`/`gb300` that requirement is
+known not to be satisfied — the measurement is recorded alongside the driver pin
+in `recipes/components/gpu-operator/values.yaml`; on OKE it is unmeasured.
+
+The remedy on R595+ is a driver at R580 — AICR ships `580.173.02` — pinned
+through the ClusterPolicy where the GPU Operator owns the driver, or through the
+node image where it does not.
+
+**Undetermined** is a third outcome, reached without either verdict above: if
+`/proc/driver/nvidia/version` or `params` cannot be read, or the version banner
+does not parse, the preflight reports the state as undetermined rather than
+assuming one. SELinux denying the read inside the container, or a
+driver-container remount leaving the path empty, produces this. Changing the
+driver version does not address it — read the file on a target node to see
+whether it is unreadable or carries an unrecognised banner.
+
 ### Opting external recipes into a benchmark profile
 
 The default applicability above is keyed to service + accelerator pairs the

@@ -35,6 +35,7 @@ for arg in "$@"; do
         https://github.com/Azure/azure-sdk-for-go/blob/sdk/azcore/v1.20.0/sdk/azcore/LICENSE.txt | \
         https://github.com/aws/aws-sdk-go-v2/blob/config/v1.2.3/config/LICENSE.txt | \
         https://github.com/blang/semver/blob/v4.0.0/LICENSE | \
+        https://github.com/cel-expr/cel-go/blob/v0.31.0/LICENSE | \
         https://github.com/example/repo/blob/nested/v1.2.3/LICENSE | \
         https://github.com/kyverno/kyverno/blob/48769d003e55/LICENSE | \
         https://github.com/root/module/blob/v1.2.3/LICENSE)
@@ -61,6 +62,7 @@ github.com/blang/semver/v4,https://github.com/blang/semver/blob/v4.0.0/v4/LICENS
 github.com/kyverno/kyverno/pkg/ext,https://github.com/kyverno/kyverno/blob/48769d003e55/ext/LICENSE,Apache-2.0
 github.com/NVIDIA/aicr/example,https://github.com/NVIDIA/aicr/blob/HEAD/licenses/overrides/example/LICENSE,Apache-2.0
 golang.org/x/term,https://cs.opensource.google/go/x/term/+/v0.34.0:LICENSE,BSD-3-Clause
+github.com/google/cel-go,https://github.com/google/cel-go/blob/v0.31.0/LICENSE,Apache-2.0
 EOF
 
 CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/input.csv" > "${TMP}/actual.csv"
@@ -73,6 +75,7 @@ github.com/blang/semver/v4,https://github.com/blang/semver/blob/v4.0.0/LICENSE,M
 github.com/kyverno/kyverno/pkg/ext,https://github.com/kyverno/kyverno/blob/48769d003e55/LICENSE,Apache-2.0
 github.com/NVIDIA/aicr/example,https://github.com/NVIDIA/aicr/blob/HEAD/licenses/overrides/example/LICENSE,Apache-2.0
 golang.org/x/term,https://cs.opensource.google/go/x/term/+/v0.34.0:LICENSE,BSD-3-Clause
+github.com/google/cel-go,https://github.com/cel-expr/cel-go/blob/v0.31.0/LICENSE,Apache-2.0
 EOF
 diff -u "${TMP}/expected.csv" "${TMP}/actual.csv"
 
@@ -89,6 +92,36 @@ example.com/missing,https://example.com/missing/LICENSE,Apache-2.0
 EOF
 if CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/unchanged-broken.csv" > /dev/null 2>&1; then
     echo "normalizer accepted an unchecked unreachable URL" >&2
+    exit 1
+fi
+
+# Every unreachable package must be reported in one pass. Failing on the first
+# one hides the rest behind another full release cycle, which is how a single
+# moved repository blocked v0.21.0-rc1.
+cat > "${TMP}/multi-broken.csv" <<'EOF'
+example.com/first,https://example.com/first/LICENSE,MIT
+github.com/root/module,https://github.com/root/module/blob/v1.2.3/LICENSE,MIT
+example.com/second,https://example.com/second/LICENSE,MIT
+EOF
+if CURL_BIN="${TMP}/curl" "${TOOL}" "${TMP}/multi-broken.csv" \
+    > "${TMP}/multi.out" 2> "${TMP}/multi.err"; then
+    echo "normalizer accepted two unreachable URLs" >&2
+    exit 1
+fi
+for pkg in example.com/first example.com/second; do
+    if ! grep -qF "no reachable license source URL for ${pkg}:" "${TMP}/multi.err"; then
+        echo "normalizer did not report ${pkg} as unreachable" >&2
+        exit 1
+    fi
+done
+if ! grep -qF "2 package(s) have no reachable license source URL." "${TMP}/multi.err"; then
+    echo "normalizer did not summarize the unreachable count" >&2
+    exit 1
+fi
+# The reachable row between the two failures must still be emitted, so the
+# failure path stays a report rather than an early abort.
+if ! grep -qF "github.com/root/module," "${TMP}/multi.out"; then
+    echo "normalizer dropped a reachable row while reporting failures" >&2
     exit 1
 fi
 

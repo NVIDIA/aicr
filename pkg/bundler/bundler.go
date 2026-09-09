@@ -1936,8 +1936,10 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 }
 
 // validateRequiredNodeSelectors returns an error if a component's registry
-// entry sets requireNodeSelector (SchedulingPaths) but the resolved value at
-// one of its non-opted-out node-selector paths is empty or missing.
+// entry sets requireNodeSelector, or sets requireNodeSelectorIfStorageClassSet
+// with a storage class already configured (SchedulingPaths), but the
+// resolved value at one of its non-opted-out node-selector paths is empty
+// or missing.
 //
 // Must run after every override in extractComponentValues, including
 // --set-json/--set-file, which can null out a selector that
@@ -1959,14 +1961,18 @@ func (b *DefaultBundler) validateRequiredNodeSelectors(componentName string, val
 		return nil
 	}
 
-	if comp.RequireSystemNodeSelector() {
+	if comp.RequireSystemNodeSelector() ||
+		(comp.RequireSystemNodeSelectorIfStorageClassSet() && componentHasConfiguredStorageClass(comp, values)) {
+
 		if err := requireNonEmptyNodeSelectors(componentName, values,
 			filterPaths(comp.GetSystemNodeSelectorPaths(), policy.optOut),
 			"--system-node-selector"); err != nil {
 			return err
 		}
 	}
-	if comp.RequireAcceleratedNodeSelector() {
+	if comp.RequireAcceleratedNodeSelector() ||
+		(comp.RequireAcceleratedNodeSelectorIfStorageClassSet() && componentHasConfiguredStorageClass(comp, values)) {
+
 		if err := requireNonEmptyNodeSelectors(componentName, values,
 			filterPaths(comp.GetAcceleratedNodeSelectorPaths(), policy.optOut),
 			"--accelerated-node-selector"); err != nil {
@@ -1974,6 +1980,21 @@ func (b *DefaultBundler) validateRequiredNodeSelectors(componentName string, val
 		}
 	}
 	return nil
+}
+
+// componentHasConfiguredStorageClass reports whether any of comp's
+// StorageClassPaths or SharedStorageClassPaths paths resolve to a
+// configured value in values.
+func componentHasConfiguredStorageClass(comp *recipe.ComponentConfig, values map[string]any) bool {
+	paths := make([]string, 0, len(comp.GetStorageClassPaths())+len(comp.GetSharedStorageClassPaths()))
+	paths = append(paths, comp.GetStorageClassPaths()...)
+	paths = append(paths, comp.GetSharedStorageClassPaths()...)
+	for _, path := range paths {
+		if hasConfiguredStorageClass(values, path) {
+			return true
+		}
+	}
+	return false
 }
 
 // requireNonEmptyNodeSelectors returns an error naming every path in paths
@@ -2084,9 +2105,9 @@ func (b *DefaultBundler) dynamicPathSetFor(componentName string, provider recipe
 }
 
 // rejectDynamicRequiredNodeSelectorPaths returns an error if a path in
-// dynPaths is also one of componentName's requireNodeSelector paths.
-// --dynamic leaves a path out of the bundle for an operator to supply
-// later, the same unpinned state requireNodeSelector exists to reject.
+// dynPaths equals, contains, or is contained by one of componentName's
+// required node selector paths, since --dynamic would defer that path to
+// install time.
 func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName string, provider recipe.DataProvider, dynPaths map[string]struct{}) error {
 	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
@@ -2102,6 +2123,11 @@ func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName st
 
 	var conflicts []string
 	seen := make(map[string]struct{})
+	// A dynamic override on an ancestor (e.g. prometheus.prometheusSpec) or a
+	// descendant (e.g. prometheus.prometheusSpec.nodeSelector.disktype) of a
+	// required path moves the required value into install-time control the
+	// same way an exact-path override does, so intersectingPaths treats
+	// either direction as a conflict, not just an exact match.
 	addConflicts := func(paths []string) {
 		for _, p := range intersectingPaths(paths, dynPaths) {
 			if _, ok := seen[p]; ok {
@@ -2111,11 +2137,25 @@ func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName st
 			conflicts = append(conflicts, p)
 		}
 	}
-	if comp.RequireSystemNodeSelector() {
+	// Reject regardless of whether a storage class ends up configured for
+	// RequireNodeSelectorIfStorageClassSet. A --dynamic path bypasses
+	// validateRequiredNodeSelectors unconditionally by merging into
+	// policy.optOut, so this is the only gate closing that loophole if a
+	// storage class is configured now or added later without rebuilding
+	// the bundle.
+	if comp.RequireSystemNodeSelector() || comp.RequireSystemNodeSelectorIfStorageClassSet() {
 		addConflicts(comp.GetSystemNodeSelectorPaths())
 	}
-	if comp.RequireAcceleratedNodeSelector() {
+	if comp.RequireAcceleratedNodeSelector() || comp.RequireAcceleratedNodeSelectorIfStorageClassSet() {
 		addConflicts(comp.GetAcceleratedNodeSelectorPaths())
+	}
+	// A --dynamic override on the storage-class path removes its value
+	// from values before componentHasConfiguredStorageClass evaluates it,
+	// so the conditional flags could never fire once an operator defers
+	// the storage class to install time.
+	if comp.RequireSystemNodeSelectorIfStorageClassSet() || comp.RequireAcceleratedNodeSelectorIfStorageClassSet() {
+		addConflicts(comp.GetStorageClassPaths())
+		addConflicts(comp.GetSharedStorageClassPaths())
 	}
 	if len(conflicts) == 0 {
 		return nil
@@ -2126,16 +2166,20 @@ func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName st
 		componentName, strings.Join(conflicts, ", ")))
 }
 
-// intersectingPaths returns the paths present in both paths and set,
-// preserving paths' order. Returns nil if either is empty.
+// intersectingPaths returns the paths in paths that equal, contain, or are
+// contained by a path in set, preserving paths' order. Returns nil if
+// either is empty.
 func intersectingPaths(paths []string, set map[string]struct{}) []string {
 	if len(paths) == 0 || len(set) == 0 {
 		return nil
 	}
 	var out []string
 	for _, p := range paths {
-		if _, ok := set[p]; ok {
-			out = append(out, p)
+		for dyn := range set {
+			if valuePathsIntersect(p, dyn) {
+				out = append(out, p)
+				break
+			}
 		}
 	}
 	return out
