@@ -21,6 +21,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -651,7 +652,8 @@ func checkAKSAutoscaling(ctx *validators.Context) error {
 	}
 
 	var nodeSummary strings.Builder
-	var agentPoolName string
+	agentPools := make(map[string]struct{})
+	var missingAgentPoolNodes []string
 	for _, n := range gpuNodes.Items {
 		gpuCount := n.Status.Capacity[resourceNVIDIAGPU]
 		instanceType := n.Labels["node.kubernetes.io/instance-type"]
@@ -660,25 +662,34 @@ func checkAKSAutoscaling(ctx *validators.Context) error {
 		fmt.Fprintf(&nodeSummary, "%-44s gpu=%s instance=%s agentPool=%s zone=%s\n",
 			n.Name, gpuCount.String(), valueOrUnknown(instanceType),
 			valueOrUnknown(agentPool), valueOrUnknown(zone))
-		if agentPoolName == "" && agentPool != "" {
-			agentPoolName = agentPool
+		if agentPool == "" {
+			missingAgentPoolNodes = append(missingAgentPoolNodes, n.Name)
+		} else {
+			agentPools[agentPool] = struct{}{}
 		}
 	}
 	recordRawTextArtifact(ctx, "GPU Nodes",
 		"kubectl get nodes -l nvidia.com/gpu.present=true -o wide", nodeSummary.String())
 
-	if agentPoolName == "" {
+	if len(missingAgentPoolNodes) > 0 {
+		sort.Strings(missingAgentPoolNodes)
 		return errors.New(errors.ErrCodeNotFound,
-			"AKS GPU nodes found but kubernetes.azure.com/agentpool label is missing — cannot verify autoscaling capability")
+			fmt.Sprintf("AKS GPU nodes missing kubernetes.azure.com/agentpool label: %s — cannot verify autoscaling capability",
+				strings.Join(missingAgentPoolNodes, ", ")))
 	}
 
+	agentPoolNames := make([]string, 0, len(agentPools))
+	for name := range agentPools {
+		agentPoolNames = append(agentPoolNames, name)
+	}
+	sort.Strings(agentPoolNames)
 	recordRawTextArtifact(ctx, "AKS Cluster Details", "",
-		fmt.Sprintf("GPU Agent Pool:  %s\nGPU Node Count: %d",
-			agentPoolName, len(gpuNodes.Items)))
+		fmt.Sprintf("GPU Agent Pools: %s\nGPU Node Count: %d",
+			strings.Join(agentPoolNames, ", "), len(gpuNodes.Items)))
 	recordRawTextArtifact(ctx, "AKS Cluster Autoscaling Result", "",
-		fmt.Sprintf("PASS — AKS cluster with %d GPU nodes in VMSS-backed agent pool %q. "+
+		fmt.Sprintf("PASS — AKS cluster with %d GPU nodes in VMSS-backed agent pool(s) %q. "+
 			"The agent pool provides cluster autoscaling capability when managed autoscaling is enabled.",
-			len(gpuNodes.Items), agentPoolName))
+			len(gpuNodes.Items), strings.Join(agentPoolNames, ", ")))
 	return nil
 }
 

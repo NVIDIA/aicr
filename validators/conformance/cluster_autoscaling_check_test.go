@@ -293,6 +293,24 @@ func TestCheckAKSAutoscaling(t *testing.T) {
 			}},
 			wantErr: true,
 		},
+		{
+			name: "mixed GPU nodes require every agent pool label",
+			nodes: []corev1.Node{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "aks-gpu-labeled", Labels: map[string]string{
+						"nvidia.com/gpu.present": "true", "kubernetes.azure.com/agentpool": "gpuworker",
+					}},
+					Status: corev1.NodeStatus{Capacity: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("8")}},
+				},
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "aks-gpu-unlabeled", Labels: map[string]string{
+						"nvidia.com/gpu.present": "true",
+					}},
+					Status: corev1.NodeStatus{Capacity: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("8")}},
+				},
+			},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
