@@ -61,6 +61,39 @@ func validateRecord(u *ComponentUpgrades, pin string) []string {
 		v = append(v, checkDirectional(where, &u.Transitions[i])...)
 	}
 	v = append(v, checkCoverage(u.Component, u.Transitions, pin)...)
+	v = append(v, checkReplaces(u.Component, u.Replaces)...)
+	return v
+}
+
+// checkReplaces applies rules 4, 5 and 6 to a replaces block. Rules 2, 3 and 7
+// do not apply: a replaces block carries no from/to ranges, because it
+// describes a component swap rather than a version boundary.
+//
+// replaces.component is deliberately not checked against the registry. ADR-021
+// says a replaces block joins the removed and added rows into one, so the
+// superseded component is by definition already gone from the registry.
+func checkReplaces(component string, r *Replaces) []string {
+	if r == nil {
+		return nil
+	}
+	where := fmt.Sprintf("component %q replaces block", component)
+	var v []string
+	if r.Component == "" {
+		v = append(v, where+" names no component to supersede")
+	}
+	if r.Summary == "" {
+		v = append(v, where+" is missing summary")
+	}
+	// Rules 4, 5 and 6 are verdict-and-steps shaped, which a replaces block
+	// shares exactly. Reuse rather than restate.
+	as := &Transition{
+		Verdict:         r.Verdict,
+		VerifiedBy:      r.VerifiedBy,
+		Summary:         r.Summary,
+		StepsByDeployer: r.StepsByDeployer,
+	}
+	v = append(v, checkVerdictFields(where, as)...)
+	v = append(v, checkStepGroups(where, as)...)
 	return v
 }
 

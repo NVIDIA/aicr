@@ -469,3 +469,66 @@ func TestValidateCoverage(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateReplaces(t *testing.T) {
+	base := func(mut func(*Replaces)) *Replaces {
+		r := &Replaces{
+			Component: "old-operator",
+			Verdict:   VerdictManual,
+			Summary:   "superseded by this component",
+			StepsByDeployer: []StepGroup{
+				{Steps: []Step{{ID: "swap", Description: "uninstall old, install new"}}},
+			},
+		}
+		if mut != nil {
+			mut(r)
+		}
+		return r
+	}
+	tests := []struct {
+		name     string
+		replaces *Replaces
+		wantErr  bool
+		wantText string
+	}{
+		{"manual with steps passes", base(nil), false, ""},
+		{
+			"safe without verifiedBy fails (rule 4 applies)",
+			base(func(r *Replaces) { r.Verdict = VerdictSafe; r.StepsByDeployer = nil }),
+			true, "verifiedBy",
+		},
+		{
+			"manual with no steps fails (rule 5 applies)",
+			base(func(r *Replaces) { r.StepsByDeployer = nil }),
+			true, "at least one step",
+		},
+		{
+			"unknown deployer fails (rule 6 applies)",
+			base(func(r *Replaces) { r.StepsByDeployer[0].Deployers = []string{"argo"} }),
+			true, "not a selectable deployer",
+		},
+		{
+			"missing summary fails",
+			base(func(r *Replaces) { r.Summary = "" }),
+			true, "summary",
+		},
+		{
+			"missing component fails",
+			base(func(r *Replaces) { r.Component = "" }),
+			true, "names no component",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set := Set{"c": &ComponentUpgrades{Component: "c", Replaces: tt.replaces}}
+			comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "v1.0.0"}}
+			err := set.Validate(comps)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), tt.wantText) {
+				t.Errorf("error %q does not mention %q", err.Error(), tt.wantText)
+			}
+		})
+	}
+}
