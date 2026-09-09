@@ -258,6 +258,82 @@ func TestLoadAllowsNilSourceWhenNothingReferencesAFile(t *testing.T) {
 	}
 }
 
+// No other test asserts that a realistic record satisfies all nine rules at
+// once, so nothing proved they are jointly satisfiable — and `replaces` was
+// never exercised through a YAML decode at all. Every clause here is load
+// bearing: rule 3 needs the two `from` domains to meet and to reach the pin,
+// rule 7 needs each `from` to stop at its own `to` floor, rule 8 needs the two
+// floors to differ, and rule 6 needs the explicit group plus the remainder to
+// cover all five deployers.
+func TestLoadAndValidateAcceptAWellFormedRecord(t *testing.T) {
+	const body = `apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: widget-operator
+transitions:
+  - from: "<0.20.0"
+    to: ">=0.20.0 <=0.20.0"
+    verdict: manual
+    summary: widget.example.invalid moves to gadget.example.invalid
+    precondition: no Widget is mid-rollout
+    reversible: true
+    reversibleNotes: only until the legacy CRD is removed in 0.22.0
+    stepsByDeployer:
+      - deployers: [argocd, argocd-helm, flux]
+        steps:
+          - id: rewrite-crs
+            description: rewrite apiVersion and kind in one commit
+            reason: splitting it lets auto-sync recreate what you deleted
+      - steps:
+          - id: rewrite-crs
+            description: rewrite apiVersion and kind, then apply
+    hooks:
+      - file: manifests/migrations/adopt-gadgets.yaml
+        phase: pre-upgrade
+    affectedResources:
+      - group: widget.example.invalid
+        kinds: [Widget, DeploymentPolicy]
+    references:
+      - https://example.invalid/migration
+  - from: ">=0.20.0 <0.22.0"
+    to: ">=0.22.0 <=0.22.0"
+    verdict: safe
+    verifiedBy: uat lane eks-h100-training
+    summary: the legacy CRD is removed with no operator action
+replaces:
+  component: old-widget-operator
+  verdict: manual
+  summary: supersedes old-widget-operator, whose registry row is gone
+  stepsByDeployer:
+    - steps:
+        - id: uninstall-old
+          description: uninstall old-widget-operator before installing this one
+`
+	src := mapSource{"upgrades/widget-operator.yaml": []byte(body)}
+	comps := []Component{{
+		Name:          "widget-operator",
+		File:          "upgrades/widget-operator.yaml",
+		PinnedVersion: "v0.22.0",
+	}}
+
+	set, err := Load(context.Background(), src, comps)
+	if err != nil {
+		t.Fatalf("Load error = %v", err)
+	}
+	if err := set.Validate(comps); err != nil {
+		t.Fatalf("Validate error = %v, want nil for a well-formed record", err)
+	}
+	u := set["widget-operator"]
+	if len(u.Transitions) != 2 {
+		t.Fatalf("transitions = %d, want 2", len(u.Transitions))
+	}
+	if u.Replaces == nil || u.Replaces.Component != "old-widget-operator" {
+		t.Fatalf("replaces = %+v, want the superseded component decoded", u.Replaces)
+	}
+	if len(u.Transitions[0].Hooks) != 1 {
+		t.Errorf("hooks = %v, want one decoded hook", u.Transitions[0].Hooks)
+	}
+}
+
 func TestLoadHonorsContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

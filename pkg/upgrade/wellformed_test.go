@@ -261,6 +261,42 @@ func TestValidateAggregatesViolations(t *testing.T) {
 	}
 }
 
+// Violations are grouped per component, and the grouping is only stable
+// because Validate sorts the names before walking the map. Every other test
+// here uses a single-key Set, which cannot see the difference. The loop runs
+// the walk repeatedly: a single range over a small map is a random rotation of
+// its slots, so one pass can land on ascending order by luck.
+func TestValidateOrdersComponentsDeterministically(t *testing.T) {
+	bad := func(name string) *ComponentUpgrades {
+		return &ComponentUpgrades{
+			Component:   name,
+			Transitions: []Transition{tr(func(x *Transition) { x.Summary = "" })},
+		}
+	}
+	set := Set{"a": bad("a"), "b": bad("b"), "c": bad("c")}
+	comps := []Component{
+		{Name: "a", File: "upgrades/a.yaml", PinnedVersion: "v0.18.0"},
+		{Name: "b", File: "upgrades/b.yaml", PinnedVersion: "v0.18.0"},
+		{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "v0.18.0"},
+	}
+	for i := range 50 {
+		err := set.Validate(comps)
+		if err == nil {
+			t.Fatal("Validate = nil, want violations from all three components")
+		}
+		ai := strings.Index(err.Error(), `component "a"`)
+		bi := strings.Index(err.Error(), `component "b"`)
+		ci := strings.Index(err.Error(), `component "c"`)
+		if ai < 0 || bi < 0 || ci < 0 {
+			t.Fatalf("run %d: not every component is reported: %s", i, err.Error())
+		}
+		if ai >= bi || bi >= ci {
+			t.Fatalf("run %d: components reported at offsets a=%d b=%d c=%d, want ascending: %s",
+				i, ai, bi, ci, err.Error())
+		}
+	}
+}
+
 // The heavy import lives here, never in the package itself.
 func TestCanonicalDeployersMatchBundlerConfig(t *testing.T) {
 	if got, want := canonicalDeployers, config.GetDeployerTypes(); !reflect.DeepEqual(got, want) {
