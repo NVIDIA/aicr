@@ -70,7 +70,8 @@ func TestTimeoutConstants(t *testing.T) {
 		{"TrainerControllerReadyTimeout", TrainerControllerReadyTimeout, 1 * time.Minute, 5 * time.Minute},
 
 		// Validator timeouts
-		{"ValidatorWaitBuffer", ValidatorWaitBuffer, 10 * time.Second, 60 * time.Second},
+		{"ValidatorWaitBuffer", ValidatorWaitBuffer, 1 * time.Minute, 5 * time.Minute},
+		{"ValidatorJobDeadlineHeadroom", ValidatorJobDeadlineHeadroom, 1 * time.Minute, 10 * time.Minute},
 		{"ValidatorDefaultTimeout", ValidatorDefaultTimeout, 1 * time.Minute, 15 * time.Minute},
 		{"ValidatorTerminationGracePeriod", ValidatorTerminationGracePeriod, 10 * time.Second, 60 * time.Second},
 
@@ -265,6 +266,19 @@ func TestValidatorTimeoutRelationships(t *testing.T) {
 	if ValidatorTerminationGracePeriod > ValidatorWaitBuffer {
 		t.Errorf("ValidatorTerminationGracePeriod (%v) should not exceed ValidatorWaitBuffer (%v)",
 			ValidatorTerminationGracePeriod, ValidatorWaitBuffer)
+	}
+	// The orchestrator must outlive the pod's own clean exit, so the wait
+	// buffer has to cover pod-start latency (scheduling + image pull).
+	if ValidatorWaitBuffer < K8sPodReadyTimeout {
+		t.Errorf("ValidatorWaitBuffer (%v) must be at least K8sPodReadyTimeout (%v)",
+			ValidatorWaitBuffer, K8sPodReadyTimeout)
+	}
+	// Kubernetes must be the LOOSEST clock. If the Job deadline is not
+	// strictly beyond the orchestrator's wait, the Job controller can kill and
+	// delete the pod before the orchestrator reads its logs — issue #2473.
+	if ValidatorJobDeadlineHeadroom <= ValidatorWaitBuffer {
+		t.Errorf("ValidatorJobDeadlineHeadroom (%v) must exceed ValidatorWaitBuffer (%v)",
+			ValidatorJobDeadlineHeadroom, ValidatorWaitBuffer)
 	}
 	// Default timeout must be positive and reasonable.
 	if ValidatorDefaultTimeout < 1*time.Minute {

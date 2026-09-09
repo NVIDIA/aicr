@@ -1140,9 +1140,19 @@ const (
 
 // Validator constants.
 const (
-	// ValidatorWaitBuffer is added to the catalog timeout when waiting for Job
-	// completion. Accounts for pod scheduling, image pull, and graceful termination.
-	ValidatorWaitBuffer = 30 * time.Second
+	// ValidatorWaitBuffer is added to the catalog timeout when the orchestrator
+	// waits for Job completion. It must exceed the delay between Job creation
+	// and the validator container's first instruction, or the orchestrator
+	// abandons the wait before the check's own clean exit and reports an
+	// orchestrator timeout in place of the check's verdict.
+	ValidatorWaitBuffer = K8sPodReadyTimeout + ValidatorTerminationGracePeriod
+
+	// ValidatorJobDeadlineHeadroom is the gap between a check's own budget
+	// (AICR_CHECK_TIMEOUT) and the Job's activeDeadlineSeconds. Sized so the
+	// orchestrator is always the tighter clock: on exhaustion the check
+	// self-terminates and its pod stays Failed-but-present for log extraction,
+	// instead of the Job controller deleting it as an active pod (issue #2473).
+	ValidatorJobDeadlineHeadroom = ValidatorWaitBuffer + JobEnvelopeMargin
 
 	// ValidatorDefaultTimeout is the default per-validator timeout if not
 	// specified in the catalog. Used as fallback only.
