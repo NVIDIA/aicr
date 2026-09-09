@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Artifact Registry repository for demo API server images
+# Retained, no longer written to. This mirrored ghcr.io/nvidia/aicrd for the
+# hosted demo API service, which the project stopped publishing; nothing pushes
+# here now. It stays declared because removing it from config would destroy the
+# repository and its images on the next apply.
 resource "google_artifact_registry_repository" "demo" {
   repository_id = "demo"
   project       = var.project_id

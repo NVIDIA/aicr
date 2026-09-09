@@ -2544,6 +2544,52 @@ components:
 	return layered
 }
 
+// requireNodeSelectorIfStorageClassSetFixtureComponent is a synthetic
+// registry component (merged in via a LayeredDataProvider, never a real
+// catalog entry) that isolates
+// TestApplyNodeSchedulingOverrides_RequireNodeSelectorIfStorageClassSet from
+// whichever real components happen to opt into
+// requireNodeSelectorIfStorageClassSet.
+const requireNodeSelectorIfStorageClassSetFixtureComponent = "require-node-selector-if-storage-class-set-fixture"
+
+// requireNodeSelectorIfStorageClassSetFixtureProvider returns a
+// DataProvider whose merged registry.yaml adds
+// requireNodeSelectorIfStorageClassSetFixtureComponent on top of the
+// embedded catalog, so callers get a component with a real, addressable
+// registry entry that never drifts with the real catalog's opt-ins.
+func requireNodeSelectorIfStorageClassSetFixtureProvider(t *testing.T) recipe.DataProvider {
+	t.Helper()
+
+	tmpData := t.TempDir()
+	registryYAML := []byte(`apiVersion: aicr.run/v1alpha2
+kind: ComponentRegistry
+components:
+  - name: ` + requireNodeSelectorIfStorageClassSetFixtureComponent + `
+    displayName: Require Node Selector If Storage Class Set Fixture
+    storageClassPaths:
+      - controller.storage.storageClassName
+    sharedStorageClassPaths:
+      - controller.sharedStorage.storageClassName
+    nodeScheduling:
+      system:
+        nodeSelectorPaths:
+          - controller.podSpec.nodeSelector
+        requireNodeSelectorIfStorageClassSet: true
+`)
+	if err := os.WriteFile(filepath.Join(tmpData, "registry.yaml"), registryYAML, 0o600); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+
+	embedded := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+	layered, err := recipe.NewLayeredDataProvider(embedded, recipe.LayeredProviderConfig{ExternalDir: tmpData})
+	if err != nil {
+		t.Fatalf("NewLayeredDataProvider: %v", err)
+	}
+	recipe.EvictCachedRegistry(layered)
+	t.Cleanup(func() { recipe.EvictCachedRegistry(layered) })
+	return layered
+}
+
 // failingRegistryProvider is a recipe.DataProvider whose ReadFile always
 // errors. It exercises the registry load failure path of functions that
 // call recipe.GetComponentRegistryFor, such as validateRequiredNodeSelectors.
@@ -2743,8 +2789,32 @@ func TestApplyNodeSchedulingOverrides_RequireNodeSelector(t *testing.T) {
 		}
 	})
 
-	// extractComponentValues rejects a --dynamic path that conflicts with
-	// a requireNodeSelector path.
+	t.Run("dynamic override on an ancestor of a required selector path is rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.podSpec": {}}
+		err = b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorFixtureComponent, provider, dynPaths)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted an ancestor of a requireNodeSelector path")
+		}
+	})
+
+	t.Run("dynamic override on a descendant of a required selector path is rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.podSpec.nodeSelector.nodeGroup": {}}
+		err = b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorFixtureComponent, provider, dynPaths)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted a descendant of a requireNodeSelector path")
+		}
+	})
+
 	t.Run("extractComponentValues rejects a dynamic required selector path", func(t *testing.T) {
 		cfg := config.NewConfig(config.WithDynamicValues(map[string][]string{
 			requireNodeSelectorFixtureComponent: {"controller.podSpec.nodeSelector"},
@@ -2768,6 +2838,46 @@ func TestApplyNodeSchedulingOverrides_RequireNodeSelector(t *testing.T) {
 		}
 	})
 
+	t.Run("extractComponentValues rejects a dynamic ancestor of a required selector path", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithDynamicValues(map[string][]string{
+			requireNodeSelectorFixtureComponent: {"controller.podSpec"},
+		}))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{Name: requireNodeSelectorFixtureComponent, Type: "helm"}},
+		}
+		recipeResult.BindDataProvider(provider)
+
+		_, err = b.extractComponentValues(context.Background(), recipeResult)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted an ancestor of a requireNodeSelector path")
+		}
+	})
+
+	t.Run("extractComponentValues rejects a dynamic descendant of a required selector path", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithDynamicValues(map[string][]string{
+			requireNodeSelectorFixtureComponent: {"controller.podSpec.nodeSelector.nodeGroup"},
+		}))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		recipeResult := &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{Name: requireNodeSelectorFixtureComponent, Type: "helm"}},
+		}
+		recipeResult.BindDataProvider(provider)
+
+		_, err = b.extractComponentValues(context.Background(), recipeResult)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted a descendant of a requireNodeSelector path")
+		}
+	})
+
 	// Regression for a third gap: a registry that fails to load used to
 	// make validateRequiredNodeSelectors a silent no-op, the same as a
 	// missing component. A load failure means requireNodeSelector cannot
@@ -2781,6 +2891,183 @@ func TestApplyNodeSchedulingOverrides_RequireNodeSelector(t *testing.T) {
 		values := map[string]any{}
 		if err := b.validateRequiredNodeSelectors(requireNodeSelectorFixtureComponent, values, failingRegistryProvider{}, schedulingPathPolicy{}); err == nil {
 			t.Fatal("expected an error, the component registry failed to load")
+		}
+	})
+}
+
+// TestApplyNodeSchedulingOverrides_RequireNodeSelectorIfStorageClassSet
+// covers requireNodeSelectorIfStorageClassSet (registry.yaml), the
+// conditional counterpart to requireNodeSelector for a chart, like
+// kube-prometheus-stack, whose zone-pinning PVC only exists once a storage
+// class is configured. Real opt-ins are covered by their own
+// component-specific tests; this exercises the mechanism in isolation.
+func TestApplyNodeSchedulingOverrides_RequireNodeSelectorIfStorageClassSet(t *testing.T) {
+	provider := requireNodeSelectorIfStorageClassSetFixtureProvider(t)
+
+	t.Run("no storage class configured stays a silent no-op", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("no storage class was configured; expected no error, got: %v", err)
+		}
+	})
+
+	t.Run("storage class configured without a selector fails closed", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithStorageClass("gp3"))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		err = b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err == nil {
+			t.Fatal("expected an error: --storage-class was set with no --system-node-selector")
+		}
+		if !strings.Contains(err.Error(), "system-node-selector") {
+			t.Errorf("error should name the missing flag, got: %v", err)
+		}
+	})
+
+	t.Run("storage class and selector both configured satisfies the requirement", func(t *testing.T) {
+		cfg := config.NewConfig(
+			config.WithStorageClass("gp3"),
+			config.WithSystemNodeSelector(map[string]string{"nodeGroup": "system-cpu"}),
+		)
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("unexpected error with both flags set: %v", err)
+		}
+	})
+
+	// applySharedStorageClassOverride injects --shared-storage-class into
+	// SharedStorageClassPaths, which requireNodeSelectorIfStorageClassSet
+	// evaluates to decide whether to enforce a selector.
+	t.Run("shared storage class configured without a selector fails closed", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithSharedStorageClass("efs-sc"))
+		b, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if sharedErr := b.applySharedStorageClassOverride(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider); sharedErr != nil {
+			t.Fatalf("applySharedStorageClassOverride() error = %v", sharedErr)
+		}
+		err = b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err == nil {
+			t.Fatal("expected an error: --shared-storage-class was set with no --system-node-selector")
+		}
+		if !strings.Contains(err.Error(), "system-node-selector") {
+			t.Errorf("error should name the missing flag, got: %v", err)
+		}
+	})
+
+	// A recipe overlay/default values file can set the storage class name
+	// directly, with no --storage-class flag at all. The condition reads
+	// the resolved value, not just the CLI flag, so this must still fail
+	// closed without a selector.
+	t.Run("overlay-hardcoded storage class without a selector fails closed", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{
+			"controller": map[string]any{
+				"storage": map[string]any{"storageClassName": "hardcoded-class"},
+			},
+		}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{}); err == nil {
+			t.Fatal("expected an error: an overlay-set storage class with no selector is still the unpinned hazard")
+		}
+	})
+
+	// A blank string is the value an operator gets from a --set override
+	// or overlay field left empty; it carries no storage class and must
+	// not be misread as configured.
+	t.Run("blank overlay storage class value is treated as unset", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{
+			"controller": map[string]any{
+				"storage": map[string]any{"storageClassName": "   "},
+			},
+		}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{}); err != nil {
+			t.Fatalf("a blank storage class value should not activate the requirement, got: %v", err)
+		}
+	})
+
+	// A malformed non-string value at the storage class path (e.g. a
+	// misconfigured overlay) must fail closed rather than silently
+	// skip the requirement.
+	t.Run("non-string overlay storage class value fails closed", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		values := map[string]any{
+			"controller": map[string]any{
+				"storage": map[string]any{"storageClassName": true},
+			},
+		}
+		b.applyNodeSchedulingOverrides(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{})
+		if err := b.validateRequiredNodeSelectors(requireNodeSelectorIfStorageClassSetFixtureComponent, values, provider, schedulingPathPolicy{}); err == nil {
+			t.Fatal("expected an error: a non-string storage class value should still activate the requirement")
+		}
+	})
+
+	// Regression for the same --dynamic bypass covered for the
+	// unconditional flag, rejected regardless of whether a storage class
+	// is configured now, since one could be added later without
+	// rebuilding the bundle.
+	t.Run("dynamic override on a conditionally required selector path is rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.podSpec.nodeSelector": {}}
+		err = b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorIfStorageClassSetFixtureComponent, provider, dynPaths)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted a requireNodeSelectorIfStorageClassSet path")
+		}
+	})
+
+	// A --dynamic override on the storage-class path removes the value
+	// componentHasConfiguredStorageClass reads, letting an operator defer
+	// the storage class to install time and bypass the requirement
+	// entirely.
+	t.Run("dynamic override on the conditioning storage class path is rejected", func(t *testing.T) {
+		b, err := New(WithConfig(config.NewConfig()))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+
+		dynPaths := map[string]struct{}{"controller.storage.storageClassName": {}}
+		err = b.rejectDynamicRequiredNodeSelectorPaths(requireNodeSelectorIfStorageClassSetFixtureComponent, provider, dynPaths)
+		if err == nil {
+			t.Fatal("expected an error, --dynamic targeted the storage class path that conditions requireNodeSelectorIfStorageClassSet")
 		}
 	})
 }

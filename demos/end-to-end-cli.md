@@ -48,22 +48,24 @@ aicr recipe --service eks --accelerator h100 --os ubuntu \
 
 ![data flow](images/recipe.png)
 
+The API examples below talk to a self-hosted `aicrd`. Start one first:
+
+```shell
+docker run -p 8080:8080 ghcr.io/nvidia/aicrd:latest
+```
+
 Recipe from API (GET):
 
 ```shell
-curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=gb200&intent=training" | jq .
+curl -s "http://localhost:8080/v1/recipe?service=eks&accelerator=gb200&intent=training" | jq .
 ```
 
 Recipe from API (POST with criteria body):
 
 ```shell
-curl -s -X POST "https://aicr-demo.dgxc.io/v1/recipe" \
+curl -s -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
-  -d 'kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: gb200-training
-spec:
+  -d 'criteria:
   service: eks
   accelerator: gb200
   intent: training' | jq .
@@ -72,7 +74,7 @@ spec:
 Allowed list support in self-hosted API:
 
 ```shell
-curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=l40&intent=training" | jq .
+curl -s "http://localhost:8080/v1/recipe?service=eks&accelerator=l40&intent=training" | jq .
 ```
 
 ## Snapshot
@@ -132,9 +134,14 @@ aicr bundle \
 Bundle from Recipe using API:
 
 ```shell
-curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=h100&intent=training" | \
-  curl -X POST "https://aicr-demo.dgxc.io/v1/bundle?deployer=argocd" \
-    -H "Content-Type: application/json" -d @- -o bundle.zip
+# Sequential rather than piped: -f stops on an HTTP error so a 4xx recipe body
+# is never posted, and each request stays individually replayable by the docs
+# gate in pkg/server/docs_examples_test.go.
+set -eu
+curl -fsS -o recipe.json \
+  "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training"
+curl -fsS -X POST "http://localhost:8080/v1/bundle?deployer=argocd" \
+  -H "Content-Type: application/json" -d @recipe.json -o bundle.zip
 ```
 
 Navigate into the bundle:
