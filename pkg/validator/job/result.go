@@ -186,7 +186,7 @@ func (d *Deployer) missingPodOutcome(ctx context.Context, findErr error) (exitCo
 		// controller deletion would name a false root cause for the other two.
 		return validatorExitFailed, boundTerminationMsg(fmt.Sprintf(
 			"validator Job did not complete within its %s Job deadline (check budget %s); no pod remains for it, so its logs are unavailable (Job condition Failed/%s: %s)",
-			enforcedDeadline(job, d.config.Entry.Timeout), effectiveTimeout(d.config.Entry.Timeout),
+			enforcedDeadline(job, d.config.Entry.Timeout), truncateToSeconds(effectiveTimeout(d.config.Entry.Timeout)),
 			cond.Reason, detail),
 			defaults.ValidatorMaxTerminationMsgBytes)
 	}
@@ -342,6 +342,15 @@ func effectiveTimeout(configured time.Duration) time.Duration {
 		return defaults.ValidatorDefaultTimeout
 	}
 	return configured
+}
+
+// truncateToSeconds drops d's sub-second component. Both activeDeadlineSeconds
+// and AICR_CHECK_TIMEOUT (pkg/validator/v1/job_plan.go) are whole-second int64
+// values, so any duration reported alongside them must match that precision —
+// otherwise the message names a sub-second component the check was never
+// actually granted.
+func truncateToSeconds(d time.Duration) time.Duration {
+	return time.Duration(int64(d.Seconds())) * time.Second
 }
 
 // enforcedDeadline is the deadline Kubernetes actually applied, as opposed to
