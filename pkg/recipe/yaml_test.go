@@ -1069,10 +1069,13 @@ To skip this validation (not recommended), add:
 // TestManifestHelmHooksRequired cannot catch either case — it stops at the
 // opt-out, and is satisfied by hooks when the opt-out is gone.
 func TestManifestSkipHookOptOutExcludesHooks(t *testing.T) {
-	helmHookPattern := regexp.MustCompile(`(?m)^\s*["']?helm\.sh/hook[\w-]*["']?:\s*\S`)
+	// No line anchor (matches flow-style YAML too); [ \t]* not \s* so a
+	// match can't cross a newline onto an unrelated annotation.
+	helmHookPattern := regexp.MustCompile(`["']?helm\.sh/hook[\w-]*["']?:[ \t]*\S`)
 	skipValidationPattern := regexp.MustCompile(`(?m)["']?aicr/skip-hook-validation["']?:\s*["']?true["']?`)
-	// Deleting these dismantles live networking. Extend by kind, not by filename.
-	neverHookKindPattern := regexp.MustCompile(`(?m)^kind:\s*(NicClusterPolicy|NodeFeatureRule)\s*$`)
+	// Deleting these dismantles live networking. Extend by kind, not by
+	// filename. Tolerates a quoted kind value and a trailing comment.
+	neverHookKindPattern := regexp.MustCompile(`(?m)^kind:\s*["']?(NicClusterPolicy|NodeFeatureRule)["']?\s*(#.*)?$`)
 
 	manifestFiles := collectManifestFiles(t)
 	if len(manifestFiles) == 0 {
