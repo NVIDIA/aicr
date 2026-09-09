@@ -532,3 +532,81 @@ func TestValidateReplaces(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateDistinctBoundaries(t *testing.T) {
+	mk := func(from, to string) Transition {
+		x := tr(nil)
+		x.From, x.To = from, to
+		return x
+	}
+	tests := []struct {
+		name    string
+		trs     []Transition
+		wantErr bool
+	}{
+		{
+			"ADR block-spanning pair is legitimate",
+			[]Transition{
+				mk("<0.18.0", ">=0.18.0 <0.20.0"),
+				mk("<0.20.0", ">=0.20.0 <=0.20.0"),
+			},
+			false,
+		},
+		{
+			"exact duplicate transitions",
+			[]Transition{
+				mk("<0.18.0", ">=0.18.0 <=0.18.0"),
+				mk("<0.18.0", ">=0.18.0 <=0.18.0"),
+			},
+			true,
+		},
+		{
+			"same boundary reached by different from ranges",
+			[]Transition{
+				mk("<0.18.0", ">=0.18.0 <=0.18.0"),
+				mk("<0.17.0", ">=0.18.0 <=0.18.0"),
+			},
+			true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set := Set{"c": &ComponentUpgrades{Component: "c", Transitions: tt.trs}}
+			comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "v0.20.0"}}
+			err := set.Validate(comps)
+			got := err != nil && strings.Contains(err.Error(), "same boundary")
+			if got != tt.wantErr {
+				t.Fatalf("duplicate-boundary violation = %v, want %v (err: %v)", got, tt.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestValidateHooks(t *testing.T) {
+	tests := []struct {
+		name     string
+		hooks    []Hook
+		wantErr  bool
+		wantText string
+	}{
+		{"pre-upgrade", []Hook{{File: "manifests/migrations/a.yaml", Phase: "pre-upgrade"}}, false, ""},
+		{"post-upgrade", []Hook{{File: "manifests/migrations/a.yaml", Phase: "post-upgrade"}}, false, ""},
+		{"empty hook", []Hook{{}}, true, "phase"},
+		{"typo'd phase", []Hook{{File: "manifests/migrations/a.yaml", Phase: "pre-upgrde"}}, true, "phase"},
+		{"missing file", []Hook{{Phase: "pre-upgrade"}}, true, "file"},
+		{"absolute path", []Hook{{File: "/etc/passwd", Phase: "pre-upgrade"}}, true, "must be a local path"},
+		{"traversal", []Hook{{File: "../../etc/passwd", Phase: "pre-upgrade"}}, true, "must be a local path"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set, comps := rec("v0.18.0", tr(func(x *Transition) { x.Hooks = tt.hooks }))
+			err := set.Validate(comps)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), tt.wantText) {
+				t.Errorf("error %q does not mention %q", err.Error(), tt.wantText)
+			}
+		})
+	}
+}

@@ -16,6 +16,7 @@ package upgrade
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -59,8 +60,10 @@ func validateRecord(u *ComponentUpgrades, pin string) []string {
 		v = append(v, checkStepGroups(where, &u.Transitions[i])...)
 		v = append(v, checkPinCeiling(where, &u.Transitions[i], pin)...)
 		v = append(v, checkDirectional(where, &u.Transitions[i])...)
+		v = append(v, checkHooks(where, &u.Transitions[i])...)
 	}
 	v = append(v, checkCoverage(u.Component, u.Transitions, pin)...)
+	v = append(v, checkDistinctBoundaries(u.Component, u.Transitions)...)
 	v = append(v, checkReplaces(u.Component, u.Replaces)...)
 	return v
 }
@@ -405,4 +408,59 @@ func contiguous(upper, lower bound) bool {
 		return false
 	}
 	return upper.inclusive || lower.inclusive
+}
+
+// checkDistinctBoundaries implements rule 8, an addition to ADR-021. A
+// boundary is identified by the floor its `to` names, so two transitions
+// sharing that floor describe the same boundary twice. ADR-021's matcher
+// blocks any jump where more than one record applies, so a duplicate silently
+// converts that boundary's crossings from manual to blocked.
+//
+// Overlapping `from` domains stay legal on purpose: a jump spanning two real
+// blocks must resolve to blocked, which is the ADR's design.
+func checkDistinctBoundaries(component string, trs []Transition) []string {
+	seen := make(map[string]int, len(trs))
+	var v []string
+	for i := range trs {
+		b, err := parseBounds(trs[i].To, prereleaseAllowed)
+		if err != nil || b.lower.unbounded {
+			continue // reported elsewhere
+		}
+		key := b.lower.ver.String()
+		if !b.lower.inclusive {
+			key += "-exclusive"
+		}
+		if prev, dup := seen[key]; dup {
+			v = append(v, fmt.Sprintf(
+				"component %q transitions %d and %d describe the same boundary (to starts at %s); a jump crossing it would resolve to blocked rather than the authored verdict",
+				component, prev, i, key))
+			continue
+		}
+		seen[key] = i
+	}
+	return v
+}
+
+// checkHooks implements rule 9, an addition to ADR-021. Hooks are the
+// deliberate exception that lets a safe verdict carry work, so an unvalidated
+// phase silently doing nothing is worse than a rejected record. file is gated
+// with filepath.IsLocal rather than a substring scan for "..", per CLAUDE.md.
+func checkHooks(where string, t *Transition) []string {
+	var v []string
+	for i, h := range t.Hooks {
+		switch h.Phase {
+		case "pre-upgrade", "post-upgrade":
+		default:
+			v = append(v, fmt.Sprintf(
+				"%s hook %d has phase %q, expected %q or %q", where, i, h.Phase, "pre-upgrade", "post-upgrade"))
+		}
+		switch {
+		case h.File == "":
+			v = append(v, fmt.Sprintf("%s hook %d has no file", where, i))
+		case !filepath.IsLocal(h.File):
+			v = append(v, fmt.Sprintf(
+				"%s hook %d file %q must be a local path under the bundle", where, i, h.File))
+		}
+	}
+	return v
 }
