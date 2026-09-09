@@ -1033,6 +1033,40 @@ func TestIsRuntimeRequiredTaint(t *testing.T) {
 	}
 }
 
+// TestVerifyGPUReadinessSignalsPreservesOrderConcurrently pins the two
+// properties concurrency must not break: every signal reports (one failure never
+// truncates its siblings), and failures come back in the fixed nodewright → DRA
+// → RDMA order the firstStructuredErr precedence depends on.
+func TestVerifyGPUReadinessSignalsPreservesOrderConcurrently(t *testing.T) {
+	t.Parallel()
+
+	refs := []recipe.ComponentRef{
+		{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
+		{Name: draDriverComponent, Namespace: "nvidia-dra-driver"},
+	}
+	// The Nodewright GroupVersion must be registered (extraRegistered) or the
+	// CRD-not-registered skip (#607) returns nil before the signal ever fails —
+	// this proves both signals report, not just that one CRD is absent.
+	ctx := newDeploymentTestContextWithDiscovery(t, nil, nil, []schema.GroupVersion{nodewrightGVR.GroupVersion()}, nil, refs)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel() // force every probe's poll loop to exit on its first iteration
+	ctx.Ctx = canceled
+
+	failures, firstStructured := verifyGPUReadinessSignals(ctx, refs)
+	if len(failures) != 2 {
+		t.Fatalf("got %d failures, want 2 — every enabled signal must report", len(failures))
+	}
+	if !strings.Contains(failures[0], "Nodewright") {
+		t.Errorf("failures[0] = %q, want the nodewright signal first", failures[0])
+	}
+	// firstStructuredErr precedence is fixed-order, not completion-order: it
+	// must resolve to the nodewright signal (index 0) even though both probes
+	// ran concurrently and either could have finished first.
+	if firstStructured == nil || firstStructured.Error() != failures[0] {
+		t.Errorf("firstStructured = %v, want it to match failures[0] (%q)", firstStructured, failures[0])
+	}
+}
+
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

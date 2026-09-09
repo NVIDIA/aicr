@@ -470,24 +470,64 @@ func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentR
 		}
 	}
 
+	// Build the probe list in a FIXED order. capture() below is applied to the
+	// results in that same order after the fan-out joins, so firstStructured
+	// precedence is identical to the previous serial implementation.
+	var probes []func() error
+
 	if ref, ok := findEnabledComponent(refs, nodewrightCustomizationsComponent); ok {
-		capture(verifyNodewrightReady(ctx, ref))
+		// Warm ctx.DynamicClient before the fan-out: getDynamicClient writes it
+		// on the SHARED Context, which is not safe from a goroutine. Only the
+		// nodewright probe reaches it, so warming it only when that component is
+		// enabled keeps Contexts without a RESTConfig (the RDMA dispatch tests)
+		// off this path entirely. A failure here is deliberately ignored — the
+		// probe calls getDynamicClient again and surfaces the identical error,
+		// and that call returns before the write, so no race is introduced.
+		_, _ = getDynamicClient(ctx)
+		probes = append(probes, func() error { return verifyNodewrightReady(ctx, ref) })
 	}
 
 	if ref, ok := findEnabledComponent(refs, draDriverComponent); ok {
-		capture(verifyDRAKubeletPluginReady(ctx, ref.Namespace))
+		probes = append(probes, func() error { return verifyDRAKubeletPluginReady(ctx, ref.Namespace) })
 	}
 
 	if ref, ok := findEnabledComponent(refs, networkOperatorComponent); ok && recipeDeclaresRDMAFabric(ref) {
-		// The polled resource is derived from the recipe's own NicClusterPolicy
-		// manifest (rdma/hca_shared_devices_a on AKS, nvidia.com/mlnxnics on OKE)
-		// so the gate waits for exactly what this recipe's fabric advertises. A
-		// derivation failure fails the gate closed — never "skip the fabric".
-		if fabricResource, ferr := rdmaFabricResource(ctx.Ctx, ref); ferr != nil {
-			capture(ferr)
-		} else {
-			capture(verifyRDMAFabricReady(ctx, fabricResource))
-		}
+		probes = append(probes, func() error {
+			// The polled resource is derived from the recipe's own
+			// NicClusterPolicy manifest (rdma/hca_shared_devices_a on AKS,
+			// nvidia.com/mlnxnics on OKE) so the gate waits for exactly what
+			// this recipe's fabric advertises. A derivation failure fails the
+			// gate closed — never "skip the fabric".
+			fabricResource, ferr := rdmaFabricResource(ctx.Ctx, ref)
+			if ferr != nil {
+				return ferr
+			}
+			return verifyRDMAFabricReady(ctx, fabricResource)
+		})
+	}
+
+	// Plain Group, not WithContext: every probe takes *validators.Context and
+	// reads ctx.Ctx directly (pollUntilStable), so a derived gctx would be built
+	// and discarded — the same reasoning as the Skyhook-status/taint-scan
+	// errgroup fan-out inside verifyNodewrightReady's own poll probe elsewhere
+	// in this file. Each goroutine writes its result into its own slice index
+	// and always returns nil, so one unhealthy signal never stops the others
+	// from running, and results are read back in fixed index order after
+	// Wait() — never in completion order.
+	results := make([]error, len(probes))
+	g := new(errgroup.Group)
+	for i, probe := range probes {
+		g.Go(func() error {
+			results[i] = probe()
+			return nil
+		})
+	}
+	if err := g.Wait(); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "gpu readiness fan-out failed", err)
+	}
+
+	for _, err := range results {
+		capture(err)
 	}
 
 	return failures, firstStructured
