@@ -300,7 +300,10 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/nvidia/nodewright/charts
       defaultChart: nodewright
-      defaultVersion: v0.18.0
+      # v0.18.0 renames Skyhook to NodeWright and writes status only on the new
+      # kind; do not bump past v0.17.x until the upgrade guidance (design 021)
+      # lands. See #2595.
+      defaultVersion: v0.17.1
       defaultNamespace: skyhook
     nodeScheduling:
       nodeCountPaths:

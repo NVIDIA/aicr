@@ -35,3 +35,8 @@ controllerManager:
       requests:
         cpu: 1000m
         memory: 2000Mi
+
+webhook:
+  # The chart default is the short name alpine/kubectl, which cri-o on OKE
+  # rejects (NVIDIA/nodewright#481). Tag and digest stay at the chart's pins.
+  removalImage: docker.io/alpine/kubectl

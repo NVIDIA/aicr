@@ -68,22 +68,67 @@ normalized_candidate() {
     printf '%s/%s\n' "${normalized}" "${segments[$last_index]}"
 }
 
+# Repositories that moved after their Go module path was already fixed. A module
+# path is immutable, so go-licenses keeps deriving the license URL from the
+# original host path; when the project transfers the repo and GitHub serves no
+# redirect, that URL 404s even though the license itself never changed. Remap the
+# dead path to the live one so the notices cite genuine upstream provenance
+# rather than a copy committed into this repo.
+#
+# Format: <old-repo-path>|<new-repo-path>
+#
+# github.com/google/cel-go: the CEL project moved out of the google org to its
+# own (see the sibling cel.dev/expr module); github.com/google/cel-go returns a
+# hard 404, not a redirect, so nothing upstream rescues the emitted URL.
+MOVED_REPOSITORIES=(
+    "github.com/google/cel-go|github.com/cel-expr/cel-go"
+)
+
+remapped_candidate() {
+    local url=$1
+    local entry old new
+    for entry in "${MOVED_REPOSITORIES[@]}"; do
+        # Trailing slashes keep a prefix from matching a longer sibling repo
+        # (a cel-go entry must not rewrite a cel-go-extra URL).
+        old="${entry%%|*}/"
+        new="${entry##*|}/"
+        if [[ "${url}" == *"${old}"* ]]; then
+            printf '%s\n' "${url/"${old}"/"${new}"}"
+            return
+        fi
+    done
+    printf '%s\n' "${url}"
+}
+
+# Every URL worth probing for one CSV row, best-provenance first and deduplicated
+# while preserving that order. Normalization is applied to the remapped URL too,
+# so a moved repo that also needs the nested-module fixup is still resolvable.
+url_candidates() {
+    local url=$1
+    local remapped
+    remapped=$(remapped_candidate "${url}")
+    printf '%s\n' \
+        "${url}" \
+        "$(normalized_candidate "${url}")" \
+        "${remapped}" \
+        "$(normalized_candidate "${remapped}")" \
+        | awk '!seen[$0]++'
+}
+
+# Status lookup for an already-probed URL. Empty means curl reported nothing.
+url_status() {
+    awk -F '\t' -v url="$1" '$1 == url { print $2; exit }' "${CANDIDATE_STATUS}"
+}
+
 TMP=$(mktemp -d)
 trap 'rm -rf "${TMP}"' EXIT
-readonly CURRENT_URLS="${TMP}/current-urls"
-readonly NORMALIZED_URLS="${TMP}/normalized-urls"
-readonly CURRENT_STATUS="${TMP}/current-status"
-readonly NORMALIZED_STATUS="${TMP}/normalized-status"
+readonly CANDIDATE_URLS="${TMP}/candidate-urls"
+readonly CANDIDATE_STATUS="${TMP}/candidate-status"
 
-: > "${CURRENT_URLS}"
-: > "${NORMALIZED_URLS}"
+: > "${CANDIDATE_URLS}"
 while IFS=, read -r package url license; do
     [[ -z "${package}" ]] && continue
-    candidate=$(normalized_candidate "${url}")
-    printf '%s\n' "${url}" >> "${CURRENT_URLS}"
-    if [[ "${candidate}" != "${url}" ]]; then
-        printf '%s\n' "${candidate}" >> "${NORMALIZED_URLS}"
-    fi
+    url_candidates "${url}" >> "${CANDIDATE_URLS}"
 done < "${INPUT}"
 
 check_urls() {
@@ -116,31 +161,40 @@ check_urls() {
     fi
 }
 
-check_urls "${CURRENT_URLS}" "${CURRENT_STATUS}"
-check_urls "${NORMALIZED_URLS}" "${NORMALIZED_STATUS}"
+check_urls "${CANDIDATE_URLS}" "${CANDIDATE_STATUS}"
 
+# Unreachable packages are collected rather than fatal on the first one. curl has
+# already probed every candidate by this point, so reporting only the first
+# failure hides the rest behind another full release cycle.
+unreachable=0
 while IFS=, read -r package url license; do
     [[ -z "${package}" ]] && continue
-    candidate=$(normalized_candidate "${url}")
-    current_code=$(awk -F '\t' -v url="${url}" '$1 == url { print $2; exit }' "${CURRENT_STATUS}")
-    if [[ "${current_code}" == "200" ]]; then
-        printf '%s,%s,%s\n' "${package}" "${url}" "${license}"
+
+    resolved=""
+    while IFS= read -r candidate; do
+        if [[ "$(url_status "${candidate}")" == "200" ]]; then
+            resolved=${candidate}
+            break
+        fi
+    done < <(url_candidates "${url}")
+
+    if [[ -n "${resolved}" ]]; then
+        printf '%s,%s,%s\n' "${package}" "${resolved}" "${license}"
         continue
     fi
 
-    normalized_code=""
-    if [[ "${candidate}" != "${url}" ]]; then
-        normalized_code=$(awk -F '\t' -v url="${candidate}" '$1 == url { print $2; exit }' "${NORMALIZED_STATUS}")
-        if [[ "${normalized_code}" == "200" ]]; then
-            printf '%s,%s,%s\n' "${package}" "${candidate}" "${license}"
-            continue
-        fi
-    fi
-
-    echo "ERROR: no reachable license source URL for ${package}:" >&2
-    echo "  emitted (${current_code:-no response}): ${url}" >&2
-    if [[ "${candidate}" != "${url}" ]]; then
-        echo "  normalized (${normalized_code:-no response}): ${candidate}" >&2
-    fi
-    exit 1
+    unreachable=$((unreachable + 1))
+    {
+        echo "ERROR: no reachable license source URL for ${package}:"
+        while IFS= read -r candidate; do
+            code=$(url_status "${candidate}")
+            echo "  tried (${code:-no response}): ${candidate}"
+        done < <(url_candidates "${url}")
+    } >&2
 done < "${INPUT}"
+
+if (( unreachable > 0 )); then
+    echo "ERROR: ${unreachable} package(s) have no reachable license source URL." >&2
+    echo "If a repository moved, add it to MOVED_REPOSITORIES in $0." >&2
+    exit 1
+fi
