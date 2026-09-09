@@ -1785,6 +1785,14 @@ func TestCheckExpectedResourcesFailsClosedOnExhaustedBudget(t *testing.T) {
 	if !strings.Contains(err.Error(), "budget exhausted") {
 		t.Errorf("error = %q, want it to name budget exhaustion", err.Error())
 	}
+	// verifyNamespacesActive runs before the enabledRefs loop and, against the
+	// nil-kubeObjects fake clientset, produces exactly one NotFound failure for
+	// app-ns before the loop's own ctx.Done() check trips budgetExhausted. This
+	// pins that collected failures survive into the fail-closed report rather
+	// than being discarded — the commit's headline behavior.
+	if !strings.Contains(err.Error(), "1 issue(s) collected") {
+		t.Errorf("error = %q, want it to report 1 issue(s) collected", err.Error())
+	}
 }
 
 // TestMarkUndispatched proves a component queued for chainsaw but never

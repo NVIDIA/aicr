@@ -197,11 +197,17 @@ func pollUntilStable(ctx *validators.Context, label string, probe func() error, 
 // checkExpectedResources verifies that all expected Kubernetes resources declared
 // in the validation's componentRefs exist and are healthy in the live cluster.
 //
-// The two ctx.Done() checks (expected-resources iteration, chainsaw dispatch)
-// never return early: they record the stage in budgetExhausted, mark
-// undispatched work, print the accumulated failures, and fail closed (issue
-// #2473). gatedHealthCheckSuppressed and buildResourceFetcher still return
-// directly on error — both are hard errors, not budget-exhaustion handling.
+// The two ctx.Done() checks (expected-resources iteration, GPU readiness /
+// chainsaw dispatch) never return early: they record the stage in
+// budgetExhausted, mark undispatched work, print the accumulated failures,
+// and fail closed (issue #2473). "Mark undispatched work" covers only the
+// chainsaw asserts already queued when the loop broke (via markUndispatched);
+// enabledRefs entries the loop never reached produce no line at all. The
+// second check is unconditional — it does not require any chainsaw asserts
+// to have been queued, since verifyGPUReadinessSignals alone can exhaust the
+// budget on a recipe that queued none. gatedHealthCheckSuppressed and
+// buildResourceFetcher still return directly on error — both are hard
+// errors, not budget-exhaustion handling.
 // gatedHealthCheckSuppressed's error can itself be cancellation-induced (it
 // threads ctx.Ctx into a Helm render), and that path discards whatever
 // failures were already collected under an ErrCodeInternal wrap rather than
@@ -300,16 +306,14 @@ func checkExpectedResources(ctx *validators.Context) error {
 		firstStructuredErr = gpuStructuredErr
 	}
 
-	if len(chainsawAsserts) > 0 && budgetExhausted == "" {
-		// Bail out before paying chainsaw startup cost if the caller
-		// already canceled. chainsaw.Run honors ctx mid-flight too,
-		// but a short-circuit here skips fetcher construction and
-		// log noise on a doomed run.
-		select {
-		case <-ctx.Ctx.Done():
-			budgetExhausted = "chainsaw dispatch"
-		default:
-		}
+	// This probe must run regardless of whether any asserts were queued:
+	// verifyGPUReadinessSignals above can itself consume the remaining budget
+	// on a recipe whose enabled refs queued no chainsaw asserts, and skipping
+	// the check in that case is exactly the fail-open issue #2473 closed
+	// elsewhere in this function — an exhausted context with zero collected
+	// failures must still fail closed, not fall through to the healthy return.
+	if budgetExhausted == "" && ctx.Ctx.Err() != nil {
+		budgetExhausted = "GPU readiness / chainsaw dispatch"
 	}
 	if budgetExhausted != "" {
 		failures = markUndispatched(failures, chainsawAsserts, budgetExhausted)
@@ -431,12 +435,13 @@ func verifyNamespacesActive(ctx *validators.Context, refs []recipe.ComponentRef)
 	return failures
 }
 
-// verifyGPUReadinessSignals runs the two Go-resident deep checks
-// introduced by issue #611. Returns the human-readable failure strings
-// plus the first *errors.StructuredError encountered across all checks
-// so the caller can propagate the original error code (e.g.,
-// ErrCodeInternal from a discovery/RBAC failure) instead of flattening
-// it into the generic ErrCodeNotFound summary — per PR #1235 review.
+// verifyGPUReadinessSignals runs the three Go-resident deep checks (nodewright,
+// DRA kubelet-plugin, RDMA fabric) introduced by issue #611. Returns the
+// human-readable failure strings plus the first *errors.StructuredError
+// encountered across all checks so the caller can propagate the original
+// error code (e.g., ErrCodeInternal from a discovery/RBAC failure) instead of
+// flattening it into the generic ErrCodeNotFound summary — per PR #1235
+// review.
 //
 // Migration disposition (per #1220 plan):
 //
@@ -522,9 +527,9 @@ func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentR
 			return nil
 		})
 	}
-	if err := g.Wait(); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "gpu readiness fan-out failed", err)
-	}
+	// Goroutines never return an error (results are recorded per-index), so Wait
+	// only blocks until every probe completes.
+	_ = g.Wait()
 
 	for _, err := range results {
 		capture(err)
