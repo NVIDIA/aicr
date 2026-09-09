@@ -26,11 +26,10 @@ kind: NicClusterPolicy
 metadata:
   name: nic-cluster-policy
   annotations:
-    # Not a Helm hook: hook-delete-policy would delete the live NCP on upgrade,
-    # tearing down OFED/RDMA pods. No explicit ordering vs. the sibling
-    # nfd-network-rule.yaml is enforced; if NCP applies first its
-    # nodeAffinity-gated DaemonSets briefly match no nodes, and Kubernetes'
-    # DaemonSet controller re-evaluates nodeAffinity once NFD's labels land.
+    # Not a Helm hook: hook-delete-policy would delete the live NCP on
+    # upgrade, tearing down the RDMA shared device plugin DaemonSet. This is
+    # the only network-operator manifest in this overlay — no sibling to
+    # order against.
     aicr/skip-hook-validation: "true"
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
