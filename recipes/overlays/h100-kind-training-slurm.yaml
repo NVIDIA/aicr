@@ -88,35 +88,56 @@ spec:
         - slinky-slurm-operator-crds
         - slinky-slurm
       overrides:
+        # The `test` provider hands the engine a ready-made instance map, and
+        # the engine uses a non-empty map as-is rather than resolving pod and
+        # node names, so no real name was ever looked up and the leaf only
+        # asserted an embedded fixture's own shape. `dra` derives the topology
+        # from live Node labels instead, which makes the slinky engine resolve
+        # the actual slurmd pods.
         provider:
-          name: test
+          name: dra
           params:
-            # Bare filename only: the v1.0.0 test provider's model loader
-            # resolves this against topograph's embedded tests/models/*.yaml
-            # (compiled into the binary) and rejects any path component —
-            # a mounted ConfigMap file cannot be referenced this way. Use one
-            # of topograph's built-in fixtures (tests/models/small-tree.yaml
-            # upstream) instead of a custom mounted model.
-            modelFileName: small-tree.yaml
+            accelerator:
+              source: kubernetes-label
+              kubernetesLabel:
+                key: nvidia.com/gpu.clique
         engine:
           name: slinky
+          params:
+            # Block, not tree: the clique label yields flat accelerator
+            # domains with no switch hierarchy to express. `TopologyPlugin`
+            # on slinky-slurm below moves with this, because slurmctld fatals
+            # with "unrecognized key" when the plugin and the topology.conf
+            # body disagree.
+            plugin: topology/block
+            # A block holds two Slurm nodes. Slurm nodes are slurmd pods, NOT
+            # the Kubernetes nodes underneath them, and this leaf ships
+            # nodesets.slinky.replicas: 1 (components/slinky-slurm/
+            # values.yaml), so as shipped there is one pod, one domain, and no
+            # block can be filled. A consumer that wants the two-clique
+            # topology has to raise the replica count itself. This value
+            # describes that intended configuration, not the leaf's own
+            # default.
+            blockSizes: [2]
+            # The engine reads its own key here rather than reusing
+            # provider.accelerator: the chart schema gives it no default, and
+            # slinky drops label-less nodes from the block domains and fails
+            # once none remain.
+            acceleratorDomainSourceLabel: nvidia.com/gpu.clique
         # Disable the node-data-broker in the kind environment. nodeObserver
         # automatically skips waiting on it when nodeDataBroker.enabled is false.
         nodeDataBroker:
           enabled: false
+        # Deliberate, not leftover debugging: one level above the chart
+        # default of 3. This leaf exists for CI, a CI run gets a single pass
+        # at an ephemeral cluster's logs, and the per-node domain assignment
+        # is what tells you why a topology failed to resolve. It renders only
+        # as -v=4 on the container args and cannot affect resolution.
+        verbosity: 4
       # Inline override of the registry assertFile (checks/slinky-topograph/
       # health-check.yaml): this leaf disables node-data-broker, so the
-      # DaemonSet step must not run, and the exact topology.conf content
-      # below pins the small-tree.yaml fixture's own shape — it does NOT
-      # validate resolution of the leaf's real one-replica worker
-      # (slinky-0). Topograph's test provider always returns its fixture
-      # data as a ready-made instance map, and when the engine already has
-      # a non-empty instance map it uses that as-is instead of resolving
-      # real pod/node names — so the real slinky-0 pod is never looked up
-      # here. Node names (I21, I22, I25, I34-I36) are the fixture's
-      # instance IDs; cluset compacts them to I[21-22,25] and I[34-36].
-      # Switch order (S2 before S3) is deterministic (sorted breadth-first
-      # traversal of the fixture tree).
+      # DaemonSet step must not run, and it runs the topology/block plugin,
+      # so the registry check's SwitchName assertion does not describe it.
       healthCheckAsserts: |
         apiVersion: chainsaw.kyverno.io/v1alpha1
         kind: Test
@@ -206,6 +227,65 @@ spec:
                       status:
                         ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
             - name: validate-topology-configmap
+              # THE ACCEPTANCE ASSERTION (#2358), and the reason the one it
+              # replaces could not fail for the right reason. That one pinned
+              # the exact content of topograph's own embedded small-tree.yaml
+              # fixture -- the node names I21, I22, I25 and I34-I36 are that
+              # fixture's instance IDs, and they name a node on no cluster.
+              # PR #2254 deleted this leaf's topology fixture while bumping
+              # topograph and nothing noticed, because an assertion tied to
+              # the tool's own sample answer passes whatever the tool emits.
+              #
+              # What is asserted instead is the SHAPE topograph must produce
+              # for this leaf, against the key it patches after every
+              # successful sync:
+              #
+              #   (# <block>=<domain>
+              #    BlockName=<block> Nodes=slinky-<hostlist>)+
+              #   BlockSizes=<n>
+              #
+              # Every clause carries weight:
+              #
+              #   Nodes=slinky-       the Slurm nodes are this leaf's own
+              #                       slurmd pods. A Slurm node is a NodeSet
+              #                       pod's HOSTNAME (slinky-0), not its pod
+              #                       name (slinky-slurm-slinky-0) and not the
+              #                       Kubernetes node under it. This is the
+              #                       clause the fixture-ID assertion could
+              #                       never make.
+              #   BlockName, and no   the PLUGIN COUPLING. `plugin:
+              #   SwitchName          topology/block` on the topograph engine
+              #                       above and `TopologyPlugin:
+              #                       topology/block` on slinky-slurm below
+              #                       must agree. Flipping ONE fatals
+              #                       slurmctld on an unrecognized key, so it
+              #                       cannot ship silently. Flipping BOTH back
+              #                       to tree leaves the file internally
+              #                       consistent, slurmctld starts, nothing
+              #                       errors -- and topograph writes SwitchName
+              #                       lines, which this pattern rejects.
+              #   # <block>=<domain>  every block is attributed to an
+              #                       accelerator domain. Without that comment
+              #                       a topology can only be compared as an
+              #                       unordered partition, and a partition
+              #                       cannot show two blocks swapped between
+              #                       domains.
+              #   anchored whole-key  nothing else may be in the file, so the
+              #                       'aicr-preseed' seed this leaf ships in
+              #                       configFiles below cannot satisfy it: the
+              #                       step fails closed (5m assert retry) until
+              #                       a real sync lands.
+              #
+              # WHAT IT DELIBERATELY DOES NOT ASSERT: how many blocks there
+              # are, or how many nodes are in each. Both follow the replica
+              # count, and this leaf SHIPS nodesets.slinky.replicas: 1 -- one
+              # slurmd pod, one domain, one block. Pinning "two blocks of two"
+              # here would fail the recipe as shipped and hold only for a
+              # consumer who raised the count. That check belongs where the
+              # count is chosen: tests/uat/kind/verify-topology.sh recomputes
+              # the expected membership from the live pod-to-node mapping and
+              # each node's nvidia.com/gpu.clique label, and the UAT lane runs
+              # it.
               try:
                 - assert:
                     resource:
@@ -214,11 +294,11 @@ spec:
                       metadata:
                         name: slinky-slurm-config-extra
                         namespace: slurm
-                      data:
-                        topology.conf: |
-                          SwitchName=S1 Switches=S[2-3]
-                          SwitchName=S2 Nodes=I[21-22,25]
-                          SwitchName=S3 Nodes=I[34-36]
+                      # `|| ''` because an absent key yields null, and
+                      # regex_match(null) is an engine error rather than a
+                      # failed assertion -- which reports as "assertion engine
+                      # error" instead of "topograph has not synced".
+                      (regex_match('\A(# [A-Za-z0-9_.-]+=[A-Za-z0-9_.-]+\nBlockName=[A-Za-z0-9_.-]+ Nodes=slinky-[0-9\[\],-]+\n)+BlockSizes=[0-9]+\n?\z', data."topology.conf" || '')): true
 
     - name: slinky-slurm
       type: Helm
@@ -235,22 +315,31 @@ spec:
           # mounted at /etc/slurm) from first boot. Topograph overwrites this
           # key after each successful topology sync. NOTE: helm upgrade resets
           # the key to this seed until the next Topograph sync.
-          # The seed is a syntactically VALID one-switch placeholder, not
+          # The seed is a syntactically VALID one-block placeholder, not
           # comment-only: with controller.inplaceReconfigure below, slurmctld
-          # re-reads /etc/slurm on every projected change, and Slurm's
-          # topology/tree plugin fatals on a zero-switch config once node
-          # records exist (slurm-26.05 switch_record.c) — reachable via a
-          # helm-upgrade seed restore or a controller restart. Unknown node
-          # names only warn (node_conf.c), so the placeholder is safe in every
-          # reachable state. Fail-closed now lives in the health check: it
-          # requires SwitchName content WITHOUT the aicr-preseed marker, so an
-          # unconfigured provider still cannot pass vacuously.
+          # re-reads /etc/slurm on every projected change, so the seed is
+          # reachable via a helm-upgrade seed restore or a controller restart.
+          # It must match TopologyPlugin below. Verified against
+          # slurmctld 26.05.4: under topology/block a SwitchName seed dies with
+          # "_parse_next_key: Parsing error at unrecognized key: SwitchName"
+          # followed by "fatal: something wrong with opening/reading
+          # topology.conf", whereas this BlockName seed only warns
+          # ("Invalid hostnames in block configuration") and reaches "Running
+          # as primary controller". Unknown node names stay a warning
+          # (node_conf.c), so the placeholder is safe in every reachable state.
+          # Fail-closed lives in the health check: it requires topology content
+          # WITHOUT the aicr-preseed marker, so an unconfigured provider still
+          # cannot pass vacuously.
           topology.conf: |
             # Managed by NVIDIA Topograph (engine: slinky). Pre-sync placeholder.
-            SwitchName=aicr-preseed Nodes=aicr-preseed-node
+            BlockName=aicr-preseed Nodes=aicr-preseed-node
+            BlockSizes=1
         controller:
           extraConfMap:
-            TopologyPlugin: "topology/tree"
+            # Moves with the topograph engine's `plugin` above: topograph
+            # writes BlockName/BlockSizes into topology.conf, which the
+            # topology/tree parser rejects outright.
+            TopologyPlugin: "topology/block"
           # Reload path (review: PR #1737): the reconfigure sidecar (slurm
           # chart v1.2.0, controller.inplaceReconfigure) runs scontrol
           # reconfigure when any file under /etc/slurm changes. Without it the
