@@ -12,29 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-name: Test Deploy Action
-
-on:
-  workflow_dispatch:
-    inputs:
-      image_tag:
-        description: 'Image tag to deploy (e.g., v0.1.4)'
-        required: true
-        default: 'v0.1.4'
-
-permissions:
-  contents: read
-
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
-
-jobs:
-  deploy:
-    uses: ./.github/workflows/deploy.yaml
-    permissions:
-      contents: read
-      packages: read
-      id-token: write
-    with:
-      image_tag: ${{ inputs.image_tag }}
+# The "demo" prefix predates this directory's rename from demo-api-server and is
+# load-bearing: it names an existing state object, so changing it is a state
+# migration rather than a text edit. The bucket is shared — uat-gcp-account uses
+# the same one under a different prefix.
+terraform {
+  backend "gcs" {
+    bucket = "eidos-tf-state"
+    prefix = "demo"
+  }
+}

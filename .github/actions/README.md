@@ -260,39 +260,6 @@ array. The action's header comment explains the full subject policy.
     helm_version: ${{ steps.versions.outputs.helm }}
 ```
 
-### Deployment Actions
-
-#### `cloud-run-deploy/`
-**Purpose**: Copy image from GHCR to Artifact Registry and deploy to Cloud Run
-**When to use**: Cloud Run deployments from CI/CD
-**Inputs**:
-- `project_id` (required): GCP project ID
-- `workload_identity_provider` (required): WIF provider resource name
-- `service_account` (required): Service account email
-- `region` (required): Cloud Run region
-- `service` (required): Cloud Run service name
-- `source_image` (required): Source image to copy (e.g., "ghcr.io/nvidia/aicrd:v1.0.0")
-- `target_registry` (required): Target Artifact Registry path (e.g., "us-docker.pkg.dev/project/repo")
-- `image_name` (optional): Image name in target registry (default: "aicrd")
-- `ghcr_token` (required): GitHub token for GHCR authentication (use `github.token`)
-
-**Flow**: GHCR → Artifact Registry → Cloud Run
-
-**Example**:
-```yaml
-- uses: ./.github/actions/cloud-run-deploy
-  with:
-    project_id: 'example-gcp-project'
-    workload_identity_provider: 'projects/.../providers/github-actions-provider'
-    service_account: 'github-actions@example-gcp-project.iam.gserviceaccount.com'
-    region: 'us-west1'
-    service: 'api'
-    source_image: 'ghcr.io/nvidia/aicrd:v1.0.0'
-    target_registry: 'us-docker.pkg.dev/example-gcp-project/demo'
-    image_name: 'aicrd'
-    ghcr_token: ${{ github.token }}
-```
-
 ## Workflows
 
 ### `on-push.yaml`
@@ -305,7 +272,7 @@ array. The action's header comment explains the full subject policy.
 
 ### `on-tag.yaml`
 **Trigger**: Semantic version tags (v*.*.*)
-**Purpose**: Build, release, attest, deploy
+**Purpose**: Build, release, attest
 **Jobs**:
 1. **Qualification**: Reusable test, lint, E2E, and source-security gates
 2. **Candidate Builds**: Draft release artifacts and all seven images under one
@@ -317,13 +284,7 @@ array. The action's header comment explains the full subject policy.
    aliases only after every version alias is verified
 7. **Publication**: Require the exact release asset set, then publish the
    validated numeric GitHub release ID
-8. **Stable Distribution**: Publish Homebrew and deploy the demo after publication
-
-### `test-deploy.yaml`
-**Trigger**: Manual (workflow_dispatch)
-**Purpose**: Isolated testing of the deploy action
-**Inputs**:
-- `image_tag`: Image tag to deploy (e.g., "v0.1.5")
+8. **Stable Distribution**: Publish Homebrew after publication
 
 ### `kwok-recipes.yaml`
 **Trigger**: Push/PR to main (when `recipes/**` or `kwok/**` change), manual dispatch
