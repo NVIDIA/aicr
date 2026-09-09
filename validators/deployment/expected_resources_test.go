@@ -17,9 +17,12 @@ package main
 import (
 	"context"
 	stderrors "errors"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/chainsaw"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -1721,4 +1724,62 @@ func TestGatedHealthCheckSuppressed(t *testing.T) {
 			t.Fatal("gatedHealthCheckSuppressed() error = nil, want cancellation")
 		}
 	})
+}
+
+// TestCheckExpectedResourcesFailsClosedOnExhaustedBudget is the regression test
+// for issue #2473's second half: a check whose budget expires must not report a
+// healthy verdict. Before the fix the ctx.Done() branches returned before the
+// reporting block, and with no collected failures the function fell through to
+// "All deployment resources ... are healthy" and returned nil.
+func TestCheckExpectedResourcesFailsClosedOnExhaustedBudget(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t, nil, nil, []recipe.ComponentRef{
+		{Name: "app-component", Namespace: "app-ns"},
+	})
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel() // budget already spent before the first component is examined
+	ctx.Ctx = canceled
+
+	err := checkExpectedResources(ctx)
+	if err == nil {
+		t.Fatal("checkExpectedResources returned nil on an exhausted budget; it must fail closed")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("error = %v, want ErrCodeTimeout", err)
+	}
+	if !strings.Contains(err.Error(), "budget exhausted") {
+		t.Errorf("error = %q, want it to name budget exhaustion", err.Error())
+	}
+}
+
+// TestMarkUndispatched proves a component queued for chainsaw but never
+// dispatched is reported as not evaluated rather than silently dropped —
+// otherwise an operator reads a short failure list and concludes the rest of
+// the cluster is fine.
+//
+// Unit-tested against the helper rather than through checkExpectedResources:
+// reaching that path in an integration test needs a context that is live while
+// the enabledRefs loop queues asserts and dead by the chainsaw guard a few
+// statements later, which is not deterministically arrangeable.
+func TestMarkUndispatched(t *testing.T) {
+	t.Parallel()
+
+	got := markUndispatched(
+		[]string{"[expectedResources] existing failure"},
+		[]chainsaw.ComponentAssert{{Name: "gpu-operator"}, {Name: "network-operator"}},
+		"chainsaw dispatch",
+	)
+
+	if len(got) != 3 {
+		t.Fatalf("got %d failures, want 3 (1 pre-existing + 2 undispatched)", len(got))
+	}
+	for _, want := range []string{
+		"[chainsaw] gpu-operator: not evaluated — budget exhausted during chainsaw dispatch",
+		"[chainsaw] network-operator: not evaluated — budget exhausted during chainsaw dispatch",
+	} {
+		if !slices.Contains(got, want) {
+			t.Errorf("failures %q missing %q", got, want)
+		}
+	}
 }

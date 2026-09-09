@@ -196,6 +196,14 @@ func pollUntilStable(ctx *validators.Context, label string, probe func() error, 
 
 // checkExpectedResources verifies that all expected Kubernetes resources declared
 // in the validation's componentRefs exist and are healthy in the live cluster.
+//
+// Budget exhaustion NEVER returns early: it records the stage in
+// budgetExhausted, marks undispatched work, prints the accumulated failures,
+// and fails closed (issue #2473). The remaining early returns — a Helm render
+// failure at gatedHealthCheckSuppressed, a resource-fetcher construction
+// failure, and the RDMA fabric-resource derivation — are hard errors that
+// carry their own structured cause and produce no partial failure list worth
+// printing, so they still return directly.
 func checkExpectedResources(ctx *validators.Context) error {
 	if ctx.ValidationInput == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "validation is not available")
@@ -216,6 +224,12 @@ func checkExpectedResources(ctx *validators.Context) error {
 	var firstStructuredErr error
 	enabledRefs := enabledComponentRefs(ctx.ValidationInput.ComponentRefs)
 
+	// budgetExhausted names the stage that ran out of deadline, empty when the
+	// check completed its work. It is deliberately NOT an early return: the
+	// accumulated failures are the diagnosis, and returning before the
+	// reporting block below is what made issue #2473 undiagnosable.
+	var budgetExhausted string
+
 	failures = append(failures, verifyNamespacesActive(ctx, enabledRefs)...)
 
 	// When both ExpectedResources and HealthCheckAsserts are populated on
@@ -235,10 +249,11 @@ func checkExpectedResources(ctx *validators.Context) error {
 		// check ctx.Done() in long-running operations and loops".
 		select {
 		case <-ctx.Ctx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout,
-				"deployment validation canceled during expected-resources iteration",
-				ctx.Ctx.Err())
+			budgetExhausted = "expected-resources iteration"
 		default:
+		}
+		if budgetExhausted != "" {
+			break
 		}
 		if ref.HealthCheckAsserts != "" {
 			// The registry-declared static assert cannot see value gates, so on a
@@ -282,18 +297,20 @@ func checkExpectedResources(ctx *validators.Context) error {
 		firstStructuredErr = gpuStructuredErr
 	}
 
-	if len(chainsawAsserts) > 0 {
+	if len(chainsawAsserts) > 0 && budgetExhausted == "" {
 		// Bail out before paying chainsaw startup cost if the caller
 		// already canceled. chainsaw.Run honors ctx mid-flight too,
 		// but a short-circuit here skips fetcher construction and
 		// log noise on a doomed run.
 		select {
 		case <-ctx.Ctx.Done():
-			return errors.Wrap(errors.ErrCodeTimeout,
-				"deployment validation canceled before chainsaw dispatch",
-				ctx.Ctx.Err())
+			budgetExhausted = "chainsaw dispatch"
 		default:
 		}
+	}
+	if budgetExhausted != "" {
+		failures = markUndispatched(failures, chainsawAsserts, budgetExhausted)
+	} else if len(chainsawAsserts) > 0 {
 		slog.Info("running health check assertions", "components", len(chainsawAsserts))
 		fetcher, fetcherErr := buildResourceFetcher(ctx)
 		if fetcherErr != nil {
@@ -331,12 +348,23 @@ func checkExpectedResources(ctx *validators.Context) error {
 		for _, f := range failures {
 			fmt.Printf("  %s\n", f)
 		}
-		// Prefer the first structured error (e.g.,
-		// ErrCodeInvalidRequest from a registry assert that violated
-		// the read-only allowlist) over the generic ErrCodeNotFound
-		// summary so downstream catalog/CLI surfaces classify the
-		// failure correctly. The human-readable failures list is still
-		// printed above for operator visibility.
+	}
+
+	// Fail closed BEFORE the healthy return: an unfinished run is not a passing
+	// run, and with no collected failures the old code fell through to
+	// "All deployment resources ... are healthy" (issue #2473).
+	if budgetExhausted != "" {
+		return errors.Wrap(errors.ErrCodeTimeout,
+			fmt.Sprintf("deployment validation budget exhausted during %s with %d issue(s) collected",
+				budgetExhausted, len(failures)),
+			ctx.Ctx.Err())
+	}
+
+	if len(failures) > 0 {
+		// Prefer the first structured error (e.g., ErrCodeInvalidRequest from a
+		// registry assert that violated the read-only allowlist) over the
+		// generic ErrCodeNotFound summary so downstream catalog/CLI surfaces
+		// classify the failure correctly.
 		if firstStructuredErr != nil {
 			return firstStructuredErr
 		}
@@ -357,6 +385,19 @@ func enabledComponentRefs(refs []recipe.ComponentRef) []recipe.ComponentRef {
 		}
 	}
 	return enabled
+}
+
+// markUndispatched appends a not-evaluated line for every assert that was
+// queued but never handed to chainsaw. Reporting them explicitly is what stops
+// a truncated run from reading as a mostly-healthy cluster: the operator sees
+// which components carry no verdict rather than inferring their absence means
+// "fine".
+func markUndispatched(failures []string, asserts []chainsaw.ComponentAssert, stage string) []string {
+	for _, a := range asserts {
+		failures = append(failures, fmt.Sprintf(
+			"[chainsaw] %s: not evaluated — budget exhausted during %s", a.Name, stage))
+	}
+	return failures
 }
 
 func verifyNamespacesActive(ctx *validators.Context, refs []recipe.ComponentRef) []string {
