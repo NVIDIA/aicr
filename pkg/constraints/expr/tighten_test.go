@@ -132,7 +132,7 @@ func TestTightenNeverWidens(t *testing.T) {
 	versions := []string{
 		"1.34", "1.34.0", "1.34.1", "1.35", "1.35.0", "1.35.2",
 		"1.34.3-gke.100", "1.34.3-gke.900", "1.35.0-gke.100", "1.35.0-gke.101",
-		"1.35-gke.100", "2", "1",
+		"1.35.0-gke.0", "1.35.0-gke.1", "1.35-gke.100", "2", "1",
 	}
 	ranges := []string{
 		">= 1.34.1 < 1.36.0", ">= 1.32 < 1.35", "> 1.34.0 <= 1.35.2",
@@ -147,7 +147,8 @@ func TestTightenNeverWidens(t *testing.T) {
 	}
 	actuals := append([]string{
 		"1.33", "1.33.9", "1.36", "1.36.0", "0.9",
-		"1.35.0-gke.99", "1.35.0-gke.150", "1.36.0-gke.10", "1.34.3-gke.500",
+		"1.35.0-gke.0", "1.35.0-gke.1", "1.35.0-gke.99", "1.35.0-gke.150",
+		"1.36.0-gke.10", "1.34.3-gke.500",
 	}, versions...)
 
 	admits := func(t *testing.T, expression, actual string) bool {
@@ -204,7 +205,8 @@ func TestTightenRejectsEmptyRanges(t *testing.T) {
 	operators := []string{">=", ">", "<=", "<"}
 	versions := []string{
 		"1", "1.35", "1.35.0", "1.35.2", "1.36", "1.36.0", "2",
-		"1.35-gke.100", "1.35.0-gke.100", "1.35.0-gke.101", "1.36.0-gke.50",
+		"1.35-gke.100", "1.35.0-gke.0", "1.35.0-gke.100", "1.35.0-gke.101",
+		"1.36.0-gke.50",
 	}
 	// Readings carry at least major.minor (Kubernetes "1.34.1", Ubuntu
 	// "24.04"), and emptiness is decided over that domain. A bare-major
@@ -218,7 +220,8 @@ func TestTightenRejectsEmptyRanges(t *testing.T) {
 		"2.0", "2.0.0", "2.1", "3.0.0",
 		// A GKE build sorts after the bare core it builds on, and the
 		// build number is the finest dimension pkg/version orders.
-		"1.35.0-gke.99", "1.35.0-gke.100", "1.35.0-gke.101", "1.35.0-gke.150",
+		"1.35.0-gke.0", "1.35.0-gke.1", "1.35.0-gke.99", "1.35.0-gke.100",
+		"1.35.0-gke.101", "1.35.0-gke.150",
 		"1.36.0-gke.10", "1.36.0-gke.50", "1.36.0-gke.51",
 	}
 
@@ -336,6 +339,19 @@ func TestTightenGKEBuildDimension(t *testing.T) {
 			name:     "a build sorts after its bare core",
 			existing: "> 1.35.0", candidate: "< 1.35.1",
 			wantValue: "> 1.35.0 < 1.35.1", wantOutcome: TightenNarrowed,
+		},
+		{
+			name:        "nothing sits between a bare core and its first build",
+			existing:    "> 1.35.0",
+			candidate:   "< 1.35.0-gke.0",
+			wantOutcome: TightenUnsatisfiable,
+		},
+		{
+			name:        "the first build itself is reachable",
+			existing:    "> 1.35.0",
+			candidate:   "<= 1.35.0-gke.0",
+			wantValue:   "> 1.35.0 <= 1.35.0-gke.0",
+			wantOutcome: TightenNarrowed,
 		},
 	}
 

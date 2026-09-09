@@ -230,10 +230,16 @@ func strongerBound(existing, candidate *bound) (stronger *bound, narrowed, ok bo
 	return existing, false, true
 }
 
-// boundsSatisfiable reports whether some version satisfies both bounds. An
-// open side is always satisfiable; a closed range is empty when the floor
-// sits above the ceiling, or on it with either endpoint excluded. Both
-// endpoints are taken at full precision so the comparison is exact.
+// boundsSatisfiable reports whether some version satisfies both bounds.
+//
+// An open side is always satisfiable. A closed range is decided on the order
+// pkg/version.Compare defines, over full-precision endpoints keyed by their
+// position in it — including the GKE build dimension, where the bare numeric
+// core precedes every build of itself. Working in that order rather than
+// approximating it is what keeps the adjacent cases honest: nothing sits
+// between "-gke.100" and "-gke.101", nor between a bare core and its
+// "-gke.0", while a bare core and the next patch always have builds between
+// them.
 func boundsSatisfiable(lower, upper *bound) bool {
 	if lower == nil || upper == nil {
 		return true
@@ -241,14 +247,19 @@ func boundsSatisfiable(lower, upper *bound) bool {
 	low, lowAdmitted := lower.limit()
 	high, highAdmitted := upper.limit()
 
-	cmp := low.Compare(high)
-	if cmp > 0 {
-		return false
+	// Normalize the floor to the first version it admits, which the discrete
+	// finest dimension always makes representable, and then read the answer
+	// straight off the order.
+	first := versionKeyOf(low)
+	if !lowAdmitted {
+		first = first.next()
 	}
-	if cmp == 0 {
-		return lowAdmitted && highAdmitted
+
+	cmp := first.compare(versionKeyOf(high))
+	if highAdmitted {
+		return cmp <= 0
 	}
-	return buildsLeaveRoom(low, high, lowAdmitted, highAdmitted)
+	return cmp < 0
 }
 
 // limit returns the full-precision version where the bound's half-line ends,
@@ -305,34 +316,59 @@ func bumpLastSignificant(v version.Version) version.Version {
 	return v
 }
 
-// buildsLeaveRoom reports whether two ordered endpoints on the same numeric
-// core leave a GKE build between them.
+// versionKey is a full-precision version's position in the total order
+// pkg/version.Compare defines, as a tuple ordered lexicographically.
 //
-// Build numbers are integers and are the finest dimension pkg/version orders,
-// so an open interval between adjacent builds is empty even though the
-// endpoints compare as ordered — nothing sits between -gke.100 and -gke.101.
-// The numeric components need no such treatment: a bare core and the next one
-// always have the -gke.N builds of the first between them.
-//
-// Endpoints that are not both GKE builds on one core have room by ordering
-// alone, so they report true.
-func buildsLeaveRoom(low, high version.Version, lowAdmitted, highAdmitted bool) bool {
-	lowBuild, lowIsGKE := version.ExtractGKEBuild(low.Extras)
-	highBuild, highIsGKE := version.ExtractGKEBuild(high.Extras)
-	if !lowIsGKE || !highIsGKE || !sameCore(low, high) {
-		return true
-	}
-
-	if !lowAdmitted {
-		lowBuild++
-	}
-	if !highAdmitted {
-		highBuild--
-	}
-	return lowBuild <= highBuild
+// The build component carries the whole GKE dimension. Compare ranks a
+// "-gke.N" build above the bare numeric core it builds on and orders two
+// builds numerically, so ranking a bare core 0 and a build N at N+1
+// reproduces that order exactly. Extras that are not a valid GKE build are
+// never compared, which the same rank of 0 expresses.
+type versionKey struct {
+	major int
+	minor int
+	patch int
+	build int64
 }
 
-// sameCore reports whether two versions share every numeric component.
-func sameCore(a, b version.Version) bool {
-	return a.Major == b.Major && a.Minor == b.Minor && a.Patch == b.Patch
+func versionKeyOf(v version.Version) versionKey {
+	key := versionKey{major: v.Major, minor: v.Minor, patch: v.Patch}
+	if build, isGKE := version.ExtractGKEBuild(v.Extras); isGKE {
+		key.build = build + 1
+	}
+	return key
+}
+
+// next returns the version immediately after k. The build component is a
+// non-negative integer and is the finest dimension ordered, so every key has
+// an immediate successor: the one after a bare core is its "-gke.0" build.
+// That is what lets an exclusive floor be restated as the inclusive floor one
+// step up, which in turn makes emptiness a plain comparison.
+func (k versionKey) next() versionKey {
+	k.build++
+	return k
+}
+
+func (k versionKey) compare(other versionKey) int {
+	switch {
+	case k.major != other.major:
+		return compareInt(int64(k.major), int64(other.major))
+	case k.minor != other.minor:
+		return compareInt(int64(k.minor), int64(other.minor))
+	case k.patch != other.patch:
+		return compareInt(int64(k.patch), int64(other.patch))
+	default:
+		return compareInt(k.build, other.build)
+	}
+}
+
+func compareInt(a, b int64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
 }
