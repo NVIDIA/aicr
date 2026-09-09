@@ -57,6 +57,12 @@ valid values for each criterion (services, accelerators, operating systems,
 intents, platforms) are enumerated in the [CLI Reference](cli-reference.md) and
 the [documentation hub glossary](../README.md#glossary).
 
+**Preview coordinates.** VR200 support in v1 covers three coordinates:
+`rke2 / vr200 / ubuntu / training`, `rke2 / vr200 / ubuntu / inference`,
+and `rke2 / vr200 / ubuntu / inference / dynamo`. See
+[VR200 Preview coverage](component-catalog.md#vr200-preview-coverage) before
+choosing any of them.
+
 > Prefer to start from your live cluster instead of criteria? Capture a
 > snapshot first (`aicr snapshot --output snapshot.yaml`) and pass
 > `--snapshot snapshot.yaml` to `aicr recipe`. See
