@@ -148,8 +148,12 @@ func checkVerdictFields(where string, t *Transition) []string {
 	if t.Summary == "" {
 		v = append(v, where+" is missing summary")
 	}
-	if t.Reversible != nil && t.ReversibleNotes == "" {
-		v = append(v, where+" sets reversible but carries no reversibleNotes; renderers never surface the flag alone")
+	// Only the affirmative claim needs notes. ADR-021's own worked example
+	// carries reversible: false with none, and the rendering rationale — never
+	// surface an unexplained "reversible: yes" — has nothing to say about a
+	// transition that simply does not claim to be reversible.
+	if t.Reversible != nil && *t.Reversible && t.ReversibleNotes == "" {
+		v = append(v, where+" sets reversible: true but carries no reversibleNotes; renderers never surface the flag alone")
 	}
 	for gi, g := range t.StepsByDeployer {
 		seen := make(map[string]bool, len(g.Steps))
@@ -443,14 +447,6 @@ func contiguous(upper, lower bound) bool {
 	return upper.inclusive || lower.inclusive
 }
 
-// checkDistinctBoundaries implements rule 8, an addition to ADR-021. A
-// boundary is identified by the floor its `to` names, so two transitions
-// sharing that floor describe the same boundary twice. ADR-021's matcher
-// blocks any jump where more than one record applies, so a duplicate silently
-// converts that boundary's crossings from manual to blocked.
-//
-// Overlapping `from` domains stay legal on purpose: a jump spanning two real
-// blocks must resolve to blocked, which is the ADR's design.
 // boundaryKey identifies a `to` floor by version and inclusivity as two
 // comparable fields rather than one delimited string: `to` permits
 // prereleases, and a prerelease tag can itself read as a delimiter suffix,
@@ -460,24 +456,76 @@ type boundaryKey struct {
 	inclusive bool
 }
 
+// boundaryClaim is the transition that first claimed a boundary, kept with its
+// `from` domain so a later claim on the same floor can be tested for overlap.
+type boundaryClaim struct {
+	idx  int
+	from bounds
+}
+
+// checkDistinctBoundaries implements rule 8, an addition to ADR-021. A
+// boundary is identified by the floor its `to` names, so two transitions
+// sharing that floor describe the same boundary twice. ADR-021's matcher
+// blocks any jump where more than one record applies, so a duplicate silently
+// converts that boundary's crossings from manual to blocked.
+//
+// Sharing a floor is only a duplicate when the two `from` domains intersect.
+// Where they are disjoint, ADR-021's own applies predicate lets at most one of
+// them match any given source version, so the pair describes one boundary
+// reached from two different blocks rather than the same boundary twice.
+//
+// Overlapping `from` domains stay legal across *different* floors on purpose: a
+// jump spanning two real blocks must resolve to blocked, which is the ADR's
+// design.
 func checkDistinctBoundaries(component string, trs []Transition) []string {
-	seen := make(map[boundaryKey]int, len(trs))
+	seen := make(map[boundaryKey][]boundaryClaim, len(trs))
 	var v []string
 	for i := range trs {
 		b, err := parseBounds(trs[i].To, prereleaseAllowed)
 		if err != nil || b.lower.unbounded {
 			continue // reported elsewhere
 		}
+		from, ferr := parseBounds(trs[i].From, prereleaseForbidden)
+		if ferr != nil {
+			continue // reported by checkDirectional
+		}
 		key := boundaryKey{ver: b.lower.ver.String(), inclusive: b.lower.inclusive}
-		if prev, dup := seen[key]; dup {
+		dup, found := -1, false
+		for _, c := range seen[key] {
+			if intervalsIntersect(c.from, from) {
+				dup, found = c.idx, true
+				break
+			}
+		}
+		if found {
 			v = append(v, fmt.Sprintf(
-				"component %q transitions %d and %d describe the same boundary (to starts at %s); a jump crossing it would resolve to blocked rather than the authored verdict",
-				component, prev, i, key.ver))
+				"component %q transitions %d and %d describe the same boundary (to starts at %s) for overlapping from ranges; a jump crossing it would resolve to blocked rather than the authored verdict",
+				component, dup, i, key.ver))
 			continue
 		}
-		seen[key] = i
+		seen[key] = append(seen[key], boundaryClaim{idx: i, from: from})
 	}
 	return v
+}
+
+// intervalsIntersect reports whether two intervals share at least one version.
+func intervalsIntersect(a, b bounds) bool {
+	return lowerAtOrBelow(a.lower, b.upper) && lowerAtOrBelow(b.lower, a.upper)
+}
+
+// lowerAtOrBelow reports whether a lower bound sits at or below an upper bound,
+// so the pair admits at least one version. Unlike contiguous, which asks
+// whether coverage continues across a shared point and accepts either side
+// including it, sharing a version requires both sides to include it.
+func lowerAtOrBelow(lo, hi bound) bool {
+	if lo.unbounded || hi.unbounded {
+		return true
+	}
+	cmp := lo.ver.Compare(hi.ver)
+	if cmp != 0 {
+		return cmp < 0
+	}
+	return lo.inclusive && hi.inclusive
 }
 
 // checkHooks implements rule 9, an addition to ADR-021. Hooks are the

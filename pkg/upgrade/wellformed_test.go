@@ -125,9 +125,16 @@ func TestValidateVerdictFields(t *testing.T) {
 			true, "at least one step",
 		},
 		{
-			"reversible set without notes fails",
+			"reversible true without notes fails",
 			tr(func(x *Transition) { b := true; x.Reversible = &b }),
 			true, "reversibleNotes",
+		},
+		{
+			// ADR-021's worked example carries reversible: false and no notes.
+			// Requiring them there rejects the record first-record authors copy.
+			"reversible false without notes passes",
+			tr(func(x *Transition) { b := false; x.Reversible = &b }),
+			false, "",
 		},
 		{
 			"duplicate step id within a group fails",
@@ -716,6 +723,28 @@ func TestValidateDistinctBoundaries(t *testing.T) {
 			[]Transition{
 				mk("<0.18.0", ">=0.18.0 <=0.18.0"),
 				mk("<0.17.0", ">=0.18.0 <=0.18.0"),
+			},
+			true,
+		},
+		{
+			// Two blocks reaching one boundary. Under ADR:182's applies
+			// predicate at most one of these can match any given source, so
+			// the "would resolve to blocked" claim does not hold and rule 8
+			// must not reject the pair.
+			"same boundary from disjoint from ranges is not a duplicate",
+			[]Transition{
+				mk("<0.18.0", ">=0.20.0 <=0.20.0"),
+				mk(">=0.18.0 <0.20.0", ">=0.20.0 <=0.20.0"),
+			},
+			false,
+		},
+		{
+			// The from domains touch at exactly 0.18.0, so one source version
+			// does match both, and the pair is a duplicate after all.
+			"same boundary from ranges sharing a single version is a duplicate",
+			[]Transition{
+				mk("<=0.18.0", ">=0.20.0 <=0.20.0"),
+				mk(">=0.18.0 <0.20.0", ">=0.20.0 <=0.20.0"),
 			},
 			true,
 		},
