@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Verify every committed ComponentUpgrades record is well-formed (ADR-021 AC7).
+#
+# A malformed or reverse-matching record must fail `make lint` rather than be
+# silently skipped. Inert while recipes/upgrades/ is empty.
+
+set -euo pipefail
+
+echo "Checking upgrade transition records..."
+go test ./pkg/recipe/... -run TestRealUpgradeRecordsWellFormed -count=1
