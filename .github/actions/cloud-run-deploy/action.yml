@@ -139,3 +139,49 @@ runs:
           --region "${{ inputs.region }}" \
           --project "${{ inputs.project_id }}"
         echo "Deploy complete."
+
+    - name: Smoke check deployed service
+      shell: bash
+      env:
+        SERVICE: ${{ inputs.service }}
+        REGION: ${{ inputs.region }}
+        PROJECT_ID: ${{ inputs.project_id }}
+        SOURCE_IMAGE: ${{ inputs.source_image }}
+      run: |
+        set -euo pipefail
+
+        # A successful `services update` only means the revision was created.
+        # Cloud Run keeps serving the last healthy revision when a rollout
+        # fails, and /health answers 200 from whichever revision holds traffic
+        # — so a liveness probe cannot tell a stale deploy from a fresh one.
+        # The demo served v0.17.0 across four releases that way (#2652). Assert
+        # the build that answers is the one just deployed.
+        expected="${SOURCE_IMAGE##*:}"
+        expected="${expected#v}"
+
+        url="$(gcloud run services describe "${SERVICE}" \
+          --region "${REGION}" --project "${PROJECT_ID}" \
+          --format='value(status.url)')"
+        if [[ -z "${url}" ]]; then
+          echo "::error::could not resolve URL for service ${SERVICE}"
+          exit 1
+        fi
+
+        attempts=10
+        delay=6
+        got=""
+        for i in $(seq 1 "${attempts}"); do
+          body="$(curl -fsS --max-time 15 "${url}/" || true)"
+          got="$(jq -r '.version // empty' <<<"${body}" 2>/dev/null || true)"
+          if [[ "${got}" == "${expected}" ]]; then
+            echo "Smoke check passed: ${url} reports version ${got}"
+            exit 0
+          fi
+          echo "attempt ${i}/${attempts}: want ${expected}, got '${got:-<no response>}'"
+          if [[ "${i}" -lt "${attempts}" ]]; then
+            sleep "${delay}"
+          fi
+        done
+
+        echo "::error::${url} reports '${got:-<no response>}', expected ${expected}"
+        exit 1

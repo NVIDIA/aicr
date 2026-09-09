@@ -93,9 +93,20 @@ v2.49+). RELEASE.md §Container Attestations has both `gh` and
 `cosign` flows.
 
 **Cloud Run demo deploy fails after tag push.** Check the demo deploy
-job (`deploy.yaml`, called from `on-tag.yaml`); the most common cause is GitHub Container
-Registry (GHCR) pull
-failure during the first 60s after tag publish. Re-run the workflow.
+job (`deploy.yaml`, called from `on-tag.yaml`). Three distinct causes:
+
+- *The container never starts*, failing `gcloud run services update` with
+  "failed to find initial working directory". Expected on every tag until
+  [#2652](https://github.com/NVIDIA/aicr/issues/2652) is resolved — the base
+  image declares `WorkingDir=/app` without shipping the directory, and Cloud
+  Run refuses to start such a container. Re-running does not help.
+- *The smoke check reports a version mismatch.* The rollout failed and Cloud
+  Run left traffic on the last healthy revision, so the service answers 200
+  but reports an older build. Compare `gcloud run revisions list` against the
+  tag; note that a retired revision reports `Ready=True` regardless of whether
+  it ever started, so read the `ContainerHealthy` condition instead.
+- *GHCR pull failure* during the first 60s after tag publish. Re-run the
+  workflow.
 
 ## Release Supply-Chain Monitoring
 
