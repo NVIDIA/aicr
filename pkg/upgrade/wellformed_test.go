@@ -403,7 +403,6 @@ func TestValidateCoverage(t *testing.T) {
 		{"single transition has no interior", []string{"<0.18.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", false},
 		{"contiguous halves", []string{"<0.18.0", ">=0.18.0 <0.20.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", false},
 		{"wholly contained range is not a hole", []string{"<0.20.0", "<0.18.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", false},
-		{"touching at an inclusive boundary", []string{"<0.18.0", ">=0.18.0 <0.20.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", false},
 		{
 			"ADR ordinary idiom does not require coverage from zero",
 			[]string{">=25.0.0 <26.0.0"}, ">=26.0.0 <=26.0.0", "v26.0.0", false,
@@ -419,6 +418,43 @@ func TestValidateCoverage(t *testing.T) {
 		{
 			"one-version hole at a shared exclusive boundary",
 			[]string{"<0.18.0", ">0.18.0 <0.20.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", true,
+		},
+		{
+			// A blind cur = next.upper (instead of a running maximum) would
+			// drop coverage back to 0.18.0 after the second interval and
+			// report a spurious hole before 0.20.0.
+			"running maximum merge across three intervals, no interior hole",
+			[]string{"<0.20.0", "<0.18.0", ">=0.20.0 <0.22.0"}, ">=0.22.0 <=0.22.0", "v0.22.0", false,
+		},
+		{
+			// Both floors are exactly 0.20.0; only the running-maximum
+			// upper's inclusivity tie-break tells the merge that <=0.20.0
+			// (not <0.20.0) is the one that reaches the third interval.
+			"upperAfter inclusivity tie-break at equal floors, no interior hole",
+			[]string{"<=0.20.0", "<0.20.0", ">0.20.0 <0.22.0"}, ">=0.22.0 <=0.22.0", "v0.22.0", false,
+		},
+		{
+			// Deliberately unsorted input (0.10-0.15, 0.20-0.25, 0.15-0.20):
+			// only sort.Slice + lowerBefore's total order puts these back in
+			// ascending-floor order before the walk; processed as given, the
+			// walk would see the third interval's 0.15 floor arrive after
+			// the second interval's 0.25 ceiling and misreport a hole.
+			"unsorted intervals still resolve to no interior hole",
+			[]string{">=0.10.0 <0.15.0", ">=0.20.0 <0.25.0", ">=0.15.0 <0.20.0"}, ">=0.25.0 <=0.25.0", "v0.30.0", false,
+		},
+		{
+			// The other three cases never compare two equal concrete
+			// floors, so lowerBefore's cmp==0 tie-break line is never
+			// evaluated by them: distinct-version pairs return from the
+			// cmp!=0 branch first, and unbounded-lower pairs return from
+			// the a.unbounded branch first. Here ">=0.20.0" and ">0.20.0"
+			// share floor 0.20.0 with different inclusivity: the correct
+			// order sorts the inclusive one first, so it bridges "<0.20.0"
+			// and ">0.20.0 <0.22.0" at the single point 0.20.0. A flipped
+			// tie-break reorders them, drops the bridging interval to last,
+			// and reports a spurious hole at that point.
+			"lowerBefore inclusivity tie-break at equal floors, no interior hole",
+			[]string{"<0.20.0", ">=0.20.0 <0.21.0", ">0.20.0 <0.22.0"}, ">=0.22.0 <=0.22.0", "v0.22.0", false,
 		},
 	}
 	for _, tt := range tests {
