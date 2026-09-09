@@ -359,28 +359,40 @@ func truncateToSeconds(d time.Duration) time.Duration {
 // enforced — so it is preferred whenever the Job could be read and carries it.
 //
 // The fallback derives the deadline v1.JobDeadlineFor(effectiveTimeout(configured))
-// would have produced — the same value BuildJobPlan renders onto
-// ActiveDeadlineSeconds. It is unreachable in practice: the only caller,
-// missingPodOutcome, sits behind an `if !ok { return -1, notFound }` guard
-// that requires jobFailedCondition to have already succeeded, so job is
-// non-nil here only when a live Job was just read with ActiveDeadlineSeconds
-// set — both renderers in pkg/validator/v1/job_plan.go always set it.
+// would have produced, truncated to whole seconds — the same value BuildJobPlan
+// renders onto ActiveDeadlineSeconds via int64(JobDeadlineFor(timeout).Seconds()).
+// It is unreachable in practice: the only caller, missingPodOutcome, sits behind
+// an `if !ok { return -1, notFound }` guard that requires jobFailedCondition to
+// have already succeeded, so job is non-nil here only when a live Job was just
+// read with ActiveDeadlineSeconds set — both renderers in
+// pkg/validator/v1/job_plan.go always set it.
 func enforcedDeadline(job *batchv1.Job, configured time.Duration) time.Duration {
 	if job != nil && job.Spec.ActiveDeadlineSeconds != nil {
 		return time.Duration(*job.Spec.ActiveDeadlineSeconds) * time.Second
 	}
-	return v1.JobDeadlineFor(effectiveTimeout(configured))
+	return truncateToSeconds(v1.JobDeadlineFor(effectiveTimeout(configured)))
 }
 
 // waitFailureMessage renders the TerminationMsg for a validator whose container
 // never terminated. Only a genuine context-deadline expiry is reported as a
-// "timeout ... within <configured>" — any other cause (infra/unavailable) is
-// surfaced verbatim so diagnosis is not misdirected to the catalog timeout
-// (see issue #1966). A nil cause is treated as a timeout for backward
-// compatibility with callers that had no error to thread through.
+// timeout — any other cause (infra/unavailable) is surfaced verbatim so
+// diagnosis is not misdirected to the catalog timeout (see issue #1966). A nil
+// cause is treated as a timeout for backward compatibility with callers that
+// had no error to thread through.
+//
+// The timeout wording names the actual clock the orchestrator waited on
+// (WaitForCompletion's timeout+defaults.ValidatorWaitBuffer), not just the
+// catalog budget: since #2473 the Job's own activeDeadlineSeconds exceeds the
+// catalog budget by ValidatorJobDeadlineHeadroom, so a hung check now
+// routinely expires this orchestrator wait before the Job deadline, and
+// reporting only the catalog value would understate how long the operator
+// actually waited.
 func waitFailureMessage(cause error, configured time.Duration) string {
 	if cause == nil || isDeadlineCause(cause) {
-		return fmt.Sprintf("timeout: validator did not complete within %s", configured)
+		checkBudget := truncateToSeconds(configured)
+		waitBuffer := truncateToSeconds(defaults.ValidatorWaitBuffer)
+		return fmt.Sprintf("timeout: validator did not complete within %s (check budget %s + orchestrator wait buffer %s)",
+			checkBudget+waitBuffer, checkBudget, waitBuffer)
 	}
 	return fmt.Sprintf("validation failed: %v", cause)
 }

@@ -273,6 +273,15 @@ func TestValidatorTimeoutRelationships(t *testing.T) {
 		t.Errorf("ValidatorWaitBuffer (%v) must be at least K8sPodReadyTimeout (%v)",
 			ValidatorWaitBuffer, K8sPodReadyTimeout)
 	}
+	// The two checks above do not backstop a dropped summand: if
+	// ValidatorTerminationGracePeriod were dropped from ValidatorWaitBuffer's
+	// definition, the result (2m) would still pass both the bounds-range table
+	// test and the >= K8sPodReadyTimeout check above. Assert the sum of the two
+	// independently named constants directly so a dropped summand fails here.
+	if ValidatorWaitBuffer < K8sPodReadyTimeout+ValidatorTerminationGracePeriod {
+		t.Errorf("ValidatorWaitBuffer (%v) must be at least K8sPodReadyTimeout + ValidatorTerminationGracePeriod (%v)",
+			ValidatorWaitBuffer, K8sPodReadyTimeout+ValidatorTerminationGracePeriod)
+	}
 	// Kubernetes must be the LOOSEST clock. If the Job deadline is not
 	// strictly beyond the orchestrator's wait, the Job controller can kill and
 	// delete the pod before the orchestrator reads its logs — issue #2473.
