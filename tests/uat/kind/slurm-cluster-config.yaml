@@ -1,0 +1,60 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Kind topology for the UAT slurm lane.
+#
+# Unlike tests/uat/kind/cluster-config.yaml (an informational nvkind
+# descriptor), this file is a real kind config and IS consumed, by
+# tests/uat/kind/bootstrap-cluster.sh:
+#
+#   tests/uat/kind/bootstrap-cluster.sh [cluster-name]
+#
+# That script is the only caller, and the only place the create-then-simulate
+# sequence lives: .github/workflows/uat-kind-sim.yaml and a local acceptance
+# run both invoke it, so the two cannot drift into standing up different
+# clusters. It resolves the node image, creates from this file, runs
+# setup-gpu-sim.sh, and then reads the result back (four workers advertising
+# GPUs in two cliques, control plane GPU-free).
+#
+# The node image is deliberately NOT pinned here. Every other kind consumer in
+# the repo (kwok/scripts/run-all-recipes.sh, tools/component-test/ensure-cluster.sh,
+# the GitHub composite actions) resolves it from .settings.yaml testing.kind_node_image
+# at run time, which keeps the single source of truth single and lets Renovate
+# bump one line. Hardcoding an image here would fork that.
+#
+# These are REAL kubelet-backed nodes, not KWOK fakes. The distinction is
+# structural rather than cosmetic: slurmd has to execute and register with
+# slurmctld for the Slinky operator to converge. On fake nodes there is no
+# kubelet to run the container, so the operator deletes the unready worker
+# pods every few seconds and topograph never writes a topology.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: aicr-uat-slurm
+
+# Exactly four workers, which setup-gpu-sim.sh labels cq0/cq0/cq1/cq1. Two
+# cliques of two is the smallest shape that makes the block topology
+# non-trivial: with one clique, or with a single node in a clique, a topology
+# assertion passes without proving anything about grouping. The count is
+# gated against setup-gpu-sim.sh's clique map by setup-gpu-sim_test.sh, so
+# adding a worker here fails the shell suite until the map is extended.
+#
+# The control plane stays GPU-free (it never gets the mokka.nvidia.com/type
+# label, so the device plugin does not schedule there), which is what makes
+# `<none>` on the control plane a meaningful check rather than an accident.
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+  - role: worker
+  - role: worker

@@ -1,0 +1,424 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+name: UAT - Kind (simulated GPUs)
+
+# The Slurm UAT lane (issue #2358). A four-worker kind cluster whose GPU
+# capacity is SIMULATED (a mocked NVML driver tree plus a device plugin
+# pointed at it, tests/uat/kind/setup-gpu-sim.sh), on a GitHub-hosted runner.
+#
+# WHY THIS IS NOT A CELL OF uat-kind.yaml. The two lanes need different
+# clusters, and neither can serve the other:
+#
+#   uat-kind.yaml   one node, one REAL H100, nvkind on a self-hosted GPU
+#                   runner, leased through uat-run.yaml. Its own
+#                   cluster_config_path input says the descriptor is
+#                   informational because nvkind provisions from the runner.
+#   this file       four schedulable nodes, which is what a Slurm block
+#                   topology of two blocks of two requires (one slurmd pod per
+#                   node, enforced by the Slinky operator's hard per-hostname
+#                   podAntiAffinity). Simulated GPUs need no hardware, so this
+#                   lane holds no lease and consumes no GPU capacity.
+#
+# Routing the slurm cell through the leased lane instead would run it against
+# a single node: three slurmd pods stay Pending and no block ever fills.
+#
+# SCOPE: THIS LANE DOES NOT DEPLOY THE TWO DRIVER-DEPENDENT COMPONENTS,
+# gpu-operator and nvidia-dra-driver-gpu. gpu-operator's operands ask for the
+# `nvidia` RuntimeClass and a stock kindest/node has no such containerd
+# runtime; the DRA kubelet plugin blocks waiting for nvidia-smi and
+# libnvidia-ml.so.1 under the pinned driver root `/`, where the mocked driver
+# tree is not. Both need a real (or pre-baked) driver stack on the node, which
+# this lane deliberately does not build. It therefore validates the Slurm,
+# Slinky and topograph path and NOT the GPU stack, and a regression in either
+# excluded component will not be caught here.
+#
+# IT ALSO DOES NOT RUN THE DEPLOYMENT VALIDATION PHASE, which follows from those
+# exclusions: `aicr validate` validates the recipe rather than the deployed
+# subset and has no component filter, so that phase polls for a DRA kubelet
+# plugin this lane never installs and is killed at the validator Job's deadline.
+# tests/uat/kind/run-sim sets VALIDATE_PHASES=conformance, which also turns off
+# the post-install readiness gate. THE LANE THEREFORE DOES NOT ASSERT DEPLOYMENT
+# READINESS, and a deployment-readiness regression will not be caught here.
+# THIS DIVERGES FROM THE CLOUD LANES (uat-aws / uat-gcp / uat-azure), which run
+# `--phase all` and do gate on it.
+#
+# AND IT SKIPS SEVEN OF THE TEN CONFORMANCE CHECKS, for the same reason one
+# level further down: six of them read the GPU stack this lane does not deploy,
+# and the seventh needs /dev/nvidia* device nodes the simulated devices do not
+# provide. They are named one by one, each with its prerequisite, under
+# spec.validate.execution.skipChecks in the test config. gang-scheduling,
+# cluster-autoscaling and slinky-slurm-health still run and still gate. Each
+# skipped check is REPORTED as skipped in the CTRF report, so the signed
+# evidence bundle attests to the suite that actually ran.
+#
+# The full reasoning, and the numbered list of what a green run does NOT tell
+# you, is in the header of tests/uat/kind/tests/h100-training-slurm-config.yaml,
+# next to the two `--set <component>:enabled=false` entries that implement the
+# exclusions and the skipChecks list that narrows the conformance phase; run-sim
+# carries the long form of the phase decision.
+#
+# THE CLUSTER IS STOOD UP BY tests/uat/kind/bootstrap-cluster.sh, the same
+# committed script a local acceptance run calls. That is deliberate and
+# guarded (tests/uat/kind/bootstrap-cluster_test.sh): two hand-written copies
+# of `kind create` drift, and the drift surfaces as a topology assertion that
+# passes locally and fails here, or the reverse.
+#
+# Scope today: manual dispatch, main tip, one cell (h100 training slurm). It is
+# NOT enrolled in the nightly batch and NOT in the version matrix, because
+# whether the whole bundle fits a GitHub-hosted runner is an open question this
+# lane is the instrument for: every run records disk and memory at each stage
+# into the job summary. Enrolment is the follow-up once a dispatch is green and
+# the measured footprint is known.
+#
+# Evidence: the run signs a bundle with THIS file's OIDC identity, and the
+# verify step pins that identity. The bundle is deliberately NOT ingested onto
+# validation.aicr.run, because it attests to simulated devices and
+# corroboration evidence must describe real silicon. That is enforced rather
+# than trusted: recipes/evidence/allowlist.yaml and evidence-ingest.yaml's
+# FIRST_PARTY_IDENTITY both pin `uat-(aws|gcp|azure|kind).yaml`, which this
+# path does not match, so an accidental ingest fails closed.
+
+on:
+  # No inputs: one cell, main tip. Every axis the leased lane parameterises
+  # (version matrix, intent, platform, lifecycle) is fixed here, so there is
+  # nothing to pass and no unexercised branch to get wrong.
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  # One at a time per ref. Not a lease on anything physical (the runner is
+  # ephemeral and the cluster lives and dies inside the job); this only keeps
+  # two dispatches of the same ref from racing the same GHCR evidence tag.
+  group: uat-kind-sim-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  uat-kind-sim:
+    name: kind slurm (simulated GPUs)
+    # Never on a fork: the evidence push needs ghcr.io/nvidia write access.
+    if: github.repository == 'nvidia/aicr'
+    runs-on: ubuntu-latest
+    # Covers the sum of the sequential step budgets (tools 10 + bootstrap 25 +
+    # binary 20 + images 25 + prep 20 + install 90 + topology 10 +
+    # conformance 45 + verify 5 + debug 8 = 258) plus headroom, and stays under
+    # the 360-minute cap GitHub imposes on hosted runners: a job-level value
+    # above that cap is silently clamped and the budget written here would be
+    # fiction.
+    timeout-minutes: 300
+    permissions:
+      contents: read
+      id-token: write  # Sigstore keyless signing (ambient GitHub Actions OIDC)
+      packages: write  # push the signed evidence bundle to GHCR
+    env:
+      # One cell, named outright. uat-kind.yaml composes this path from its
+      # intent and platform inputs because it serves several; this lane serves
+      # the slurm cell only, and a literal cannot resolve to a file that does
+      # not exist.
+      TEST_CONFIG: tests/uat/kind/tests/h100-training-slurm-config.yaml
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      # Frees the preinstalled Android SDK, .NET and GHC trees and prunes
+      # docker, and raises the inotify limits five kubelets need. The disk
+      # reclamation is why the footprint table below starts AFTER this step:
+      # the baseline that matters is the one the cluster is actually built on.
+      - name: Prep runner for Kind
+        uses: ./.github/actions/prep-kind-runner
+
+      # kind + the tools the shared phases need on PATH: kubectl and yq (used
+      # throughout phases.sh and by the bootstrap), helm (the nvml-mock chart
+      # and helm-diff), helmfile (the install phase's `helmfile apply`).
+      - name: Setup build tools
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_kind: 'true'
+          kind_version: '${{ steps.versions.outputs.kind }}'
+          install_kubectl: 'true'
+          kubectl_version: '${{ steps.versions.outputs.kubectl }}'
+          install_yq: 'true'
+          yq_version: '${{ steps.versions.outputs.yq }}'
+          install_helm: 'true'
+          helm_version: '${{ steps.versions.outputs.helm }}'
+          install_helmfile: 'true'
+          helmfile_version: '${{ steps.versions.outputs.helmfile }}'
+          helmfile_sha256: '${{ steps.versions.outputs.helmfile_sha256_linux_amd64 }}'
+
+      # The cluster name comes from the kind config, through the bootstrap's
+      # own accessor, so this workflow and the script cannot disagree about
+      # which cluster the validator images are side-loaded into. Sourcing the
+      # bootstrap touches no cluster.
+      - name: Resolve cluster name
+        run: |
+          set -euo pipefail
+          # shellcheck source=/dev/null
+          source tests/uat/kind/bootstrap-cluster.sh
+          name="$(bootstrap_cluster_name)"
+          echo "KIND_CLUSTER_NAME=${name}" >> "$GITHUB_ENV"
+          echo "cluster: ${name}  test-config: ${TEST_CONFIG}"
+          test -f "${TEST_CONFIG}"
+
+      # FOUR FOOTPRINT STAGES, AND THEY GATE. Each call records disk and memory
+      # to the log and to the job summary, then fails the step when the headroom
+      # left is under 10% of the totals this runner reports for itself. The
+      # floor is a percentage rather than a budget because nobody has measured
+      # this lane yet, so an absolute number would be invented; a percentage
+      # also survives a change of runner size. Deliberately no
+      # continue-on-error: a lane that reports success while it is out of room
+      # is the failure these steps exist to catch, and without the gate an
+      # exhausted runner surfaces three steps later as an OOM-killed pod or an
+      # out-of-disk helm error that reads like a product bug.
+      - name: Footprint - baseline
+        id: footprint_baseline
+        run: .github/scripts/record-footprint.sh "baseline (runner prepped)"
+
+      # THE SHARED BOOTSTRAP. Creates the four-worker cluster, installs the
+      # GPU simulation, and asserts the post-condition the topology work rests
+      # on: four workers advertising GPUs in two cliques of two, control plane
+      # GPU-free.
+      - name: Bootstrap simulated four-worker cluster
+        id: bootstrap
+        timeout-minutes: 25
+        run: ./tests/uat/kind/bootstrap-cluster.sh "${KIND_CLUSTER_NAME}"
+
+      - name: Footprint - after cluster and GPU simulation
+        id: footprint_cluster
+        run: .github/scripts/record-footprint.sh "cluster + GPU simulation"
+
+      # Resolve validator + agent images to the kind-local ko.local registry
+      # (side-loaded by the aicr-build step below). Written to GITHUB_ENV
+      # rather than inline so the values are set once for every later step.
+      - name: Configure image resolution
+        run: |
+          set -euo pipefail
+          {
+            echo "AICR_IMAGE=ko.local:smoke-test"
+            echo "AICR_VALIDATOR_IMAGE=ko.local:smoke-test"
+            echo "AICR_VALIDATOR_IMAGE_REGISTRY=ko.local"
+            # The binary is stamped with a real commit, so the catalog would
+            # otherwise rewrite :latest to :sha-<commit>, a tag never loaded
+            # into the cluster, and the validator Jobs ImagePullBackOff.
+            echo "AICR_VALIDATOR_IMAGE_TAG=latest"
+          } >> "$GITHUB_ENV"
+
+      - name: Build aicr binary
+        timeout-minutes: 20
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build \
+            -ldflags "-X github.com/NVIDIA/aicr/pkg/cli.version=main -X github.com/NVIDIA/aicr/pkg/cli.commit=${COMMIT_SHA} -X github.com/NVIDIA/aicr/pkg/cli.date=${BUILD_DATE}" \
+            -o ./aicr ./cmd/aicr
+          VER_OUT="$(./aicr --version)"
+          echo "${VER_OUT}"
+          if ! printf '%s' "${VER_OUT}" | grep -qF "main (commit: ${COMMIT_SHA}"; then
+            echo "::error::aicr binary not stamped (want 'main (commit: ${COMMIT_SHA}'); got: ${VER_OUT}" >&2
+            exit 1
+          fi
+
+      # Side-load the validator (all phases) + snapshot-agent images into the
+      # cluster under ko.local. build_cli is false: the host binary is the
+      # stamped go build above.
+      - name: Build validator + agent images into kind
+        timeout-minutes: 25
+        uses: ./.github/actions/aicr-build
+        with:
+          build_cli: 'false'
+          build_snapshot_agent: 'true'
+          validator_phases: 'deployment,conformance,performance'
+
+      - name: Footprint - after image side-load
+        id: footprint_images
+        run: .github/scripts/record-footprint.sh "validator + agent images"
+
+      # GHCR auth for the evidence-bundle push in the conformance phase.
+      - name: Authenticate to GHCR
+        uses: ./.github/actions/ghcr-login
+
+      # UAT phases, invoked one per step so a per-phase failure surfaces in
+      # the Actions UI. No train/serve step: a slurm recipe has no K8s-native
+      # CUJ (cuj_phase_for returns `none`), and conformance covers the
+      # deployed stack.
+      - name: UAT - prep (snapshot + recipe + validate + bundle)
+        id: prep
+        timeout-minutes: 20
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/kind/run-sim prep "${TEST_CONFIG}"
+
+      - name: UAT - install (helmfile apply + readiness gate)
+        id: install
+        if: steps.prep.outcome == 'success'
+        timeout-minutes: 90
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/kind/run-sim install "${TEST_CONFIG}"
+
+      - name: Footprint - after bundle install
+        id: footprint_install
+        if: always() && steps.install.outcome != 'skipped'
+        run: .github/scripts/record-footprint.sh "AICR bundle installed"
+
+      # THE TOPOLOGY ACCEPTANCE CHECK (#2358). Recomputes the expected block
+      # membership from the live slurmd placement and each node's
+      # nvidia.com/gpu.clique label, and compares Topograph's topology.conf
+      # against it.
+      #
+      # It runs HERE, and not as part of the recipe's own healthCheckAsserts,
+      # because the two questions belong to different artifacts. The overlay's
+      # inline assertion gates the SHAPE Topograph must produce, and it has to
+      # hold for the leaf as shipped -- one slurmd replica, one block. How many
+      # blocks there are, and which Slurm nodes are in each, follow the replica
+      # count THIS LANE chooses (nodesets.slinky.replicas=4 in the test config),
+      # so the count-sensitive check lives with the lane. It is also not
+      # expressible there: registry-declared health checks are restricted to
+      # chainsaw assert/error operations (pkg/chainsaw/allowlist.go), each
+      # evaluated against ONE fetched resource, and the expectation is a join
+      # across the ConfigMap, the slurmd Pods and the Nodes.
+      #
+      # After install, because that is the first point where four slurmd pods
+      # are Running and Topograph has synced; before conformance, so a wrong
+      # topology fails before a signed evidence bundle is emitted for it.
+      - name: UAT - verify simulated GPU topology
+        id: topology
+        if: steps.install.outcome == 'success'
+        timeout-minutes: 10
+        run: ./tests/uat/kind/verify-topology.sh "${KIND_CLUSTER_NAME}"
+
+      - name: UAT - validate (conformance phase) + emit signed evidence
+        id: conformance
+        if: steps.topology.outcome == 'success'
+        timeout-minutes: 45
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/kind/run-sim conformance "${TEST_CONFIG}"
+
+      - name: UAT - verify (evidence verify)
+        id: verify
+        if: steps.conformance.outcome == 'success'
+        timeout-minutes: 5
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+          # Pin the expected signer to THIS workflow's OIDC identity, so verify
+          # passes only for a bundle this lane signed.
+          EXPECTED_ISSUER: https://token.actions.githubusercontent.com
+          EXPECTED_IDENTITY_REGEXP: '^https://github\.com/NVIDIA/aicr/\.github/workflows/uat-kind-sim\.yaml@refs/heads/.+$'
+        run: ./tests/uat/kind/run-sim verify "${TEST_CONFIG}"
+
+      - name: Collect cluster debug bundle
+        if: failure() && steps.prep.outcome != 'skipped'
+        timeout-minutes: 8
+        env:
+          AICR_BIN: ${{ github.workspace }}/aicr
+          RUN_ID: ${{ github.run_id }}
+        run: ./tests/uat/kind/run-sim debug "${TEST_CONFIG}" || true
+
+      # The shared collector above needs a resolved recipe, so it cannot run
+      # when the bootstrap itself failed. This is the smaller, dependency-free
+      # snapshot for that case: what the cluster looked like when the GPU
+      # simulation did not take.
+      - name: Collect cluster state on bootstrap failure
+        if: failure() && steps.bootstrap.outcome == 'failure'
+        run: |
+          set -uo pipefail
+          mkdir -p cluster-debug
+          kubectl get nodes -o wide --show-labels > cluster-debug/nodes.txt 2>&1 || true
+          kubectl get pods -A -o wide > cluster-debug/pods.txt 2>&1 || true
+          kubectl describe nodes > cluster-debug/nodes-describe.txt 2>&1 || true
+          docker ps -a > cluster-debug/docker-ps.txt 2>&1 || true
+
+      - name: Upload failure debug
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: uat-kind-sim-debug-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            snapshot.yaml
+            recipe.yaml
+            dry-run.json
+            report.json
+            evidence-result.json
+            evidence/pointer.yaml
+            cluster-debug/**
+          retention-days: 30
+          if-no-files-found: ignore
+
+      # THE ONE ARTIFACT A HUMAN READS. Every step that can turn this job red
+      # gets a row, and every row names what actually ran:
+      #
+      #   - "Validate (phases: conformance)", not "all phases". This lane sets
+      #     VALIDATE_PHASES=conformance in tests/uat/kind/run-sim, so the label
+      #     the cloud lanes use would report a suite that never ran. The literal
+      #     here is pinned against run-sim by tests/uat/kind/topology-golden_test.sh.
+      #   - Topology, the #2358 acceptance gate. Without a row, a run whose
+      #     verify-topology.sh failed showed Bootstrap/Prep/Install success and
+      #     Validate skipped, naming nothing that went red.
+      #   - The four footprint gates. They have no continue-on-error, so one
+      #     going over its floor skips everything after it; with no row the
+      #     table read as an all-skipped run with no cause.
+      - name: Test Summary
+        if: always()
+        env:
+          # Via env, not inline ${{ }} in the run block: github.ref_name can
+          # carry shell-active characters (expression injection), which
+          # `git check-ref-format --branch 'feat/a$(id)b'` accepts. sha is safe
+          # but is routed the same way, as uat-azure.yaml does.
+          SUMMARY_SHA: ${{ github.sha }}
+          SUMMARY_REF: ${{ github.ref_name }}
+        run: |
+          {
+            echo "## UAT Results (kind, SIMULATED GPUs, slurm)"
+            echo ""
+            printf '**Cluster:** `%s` (four workers, mocked NVML devices, two cliques)\n' \
+              "${KIND_CLUSTER_NAME}"
+            printf '**Test config:** `%s`\n' "${TEST_CONFIG}"
+            printf '**Build:** `%s` (branch: `%s`)\n' "$SUMMARY_SHA" "$SUMMARY_REF"
+            echo ""
+            echo "| Step | Status |"
+            echo "|------|--------|"
+            echo "| Footprint - baseline | ${{ steps.footprint_baseline.outcome }} |"
+            echo "| Bootstrap | ${{ steps.bootstrap.outcome }} |"
+            echo "| Footprint - after cluster and GPU simulation | ${{ steps.footprint_cluster.outcome }} |"
+            echo "| Footprint - after image side-load | ${{ steps.footprint_images.outcome }} |"
+            echo "| Prep | ${{ steps.prep.outcome }} |"
+            echo "| Install | ${{ steps.install.outcome }} |"
+            echo "| Footprint - after bundle install | ${{ steps.footprint_install.outcome }} |"
+            echo "| Topology (#2358 acceptance gate) | ${{ steps.topology.outcome }} |"
+            echo "| Validate (phases: conformance) | ${{ steps.conformance.outcome }} |"
+            echo "| Verify | ${{ steps.verify.outcome }} |"
+            echo ""
+            echo "Evidence from this lane attests to SIMULATED devices and is not ingested."
+          } >> "$GITHUB_STEP_SUMMARY"
