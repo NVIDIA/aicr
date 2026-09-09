@@ -789,6 +789,16 @@ func TestValidateHooks(t *testing.T) {
 		{"missing file", []Hook{{Phase: "pre-upgrade"}}, true, "file"},
 		{"absolute path", []Hook{{File: "/etc/passwd", Phase: "pre-upgrade"}}, true, "must be a local path"},
 		{"traversal", []Hook{{File: "../../etc/passwd", Phase: "pre-upgrade"}}, true, "must be a local path"},
+		{
+			// Local and traversal-free, but outside the only tree tools/bom
+			// walks, so its image would be unpinned and BOM-invisible.
+			"local path outside the migrations tree",
+			[]Hook{{File: "values.yaml", Phase: "pre-upgrade"}}, true, "must live under manifests/migrations/",
+		},
+		{
+			"a sibling manifests directory is not the migrations tree",
+			[]Hook{{File: "manifests/adopt.yaml", Phase: "pre-upgrade"}}, true, "must live under manifests/migrations/",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

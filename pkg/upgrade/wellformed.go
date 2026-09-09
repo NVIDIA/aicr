@@ -528,6 +528,12 @@ func lowerAtOrBelow(lo, hi bound) bool {
 	return lo.inclusive && hi.inclusive
 }
 
+// hookDir is where ADR-021 puts a hook manifest. The location is load-bearing
+// rather than a convention: tools/bom walks only .../manifests, and
+// recipes/manifest_images_test.go skips any path without /manifests/, so a
+// hook outside that tree carries an image nothing pins and the BOM never sees.
+const hookDir = "manifests/migrations/"
+
 // checkHooks implements rule 9, an addition to ADR-021. Hooks are the
 // deliberate exception that lets a safe verdict carry work, so an unvalidated
 // phase silently doing nothing is worse than a rejected record. file is gated
@@ -547,6 +553,10 @@ func checkHooks(where string, t *Transition) []string {
 		case !filepath.IsLocal(h.File):
 			v = append(v, fmt.Sprintf(
 				"%s hook %d file %q must be a local path under the bundle", where, i, h.File))
+		case !strings.HasPrefix(h.File, hookDir):
+			v = append(v, fmt.Sprintf(
+				"%s hook %d file %q must live under %s, the only tree the BOM and the image-pin test walk",
+				where, i, h.File, hookDir))
 		}
 	}
 	return v
