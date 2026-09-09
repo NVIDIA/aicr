@@ -785,16 +785,22 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/aws/run conformance "${TEST_CONFIG}"
 
-      # The CUJ phase is intent-selected, mirroring the runner's intent-aware
-      # `all`: training runs the Kubeflow TrainJob; inference would run the
-      # served DynamoGraphDeployment (phase_serve, DC3). For training, the
-      # TrainJob fires; for inference the serve step is currently disabled (see
-      # below), so verify/evidence cover the deployed stack either way.
+      # The CUJ phase is selected by intent AND platform, mirroring the
+      # runner's `all` (cuj_phase_for, tests/uat/lib/cuj-dispatch.sh): platform
+      # decides whether a Kubernetes-native CUJ exists at all, intent decides
+      # which one. Every cell this pipeline runs declares kubeflow or dynamo,
+      # so the intent-only condition below selects the same phase `all` would;
+      # the one platform with no CUJ (slurm, where a TrainJob would bypass
+      # slurmd) has no cell here. Training runs the Kubeflow TrainJob;
+      # inference would run the served DynamoGraphDeployment (phase_serve,
+      # DC3). For training, the TrainJob fires; for inference the serve step is
+      # currently disabled (see below), so verify/evidence cover the deployed
+      # stack either way.
 
-      # One refresh before the intent-selected CUJ — currently the training
-      # TrainJob (the inference serve step is disabled above). Gates on
-      # conformance success, matching the CUJ step it precedes; if serve is
-      # re-enabled it shares this same gate, so exactly one CUJ runs per intent.
+      # One refresh before the selected CUJ, currently the training TrainJob
+      # (the inference serve step is disabled above). Gates on conformance
+      # success, matching the CUJ step it precedes; if serve is re-enabled it
+      # shares this same gate, so exactly one CUJ runs per cell.
       - name: Refresh AWS credentials before CUJ
         if: steps.conformance.outcome == 'success'
         uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
@@ -937,6 +943,12 @@ jobs:
           SUMMARY_INTENT: ${{ inputs.intent }}
           SUMMARY_LIFECYCLE: ${{ inputs.lifecycle }}
           SUMMARY_DEPLOYER: ${{ inputs.deployer }}
+          # Via env, not inline ${{ }} in the run block: github.ref_name can
+          # carry shell-active characters (expression injection), which
+          # `git check-ref-format --branch 'feat/a$(id)b'` accepts. sha is safe
+          # but is routed the same way, as uat-azure.yaml does.
+          SUMMARY_SHA: ${{ github.sha }}
+          SUMMARY_REF: ${{ github.ref_name }}
         run: |
           {
             echo "## UAT Results (AWS)"
@@ -952,7 +964,7 @@ jobs:
             fi
             printf '**Cluster:** `%s`\n' "$DEPLOYMENT_ID"
             printf '**AICR version:** `%s`\n' "${SUMMARY_AICR_VERSION:-main (build from source)}"
-            echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)"
+            printf '**Build:** `%s` (branch: `%s`)\n' "$SUMMARY_SHA" "$SUMMARY_REF"
             echo ""
             echo "| Phase | Status |"
             echo "|-------|--------|"
