@@ -379,3 +379,57 @@ func TestValidateDirectionalRejectsEmptyFromRange(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateCoverage(t *testing.T) {
+	// Each case supplies its own `to` so the other rules stay satisfied and
+	// only rule 3 can fail.
+	froms := func(to string, fs ...string) []Transition {
+		out := make([]Transition, 0, len(fs))
+		for _, f := range fs {
+			x := tr(nil)
+			x.From = f
+			x.To = to
+			out = append(out, x)
+		}
+		return out
+	}
+	tests := []struct {
+		name    string
+		from    []string
+		to      string
+		pin     string
+		wantErr bool
+	}{
+		{"single transition has no interior", []string{"<0.18.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", false},
+		{"contiguous halves", []string{"<0.18.0", ">=0.18.0 <0.20.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", false},
+		{"wholly contained range is not a hole", []string{"<0.20.0", "<0.18.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", false},
+		{"touching at an inclusive boundary", []string{"<0.18.0", ">=0.18.0 <0.20.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", false},
+		{
+			"ADR ordinary idiom does not require coverage from zero",
+			[]string{">=25.0.0 <26.0.0"}, ">=26.0.0 <=26.0.0", "v26.0.0", false,
+		},
+		{
+			"two blocks in one major line, no interior hole",
+			[]string{">=25.0.0 <25.2.0", ">=25.2.0 <26.0.0"}, ">=26.0.0 <=26.0.0", "v26.0.0", false,
+		},
+		{
+			"gap between non-adjacent domains",
+			[]string{"<0.18.0", ">=0.19.0 <0.20.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", true,
+		},
+		{
+			"one-version hole at a shared exclusive boundary",
+			[]string{"<0.18.0", ">0.18.0 <0.20.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set := Set{"c": &ComponentUpgrades{Component: "c", Transitions: froms(tt.to, tt.from...)}}
+			comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: tt.pin}}
+			err := set.Validate(comps)
+			hasHole := err != nil && strings.Contains(err.Error(), "no record describes")
+			if hasHole != tt.wantErr {
+				t.Fatalf("coverage violation = %v, want %v (err: %v)", hasHole, tt.wantErr, err)
+			}
+		})
+	}
+}

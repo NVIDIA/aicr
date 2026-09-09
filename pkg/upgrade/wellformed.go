@@ -60,6 +60,7 @@ func validateRecord(u *ComponentUpgrades, pin string) []string {
 		v = append(v, checkPinCeiling(where, &u.Transitions[i], pin)...)
 		v = append(v, checkDirectional(where, &u.Transitions[i])...)
 	}
+	v = append(v, checkCoverage(u.Component, u.Transitions, pin)...)
 	return v
 }
 
@@ -274,4 +275,101 @@ func checkDirectional(where string, t *Transition) []string {
 	return []string{fmt.Sprintf(
 		"%s matches in reverse: from reaches %s but to starts at %s, so a downgrade would select this record",
 		where, fb.upper.ver, tb.lower.ver)}
+}
+
+// checkCoverage implements rule 3: no *interior* hole between the from domains.
+//
+// ADR-021 words this as adjacency ("each from meets or overlaps the previous
+// to"), but that formulation is vacuous for the <X-shaped from ranges its own
+// example uses and passes on real gaps. The property its next sentence states —
+// "a hole between them is a version range the component could be running that
+// no record describes" — is coverage, and that is what this implements.
+//
+// Coverage starts at the lowest from floor, not at zero: requiring zero would
+// reject the ADR's stated ordinary case (from ">=25.0 <26.0"). A version below
+// every record resolves to the unknown verdict, not a malformed file.
+func checkCoverage(component string, trs []Transition, pin string) []string {
+	if len(trs) < 2 {
+		return nil
+	}
+	intervals := make([]bounds, 0, len(trs))
+	for i := range trs {
+		b, err := parseBounds(trs[i].From, prereleaseForbidden)
+		if err != nil {
+			return nil // reported per-transition by checkDirectional
+		}
+		intervals = append(intervals, b)
+	}
+	sort.Slice(intervals, func(i, j int) bool {
+		return lowerBefore(intervals[i].lower, intervals[j].lower)
+	})
+
+	pinVer, perr := semver.NewVersion(pin)
+	cur := intervals[0].upper
+	var v []string
+	for _, next := range intervals[1:] {
+		if cur.unbounded {
+			return v // everything above is covered
+		}
+		if !contiguous(cur, next.lower) {
+			// Only an interior hole below the pin matters.
+			if perr == nil && cur.ver.Compare(pinVer) >= 0 {
+				break
+			}
+			v = append(v, fmt.Sprintf(
+				"component %q leaves a version gap after %s that no record describes; an operator on a version in that range would match no transition",
+				component, cur.ver))
+		}
+		// Merge with a running maximum: a wholly contained range must not
+		// shrink the covered span.
+		if next.upper.unbounded || (!cur.unbounded && upperAfter(next.upper, cur)) {
+			cur = next.upper
+		}
+	}
+	return v
+}
+
+// lowerBefore orders lower bounds, unbounded first.
+func lowerBefore(a, b bound) bool {
+	if a.unbounded != b.unbounded {
+		return a.unbounded
+	}
+	if a.unbounded {
+		return false
+	}
+	if cmp := a.ver.Compare(b.ver); cmp != 0 {
+		return cmp < 0
+	}
+	return a.inclusive && !b.inclusive
+}
+
+// upperAfter reports whether a extends coverage beyond b.
+func upperAfter(a, b bound) bool {
+	if a.unbounded {
+		return true
+	}
+	if b.unbounded {
+		return false
+	}
+	if cmp := a.ver.Compare(b.ver); cmp != 0 {
+		return cmp > 0
+	}
+	return a.inclusive && !b.inclusive
+}
+
+// contiguous reports whether coverage continues from an upper bound into the
+// next lower bound. Comparing versions alone is not enough: "<0.18.0" followed
+// by ">0.18.0" leaves exactly 0.18.0 uncovered while the versions look equal.
+func contiguous(upper, lower bound) bool {
+	if upper.unbounded || lower.unbounded {
+		return true
+	}
+	cmp := lower.ver.Compare(upper.ver)
+	if cmp < 0 {
+		return true
+	}
+	if cmp > 0 {
+		return false
+	}
+	return upper.inclusive || lower.inclusive
 }
