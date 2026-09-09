@@ -104,6 +104,8 @@ Reference for the terms used across the docs site.
 | **Specificity** | A score counting non-`any` criteria fields. More-specific overlays merge later. |
 | **Asymmetric matching** | Criteria-matching rule: recipe `any` is a wildcard; query `any` does not match a specific recipe. |
 | **ConfigMap URI** | `cm://namespace/name` — read or write snapshots and recipes directly to Kubernetes ConfigMaps. |
+| **Supported** | The upstream recipe resolves and bundles, deploys on real hardware, passes its declared validation phases, and has published, verifiable evidence. See [ROADMAP](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#maturity). |
+| **Preview** | The recipe path and evidence are useful for early adoption, but AICR does not yet make the complete production support and lifecycle commitment required for Supported status. See [Preview recipes](integrator/recipe-development.md#preview-recipes). |
 | **SLSA / SBOM** | Supply-chain Levels for Software Artifacts (release images reach Build Level 3) and Software Bill of Materials shipped with binaries and images. |
 
 ## Links

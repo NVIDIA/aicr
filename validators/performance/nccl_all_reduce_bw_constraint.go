@@ -429,10 +429,13 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 
 	// Preflight cluster-side prerequisites before spending TrainJob time.
-	// On GB200/EKS and GB200/OKE the NET variant needs
-	// NVreg_GrdmaPciTopoCheckOverride=1 on the NVIDIA driver; without it, the
-	// PCIe-attached NIC (EFA on EKS, ConnectX IB on OKE) can't attach dma-buf
-	// to GPU HBM and NCCL silently falls back to Socket. Preflights key off
+	// On GB200/EKS and GB200/OKE the NET variant needs GPUDirect RDMA. Before
+	// R595 that requires NVreg_GrdmaPciTopoCheckOverride=1 on the NVIDIA driver
+	// (R580 is the version AICR pins); R595 removed the parameter, substituting a
+	// topology requirement the preflight does not check, so there it fails rather
+	// than assume (#2459). Before R595, without the flag the PCIe-attached NIC (EFA on EKS, ConnectX
+	// IB on OKE) can't attach dma-buf to GPU HBM and NCCL silently falls back
+	// to Socket. Preflights key off
 	// the benchmark target: opting into a profile opts into that profile's
 	// environment contract, preflights included. (OKE takes the default
 	// fabric env here — AICR_NCCL_FABRIC's roce override is an EKS-only
