@@ -323,16 +323,23 @@ func checkDirectional(where string, t *Transition) []string {
 //
 // Coverage starts at the lowest from floor, not at zero: requiring zero would
 // reject the ADR's stated ordinary case (from ">=25.0 <26.0"). A version below
-// every record resolves to the unknown verdict, not a malformed file.
+// every record resolves to the unknown verdict, not a malformed file. It runs
+// up to the pin, which is why a single-transition record is checked too.
 func checkCoverage(component string, trs []Transition, pin string) []string {
-	if len(trs) < 2 {
+	if len(trs) == 0 {
 		return nil
 	}
 	intervals := make([]bounds, 0, len(trs))
 	for i := range trs {
 		b, err := parseBounds(trs[i].From, prereleaseForbidden)
 		if err != nil {
-			return nil // reported per-transition by checkDirectional
+			// Rule 3 is a whole-record property, and the range that failed to
+			// parse may be the one bridging the gap, so a hole computed from
+			// what is left would be a false positive the author cannot act on.
+			// Rule 2 is per transition, a property partial data can still
+			// answer, which is why it reports and this does not.
+			// checkDirectional names the unparseable range itself.
+			return nil
 		}
 		intervals = append(intervals, b)
 	}
@@ -362,7 +369,21 @@ func checkCoverage(component string, trs []Transition, pin string) []string {
 			cur = next.upper
 		}
 	}
-	return v
+	return append(v, checkCoverageReachesPin(component, cur, pinVer, perr)...)
+}
+
+// checkCoverageReachesPin closes rule 3's upper end. Comparing consecutive
+// intervals alone stops at the highest from ceiling the file happens to name,
+// so a record whose coverage falls short of the pin is accepted while every
+// version between the two matches no transition — the exact shape a record has
+// immediately after a pin bump that nobody extended it for.
+func checkCoverageReachesPin(component string, cur bound, pinVer *semver.Version, perr error) []string {
+	if cur.unbounded || perr != nil || cur.ver.Compare(pinVer) >= 0 {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"component %q leaves a version gap between %s and the pinned version %s that no record describes; an operator on a version in that range would match no transition",
+		component, cur.ver, pinVer)}
 }
 
 // lowerBefore orders lower bounds, unbounded first.

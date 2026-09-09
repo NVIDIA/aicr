@@ -45,6 +45,38 @@ func rec(pin string, trs ...Transition) (Set, []Component) {
 	return Set{"c": u}, []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: pin}}
 }
 
+// mentions reports whether err names any of the given message fragments.
+//
+// Rules 2, 3 and 7 constrain the same two ranges from three directions, so a
+// fixture that isolates one of them is often not well-formed under another —
+// a `to` ceiling below the pin is legal under rule 2 and always leaves a rule
+// 3 hole, for instance. A table that asserts on its own rule's wording stays
+// about that rule; asserting err != nil would make it a referendum on all
+// three at once.
+func mentions(err error, fragments ...string) bool {
+	if err == nil {
+		return false
+	}
+	for _, f := range fragments {
+		if strings.Contains(err.Error(), f) {
+			return true
+		}
+	}
+	return false
+}
+
+// The message fragments checkPinCeiling and checkDirectional can emit.
+var (
+	rule2Fragments = []string{
+		"reaches past", "to range with no upper bound", "to range with no lower bound",
+		"not a comparable version", "which carries build metadata", "unparseable to range",
+	}
+	rule7Fragments = []string{
+		"matches in reverse", "cannot be shown to be forward-only",
+		"matches no version", "unparseable from range",
+	}
+)
+
 func TestValidateVerdictFields(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -258,8 +290,8 @@ func TestValidatePinCeiling(t *testing.T) {
 				x.From = "<0.0.1"
 			}))
 			err := set.Validate(comps)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("Validate error = %v, wantErr %v", err, tt.wantErr)
+			if got := mentions(err, rule2Fragments...); got != tt.wantErr {
+				t.Fatalf("rule 2 violation = %v, want %v (err: %v)", got, tt.wantErr, err)
 			}
 			if tt.wantErr && !strings.Contains(err.Error(), tt.wantText) {
 				t.Errorf("error %q does not mention %q", err.Error(), tt.wantText)
@@ -320,8 +352,8 @@ func TestValidateDirectional(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			set, comps := rec("v0.19.0", tr(func(x *Transition) { x.From = tt.from; x.To = tt.to }))
 			err := set.Validate(comps)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("Validate error = %v, wantErr %v", err, tt.wantErr)
+			if got := mentions(err, rule7Fragments...); got != tt.wantErr {
+				t.Fatalf("rule 7 violation = %v, want %v (err: %v)", got, tt.wantErr, err)
 			}
 			if tt.wantErr && !strings.Contains(err.Error(), tt.wantText) {
 				t.Errorf("error %q does not mention %q", err.Error(), tt.wantText)
@@ -381,8 +413,10 @@ func TestValidateDirectionalRejectsEmptyFromRange(t *testing.T) {
 }
 
 func TestValidateCoverage(t *testing.T) {
-	// Each case supplies its own `to` so the other rules stay satisfied and
-	// only rule 3 can fail.
+	// Every case shares one `to` across its transitions, so a multi-transition
+	// case also violates rule 8. That is deliberate and harmless here: the
+	// assertion greps rule 3's own wording, and pinning the `to` keeps rules 2
+	// and 7 constant while only the `from` domains vary.
 	froms := func(to string, fs ...string) []Transition {
 		out := make([]Transition, 0, len(fs))
 		for _, f := range fs {
@@ -400,7 +434,20 @@ func TestValidateCoverage(t *testing.T) {
 		pin     string
 		wantErr bool
 	}{
-		{"single transition has no interior", []string{"<0.18.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", false},
+		{"single transition reaching the pin", []string{"<0.20.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", false},
+		{
+			// A lone transition has no interior to hole, but it still has to
+			// reach the pin: everything in [0.18.0, 0.20.0) matches nothing.
+			"single transition stopping short of the pin",
+			[]string{"<0.18.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", true,
+		},
+		{
+			// The shape a record has right after a pin bump nobody extended it
+			// for: the intervals are contiguous with each other and the walk
+			// alone sees no problem, but [0.19.0, 0.30.0) matches nothing.
+			"contiguous intervals stopping short of the pin",
+			[]string{"<0.18.0", "<0.19.0"}, ">=0.20.0 <=0.20.0", "v0.30.0", true,
+		},
 		{"contiguous halves", []string{"<0.18.0", ">=0.18.0 <0.20.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", false},
 		{"wholly contained range is not a hole", []string{"<0.20.0", "<0.18.0"}, ">=0.20.0 <=0.20.0", "v0.20.0", false},
 		{
@@ -440,7 +487,7 @@ func TestValidateCoverage(t *testing.T) {
 			// walk would see the third interval's 0.15 floor arrive after
 			// the second interval's 0.25 ceiling and misreport a hole.
 			"unsorted intervals still resolve to no interior hole",
-			[]string{">=0.10.0 <0.15.0", ">=0.20.0 <0.25.0", ">=0.15.0 <0.20.0"}, ">=0.25.0 <=0.25.0", "v0.30.0", false,
+			[]string{">=0.10.0 <0.15.0", ">=0.20.0 <0.25.0", ">=0.15.0 <0.20.0"}, ">=0.25.0 <=0.25.0", "v0.25.0", false,
 		},
 		{
 			// The other three cases never compare two equal concrete
@@ -467,6 +514,27 @@ func TestValidateCoverage(t *testing.T) {
 				t.Fatalf("coverage violation = %v, want %v (err: %v)", hasHole, tt.wantErr, err)
 			}
 		})
+	}
+}
+
+// Rule 3 runs "up to the pin". Comparing consecutive intervals alone stops at
+// the highest from ceiling the file names, which accepts a record whose
+// coverage ends below the pin and strands every version in between. The
+// message must name the pin, or an author cannot tell a trailing hole from an
+// interior one.
+func TestValidateCoverageNamesThePinOnATrailingHole(t *testing.T) {
+	set, comps := rec("v0.30.0", tr(func(x *Transition) {
+		x.From = "<0.19.0"
+		x.To = ">=0.20.0 <=0.20.0"
+	}))
+	err := set.Validate(comps)
+	if err == nil {
+		t.Fatal("Validate = nil, want a trailing coverage hole up to the pin")
+	}
+	for _, want := range []string{"0.19.0", "pinned version 0.30.0", "no record describes"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err.Error(), want)
+		}
 	}
 }
 
