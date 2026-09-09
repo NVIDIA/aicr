@@ -65,6 +65,10 @@ func Load(ctx context.Context, src Source, comps []Component) (Set, error) {
 		if c.File == "" {
 			continue
 		}
+		if src == nil {
+			return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+				"component %q references upgrades file %q but no source was given to read it from", c.Name, c.File))
+		}
 		readCtx, cancel := context.WithTimeout(ctx, defaults.FileReadTimeout)
 		data, err := src.ReadFile(readCtx, c.File)
 		cancel()
@@ -103,11 +107,12 @@ func decodeRecord(data []byte, c Component) (*ComponentUpgrades, error) {
 			"%s has kind %q, expected %q; use a ComponentUpgrades document compatible with this aicr release",
 			c.File, u.Kind, ComponentUpgradesKind))
 	}
-	if !header.IsSupportedAuthoringAPIVersion(u.APIVersion) {
+	// ComponentUpgrades starts at its ADR-022 target rather than on the alpha
+	// track, so there is no alpha version to accept here and later retire.
+	if u.APIVersion != header.GroupVersionV1Beta1 {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-			"%s has apiVersion %q, expected %q or %q for %s; update the record header for this aicr release",
-			c.File, u.APIVersion, header.AuthoringGroupVersion, header.GroupVersionV1Beta1,
-			ComponentUpgradesKind))
+			"%s has apiVersion %q, expected %q for %s; update the record header for this aicr release",
+			c.File, u.APIVersion, header.GroupVersionV1Beta1, ComponentUpgradesKind))
 	}
 	if u.Component != c.Name {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(

@@ -38,7 +38,7 @@ func (m mapSource) ReadFile(ctx context.Context, path string) ([]byte, error) {
 }
 
 func validRecord(component string) string {
-	return "apiVersion: " + header.AuthoringGroupVersion + "\n" +
+	return "apiVersion: " + header.GroupVersionV1Beta1 + "\n" +
 		"kind: " + ComponentUpgradesKind + "\n" +
 		"component: " + component + "\n" +
 		"transitions:\n" +
@@ -70,7 +70,7 @@ func TestLoadSuccess(t *testing.T) {
 
 // A component with no record is not an error here — that is #2535's gate.
 func TestLoadSkipsComponentsWithoutRecords(t *testing.T) {
-	set, err := Load(context.Background(), mapSource{}, []Component{{Name: "nfd"}})
+	set, err := Load(context.Background(), mapSource{}, []Component{{Name: "nw"}})
 	if err != nil {
 		t.Fatalf("Load error = %v", err)
 	}
@@ -86,13 +86,20 @@ func TestLoadRejectsBadHeaders(t *testing.T) {
 		wantText []string
 	}{
 		{
-			name:     "unrecognized apiVersion names both values",
-			body:     strings.Replace(validRecord("nw"), header.AuthoringGroupVersion, "aicr.run/v9", 1),
-			wantText: []string{"aicr.run/v9", header.AuthoringGroupVersion, header.GroupVersionV1Beta1},
+			name:     "unrecognized apiVersion names the one expected value",
+			body:     strings.Replace(validRecord("nw"), header.GroupVersionV1Beta1, "aicr.run/v9", 1),
+			wantText: []string{"aicr.run/v9", header.GroupVersionV1Beta1},
+		},
+		{
+			// ADR-021:149 and ADR-022:103 both put this kind on the beta track
+			// from the start: there is no alpha version to emit and later retire.
+			name:     "the alpha authoring version is not accepted",
+			body:     strings.Replace(validRecord("nw"), header.GroupVersionV1Beta1, header.AuthoringGroupVersion, 1),
+			wantText: []string{header.AuthoringGroupVersion, header.GroupVersionV1Beta1},
 		},
 		{
 			name:     "empty apiVersion is not tolerated",
-			body:     strings.Replace(validRecord("nw"), "apiVersion: "+header.AuthoringGroupVersion, "apiVersion: \"\"", 1),
+			body:     strings.Replace(validRecord("nw"), "apiVersion: "+header.GroupVersionV1Beta1, "apiVersion: \"\"", 1),
 			wantText: []string{"apiVersion"},
 		},
 		{
@@ -167,7 +174,7 @@ func TestLoadRejectsUnknownFields(t *testing.T) {
 
 // A record asserting nothing must not read as well-formed.
 func TestLoadRejectsRecordWithNoAssertions(t *testing.T) {
-	body := "apiVersion: " + header.AuthoringGroupVersion + "\n" +
+	body := "apiVersion: " + header.GroupVersionV1Beta1 + "\n" +
 		"kind: " + ComponentUpgradesKind + "\n" +
 		"component: nw\n" +
 		"transitions: []\n"
@@ -198,13 +205,14 @@ func TestLoadRejectsDuplicateComponentNames(t *testing.T) {
 	}
 }
 
-// A prerelease ceiling in `to` must load — grove is pinned at one.
+// A prerelease ceiling in `to` must load. Real components are pinned at
+// prereleases, and such a pin otherwise cannot have a record reaching it.
 func TestLoadAllowsPrereleaseInTo(t *testing.T) {
-	body := strings.Replace(validRecord("grove"),
+	body := strings.Replace(validRecord("pre"),
 		`to: ">=0.18.0 <=0.18.0"`, `to: ">=0.1.0-alpha.1 <=0.1.0-alpha.12"`, 1)
 	body = strings.Replace(body, `from: "<0.18.0"`, `from: "<0.1.0"`, 1)
-	src := mapSource{"upgrades/grove.yaml": []byte(body)}
-	comps := []Component{{Name: "grove", File: "upgrades/grove.yaml", PinnedVersion: "v0.1.0-alpha.12"}}
+	src := mapSource{"upgrades/pre.yaml": []byte(body)}
+	comps := []Component{{Name: "pre", File: "upgrades/pre.yaml", PinnedVersion: "v0.1.0-alpha.12"}}
 
 	if _, err := Load(context.Background(), src, comps); err != nil {
 		t.Fatalf("Load error = %v", err)
@@ -220,6 +228,33 @@ func TestLoadPropagatesReadError(t *testing.T) {
 	}
 	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
 		t.Errorf("error = %v, want inner ErrCodeNotFound preserved", err)
+	}
+}
+
+// A nil Source with a record to read is a caller bug, but panicking on it
+// turns a misconfiguration into a crash in whatever process called Load.
+func TestLoadRejectsNilSource(t *testing.T) {
+	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+	_, err := Load(context.Background(), nil, comps)
+	if err == nil {
+		t.Fatal("Load = nil error, want rejection of the nil source")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+	}
+	if !strings.Contains(err.Error(), "upgrades/nw.yaml") {
+		t.Errorf("error %q does not name the file it could not read", err.Error())
+	}
+}
+
+// A component with no record needs no source at all.
+func TestLoadAllowsNilSourceWhenNothingReferencesAFile(t *testing.T) {
+	set, err := Load(context.Background(), nil, []Component{{Name: "nw"}})
+	if err != nil {
+		t.Fatalf("Load error = %v, want nil", err)
+	}
+	if len(set) != 0 {
+		t.Errorf("set = %v, want empty", set)
 	}
 }
 

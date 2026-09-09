@@ -45,17 +45,17 @@ func TestVerdictAuthorable(t *testing.T) {
 
 func TestComponentUpgradesDecode(t *testing.T) {
 	const doc = `
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
-component: nodewright-operator
+component: widget-operator
 transitions:
   - from: "<0.18.0"
     to: ">=0.18.0 <=0.18.0"
     verdict: manual
     reversible: true
     reversibleNotes: only until legacy cleanup runs
-    summary: skyhook.nvidia.com is renamed to nodewright.nvidia.com
-    precondition: no Skyhook is mid-rollout
+    summary: widget.example.invalid is renamed to gadget.example.invalid
+    precondition: no Widget is mid-rollout
     stepsByDeployer:
       - deployers: [argocd, flux]
         steps:
@@ -66,8 +66,8 @@ transitions:
           - id: rename-crs
             description: rewrite apiVersion and kind, then apply
     affectedResources:
-      - group: skyhook.nvidia.com
-        kinds: [Skyhook, DeploymentPolicy]
+      - group: widget.example.invalid
+        kinds: [Widget, DeploymentPolicy]
     references:
       - https://example.invalid/migration
 `
@@ -103,9 +103,9 @@ transitions:
 // Absent `reversible` must stay nil — absent means no claim, not false.
 func TestReversibleAbsentIsNil(t *testing.T) {
 	const doc = `
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentUpgrades
-component: nfd
+component: widget-operator
 transitions:
   - from: "<1.0.0"
     to: ">=1.0.0 <=1.0.0"
