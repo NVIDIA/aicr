@@ -290,7 +290,6 @@ but they do not update:
 
 - Homebrew formula (users on `brew upgrade` are unaffected)
 - Container `:latest` tags (only candidate and version aliases are written)
-- Demo deployment (Cloud Run stays on latest stable)
 - Site documentation (GitHub Pages stays on latest stable)
 
 Slack notifications fire for both pre-releases and stable releases.
@@ -333,7 +332,7 @@ For critical fixes between regular releases:
 ## Release Pipeline
 
 ```
-Tag Push --> CI --> Candidate Images --> Resolve Digests --> Scan + Attest --> Promote Aliases --> Publish --> Deploy
+Tag Push --> CI --> Candidate Images --> Resolve Digests --> Scan + Attest --> Promote Aliases --> Publish
 ```
 
 The release workflow resolves one authoritative seven-image digest map. Both
@@ -543,12 +542,6 @@ else
   exit 1
 fi
 ```
-
-## Demo Deployment
-
-> **Note**: Demonstration only — not a production service. Self-host `aicrd` for production use. See [API Server Documentation](docs/contributor/api-server.md).
-
-The `aicrd` API server demo deploys to Google Cloud Run on successful release (region: `us-west1`, auth: Workload Identity Federation). Project-specific details are managed in CI configuration.
 
 ## Troubleshooting
 

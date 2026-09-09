@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Additional GCP APIs required for GKE UAT beyond what demo-api-server enables.
-# APIs already enabled by infra/demo-api-server are safe to list here (idempotent).
+# Additional GCP APIs required for GKE UAT beyond what gcp-shared enables.
+# APIs already enabled by infra/gcp-shared are safe to list here (idempotent).
 locals {
   services = [
     "cloudkms.googleapis.com",
