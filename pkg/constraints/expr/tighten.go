@@ -85,18 +85,22 @@ func Tighten(existing, candidate string) (string, TightenOutcome) {
 	if !boundsSatisfiable(lower, upper) {
 		return "", TightenUnsatisfiable
 	}
-	if !lowerNarrowed && !upperNarrowed {
-		return existing, TightenUnchanged
-	}
 
 	terms := make([]string, 0, 4)
-	terms = appendBound(terms, lower, droppedBound(existingLower, candidateLower, lower))
-	terms = appendBound(terms, upper, droppedBound(existingUpper, candidateUpper, upper))
+	terms, lowerKept := appendBound(terms, lower, droppedBound(existingLower, candidateLower, lower))
+	terms, upperKept := appendBound(terms, upper, droppedBound(existingUpper, candidateUpper, upper))
+
+	// A retained loser still restricts, so it narrows even when the winning
+	// bound came from the composition. Reporting Unchanged there would drop
+	// the profile's own restriction.
+	if !lowerNarrowed && !upperNarrowed && !lowerKept && !upperKept {
+		return existing, TightenUnchanged
+	}
 	return strings.Join(terms, " "), TightenNarrowed
 }
 
 // appendBound writes the winning bound and, where dropping the loser could
-// widen the range, the loser as well.
+// widen the range, the loser as well. It reports whether the loser was kept.
 //
 // pkg/version compares at the lower of two precisions, so an actual written
 // with fewer components than the bounds can satisfy ">= 1.34.1" while failing
@@ -106,15 +110,15 @@ func Tighten(existing, candidate string) (string, TightenOutcome) {
 // redundant when it is inclusive, or when the winner is exclusive too: only
 // an exclusive bound can reject a version its own neighborhood admits, so
 // only an inclusive winner can lose that exclusion.
-func appendBound(terms []string, winner, dropped *bound) []string {
+func appendBound(terms []string, winner, dropped *bound) ([]string, bool) {
 	if winner == nil {
-		return terms
+		return terms, false
 	}
 	terms = append(terms, winner.String())
 	if dropped != nil && !dropped.inclusive() && winner.inclusive() {
-		terms = append(terms, dropped.String())
+		return append(terms, dropped.String()), true
 	}
-	return terms
+	return terms, false
 }
 
 // droppedBound returns the same-direction bound that lost to winner, or nil
@@ -229,20 +233,29 @@ func boundsSatisfiable(lower, upper *bound) bool {
 	if lower == nil || upper == nil {
 		return true
 	}
-	cmp := lower.parsed.Compare(upper.parsed)
+	// Bounds written at different precisions read as equal under Compare
+	// (">= 1.36" against "< 1.36.0"), which says nothing about emptiness.
+	// Comparing them padded to full precision does: a bound's omitted
+	// components admit versions from its zero-padded form upward, so the
+	// padded pair orders exactly as the ranges do.
+	low, high := lower.parsed, upper.parsed
+	if low.Precision != high.Precision {
+		low, high = atFullPrecision(low), atFullPrecision(high)
+	}
+
+	cmp := low.Compare(high)
 	if cmp > 0 {
 		return false
 	}
 	if cmp == 0 {
-		// Equal at the lower of the two precisions (">= 1.35" against
-		// "< 1.35.2") does not mean the range is empty, so an emptiness
-		// verdict is only safe when both bounds carry the same precision.
-		// Where it is not, the range is allowed through and constraint
-		// evaluation — which fails closed — remains the backstop.
-		if lower.parsed.Precision != upper.parsed.Precision {
-			return true
-		}
 		return lower.inclusive() && upper.inclusive()
 	}
 	return true
+}
+
+// atFullPrecision returns v with every component significant, so a bound
+// written as "1.36" compares as the "1.36.0" its range starts at.
+func atFullPrecision(v version.Version) version.Version {
+	v.Precision = 3
+	return v
 }

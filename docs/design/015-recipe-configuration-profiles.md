@@ -501,7 +501,7 @@ to the surviving composition:
    and the profile's are **both version ranges** — one clause of `>=`, `>`,
    `<=`, `<` terms — resolution now replaces the composed entry with the
    intersection of the two, and the profile may only narrow it. Three cases
-   keep failing closed: a candidate that would widen the range is dropped
+   keep failing closed: a candidate that adds no restriction is dropped
    rather than applied; an intersection no version can satisfy is rejected;
    and a pair with no ordering to intersect — an exact match, `!=`, a
    node-set label predicate, or an expression carrying `||` alternatives —

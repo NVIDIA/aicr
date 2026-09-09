@@ -704,8 +704,8 @@ Profile declarations are intentionally narrow:
   declaring `>= 1.35` resolves to `>= 1.35`, and `>= 1.34.1 < 1.36.0` under
   `>= 1.35` resolves to `>= 1.35 < 1.36.0`. Use this when a value is gated on
   a feature with its own floor (DRA on GKE) that the other values do not
-  need. Three cases keep failing closed: a candidate that would widen the
-  range is ignored, an empty intersection is rejected, and any pair that does
+  need. Three cases keep failing closed: a candidate that adds no restriction
+  is ignored, an empty intersection is rejected, and any pair that does
   not order — an exact match, `!=`, a node-set label predicate, or an
   expression with `||` alternatives — is rejected as a collision. Two
   same-direction bounds written at different precisions (`>= 1.34` against

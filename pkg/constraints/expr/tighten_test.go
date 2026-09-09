@@ -43,6 +43,8 @@ func TestTighten(t *testing.T) {
 		{"floor above ceiling", "<= 1.30", ">= 1.35", "", TightenUnsatisfiable},
 		{"exclusive bounds meeting at one version", ">= 1.35", "< 1.35", "", TightenUnsatisfiable},
 		{"disjoint closed ranges", ">= 1.30 < 1.32", ">= 1.34 < 1.36", "", TightenUnsatisfiable},
+		{"floor meeting an omitted-component ceiling", ">= 1.34.1 < 1.36.0", ">= 1.36", "", TightenUnsatisfiable},
+		{"floor below an omitted-component ceiling", ">= 1.34.1 < 1.36.5", ">= 1.36", ">= 1.36 < 1.36.5", TightenNarrowed},
 
 		{"exact match has no ordering", "ubuntu", ">= 1.35", "", TightenIncomparable},
 		{"equality has no ordering", ">= 1.32", "== 1.35", "", TightenIncomparable},
@@ -53,6 +55,7 @@ func TestTighten(t *testing.T) {
 		{"alternatives are not intersected", ">= 1.34 < 1.35 || >= 1.35.1", ">= 1.35", "", TightenIncomparable},
 		{"unparseable version", ">= 1.32", ">= not-a-version", "", TightenIncomparable},
 		{"an exclusive loser is kept, not dropped", "> 1.34.0", ">= 1.34.1", ">= 1.34.1 > 1.34.0", TightenNarrowed},
+		{"a losing exclusive candidate still restricts", ">= 24.04.1", "> 24.04.0", ">= 24.04.1 > 24.04.0", TightenNarrowed},
 		{"empty candidate", ">= 1.32", "", "", TightenIncomparable},
 	}
 
@@ -107,8 +110,9 @@ func TestTightenResultParses(t *testing.T) {
 	}
 }
 
-// TestTightenNeverWidens is the invariant the recipe merge depends on: a
-// tightened expression must admit no version the composed expression rejected.
+// TestTightenNeverWidens is the invariant the recipe merge depends on: the
+// result is an intersection, so it must admit no version that either input
+// rejected — neither the composed expression nor the profile's own.
 // It is asserted by exhaustion rather than by argument because pkg/version
 // compares at the lower of two precisions, which makes "stricter" subtle
 // enough that reasoning about it has already been wrong once (an exclusive
@@ -152,8 +156,18 @@ func TestTightenNeverWidens(t *testing.T) {
 				continue
 			}
 			for _, actual := range actuals {
-				if admits(t, merged, actual) && !admits(t, existing, actual) {
-					t.Errorf("Tighten(%q, %q) = %q widened: it admits %q, which the composed expression rejects",
+				if !admits(t, merged, actual) {
+					continue
+				}
+				// The result is an intersection, so it must imply BOTH
+				// inputs. Checking only the composed side would miss a
+				// result that silently discards the profile's own bound.
+				if !admits(t, existing, actual) {
+					t.Errorf("Tighten(%q, %q) = %q admits %q, which the composed expression rejects",
+						existing, candidate, merged, actual)
+				}
+				if !admits(t, candidate, actual) {
+					t.Errorf("Tighten(%q, %q) = %q admits %q, which the profile's own expression rejects",
 						existing, candidate, merged, actual)
 				}
 			}
