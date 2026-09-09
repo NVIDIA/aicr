@@ -30,11 +30,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// TestCatalogTimeoutsFitFacadeBudget asserts every catalog entry's per-check
-// timeout stays below the facade-level ValidationOperationTimeout. Otherwise a
-// controller/library caller (which gets that facade deadline when no explicit
-// timeout is set) could hit the top-level "context deadline exceeded" before
-// the per-check Job reaches its own deadline and emits a structured result.
+// TestCatalogTimeoutsFitFacadeBudget asserts every catalog entry's rendered
+// Job deadline (CheckTimeout + ValidatorJobDeadlineHeadroom, per
+// v1.JobDeadlineFor) stays below the facade-level ValidationOperationTimeout.
+// Otherwise a controller/library caller (which gets that facade deadline when
+// no explicit timeout is set) could hit the top-level "context deadline
+// exceeded" before the per-check Job reaches its own deadline and emits a
+// structured result.
 func TestCatalogTimeoutsFitFacadeBudget(t *testing.T) {
 	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
 	if err != nil {
