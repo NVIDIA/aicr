@@ -131,9 +131,13 @@ func TestTightenNeverWidens(t *testing.T) {
 	operators := []string{">=", ">", "<=", "<"}
 	versions := []string{
 		"1.34", "1.34.0", "1.34.1", "1.35", "1.35.0", "1.35.2",
-		"1.34.3-gke.100", "1.34.3-gke.900", "2", "1",
+		"1.34.3-gke.100", "1.34.3-gke.900", "1.35.0-gke.100", "1.35.0-gke.101",
+		"1.35-gke.100", "2", "1",
 	}
-	ranges := []string{">= 1.34.1 < 1.36.0", ">= 1.32 < 1.35", "> 1.34.0 <= 1.35.2"}
+	ranges := []string{
+		">= 1.34.1 < 1.36.0", ">= 1.32 < 1.35", "> 1.34.0 <= 1.35.2",
+		">= 1.34.3-gke.100 < 1.35.0", "> 1.35.0-gke.100 <= 1.35.0-gke.900",
+	}
 	expressions := make([]string, 0, len(ranges)+len(operators)*len(versions))
 	expressions = append(expressions, ranges...)
 	for _, operator := range operators {
@@ -141,7 +145,10 @@ func TestTightenNeverWidens(t *testing.T) {
 			expressions = append(expressions, operator+" "+version)
 		}
 	}
-	actuals := append([]string{"1.33", "1.33.9", "1.36", "1.36.0", "0.9"}, versions...)
+	actuals := append([]string{
+		"1.33", "1.33.9", "1.36", "1.36.0", "0.9",
+		"1.35.0-gke.99", "1.35.0-gke.150", "1.36.0-gke.10", "1.34.3-gke.500",
+	}, versions...)
 
 	admits := func(t *testing.T, expression, actual string) bool {
 		t.Helper()
@@ -195,7 +202,10 @@ func TestTightenRejectsEmptyRanges(t *testing.T) {
 	t.Parallel()
 
 	operators := []string{">=", ">", "<=", "<"}
-	versions := []string{"1", "1.35", "1.35.0", "1.35.2", "1.36", "1.36.0", "2"}
+	versions := []string{
+		"1", "1.35", "1.35.0", "1.35.2", "1.36", "1.36.0", "2",
+		"1.35-gke.100", "1.35.0-gke.100", "1.35.0-gke.101", "1.36.0-gke.50",
+	}
 	// Readings carry at least major.minor (Kubernetes "1.34.1", Ubuntu
 	// "24.04"), and emptiness is decided over that domain. A bare-major
 	// actual is degenerate under pkg/version — "1" compares equal to every
@@ -206,6 +216,10 @@ func TestTightenRejectsEmptyRanges(t *testing.T) {
 		"1.34", "1.34.9", "1.35", "1.35.0", "1.35.1", "1.35.2", "1.35.9",
 		"1.36", "1.36.0", "1.36.1", "1.36.9", "1.37", "1.37.0",
 		"2.0", "2.0.0", "2.1", "3.0.0",
+		// A GKE build sorts after the bare core it builds on, and the
+		// build number is the finest dimension pkg/version orders.
+		"1.35.0-gke.99", "1.35.0-gke.100", "1.35.0-gke.101", "1.35.0-gke.150",
+		"1.36.0-gke.10", "1.36.0-gke.50", "1.36.0-gke.51",
 	}
 
 	expressions := make([]string, 0, len(operators)*len(versions))
@@ -252,7 +266,7 @@ func TestTightenRejectsEmptyRanges(t *testing.T) {
 			// refusing that range is the fail-closed reading of an
 			// incoherent pair, not a false rejection to fix.
 			for _, actual := range actuals {
-				if strings.Count(actual, ".") != fullPrecision-1 {
+				if !isFullPrecision(actual) {
 					continue
 				}
 				if admitsBoth(t, existing, candidate, actual) {
@@ -281,4 +295,63 @@ func admitsBoth(t *testing.T, first, second, actual string) bool {
 		}
 	}
 	return true
+}
+
+// isFullPrecision reports whether an actual names every numeric component,
+// with or without a build suffix ("1.35.0", "1.35.0-gke.100").
+func isFullPrecision(actual string) bool {
+	core, _, _ := strings.Cut(actual, "-")
+	return strings.Count(core, ".") == fullPrecision-1
+}
+
+// TestTightenGKEBuildDimension pins the two ways the build suffix breaks the
+// numeric-only model: a coarse bound never has its suffix consulted, and
+// adjacent builds leave no room between them.
+func TestTightenGKEBuildDimension(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		existing    string
+		candidate   string
+		wantValue   string
+		wantOutcome TightenOutcome
+	}{
+		{
+			name:     "adjacent builds leave no room",
+			existing: "> 1.35.0-gke.100", candidate: "< 1.35.0-gke.101",
+			wantOutcome: TightenUnsatisfiable,
+		},
+		{
+			name:     "separated builds do",
+			existing: "> 1.35.0-gke.100", candidate: "< 1.35.0-gke.150",
+			wantValue: "> 1.35.0-gke.100 < 1.35.0-gke.150", wantOutcome: TightenNarrowed,
+		},
+		{
+			name:     "a coarse bound ignores its own suffix",
+			existing: "> 1.35-gke.100", candidate: "< 1.36.0-gke.50",
+			wantValue: "> 1.35-gke.100 < 1.36.0-gke.50", wantOutcome: TightenNarrowed,
+		},
+		{
+			name:     "a build sorts after its bare core",
+			existing: "> 1.35.0", candidate: "< 1.35.1",
+			wantValue: "> 1.35.0 < 1.35.1", wantOutcome: TightenNarrowed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			value, outcome := Tighten(tt.existing, tt.candidate)
+			if outcome != tt.wantOutcome {
+				t.Fatalf("Tighten(%q, %q) outcome = %v, want %v",
+					tt.existing, tt.candidate, outcome, tt.wantOutcome)
+			}
+			if value != tt.wantValue {
+				t.Fatalf("Tighten(%q, %q) = %q, want %q",
+					tt.existing, tt.candidate, value, tt.wantValue)
+			}
+		})
+	}
 }

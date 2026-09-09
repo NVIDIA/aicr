@@ -248,7 +248,7 @@ func boundsSatisfiable(lower, upper *bound) bool {
 	if cmp == 0 {
 		return lowAdmitted && highAdmitted
 	}
-	return true
+	return buildsLeaveRoom(low, high, lowAdmitted, highAdmitted)
 }
 
 // limit returns the full-precision version where the bound's half-line ends,
@@ -268,11 +268,19 @@ func (b *bound) limit() (version.Version, bool) {
 		return b.parsed, b.inclusive()
 	}
 
+	// Compare stops at the lower of the two precisions and only reaches the
+	// GKE build dimension once whole numeric cores match, so a bound written
+	// below full precision never has its own suffix consulted when it is
+	// evaluated. Carrying that suffix into the endpoint would invent an
+	// ordering the evaluator does not apply.
+	coarse := b.parsed
+	coarse.Extras = ""
+
 	isLower := b.operator == OperatorGTE || b.operator == OperatorGT
 	if b.operator == OperatorGT || b.operator == OperatorLTE {
-		return bumpLastSignificant(b.parsed), isLower
+		return bumpLastSignificant(coarse), isLower
 	}
-	return atFullPrecision(b.parsed), isLower
+	return atFullPrecision(coarse), isLower
 }
 
 // atFullPrecision returns v with every component significant, so a bound
@@ -295,4 +303,36 @@ func bumpLastSignificant(v version.Version) version.Version {
 	v.Patch = 0
 	v.Precision = fullPrecision
 	return v
+}
+
+// buildsLeaveRoom reports whether two ordered endpoints on the same numeric
+// core leave a GKE build between them.
+//
+// Build numbers are integers and are the finest dimension pkg/version orders,
+// so an open interval between adjacent builds is empty even though the
+// endpoints compare as ordered — nothing sits between -gke.100 and -gke.101.
+// The numeric components need no such treatment: a bare core and the next one
+// always have the -gke.N builds of the first between them.
+//
+// Endpoints that are not both GKE builds on one core have room by ordering
+// alone, so they report true.
+func buildsLeaveRoom(low, high version.Version, lowAdmitted, highAdmitted bool) bool {
+	lowBuild, lowIsGKE := version.ExtractGKEBuild(low.Extras)
+	highBuild, highIsGKE := version.ExtractGKEBuild(high.Extras)
+	if !lowIsGKE || !highIsGKE || !sameCore(low, high) {
+		return true
+	}
+
+	if !lowAdmitted {
+		lowBuild++
+	}
+	if !highAdmitted {
+		highBuild--
+	}
+	return lowBuild <= highBuild
+}
+
+// sameCore reports whether two versions share every numeric component.
+func sameCore(a, b version.Version) bool {
+	return a.Major == b.Major && a.Minor == b.Minor && a.Patch == b.Patch
 }
