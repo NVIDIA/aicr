@@ -446,14 +446,13 @@ install_argocd() {
 # forever. The chainsaw sync gate treats that as a timeout unrelated to the
 # recipe under test. Enabling server-side diff for the controller doesn't
 # clear the field on every lane by itself, so this patch is still required.
-# The ignoreDifferences jqPathExpressions form, unlike managedFieldsManagers,
-# strips the offending field from both sides before Argo CD's structured
-# comparison runs, sidestepping the broken code path instead of hitting it.
 # Drop it once the chart's schema declares the field. Applied system-level so
 # it covers every Application this instance manages, not just the one under
 # test.
 configure_argocd_diff_customizations() {
     log_info "Patching argocd-cm: ignore CSIDriver.spec.preventPodSchedulingIfMissing (Argo CD schema-lag workaround)..."
+    # jqPathExpressions strips the field before comparison runs, unlike
+    # managedFieldsManagers. This empirically clears the error on chart 9.5.x.
     if ! kc patch configmap argocd-cm -n "${ARGOCD_NAMESPACE}" --type merge -p \
             '{"data":{"resource.customizations.ignoreDifferences.storage.k8s.io_CSIDriver":"jqPathExpressions:\n- .spec.preventPodSchedulingIfMissing\n"}}'; then
         log_error "Failed to patch argocd-cm with CSIDriver diff customization"
