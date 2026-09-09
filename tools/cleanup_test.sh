@@ -29,9 +29,9 @@ CLEANUP="${SCRIPT_DIR}/cleanup"
 # --- Stub kubectl/helm/sleep on PATH ------------------------------------------
 # All three log their args to $KLOG/$HLOG when set, so the live (--yes) path can
 # assert which resources actually received destructive calls.
-# kubectl: context name for detection; `get crd` returns an excluded and a
-# non-excluded CRD; `get ns` reports existence + a Terminating phase so the
-# phase-4 finalizer rescue engages; `api-resources`/`get configmaps` feed that
+# kubectl: context name for detection; `get crd` returns an excluded CRD plus
+# AICR-owned NVIDIA and JobSet CRDs; `get ns` reports existence plus a
+# Terminating phase so the phase-4 finalizer rescue engages; `api-resources`/`get configmaps` feed that
 # rescue one patchable object. helm: `ls` (phase 1) returns two releases — one
 # out-of-band, one AICR-owned; `list` (driver probe) returns nothing so the
 # cluster is treated as non-driver-managed. sleep: instant (skips phase-4 wait).
@@ -52,6 +52,7 @@ if [[ "$1" == "get" ]]; then
         crd)
             printf '%s\n' \
                 "customresourcedefinition.apiextensions.k8s.io/clusterpolicies.nvidia.com" \
+                "customresourcedefinition.apiextensions.k8s.io/jobsets.jobset.x-k8s.io" \
                 "customresourcedefinition.apiextensions.k8s.io/nodes.skyhook.nvidia.com"
             ;;
         ns|namespace)
@@ -138,6 +139,7 @@ check_contains "phase4-check-backstop-exact-deleted" "kubectl delete ns gang-sch
 
 # 4. Phase 3: excluded CRD match is echoed under dry-run.
 check_contains "phase3-excluded-crd-echoed" "excluding CRDs matching: skyhook.nvidia.com"
+check_contains "phase3-jobset-pattern-owned" "match CRDs against pattern: jobset.x-k8s.io"
 
 # 5. Asymmetric invocation warns (ns without crd, and crd without ns).
 run --dry-run --exclude-ns skyhook
@@ -179,6 +181,7 @@ rm -f "${KLOG}" "${HLOG}"
 # CRD phase: non-excluded CRD deleted; the excluded group is never touched even
 # though the broad nvidia.com pattern matches it.
 has     "live-crd-nonexcluded-deleted" "${klog}" "delete customresourcedefinition.apiextensions.k8s.io/clusterpolicies.nvidia.com"
+has     "live-crd-jobset-deleted" "${klog}" "delete customresourcedefinition.apiextensions.k8s.io/jobsets.jobset.x-k8s.io"
 has_not "live-nothing-skyhook-in-kubectl" "${klog}" "skyhook"
 # Namespace phase: backstop deleted; excluded namespace neither deleted nor
 # finalizer-patched (the has_not above already covers skyhook end-to-end).
