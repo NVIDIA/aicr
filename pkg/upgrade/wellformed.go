@@ -84,11 +84,9 @@ func checkReplaces(component string, r *Replaces) []string {
 	if r.Component == "" {
 		v = append(v, where+" names no component to supersede")
 	}
-	if r.Summary == "" {
-		v = append(v, where+" is missing summary")
-	}
 	// Rules 4, 5 and 6 are verdict-and-steps shaped, which a replaces block
-	// shares exactly. Reuse rather than restate.
+	// shares exactly, as are the verdict, summary and step-id field rules.
+	// Reuse rather than restate.
 	as := &Transition{
 		Verdict:         r.Verdict,
 		VerifiedBy:      r.VerifiedBy,
@@ -98,6 +96,16 @@ func checkReplaces(component string, r *Replaces) []string {
 	v = append(v, checkVerdictFields(where, as)...)
 	v = append(v, checkStepGroups(where, as)...)
 	return v
+}
+
+// nonAuthorableVerdict reports a verdict a record must not carry. Validate is
+// exported on an exported map type, so a caller can build a Set without going
+// through Load, and every rule keyed to a verdict reads as satisfied when the
+// verdict itself is garbage.
+func nonAuthorableVerdict(where string, v Verdict) string {
+	return fmt.Sprintf(
+		"%s has verdict %q; only safe, manual and blocked may be authored (unknown and unversioned are computed)",
+		where, v)
 }
 
 // checkVerdictFields implements rules 4 and 5 plus the field-level rules the
@@ -133,8 +141,12 @@ func checkVerdictFields(where string, t *Transition) []string {
 			}
 		}
 	case VerdictUnknown, VerdictUnversioned:
-		// Computed, never authored; Load rejects a record carrying either
-		// before it can reach a Set for Validate to see.
+		v = append(v, nonAuthorableVerdict(where, t.Verdict))
+	default:
+		v = append(v, nonAuthorableVerdict(where, t.Verdict))
+	}
+	if t.Summary == "" {
+		v = append(v, where+" is missing summary")
 	}
 	if t.Reversible != nil && t.ReversibleNotes == "" {
 		v = append(v, where+" sets reversible but carries no reversibleNotes; renderers never surface the flag alone")

@@ -152,6 +152,89 @@ func TestValidateVerdictFields(t *testing.T) {
 	}
 }
 
+// Validate is exported on an exported map type, so a Set can be built without
+// ever going through Load. Every rule keyed to a verdict reads as satisfied
+// when the verdict itself is garbage, and nothing else in wellformed.go looks
+// at summary — so deleting either of Load's own gates left the whole pipeline
+// green on a record that asserts nothing usable.
+func TestValidateIsSelfSufficientWithoutLoad(t *testing.T) {
+	tests := []struct {
+		name       string
+		transition Transition
+		wantText   string
+	}{
+		{
+			"a verdict Load would never admit",
+			Transition{From: "<0.18.0", To: ">=0.18.0 <=0.18.0", Verdict: Verdict("yolo"), Summary: "s"},
+			"only safe, manual and blocked may be authored",
+		},
+		{
+			"the computed unknown verdict",
+			Transition{From: "<0.18.0", To: ">=0.18.0 <=0.18.0", Verdict: VerdictUnknown, Summary: "s"},
+			"only safe, manual and blocked may be authored",
+		},
+		{
+			"the computed unversioned verdict",
+			Transition{From: "<0.18.0", To: ">=0.18.0 <=0.18.0", Verdict: VerdictUnversioned, Summary: "s"},
+			"only safe, manual and blocked may be authored",
+		},
+		{
+			"no summary",
+			tr(func(x *Transition) { x.Summary = "" }),
+			"is missing summary",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set, comps := rec("v0.18.0", tt.transition)
+			err := set.Validate(comps)
+			if err == nil {
+				t.Fatal("Validate = nil, want a violation")
+			}
+			if !strings.Contains(err.Error(), tt.wantText) {
+				t.Errorf("error %q does not mention %q", err.Error(), tt.wantText)
+			}
+		})
+	}
+}
+
+// The same holds for a replaces block, which Load gates separately.
+func TestValidateReplacesIsSelfSufficientWithoutLoad(t *testing.T) {
+	set := Set{"c": &ComponentUpgrades{
+		Component: "c",
+		Replaces:  &Replaces{Component: "old", Verdict: VerdictUnknown, Summary: "superseded"},
+	}}
+	comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "v1.0.0"}}
+	err := set.Validate(comps)
+	if err == nil {
+		t.Fatal("Validate = nil, want a violation for a non-authorable replaces verdict")
+	}
+	if !strings.Contains(err.Error(), "only safe, manual and blocked may be authored") {
+		t.Errorf("error %q does not name the non-authorable verdict", err.Error())
+	}
+}
+
+// One violation per problem: checkReplaces used to repeat checkVerdictFields'
+// summary check, and an author counting violations should not see the same
+// one twice.
+func TestValidateReportsAMissingReplacesSummaryOnce(t *testing.T) {
+	set := Set{"c": &ComponentUpgrades{
+		Component: "c",
+		Replaces: &Replaces{
+			Component: "old", Verdict: VerdictManual,
+			StepsByDeployer: []StepGroup{{Steps: []Step{{ID: "swap", Description: "swap it"}}}},
+		},
+	}}
+	comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "v1.0.0"}}
+	err := set.Validate(comps)
+	if err == nil {
+		t.Fatal("Validate = nil, want a missing-summary violation")
+	}
+	if got := strings.Count(err.Error(), "is missing summary"); got != 1 {
+		t.Errorf("error mentions %q %d time(s), want exactly 1: %s", "is missing summary", got, err.Error())
+	}
+}
+
 // An author should see every problem in one run, not one CI cycle at a time.
 func TestValidateAggregatesViolations(t *testing.T) {
 	bad := tr(func(x *Transition) {
