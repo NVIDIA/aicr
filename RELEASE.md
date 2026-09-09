@@ -13,6 +13,29 @@ Releases follow a **bi-weekly cadence**. A new release is cut every two weeks.
 | Pre-release | Before a regular release, as needed | `rc` | Any maintainer can create for testing |
 | Major | Planned | `major` | Requires team agreement and advance communication |
 
+## Supported Versions
+
+AICR is pre-1.0 and ships from a single active release line. Only the latest
+released minor receives security fixes. Earlier minors are end-of-life: fixes
+are not backported to them, and the upgrade path is forward to the latest
+release.
+
+| Version | Status |
+|---------|--------|
+| `0.20.x` (latest released minor) | Supported: receives security fixes |
+| `< 0.20` | End-of-life: upgrade to the latest release |
+
+A fix ships in a new patch or minor release cut from `main` under the cadence
+above, never as a backport to an end-of-life version. When AICR reaches 1.0
+this policy is revised and a longer support window published here.
+
+This section says which versions a fix lands in. It does not say how to report
+one: security issues go to NVIDIA PSIRT rather than through GitHub, and
+[SECURITY.md](SECURITY.md) is the authority on reporting, embargo, and CVE
+assignment. Both files carry this table on purpose, so each is usable on its
+own. `TestSupportedVersionsMatchSecurityPolicy` in `tests/releasepolicy` fails
+when they disagree.
+
 ## Deprecation Policy
 
 AICR freezes four public surfaces at v1
@@ -267,7 +290,6 @@ but they do not update:
 
 - Homebrew formula (users on `brew upgrade` are unaffected)
 - Container `:latest` tags (only candidate and version aliases are written)
-- Demo deployment (Cloud Run stays on latest stable)
 - Site documentation (GitHub Pages stays on latest stable)
 
 Slack notifications fire for both pre-releases and stable releases.
@@ -310,7 +332,7 @@ For critical fixes between regular releases:
 ## Release Pipeline
 
 ```
-Tag Push --> CI --> Candidate Images --> Resolve Digests --> Scan + Attest --> Promote Aliases --> Publish --> Deploy
+Tag Push --> CI --> Candidate Images --> Resolve Digests --> Scan + Attest --> Promote Aliases --> Publish
 ```
 
 The release workflow resolves one authoritative seven-image digest map. Both
@@ -520,12 +542,6 @@ else
   exit 1
 fi
 ```
-
-## Demo Deployment
-
-> **Note**: Demonstration only — not a production service. Self-host `aicrd` for production use. See [API Server Documentation](docs/contributor/api-server.md).
-
-The `aicrd` API server demo deploys to Google Cloud Run on successful release (region: `us-west1`, auth: Workload Identity Federation). Project-specific details are managed in CI configuration.
 
 ## Troubleshooting
 

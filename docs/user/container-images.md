@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **44**
-- Unique images: **101**
+- Components: **47**
+- Unique images: **109**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -31,13 +31,14 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 
 | Component | Type | Chart | Pinned Version | Images |
 |-----------|------|-------|----------------|--------|
-| agentgateway | helm | agentgateway | v1.3.1 | 1 |
-| agentgateway-crds | helm | agentgateway-crds | v1.3.1 | 0 |
+| agentgateway | helm | agentgateway | v1.5.0 | 1 |
+| agentgateway-crds | helm | agentgateway-crds | v1.5.0 | 0 |
 | aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 6 |
 | aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.29 | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
 | cert-manager-ocp | manifest | — | — | 0 |
 | cert-manager-ocp-olm | manifest | — | — | 0 |
+| dranet | manifest | — | — | 1 |
 | dynamo-platform | helm | dynamo-platform | 1.4.2 | 1 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
 | gcp-driver-installer | manifest | — | — | 3 |
@@ -53,23 +54,25 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | kai-scheduler | helm | kai-scheduler | v0.14.1 | 11 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
 | kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
-| kueue | helm | kueue | 0.18.2 | 1 |
+| kueue | helm | kueue | 0.19.3 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.6.0 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.6.0 | 0 |
-| network-operator | helm | nvidia/network-operator | 26.4.1 | 9 |
+| network-operator | helm | nvidia/network-operator | 26.4.1 | 12 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.19.0 | 1 |
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
-| nodewright-customizations | manifest | — | — | 5 |
-| nodewright-operator | helm | nodewright | v0.18.0 | 2 |
+| nodewright-customizations | manifest | — | — | 6 |
+| nodewright-operator | helm | nodewright | v0.17.1 | 3 |
+| nvcre | helm | cluster-readiness-engine | v0.2.0 | 1 |
 | nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
 | nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
 | nvsentinel | helm | nvsentinel | v1.20.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
+| rdma-netns-exclusive | manifest | — | — | 1 |
 | slinky-slurm | helm | slurm | 1.2.0 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
@@ -89,7 +92,7 @@ from the component's registry default above.
 
 ### agentgateway
 
-- `cr.agentgateway.dev/controller:v1.3.1`
+- `cr.agentgateway.dev/controller:v1.5.0`
 
 ### agentgateway-crds
 
@@ -122,6 +125,10 @@ _No images extracted._
 ### cert-manager-ocp-olm
 
 _No images extracted._
+
+### dranet
+
+- `registry.k8s.io/networking/dranet:stable@sha256:3248d8a520584100a5e87a2b92039591ea3b83a5492cc3e2d881b20d3b18ada6`
 
 ### dynamo-platform
 
@@ -225,7 +232,7 @@ _No images extracted._
 
 ### kueue
 
-- `registry.k8s.io/kueue/kueue:v0.18.2`
+- `registry.k8s.io/kueue/kueue:v0.19.3`
 
 ### mariadb-operator
 
@@ -241,10 +248,13 @@ _No images extracted._
 - `ghcr.io/k8snetworkplumbingwg/multus-cni:v4.2.1`
 - `ghcr.io/k8snetworkplumbingwg/plugins:v1.6.2-update.1`
 - `ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin:v3.9.0`
+- `ghcr.io/mellanox/nic-configuration-operator-daemon:v1.3.1`
+- `ghcr.io/mellanox/nic-configuration-operator:v1.3.1`
 - `ghcr.io/mellanox/nvidia-k8s-ipam:v0.2.0`
 - `nvcr.io/nvidia/cloud-native/network-operator:v26.4.1`
 - `nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.4.1`
 
 ### network-operator-ocp
@@ -272,13 +282,19 @@ _No images extracted._
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.3.0@sha256:f17c951d60b519d097c20a3d9f49668f043a996adb31b9bb4db24a112a8f60a2`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.5.0@sha256:f3994267c9b5e62fb7720012dcd4d473fc2f8474f4276e203bba842c970307ad`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.2@sha256:a8bdca40dbe36de9d7a13e6afada49870714784fd9a3b9ce08717d675978c2b6`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.9.0@sha256:a33d0d5e0a0c7f192a34042f7ff14b7a98f10bae97bb4cf820ea9cd0ce013320`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2@sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1`
 
 ### nodewright-operator
 
 - `docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
-- `ghcr.io/nvidia/nodewright/operator:v0.18.0@sha256:49ace92de35703f6da84c75147e2f93803d8b70f4f48dc9ae5213f7a6788ddfb`
+- `ghcr.io/nvidia/nodewright/operator:v0.17.0@sha256:1511449bf51f2844b6bb3a03bde3d5590caf2ca283e3e39c0745a8016af2132f`
+- `quay.io/brancz/kube-rbac-proxy:v0.15.0@sha256:2c7b120590cbe9f634f5099f2cbb91d0b668569023a81505ca124a5c437e7663`
+
+### nvcre
+
+- `ghcr.io/nvidia/cluster-readiness-engine/manager:v0.2.0`
 
 ### nvidia-dra-driver-gpu
 
@@ -308,6 +324,10 @@ _No images extracted._
 ### prometheus-operator-crds
 
 _No images extracted._
+
+### rdma-netns-exclusive
+
+- `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1@sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf`
 
 ### slinky-slurm
 

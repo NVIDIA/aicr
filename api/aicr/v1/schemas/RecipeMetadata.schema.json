@@ -154,7 +154,8 @@
                 "h200",
                 "l40",
                 "l40s",
-                "rtx-pro-6000"
+                "rtx-pro-6000",
+                "vr200"
               ]
             },
             "intent": {
@@ -198,12 +199,14 @@
                 "any",
                 "bcm",
                 "eks",
+                "generic",
                 "gke",
                 "kind",
                 "lke",
                 "metal3",
                 "ocp",
-                "oke"
+                "oke",
+                "rke2"
               ]
             }
           }

@@ -360,7 +360,11 @@ aicr snapshot -o cm://default/snapshot      # captures the cluster (deploys the 
 aicr recipe   -s cm://default/snapshot --intent training
 ```
 
-When both a snapshot and explicit criteria are given, the explicit values win (e.g. `--snapshot … --service gke` overrides the detected service).
+When both a snapshot and explicit criteria are given, the explicit values win (e.g. `--snapshot … --service gke` overrides the detected service). This is also the only way to select a `generic` recipe from a snapshot: a bare-metal cluster fingerprints as its provisioner (`metal3`, `rke2`), never as `generic`, so pass the override explicitly:
+
+```bash
+aicr recipe --snapshot snapshot.yaml --service generic --intent training
+```
 
 **Configuration profiles:** an overlay composition may declare one named
 configuration choice. Select a non-default value with
@@ -489,8 +493,8 @@ Generate recipes using direct system parameters:
 **Flags:**
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3 |
-| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000 |
+| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; `self-managed`, `self`, and `vanilla` are accepted aliases) — unlike the `any` wildcard, which matches every service and does not select `generic` recipes. `generic` is never detected from a snapshot (the fingerprint reports the provisioner it sees, such as `metal3` or `rke2`), so `generic` recipes require this flag as an explicit opt-in, also alongside `--snapshot` |
+| `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
 | `--platform` | | string | Platform/framework type: dynamo, kubeflow, nim, runai, slurm |
@@ -511,6 +515,8 @@ node shape the resolved recipe targets. See
 [Qualified Machine Types](#qualified-machine-types) below.
 
 > **Service / Accelerator / OS / Intent / Platform value listings above are the OSS-embedded set.** When `--data` registers additional values (e.g., undisclosed providers, proprietary platforms), the CLI admits them at runtime through the criteria registry — see [Data Extension](../integrator/data-extension.md). `--criteria-strict` restores the OSS-only set regardless of what `--data` contributes.
+
+> **`--service rke2` and `--accelerator vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence at [validation.aicr.run](https://validation.aicr.run/) for current coverage.
 
 **Examples:**
 ```shell
@@ -1515,15 +1521,15 @@ aicr bundle [flags]
 | `--set-file` | | string[] | Override a value by reading JSON/YAML from a file (repeatable, format: `component:path=<filepath>`). For larger structures than `--set-json`; same merge and absent-component-rejection semantics (no `enabled` exemption on the typed path). |
 | `--dynamic` | | string[] | Declare value paths as install-time parameters (repeatable, format: `component:path`). Supported with `helm`, `argocd-helm`, `flux`, and `helmfile` deployers. A declaration whose component is absent from the generated bundle is rejected (no path is exempt — a dynamic path is never a removal idiom); see [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). Certain gate- or contract-owned paths on **present** components cannot be declared dynamic either — driver-ownership paths (e.g. `gpuoperator:driver.enabled`), GPU allocation-policy keys, the DRA eviction paths `kubeletPlugin.nodeSelector` and `driver.manager.env` when both contract components are enabled **and** the eviction contract is opted into with `--dra-eviction-node-label`, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths — because an install-time edit there would undo what AICR verified or made consistent; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Dynamic Install-Time Values](#dynamic-install-time-values). |
 | `--data` | | string | External data directory to overlay on embedded data (see [External Data](#external-data-directory)) |
-| `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable) |
+| `--system-node-selector` | | string[] | Node selector for system components (format: key=value, repeatable). Optional in general, but some components (e.g. `slinky-slurm`, `slurm-accounting-mariadb`) declare `requireNodeSelector` in the registry and fail the bundle if this is omitted and no overlay opts their paths out. `kube-prometheus-stack` declares the conditional `requireNodeSelectorIfStorageClassSet` instead, so it only fails once the component ends up with a non-empty value at a declared `storageClassPaths`/`sharedStorageClassPaths` entry, whether from `--storage-class`, a per-component `--set` override, or an overlay's own `storageClassName` default. See [`nodeScheduling.system` vs `accelerated`](../contributor/component.md#nodeschedulingsystem-vs-accelerated). |
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
-| `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable) |
+| `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable). Same `requireNodeSelector` caveat as `--system-node-selector` above applies to components that declare it on their accelerated paths. |
 | `--accelerated-node-toleration` | | string[] | Toleration for accelerated/GPU nodes (format: key=value:effect, repeatable) |
 | `--dra-eviction-node-label` | | string | Opt in to DRA kubelet-plugin eviction coordination with GPU Operator driver upgrades (format: `key=value`; no default — unset means AICR injects nothing). Applied only when both components are enabled. Nodes must then carry the label. |
 | `--workload-gate` | | string | Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
 | `--workload-selector` | | string[] | Label selector for nodewright-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when nodewright-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
-| `--storage-class` | | string | Kubernetes StorageClass name to inject at bundle time. Written to registry-declared `storageClassPaths` for each component. Overrides any `storageClassName` set in recipe overlays. |
+| `--storage-class` | | string | Kubernetes StorageClass name to inject at bundle time. Written to registry-declared `storageClassPaths` for each component. Overrides any `storageClassName` set in recipe overlays. For a component declaring the conditional `requireNodeSelectorIfStorageClassSet` (e.g. `kube-prometheus-stack`), setting this to a non-empty value (or providing a non-empty value through a per-component `--set` override or an overlay's own `storageClassName` default) also starts requiring `--system-node-selector`/`--accelerated-node-selector`; see the `--system-node-selector` row above. |
 | `--shared-storage-class` | | string | RWX-capable Kubernetes StorageClass for opt-in shared filesystem PVCs. Written to registry-declared `sharedStorageClassPaths`; never falls back to `--storage-class`. |
 | `--vendor-charts` | | bool | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Requires `helm` on `$PATH`. See [Vendoring Charts for Air-Gap](#vendoring-charts-for-air-gap). |
 | `--readiness-hooks` | | bool | Emit a per-component readiness gate (`NNN-<name>-readiness/`) for each component that ships a `recipes/components/<name>/readiness.yaml` Chainsaw test. The gate runs as a post-component Job so the deploy blocks on component-specific readiness signals (e.g. `ClusterPolicy` state). Supported with `--deployer helm`, `argocd`, and `argocd-helm`. Off by default. See [Readiness Gates](#readiness-gates). |
@@ -1847,6 +1853,8 @@ The `--deployer` flag controls how deployment artifacts are generated:
 > **Note:** `--dynamic` is not supported with `--deployer argocd`. Use `--deployer argocd-helm` instead, which produces a Helm chart where all non-profile-owned values are overridable at install time (a profiled recipe ships a lock template that rejects install-time values on profile-owned paths).
 
 > **Note:** `--dynamic` declarations targeting the GPU allocation-policy keys (`nvidia-dra-driver-gpu` `resources.gpus.enabled` / `gpuResourcesEnabledOverride`, `gpu-operator`(`-ocp`) `devicePlugin.enabled`, or those components' `enabled` toggle) are rejected: validators verify the recipe-resolved allocation policy, so its value cannot be deferred to install time. See [Configured GPU allocation policy](validation.md#configured-gpu-allocation-policy).
+
+> **Note:** `--dynamic` is rejected on a path that equals, contains, or is contained by a path a component's `requireNodeSelector` (or its conditional `requireNodeSelectorIfStorageClassSet` counterpart, e.g. `kube-prometheus-stack`) marks as required (e.g. `slinky-slurm`, `slurm-accounting-mariadb`), or by a declared `storageClassPaths`/`sharedStorageClassPaths` path that conditions `requireNodeSelectorIfStorageClassSet`. This holds regardless of whether a storage class is configured yet, since one could be added later without rebuilding the bundle. The flag defers the value to install time, the same unpinned state `requireNodeSelector` exists to reject. Supply `--system-node-selector` / `--accelerated-node-selector` instead. See [`nodeScheduling.system` vs `accelerated`](../contributor/component.md#nodeschedulingsystem-vs-accelerated).
 
 **Deployment Order:**
 

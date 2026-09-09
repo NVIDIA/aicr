@@ -12,9 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-terraform {
-  backend "gcs" {
-    bucket = "eidos-tf-state"
-    prefix = "demo"
-  }
-}
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: rke2-training
+
+spec:
+  # Inherits from rke2 recipe (RKE2-specific settings)
+  base: rke2
+
+  # No training-specific component overrides yet. The eks-training layer
+  # swaps in a training-optimized gpu-operator values file
+  # (values-eks-training.yaml); an rke2 equivalent can be added here once
+  # training-specific tuning for bare-metal RKE2 is baselined.
+  criteria:
+    service: rke2
+    intent: training

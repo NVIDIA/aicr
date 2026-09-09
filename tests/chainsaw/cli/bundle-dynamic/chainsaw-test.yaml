@@ -367,6 +367,33 @@ spec:
             check:
               ($error == null): true
 
+    - name: helm-dynamic-on-required-node-selector-is-rejected
+      description: >-
+        --dynamic on a path a component's requireNodeSelector marks as
+        required is REJECTED. The flag defers the value to install time,
+        the same unpinned state requireNodeSelector exists to reject.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-dynamic"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --os ubuntu \
+                --intent training --platform slurm -o "${WORK}/slurm-recipe.yaml"
+              set +e
+              OUT=$(${AICR_BIN} bundle -r "${WORK}/slurm-recipe.yaml" -o "${WORK}/helm-slurm-dynamic" \
+                --system-node-selector nodeGroup=system-pool \
+                --accelerated-node-selector nodeGroup=gpu-worker \
+                --dynamic slinkyslurm:controller.podSpec.nodeSelector 2>&1)
+              RC=$?
+              set -e
+              [ "${RC}" -ne 0 ] || { echo "expected rejection, bundle succeeded" >&2; exit 1; }
+              echo "${OUT}" | grep -q -- "cannot use --dynamic on controller.podSpec.nodeSelector" \
+                || { echo "missing rejection message; got: ${OUT}" >&2; exit 1; }
+              [ ! -d "${WORK}/helm-slurm-dynamic" ] \
+                || { echo "rejected bundle emitted output" >&2; exit 1; }
+            check:
+              ($error == null): true
+
     - name: cleanup
       description: Remove test artifacts.
       try:

@@ -36,8 +36,9 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **agentgateway-crds** | Custom Resource Definitions for agentgateway (Kubernetes Gateway API implementation for AI/ML inference). | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **agentgateway** | Kubernetes Gateway API implementation for AI/ML inference. Implements the Gateway API Inference Extension for model-aware ingress routing to InferencePool backends. | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **k8s-nim-operator** | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. AICR installs the operator only — it creates no `NIMService` and no credentials; see [NIM workload credentials](#nim-workload-credentials). | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
-| **kueue** | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. Ships default quota CRs (ResourceFlavor `default-flavor`, ClusterQueue `cluster-queue`, LocalQueue `default` in the `default` namespace) so admission works out of the box — tune the ClusterQueue's nominal quotas to cluster capacity to enact real limits. Managed frameworks are pinned to batch/job, JobSet, and TrainJob. Upgrade note: the quota CRs are helm post-install/post-upgrade hooks with a delete-and-recreate policy — quiesce queues before upgrading the bundle (Kueue's resource-in-use finalizer on an active ClusterQueue/ResourceFlavor blocks the delete and can wedge the upgrade), and re-apply tuned quotas afterwards since upgrades reset them to the shipped defaults. Uninstalling leaves the hook-created CRs behind; delete them manually when removing Kueue. Overlays that override the component's `manifestFiles` (replacing the default quota CRs) must also override its health check — the shipped check asserts the default CR names above. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
+| **kueue** | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. Ships default quota CRs (ResourceFlavor `default-flavor`, ClusterQueue `cluster-queue`, LocalQueue `default` in the `default` namespace) so admission works out of the box — tune the ClusterQueue's nominal quotas to cluster capacity to enact real limits. Managed frameworks are pinned to batch/job, JobSet, and TrainJob. Upgrade note: the quota CRs are helm post-install/post-upgrade hooks with a delete-and-recreate policy — quiesce queues before upgrading the bundle (Kueue's resource-in-use finalizer on an active ClusterQueue/ResourceFlavor blocks the delete and can wedge the upgrade), and re-apply tuned quotas afterwards since upgrades reset them to the shipped defaults. Uninstalling leaves the hook-created CRs behind; delete them manually when removing Kueue. Overlays that override the component's `manifestFiles` (replacing the default quota CRs) must also override its health check — the shipped check asserts the default CR names above. Upgrading from a 0.18.x bundle needs two checks first: see [Upgrade Notes](#kueue-018x-to-019x) below. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
 | **kubeflow-trainer** | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
+| **nvcre** | NVIDIA Cluster Readiness Engine — GPU cluster burn-in certification controller. Runs training and NCCL workloads, measures goodput and bandwidth. **Not installed by default** — enabling it takes both a `valuesFile` and a Trainer source; see [Enabling NVCRE](#enabling-nvcre) for a fragment that resolves. With that values file referenced, `metrics.serviceMonitor.enabled` is **false** so install does not require prometheus-operator CRDs; turn it on with `--set cre:metrics.serviceMonitor.enabled=true` only after those CRDs exist, and add `prometheus-operator-crds` to `dependencyRefs`. The chart has no manager `nodeSelector`; for hard placement, set `manager.affinity` in `recipes/components/nvcre/values.yaml` or a complete JSON object, for example `--set-json cre:manager.affinity='{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"nvidia.com/gpu.present","operator":"Exists"}]}]}}}'` (scalar `--set cre:manager.affinity=...` renders an invalid string). CLI aliases: `cre`, `cluster-readiness-engine`. Shipped EKS H100 training still uses the TrainJob NCCL check. Opt-in AICR validators drive CRE with `Certification` (create, wait, delete), not `WorkloadRun`. | [Cluster Readiness Engine](https://github.com/NVIDIA/cluster-readiness-engine) |
 | **mariadb-operator-crds** | Official MariaDB Operator CRDs. Declared in every Slurm recipe but installed only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
 | **mariadb-operator** | Official MariaDB Operator controller, webhook, and certificate controller. AICR installs it only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
 | **slurm-accounting-mariadb** | Installation-managed MariaDB instance whose initial database, all-privileges accounting user, and generated Secret reference are configured atomically on the MariaDB resource. Declared in every Slurm recipe and rendered only for `accounting.mode: aicr-provided`. | [MariaDB Cluster chart](https://artifacthub.io/packages/helm/mariadb-operator/mariadb-cluster) |
@@ -56,6 +57,24 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **prometheus-adapter-ocp** | Prometheus Adapter for OpenShift. Reuses the same upstream chart as `prometheus-adapter`, pointed at OCP's built-in Thanos Querier instead of kube-prometheus-stack (which stays disabled on OCP). No certified OCP operator exists for this component. OCP-specific. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
 | **nvidia-dra-driver-gpu-ocp** | NVIDIA DRA GPU driver for OpenShift. Reuses the same upstream chart as `nvidia-dra-driver-gpu`, with an added SCC RoleBinding granting the kubelet-plugin DaemonSet the host device access OCP's default restricted-v2 SCC forbids. No certified OCP operator exists for this component. OCP-specific. Known limitation: some GPU-driver rollout protections and remedy hints do not yet cover the OCP aliases (`gpu-operator-ocp`, `nvidia-dra-driver-gpu-ocp`) — the deployer's stale-NVML migration wait/restart, driver-version annotation injection, and the driver-absent remedy's `gpuoperator:`/`dradriver:` override keys; tracked in [#2136](https://github.com/NVIDIA/aicr/issues/2136). | [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu) |
 | **k8s-nim-operator-ocp** | NVIDIA NIM Operator for OpenShift. Reuses the same upstream chart as `k8s-nim-operator`, with OCP-specific RBAC. Requires `cert-manager-ocp` for admission-webhook TLS. OCP-specific. | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
+
+## VR200 Preview coverage
+
+> **`service=rke2` and `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence for these Preview coordinates at [validation.aicr.run](https://validation.aicr.run/); freshness against the current recipe is captured in the **Evidence status** note below.
+
+Three coordinates ship in v1:
+
+| Coordinate | Evidence |
+|---|---|
+| `rke2 / vr200 / ubuntu / training` | [validation.aicr.run/#/rke2/vr200-ubuntu/training](https://validation.aicr.run/#/rke2/vr200-ubuntu/training) |
+| `rke2 / vr200 / ubuntu / inference` | [validation.aicr.run/#/rke2/vr200-ubuntu/inference](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference) |
+| `rke2 / vr200 / ubuntu / inference / dynamo` | [validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
+
+The platform-neutral `inference` coordinate is the base the Dynamo leaf inherits from; it exists so that resolving `rke2/vr200/ubuntu/inference` **without** `--platform` resolves to the VR200-safe overlay rather than falling through to the generic `rke2-inference` base. It carries the same VR200 hardware overrides as its Dynamo child.
+
+> **Evidence status.** The recipes for all three coordinates above have changed since evidence publication (`aicr evidence digest` reports a mismatch against each pointer's `predicate.recipe.digest`); treat the linked evidence as historical precedent for the recipe content at publication time, not as validating the current recipe. Fresh hardware validation is pending VR cluster access.
+
+For the definitional Preview-vs-Supported distinction, see [Preview recipes](../integrator/recipe-development.md#preview-recipes). For bare-metal cluster prerequisites, Skyhook reboot behavior, and known gaps on this coordinate, see [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md).
 
 ## How Components Are Selected
 
@@ -256,6 +275,34 @@ aicr bundle -r recipe.yaml \
 ```
 
 See [AKS GPU Setup](../integrator/aks-gpu-setup.md#default-use-the-aks-azure-managed-profile) for the per-profile guidance.
+
+## Enabling NVCRE
+
+**nvcre** is not on any shipped overlay, so enabling it means writing the `componentRef` yourself. Two requirements are easy to miss, and each one produces a different failure.
+
+`dependencyRefs` only *orders* components that are already in `componentRefs` — it does not add one. Naming a component that is not present fails resolution outright with `component "nvcre" references unknown dependency "kubeflow-trainer"`. NVCRE drives its benchmarks through Kubeflow Trainer (`TrainJob` / `TrainingRuntime`) and the chart does not install Trainer, so Trainer has to come from somewhere else — the `platform-kubeflow` mixin is the cleanest source.
+
+Component values are also never auto-discovered from the component name: a ref with no `valuesFile` and no inline overrides resolves to an empty map. Omit it and the chart defaults apply, which means a `ServiceMonitor` you did not ask for (requiring prometheus-operator CRDs) and a release-prefixed Deployment name such as `aicr-stack-nvcre-manager`, which the shipped health check cannot match.
+
+Add this to an overlay that already inherits a stock AICR base:
+
+```yaml
+spec:
+  mixins:
+    - platform-kubeflow          # brings in kubeflow-trainer
+  componentRefs:
+    - name: nvcre
+      type: Helm
+      valuesFile: components/nvcre/values.yaml
+      dependencyRefs:
+        - kubeflow-trainer
+```
+
+Do not also declare `kubeflow-trainer` locally. The mixin's ref sets `type`, `valuesFile`, and `dependencyRefs`, all of which are prohibited collision fields, and overlay chains merge before mixins — so a local ref collides rather than overrides.
+
+Prerequisites: NVIDIA GPU Operator and cert-manager, both inherited from `base.yaml` by every stock recipe, plus Kubeflow Trainer, which is not — see the fragment above.
+
+NVCRE v0.2.0 expects Kubeflow Trainer **v2.2.1** — it pins `kubeflowTrainerVersion = "v2.2.1"` and its `setup status` reports the 2.2.0 that the registry defaults to as unsupported. No functional break is known between the two versions: the CRD delta is documentation text plus one embedded PodSpec field NVCRE does not set. Aligning the global Trainer default is tracked separately.
 
 ## NIM Workload Credentials
 
@@ -856,3 +903,305 @@ covered — those components install no chart `crds/` of their own, so their
 CRDs come from the OLM `Subscription`/CSV and an `Application`-level
 `ignoreDifferences` has nothing to arbitrate. That conflict is tracked
 separately. See [NVIDIA/aicr#2546](https://github.com/NVIDIA/aicr/issues/2546).
+
+### `agentgateway`: upgrading across breaking releases
+
+AICR pins the `agentgateway` and `agentgateway-crds` charts in the component
+registry, and a pin bump can cross upstream releases that document breaking
+changes — to JWT claim enforcement, LLM token accounting, policy merging,
+cross-namespace route delegation, managed API-key metadata, Istio identity,
+Gateway API and `TCPRoute` handling, MCP guardrails, standalone auth, and image
+base. Whether any of that reaches you depends entirely on which agentgateway
+resources exist in your cluster, and the answer differs sharply between what
+AICR generates and what you author yourself.
+
+**AICR-generated bundles are unaffected.** A bundle creates exactly two
+agentgateway resources: an `AgentgatewayParameters` that carries deployment and
+service shape only, and the `inference-gateway` `Gateway`. It ships no
+`AgentgatewayPolicy`, `AgentgatewayBackend`, `AgentgatewayModel`, or
+`HTTPRoute` — so the breaking changes land on surface AICR never populates.
+
+**Resources you author yourself are exposed**, and AICR can neither detect nor
+migrate them. Before applying a bundle whose agentgateway pin moved, check
+whether you have any:
+
+```bash
+(
+  if ! kinds=$(kubectl api-resources --api-group=agentgateway.dev -o name); then
+    echo "discovery incomplete — retry; do not read this as clear" >&2; exit 1
+  fi
+  if [ -z "$kinds" ]; then
+    echo "no agentgateway.dev kinds registered — the chart is not installed" >&2; exit 0
+  fi
+  for kind in $kinds; do
+    kubectl get "$kind" -A || { echo "listing $kind failed — retry" >&2; exit 1; }
+  done
+)
+```
+
+The kinds are discovered rather than named because the API group grows across
+chart versions — `AgentgatewayModel` only exists from v1.4.0 — so naming them
+would fail with `the server doesn't have a resource type` on exactly the older
+pins whose operators most need to run this. The status checks matter for the
+same reason: an unhealthy aggregated APIService (a down metrics-server or
+custom-metrics adapter, and `prometheus-adapter` is in AICR's own component
+set) makes `kubectl api-resources` exit non-zero, the substitution yields an
+empty list, and the loop would silently report clean. Empty output *plus* an
+error means retry, not clear.
+
+Routes you authored live in the Gateway API group rather than
+`agentgateway.dev`, so the sweep above does not see them — and they are exactly
+what the cross-namespace route delegation change affects:
+
+```bash
+(
+  kubectl get httproutes,grpcroutes -A \
+    -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PKIND:.spec.parentRefs[*].kind,PNS:.spec.parentRefs[*].namespace,PARENTS:.spec.parentRefs[*].name' \
+    || { echo "route listing failed — retry" >&2; exit 1; }
+)
+```
+
+Read the rows by their parent:
+
+- `PKIND: Gateway` naming `inference-gateway` — a route you attached to the
+  AICR gateway.
+- `PKIND: HTTPRoute` with a `PNS` that differs from `NS` — cross-namespace
+  route-to-route delegation. From v1.5.0 this requires a `ReferenceGrant` in
+  the child's namespace authorizing the parent's namespace, where previously
+  none was needed. Confirm `kubectl get referencegrants -A` covers each one
+  before upgrading, or the delegation stops being accepted.
+- `PKIND: HTTPRoute` with an empty `PNS` — same-namespace delegation, which the
+  change does not affect. `parentRefs[].namespace` is optional and defaults to
+  the route's own namespace, so empty is the same-namespace signal.
+
+One caveat on the command: a route with several `parentRefs` where only some
+set `namespace` will have its `PNS` column misalign, because JSONPath omits the
+missing entries rather than padding them. Describe those routes individually
+with `kubectl get <httproute-or-grpcroute> <name> -n <ns> -o yaml` rather than
+trusting the columns.
+
+AICR's own `AgentgatewayParameters` named `system-proxy` in
+`agentgateway-system` is expected. If nothing else appears here, nothing you
+authored in the `agentgateway.dev` group is affected — but that is not the
+whole check. A cluster with no custom agentgateway resources and no routes can
+still hold an `agentgateway` Gateway outside `agentgateway-system`, which stops
+reconciling once the namespace list is scoped. Finish with the Gateway
+inventory in
+[which namespaces the controller may provision Gateways in](#agentgateway-which-namespaces-the-controller-may-provision-gateways-in)
+before concluding the upgrade needs nothing from you. Anything else returned means read the upstream release notes
+for every version between the old and new pin and validate off-production
+first — a multi-version jump has to absorb every breaking change in between,
+not just the newest one. Use the
+[component version matrix](component-version-matrix.md) to find which versions
+those are.
+
+One limit worth stating plainly: AICR CI exercises **fresh installs** of a
+pinned chart, not in-place upgrades from an older pin. A green release
+validates that the new version deploys and passes its health checks. It is not
+an in-place upgrade certification.
+
+### `agentgateway`: which namespaces the controller may provision Gateways in
+
+From chart v1.5.0 the controller's write permissions are scoped by
+`rbac.gatewayNamespaces`, and AICR sets it to `agentgateway-system` — the one
+namespace it provisions the `inference-gateway` Gateway in. The chart's own
+default is an empty list, which binds the write role (Deployments, DaemonSets,
+Secrets, ServiceAccounts, ConfigMaps, Services, HPAs, PDBs) with a
+*ClusterRoleBinding*, letting a network-facing controller write those objects
+in every namespace on the cluster.
+
+Scoping narrows that **write** reach to the namespaces you name, and nothing
+else. Two things it does not contain. The controller's read role is a separate
+`ClusterRole` bound cluster-wide regardless of this value, and it carries
+`get`/`list`/`watch` on Secrets — so a scoped controller can still read every
+Secret in the cluster. And the write role still grants `daemonsets`, so a
+DaemonSet created in a permitted namespace still schedules pods onto every
+node. Treat the controller as privileged rather than contained; scoping is
+worth doing, but it is not the control that keeps it away from your Secrets.
+
+The consequence for you is that **only Gateways in the listed namespaces are
+provisioned**. A Gateway elsewhere is accepted by the API server but never gets
+an address — the controller cannot create its Deployment or Service there. The
+Gateway reports it: v1.5.0 sets `Programmed=False` with reason
+`DeploymentFailed` when those writes are denied, so
+`kubectl get gateway <name> -n <ns> -o yaml` shows the cause in `status.conditions`,
+with matching `forbidden` errors in the controller log. This is
+about where the *Gateway* lives; routes are unaffected, and `HTTPRoute`s in any
+namespace still attach to the AICR gateway.
+
+Upgrading an existing cluster is where this bites. A Gateway that reconciles
+today under the chart's unscoped default stops once the list is scoped without
+its namespace, so inventory what you have before upgrading:
+
+```bash
+(
+  kubectl get gateways.gateway.networking.k8s.io -A \
+    -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,CLASS:.spec.gatewayClassName' \
+    || { echo "Gateway listing failed — retry" >&2; exit 1; }
+)
+```
+
+Every namespace holding a Gateway with `CLASS: agentgateway` belongs in the
+list. To add them:
+
+```bash
+aicr bundle -r recipe.yaml \
+  --set-json agentgateway:rbac.gatewayNamespaces='["agentgateway-system","my-gateways"]'
+```
+
+Two constraints on that edit. The namespaces **must already exist** — the chart
+creates a `RoleBinding` in each, and naming one that has not been created fails
+the install. And the key is a list, so it needs `--set-json`: a plain
+`--set agentgateway:rbac.gatewayNamespaces=my-gateways` writes a bare string and
+the chart's `range` over it fails at render, the same list-versus-string trap
+described for `allowedSourceRanges` above.
+
+### `kueue`: 0.18.x to 0.19.x
+
+Upstream's 0.19 notes ask you to review the `.0` notes for every minor version
+you cross. Coming from AICR's previous pin of 0.18.2 that is discharged, so
+0.19.0 is the floor here. If you are upgrading from an AICR release older than
+the 0.18.2 pin, read the 0.17.0 and 0.18.0 notes as well.
+
+One change alters behavior on a default install. The rest apply only if you
+author Kueue objects yourself or have re-enabled an integration AICR trims.
+
+**`WaitForPodsReady` is on by default from 0.19.0.** The v1beta2 configuration
+has no enable switch for it: the controller defaults the block
+unconditionally, so an existing install that never set `waitForPodsReady`
+inherits it on upgrade. The effective values come from the Kueue binary rather
+than from the commented example in the chart, and a running 0.19.3 controller
+reports them as:
+
+```yaml
+waitForPodsReady:
+  blockAdmission: false
+  recoveryTimeout: 30m0s
+  requeuingStrategy:
+    backoffBaseSeconds: 60
+    backoffMaxSeconds: 3600
+    timestamp: Eviction
+  timeout: 30m0s
+```
+
+What changes for a running cluster: a workload whose pods do not all become
+ready inside 30 minutes is evicted and requeued instead of holding its quota,
+and a running workload that loses readiness for 30 minutes is evicted the same
+way. On 0.18.2 the first case held its GPU quota while never running, so for
+most clusters this is the better behavior. `blockAdmission` stays false, so an
+evicted workload does not stall the queue behind it.
+
+AICR inherits this rather than pinning it. If 30 minutes is wrong for your
+workloads, set a different timeout rather than trying to switch the feature
+off: the `DisableWaitForPodsReady` feature gate is already deprecated upstream
+and is slated for removal in 0.21. Note that AICR pins
+`managerConfig.controllerManagerConfigYaml` as a single string, and Helm does
+not merge into a string, so changing one key means supplying the whole block
+rather than overriding `waitForPodsReady` on its own.
+
+**Rename any device-class mapping or resource transformation named `pods`.**
+Kueue reserves that exact resource name for the request it synthesizes from the
+PodSet count, and refuses it in four positions: `resources.transformations[].input`,
+that entry's `multiplyBy`, any key of its `outputs`, and
+`resources.deviceClassMappings[].name` (the last additionally requires
+`KueueDRAIntegration`, which has defaulted on since 0.18). Through 0.19.2 an entry
+using it was accepted and then silently discarded, or left the Workload pending
+indefinitely. 0.19.3 adds a real
+refusal and holds it behind the alpha `ReservedResourceNameValidation` feature
+gate, which is off by default in 0.19 so that existing clusters can rename
+first.
+
+Upstream's release note says the controller-manager "will fail to start", which
+holds only once that gate is on. Checked against 0.19.3 on kind with
+`resources.transformations[0].input: pods` in the configuration: at the default
+gate setting the controller came up `1/1 Running` with 0 restarts, and adding
+`--feature-gates=ReservedResourceNameValidation=true` to the same
+configuration crash-looped it at startup with
+
+```text
+Unable to validate the configuration
+resources.transformations[0].input: Invalid value: "pods": the key is reserved for internal kueue use
+```
+
+So a 0.19.3 upgrade does not break on this by itself. Rename anyway, while the
+gate is still off. The check applies to the controller Configuration, not to
+ClusterQueue `coveredResources`. AICR ships neither block, so a default install
+has nothing to rename, but both are reachable through typed overrides on the
+`kueue` component:
+
+```bash
+kubectl get configmap kueue-manager-config -n kueue-system \
+  -o jsonpath='{.data.controller_manager_config\.yaml}' \
+  | grep -nE "^[[:space:]]*-?[[:space:]]*(input|multiplyBy|name)[[:space:]]*:[[:space:]]*[\"']?pods[\"']?([[:space:]]+#.*)?[[:space:]]*\$|^[[:space:]]*[\"']?pods[\"']?[[:space:]]*:"
+```
+
+Helm renders this ConfigMap through `fromYaml | toYaml`, so a value written as
+`input: "pods" # rename me` reaches it normalized to `input: pods`, quotes and
+comment dropped. The pattern accepts quotes, a trailing comment and arbitrary
+spacing anyway, so it still reports a hit against a ConfigMap that was applied
+directly or installed by another tool and never passed through that
+normalization.
+
+No output means nothing to do. Rename any hit to a qualified name such as
+`example.com/pods`. A rename also means updating the matching ClusterQueue
+`nominalQuota` entries in the same change, because the quota is keyed on the
+name you just changed.
+
+**Workloads you author yourself are validated more strictly from 0.19.1.**
+Topology-aware scheduling is on by default (`TopologyAwareScheduling` since
+0.14) and so is the new check (`TASValidateWorkloadSliceSize` at 0.19), so this
+needs no change in AICR to take effect. It reaches only `Workload` objects you
+create directly or through your own controller, not those Kueue builds from a
+Job. After upgrading, a Workload is rejected unless `podSetSliceRequiredTopology`
+is paired with a `podSetSliceSize` greater than zero, `podSetSliceSize` is
+absent when that topology field is absent, and every
+`podsetSliceRequiredTopologyConstraints` entry has a positive size. For a phased
+rollout, disable `TASValidateWorkloadSliceSize`, clean up the invalid Workloads,
+then re-enable it. While you are in there, fix any negative `subGroupCount` on a
+Workload: 0.19 only warns about it, but 0.20 rejects it at the API level.
+
+**If you turned topology-aware scheduling off, the gate the release note names
+is not enough.** `TASRecomputeAssignmentWithinSchedulingCycle` is new in 0.19
+and defaults on, and the 0.19.1 note tells you to set it false before upgrading
+when TAS is disabled. That is necessary and not sufficient. Checked against
+0.19.3 on kind: with `TopologyAwareScheduling=false` alone the manager exits at
+startup with `conflicting feature gates detected` and eight causes, and the
+Deployment crash-loops. Applying the release note's instruction on top of that,
+so `TASRecomputeAssignmentWithinSchedulingCycle=false` as well, still
+crash-loops. Seven sub-gates default on and each requires TAS
+(`TASHandleOverlappingFlavors`, `TASFailedNodeReplacement`,
+`TASFailedNodeReplacementFailFast`, `TASReplaceNodeOnPodTermination`,
+`TASReplaceNodeOnNodeTaints`, `TASMultiLayerTopology`,
+`TASRecomputeAssignmentWithinSchedulingCycle`), and `TASProfileMixed`, on by
+default since 0.15, fails on its own with `cannot use a TAS profile with TAS
+disabled`. The manager reached `1/1 Running` only with all nine set false
+together. AICR sets no feature gates for kueue, so a default install is
+unaffected and stays unaffected. This reaches only a cluster that disabled TAS
+through an override on the `kueue` component, in either
+`controllerManager.featureGates` or a `featureGates:` block inside
+`managerConfig.controllerManagerConfigYaml`; both were checked and fail
+identically, and kueue rejects setting the two at once. Given the cost, the
+cheaper path is to drop the override and leave TAS on.
+
+**If you re-enabled an integration AICR trims, check these too.** AICR pins
+`integrations.frameworks` to `batch/job`, JobSet and TrainJob, so the following
+are inert on a default install and matter only if you added the framework back
+through an override:
+
+- `ray.io/raycluster`: the autoscaler sidecar is now counted against quota.
+  Budget an extra 500m CPU and 512Mi memory per head pod, or whatever
+  `spec.autoscalerOptions.resources` sets, or admission starts failing.
+- `ray.io/rayjob` with `submissionMode: SidecarMode`: the submitter sidecar is
+  now counted against quota. Budget an extra 500m CPU and 200Mi memory per head
+  pod.
+- `leaderworkerset.x-k8s.io/leaderworkerset`: `spec.leaderWorkerTemplate.size`
+  is immutable while Kueue manages the LeaderWorkerSet. Recreate at the new size
+  rather than resizing in place. `spec.replicas` stays mutable.
+
+If you add MultiKueue through an override and use `locationType: Path`, the
+kubeconfig has to be mounted into the `kueue-controller-manager` pod under
+`/etc/multikueue/kubeconfigs`. Moving the file on a node is not enough, because
+the path is resolved inside the controller's own filesystem.
+`MultiKueueKubeConfigPathValidation` is alpha and off by default in 0.19 and
+upstream expects to turn it on later, so prefer `locationType: Secret` or
+`ClusterProfile` rather than taking that dependency.

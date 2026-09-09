@@ -1,0 +1,109 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: rke2
+
+spec:
+  # Inherits from base (implicit when spec.base is empty).
+  # RKE2 (Rancher Kubernetes Engine 2) provisions only the base platform —
+  # Kubernetes control plane, containerd, a bundled CNI (Canal by default;
+  # Calico/Cilium/Flannel selectable), CoreDNS, an ingress controller
+  # (rke2-ingress-nginx through v1.35; Traefik is the default for new
+  # v1.36+ clusters), and metrics-server. The NVIDIA runtime stack
+  # (GPU Operator, NFD, cert-manager, Prometheus, DRA driver, etc.) is
+  # delivered by AICR via base.yaml, mirroring the `bcm` bare-metal
+  # service root.
+  #
+  # Storage note: RKE2 ships NO StorageClass (unlike k3s, local-path is not
+  # bundled). The base kube-prometheus-stack defaults to emptyDir storage, so
+  # nothing here requires a StorageClass. If persistent monitoring is needed,
+  # install a provisioner (e.g. local-path-provisioner) and override
+  # prometheusSpec.storageSpec per the bcm.yaml pattern.
+  #
+  # node-exporter port note: some RKE2 host images run a host-level
+  # node_exporter systemd service bound to the default port 9100. The base
+  # kube-prometheus-stack node-exporter DaemonSet runs hostNetwork with
+  # tolerate-all on the same default, so on a node with a host exporter it
+  # crash-loops with "bind: address already in use" and helm --wait wedges
+  # the release. This root therefore overrides the exporter to port 9110
+  # (see the kube-prometheus-stack ref below); Prometheus scrapes via the
+  # Service, so the non-default port is side-effect-free.
+
+  criteria:
+    service: rke2
+
+  # RKE2-specific constraints
+  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
+  constraints:
+    # >= 1.34.1: first 1.34-line RKE2 release that ships containerd 2.1,
+    # required by the GPU Operator CDI/NRI plugin path configured below.
+    - name: K8s.server.version
+      value: ">= 1.34.1"
+
+  componentRefs:
+    # GPU Operator on RKE2 uses CDI with the NRI plugin — current RKE2
+    # guidance for gpu-operator (rancher/rke2-docs
+    # docs/add-ons/gpu_operators.md): device injection happens over the NRI
+    # socket, so the toolkit never rewrites RKE2's containerd
+    # config.toml.tmpl and workloads don't need runtimeClassName: nvidia.
+    # The legacy toolkit-env path (CONTAINERD_CONFIG=
+    # /var/lib/rancher/rke2/agent/etc/containerd/config.toml.tmpl) is known
+    # to break RKE2 clusters on reboot (NVIDIA/gpu-operator#992) and forces
+    # a containerd SIGHUP that restarts RKE2. NRI needs containerd 2.1
+    # (v1.34.1+rke2r1 and later) — enforced by the K8s.server.version floor
+    # above. If NRI must be disabled, set nriPluginEnabled: false and add
+    # CONTAINERD_SOCKET=/run/k3s/containerd/containerd.sock to the toolkit
+    # env.
+    #
+    # Production support boundary: NVIDIA documents CDI+NRI as an
+    # experimental GPU Operator feature (not GA, "not recommended for
+    # production use"). RKE2's own docs describe it as an available path
+    # for gpu-operator on RKE2 (v1.31.13+/v1.32.9+/v1.33.5+/v1.34.1+rke2r1
+    # provide the required containerd support) rather than unconditional
+    # current guidance — both the NRI and non-NRI (legacy toolkit-env)
+    # wirings are documented options. Setting it at this root, rather than
+    # per-leaf, is safe today only because every rke2-derived leaf so far
+    # is itself Preview (vr200) — if a future accelerator on rke2 needs a
+    # validated, non-experimental toolkit path before NRI reaches GA,
+    # override nriPluginEnabled: false on that leaf rather than assuming
+    # the root default is production-validated for it.
+    - name: gpu-operator
+      type: Helm
+      overrides:
+        cdi:
+          enabled: true
+          nriPluginEnabled: true
+
+    # Move the node-exporter off 9100 — see the port note above.
+    - name: kube-prometheus-stack
+      type: Helm
+      overrides:
+        prometheus-node-exporter:
+          service:
+            port: 9110
+            targetPort: 9110
+
+  # Baseline conformance floor for any recipe resolved at the rke2 service
+  # root (mirrors the bcm.yaml bare-metal service root). Leaves extend this
+  # with accelerator-specific deployment checks and constraints.
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - accelerator-metrics
+        - ai-service-metrics

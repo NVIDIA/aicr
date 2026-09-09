@@ -73,8 +73,8 @@ should be upgraded.
 
 | Version | Supported |
 |---------|-----------|
-| `0.19.x` (latest released minor) | ✅ Receives security fixes |
-| `< 0.19` | ❌ End-of-life — upgrade to the latest release |
+| `0.20.x` (latest released minor) | ✅ Receives security fixes |
+| `< 0.20` | ❌ End-of-life — upgrade to the latest release |
 
 Security fixes ship in a new patch or minor release rather than as backports to
 end-of-life versions. When AICR reaches 1.0 this policy will be revised and a

@@ -1,0 +1,209 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# DraNet — DRA-based Kubernetes network driver (kubernetes-sigs/dranet).
+#
+# Vendored from the upstream `install.yaml`
+# (https://github.com/kubernetes-sigs/dranet, image
+# registry.k8s.io/networking/dranet), adapted to AICR conventions
+# (app.kubernetes.io labels, digest-pinned image, seccomp RuntimeDefault,
+# priorityClassName, GPU-node scoping).
+#
+# Purpose on VR200 (Vera Rubin NVL72, RKE2): expose the ConnectX-9 RDMA
+# compute-fabric NICs to pods via DRA, as an alternative to the NVIDIA Network
+# Operator. DraNet discovers interfaces generically (driver `dra.net`), publishes
+# them as ResourceSlices, and uses NRI to move the netdev + RDMA device into the
+# pod netns at container creation. No host driver/containerd/kubelet mutation:
+# it relies on the host DOCA-OFED stack and the already-enabled containerd NRI
+# plugin (containerd 2.x on rke2).
+#
+# DraNet does not set or require a particular host RDMA namespace mode — it
+# works under whichever mode `ib_core`'s netns_mode leaves in place, and never
+# mutates it. Which mode a given deployment runs is therefore decided by the
+# recipe, not here: on a host left at the default the subsystem stays shared,
+# while the VR200 leaves pair this component with rdma-netns-exclusive, which
+# sets netns_mode=0 and reboots so each pod netns gets its own RDMA view.
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dranet
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: dranet
+    app.kubernetes.io/instance: dranet
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dranet
+  labels:
+    app.kubernetes.io/name: dranet
+    app.kubernetes.io/instance: dranet
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch", "update"]
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["resourceslices"]
+    verbs: ["list", "watch", "create", "update", "delete"]
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["resourceclaims", "deviceclasses"]
+    verbs: ["get"]
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["resourceclaims/status"]
+    verbs: ["patch", "update"]
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["resourceclaims/driver"]
+    verbs: ["associated-node:patch", "associated-node:update"]
+    resourceNames: ["dra.net"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dranet
+  labels:
+    app.kubernetes.io/name: dranet
+    app.kubernetes.io/instance: dranet
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dranet
+subjects:
+  - kind: ServiceAccount
+    name: dranet
+    namespace: kube-system
+---
+# DeviceClass for claiming a ConnectX-9 RDMA NIC. Hardware scoping is enforced at
+# the publish layer (the DaemonSet `--filter` only publishes CX9 devices), so
+# every device the driver advertises is already a CX9 compute NIC — this selector
+# only needs to match the driver. Never select on link/"up" state (the CX9 ports
+# report state=down until the fabric is up).
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: mlnx-cx9
+  labels:
+    app.kubernetes.io/name: dranet
+    app.kubernetes.io/instance: dranet
+spec:
+  selectors:
+    - cel:
+        expression: device.driver == "dra.net"
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dranet
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: dranet
+    app.kubernetes.io/instance: dranet
+    tier: node
+    app: dranet
+    k8s-app: dranet
+spec:
+  selector:
+    matchLabels:
+      app: dranet
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dranet
+        app.kubernetes.io/instance: dranet
+        tier: node
+        app: dranet
+        k8s-app: dranet
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: dranet
+      priorityClassName: system-node-critical
+      hostNetwork: true
+      # Scope to GPU workers (both vr200 workers carry nvidia.com/gpu.present;
+      # control-plane nodes do not), so DraNet only runs where the Mellanox
+      # fabric lives.
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      tolerations:
+        - operator: Exists
+          effect: NoSchedule
+        - operator: Exists
+          effect: NoExecute
+      containers:
+        - name: dranet
+          image: registry.k8s.io/networking/dranet:stable@sha256:3248d8a520584100a5e87a2b92039591ea3b83a5492cc3e2d881b20d3b18ada6
+          imagePullPolicy: IfNotPresent
+          args:
+            - /dranet
+            - --v=4
+            - --hostname-override=$(NODE_NAME)
+            # Publish ONLY the ConnectX-9 compute-fabric NICs. Two reasons:
+            # (1) Correct scoping — excludes the BlueField-4 DPUs, the USB mgmt
+            #     NIC, and virtual/overlay interfaces (vxlan/bridge/cali), so the
+            #     ResourceSlice holds only the CX9 RDMA ports intended to be
+            #     claimed.
+            # (2) BF4 DRA workaround — DraNet stores the full lspci description
+            #     in `dra.net/pciDevice`; a BlueField-4 string can exceed the DRA
+            #     64-byte attribute limit and one invalid device rejects the
+            #     WHOLE ResourceSlice, so nothing publishes. BF4 is also
+            #     rdma=true, so a generic rdma filter would re-trigger the bug —
+            #     match the ConnectX-9 model string explicitly instead.
+            - '--filter=("dra.net/pciDevice" in attributes) && attributes["dra.net/pciDevice"].StringValue == "CX9 Family [ConnectX-9]"'
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          resources:
+            requests:
+              cpu: 100m
+              memory: 50Mi
+          securityContext:
+            privileged: true
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 9177
+            failureThreshold: 12
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9177
+          volumeMounts:
+            - { name: device-plugin, mountPath: /var/lib/kubelet/plugins }
+            - { name: plugin-registry, mountPath: /var/lib/kubelet/plugins_registry }
+            - { name: nri-plugin, mountPath: /var/run/nri }
+            - { name: netns, mountPath: /var/run/netns, mountPropagation: HostToContainer }
+            - { name: infiniband, mountPath: /dev/infiniband, mountPropagation: HostToContainer }
+            - { name: bpf-programs, mountPath: /sys/fs/bpf, mountPropagation: HostToContainer }
+            - { name: dranet-run, mountPath: /var/run/dranet }
+      volumes:
+        - { name: device-plugin, hostPath: { path: /var/lib/kubelet/plugins } }
+        - { name: plugin-registry, hostPath: { path: /var/lib/kubelet/plugins_registry } }
+        - { name: nri-plugin, hostPath: { path: /var/run/nri } }
+        - { name: netns, hostPath: { path: /var/run/netns } }
+        - { name: infiniband, hostPath: { path: /dev/infiniband } }
+        - { name: bpf-programs, hostPath: { path: /sys/fs/bpf } }
+        - { name: dranet-run, hostPath: { path: /var/run/dranet, type: DirectoryOrCreate } }

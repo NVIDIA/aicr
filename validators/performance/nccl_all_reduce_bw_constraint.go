@@ -282,6 +282,11 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 	variantNVLS: {
 		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200},
 		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
+		// VR200 NVL72 on bare-metal RKE2: MNNVL across the IMEX domain, same
+		// shape as GB200 but with its own runtime (NGC pytorch image, distinct
+		// mpirun path) — see testdata/vr200/rke2/runtime-nvls.yaml.
+		recipe.CriteriaServiceRKE2:    {recipe.CriteriaAcceleratorVR200},
+		recipe.CriteriaServiceGeneric: {recipe.CriteriaAcceleratorGB300},
 	},
 }
 
@@ -444,10 +449,13 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 
 	// Preflight cluster-side prerequisites before spending TrainJob time.
-	// On GB200/EKS and GB200/OKE the NET variant needs
-	// NVreg_GrdmaPciTopoCheckOverride=1 on the NVIDIA driver; without it, the
-	// PCIe-attached NIC (EFA on EKS, ConnectX IB on OKE) can't attach dma-buf
-	// to GPU HBM and NCCL silently falls back to Socket. Preflights key off
+	// On GB200/EKS and GB200/OKE the NET variant needs GPUDirect RDMA. Before
+	// R595 that requires NVreg_GrdmaPciTopoCheckOverride=1 on the NVIDIA driver
+	// (R580 is the version AICR pins); R595 removed the parameter, substituting a
+	// topology requirement the preflight does not check, so there it fails rather
+	// than assume (#2459). Before R595, without the flag the PCIe-attached NIC (EFA on EKS, ConnectX
+	// IB on OKE) can't attach dma-buf to GPU HBM and NCCL silently falls back
+	// to Socket. Preflights key off
 	// the benchmark target: opting into a profile opts into that profile's
 	// environment contract, preflights included. (OKE takes the default
 	// fabric env here — AICR_NCCL_FABRIC's roce override is an EKS-only
@@ -992,11 +1000,12 @@ const (
 // acceleratorProductMatchers maps a recipe Criteria.Accelerator to a predicate
 // that reports whether a given nvidia.com/gpu.product label value belongs to
 // that accelerator family. Exact matches are used where GFD emits a single
-// product string (GB200, B200, L40 family, RTX Pro 6000); prefix matches cover
+// product string (GB200, GB300, B200, L40 family, RTX Pro 6000); prefix matches cover
 // accelerators with multiple concrete SKUs (H100 SXM/PCIe/NVL, H200, A100 SXM/PCIe).
 // No entry for CriteriaAcceleratorAny — "any" deliberately skips the filter.
 var acceleratorProductMatchers = map[recipe.CriteriaAcceleratorType]func(string) bool{
 	recipe.CriteriaAcceleratorGB200:      func(s string) bool { return s == "NVIDIA-GB200" },
+	recipe.CriteriaAcceleratorGB300:      func(s string) bool { return s == "NVIDIA-GB300" },
 	recipe.CriteriaAcceleratorB200:       func(s string) bool { return s == "NVIDIA-B200" },
 	recipe.CriteriaAcceleratorH100:       func(s string) bool { return strings.HasPrefix(s, "NVIDIA-H100-") },
 	recipe.CriteriaAcceleratorH200:       func(s string) bool { return strings.HasPrefix(s, "NVIDIA-H200-") },
@@ -1869,7 +1878,7 @@ func waitForResourceGone(ctx context.Context, client dynamic.ResourceInterface, 
 // platformWorkerScheduling returns the default nodeSelector and tolerations
 // for NCCL worker pods on the given service. instanceType is only used for EKS;
 // nodes (the accelerator-narrowed target set from resolveTargetGPUNodes) is
-// used for GKE (the gke-accelerator label) and OKE/AKS (the shared
+// used for GKE (the gke-accelerator label) and OKE/AKS/generic (the shared
 // nvidia.com/gpu.product label).
 func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType string, nodes []v1.Node) (map[string]string, []v1.Toleration, error) {
 	switch service {
@@ -1895,28 +1904,22 @@ func platformWorkerScheduling(service recipe.CriteriaServiceType, instanceType s
 			{Operator: v1.TolerationOpExists},
 			{Key: "nvidia.com/gpu", Operator: v1.TolerationOpEqual, Value: "present", Effect: v1.TaintEffectNoSchedule},
 		}, nil
-	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS:
-		// OKE bare-metal GB200 pools are commonly tainted and may coexist
-		// with other GPU shapes under one control plane. Tolerate the pool
-		// taint (mirroring EKS/GKE) and pin workers to the same cohort the
-		// node count was sized against by reusing the GFD gpu.product label
-		// that resolveTargetGPUNodes -> narrowByAccelerator already filtered
-		// on. On non-GFD installs no shared product label exists, so emit no
-		// selector — matching the counting path's unfiltered fallback so the
-		// two stay aligned.
-		//
-		// AKS shares this shape: GPU pools carry the nvidia.com/gpu=present:
-		// NoSchedule taint and AICR recipes deploy the GPU Operator with GFD,
-		// so gpu.product (e.g. NVIDIA-H100-80GB-HBM3) is the discriminating
-		// label. The AKS-native kubernetes.azure.com/accelerator label is not
-		// used because its value is just "nvidia" — it cannot pin the H100
-		// cohort narrowByAccelerator sized the job against.
+	case recipe.CriteriaServiceOKE, recipe.CriteriaServiceAKS, recipe.CriteriaServiceGeneric:
+		// These services share one shape: tainted GPU pools whose nodes carry
+		// GFD labels. Tolerate the pool taint and pin workers to the
+		// gpu.product label that resolveTargetGPUNodes → narrowByAccelerator
+		// already filtered on, so placement matches the cohort WorkerCount
+		// was sized against. On non-GFD installs no shared product label
+		// exists; emit no selector, matching the counting path's unfiltered
+		// fallback so the two stay aligned. (AKS's native
+		// kubernetes.azure.com/accelerator label is just "nvidia" — it
+		// cannot pin a cohort.)
 		var nodeSelector map[string]string
 		if product := commonGPUProduct(nodes); product != "" {
 			nodeSelector = map[string]string{gpuProductLabel: product}
 		}
 		return nodeSelector, []v1.Toleration{{Operator: v1.TolerationOpExists}}, nil
-	case recipe.CriteriaServiceAny, recipe.CriteriaServiceOCP, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM, recipe.CriteriaServiceMetal3:
+	case recipe.CriteriaServiceAny, recipe.CriteriaServiceOCP, recipe.CriteriaServiceKind, recipe.CriteriaServiceLKE, recipe.CriteriaServiceBCM, recipe.CriteriaServiceMetal3, recipe.CriteriaServiceRKE2:
 		return nil, nil, nil
 	default:
 		return nil, nil, nil
@@ -2718,10 +2721,8 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 	waitCtx, waitCancel := context.WithTimeout(context.Background(), defaults.InferenceNamespaceTerminationWait)
 	defer waitCancel()
 	if err := waitForNamespaceGone(waitCtx, nsClient, namespace); err != nil {
-		slog.Warn("NCCL benchmark namespace did not finish terminating within the wait bound, "+
-			"deletion was accepted and its cascading GC continues in the background",
-			"namespace", namespace, "error", err)
-		return nil
+		return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
+			fmt.Sprintf("NCCL benchmark namespace %q did not finish terminating within the wait bound", namespace), err)
 	}
 
 	slog.Info("Deleted NCCL benchmark namespace", "namespace", namespace)

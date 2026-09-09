@@ -199,3 +199,4 @@ tools/mdx/node_modules/
 # merge gate's notices-generator job, so breakage surfaces on the PR that
 # causes it rather than at tag time.
 /THIRD_PARTY_NOTICES.md
+performance

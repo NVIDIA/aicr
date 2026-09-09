@@ -91,9 +91,17 @@ spec:
                 # otherwise warn that they rely on the cluster's default
                 # StorageClass, which this no-cluster test has no way to
                 # provide.
+                #
+                # Also pass system/accelerated node selectors: harmless for
+                # most overlays, but required by slinky-slurm and
+                # slurm-accounting-mariadb's registry.yaml
+                # requireNodeSelector guard, which real (non-Kind) slurm
+                # leaves don't opt out of.
                 echo "=== ${basename}: bundle ==="
                 ${AICR_BIN} bundle -r "${test_dir}/recipe.yaml" -o "${test_dir}/bundle" \
                   --accelerated-node-toleration "nvidia.com/gpu=present:NoSchedule" \
+                  --system-node-selector "nodeGroup=system-pool" \
+                  --accelerated-node-selector "nodeGroup=gpu-worker" \
                   --storage-class "gp3" || \
                   { echo "FAIL: bundle generation for ${basename}" >&2; exit 1; }
 

@@ -96,6 +96,16 @@ workspace paths. Use local file paths only when explicitly requested.
 - Sign every commit with both `-S` (cryptographic signature) and `-s` (DCO sign-off), authored as the human (the configured `git config user.name`/`user.email`), not the agent
 - Do NOT add `Co-Authored-By` lines or any agent attribution (e.g. Claude Code, Codex) — organization policy
 
+## Secrets and Credentials
+
+**Never commit a secret.** Credentials, API keys, tokens, passwords, private keys, certificates, kubeconfigs, and cloud service-account JSON do not belong in this repository: not in source, not in test fixtures, not in recipe or Helm values, not baked into a container image, and not in a commit message. That includes values you are only using locally, such as `GITHUB_TOKEN`, `GITLAB_TOKEN`, and `NGC_API_KEY`.
+
+**Never paste one where it is recorded.** Issues, pull requests, review comments, CI logs, `slog` output, error strings, and terminal transcripts copied into a report are all durable and mostly public. Redact before pasting: a token in a debug log is a leaked token.
+
+**Where a secret belongs instead.** Read it at run time from an environment variable, a Kubernetes Secret, or an external secret operator. Commit the *reference* (the env var name, or the Secret name and key), never the value. `.env` and `*.pem` are already gitignored; a kubeconfig or a downloaded service-account JSON is not, so keep those outside the working tree. Test fixtures use obviously fake values.
+
+**If a secret does get committed, rotate it.** Deleting the file or amending the commit is not a fix: the value is in the git history, in every clone that fetched it, and possibly in CI logs and forks. Revoke and reissue the credential first, then tell a maintainer, then clean the history. Report it even when the commit never left your machine, because you cannot prove that it did not.
+
 ## Key Packages
 
 | Package | Purpose | Business Logic? |
@@ -521,6 +531,19 @@ ${AICR_BIN} validate -r recipe.yaml -s snapshot.yaml --no-cluster
 
 **Anchor link hygiene.** Broken anchors are caught in CI by lychee on any PR touching `docs/**` (`.github/workflows/fern-docs-ci.yaml`, config `.lychee.toml`) — `make qualify` does NOT run it. When renaming/removing a heading, grep for `<filename>.md#<old-slug>` across the repo first (other docs, Helm templates, and `SECURITY.md` link into user-facing anchors), and update any inbound link in the same PR.
 
+## Code Comment Style
+
+**Go: follow [Go doc comment conventions](https://go.dev/doc/comment).** The violations that most often produce verbose comments:
+
+- Repo policy (stricter than Go's guidance, which permits short per-member comments under a group doc): a const/var group documented once at the top keeps its members bare — a lone multi-line comment on one member breaks the group.
+- A comparison between two values ("X is concrete, unlike wildcard Y") belongs on the *type's* doc comment, where readers of both see it — not on one member.
+- Don't document another subsystem's behavior in a declaration's comment, and don't restate an already-documented concept to set up a contrast — one defining sentence that references it is enough.
+- Keep enumerations inside existing doc comments accurate when adding values, instead of commenting the new line.
+
+**Python: conform to [PEP 8](https://peps.python.org/pep-0008/) with a 120-character line limit** (`pycodestyle --max-line-length=120` is the reference check), and follow [PEP 257](https://peps.python.org/pep-0257/) for docstrings on new or changed modules and functions — no retrofit of existing helpers is implied.
+
+**All languages:** a comment states what the code cannot show — a constraint, an absence ("no X because Y"), or provenance for a magic value. Comments that narrate the next line, restate the identifier, or justify the change to a reviewer are noise.
+
 ## Anti-Patterns (Do Not Do)
 
 Process and unique findings below; the rule sections above (Error Wrapping, Context Propagation, HTTP Client/Server, Logging, Constants, Kubernetes Patterns, Test Isolation) are authoritative for everything they cover and are not repeated here.
@@ -608,7 +631,7 @@ CI also posts per-package deltas post-push via `go-coverage-report` (`on-push-co
 - Do NOT add "Generated with Claude Code", "Created by Codex", or similar attribution
 - Add a `theme/*` label matching the PR's primary concern: `theme/recipes`, `theme/validation`, `theme/deployer`, `theme/ci-dx`, `theme/community`, `theme/supply-chain`. Use `dependencies` for dependency bumps. (There are no `enhancement`/`bug`/`documentation` repo labels — those names are org-level *issue types*, which apply to issues, not PRs.)
 - Area labels are auto-assigned by `.github/labeler.yml` based on changed file paths (e.g., `area/recipes`, `area/ci`, `area/api`, `area/cli`, `area/bundler`, `area/collector`, `area/validator`, `area/docs`, `area/infra`, `area/tests`). You may also add them manually when the auto-labeler wouldn't match (e.g., issue-only PRs or cross-cutting changes).
-- Do NOT add issue priority labels `P0`, `P1`, or `P2` to PRs; they are reserved for issues and automation removes them from pull requests
+- Do NOT add a priority label (`P0`, `P1`, `P2`) to PRs. Priority is a field on the AICR Project board (see **Issue policy** below), not a repo label, and the PR Label Guard workflow (`.github/workflows/pr-label-guard.yaml`) strips any `P<number>` label from a pull request
 - Do NOT add `size/*` labels (auto-assigned by bot)
 - **PR titles are linted.** CI enforces Conventional Commits format — `type: subject`, `type(scope): subject`, `type!: subject`, or `type(scope)!: subject`, where `!` marks a breaking change. Valid types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`. Scopes may be mixed case (`fix(GB200):`). A malformed title fails the check; editing the title re-runs it automatically. The title is the whole commit message on `main` (`squash_merge_commit_message: BLANK`) and cannot be corrected after merge
 - Keep the PR title to 70 characters or fewer; use the description for details. Over 70 warns but does not block — dependency-bot titles embed pseudo-versions that cannot be shortened
@@ -626,7 +649,7 @@ CI also posts per-package deltas post-push via `go-coverage-report` (`on-push-co
 |------|---------|
 | `CONTRIBUTING.md` | Contribution guidelines, PR process, DCO |
 | `DEVELOPMENT.md` | Development setup, architecture, Make targets |
-| `RELEASING.md` | Release process for maintainers |
+| `RELEASE.md` | Release process for maintainers |
 | `.settings.yaml` | Project settings: tool versions, quality thresholds, build/test config (single source of truth) |
 | `recipes/registry.yaml` | Declarative component configuration |
 | `recipes/overlays/*.yaml` | Recipe overlay definitions |
@@ -708,7 +731,7 @@ aicr bundle -r recipe.yaml \
 
 ## Full Reference
 
-See `CONTRIBUTING.md`, `DEVELOPMENT.md`, `RELEASING.md`, and the `docs/` tree (`docs/contributor/` for architecture) for extended documentation including:
+See `CONTRIBUTING.md`, `DEVELOPMENT.md`, `RELEASE.md`, and the `docs/` tree (`docs/contributor/` for architecture) for extended documentation including:
 - Detailed code examples for collectors, bundlers, API endpoints
 - GitHub Actions architecture (three-layer composite actions)
 - CI/CD workflows, supply chain security (SLSA, SBOM, Cosign)

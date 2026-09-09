@@ -1,0 +1,114 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: vr200-rke2-ubuntu-inference-dynamo
+
+spec:
+  # PREVIEW: publishes an early-adopter VR200 (Vera Rubin) recipe path
+  # without the full production support and lifecycle qualification
+  # required for Supported status. See validation.aicr.run for published
+  # evidence for this Preview coordinate — the recipe has since changed
+  # (aicr evidence digest reports a mismatch against the linked pointer's
+  # predicate.recipe.digest), so treat that evidence as historical
+  # precedent, not as validating the current recipe content. Fresh
+  # hardware validation is pending VR cluster access.
+  #
+  # Inherits every VR200-specific safety override (host-managed driver,
+  # tuning scaffold, NFD topology updater) from the platform-neutral
+  # vr200-rke2-ubuntu-inference base, and adds only the Dynamo platform
+  # components — mirroring gb200-eks-ubuntu-inference-dynamo (the other
+  # arm64 NVL72 platform).
+  base: vr200-rke2-ubuntu-inference
+
+  criteria:
+    service: rke2
+    accelerator: vr200
+    os: ubuntu
+    intent: inference
+    platform: dynamo
+
+  componentRefs:
+    - name: grove
+      type: Helm
+      valuesFile: components/grove/values.yaml
+
+    # Storage prerequisite: dynamo-platform's NATS JetStream StatefulSet
+    # requests a PVC, and RKE2 ships no StorageClass (see the rke2 root's
+    # storage note) — without one the NATS pod stays Pending on an unbound
+    # claim and helm --wait times out. Any dynamic provisioner suffices;
+    # node-local storage via rancher/local-path-provisioner (set as
+    # default StorageClass) is the validated minimum.
+    #
+    # RKE2 also needs the TLSRoute v1alpha2 CRD, which rke2-inference
+    # installs from a vendored manifest rather than relying on a Traefik
+    # release owning it — see the rke2-inference agentgateway-crds notes.
+    - name: dynamo-platform
+      type: Helm
+      valuesFile: components/dynamo-platform/values.yaml
+      dependencyRefs:
+        - grove
+        - cert-manager
+        - kube-prometheus-stack
+        - gpu-operator
+        - kai-scheduler
+
+  # Performance validation (inference-perf) is deferred: no VR200-measured
+  # throughput/TTFT floor exists yet in the public catalog. This is not
+  # just a missing measurement — as of 2026-09-01 the fix isn't reachable
+  # from any image this recipe can pull, and the requirement is CUDA
+  # 13.4, not just a vLLM version:
+  #   - vllm-project/vllm merged sm_107a (Rubin) support in v0.27.0
+  #     (2026-08-10): PR #49387 "Add sm_107 for Rubin" (merged
+  #     2026-07-24) and PR #49647 "[Rubin] Enable NVLink all-reduce
+  #     paths on SM107" (merged 2026-07-29). The SM107 kernel path is
+  #     itself gated on CUDA >= 13.4 at build time
+  #     (CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 13.4) — a
+  #     vLLM build against an older CUDA toolkit has the Python/dispatch
+  #     code but not the compiled kernel.
+  #   - vLLM's own published Docker images, including v0.28.0, still
+  #     build against CUDA 13.0.3 (docker/Dockerfile ARG CUDA_VERSION),
+  #     below the 13.4 floor — so even the newest vLLM release image
+  #     does not actually carry a working SM107 kernel.
+  #   - ai-dynamo's latest tagged release (v1.4.2, 2026-08-29) pins
+  #     vllm/vllm-openai:v0.26.0 (predates the code); its unreleased main
+  #     branch pins v0.28.0 (has the code, not yet CUDA 13.4); neither is
+  #     what this leaf needs, and nothing built from main is published.
+  #   - Independent of the runtime image, this repo's own performance
+  #     validator hardcodes nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
+  #     in two places (validators/performance/model_cache.go
+  #     cacheWorkerImage, and the DynamoGraphDeployment testdata under
+  #     validators/performance/testdata/inference/) — those pins need
+  #     updating too before this leaf's inference-perf check would even
+  #     exercise a different image.
+  # Add a `validation.performance` block once a published, CUDA
+  # >= 13.4-built runtime image is verified on real VR200 hardware (past
+  # the JIT-compile crash, not just past a version-number check), the
+  # AICR-side 1.2.1 pins above are updated in lockstep, and a real floor
+  # is measured (same class of gap as GB300/sm_103 — plain CUDA kernels
+  # forward-compat onto Rubin via PTX JIT, but runtime kernel compilers
+  # need explicit sm_107a support).
+  #
+  # Deployment phase and baseline conformance checks are inherited from
+  # vr200-rke2-ubuntu-inference (checks union across the overlay chain);
+  # this adds the Dynamo-specific checks, mirroring
+  # gb200-eks-ubuntu-inference-dynamo.
+  validation:
+    conformance:
+      checks:
+        - gang-scheduling
+        - robust-controller
+        - secure-accelerator-access

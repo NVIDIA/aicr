@@ -686,7 +686,7 @@ func stringFlagValue(t *testing.T, cmd *cli.Command, flagName string) string {
 //
 // The declared half is a compatibility contract. "aicr" is what `--help`
 // prints and what integrations read; dropping it is a breaking change to a
-// frozen v1 surface that owes the deprecation window in RELEASING.md.
+// frozen v1 surface that owes the deprecation window in RELEASE.md.
 //
 // The delivered half is a security property, and it is the one worth the
 // test. Config.ServiceAccountName is exact-if-exists: agent.Deployer's
