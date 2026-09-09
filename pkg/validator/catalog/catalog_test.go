@@ -59,11 +59,12 @@ func TestCatalogTimeoutsFitFacadeBudget(t *testing.T) {
 }
 
 // TestExpectedResourcesCatalogEnvelope asserts the expected-resources
-// validator's catalog timeout (which becomes the Job's
-// activeDeadlineSeconds) exceeds the inner chainsaw assert timeout by
-// enough headroom for graceful chainsaw termination. Without this,
-// chainsaw is SIGKILLed mid-cleanup and operators see truncated output.
-// See issue #1220.
+// validator's catalog timeout (the check's own AICR_CHECK_TIMEOUT budget —
+// the Job's activeDeadlineSeconds is this value plus
+// ValidatorJobDeadlineHeadroom, see TestRenderedJobDeadlineExceedsOrchestratorWait
+// below) exceeds the inner chainsaw assert timeout by enough headroom for
+// graceful chainsaw termination. Without this, chainsaw is SIGKILLed
+// mid-cleanup and operators see truncated output. See issue #1220.
 func TestExpectedResourcesCatalogEnvelope(t *testing.T) {
 	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
 	if err != nil {
