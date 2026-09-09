@@ -989,7 +989,7 @@ strategy.
 
 ### Benchmark Job stuck or timed out
 
-Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:`. For `inference-perf`, the full pipeline (workload ready → endpoint health → benchmark) can take up to 30 min on cold-start clusters. If it still times out:
+Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:` plus `ValidatorJobDeadlineHeadroom` (3m30s) on top. For `inference-perf`, the full pipeline (workload ready → endpoint health → benchmark) can take up to 30 min on cold-start clusters. If it still times out:
 
 ```bash
 # validator orchestrator Job + AIPerf benchmark Job both live in aicr-validation.

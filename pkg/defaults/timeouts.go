@@ -581,7 +581,9 @@ const (
 const (
 	// CheckExecutionTimeout is the parent context timeout for checks running
 	// inside a K8s Job. Must be long enough for the slowest behavioral check
-	// and shorter than the catalog-level Job timeout (activeDeadlineSeconds).
+	// and shorter than the catalog's own check timeout (AICR_CHECK_TIMEOUT) —
+	// not the Job's activeDeadlineSeconds, which adds
+	// ValidatorJobDeadlineHeadroom on top of that check timeout.
 	//
 	// The ceiling is set by the cold-start inference benchmark, which runs
 	// the following phases serially under the parent ctx:

@@ -73,12 +73,19 @@ type JobPlan struct {
 	Resources corev1.ResourceRequirements
 
 	// CheckTimeout is the budget the check itself is given, published to the
-	// container as AICR_CHECK_TIMEOUT.
+	// container as AICR_CHECK_TIMEOUT. Informational only once BuildJobPlan has
+	// returned: buildEnv already baked the same timeout value into plan.Env at
+	// build time, so mutating this field afterwards does not change what the
+	// container receives.
 	CheckTimeout int64
 
 	// JobDeadline is the Job's activeDeadlineSeconds. It exceeds CheckTimeout
 	// by defaults.ValidatorJobDeadlineHeadroom so the check always terminates
-	// itself first and its pod survives for log extraction.
+	// itself first and its pod survives for log extraction. Unlike
+	// CheckTimeout, RenderPlan reads this field directly, so it is not purely
+	// informational — but leaving it at its zero value yields a Job whose
+	// activeDeadlineSeconds is 0, which the Job controller treats as already
+	// exceeded, killing the pod instantly.
 	JobDeadline int64
 
 	// ServiceAccount is the Kubernetes ServiceAccount name
