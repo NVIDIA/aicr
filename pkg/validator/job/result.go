@@ -28,6 +28,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -184,8 +185,9 @@ func (d *Deployer) missingPodOutcome(ctx context.Context, findErr error) (exitCo
 		// (quota or webhook rejection), and one removed externally; asserting
 		// controller deletion would name a false root cause for the other two.
 		return validatorExitFailed, boundTerminationMsg(fmt.Sprintf(
-			"validator Job did not complete within its %s deadline; no pod remains for it, so its logs are unavailable (Job condition Failed/%s: %s)",
-			enforcedDeadline(job, d.config.Entry.Timeout), cond.Reason, detail),
+			"validator Job did not complete within its %s Job deadline (check budget %s); no pod remains for it, so its logs are unavailable (Job condition Failed/%s: %s)",
+			enforcedDeadline(job, d.config.Entry.Timeout), effectiveTimeout(d.config.Entry.Timeout),
+			cond.Reason, detail),
 			defaults.ValidatorMaxTerminationMsgBytes)
 	}
 
@@ -347,18 +349,18 @@ func effectiveTimeout(configured time.Duration) time.Duration {
 // Job's spec.activeDeadlineSeconds — the literal value the Job controller
 // enforced — so it is preferred whenever the Job could be read and carries it.
 //
-// The fallback re-derives it the way BuildJobPlan does, converting the catalog
-// timeout with int64(timeout.Seconds()) before assigning it to
-// ActiveDeadlineSeconds (pkg/validator/v1/job_plan.go), so any sub-second
-// component is truncated away: a 1500ms entry yields a 1s Job deadline.
-// Reporting the raw duration would name a deadline that never existed, and the
-// whole point of this message is to describe the Kubernetes state that produced
-// the failure.
+// The fallback derives the deadline v1.JobDeadlineFor(effectiveTimeout(configured))
+// would have produced — the same value BuildJobPlan renders onto
+// ActiveDeadlineSeconds. It is unreachable in practice: the only caller,
+// missingPodOutcome, sits behind an `if !ok { return -1, notFound }` guard
+// that requires jobFailedCondition to have already succeeded, so job is
+// non-nil here only when a live Job was just read with ActiveDeadlineSeconds
+// set — both renderers in pkg/validator/v1/job_plan.go always set it.
 func enforcedDeadline(job *batchv1.Job, configured time.Duration) time.Duration {
 	if job != nil && job.Spec.ActiveDeadlineSeconds != nil {
 		return time.Duration(*job.Spec.ActiveDeadlineSeconds) * time.Second
 	}
-	return time.Duration(int64(effectiveTimeout(configured).Seconds())) * time.Second
+	return v1.JobDeadlineFor(effectiveTimeout(configured))
 }
 
 // waitFailureMessage renders the TerminationMsg for a validator whose container

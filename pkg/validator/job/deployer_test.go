@@ -150,8 +150,9 @@ func TestDeployJobTimeouts(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()}))
 
-	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != 120 {
-		t.Errorf("ActiveDeadlineSeconds = %v, want 120", job.Spec.ActiveDeadlineSeconds)
+	wantDeadline := int64(v1.JobDeadlineFor(2 * time.Minute).Seconds()) // 120 + 210 = 330
+	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != wantDeadline {
+		t.Errorf("ActiveDeadlineSeconds = %v, want %d", job.Spec.ActiveDeadlineSeconds, wantDeadline)
 	}
 	if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 0 {
 		t.Errorf("BackoffLimit = %v, want 0", job.Spec.BackoffLimit)
@@ -175,7 +176,7 @@ func TestDeployJobDefaultTimeout(t *testing.T) {
 	entry.Timeout = 0
 	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: entry}))
 
-	expected := int64(defaults.ValidatorDefaultTimeout.Seconds())
+	expected := int64(v1.JobDeadlineFor(defaults.ValidatorDefaultTimeout).Seconds())
 	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != expected {
 		t.Errorf("ActiveDeadlineSeconds = %v, want %d (default)", job.Spec.ActiveDeadlineSeconds, expected)
 	}
