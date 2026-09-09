@@ -187,7 +187,7 @@ func validateCleanupFallback(opts aicr.ValidateSettings, present bool) bool {
 // inconsistent flag pairings before any I/O runs. Split out of the Action
 // closure so the guard logic can be read (and length-budgeted) independently
 // of the rest of the command's orchestration.
-func validateFlagCombinations(cncfSubmission bool, evidenceDir string, features []string, noCluster, explicitAttest bool) error {
+func validateFlagCombinations(cncfSubmission bool, evidenceDir string, features []string, noCluster, explicitAttest bool, skipChecks []string) error {
 	if cncfSubmission && evidenceDir == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, "--cncf-submission requires --evidence-dir")
 	}
@@ -210,6 +210,25 @@ func validateFlagCombinations(cncfSubmission bool, evidenceDir string, features 
 	// — consistent with the --cncf-submission guard above. A config-driven
 	// spec.validate.evidence.attestation is still silently suppressed in
 	// --no-cluster mode by evidenceConfigForRunMode.
+	// A withheld check must not reach a CNCF conformance submission as an
+	// absence. pkg/evidence/cncf/renderer.go drops every skipped entry before
+	// grouping, so a requirement whose checks were all skipped produces no
+	// markdown file and no index entry, and nothing in the rendered evidence
+	// records that it was omitted. That is long-standing and was tolerable
+	// while skips were incidental; --skip-check makes them deliberate and
+	// plural, and five of the checks a caller is most likely to withhold are
+	// submission requirements. A submission that silently omits a requirement
+	// reads as complete when it is not, which is the one failure this feature
+	// must not introduce. Refused rather than rendered, until the renderer can
+	// record a withheld requirement WITH its reason: that is a change to what a
+	// conformance submission contains, and it needs its own decision rather
+	// than being improvised behind a flag.
+	if evidenceDir != "" && len(skipChecks) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"--skip-check cannot be combined with --evidence-dir: the CNCF evidence renderer omits skipped checks "+
+				"entirely, so a withheld requirement would leave no file and no index entry and the rendered "+
+				"evidence would read as a complete submission")
+	}
 	if noCluster && explicitAttest {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"--emit-attestation/--push cannot be combined with --no-cluster: an offline dry-run must not sign or push an attestation")
@@ -323,6 +342,11 @@ type validationConfig struct {
 	// Input
 	phases []validator.Phase
 
+	// skipChecks names checks to withhold from every phase that runs
+	// (--skip-check / spec.validate.execution.skipChecks). Empty runs every
+	// check the recipe declares.
+	skipChecks []string
+
 	// runID is generated once, up front, for the whole `aicr validate`
 	// invocation (see validateCmd's Action) and reused here instead of a
 	// second v1.GenerateRunID() call. Sharing one ID keeps names, labels,
@@ -431,6 +455,12 @@ func runValidation(
 		}
 		opts = append(opts, aicr.WithValidationPhases(facadePhases...))
 	}
+	// Same shape as phases: pass the option only when there is something to
+	// say, so the default path stays exactly the one that existed before the
+	// knob did.
+	if len(cfg.skipChecks) > 0 {
+		opts = append(opts, aicr.WithValidationSkipChecks(cfg.skipChecks...))
+	}
 
 	results, err := client.ValidateState(ctx, rec, snap, opts...)
 	if err != nil {
@@ -460,12 +490,20 @@ func runValidation(
 		return errors.Wrap(errors.ErrCodeInternal, "failed to serialize CTRF report", writeErr)
 	}
 
-	// Log per-phase summary
+	// Log per-phase summary. The skipped count is printed alongside the status
+	// because a phase can report passed while several of its checks never ran:
+	// --skip-check withholds them deliberately, and an operator reading only
+	// "status=passed" would have no way to see that from here.
 	anyFailed := false
 	for _, pr := range results {
+		skipped := 0
+		if pr.Report != nil {
+			skipped = pr.Report.Results.Summary.Skipped
+		}
 		slog.Info("phase result",
 			"phase", pr.Phase,
 			"status", pr.Status,
+			"skipped", skipped,
 			"duration", pr.Duration)
 		if ctrf.IsFailingStatus(pr.Status) {
 			anyFailed = true
@@ -513,7 +551,7 @@ func runValidation(
 }
 
 func validateCmdFlags() []cli.Flag {
-	return []cli.Flag{
+	flags := []cli.Flag{
 		&cli.StringFlag{
 			Name:    cmdNameRecipe,
 			Aliases: []string{"r"},
@@ -535,6 +573,17 @@ func validateCmdFlags() []cli.Flag {
 	Options: "deployment", "performance", "conformance", "all".
 	Default: all phases.
 	Example: --phase deployment --phase conformance`,
+			Category: catValidationControl,
+		},
+		&cli.StringSliceFlag{
+			Name: "skip-check",
+			Usage: `Check(s) to withhold from every phase that runs (can be repeated).
+	For a caller that cannot satisfy a check the recipe declares, e.g. a lane
+	deploying a subset of the recipe. Each named check is REPORTED as skipped,
+	not dropped, so the report still accounts for it.
+	Rejected before the cluster is touched when a name matches no check, or when
+	the list would leave a requested phase with nothing to run.
+	Example: --skip-check gpu-operator-health --skip-check dra-support`,
 			Category: catValidationControl,
 		},
 		&cli.BoolFlag{
@@ -633,6 +682,19 @@ func validateCmdFlags() []cli.Flag {
 			Sources:  cli.EnvVars("AICR_AKS_GPU_POOLS_PATH"),
 			Category: catAgentDeployment,
 		},
+	}
+	// The evidence flags are a block of their own; splitting them out keeps
+	// this list under the funlen limit as flags are added. Order is preserved,
+	// so `--help` renders exactly as before.
+	flags = append(flags, validateEvidenceFlags()...)
+	return append(flags, configFlag(), dataFlag(), outputFlag(), kubeconfigFlag())
+}
+
+// validateEvidenceFlags returns the evidence-emission flags for `aicr validate`:
+// CNCF conformance markdown, and the recipe-evidence bundle with its signing and
+// push inputs.
+func validateEvidenceFlags() []cli.Flag {
+	return []cli.Flag{
 		&cli.StringFlag{
 			Name:     "evidence-dir",
 			Usage:    "Write CNCF conformance evidence markdown to this directory. Requires --phase conformance.",
@@ -714,10 +776,6 @@ func validateCmdFlags() []cli.Flag {
 			Category: catEvidence,
 		},
 		assumeYesFlag(catEvidence),
-		configFlag(),
-		dataFlag(),
-		outputFlag(),
-		kubeconfigFlag(),
 	}
 }
 
@@ -840,8 +898,14 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// the mode banner further down.
 			noCluster := boolFlagOrConfig(cmd, "no-cluster", opts.NoCluster)
 			explicitAttest := cmd.IsSet("emit-attestation") || cmd.IsSet(flagPush)
+			// Not parsed or checked here: the check catalog is resolved from
+			// the recipe inside the validator, so the names are validated
+			// against it there (before any cluster work) rather than against a
+			// second list kept in step by hand. Resolved this early only
+			// because the guard below needs it.
+			skipChecks := stringSliceFlagOrConfig(cmd, "skip-check", opts.SkipChecks)
 
-			if err = validateFlagCombinations(cncfSubmission, evidenceDir, features, noCluster, explicitAttest); err != nil {
+			if err = validateFlagCombinations(cncfSubmission, evidenceDir, features, noCluster, explicitAttest, skipChecks); err != nil {
 				return err
 			}
 
@@ -1031,6 +1095,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 
 			return runValidation(ctx, client, rec, snap, validationConfig{
 				phases:                phases,
+				skipChecks:            skipChecks,
 				runID:                 runID,
 				kubeconfig:            kubeconfig,
 				output:                cmd.String("output"),

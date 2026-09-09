@@ -1078,3 +1078,43 @@ func TestSnapshotResolve_PrivilegedPointer(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateResolve_SkipChecks(t *testing.T) {
+	v := &config.ValidateSpec{Execution: &config.ValidateExecutionSpec{
+		SkipChecks: []string{"gpu-operator-health", "dra-support"},
+	}}
+	got, err := v.Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !reflect.DeepEqual(got.SkipChecks, []string{"gpu-operator-health", "dra-support"}) {
+		t.Errorf("SkipChecks = %v", got.SkipChecks)
+	}
+}
+
+func TestValidateResolve_SkipChecksRejectsEmptyEntry(t *testing.T) {
+	// An empty entry matches no check name, so it would be inert -- and the
+	// validator's own preflight would reject it as unmatched with an error
+	// naming "". Catching it here attributes the defect to the field that
+	// carries it.
+	v := &config.ValidateSpec{Execution: &config.ValidateExecutionSpec{
+		SkipChecks: []string{"gpu-operator-health", "  "},
+	}}
+	_, err := v.Resolve()
+	if err == nil || !strings.Contains(err.Error(), "spec.validate.execution.skipChecks") {
+		t.Fatalf("expected skipChecks-validation error, got %v", err)
+	}
+}
+
+func TestValidateResolve_SkipChecksUnsetIsNil(t *testing.T) {
+	// Nil, not empty: WithSkipChecks on an empty slice is a no-op either way,
+	// but nil keeps "config said nothing" distinct for a caller that cares.
+	v := &config.ValidateSpec{Execution: &config.ValidateExecutionSpec{}}
+	got, err := v.Resolve()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.SkipChecks != nil {
+		t.Errorf("SkipChecks = %v, want nil", got.SkipChecks)
+	}
+}

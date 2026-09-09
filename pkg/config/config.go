@@ -351,8 +351,22 @@ type ValidateAgentSpec struct {
 // Timeout is the wire-string form (e.g. "5m"); Resolve parses it to a
 // time.Duration with errors attributed to spec.validate.execution.timeout.
 type ValidateExecutionSpec struct {
-	Phases      []string `yaml:"phases,omitempty" json:"phases,omitempty"`
-	FailOnError *bool    `yaml:"failOnError,omitempty" json:"failOnError,omitempty"`
+	Phases []string `yaml:"phases,omitempty" json:"phases,omitempty"`
+
+	// SkipChecks names individual checks this run cannot satisfy, one level
+	// below Phases. Each named check is withheld from every phase that runs
+	// and recorded in that phase's report as skipped, so the report (and the
+	// evidence bundle rendered from it) still accounts for it.
+	//
+	// It belongs in the config rather than only on the command line because a
+	// skip is a durable, reviewable scoping decision about a lane: the reason
+	// a lane cannot satisfy a check lives beside the list, in version control,
+	// where a reviewer meets it. The validator rejects a name that matches no
+	// check, and rejects a list that would leave a requested phase with
+	// nothing to run.
+	SkipChecks []string `yaml:"skipChecks,omitempty" json:"skipChecks,omitempty"`
+
+	FailOnError *bool `yaml:"failOnError,omitempty" json:"failOnError,omitempty"`
 	// FailFast, when true, stops validation after the first failed phase.
 	// Pointer so nil means "unset; inherit CLI default (false)".
 	FailFast  *bool  `yaml:"failFast,omitempty" json:"failFast,omitempty"`

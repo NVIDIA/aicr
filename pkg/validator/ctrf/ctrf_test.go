@@ -567,3 +567,35 @@ func TestBuilderStdoutNotCapturedWhenEmpty(t *testing.T) {
 		t.Errorf("Stdout should be nil for empty slice, got %v", report.Results.Tests[0].Stdout)
 	}
 }
+
+func TestBuilderAddSkippedWithExtra(t *testing.T) {
+	t.Run("extra is attached and AddSkipped still attaches none", func(t *testing.T) {
+		b := NewBuilder("aicr", "1.0.0", "conformance")
+		b.AddSkippedWithExtra("dra-support", "conformance", "withheld",
+			map[string]string{"skipReason": "named-in-skip-checks"})
+		b.AddSkipped("gpu-operator-health", "conformance", "withheld")
+
+		tests := b.Build().Results.Tests
+		if got := tests[0].Extra["skipReason"]; got != "named-in-skip-checks" {
+			t.Errorf("Extra[skipReason] = %q, want %q", got, "named-in-skip-checks")
+		}
+		if tests[1].Extra != nil {
+			t.Errorf("AddSkipped must attach no Extra, got %v", tests[1].Extra)
+		}
+	})
+
+	t.Run("the built report does not alias the caller's map", func(t *testing.T) {
+		b := NewBuilder("aicr", "1.0.0", "conformance")
+		extra := map[string]string{"skipReason": "named-in-skip-checks"}
+		b.AddSkippedWithExtra("dra-support", "conformance", "withheld", extra)
+
+		// A caller reusing its map across checks would otherwise rewrite an
+		// already-recorded skip reason in the report the bundle is built from.
+		extra["skipReason"] = "nodes-busy"
+
+		if got := b.Build().Results.Tests[0].Extra["skipReason"]; got != "named-in-skip-checks" {
+			t.Errorf("Extra[skipReason] = %q after the caller mutated its map, want %q",
+				got, "named-in-skip-checks")
+		}
+	})
+}

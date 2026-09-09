@@ -440,6 +440,15 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			want: map[string]string{"skipReason": "no-schedulable-gpu-nodes"},
 		},
 		{
+			// pkg/validator mints this for a check the CALLER withheld
+			// (--skip-check). It has to clear the allowlist or the signed
+			// bundle records WHICH check was withheld but not WHY: the
+			// message that used to carry the reason is blanked above.
+			name: "caller-declared skip code survives",
+			in:   map[string]string{"skipReason": "named-in-skip-checks"},
+			want: map[string]string{"skipReason": "named-in-skip-checks"},
+		},
+		{
 			name: "well-formed but unlisted skip code is dropped",
 			in:   map[string]string{"skipReason": "customer-prod-cluster"},
 			want: nil,

@@ -195,6 +195,7 @@ spec:
       requireGpu: false
     execution:
       phases: [deployment, conformance, performance]
+      skipChecks: []                 # checks this run cannot satisfy; empty = run them all
       failOnError: true              # tri-state; absent = CLI default (true)
       failFast: false
       noCluster: false
@@ -300,6 +301,7 @@ Inputs to `aicr validate`.
 | `agent.jobName` | string | Optional **prefix**, never an exact name — the run ID is always appended (`<prefix>-<run-id>`). Omit it to take the default (`aicr-validate`) |
 | `agent.serviceAccountName` | string | Optional and **exact-if-exists**, with the same two branches as `spec.snapshot.agent.serviceAccountName`: an existing ServiceAccount of exactly this name in `agent.namespace` is used verbatim, the run creates and deletes **no** RBAC, and per-run permission isolation is waived — concurrent runs share that identity's persistent grants; when it does not exist the value is a prefix with the run ID appended (`<prefix>-<run-id>`) and the run owns a full run-scoped RBAC set. Omitting the field is not the same as writing `aicr-validate` into it: an omitted name is never probed, so the run always takes the run-scoped `aicr-validate-<run-id>`. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) |
 | `execution.phases` | []string | e.g. `[deployment, conformance, performance]` |
+| `execution.skipChecks` | []string | Checks to withhold from every phase that runs, one level below `phases`. For a caller that cannot satisfy a check the recipe declares, e.g. a lane deploying a subset of the recipe. Each named check is **reported as skipped**, not dropped, so the CTRF report and the recipe-evidence bundle still account for it. Rejected before the cluster is touched when a name matches no check, when the list would leave a requested phase with nothing to run, or when it is set alongside `evidence.cncf.dir` (that renderer omits skipped checks, so a submission would silently lose the requirement). Mirrors `--skip-check` |
 | `execution.failOnError` | bool (tri-state) | Absent = CLI default (`true`); explicit `false` opts out |
 | `execution.failFast` | bool (tri-state) | Stop after the first failed phase |
 | `execution.noCluster` | bool | Test mode: no cluster access, constraints evaluated inline |

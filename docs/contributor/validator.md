@@ -63,6 +63,36 @@ authoring error. A check that is *legitimately* not applicable at runtime
 reports its own `skip` sentinel from inside the container — it is still
 declared and still resolves to a catalog entry.
 
+**A caller may withhold a declared check, and is held to the same discipline.**
+`Validator.SkipChecks` (`pkg/validator/skip_checks.go`, reached from
+`--skip-check` / `spec.validate.execution.skipChecks`) narrows a run to the
+checks the CALLER can satisfy, which is a property of the run rather than of
+the recipe: a lane deploying a subset of the recipe, or running against
+simulated devices. `selectEntries` withholds each named check from its phase
+and records it on the phase's CTRF builder as `skipped`, so a withheld check is
+reported rather than dropped and the recipe-evidence bundle still accounts for
+it. It records the reason twice on purpose: as prose in `message`, and as the
+`skipCheckReasonCode` (`named-in-skip-checks`) under the allowlisted
+`extra.skipReason` key. Only the second survives the default bundle, whose
+minimal redaction policy blanks every `message`. A bundle carrying WHICH check
+was withheld but not WHY would be the same "reads as complete" defect the flag's
+guards exist to prevent. The CNCF evidence renderer does
+NOT: `pkg/evidence/cncf/renderer.go` drops every skipped entry before grouping
+(pinned by `TestRenderSkippedExcluded`), so a withheld requirement would leave
+no file and no index entry. `validateFlagCombinations` refuses `--skip-check`
+together with `--evidence-dir` for that reason, rather than emitting a
+submission that reads as complete. `preflightSkipChecks` runs beside `preflightDeclaredChecks`, on the
+same fail-closed terms and at the same point: a name matching no catalog
+validator is rejected, and so is a list that would remove every declared check
+from a requested phase (that phase would report `passed` while running nothing,
+since the skipped entries keep `Summary.Tests` above zero). A known name that no
+requested phase declares is inert rather than wrong, and warns.
+
+It is a skip list and not an allow list on purpose. The two differ only on a
+check nobody has considered yet: under a skip list a newly declared check runs,
+and a caller that cannot satisfy it goes red until someone decides; under an
+allow list it would be excluded in silence.
+
 Top-level `constraints` — and any declared under
 `validation.readiness.constraints` — are evaluated as a **pre-flight
 gate** before phase checks run; other phases' `constraints` are
@@ -376,7 +406,9 @@ fail-closed **key _and_ value** check: only the listed keys (`nodesValidated`,
 `nodesTotal`, `skipReason`) survive, and each surviving value must pass its key's
 validator — a non-negative decimal count for the `nodes*` keys, and for
 `skipReason` a **closed set** of known codes (`ctrfSkipReasons`, currently
-`no-gpu-nodes`, `no-schedulable-gpu-nodes`, `nodes-busy`). A closed set rather
+`no-gpu-nodes`, `no-schedulable-gpu-nodes`, `nodes-busy`, and
+`named-in-skip-checks`, the one code a *caller* rather than a check mints, for
+`--skip-check`). A closed set rather
 than a shape regex is deliberate: a kebab-case regex would still pass an
 arbitrary low-cardinality identifier like `customer-prod-cluster`. A value that
 is ill-shaped or unlisted (an IP under `nodesTotal`, a hostname or unminted code
@@ -664,8 +696,8 @@ reports `0` validated and never reads as ready.
 Unlike `check-nvidia-smi`, the RDMA gate never *skips* — it either
 certifies the cohort or fails closed — so it mints no `skipReason`
 enum. Its coverage rides the existing `nodesValidated`/`nodesTotal`
-allowlist keys unchanged (see below), so the redaction
-`PolicyVersion` stays `v2`.
+allowlist keys unchanged (see below), so it does not bump the
+redaction `PolicyVersion`.
 
 Cluster-aggregate checks that assert on an operator's aggregate status
 (`gpu-operator-health`) remain unaffected — DaemonSet operands ignore
