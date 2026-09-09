@@ -876,21 +876,6 @@ jobs:
           .github/scripts/release-images.sh promote validated-digests.json
 
   # =============================================================================
-  # Deploy Job (runs after release is published)
-  # =============================================================================
-
-  deploy:
-    needs: [detect, publish]
-    if: needs.detect.outputs.is_prerelease == 'false'
-    uses: ./.github/workflows/deploy.yaml
-    permissions:
-      contents: read
-      packages: read
-      id-token: write
-    with:
-      image_tag: ${{ github.ref_name }}
-
-  # =============================================================================
   # Publish: Flip draft release to public after attestation succeeds
   # =============================================================================
 
@@ -1235,7 +1220,6 @@ jobs:
       - promote-images
       - publish
       - publish-homebrew
-      - deploy
       - notify
     if: always()
     timeout-minutes: 5
@@ -1256,7 +1240,6 @@ jobs:
           PROMOTE: ${{ needs.promote-images.result }}
           PUBLISH: ${{ needs.publish.result }}
           HOMEBREW: ${{ needs.publish-homebrew.result }}
-          DEPLOY: ${{ needs.deploy.result }}
           NOTIFY: ${{ needs.notify.result }}
           # Non-gating by design (see the attach-source job), so a failure here
           # does not red the release. It still reds its own job, but the summary
@@ -1289,6 +1272,5 @@ jobs:
             echo "| Publish | ${PUBLISH} |"
             echo "| Third-Party Source | ${ATTACH_SOURCE} |"
             echo "| Homebrew | ${HOMEBREW} |"
-            echo "| Deploy | ${DEPLOY} |"
             echo "| Slack Notification | ${NOTIFY} |"
           } >> "$GITHUB_STEP_SUMMARY"

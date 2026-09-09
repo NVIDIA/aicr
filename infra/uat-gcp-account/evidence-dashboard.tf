@@ -40,7 +40,7 @@ resource "google_storage_bucket_iam_member" "evidence_read_viewer" {
 
 # Let the existing github-actions-pool federation impersonate the read SA from
 # NVIDIA/aicr workflow runs. Scoped per-SA via the repository attribute (the
-# shared provider, owned by demo-api-server, already pins the repo + main/tag
+# shared provider, owned by gcp-shared, already pins the repo + main/tag
 # refs); the resource grant above keeps this least-privilege regardless.
 resource "google_service_account_iam_member" "evidence_read_impersonation" {
   service_account_id = google_service_account.evidence_read.id

@@ -13,16 +13,16 @@
 # limitations under the License.
 
 # The github-actions service account and Workload Identity Federation pool/provider
-# are created by infra/demo-api-server. This config references them as data sources
+# are created by infra/gcp-shared. This config references them as data sources
 # and adds only the IAM roles required for GKE cluster lifecycle management.
 #
-# Existing roles from demo-api-server (not managed here):
+# Existing roles from gcp-shared (not managed here):
 #   roles/artifactregistry.writer, roles/iam.serviceAccountUser,
 #   roles/logging.logWriter, roles/monitoring.metricWriter,
 #   roles/run.invoker, roles/run.admin, roles/secretmanager.secretAccessor,
 #   roles/storage.objectAdmin, roles/storage.objectViewer
 
-# Reference the existing service account (created by infra/demo-api-server)
+# Reference the existing service account (created by infra/gcp-shared)
 data "google_service_account" "github_actions" {
   account_id = "github-actions"
   project    = var.project_id
@@ -30,7 +30,7 @@ data "google_service_account" "github_actions" {
 
 # Additional project-level roles for GKE cluster management.
 # Uses google_project_iam_member (additive) to avoid conflicts with
-# demo-api-server's google_project_iam_member bindings.
+# gcp-shared's google_project_iam_member bindings.
 locals {
   gke_roles = toset([
     "roles/container.admin",                 # GKE cluster CRUD

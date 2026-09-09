@@ -23,7 +23,6 @@ The short form:
 | 2. Bump | `make bump-patch` (or `bump-minor`/`bump-rc`) | Tags HEAD and pushes the tag. To promote a pre-release to stable on the same SHA, use `make bump-promote TAG=<rc-tag>` (e.g. `TAG=v1.3.0-rc2`). |
 | 3. Push | `git push origin <tag>` (done by the bump target) | Triggers the `On Tag Release` (`on-tag.yaml`) workflow. |
 | 4. Verify | `gh release view <tag>` + `cosign verify-attestation ...` | See RELEASE.md §Verification. |
-| 5. Demo | Cloud Run deploy auto-triggers on tag push | Inspect `aicrd.demo` health. |
 
 Bi-weekly cadence; hotfix between cycles when a fix is critical.
 
@@ -91,11 +90,6 @@ attestation predicate type matches `https://slsa.dev/provenance/v1`
 and that the user's `gh` is recent enough (`gh attestation verify` is
 v2.49+). RELEASE.md §Container Attestations has both `gh` and
 `cosign` flows.
-
-**Cloud Run demo deploy fails after tag push.** Check the demo deploy
-job (`deploy.yaml`, called from `on-tag.yaml`); the most common cause is GitHub Container
-Registry (GHCR) pull
-failure during the first 60s after tag publish. Re-run the workflow.
 
 ## Release Supply-Chain Monitoring
 
