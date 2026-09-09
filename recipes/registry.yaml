@@ -631,7 +631,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/kai-scheduler/kai-scheduler
       defaultChart: kai-scheduler
-      defaultVersion: v0.14.1
+      defaultVersion: v0.16.9
       defaultNamespace: kai-scheduler
     nodeScheduling:
       system:
