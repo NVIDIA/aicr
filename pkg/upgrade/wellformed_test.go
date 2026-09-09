@@ -309,6 +309,12 @@ func TestValidateDirectional(t *testing.T) {
 			"from with no upper bound fails",
 			">=0.16.0", ">=0.18.0 <=0.18.0", true, "upper bound",
 		},
+		{
+			// Pins the ferr branch: an unparseable from is reported here, by
+			// checkDirectional itself, not silently skipped.
+			"unparseable from is reported here",
+			"^0.18.0", ">=0.18.0 <=0.18.0", true, "unparseable from range",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -321,6 +327,25 @@ func TestValidateDirectional(t *testing.T) {
 				t.Errorf("error %q does not mention %q", err.Error(), tt.wantText)
 			}
 		})
+	}
+}
+
+// Pins the terr branch: an unparseable to must be reported exactly once, by
+// checkPinCeiling alone. strings.Contains would pass even if checkDirectional
+// duplicated the report, which is precisely the failure the terr != nil
+// early return exists to prevent.
+func TestValidateDirectionalUnparseableToReportedOnce(t *testing.T) {
+	set, comps := rec("v0.19.0", tr(func(x *Transition) {
+		x.From = "<0.18.0"
+		x.To = "^0.20.0"
+	}))
+	err := set.Validate(comps)
+	if err == nil {
+		t.Fatal("Validate error = nil, want a violation for an unparseable to range")
+	}
+	if got := strings.Count(err.Error(), "unparseable to range"); got != 1 {
+		t.Errorf("error mentions %q %d time(s), want exactly 1 (checkDirectional must not duplicate checkPinCeiling's report): %s",
+			"unparseable to range", got, err.Error())
 	}
 }
 
