@@ -41,10 +41,17 @@ func TestCatalogTimeoutsFitFacadeBudget(t *testing.T) {
 		t.Fatalf("Load() failed: %v", err)
 	}
 	for _, v := range catalog.Validators {
-		if v.Timeout >= defaults.ValidationOperationTimeout {
-			t.Errorf("validator %q timeout %v must be < facade ValidationOperationTimeout %v "+
-				"(else the orchestration cap preempts the per-check structured result)",
-				v.Name, v.Timeout, defaults.ValidationOperationTimeout)
+		timeout := v.Timeout
+		if timeout == 0 {
+			timeout = defaults.ValidatorDefaultTimeout
+		}
+		// The facade budget must exceed the deadline Kubernetes actually
+		// enforces, not just the catalog value — the Job now outlives the check
+		// budget by ValidatorJobDeadlineHeadroom.
+		enforced := v1.JobDeadlineFor(timeout)
+		if enforced >= defaults.ValidationOperationTimeout {
+			t.Errorf("%s: rendered Job deadline %v must stay under ValidationOperationTimeout (%v)",
+				v.Name, enforced, defaults.ValidationOperationTimeout)
 		}
 	}
 }
@@ -78,6 +85,58 @@ func TestExpectedResourcesCatalogEnvelope(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected-resources validator missing from catalog — invariant cannot be verified")
+	}
+}
+
+// TestRenderedJobDeadlineExceedsOrchestratorWait pins the ordering that keeps a
+// timed-out validator's logs readable: the check's own context expires first,
+// the orchestrator is still waiting when it does, and the Job's
+// activeDeadlineSeconds — the only clock that DELETES the pod — is last.
+// Issue #2473 was this ordering collapsing into a three-way tie.
+func TestRenderedJobDeadlineExceedsOrchestratorWait(t *testing.T) {
+	catalog, err := LoadWithDataProvider(context.Background(), nil, "", "")
+	if err != nil {
+		t.Fatalf("Load() failed: %v", err)
+	}
+	if len(catalog.Validators) == 0 {
+		t.Fatal("catalog has no validators — invariant cannot be verified")
+	}
+	for _, entry := range catalog.Validators {
+		t.Run(entry.Name, func(t *testing.T) {
+			plan, buildErr := v1.BuildJobPlan(entry, "run", "ns", "v", "c", "sa", nil, nil, nil, "", "", nil)
+			if buildErr != nil {
+				t.Fatalf("BuildJobPlan(%s) failed: %v", entry.Name, buildErr)
+			}
+
+			checkTimeout := entry.Timeout
+			if checkTimeout == 0 {
+				checkTimeout = defaults.ValidatorDefaultTimeout
+			}
+			orchestratorWait := int64((checkTimeout + defaults.ValidatorWaitBuffer).Seconds())
+
+			if plan.CheckTimeout != int64(checkTimeout.Seconds()) {
+				t.Errorf("CheckTimeout = %d, want %d", plan.CheckTimeout, int64(checkTimeout.Seconds()))
+			}
+			if plan.JobDeadline <= orchestratorWait {
+				t.Errorf("JobDeadline (%ds) must exceed the orchestrator wait (%ds); "+
+					"otherwise the Job controller deletes the pod before its logs are read",
+					plan.JobDeadline, orchestratorWait)
+			}
+
+			// Both renderers must carry the same deadline, or server-side apply
+			// and the typed path diverge. Production uses the apply path
+			// (pkg/validator/job/deployer.go RenderPlanToApplyConfig).
+			typed := v1.RenderPlan(plan)
+			if typed.Spec.ActiveDeadlineSeconds == nil || *typed.Spec.ActiveDeadlineSeconds != plan.JobDeadline {
+				t.Errorf("RenderPlan ActiveDeadlineSeconds = %v, want %d",
+					typed.Spec.ActiveDeadlineSeconds, plan.JobDeadline)
+			}
+			applied := v1.RenderPlanToApplyConfig(plan, "job-name")
+			if applied.Spec.ActiveDeadlineSeconds == nil || *applied.Spec.ActiveDeadlineSeconds != plan.JobDeadline {
+				t.Errorf("RenderPlanToApplyConfig ActiveDeadlineSeconds = %v, want %d",
+					applied.Spec.ActiveDeadlineSeconds, plan.JobDeadline)
+			}
+		})
 	}
 }
 

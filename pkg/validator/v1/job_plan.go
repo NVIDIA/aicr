@@ -16,6 +16,7 @@ package v1
 
 import (
 	"strings"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -71,8 +72,14 @@ type JobPlan struct {
 	// Resources are container resource requirements
 	Resources corev1.ResourceRequirements
 
-	// Timeout is the maximum execution time (Job activeDeadlineSeconds)
-	Timeout int64
+	// CheckTimeout is the budget the check itself is given, published to the
+	// container as AICR_CHECK_TIMEOUT.
+	CheckTimeout int64
+
+	// JobDeadline is the Job's activeDeadlineSeconds. It exceeds CheckTimeout
+	// by defaults.ValidatorJobDeadlineHeadroom so the check always terminates
+	// itself first and its pod survives for log extraction.
+	JobDeadline int64
 
 	// ServiceAccount is the Kubernetes ServiceAccount name
 	ServiceAccount string
@@ -180,6 +187,13 @@ func Plan(
 	return plans, nil
 }
 
+// JobDeadlineFor returns the Job activeDeadlineSeconds a given check timeout
+// renders to. Single source for the derivation so the renderer and any code
+// reporting the enforced deadline cannot drift apart.
+func JobDeadlineFor(checkTimeout time.Duration) time.Duration {
+	return checkTimeout + defaults.ValidatorJobDeadlineHeadroom
+}
+
 // BuildJobPlan creates a JobPlan from a validator entry.
 // Exposed as public for verification and testing purposes.
 //
@@ -258,7 +272,8 @@ func BuildJobPlan(
 		Volumes:          volumes,
 		VolumeMounts:     volumeMounts,
 		Resources:        resources,
-		Timeout:          int64(timeout.Seconds()),
+		CheckTimeout:     int64(timeout.Seconds()),
+		JobDeadline:      int64(JobDeadlineFor(timeout).Seconds()),
 		ServiceAccount:   serviceAccount,
 		Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
 		ImagePullSecrets: imagePullSecrets,
@@ -288,7 +303,7 @@ func RenderPlan(plan JobPlan) *batchv1.Job {
 			Labels:    plan.Labels,
 		},
 		Spec: batchv1.JobSpec{
-			ActiveDeadlineSeconds:   &plan.Timeout,
+			ActiveDeadlineSeconds:   &plan.JobDeadline,
 			BackoffLimit:            int32Ptr(0),
 			TTLSecondsAfterFinished: int32Ptr(int32(defaults.JobTTLAfterFinished.Seconds())),
 			Template: corev1.PodTemplateSpec{
@@ -398,7 +413,7 @@ func RenderPlanToApplyConfig(plan JobPlan, jobName string) *applybatchv1.JobAppl
 	return applybatchv1.Job(jobName, plan.Namespace).
 		WithLabels(plan.Labels).
 		WithSpec(applybatchv1.JobSpec().
-			WithActiveDeadlineSeconds(plan.Timeout).
+			WithActiveDeadlineSeconds(plan.JobDeadline).
 			WithBackoffLimit(0).
 			WithTTLSecondsAfterFinished(int32(defaults.JobTTLAfterFinished.Seconds())).
 			WithTemplate(applycorev1.PodTemplateSpec().

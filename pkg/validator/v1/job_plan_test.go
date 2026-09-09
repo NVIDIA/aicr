@@ -672,7 +672,7 @@ func TestRenderPlan(t *testing.T) {
 		Volumes:          []corev1.Volume{{Name: "snapshot"}},
 		VolumeMounts:     []corev1.VolumeMount{{Name: "snapshot", MountPath: "/data"}},
 		Resources:        corev1.ResourceRequirements{},
-		Timeout:          300,
+		JobDeadline:      300,
 		ServiceAccount:   "test-sa",
 		Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
 		ImagePullSecrets: []string{"my-secret"},
@@ -764,7 +764,7 @@ func TestRenderPlanTagOverridePullPolicy(t *testing.T) {
 				Namespace:        "ns",
 				Image:            tt.image,
 				ImageTagOverride: tt.override,
-				Timeout:          300,
+				JobDeadline:      300,
 			}
 
 			// Typed render path (job_plan.go RenderPlan).
@@ -798,7 +798,7 @@ func TestRenderPlanToApplyConfig(t *testing.T) {
 		Volumes:          []corev1.Volume{{Name: "snapshot"}},
 		VolumeMounts:     []corev1.VolumeMount{{Name: "snapshot", MountPath: "/data"}},
 		Resources:        corev1.ResourceRequirements{},
-		Timeout:          600,
+		JobDeadline:      600,
 		ServiceAccount:   "apply-sa",
 		Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
 		ImagePullSecrets: []string{"apply-secret"},
@@ -898,7 +898,7 @@ func TestRenderPlanToApplyConfig_EnvAndVolumeTypes(t *testing.T) {
 		},
 		VolumeMounts:     []corev1.VolumeMount{{Name: "configmap-vol", MountPath: "/data"}},
 		Resources:        corev1.ResourceRequirements{},
-		Timeout:          300,
+		JobDeadline:      300,
 		ServiceAccount:   "sa",
 		Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
 		ImagePullSecrets: []string{"secret"},
