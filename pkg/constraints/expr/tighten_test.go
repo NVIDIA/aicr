@@ -61,6 +61,8 @@ func TestTighten(t *testing.T) {
 			"", TightenIncomparable},
 		{"alternatives are not intersected", ">= 1.34 < 1.35 || >= 1.35.1", ">= 1.35", "", TightenIncomparable},
 		{"unparseable version", ">= 1.32", ">= not-a-version", "", TightenIncomparable},
+		{"a clause repeating a direction is not reduced", ">= 1.34.1 > 1.34.0", "< 1.36", "", TightenIncomparable},
+		{"a repeated direction on the candidate side too", "< 1.36", ">= 1.34.1 > 1.34.0", "", TightenIncomparable},
 		{"an exclusive loser is kept, not dropped", "> 1.34.0", ">= 1.34.1", ">= 1.34.1 > 1.34.0", TightenNarrowed},
 		{"a losing exclusive candidate still restricts", ">= 24.04.1", "> 24.04.0", ">= 24.04.1 > 24.04.0", TightenNarrowed},
 		{"empty candidate", ">= 1.32", "", "", TightenIncomparable},
@@ -137,6 +139,8 @@ func TestTightenNeverWidens(t *testing.T) {
 	ranges := []string{
 		">= 1.34.1 < 1.36.0", ">= 1.32 < 1.35", "> 1.34.0 <= 1.35.2",
 		">= 1.34.3-gke.100 < 1.35.0", "> 1.35.0-gke.100 <= 1.35.0-gke.900",
+		// The shape appendBound emits when it retains an exclusive loser.
+		">= 1.34.1 > 1.34.0", ">= 24.04.1 > 24.04.0",
 	}
 	expressions := make([]string, 0, len(ranges)+len(operators)*len(versions))
 	expressions = append(expressions, ranges...)

@@ -183,7 +183,8 @@ func tightenProfileConstraint(profileName, valueName string, existing, candidate
 	case expr.TightenIncomparable:
 		return Constraint{}, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("profile %q value %q constraint %q collides with the composed recipe: "+
-				"%q and %q are not both version ranges, so there is no intersection to take",
+				"%q and %q are not both simple version ranges (one clause, at most one bound "+
+				"per direction), so there is no intersection to take",
 				profileName, valueName, candidate.Name, candidate.Value, existing.Value))
 
 	default:

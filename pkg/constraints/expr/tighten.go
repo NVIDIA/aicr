@@ -170,16 +170,24 @@ func versionBounds(expression string) (lower, upper *bound, ok bool) {
 			return nil, nil, false
 		}
 		b := &bound{operator: term.Operator, parsed: parsed, term: term}
-		var ok bool
+
+		// One bound per direction. A clause stating two — which is the shape
+		// this package itself emits when it retains an exclusive loser —
+		// cannot be reduced to one without losing a restriction, and picking
+		// the stronger would silently drop the other. Refusing keeps that
+		// failure closed; the expression still evaluates normally, it just
+		// does not take part in another intersection.
 		switch term.Operator {
 		case OperatorGTE, OperatorGT:
-			if lower, _, ok = strongerBound(lower, b); !ok {
+			if lower != nil {
 				return nil, nil, false
 			}
+			lower = b
 		case OperatorLTE, OperatorLT:
-			if upper, _, ok = strongerBound(upper, b); !ok {
+			if upper != nil {
 				return nil, nil, false
 			}
+			upper = b
 		case OperatorEQ, OperatorNE, OperatorExact:
 			return nil, nil, false
 		default:

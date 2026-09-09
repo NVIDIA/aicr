@@ -75,7 +75,7 @@ type ParsedConstraint struct {
 // Examples:
 //   - ">= 1.32.4" -> {Operator: ">=", Value: "1.32.4", IsVersionComparison: true}
 //   - "ubuntu" -> {Operator: "", Value: "ubuntu", IsVersionComparison: false}
-//   - "== 24.04" -> {Operator: "==", Value: "24.04", IsVersionComparison: false}
+//   - "== 24.04" -> {Operator: "==", Value: "24.04", IsVersionComparison: true}
 func ParseConstraintExpression(expr string) (*ParsedConstraint, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
