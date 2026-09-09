@@ -197,13 +197,16 @@ func pollUntilStable(ctx *validators.Context, label string, probe func() error, 
 // checkExpectedResources verifies that all expected Kubernetes resources declared
 // in the validation's componentRefs exist and are healthy in the live cluster.
 //
-// Budget exhaustion NEVER returns early: it records the stage in
-// budgetExhausted, marks undispatched work, prints the accumulated failures,
-// and fails closed (issue #2473). The remaining early returns — a Helm render
-// failure at gatedHealthCheckSuppressed, a resource-fetcher construction
-// failure, and the RDMA fabric-resource derivation — are hard errors that
-// carry their own structured cause and produce no partial failure list worth
-// printing, so they still return directly.
+// The two ctx.Done() checks (expected-resources iteration, chainsaw dispatch)
+// never return early: they record the stage in budgetExhausted, mark
+// undispatched work, print the accumulated failures, and fail closed (issue
+// #2473). gatedHealthCheckSuppressed and buildResourceFetcher still return
+// directly on error — both are hard errors, not budget-exhaustion handling.
+// gatedHealthCheckSuppressed's error can itself be cancellation-induced (it
+// threads ctx.Ctx into a Helm render), and that path discards whatever
+// failures were already collected under an ErrCodeInternal wrap rather than
+// the fail-closed ErrCodeTimeout above — a known gap, deliberately out of
+// scope here.
 func checkExpectedResources(ctx *validators.Context) error {
 	if ctx.ValidationInput == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "validation is not available")
