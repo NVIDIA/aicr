@@ -66,6 +66,8 @@ var documentedAPISources = []string{
 	"../../DEVELOPMENT.md",
 	"../../tests/e2e/README.md",
 	"../../demos/private-signing.md",
+	"../../demos/end-to-end-cli.md",
+	"../../demos/recipe-data-architecture.md",
 }
 
 // docsExampleHost is the host the reference uses for a locally running aicrd.
