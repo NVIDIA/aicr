@@ -79,6 +79,9 @@ outputs:
   oras:
     description: 'ORAS version (attaches the aiperf-bench source archive as an OCI 1.1 referrer; cosign cannot attach arbitrary artifacts)'
     value: ${{ steps.versions.outputs.oras }}
+  oras_sha256_linux_amd64:
+    description: 'ORAS SHA256 for linux/amd64'
+    value: ${{ steps.versions.outputs.oras_sha256_linux_amd64 }}
   yamllint:
     description: 'yamllint version'
     value: ${{ steps.versions.outputs.yamllint }}
@@ -190,6 +193,7 @@ runs:
         echo "grype=$(yq eval '.security_tools.grype' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "cosign=$(yq eval '.security_tools.cosign' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "oras=$(yq eval '.security_tools.oras' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "oras_sha256_linux_amd64=$(yq eval '.security_tools.oras_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
 
         # Testing tools
         echo "kubectl=$(yq eval '.testing_tools.kubectl' .settings.yaml)" >> $GITHUB_OUTPUT
