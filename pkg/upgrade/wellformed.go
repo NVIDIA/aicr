@@ -58,6 +58,7 @@ func validateRecord(u *ComponentUpgrades, pin string) []string {
 		v = append(v, checkVerdictFields(where, &u.Transitions[i])...)
 		v = append(v, checkStepGroups(where, &u.Transitions[i])...)
 		v = append(v, checkPinCeiling(where, &u.Transitions[i], pin)...)
+		v = append(v, checkDirectional(where, &u.Transitions[i])...)
 	}
 	return v
 }
@@ -230,4 +231,47 @@ func checkPinCeiling(where string, t *Transition, pin string) []string {
 			where, b.upper.ver, pinVer))
 	}
 	return v
+}
+
+// checkDirectional implements rule 7. A record describes going forward and says
+// nothing about coming back, so `from`'s domain must not intersect
+// [lower(to), ∞). Matching a forward record in reverse is the "negative check
+// that passes on an ambiguous condition" anti-pattern, and it is easy to write
+// by accident.
+func checkDirectional(where string, t *Transition) []string {
+	fb, ferr := parseBounds(t.From, prereleaseForbidden)
+	tb, terr := parseBounds(t.To, prereleaseAllowed)
+	if ferr != nil {
+		return []string{where + " has an unparseable from range: " + ferr.Error()}
+	}
+	if terr != nil {
+		return nil // reported by checkPinCeiling
+	}
+	// parseBounds accepts an empty or contradictory interval (e.g.
+	// ">=0.20.0 <0.18.0") because at the bounds layer such a range is
+	// harmless: it matches nothing. Here it would sail through the
+	// disjointness check below and produce a record that can never apply, so
+	// it is rejected as its own violation.
+	if !fb.lower.unbounded && !fb.upper.unbounded {
+		cmp := fb.lower.ver.Compare(fb.upper.ver)
+		if cmp > 0 || (cmp == 0 && (!fb.lower.inclusive || !fb.upper.inclusive)) {
+			return []string{fmt.Sprintf(
+				"%s has a from range %q that matches no version: the lower bound %s is not below the upper bound %s",
+				where, t.From, fb.lower.ver, fb.upper.ver)}
+		}
+	}
+	if fb.upper.unbounded {
+		return []string{where + " has a from range with no upper bound, so it cannot be shown to be forward-only"}
+	}
+	if tb.lower.unbounded {
+		return nil // reported by checkPinCeiling
+	}
+	cmp := fb.upper.ver.Compare(tb.lower.ver)
+	disjoint := cmp < 0 || (cmp == 0 && (!fb.upper.inclusive || !tb.lower.inclusive))
+	if disjoint {
+		return nil
+	}
+	return []string{fmt.Sprintf(
+		"%s matches in reverse: from reaches %s but to starts at %s, so a downgrade would select this record",
+		where, fb.upper.ver, tb.lower.ver)}
 }

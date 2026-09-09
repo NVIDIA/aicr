@@ -284,3 +284,73 @@ func TestValidatePinCeilingSkipsReplacesOnlyRecord(t *testing.T) {
 		t.Errorf("Validate error = %v, want nil for a replaces-only record", err)
 	}
 }
+
+func TestValidateDirectional(t *testing.T) {
+	tests := []struct {
+		name     string
+		from     string
+		to       string
+		wantErr  bool
+		wantText string
+	}{
+		{"exclusive from meets inclusive to", "<0.18.0", ">=0.18.0 <=0.18.0", false, ""},
+		{"clear separation", "<0.17.0", ">=0.18.0 <=0.18.0", false, ""},
+		{"inclusive from against exclusive to floor", "<=0.18.0", ">0.18.0 <=0.19.0", false, ""},
+		{"exclusive from against exclusive to floor", "<0.18.0", ">0.18.0 <=0.19.0", false, ""},
+		{
+			"both inclusive at the same version overlaps",
+			"<=0.18.0", ">=0.18.0 <=0.18.0", true, "matches in reverse",
+		},
+		{
+			"from reaching above the to floor overlaps",
+			"<0.19.0", ">=0.18.0 <=0.18.0", true, "matches in reverse",
+		},
+		{
+			"from with no upper bound fails",
+			">=0.16.0", ">=0.18.0 <=0.18.0", true, "upper bound",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set, comps := rec("v0.19.0", tr(func(x *Transition) { x.From = tt.from; x.To = tt.to }))
+			err := set.Validate(comps)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Validate error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), tt.wantText) {
+				t.Errorf("error %q does not mention %q", err.Error(), tt.wantText)
+			}
+		})
+	}
+}
+
+// parseBounds treats an empty or contradictory `from` interval (e.g.
+// ">=0.20.0 <0.18.0") as harmless: both range representations agree it
+// matches nothing. checkDirectional compares upper(from) against lower(to),
+// so such a from must be rejected explicitly, or a record that can never
+// apply would sail through the disjointness check as spuriously "safe".
+func TestValidateDirectionalRejectsEmptyFromRange(t *testing.T) {
+	tests := []struct {
+		name string
+		from string
+	}{
+		{"lower above upper", ">=0.20.0 <0.18.0"},
+		{"equal with inclusive lower, exclusive upper", ">=0.18.0 <0.18.0"},
+		{"equal with both exclusive", ">0.18.0 <0.18.0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set, comps := rec("v0.19.0", tr(func(x *Transition) {
+				x.From = tt.from
+				x.To = ">=0.18.0 <=0.18.0"
+			}))
+			err := set.Validate(comps)
+			if err == nil {
+				t.Fatal("Validate error = nil, want a violation for an empty from range")
+			}
+			if !strings.Contains(err.Error(), "matches no version") {
+				t.Errorf("error %q does not mention %q", err.Error(), "matches no version")
+			}
+		})
+	}
+}
