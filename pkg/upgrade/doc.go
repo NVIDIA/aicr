@@ -34,6 +34,22 @@
 // rather than returning the first, so an author sees all of a record's problems
 // in one run. The lint gate calls both.
 //
+// # The nine rules
+//
+// Rule 1 is Load's; rules 2 through 9 are Validate's, one function each in
+// wellformed.go. A reader told there are nine rules otherwise finds eight,
+// numbered 2 to 9, because rule 1 is named nowhere in the package.
+//
+//	1  apiVersion and kind are recognized                        decodeRecord
+//	2  to is bounded, its ceiling at or below the pin            checkPinCeiling
+//	3  the from domains have no hole up to the pin               checkCoverage
+//	4  safe names its verifiedBy                                 checkVerdictFields
+//	5  manual and blocked carry steps in every group             checkVerdictFields
+//	6  deployer groups partition the deployers                   checkStepGroups
+//	7  from is forward-only against to                           checkDirectional
+//	8  no two transitions share a to floor for the same from     checkDistinctBoundaries
+//	9  hooks name a phase and a local manifests/migrations file  checkHooks
+//
 // # Read-only contract
 //
 // A Set and everything reachable from it must not be mutated. Consumers share
