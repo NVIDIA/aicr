@@ -34,6 +34,8 @@ func TestTighten(t *testing.T) {
 		{"equal floor is dropped", ">= 1.35", ">= 1.35", ">= 1.35", TightenUnchanged},
 		{"exclusive beats inclusive at the same version", ">= 1.35", "> 1.35", "> 1.35", TightenNarrowed},
 		{"inclusive loses to exclusive at the same version", "> 1.35", ">= 1.35", "> 1.35", TightenUnchanged},
+		{"exclusive ceiling beats inclusive at the same version", "<= 1.35", "< 1.35", "< 1.35", TightenNarrowed},
+		{"inclusive ceiling loses to exclusive at the same version", "< 1.35", "<= 1.35", "< 1.35", TightenUnchanged},
 		{"differing precision is not orderable", ">= 1.32", ">= 1.32.4", "", TightenPrecisionMismatch},
 		{"same precision at patch level", ">= 1.32.1", ">= 1.32.4", ">= 1.32.4", TightenNarrowed},
 		{"ceiling survives a raised floor", ">= 1.34.1 < 1.36.0", ">= 1.35", ">= 1.35 < 1.36.0", TightenNarrowed},
@@ -62,9 +64,13 @@ func TestTighten(t *testing.T) {
 		{"alternatives are not intersected", ">= 1.34 < 1.35 || >= 1.35.1", ">= 1.35", "", TightenIncomparable},
 		{"unparseable version", ">= 1.32", ">= not-a-version", "", TightenIncomparable},
 		{"a clause repeating a direction is not reduced", ">= 1.34.1 > 1.34.0", "< 1.36", "", TightenIncomparable},
+		{"a clause repeating the upper direction is not reduced", "<= 1.34.0 < 1.35", ">= 1.30", "", TightenIncomparable},
 		{"a repeated direction on the candidate side too", "< 1.36", ">= 1.34.1 > 1.34.0", "", TightenIncomparable},
 		{"an exclusive loser is kept, not dropped", "> 1.34.0", ">= 1.34.1", ">= 1.34.1 > 1.34.0", TightenNarrowed},
 		{"a losing exclusive candidate still restricts", ">= 24.04.1", "> 24.04.0", ">= 24.04.1 > 24.04.0", TightenNarrowed},
+		{"a loser that cannot bite is dropped", ">= 300", "> 150", ">= 300", TightenUnchanged},
+		{"an unbitable ceiling loser is dropped too", "< 4000", "<= 2000", "<= 2000", TightenNarrowed},
+		{"a loser one component down still bites", ">= 1.35.0", "> 1.34.0", ">= 1.35.0 > 1.34.0", TightenNarrowed},
 		{"empty candidate", ">= 1.32", "", "", TightenIncomparable},
 	}
 
@@ -98,6 +104,34 @@ func TestTightenResultParses(t *testing.T) {
 	compound, err := ParseCompoundConstraint(value)
 	if err != nil {
 		t.Fatalf("ParseCompoundConstraint(%q) error = %v", value, err)
+	}
+
+	// The retained-loser clause is the shape this change introduces, so it
+	// is the one whose round-trip matters: two same-direction terms must
+	// survive splitAndTerms and still evaluate as the intersection.
+	retained, outcome := Tighten("> 1.34.0", ">= 1.34.1")
+	if outcome != TightenNarrowed {
+		t.Fatalf("Tighten() outcome = %v, want TightenNarrowed", outcome)
+	}
+	retainedCompound, err := ParseCompoundConstraint(retained)
+	if err != nil {
+		t.Fatalf("ParseCompoundConstraint(%q) error = %v", retained, err)
+	}
+	for _, tc := range []struct {
+		actual string
+		want   bool
+	}{
+		{"1.34", false},
+		{"1.34.0", false},
+		{"1.34.1", true},
+	} {
+		got, err := retainedCompound.Evaluate(tc.actual)
+		if err != nil {
+			t.Fatalf("Evaluate(%q) error = %v", tc.actual, err)
+		}
+		if got != tc.want {
+			t.Errorf("%q against %q = %v, want %v", tc.actual, retained, got, tc.want)
+		}
 	}
 
 	for _, tc := range []struct {
@@ -135,12 +169,14 @@ func TestTightenNeverWidens(t *testing.T) {
 		"1.34", "1.34.0", "1.34.1", "1.35", "1.35.0", "1.35.2",
 		"1.34.3-gke.100", "1.34.3-gke.900", "1.35.0-gke.100", "1.35.0-gke.101",
 		"1.35.0-gke.0", "1.35.0-gke.1", "1.35-gke.100", "2", "1",
+		"150", "300", "2000", "4000",
 	}
 	ranges := []string{
 		">= 1.34.1 < 1.36.0", ">= 1.32 < 1.35", "> 1.34.0 <= 1.35.2",
 		">= 1.34.3-gke.100 < 1.35.0", "> 1.35.0-gke.100 <= 1.35.0-gke.900",
 		// The shape appendBound emits when it retains an exclusive loser.
 		">= 1.34.1 > 1.34.0", ">= 24.04.1 > 24.04.0",
+		"<= 1.35.2 < 1.35.0",
 	}
 	expressions := make([]string, 0, len(ranges)+len(operators)*len(versions))
 	expressions = append(expressions, ranges...)
@@ -151,6 +187,7 @@ func TestTightenNeverWidens(t *testing.T) {
 	}
 	actuals := append([]string{
 		"1.33", "1.33.9", "1.36", "1.36.0", "0.9",
+		"150", "300", "2000", "4000", "3000",
 		"1.35.0-gke.0", "1.35.0-gke.1", "1.35.0-gke.99", "1.35.0-gke.150",
 		"1.36.0-gke.10", "1.34.3-gke.500",
 	}, versions...)
@@ -188,6 +225,30 @@ func TestTightenNeverWidens(t *testing.T) {
 				if !admits(t, candidate, actual) {
 					t.Errorf("Tighten(%q, %q) = %q admits %q, which the profile's own expression rejects",
 						existing, candidate, merged, actual)
+				}
+			}
+
+			// The converse: an intersection must keep everything both
+			// inputs admit. Without this, returning some arbitrary
+			// narrower range would satisfy every other assertion here.
+			for _, actual := range actuals {
+				if admits(t, existing, actual) && admits(t, candidate, actual) && !admits(t, merged, actual) {
+					t.Errorf("Tighten(%q, %q) = %q drops %q, which both inputs admit",
+						existing, candidate, merged, actual)
+				}
+			}
+
+			// Intersection is commutative. The outcome label may differ by
+			// argument order, but the set of admitted versions may not —
+			// and the retained-loser rule is written in terms of a winner
+			// and a loser, so it is the rule most likely to break this.
+			swapped, swappedOutcome := Tighten(candidate, existing)
+			if swappedOutcome == TightenNarrowed || swappedOutcome == TightenUnchanged {
+				for _, actual := range actuals {
+					if admits(t, merged, actual) != admits(t, swapped, actual) {
+						t.Errorf("Tighten(%q, %q) = %q and Tighten(%q, %q) = %q disagree on %q",
+							existing, candidate, merged, candidate, existing, swapped, actual)
+					}
 				}
 			}
 		}

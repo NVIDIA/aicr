@@ -38,8 +38,12 @@ const (
 	// expression already admits, so the intersection is the existing one.
 	TightenUnchanged
 
-	// TightenNarrowed means the intersection is strictly smaller than the
-	// existing expression; the returned expression is that intersection.
+	// TightenNarrowed means the returned expression is the intersection
+	// restated, because a bound moved or a term had to be retained. It is
+	// never wider than the existing expression, but it is not always
+	// strictly narrower: two bounds can differ textually and admit the same
+	// versions (">= 1.32 < 1.35" against "<= 1.34"), and restating them is
+	// still correct.
 	TightenNarrowed
 
 	// TightenUnsatisfiable means the two expressions have no version in
@@ -111,18 +115,37 @@ func Tighten(existing, candidate string) (string, TightenOutcome) {
 // "> 1.34.0" — dropping the exclusive term would then admit a version the
 // composition excluded. Both terms are AND-joined in the same clause, so
 // keeping the loser states the intersection exactly. The loser is dropped as
-// redundant when it is inclusive, or when the winner is exclusive too: only
-// an exclusive bound can reject a version its own neighborhood admits, so
-// only an inclusive winner can lose that exclusion.
+// redundant when it is inclusive, when the winner is exclusive too (only an
+// exclusive bound can reject a version its own neighborhood admits, so only
+// an inclusive winner can lose that exclusion), or when no reading could
+// compare equal to both.
 func appendBound(terms []string, winner, dropped *bound) ([]string, bool) {
 	if winner == nil {
 		return terms, false
 	}
 	terms = append(terms, winner.String())
-	if dropped != nil && !dropped.inclusive() && winner.inclusive() {
+	if dropped != nil && !dropped.inclusive() && winner.inclusive() && canCompareEqual(winner, dropped) {
 		return append(terms, dropped.String()), true
 	}
 	return terms, false
+}
+
+// canCompareEqual reports whether any reading can compare equal to both
+// bounds, which is the only way the dropped one can exclude something the
+// winner admits.
+//
+// Compare truncates to the shorter precision, so that needs a truncation the
+// two bounds survive identically: a reading coarser than they are, agreeing
+// from the major component down. Two precision-1 bounds have nothing coarser
+// to be read at, and two bounds with different majors never collapse
+// together — so for those, retaining the loser would add a term that cannot
+// bite, report a narrowing that narrows nothing, and leave behind an
+// expression this package then refuses to intersect again.
+func canCompareEqual(a, b *bound) bool {
+	if min(a.parsed.Precision, b.parsed.Precision) < 2 {
+		return false
+	}
+	return a.parsed.Major == b.parsed.Major
 }
 
 // droppedBound returns the same-direction bound that lost to winner, or nil
@@ -240,6 +263,11 @@ func strongerBound(existing, candidate *bound) (stronger *bound, narrowed, ok bo
 
 // boundsSatisfiable reports whether some version satisfies both bounds.
 //
+// The verdict is taken over full-precision versions. A reading coarser than
+// the bounds behaves as a band and can satisfy two ranges that are disjoint
+// at full precision, so a range refused here may still have a coarse witness;
+// refusing it is the fail-closed reading of an incoherent pair.
+//
 // An open side is always satisfiable. A closed range is decided on the order
 // pkg/version.Compare defines, over full-precision endpoints keyed by their
 // position in it — including the GKE build dimension, where the bare numeric
@@ -299,14 +327,8 @@ func (b *bound) limit() (version.Version, bool) {
 	if b.operator == OperatorGT || b.operator == OperatorLTE {
 		return bumpLastSignificant(coarse), isLower
 	}
-	return atFullPrecision(coarse), isLower
-}
-
-// atFullPrecision returns v with every component significant, so a bound
-// written as "1.36" compares as the "1.36.0" its range starts at.
-func atFullPrecision(v version.Version) version.Version {
-	v.Precision = fullPrecision
-	return v
+	// The omitted components are already zero, which is where the band starts.
+	return coarse, isLower
 }
 
 // bumpLastSignificant returns the next version after v's band: the component
@@ -320,7 +342,6 @@ func bumpLastSignificant(v version.Version) version.Version {
 		v.Minor++
 	}
 	v.Patch = 0
-	v.Precision = fullPrecision
 	return v
 }
 

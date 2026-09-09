@@ -146,14 +146,14 @@ func tightenProfileConstraint(profileName, valueName string, existing, candidate
 		merged.Value = tightened
 		// The profile's guidance is the specific one: it explains the value
 		// the operator selected, not the baseline every value shares.
+		//
+		// Only the guidance is taken. Severity is deliberately left as the
+		// composition states it: a value fragment must not relax a
+		// requirement the recipe makes of every value, and letting a
+		// candidate carry severity across would do exactly that on a merge
+		// whose whole purpose is to narrow.
 		if candidate.Remediation != "" {
 			merged.Remediation = candidate.Remediation
-		}
-		if candidate.Severity != "" {
-			merged.Severity = candidate.Severity
-		}
-		if candidate.Unit != "" {
-			merged.Unit = candidate.Unit
 		}
 		slog.Debug("profile constraint tightened the composed recipe",
 			"profile", profileName, "value", valueName, "constraint", existing.Name,
