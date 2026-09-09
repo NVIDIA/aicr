@@ -20,6 +20,10 @@ import (
 	"github.com/NVIDIA/aicr/pkg/version"
 )
 
+// fullPrecision is the component count pkg/version treats as fully
+// significant (major.minor.patch).
+const fullPrecision = 3
+
 // TightenOutcome reports how two same-named constraint expressions relate.
 type TightenOutcome int
 
@@ -227,35 +231,68 @@ func strongerBound(existing, candidate *bound) (stronger *bound, narrowed, ok bo
 }
 
 // boundsSatisfiable reports whether some version satisfies both bounds. An
-// open side is always satisfiable; a closed range is empty when the floor is
-// above the ceiling, or equal to it with either side exclusive.
+// open side is always satisfiable; a closed range is empty when the floor
+// sits above the ceiling, or on it with either endpoint excluded. Both
+// endpoints are taken at full precision so the comparison is exact.
 func boundsSatisfiable(lower, upper *bound) bool {
 	if lower == nil || upper == nil {
 		return true
 	}
-	// Bounds written at different precisions read as equal under Compare
-	// (">= 1.36" against "< 1.36.0"), which says nothing about emptiness.
-	// Comparing them padded to full precision does: a bound's omitted
-	// components admit versions from its zero-padded form upward, so the
-	// padded pair orders exactly as the ranges do.
-	low, high := lower.parsed, upper.parsed
-	if low.Precision != high.Precision {
-		low, high = atFullPrecision(low), atFullPrecision(high)
-	}
+	low, lowAdmitted := lower.limit()
+	high, highAdmitted := upper.limit()
 
 	cmp := low.Compare(high)
 	if cmp > 0 {
 		return false
 	}
 	if cmp == 0 {
-		return lower.inclusive() && upper.inclusive()
+		return lowAdmitted && highAdmitted
 	}
 	return true
+}
+
+// limit returns the full-precision version where the bound's half-line ends,
+// and whether that version is itself admitted.
+//
+// A bound written at full precision is its own endpoint. A coarser one
+// quantifies over a whole band of versions, and zero-padding it is only
+// right for half the operators: ">= 1.35" does start at 1.35.0, but
+// "> 1.35" excludes every 1.35.x — pkg/version compares an actual at the
+// bound's precision, so 1.35.9 reads as equal to 1.35 and fails — which
+// makes its true endpoint 1.36.0. Symmetrically "< 1.35" ends at 1.35.0
+// while "<= 1.35" runs to just below 1.36.0. Bumping the last significant
+// component covers the two that step past their own band; the endpoint of a
+// coarse bound is then admitted exactly when it is a lower bound.
+func (b *bound) limit() (version.Version, bool) {
+	if b.parsed.Precision >= fullPrecision {
+		return b.parsed, b.inclusive()
+	}
+
+	isLower := b.operator == OperatorGTE || b.operator == OperatorGT
+	if b.operator == OperatorGT || b.operator == OperatorLTE {
+		return bumpLastSignificant(b.parsed), isLower
+	}
+	return atFullPrecision(b.parsed), isLower
 }
 
 // atFullPrecision returns v with every component significant, so a bound
 // written as "1.36" compares as the "1.36.0" its range starts at.
 func atFullPrecision(v version.Version) version.Version {
-	v.Precision = 3
+	v.Precision = fullPrecision
+	return v
+}
+
+// bumpLastSignificant returns the next version after v's band: the component
+// v's precision stops at is incremented and the rest zeroed, so "1.35"
+// becomes 1.36.0 and "1" becomes 2.0.0.
+func bumpLastSignificant(v version.Version) version.Version {
+	if v.Precision <= 1 {
+		v.Major++
+		v.Minor = 0
+	} else {
+		v.Minor++
+	}
+	v.Patch = 0
+	v.Precision = fullPrecision
 	return v
 }

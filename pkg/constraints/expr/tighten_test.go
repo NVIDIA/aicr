@@ -14,7 +14,10 @@
 
 package expr
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestTighten(t *testing.T) {
 	t.Parallel()
@@ -44,6 +47,10 @@ func TestTighten(t *testing.T) {
 		{"exclusive bounds meeting at one version", ">= 1.35", "< 1.35", "", TightenUnsatisfiable},
 		{"disjoint closed ranges", ">= 1.30 < 1.32", ">= 1.34 < 1.36", "", TightenUnsatisfiable},
 		{"floor meeting an omitted-component ceiling", ">= 1.34.1 < 1.36.0", ">= 1.36", "", TightenUnsatisfiable},
+		{"exclusive coarse floor skips its own band", "> 1.35", "< 1.35.2", "", TightenUnsatisfiable},
+		{"exclusive coarse floor clears the next band", "> 1.35", "< 1.36.2", "> 1.35 < 1.36.2", TightenNarrowed},
+		{"inclusive coarse ceiling covers its own band", ">= 1.35.2", "<= 1.35", ">= 1.35.2 <= 1.35", TightenNarrowed},
+		{"exclusive coarse ceiling excludes its own band", ">= 1.35.2", "< 1.35", "", TightenUnsatisfiable},
 		{"floor below an omitted-component ceiling", ">= 1.34.1 < 1.36.5", ">= 1.36", ">= 1.36 < 1.36.5", TightenNarrowed},
 
 		{"exact match has no ordering", "ubuntu", ">= 1.35", "", TightenIncomparable},
@@ -173,4 +180,105 @@ func TestTightenNeverWidens(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestTightenRejectsEmptyRanges is the complement of TestTightenNeverWidens,
+// which cannot see this class: implication holds vacuously for a result no
+// version satisfies, so an empty range accepted as narrowed passes it. Here
+// every pair reported satisfiable must be satisfied by some version, and
+// every pair reported unsatisfiable by none.
+//
+// It matters because the criteria-only generation path evaluates constraints
+// with a nil evaluator: an empty range accepted here is not caught later, it
+// ships in the recipe.
+func TestTightenRejectsEmptyRanges(t *testing.T) {
+	t.Parallel()
+
+	operators := []string{">=", ">", "<=", "<"}
+	versions := []string{"1", "1.35", "1.35.0", "1.35.2", "1.36", "1.36.0", "2"}
+	// Readings carry at least major.minor (Kubernetes "1.34.1", Ubuntu
+	// "24.04"), and emptiness is decided over that domain. A bare-major
+	// actual is degenerate under pkg/version — "1" compares equal to every
+	// 1.x bound and so satisfies mutually exclusive ranges — which is a
+	// property of the comparison, not of this solver.
+	actuals := []string{
+		"0.9", "0.9.9",
+		"1.34", "1.34.9", "1.35", "1.35.0", "1.35.1", "1.35.2", "1.35.9",
+		"1.36", "1.36.0", "1.36.1", "1.36.9", "1.37", "1.37.0",
+		"2.0", "2.0.0", "2.1", "3.0.0",
+	}
+
+	expressions := make([]string, 0, len(operators)*len(versions))
+	for _, operator := range operators {
+		for _, version := range versions {
+			expressions = append(expressions, operator+" "+version)
+		}
+	}
+
+	for _, existing := range expressions {
+		for _, candidate := range expressions {
+			merged, outcome := Tighten(existing, candidate)
+			if outcome != TightenNarrowed && outcome != TightenUnchanged && outcome != TightenUnsatisfiable {
+				continue
+			}
+
+			satisfiable := false
+			if outcome != TightenUnsatisfiable {
+				compound, err := ParseCompoundConstraint(merged)
+				if err != nil {
+					t.Fatalf("ParseCompoundConstraint(%q) error = %v", merged, err)
+				}
+				for _, actual := range actuals {
+					passed, err := compound.Evaluate(actual)
+					if err != nil {
+						t.Fatalf("Evaluate(%q against %q) error = %v", actual, merged, err)
+					}
+					if passed {
+						satisfiable = true
+						break
+					}
+				}
+				if !satisfiable {
+					t.Errorf("Tighten(%q, %q) = %q reported outcome %v, but no version satisfies it",
+						existing, candidate, merged, outcome)
+				}
+				continue
+			}
+
+			// Reported unsatisfiable: no full-precision version may satisfy
+			// both inputs. The check stops there deliberately. A coarser
+			// actual can straddle two disjoint fine-grained bounds — "1.35"
+			// compares equal to both ">= 1.35.2" and "<= 1.35.0" — and
+			// refusing that range is the fail-closed reading of an
+			// incoherent pair, not a false rejection to fix.
+			for _, actual := range actuals {
+				if strings.Count(actual, ".") != fullPrecision-1 {
+					continue
+				}
+				if admitsBoth(t, existing, candidate, actual) {
+					t.Errorf("Tighten(%q, %q) reported TightenUnsatisfiable, but %q satisfies both",
+						existing, candidate, actual)
+				}
+			}
+		}
+	}
+}
+
+func admitsBoth(t *testing.T, first, second, actual string) bool {
+	t.Helper()
+
+	for _, expression := range []string{first, second} {
+		compound, err := ParseCompoundConstraint(expression)
+		if err != nil {
+			t.Fatalf("ParseCompoundConstraint(%q) error = %v", expression, err)
+		}
+		passed, err := compound.Evaluate(actual)
+		if err != nil {
+			t.Fatalf("Evaluate(%q against %q) error = %v", actual, expression, err)
+		}
+		if !passed {
+			return false
+		}
+	}
+	return true
 }
