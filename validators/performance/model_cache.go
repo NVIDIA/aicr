@@ -62,9 +62,12 @@ const (
 	defaultStorageClassAnnotationValue = "true"
 
 	// envModelCacheStorageClass sets the StorageClass for the cache PVC.
-	// Required on clusters without a default StorageClass — otherwise the PVC
+	// Required on clusters without a default StorageClass, otherwise the PVC
 	// stays Pending ("no persistent volumes available … and no storage class is
-	// set"). Unset uses the cluster's default StorageClass.
+	// set"). Unset uses the cluster's default StorageClass. A per-accelerator
+	// overlay can also set this via the `inference-model-cache-storage-class`
+	// performance constraint, which takes precedence (see
+	// resolveModelCacheStorageClass).
 	envModelCacheStorageClass = "AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS"
 
 	// envModelCachePopulateTimeout overrides the wait bound for the one-time
@@ -234,8 +237,12 @@ func machineFamily(instanceType string) string {
 // can't attach to the worker node's machine family, per
 // storageCompatibilityRules. A nil sc (not found, e.g. a typo in the
 // explicit override) is not an error here; that surfaces via the normal
-// PVC-create path instead.
-func checkStorageClassNodeCompatibility(instanceType string, sc *storagev1.StorageClass) error {
+// PVC-create path instead. fromRecipeConstraint indicates sc was selected by
+// the `inference-model-cache-storage-class` recipe constraint, see
+// resolveModelCacheStorageClass. That constraint takes precedence over
+// envModelCacheStorageClass, so the remediation must point at whichever one
+// actually controls the resolved value, since setting the other is a no-op.
+func checkStorageClassNodeCompatibility(instanceType string, sc *storagev1.StorageClass, fromRecipeConstraint bool) error {
 	if sc == nil {
 		return nil
 	}
@@ -252,10 +259,14 @@ func checkStorageClassNodeCompatibility(instanceType string, sc *storagev1.Stora
 		if rule.autoSelectType != "" {
 			typeGuidance += fmt.Sprintf(" (or is %q)", rule.autoSelectType)
 		}
+		fixGuidance := fmt.Sprintf("set %s to", envModelCacheStorageClass)
+		if fromRecipeConstraint {
+			fixGuidance = fmt.Sprintf("change or remove the %q recipe constraint to select", perfConstraintModelCacheStorageClass)
+		}
 		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 			"model-weights cache PVC would bind to StorageClass %q (provisioner %s), which node machine family %q can't attach; "+
-				"set %s to a StorageClass whose %s, or disable the cache with %s=off; see %s",
-			sc.Name, sc.Provisioner, family, envModelCacheStorageClass, typeGuidance, envModelCacheSize, rule.docsRef))
+				"%s a StorageClass whose %s, or disable the cache with %s=off; see %s",
+			sc.Name, sc.Provisioner, family, fixGuidance, typeGuidance, envModelCacheSize, rule.docsRef))
 	}
 	return nil
 }
@@ -317,7 +328,7 @@ func ensureModelCache(ctx *validators.Context, config *inferenceWorkloadConfig) 
 			return errors.Wrap(errors.ErrCodeInternal, "failed to get StorageClass for cache pre-flight", gerr)
 		}
 	}
-	if cerr := checkStorageClassNodeCompatibility(config.gpuNodeInstanceType, resolvedSC); cerr != nil {
+	if cerr := checkStorageClassNodeCompatibility(config.gpuNodeInstanceType, resolvedSC, config.modelCacheStorageClassFromRecipe); cerr != nil {
 		return cerr
 	}
 

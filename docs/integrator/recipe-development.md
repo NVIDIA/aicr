@@ -244,15 +244,22 @@ validation:
         value: "256"
       - name: inference-routing-mode        # optional; dynamo-router or gateway-epp
         value: dynamo-router
+      - name: inference-model-cache-storage-class # optional, StorageClass name
+        value: gp3
 ```
 
-`inference-model` and `inference-concurrency-per-gpu` resolve with precedence
-**recipe constraint > `AICR_INFERENCE_PERF_*` catalog env > compiled default**
-(Qwen3-8B at 256/GPU). Set them per overlay to pick the right model and load for
-each accelerator — exactly as the throughput/TTFT thresholds already vary per
-overlay — while the compiled defaults cover overlays that omit them. Because the
-thresholds are only meaningful at a specific model + concurrency, pin all four
-together in an overlay rather than relying on the global defaults for the inputs.
+`inference-model`, `inference-concurrency-per-gpu`, and
+`inference-model-cache-storage-class` resolve with precedence **recipe
+constraint > `AICR_INFERENCE_PERF_*` catalog env > compiled default**
+(Qwen3-8B at 256/GPU, cluster default StorageClass). Set them per overlay,
+exactly as the throughput/TTFT thresholds already vary per overlay, to pick
+the right model, load, and cache StorageClass for each accelerator. The
+compiled defaults cover overlays that omit them. Because the thresholds are
+only meaningful at a specific model + concurrency, pin the model and
+concurrency together in an overlay rather than relying on the global
+defaults for the inputs. `inference-model-cache-storage-class` is
+independent of that pairing. Set it whenever the cluster's default
+StorageClass can't attach to the target node's machine family.
 `inference-routing-mode` resolves from the recipe only, defaulting to
 `dynamo-router`; set `gateway-epp` to validate the GAIE/EPP path through the
 AICR-managed inference gateway.
