@@ -63,6 +63,7 @@ type clusterAutoscalingReport struct {
 //  1. Karpenter — behavioral test with HPA + GPU NodePool
 //  2. EKS node group — validates ASG-backed GPU node group via node labels
 //  3. GKE cluster autoscaler — validates via cluster-autoscaler-status ConfigMap
+//  4. AKS agent pool — validates VMSS-backed GPU nodes via the agentpool label
 //
 // Skips gracefully when no autoscaling mechanism can be detected (e.g., Kind CI).
 func CheckClusterAutoscaling(ctx *validators.Context) error {
@@ -479,7 +480,7 @@ func findKarpenterDeployment(ctx *validators.Context) (*appsv1.Deployment, strin
 	return deploy, deploy.Namespace, nil
 }
 
-// detectPlatform returns "eks", "gke", or "" based on the first node's
+// detectPlatform returns "eks", "gke", "aks", or "" based on the first node's
 // providerID. A genuinely empty node list (Kind CI, KWOK) or an unrecognized
 // providerID yields ("", nil): the caller treats that as a legitimately
 // inapplicable Skip.
@@ -512,11 +513,14 @@ func detectPlatform(ctx *validators.Context) (string, error) {
 	if strings.HasPrefix(pid, "gce://") {
 		return "gke", nil
 	}
+	if strings.HasPrefix(pid, "azure://") {
+		return "aks", nil
+	}
 	return "", nil
 }
 
 // checkPlatformAutoscaling validates cluster autoscaling when Karpenter is absent.
-// Falls back to EKS node group or GKE cluster autoscaler validation.
+// Falls back to EKS node group, GKE cluster autoscaler, or AKS agent-pool validation.
 func checkPlatformAutoscaling(ctx *validators.Context) error {
 	platform, err := detectPlatform(ctx)
 	if err != nil {
@@ -531,8 +535,10 @@ func checkPlatformAutoscaling(ctx *validators.Context) error {
 		return checkEKSAutoscaling(ctx)
 	case "gke":
 		return checkGKEAutoscaling(ctx)
+	case "aks":
+		return checkAKSAutoscaling(ctx)
 	default:
-		return validators.Skip("Karpenter not found and cluster platform not recognized (not EKS or GKE)")
+		return validators.Skip("Karpenter not found and cluster platform not recognized (not EKS, GKE, or AKS)")
 	}
 }
 
@@ -626,6 +632,53 @@ func checkEKSAutoscaling(ctx *validators.Context) error {
 		fmt.Sprintf("PASS — EKS cluster with %d GPU nodes in node group %q. "+
 			"ASG-backed node group provides autoscaling capability.",
 			len(gpuNodes.Items), valueOrUnknown(nodeGroupName)))
+	return nil
+}
+
+// checkAKSAutoscaling validates AKS VMSS-backed GPU agent-pool autoscaling capability.
+// AKS labels every node with kubernetes.azure.com/agentpool; resolving that
+// label on a GPU node proves the node belongs to an AKS agent pool that can be
+// scaled by the managed cluster autoscaler when enabled.
+func checkAKSAutoscaling(ctx *validators.Context) error {
+	gpuNodes, err := ctx.Clientset.CoreV1().Nodes().List(ctx.Ctx, metav1.ListOptions{
+		LabelSelector: labelNVIDIAGPUPresent,
+	})
+	if err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to list GPU nodes", err)
+	}
+	if len(gpuNodes.Items) == 0 {
+		return errors.New(errors.ErrCodeNotFound, "no GPU nodes found in AKS cluster")
+	}
+
+	var nodeSummary strings.Builder
+	var agentPoolName string
+	for _, n := range gpuNodes.Items {
+		gpuCount := n.Status.Capacity[resourceNVIDIAGPU]
+		instanceType := n.Labels["node.kubernetes.io/instance-type"]
+		agentPool := n.Labels["kubernetes.azure.com/agentpool"]
+		zone := n.Labels["topology.kubernetes.io/zone"]
+		fmt.Fprintf(&nodeSummary, "%-44s gpu=%s instance=%s agentPool=%s zone=%s\n",
+			n.Name, gpuCount.String(), valueOrUnknown(instanceType),
+			valueOrUnknown(agentPool), valueOrUnknown(zone))
+		if agentPoolName == "" && agentPool != "" {
+			agentPoolName = agentPool
+		}
+	}
+	recordRawTextArtifact(ctx, "GPU Nodes",
+		"kubectl get nodes -l nvidia.com/gpu.present=true -o wide", nodeSummary.String())
+
+	if agentPoolName == "" {
+		return errors.New(errors.ErrCodeNotFound,
+			"AKS GPU nodes found but kubernetes.azure.com/agentpool label is missing — cannot verify autoscaling capability")
+	}
+
+	recordRawTextArtifact(ctx, "AKS Cluster Details", "",
+		fmt.Sprintf("GPU Agent Pool:  %s\nGPU Node Count: %d",
+			agentPoolName, len(gpuNodes.Items)))
+	recordRawTextArtifact(ctx, "AKS Cluster Autoscaling Result", "",
+		fmt.Sprintf("PASS — AKS cluster with %d GPU nodes in VMSS-backed agent pool %q. "+
+			"The agent pool provides cluster autoscaling capability when managed autoscaling is enabled.",
+			len(gpuNodes.Items), agentPoolName))
 	return nil
 }
 
