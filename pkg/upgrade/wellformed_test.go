@@ -568,6 +568,19 @@ func TestValidateDistinctBoundaries(t *testing.T) {
 			},
 			true,
 		},
+		{
+			// A prerelease tag that reads as the exclusivity marker must not
+			// collide with it: an exclusive floor at 1.0.0 and an inclusive
+			// floor at the distinct version 1.0.0-exclusive are not the same
+			// boundary, even though naive string concatenation of version and
+			// marker would produce the same key for both.
+			"exclusive floor does not collide with a same-named prerelease floor",
+			[]Transition{
+				mk("<1.0.0", ">1.0.0 <2.0.0"),
+				mk("<1.0.0", ">=1.0.0-exclusive <2.0.0"),
+			},
+			false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

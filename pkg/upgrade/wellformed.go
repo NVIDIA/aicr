@@ -418,22 +418,28 @@ func contiguous(upper, lower bound) bool {
 //
 // Overlapping `from` domains stay legal on purpose: a jump spanning two real
 // blocks must resolve to blocked, which is the ADR's design.
+// boundaryKey identifies a `to` floor by version and inclusivity as two
+// comparable fields rather than one delimited string: `to` permits
+// prereleases, and a prerelease tag can itself read as a delimiter suffix,
+// so string concatenation cannot distinguish content from marker.
+type boundaryKey struct {
+	ver       string
+	inclusive bool
+}
+
 func checkDistinctBoundaries(component string, trs []Transition) []string {
-	seen := make(map[string]int, len(trs))
+	seen := make(map[boundaryKey]int, len(trs))
 	var v []string
 	for i := range trs {
 		b, err := parseBounds(trs[i].To, prereleaseAllowed)
 		if err != nil || b.lower.unbounded {
 			continue // reported elsewhere
 		}
-		key := b.lower.ver.String()
-		if !b.lower.inclusive {
-			key += "-exclusive"
-		}
+		key := boundaryKey{ver: b.lower.ver.String(), inclusive: b.lower.inclusive}
 		if prev, dup := seen[key]; dup {
 			v = append(v, fmt.Sprintf(
 				"component %q transitions %d and %d describe the same boundary (to starts at %s); a jump crossing it would resolve to blocked rather than the authored verdict",
-				component, prev, i, key))
+				component, prev, i, key.ver))
 			continue
 		}
 		seen[key] = i
