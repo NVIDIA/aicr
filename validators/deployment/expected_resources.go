@@ -1222,22 +1222,25 @@ func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResource string, e
 			coverage = cov
 			// Eager disclosure floor: emit the structured coverage once, on the
 			// first observation that actually enumerated an RDMA-candidate node,
-			// so a cordoned node narrowing the cohort survives even if the Job's
-			// activeDeadlineSeconds SIGKILLs the process mid-poll before the
-			// terminal emit runs. The catalog timeout feeds both the Job deadline
-			// and this poll budget with no margin (pkg/validator/v1/job_plan.go),
-			// so an exhausted never-ready poll (every RDMA node cordoned for
-			// maintenance, or a rollout slower than the budget) can be killed at
-			// the deadline with no terminal emit. parseExtraSentinels keeps the
-			// LAST valid sentinel, so a clean exit's terminal emit wins and a
-			// deadline kill leaves this floor as the disclosure of record.
+			// so a cordoned node narrowing the cohort survives even if the
+			// process never reaches the terminal emit below. The catalog timeout
+			// bounds this poll (AICR_CHECK_TIMEOUT); the Job's
+			// activeDeadlineSeconds now adds defaults.ValidatorJobDeadlineHeadroom
+			// on top (pkg/validator/v1/job_plan.go), so an exhausted never-ready
+			// poll (every RDMA node cordoned for maintenance, or a rollout slower
+			// than the budget) has margin to unwind and reach the terminal emit
+			// before the Job's SIGKILL. parseExtraSentinels keeps the LAST valid
+			// sentinel, so a clean exit's terminal emit wins and this floor is
+			// the disclosure of record only on the rarer path where the process
+			// is still killed before reaching it.
 			// validated=0: nothing is certified mid-poll. Only the structured
 			// Extra is emitted eagerly (not the stdout enumeration) — the Extra is
 			// the piece that survives redaction into the signed bundle (#1951/
 			// #1952), and duplicating stdout would spam divergent counts. The
-			// broader no-margin kill race predates this gate and is tracked
-			// separately; this closes only the gate's own every-terminal-outcome
-			// coverage contract.
+			// broader no-margin kill race (#2473) is now bounded generally by
+			// defaults.ValidatorJobDeadlineHeadroom; this floor remains
+			// defense-in-depth for a probe call that blocks past its own
+			// poll-budget cancellation.
 			if !emittedEarly && cov.total() > 0 {
 				emittedEarly = true
 				emitCoverage(0, cov.total())

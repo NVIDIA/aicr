@@ -173,7 +173,8 @@ type JobPlan struct {
     Volumes          []corev1.Volume             // snapshot + validation ConfigMaps
     VolumeMounts     []corev1.VolumeMount
     Resources        corev1.ResourceRequirements
-    Timeout          int64                       // activeDeadlineSeconds
+    CheckTimeout     int64                       // check's own budget; published as AICR_CHECK_TIMEOUT
+    JobDeadline      int64                       // activeDeadlineSeconds = CheckTimeout + ValidatorJobDeadlineHeadroom
     ServiceAccount   string
     Tolerations      []corev1.Toleration         // forwarded; orchestrator pod is tolerate-all
     ImagePullSecrets []string
@@ -222,7 +223,8 @@ if err != nil {
     return err
 }
 
-plan.Timeout = 600 // 10 minutes
+plan.CheckTimeout = 600                                    // 10 minutes
+plan.JobDeadline = int64(v1.JobDeadlineFor(10 * time.Minute).Seconds()) // activeDeadlineSeconds
 plan.Env = append(plan.Env, corev1.EnvVar{Name: "MY_VAR", Value: "x"})
 
 job := v1.RenderPlan(plan)

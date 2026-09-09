@@ -40,11 +40,14 @@ validators:
     image: ghcr.io/nvidia/aicr-validators/deployment:latest
     # Must be strictly > defaults.ChainsawAssertTimeout (6m) +
     # defaults.JobEnvelopeMargin (60s) so chainsaw has headroom to
-    # terminate, clean up its temp dir, and flush log output before the
-    # Job's SIGKILL AND so pre-chainsaw work (helper.VerifyResource
-    # iteration) can't starve the chainsaw budget. 8m provides 60s for
-    # cleanup plus another 60s for pre-chainsaw work. The invariant is
-    # verified by TestExpectedResourcesCatalogEnvelope in
+    # terminate, clean up its temp dir, and flush log output before this
+    # check's own AICR_CHECK_TIMEOUT context elapses AND so pre-chainsaw
+    # work (helper.VerifyResource iteration) can't starve the chainsaw
+    # budget. 8m provides 60s for cleanup plus another 60s for
+    # pre-chainsaw work. The Job's activeDeadlineSeconds adds
+    # defaults.ValidatorJobDeadlineHeadroom (3m30s) on top of this value
+    # as a separate, later backstop. The invariant is verified by
+    # TestExpectedResourcesCatalogEnvelope in
     # pkg/validator/catalog — raising ChainsawAssertTimeout without
     # raising this in tandem will fail the test. See issue #1220 and
     # PR #1235 review.
@@ -112,9 +115,11 @@ validators:
     # + AIPerf pod scheduling (5m) + AIPerf benchmark (15m)
     # = 50m. The 65m timeout = that 50m sum + 15m headroom for inter-phase
     # overhead (slow registries, K8s API round-trips) and deferred cleanup /
-    # CTRF-tail work. The Job's activeDeadlineSeconds derives from this value and
-    # kills the pod only after the ctx has surfaced a clean timeout. Raising the
-    # model (or disabling the cache) shifts this budget — see the knobs below.
+    # CTRF-tail work. The Job's activeDeadlineSeconds adds
+    # defaults.ValidatorJobDeadlineHeadroom (3m30s) on top of this value, so
+    # it kills the pod only after the ctx has already surfaced a clean
+    # timeout. Raising the model (or disabling the cache) shifts this
+    # budget — see the knobs below.
     timeout: 65m
     args: ["inference-perf"]
     # Benchmark tuning knobs (optional). AIPerf warms up before measuring so

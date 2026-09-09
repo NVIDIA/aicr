@@ -264,7 +264,8 @@ func TestDeployJobEnvVars(t *testing.T) {
 
 	// AICR_CHECK_TIMEOUT propagates the entry's catalog-level timeout to
 	// validators.checkTimeoutFromEnv so the inner parent context matches
-	// the Job's ActiveDeadlineSeconds. Value is time.Duration.String().
+	// CheckTimeout, not the Job's larger ActiveDeadlineSeconds (which adds
+	// defaults.ValidatorJobDeadlineHeadroom). Value is time.Duration.String().
 	timeoutEnv, ok := envMap["AICR_CHECK_TIMEOUT"]
 	if !ok {
 		t.Error("AICR_CHECK_TIMEOUT must be injected")

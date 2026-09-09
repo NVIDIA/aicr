@@ -1266,14 +1266,18 @@ but a readiness test copied from a validator check (`assert: 5m`) is
 now capped at the gate's 2m per evaluation rather than overrunning it.
 
 The `expected-resources` catalog timeout (8m in
-`recipes/validators/catalog.yaml`) is the **outer** envelope. It must
-exceed the longest in-tree `assert` value plus headroom for
-pre-chainsaw work, chainsaw teardown, and log flush
-(`defaults.JobEnvelopeMargin`). If assert runs too close to that
-catalog deadline, the Job can SIGKILL the pod before chainsaw reports
-the failing step — operators see truncated output instead of a useful
-failure. Raise the catalog `timeout` in tandem when you need a longer
-assert budget (`TestExpectedResourcesCatalogEnvelope` guards this).
+`recipes/validators/catalog.yaml`) is the **outer** envelope for the
+check's own budget (`AICR_CHECK_TIMEOUT`). It must exceed the longest
+in-tree `assert` value plus headroom for pre-chainsaw work, chainsaw
+teardown, and log flush (`defaults.JobEnvelopeMargin`). If assert runs
+too close to that catalog deadline, the check's own context can expire
+before chainsaw reports the failing step — operators see truncated
+output instead of a useful failure. The Job's `activeDeadlineSeconds`
+(this catalog timeout plus `defaults.ValidatorJobDeadlineHeadroom`) is
+a separate, later backstop and no longer the deadline this margin
+protects against. Raise the catalog `timeout` in tandem when you need
+a longer assert budget (`TestExpectedResourcesCatalogEnvelope` guards
+this).
 
 ## Constraint evaluation algorithm
 

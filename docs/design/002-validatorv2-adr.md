@@ -110,7 +110,8 @@ Every validator container:
 
 Each validator runs as a K8s Job with:
 - `backoffLimit: 0` — no retries
-- `activeDeadlineSeconds` — from catalog `timeout`
+- `activeDeadlineSeconds` — catalog `timeout` plus `defaults.ValidatorJobDeadlineHeadroom`,
+  so the check's own budget always expires first (see Timeout and Termination below)
 - `terminationGracePeriodSeconds: 30` — time between SIGTERM and SIGKILL
 - `ttlSecondsAfterFinished: 3600` — 1 hour retention for debugging
 - `restartPolicy: Never`
@@ -143,17 +144,30 @@ Created once per run via Server-Side Apply, cleaned up at end.
 
 ### Timeout and Termination
 
-Three independent timeout layers protect against hangs:
+Four timeout layers protect against hangs. The first three are ordered so the
+check's own budget is always the tightest — the ordering that closes issue
+#2473 (see below):
 
-1. **Job `activeDeadlineSeconds`** (from catalog): K8s sends SIGTERM, then SIGKILL
-   after `terminationGracePeriodSeconds` (30s). Pod logs and termination message
-   remain available after termination.
+1. **Check budget** (catalog `timeout`, published as `AICR_CHECK_TIMEOUT`): the
+   validator's own parent context. A well-behaved check cancels and exits on
+   this deadline before Kubernetes ever intervenes.
 
-2. **Orchestrator wait timeout** (catalog timeout + 30s buffer): If the Job hasn't
-   reached a terminal state, the orchestrator captures whatever logs/status are
-   available and moves to the next validator.
+2. **Orchestrator wait timeout** (catalog timeout + `defaults.ValidatorWaitBuffer`,
+   2m30s): if the Job hasn't reached a terminal state by then, the orchestrator
+   captures whatever logs/status are available and moves to the next validator.
 
-3. **Parent context timeout** (CLI flag): Cancels the entire phase if exceeded.
+3. **Job `activeDeadlineSeconds`** (catalog timeout + `defaults.ValidatorJobDeadlineHeadroom`,
+   3m30s): K8s sends SIGTERM, then SIGKILL after `terminationGracePeriodSeconds` (30s),
+   as a backstop for a check that never exits on its own. Because the headroom keeps
+   this clock behind clocks 1 and 2, a self-terminated pod is no longer *active* by
+   the time this deadline could fire, and the Job controller's `deleteActivePods`
+   only deletes active pods — so the pod survives, `Failed`, with its logs and
+   termination message intact for extraction. Before this ordering existed, all
+   three clocks shared one catalog value and the Job's deadline — timed from Job
+   creation, ahead of the check's own deadline, timed from container start — fired
+   first and deleted the still-running pod, which is exactly what #2473 reported.
+
+4. **Parent context timeout** (CLI flag): Cancels the entire phase if exceeded.
 
 On any timeout, the orchestrator always attempts log capture with a fresh
 `context.Background()` context before cleanup, ensuring partial results are never
@@ -194,7 +208,7 @@ ValidateAll(ctx, recipe, snapshot)
 │   ├── For each validator (sequentially):
 │   │   ├── Deploy Job
 │   │   ├── Stream stderr (background, for live progress)
-│   │   ├── WaitForCompletion(timeout + 30s buffer)
+│   │   ├── WaitForCompletion(timeout + ValidatorWaitBuffer)
 │   │   ├── ExtractResult() — exit code, termination msg, stdout
 │   │   ├── Add to CTRF report
 │   │   └── CleanupJob() unless --no-cleanup

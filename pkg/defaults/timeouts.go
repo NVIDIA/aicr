@@ -146,14 +146,16 @@ const (
 	// ValidationOperationTimeout is the facade-level upper bound for
 	// Client.ValidateState when the caller's context has no deadline
 	// (controller/library callers; the CLI runs uncapped). It must exceed the
-	// LARGEST per-check Job timeout so that inner timeout fires first and the
+	// LARGEST rendered per-check Job deadline (catalog timeout plus
+	// ValidatorJobDeadlineHeadroom) so that inner timeout fires first and the
 	// run surfaces a structured per-check error rather than the wrapping
 	// context's bare deadline-exceeded. The largest is the inference-perf
 	// catalog timeout (65m, which covers the model-cache populate + cold-start
-	// benchmark phases), not CheckExecutionTimeout (55m, the fallback when no
-	// catalog timeout is set). 75m keeps margin above 65m for orchestration
-	// overhead (snapshot agent, RBAC, namespace setup, cleanup). The
-	// catalog-vs-facade relationship is asserted in
+	// benchmark phases) plus the 3m30s headroom, i.e. 68m30s — not
+	// CheckExecutionTimeout (55m, the fallback when no catalog timeout is
+	// set). 75m keeps margin above that 68m30s rendered deadline for
+	// orchestration overhead (snapshot agent, RBAC, namespace setup,
+	// cleanup). The catalog-vs-facade relationship is asserted in
 	// pkg/validator/catalog/catalog_test.go.
 	ValidationOperationTimeout = 75 * time.Minute
 
