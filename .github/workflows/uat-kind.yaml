@@ -47,9 +47,13 @@ on:
         type: string
         default: ''
       intent:
-        description: 'Recipe intent — selects tests/uat/kind/tests/h100-<intent>-config.yaml.'
+        description: 'Recipe intent: the first coordinate of tests/uat/kind/tests/h100-<intent>[-<platform>]-config.yaml.'
         type: string
         default: training
+      platform:
+        description: 'Recipe platform, selects tests/uat/kind/tests/h100-<intent>[-<platform>]-config.yaml. Empty means the default kubeflow/dynamo config.'
+        type: string
+        default: ''
       lifecycle:
         description: 'Cluster lifecycle. Only nightly is supported for the nvkind lane (no held daytime cluster on a shared runner).'
         type: string
@@ -100,7 +104,14 @@ jobs:
       cancel-in-progress: false
     env:
       KIND_CLUSTER_NAME: uat-kind-${{ inputs.intent }}
-      TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}-config.yaml
+      # `platform` is an optional filename segment, not a separate config
+      # directory: an empty value resolves to the same h100-<intent>-config.yaml
+      # every existing cell has always used, so only a cell that asks for a
+      # platform gets a different file. Same guarded-format idiom as
+      # uat-run.yaml's run-name deployer segment (an empty string is falsy in a
+      # workflow expression, so the `|| ''` arm wins). `Validate inputs` below
+      # bounds the value before it reaches a path.
+      TEST_CONFIG: ${{ inputs.test_config_dir }}/h100-${{ inputs.intent }}${{ inputs.platform && format('-{0}', inputs.platform) || '' }}-config.yaml
     outputs:
       # Digest-pinned OCI ref of the signed evidence bundle, consumed by the
       # ingest-evidence job below. Empty when no bundle was produced.
@@ -115,6 +126,7 @@ jobs:
       - name: Validate inputs
         env:
           INTENT: ${{ inputs.intent }}
+          PLATFORM: ${{ inputs.platform }}
           LIFECYCLE: ${{ inputs.lifecycle }}
         run: |
           set -euo pipefail
@@ -122,10 +134,36 @@ jobs:
             training|inference) ;;
             *) echo "::error::unsupported intent: ${INTENT}"; exit 1 ;;
           esac
+          # This lane admits NO platform, and that is a property of its
+          # cluster rather than a gap waiting to be filled. One platform
+          # exists in the tree, slurm, and it needs four schedulable nodes:
+          # the Slinky operator attaches a hard per-hostname podAntiAffinity
+          # to every NodeSet pod, so four slurmd replicas need four nodes.
+          # This lane's cluster is single-node nvkind. Admitting the dispatch
+          # would provision on a leased GPU runner, run one slurmd pod, leave
+          # three Pending, fill no topology block and fail, having spent a
+          # slot on scarce contended hardware to do it.
+          #
+          # The input and the TEST_CONFIG segment above stay. They are the
+          # mechanism uat-run.yaml's lane gate forwards through, and the shape
+          # a platform this lane COULD serve would use; what is bounded here
+          # is only which values it admits, which today is the empty one. The
+          # slurm cell runs on four simulated workers in
+          # .github/workflows/uat-kind-sim.yaml, which needs no GPU and takes
+          # no lease.
+          case "${PLATFORM}" in
+            '') ;;
+            *)
+              echo "::error::unsupported platform: '${PLATFORM}' -- the nvkind lane is single-node and serves no platform."
+              echo "::error::The slurm cell runs on four simulated workers in .github/workflows/uat-kind-sim.yaml, which needs no GPU."
+              echo "::error::Omit platform to run this lane's default per-intent config."
+              exit 1
+              ;;
+          esac
           if [[ ! -f "${TEST_CONFIG}" ]]; then
             echo "::error::test config not found: ${TEST_CONFIG}"; exit 1
           fi
-          echo "intent=${INTENT} lifecycle=${LIFECYCLE} test-config=${TEST_CONFIG} cluster=${KIND_CLUSTER_NAME}"
+          echo "intent=${INTENT} platform=${PLATFORM:-<none>} lifecycle=${LIFECYCLE} test-config=${TEST_CONFIG} cluster=${KIND_CLUSTER_NAME}"
 
       - name: Prepare GPU workflow
         id: prepare
@@ -269,9 +307,22 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/kind/run conformance "${TEST_CONFIG}"
 
+      # The CUJ is a function of BOTH intent and platform: platform decides
+      # whether a K8s-native workload CUJ exists at all, intent decides which
+      # one. A slurm recipe has none -- a TrainJob would go to the Kubernetes
+      # scheduler and bypass slurmd, measuring the wrong path -- so it runs
+      # conformance and health checks only. Same rule the shared runner applies
+      # in tests/uat/lib/cuj-dispatch.sh; this lane invokes discrete phases
+      # rather than `run all`, so the gate is restated here.
+      #
+      # `Validate inputs` now admits only the empty platform, so the slurm arm
+      # of this condition cannot fire on this lane today. It is kept, not
+      # dead code to delete: widening that allowlist is a one-line edit, and
+      # without this condition the widening would silently apply a Kubeflow
+      # TrainJob to a recipe that installs no TrainJob CRD.
       - name: UAT - train (TrainJob)
         id: train
-        if: inputs.skip_tests != true && steps.conformance.outcome == 'success' && inputs.intent == 'training'
+        if: inputs.skip_tests != true && steps.conformance.outcome == 'success' && inputs.intent == 'training' && inputs.platform != 'slurm'
         timeout-minutes: 30
         env:
           AICR_BIN: ${{ github.workspace }}/aicr
@@ -340,6 +391,12 @@ jobs:
           SUMMARY_RESERVATION: ${{ inputs.reservation }}
           SUMMARY_AICR_VERSION: ${{ inputs.aicr_version }}
           SUMMARY_INTENT: ${{ inputs.intent }}
+          # Via env, not inline ${{ }} in the run block: github.ref_name can
+          # carry shell-active characters (expression injection), which
+          # `git check-ref-format --branch 'feat/a$(id)b'` accepts. sha is safe
+          # but is routed the same way, as uat-azure.yaml does.
+          SUMMARY_SHA: ${{ github.sha }}
+          SUMMARY_REF: ${{ github.ref_name }}
         run: |
           {
             echo "## UAT Results (nvkind — service: kind)"
@@ -348,7 +405,7 @@ jobs:
               "$SUMMARY_RESERVATION" "$SUMMARY_INTENT"
             printf '**Cluster:** `%s` (H100 x1, single-GPU, self-hosted runner)\n' "$KIND_CLUSTER_NAME"
             printf '**AICR version:** `%s`\n' "${SUMMARY_AICR_VERSION:-main (build from source)}"
-            echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)"
+            printf '**Build:** `%s` (branch: `%s`)\n' "$SUMMARY_SHA" "$SUMMARY_REF"
             echo ""
             echo "| Phase | Status |"
             echo "|-------|--------|"

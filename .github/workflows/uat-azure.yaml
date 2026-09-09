@@ -86,7 +86,7 @@ jobs:
     runs-on: ubuntu-latest
     # Budget = uncapped non-UAT steps (build, validator image push, AKS
     # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 90
-    # + validate 40 + the intent-selected CUJ (train 25 OR serve 40) + verify 5
+    # + validate 40 + the selected CUJ (train 25 OR serve 40) + verify 5
     # = up to 190) + ~8 failure-path debug collection (Collect cluster debug
     # bundle) + the always()-run Destroy Cluster teardown. Only one of
     # train/serve runs per intent, so the budget counts the larger (serve).
@@ -773,11 +773,17 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/azure/run conformance "${TEST_CONFIG}"
 
-      # The CUJ phase is intent-selected, mirroring the runner's intent-aware
-      # `all`: training runs the Kubeflow TrainJob; inference would run the
-      # served DynamoGraphDeployment (phase_serve, DC3). For training, the
-      # TrainJob fires; for inference the serve step is currently disabled (see
-      # below), so verify/evidence cover the deployed stack either way.
+      # The CUJ phase is selected by intent AND platform, mirroring the
+      # runner's `all` (cuj_phase_for, tests/uat/lib/cuj-dispatch.sh): platform
+      # decides whether a Kubernetes-native CUJ exists at all, intent decides
+      # which one. Every cell this pipeline runs declares kubeflow or dynamo,
+      # so the intent-only condition below selects the same phase `all` would;
+      # the one platform with no CUJ (slurm, where a TrainJob would bypass
+      # slurmd) has no cell here. Training runs the Kubeflow TrainJob;
+      # inference would run the served DynamoGraphDeployment (phase_serve,
+      # DC3). For training, the TrainJob fires; for inference the serve step is
+      # currently disabled (see below), so verify/evidence cover the deployed
+      # stack either way.
       - name: Refresh Azure credentials before CUJ
         if: steps.conformance.outcome == 'success'
         uses: azure/login@7ddb5af1ef8758cf1353cf3b42f940aee27ba21c  # v3.0.2
