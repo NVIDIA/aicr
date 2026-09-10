@@ -211,10 +211,11 @@ func JobDeadlineFor(checkTimeout time.Duration) time.Duration {
 // wait to observedStart instead of to now removes that delay from the
 // comparison, so a caller that waits checkTimeout+defaults.ValidatorWaitBuffer
 // still expires before the Job's checkTimeout+defaults.ValidatorJobDeadlineHeadroom
-// no matter how slow the response was. Without the rebase the effective margin
-// between the two is only defaults.JobEnvelopeMargin, and a response slower
-// than that lets the Job controller win and delete the still-active pod whose
-// logs carry the verdict (issue #2473).
+// for all but a pathologically slow response (see the floor below for where
+// that stops holding). Without the rebase the effective margin between the
+// two is only defaults.JobEnvelopeMargin, and a response slower than that
+// lets the Job controller win and delete the still-active pod whose logs
+// carry the verdict (issue #2473).
 //
 // observedStart is status.startTime when the caller has seen it, else the Job's
 // creationTimestamp — never later than status.startTime, so the fallback ends
@@ -224,7 +225,9 @@ func JobDeadlineFor(checkTimeout time.Duration) time.Duration {
 // The result is capped at that same unrebased budget, because apiserver clock
 // skew can place observedStart in the caller's future, and floored at
 // defaults.ValidatorMinCompletionWait so a pathological response delay does not
-// produce a wait too short to observe a terminal condition.
+// produce a wait too short to observe a terminal condition. Once the floor
+// engages, the Job's own deadline can fire first again — later than without
+// the rebase, but no longer guaranteed to trail it.
 func OrchestratorWaitFor(observedStart, now time.Time, checkTimeout time.Duration) time.Duration {
 	budget := checkTimeout + defaults.ValidatorWaitBuffer
 	if observedStart.IsZero() {

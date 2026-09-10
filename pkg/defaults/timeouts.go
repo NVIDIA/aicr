@@ -1161,11 +1161,13 @@ const (
 	// ValidatorMinCompletionWait floors the orchestrator's Job-completion wait
 	// once that wait has been rebased onto the Job's observed start time. The
 	// rebase subtracts however long the create/apply response took to arrive,
-	// and a pathological delay would otherwise leave a zero or negative
-	// remainder — an orchestrator timeout reported before the check ran. One
-	// SIGTERM-to-SIGKILL window is the shortest span in which a Job already
-	// past its activeDeadlineSeconds can still stamp a terminal condition for
-	// the orchestrator to read.
+	// and the floor engages as soon as the rebased remainder drops below it —
+	// not only once that remainder goes zero or negative — since an unfloored
+	// wait that short risks reporting an orchestrator timeout before the check
+	// ran. One SIGTERM-to-SIGKILL window is the shortest span in which a Job
+	// can still stamp a terminal condition for the orchestrator to read,
+	// whether or not its own activeDeadlineSeconds has already elapsed by the
+	// time the floor engages.
 	ValidatorMinCompletionWait = ValidatorTerminationGracePeriod
 
 	// ValidatorDefaultTimeout is the default per-validator timeout if not

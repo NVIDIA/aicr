@@ -345,8 +345,8 @@ func (d *Deployer) CleanupJob(ctx context.Context) error {
 // The wait is anchored to the Job's observed start time rather than to the
 // moment this method was called, so it and the Job's own activeDeadlineSeconds
 // are measured from the same origin and the orchestrator stays the tighter
-// clock however long the apply response took to arrive. v1.OrchestratorWaitFor
-// carries the derivation.
+// clock for all but a pathologically slow apply response. v1.OrchestratorWaitFor
+// carries the derivation, including where that guarantee stops holding.
 func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration) error {
 	waitTimeout := v1.OrchestratorWaitFor(d.jobStart, time.Now(), timeout)
 	// pod.WaitForJobTerminal already returns structured errors with proper
