@@ -19,11 +19,38 @@ description: 'Installs development tools for E2E testing using the shared setup 
 # local development and CI environments. The same script, same versions,
 # same installation logic - no more "works on my machine" issues.
 
+inputs:
+  privileged_ci:
+    description: >-
+      Whether this run checked out trusted content. Only trusted runs save the
+      tool cache; restore is unconditional. ok-to-test executes an untrusted PR
+      head inside the default branch's cache scope, and this cache stores
+      executables rather than content-addressed objects.
+    required: false
+    default: 'true'
+
 runs:
   using: "composite"
   steps:
-    - name: Cache development tools
-      uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+    # Split restore/save rather than the combined `actions/cache`, and the save
+    # is gated. This cache stores executables by path, so a restored entry is
+    # run directly -- a strictly worse payload than the content-addressed Go
+    # caches #2670 gated, where a planted entry is only consulted when its
+    # ActionID matches. `ok-to-test` runs on `issue_comment`, so its
+    # `github.ref` is the default branch and its writes land in main's scope
+    # while the checkout is an untrusted PR head.
+    #
+    # `--upgrade` below is not a sufficient defence, which is why the write is
+    # gated instead of relied upon:
+    #   - tools/setup-tools:229 runs `yq --version` (via is_mikefarah_yq) on the
+    #     RESTORED binary, before the reinstall at :238 replaces it.
+    #   - a failed download calls log_error, which prints and returns without
+    #     exiting (tools/common:56), leaving the restored binary in place.
+    # Both would have to keep holding for overwrite-before-use to protect
+    # anything, and neither is stated as a security property where it lives.
+    - name: Restore development tools
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      id: tools-restore
       with:
         path: |
           /usr/local/bin/ctlptl
@@ -74,3 +101,26 @@ runs:
           tools_check_rc=$?
           printf '%s\n' "::warning title=Non-gating tool check failed::make tools-check exited with status ${tools_check_rc}; E2E continues because its required-tool contract is narrower."
         fi
+
+    # Saved here rather than by a combined `actions/cache` post step, so the
+    # write can be gated. Skipped entirely when the checkout is untrusted; the
+    # restore above is unconditional, so a fork run keeps the speedup.
+    #
+    # Runs after the install step on purpose: what is banked is what
+    # setup-tools produced at the pinned versions, not whatever the restore
+    # left behind.
+    - name: Save development tools
+      if: >-
+        inputs.privileged_ci == 'true'
+        && steps.tools-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: |
+          /usr/local/bin/ctlptl
+          /usr/local/bin/kind
+          /usr/local/bin/kubectl
+          /usr/local/bin/tilt
+          /usr/local/bin/ko
+          /usr/local/bin/helm
+          /usr/local/bin/yq
+        key: ${{ steps.tools-restore.outputs.cache-primary-key }}

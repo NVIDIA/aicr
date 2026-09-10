@@ -105,13 +105,18 @@ runs:
     # by accident; a prefix fallback would not, which is why adding the fallback
     # and gating the write belong in the same change.
     #
-    # This gates THIS job only, and does not make the fork path safe on its own.
-    # qualification.yaml's `lint` and `e2e` jobs are ungated and reach setup-go
-    # with `cache: true`, which saves the same two directories into the same
-    # scope while running the same untrusted checkout. Closing that means giving
-    # them this restore/save split too -- setup-go's `cache` input cannot
-    # separate the two halves, and turning it off outright would make fork runs
-    # pay a cold cache against a 10-minute lint budget. Tracked in #2670.
+    # This job is the only writer of the `go-` key: #2670 moved qualification's
+    # `lint` and `e2e` onto it as restore-only consumers, so the save gated
+    # below decides the contents every later run restores -- which is why it
+    # waits for `make test` rather than banking a GOCACHE with no -race test
+    # objects in it.
+    #
+    # Note what this gate is and is not. On the ok-to-test path the action file
+    # you are reading is itself checked out from the fork (ok-to-test.yaml
+    # documents this), so a crafted PR can edit the gate away. It stops the
+    # default-on writes an ordinary fork run would make; it is not a boundary
+    # against an attacker. The boundary that holds is job-level: skipping the
+    # job in qualification.yaml, as cli-e2e and security-scan do.
     - name: Restore Go modules and build output
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       id: gocache-restore

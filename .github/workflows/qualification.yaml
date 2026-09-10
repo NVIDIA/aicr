@@ -100,6 +100,7 @@ jobs:
           golangci_lint_version: ${{ steps.versions.outputs.golangci_lint }}
           addlicense_version: ${{ steps.versions.outputs.addlicense }}
           lint_timeout: ${{ steps.versions.outputs.lint_timeout }}
+          privileged_ci: ${{ inputs.privileged_ci }}
 
   cli-e2e:
     name: CLI E2E
@@ -152,6 +153,7 @@ jobs:
         uses: ./.github/actions/e2e
         with:
           go_version: ${{ steps.versions.outputs.go }}
+          privileged_ci: ${{ inputs.privileged_ci }}
 
   security-scan:
     name: Security Scan
