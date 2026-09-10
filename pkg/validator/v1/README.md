@@ -208,7 +208,13 @@ for _, p := range groups[string(v1.PhaseConformance)] { /* … */ }
 
 ## Customizing a single plan
 
+Change the timeout on the catalog entry, not on the returned plan.
+`BuildJobPlan` bakes `AICR_CHECK_TIMEOUT` into `plan.Env` and derives
+`plan.JobDeadline` from the same value, so both follow from `entry.Timeout`:
+
 ```go
+entry.Timeout = 10 * time.Minute // drives AICR_CHECK_TIMEOUT and activeDeadlineSeconds
+
 plan, err := v1.BuildJobPlan(
     entry,
     runID,
@@ -223,8 +229,6 @@ if err != nil {
     return err
 }
 
-plan.CheckTimeout = 600                                    // 10 minutes
-plan.JobDeadline = int64(v1.JobDeadlineFor(10 * time.Minute).Seconds()) // activeDeadlineSeconds
 plan.Env = append(plan.Env, corev1.EnvVar{Name: "MY_VAR", Value: "x"})
 
 job := v1.RenderPlan(plan)
