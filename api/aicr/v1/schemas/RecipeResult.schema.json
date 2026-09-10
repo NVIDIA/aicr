@@ -235,6 +235,7 @@
             "eks",
             "generic",
             "gke",
+            "k0s",
             "kind",
             "lke",
             "metal3",

@@ -124,6 +124,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=):
             - service=eks, accelerator=rtx-pro-6000, intent=inference
             - service=eks, accelerator=rtx-pro-6000, intent=training
             - service=generic, accelerator=gb300, intent=training
+            - service=k0s, accelerator=h200, intent=training
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=oke, accelerator=a100, intent=training
@@ -152,6 +153,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=dynamo):
             - service=eks, accelerator=rtx-pro-6000, intent=inference
             - service=eks, accelerator=rtx-pro-6000, intent=training
             - service=generic, accelerator=gb300, intent=training
+            - service=k0s, accelerator=h200, intent=training
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=oke, accelerator=a100, intent=training
@@ -189,6 +191,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=kubeflow):
             - service=eks, accelerator=rtx-pro-6000, intent=inference
             - service=eks, accelerator=rtx-pro-6000, intent=training
             - service=generic, accelerator=gb300, intent=training
+            - service=k0s, accelerator=h200, intent=training
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=oke, accelerator=a100, intent=training
@@ -228,6 +231,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=nim):
             - service=eks, accelerator=rtx-pro-6000, intent=inference
             - service=eks, accelerator=rtx-pro-6000, intent=training
             - service=generic, accelerator=gb300, intent=training
+            - service=k0s, accelerator=h200, intent=training
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=oke, accelerator=a100, intent=training
@@ -260,6 +264,7 @@ criteria(service=, accelerator=, intent=, os=ubuntu, platform=slurm):
             - service=eks, accelerator=rtx-pro-6000, intent=inference
             - service=eks, accelerator=rtx-pro-6000, intent=training
             - service=generic, accelerator=gb300, intent=training
+            - service=k0s, accelerator=h200, intent=training
             - service=lke, accelerator=rtx-pro-6000, intent=inference
             - service=lke, accelerator=rtx-pro-6000, intent=training
             - service=oke, accelerator=a100, intent=training
@@ -490,6 +495,7 @@ criteria(service=, accelerator=, intent=training, os=, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -509,6 +515,7 @@ criteria(service=, accelerator=, intent=training, os=, platform=kubeflow):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -542,6 +549,7 @@ criteria(service=, accelerator=, intent=training, os=, platform=slurm):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -569,6 +577,7 @@ criteria(service=, accelerator=, intent=training, os=cos, platform=):
             - service=bcm
             - service=eks
             - service=gke
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -587,6 +596,7 @@ criteria(service=, accelerator=, intent=training, os=cos, platform=kubeflow):
             - service=bcm
             - service=eks
             - service=gke
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -610,6 +620,7 @@ criteria(service=, accelerator=, intent=training, os=cos, platform=slurm):
             - service=bcm
             - service=eks
             - service=gke
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -629,6 +640,7 @@ criteria(service=, accelerator=, intent=training, os=ol, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=oke
@@ -646,6 +658,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -663,6 +676,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=):
             - service=eks, accelerator=h100
             - service=eks, accelerator=rtx-pro-6000
             - service=generic, accelerator=gb300
+            - service=k0s, accelerator=h200
             - service=lke, accelerator=rtx-pro-6000
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
@@ -678,6 +692,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=kubeflow):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -695,6 +710,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=kubeflow):
             - service=eks, accelerator=h100
             - service=eks, accelerator=rtx-pro-6000
             - service=generic, accelerator=gb300
+            - service=k0s, accelerator=h200
             - service=lke, accelerator=rtx-pro-6000
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
@@ -721,6 +737,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=slurm):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -738,6 +755,7 @@ criteria(service=, accelerator=, intent=training, os=ubuntu, platform=slurm):
             - service=eks, accelerator=h100
             - service=eks, accelerator=rtx-pro-6000
             - service=generic, accelerator=gb300
+            - service=k0s, accelerator=h200
             - service=lke, accelerator=rtx-pro-6000
             - service=oke, accelerator=a100
             - service=oke, accelerator=gb200
@@ -816,6 +834,7 @@ criteria(service=, accelerator=a100, intent=training, os=, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -832,6 +851,7 @@ criteria(service=, accelerator=a100, intent=training, os=, platform=kubeflow):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -854,6 +874,7 @@ criteria(service=, accelerator=a100, intent=training, os=cos, platform=):
             - service=bcm
             - service=eks
             - service=gke
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -871,6 +892,7 @@ criteria(service=, accelerator=a100, intent=training, os=cos, platform=kubeflow)
             - service=bcm
             - service=eks
             - service=gke
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -888,6 +910,7 @@ criteria(service=, accelerator=a100, intent=training, os=ol, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=oke
@@ -904,6 +927,7 @@ criteria(service=, accelerator=a100, intent=training, os=ubuntu, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=oke
@@ -923,6 +947,7 @@ criteria(service=, accelerator=a100, intent=training, os=ubuntu, platform=kubefl
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=oke
@@ -1057,6 +1082,7 @@ criteria(service=, accelerator=b200, intent=training, os=, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -1072,6 +1098,7 @@ criteria(service=, accelerator=b200, intent=training, os=, platform=kubeflow):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -1090,6 +1117,7 @@ criteria(service=, accelerator=b200, intent=training, os=cos, platform=):
             - service=bcm
             - service=eks
             - service=gke
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -1107,6 +1135,7 @@ criteria(service=, accelerator=b200, intent=training, os=cos, platform=kubeflow)
             - service=bcm
             - service=eks
             - service=gke
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -1299,6 +1328,7 @@ criteria(service=, accelerator=gb200, intent=training, os=, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -1315,6 +1345,7 @@ criteria(service=, accelerator=gb200, intent=training, os=, platform=kubeflow):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -1334,6 +1365,7 @@ criteria(service=, accelerator=gb200, intent=training, os=, platform=slurm):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -1352,6 +1384,7 @@ criteria(service=, accelerator=gb200, intent=training, os=ol, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=oke
@@ -1368,6 +1401,7 @@ criteria(service=, accelerator=gb200, intent=training, os=ubuntu, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=oke
@@ -1386,6 +1420,7 @@ criteria(service=, accelerator=gb200, intent=training, os=ubuntu, platform=kubef
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=oke
@@ -1407,6 +1442,7 @@ criteria(service=, accelerator=gb200, intent=training, os=ubuntu, platform=slurm
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=oke
@@ -1561,6 +1597,7 @@ criteria(service=, accelerator=gb300, intent=training, os=, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -1577,6 +1614,7 @@ criteria(service=, accelerator=gb300, intent=training, os=, platform=kubeflow):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -1595,6 +1633,7 @@ criteria(service=, accelerator=gb300, intent=training, os=, platform=slurm):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -1614,6 +1653,7 @@ criteria(service=, accelerator=gb300, intent=training, os=ubuntu, platform=):
             - service=bcm
             - service=eks
             - service=generic
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -1632,6 +1672,7 @@ criteria(service=, accelerator=gb300, intent=training, os=ubuntu, platform=kubef
             - service=bcm
             - service=eks
             - service=generic
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -1652,6 +1693,7 @@ criteria(service=, accelerator=gb300, intent=training, os=ubuntu, platform=slurm
             - service=bcm
             - service=eks
             - service=generic
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -1976,6 +2018,7 @@ criteria(service=, accelerator=h100, intent=training, os=, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=kind
             - service=lke
             - service=ocp
@@ -1992,6 +2035,7 @@ criteria(service=, accelerator=h100, intent=training, os=, platform=kubeflow):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=kind
             - service=lke
             - service=ocp
@@ -2013,6 +2057,7 @@ criteria(service=, accelerator=h100, intent=training, os=, platform=slurm):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=kind
             - service=lke
             - service=ocp
@@ -2035,6 +2080,7 @@ criteria(service=, accelerator=h100, intent=training, os=cos, platform=):
             - service=bcm
             - service=eks
             - service=gke
+            - service=k0s
             - service=kind
             - service=lke
             - service=ocp
@@ -2053,6 +2099,7 @@ criteria(service=, accelerator=h100, intent=training, os=cos, platform=kubeflow)
             - service=bcm
             - service=eks
             - service=gke
+            - service=k0s
             - service=kind
             - service=lke
             - service=ocp
@@ -2074,6 +2121,7 @@ criteria(service=, accelerator=h100, intent=training, os=cos, platform=slurm):
             - service=bcm
             - service=eks
             - service=gke
+            - service=k0s
             - service=kind
             - service=lke
             - service=ocp
@@ -2093,6 +2141,7 @@ criteria(service=, accelerator=h100, intent=training, os=ubuntu, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=kind
             - service=lke
             - service=ocp
@@ -2112,6 +2161,7 @@ criteria(service=, accelerator=h100, intent=training, os=ubuntu, platform=kubefl
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=kind
             - service=lke
             - service=ocp
@@ -2135,6 +2185,7 @@ criteria(service=, accelerator=h100, intent=training, os=ubuntu, platform=slurm)
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=kind
             - service=lke
             - service=ocp
@@ -2149,6 +2200,13 @@ criteria(service=, accelerator=h100, intent=training, os=ubuntu, platform=slurm)
             - service=kind
 criteria(service=, accelerator=h200, intent=, os=, platform=):
     outcome: success
+criteria(service=, accelerator=h200, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - service=k0s, intent=training
 criteria(service=, accelerator=h200, intent=inference, os=, platform=):
     outcome: error
     uncovered:
@@ -2173,11 +2231,28 @@ criteria(service=, accelerator=h200, intent=training, os=, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
             - service=gke, os=cos
             - service=oke, os=ol
+criteria(service=, accelerator=h200, intent=training, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - intent
+        - os
+    validCompletions:
+        intent:
+            - service=aks
+            - service=bcm
+            - service=eks
+            - service=k0s
+            - service=lke
+            - service=ocp
+            - service=rke2
+        os:
+            - service=k0s
 criteria(service=, accelerator=l40s, intent=, os=, platform=):
     outcome: success
 criteria(service=, accelerator=l40s, intent=, os=ol, platform=):
@@ -2228,6 +2303,7 @@ criteria(service=, accelerator=l40s, intent=training, os=, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -2243,6 +2319,7 @@ criteria(service=, accelerator=l40s, intent=training, os=ol, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=oke
@@ -2444,6 +2521,7 @@ criteria(service=, accelerator=rtx-pro-6000, intent=training, os=, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -2459,6 +2537,7 @@ criteria(service=, accelerator=rtx-pro-6000, intent=training, os=, platform=kube
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -2476,6 +2555,7 @@ criteria(service=, accelerator=rtx-pro-6000, intent=training, os=ubuntu, platfor
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -2493,6 +2573,7 @@ criteria(service=, accelerator=rtx-pro-6000, intent=training, os=ubuntu, platfor
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -2639,6 +2720,7 @@ criteria(service=, accelerator=vr200, intent=training, os=, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -2657,6 +2739,7 @@ criteria(service=, accelerator=vr200, intent=training, os=ubuntu, platform=):
             - service=aks
             - service=bcm
             - service=eks
+            - service=k0s
             - service=lke
             - service=ocp
             - service=rke2
@@ -4212,6 +4295,39 @@ criteria(service=gke, accelerator=h100, intent=training, os=cos, platform=):
 criteria(service=gke, accelerator=h100, intent=training, os=cos, platform=kubeflow):
     outcome: success
 criteria(service=gke, accelerator=h100, intent=training, os=cos, platform=slurm):
+    outcome: success
+criteria(service=k0s, accelerator=, intent=, os=, platform=):
+    outcome: success
+criteria(service=k0s, accelerator=, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - accelerator=h200, intent=training
+criteria(service=k0s, accelerator=, intent=training, os=, platform=):
+    outcome: success
+criteria(service=k0s, accelerator=, intent=training, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - accelerator=h200
+criteria(service=k0s, accelerator=h200, intent=, os=, platform=):
+    outcome: success
+criteria(service=k0s, accelerator=h200, intent=, os=ubuntu, platform=):
+    outcome: error
+    uncovered:
+        - os
+    validCompletions:
+        os:
+            - intent=training
+criteria(service=k0s, accelerator=h200, intent=training, os=, platform=):
+    outcome: error
+    strictDimensions:
+        - os
+criteria(service=k0s, accelerator=h200, intent=training, os=ubuntu, platform=):
     outcome: success
 criteria(service=kind, accelerator=, intent=, os=, platform=):
     outcome: success

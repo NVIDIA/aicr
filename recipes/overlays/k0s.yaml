@@ -1,0 +1,75 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: k0s
+
+spec:
+  # Inherits from base (implicit when spec.base is empty).
+  # k0s provisions only the base platform — Kubernetes control plane, its
+  # own bundled containerd, kube-router (or Calico) CNI, CoreDNS, and
+  # metrics-server.
+  # Storage note: k0s ships NO StorageClass (same posture as rke2). The
+  # base kube-prometheus-stack defaults to emptyDir storage, so nothing
+  # here requires a StorageClass. If persistent monitoring is needed,
+  # install a provisioner (e.g. local-path-provisioner) and override
+  # prometheusSpec.storageSpec per the bcm.yaml pattern.
+
+  criteria:
+    service: k0s
+
+  # k0s-specific constraints
+  # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
+  constraints:
+    # k0s tracks upstream Kubernetes minors closely; >= 1.34 matches the
+    # training leaves' floor and is the earliest line validated with the
+    # toolkit drop-in path below (validated on k0s v1.36.3+k0s.0).
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs:
+    # k0s runs its OWN containerd (socket /run/k0s/containerd.sock), not
+    # the distro default. Without these three env vars the container
+    # toolkit configures the default containerd, reports success, and GPU
+    # pods then fail with `no runtime for "nvidia" is configured`.
+    #
+    # k0s natively supports drop-in containerd config under
+    # /etc/k0s/containerd.d/; the toolkit writes
+    # its own file there and k0s picks it up without disturbing the main
+    # config or restarting the distro.
+    - name: gpu-operator
+      type: Helm
+      overrides:
+        toolkit:
+          env:
+            - name: CONTAINERD_CONFIG
+              value: /etc/k0s/containerd.d/nvidia.toml
+            - name: CONTAINERD_SOCKET
+              value: /run/k0s/containerd.sock
+            - name: CONTAINERD_RUNTIME_CLASS
+              value: nvidia
+
+  # Baseline conformance floor for any recipe resolved at the k0s service
+  # root (mirrors the bcm.yaml and rke2.yaml bare-metal service roots).
+  # Leaves extend this with accelerator-specific deployment checks and
+  # constraints.
+  validation:
+    conformance:
+      checks:
+        - platform-health
+        - gpu-operator-health
+        - accelerator-metrics
+        - ai-service-metrics
