@@ -175,6 +175,7 @@ AICR_CRD_PATTERNS=(
     agentgateway.dev
     apps.nvidia.com
     kueue.x-k8s.io
+    jobset.x-k8s.io
     kubeflow.org
     trainer.kubeflow.org
     slinky.slurm.net

@@ -52,6 +52,7 @@ if [[ "$1" == "get" ]]; then
         crd)
             printf '%s\n' \
                 "customresourcedefinition.apiextensions.k8s.io/clusterpolicies.nvidia.com" \
+                "customresourcedefinition.apiextensions.k8s.io/jobsets.jobset.x-k8s.io" \
                 "customresourcedefinition.apiextensions.k8s.io/nodes.skyhook.nvidia.com"
             ;;
         ns|namespace)
@@ -176,9 +177,10 @@ KLOG="${KLOG}" HLOG="${HLOG}" "${CLEANUP}" --yes \
 klog="$(cat "${KLOG}")"; hlog="$(cat "${HLOG}")"
 rm -f "${KLOG}" "${HLOG}"
 
-# CRD phase: non-excluded CRD deleted; the excluded group is never touched even
+# CRD phase: non-excluded CRDs deleted; the excluded group is never touched even
 # though the broad nvidia.com pattern matches it.
 has     "live-crd-nonexcluded-deleted" "${klog}" "delete customresourcedefinition.apiextensions.k8s.io/clusterpolicies.nvidia.com"
+has     "live-jobset-crd-deleted" "${klog}" "delete customresourcedefinition.apiextensions.k8s.io/jobsets.jobset.x-k8s.io"
 has_not "live-nothing-skyhook-in-kubectl" "${klog}" "skyhook"
 # Namespace phase: backstop deleted; excluded namespace neither deleted nor
 # finalizer-patched (the has_not above already covers skyhook end-to-end).
