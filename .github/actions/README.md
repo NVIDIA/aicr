@@ -25,6 +25,7 @@ executable bits or `./script.sh` invocation.
 - `setup_envtest_version` (required): setup-envtest version from `load-versions`
 - `apidiff_version` (optional): apidiff version from `load-versions`; when set, installs apidiff and runs `make api-diff` (default: empty, which skips both steps)
 - `oasdiff_version` (**required**): oasdiff version from `load-versions`; installs oasdiff before `make test` and runs `make openapi-diff` after. Not optional, because `make test` runs `tools/openapi-diff_test.sh`, which fails in CI when oasdiff is absent rather than skipping — the REST contract gate cannot be silently unverified
+- `privileged_ci` (optional): whether the checked-out ref is trusted (default: `"true"`). Only trusted runs save the Go cache; restore is unconditional. `ok-to-test` passes `false` because it runs an untrusted PR head inside the default branch's cache scope
 
 Callers that set `apidiff_version` must check out full history with
 `fetch-depth: 0` so `make api-diff` can resolve a reachable stable release tag.
@@ -109,7 +110,7 @@ quality thresholds; not every settings key is exposed) — see
 ### Build & Release Actions
 
 #### `setup-build-tools/`
-**Purpose**: Install container build tools (ko, syft, crane, oras, goreleaser)  
+**Purpose**: Install container build tools (ko, syft, crane, oras, oasdiff, goreleaser)  
 **When to use**: When you need specific build tools without full build pipeline  
 **Inputs**:
 - `install_ko` (optional): Install ko (default: "false")
@@ -119,6 +120,8 @@ quality thresholds; not every settings key is exposed) — see
 - `install_oras` (optional): Install oras (default: "false")
 - `oras_version` (required when `install_oras: "true"`): oras version from `load-versions`, without the leading `v`
 - `oras_sha256` (required when `install_oras: "true"`): oras linux/amd64 SHA256 from `load-versions`
+- `install_oasdiff` (optional): Install oasdiff (default: "false")
+- `oasdiff_version` (required when `install_oasdiff: "true"`): oasdiff version from `load-versions`
 - `install_goreleaser` (optional): Install goreleaser (default: "false")
 - `goreleaser_version` (required when `install_goreleaser: "true"`): GoReleaser version from `load-versions`
 

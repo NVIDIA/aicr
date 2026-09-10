@@ -41,7 +41,13 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 15 minutes was sized for a warm Go module cache: the same job finished in
+    # 9m59s on the v0.21.0 tag with a cache hit, and was killed at the wall on
+    # v0.21.1 with a miss, after 13.6 minutes of `go: downloading` stalls. The
+    # prefix fallback added in go-test makes a total miss far less likely, but a
+    # budget that only holds when the cache hits is the wrong shape for the one
+    # place a failure is most expensive -- a release run (#2663).
+    timeout-minutes: 30
     permissions:
       actions: read
       contents: read
@@ -68,6 +74,7 @@ jobs:
           helm_version: ${{ steps.versions.outputs.helm }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
           oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
+          privileged_ci: ${{ inputs.privileged_ci }}
 
   lint:
     name: Lint

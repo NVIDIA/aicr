@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'Setup Build Tools'
-description: 'Install build, release, and testing tools (ko, syft, crane, goreleaser, chainsaw, helm, helmfile, kubectl, kind, yq, flux)'
+description: 'Install build, release, and testing tools (ko, syft, crane, oras, oasdiff, goreleaser, chainsaw, helm, helmfile, kubectl, kind, yq, flux, hauler, zarf, ctlptl)'
 
 inputs:
   install_ko:
@@ -46,6 +46,14 @@ inputs:
     default: ''
   oras_sha256:
     description: 'oras SHA256 checksum for linux/amd64 (from .settings.yaml via load-versions; required when install_oras=true)'
+    required: false
+    default: ''
+  install_oasdiff:
+    description: 'Install oasdiff (true/false)'
+    required: false
+    default: 'false'
+  oasdiff_version:
+    description: 'oasdiff version (from .settings.yaml via load-versions; required when install_oasdiff=true)'
     required: false
     default: ''
   install_goreleaser:
@@ -242,6 +250,58 @@ runs:
         sudo chmod +x /usr/local/bin/oras
         rm -rf "${ORAS_TMP}"
         echo "oras installed: $(oras version 2>&1 | grep -E '^Version:' || echo "${ORAS_VERSION}")"
+
+    # Binary release rather than `go install`, for the same reason as #2664:
+    # `go install pkg@version` builds outside the main module, so go.sum covers
+    # none of the tool's dependencies and each is authenticated against
+    # sum.golang.org live. A checksum-database outage then fails the job, which
+    # is what took down tests / E2E on the v0.21.1 release.
+    #
+    # The checksum is fetched from the release rather than pinned in
+    # .settings.yaml, matching the crane block above and the oasdiff install in
+    # tools/setup-tools. That catches corruption but not a compromised upstream
+    # release, which a pinned digest would.
+    #
+    # Not pinning here is a consistency choice, not a security argument. Token
+    # scope is the weaker half of the case: attach-source holds packages: write
+    # and id-token: write while this runs with contents: read, but a token scope
+    # does not constrain what an executed binary does on the runner, and
+    # tests / Test runs on every PR whereas attach-source runs once per release
+    # -- so by frequency this tool has the wider exposure, not the narrower one.
+    # Pinning it means a .settings.yaml key, a refresh script, and a Renovate
+    # postUpgradeTasks hook, which belongs with the rest of #2666 rather than
+    # bolted on here.
+    - name: Install oasdiff
+      if: inputs.install_oasdiff == 'true'
+      shell: bash
+      # Routed through env rather than interpolated into the script body: the
+      # value comes from a checked-out .settings.yaml, which is fork-controlled
+      # on the ok-to-test path. Matches the kubectl/kind/yq/flux blocks below.
+      env:
+        OASDIFF_INPUT_VERSION: ${{ inputs.oasdiff_version }}
+      run: |
+        set -euo pipefail
+        OASDIFF_VERSION="${OASDIFF_INPUT_VERSION#v}"
+        if [[ -z "${OASDIFF_VERSION}" ]]; then
+          echo "::error::install_oasdiff=true requires oasdiff_version"
+          exit 1
+        fi
+        OASDIFF_BASE="https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}"
+        OASDIFF_TAR="oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+        OASDIFF_TMP="$(mktemp -d)"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${OASDIFF_TMP}/${OASDIFF_TAR}" "${OASDIFF_BASE}/${OASDIFF_TAR}"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${OASDIFF_TMP}/checksums.txt" "${OASDIFF_BASE}/checksums.txt"
+        EXPECTED=$(grep "  ${OASDIFF_TAR}$" "${OASDIFF_TMP}/checksums.txt" | awk '{print $1}')
+        ACTUAL=$(sha256sum "${OASDIFF_TMP}/${OASDIFF_TAR}" | awk '{print $1}')
+        if [[ -z "${EXPECTED}" || "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::oasdiff checksum mismatch: expected '${EXPECTED}', got '${ACTUAL}'"
+          exit 1
+        fi
+        tar -xzf "${OASDIFF_TMP}/${OASDIFF_TAR}" -C "${OASDIFF_TMP}"
+        sudo mv "${OASDIFF_TMP}/oasdiff" /usr/local/bin/oasdiff
+        sudo chmod +x /usr/local/bin/oasdiff
+        rm -rf "${OASDIFF_TMP}"
+        echo "oasdiff installed: $(oasdiff --version 2>&1 | head -1 || echo "${OASDIFF_VERSION}")"
 
     - name: Validate GoReleaser version input
       if: inputs.install_goreleaser == 'true'
