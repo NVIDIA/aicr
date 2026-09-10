@@ -140,11 +140,13 @@ func resolveBuildConfig(criteria *Criteria, opts ...BuildOption) (*buildConfig, 
 	if cfg.tcpxoInterfaces != nil {
 		if criteria != nil && criteria.Service != "" && criteria.Service != CriteriaServiceAny &&
 			criteria.Service != CriteriaServiceGKE {
+
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"GKE TCPXO interfaces can only be set when recipe service is gke")
 		}
 		if criteria != nil && criteria.Accelerator != "" && criteria.Accelerator != CriteriaAcceleratorAny &&
 			criteria.Accelerator != CriteriaAcceleratorH100 {
+
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"GKE TCPXO interfaces are supported on h100 (a3-megagpu-8g) recipes only")
 		}

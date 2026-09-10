@@ -284,10 +284,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	recipeResult = &validated
 	profileBaseline := recipeResult
 
-	if err := b.enforceAccountingOwnership(recipeResult); err != nil {
-		return nil, err
-	}
-	if err := b.enforceGKETCPXOOwnership(recipeResult); err != nil {
+	if err := b.enforceConfigurationOwnership(recipeResult); err != nil {
 		return nil, err
 	}
 
@@ -565,6 +562,17 @@ func accountingValuesEqual(actual, expected any) bool {
 	default:
 		return reflect.DeepEqual(actual, expected)
 	}
+}
+
+// enforceConfigurationOwnership runs every typed-configuration ownership gate
+// before component filtering, so a required component cannot disappear before
+// a gate observes it. One call site keeps Make's statement budget under
+// funlen's; the gates themselves stay separate functions with separate tests.
+func (b *DefaultBundler) enforceConfigurationOwnership(result *recipe.RecipeResult) error {
+	if err := b.enforceAccountingOwnership(result); err != nil {
+		return err
+	}
+	return b.enforceGKETCPXOOwnership(result)
 }
 
 // enforceAccountingOwnership prevents bundle-time inputs from becoming a

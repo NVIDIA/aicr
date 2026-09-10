@@ -242,6 +242,7 @@ func GKETCPXOIntrospectionInterfaces() []NetworkInterfaceMapping {
 func GKETCPXOIntrospectionBuildOptions(c *Criteria) []BuildOption {
 	if c == nil || c.Service != CriteriaServiceGKE ||
 		c.Accelerator != CriteriaAcceleratorH100 || c.Platform != CriteriaPlatformKubeflow {
+
 		return nil
 	}
 	return []BuildOption{WithGKETCPXOInterfaces(gkeTCPXOIntrospectionMapping)}
@@ -293,6 +294,7 @@ func applyGKETCPXOInterfaces(result *RecipeResult, mapping *[]NetworkInterfaceMa
 	// ends up stating one thing and deploying another.
 	if !componentPresentAndEnabled(result, kubeflowTrainerComponentName) ||
 		!componentPresentAndEnabled(result, gkeNCCLTCXOComponentName) {
+
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("GKE TCPXO interfaces require the recipe to declare and enable components %q and %q; "+
 				"this recipe does not resolve both", kubeflowTrainerComponentName, gkeNCCLTCXOComponentName))
@@ -390,6 +392,7 @@ func (r *RecipeResult) validateGKEConfiguration() error {
 	}
 	if r.Criteria == nil || r.Criteria.Service != CriteriaServiceGKE ||
 		r.Criteria.Accelerator != CriteriaAcceleratorH100 {
+
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"configuration.gke.tcpxoInterfaces is only valid for an h100 GKE recipe")
 	}
@@ -401,6 +404,7 @@ func (r *RecipeResult) validateGKEConfiguration() error {
 	}
 	if !componentPresentAndEnabled(r, kubeflowTrainerComponentName) ||
 		!componentPresentAndEnabled(r, gkeNCCLTCXOComponentName) {
+
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("configuration.gke.tcpxoInterfaces requires the recipe to declare and enable "+
 				"components %q and %q", kubeflowTrainerComponentName, gkeNCCLTCXOComponentName))

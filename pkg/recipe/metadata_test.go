@@ -2274,6 +2274,7 @@ func TestComponentRefMergeWithPath(t *testing.T) {
 func tcpxoRequiredBuildOpts(cr *Criteria) []BuildOption {
 	if cr.Service == CriteriaServiceGKE && cr.Accelerator == CriteriaAcceleratorH100 &&
 		cr.Platform == CriteriaPlatformKubeflow {
+
 		return []BuildOption{WithGKETCPXOInterfaces(tcpxoTestMapping())}
 	}
 	return nil

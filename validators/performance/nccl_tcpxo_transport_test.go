@@ -28,7 +28,7 @@ import (
 
 func tcpxoInterfacesAnnotation(t *testing.T, mutate func(entries []gkeTCXOInterfaceEntry) []gkeTCXOInterfaceEntry) string {
 	t.Helper()
-	entries := []gkeTCXOInterfaceEntry{{InterfaceName: "eth0", Network: "default"}}
+	entries := []gkeTCXOInterfaceEntry{{InterfaceName: "eth0", Network: gkeTCXODefaultNetwork}}
 	for i := 1; i <= 8; i++ {
 		entries = append(entries, gkeTCXOInterfaceEntry{
 			InterfaceName: fmt.Sprintf("eth%d", i),
