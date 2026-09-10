@@ -127,11 +127,6 @@ func TestLoadRejectsBadHeaders(t *testing.T) {
 			body:     strings.Replace(validRecord("nw"), `from: "<0.18.0"`, `from: "^0.18.0"`, 1),
 			wantText: []string{"from"},
 		},
-		{
-			name:     "prerelease in from is rejected",
-			body:     strings.Replace(validRecord("nw"), `from: "<0.18.0"`, `from: "<0.18.0-rc.1"`, 1),
-			wantText: []string{"prerelease"},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

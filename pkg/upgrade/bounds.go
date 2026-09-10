@@ -23,17 +23,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
-// prereleasePolicy controls whether a range bound may name a prerelease.
-// Forbidden in `from`; allowed in `to`, because a component pinned at a
-// prerelease (grove, v0.1.0-alpha.12) otherwise cannot have a record whose
-// ceiling reaches its own pin.
-type prereleasePolicy int
-
-const (
-	prereleaseForbidden prereleasePolicy = iota
-	prereleaseAllowed
-)
-
 // newConstraint is the only place IncludePrerelease is set. Masterminds
 // otherwise derives prerelease inclusion per AND-group from whether the
 // constraint text contains a prerelease, which makes Check disagree with
@@ -97,7 +86,7 @@ func (b bounds) contains(v *semver.Version) bool {
 // check is worse than a rejected record. Every rejection names the full
 // constraint text, since callers (Task 5's aggregation) surface these
 // messages without the surrounding record context.
-func parseBounds(constraint string, pre prereleasePolicy) (bounds, error) {
+func parseBounds(constraint string) (bounds, error) {
 	if strings.Contains(constraint, "||") {
 		return bounds{}, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("range %q uses ||; only a single AND-group of simple comparators is allowed", constraint))
@@ -140,7 +129,7 @@ func parseBounds(constraint string, pre prereleasePolicy) (bounds, error) {
 				fmt.Sprintf("range %q: comparator %q is missing a version; the operator and version must not be separated by a space (write %q)",
 					constraint, f, suggestion))
 		}
-		v, err := parseRangeVersion(constraint, verStr, pre)
+		v, err := parseRangeVersion(constraint, verStr)
 		if err != nil {
 			return bounds{}, err
 		}
@@ -196,18 +185,21 @@ func splitComparator(tok string) (op, ver string) {
 }
 
 // parseRangeVersion parses one bound's version under the grammar's rules:
-// full X.Y.Z, no wildcard, no build metadata, and a prerelease only where the
-// policy allows one. constraint is the full range text the version came
-// from, carried only so rejections can name it.
-func parseRangeVersion(constraint, s string, pre prereleasePolicy) (*semver.Version, error) {
+// full X.Y.Z, no wildcard, no build metadata. A prerelease identifier is
+// legal on either bound — newConstraint sets IncludePrerelease globally, so
+// Masterminds agrees with these bounds numerically regardless of which side
+// names one, and a component pinned at a prerelease (grove, v0.1.0-alpha.12)
+// cannot otherwise have an honest record. constraint is the full range text
+// the version came from, carried only so rejections can name it.
+func parseRangeVersion(constraint, s string) (*semver.Version, error) {
 	if strings.Contains(s, "+") {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("range %q: version %q carries build metadata, which semver orders as equal; "+
 				"a bump that changes only build metadata would move past no ceiling", constraint, s))
 	}
 	// The wildcard check runs on core (the release segment only), not the
-	// raw token: a prerelease tag legal under pre may itself contain an x or
-	// X (e.g. "1.2.3-hotfix.1"), which is not a wildcard.
+	// raw token: a legal prerelease tag may itself contain an x or X (e.g.
+	// "1.2.3-hotfix.1"), which is not a wildcard.
 	core := strings.TrimPrefix(s, "v")
 	if idx := strings.IndexAny(core, "-+"); idx >= 0 {
 		core = core[:idx]
@@ -225,10 +217,6 @@ func parseRangeVersion(constraint, s string, pre prereleasePolicy) (*semver.Vers
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("range %q: invalid version %q", constraint, s), err)
-	}
-	if v.Prerelease() != "" && pre == prereleaseForbidden {
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("range %q: version %q names a prerelease, which is not allowed here", constraint, s))
 	}
 	return v, nil
 }

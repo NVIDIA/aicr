@@ -144,10 +144,10 @@ func checkTransitionReadable(path string, idx int, tr *Transition) error {
 	if tr.Summary == "" {
 		return errors.New(errors.ErrCodeInvalidRequest, where+" is missing summary")
 	}
-	if _, err := parseBounds(tr.From, prereleaseForbidden); err != nil {
+	if _, err := parseBounds(tr.From); err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, where+" has an invalid from range", err)
 	}
-	if _, err := parseBounds(tr.To, prereleaseAllowed); err != nil {
+	if _, err := parseBounds(tr.To); err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, where+" has an invalid to range", err)
 	}
 	return nil

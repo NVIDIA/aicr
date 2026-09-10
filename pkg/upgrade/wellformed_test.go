@@ -898,3 +898,41 @@ func TestValidateHooks(t *testing.T) {
 		})
 	}
 }
+
+// grove (recipes/registry.yaml:637) is pinned at a prerelease,
+// v0.1.0-alpha.12, and its history crosses a second prerelease boundary
+// before that pin. A ban on a prerelease in `from` made this shape
+// unrecordable: the first transition's `from` needs an alpha ceiling of its
+// own to hand off to the second without leaving a gap. Lifting the ban is
+// what makes this record — and grove's pin — authorable at all.
+func TestValidateGroveShapedRecordPasses(t *testing.T) {
+	set, comps := rec("v0.1.0-alpha.12",
+		tr(func(x *Transition) {
+			x.From = "<0.1.0-alpha.9"
+			x.To = ">=0.1.0-alpha.9 <=0.1.0-alpha.11"
+		}),
+		tr(func(x *Transition) {
+			x.From = "<0.1.0-alpha.12"
+			x.To = ">=0.1.0-alpha.12 <=0.1.0-alpha.12"
+		}),
+	)
+	if err := set.Validate(comps); err != nil {
+		t.Fatalf("Validate error = %v, want a clean grove-shaped record", err)
+	}
+}
+
+// Lifting the from-side prerelease ban does not also legalize naming an
+// unreleased boundary: a `to` ceiling of the bare release ">=0.1.0 <=0.1.0"
+// still reaches past a prerelease pin, because semver orders a release above
+// all of its own prereleases. This is the shape rule 2 rejected before the
+// ban was lifted, and must keep rejecting after.
+func TestValidatePinCeilingRejectsReleaseCeilingAtPrereleasePin(t *testing.T) {
+	set, comps := rec("v0.1.0-alpha.12", tr(func(x *Transition) {
+		x.From = "<0.1.0"
+		x.To = ">=0.1.0 <=0.1.0"
+	}))
+	err := set.Validate(comps)
+	if !mentions(err, rule2Fragments...) {
+		t.Fatalf("Validate error = %v, want a rule 2 violation for reaching past the pin", err)
+	}
+}

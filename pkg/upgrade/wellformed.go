@@ -250,7 +250,7 @@ func checkStepGroups(where string, t *Transition) []string {
 // a record cannot make version claims nobody can verify. Relaxing this later is
 // the cheap direction if it proves wrong.
 func checkPinCeiling(where string, t *Transition, pin string) []string {
-	b, err := parseBounds(t.To, prereleaseAllowed)
+	b, err := parseBounds(t.To)
 	if err != nil {
 		// Not "already reported by the loader": Validate is exported on an
 		// exported map type, so a Set can be built without ever going
@@ -306,8 +306,8 @@ func checkPinCeiling(where string, t *Transition, pin string) []string {
 // that passes on an ambiguous condition" anti-pattern, and it is easy to write
 // by accident.
 func checkDirectional(where string, t *Transition) []string {
-	fb, ferr := parseBounds(t.From, prereleaseForbidden)
-	tb, terr := parseBounds(t.To, prereleaseAllowed)
+	fb, ferr := parseBounds(t.From)
+	tb, terr := parseBounds(t.To)
 	if ferr != nil {
 		return []string{where + " has an unparseable from range: " + ferr.Error()}
 	}
@@ -361,7 +361,7 @@ func checkCoverage(component string, trs []Transition, pin string) []string {
 	}
 	intervals := make([]bounds, 0, len(trs))
 	for i := range trs {
-		b, err := parseBounds(trs[i].From, prereleaseForbidden)
+		b, err := parseBounds(trs[i].From)
 		if err != nil {
 			// Rule 3 is a whole-record property, and the range that failed to
 			// parse may be the one bridging the gap, so a hole computed from
@@ -495,11 +495,11 @@ func checkDistinctBoundaries(component string, trs []Transition) []string {
 	seen := make(map[boundaryKey][]boundaryClaim, len(trs))
 	var v []string
 	for i := range trs {
-		b, err := parseBounds(trs[i].To, prereleaseAllowed)
+		b, err := parseBounds(trs[i].To)
 		if err != nil || b.lower.unbounded {
 			continue // reported elsewhere
 		}
-		from, ferr := parseBounds(trs[i].From, prereleaseForbidden)
+		from, ferr := parseBounds(trs[i].From)
 		if ferr != nil {
 			continue // reported by checkDirectional
 		}
