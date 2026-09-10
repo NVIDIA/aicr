@@ -174,13 +174,15 @@ Two details are easy to miss because they are not in the pod spec:
 
 This is the part no example can fill in for you. The
 `networking.gke.io/interfaces` annotation must name the eight GPU NIC `Network`
-objects **as they exist on your cluster**. AICR requires only that each name
-contain `gpu-nic`; the rest is chosen by whoever provisioned it, so prefixed
-forms such as `aicr-demo2-gpu-nic-0` are common.
+objects **as they exist on your cluster**, mapped to the right guest interface.
+AICR requires only that each name contain `gpu-nic`; the rest is chosen by
+whoever provisioned it, so prefixed forms such as `aicr-demo2-gpu-nic-0` are
+common.
 
-(On the shipped-runtime path above, these same eight names are what you pass
-to `--gke-tcpxo-interfaces` at recipe generation — the discovery step below is
-how you find them either way.)
+The `eth1`–`eth8` assignment is a provisioning decision: take the ordered
+mapping from whoever provisioned the cluster (its `GKENetworkParamSet` or
+network configuration), not from name order. Enumerating names answers only
+"which networks exist":
 
 ```shell
 kubectl get networks.networking.gke.io \
@@ -188,11 +190,14 @@ kubectl get networks.networking.gke.io \
 ```
 
 That prints bare names, which is what the annotation takes. `-o name` would
-prefix them with `network.networking.gke.io/` — not the form to paste.
+prefix them with `network.networking.gke.io/` — not the form to paste. Do not
+infer the interface assignment from this list's order.
+
+On the shipped-runtime path above, the same mapping is what you pass to
+`--gke-tcpxo-interfaces` at recipe generation.
 
 `Network` is cluster-scoped. If your role is namespace-only you will not be able
-to list them; ask whoever provisions the cluster for the eight names, or for the
-`GKENetworkParamSet` mapping.
+to list them; ask whoever provisions the cluster for the mapping.
 
 ### Do not set `resourcesPerNode`
 

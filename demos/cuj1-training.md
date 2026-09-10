@@ -68,10 +68,12 @@ aicr recipe \
 
 ```shell
 # The h100 GKE kubeflow recipe ships the torch-distributed-tcpxo runtime, so
-# generation requires the eight GPU-NIC network names of your cluster,
-# recorded in the recipe. Find them with:
-#   kubectl get networks.networking.gke.io \
-#     -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | grep gpu-nic
+# generation requires the cluster's ordered eth1..eth8 -> GPU-NIC Network
+# mapping, recorded in the recipe. Take the mapping from whoever provisioned
+# the cluster (its GKENetworkParamSet / provisioning configuration): the
+# interface assignment is a provisioning decision. Enumerating Network names
+# (kubectl get networks.networking.gke.io) shows which networks exist but NOT
+# which one binds ethN — do not infer the mapping from name order.
 aicr recipe \
   --service gke \
   --accelerator h100 \
@@ -203,6 +205,10 @@ spec:
   # ClusterTrainingRuntime carries the cluster-aware nodeSelector and
   # tolerations baked in at bundle time from --accelerated-node-selector /
   # --accelerated-node-toleration flags.
+  #
+  # On GKE clusters bundled from this recipe, the torch-distributed-tcpxo
+  # sibling runtime additionally wires GPUDirect-TCPXO (multi-NIC fabric).
+  # Reference it by name instead to run on the fabric.
   runtimeRef:
     name: torch-distributed
     apiGroup: trainer.kubeflow.org
