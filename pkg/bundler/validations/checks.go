@@ -2064,7 +2064,7 @@ func CheckGKETCPXOInterfacesCoherence(ctx context.Context, componentName string,
 	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
 		return nil, nil
 	}
-	if !recipeResult.ShipsGKETCPXORuntime() {
+	if !declaredUnionView(recipeResult).ShipsGKETCPXORuntime() {
 		return nil, nil
 	}
 	ref := recipeResult.GetComponentRef(componentName)

@@ -140,7 +140,7 @@ func flagMatchesName(f cli.Flag, name string) bool {
 //nolint:gocyclo // linear option resolution
 func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 	if validErr := validateSingleValueFlags(cmd, "recipe", "service", "accelerator",
-		"intent", "os", "platform", flagProfile, "snapshot", "config", "format", "output"); validErr != nil {
+		"intent", "os", "platform", flagProfile, flagGKETCPXOInterfaces, "snapshot", "config", "format", "output"); validErr != nil {
 		return validErr
 	}
 

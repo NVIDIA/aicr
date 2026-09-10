@@ -102,7 +102,14 @@ func TestGKETCPXODaemonPluginPairing(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", site.label, err)
 		}
-		for _, match := range gkeTCXODaemonImageRe.FindAllSubmatch(data, -1) {
+		matches := gkeTCXODaemonImageRe.FindAllSubmatch(data, -1)
+		if len(matches) == 0 {
+			// A TCPXO workload without the daemon is a defect, not an absence of
+			// evidence; report it rather than skipping the site silently.
+			t.Errorf("%s carries no tcpgpudmarxd-dev image tag", site.label)
+			continue
+		}
+		for _, match := range matches {
 			if got := string(match[1]); got != wantDaemon {
 				t.Errorf("%s daemon pin = %s, want %s (pairs with plugin %s)",
 					site.label, got, wantDaemon, pluginTag)
@@ -111,11 +118,11 @@ func TestGKETCPXODaemonPluginPairing(t *testing.T) {
 	}
 }
 
-// TestTCPIXORuntimeRendersRecordedMapping proves the recipe-recorded interface
+// TestTCPXORuntimeRendersRecordedMapping proves the recipe-recorded interface
 // mapping is what lands in the rendered annotation — in order, behind the
 // fixed eth0 → default entry — and that the fabric wiring the runtime
 // promises is actually present in the output.
-func TestTCPIXORuntimeRendersRecordedMapping(t *testing.T) {
+func TestTCPXORuntimeRendersRecordedMapping(t *testing.T) {
 	content, err := fs.ReadFile(FS,
 		"components/kubeflow-trainer/manifests/torch-distributed-tcpxo-cluster-training-runtime.yaml")
 	if err != nil {
@@ -179,13 +186,13 @@ func TestTCPIXORuntimeRendersRecordedMapping(t *testing.T) {
 	}
 }
 
-// TestTCPIXORuntimeFailsVisibleWithoutMapping pins the deliberate no-guard
+// TestTCPXORuntimeFailsVisibleWithoutMapping pins the deliberate no-guard
 // contract: with the mapping absent the annotation renders visibly
 // incomplete (eth0 only) rather than silently omitting the interfaces block —
 // the Go gates (recipe generation fail-closed, bundle ownership) are the
 // enforcement, and a template that hides the omission would mask their
 // bypass. See issue #2296.
-func TestTCPIXORuntimeFailsVisibleWithoutMapping(t *testing.T) {
+func TestTCPXORuntimeFailsVisibleWithoutMapping(t *testing.T) {
 	content, err := fs.ReadFile(FS,
 		"components/kubeflow-trainer/manifests/torch-distributed-tcpxo-cluster-training-runtime.yaml")
 	if err != nil {

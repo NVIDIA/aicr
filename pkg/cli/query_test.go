@@ -365,3 +365,42 @@ func TestRecipeCommandRejectsRuntimeInventoryWithoutComponent(t *testing.T) {
 		t.Fatalf("command error = %v, want the missing-component rejection", err)
 	}
 }
+
+// TestRecipeAndQueryRejectRepeatedGKETCPXOInterfaces covers the single-value
+// contract for the required mapping: urfave/cli keeps the last repeated value
+// silently, so the flag must be in each command's validateSingleValueFlags
+// list (CodeRabbit PR #2705).
+func TestRecipeAndQueryRejectRepeatedGKETCPXOInterfaces(t *testing.T) {
+	mapping := "eth1=gpu-nic-0,eth2=gpu-nic-1,eth3=gpu-nic-2,eth4=gpu-nic-3," +
+		"eth5=gpu-nic-4,eth6=gpu-nic-5,eth7=gpu-nic-6,eth8=gpu-nic-7"
+
+	tests := []struct {
+		name string
+		cmd  func() *cli.Command
+		args []string
+	}{
+		{
+			name: "recipe",
+			cmd:  recipeCmd,
+			args: []string{"recipe", "--service", "gke", "--accelerator", "h100",
+				"--os", "cos", "--intent", "training", "--platform", "kubeflow",
+				"--gke-tcpxo-interfaces", mapping, "--gke-tcpxo-interfaces", mapping},
+		},
+		{
+			name: "query",
+			cmd:  queryCmd,
+			args: []string{"query", "--service", "gke", "--selector", "deploymentOrder",
+				"--gke-tcpxo-interfaces", mapping, "--gke-tcpxo-interfaces", mapping},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cmd().Run(t.Context(), tt.args)
+			if err == nil || !strings.Contains(err.Error(),
+				"flag --gke-tcpxo-interfaces can only be specified once") {
+
+				t.Fatalf("%s error = %v, want repeated flag rejection", tt.name, err)
+			}
+		})
+	}
+}
