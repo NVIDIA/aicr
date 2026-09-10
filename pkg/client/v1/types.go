@@ -522,7 +522,7 @@ type RecipeResult struct {
 }
 
 // SelectedProfile is the stable facade projection of a recipe profile.
-// It is populated only for aicr.run/v1alpha3 results; an unprofiled
+// It is populated only for aicr.run/v1beta2 (or legacy aicr.run/v1alpha3) results; an unprofiled
 // composition leaves it nil.
 type SelectedProfile struct {
 	// Name is the declaration this selection came from, e.g. "gpuStack".

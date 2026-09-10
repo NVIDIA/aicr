@@ -1092,7 +1092,11 @@ func TestProfileArtifactContract(t *testing.T) {
 }
 
 func TestDecodeRecipeResult_ProfileStrictness(t *testing.T) {
-	valid := []byte(`apiVersion: aicr.run/v1alpha3
+	// Built from the constant, not a literal. The "legacy version" case below
+	// mutates this fixture with strings.Replace(RecipeProfileAPIVersion, ...),
+	// which silently became a no-op at the N+1 emitter switch when the constant
+	// moved off the hardcoded aicr.run/v1alpha3 and stopped matching.
+	valid := []byte(`apiVersion: ` + RecipeProfileAPIVersion + `
 kind: RecipeResult
 metadata:
   selectedProfile:

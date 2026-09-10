@@ -15,7 +15,10 @@
 package header
 
 import (
+	"fmt"
 	"time"
+
+	"github.com/NVIDIA/aicr/pkg/deprecation"
 )
 
 // AICR artifact API versioning. These constants are the single source of
@@ -75,18 +78,19 @@ const (
 
 	// StableGroupVersion is the value emitted for the ADR-022 stable artifact
 	// track: Snapshot, the default RecipeResult, RecipeCriteria, and
-	// BundleProvenance. Its §2 target is GroupVersionV1.
-	StableGroupVersion = GroupVersion
+	// BundleProvenance. It reached its §2 target in v0.22 (#2416); the readers
+	// still accept GroupVersion until #2417.
+	StableGroupVersion = GroupVersionV1
 
 	// AuthoringGroupVersion is the value emitted for the ADR-022 authoring and
 	// configuration track: AICRConfig, ordinary RecipeMetadata, RecipeMixin,
-	// and ComponentRegistry. Its §2 target is GroupVersionV1Beta1.
-	AuthoringGroupVersion = GroupVersion
+	// and ComponentRegistry. It reached its §2 target in v0.22 (#2416).
+	AuthoringGroupVersion = GroupVersionV1Beta1
 
 	// ProfileGroupVersion is the value emitted for the ADR-022 profile-bearing
-	// track: profile RecipeMetadata and RecipeResult. Its §2 target is
-	// GroupVersionV1Beta2.
-	ProfileGroupVersion = RecipeResultGroupVersion
+	// track: profile RecipeMetadata and RecipeResult. It reached its §2 target
+	// in v0.22 (#2416).
+	ProfileGroupVersion = GroupVersionV1Beta2
 
 	// GroupVersionV1Beta1 is the target authoring/configuration group/version.
 	GroupVersionV1Beta1 = APIGroup + "/" + APIVersionV1Beta1
@@ -97,6 +101,37 @@ const (
 	// GroupVersionV1 is the target stable public artifact group/version.
 	GroupVersionV1 = APIGroup + "/" + APIVersionV1
 )
+
+// AlphaRemovedIn is the release that stops reading the alpha apiVersion values
+// and the legacy empty header. ADR-022 §3 binds N+2 to v1.0.0 (#2417): shipping
+// v1.0.0 while it still reads alpha would make alpha acceptance part of the
+// frozen v1 surface.
+const AlphaRemovedIn = "v1.0.0"
+
+// WarnDeprecatedAPIVersion emits a deprecation warning when an artifact carries
+// an alpha or absent apiVersion, and does nothing otherwise. target is the §2
+// value the caller's track expects, so the warning says what to write instead.
+//
+// The subject embeds the file path, which makes it the deduplication key: a
+// catalog scan over many files warns once per offending file rather than once
+// per process. Callers with no file — a request body, an in-memory decode —
+// should not call this; REST deprecations travel as headers instead.
+func WarnDeprecatedAPIVersion(path, apiVersion, target string) {
+	var subject string
+	switch apiVersion {
+	case "":
+		subject = fmt.Sprintf("an absent apiVersion in %s", path)
+	case GroupVersion, RecipeResultGroupVersion:
+		subject = fmt.Sprintf("apiVersion %s in %s", apiVersion, path)
+	default:
+		return
+	}
+	deprecation.Warn(deprecation.Notice{
+		Subject:     subject,
+		Replacement: target,
+		RemovedIn:   AlphaRemovedIn,
+	})
+}
 
 // IsSupportedAPIVersion reports whether v is an artifact apiVersion this binary
 // understands. The empty string is intentionally NOT supported here: callers

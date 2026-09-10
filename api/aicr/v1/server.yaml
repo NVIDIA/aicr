@@ -1600,13 +1600,11 @@ components:
       description: >
         Complete legacy, profile-aware, or Slurm-accounting-aware recipe
         response with metadata and component references. Recipes without typed
-        configuration emitted by this release use aicr.run/v1alpha2;
-        profile-bearing recipes and recipes carrying
-        configuration.slurm.accounting use aicr.run/v1alpha3. The schema also
-        admits both ADR-022 targets, aicr.run/v1 for the default track and
-        aicr.run/v1beta2 for the profile track, so a client generated from this
-        spec tolerates them a release before the emitter switch. This release
-        emits neither.
+        configuration emitted by this release use aicr.run/v1; profile-bearing
+        recipes and recipes carrying configuration.slurm.accounting use
+        aicr.run/v1beta2. The schema also still admits the superseded
+        aicr.run/v1alpha2 and aicr.run/v1alpha3, so responses captured before
+        the ADR-022 emitter switch keep validating; v1.0.0 removes them.
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase"
         - type: object
@@ -1615,7 +1613,7 @@ components:
             apiVersion:
               type: string
               enum: [aicr.run/v1alpha2, aicr.run/v1alpha3, aicr.run/v1, aicr.run/v1beta2]
-              example: aicr.run/v1alpha2
+              example: aicr.run/v1
             kind:
               type: string
               enum: [RecipeResult]
@@ -1658,9 +1656,9 @@ components:
         - $ref: "#/components/schemas/RecipeResponse"
         - type: object
           description: >
-            Closed profile-bearing RecipeResult shape. aicr.run/v1alpha3 is
-            emitted; aicr.run/v1beta2 is accepted during ADR-022 Release N.
-            Unknown fields are rejected at its typed object boundaries.
+            Closed profile-bearing RecipeResult shape. aicr.run/v1beta2 is
+            emitted; the superseded aicr.run/v1alpha3 is still accepted until
+            v1.0.0. Unknown fields are rejected at its typed object boundaries.
           required: [metadata, componentRefs]
           additionalProperties: false
           properties:
@@ -1803,8 +1801,8 @@ components:
         - type: object
           description: >
             Closed accounting-configured RecipeResult shape without a selected
-            profile. aicr.run/v1alpha3 is emitted; aicr.run/v1beta2 is
-            accepted during ADR-022 Release N.
+            profile. aicr.run/v1beta2 is emitted; the superseded
+            aicr.run/v1alpha3 is still accepted until v1.0.0.
           required: [metadata, configuration, componentRefs]
           additionalProperties: false
           properties:

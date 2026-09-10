@@ -164,15 +164,15 @@ func TestADR022TargetIsReadableBeforeTheEmitterSwitch(t *testing.T) {
 	}
 }
 
-// TestADR022EmittersAreStillOnAlpha pins the migration stage. AICR is in
-// ADR-022 §3 Release N: readers accept both tracks, emitters still write the
-// alpha values.
+// TestADR022EmittersAreOnTarget pins the migration stage. AICR is in ADR-022 §3
+// Release N+1 (v0.22, issue #2416): every emitter writes its §2 target, and the
+// readers still accept the alpha values until N+2 (v1.0.0, issue #2417).
 //
-// The emitter switch (v0.22, issue #2416) makes this test fail, which is the
-// point — it forces that release to update this table rather than flipping
-// constants and discovering the blast radius in review. When it does, invert
-// this to assert emitted == target and delete the alpha branch.
-func TestADR022EmittersAreStillOnAlpha(t *testing.T) {
+// This is the inverted form of the Release N test, which asserted the opposite
+// and failed at the switch by design. Keep it: an emitter silently reverting to
+// an alpha value — most likely by aliasing header.GroupVersion directly instead
+// of its track constant — is exactly what this catches.
+func TestADR022EmittersAreOnTarget(t *testing.T) {
 	t.Parallel()
 
 	alpha := map[string]bool{
@@ -183,39 +183,44 @@ func TestADR022EmittersAreStillOnAlpha(t *testing.T) {
 	for _, row := range adr022Map() {
 		t.Run(row.kind, func(t *testing.T) {
 			t.Parallel()
-			if !alpha[row.emitted] {
-				t.Errorf("emitted apiVersion %q is not an alpha value; if this is the "+
-					"ADR-022 emitter switch, update this test and the migration table "+
-					"in RELEASE.md together", row.emitted)
+			if alpha[row.emitted] {
+				t.Errorf("emitted apiVersion %q is still an alpha value; Release N+1 "+
+					"switched every emitter to its §2 target", row.emitted)
 			}
-			if row.emitted == row.target {
-				t.Errorf("emitted apiVersion equals the target %q; emitters do not "+
-					"switch until Release N+1", row.target)
+			if row.emitted != row.target {
+				t.Errorf("emitted apiVersion %q is not the §2 target %q; update this "+
+					"table and the migration table in RELEASE.md together",
+					row.emitted, row.target)
 			}
 		})
 	}
 }
 
-// TestADR022TracksShareAlphaButNotTargets is why the stable and authoring
-// emitter constants are separate despite carrying the same string today.
+// TestADR022TracksHaveDiverged is why the stable and authoring emitter
+// constants are separate.
 //
-// header.StableGroupVersion == header.AuthoringGroupVersion during the
-// reader-first release, so a package that aliases either one, or aliases
-// header.GroupVersion directly, looks correct now and silently emits the wrong
-// value at the switch. Snapshot goes to aicr.run/v1 while AICRConfig goes to
-// aicr.run/v1beta1; one shared constant cannot serve both.
-func TestADR022TracksShareAlphaButNotTargets(t *testing.T) {
+// They carried the same string through the reader-first release, which is what
+// made a package aliasing either one — or aliasing header.GroupVersion directly
+// — look correct while silently emitting the wrong value at the switch. Release
+// N+1 separated them: Snapshot emits aicr.run/v1 while AICRConfig emits
+// aicr.run/v1beta1, so a collapsed alias now shows up as a wrong value rather
+// than a latent one.
+func TestADR022TracksHaveDiverged(t *testing.T) {
 	t.Parallel()
 
-	if header.StableGroupVersion != header.AuthoringGroupVersion {
-		t.Fatalf("the tracks have already diverged (stable %q, authoring %q); "+
-			"this test documents the reader-first release and needs updating",
-			header.StableGroupVersion, header.AuthoringGroupVersion)
+	tracks := map[string]string{
+		"stable":    header.StableGroupVersion,
+		"authoring": header.AuthoringGroupVersion,
+		"profile":   header.ProfileGroupVersion,
 	}
 
-	if header.GroupVersionV1 == header.GroupVersionV1Beta1 {
-		t.Errorf("stable and authoring targets are both %q; ADR-022 §2 sends them "+
-			"to different maturities", header.GroupVersionV1)
+	seen := make(map[string]string, len(tracks))
+	for name, gv := range tracks {
+		if other, dup := seen[gv]; dup {
+			t.Errorf("tracks %q and %q both emit %q; ADR-022 §2 sends them to "+
+				"different maturities", other, name, gv)
+		}
+		seen[gv] = name
 	}
 }
 

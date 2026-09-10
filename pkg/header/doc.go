@@ -23,7 +23,7 @@
 //
 //	type Header struct {
 //	    Kind       Kind              `json:"kind,omitempty" yaml:"kind,omitempty"`             // Resource type (Snapshot, Recipe, RecipeResult)
-//	    APIVersion string            `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"` // API version (e.g., "aicr.run/v1alpha2")
+//	    APIVersion string            `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"` // API version (e.g., "aicr.run/v1")
 //	    Metadata   map[string]string `json:"metadata,omitempty" yaml:"metadata,omitempty"`     // Free-form string metadata (timestamp, version, etc.)
 //	}
 //
@@ -57,7 +57,7 @@
 // Headers serialize consistently to JSON and YAML:
 //
 //	{
-//	  "apiVersion": "aicr.run/v1alpha2",
+//	  "apiVersion": "aicr.run/v1",
 //	  "kind": "Recipe",
 //	  "metadata": {
 //	    "timestamp": "2025-12-30T10:30:00Z",

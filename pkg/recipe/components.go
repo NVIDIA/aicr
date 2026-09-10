@@ -501,7 +501,7 @@ func validateComponentRegistryHeader(registry *ComponentRegistry, source string)
 	if !header.IsSupportedAuthoringAPIVersion(registry.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("%s has apiVersion %q, expected %q or %q for %s; update the registry header for this aicr release",
-				source, registry.APIVersion, ComponentRegistryAPIVersion, header.GroupVersionV1Beta1, ComponentRegistryKind))
+				source, registry.APIVersion, header.GroupVersion, header.GroupVersionV1Beta1, ComponentRegistryKind))
 	}
 	return nil
 }

@@ -484,7 +484,7 @@ A declaring overlay uses recipe apiVersion `aicr.run/v1alpha3`:
 
 ```yaml
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   name: example-service
 spec:
@@ -940,7 +940,7 @@ go test -v ./pkg/recipe/... -run TestConstraintPathsUseValidMeasurementTypes
 **Example:**
 ```yaml
 # recipes/overlays/gb200-eks-ubuntu-training.yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: gb200-eks-ubuntu-training

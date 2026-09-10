@@ -128,7 +128,7 @@ metadata:
 data:
   snapshot.yaml: |
     # Complete snapshot YAML stored as ConfigMap data
-    apiVersion: aicr.run/v1alpha2
+    apiVersion: aicr.run/v1
     kind: Snapshot
     measurements: [...]
 ```
@@ -705,7 +705,7 @@ spec:
 
 **YAML:**
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 kind: Snapshot
 measurements:
   - type: K8s

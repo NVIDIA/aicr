@@ -28,7 +28,7 @@ The equivalent `AICRConfig` input is:
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   recipe:
     criteria:
