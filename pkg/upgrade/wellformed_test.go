@@ -443,6 +443,37 @@ func TestValidatePinCeilingSkipsReplacesOnlyRecord(t *testing.T) {
 	}
 }
 
+// parseBounds treats an empty or contradictory `to` interval (e.g.
+// ">=0.30.0 <=0.19.0") as harmless: both range representations agree it
+// matches nothing. Rule 2 only ever compares upper(to) against the pin, so
+// such a to must be rejected explicitly, or a record moving the floor
+// without moving the ceiling would validate clean while claiming a boundary
+// that does not exist.
+func TestValidatePinCeilingRejectsEmptyToRange(t *testing.T) {
+	tests := []struct {
+		name    string
+		to      string
+		wantErr bool
+	}{
+		{"lower above upper, both inclusive", ">=0.30.0 <=0.19.0", true},
+		{"lower far above upper, exclusive", ">=99.0.0 <0.0.1", true},
+		{"point interval at the pin is not empty", ">=0.20.0 <=0.20.0", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set, comps := rec("v0.20.0", tr(func(x *Transition) {
+				x.From = "<0.18.0"
+				x.To = tt.to
+			}))
+			err := set.Validate(comps)
+			got := err != nil && strings.Contains(err.Error(), "matches no version")
+			if got != tt.wantErr {
+				t.Fatalf("empty to-range violation = %v, want %v (err: %v)", got, tt.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestValidateDirectional(t *testing.T) {
 	tests := []struct {
 		name     string

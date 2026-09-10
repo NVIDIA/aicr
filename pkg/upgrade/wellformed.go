@@ -264,6 +264,20 @@ func checkPinCeiling(where string, t *Transition, pin string) []string {
 	if b.lower.unbounded {
 		v = append(v, where+" has a to range with no lower bound; without one the record would apply to every target version")
 	}
+	// parseBounds accepts an empty or contradictory interval (e.g.
+	// ">=0.30.0 <=0.19.0") because at the bounds layer such a range is
+	// harmless: it matches nothing. The ceiling check below only ever
+	// compares b.upper against the pin, so an inverted to would sail through
+	// it and validate a boundary at a version the record never actually
+	// reaches. Both sides must be bounded to ask the question at all.
+	if !b.lower.unbounded && !b.upper.unbounded {
+		cmp := b.lower.ver.Compare(b.upper.ver)
+		if cmp > 0 || (cmp == 0 && (!b.lower.inclusive || !b.upper.inclusive)) {
+			return []string{fmt.Sprintf(
+				"%s has a to range %q that matches no version: the lower bound %s is not below the upper bound %s",
+				where, t.To, b.lower.ver, b.upper.ver)}
+		}
+	}
 	if b.upper.unbounded {
 		return v
 	}
