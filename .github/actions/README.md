@@ -28,6 +28,17 @@ executable bits or `./script.sh` invocation.
 - `oasdiff_sha256` (**required**): pinned linux/amd64 SHA256 for the oasdiff release archive, from `load-versions`. The install fails closed when it is missing or malformed rather than falling back to the release's own `checksums.txt`
 - `privileged_ci` (optional): whether the checked-out ref is trusted (default: `"true"`). Only trusted runs save the Go cache; restore is unconditional. `ok-to-test` passes `false` because it runs an untrusted PR head inside the default branch's cache scope
 
+`go-lint`, `e2e`, and `install-e2e-tools` take a `privileged_ci` input too, but
+each gates a different cache, so the name alone does not tell you what stops:
+`go-lint` gates only golangci-lint's own `~/.cache/golangci-lint` entry,
+`install-e2e-tools` gates its `/usr/local/bin` tool cache, and `e2e` only
+forwards the value. None of the three writes the Go module or build cache —
+they restore `go-test`'s entry and never save it. In all four, the input
+suppresses the writes an ordinary fork run makes by default; on the `ok-to-test`
+path these action files are themselves checked out from the fork, so the gate is
+not a boundary against a crafted PR. Job-level skipping in `qualification.yaml`
+(`cli-e2e`, `security-scan`) is the control that holds there.
+
 Callers that set `apidiff_version` must check out full history with
 `fetch-depth: 0` so `make api-diff` can resolve a reachable stable release tag.
 

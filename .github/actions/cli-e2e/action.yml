@@ -52,8 +52,35 @@ runs:
     - name: Setup Go
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
       with:
+        # Caching is done explicitly below, for the reasons in go-lint.
+        cache: false
         go-version: '${{ inputs.go_version }}'
-        cache: true
+
+    - name: Resolve Go cache paths
+      id: gocache
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        echo "buildcache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+    # Restore-only against go-test's key, like lint and e2e. This job is
+    # already skipped on the fork path (`if: inputs.privileged_ci` on the job
+    # in qualification.yaml), so the motive here is storage rather than trust:
+    # setup-go was banking a second copy of these same two directories under
+    # `setup-go-*` on every go.sum change, and this repo's cache scope is over
+    # its ceiling and evicting. That eviction falls on the single `go-` entry
+    # lint and e2e now depend on entirely, so reclaiming the duplicate protects
+    # them rather than just saving space.
+    - name: Restore Go modules and build output
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: |
+          ${{ steps.gocache.outputs.modcache }}
+          ${{ steps.gocache.outputs.buildcache }}
+        key: go-${{ runner.os }}-${{ runner.arch }}-${{ inputs.go_version }}-${{ hashFiles('go.sum') }}
+        restore-keys: |
+          go-${{ runner.os }}-${{ runner.arch }}-${{ inputs.go_version }}-
 
     - name: Install Cosign
       uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
