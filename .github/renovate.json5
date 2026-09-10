@@ -341,6 +341,19 @@
       },
     },
 
+    // ---- oasdiff bumps refresh the pinned linux/amd64 SHA256 via post-upgrade script ----
+    // Same contract as oras above. The setup-build-tools action verifies the
+    // downloaded archive against this pin, so a version bump without a refreshed
+    // digest fails the tests job on the Renovate PR itself rather than later.
+    {
+      matchDepNames: ["oasdiff/oasdiff"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-oasdiff-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
     // ---- aiperf-bench base image is capped below python 3.14 ----
     // PR #1906 auto-bumped this to 3.14 and broke the UAT validator image
     // build (aiperf's pyzmq/uvloop had no cp314 wheels, and the single-stage

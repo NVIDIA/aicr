@@ -60,7 +60,17 @@ extract_sha() {
     echo "ERROR: no checksum entry matching ${pattern} in ${CHECKSUMS_URL}" >&2
     exit 1
   fi
-  echo "${line%% *}"
+  local sha="${line%% *}"
+  # Same check as update-oras-checksums. The value is interpolated into the
+  # awk regex in verify_block, where a metacharacter would change what the
+  # verification matches rather than being compared literally, and it is
+  # written into .settings.yaml for tools/setup-tools to pin against at
+  # install time. Both want a digest, so reject anything that is not one here.
+  if [[ ! "${sha}" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "ERROR: extracted value is not a sha256: '${sha}'" >&2
+    exit 1
+  fi
+  echo "${sha}"
 }
 
 LINUX_AMD64=$(extract_sha linux amd64)

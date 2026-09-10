@@ -74,6 +74,7 @@ jobs:
           helm_version: ${{ steps.versions.outputs.helm }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
           oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
+          oasdiff_sha256: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
           privileged_ci: ${{ inputs.privileged_ci }}
 
   lint:

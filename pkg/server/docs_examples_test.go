@@ -354,6 +354,12 @@ func continuesCommand(text string) bool {
 // reported, and the gate claimed coverage it did not have (#2655). Silent
 // under-coverage is worse than an honest skip, because the skip lines are what
 // a maintainer reads to know what is not being checked.
+//
+// `&` separates as well as `|` and `;`, which covers `&&` because tokenizeShell
+// emits the character twice. Without it `curl A && curl -X POST B` was a single
+// stage, and parseCurlSegment kept A's URL with B's method and body -- the gate
+// replayed a fabricated request that neither documented command issues, which
+// is worse than dropping one (#2672).
 func curlSegments(tokens []string) []curlStage {
 	var stages []curlStage
 	start := 0
@@ -364,7 +370,7 @@ func curlSegments(tokens []string) []curlStage {
 	}
 	for i, token := range tokens {
 		switch token {
-		case "|", ";":
+		case "|", ";", "&":
 			add(tokens[start:i])
 			start = i + 1
 		}
@@ -722,9 +728,14 @@ func tokenizeShell(command string) ([]string, error) {
 			}
 			current.WriteRune(c)
 			inWord = true
-		case '|', ';':
-			// Unquoted pipeline separator. Emitted as its own token so the
-			// caller can stop reading arguments at the end of this command.
+		case '|', ';', '&':
+			// Unquoted pipeline or list separator. Emitted as its own token so
+			// the caller can stop reading arguments at the end of this command.
+			//
+			// `&` matters because a URL's query string is full of them, and an
+			// unquoted one would end the command in a real shell too -- so
+			// every documented curl already quotes its URL, and a quoted `&`
+			// never reaches this switch.
 			flush()
 			tokens = append(tokens, string(c))
 		case ' ', '\t', '\n':
@@ -1049,6 +1060,31 @@ func TestParseCurlRequestsPipeline(t *testing.T) {
 			name:        "keyword-led non-curl stage is not a request",
 			command:     `if kubectl get pods; then echo ok; fi`,
 			wantMethods: nil,
+		},
+		{
+			// Previously one stage, replayed as A's URL with B's method and
+			// body. Fabricating a request is worse than dropping one, because
+			// the gate then reports a pass or a failure for something no
+			// documented command issues.
+			name: "&& separates two curl invocations",
+			command: `curl "http://localhost:8080/v1/recipe?service=eks" && ` +
+				`curl -X POST "http://localhost:8080/v1/recipe" -d '{"service":"eks"}'`,
+			wantMethods: []string{http.MethodGet, http.MethodPost},
+		},
+		{
+			// `||` already worked by accident, because tokenizeShell emits `|`
+			// per character. Pinned so the `&` addition does not regress it.
+			name: "|| separates two curl invocations",
+			command: `curl "http://localhost:8080/v1/recipe?service=eks" || ` +
+				`curl "http://localhost:8080/health"`,
+			wantMethods: []string{http.MethodGet, http.MethodGet},
+		},
+		{
+			// A quoted `&` is a query-string separator, not a command
+			// separator, and must not split the stage.
+			name:        "ampersand inside a quoted URL does not split",
+			command:     `curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100"`,
+			wantMethods: []string{http.MethodGet},
 		},
 		{
 			// A wrapper runs curl as a child, so replaying the stage would not

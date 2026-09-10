@@ -56,6 +56,10 @@ inputs:
     description: 'oasdiff version (from .settings.yaml via load-versions; required when install_oasdiff=true)'
     required: false
     default: ''
+  oasdiff_sha256:
+    description: 'oasdiff SHA256 checksum for linux/amd64 (from .settings.yaml via load-versions; required when install_oasdiff=true)'
+    required: false
+    default: ''
   install_goreleaser:
     description: 'Install goreleaser (true/false)'
     required: false
@@ -257,20 +261,21 @@ runs:
     # sum.golang.org live. A checksum-database outage then fails the job, which
     # is what took down tests / E2E on the v0.21.1 release.
     #
-    # The checksum is fetched from the release rather than pinned in
-    # .settings.yaml, matching the crane block above and the oasdiff install in
-    # tools/setup-tools. That catches corruption but not a compromised upstream
-    # release, which a pinned digest would.
+    # The digest is pinned in .settings.yaml rather than read from the
+    # checksums.txt served beside the tarball, matching the oras block above.
+    # A fetched manifest comes from the same release as the archive, so it
+    # detects corruption in transit but not a compromise of the release itself;
+    # a value committed and reviewed at this SHA does.
     #
-    # Not pinning here is a consistency choice, not a security argument. Token
-    # scope is the weaker half of the case: attach-source holds packages: write
-    # and id-token: write while this runs with contents: read, but a token scope
-    # does not constrain what an executed binary does on the runner, and
-    # tests / Test runs on every PR whereas attach-source runs once per release
-    # -- so by frequency this tool has the wider exposure, not the narrower one.
-    # Pinning it means a .settings.yaml key, a refresh script, and a Renovate
-    # postUpgradeTasks hook, which belongs with the rest of #2666 rather than
-    # bolted on here.
+    # That matters here specifically because this replaced `go install`, which
+    # authenticated every dependency against sum.golang.org -- a public
+    # transparency log with independent witnesses. Swapping that for an unpinned
+    # binary would have traded a real integrity guarantee for none. The pin is
+    # what keeps this a move from one check to another rather than a regression.
+    #
+    # tools/update-oasdiff-checksums refreshes it, wired to Renovate's
+    # postUpgradeTasks, so a version bump that forgets the digest fails this
+    # step on the Renovate PR itself.
     - name: Install oasdiff
       if: inputs.install_oasdiff == 'true'
       shell: bash
@@ -279,6 +284,7 @@ runs:
       # on the ok-to-test path. Matches the kubectl/kind/yq/flux blocks below.
       env:
         OASDIFF_INPUT_VERSION: ${{ inputs.oasdiff_version }}
+        OASDIFF_INPUT_SHA256: ${{ inputs.oasdiff_sha256 }}
       run: |
         set -euo pipefail
         OASDIFF_VERSION="${OASDIFF_INPUT_VERSION#v}"
@@ -286,15 +292,20 @@ runs:
           echo "::error::install_oasdiff=true requires oasdiff_version"
           exit 1
         fi
+        # Fail closed on a missing or malformed pin rather than falling back to
+        # the release's own checksums.txt: a silent fallback would make the
+        # pin's absence indistinguishable from its presence.
+        if [[ ! "${OASDIFF_INPUT_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+          echo "::error::install_oasdiff=true requires oasdiff_sha256 to be a 64-character lowercase sha256 (got '${OASDIFF_INPUT_SHA256}')"
+          exit 1
+        fi
         OASDIFF_BASE="https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}"
         OASDIFF_TAR="oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
         OASDIFF_TMP="$(mktemp -d)"
         curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${OASDIFF_TMP}/${OASDIFF_TAR}" "${OASDIFF_BASE}/${OASDIFF_TAR}"
-        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${OASDIFF_TMP}/checksums.txt" "${OASDIFF_BASE}/checksums.txt"
-        EXPECTED=$(grep "  ${OASDIFF_TAR}$" "${OASDIFF_TMP}/checksums.txt" | awk '{print $1}')
         ACTUAL=$(sha256sum "${OASDIFF_TMP}/${OASDIFF_TAR}" | awk '{print $1}')
-        if [[ -z "${EXPECTED}" || "${ACTUAL}" != "${EXPECTED}" ]]; then
-          echo "::error::oasdiff checksum mismatch: expected '${EXPECTED}', got '${ACTUAL}'"
+        if [[ "${ACTUAL}" != "${OASDIFF_INPUT_SHA256}" ]]; then
+          echo "::error::oasdiff checksum mismatch: expected '${OASDIFF_INPUT_SHA256}', got '${ACTUAL}'"
           exit 1
         fi
         tar -xzf "${OASDIFF_TMP}/${OASDIFF_TAR}" -C "${OASDIFF_TMP}"

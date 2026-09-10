@@ -182,6 +182,7 @@ runs:
       with:
         install_oasdiff: 'true'
         oasdiff_version: '${{ inputs.oasdiff_version }}'
+        oasdiff_sha256: '${{ inputs.oasdiff_sha256 }}'
 
     - name: Run Tests with Coverage
       id: gotest

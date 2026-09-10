@@ -25,6 +25,7 @@ executable bits or `./script.sh` invocation.
 - `setup_envtest_version` (required): setup-envtest version from `load-versions`
 - `apidiff_version` (optional): apidiff version from `load-versions`; when set, installs apidiff and runs `make api-diff` (default: empty, which skips both steps)
 - `oasdiff_version` (**required**): oasdiff version from `load-versions`; installs oasdiff before `make test` and runs `make openapi-diff` after. Not optional, because `make test` runs `tools/openapi-diff_test.sh`, which fails in CI when oasdiff is absent rather than skipping — the REST contract gate cannot be silently unverified
+- `oasdiff_sha256` (**required**): pinned linux/amd64 SHA256 for the oasdiff release archive, from `load-versions`. The install fails closed when it is missing or malformed rather than falling back to the release's own `checksums.txt`
 - `privileged_ci` (optional): whether the checked-out ref is trusted (default: `"true"`). Only trusted runs save the Go cache; restore is unconditional. `ok-to-test` passes `false` because it runs an untrusted PR head inside the default branch's cache scope
 
 Callers that set `apidiff_version` must check out full history with
@@ -122,6 +123,7 @@ quality thresholds; not every settings key is exposed) — see
 - `oras_sha256` (required when `install_oras: "true"`): oras linux/amd64 SHA256 from `load-versions`
 - `install_oasdiff` (optional): Install oasdiff (default: "false")
 - `oasdiff_version` (required when `install_oasdiff: "true"`): oasdiff version from `load-versions`
+- `oasdiff_sha256` (required when `install_oasdiff: "true"`): oasdiff linux/amd64 SHA256 from `load-versions`
 - `install_goreleaser` (optional): Install goreleaser (default: "false")
 - `goreleaser_version` (required when `install_goreleaser: "true"`): GoReleaser version from `load-versions`
 
@@ -360,6 +362,7 @@ jobs:
           setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
           oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
+          oasdiff_sha256: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
           coverage_report: 'true'
       - uses: ./.github/actions/go-lint
         with:
@@ -385,6 +388,7 @@ jobs:
           helm_version: ${{ steps.versions.outputs.helm }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
           oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
+          oasdiff_sha256: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
       - uses: ./.github/actions/go-build-release
         id: release
         with:
