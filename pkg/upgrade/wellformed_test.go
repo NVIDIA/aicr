@@ -835,6 +835,24 @@ func TestValidateHooks(t *testing.T) {
 			"a sibling manifests directory is not the migrations tree",
 			[]Hook{{File: "manifests/adopt.yaml", Phase: "pre-upgrade"}}, true, "must live under manifests/migrations/",
 		},
+		{
+			// IsLocal accepts this: the ".." never climbs above the bundle
+			// root. But a raw-string prefix test would still see the literal
+			// "manifests/migrations/" prefix and accept a hook that actually
+			// resolves outside the tree entirely.
+			"traversal within an accepted prefix escapes the migrations tree",
+			[]Hook{{File: "manifests/migrations/../../values.yaml", Phase: "pre-upgrade"}},
+			true, "must live under manifests/migrations/",
+		},
+		{
+			"traversal within an accepted prefix resolves to a sibling file",
+			[]Hook{{File: "manifests/migrations/../secret.yaml", Phase: "pre-upgrade"}},
+			true, "must live under manifests/migrations/",
+		},
+		{
+			"a legitimate hook under the migrations tree still passes",
+			[]Hook{{File: "manifests/migrations/adopt.yaml", Phase: "pre-upgrade"}}, false, "",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -538,6 +538,11 @@ const hookDir = "manifests/migrations/"
 // deliberate exception that lets a safe verdict carry work, so an unvalidated
 // phase silently doing nothing is worse than a rejected record. file is gated
 // with filepath.IsLocal rather than a substring scan for "..", per CLAUDE.md.
+// The tree check runs against the cleaned, slash-normalized path rather than
+// h.File itself: IsLocal alone accepts a ".." that stays under the bundle
+// root while still walking out of hookDir (e.g.
+// "manifests/migrations/../../values.yaml"), which a raw-string prefix test
+// would miss.
 func checkHooks(where string, t *Transition) []string {
 	var v []string
 	for i, h := range t.Hooks {
@@ -553,7 +558,7 @@ func checkHooks(where string, t *Transition) []string {
 		case !filepath.IsLocal(h.File):
 			v = append(v, fmt.Sprintf(
 				"%s hook %d file %q must be a local path under the bundle", where, i, h.File))
-		case !strings.HasPrefix(h.File, hookDir):
+		case !strings.HasPrefix(filepath.ToSlash(filepath.Clean(h.File)), hookDir):
 			v = append(v, fmt.Sprintf(
 				"%s hook %d file %q must live under %s, the only tree the BOM and the image-pin test walk",
 				where, i, h.File, hookDir))
