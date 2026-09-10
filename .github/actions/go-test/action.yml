@@ -40,6 +40,9 @@ inputs:
     # contract gate cannot be left silently unverified.
     description: 'oasdiff version pinned in .settings.yaml (linting.oasdiff, via load-versions)'
     required: true
+  oasdiff_sha256:
+    description: 'Pinned linux/amd64 SHA256 for the oasdiff release archive (linting.oasdiff_sha256_linux_amd64, via load-versions)'
+    required: true
   setup_envtest_version:
     description: 'setup-envtest version pinned in .settings.yaml (testing_tools.setup_envtest, via load-versions)'
     required: true
