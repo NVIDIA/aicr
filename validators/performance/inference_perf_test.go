@@ -1556,6 +1556,41 @@ func TestResolveModel(t *testing.T) {
 	}
 }
 
+// TestResolveModelCacheStorageClass verifies the model-cache StorageClass
+// resolution precedence recipe > env > default (""): a per-accelerator
+// `inference-model-cache-storage-class` constraint wins over the catalog env
+// knob, the env knob wins over the compiled default, and a blank/absent
+// recipe value falls through. It also verifies the returned fromRecipe flag,
+// which checkStorageClassNodeCompatibility needs to target the right
+// remediation knob in its incompatibility error.
+func TestResolveModelCacheStorageClass(t *testing.T) {
+	scC := func(v string) recipe.Constraint {
+		return recipe.Constraint{Name: perfConstraintModelCacheStorageClass, Value: v}
+	}
+	tests := []struct {
+		name       string
+		ctx        *validators.Context
+		envVal     string
+		want       string
+		wantRecipe bool
+	}{
+		{"recipe wins over env", ctxWithPerfConstraints(scC("hyperdisk-balanced")), "standard-rwo", "hyperdisk-balanced", true},
+		{"recipe trimmed", ctxWithPerfConstraints(scC("  hyperdisk-balanced  ")), "", "hyperdisk-balanced", true},
+		{"no recipe → env", ctxWithPerfConstraints(), "gp3", "gp3", false},
+		{"blank recipe → env", ctxWithPerfConstraints(scC("   ")), "gp3", "gp3", false},
+		{"no recipe, no env → cluster default", ctxWithPerfConstraints(), "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envModelCacheStorageClass, tt.envVal)
+			got, gotRecipe := resolveModelCacheStorageClass(tt.ctx)
+			if got != tt.want || gotRecipe != tt.wantRecipe {
+				t.Errorf("resolveModelCacheStorageClass() = (%q, %v), want (%q, %v)", got, gotRecipe, tt.want, tt.wantRecipe)
+			}
+		})
+	}
+}
+
 // TestValidateModelID accepts well-formed Hugging Face model IDs and rejects
 // values with YAML/shell metacharacters that could break the Dynamo deploy YAML.
 func TestValidateModelID(t *testing.T) {
