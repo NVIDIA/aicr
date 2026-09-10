@@ -130,20 +130,27 @@ spec:
           # ... eth2..eth8
 ```
 
-The mapping is ordered (`eth1`→first GPU NIC network, …, `eth8`→eighth) and
-validated as eight unique interfaces mapped to eight unique networks. It
-cannot be changed at bundle time: `--set`/`--set-json`/`--set-file`/`--dynamic`
+The mapping is an ordered list of explicit `interfaceName` → Network pairs —
+the interface key, not the list position, binds a network to `ethN`. Take the
+mapping from whoever provisioned the cluster (its `GKENetworkParamSet` /
+provisioning configuration); enumerating Network names shows what exists but
+not which one binds each interface. The value is validated as eight unique
+interfaces mapped to eight unique networks. It cannot be changed at bundle
+time: `--set`/`--set-json`/`--set-file`/`--dynamic`
 paths intersecting `kubeflow-trainer:tcpxoInterfaces` are rejected, and the
 bundle fails if the final resolved value disagrees with what the recipe
 records. (This is ownership enforcement, not the profile lock — the lock is
-unavailable to this value, see issue #2296.) If the generated artifact is
-later edited outside AICR, validation treats a recipe-versus-deployed
-mismatch as a failure.
+unavailable to this value, see issue #2296.) Editing the generated artifact
+outside AICR is detected at validation time as part of #2297's
+recipe-versus-deployed comparison.
 
-**Re-bundling a pre-existing recipe:** recipes generated before this runtime
-existed record no mapping, so `aicr bundle` on a stored
-`h100-gke-cos-training-kubeflow` recipe now fails closed, naming the remedy.
-Regenerate the recipe with `--gke-tcpxo-interfaces`.
+**Re-bundling a pre-existing recipe:** the obligation follows the
+declaration. Recipes generated before this runtime existed do not declare
+its manifest, so they bundle exactly as before — no runtime, no required
+input. Only a recipe whose kubeflow-trainer component attaches the
+`torch-distributed-tcpxo` manifest must record the mapping; a hand-edited
+recipe that adds the manifest without the configuration fails closed at
+load and at bundle time.
 
 **Residual limitation, stated plainly:** the runtime is an opt-in sibling —
 workloads that keep referencing `torch-distributed` get TCP as before, and

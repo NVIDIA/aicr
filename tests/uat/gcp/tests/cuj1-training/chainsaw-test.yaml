@@ -54,11 +54,12 @@ spec:
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/uat-cuj1-training-gke"
               # Required on this family: the ordered eth1..eth8 -> GPU-NIC
-              # network mapping, matching the UAT cluster's provisioned names.
-              IFACES="eth1=aicr-uat-gpu-nic-0,eth2=aicr-uat-gpu-nic-1,"
-              IFACES+="eth3=aicr-uat-gpu-nic-2,eth4=aicr-uat-gpu-nic-3,"
-              IFACES+="eth5=aicr-uat-gpu-nic-4,eth6=aicr-uat-gpu-nic-5,"
-              IFACES+="eth7=aicr-uat-gpu-nic-6,eth8=aicr-uat-gpu-nic-7"
+              # network mapping. Derive the provisioner's names from the
+              # deployment ID (the provisioner names them <id>-gpu-nic-<N>);
+              # the committed aicr-uat names are the local-dev fallback.
+              # One assignment: this script runs under POSIX sh.
+              NET_PREFIX="${DEPLOYMENT_ID:-aicr-uat}"
+              IFACES="eth1=${NET_PREFIX}-gpu-nic-0,eth2=${NET_PREFIX}-gpu-nic-1,eth3=${NET_PREFIX}-gpu-nic-2,eth4=${NET_PREFIX}-gpu-nic-3,eth5=${NET_PREFIX}-gpu-nic-4,eth6=${NET_PREFIX}-gpu-nic-5,eth7=${NET_PREFIX}-gpu-nic-6,eth8=${NET_PREFIX}-gpu-nic-7"
               ${AICR_BIN} recipe \
                 --service gke \
                 --accelerator h100 \
@@ -68,6 +69,7 @@ spec:
                 --gke-tcpxo-interfaces "${IFACES}" \
                 --output "${WORK}/recipe.yaml"
               test -f "${WORK}/recipe.yaml"
+              printf '%s\n' "${IFACES}" > "${WORK}/expected-interfaces.txt"
 
     - name: assert-recipe
       description: Verify recipe has correct criteria and components.
@@ -80,6 +82,10 @@ spec:
                 --resource "${WORK}/recipe.yaml" \
                 --file ./assert-recipe.yaml \
                 --no-color --timeout 10s
+              # The recorded mapping is derived per run; compare it against
+              # the value this run generated with, not a committed constant.
+              got="$(yq -r '[.configuration.gke.tcpxoInterfaces[] | .interfaceName + "=" + .network] | join(",")' "${WORK}/recipe.yaml")"
+              test "${got}" = "$(cat "${WORK}/expected-interfaces.txt")"
 
     # ── Step 3: Validate deployment against live snapshot ───────────────
     - name: validate-deployment
@@ -147,7 +153,9 @@ spec:
               test -f "${WORK}/bundle/recipe.yaml"
               ls "${WORK}"/bundle/*/values.yaml >/dev/null 2>&1
               # The TCPXO-wired runtime ships in the bundle (issue #2296)
-              grep -rq "torch-distributed-tcpxo" "${WORK}/bundle/"
+              # Match the rendered resource, not the manifest path recorded
+              # in the bundle's recipe.yaml.
+              grep -rq "name: torch-distributed-tcpxo" "${WORK}/bundle/"
             check:
               ($error == null): true
 

@@ -416,11 +416,16 @@ The AKS and GKE families are the embedded profile adopters (`gpuStack`) and
 need no special routing.
 
 **GET `/v1/recipe`.** Accepts the `/v1/recipe` criteria parameters plus
-optional `profile=name=value` and `slurmAccountingMode`. Profile omission
+optional `profile=name=value`, `slurmAccountingMode`, and
+`gkeTcpxoInterfaces`. Profile omission
 applies the resolved declaration's required default. Slurm accounting accepts
 `disabled`, `customer-managed`, or `aicr-provided`; omission defaults a Slurm
 recipe to `disabled`. The setting is recorded at
 `configuration.slurm.accounting.mode` in an `aicr.run/v1alpha3` RecipeResult.
+`gkeTcpxoInterfaces` carries the ordered `eth1=<network>,...,eth8=<network>`
+GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime; it is
+required when the resolved recipe ships that runtime (h100 GKE kubeflow
+training) and is recorded at `configuration.gke.tcpxoInterfaces`.
 The route rejects unknown query parameters and conflicting repeated values.
 
 ```shell
@@ -429,6 +434,9 @@ curl "http://localhost:8080/v1/recipe?service=aks&accelerator=h100&os=ubuntu&int
 
 # Slurm with AICR-provided accounting
 curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=aicr-provided"
+
+# GKE h100 kubeflow training (required TCPXO mapping):
+curl "http://localhost:8080/v1/recipe?service=gke&accelerator=h100&os=cos&intent=training&platform=kubeflow&gkeTcpxoInterfaces=eth1=gpu-nic-0,eth2=gpu-nic-1,eth3=gpu-nic-2,eth4=gpu-nic-3,eth5=gpu-nic-4,eth6=gpu-nic-5,eth7=gpu-nic-6,eth8=gpu-nic-7"
 ```
 
 **POST `/v1/recipe`.** Accepts a strict JSON or YAML envelope. `criteria` is
@@ -452,7 +460,7 @@ INVALID_REQUEST`. POST envelopes require `Content-Type: application/json` or
 types are rejected.
 
 **GET and POST `/v1/query`.** GET accepts the recipe parameters, including
-`slurmAccountingMode`, plus
+`slurmAccountingMode` and `gkeTcpxoInterfaces`, plus
 `selector`. POST accepts the same strict envelope with a required selector.
 POST profile selection follows the same query/envelope agreement rule as
 `/v1/recipe`:

@@ -54,4 +54,31 @@ if [[ -n "${CLUSTER_CONFIG:-}" ]]; then
   fi
 fi
 
+# The TCPXO recipe input must name this run's provisioned GPU NIC networks.
+# The pinned provisioner derives them from deployment.id as
+# "<id>-gpu-nic-<0..7>" (provider/gke/terraform/main.tf), and the workflow
+# exports DEPLOYMENT_ID job-wide after overwriting .deployment.id in the
+# cluster config to the same value. Deriving here keeps recipe generation on
+# the provisioner's own naming instead of a committed placeholder. A config
+# written for a cluster provisioned by other means should carry its real
+# mapping and run with DEPLOYMENT_ID unset.
+if [[ -n "${DEPLOYMENT_ID:-}" && -n "${2:-}" && -f "${2}" ]]; then
+  recipe_criteria="$(yq -r '[.spec.recipe.criteria.service, .spec.recipe.criteria.accelerator, .spec.recipe.criteria.platform] | join("/")' "${2}")"
+  if [[ "${recipe_criteria}" == "gke/h100/kubeflow" ]]; then
+    derived_config="$(mktemp /tmp/aicr-uat-tcpxo-config.XXXXXX.yaml)"
+    cp "${2}" "${derived_config}"
+    yq -i 'del(.spec.recipe.configuration.gke.tcpxoInterfaces)' "${derived_config}"
+    for i in 0 1 2 3 4 5 6 7; do
+      yq -i ".spec.recipe.configuration.gke.tcpxoInterfaces += [{\"interfaceName\": \"eth$((i + 1))\", \"network\": \"${DEPLOYMENT_ID}-gpu-nic-${i}\"}]" "${derived_config}"
+    done
+    set -- "$1" "${derived_config}"
+    echo "TCPXO interface mapping derived from DEPLOYMENT_ID (${DEPLOYMENT_ID}-gpu-nic-0..7)"
+  fi
+fi
+
+# The training smoke references the shipped TCPXO runtime on this lane, so UAT
+# exercises a TrainJob on torch-distributed-tcpxo rather than only the
+# unwired sibling (issue #2296's acceptance path).
+export TRAINJOB_RUNTIME="${TRAINJOB_RUNTIME:-torch-distributed-tcpxo}"
+
 uat_main "$@"
