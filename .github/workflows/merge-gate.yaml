@@ -26,8 +26,17 @@
 
 name: Merge Gate
 
+# The push trigger is a watchdog, not a second PR gate. A PR run gates the
+# merge commit GitHub predicts; nothing re-checks main after the merge lands,
+# so main can sit broken until an unrelated PR's gate reports it. #2678 merged
+# ten seconds before its own gate started, and the failure surfaced on the next
+# author's PR instead. Push runs check everything (see check-paths outputs)
+# because there is no base to diff a merged commit against.
 on:
   pull_request:
+    branches:
+      - main
+  push:
     branches:
       - main
   workflow_dispatch: {}
@@ -48,24 +57,37 @@ jobs:
   check-paths:
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    # Every output is forced true on push so a main run skips path filtering
+    # and exercises the whole gate. Path filtering exists to keep PR feedback
+    # cheap by diffing against the base; a push to main has no such base, and a
+    # watchdog that only re-checks the paths the merge happened to touch would
+    # miss exactly the case it is here for — a merge that is individually clean
+    # but breaks a derived artifact somewhere else in the tree.
     outputs:
-      code: ${{ steps.code.outputs.code }}
-      actions: ${{ steps.changes.outputs.actions }}
-      deps: ${{ steps.changes.outputs.deps }}
-      renovate: ${{ steps.changes.outputs.renovate }}
-      bom: ${{ steps.changes.outputs.bom }}
-      tuning: ${{ steps.changes.outputs.tuning }}
-      notices: ${{ steps.changes.outputs.notices }}
-      coverage: ${{ steps.changes.outputs.coverage }}
-      docs: ${{ steps.changes.outputs.docs }}
+      code: ${{ github.event_name == 'push' && 'true' || steps.code.outputs.code }}
+      actions: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.actions }}
+      deps: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.deps }}
+      renovate: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.renovate }}
+      bom: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.bom }}
+      tuning: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.tuning }}
+      notices: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.notices }}
+      coverage: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.coverage }}
+      docs: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.docs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
       # Detect targeted path categories (default: any match = true)
+      #
+      # Skipped on push: the outputs above already force every category true
+      # there, and running the filter anyway is not merely redundant. On a push
+      # event it diffs against github.event.before, which is all-zeros for the
+      # first push on a new branch and after history rewrites; the step then
+      # errors, failing check-paths and taking the whole gate down with it.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         id: changes
+        if: github.event_name != 'push'
         with:
           filters: |
             actions:
@@ -253,6 +275,7 @@ jobs:
       # '.settings.yaml', etc. still count as code.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         id: code
+        if: github.event_name != 'push'
         with:
           predicate-quantifier: 'every'
           filters: |
