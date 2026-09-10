@@ -251,7 +251,7 @@ validation:
 `inference-model`, `inference-concurrency-per-gpu`, and
 `inference-model-cache-storage-class` resolve with precedence **recipe
 constraint > `AICR_INFERENCE_PERF_*` catalog env > compiled default**
-(Qwen3-8B at 256/GPU, cluster default StorageClass). Set them per overlay,
+(Qwen/Qwen3-8B at 256/GPU, cluster default StorageClass). Set them per overlay,
 exactly as the throughput/TTFT thresholds already vary per overlay, to pick
 the right model, load, and cache StorageClass for each accelerator. The
 compiled defaults cover overlays that omit them. Because the thresholds are
