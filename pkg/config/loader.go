@@ -29,6 +29,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 )
 
 // configMapURIScheme matches the prefix used by the snapshot/recipe loaders
@@ -80,6 +81,11 @@ func Load(ctx context.Context, source string) (*AICRConfig, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
+	// After Validate, so a rejected header errors rather than warns. Load holds
+	// source, which Validate does not -- a method on the struct cannot name the
+	// file, and a warning that cannot name the file is not the one RELEASE.md
+	// promises.
+	header.WarnDeprecatedAPIVersion(source, cfg.APIVersion, header.GroupVersionV1Beta1)
 	return cfg, nil
 }
 

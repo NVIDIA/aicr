@@ -861,7 +861,7 @@ func validateRecipeCriteriaHeader(kind, apiVersion string) error {
 	if apiVersion != "" && !header.IsSupportedAPIVersion(apiVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid apiVersion %q for %s, expected %q or %q; regenerate the criteria with a matching aicr version",
-				apiVersion, RecipeCriteriaKind, RecipeCriteriaAPIVersion, header.GroupVersionV1))
+				apiVersion, RecipeCriteriaKind, header.GroupVersion, header.GroupVersionV1))
 	}
 	return nil
 }
@@ -872,7 +872,7 @@ func validateRecipeCriteriaHeader(kind, apiVersion string) error {
 // Example:
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -884,7 +884,7 @@ type RecipeCriteria struct {
 	// Kind is always "RecipeCriteria".
 	Kind string `json:"kind" yaml:"kind"`
 
-	// APIVersion is the API version (e.g., "aicr.run/v1alpha2").
+	// APIVersion is the API version (e.g., "aicr.run/v1").
 	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 
 	// Metadata contains the name and other metadata.
@@ -982,7 +982,7 @@ func validateAndConvertRawSpec(raw *rawCriteriaSpec, reg *CriteriaRegistry) (*Cr
 // Example file (YAML):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -999,6 +999,7 @@ func LoadCriteriaFromFile(path string, reg *CriteriaRegistry) (*Criteria, error)
 	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
+	header.WarnDeprecatedAPIVersion(path, raw.APIVersion, header.GroupVersionV1)
 
 	return validateAndConvertRawSpec(&raw.Spec, reg)
 }
@@ -1013,7 +1014,7 @@ func LoadCriteriaFromFile(path string, reg *CriteriaRegistry) (*Criteria, error)
 // Example file (YAML):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -1039,6 +1040,7 @@ func LoadCriteriaFromFileWithContext(ctx context.Context, path string, reg *Crit
 	if err := validateRecipeCriteriaHeader(raw.Kind, raw.APIVersion); err != nil {
 		return nil, err
 	}
+	header.WarnDeprecatedAPIVersion(path, raw.APIVersion, header.GroupVersionV1)
 
 	return validateAndConvertRawSpec(&raw.Spec, reg)
 }
@@ -1111,7 +1113,7 @@ func criteriaBodyFormat(contentType string) (serializer.Format, bool) {
 //
 //	{
 //	  "kind": "RecipeCriteria",
-//	  "apiVersion": "aicr.run/v1alpha2",
+//	  "apiVersion": "aicr.run/v1",
 //	  "metadata": {"name": "my-criteria"},
 //	  "spec": {"service": "eks", "accelerator": "h100"}
 //	}

@@ -19,7 +19,7 @@
 # inference-specific components (agentgateway, DRA driver, KAI scheduler, Dynamo),
 # and standard GPU stack components.
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   selectedProfile:
     name: gpuStack

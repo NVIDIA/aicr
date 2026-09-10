@@ -17,7 +17,7 @@
 # passthrough, Ubuntu 24.04, driver 610.57.04): one node that is both
 # control plane and worker, with full GPU devices owned by the node
 # rather than a cloud instance type.
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: KWOKNodeProfile
 metadata:
   name: accelerated-h200
