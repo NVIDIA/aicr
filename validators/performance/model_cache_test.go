@@ -479,24 +479,36 @@ func TestCheckStorageClassNodeCompatibility(t *testing.T) {
 		name         string
 		instanceType string
 		sc           *storagev1.StorageClass
+		fromRecipe   bool
 		wantErr      bool
+		wantErrMsg   string // substring; empty skips the check
 	}{
-		{"a4x with Persistent Disk is rejected", "a4x-highgpu-4g", pdBalanced, true},
-		{"a4x with explicit Hyperdisk selection is fine", "a4x-highgpu-4g", hyperdiskBalanced, false},
-		{"a4x with dynamic disk-type selection is fine", "a4x-highgpu-4g", dynamicSelect, false},
-		{"non-a4x family with Persistent Disk is fine", "n2-standard-4", pdBalanced, false},
-		{"non-a4x family with dynamic disk-type selection is fine", "n2-standard-4", dynamicSelect, false},
-		{"a4x with an unrelated provisioner is fine", "a4x-highgpu-4g", otherProvisioner, false},
-		{"nil StorageClass is fine (not this function's concern)", "a4x-highgpu-4g", nil, false},
+		{"a4x with Persistent Disk is rejected", "a4x-highgpu-4g", pdBalanced, false, true, envModelCacheStorageClass},
+		{"a4x with explicit Hyperdisk selection is fine", "a4x-highgpu-4g", hyperdiskBalanced, false, false, ""},
+		{"a4x with dynamic disk-type selection is fine", "a4x-highgpu-4g", dynamicSelect, false, false, ""},
+		{"non-a4x family with Persistent Disk is fine", "n2-standard-4", pdBalanced, false, false, ""},
+		{"non-a4x family with dynamic disk-type selection is fine", "n2-standard-4", dynamicSelect, false, false, ""},
+		{"a4x with an unrelated provisioner is fine", "a4x-highgpu-4g", otherProvisioner, false, false, ""},
+		{"nil StorageClass is fine (not this function's concern)", "a4x-highgpu-4g", nil, false, false, ""},
+		{
+			"recipe-sourced StorageClass points remediation at the recipe constraint, not the env var",
+			"a4x-highgpu-4g", pdBalanced, true, true, perfConstraintModelCacheStorageClass,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := checkStorageClassNodeCompatibility(tt.instanceType, tt.sc)
+			err := checkStorageClassNodeCompatibility(tt.instanceType, tt.sc, tt.fromRecipe)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			if tt.wantErrMsg != "" && !strings.Contains(err.Error(), tt.wantErrMsg) {
+				t.Errorf("error = %v, want it to mention %q", err, tt.wantErrMsg)
+			}
+			if tt.fromRecipe && tt.wantErr && strings.Contains(err.Error(), "set "+envModelCacheStorageClass+" to") {
+				t.Errorf("error = %v, should not tell the user to set %s when the value came from a recipe constraint (that env var can't override it)", err, envModelCacheStorageClass)
 			}
 		})
 	}
@@ -516,10 +528,11 @@ func TestEnsureModelCache(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		classes []runtime.Object
-		cfg     *inferenceWorkloadConfig
-		wantErr bool
+		name       string
+		classes    []runtime.Object
+		cfg        *inferenceWorkloadConfig
+		wantErr    bool
+		wantErrMsg string // substring; empty skips the check
 	}{
 		{
 			name: "disabled is a no-op",
@@ -540,13 +553,25 @@ func TestEnsureModelCache(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "incompatible explicit override is rejected",
+			name:    "incompatible explicit override from env is rejected, pointing at the env var",
 			classes: []runtime.Object{pdBalanced},
 			cfg: &inferenceWorkloadConfig{
 				namespace: "ns", model: "Qwen/Qwen3-8B", modelCacheSize: defaultModelCacheSize,
 				gpuNodeInstanceType: "a4x-highgpu-4g", modelCacheStorageClass: "standard-rwo",
 			},
-			wantErr: true,
+			wantErr:    true,
+			wantErrMsg: envModelCacheStorageClass,
+		},
+		{
+			name:    "incompatible explicit override from recipe is rejected, pointing at the recipe constraint",
+			classes: []runtime.Object{pdBalanced},
+			cfg: &inferenceWorkloadConfig{
+				namespace: "ns", model: "Qwen/Qwen3-8B", modelCacheSize: defaultModelCacheSize,
+				gpuNodeInstanceType: "a4x-highgpu-4g", modelCacheStorageClass: "standard-rwo",
+				modelCacheStorageClassFromRecipe: true,
+			},
+			wantErr:    true,
+			wantErrMsg: perfConstraintModelCacheStorageClass,
 		},
 	}
 	for _, tt := range tests {
@@ -559,6 +584,9 @@ func TestEnsureModelCache(t *testing.T) {
 			}
 			if tt.wantErr && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			if tt.wantErrMsg != "" && !strings.Contains(err.Error(), tt.wantErrMsg) {
+				t.Errorf("error = %v, want it to mention %q", err, tt.wantErrMsg)
 			}
 			pvcs, _ := client.CoreV1().PersistentVolumeClaims(tt.cfg.namespace).List(context.Background(), metav1.ListOptions{})
 			if len(pvcs.Items) != 0 {

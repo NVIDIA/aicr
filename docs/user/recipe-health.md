@@ -86,6 +86,7 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | h100-gke-cos-inference-dynamo | gke | h100 | cos | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | h100-gke-cos-training-kubeflow | gke | h100 | cos | training | kubeflow | pass | R:0 D:5 P:1 C:10 | pending |
 | h100-gke-cos-training-slurm | gke | h100 | cos | training | slurm | pass | R:0 D:5 P:0 C:11 | pending |
+| h200-k0s-ubuntu-training | k0s | h200 | ubuntu | training | — | pass | R:0 D:4 P:0 C:4 | pending |
 | h100-kind-inference-dynamo | kind | h100 | — | inference | dynamo | pass | R:0 D:4 P:0 C:11 | pending |
 | h100-kind-training-kubeflow | kind | h100 | — | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | h100-kind-training-slurm | kind | h100 | — | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
