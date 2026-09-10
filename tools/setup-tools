@@ -790,15 +790,42 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         if prompt_continue; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install tilt-dev/tap/ctlptl
+                log_success "ctlptl installed"
             elif [[ "${OS}" == "linux" ]]; then
-                if command_exists go; then
-                    GOFLAGS= go install github.com/tilt-dev/ctlptl/cmd/ctlptl@v"${CTLPTL_VERSION}"
-                    sudo cp "$(go env GOPATH)/bin/ctlptl" /usr/local/bin/
+                # Binary release rather than `go install`: the latter builds
+                # outside this module, so go.sum covers none of ctlptl's
+                # dependencies and every one is authenticated against
+                # sum.golang.org over the network. A checksum-database outage
+                # then fails the install -- and did, breaking the v0.21.1
+                # release (#2664). ctlptl pulls the whole Docker client tree,
+                # so it is the widest such exposure we had.
+                CTLPTL_ASSET_ARCH="x86_64"
+                if [[ "${GO_ARCH}" == "arm64" ]]; then
+                    CTLPTL_ASSET_ARCH="arm64"
+                fi
+                CTLPTL_TAR="ctlptl.${CTLPTL_VERSION}.linux.${CTLPTL_ASSET_ARCH}.tar.gz"
+                CTLPTL_BASE="https://github.com/tilt-dev/ctlptl/releases/download/v${CTLPTL_VERSION}"
+                if verify_download_url "${CTLPTL_BASE}/${CTLPTL_TAR}" "ctlptl ${CTLPTL_VERSION} for Linux ${GO_ARCH}"; then
+                    CTLPTL_TMP=$(mktemp -d)
+                    curl -fsSL -o "${CTLPTL_TMP}/${CTLPTL_TAR}" "${CTLPTL_BASE}/${CTLPTL_TAR}"
+                    curl -fsSL -o "${CTLPTL_TMP}/checksums.txt" "${CTLPTL_BASE}/checksums.txt"
+                    CTLPTL_EXPECTED=$(grep "  ${CTLPTL_TAR}$" "${CTLPTL_TMP}/checksums.txt" | awk '{print $1}')
+                    if [[ -n "${CTLPTL_EXPECTED}" ]]; then
+                        verify_sha256 "${CTLPTL_TMP}/${CTLPTL_TAR}" "${CTLPTL_EXPECTED}"
+                    else
+                        log_error "Could not extract checksum for ${CTLPTL_TAR} from checksums file; aborting install"
+                        rm -rf "$CTLPTL_TMP"
+                        exit 1
+                    fi
+                    tar -xzC "$CTLPTL_TMP" -f "${CTLPTL_TMP}/${CTLPTL_TAR}"
+                    sudo mv "$CTLPTL_TMP/ctlptl" /usr/local/bin/ctlptl
+                    sudo chmod +x /usr/local/bin/ctlptl
+                    rm -rf "$CTLPTL_TMP"
+                    log_success "ctlptl installed"
                 else
-                    log_warning "Go not installed, skipping ctlptl"
+                    log_error "Failed to install ctlptl. Please install manually."
                 fi
             fi
-            log_success "ctlptl installed"
         fi
     fi
 
@@ -934,15 +961,37 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
         if prompt_continue; then
             if [[ "${OS}" == "darwin" ]]; then
                 brew install goreleaser
+                log_success "goreleaser installed"
             elif [[ "${OS}" == "linux" ]]; then
-                if command_exists go; then
-                    GOFLAGS= go install github.com/goreleaser/goreleaser/v2@"${GORELEASER_VERSION}"
-                    sudo cp "$(go env GOPATH)/bin/goreleaser" /usr/local/bin/
+                # Binary release rather than `go install`; see the ctlptl block
+                # above for why (#2664). The asset name carries no version.
+                GORELEASER_ASSET_ARCH="x86_64"
+                if [[ "${GO_ARCH}" == "arm64" ]]; then
+                    GORELEASER_ASSET_ARCH="arm64"
+                fi
+                GORELEASER_TAR="goreleaser_Linux_${GORELEASER_ASSET_ARCH}.tar.gz"
+                GORELEASER_BASE="https://github.com/goreleaser/goreleaser/releases/download/${GORELEASER_VERSION}"
+                if verify_download_url "${GORELEASER_BASE}/${GORELEASER_TAR}" "goreleaser ${GORELEASER_VERSION} for Linux ${GO_ARCH}"; then
+                    GORELEASER_TMP=$(mktemp -d)
+                    curl -fsSL -o "${GORELEASER_TMP}/${GORELEASER_TAR}" "${GORELEASER_BASE}/${GORELEASER_TAR}"
+                    curl -fsSL -o "${GORELEASER_TMP}/checksums.txt" "${GORELEASER_BASE}/checksums.txt"
+                    GORELEASER_EXPECTED=$(grep "  ${GORELEASER_TAR}$" "${GORELEASER_TMP}/checksums.txt" | awk '{print $1}')
+                    if [[ -n "${GORELEASER_EXPECTED}" ]]; then
+                        verify_sha256 "${GORELEASER_TMP}/${GORELEASER_TAR}" "${GORELEASER_EXPECTED}"
+                    else
+                        log_error "Could not extract checksum for ${GORELEASER_TAR} from checksums file; aborting install"
+                        rm -rf "$GORELEASER_TMP"
+                        exit 1
+                    fi
+                    tar -xzC "$GORELEASER_TMP" -f "${GORELEASER_TMP}/${GORELEASER_TAR}"
+                    sudo mv "$GORELEASER_TMP/goreleaser" /usr/local/bin/goreleaser
+                    sudo chmod +x /usr/local/bin/goreleaser
+                    rm -rf "$GORELEASER_TMP"
+                    log_success "goreleaser installed"
                 else
-                    log_warning "Go not installed, skipping goreleaser"
+                    log_error "Failed to install goreleaser. Please install manually."
                 fi
             fi
-            log_success "goreleaser installed"
         fi
     fi
 
@@ -1042,8 +1091,31 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
         fi
         log_info "Installing oasdiff ${OASDIFF_VERSION}..."
         if prompt_continue; then
-            GOFLAGS= go install github.com/oasdiff/oasdiff@"${OASDIFF_VERSION}"
-            log_success "oasdiff ${OASDIFF_VERSION} installed"
+            # Binary release rather than `go install`; see the ctlptl block
+            # above for why (#2664).
+            OASDIFF_VERSION_NUM="${OASDIFF_VERSION#v}"
+            OASDIFF_TAR="oasdiff_${OASDIFF_VERSION_NUM}_linux_${GO_ARCH}.tar.gz"
+            OASDIFF_BASE="https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION_NUM}"
+            if verify_download_url "${OASDIFF_BASE}/${OASDIFF_TAR}" "oasdiff ${OASDIFF_VERSION} for Linux ${GO_ARCH}"; then
+                OASDIFF_TMP=$(mktemp -d)
+                curl -fsSL -o "${OASDIFF_TMP}/${OASDIFF_TAR}" "${OASDIFF_BASE}/${OASDIFF_TAR}"
+                curl -fsSL -o "${OASDIFF_TMP}/checksums.txt" "${OASDIFF_BASE}/checksums.txt"
+                OASDIFF_EXPECTED=$(grep "  ${OASDIFF_TAR}$" "${OASDIFF_TMP}/checksums.txt" | awk '{print $1}')
+                if [[ -n "${OASDIFF_EXPECTED}" ]]; then
+                    verify_sha256 "${OASDIFF_TMP}/${OASDIFF_TAR}" "${OASDIFF_EXPECTED}"
+                else
+                    log_error "Could not extract checksum for ${OASDIFF_TAR} from checksums file; aborting install"
+                    rm -rf "$OASDIFF_TMP"
+                    exit 1
+                fi
+                tar -xzC "$OASDIFF_TMP" -f "${OASDIFF_TMP}/${OASDIFF_TAR}"
+                sudo mv "$OASDIFF_TMP/oasdiff" /usr/local/bin/oasdiff
+                sudo chmod +x /usr/local/bin/oasdiff
+                rm -rf "$OASDIFF_TMP"
+                log_success "oasdiff ${OASDIFF_VERSION} installed"
+            else
+                log_error "Failed to install oasdiff. Please install manually."
+            fi
         fi
     fi
 

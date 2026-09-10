@@ -40,9 +40,20 @@ inputs:
     # contract gate cannot be left silently unverified.
     description: 'oasdiff version pinned in .settings.yaml (linting.oasdiff, via load-versions)'
     required: true
+  oasdiff_sha256:
+    description: 'Pinned linux/amd64 SHA256 for the oasdiff release archive (linting.oasdiff_sha256_linux_amd64, via load-versions)'
+    required: true
   setup_envtest_version:
     description: 'setup-envtest version pinned in .settings.yaml (testing_tools.setup_envtest, via load-versions)'
     required: true
+  privileged_ci:
+    description: >-
+      Whether this run checked out trusted content. Only trusted runs write the
+      Go cache: ok-to-test executes an untrusted PR head inside the default
+      branch's cache scope, so letting it save would let a crafted PR plant an
+      entry a later trusted run consumes. Restore is unconditional either way.
+    required: false
+    default: 'true'
 
 runs:
   using: 'composite'
@@ -51,10 +62,66 @@ runs:
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
       with:
         go-version: '${{ inputs.go_version }}'
-        cache: true
-        cache-dependency-path: |
-          go.sum
+        # Caching is done explicitly below. setup-go restores on an exact
+        # hash of go.sum with no prefix fallback, so a release cut from an
+        # older tag -- whose go.sum has since diverged from main by a handful
+        # of modules -- misses entirely and pays a full cold download. That
+        # cost the v0.21.1 release run its 15-minute budget (#2663).
+        cache: false
         check-latest: true
+
+    - name: Resolve Go cache paths
+      id: gocache
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        echo "buildcache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+    # `restore-keys` is safe here in a way it was NOT for the tool-binary cache
+    # in install-e2e-tools. That one stored executables and setup-tools' guards
+    # were presence-only (`command_exists kind`), so a prefix-restored stale
+    # binary satisfied the check and silently pinned E2E to kind v0.31.0
+    # against a v0.33.0 pin.
+    #
+    # Neither cache here can fail that way, because Go itself is the consumer
+    # and both are content-addressed:
+    #   - GOMODCACHE is keyed by module@version, so a restored x/sys@v0.47.0 is
+    #     simply not consulted when go.mod asks for v0.48.0.
+    #   - GOCACHE is keyed by build ActionID -- a hash over the compiler/tool
+    #     content ID, build flags, and every input source -- so an entry built
+    #     from different source, flags, or Go version is unused, not served.
+    # A near-miss restore therefore supplies what did not change and re-fetches
+    # or rebuilds what did, which is the point: the drift between a release tag
+    # and main is typically a handful of modules out of ~600.
+    #
+    # Restore is unconditional; SAVE is not. `ok-to-test` runs on
+    # `issue_comment`, so its `github.ref` resolves to the default branch and it
+    # writes into main's cache scope -- while checking out an untrusted PR head
+    # that this job then executes via `make test`. GOCACHE entries are not
+    # re-verified on read (`GODEBUG=gocacheverify` is opt-in), so allowing those
+    # runs to write would let a crafted PR plant an entry a later trusted run
+    # consumes. The exact-key-only restore this replaces made that hard to reach
+    # by accident; a prefix fallback would not, which is why adding the fallback
+    # and gating the write belong in the same change.
+    #
+    # This gates THIS job only, and does not make the fork path safe on its own.
+    # qualification.yaml's `lint` and `e2e` jobs are ungated and reach setup-go
+    # with `cache: true`, which saves the same two directories into the same
+    # scope while running the same untrusted checkout. Closing that means giving
+    # them this restore/save split too -- setup-go's `cache` input cannot
+    # separate the two halves, and turning it off outright would make fork runs
+    # pay a cold cache against a 10-minute lint budget. Tracked in #2670.
+    - name: Restore Go modules and build output
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      id: gocache-restore
+      with:
+        path: |
+          ${{ steps.gocache.outputs.modcache }}
+          ${{ steps.gocache.outputs.buildcache }}
+        key: go-${{ runner.os }}-${{ runner.arch }}-${{ inputs.go_version }}-${{ hashFiles('go.sum') }}
+        restore-keys: |
+          go-${{ runner.os }}-${{ runner.arch }}-${{ inputs.go_version }}-
 
     # `go mod tidy -diff` asks whether go.mod/go.sum are correct for the source:
     # no requirement the code does not import, none missing, no stale go.sum
@@ -114,16 +181,14 @@ runs:
     # tools/openapi-diff_test.sh, which exercises the real oasdiff rather than a
     # stub and fails in CI when it is missing.
     - name: Install OpenAPI-diff tool
-      shell: bash
-      env:
-        OASDIFF_VERSION: ${{ inputs.oasdiff_version }}
-      run: |
-        set -euo pipefail
-        [ -n "${OASDIFF_VERSION}" ] \
-          || { echo "oasdiff_version input is required" >&2; exit 1; }
-        GOFLAGS= go install "github.com/oasdiff/oasdiff@${OASDIFF_VERSION}"
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_oasdiff: 'true'
+        oasdiff_version: '${{ inputs.oasdiff_version }}'
+        oasdiff_sha256: '${{ inputs.oasdiff_sha256 }}'
 
     - name: Run Tests with Coverage
+      id: gotest
       shell: bash
       run: make test
 
@@ -142,3 +207,33 @@ runs:
     - name: Check REST contract compatibility
       shell: bash
       run: make openapi-diff
+
+    # A cache entry is immutable: once this key exists, every later run with the
+    # same go.sum gets an exact hit and skips this step, so whatever is banked
+    # here is what that scope keeps until go.sum moves or the entry idles out.
+    # That makes *when* to save the whole question.
+    #
+    # `make test` having run is the condition, pass or fail. Failing is fine and
+    # deliberately still saves -- the modules were downloaded and the packages
+    # compiled, which is the cost worth keeping, and a re-run of a flake should
+    # not pay it again. But a run that dies before it, at Install Helm or
+    # envtest, has a warm GOMODCACHE (`go mod tidy -diff` resolves the graph)
+    # and a nearly empty GOCACHE. Banking that would pin a cache that rebuilds
+    # all of ./... under -race on every subsequent run -- the exact cost the
+    # 15-to-30 minute bump is absorbing.
+    #
+    # `outcome` is the pre-`continue-on-error` result, and is `skipped` when the
+    # step never ran and `cancelled` on cancellation, so testing for the two
+    # ran-to-completion values covers both without naming them.
+    - name: Save Go modules and build output
+      if: >-
+        always()
+        && inputs.privileged_ci == 'true'
+        && steps.gocache-restore.outputs.cache-hit != 'true'
+        && (steps.gotest.outcome == 'success' || steps.gotest.outcome == 'failure')
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: |
+          ${{ steps.gocache.outputs.modcache }}
+          ${{ steps.gocache.outputs.buildcache }}
+        key: ${{ steps.gocache-restore.outputs.cache-primary-key }}

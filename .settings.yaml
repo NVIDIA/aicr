@@ -31,8 +31,30 @@ build_tools:
 linting:
   # renovate: datasource=go depName=golang.org/x/exp depType=linting
   apidiff: 'v0.0.0-20260824195058-e88cd73687aa'
+  # The annotation must stay on the line directly above the value: the
+  # customManagers regexes in .github/renovate.json5 match `# renovate: ...`
+  # followed immediately by `key: 'value'`, so any comment between them silently
+  # drops this pin from Renovate's scan (#2657).
   # renovate: datasource=github-releases depName=oasdiff/oasdiff depType=linting
   oasdiff: 'v1.31.0'
+  # Refreshed automatically by tools/update-oasdiff-checksums via Renovate
+  # postUpgradeTasks whenever the version above is bumped. Same reasoning as the
+  # oras pin in security_tools: the checksums.txt served beside the tarball
+  # comes from the same release, so it detects corruption but not a compromise
+  # of the release itself. A digest committed and reviewed at this SHA does.
+  #
+  # This one matters specifically because #2663 moved oasdiff off `go install`,
+  # which authenticated every dependency against sum.golang.org -- a public
+  # transparency log. Dropping to an unpinned binary would have traded that for
+  # nothing; the pin is what keeps the integrity story from regressing.
+  #
+  # Flat, uniquely-named key rather than a nested `<tool>_checksums:` mapping,
+  # for the reason spelled out on oras_sha256_linux_amd64: the nested blocks all
+  # share sub-key names and the refresh scripts rewrite by sub-key.
+  #
+  # linux/amd64 only: this feeds the setup-build-tools action, which runs on
+  # ubuntu runners. tools/setup-tools handles local dev on other platforms.
+  oasdiff_sha256_linux_amd64: '0177d4bc0bf04f4061e9277795b77335ee100a43b508e94fce5c46de083bbede'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.13.2'
   # renovate: datasource=pypi depName=yamllint depType=linting
@@ -56,15 +78,42 @@ security_tools:
   cosign: 'v3.1.3'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
   syft: 'v1.51.1'
-  # renovate: datasource=github-releases depName=oras-project/oras depType=security_tools
   # Attaches the aiperf-bench third-party source archive as an OCI 1.1 referrer
   # (tools/generate-aiperf-source). Cosign cannot attach arbitrary artifacts, so
   # this is a separate dependency from the signing/attestation path.
   #
-  # Stored WITHOUT the leading 'v', unlike cosign/syft/grype above:
-  # oras-project/setup-oras looks the version up against bare release keys and
-  # throws on 'v1.3.4'. tools/setup-tools re-adds the prefix for the download URL.
+  # Stored WITHOUT the leading 'v', unlike cosign/syft/grype above. Both
+  # consumers — tools/setup-tools and the setup-build-tools action — re-add the
+  # prefix for the download URL, and the bare form is what the release asset
+  # names embed (oras_1.3.4_linux_amd64.tar.gz).
+  #
+  # This is the only oras pin. It was previously paired with a separately pinned
+  # oras-project/setup-oras action that validated it against a bundled release
+  # list, which meant two bots owned two artifacts that had to stay compatible
+  # and nothing checked that they did (#2648).
+  #
+  # The annotation below must stay on the line directly above the value: the
+  # customManagers regexes in .github/renovate.json5 match `# renovate: ...`
+  # followed immediately by `key: 'value'`, so any comment between them silently
+  # drops this pin from Renovate's scan.
+  # renovate: datasource=github-releases depName=oras-project/oras depType=security_tools
   oras: '1.3.4'
+  # Refreshed automatically by tools/update-oras-checksums via Renovate
+  # postUpgradeTasks whenever the version above is bumped. Pinning the digest
+  # here — rather than trusting the checksums.txt served beside the tarball —
+  # is what makes a later compromise of the upstream release assets detectable:
+  # an attacker who replaces both the archive and its checksum still fails
+  # against a value committed and reviewed at this SHA.
+  #
+  # Deliberately a flat, uniquely-named key rather than the nested
+  # `<tool>_checksums:` mapping the other pinned tools use. Those blocks all
+  # share the sub-keys linux_amd64/linux_arm64/..., and the existing refresh
+  # scripts rewrite by sub-key with no block scoping, so a nested block here
+  # would be corrupted by every sibling tool's script (#2658).
+  #
+  # linux/amd64 only: this pin feeds the setup-build-tools action, which runs on
+  # ubuntu runners. tools/setup-tools handles local dev on other platforms.
+  oras_sha256_linux_amd64: 'f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454'
 
 # E2E Testing Tools
 testing_tools:

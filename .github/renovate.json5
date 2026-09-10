@@ -177,6 +177,31 @@
       platformAutomerge: true,
     },
 
+    // ---- Auto-merge: digest rotations in component manifests ----
+    // Scoped to digest/pin deliberately. A digest rotation re-pins the same
+    // tag as upstream rebuilds it (ADR-006), which is mechanical; a tag bump
+    // changes what the component actually deploys and keeps a human on it.
+    //
+    // These bumps also change two derived artifacts —
+    // pkg/bundler/testdata/stock_render_golden.yaml and
+    // docs/user/container-images.md — that Renovate cannot regenerate for
+    // itself: postUpgradeTasks run inside the Renovate image, which ships
+    // neither Go nor Helm, while `make bom-docs` needs both plus network
+    // chart pulls. So these PRs fail their own gate until someone
+    // regenerates, and platformAutomerge is what makes that outcome safe:
+    // it hands the merge to GitHub, which merges only once the required
+    // `gate` check passes. #2678 broke main because it was merged ten
+    // seconds before its gate started running; a PR left open until it is
+    // green is the failure mode to prefer.
+    {
+      matchManagers: ["kubernetes"],
+      matchUpdateTypes: ["digest", "pin"],
+      minimumReleaseAge: "7 days",
+      automerge: true,
+      automergeType: "pr",
+      platformAutomerge: true,
+    },
+
     // ---- Grouping: bundle related bumps into single PRs ----
     // Preserve dependabot's gomod groups verbatim.
     {
@@ -324,6 +349,31 @@
       matchDepNames: ["databus23/helm-diff"],
       postUpgradeTasks: {
         commands: ["./tools/update-helm-diff-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
+    // ---- oras bumps refresh the pinned linux/amd64 SHA256 via post-upgrade script ----
+    // Without this the version moves and the pin does not, so the release job's
+    // checksum verify fails closed on the next bump rather than at release time.
+    {
+      matchDepNames: ["oras-project/oras"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-oras-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
+    // ---- oasdiff bumps refresh the pinned linux/amd64 SHA256 via post-upgrade script ----
+    // Same contract as oras above. The setup-build-tools action verifies the
+    // downloaded archive against this pin, so a version bump without a refreshed
+    // digest fails the tests job on the Renovate PR itself rather than later.
+    {
+      matchDepNames: ["oasdiff/oasdiff"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-oasdiff-checksums {{{newVersion}}}"],
         fileFilters: [".settings.yaml"],
         executionMode: "update",
       },

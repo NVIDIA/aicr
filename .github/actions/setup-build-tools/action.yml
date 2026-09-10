@@ -13,7 +13,7 @@
 # limitations under the License.
 
 name: 'Setup Build Tools'
-description: 'Install build, release, and testing tools (ko, syft, crane, goreleaser, chainsaw, helm, helmfile, kubectl, kind, yq, flux)'
+description: 'Install build, release, and testing tools (ko, syft, crane, oras, oasdiff, goreleaser, chainsaw, helm, helmfile, kubectl, kind, yq, flux, hauler, zarf, ctlptl)'
 
 inputs:
   install_ko:
@@ -36,6 +36,30 @@ inputs:
     description: 'crane version (e.g. v0.21.0)'
     required: false
     default: 'v0.21.0'
+  install_oras:
+    description: 'Install oras (true/false)'
+    required: false
+    default: 'false'
+  oras_version:
+    description: 'oras version, without the leading v (from .settings.yaml via load-versions; required when install_oras=true)'
+    required: false
+    default: ''
+  oras_sha256:
+    description: 'oras SHA256 checksum for linux/amd64 (from .settings.yaml via load-versions; required when install_oras=true)'
+    required: false
+    default: ''
+  install_oasdiff:
+    description: 'Install oasdiff (true/false)'
+    required: false
+    default: 'false'
+  oasdiff_version:
+    description: 'oasdiff version (from .settings.yaml via load-versions; required when install_oasdiff=true)'
+    required: false
+    default: ''
+  oasdiff_sha256:
+    description: 'oasdiff SHA256 checksum for linux/amd64 (from .settings.yaml via load-versions; required when install_oasdiff=true)'
+    required: false
+    default: ''
   install_goreleaser:
     description: 'Install goreleaser (true/false)'
     required: false
@@ -191,6 +215,104 @@ runs:
         sudo chmod +x /usr/local/bin/crane
         rm -rf "$CRANE_TMP"
         echo "crane installed: $(crane version 2>&1 || echo '${{ inputs.crane_version }}')"
+
+    # Installed here rather than via oras-project/setup-oras, which resolves the
+    # requested version against a statically bundled releases.json and throws on
+    # anything newer than the action's last release. That made the CLI pin in
+    # .settings.yaml (Renovate) and the action pin (Dependabot) a compatibility
+    # pair nothing enforced, and #2648 is what it looks like when they diverge.
+    #
+    # The checksum is the pin from .settings.yaml, not the checksums.txt served
+    # beside the tarball: verifying an artifact against a digest from the same
+    # origin catches corruption but not a compromised release, and this runs in
+    # a job holding packages: write and id-token: write. Renovate refreshes the
+    # pin with the version (tools/update-oras-checksums), so the pair cannot
+    # drift the way the setup-oras pairing did.
+    - name: Install oras
+      if: inputs.install_oras == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        ORAS_VERSION="${{ inputs.oras_version }}"
+        ORAS_VERSION="${ORAS_VERSION#v}"
+        EXPECTED="${{ inputs.oras_sha256 }}"
+        if [[ -z "${ORAS_VERSION}" || -z "${EXPECTED}" ]]; then
+          echo "::error::install_oras=true requires oras_version and oras_sha256 (pass from load-versions outputs to keep .settings.yaml as the single source of truth)"
+          exit 1
+        fi
+        ORAS_TAR="oras_${ORAS_VERSION}_linux_amd64.tar.gz"
+        ORAS_URL="https://github.com/oras-project/oras/releases/download/v${ORAS_VERSION}/${ORAS_TAR}"
+        ORAS_TMP="$(mktemp -d)"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${ORAS_TMP}/${ORAS_TAR}" "${ORAS_URL}"
+        ACTUAL=$(sha256sum "${ORAS_TMP}/${ORAS_TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${EXPECTED}" ]]; then
+          echo "::error::oras checksum mismatch: expected ${EXPECTED}, got ${ACTUAL}"
+          exit 1
+        fi
+        tar -xzf "${ORAS_TMP}/${ORAS_TAR}" -C "${ORAS_TMP}"
+        sudo mv "${ORAS_TMP}/oras" /usr/local/bin/oras
+        sudo chmod +x /usr/local/bin/oras
+        rm -rf "${ORAS_TMP}"
+        echo "oras installed: $(oras version 2>&1 | grep -E '^Version:' || echo "${ORAS_VERSION}")"
+
+    # Binary release rather than `go install`, for the same reason as #2664:
+    # `go install pkg@version` builds outside the main module, so go.sum covers
+    # none of the tool's dependencies and each is authenticated against
+    # sum.golang.org live. A checksum-database outage then fails the job, which
+    # is what took down tests / E2E on the v0.21.1 release.
+    #
+    # The digest is pinned in .settings.yaml rather than read from the
+    # checksums.txt served beside the tarball, matching the oras block above.
+    # A fetched manifest comes from the same release as the archive, so it
+    # detects corruption in transit but not a compromise of the release itself;
+    # a value committed and reviewed at this SHA does.
+    #
+    # That matters here specifically because this replaced `go install`, which
+    # authenticated every dependency against sum.golang.org -- a public
+    # transparency log with independent witnesses. Swapping that for an unpinned
+    # binary would have traded a real integrity guarantee for none. The pin is
+    # what keeps this a move from one check to another rather than a regression.
+    #
+    # tools/update-oasdiff-checksums refreshes it, wired to Renovate's
+    # postUpgradeTasks, so a version bump that forgets the digest fails this
+    # step on the Renovate PR itself.
+    - name: Install oasdiff
+      if: inputs.install_oasdiff == 'true'
+      shell: bash
+      # Routed through env rather than interpolated into the script body: the
+      # value comes from a checked-out .settings.yaml, which is fork-controlled
+      # on the ok-to-test path. Matches the kubectl/kind/yq/flux blocks below.
+      env:
+        OASDIFF_INPUT_VERSION: ${{ inputs.oasdiff_version }}
+        OASDIFF_INPUT_SHA256: ${{ inputs.oasdiff_sha256 }}
+      run: |
+        set -euo pipefail
+        OASDIFF_VERSION="${OASDIFF_INPUT_VERSION#v}"
+        if [[ -z "${OASDIFF_VERSION}" ]]; then
+          echo "::error::install_oasdiff=true requires oasdiff_version"
+          exit 1
+        fi
+        # Fail closed on a missing or malformed pin rather than falling back to
+        # the release's own checksums.txt: a silent fallback would make the
+        # pin's absence indistinguishable from its presence.
+        if [[ ! "${OASDIFF_INPUT_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+          echo "::error::install_oasdiff=true requires oasdiff_sha256 to be a 64-character lowercase sha256 (got '${OASDIFF_INPUT_SHA256}')"
+          exit 1
+        fi
+        OASDIFF_BASE="https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}"
+        OASDIFF_TAR="oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
+        OASDIFF_TMP="$(mktemp -d)"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 -o "${OASDIFF_TMP}/${OASDIFF_TAR}" "${OASDIFF_BASE}/${OASDIFF_TAR}"
+        ACTUAL=$(sha256sum "${OASDIFF_TMP}/${OASDIFF_TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${OASDIFF_INPUT_SHA256}" ]]; then
+          echo "::error::oasdiff checksum mismatch: expected '${OASDIFF_INPUT_SHA256}', got '${ACTUAL}'"
+          exit 1
+        fi
+        tar -xzf "${OASDIFF_TMP}/${OASDIFF_TAR}" -C "${OASDIFF_TMP}"
+        sudo mv "${OASDIFF_TMP}/oasdiff" /usr/local/bin/oasdiff
+        sudo chmod +x /usr/local/bin/oasdiff
+        rm -rf "${OASDIFF_TMP}"
+        echo "oasdiff installed: $(oasdiff --version 2>&1 | head -1 || echo "${OASDIFF_VERSION}")"
 
     - name: Validate GoReleaser version input
       if: inputs.install_goreleaser == 'true'

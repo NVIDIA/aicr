@@ -75,7 +75,8 @@ per-value constraints, which are verified at snapshot-based generation
 (criteria-only generation has no snapshot evaluator and defers entirely
 to the pre-flight) AND re-evaluated by the same readiness pre-flight.)
 
-**Supported operators** (`pkg/constraints/constraint.go`):
+**Supported operators** (`pkg/constraints/expr/expr.go`, re-exported
+from `pkg/constraints`):
 
 | Operator | Use | Notes |
 |----------|-----|-------|
@@ -116,7 +117,7 @@ encodings, unknown service, service with no declared universe label).
 
 **Adding a new operator:**
 
-1. Add an `Operator` constant in `pkg/constraints/constraint.go`.
+1. Add an `Operator` constant in `pkg/constraints/expr/expr.go`.
 2. Insert it in the operator slice in `ParseConstraintExpression` —
    **longest prefix first** (e.g. `~=` before `~`).
 3. Add a `case` arm in `(*ParsedConstraint).Evaluate`. Return an
