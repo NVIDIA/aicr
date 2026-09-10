@@ -33,6 +33,10 @@ const (
 	gkeTCXOInterfacesAnnotation = "networking.gke.io/interfaces"
 	gkeTCXODefaultAnnotation    = "networking.gke.io/default-interface"
 	gkeTCXODaemonContainer      = "tcpxo-daemon"
+
+	// gkeTCXODefaultNetwork is the network name of the default (eth0)
+	// interface in the interfaces annotation.
+	gkeTCXODefaultNetwork = "default"
 )
 
 // assertGKETCPXOTransportRealized verifies the realized benchmark pods carried
@@ -120,7 +124,7 @@ func checkTCXOAnnotations(pod *v1.Pod) error {
 			"pod %q: %s annotation has %d entries, want 9 (eth0 default + eth1..eth8 GPU NICs)",
 			pod.Name, gkeTCXOInterfacesAnnotation, len(entries)))
 	}
-	if entries[0].InterfaceName != "eth0" || entries[0].Network != "default" {
+	if entries[0].InterfaceName != "eth0" || entries[0].Network != gkeTCXODefaultNetwork {
 		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
 			"pod %q: %s first entry = %s→%s, want eth0→default",
 			pod.Name, gkeTCXOInterfacesAnnotation, entries[0].InterfaceName, entries[0].Network))
