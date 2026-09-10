@@ -155,6 +155,16 @@ check's own budget is always the tightest — the ordering that closes issue
 2. **Orchestrator wait timeout** (catalog timeout + `defaults.ValidatorWaitBuffer`,
    2m30s): if the Job hasn't reached a terminal state by then, the orchestrator
    captures whatever logs/status are available and moves to the next validator.
+   The window is measured from the Job's **observed start time** — `status.startTime`
+   when the apiserver has stamped it, otherwise `creationTimestamp` — not from the
+   moment the create/apply response reached the CLI, so it shares an origin with
+   clock 3 below. Anchored anywhere else, the real margin between clocks 2 and 3
+   collapses to `defaults.JobEnvelopeMargin` (60s), because clock 3 has already
+   been running for however long the apply response took: a response slower than
+   that lets clock 3 fire first and delete the still-active pod. `v1.OrchestratorWaitFor`
+   carries the derivation; it caps the result at the un-rebased budget (apiserver
+   clock skew can place the start time in the CLI's future) and floors it at
+   `defaults.ValidatorMinCompletionWait`.
 
 3. **Job `activeDeadlineSeconds`** (catalog timeout + `defaults.ValidatorJobDeadlineHeadroom`,
    3m30s): K8s sends SIGTERM, then SIGKILL after `terminationGracePeriodSeconds` (30s),
@@ -208,7 +218,7 @@ ValidateAll(ctx, recipe, snapshot)
 │   ├── For each validator (sequentially):
 │   │   ├── Deploy Job
 │   │   ├── Stream stderr (background, for live progress)
-│   │   ├── WaitForCompletion(timeout + ValidatorWaitBuffer)
+│   │   ├── WaitForCompletion() — until jobStart + timeout + ValidatorWaitBuffer
 │   │   ├── ExtractResult() — exit code, termination msg, stdout
 │   │   ├── Add to CTRF report
 │   │   └── CleanupJob() unless --no-cleanup

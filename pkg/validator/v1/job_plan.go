@@ -201,6 +201,45 @@ func JobDeadlineFor(checkTimeout time.Duration) time.Duration {
 	return checkTimeout + defaults.ValidatorJobDeadlineHeadroom
 }
 
+// OrchestratorWaitFor returns how much longer a caller should wait for a
+// validator Job to reach a terminal state, given the Job's observed start time
+// (see the observedStart contract below) and the check's own budget.
+//
+// The two clocks do not share an origin. Kubernetes measures
+// activeDeadlineSeconds from the Job's status.startTime, whereas a caller can
+// only begin waiting once the create/apply response reaches it. Anchoring the
+// wait to observedStart instead of to now removes that delay from the
+// comparison, so a caller that waits checkTimeout+defaults.ValidatorWaitBuffer
+// still expires before the Job's checkTimeout+defaults.ValidatorJobDeadlineHeadroom
+// no matter how slow the response was. Without the rebase the effective margin
+// between the two is only defaults.JobEnvelopeMargin, and a response slower
+// than that lets the Job controller win and delete the still-active pod whose
+// logs carry the verdict (issue #2473).
+//
+// observedStart is status.startTime when the caller has seen it, else the Job's
+// creationTimestamp — never later than status.startTime, so the fallback ends
+// the wait earlier rather than later. A zero observedStart means no start time
+// was observed at all and yields the unrebased budget.
+//
+// The result is capped at that same unrebased budget, because apiserver clock
+// skew can place observedStart in the caller's future, and floored at
+// defaults.ValidatorMinCompletionWait so a pathological response delay does not
+// produce a wait too short to observe a terminal condition.
+func OrchestratorWaitFor(observedStart, now time.Time, checkTimeout time.Duration) time.Duration {
+	budget := checkTimeout + defaults.ValidatorWaitBuffer
+	if observedStart.IsZero() {
+		return budget
+	}
+	remaining := observedStart.Add(budget).Sub(now)
+	if remaining > budget {
+		return budget
+	}
+	if remaining < defaults.ValidatorMinCompletionWait {
+		return defaults.ValidatorMinCompletionWait
+	}
+	return remaining
+}
+
 // BuildJobPlan creates a JobPlan from a validator entry.
 // Exposed as public for verification and testing purposes.
 //

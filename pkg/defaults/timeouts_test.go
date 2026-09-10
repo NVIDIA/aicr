@@ -74,6 +74,7 @@ func TestTimeoutConstants(t *testing.T) {
 		{"ValidatorJobDeadlineHeadroom", ValidatorJobDeadlineHeadroom, 1 * time.Minute, 10 * time.Minute},
 		{"ValidatorDefaultTimeout", ValidatorDefaultTimeout, 1 * time.Minute, 15 * time.Minute},
 		{"ValidatorTerminationGracePeriod", ValidatorTerminationGracePeriod, 10 * time.Second, 60 * time.Second},
+		{"ValidatorMinCompletionWait", ValidatorMinCompletionWait, 10 * time.Second, 60 * time.Second},
 
 		// ConfigMap read/write budgets — held as distinct constants so the
 		// read path (serializer resolving cm:// URIs) and the write path
@@ -288,6 +289,19 @@ func TestValidatorTimeoutRelationships(t *testing.T) {
 	if ValidatorJobDeadlineHeadroom <= ValidatorWaitBuffer {
 		t.Errorf("ValidatorJobDeadlineHeadroom (%v) must exceed ValidatorWaitBuffer (%v)",
 			ValidatorJobDeadlineHeadroom, ValidatorWaitBuffer)
+	}
+	// The floor on a start-time-rebased wait has to leave room for a Job past
+	// its deadline to stamp a terminal condition, which takes at least the
+	// pod's SIGTERM-to-SIGKILL window; and it must stay under the wait buffer,
+	// or a floor larger than the budget it clamps would extend every wait
+	// instead of bounding the clamped ones.
+	if ValidatorMinCompletionWait < ValidatorTerminationGracePeriod {
+		t.Errorf("ValidatorMinCompletionWait (%v) must be at least ValidatorTerminationGracePeriod (%v)",
+			ValidatorMinCompletionWait, ValidatorTerminationGracePeriod)
+	}
+	if ValidatorMinCompletionWait > ValidatorWaitBuffer {
+		t.Errorf("ValidatorMinCompletionWait (%v) must not exceed ValidatorWaitBuffer (%v)",
+			ValidatorMinCompletionWait, ValidatorWaitBuffer)
 	}
 	// Default timeout must be positive and reasonable.
 	if ValidatorDefaultTimeout < 1*time.Minute {

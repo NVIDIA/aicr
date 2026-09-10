@@ -380,13 +380,13 @@ func enforcedDeadline(job *batchv1.Job, configured time.Duration) time.Duration 
 // cause is treated as a timeout for backward compatibility with callers that
 // had no error to thread through.
 //
-// The timeout wording names the actual clock the orchestrator waited on
-// (WaitForCompletion's timeout+defaults.ValidatorWaitBuffer), not just the
-// catalog budget: since #2473 the Job's own activeDeadlineSeconds exceeds the
-// catalog budget by ValidatorJobDeadlineHeadroom, so a hung check now
-// routinely expires this orchestrator wait before the Job deadline, and
-// reporting only the catalog value would understate how long the operator
-// actually waited.
+// The timeout wording names the actual clock the orchestrator waited on —
+// configured+defaults.ValidatorWaitBuffer, the window WaitForCompletion spans
+// measured from the Job's start time — not just the catalog budget: since
+// #2473 the Job's own activeDeadlineSeconds exceeds the catalog budget by
+// ValidatorJobDeadlineHeadroom, so a hung check now routinely expires this
+// orchestrator wait before the Job deadline, and reporting only the catalog
+// value would understate how long the operator actually waited.
 func waitFailureMessage(cause error, configured time.Duration) string {
 	if cause == nil || isDeadlineCause(cause) {
 		checkBudget := truncateToSeconds(configured)

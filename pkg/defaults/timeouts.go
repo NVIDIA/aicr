@@ -1158,6 +1158,16 @@ const (
 	// instead of the Job controller deleting it as an active pod (issue #2473).
 	ValidatorJobDeadlineHeadroom = ValidatorWaitBuffer + JobEnvelopeMargin
 
+	// ValidatorMinCompletionWait floors the orchestrator's Job-completion wait
+	// once that wait has been rebased onto the Job's observed start time. The
+	// rebase subtracts however long the create/apply response took to arrive,
+	// and a pathological delay would otherwise leave a zero or negative
+	// remainder — an orchestrator timeout reported before the check ran. One
+	// SIGTERM-to-SIGKILL window is the shortest span in which a Job already
+	// past its activeDeadlineSeconds can still stamp a terminal condition for
+	// the orchestrator to read.
+	ValidatorMinCompletionWait = ValidatorTerminationGracePeriod
+
 	// ValidatorDefaultTimeout is the default per-validator timeout if not
 	// specified in the catalog. Used as fallback only.
 	ValidatorDefaultTimeout = 5 * time.Minute
