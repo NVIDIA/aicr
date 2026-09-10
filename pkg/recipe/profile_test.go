@@ -1801,11 +1801,13 @@ func TestValidateProfileValuesRejectsInvalidBaseline(t *testing.T) {
 	}
 }
 
-// TestApplyEffectiveProfileConstraints covers the two constraint outcomes of a
-// selection: a name already present in the composed recipe is rejected rather
-// than silently shadowing it, and a fresh name is appended in sorted order.
+// TestApplyEffectiveProfileConstraints covers the constraint outcomes of a
+// selection: a fresh name is appended in sorted order, a name the composition
+// already carries is intersected when both sides are version ranges (issue
+// #2512), and anything else — a widening range, an empty intersection, or a
+// predicate with no ordering — leaves the recipe's own constraint intact.
 func TestApplyEffectiveProfileConstraints(t *testing.T) {
-	newDecl := func(constraintName string) *effectiveProfileDeclaration {
+	newDecl := func(constraintName, constraintValue string) *effectiveProfileDeclaration {
 		return &effectiveProfileDeclaration{
 			Source: "test-overlay",
 			Declaration: &ProfileDeclaration{
@@ -1816,22 +1818,97 @@ func TestApplyEffectiveProfileConstraints(t *testing.T) {
 							Name:      "gpu-operator",
 							Overrides: map[string]any{"driver": map[string]any{"enabled": false}},
 						}},
-						Constraints: []Constraint{{Name: constraintName, Value: ">= 1.32"}},
+						Constraints: []Constraint{{
+							Name:        constraintName,
+							Value:       constraintValue,
+							Remediation: "create the pool on a newer cluster",
+						}},
 					},
 				},
 			},
 		}
 	}
-	newSpec := func() *RecipeMetadataSpec {
+	newSpec := func(recipeConstraint Constraint) *RecipeMetadataSpec {
 		return &RecipeMetadataSpec{
 			ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm}},
-			Constraints:   []Constraint{{Name: "K8s.server.version", Value: ">= 1.30"}},
+			Constraints:   []Constraint{recipeConstraint},
 		}
 	}
+	k8sFloor := func(value string) Constraint {
+		return Constraint{Name: "K8s.server.version", Value: value}
+	}
 
-	t.Run("collision with the composed recipe is rejected", func(t *testing.T) {
-		spec := newSpec()
-		_, err := applyEffectiveProfile(spec, newDecl("K8s.server.version"), "", nil)
+	t.Run("stricter version floor tightens the composed recipe", func(t *testing.T) {
+		spec := newSpec(k8sFloor(">= 1.30"))
+		if _, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.35"), "", nil); err != nil {
+			t.Fatalf("applyEffectiveProfile() error = %v", err)
+		}
+		if len(spec.Constraints) != 1 {
+			t.Fatalf("composed constraints = %v, want one entry per name", spec.Constraints)
+		}
+		if spec.Constraints[0].Value != ">= 1.35" {
+			t.Fatalf("constraint value = %q, want %q", spec.Constraints[0].Value, ">= 1.35")
+		}
+		if spec.Constraints[0].Remediation != "create the pool on a newer cluster" {
+			t.Fatalf("remediation = %q, want the profile's own guidance", spec.Constraints[0].Remediation)
+		}
+	})
+
+	t.Run("tightening preserves the composed ceiling", func(t *testing.T) {
+		spec := newSpec(k8sFloor(">= 1.34.1 < 1.36.0"))
+		if _, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.35"), "", nil); err != nil {
+			t.Fatalf("applyEffectiveProfile() error = %v", err)
+		}
+		if got, want := spec.Constraints[0].Value, ">= 1.35 < 1.36.0"; got != want {
+			t.Fatalf("constraint value = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("weaker version floor leaves the composed recipe alone", func(t *testing.T) {
+		spec := newSpec(k8sFloor(">= 1.34"))
+		if _, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.30"), "", nil); err != nil {
+			t.Fatalf("applyEffectiveProfile() error = %v", err)
+		}
+		if got, want := spec.Constraints[0].Value, ">= 1.34"; got != want {
+			t.Fatalf("constraint value = %q, want the recipe's own floor %q", got, want)
+		}
+		if spec.Constraints[0].Remediation != "" {
+			t.Fatalf("remediation = %q, want the recipe's own left intact", spec.Constraints[0].Remediation)
+		}
+	})
+
+	t.Run("empty intersection is rejected", func(t *testing.T) {
+		spec := newSpec(k8sFloor("<= 1.30"))
+		_, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.35"), "", nil)
+		if err == nil || !strings.Contains(err.Error(), "no version can satisfy") {
+			t.Fatalf("applyEffectiveProfile() error = %v, want an unsatisfiable-range rejection", err)
+		}
+		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			t.Fatalf("applyEffectiveProfile() error = %v, want ErrCodeInvalidRequest", err)
+		}
+		if len(spec.Constraints) != 1 || spec.Constraints[0].Value != "<= 1.30" {
+			t.Fatalf("composed constraints = %v, want the recipe's own left intact", spec.Constraints)
+		}
+	})
+
+	t.Run("bounds at different precisions are rejected as unorderable", func(t *testing.T) {
+		spec := newSpec(k8sFloor(">= 1.34"))
+		_, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.34.1"), "", nil)
+		if err == nil || !strings.Contains(err.Error(), "different precisions cannot be ordered") {
+			t.Fatalf("applyEffectiveProfile() error = %v, want a precision-mismatch rejection", err)
+		}
+		if strings.Contains(err.Error(), "not both version ranges") {
+			t.Fatalf("applyEffectiveProfile() error = %v, must not claim these are not version ranges", err)
+		}
+		if len(spec.Constraints) != 1 || spec.Constraints[0].Value != ">= 1.34" {
+			t.Fatalf("composed constraints = %v, want the recipe's own left intact", spec.Constraints)
+		}
+	})
+
+	t.Run("collision with no ordering is rejected", func(t *testing.T) {
+		spec := newSpec(Constraint{Name: "NodeTopology.gpu-nodes.label", Value: "gke-no-default-nvidia-gpu-device-plugin=true"})
+		_, err := applyEffectiveProfile(spec,
+			newDecl("NodeTopology.gpu-nodes.label", "!gke-no-default-nvidia-gpu-device-plugin"), "", nil)
 		if err == nil || !strings.Contains(err.Error(), "collides with the composed recipe") {
 			t.Fatalf("applyEffectiveProfile() error = %v, want collision", err)
 		}
@@ -1844,8 +1921,8 @@ func TestApplyEffectiveProfileConstraints(t *testing.T) {
 	})
 
 	t.Run("distinct constraint is merged", func(t *testing.T) {
-		spec := newSpec()
-		selected, err := applyEffectiveProfile(spec, newDecl("Driver.gpu.mode"), "", nil)
+		spec := newSpec(k8sFloor(">= 1.30"))
+		selected, err := applyEffectiveProfile(spec, newDecl("Driver.gpu.mode", ">= 1.32"), "", nil)
 		if err != nil {
 			t.Fatalf("applyEffectiveProfile() error = %v", err)
 		}
