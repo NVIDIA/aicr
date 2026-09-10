@@ -91,6 +91,12 @@ func TestLoadFromFileWarnsOnAlphaAPIVersion(t *testing.T) {
 	if !strings.Contains(got, header.GroupVersionV1) {
 		t.Errorf("warning does not name the stable target %q: %q", header.GroupVersionV1, got)
 	}
+	// The observed value, not just the target: without this a loader that passed
+	// through the wrong version — or an empty one — still satisfies every other
+	// assertion here.
+	if !strings.Contains(got, header.GroupVersion) {
+		t.Errorf("warning does not name the observed apiVersion %q: %q", header.GroupVersion, got)
+	}
 }
 
 // TestLoadFromFileIsSilentOnTargetAPIVersion is the other half: a snapshot
@@ -125,5 +131,13 @@ func TestLoadFromFileWarnsOnAbsentAPIVersion(t *testing.T) {
 	}
 	if !strings.Contains(got, "headerless-snapshot.yaml") {
 		t.Errorf("warning does not name the file: %q", got)
+	}
+	// An absent header has no observed value to report, so the replacement and
+	// the removal release are the whole actionable payload here.
+	if !strings.Contains(got, header.GroupVersionV1) {
+		t.Errorf("warning does not name the stable target %q: %q", header.GroupVersionV1, got)
+	}
+	if !strings.Contains(got, header.AlphaRemovedIn) {
+		t.Errorf("warning does not name the removal release %q: %q", header.AlphaRemovedIn, got)
 	}
 }

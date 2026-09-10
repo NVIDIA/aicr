@@ -63,6 +63,12 @@ func TestLoadWarnsOnAlphaAPIVersion(t *testing.T) {
 	if !strings.Contains(got, header.GroupVersionV1Beta1) {
 		t.Errorf("warning does not name the authoring target %q: %q", header.GroupVersionV1Beta1, got)
 	}
+	// The observed value, not just the target: without this a loader that passed
+	// through the wrong version — or an empty one — still satisfies every other
+	// assertion here.
+	if !strings.Contains(got, header.GroupVersion) {
+		t.Errorf("warning does not name the observed apiVersion %q: %q", header.GroupVersion, got)
+	}
 }
 
 // TestLoadIsSilentOnTargetAPIVersion is the other half: a migrated config must
