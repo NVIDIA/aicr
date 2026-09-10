@@ -138,7 +138,9 @@ func LoadFromFileWithProviderProfile(
 			opts = append(opts, WithDataProvider(dp))
 		}
 		builder := NewBuilder(opts...)
-		rec, err = builder.BuildFromCriteriaWithProfile(ctx, overlay.Spec.Criteria, profile)
+		criteria := *overlay.Spec.Criteria
+		criteria.FillUnsetWithAny()
+		rec, err = builder.BuildFromCriteriaWithProfile(ctx, &criteria, profile)
 		if err != nil {
 			return nil, err
 		}
