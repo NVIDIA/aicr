@@ -18,11 +18,16 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
+	"sort"
+	"strings"
+	"sync"
+	"time"
 
-	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -37,57 +42,182 @@ const (
 	// gkeTCXODefaultNetwork is the network name of the default (eth0)
 	// interface in the interfaces annotation.
 	gkeTCXODefaultNetwork = "default"
+
+	// gkeTCXOExpectedEntries is eth0 (default) plus eth1..eth8 (GPU NICs) on
+	// the a3-megagpu-8g shape this assertion covers.
+	gkeTCXOExpectedEntries = 9
 )
 
-// assertGKETCPXOTransportRealized verifies the realized benchmark pods carried
-// the TCPXO wiring. It exists because the marker-based check
-// (verifyTransportFromLogs) is a no-op on exactly this path: NCCL_DEBUG=WARN
-// is deliberate on GKE (INFO rotated the results table out of retrievable
-// logs, #1712), so the "NCCL INFO Using network" banner never appears.
+// tcpxoWorkerRecord accumulates what the watcher has seen of one worker pod.
+// daemonStarted is sticky: it records that the sidecar reached Started at some
+// point while running. Reading it at assertion time would race JobSet's
+// teardown of completed workers, which flips Started back to false.
+type tcpxoWorkerRecord struct {
+	wiringErr     error
+	daemonStarted bool
+}
+
+// tcpxoWorkerWatcher observes benchmark worker pods as they run.
+type tcpxoWorkerWatcher struct {
+	mu      sync.Mutex
+	records map[string]*tcpxoWorkerRecord
+}
+
+// startGKETCPXOWorkerWatch watches the benchmark's worker pods from TrainJob
+// creation until stop is called. It answers the question the log-marker check
+// cannot answer on GKE (NCCL_DEBUG=WARN suppresses the "Using network" banner,
+// deliberately — #1712): did the realized worker pods carry and activate the
+// TCPXO wiring?
 //
-// The assertion is on the realized Pod, so it holds regardless of where the
-// runtime came from — the validator's own testdata today, the shipped
-// torch-distributed-tcpxo runtime once #2297 derives from it. It proves the
-// wiring was present and started; the bandwidth floor (unreachable over TCP
-// on eth0) proves traffic crossed it.
-func assertGKETCPXOTransportRealized(ctx context.Context, clientset kubernetes.Interface, namespace string) error {
-	listCtx, cancel := context.WithTimeout(ctx, defaults.DiagnosticTimeout)
-	defer cancel()
+// Observations are recorded while pods are alive because the JobSet controller
+// deletes active worker Jobs as soon as the JobSet completes — by the time the
+// launcher is known to have succeeded, the workers may already be gone, and a
+// completed native sidecar's Started flag reads false. Asserting from state
+// read only after completion would fail successful runs at random.
+//
+// The returned assert must be called after stop, once the benchmark outcome is
+// known. The watcher is scoped to the benchmark's JobSet labels, so unrelated
+// pods in the namespace are never inspected.
+func startGKETCPXOWorkerWatch(ctx context.Context, clientset kubernetes.Interface, namespace string) (assert func(wantWorkers int) error, stop func()) {
+	watchCtx, cancel := context.WithCancel(ctx)
+	w := &tcpxoWorkerWatcher{records: make(map[string]*tcpxoWorkerRecord)}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.run(watchCtx, clientset, namespace)
+	}()
 
-	pods, err := clientset.CoreV1().Pods(namespace).List(listCtx, metav1.ListOptions{})
+	stop = func() {
+		cancel()
+		<-done
+	}
+	assert = func(wantWorkers int) error { return w.assert(wantWorkers) }
+	return assert, stop
+}
+
+func (w *tcpxoWorkerWatcher) run(ctx context.Context, clientset kubernetes.Interface, namespace string) {
+	selector := fmt.Sprintf("jobset.sigs.k8s.io/jobset-name=%s,jobset.sigs.k8s.io/replicatedjob-name=%s",
+		ncclTrainJobName, nodeJobName)
+	for ctx.Err() == nil {
+		w.watchOnce(ctx, clientset, namespace, selector)
+	}
+}
+
+// watchOnce streams one watch session; the outer run loop re-establishes after
+// the API server closes the channel, which it does routinely.
+func (w *tcpxoWorkerWatcher) watchOnce(ctx context.Context, clientset kubernetes.Interface, namespace, selector string) {
+	watcher, err := clientset.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{LabelSelector: selector})
 	if err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal,
-			"failed to list benchmark pods for TCPXO transport assertion", err)
+		if ctx.Err() == nil {
+			slog.Warn("TCPXO worker watch failed to start; retrying", "error", err)
+			time.Sleep(time.Second)
+		}
+		return
 	}
+	defer watcher.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return
+			}
+			pod, ok := event.Object.(*v1.Pod)
+			if !ok || event.Type == watch.Deleted {
+				continue
+			}
+			w.record(pod)
+		}
+	}
+}
 
-	workers := 0
-	for i := range pods.Items {
-		pod := &pods.Items[i]
-		if !podHasTCXODaemon(pod) {
-			continue
+func (w *tcpxoWorkerWatcher) record(pod *v1.Pod) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	rec := w.records[pod.Name]
+	if rec == nil {
+		rec = &tcpxoWorkerRecord{}
+		w.records[pod.Name] = rec
+	}
+	// Pod wiring is immutable, but validate on every event so a bad object is
+	// recorded the first time it is seen, not only on creation.
+	rec.wiringErr = validateTCPXOWorkerWiring(pod)
+	if tcpxoDaemonStarted(pod) {
+		rec.daemonStarted = true
+	}
+}
+
+// assert evaluates the collected records once the benchmark outcome is known.
+// wantWorkers is the benchmark's worker count: that many workers must have
+// been observed with the daemon provably started, and no observed worker may
+// carry broken wiring.
+func (w *tcpxoWorkerWatcher) assert(wantWorkers int) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.records) == 0 {
+		return aicrErrors.New(aicrErrors.ErrCodeInternal,
+			"no NCCL worker pods were observed during the benchmark; the TCPXO wiring cannot be attested")
+	}
+	var problems []string
+	started := 0
+	for name, rec := range w.records {
+		if rec.wiringErr != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", name, rec.wiringErr))
 		}
-		workers++
-		if err := checkTCXOAnnotations(pod); err != nil {
-			return err
-		}
-		if err := checkTCXODaemonStarted(pod); err != nil {
-			return err
+		if rec.daemonStarted {
+			started++
 		}
 	}
-	if workers == 0 {
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return aicrErrors.New(aicrErrors.ErrCodeInternal,
+			"benchmark worker pods did not carry the TCPXO wiring: "+strings.Join(problems, "; "))
+	}
+	if started < wantWorkers {
 		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
-			"no pod in namespace %q carries the %s sidecar; the benchmark ran without the TCPXO wiring "+
-				"and its bandwidth number says nothing about the fabric", namespace, gkeTCXODaemonContainer))
+			"the %s sidecar was observed started on %d of %d benchmark workers; "+
+				"the bandwidth result cannot attest to the fabric on the full cohort",
+			gkeTCXODaemonContainer, started, wantWorkers))
 	}
 	return nil
+}
+
+// validateTCPXOWorkerWiring checks the immutable wiring on one benchmark
+// worker pod: the daemon sidecar, the default interface, and the interfaces
+// annotation. The annotation contract matches the recipe-level validation
+// (ValidateGKETCPXOInterfaces): eth0 → default first (fixed by the manifest),
+// then explicit interfaceName → network pairs covering eth1..eth8 exactly once
+// with unique networks. Pair order in the annotation follows the recipe's
+// recorded order; the explicit interfaceName keys are the mapping, not the
+// list position.
+func validateTCPXOWorkerWiring(pod *v1.Pod) error {
+	if !podHasTCXODaemon(pod) {
+		return fmt.Errorf("pod %q has no %s sidecar", pod.Name, gkeTCXODaemonContainer)
+	}
+	return checkTCXOAnnotations(pod)
 }
 
 // podHasTCXODaemon reports whether the pod spec includes the tcpxo-daemon
 // native sidecar (an initContainer with restartPolicy: Always).
 func podHasTCXODaemon(pod *v1.Pod) bool {
 	for _, c := range pod.Spec.InitContainers {
-		if c.Name == gkeTCXODaemonContainer {
+		if c.Name == gkeTCXODaemonContainer && c.RestartPolicy != nil &&
+			*c.RestartPolicy == v1.ContainerRestartPolicyAlways {
+
 			return true
+		}
+	}
+	return false
+}
+
+// tcpxoDaemonStarted reports whether the daemon's init-container status
+// currently reports Started. The watcher OR-accumulates this into the record,
+// so a normal termination at job completion never erases the proof.
+func tcpxoDaemonStarted(pod *v1.Pod) bool {
+	for _, status := range pod.Status.InitContainerStatuses {
+		if status.Name == gkeTCXODaemonContainer {
+			return status.Started != nil && *status.Started
 		}
 	}
 	return false
@@ -100,68 +230,62 @@ type gkeTCXOInterfaceEntry struct {
 	Network       string `json:"network"`
 }
 
-// checkTCXOAnnotations asserts the multi-NIC annotations: eth0 → default
-// first, then exactly the eight GPU-NIC interfaces eth1..eth8 mapped to eight
-// distinct networks — the a3-megagpu-8g contract the runtime records.
+// checkTCXOAnnotations asserts the multi-NIC annotations on a realized pod:
+// eth0 → default first, then explicit pairs covering eth1..eth8 exactly once
+// with distinct networks — the a3-megagpu-8g contract the runtime records.
 func checkTCXOAnnotations(pod *v1.Pod) error {
 	if pod.Annotations[gkeTCXODefaultAnnotation] != "eth0" {
-		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
-			"pod %q: %s annotation is %q, want eth0", pod.Name, gkeTCXODefaultAnnotation,
-			pod.Annotations[gkeTCXODefaultAnnotation]))
+		return fmt.Errorf("pod %q: %s annotation is %q, want eth0",
+			pod.Name, gkeTCXODefaultAnnotation, pod.Annotations[gkeTCXODefaultAnnotation])
 	}
 	raw := pod.Annotations[gkeTCXOInterfacesAnnotation]
 	if raw == "" {
-		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
-			"pod %q: missing %s annotation", pod.Name, gkeTCXOInterfacesAnnotation))
+		return fmt.Errorf("pod %q: missing %s annotation", pod.Name, gkeTCXOInterfacesAnnotation)
 	}
 	var entries []gkeTCXOInterfaceEntry
 	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf(
-			"pod %q: %s annotation is not valid JSON", pod.Name, gkeTCXOInterfacesAnnotation), err)
+		return fmt.Errorf("pod %q: %s annotation is not valid JSON: %w",
+			pod.Name, gkeTCXOInterfacesAnnotation, err)
 	}
-	if len(entries) != 9 {
-		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
-			"pod %q: %s annotation has %d entries, want 9 (eth0 default + eth1..eth8 GPU NICs)",
-			pod.Name, gkeTCXOInterfacesAnnotation, len(entries)))
+	if len(entries) != gkeTCXOExpectedEntries {
+		return fmt.Errorf("pod %q: %s annotation has %d entries, want %d (eth0 default + eth1..eth8 GPU NICs)",
+			pod.Name, gkeTCXOInterfacesAnnotation, len(entries), gkeTCXOExpectedEntries)
 	}
 	if entries[0].InterfaceName != "eth0" || entries[0].Network != gkeTCXODefaultNetwork {
-		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
-			"pod %q: %s first entry = %s→%s, want eth0→default",
-			pod.Name, gkeTCXOInterfacesAnnotation, entries[0].InterfaceName, entries[0].Network))
+		return fmt.Errorf("pod %q: %s first entry = %s→%s, want eth0→default",
+			pod.Name, gkeTCXOInterfacesAnnotation, entries[0].InterfaceName, entries[0].Network)
 	}
-	seenNetworks := make(map[string]struct{}, len(entries)-1)
-	for i, entry := range entries[1:] {
-		want := fmt.Sprintf("eth%d", i+1)
-		if entry.InterfaceName != want {
-			return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
-				"pod %q: %s entry %d = interface %q, want %q — the ordered interface→network "+
-					"mapping is the contract, and a shifted mapping silently lands traffic on the wrong NIC",
-				pod.Name, gkeTCXOInterfacesAnnotation, i+1, entry.InterfaceName, want))
+	seenInterfaces := make(map[string]struct{}, gkeTCXOExpectedEntries-1)
+	seenNetworks := make(map[string]struct{}, gkeTCXOExpectedEntries-1)
+	for _, entry := range entries[1:] {
+		if !gkeTCPXOInterfaceName(entry.InterfaceName) {
+			return fmt.Errorf("pod %q: %s entry has interface %q, want eth1..eth8 — "+
+				"a wrong interface name lands traffic on the wrong NIC",
+				pod.Name, gkeTCXOInterfacesAnnotation, entry.InterfaceName)
 		}
+		if _, dup := seenInterfaces[entry.InterfaceName]; dup {
+			return fmt.Errorf("pod %q: %s repeats interface %q",
+				pod.Name, gkeTCXOInterfacesAnnotation, entry.InterfaceName)
+		}
+		seenInterfaces[entry.InterfaceName] = struct{}{}
 		if _, dup := seenNetworks[entry.Network]; dup {
-			return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
-				"pod %q: %s maps two interfaces to network %q", pod.Name, gkeTCXOInterfacesAnnotation, entry.Network))
+			return fmt.Errorf("pod %q: %s maps two interfaces to network %q",
+				pod.Name, gkeTCXOInterfacesAnnotation, entry.Network)
 		}
 		seenNetworks[entry.Network] = struct{}{}
+	}
+	if len(seenInterfaces) != gkeTCXOExpectedEntries-1 {
+		return fmt.Errorf("pod %q: %s covers %d secondary interfaces, want eth1..eth8",
+			pod.Name, gkeTCXOInterfacesAnnotation, len(seenInterfaces))
 	}
 	return nil
 }
 
-// checkTCXODaemonStarted requires the native sidecar to report Started in its
-// init-container status — proof the RxDM manager actually ran, not merely
-// that the spec named it.
-func checkTCXODaemonStarted(pod *v1.Pod) error {
-	for _, status := range pod.Status.InitContainerStatuses {
-		if status.Name != gkeTCXODaemonContainer {
-			continue
-		}
-		if status.Started != nil && *status.Started {
-			return nil
-		}
-		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
-			"pod %q: %s sidecar never reported started", pod.Name, gkeTCXODaemonContainer))
+// gkeTCPXOInterfaceName mirrors the recipe layer's eth1..eth8 contract without
+// importing it (the validator binary is built separately).
+func gkeTCPXOInterfaceName(name string) bool {
+	if len(name) != 4 || !strings.HasPrefix(name, "eth") {
+		return false
 	}
-	return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
-		"pod %q: no init-container status for %s; the sidecar's start cannot be proven",
-		pod.Name, gkeTCXODaemonContainer))
+	return name[3] >= '1' && name[3] <= '8'
 }

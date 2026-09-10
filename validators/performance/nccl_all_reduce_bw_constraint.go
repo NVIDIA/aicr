@@ -913,6 +913,21 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 		return "", aicrErrors.PropagateOrWrap(applyErr, aicrErrors.ErrCodeInternal, "failed to apply NCCL resources")
 	}
 
+	// On GKE H100 the log-marker transport check is a documented no-op
+	// (NCCL_DEBUG=WARN keeps the results table retrievable, so the INFO
+	// banner never appears — see verifyTransportFromLogs). Watch the worker
+	// pods for the TCPXO wiring instead, from creation through completion.
+	// Asserting from state read after the launcher finishes would race the
+	// JobSet controller, which deletes completed workers immediately. A
+	// recipe-supplied runtime owns its fabric end to end and is out of scope
+	// here.
+	var assertTCPXO func(int) error
+	if customRuntime == "" && gkeTCPXOPreflightApplies(variant, accelerator, service) {
+		var stop func()
+		assertTCPXO, stop = startGKETCPXOWorkerWatch(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
+		defer stop()
+	}
+
 	podHelper := &helper.PodLifecycle{
 		ClientSet: ctx.Clientset,
 		Namespace: gpuConfig.Namespace,
@@ -924,13 +939,8 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get launcher logs", err)
 	}
 
-	// On GKE H100 the log-marker transport check is a documented no-op
-	// (NCCL_DEBUG=WARN keeps the results table retrievable, so the INFO
-	// banner never appears — see verifyTransportFromLogs). Assert the
-	// realized transport on the pods instead, while they are still here:
-	// the deferred cleanup above tears the namespace down on return.
-	if gkeTCPXOPreflightApplies(variant, accelerator, service) {
-		if assertErr := assertGKETCPXOTransportRealized(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace); assertErr != nil {
+	if assertTCPXO != nil {
+		if assertErr := assertTCPXO(gpuConfig.WorkerCount); assertErr != nil {
 			return "", assertErr
 		}
 	}
