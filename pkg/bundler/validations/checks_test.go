@@ -1752,3 +1752,93 @@ func TestEffectiveComponentValues_PreservesResolverCode(t *testing.T) {
 		t.Errorf("error %q missing coherence framing", err.Error())
 	}
 }
+
+// tcpxoCoherenceTestResult builds a fingerprint recipe (h100 GKE kubeflow
+// with the fabric component) that records the fixed introspection mapping and
+// projects it into the kubeflow-trainer overrides, as recipe generation does.
+func tcpxoCoherenceTestResult() *recipe.RecipeResult {
+	mapping := recipe.GKETCPXOIntrospectionInterfaces()
+	override := make([]any, 0, len(mapping))
+	for _, entry := range mapping {
+		override = append(override, map[string]any{
+			"interfaceName": entry.InterfaceName,
+			"network":       entry.Network,
+		})
+	}
+	return &recipe.RecipeResult{
+		Criteria: &recipe.Criteria{
+			Service:     recipe.CriteriaServiceGKE,
+			Accelerator: recipe.CriteriaAcceleratorH100,
+			Platform:    recipe.CriteriaPlatformKubeflow,
+		},
+		Configuration: &recipe.RecipeConfiguration{
+			GKE: &recipe.GKEConfiguration{TCPXOInterfaces: mapping},
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gke-nccl-tcpxo"},
+			{Name: "kubeflow-trainer", Overrides: map[string]any{"tcpxoInterfaces": override}},
+		},
+	}
+}
+
+func TestCheckGKETCPXOInterfacesCoherence(t *testing.T) {
+	t.Parallel()
+
+	nonFingerprint := tcpxoCoherenceTestResult()
+	nonFingerprint.Criteria.Accelerator = recipe.CriteriaAcceleratorB200
+
+	drifted := tcpxoCoherenceTestResult()
+	drifted.ComponentRefs[1].Overrides["tcpxoInterfaces"].([]any)[2].(map[string]any)["network"] = "reprovisioned-network"
+
+	overrideRemoved := tcpxoCoherenceTestResult()
+	delete(overrideRemoved.ComponentRefs[1].Overrides, "tcpxoInterfaces")
+
+	unrecorded := tcpxoCoherenceTestResult()
+	unrecorded.Configuration = nil
+
+	tests := []struct {
+		name         string
+		recipeResult *recipe.RecipeResult
+		wantErrors   int
+		wantContains string
+	}{
+		{name: "nil recipe skipped"},
+		{name: "non-fingerprint recipe skipped", recipeResult: nonFingerprint},
+		{name: "recorded and resolved agree", recipeResult: tcpxoCoherenceTestResult()},
+		{
+			name:         "valid but different resolved value blocks",
+			recipeResult: drifted,
+			wantErrors:   1,
+			wantContains: "disagrees",
+		},
+		{
+			name:         "override removed by hand blocks",
+			recipeResult: overrideRemoved,
+			wantErrors:   1,
+			wantContains: "no tcpxoInterfaces",
+		},
+		{
+			name:         "missing mapping fails closed",
+			recipeResult: unrecorded,
+			wantErrors:   1,
+			wantContains: "--gke-tcpxo-interfaces",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			warnings, errs := CheckGKETCPXOInterfacesCoherence(
+				context.Background(), "kubeflow-trainer", tt.recipeResult, nil, nil)
+			if len(warnings) != 0 {
+				t.Fatalf("warnings = %d (%v), want 0", len(warnings), warnings)
+			}
+			if len(errs) != tt.wantErrors {
+				t.Fatalf("errors = %d (%v), want %d", len(errs), errs, tt.wantErrors)
+			}
+			if tt.wantContains != "" && !strings.Contains(errs[0].Error(), tt.wantContains) {
+				t.Errorf("error %q missing %q", errs[0], tt.wantContains)
+			}
+		})
+	}
+}
