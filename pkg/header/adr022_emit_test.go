@@ -47,9 +47,10 @@ import (
 // written as constants, never string literals, so they retarget in lockstep
 // with the emitters at the switch: a correctly-wired site keeps passing, and a
 // site on the wrong track diverges the moment the two constants stop being
-// equal. Today they are equal, so the stable/authoring assertions pass
-// trivially — that is expected. This is a tripwire armed for #2416, not a
-// present-defect detector.
+// equal. Until the v0.22 switch (#2416) they were equal, so the
+// stable/authoring assertions passed trivially and this was a tripwire rather
+// than a detector. The tracks have diverged now, so a failure here is a live
+// wrong-track emit, not noise.
 //
 // Chained with the map, the full contract is covered end to end:
 //

@@ -55,7 +55,7 @@ type adr022Row struct {
 // routes to the right gate and target. It does not verify that an individual
 // emit site selected the right constant. A catalog emitter that referenced
 // RecipeResultAPIVersion instead of RecipeMetadataAPIVersion is invisible here,
-// because the stable and authoring constants carry the same string until the
+// because the stable and authoring constants carried the same string until the
 // emitter switch. That half lives in adr022_emit_test.go, which asserts the
 // observed apiVersion on a real artifact against its track's constant.
 //
@@ -145,11 +145,11 @@ func TestADR022EmittedValueIsReadable(t *testing.T) {
 	}
 }
 
-// TestADR022TargetIsReadableBeforeTheEmitterSwitch asserts the ADR-022 §3
-// reader-first invariant: every §2 target parses now, a release before any
-// emitter writes it. Without this a rollback to the current release cannot
-// read artifacts the next release produced.
-func TestADR022TargetIsReadableBeforeTheEmitterSwitch(t *testing.T) {
+// TestADR022TargetIsReadable asserts every §2 target parses. It was the
+// reader-first invariant before the v0.22 switch; now that emitted == target it
+// overlaps TestADR022EmittedValueIsReadable, and it stays because the two
+// diverge again the moment a future kind is added on a target no gate accepts.
+func TestADR022TargetIsReadable(t *testing.T) {
 	t.Parallel()
 
 	for _, row := range adr022Map() {
@@ -226,10 +226,10 @@ func TestADR022TracksHaveDiverged(t *testing.T) {
 
 // TestADR022RowUsesItsTracksGate asserts each kind is guarded by the gate for
 // its own track, not merely by some gate that happens to accept the alpha
-// value all three share today.
+// value all three still share.
 //
-// Every gate accepts header.GroupVersion during the reader-first release, so a
-// kind wired to the wrong one still reads its own artifacts and looks correct.
+// Every gate accepts header.GroupVersion until #2417, so a kind wired to the
+// wrong one still reads its own artifacts and looks correct.
 // The targets are what distinguish the tracks, so that is what this checks: a
 // gate must accept its row's target and reject the other two.
 func TestADR022RowUsesItsTracksGate(t *testing.T) {

@@ -27,7 +27,7 @@
 # back, which is the failure this file exists to prevent. Same contract as
 # pkg/client/v1/api-diff-exceptions.yaml.
 #
-# The scheduled ADR-022 apiVersion removals in v0.22 (#2416) and v1.0.0 (#2417)
+# The scheduled ADR-022 apiVersion removal in v1.0.0 (#2417)
 # are the expected future occupants: they are planned narrowings of an enum,
 # and recording them here is what the acceptance criteria mean by representing
 # a transition explicitly rather than disabling the gate.

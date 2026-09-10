@@ -1366,7 +1366,7 @@ components:
               type: object
               description: >
                 Selected profile identity and declaration-wide lock surface.
-                Present only when apiVersion is aicr.run/v1alpha3.
+                Present only when apiVersion is aicr.run/v1beta2 (or the superseded aicr.run/v1alpha3).
               required: [name, value, ownedPaths]
               additionalProperties: false
               properties:

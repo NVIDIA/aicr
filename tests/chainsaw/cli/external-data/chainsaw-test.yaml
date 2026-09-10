@@ -48,7 +48,7 @@ spec:
                     defaultVersion: v1.0.0
               EOF
 
-              echo 'apiVersion: aicr.run/v1alpha2
+              echo 'apiVersion: aicr.run/v1beta1
               kind: ComponentRegistry
               components: []' > "${WORK}/with-overlay/registry.yaml"
 

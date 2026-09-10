@@ -209,7 +209,7 @@ names the ones at the end of a chain.
 
 `RecipeMetadata.Spec.Profile` declares one overlay-scoped enum for qualified
 configuration ownership modes. A declaration requires recipe apiVersion
-`aicr.run/v1alpha3` or its ADR-022 target `aicr.run/v1beta2`; either profile
+`aicr.run/v1beta2`, or the superseded `aicr.run/v1alpha3`; either profile
 track without a declaration, or a declaration on a default-track version, is
 rejected. Profile-version metadata and recipe artifacts are strictly decoded
 so an unknown field cannot silently disappear.
@@ -258,7 +258,7 @@ Resolution enforces these invariants:
    readiness pre-flight evaluates them fail closed. Names deduplicate
    per phase — the same measurement path may carry a generation-time
    pre-condition and a readiness-time post-deployment state.
-6. Stamp the result `aicr.run/v1alpha3` and persist
+6. Stamp the result `aicr.run/v1beta2` and persist
    `metadata.selectedProfile`. Its sorted `ownedPaths` is the
    declaration-wide path union plus synthetic `enabled` for each referenced
    component.

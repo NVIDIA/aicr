@@ -371,7 +371,7 @@ configuration choice. Select a non-default value with
 `--profile name=value`; omitting the flag applies the declaration's required
 default. A selection against a composition with no declaration, a wrong name,
 or an unknown value fails closed. Profile-bearing output records
-`metadata.selectedProfile`, uses recipe apiVersion `aicr.run/v1alpha3`, and
+`metadata.selectedProfile`, uses recipe apiVersion `aicr.run/v1beta2`, and
 locks every declared owned path: divergent `aicr bundle`/`aicr mirror`
 static overrides are rejected (identical values accepted), and
 argocd-helm install-time values are rejected on key *presence* alone —

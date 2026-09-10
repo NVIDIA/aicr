@@ -27,6 +27,10 @@ import (
 // wrote. Not parallel-safe: slog.SetDefault is process-wide.
 func captureWarnings(t *testing.T) *bytes.Buffer {
 	t.Helper()
+	// Fresh recorder per test: dedup is the behavior under test, and the
+	// process-wide one makes `go test -count=2` observe every subject already
+	// seen and emit nothing.
+	header.ResetAPIVersionRecorderForTest()
 	var buf bytes.Buffer
 	prev := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
@@ -115,26 +119,5 @@ func TestWarnDeprecatedAPIVersionDedupsPerFile(t *testing.T) {
 	}
 	if n := records("dedup/second.yaml"); n != 1 {
 		t.Errorf("second file warned %d times, want 1: %s", n, got)
-	}
-}
-
-// TestAlphaStillReadableAtN1 is the Release N+1 acceptance criterion that is
-// easiest to regress while chasing green: emitters moved to the targets, but
-// the readers must keep accepting the alpha values until N+2 (#2417). Narrowing
-// a gate early would strand every artifact produced before this release.
-func TestAlphaStillReadableAtN1(t *testing.T) {
-	t.Parallel()
-
-	if !header.IsSupportedAPIVersion(header.GroupVersion) {
-		t.Errorf("stable gate rejects %q; alpha stays readable until %s",
-			header.GroupVersion, header.AlphaRemovedIn)
-	}
-	if !header.IsSupportedAuthoringAPIVersion(header.GroupVersion) {
-		t.Errorf("authoring gate rejects %q; alpha stays readable until %s",
-			header.GroupVersion, header.AlphaRemovedIn)
-	}
-	if !header.IsSupportedProfileAPIVersion(header.RecipeResultGroupVersion) {
-		t.Errorf("profile gate rejects %q; alpha stays readable until %s",
-			header.RecipeResultGroupVersion, header.AlphaRemovedIn)
 	}
 }

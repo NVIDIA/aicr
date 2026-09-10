@@ -73,10 +73,11 @@
 //
 // ADR-022 splits artifacts across three schema tracks. An emitter aliases the
 // constant for its track — StableGroupVersion, AuthoringGroupVersion, or
-// ProfileGroupVersion — never GroupVersion directly. The first two carry the
-// same string during the reader-first release and diverge at the emitter
-// switch, so aliasing by value rather than by track compiles and passes tests
-// today while emitting the wrong version later.
+// ProfileGroupVersion — never GroupVersion directly. The three carried the
+// same value through the reader-first release, so aliasing by value rather
+// than by track compiled and passed tests while emitting the wrong version
+// later. The v0.22 switch (#2416) separated them, which turns that mistake
+// into a visible wrong value instead of a latent one.
 //
 // Callers should select the gate for the artifact's schema track rather than
 // comparing literals, so the single source of truth in this package stays

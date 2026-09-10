@@ -443,9 +443,8 @@ func classifyRecipeMetadataCatalogHeader(
 				path, metadata.APIVersion, header.GroupVersion, header.GroupVersionV1Beta1,
 				header.RecipeResultGroupVersion, header.GroupVersionV1Beta2))
 	}
-	// Track-correct replacement: a profile-bearing document is told to write
-	// v1beta2, an ordinary one v1beta1. Naming the wrong target would be worse
-	// than naming none, since the reader would follow it into a second failure.
+	// Naming the wrong target would be worse than naming none: the reader would
+	// follow it into a second failure.
 	target := header.GroupVersionV1Beta1
 	if profileVersion {
 		target = header.GroupVersionV1Beta2

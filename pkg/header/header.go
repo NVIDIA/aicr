@@ -26,13 +26,15 @@ import (
 // readers select a version by wire kind and schema track; see ADR-022.
 //
 // Three tracks exist. StableGroupVersion, AuthoringGroupVersion, and
-// ProfileGroupVersion name the value each track emits today; GroupVersionV1,
-// GroupVersionV1Beta1, and GroupVersionV1Beta2 name where each is headed.
-// StableGroupVersion and AuthoringGroupVersion carry the same string during
-// the reader-first release and diverge at the emitter switch, so a package
-// emitter must alias the constant for its track rather than the string it
-// happens to equal. Aliasing GroupVersion directly is what made the switch a
-// refactor instead of an edit.
+// ProfileGroupVersion name the value each track emits; since the v0.22 emitter
+// switch (#2416) each equals its target, GroupVersionV1, GroupVersionV1Beta1
+// and GroupVersionV1Beta2 respectively.
+//
+// They carried the same string through the reader-first release, which is what
+// let a package alias GroupVersion directly and still look correct while
+// emitting the wrong value later. Alias the constant for your track, never the
+// string it happens to equal; the tracks are distinct now and a collapsed alias
+// shows up as a wrong value rather than a latent one.
 //
 // Evolution policy (see docs/design/011-artifact-apiversion-policy.md and
 // docs/design/022-artifact-maturity-and-deprecation.md): schema changes within
@@ -115,7 +117,9 @@ const AlphaRemovedIn = "v1.0.0"
 // The subject embeds the file path, which makes it the deduplication key: a
 // catalog scan over many files warns once per offending file rather than once
 // per process. Callers with no file — a request body, an in-memory decode —
-// should not call this; REST deprecations travel as headers instead.
+// should not call this: the message would name nothing actionable. The REST
+// surface has no equivalent signal for artifact headers today; deprecation's
+// SetHTTPHeaders covers deprecated routes, not deprecated payload versions.
 func WarnDeprecatedAPIVersion(path, apiVersion, target string) {
 	var subject string
 	switch apiVersion {
@@ -126,12 +130,21 @@ func WarnDeprecatedAPIVersion(path, apiVersion, target string) {
 	default:
 		return
 	}
-	deprecation.Warn(deprecation.Notice{
+	apiVersionRecorder.Warn(deprecation.Notice{
 		Subject:     subject,
 		Replacement: target,
 		RemovedIn:   AlphaRemovedIn,
 	})
 }
+
+// apiVersionRecorder dedups artifact-header warnings for the life of the
+// process. Held here rather than using the package-level deprecation.Warn so a
+// test can reset it: deduplication is the behavior under test, and a shared
+// process-wide recorder makes a second run of the same test observe nothing.
+var apiVersionRecorder = &deprecation.Recorder{}
+
+// resetAPIVersionRecorderForTest clears the dedup state. Test-only.
+func resetAPIVersionRecorderForTest() { apiVersionRecorder = &deprecation.Recorder{} }
 
 // IsSupportedAPIVersion reports whether v is an artifact apiVersion this binary
 // understands. The empty string is intentionally NOT supported here: callers
@@ -151,8 +164,8 @@ func IsSupportedAPIVersion(v string) bool {
 }
 
 // IsSupportedAuthoringAPIVersion reports whether v is accepted for an
-// ADR-022 authoring/configuration artifact during the Release N reader-first
-// window.
+// ADR-022 authoring/configuration artifact. It still admits the superseded
+// alpha value; #2417 narrows it to the target in v1.0.0.
 func IsSupportedAuthoringAPIVersion(v string) bool {
 	switch v {
 	case GroupVersion, GroupVersionV1Beta1:

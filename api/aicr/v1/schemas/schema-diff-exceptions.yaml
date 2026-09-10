@@ -30,7 +30,7 @@
 # as pkg/client/v1/api-diff-exceptions.yaml and
 # api/aicr/v1/openapi-diff-exceptions.yaml.
 #
-# The scheduled ADR-022 apiVersion removals in v0.22 (#2416) and v1.0.0 (#2417)
+# The scheduled ADR-022 apiVersion removal in v1.0.0 (#2417)
 # are the expected occupants: retiring an alpha value is an enum-value-removed
 # break, planned and dated.
 acknowledgements: []
