@@ -934,9 +934,7 @@ func (r *RecipeSpec) ResolveRuntimeInventoryMode() (recipe.RuntimeInventoryMode,
 // cluster-specific and recipe generation fails closed when a TCPXO recipe
 // omits it.
 func (r *RecipeSpec) ResolveGKETCPXOInterfaces() ([]recipe.NetworkInterfaceMapping, bool, error) {
-	if r == nil || r.Configuration == nil || r.Configuration.GKE == nil ||
-		len(r.Configuration.GKE.TCPXOInterfaces) == 0 {
-
+	if r == nil || r.Configuration == nil || r.Configuration.GKE == nil {
 		return nil, false, nil
 	}
 	mapping := r.Configuration.GKE.TCPXOInterfaces

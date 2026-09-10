@@ -72,24 +72,10 @@ func ParseAccountingMode(value string) (AccountingMode, error) {
 type RecipeConfiguration struct {
 	Slurm *SlurmConfiguration `json:"slurm,omitempty" yaml:"slurm,omitempty"`
 
-	// RuntimeInventory records the generation-time selection for the runtime
-	// AI inventory component. See runtimeinventory.go.
-	//
-	// This is the second entry here, and the pattern is one bespoke selection
-	// per optional component. That is deliberate for two (ADR-019 asks for
-	// this component specifically, and a generic per-component disable needs
-	// a policy for which components may be declined at all). If a third
-	// arrives, revisit rather than extending by reflex.
+	// Selections remain typed because each needs component-specific validation
+	// and application rules, rather than a generic per-component parameter map.
 	RuntimeInventory *RuntimeInventoryConfiguration `json:"runtimeInventory,omitempty" yaml:"runtimeInventory,omitempty"`
-
-	// GKE records GKE-specific desired state. See gke_tcpxo.go.
-	//
-	// The third arrival this comment block anticipated. The revisit it asked
-	// for concluded bespoke stays: each section needs typed validation, an
-	// ownership domain, and component-specific apply logic that a generic
-	// per-component map cannot express. Revisit again only when a fourth
-	// selection arrives with the same shape as an existing one.
-	GKE *GKEConfiguration `json:"gke,omitempty" yaml:"gke,omitempty"`
+	GKE              *GKEConfiguration              `json:"gke,omitempty" yaml:"gke,omitempty"`
 }
 
 // SlurmConfiguration records Slurm-specific desired state.
