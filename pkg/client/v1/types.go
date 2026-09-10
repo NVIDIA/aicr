@@ -394,9 +394,8 @@ type recipeResolveConfig struct {
 	runtimeInventoryMode *recipe.RuntimeInventoryMode
 	tcpxoInterfaces      *[]recipe.NetworkInterfaceMapping
 
-	// Kept separate from stated because an empty stated set is meaningful
-	// (every dimension derived, all relaxable) and must not read as "option
-	// absent".
+	// relaxDerived records opt-in to snapshot-criteria relaxation.
+	// An empty stated set means every dimension was derived, not option absent.
 	relaxDerived bool
 	stated       statedDimensionSet
 

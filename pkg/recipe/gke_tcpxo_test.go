@@ -50,8 +50,8 @@ func tcpxoTestResult() *RecipeResult {
 		},
 		ComponentRefs: []ComponentRef{
 			{Name: "gpu-operator", Type: ComponentTypeHelm, Namespace: "gpu-operator"},
-			{Name: gkeNCCLTCXOComponentName, Type: ComponentTypeHelm, Namespace: "kube-system"},
-			{Name: kubeflowTrainerComponentName, Type: ComponentTypeHelm, Namespace: "kubeflow"},
+			{Name: gkeNCCLTCPXOComponentName, Type: ComponentTypeHelm, Namespace: "kube-system"},
+			{Name: kubeflowTrainerComponentName, Type: ComponentTypeHelm, Namespace: "kubeflow", ManifestFiles: []string{gkeTCPXORuntimeManifest}},
 		},
 	}
 }
@@ -271,7 +271,7 @@ func TestApplyGKETCPXOInterfaces(t *testing.T) {
 		result := tcpxoTestResult()
 		disabled := false
 		for i := range result.ComponentRefs {
-			if result.ComponentRefs[i].Name == gkeNCCLTCXOComponentName {
+			if result.ComponentRefs[i].Name == gkeNCCLTCPXOComponentName {
 				result.ComponentRefs[i].Overrides = map[string]any{"enabled": disabled}
 			}
 		}
@@ -299,16 +299,16 @@ func TestShipsGKETCPXORuntime(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "gke-nccl-tcpxo missing",
+			name: "runtime declaration missing",
 			mutate: func(r *RecipeResult) {
-				r.ComponentRefs = append(r.ComponentRefs[:1], r.ComponentRefs[2])
+				r.ComponentRefs[2].ManifestFiles = nil
 			},
 			want: false,
 		},
 		{
-			name:   "non-h100 accelerator",
+			name:   "declaration is authoritative even with incorrect accelerator",
 			mutate: func(r *RecipeResult) { r.Criteria.Accelerator = CriteriaAcceleratorA100 },
-			want:   false,
+			want:   true,
 		},
 		{
 			name: "component disabled",
@@ -320,7 +320,7 @@ func TestShipsGKETCPXORuntime(t *testing.T) {
 		{
 			name:   "nil criteria",
 			mutate: func(r *RecipeResult) { r.Criteria = nil },
-			want:   false,
+			want:   true,
 		},
 	}
 	for _, tt := range tests {
@@ -429,5 +429,102 @@ func TestGKETCPXOOwnership(t *testing.T) {
 	}
 	if domain.Name == "" {
 		t.Error("GKETCPXOOwnership() Name is empty")
+	}
+}
+
+// TestDeepCopyPreservesGKETCPXOInterfaces guards the adoption path:
+// Client.AdoptRecipe deep-copies every incoming recipe, and a configuration
+// section omitted from DeepCopy is silently dropped — the bundle then fails
+// closed against a mapping that was present in the caller's artifact.
+func TestDeepCopyPreservesGKETCPXOInterfaces(t *testing.T) {
+	t.Parallel()
+
+	result := tcpxoTestResult()
+	mapping := tcpxoTestMapping()
+	if err := applyGKETCPXOInterfaces(result, &mapping); err != nil {
+		t.Fatalf("applyGKETCPXOInterfaces() error = %v", err)
+	}
+
+	clone := result.DeepCopy()
+	got, present := clone.GKETCPXOInterfaces()
+	if !present {
+		t.Fatal("DeepCopy dropped configuration.gke")
+	}
+	if !slices.Equal(got, mapping) {
+		t.Errorf("cloned mapping = %v, want %v", got, mapping)
+	}
+
+	// A copy, not an alias: mutating the clone must not reach the original.
+	clone.Configuration.GKE.TCPXOInterfaces[0].Network = "mutated-network"
+	orig, _ := result.GKETCPXOInterfaces()
+	if orig[0].Network == "mutated-network" {
+		t.Error("original mapping changed after mutating the clone; the slice is shared")
+	}
+}
+
+// TestQueryHydrationExposesGKETCPXOInterfaces covers the selector surface:
+// `aicr query --selector configuration.gke.tcpxoInterfaces` must see the
+// recorded mapping, not report the section missing.
+func TestQueryHydrationExposesGKETCPXOInterfaces(t *testing.T) {
+	t.Parallel()
+
+	result := tcpxoTestResult()
+	mapping := tcpxoTestMapping()
+	if err := applyGKETCPXOInterfaces(result, &mapping); err != nil {
+		t.Fatalf("applyGKETCPXOInterfaces() error = %v", err)
+	}
+
+	hydrated, err := HydrateResult(result)
+	if err != nil {
+		t.Fatalf("Hydrate() error = %v", err)
+	}
+	got, err := Select(hydrated, "configuration.gke.tcpxoInterfaces")
+	if err != nil {
+		t.Fatalf("Select(configuration.gke.tcpxoInterfaces) error = %v", err)
+	}
+	entries, ok := got.([]any)
+	if !ok {
+		t.Fatalf("selector returned %T, want []any", got)
+	}
+	if len(entries) != len(mapping) {
+		t.Fatalf("selector returned %d entries, want %d", len(entries), len(mapping))
+	}
+	first, ok := entries[0].(map[string]any)
+	if !ok || first["interfaceName"] != "eth1" || first["network"] != "gpu-nic-0" {
+		t.Errorf("first entry = %v, want eth1→gpu-nic-0", entries[0])
+	}
+}
+
+// TestApplyGKETCPXOInterfacesAcceptsReorderedPairs pins the contract: the
+// explicit interfaceName key, not the list position, binds network to
+// interface. The provisioner may record pairs in any order.
+func TestApplyGKETCPXOInterfacesAcceptsReorderedPairs(t *testing.T) {
+	t.Parallel()
+
+	result := tcpxoTestResult()
+	mapping := tcpxoTestMapping()
+	slices.Reverse(mapping)
+	if err := applyGKETCPXOInterfaces(result, &mapping); err != nil {
+		t.Fatalf("applyGKETCPXOInterfaces() error = %v", err)
+	}
+	got, _ := result.GKETCPXOInterfaces()
+	if !slices.Equal(got, mapping) {
+		t.Errorf("recorded mapping = %v, want supplied order %v", got, mapping)
+	}
+}
+
+// TestWithGKETCPXOInterfacesDefensiveCopy guards the option boundary: the
+// caller may reuse or mutate the slice after passing it.
+func TestWithGKETCPXOInterfacesDefensiveCopy(t *testing.T) {
+	t.Parallel()
+
+	mapping := tcpxoTestMapping()
+	opt := WithGKETCPXOInterfaces(mapping)
+	mapping[0].Network = "mutated-after-construction"
+
+	cfg := &buildConfig{}
+	opt(cfg)
+	if (*cfg.tcpxoInterfaces)[0].Network == "mutated-after-construction" {
+		t.Error("build option aliased the caller's slice; later mutation changed the recorded value")
 	}
 }

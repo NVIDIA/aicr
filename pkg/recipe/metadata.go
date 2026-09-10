@@ -1201,6 +1201,11 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 		// Omitting one does not alias it, it drops it: the copy keeps the
 		// component overrides a selection applied while losing the record
 		// explaining them, and Client.AdoptRecipe always deep-copies.
+		if r.Configuration.GKE != nil {
+			out.Configuration.GKE = &GKEConfiguration{
+				TCPXOInterfaces: slices.Clone(r.Configuration.GKE.TCPXOInterfaces),
+			}
+		}
 		if r.Configuration.RuntimeInventory != nil {
 			runtimeInventory := *r.Configuration.RuntimeInventory
 			out.Configuration.RuntimeInventory = &runtimeInventory
