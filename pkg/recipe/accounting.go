@@ -81,6 +81,15 @@ type RecipeConfiguration struct {
 	// a policy for which components may be declined at all). If a third
 	// arrives, revisit rather than extending by reflex.
 	RuntimeInventory *RuntimeInventoryConfiguration `json:"runtimeInventory,omitempty" yaml:"runtimeInventory,omitempty"`
+
+	// GKE records GKE-specific desired state. See gke_tcpxo.go.
+	//
+	// The third arrival this comment block anticipated. The revisit it asked
+	// for concluded bespoke stays: each section needs typed validation, an
+	// ownership domain, and component-specific apply logic that a generic
+	// per-component map cannot express. Revisit again only when a fourth
+	// selection arrives with the same shape as an existing one.
+	GKE *GKEConfiguration `json:"gke,omitempty" yaml:"gke,omitempty"`
 }
 
 // SlurmConfiguration records Slurm-specific desired state.
@@ -99,6 +108,7 @@ type BuildOption func(*buildConfig)
 type buildConfig struct {
 	accountingMode       *AccountingMode
 	runtimeInventoryMode *RuntimeInventoryMode
+	tcpxoInterfaces      *[]NetworkInterfaceMapping
 }
 
 // WithAccountingMode selects the Slurm accounting ownership mode for one
@@ -122,6 +132,27 @@ func resolveBuildConfig(criteria *Criteria, opts ...BuildOption) (*buildConfig, 
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"Slurm accounting mode can only be set when recipe platform is slurm")
 	}
+
+	// The GKE TCPXO mapping is platform-independent at this layer: reject
+	// only when a concrete criteria dimension already rules the family out,
+	// and defer the component-presence question to applyGKETCPXOInterfaces,
+	// which sees the resolved recipe.
+	if cfg.tcpxoInterfaces != nil {
+		if criteria != nil && criteria.Service != "" && criteria.Service != CriteriaServiceAny &&
+			criteria.Service != CriteriaServiceGKE {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"GKE TCPXO interfaces can only be set when recipe service is gke")
+		}
+		if criteria != nil && criteria.Accelerator != "" && criteria.Accelerator != CriteriaAcceleratorAny &&
+			criteria.Accelerator != CriteriaAcceleratorH100 {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"GKE TCPXO interfaces are supported on h100 (a3-megagpu-8g) recipes only")
+		}
+		if err := ValidateGKETCPXOInterfaces(*cfg.tcpxoInterfaces); err != nil {
+			return nil, err
+		}
+	}
+
 	if !isSlurm {
 		return cfg, nil
 	}
@@ -217,6 +248,13 @@ func applyBuildConfig(result *RecipeResult, cfg *buildConfig) error {
 			return err
 		}
 		selected = true
+	}
+	// Runs unconditionally — including builds that supply no mapping —
+	// because fail-closed on a recipe that ships torch-distributed-tcpxo is
+	// the contract. It does not change component enablement, so it does not
+	// participate in the deployment-order recompute `selected` tracks.
+	if err := applyGKETCPXOInterfaces(result, cfg.tcpxoInterfaces); err != nil {
+		return err
 	}
 	if cfg.accountingMode == nil {
 		// Deployment order still has to be refreshed: a selection that ran

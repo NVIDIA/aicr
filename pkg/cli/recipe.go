@@ -83,6 +83,13 @@ func recipeCmdFlags() []cli.Flag {
 				strings.Join(recipe.RuntimeInventoryModes(), ", ")),
 			Category: catQueryParameters,
 		}, recipe.RuntimeInventoryModes),
+		&cli.StringFlag{
+			Name: flagGKETCPXOInterfaces,
+			Usage: "Ordered GKE GPU-NIC interface mapping for the torch-distributed-tcpxo runtime, " +
+				"as eth1=<network>,...,eth8=<network>. Required when the resolved recipe ships that " +
+				"runtime (h100 GKE kubeflow training); recorded in the generated recipe",
+			Category: catQueryParameters,
+		},
 		&cli.IntFlag{
 			Name:     "nodes",
 			Usage:    "Number of worker/GPU nodes in the cluster",

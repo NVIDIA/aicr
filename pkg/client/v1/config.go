@@ -254,6 +254,14 @@ func (c *Config) RecipeResolveOptions() ([]RecipeResolveOption, error) {
 	if riSet {
 		out = append(out, WithRuntimeInventoryMode(string(riMode)))
 	}
+
+	tcpxoMapping, tcpxoSet, err := spec.ResolveGKETCPXOInterfaces()
+	if err != nil {
+		return nil, err
+	}
+	if tcpxoSet {
+		out = append(out, WithGKETCPXOInterfaces(recipe.FormatGKETCPXOInterfaces(tcpxoMapping)))
+	}
 	return out, nil
 }
 
@@ -301,6 +309,27 @@ func (c *Config) RecipeRuntimeInventoryMode() (string, bool, error) {
 		return "", false, err
 	}
 	return string(mode), set, nil
+}
+
+// RecipeGKETCPXOInterfaces returns
+// spec.recipe.configuration.gke.tcpxoInterfaces in the canonical string form
+// ParseGKETCPXOInterfaces accepts, and whether the document set one. Same
+// raw-accessor rationale as RecipeProfile — RecipeResolveOptions is the
+// ready-to-use form.
+//
+// Returns an error when the configured mapping is invalid.
+func (c *Config) RecipeGKETCPXOInterfaces() (string, bool, error) {
+	if c == nil || c.internal == nil {
+		return "", false, nil
+	}
+	mapping, set, err := c.internal.Recipe().ResolveGKETCPXOInterfaces()
+	if err != nil {
+		return "", false, err
+	}
+	if !set {
+		return "", false, nil
+	}
+	return recipe.FormatGKETCPXOInterfaces(mapping), true, nil
 }
 
 // SnapshotPath returns spec.recipe.input.snapshot, the snapshot a committed

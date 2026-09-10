@@ -291,6 +291,33 @@ func runtimeInventoryResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aicr.
 	return []aicr.RecipeResolveOption{aicr.WithRuntimeInventoryMode(value)}, nil
 }
 
+// gkeTCPXOInterfacesResolveOptions turns the --gke-tcpxo-interfaces flag, or
+// the equivalent AICRConfig field, into a resolve option. Mirrors
+// accountingResolveOptions: the flag wins, the config file is the fallback.
+// Unlike the mode selections there is no absent-means-default case — the
+// mapping is cluster-specific — so an unset value passes no option at all,
+// and the recipe builder fails closed when the resolved recipe needs it.
+func gkeTCPXOInterfacesResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aicr.RecipeResolveOption, error) {
+	value := cmd.String(flagGKETCPXOInterfaces)
+	if !cmd.IsSet(flagGKETCPXOInterfaces) {
+		if cfg == nil {
+			return nil, nil
+		}
+		mapping, present, err := cfg.RecipeGKETCPXOInterfaces()
+		if err != nil {
+			return nil, err
+		}
+		if !present {
+			return nil, nil
+		}
+		value = mapping
+	}
+	if _, err := recipe.ParseGKETCPXOInterfaces(value); err != nil {
+		return nil, err
+	}
+	return []aicr.RecipeResolveOption{aicr.WithGKETCPXOInterfaces(value)}, nil
+}
+
 // buildSelectionResolveOptions gathers every generation-time selection into one
 // option slice, so callers cannot wire one and forget the other.
 func buildSelectionResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aicr.RecipeResolveOption, error) {
@@ -302,7 +329,12 @@ func buildSelectionResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aicr.Re
 	if err != nil {
 		return nil, err
 	}
-	return append(opts, riOpts...), nil
+	opts = append(opts, riOpts...)
+	tcpxoOpts, err := gkeTCPXOInterfacesResolveOptions(cmd, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return append(opts, tcpxoOpts...), nil
 }
 
 // statedDimensions converts the touched set into the argument

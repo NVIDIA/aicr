@@ -928,6 +928,25 @@ func (r *RecipeSpec) ResolveRuntimeInventoryMode() (recipe.RuntimeInventoryMode,
 	return mode, true, nil
 }
 
+// ResolveGKETCPXOInterfaces validates
+// spec.recipe.configuration.gke.tcpxoInterfaces. The bool reports whether
+// the field was explicitly present; there is no default — the mapping is
+// cluster-specific and recipe generation fails closed when a TCPXO recipe
+// omits it.
+func (r *RecipeSpec) ResolveGKETCPXOInterfaces() ([]recipe.NetworkInterfaceMapping, bool, error) {
+	if r == nil || r.Configuration == nil || r.Configuration.GKE == nil ||
+		len(r.Configuration.GKE.TCPXOInterfaces) == 0 {
+
+		return nil, false, nil
+	}
+	mapping := r.Configuration.GKE.TCPXOInterfaces
+	if err := recipe.ValidateGKETCPXOInterfaces(mapping); err != nil {
+		return nil, false, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"invalid spec.recipe.configuration.gke.tcpxoInterfaces")
+	}
+	return mapping, true, nil
+}
+
 // boolPtrOrFalse dereferences a *bool, treating nil (absent in
 // YAML/JSON) as false. Used at the spec → resolved boundary so the
 // resolved layer can stay plain bool for downstream consumers.

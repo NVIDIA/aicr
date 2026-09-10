@@ -51,6 +51,14 @@ type ResolveLeavesOptions struct {
 	// supplied by the caller rather than read here so pkg/recipe stays free of
 	// a dependency on the evidence/presence manifest.
 	RetainNonLeaf func(entry CatalogEntry) bool
+	// BuildOptionsForCriteria supplies per-leaf generation-time selections.
+	// The catalog spans one family with a required typed input — the h100 GKE
+	// kubeflow leaf ships torch-distributed-tcpxo and fails closed without the
+	// interface mapping — so callers resolving for introspection (parity
+	// goldens, health and tuning reports) should pass
+	// GKETCPXOIntrospectionBuildOptions. Nil leaves the gate fail-closed and
+	// that leaf reports a resolve error in ResolvedLeaf.Err.
+	BuildOptionsForCriteria func(*Criteria) []BuildOption
 }
 
 // alwaysSatisfiedEvaluator reports every constraint satisfied, so the
@@ -59,6 +67,14 @@ type ResolveLeavesOptions struct {
 // (populating merged Constraints and Metadata) without cluster or snapshot state.
 func alwaysSatisfiedEvaluator(Constraint) ConstraintEvalResult {
 	return ConstraintEvalResult{Passed: true}
+}
+
+// buildOptionsForCriteria nil-safely resolves the per-leaf build options.
+func buildOptionsForCriteria(fn func(*Criteria) []BuildOption, c *Criteria) []BuildOption {
+	if fn == nil {
+		return nil
+	}
+	return fn(c)
 }
 
 // ResolveLeaves enumerates every leaf overlay in the catalog and resolves each
@@ -95,7 +111,8 @@ func ResolveLeaves(ctx context.Context, opts ResolveLeavesOptions) ([]ResolvedLe
 		if !entry.IsLeaf && (opts.RetainNonLeaf == nil || !opts.RetainNonLeaf(entry)) {
 			continue
 		}
-		result, buildErr := builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, alwaysSatisfiedEvaluator)
+		result, buildErr := builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, alwaysSatisfiedEvaluator,
+			buildOptionsForCriteria(opts.BuildOptionsForCriteria, entry.Criteria)...)
 		leaves = append(leaves, ResolvedLeaf{Entry: entry, Result: result, Err: buildErr})
 	}
 
