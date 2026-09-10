@@ -67,12 +67,18 @@ aicr recipe \
 **GKE**
 
 ```shell
+# The h100 GKE kubeflow recipe ships the torch-distributed-tcpxo runtime, so
+# generation requires the eight GPU-NIC network names of your cluster,
+# recorded in the recipe. Find them with:
+#   kubectl get networks.networking.gke.io \
+#     -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | grep gpu-nic
 aicr recipe \
   --service gke \
   --accelerator h100 \
   --intent training \
   --os cos \
   --platform kubeflow \
+  --gke-tcpxo-interfaces eth1=aicr-demo2-gpu-nic-0,eth2=aicr-demo2-gpu-nic-1,eth3=aicr-demo2-gpu-nic-2,eth4=aicr-demo2-gpu-nic-3,eth5=aicr-demo2-gpu-nic-4,eth6=aicr-demo2-gpu-nic-5,eth7=aicr-demo2-gpu-nic-6,eth8=aicr-demo2-gpu-nic-7 \
   --output recipe.yaml
 ```
 
@@ -290,6 +296,20 @@ spec:
       os: cos
       intent: training
       platform: kubeflow
+    # Required on this family: the ordered eth1..eth8 -> GPU-NIC network
+    # mapping, recorded into the recipe and rendered into the shipped
+    # torch-distributed-tcpxo runtime.
+    configuration:
+      gke:
+        tcpxoInterfaces:
+          - {interfaceName: eth1, network: aicr-demo2-gpu-nic-0}
+          - {interfaceName: eth2, network: aicr-demo2-gpu-nic-1}
+          - {interfaceName: eth3, network: aicr-demo2-gpu-nic-2}
+          - {interfaceName: eth4, network: aicr-demo2-gpu-nic-3}
+          - {interfaceName: eth5, network: aicr-demo2-gpu-nic-4}
+          - {interfaceName: eth6, network: aicr-demo2-gpu-nic-5}
+          - {interfaceName: eth7, network: aicr-demo2-gpu-nic-6}
+          - {interfaceName: eth8, network: aicr-demo2-gpu-nic-7}
     output:
       path: recipe.yaml
 

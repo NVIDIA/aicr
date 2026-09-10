@@ -40,9 +40,32 @@ That single limitation decides the rest:
 ## GKE GPUDirect TCPXO
 
 TCPXO needs the `tcpxo-daemon` sidecar, so the wiring cannot live in a TrainJob.
+
+**With an AICR-generated bundle (recommended).** The
+`h100-gke-cos-training-kubeflow` recipe ships a pre-wired
+`ClusterTrainingRuntime` named `torch-distributed-tcpxo`. You supply the eight
+GPU-NIC network names once, at recipe generation
+(`--gke-tcpxo-interfaces eth1=<network>,...,eth8=<network>` — see
+[the integrator page](../integrator/gke-tcpxo-networking.md#the-shipped-torch-distributed-tcpxo-runtime));
+the runtime is then on the cluster with the wiring baked in, and the TrainJob
+carries no fabric configuration at all:
+
+```yaml
+spec:
+  runtimeRef:
+    name: torch-distributed-tcpxo
+    apiGroup: trainer.kubeflow.org
+    kind: ClusterTrainingRuntime
+  trainer:
+    numNodes: 2                      # the shipped default; override freely
+    image: my-registry/my-trainer:latest
+```
+
+Everything below this point is the hand-authored path — for bundles you did
+not generate with AICR, or shapes the shipped runtime does not cover.
+
 `TrainingRuntime` is an ordinary namespaced resource: author one in your
 namespace and reference it from `runtimeRef`.
-
 **What that runtime must carry.** The annotations and sidecar are specified in
 [Workload Pod Configuration](../integrator/gke-tcpxo-networking.md#workload-pod-configuration-nri-profile);
 the `dshm` volume, worker `IPC_LOCK`, daemon `args` and NCCL settings are not in
@@ -154,6 +177,10 @@ This is the part no example can fill in for you. The
 objects **as they exist on your cluster**. AICR requires only that each name
 contain `gpu-nic`; the rest is chosen by whoever provisioned it, so prefixed
 forms such as `aicr-demo2-gpu-nic-0` are common.
+
+(On the shipped-runtime path above, these same eight names are what you pass
+to `--gke-tcpxo-interfaces` at recipe generation — the discovery step below is
+how you find them either way.)
 
 ```shell
 kubectl get networks.networking.gke.io \
