@@ -248,17 +248,19 @@ validation:
         value: gp3
 ```
 
-`inference-model`, `inference-concurrency-per-gpu`, and
-`inference-model-cache-storage-class` resolve with precedence **recipe
-constraint > `AICR_INFERENCE_PERF_*` catalog env > compiled default**
-(Qwen/Qwen3-8B at 256/GPU, cluster default StorageClass). Set them per overlay,
-exactly as the throughput/TTFT thresholds already vary per overlay, to pick
-the right model, load, and cache StorageClass for each accelerator. The
-compiled defaults cover overlays that omit them. Because the thresholds are
-only meaningful at a specific model + concurrency, pin the model and
-concurrency together in an overlay rather than relying on the global
-defaults for the inputs. `inference-model-cache-storage-class` is
-independent of that pairing. Set it whenever the cluster's default
+`inference-model` and `inference-concurrency-per-gpu` resolve with precedence
+**recipe constraint > `AICR_INFERENCE_PERF_*` catalog env > compiled default**
+(Qwen/Qwen3-8B at 256/GPU). Set them per overlay, exactly as the
+throughput/TTFT thresholds already vary per overlay, to pick the right model
+and load for each accelerator. The compiled defaults cover overlays that omit
+them. Because the thresholds are only meaningful at a specific model and
+concurrency, pin the model and concurrency together in an overlay rather than
+relying on the global defaults for the inputs.
+
+`inference-model-cache-storage-class` has no compiled default. It resolves
+from the recipe constraint, then the
+`AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` catalog env, then the
+cluster's own default StorageClass. Set it whenever the cluster's default
 StorageClass can't attach to the target node's machine family, or the
 cluster has no default StorageClass at all, since enabling the cache
 without either a configured StorageClass or a cluster default fails
