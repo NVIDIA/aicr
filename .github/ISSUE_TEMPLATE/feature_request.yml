@@ -124,6 +124,6 @@ body:
       options:
         - Yes, I can open a PR
         - Maybe, with guidance
-        - No
+        - "No"
     validations:
       required: true
