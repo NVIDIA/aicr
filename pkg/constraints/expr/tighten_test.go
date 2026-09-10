@@ -170,6 +170,7 @@ func TestTightenNeverWidens(t *testing.T) {
 		"1.34.3-gke.100", "1.34.3-gke.900", "1.35.0-gke.100", "1.35.0-gke.101",
 		"1.35.0-gke.0", "1.35.0-gke.1", "1.35-gke.100", "2", "1",
 		"150", "300", "2000", "4000",
+		"1.35.0-gke.9223372036854775807",
 	}
 	ranges := []string{
 		">= 1.34.1 < 1.36.0", ">= 1.32 < 1.35", "> 1.34.0 <= 1.35.2",
@@ -410,6 +411,26 @@ func TestTightenGKEBuildDimension(t *testing.T) {
 			existing:    "> 1.35.0",
 			candidate:   "< 1.35.0-gke.0",
 			wantOutcome: TightenUnsatisfiable,
+		},
+		{
+			name:        "no version exists past the largest build",
+			existing:    "> 1.35.0-gke.9223372036854775807",
+			candidate:   "< 1.35.1",
+			wantOutcome: TightenUnsatisfiable,
+		},
+		{
+			name:        "the next core past the largest build is reachable",
+			existing:    "> 1.35.0-gke.9223372036854775807",
+			candidate:   "<= 1.35.1",
+			wantValue:   "> 1.35.0-gke.9223372036854775807 <= 1.35.1",
+			wantOutcome: TightenNarrowed,
+		},
+		{
+			name:        "the largest build itself is reachable",
+			existing:    ">= 1.35.0-gke.9223372036854775807",
+			candidate:   "<= 1.35.0-gke.9223372036854775807",
+			wantValue:   ">= 1.35.0-gke.9223372036854775807 <= 1.35.0-gke.9223372036854775807",
+			wantOutcome: TightenNarrowed,
 		},
 		{
 			name:        "the first build itself is reachable",

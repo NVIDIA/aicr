@@ -15,6 +15,7 @@
 package expr
 
 import (
+	"math"
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/version"
@@ -288,7 +289,11 @@ func boundsSatisfiable(lower, upper *bound) bool {
 	// straight off the order.
 	first := versionKeyOf(low)
 	if !lowAdmitted {
-		first = first.next()
+		above, exists := first.next()
+		if !exists {
+			return false
+		}
+		first = above
 	}
 
 	cmp := first.compare(versionKeyOf(high))
@@ -335,11 +340,19 @@ func (b *bound) limit() (version.Version, bool) {
 // v's precision stops at is incremented and the rest zeroed, so "1.35"
 // becomes 1.36.0 and "1" becomes 2.0.0.
 func bumpLastSignificant(v version.Version) version.Version {
-	if v.Precision <= 1 {
-		v.Major++
+	// Saturating rather than wrapping: a component already at the maximum has
+	// no band above it, and a wrapped endpoint would order below the bound it
+	// came from.
+	switch {
+	case v.Precision <= 1:
+		if v.Major != math.MaxInt {
+			v.Major++
+		}
 		v.Minor = 0
-	} else {
+	case v.Minor != math.MaxInt:
 		v.Minor++
+	case v.Major != math.MaxInt:
+		v.Minor, v.Major = 0, v.Major+1
 	}
 	v.Patch = 0
 	return v
@@ -357,25 +370,54 @@ type versionKey struct {
 	major int
 	minor int
 	patch int
-	build int64
+	// hasBuild carries the bare-core-versus-build distinction on its own
+	// rather than folding it into build as build+1, which would overflow at
+	// the maximum build number.
+	hasBuild bool
+	build    int64
 }
 
 func versionKeyOf(v version.Version) versionKey {
 	key := versionKey{major: v.Major, minor: v.Minor, patch: v.Patch}
 	if build, isGKE := version.ExtractGKEBuild(v.Extras); isGKE {
-		key.build = build + 1
+		key.hasBuild, key.build = true, build
 	}
 	return key
 }
 
-// next returns the version immediately after k. The build component is a
-// non-negative integer and is the finest dimension ordered, so every key has
-// an immediate successor: the one after a bare core is its "-gke.0" build.
-// That is what lets an exclusive floor be restated as the inclusive floor one
-// step up, which in turn makes emptiness a plain comparison.
-func (k versionKey) next() versionKey {
-	k.build++
-	return k
+// next returns the version immediately after k, and whether one exists.
+//
+// The build is the finest dimension ordered, so the successor of a bare core
+// is its "-gke.0" build and the successor of a build is the next one. That is
+// what lets an exclusive floor be restated as the inclusive floor one step
+// up, which in turn makes emptiness a plain comparison.
+//
+// The dimensions are finite. Past the largest build a core can carry, the
+// next version is the next core with no build at all, and past the largest
+// core there is no next version — a floor there admits nothing, which is a
+// verdict rather than a wrap.
+func (k versionKey) next() (versionKey, bool) {
+	switch {
+	case !k.hasBuild:
+		k.hasBuild, k.build = true, 0
+		return k, true
+	case k.build != math.MaxInt64:
+		k.build++
+		return k, true
+	}
+
+	k.hasBuild, k.build = false, 0
+	switch {
+	case k.patch != math.MaxInt:
+		k.patch++
+	case k.minor != math.MaxInt:
+		k.patch, k.minor = 0, k.minor+1
+	case k.major != math.MaxInt:
+		k.patch, k.minor, k.major = 0, 0, k.major+1
+	default:
+		return k, false
+	}
+	return k, true
 }
 
 func (k versionKey) compare(other versionKey) int {
@@ -386,6 +428,12 @@ func (k versionKey) compare(other versionKey) int {
 		return compareInt(int64(k.minor), int64(other.minor))
 	case k.patch != other.patch:
 		return compareInt(int64(k.patch), int64(other.patch))
+	case k.hasBuild != other.hasBuild:
+		// A build sorts above the bare core it builds on.
+		if k.hasBuild {
+			return 1
+		}
+		return -1
 	default:
 		return compareInt(k.build, other.build)
 	}
