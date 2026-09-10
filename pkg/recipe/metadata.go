@@ -705,6 +705,9 @@ func (r *RecipeResult) ValidateCoherence() error {
 	if err := r.validateAccountingConfiguration(); err != nil {
 		return err
 	}
+	if err := r.validateGKEConfiguration(); err != nil {
+		return err
+	}
 	var problems []string
 	for i := range r.ComponentRefs {
 		if !r.ComponentRefs[i].IsEnabled() {
