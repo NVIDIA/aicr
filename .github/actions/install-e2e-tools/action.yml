@@ -102,6 +102,53 @@ runs:
           printf '%s\n' "::warning title=Non-gating tool check failed::make tools-check exited with status ${tools_check_rc}; E2E continues because its required-tool contract is narrower."
         fi
 
+    # Verify what is about to be banked actually matches the pins, because
+    # "setup-tools ran" is not the same as "setup-tools installed".
+    # verify_download_url failing calls log_error, which prints and returns
+    # without exiting (tools/common:56), so a transient download failure leaves
+    # the RESTORED binary in place -- possibly one a prefix-key fallback pulled
+    # from an older .settings.yaml. The report step above only warns, so
+    # without this the save below would promote that stale binary to the new
+    # exact key and every later run would restore it.
+    #
+    # Scoped to the seven paths this action caches rather than deferring to
+    # `make tools-check`: that covers the whole toolchain, so an unrelated
+    # mismatch would stop the cache from ever being written, and it compares
+    # helm on major only, which would not notice a v4.2.4 pin serving v4.3.0.
+    #
+    # Mismatch skips the save; it does not fail the job. E2E's required-tool
+    # contract is narrower than this cache, and a cold next run is the correct
+    # penalty for an unverifiable one.
+    - name: Verify tool versions before caching
+      id: verify-tools
+      shell: bash
+      run: |
+        set -uo pipefail
+        ok=true
+        check() {
+          local name="$1" want="$2" got="$3"
+          want="${want#v}"; got="${got#v}"
+          if [ -z "$got" ]; then
+            echo "::warning::${name}: could not read installed version (pinned ${want})"
+            ok=false
+          elif [ "$want" != "$got" ]; then
+            echo "::warning::${name}: installed ${got}, pinned ${want}"
+            ok=false
+          fi
+        }
+        pin() { yq "$1" .settings.yaml; }
+        check ctlptl  "$(pin '.testing_tools.ctlptl')"  "$(ctlptl version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+        check kind    "$(pin '.testing_tools.kind')"    "$(kind version 2>/dev/null | awk '{print $2}')"
+        check kubectl "$(pin '.testing_tools.kubectl')" "$(kubectl version --client -o json 2>/dev/null | grep gitVersion | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+        check tilt    "$(pin '.testing_tools.tilt')"    "$(tilt version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+        check ko      "$(pin '.build_tools.ko')"        "$(ko version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+        check helm    "$(pin '.testing_tools.helm')"    "$(helm version --template '{{.Version}}' 2>/dev/null)"
+        check yq      "$(pin '.testing_tools.yq')"      "$(yq --version 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+        echo "verified=${ok}" >> "$GITHUB_OUTPUT"
+        if [ "$ok" != "true" ]; then
+          echo "::warning title=Tool cache not saved::at least one binary does not match its .settings.yaml pin"
+        fi
+
     # Saved here rather than by a combined `actions/cache` post step, so the
     # write can be gated. Skipped entirely when the checkout is untrusted; the
     # restore above is unconditional, so a fork run keeps the speedup.
@@ -112,6 +159,7 @@ runs:
     - name: Save development tools
       if: >-
         inputs.privileged_ci == 'true'
+        && steps.verify-tools.outputs.verified == 'true'
         && steps.tools-restore.outputs.cache-hit != 'true'
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
