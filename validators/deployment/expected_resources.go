@@ -199,15 +199,25 @@ func pollUntilStable(ctx *validators.Context, label string, probe func() error, 
 //
 // The two ctx.Done() checks (expected-resources iteration, GPU readiness /
 // chainsaw dispatch) never return early: they record the stage in
-// budgetExhausted, mark undispatched work, print the accumulated failures,
-// and fail closed (issue #2473). "Mark undispatched work" covers only the
-// chainsaw asserts already queued when the loop broke (via markUndispatched);
-// enabledRefs entries the loop never reached produce no line at all. The
-// second check is unconditional — it does not require any chainsaw asserts
-// to have been queued, since verifyGPUReadinessSignals alone can exhaust the
-// budget on a recipe that queued none. gatedHealthCheckSuppressed and
-// buildResourceFetcher still return directly on error — both are hard
-// errors, not budget-exhaustion handling.
+// budgetExhausted, mark every piece of unevaluated work, print the accumulated
+// failures, and fail closed (issue #2473). Unevaluated work is reported in
+// three parts, all via markUndispatched: chainsaw asserts already queued when
+// the loop broke, the health checks carried by enabledRefs entries the loop
+// never reached, and the GPU readiness probes the enabled component set
+// selects. Anything less understates how much of the cluster went unchecked.
+//
+// Once budgetExhausted is set the GPU probes are skipped rather than run.
+// Their poll loops observe ctx.Ctx, but the work ahead of the first poll is not
+// uniformly cancellation-bound — expectedNodewrightNames takes no context at
+// all, so its value resolution and manifest rendering run to completion on an
+// already-dead budget. Running the probes would delay the accumulated failure
+// report without producing a verdict. The second ctx.Done() check therefore
+// only runs on the path where the probes did execute, which is the path where
+// they can still exhaust the budget themselves on a recipe whose enabled refs
+// queued no asserts.
+//
+// gatedHealthCheckSuppressed and buildResourceFetcher still return directly on
+// error — both are hard errors, not budget-exhaustion handling.
 // gatedHealthCheckSuppressed's error can itself be cancellation-induced (it
 // threads ctx.Ctx into a Helm render), and that path discards whatever
 // failures were already collected under an ErrCodeInternal wrap rather than
@@ -239,6 +249,12 @@ func checkExpectedResources(ctx *validators.Context) error {
 	// reporting block below is what made issue #2473 undiagnosable.
 	var budgetExhausted string
 
+	// unreachedRefs are the enabledRefs the loop below never examined because
+	// the budget went first. Their health checks were never queued, so
+	// markUndispatched has to name them separately from chainsawAsserts or they
+	// vanish from the report entirely.
+	var unreachedRefs []recipe.ComponentRef
+
 	failures = append(failures, verifyNamespacesActive(ctx, enabledRefs)...)
 
 	// When both ExpectedResources and HealthCheckAsserts are populated on
@@ -252,7 +268,7 @@ func checkExpectedResources(ctx *validators.Context) error {
 	// readiness signal and should always run alongside the overlay-
 	// declared resource list. The transitional hydration skip in
 	// pkg/recipe (added in #1234) was reverted in lockstep.
-	for _, ref := range enabledRefs {
+	for i, ref := range enabledRefs {
 		// Honor cancellation between components so a canceled run stops
 		// before issuing more API calls — per repo CLAUDE.md "Always
 		// check ctx.Done() in long-running operations and loops".
@@ -262,6 +278,9 @@ func checkExpectedResources(ctx *validators.Context) error {
 		default:
 		}
 		if budgetExhausted != "" {
+			// This ref included: the guard trips before any of its own
+			// checks run, so it is unevaluated like the ones behind it.
+			unreachedRefs = enabledRefs[i:]
 			break
 		}
 		if ref.HealthCheckAsserts != "" {
@@ -295,28 +314,38 @@ func checkExpectedResources(ctx *validators.Context) error {
 		}
 	}
 
-	gpuFailures, gpuStructuredErr := verifyGPUReadinessSignals(ctx, enabledRefs)
-	failures = append(failures, gpuFailures...)
-	// firstStructuredErr is guaranteed nil here (the chainsaw block
-	// below is the only other producer and hasn't run yet); we can
-	// assign unconditionally. The chainsaw block downstream checks
-	// firstStructuredErr == nil before its own assignment so the GPU
-	// error wins when both produce one.
-	if gpuStructuredErr != nil {
-		firstStructuredErr = gpuStructuredErr
+	// gpuProbes is built even on the exhausted path: selection is offline (see
+	// enabledGPUReadinessProbes), and the labels are what let the report name
+	// the probes that were skipped.
+	gpuProbes := enabledGPUReadinessProbes(ctx, enabledRefs)
+	if budgetExhausted == "" {
+		gpuFailures, gpuStructuredErr := verifyGPUReadinessSignals(ctx, enabledRefs)
+		failures = append(failures, gpuFailures...)
+		// firstStructuredErr is guaranteed nil here (the chainsaw block
+		// below is the only other producer and hasn't run yet); we can
+		// assign unconditionally. The chainsaw block downstream checks
+		// firstStructuredErr == nil before its own assignment so the GPU
+		// error wins when both produce one.
+		if gpuStructuredErr != nil {
+			firstStructuredErr = gpuStructuredErr
+		}
+
+		// Re-checked after the probes rather than only before them:
+		// verifyGPUReadinessSignals can itself consume the remaining budget on
+		// a recipe whose enabled refs queued no chainsaw asserts, and letting
+		// that fall through to the healthy return is exactly the fail-open
+		// issue #2473 closed elsewhere in this function — an exhausted context
+		// with zero collected failures must still fail closed.
+		if ctx.Ctx.Err() != nil {
+			budgetExhausted = "GPU readiness / chainsaw dispatch"
+			// The probes above already ran, so only the queued asserts are
+			// still unevaluated; gpuProbes is deliberately not passed here.
+			gpuProbes = nil
+		}
 	}
 
-	// This probe must run regardless of whether any asserts were queued:
-	// verifyGPUReadinessSignals above can itself consume the remaining budget
-	// on a recipe whose enabled refs queued no chainsaw asserts, and skipping
-	// the check in that case is exactly the fail-open issue #2473 closed
-	// elsewhere in this function — an exhausted context with zero collected
-	// failures must still fail closed, not fall through to the healthy return.
-	if budgetExhausted == "" && ctx.Ctx.Err() != nil {
-		budgetExhausted = "GPU readiness / chainsaw dispatch"
-	}
 	if budgetExhausted != "" {
-		failures = markUndispatched(failures, chainsawAsserts, budgetExhausted)
+		failures = markUndispatched(failures, chainsawAsserts, unreachedRefs, gpuProbes, budgetExhausted)
 	} else if len(chainsawAsserts) > 0 {
 		slog.Info("running health check assertions", "components", len(chainsawAsserts))
 		fetcher, fetcherErr := buildResourceFetcher(ctx)
@@ -394,15 +423,42 @@ func enabledComponentRefs(refs []recipe.ComponentRef) []recipe.ComponentRef {
 	return enabled
 }
 
-// markUndispatched appends a not-evaluated line for every assert that was
-// queued but never handed to chainsaw. Reporting them explicitly is what stops
-// a truncated run from reading as a mostly-healthy cluster: the operator sees
-// which components carry no verdict rather than inferring their absence means
-// "fine".
-func markUndispatched(failures []string, asserts []chainsaw.ComponentAssert, stage string) []string {
+// markUndispatched appends a not-evaluated line for every piece of work the
+// exhausted run left undone: each assert queued but never handed to chainsaw,
+// each health check on a component the iteration never reached, and each GPU
+// readiness probe skipped rather than run. Reporting them explicitly is what
+// stops a truncated run from reading as a mostly-healthy cluster: the operator
+// sees which components carry no verdict rather than inferring their absence
+// means "fine".
+//
+// unreached and asserts are disjoint — a ref only reaches asserts by being
+// examined, which is what unreached excludes — so no component is named twice.
+// unreached refs are not filtered through gatedHealthCheckSuppressed: that
+// render never ran for them, so whether their assert would have been suppressed
+// is unknown, and reporting "not evaluated" is the fail-closed reading.
+func markUndispatched(
+	failures []string,
+	asserts []chainsaw.ComponentAssert,
+	unreached []recipe.ComponentRef,
+	gpuProbes []gpuReadinessProbe,
+	stage string,
+) []string {
+
 	for _, a := range asserts {
 		failures = append(failures, fmt.Sprintf(
 			"[chainsaw] %s: not evaluated — budget exhausted during %s", a.Name, stage))
+	}
+	for _, ref := range unreached {
+		if ref.HealthCheckAsserts == "" {
+			continue
+		}
+		failures = append(failures, fmt.Sprintf(
+			"[chainsaw] %s: not evaluated — budget exhausted during %s", ref.Name, stage))
+	}
+	for _, p := range gpuProbes {
+		failures = append(failures, fmt.Sprintf(
+			"[gpuReadiness] %s (%s): not evaluated — budget exhausted during %s",
+			p.component, p.signal, stage))
 	}
 	return failures
 }
@@ -475,10 +531,65 @@ func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentR
 		}
 	}
 
-	// Build the probe list in a FIXED order. capture() below is applied to the
-	// results in that same order after the fan-out joins, so firstStructured
-	// precedence is identical to the previous serial implementation.
-	var probes []func() error
+	for _, err := range runGPUReadinessProbes(enabledGPUReadinessProbes(ctx, refs)) {
+		capture(err)
+	}
+
+	return failures, firstStructured
+}
+
+// runGPUReadinessProbes runs every probe concurrently and returns their results
+// indexed by probes, so callers read them back in that fixed order rather than
+// in completion order — which is what makes firstStructured precedence in
+// verifyGPUReadinessSignals independent of which probe happens to finish first.
+//
+// Plain Group, not WithContext: every probe closes over a *validators.Context
+// and reads ctx.Ctx directly (pollUntilStable), so a derived gctx would be
+// built and discarded — the same reasoning as the Skyhook-status/taint-scan
+// errgroup fan-out inside verifyNodewrightReady's own poll probe elsewhere in
+// this file. Each goroutine writes its result into its own slice index and
+// always returns nil, so one unhealthy signal never stops the others from
+// running.
+func runGPUReadinessProbes(probes []gpuReadinessProbe) []error {
+	results := make([]error, len(probes))
+	g := new(errgroup.Group)
+	for i, probe := range probes {
+		g.Go(func() error {
+			results[i] = probe.run()
+			return nil
+		})
+	}
+	// Goroutines never return an error (results are recorded per-index), so Wait
+	// only blocks until every probe completes.
+	_ = g.Wait()
+	return results
+}
+
+// gpuReadinessProbe pairs a readiness probe with the component and signal it
+// gates. The labels exist so the budget-exhausted path can report which probes
+// went unevaluated without running any of them.
+type gpuReadinessProbe struct {
+	// component is the recipe component whose enablement selected this probe.
+	component string
+	// signal names what the probe waits on, since one component can gate a
+	// signal narrower than itself (network-operator gates only the RDMA fabric).
+	signal string
+	// run is a single blocking pass of the probe; it observes ctx.Ctx through
+	// pollUntilStable and returns nil when the signal is healthy and settled.
+	run func() error
+}
+
+// enabledGPUReadinessProbes returns the GPU readiness probes the enabled
+// component set selects, in the FIXED order verifyGPUReadinessSignals reads
+// results back in — that order is what firstStructured precedence depends on.
+//
+// Selection is offline: it branches on component names and the recipe's
+// declared manifest file list, and the one client it touches (getDynamicClient,
+// below) it only constructs. No probe body runs and no request is issued, which
+// is what lets checkExpectedResources enumerate the probes it is skipping once
+// the check budget is gone.
+func enabledGPUReadinessProbes(ctx *validators.Context, refs []recipe.ComponentRef) []gpuReadinessProbe {
+	var probes []gpuReadinessProbe
 
 	if ref, ok := findEnabledComponent(refs, nodewrightCustomizationsComponent); ok {
 		// Warm ctx.DynamicClient before the fan-out: getDynamicClient writes it
@@ -489,53 +600,41 @@ func verifyGPUReadinessSignals(ctx *validators.Context, refs []recipe.ComponentR
 		// probe calls getDynamicClient again and surfaces the identical error,
 		// and that call returns before the write, so no race is introduced.
 		_, _ = getDynamicClient(ctx)
-		probes = append(probes, func() error { return verifyNodewrightReady(ctx, ref) })
+		probes = append(probes, gpuReadinessProbe{
+			component: nodewrightCustomizationsComponent,
+			signal:    "Nodewright CR completion + runtime-required taint clearance",
+			run:       func() error { return verifyNodewrightReady(ctx, ref) },
+		})
 	}
 
 	if ref, ok := findEnabledComponent(refs, draDriverComponent); ok {
-		probes = append(probes, func() error { return verifyDRAKubeletPluginReady(ctx, ref.Namespace) })
+		probes = append(probes, gpuReadinessProbe{
+			component: draDriverComponent,
+			signal:    "DRA kubelet plugin readiness",
+			run:       func() error { return verifyDRAKubeletPluginReady(ctx, ref.Namespace) },
+		})
 	}
 
 	if ref, ok := findEnabledComponent(refs, networkOperatorComponent); ok && recipeDeclaresRDMAFabric(ref) {
-		probes = append(probes, func() error {
-			// The polled resource is derived from the recipe's own
-			// NicClusterPolicy manifest (rdma/hca_shared_devices_a on AKS,
-			// nvidia.com/mlnxnics on OKE) so the gate waits for exactly what
-			// this recipe's fabric advertises. A derivation failure fails the
-			// gate closed — never "skip the fabric".
-			fabricResource, ferr := rdmaFabricResource(ctx.Ctx, ref)
-			if ferr != nil {
-				return ferr
-			}
-			return verifyRDMAFabricReady(ctx, fabricResource)
+		probes = append(probes, gpuReadinessProbe{
+			component: networkOperatorComponent,
+			signal:    "RDMA fabric resource allocatable across the Mellanox cohort",
+			run: func() error {
+				// The polled resource is derived from the recipe's own
+				// NicClusterPolicy manifest (rdma/hca_shared_devices_a on AKS,
+				// nvidia.com/mlnxnics on OKE) so the gate waits for exactly what
+				// this recipe's fabric advertises. A derivation failure fails the
+				// gate closed — never "skip the fabric".
+				fabricResource, ferr := rdmaFabricResource(ctx.Ctx, ref)
+				if ferr != nil {
+					return ferr
+				}
+				return verifyRDMAFabricReady(ctx, fabricResource)
+			},
 		})
 	}
 
-	// Plain Group, not WithContext: every probe takes *validators.Context and
-	// reads ctx.Ctx directly (pollUntilStable), so a derived gctx would be built
-	// and discarded — the same reasoning as the Skyhook-status/taint-scan
-	// errgroup fan-out inside verifyNodewrightReady's own poll probe elsewhere
-	// in this file. Each goroutine writes its result into its own slice index
-	// and always returns nil, so one unhealthy signal never stops the others
-	// from running, and results are read back in fixed index order after
-	// Wait() — never in completion order.
-	results := make([]error, len(probes))
-	g := new(errgroup.Group)
-	for i, probe := range probes {
-		g.Go(func() error {
-			results[i] = probe()
-			return nil
-		})
-	}
-	// Goroutines never return an error (results are recorded per-index), so Wait
-	// only blocks until every probe completes.
-	_ = g.Wait()
-
-	for _, err := range results {
-		capture(err)
-	}
-
-	return failures, firstStructured
+	return probes
 }
 
 func findEnabledComponent(refs []recipe.ComponentRef, name string) (recipe.ComponentRef, bool) {
