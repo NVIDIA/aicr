@@ -244,7 +244,7 @@ validation:
         value: "256"
       - name: inference-routing-mode        # optional; dynamo-router or gateway-epp
         value: dynamo-router
-      - name: inference-model-cache-storage-class # optional, StorageClass name
+      - name: inference-model-cache-storage-class # optional, StorageClass name (EKS example, GKE default is standard-rwo)
         value: gp3
 ```
 
