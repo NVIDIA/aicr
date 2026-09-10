@@ -52,6 +52,7 @@ func init() {
 	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
 	registerCheck("CheckDriverOwnershipCoherence", CheckDriverOwnershipCoherence)
 	registerCheck("CheckMariaDBOperatorOwnershipCoherence", CheckMariaDBOperatorOwnershipCoherence)
+	registerCheck("CheckGKETCPXOInterfacesCoherence", CheckGKETCPXOInterfacesCoherence)
 	registerCheck("CheckNVSentinelDriverLabelDetectable", CheckNVSentinelDriverLabelDetectable)
 	registerCheck("CheckNVSentinelRuntimeClassCoherence", CheckNVSentinelRuntimeClassCoherence)
 }
@@ -2047,4 +2048,65 @@ func CheckMariaDBOperatorOwnershipCoherence(_ context.Context, componentName str
 				"with this AICR version before bundling AICR-provided accounting",
 			componentName, state))}
 	}
+}
+
+// CheckGKETCPXOInterfacesCoherence compares the FINAL resolved
+// kubeflow-trainer tcpxoInterfaces value against the mapping the recipe
+// records in configuration.gke.tcpxoInterfaces. Validity alone is not
+// enough: a value that is well-formed but different from what the recipe
+// records is exactly the failure case — the recipe would attest to one
+// wiring while the bundle renders another (the realistic shape: networks
+// get reprovisioned and someone --sets the current names to make the bundle
+// work). The bundler's ownership enforcement already rejects all four
+// override channels for this path; this check is the defense-in-depth for
+// hand-edited recipes and any future channel.
+func CheckGKETCPXOInterfacesCoherence(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	if !recipeResult.ShipsGKETCPXORuntime() {
+		return nil, nil
+	}
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil {
+		return nil, nil
+	}
+	keys := componentOverrideKeys(componentName, recipeResult.DataProvider())
+	if componentDisabled(ref, bundlerConfig, keys) {
+		return nil, nil
+	}
+
+	recorded, present := recipeResult.GKETCPXOInterfaces()
+	if !present {
+		// Fail closed, defense-in-depth: the bundler's ownership enforcement
+		// already rejects this recipe before validations run, but the check
+		// registry is also reachable from the SDK preflight path.
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: recipe ships torch-distributed-tcpxo but records no "+
+				"configuration.gke.tcpxoInterfaces mapping; regenerate the recipe with "+
+				"--gke-tcpxo-interfaces eth1=<network>,...,eth8=<network>", componentName))}
+	}
+
+	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, keys,
+		"GKE TCPXO interface mapping coherence")
+	if err != nil {
+		return nil, []error{err}
+	}
+	rawResolved, ok := values["tcpxoInterfaces"]
+	if !ok {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: recipe records configuration.gke.tcpxoInterfaces but the resolved values carry "+
+				"no tcpxoInterfaces; regenerate the recipe rather than editing one half", componentName))}
+	}
+	resolved, normErr := recipe.NormalizeGKETCPXOInterfaces(rawResolved)
+	if normErr != nil {
+		return nil, []error{normErr}
+	}
+	if !slices.Equal(resolved, recorded) {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: the resolved tcpxoInterfaces value disagrees with "+
+				"configuration.gke.tcpxoInterfaces; the bundle would render a different wiring "+
+				"than the recipe records", componentName))}
+	}
+	return nil, nil
 }
