@@ -924,6 +924,17 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get launcher logs", err)
 	}
 
+	// On GKE H100 the log-marker transport check is a documented no-op
+	// (NCCL_DEBUG=WARN keeps the results table retrievable, so the INFO
+	// banner never appears — see verifyTransportFromLogs). Assert the
+	// realized transport on the pods instead, while they are still here:
+	// the deferred cleanup above tears the namespace down on return.
+	if gkeTCPXOPreflightApplies(variant, accelerator, service) {
+		if assertErr := assertGKETCPXOTransportRealized(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace); assertErr != nil {
+			return "", assertErr
+		}
+	}
+
 	return logs, nil
 }
 
