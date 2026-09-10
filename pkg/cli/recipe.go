@@ -172,7 +172,7 @@ Override snapshot-detected criteria:
 		Flags: recipeCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS,
-				flagPlatform, flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, "snapshot", "config", flagOutput,
+				flagPlatform, flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, flagGKETCPXOInterfaces, "snapshot", "config", flagOutput,
 				flagFormat); err != nil {
 				return err
 			}

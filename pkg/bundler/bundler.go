@@ -564,10 +564,8 @@ func accountingValuesEqual(actual, expected any) bool {
 	}
 }
 
-// enforceConfigurationOwnership runs every typed-configuration ownership gate
-// before component filtering, so a required component cannot disappear before
-// a gate observes it. One call site keeps Make's statement budget under
-// funlen's; the gates themselves stay separate functions with separate tests.
+// enforceConfigurationOwnership checks typed ownership before filtering, so
+// removing a component cannot hide a protected path.
 func (b *DefaultBundler) enforceConfigurationOwnership(result *recipe.RecipeResult) error {
 	if err := b.enforceAccountingOwnership(result); err != nil {
 		return err

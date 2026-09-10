@@ -148,13 +148,18 @@ spec:
                           # NCCL registers/pins GPU and NIC memory regions.
                           add: ["IPC_LOCK"]
                       env:
-                        # Complete GPUDirect-TCPXO NCCL configuration for the
-                        # v1.0.15 plugin the installer ships — the full set
-                        # from Google's release notes, not only NCCL_FASTRAK_*.
-                        # Sourcing the host nccl-env-profile.sh is documented
-                        # by Google as an optional shortcut, not the contract;
-                        # the contract is these values, kept version-pinned
-                        # with the plugin.
+                        # The GPUDirect-TCPXO NCCL configuration set for the v1.0.15
+                        # plugin the installer ships, from Google's release notes for that
+                        # pair (v1.0.15 / v1.0.21) — kept version-pinned with the plugin.
+                        # Sourcing the host nccl-env-profile.sh is documented by Google as
+                        # an optional shortcut, not the contract.
+                        #
+                        # Two additions the release list does not carry because it assumes
+                        # a privileged container: LD_LIBRARY_PATH locates the mounted
+                        # plugin, and NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY points at the
+                        # aperture devices the NRI annotation injects. NCCL_DEBUG=WARN is
+                        # deliberate (INFO rotates the payload out of retrievable logs,
+                        # #1712); re-enable INFO ad hoc when debugging.
                         - name: LD_LIBRARY_PATH
                           value: "/usr/lib/x86_64-linux-gnu:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
                         - name: NCCL_FASTRAK_CTRL_DEV
@@ -165,8 +170,6 @@ spec:
                           value: eth0
                         - name: NCCL_CROSS_NIC
                           value: "0"
-                        - name: NCCL_ALGO
-                          value: Ring,Tree
                         - name: NCCL_PROTO
                           value: Simple,LL128
                         - name: NCCL_MIN_NCHANNELS
@@ -177,8 +180,10 @@ spec:
                           value: /usr/local/nvidia/lib64/a3plus_tuner_config.textproto
                         - name: NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE
                           value: /usr/local/nvidia/lib64/a3plus_guest_config.textproto
-                        - name: NCCL_DYNAMIC_CHUNK_SIZE
-                          value: "524288"
+                        - name: CUDA_VISIBLE_DEVICES
+                          value: 0,1,2,3,4,5,6,7
+                        - name: NCCL_NVLSTREE_MAX_CHUNKSIZE
+                          value: "131072"
                         - name: NCCL_P2P_NET_CHUNKSIZE
                           value: "524288"
                         - name: NCCL_P2P_PCI_CHUNKSIZE
@@ -195,8 +200,6 @@ spec:
                           value: "0"
                         - name: NCCL_BUFFSIZE
                           value: "8388608"
-                        - name: CUDA_VISIBLE_DEVICES
-                          value: 0,1,2,3,4,5,6,7
                         - name: NCCL_NET_GDR_LEVEL
                           value: PIX
                         - name: NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING
@@ -206,15 +209,11 @@ spec:
                         - name: NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY
                           value: /dev/aperture_devices
                         - name: NCCL_NVLS_ENABLE
-                          value: "0"
-                        # WARN, deliberately not INFO: at INFO the NCCL/TCPXO
-                        # teardown emits tens of thousands of NET/FasTrak lines
-                        # that overflow kubelet's containerLogMaxSize and rotate
-                        # the payload out of retrievable logs (#1712). Re-enable
-                        # INFO ad hoc for debugging, with that consequence in
-                        # mind.
+                          value: "1"
                         - name: NCCL_DEBUG
                           value: WARN
+                        - name: NCCL_DEBUG_SUBSYS
+                          value: INIT,NET,ENV,COLL,GRAPH
                       volumeMounts:
                         - name: dshm
                           mountPath: /dev/shm

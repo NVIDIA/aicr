@@ -94,7 +94,7 @@ Use in shell scripts:
 		Flags: queryCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform",
-				flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, "snapshot", "config", "format", "selector"); err != nil {
+				flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, flagGKETCPXOInterfaces, "snapshot", "config", "format", "selector"); err != nil {
 				return err
 			}
 

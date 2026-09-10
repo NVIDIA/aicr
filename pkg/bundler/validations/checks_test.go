@@ -1776,7 +1776,9 @@ func tcpxoCoherenceTestResult() *recipe.RecipeResult {
 		},
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gke-nccl-tcpxo"},
-			{Name: "kubeflow-trainer", Overrides: map[string]any{"tcpxoInterfaces": override}},
+			{Name: "kubeflow-trainer", Overrides: map[string]any{"tcpxoInterfaces": override}, ManifestFiles: []string{
+				"components/kubeflow-trainer/manifests/torch-distributed-tcpxo-cluster-training-runtime.yaml",
+			}},
 		},
 	}
 }
@@ -1785,7 +1787,8 @@ func TestCheckGKETCPXOInterfacesCoherence(t *testing.T) {
 	t.Parallel()
 
 	nonFingerprint := tcpxoCoherenceTestResult()
-	nonFingerprint.Criteria.Accelerator = recipe.CriteriaAcceleratorB200
+	nonFingerprint.ComponentRefs[1].ManifestFiles = nil
+	nonFingerprint.Configuration = nil
 
 	drifted := tcpxoCoherenceTestResult()
 	drifted.ComponentRefs[1].Overrides["tcpxoInterfaces"].([]any)[2].(map[string]any)["network"] = "reprovisioned-network"

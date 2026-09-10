@@ -39,7 +39,9 @@ func tcpxoBundlerTestResult(withMapping bool) *recipe.RecipeResult {
 		},
 		ComponentRefs: []recipe.ComponentRef{
 			{Name: "gke-nccl-tcpxo"},
-			{Name: "kubeflow-trainer"},
+			{Name: "kubeflow-trainer", ManifestFiles: []string{
+				"components/kubeflow-trainer/manifests/torch-distributed-tcpxo-cluster-training-runtime.yaml",
+			}},
 		},
 	}
 	if withMapping {
@@ -181,7 +183,7 @@ func TestEnforceGKETCPXOOwnershipNonFingerprintRecipe(t *testing.T) {
 	// A recipe outside the fingerprint family carries no mapping and must be
 	// left alone even with overrides that would be rejected on one.
 	result := tcpxoBundlerTestResult(false)
-	result.Criteria.Accelerator = recipe.CriteriaAcceleratorB200
+	result.ComponentRefs[1].ManifestFiles = nil
 
 	b, err := New(WithConfig(config.NewConfig(config.WithValueOverrides(
 		map[string]map[string]string{
@@ -206,6 +208,9 @@ func TestEnforceGKETCPXOOwnershipNilConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
 	}
+
+	// New supplies defaults; explicitly clear them to exercise the nil branch.
+	b.Config = nil
 
 	if err := b.enforceGKETCPXOOwnership(tcpxoBundlerTestResult(false)); err == nil {
 		t.Fatal("enforceGKETCPXOOwnership() = nil on a fingerprint recipe without the mapping, want fail-closed")
