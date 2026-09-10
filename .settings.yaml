@@ -19,7 +19,7 @@
 # Build Tools
 build_tools:
   # renovate: datasource=github-releases depName=goreleaser/goreleaser depType=build_tools
-  goreleaser: 'v2.18.0'
+  goreleaser: 'v2.18.1'
   # renovate: datasource=github-releases depName=ko-build/ko depType=build_tools
   ko: 'v0.19.1'
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
@@ -128,7 +128,7 @@ testing_tools:
   # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools
   nvkind: 'c57050497cffee36f10c8b918d2727c4f26d886e'
   # renovate: datasource=github-releases depName=tilt-dev/ctlptl depType=testing_tools
-  ctlptl: '0.9.5'
+  ctlptl: '0.9.6'
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
   tilt: '0.37.7'
   # Keep in step with sigs.k8s.io/controller-runtime in go.mod: setup-envtest is
@@ -138,7 +138,7 @@ testing_tools:
   # renovate: datasource=go depName=sigs.k8s.io/controller-runtime/tools/setup-envtest depType=testing_tools
   setup_envtest: 'v0.25.0'
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
-  helm: 'v4.2.4'
+  helm: 'v4.3.0'
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
   helm_diff: 'v3.15.12'
   # helm_diff_checksums are refreshed automatically by tools/update-helm-diff-checksums
