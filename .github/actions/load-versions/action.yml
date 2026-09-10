@@ -37,6 +37,9 @@ outputs:
   oasdiff:
     description: 'oasdiff version from .settings.yaml (linting.oasdiff)'
     value: ${{ steps.versions.outputs.oasdiff }}
+  oasdiff_sha256_linux_amd64:
+    description: 'Pinned linux/amd64 SHA256 for the oasdiff release archive (linting.oasdiff_sha256_linux_amd64)'
+    value: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
   addlicense:
     description: 'addlicense version'
     value: ${{ steps.versions.outputs.addlicense }}
@@ -185,6 +188,7 @@ runs:
         echo "golangci_lint=$(yq eval '.linting.golangci_lint' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "apidiff=$(yq eval '.linting.apidiff' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "oasdiff=$(yq eval '.linting.oasdiff' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "oasdiff_sha256_linux_amd64=$(yq eval '.linting.oasdiff_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "yamllint=$(yq eval '.linting.yamllint' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "addlicense=$(yq eval '.linting.addlicense' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "go_licenses=$(yq eval '.linting.go_licenses' .settings.yaml)" >> $GITHUB_OUTPUT

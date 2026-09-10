@@ -31,8 +31,30 @@ build_tools:
 linting:
   # renovate: datasource=go depName=golang.org/x/exp depType=linting
   apidiff: 'v0.0.0-20260824195058-e88cd73687aa'
+  # The annotation must stay on the line directly above the value: the
+  # customManagers regexes in .github/renovate.json5 match `# renovate: ...`
+  # followed immediately by `key: 'value'`, so any comment between them silently
+  # drops this pin from Renovate's scan (#2657).
   # renovate: datasource=github-releases depName=oasdiff/oasdiff depType=linting
   oasdiff: 'v1.31.0'
+  # Refreshed automatically by tools/update-oasdiff-checksums via Renovate
+  # postUpgradeTasks whenever the version above is bumped. Same reasoning as the
+  # oras pin in security_tools: the checksums.txt served beside the tarball
+  # comes from the same release, so it detects corruption but not a compromise
+  # of the release itself. A digest committed and reviewed at this SHA does.
+  #
+  # This one matters specifically because #2663 moved oasdiff off `go install`,
+  # which authenticated every dependency against sum.golang.org -- a public
+  # transparency log. Dropping to an unpinned binary would have traded that for
+  # nothing; the pin is what keeps the integrity story from regressing.
+  #
+  # Flat, uniquely-named key rather than a nested `<tool>_checksums:` mapping,
+  # for the reason spelled out on oras_sha256_linux_amd64: the nested blocks all
+  # share sub-key names and the refresh scripts rewrite by sub-key.
+  #
+  # linux/amd64 only: this feeds the setup-build-tools action, which runs on
+  # ubuntu runners. tools/setup-tools handles local dev on other platforms.
+  oasdiff_sha256_linux_amd64: '0177d4bc0bf04f4061e9277795b77335ee100a43b508e94fce5c46de083bbede'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.13.2'
   # renovate: datasource=pypi depName=yamllint depType=linting
