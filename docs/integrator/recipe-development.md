@@ -259,7 +259,10 @@ only meaningful at a specific model + concurrency, pin the model and
 concurrency together in an overlay rather than relying on the global
 defaults for the inputs. `inference-model-cache-storage-class` is
 independent of that pairing. Set it whenever the cluster's default
-StorageClass can't attach to the target node's machine family.
+StorageClass can't attach to the target node's machine family, or the
+cluster has no default StorageClass at all, since enabling the cache
+without either a configured StorageClass or a cluster default fails
+validation.
 `inference-routing-mode` resolves from the recipe only, defaulting to
 `dynamo-router`; set `gateway-epp` to validate the GAIE/EPP path through the
 AICR-managed inference gateway.
