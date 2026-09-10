@@ -386,6 +386,7 @@ jobs:
         with:
           go_version: ${{ steps.versions.outputs.go }}
           helm_version: ${{ steps.versions.outputs.helm }}
+          setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
           oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
           oasdiff_sha256: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
@@ -457,10 +458,21 @@ To use these actions in other repositories:
 - uses: NVIDIA/aicr/.github/actions/go-test@main
   with:
     go_version: '1.26'
-    helm_version: 'v4.2.3'
+    helm_version: 'v4.2.4'
+    setup_envtest_version: 'v0.25.0'
+    oasdiff_version: 'v1.31.0'
+    oasdiff_sha256: '0177d4bc0bf04f4061e9277795b77335ee100a43b508e94fce5c46de083bbede'
     coverage_report: 'true'
 ```
 
 The cross-repository example intentionally omits `apidiff_version`. Repositories
 without AICR's `make api-diff` target retain the original test behavior because
 an empty `apidiff_version` skips the API compatibility steps.
+
+Everything else shown is required and has no such escape hatch:
+`setup_envtest_version` and `oasdiff_sha256` are each checked at the top of
+their install step and fail the job when empty, so omitting one produces a
+failure at run time rather than a skipped step. A cross-repo caller has no
+`load-versions` to read `.settings.yaml`, hence the literals — keep them in step
+with the pins there, and note that `oasdiff_sha256` must be the digest for the
+`oasdiff_version` beside it.
