@@ -107,3 +107,23 @@ func TestLoadFromFileIsSilentOnTargetAPIVersion(t *testing.T) {
 		t.Errorf("target apiVersion must not warn, got: %q", got)
 	}
 }
+
+// TestLoadFromFileWarnsOnAbsentAPIVersion covers the other deprecated shape.
+// ADR-011 §3 grants the empty-value tolerance to the snapshot, recipe and
+// criteria loaders only, and ADR-022 §3 retires it at v1.0.0 alongside the
+// alpha values — so this is the window in which it must load *and* say so.
+func TestLoadFromFileWarnsOnAbsentAPIVersion(t *testing.T) {
+	path := writeSnapshotWithAPIVersion(t, "headerless-snapshot.yaml", "")
+	buf := captureWarn(t)
+
+	if _, err := LoadFromFile(t.Context(), path); err != nil {
+		t.Fatalf("headerless snapshot must still load until %s: %v", header.AlphaRemovedIn, err)
+	}
+	got := buf.String()
+	if !strings.Contains(got, "absent apiVersion") {
+		t.Errorf("absent header must warn: %q", got)
+	}
+	if !strings.Contains(got, "headerless-snapshot.yaml") {
+		t.Errorf("warning does not name the file: %q", got)
+	}
+}

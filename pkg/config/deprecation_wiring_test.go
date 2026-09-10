@@ -89,3 +89,26 @@ func TestLoadIsSilentOnTargetAPIVersion(t *testing.T) {
 		t.Errorf("target apiVersion must not warn, got: %q", got)
 	}
 }
+
+// TestLoadRejectsHeaderlessConfig pins the fail-closed half. AICRConfig has
+// always required an exact, non-empty apiVersion (ADR-022 §2 discussion), so
+// unlike the snapshot, recipe and criteria loaders it has no empty-value
+// tolerance to retire and the warning's absent-header branch is unreachable
+// here by design.
+//
+// Written because review proposed admitting the empty value "during the
+// compatibility window". There is no such window for this kind: #2421 closed
+// the headerless seam for authoring documents in v0.21 precisely so the direct
+// and catalog paths could not disagree, and re-opening it would be a
+// regression that #2417 then has to close again.
+func TestLoadRejectsHeaderlessConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "headerless-config.yaml")
+	body := "kind: AICRConfig\nmetadata:\n  name: headerless\nspec:\n  snapshot: {}\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := config.Load(context.Background(), path); err == nil {
+		t.Fatal("headerless AICRConfig must be rejected; it has no empty-value tolerance")
+	}
+}
