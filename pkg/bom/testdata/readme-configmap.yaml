@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: readme
+data:
+  README.md: |
+    just a plain paragraph of prose
+    spanning two lines of folded text
