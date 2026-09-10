@@ -48,6 +48,23 @@ spec:
       os: cos
       intent: training
       platform: kubeflow
+    # Required on this family (issue #2296): the ordered eth1..eth8 ->
+    # GPU-NIC network mapping for the UAT cluster, provisioned by
+    # ../cluster-config.yaml (deployment id aicr-uat, gpuNets count 8).
+    # If the provisioner names them differently, list the real names with:
+    #   kubectl get networks.networking.gke.io \
+    #     -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' | grep gpu-nic
+    configuration:
+      gke:
+        tcpxoInterfaces:
+          - {interfaceName: eth1, network: aicr-uat-gpu-nic-0}
+          - {interfaceName: eth2, network: aicr-uat-gpu-nic-1}
+          - {interfaceName: eth3, network: aicr-uat-gpu-nic-2}
+          - {interfaceName: eth4, network: aicr-uat-gpu-nic-3}
+          - {interfaceName: eth5, network: aicr-uat-gpu-nic-4}
+          - {interfaceName: eth6, network: aicr-uat-gpu-nic-5}
+          - {interfaceName: eth7, network: aicr-uat-gpu-nic-6}
+          - {interfaceName: eth8, network: aicr-uat-gpu-nic-7}
     output:
       path: recipe.yaml
 

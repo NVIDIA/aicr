@@ -66,3 +66,16 @@ deploymentOrder:
   - nvidia-dra-driver-gpu
   - nvsentinel
   - prometheus-adapter
+# The recipe must record the TCPXO interface mapping supplied at generation
+# (issue #2296) — the shipped torch-distributed-tcpxo runtime renders from it.
+configuration:
+  gke:
+    tcpxoInterfaces:
+      - {interfaceName: eth1, network: aicr-uat-gpu-nic-0}
+      - {interfaceName: eth2, network: aicr-uat-gpu-nic-1}
+      - {interfaceName: eth3, network: aicr-uat-gpu-nic-2}
+      - {interfaceName: eth4, network: aicr-uat-gpu-nic-3}
+      - {interfaceName: eth5, network: aicr-uat-gpu-nic-4}
+      - {interfaceName: eth6, network: aicr-uat-gpu-nic-5}
+      - {interfaceName: eth7, network: aicr-uat-gpu-nic-6}
+      - {interfaceName: eth8, network: aicr-uat-gpu-nic-7}

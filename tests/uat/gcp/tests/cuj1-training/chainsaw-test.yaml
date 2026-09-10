@@ -53,12 +53,19 @@ spec:
               set -eu
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/uat-cuj1-training-gke"
+              # Required on this family: the ordered eth1..eth8 -> GPU-NIC
+              # network mapping, matching the UAT cluster's provisioned names.
+              IFACES="eth1=aicr-uat-gpu-nic-0,eth2=aicr-uat-gpu-nic-1,"
+              IFACES+="eth3=aicr-uat-gpu-nic-2,eth4=aicr-uat-gpu-nic-3,"
+              IFACES+="eth5=aicr-uat-gpu-nic-4,eth6=aicr-uat-gpu-nic-5,"
+              IFACES+="eth7=aicr-uat-gpu-nic-6,eth8=aicr-uat-gpu-nic-7"
               ${AICR_BIN} recipe \
                 --service gke \
                 --accelerator h100 \
                 --intent training \
                 --os cos \
                 --platform kubeflow \
+                --gke-tcpxo-interfaces "${IFACES}" \
                 --output "${WORK}/recipe.yaml"
               test -f "${WORK}/recipe.yaml"
 
@@ -139,6 +146,8 @@ spec:
               test -x "${WORK}/bundle/deploy.sh"
               test -f "${WORK}/bundle/recipe.yaml"
               ls "${WORK}"/bundle/*/values.yaml >/dev/null 2>&1
+              # The TCPXO-wired runtime ships in the bundle (issue #2296)
+              grep -rq "torch-distributed-tcpxo" "${WORK}/bundle/"
             check:
               ($error == null): true
 
