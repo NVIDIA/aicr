@@ -1,0 +1,45 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Mirrors the reference cluster the h200-k0s-ubuntu-training recipe was
+# validated on (single-node k0s v1.36.3+k0s.0, 2x H200 NVL via PCIe
+# passthrough, Ubuntu 24.04, driver 610.57.04): one node that is both
+# control plane and worker, with full GPU devices owned by the node
+# rather than a cloud instance type.
+apiVersion: aicr.run/v1alpha2
+kind: KWOKNodeProfile
+metadata:
+  name: accelerated-h200
+  labels:
+    provider: k0s
+    nodeType: accelerated
+    accelerator: h200
+
+spec:
+  instanceType: k0s-h200-nvl
+  arch: amd64
+  osImage: Ubuntu 24.04
+
+  resources:
+    cpu: "46"
+    memory: 440Gi
+    storage: 1345Gi
+
+  gpu:
+    product: NVIDIA-H200-NVL
+    count: 2
+    memory: 143771  # MiB per GPU, as reported by nvidia-smi on the reference node
+    driver: "610.57.04"
+    driverMajor: "610"
+    driverMinor: "57"
