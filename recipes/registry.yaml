@@ -34,7 +34,8 @@
 #   nodeScheduling:    Paths in Helm values where node selectors/tolerations are injected
 #   upgrades:          Component upgrade transition records (ADR-021)
 #     file:              Path to a ComponentUpgrades YAML file, relative to
-#                        the data directory (e.g., "upgrades/nodewright-operator.yaml")
+#                        the data directory (e.g.,
+#                        "components/nodewright-operator/upgrades.yaml")
 #
 # Note: A component must have either 'helm' OR 'kustomize' configuration, not both.
 # Node scheduling paths define WHERE CLI flags like --system-node-selector are applied.
