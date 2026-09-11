@@ -181,7 +181,7 @@
 # config to exercise the two-block shape, not something it arranges for
 # itself.
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: kind-h100-training-slurm-uat
 
