@@ -300,7 +300,8 @@ func TestLoadAllowsPrereleaseInTo(t *testing.T) {
 	}
 }
 
-// A structured ReadFile error keeps its own code rather than flattening.
+// A structured ReadFile error keeps its own code rather than flattening, and
+// the wrap this layer adds still names the component and file it was reading.
 func TestLoadPropagatesReadError(t *testing.T) {
 	comps := []Component{{Name: "nw", File: "upgrades/missing.yaml", PinnedVersion: "v0.18.0"}}
 	_, err := Load(context.Background(), mapSource{}, comps)
@@ -309,6 +310,9 @@ func TestLoadPropagatesReadError(t *testing.T) {
 	}
 	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
 		t.Errorf("error = %v, want inner ErrCodeNotFound preserved", err)
+	}
+	if !strings.Contains(err.Error(), "nw") || !strings.Contains(err.Error(), "upgrades/missing.yaml") {
+		t.Errorf("error %q does not name the component and file being read", err.Error())
 	}
 }
 

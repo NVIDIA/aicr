@@ -75,8 +75,8 @@ func Load(ctx context.Context, src Source, comps []Component) (Set, error) {
 		data, err := src.ReadFile(readCtx, c.File)
 		cancel()
 		if err != nil {
-			return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
-				fmt.Sprintf("failed to read upgrades file for component %q from %q", c.Name, c.File))
+			return nil, errors.Wrap(errors.ErrCodeInternal, fmt.Sprintf(
+				"failed to read upgrades file for component %q from %q", c.Name, c.File), err)
 		}
 		u, err := decodeRecord(data, c)
 		if err != nil {
