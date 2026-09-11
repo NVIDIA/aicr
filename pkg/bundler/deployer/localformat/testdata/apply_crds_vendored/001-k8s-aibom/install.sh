@@ -20,13 +20,13 @@ cd "${SCRIPT_DIR}"
 # Helm 4 uses server-side apply by default; --force-conflicts lets the
 # upgrade overwrite fields that operators own on rotated webhook cert
 # Secrets. Helm 3 uses client-side apply and does not recognize the flag.
-HELM_MAJOR=$(helm version --template '{{`{{.Version}}`}}' 2>/dev/null | sed -nE 's/^v([0-9]+)\..*/\1/p')
+HELM_MAJOR=$(helm version --template '{{.Version}}' 2>/dev/null | sed -nE 's/^v([0-9]+)\..*/\1/p')
 FORCE_CONFLICTS_FLAG=""
 if [[ "${HELM_MAJOR:-0}" -ge 4 ]]; then
   FORCE_CONFLICTS_FLAG="--force-conflicts"
 fi
 
-{{ if .OwnsCRDs }}# Apply this chart's CRDs before upgrading. Helm installs a chart's crds/
+# Apply this chart's CRDs before upgrading. Helm installs a chart's crds/
 # directory on first install and never touches it again, so without this a
 # chart bump whose CRDs changed runs the new controller against the old
 # schema. Skipped under --dry-run, which must not touch the cluster.
@@ -34,7 +34,7 @@ if [[ -z "${DRY_RUN_FLAG:-}" ]]; then
   bash ./apply-crds.sh
 fi
 
-{{ end }}helm upgrade --install ${FORCE_CONFLICTS_FLAG} {{ .Name }} ./ \
-  --namespace {{ .Namespace }}{{ if .CreateNamespace }} --create-namespace{{ end }} \
+helm upgrade --install ${FORCE_CONFLICTS_FLAG} k8s-aibom ./ \
+  --namespace k8s-aibom-system --create-namespace \
   -f values.yaml -f cluster-values.yaml \
   ${COMPONENT_WAIT_ARGS:-} ${DRY_RUN_FLAG:-} ${KUBECONFIG_FLAG:-} ${HELM_DEBUG_FLAG:-}
