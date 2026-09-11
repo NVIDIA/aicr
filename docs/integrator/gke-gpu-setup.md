@@ -53,7 +53,10 @@ aicr snapshot -o snapshot.yaml
 #    then bundle. Selection is explicit; the reading VERIFIES it.
 aicr recipe --service gke --accelerator h100 --os cos --intent training \
   --platform kubeflow \
-  --snapshot snapshot.yaml -o recipe.yaml                 # gke-default default
+  --snapshot snapshot.yaml -o recipe.yaml \
+  --gke-tcpxo-interfaces eth1=<net0>,eth2=<net1>,...,eth8=<net7>  # required: the recipe ships
+#   # the torch-distributed-tcpxo runtime; take the ordered mapping from the
+#   # cluster's provisioner (see gke-tcpxo-networking.md), not from name order
 #   ... or, for labeled pools (bundle-carried driver installer):
 #   --profile gpuStack=bundle-installer
 
@@ -199,7 +202,9 @@ advertisement, select the mode at recipe generation:
 ```shell
 aicr recipe --service gke --accelerator h100 --os cos --intent training \
   --platform kubeflow \
-  --profile gpuStack=bundle-installer -o recipe.yaml
+  --profile gpuStack=bundle-installer \
+  --gke-tcpxo-interfaces eth1=<net0>,eth2=<net1>,...,eth8=<net7> \
+  -o recipe.yaml
 aicr bundle -r recipe.yaml -o ./bundles
 ```
 

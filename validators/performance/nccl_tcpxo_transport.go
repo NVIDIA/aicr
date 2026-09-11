@@ -20,11 +20,13 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -52,9 +54,12 @@ const (
 // daemonStarted is sticky: it records that the sidecar reached Started at some
 // point while running. Reading it at assertion time would race JobSet's
 // teardown of completed workers, which flips Started back to false.
+// wiringErr is likewise sticky: once a pod is seen badly wired, a later event
+// for the same pod must not erase it.
 type tcpxoWorkerRecord struct {
 	wiringErr     error
 	daemonStarted bool
+	jobIndex      string
 }
 
 // tcpxoWorkerWatcher observes benchmark worker pods as they run.
@@ -108,9 +113,10 @@ func (w *tcpxoWorkerWatcher) Stop() {
 
 // Assert evaluates the collected records once the benchmark outcome is known.
 // Call only after Stop: records are complete once the goroutine has joined.
-// wantWorkers is the benchmark's worker count: that many workers must have
-// been observed with the daemon provably started, and no observed worker may
-// carry broken wiring.
+// wantWorkers is the benchmark's worker count. Records are grouped by the
+// pod's job index, so a restarted worker counts toward its own slot only —
+// every slot must have at least one pod whose daemon provably started, and
+// no observed pod may carry broken wiring.
 func (w *tcpxoWorkerWatcher) Assert(wantWorkers int) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -119,13 +125,13 @@ func (w *tcpxoWorkerWatcher) Assert(wantWorkers int) error {
 			"no NCCL worker pods were observed during the benchmark; the TCPXO wiring cannot be attested")
 	}
 	var problems []string
-	started := 0
+	startedByIndex := make(map[string]bool)
 	for name, rec := range w.records {
 		if rec.wiringErr != nil {
 			problems = append(problems, fmt.Sprintf("%s: %v", name, rec.wiringErr))
 		}
 		if rec.daemonStarted {
-			started++
+			startedByIndex[rec.jobIndex] = true
 		}
 	}
 	if len(problems) > 0 {
@@ -133,11 +139,13 @@ func (w *tcpxoWorkerWatcher) Assert(wantWorkers int) error {
 		return aicrErrors.New(aicrErrors.ErrCodeInternal,
 			"benchmark worker pods did not carry the TCPXO wiring: "+strings.Join(problems, "; "))
 	}
-	if started < wantWorkers {
-		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
-			"the %s sidecar was observed started on %d of %d benchmark workers; "+
-				"the bandwidth result cannot attest to the fabric on the full cohort",
-			gkeTCXODaemonContainer, started, wantWorkers))
+	for i := 0; i < wantWorkers; i++ {
+		if !startedByIndex[strconv.Itoa(i)] {
+			return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
+				"the %s sidecar was never observed started on worker index %d of %d; "+
+					"a restarted pod cannot stand in for a slot that never ran the fabric",
+				gkeTCXODaemonContainer, i, wantWorkers))
+		}
 	}
 	return nil
 }
@@ -155,6 +163,14 @@ func (w *tcpxoWorkerWatcher) run(ctx context.Context, clientset kubernetes.Inter
 		ncclTrainJobName, nodeJobName)
 	for ctx.Err() == nil {
 		w.watchOnce(ctx, clientset, namespace, selector)
+		if ctx.Err() != nil {
+			return
+		}
+		// Pace re-establishment: the API server rotates long watches every few
+		// minutes, and an immediate reconnect under apiserver stress would spin.
+		// Reconnecting with an empty resourceVersion re-lists current state, so
+		// the pause loses no observations.
+		time.Sleep(time.Second)
 	}
 }
 
@@ -196,10 +212,16 @@ func (w *tcpxoWorkerWatcher) record(pod *v1.Pod) {
 		w.records[pod.Name] = rec
 	}
 	// Pod wiring is immutable, but validate on every event so a bad object is
-	// recorded the first time it is seen, not only on creation.
-	rec.wiringErr = validateTCPXOWorkerWiring(pod)
+	// recorded the first time it is seen, not only on creation. Sticky: a later
+	// event for the same pod must not erase a recorded failure.
+	if err := validateTCPXOWorkerWiring(pod); err != nil && rec.wiringErr == nil {
+		rec.wiringErr = err
+	}
 	if tcpxoDaemonStarted(pod) {
 		rec.daemonStarted = true
+	}
+	if idx := pod.Labels["jobset.sigs.k8s.io/job-index"]; idx != "" {
+		rec.jobIndex = idx
 	}
 }
 
@@ -278,7 +300,7 @@ func checkTCXOAnnotations(pod *v1.Pod) error {
 	seenInterfaces := make(map[string]struct{}, gkeTCXOExpectedEntries-1)
 	seenNetworks := make(map[string]struct{}, gkeTCXOExpectedEntries-1)
 	for _, entry := range entries[1:] {
-		if !gkeTCPXOInterfaceName(entry.InterfaceName) {
+		if !recipe.IsGKETCPXOInterfaceName(entry.InterfaceName) {
 			return fmt.Errorf("pod %q: %s entry has interface %q, want eth1..eth8 — "+
 				"a wrong interface name lands traffic on the wrong NIC",
 				pod.Name, gkeTCXOInterfacesAnnotation, entry.InterfaceName)
@@ -299,13 +321,4 @@ func checkTCXOAnnotations(pod *v1.Pod) error {
 			pod.Name, gkeTCXOInterfacesAnnotation, len(seenInterfaces))
 	}
 	return nil
-}
-
-// gkeTCPXOInterfaceName mirrors the recipe layer's eth1..eth8 contract without
-// importing it (the validator binary is built separately).
-func gkeTCPXOInterfaceName(name string) bool {
-	if len(name) != 4 || !strings.HasPrefix(name, "eth") {
-		return false
-	}
-	return name[3] >= '1' && name[3] <= '8'
 }

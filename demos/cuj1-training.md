@@ -208,7 +208,9 @@ spec:
   #
   # On GKE clusters bundled from this recipe, the torch-distributed-tcpxo
   # sibling runtime additionally wires GPUDirect-TCPXO (multi-NIC fabric).
-  # Reference it by name instead to run on the fabric.
+  # This single-node, single-GPU smoke never crosses the fabric — reference
+  # that runtime by name on a multi-node job that should (and keep the job's
+  # resourcesPerNode consistent with its 8-GPU worker shape).
   runtimeRef:
     name: torch-distributed
     apiGroup: trainer.kubeflow.org
