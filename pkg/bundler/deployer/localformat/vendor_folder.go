@@ -171,7 +171,7 @@ func writeVendoredHelmFolder(
 	// it needs no network at deploy time; `helm show crds ./` recurses into
 	// the subchart tarball written above.
 	if c.OwnsCRDs {
-		crdScript, crdErr := writeApplyCRDsScript(folderDir, dir, c.Name, false)
+		crdScript, crdErr := writeApplyCRDsScript(folderDir, dir, c.Name, c.Namespace, false)
 		if crdErr != nil {
 			return Folder{}, VendorRecord{}, crdErr
 		}
