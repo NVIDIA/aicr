@@ -43,13 +43,32 @@
 # would invalidate it is not state; it is prose, and it belongs in a PR
 # description or nowhere.
 ---
-# No deferred verifications are outstanding.
+# Entries here are one-off by design: the skill runs each check at the start of
+# an invocation and deletes the entry once it passes. That is what makes this
+# different from `known_negatives` and `deliberate_exclusions`, which persist
+# until their `invalidated_by` condition fires.
 #
-# An entry belongs here only if the skill would ask the question again on a
-# later run. A one-off check on a single change -- "did this edit land in the
-# next release?" -- is not carried state: it resolves once, never recurs, and
-# belongs in that change's PR description where a reviewer will see it.
-deferred_verifications: []
+# A post-merge check belongs here rather than only in a PR description, because
+# the skill reads this file and does not read PR descriptions. A check recorded
+# only in a PR is a check nobody runs.
+deferred_verifications:
+  - id: revision-16-tooling-not-published
+    opened: 2026-09-10
+    document_version: 16
+    why_deferred: >-
+      The projection is only produced during a release, so the published bytes
+      cannot be inspected until the next release runs.
+    check: >-
+      The OpenVEX attestation on the next released image must carry `tooling`
+      equal to the openvex-bind identifier and must contain none of the revision
+      narrative removed at revision 16.
+    how: |
+      cosign verify-attestation --type openvex \
+        --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+        --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.*' \
+        ghcr.io/nvidia/aicr@<linux/amd64 digest> \
+        | jq -rs '.[0].payload | @base64d | fromjson | .predicate.tooling'
+    resolves_when: the first release after revision 16 publishes
 
 known_negatives:
   - id: aiperf-pins-block-pillow-and-aiohttp-fixes

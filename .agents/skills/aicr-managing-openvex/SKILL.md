@@ -143,15 +143,20 @@ reading SBOMs) read this. Cite at least one of:
 See existing statements for the expected density; CI does not enforce
 this but reviewers will.
 
-### 5. Document-level fields are identifiers, not prose
+### 5. Document-level fields are short metadata, not prose
 
-`@context`, `@id`, `author`, `role`, `timestamp` and `tooling` are the
-only document-level fields OpenVEX v0.2.0 defines, and every one of them
-is an identifier. There is no notes or changelog field. Anything that is
-not scoped to a single CVE has no home in the document at all: what a
-revision changed and how it was verified goes in that revision's PR
-description, and work that is not finished yet goes in `vex-state.yaml`
-(see **Carried state** below).
+OpenVEX v0.2.0 defines exactly nine document-level fields: `@context`,
+`@id`, `author`, `role`, `timestamp`, `last_updated`, `version`,
+`tooling` and `statements`. Each is short, structured metadata -- an IRI,
+an author or role string, an RFC 3339 timestamp, an integer, a generator
+identifier -- and `statements` is the only one that carries substance.
+**None of them is a free-form prose field, and there is no notes or
+changelog field.**
+
+So anything not scoped to a single CVE has no home in the document at
+all: what a revision changed and how it was verified goes in that
+revision's PR description, and work that is not finished yet goes in
+`vex-state.yaml` (see **Carried state** below).
 
 `tooling` is where this went wrong. Each revision appended its own
 rationale to it because it was the only free-form string available, and
