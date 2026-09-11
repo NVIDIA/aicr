@@ -717,6 +717,36 @@ func TestCheckConditions(t *testing.T) {
 	}
 }
 
+// TestDriverAbsentRemedy_OCP pins the OCP branch added for #2135:
+// driverAbsentRemedy must use the OCP-specific override keys
+// (gpuoperatorocp:/dradriverocp:) rather than falling through to the
+// generic gpuoperator:/dradriver: default, since those keys don't
+// resolve against an OCP recipe's registry aliases. Also asserts the
+// generic-default keys are NOT present, so a future edit that
+// accidentally reuses gpuOperatorManagedOverrideSet for OCP fails
+// loudly instead of silently.
+func TestDriverAbsentRemedy_OCP(t *testing.T) {
+	got := driverAbsentRemedy(recipe.CriteriaServiceOCP, "", false)
+
+	wantContains := []string{
+		"--set gpuoperatorocp:driver.enabled=true",
+		"--set gpuoperatorocp:toolkit.enabled=true",
+		"--set dradriverocp:nvidiaDriverRoot=/run/nvidia/driver",
+	}
+	for _, want := range wantContains {
+		if !strings.Contains(got, want) {
+			t.Errorf("driverAbsentRemedy(OCP) missing %q:\n%s", want, got)
+		}
+	}
+
+	dontWant := []string{"gpuoperator:", "dradriver:"}
+	for _, unwanted := range dontWant {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("driverAbsentRemedy(OCP) unexpectedly contains generic-default key %q:\n%s", unwanted, got)
+		}
+	}
+}
+
 // TestCheckDriverOwnershipCoherence covers the bundle-time
 // driver-ownership gate on FINAL effective values: Rule 1 (a recipe whose
 // snapshot observed no NVIDIA driver on the sampled GPU node —
@@ -782,6 +812,7 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 		recipeResult    *recipe.RecipeResult
 		bundlerConfig   *config.Config
 		conditions      map[string][]string
+		componentName   string // defaults to "gpu-operator" when empty; set to test an OCP-alias row through the exact-match componentName entrypoint
 		wantMsgs        int
 		wantContains    []string
 		wantErrs        int
@@ -1064,6 +1095,26 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 				gpuOpRef(driverOff()), draRef(rootAt("/run/nvidia/driver"))),
 			wantMsgs:     1,
 			wantContains: []string{"nothing", "regenerate the recipe", "--set gpuoperator:driver.enabled=true"},
+		},
+		{
+			// Same Rule-2 legacy signature, but through the OCP aliases:
+			// gpu-operator-ocp/nvidia-dra-driver-gpu-ocp. Verifies the
+			// remedy names the resolved OCP component (draRef.Name, not
+			// the canonical constant) and the OCP override keys — the
+			// generic gpuoperator:/dradriver: set would hard-fail on OCP
+			// since recipes/overlays/ocp.yaml disables the canonical
+			// gpu-operator component.
+			name:          "Rule 2: OCP alias lockstep names the OCP component and OCP override keys",
+			componentName: "gpu-operator-ocp",
+			recipeResult: result("", recipe.CriteriaServiceOCP,
+				recipe.ComponentRef{Name: "gpu-operator-ocp", Overrides: driverOff()},
+				recipe.ComponentRef{Name: "nvidia-dra-driver-gpu-ocp", Overrides: rootAt("/run/nvidia/driver")}),
+			wantMsgs: 1,
+			wantContains: []string{
+				"nvidia-dra-driver-gpu-ocp",
+				"--set gpuoperatorocp:driver.enabled=true",
+				"--set dradriverocp:nvidiaDriverRoot=/run/nvidia/driver",
+			},
 		},
 		{
 			name: "Rule 2: driver off + DRA root=/ (preinstalled profile) → passes",
@@ -1586,8 +1637,12 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			componentName := tt.componentName
+			if componentName == "" {
+				componentName = "gpu-operator"
+			}
 			msgs, errs := CheckDriverOwnershipCoherence(
-				context.Background(), "gpu-operator", tt.recipeResult, tt.bundlerConfig, tt.conditions)
+				context.Background(), componentName, tt.recipeResult, tt.bundlerConfig, tt.conditions)
 			if len(errs) != tt.wantErrs {
 				t.Fatalf("hard errors = %d (%v), want %d", len(errs), errs, tt.wantErrs)
 			}

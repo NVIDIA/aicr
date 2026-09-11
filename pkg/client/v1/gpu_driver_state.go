@@ -51,6 +51,15 @@ const gpuOperatorManagedOverrideSet = "--set gpuoperator:driver.enabled=true " +
 	"--set gpuoperator:operator.runtimeClass=nvidia " +
 	"--set dradriver:nvidiaDriverRoot=/run/nvidia/driver"
 
+// ocpGPUOperatorManagedOverrideSet is gpuOperatorManagedOverrideSet's OCP
+// counterpart — see the sibling constant of the same name in
+// pkg/bundler/validations/checks.go for why the keys and fields differ
+// (gpuoperatorocp:/dradriverocp: aliases, no operator.runtimeClass on
+// the ClusterPolicy CR). Keep both copies in sync.
+const ocpGPUOperatorManagedOverrideSet = "--set gpuoperatorocp:driver.enabled=true " +
+	"--set gpuoperatorocp:toolkit.enabled=true " +
+	"--set dradriverocp:nvidiaDriverRoot=/run/nvidia/driver"
+
 // gkeGPUOperatorManagedOverrideSet extends the override tuple for GKE
 // remedies. GKE preinstalled-driver profiles (Google driver installer,
 // documented for both COS and Ubuntu node images) pin
@@ -73,7 +82,7 @@ const gkeGPUOperatorManagedOverrideSet = gpuOperatorManagedOverrideSet +
 // anything else gets the generic reprovision wording plus the override
 // set.
 func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOSType, profiled bool) string {
-	switch service { //nolint:exhaustive // only AKS and GKE have provider-specific wording; every other service takes the generic default
+	switch service { //nolint:exhaustive // only AKS, GKE, and OCP have provider-specific wording; every other service takes the generic default
 	case recipe.CriteriaServiceAKS:
 		if !profiled {
 			// Legacy pre-profile artifact: the ownership lock does not
@@ -125,6 +134,10 @@ func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOS
 				"driver, so those may bundle in GPU-Operator-managed mode: " +
 				gkeGPUOperatorManagedOverrideSet + "."
 		}
+	case recipe.CriteriaServiceOCP:
+		return "Either reprovision the GPU nodes with a platform-installed " +
+			"NVIDIA driver, or bundle in GPU-Operator-managed mode: " +
+			ocpGPUOperatorManagedOverrideSet + "."
 	default:
 		return "Either reprovision the GPU nodes with a platform-installed " +
 			"NVIDIA driver, or bundle in GPU-Operator-managed mode: " +
