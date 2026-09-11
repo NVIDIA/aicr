@@ -91,8 +91,8 @@ transitions:
 	if len(tr.StepsByDeployer) != 2 {
 		t.Fatalf("stepsByDeployer groups = %d, want 2", len(tr.StepsByDeployer))
 	}
-	if len(tr.StepsByDeployer[1].Deployers) != 0 {
-		t.Errorf("second group Deployers = %v, want empty (the remainder group)",
+	if tr.StepsByDeployer[1].Deployers != nil {
+		t.Errorf("second group Deployers = %v, want nil (the remainder group)",
 			tr.StepsByDeployer[1].Deployers)
 	}
 	if tr.StepsByDeployer[0].Steps[0].Reason == "" {
