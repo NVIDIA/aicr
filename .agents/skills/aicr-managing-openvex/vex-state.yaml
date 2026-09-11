@@ -1,0 +1,82 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Carried state for the aicr-managing-openvex skill: the working notes one
+# invocation has to hand the next. Read it at the start of an invocation, and
+# update it at the end. It is NOT part of `.openvex.json`, which is signed,
+# published on every release image, and consumed by scanners that need none of
+# this. It is also not a changelog: what a revision changed belongs in that
+# revision's PR description.
+#
+# Three kinds of entry, each with its own lifecycle. The lifecycle is the point
+# of the file: state that is never removed is what turned the document's
+# `tooling` field into 8,010 bytes of accumulated prose (NVIDIA/aicr#2706).
+#
+#   deferred_verifications  A check that cannot be completed in the session
+#                           that wrote it, because it needs a later CI run.
+#                           DELETE the entry once it resolves, recording the
+#                           outcome in the PR that resolves it. Any caveat on
+#                           the evidence that made the check necessary lives on
+#                           the entry and goes with it.
+#   known_negatives         Work already done that came back negative, recorded
+#                           so nobody repeats it. Each carries `invalidated_by`:
+#                           the upstream event that makes it worth re-checking.
+#                           DELETE once that event happens, do not rewrite it as
+#                           history.
+#   deliberate_exclusions   A decision not to act, recorded so the next
+#                           maintainer does not silently reverse it. Also
+#                           carries `invalidated_by`. DELETE when the condition
+#                           it rests on changes.
+#
+# Every entry states what would invalidate it. An entry that cannot say what
+# would invalidate it is not state; it is prose, and it belongs in a PR
+# description or nowhere.
+---
+# No deferred verifications are outstanding.
+#
+# An entry belongs here only if the skill would ask the question again on a
+# later run. A one-off check on a single change -- "did this edit land in the
+# next release?" -- is not carried state: it resolves once, never recurs, and
+# belongs in that change's PR description where a reviewer will see it.
+deferred_verifications: []
+
+known_negatives:
+  - id: aiperf-pins-block-pillow-and-aiohttp-fixes
+    checked: 2026-09-03
+    finding: >-
+      Neither surviving suppression can be remediated by a pin bump. aiperf
+      pins pillow~=12.2.0 while the 10 pillow GHSAs are fixed in 12.3.0, and
+      aiohttp~=3.13.3 (>=3.13.3,<3.14) while GHSA-cq5v-8q36-5273 is fixed in
+      3.14.3. Both caps hold at aiperf 0.11.0 (installed) and 0.12.0 (newest
+      upstream at the time of checking), so requiring a fixed version in
+      validators/performance/requirements.txt would fail pip resolution rather
+      than produce a fixed image.
+    also: >-
+      Both packages arrive through the copied virtualenv layer, not the
+      distroless base, so no base-image bump can retire either statement.
+    invalidated_by: >-
+      an aiperf release later than 0.12.0 that relaxes either cap; re-check
+      pyproject.toml before assuming the suppression is still unavoidable
+
+deliberate_exclusions:
+  - id: cve-2026-66046-libexpat1-wont-fix
+    decided: 2026-08-27
+    decision: >-
+      This High finding on libexpat1 is deliberately NOT suppressed. Debian
+      marks it wont-fix, so `--only-fixed` already withholds it from the
+      reported counts, and pre-suppressing a wont-fix finding would hide it the
+      moment a fix ships.
+    invalidated_by: >-
+      Debian shipping a fixed libexpat1; at that point the finding must surface
+      and be remediated by the weekly image rebuild, not suppressed

@@ -247,7 +247,8 @@ runs:
     # byte-identical evidence. It also drops statements scoped to a different
     # image rather than re-pointing them at this digest. Publishing a signed
     # claim about a product we never triaged here would be worse than
-    # publishing none.
+    # publishing none. `tooling` is the one document field it rewrites, to an
+    # identifier of itself, so a committed value cannot become signed prose.
     - name: Bind OpenVEX to platform manifests
       shell: bash
       env:

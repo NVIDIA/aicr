@@ -549,6 +549,12 @@ func TestReleaseSbomAttestInputValidation(t *testing.T) {
 // both the guard and this test, and with them the enum tables below.
 const openVEXContext = "https://openvex.dev/ns/v0.2.0"
 
+// openVEXMaxDocFieldBytes is the guard's bound on any document-level string.
+// It exists because `tooling` grew into an 8,010 byte revision changelog that
+// shipped on every release image (NVIDIA/aicr#2706); the fields the spec
+// defines at that level are identifiers, not prose.
+const openVEXMaxDocFieldBytes = 256
+
 // TestReleaseOpenVEXValidation exercises the sbom-and-attest guard that stands
 // between `.openvex.json` and a published VEX attestation. The step runs after
 // image promotion, so it validates in jq rather than fetching a schema; these
@@ -587,6 +593,12 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 	if want := `OPENVEX_CONTEXT="` + openVEXContext + `"`; !strings.Contains(guard, want) {
 		t.Fatalf("%s must pin the OpenVEX namespace with %s", openVEXGuardPath, want)
 	}
+	// The size bound lives beside the @context for the same reason: one value,
+	// both modes. A per-mode copy could let the projection accept prose the
+	// source rejects, which is the direction that reaches a signature.
+	if want := fmt.Sprintf("OPENVEX_MAX_DOC_FIELD_BYTES=%d", openVEXMaxDocFieldBytes); !strings.Contains(guard, want) {
+		t.Fatalf("%s must pin the document-field bound with %s", openVEXGuardPath, want)
+	}
 	if action := string(readFile(t, ".github/actions/sbom-and-attest/action.yml")); strings.Contains(action, "VEX_CONTEXT") {
 		t.Error("the OpenVEX @context must be pinned only in openvex-guard.sh, not in a step env")
 	}
@@ -604,6 +616,12 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 		return `{"@context": "` + openVEXContext + `", "@id": "https://github.com/NVIDIA/aicr/.openvex.json",
 			"author": "NVIDIA AICR maintainers", "timestamp": "2026-08-04T00:00:00Z", "version": 1,
 			"statements": [` + statements + `]}`
+	}
+	// tooled rebuilds the document carrying a `tooling` value of the given
+	// length, which is how the size bound is exercised from both modes.
+	tooled := func(size int) string {
+		return strings.Replace(document(validStatement), `"version": 1,`,
+			`"version": 1, "tooling": "`+strings.Repeat("t", size)+`",`, 1)
 	}
 
 	tests := []struct {
@@ -707,6 +725,18 @@ func TestReleaseOpenVEXValidation(t *testing.T) {
 				"status": "fixed"}`),
 			wantErr: "statement 0 has a product whose subcomponents is not an array of objects",
 		},
+		{
+			// The regression NVIDIA/aicr#2706 left behind: `tooling` had grown
+			// to 8,010 bytes of revision narrative and was signed onto every
+			// released image. The bound is checked in projection mode too,
+			// because the projection is what gets signed and the generator is
+			// not the only thing that can put a document in front of cosign.
+			name:     "document field over the size bound",
+			document: tooled(openVEXMaxDocFieldBytes + 1),
+			wantErr: fmt.Sprintf("document field tooling is %d bytes, over the %d byte bound",
+				openVEXMaxDocFieldBytes+1, openVEXMaxDocFieldBytes),
+		},
+		{name: "document field at the size bound is accepted", document: tooled(openVEXMaxDocFieldBytes)},
 		{name: "document that is not an object", document: `[]`, wantErr: "statements must be an array"},
 		{name: "document that is not JSON", document: `{`, wantErr: "not valid JSON"},
 		{name: "empty document", document: "", wantErr: "not found or empty"},
