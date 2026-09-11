@@ -25,8 +25,13 @@
 #
 #   deferred_verifications  A check that cannot be completed in the session
 #                           that wrote it, because it needs a later CI run.
-#                           DELETE the entry once it resolves, recording the
-#                           outcome in the PR that resolves it. Any caveat on
+#                           DELETE the entry once the check has been RUN and
+#                           PASSED, recording the outcome in the PR that
+#                           resolves it. `resolves_when` must name that outcome,
+#                           never the event that merely makes the check
+#                           runnable: "the release published" is not a result.
+#                           A failed check is not a resolution either -- it is
+#                           the finding you are now triaging. Any caveat on
 #                           the evidence that made the check necessary lives on
 #                           the entry and goes with it.
 #   known_negatives         Work already done that came back negative, recorded
@@ -68,7 +73,12 @@ deferred_verifications:
         --certificate-identity-regexp 'https://github.com/NVIDIA/aicr/.*' \
         ghcr.io/nvidia/aicr@<linux/amd64 digest> \
         | jq -rs '.[0].payload | @base64d | fromjson | .predicate.tooling'
-    resolves_when: the first release after revision 16 publishes
+    resolves_when: >-
+      the command above has been run against a release published after revision
+      16 AND returned the openvex-bind identifier. A release publishing is what
+      makes the check runnable, not what resolves it: if the command has not
+      been run, or returns anything else, the entry stays and the mismatch is
+      the finding.
 
 known_negatives:
   - id: aiperf-pins-block-pillow-and-aiohttp-fixes
