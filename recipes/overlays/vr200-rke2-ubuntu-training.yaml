@@ -103,21 +103,36 @@ spec:
       overrides:
         labeler:
           assumeDriverInstalled: true
-        # metadata-collector is disabled here, not patched. Its chart only
-        # gets GPU/NVML access two ways: a runtimeClassName matching a real
-        # containerd runtime handler (none exists on the host-managed-driver
-        # + CDI/NRI path this leaf uses — GPU Operator's CDI+NRI mode never
-        # registers one), or requesting the nvidia.com/gpu resource (works,
-        # but permanently reserves one GPU per node for the DaemonSet's
-        # lifetime — unacceptable on a training cluster). gpu-health-monitor
-        # avoids this entirely via direct hostPath device/driver mounts; the
-        # correct fix is the same mechanism added to metadata-collector's
-        # chart upstream (NVIDIA/nvsentinel#1717). Disabled here until that
-        # lands — assumeDriverInstalled above still fixes the two
-        # syslog-health-monitor DaemonSets, which don't need driver access.
-        global:
-          metadataCollector:
-            enabled: false
+        # metadata-collector runs on this NRI-mode host-managed-driver cluster
+        # via the escape hatch added upstream in NVIDIA/NVSentinel#1742 and
+        # released in v1.22.0. The chart used to require either a
+        # runtimeClassName matching a real containerd runtime handler (none
+        # exists on the GPU-Operator CDI+NRI path) or requesting
+        # nvidia.com/gpu (which permanently reserves a GPU per node —
+        # unacceptable on a training cluster). v1.22.0 makes runtimeClassName
+        # conditional and exposes additionalHostVolumes /
+        # additionalVolumeMounts / extraEnv on metadata-collector — the same
+        # shape gpu-health-monitor already had. The block below clears
+        # runtimeClassName and mounts the host driver userspace directly.
+        #
+        # Path selection: the Vera Rubin reference image is Ubuntu 26.04
+        # arm64 (see this leaf's OS constraints), so the driver libraries
+        # live under /usr/lib/aarch64-linux-gnu — not /usr/lib/x86_64-linux-gnu
+        # or /run/nvidia/driver.
+        metadata-collector:
+          runtimeClassName: ""
+          extraEnv:
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib
+          additionalVolumeMounts:
+            - name: nvidia-driver-libs
+              mountPath: /usr/local/nvidia/lib
+              readOnly: true
+          additionalHostVolumes:
+            - name: nvidia-driver-libs
+              hostPath:
+                path: /usr/lib/aarch64-linux-gnu
+                type: Directory
 
     # GPU-allocation policy is unchanged: resources.gpus stays disabled
     # (the gpu-operator device plugin remains the whole-GPU advertiser per
