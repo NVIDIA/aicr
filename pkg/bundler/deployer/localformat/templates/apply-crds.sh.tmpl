@@ -30,26 +30,24 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "${SCRIPT_DIR}"
 
+# Bound once as literals. Recipe values are validated as path components
+# (separators rejected), not as shell words, so they are never interpolated
+# bare into a command or into a double-quoted string, where $(...) would
+# re-expand. Every later use is a plain parameter expansion, which does not.
+RELEASE={{ .Name | shq }}
+NAMESPACE={{ .Namespace | shq }}
+RELEASE_FILTER={{ .ReleaseFilter | shq }}
+
 if ! command -v kubectl >/dev/null 2>&1; then
-  echo "ERROR: kubectl is required to apply {{ .Name }} CRDs before upgrade." >&2
+  echo "ERROR: kubectl is required to apply ${RELEASE} CRDs before upgrade." >&2
   exit 1
 fi
 
-# Upgrades only. Helm installs a chart's crds/ directory itself on first
-# install, which is the whole reason this script exists for upgrades and
-# nowhere else. Running it on a fresh cluster would add a registry round-trip
-# and a failure mode to the install path in order to apply CRDs helm is about
-# to create a moment later.
-if ! helm status {{ .Name }} --namespace {{ .Namespace }} ${KUBECONFIG_FLAG:-} >/dev/null 2>&1; then
-  echo "{{ .Name }}: no existing release; helm install creates the chart's CRDs."
-  exit 0
-fi
-
-# Bound the registry read. This runs inside the deploy path, where an
-# unbounded call would hang the whole rollout rather than fail it; deploy.sh
-# retries a failed component but cannot interrupt one that never returns.
-# `timeout` is absent on stock macOS, so fall back to running unbounded there
-# rather than failing outright.
+# Bound every cluster and registry read. This runs inside the deploy path,
+# where an unbounded call hangs the whole rollout rather than failing it:
+# deploy.sh retries a component that exits non-zero but cannot interrupt one
+# that never returns. `timeout` is absent on stock macOS, so fall back to
+# running unbounded there rather than failing outright.
 run_bounded() {
   if command -v timeout >/dev/null 2>&1; then
     timeout {{ .ShowCRDsTimeoutSeconds }} "$@"
@@ -57,6 +55,33 @@ run_bounded() {
     "$@"
   fi
 }
+
+# Upgrades only. Helm installs a chart's crds/ directory itself on first
+# install, which is the whole reason this script exists for upgrades and
+# nowhere else. Running it on a fresh cluster would add a registry round-trip
+# and a failure mode to the install path in order to apply CRDs helm is about
+# to create a moment later.
+#
+# "Absent" and "cannot tell" are deliberately distinguished. An auth failure,
+# an unreachable apiserver, or a broken helm must not read as a fresh install:
+# the `helm upgrade` that follows can still succeed, and would then leave the
+# previous CRDs in place. That is precisely the stranded-schema defect this
+# script exists to prevent, so an indeterminate answer fails closed. `helm
+# list` exits 0 whenever the query itself succeeded, whether or not it matched,
+# which is what makes the two cases separable. --all so a release left in a
+# failed or pending state still counts as existing; its CRDs are already
+# installed.
+if ! existing="$(run_bounded helm list --namespace "${NAMESPACE}" \
+  --filter "${RELEASE_FILTER}" --short --all ${KUBECONFIG_FLAG:-} 2>&1)"; then
+  echo "ERROR: cannot determine whether release ${RELEASE} exists; refusing to" >&2
+  echo "       skip the CRD step and risk leaving the previous schema in place: ${existing}" >&2
+  exit 1
+fi
+if [[ -z "${existing//[[:space:]]/}" ]]; then
+  echo "${RELEASE}: no existing release; helm install creates the chart's CRDs."
+  exit 0
+fi
+
 {{ if .FromUpstreamEnv }}
 # shellcheck source=/dev/null
 source ./upstream.env
@@ -84,7 +109,7 @@ crds="$(run_bounded helm show crds ./ | sed -n '/^---$/,$p')"
 # `kubectl apply` on an empty stream exits non-zero with "no objects passed to
 # apply", which would abort the deploy over nothing.
 if [[ -z "${crds//[[:space:]]/}" ]]; then
-  echo "{{ .Name }}: chart ships no CRDs; nothing to apply."
+  echo "${RELEASE}: chart ships no CRDs; nothing to apply."
   exit 0
 fi
 
