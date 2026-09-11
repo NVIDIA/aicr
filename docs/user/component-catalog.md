@@ -62,17 +62,20 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 
 > **`service=rke2` and `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence for these Preview coordinates at [validation.aicr.run](https://validation.aicr.run/); freshness against the current recipe is captured in the **Evidence status** note below.
 
-Three coordinates ship in v1:
+Four coordinates ship in v1:
 
 | Coordinate | Evidence |
 |---|---|
 | `rke2 / vr200 / ubuntu / training` | [validation.aicr.run/#/rke2/vr200-ubuntu/training](https://validation.aicr.run/#/rke2/vr200-ubuntu/training) |
+| `rke2 / vr200 / ubuntu / training / kubeflow` | pending — no published evidence yet |
 | `rke2 / vr200 / ubuntu / inference` | [validation.aicr.run/#/rke2/vr200-ubuntu/inference](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference) |
 | `rke2 / vr200 / ubuntu / inference / dynamo` | [validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
 
 The platform-neutral `inference` coordinate is the base the Dynamo leaf inherits from; it exists so that resolving `rke2/vr200/ubuntu/inference` **without** `--platform` resolves to the VR200-safe overlay rather than falling through to the generic `rke2-inference` base. It carries the same VR200 hardware overrides as its Dynamo child.
 
-> **Evidence status.** The recipes for all three coordinates above have changed since evidence publication (`aicr evidence digest` reports a mismatch against each pointer's `predicate.recipe.digest`); treat the linked evidence as historical precedent for the recipe content at publication time, not as validating the current recipe. Fresh hardware validation is pending VR cluster access.
+> **Evidence status.** The recipes for the three evidence-linked coordinates above have changed since evidence publication (`aicr evidence digest` reports a mismatch against each pointer's `predicate.recipe.digest`); treat the linked evidence as historical precedent for the recipe content at publication time, not as validating the current recipe. The `training / kubeflow` coordinate has no published evidence at all — it is newer than the last publication run.
+
+> **Every VR200 coordinate carries the same hardware prerequisites**, including the mandatory host `nvidia-imex` masking. See [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md) before deploying any of them.
 
 For the definitional Preview-vs-Supported distinction, see [Preview recipes](../integrator/recipe-development.md#preview-recipes). For bare-metal cluster prerequisites, Skyhook reboot behavior, and known gaps on this coordinate, see [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md).
 

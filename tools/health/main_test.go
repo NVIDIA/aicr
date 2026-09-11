@@ -550,36 +550,37 @@ func repoRoot(t *testing.T) string {
 // rendered. Without the predicate a coordinate silently loses its row — and its
 // only live validation.aicr.run link — the moment a platform sibling is added
 // beneath its overlay.
+//
+// It drives run() rather than re-supplying the predicate itself, so it fails
+// if run() ever stops passing RetainNonLeaf — the wiring, not just the
+// predicate, is what ships. That matters because recipe-health-check is
+// advisory and outside the merge gate, so nothing else would catch it.
 func TestEveryPublishedCoordinateHasARow(t *testing.T) {
 	presence, err := testgrid.LoadPresence()
 	if err != nil {
 		t.Fatalf("LoadPresence() error = %v", err)
 	}
-
-	report, err := health.Compute(context.Background(), health.Options{
-		RetainNonLeaf: hasPublishedEvidence(presence),
-	})
-	if err != nil {
-		t.Fatalf("health.Compute() error = %v", err)
-	}
-
-	scored := make(map[string]struct{}, len(report.Combos))
-	for _, combo := range report.Combos {
-		co, coErr := recipe.CoordinateFor(combo.Criteria)
-		if coErr != nil {
-			continue
-		}
-		scored[co.Path()] = struct{}{}
-	}
-
 	paths := presence.Paths()
 	if len(paths) == 0 {
 		t.Fatal("presence manifest is empty; this test would pass vacuously")
 	}
+
+	outDir := t.TempDir()
+	if runErr := run(context.Background(), outDir, "", "test-v1", true, true); runErr != nil {
+		t.Fatalf("run() error = %v", runErr)
+	}
+	rendered, err := os.ReadFile(filepath.Join(outDir, matrixFile))
+	if err != nil {
+		t.Fatalf("read %s: %v", matrixFile, err)
+	}
+
+	// Assert on the rendered Evidence cell, which is what a reader follows —
+	// a row alone is not enough if the deep-link is missing.
 	for _, path := range paths {
-		if _, ok := scored[path]; !ok {
-			t.Errorf("published coordinate %q has no row in the health matrix; "+
-				"its Evidence link would be dropped", path)
+		cell := "[" + path + "](" + testgrid.Origin + "/#/" + path + ")"
+		if !strings.Contains(string(rendered), cell) {
+			t.Errorf("published coordinate %q has no Evidence deep-link in the generated matrix; "+
+				"its validation.aicr.run link would be dropped", path)
 		}
 	}
 }
