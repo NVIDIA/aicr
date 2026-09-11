@@ -26,6 +26,14 @@
 
 set -euo pipefail
 
+# The GKE lane's training smoke runs on the shipped TCPXO runtime at full-node
+# shape. These defaults must be set BEFORE sourcing phases.sh: the shared file
+# initializes the same knobs with := defaults, and a later assignment would
+# never take effect (review of #2705 caught the previous ordering doing
+# exactly that).
+export TRAINJOB_RUNTIME="${TRAINJOB_RUNTIME:-torch-distributed-tcpxo}"
+export TRAINJOB_GPUS_PER_NODE="${TRAINJOB_GPUS_PER_NODE:-8}"
+
 # shellcheck source=../lib/phases.sh
 source "$(dirname "${BASH_SOURCE[0]}")/../lib/phases.sh"
 
@@ -75,10 +83,5 @@ if [[ -n "${DEPLOYMENT_ID:-}" && -n "${2:-}" && -f "${2}" ]]; then
     echo "TCPXO interface mapping derived from DEPLOYMENT_ID (${DEPLOYMENT_ID}-gpu-nic-0..7)"
   fi
 fi
-
-# The training smoke references the shipped TCPXO runtime on this lane, so UAT
-# exercises a TrainJob on torch-distributed-tcpxo rather than only the
-# unwired sibling (issue #2296's acceptance path).
-export TRAINJOB_RUNTIME="${TRAINJOB_RUNTIME:-torch-distributed-tcpxo}"
 
 uat_main "$@"
