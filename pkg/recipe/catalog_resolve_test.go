@@ -78,3 +78,56 @@ func TestResolveLeaves_CanceledContextZeroMatchFilter(t *testing.T) {
 		t.Fatal("expected error on canceled context with a zero-match filter")
 	}
 }
+
+// TestResolveLeaves_RetainNonLeaf asserts the opt-in escape hatch that keeps an
+// evidence-backed coordinate enumerable after a platform sibling turns its
+// overlay into a non-leaf (#2564). The control half matters as much as the
+// test: the same overlay must be absent without the predicate, otherwise the
+// assertion would pass for the wrong reason.
+func TestResolveLeaves_RetainNonLeaf(t *testing.T) {
+	// vr200-rke2-ubuntu-training became a non-leaf when
+	// vr200-rke2-ubuntu-training-kubeflow was added, and it carries published
+	// evidence (pkg/testgrid/presence.yaml lists rke2/vr200-ubuntu/training).
+	const nonLeaf = "vr200-rke2-ubuntu-training"
+
+	baseline, err := recipe.ResolveLeaves(context.Background(), recipe.ResolveLeavesOptions{})
+	if err != nil {
+		t.Fatalf("ResolveLeaves (leaf-only): %v", err)
+	}
+	if containsEntry(baseline, nonLeaf) {
+		t.Fatalf("%s is a leaf today; pick another non-leaf overlay for this regression", nonLeaf)
+	}
+
+	retained, err := recipe.ResolveLeaves(context.Background(), recipe.ResolveLeavesOptions{
+		RetainNonLeaf: func(entry recipe.CatalogEntry) bool { return entry.Name == nonLeaf },
+	})
+	if err != nil {
+		t.Fatalf("ResolveLeaves (RetainNonLeaf): %v", err)
+	}
+	if !containsEntry(retained, nonLeaf) {
+		t.Fatalf("RetainNonLeaf did not retain %s", nonLeaf)
+	}
+	if got, want := len(retained), len(baseline)+1; got != want {
+		t.Errorf("retained %d entries, want %d — RetainNonLeaf must add exactly the opted-in entry", got, want)
+	}
+	for _, l := range retained {
+		if l.Entry.Name != nonLeaf {
+			continue
+		}
+		if l.Err != nil {
+			t.Errorf("%s resolve err: %v", nonLeaf, l.Err)
+		}
+		if l.Result == nil || len(l.Result.ComponentRefs) == 0 {
+			t.Errorf("expected resolved componentRefs for %s", nonLeaf)
+		}
+	}
+}
+
+func containsEntry(leaves []recipe.ResolvedLeaf, name string) bool {
+	for _, l := range leaves {
+		if l.Entry.Name == name {
+			return true
+		}
+	}
+	return false
+}
