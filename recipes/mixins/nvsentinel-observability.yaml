@@ -29,7 +29,7 @@
 # each value below means and how to adopt this mixin.
 
 kind: RecipeMixin
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: nvsentinel-observability
 spec:
