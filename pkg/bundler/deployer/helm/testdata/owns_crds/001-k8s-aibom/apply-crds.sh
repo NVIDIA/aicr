@@ -68,11 +68,15 @@ run_bounded() {
 # previous CRDs in place. That is precisely the stranded-schema defect this
 # script exists to prevent, so an indeterminate answer fails closed. `helm
 # list` exits 0 whenever the query itself succeeded, whether or not it matched,
-# which is what makes the two cases separable. --all so a release left in a
-# failed or pending state still counts as existing; its CRDs are already
-# installed.
+# which is what makes the two cases separable.
+#
+# The status flags are named rather than left to the default: Helm 4 lists every
+# status by default but Helm 3 does not, and `--all` (which Helm 3 uses for
+# that) was removed in Helm 4. These three exist in both and are exactly the
+# set an upgrade would act on, so one spelling works against either binary.
 if ! existing="$(run_bounded helm list --namespace "${NAMESPACE}" \
-  --filter "${RELEASE_FILTER}" --short --all ${KUBECONFIG_FLAG:-} 2>&1)"; then
+  --filter "${RELEASE_FILTER}" --short --deployed --failed --pending \
+  ${KUBECONFIG_FLAG:-} 2>&1)"; then
   echo "ERROR: cannot determine whether release ${RELEASE} exists; refusing to" >&2
   echo "       skip the CRD step and risk leaving the previous schema in place: ${existing}" >&2
   exit 1

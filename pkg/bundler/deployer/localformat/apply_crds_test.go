@@ -324,3 +324,57 @@ func renderApplyCRDs(t *testing.T, c localformat.Component) string {
 	}
 	return string(b)
 }
+
+// TestApplyCRDsScript_HelmFlagsExist runs the generated script's release-lookup
+// command against the real helm binary to verify every flag it uses actually
+// exists.
+//
+// This is deliberately not covered by the stubbed-helm tests: a stub accepts
+// any flag, so it validates the script's logic while saying nothing about the
+// helm CLI contract. That gap shipped a broken gate. `helm list --all` is valid
+// in Helm 3 and was removed in Helm 4, where listing every status is the
+// default, so the command failed with "unknown flag: --all" on every fresh
+// install and the fail-closed branch correctly aborted the deploy.
+//
+// A cluster is not required. An unreachable cluster is a different error from
+// an unparseable command line, and only the latter is under test here.
+func TestApplyCRDsScript_HelmFlagsExist(t *testing.T) {
+	helmBin, err := exec.LookPath("helm")
+	if err != nil {
+		t.Skip("helm not on PATH")
+	}
+
+	script := renderApplyCRDs(t, ownsCRDsComponent(true))
+
+	// Pull the flags straight out of the rendered script so this cannot drift
+	// from what the bundle actually runs.
+	flags := []string{"--namespace", "--filter", "--short"}
+	for _, f := range []string{"--deployed", "--failed", "--pending", "--all", "--uninstalled"} {
+		if strings.Contains(script, f+" ") || strings.Contains(script, f+" \\") {
+			flags = append(flags, f)
+		}
+	}
+
+	args := []string{"list", "--namespace", "aicr-flag-probe", "--filter", "^aicr-flag-probe$"}
+	for _, f := range flags {
+		if f == "--namespace" || f == "--filter" {
+			continue
+		}
+		args = append(args, f)
+	}
+
+	out, runErr := exec.Command(helmBin, args...).CombinedOutput()
+	if runErr != nil && strings.Contains(string(out), "unknown flag") {
+		t.Fatalf("generated script uses a flag this helm does not accept.\nhelm %s\n%s\n"+
+			"helm version: %s", strings.Join(args, " "), out, helmVersion(t, helmBin))
+	}
+}
+
+func helmVersion(t *testing.T, helmBin string) string {
+	t.Helper()
+	out, err := exec.Command(helmBin, "version", "--short").CombinedOutput()
+	if err != nil {
+		return "unknown"
+	}
+	return strings.TrimSpace(string(out))
+}
