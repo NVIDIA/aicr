@@ -29,6 +29,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -3250,7 +3251,7 @@ func assertCRDPolicy(t *testing.T, ref recipe.ComponentRef, component, want stri
 // makes the chartRef template's UpgradeCRDs block unreachable today.
 //
 // chartRef is reached by local, vendored and manifest-backed components. Those
-// carry no registry chart coordinates, so usesRegistryChart is false for them
+// carry no registry chart coordinates, so UsesRegistryChart is false for them
 // and the policy cannot render. Asserting that directly is preferable to a
 // render test: an attempt at the render route produced a sourceRef HelmRelease
 // instead, so such a test would have passed without exercising anything, which
@@ -3292,7 +3293,7 @@ func TestUsesRegistryChartRejectsRefsWithoutCoordinates(t *testing.T) {
 		},
 		{
 			// The control: without this, every case above could pass because
-			// usesRegistryChart always returns false.
+			// UsesRegistryChart always returns false.
 			name: "fully resolved registry ref matches",
 			ref: func() recipe.ComponentRef {
 				r := recipe.ComponentRef{Name: "k8s-aibom", Type: recipe.ComponentTypeHelm}
@@ -3305,8 +3306,8 @@ func TestUsesRegistryChartRejectsRefsWithoutCoordinates(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := usesRegistryChart(tt.ref, cfg); got != tt.want {
-				t.Errorf("usesRegistryChart() = %v, want %v (chart=%q source=%q version=%q)",
+			if got := deployer.UsesRegistryChart(tt.ref, cfg); got != tt.want {
+				t.Errorf("UsesRegistryChart() = %v, want %v (chart=%q source=%q version=%q)",
 					got, tt.want, tt.ref.EffectiveChart(), tt.ref.Source, tt.ref.Version)
 			}
 		})
