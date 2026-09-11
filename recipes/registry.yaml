@@ -823,6 +823,19 @@ components:
           - acceleratedNodeSelector
         tolerationPaths:
           - acceleratedTolerations
+    validations:
+      # Blocking: on recipes shipping torch-distributed-tcpxo (h100 GKE
+      # kubeflow training), the final resolved tcpxoInterfaces value must
+      # equal the mapping recorded in configuration.gke.tcpxoInterfaces —
+      # the recipe must not attest to one wiring while the bundle renders
+      # another. See issue #2296.
+      - function: CheckGKETCPXOInterfacesCoherence
+        severity: error
+        conditions:
+          service:
+            - gke
+          accelerator:
+            - h100
 
   # NVIDIA Cluster Readiness Engine — GPU cluster burn-in certification
   # controller. Named `nvcre` after the chart nameOverride, install

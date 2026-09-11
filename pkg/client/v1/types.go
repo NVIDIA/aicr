@@ -373,6 +373,13 @@ type RecipeRequest struct {
 	// fields above instead.
 	PinnedName string
 
+	// GKETCPXOInterfaces is the ordered eth1..eth8 → VPC network mapping
+	// rendered into the torch-distributed-tcpxo ClusterTrainingRuntime, in
+	// the string form "eth1=<network>,...,eth8=<network>". Required — with
+	// no default — when the resolved recipe ships that runtime (h100 GKE
+	// kubeflow training); rejected for recipes that do not.
+	GKETCPXOInterfaces string
+
 	// PinnedVersion reserves space for future pinned-recipe support.
 	// Currently rejected with ErrCodeUnavailable.
 	PinnedVersion string
@@ -385,11 +392,10 @@ type recipeResolveConfig struct {
 	profile              string
 	accountingMode       *recipe.AccountingMode
 	runtimeInventoryMode *recipe.RuntimeInventoryMode
+	tcpxoInterfaces      *[]recipe.NetworkInterfaceMapping
 
-	// relaxDerived records that WithSnapshotCriteriaRelaxation was passed.
-	// Kept separate from stated because an empty stated set is meaningful
-	// (every dimension derived, all relaxable) and must not read as "option
-	// absent".
+	// relaxDerived records opt-in to snapshot-criteria relaxation.
+	// An empty stated set means every dimension was derived, not option absent.
 	relaxDerived bool
 	stated       statedDimensionSet
 
@@ -448,6 +454,27 @@ func WithRuntimeInventoryMode(mode string) RecipeResolveOption {
 			return
 		}
 		cfg.runtimeInventoryMode = &parsed
+	}
+}
+
+// WithGKETCPXOInterfaces supplies the ordered eth1..eth8 → VPC network
+// mapping for a criteria- or snapshot-based resolve call, in the string form
+// "eth1=<network>,...,eth8=<network>". The value is recorded in the emitted
+// recipe (configuration.gke.tcpxoInterfaces) and rendered into the
+// torch-distributed-tcpxo ClusterTrainingRuntime's
+// networking.gke.io/interfaces annotation.
+//
+// Required — with no default — when the resolved recipe ships that runtime;
+// rejected when it does not. An empty or malformed value is rejected when
+// the resolve call runs.
+func WithGKETCPXOInterfaces(value string) RecipeResolveOption {
+	return func(cfg *recipeResolveConfig) {
+		parsed, err := recipe.ParseGKETCPXOInterfaces(value)
+		if err != nil {
+			cfg.recordOptErr(err)
+			return
+		}
+		cfg.tcpxoInterfaces = &parsed
 	}
 }
 

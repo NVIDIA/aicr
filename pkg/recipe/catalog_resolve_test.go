@@ -16,6 +16,7 @@ package recipe_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -130,4 +131,70 @@ func containsEntry(leaves []recipe.ResolvedLeaf, name string) bool {
 		}
 	}
 	return false
+}
+
+// TestResolveLeaves_TCPXOFingerprintLeafRetriesWithIntrospection covers the
+// retry path: the one embedded family with a required typed input resolves
+// with the fixed introspection mapping, and no other error is retried.
+func TestResolveLeaves_TCPXOFingerprintLeafRetriesWithIntrospection(t *testing.T) {
+	leaves, err := recipe.ResolveLeaves(context.Background(), recipe.ResolveLeavesOptions{})
+	if err != nil {
+		t.Fatalf("ResolveLeaves: %v", err)
+	}
+	var found bool
+	for _, leaf := range leaves {
+		if leaf.Entry.Name != "h100-gke-cos-training-kubeflow" {
+			continue
+		}
+		found = true
+		if leaf.Err != nil {
+			t.Fatalf("fingerprint leaf failed to resolve: %v", leaf.Err)
+		}
+		mapping, present := leaf.Result.GKETCPXOInterfaces()
+		if !present {
+			t.Fatal("fingerprint leaf resolved without the recorded mapping")
+		}
+		if want := recipe.GKETCPXOIntrospectionInterfaces(); !slices.Equal(mapping, want) {
+			t.Errorf("recorded mapping = %v, want the introspection value %v", mapping, want)
+		}
+	}
+	if !found {
+		t.Fatal("h100-gke-cos-training-kubeflow not in catalog")
+	}
+}
+
+// TestResolveLeaves_BuildOptionsForCriteriaSuppliedWins covers hook precedence:
+// a caller-supplied mapping applies to the initial build, so the introspection
+// retry never fires and the leaf records the caller's value.
+func TestResolveLeaves_BuildOptionsForCriteriaSuppliedWins(t *testing.T) {
+	custom := recipe.GKETCPXOIntrospectionInterfaces()
+	custom[0].Network = "custom-network-0"
+
+	leaves, err := recipe.ResolveLeaves(context.Background(), recipe.ResolveLeavesOptions{
+		BuildOptionsForCriteria: func(c *recipe.Criteria) []recipe.BuildOption {
+			if c.Service == recipe.CriteriaServiceGKE && c.Accelerator == recipe.CriteriaAcceleratorH100 &&
+				c.Platform == recipe.CriteriaPlatformKubeflow {
+
+				return []recipe.BuildOption{recipe.WithGKETCPXOInterfaces(custom)}
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveLeaves: %v", err)
+	}
+	for _, leaf := range leaves {
+		if leaf.Entry.Name != "h100-gke-cos-training-kubeflow" {
+			continue
+		}
+		if leaf.Err != nil {
+			t.Fatalf("fingerprint leaf failed to resolve: %v", leaf.Err)
+		}
+		mapping, _ := leaf.Result.GKETCPXOInterfaces()
+		if !slices.Equal(mapping, custom) {
+			t.Errorf("recorded mapping = %v, want the hook's %v", mapping, custom)
+		}
+		return
+	}
+	t.Fatal("h100-gke-cos-training-kubeflow not in catalog")
 }

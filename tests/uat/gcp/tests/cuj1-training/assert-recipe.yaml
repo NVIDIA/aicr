@@ -66,3 +66,7 @@ deploymentOrder:
   - nvidia-dra-driver-gpu
   - nvsentinel
   - prometheus-adapter
+# The recorded TCPXO interface mapping is asserted in chainsaw-test.yaml's
+# assert step, which compares the recipe against this run's generated value
+# (the names are derived from the run's deployment ID, so no static list
+# belongs here).

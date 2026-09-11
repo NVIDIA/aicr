@@ -41,6 +41,12 @@ spec:
       valuesFile: components/kubeflow-trainer/values.yaml
       manifestFiles:
         - components/kubeflow-trainer/manifests/torch-distributed-cluster-training-runtime.yaml
+        # torch-distributed-tcpxo ships pre-wired for GPUDirect-TCPXO. It
+        # renders from the recipe-recorded configuration.gke.tcpxoInterfaces
+        # mapping (required at recipe generation for this family — see issue
+        # #2296), so the value is guaranteed present by the time this file
+        # renders.
+        - components/kubeflow-trainer/manifests/torch-distributed-tcpxo-cluster-training-runtime.yaml
       dependencyRefs:
         - cert-manager
         - kube-prometheus-stack

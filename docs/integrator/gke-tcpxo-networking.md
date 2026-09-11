@@ -91,6 +91,76 @@ available for TCPXO. This is distinct from the `--enable-gvnic` node-pool flag,
 which selects the gVNIC driver and **is** required: pass the flag, but do not add
 a ninth `--additional-node-network` entry for it.
 
+## The shipped `torch-distributed-tcpxo` runtime
+
+On the `h100-gke-cos-training-kubeflow` recipe, AICR ships a pre-wired
+`ClusterTrainingRuntime` named `torch-distributed-tcpxo` (a sibling of
+`torch-distributed`, which stays as it is). It carries the annotations,
+native sidecar, volumes, `IPC_LOCK`, and the complete versioned NCCL
+configuration set — the entire wiring described in the next section — so a
+TrainJob references it by name and supplies no fabric configuration at all:
+
+```yaml
+spec:
+  runtimeRef:
+    name: torch-distributed-tcpxo
+    apiGroup: trainer.kubeflow.org
+    kind: ClusterTrainingRuntime
+```
+
+**The network names are a required recipe-generation input.** The eight names
+are cluster-specific and AICR has no cluster access at generation time, so
+they are recorded in the recipe (`configuration.gke.tcpxoInterfaces`),
+auditable and provenance-visible. Generation fails closed without them:
+
+```shell
+aicr recipe --service gke --accelerator h100 --os cos --intent training --platform kubeflow \
+  --gke-tcpxo-interfaces eth1=aicr-demo2-gpu-nic-0,eth2=aicr-demo2-gpu-nic-1,eth3=aicr-demo2-gpu-nic-2,eth4=aicr-demo2-gpu-nic-3,eth5=aicr-demo2-gpu-nic-4,eth6=aicr-demo2-gpu-nic-5,eth7=aicr-demo2-gpu-nic-6,eth8=aicr-demo2-gpu-nic-7
+```
+
+or in an AICRConfig:
+
+```yaml
+spec:
+  recipe:
+    configuration:
+      gke:
+        tcpxoInterfaces:
+          - {interfaceName: eth1, network: aicr-demo2-gpu-nic-0}
+          # ... eth2..eth8
+```
+
+The mapping is an ordered list of explicit `interfaceName` → Network pairs —
+the interface key, not the list position, binds a network to `ethN`. Take the
+mapping from whoever provisioned the cluster (its `GKENetworkParamSet` /
+provisioning configuration); enumerating Network names shows what exists but
+not which one binds each interface. The value is validated as eight unique
+interfaces mapped to eight unique networks. It cannot be changed at bundle
+time: `--set`/`--set-json`/`--set-file`/`--dynamic`
+paths intersecting `kubeflow-trainer:tcpxoInterfaces` are rejected, and the
+bundle fails if the final resolved value disagrees with what the recipe
+records. (This is ownership enforcement, not the profile lock — the lock is
+unavailable to this value, see issue #2296.) One gap remains open by design:
+editing the generated artifact *after* AICR produced it is not yet detected
+at validation time — that recipe-versus-deployed comparison is #2297's
+work, tracked separately.
+
+**Re-bundling a pre-existing recipe:** the obligation follows the
+declaration. Recipes generated before this runtime existed do not declare
+its manifest, so they bundle exactly as before — no runtime, no required
+input. Only a recipe whose kubeflow-trainer component attaches the
+`torch-distributed-tcpxo` manifest must record the mapping: generation fails
+closed without it, and a hand-edited recipe that adds the manifest without
+the configuration is rejected at bundle time. (Recipe *loading* does not
+fail closed on this shape — the metadata store's coherence check also serves
+catalog introspection paths that never deploy, so the enforcement lives at
+generation and bundling, where artifacts are produced.)
+
+**Residual limitation, stated plainly:** the runtime is an opt-in sibling —
+workloads that keep referencing `torch-distributed` get TCP as before, and
+nothing points them at the fabric runtime. Discoverability is a doc concern,
+not a behavioral one.
+
 ## Workload Pod Configuration (NRI Profile)
 
 The NRI profile mounts the host's `/sys` and `/proc/sys` into the TCPXO daemon
@@ -176,7 +246,11 @@ Key properties:
 - Requires NRI device injector DaemonSet deployed on GPU nodes
 
 Running a **Kubeflow TrainJob** rather than a bare Pod? A TrainJob cannot add
-the `tcpxo-daemon` sidecar, so the wiring must live in a `TrainingRuntime` — see
+the `tcpxo-daemon` sidecar, so the wiring must live in a runtime. On an
+AICR-generated bundle for this recipe family you do not author one: reference
+the shipped `torch-distributed-tcpxo` `ClusterTrainingRuntime` (see above).
+To hand-author a `TrainingRuntime` — a bundle you did not generate, or a
+shape the shipped runtime does not cover — see
 [Attaching a Training Workload to the Cluster Fabric](../user/fabric-attached-training.md).
 
 See [`demos/workloads/training/gke-nccl-test-tcpxo.yaml`](https://github.com/NVIDIA/aicr/blob/main/demos/workloads/training/gke-nccl-test-tcpxo.yaml) for a complete 2-node NCCL benchmark example. (pinned to the same coupled pair the recipe ships, plugin `v1.0.15` with daemon `v1.0.21`)

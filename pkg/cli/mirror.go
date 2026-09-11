@@ -140,7 +140,7 @@ func flagMatchesName(f cli.Flag, name string) bool {
 //nolint:gocyclo // linear option resolution
 func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 	if validErr := validateSingleValueFlags(cmd, "recipe", "service", "accelerator",
-		"intent", "os", "platform", flagProfile, "snapshot", "config", "format", "output"); validErr != nil {
+		"intent", "os", "platform", flagProfile, flagGKETCPXOInterfaces, "snapshot", "config", "format", "output"); validErr != nil {
 		return validErr
 	}
 
@@ -234,6 +234,19 @@ func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *aicr.Con
 		if cmd.IsSet(flagProfile) || cfg.RecipeProfile() != "" {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--profile/spec.recipe.profile selects during criteria resolution and cannot be combined with --recipe")
+		}
+		if cmd.IsSet(flagGKETCPXOInterfaces) {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--gke-tcpxo-interfaces applies during criteria resolution and cannot be combined with --recipe; the recipe file already records the mapping")
+		}
+		// The config-file mapping is equally a criteria-resolution input; the
+		// recipe file on disk already records its mapping. Mirror the profile
+		// guard's flag-or-config check.
+		if _, set, cfgErr := cfg.RecipeGKETCPXOInterfaces(); cfgErr != nil {
+			return nil, cfgErr
+		} else if set {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"spec.recipe.configuration.gke.tcpxoInterfaces applies during criteria resolution and cannot be combined with --recipe; the recipe file already records the mapping")
 		}
 		slog.Info("loading recipe from file", "path", recipePath)
 

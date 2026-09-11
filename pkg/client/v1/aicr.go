@@ -838,6 +838,9 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	if req.AccountingMode != "" {
 		resolveOpts = append(resolveOpts, WithAccountingMode(req.AccountingMode))
 	}
+	if req.GKETCPXOInterfaces != "" {
+		resolveOpts = append(resolveOpts, WithGKETCPXOInterfaces(req.GKETCPXOInterfaces))
+	}
 	internal, err := c.resolveCriteria(ctx, builder, criteria, resolveOpts...)
 	if err != nil {
 		// Don't re-wrap with ErrCodeInternal — the builder already
@@ -898,6 +901,9 @@ func recipeBuildOptions(opts ...RecipeResolveOption) (*recipeResolveConfig, []re
 	}
 	if cfg.runtimeInventoryMode != nil {
 		buildOpts = append(buildOpts, recipe.WithRuntimeInventoryMode(*cfg.runtimeInventoryMode))
+	}
+	if cfg.tcpxoInterfaces != nil {
+		buildOpts = append(buildOpts, recipe.WithGKETCPXOInterfaces(*cfg.tcpxoInterfaces))
 	}
 	return cfg, buildOpts, nil
 }

@@ -202,6 +202,9 @@ func Compute(ctx context.Context, opts Options) (*Report, error) {
 		Filter:   opts.Filter,
 
 		RetainNonLeaf: opts.RetainNonLeaf,
+		// Satisfy the TCPXO fingerprint leaf's required mapping so the
+		// combo reports its true structural health rather than a resolve error.
+		BuildOptionsForCriteria: recipe.GKETCPXOIntrospectionBuildOptions,
 	})
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err,

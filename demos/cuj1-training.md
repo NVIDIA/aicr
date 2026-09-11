@@ -67,12 +67,20 @@ aicr recipe \
 **GKE**
 
 ```shell
+# The h100 GKE kubeflow recipe ships the torch-distributed-tcpxo runtime, so
+# generation requires the cluster's ordered eth1..eth8 -> GPU-NIC Network
+# mapping, recorded in the recipe. Take the mapping from whoever provisioned
+# the cluster (its GKENetworkParamSet / provisioning configuration): the
+# interface assignment is a provisioning decision. Enumerating Network names
+# (kubectl get networks.networking.gke.io) shows which networks exist but NOT
+# which one binds ethN — do not infer the mapping from name order.
 aicr recipe \
   --service gke \
   --accelerator h100 \
   --intent training \
   --os cos \
   --platform kubeflow \
+  --gke-tcpxo-interfaces eth1=aicr-demo2-gpu-nic-0,eth2=aicr-demo2-gpu-nic-1,eth3=aicr-demo2-gpu-nic-2,eth4=aicr-demo2-gpu-nic-3,eth5=aicr-demo2-gpu-nic-4,eth6=aicr-demo2-gpu-nic-5,eth7=aicr-demo2-gpu-nic-6,eth8=aicr-demo2-gpu-nic-7 \
   --output recipe.yaml
 ```
 
@@ -197,6 +205,12 @@ spec:
   # ClusterTrainingRuntime carries the cluster-aware nodeSelector and
   # tolerations baked in at bundle time from --accelerated-node-selector /
   # --accelerated-node-toleration flags.
+  #
+  # On GKE clusters bundled from this recipe, the torch-distributed-tcpxo
+  # sibling runtime additionally wires GPUDirect-TCPXO (multi-NIC fabric).
+  # This single-node, single-GPU smoke never crosses the fabric — reference
+  # that runtime by name on a multi-node job that should (and keep the job's
+  # resourcesPerNode consistent with its 8-GPU worker shape).
   runtimeRef:
     name: torch-distributed
     apiGroup: trainer.kubeflow.org
@@ -290,6 +304,20 @@ spec:
       os: cos
       intent: training
       platform: kubeflow
+    # Required on this family: the ordered eth1..eth8 -> GPU-NIC network
+    # mapping, recorded into the recipe and rendered into the shipped
+    # torch-distributed-tcpxo runtime.
+    configuration:
+      gke:
+        tcpxoInterfaces:
+          - {interfaceName: eth1, network: aicr-demo2-gpu-nic-0}
+          - {interfaceName: eth2, network: aicr-demo2-gpu-nic-1}
+          - {interfaceName: eth3, network: aicr-demo2-gpu-nic-2}
+          - {interfaceName: eth4, network: aicr-demo2-gpu-nic-3}
+          - {interfaceName: eth5, network: aicr-demo2-gpu-nic-4}
+          - {interfaceName: eth6, network: aicr-demo2-gpu-nic-5}
+          - {interfaceName: eth7, network: aicr-demo2-gpu-nic-6}
+          - {interfaceName: eth8, network: aicr-demo2-gpu-nic-7}
     output:
       path: recipe.yaml
 

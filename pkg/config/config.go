@@ -14,7 +14,10 @@
 
 package config
 
-import "github.com/NVIDIA/aicr/pkg/header"
+import (
+	"github.com/NVIDIA/aicr/pkg/header"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+)
 
 // Kind is the kind value for AICRConfig documents.
 const Kind = "AICRConfig"
@@ -133,6 +136,18 @@ type RecipeConfigurationSpec struct {
 	// RuntimeInventory selects whether the runtime AI inventory component
 	// (k8s-aibom) is installed. Mirrors the --runtime-inventory flag.
 	RuntimeInventory *RuntimeInventorySpec `yaml:"runtimeInventory,omitempty" json:"runtimeInventory,omitempty"`
+
+	// GKE contains GKE-specific desired-state inputs.
+	GKE *GKEConfigurationSpec `yaml:"gke,omitempty" json:"gke,omitempty"`
+}
+
+// GKEConfigurationSpec contains GKE-specific desired-state inputs.
+type GKEConfigurationSpec struct {
+	// TCPXOInterfaces is the ordered eth1..eth8 → VPC network mapping
+	// rendered into the torch-distributed-tcpxo ClusterTrainingRuntime.
+	// Required when the resolved recipe ships that runtime. Mirrors the
+	// --gke-tcpxo-interfaces flag's value in structured form.
+	TCPXOInterfaces []recipe.NetworkInterfaceMapping `yaml:"tcpxoInterfaces,omitempty" json:"tcpxoInterfaces,omitempty"`
 }
 
 // RuntimeInventorySpec contains the runtime AI inventory selection.
