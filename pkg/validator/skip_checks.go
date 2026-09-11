@@ -15,6 +15,7 @@
 package validator
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -148,6 +149,45 @@ func (v *Validator) preflightSkipChecks(
 
 	return errors.New(errors.ErrCodeInvalidRequest,
 		"invalid skipChecks:\n  - "+strings.Join(problems, "\n  - "))
+}
+
+// PreflightSkipChecks runs the skip-list guard on its own, loading the catalog
+// the same way ValidatePhases does, for a caller that performs cluster work of
+// its own BEFORE it reaches ValidatePhases.
+//
+// The CLI is that caller: with neither --snapshot nor --no-cluster, `aicr
+// validate` deploys a snapshot-capture agent before it ever constructs the
+// validator, so the guard inside ValidatePhases fires only after a
+// ServiceAccount, a Role and a Job exist. The --skip-check help text promises
+// the opposite ("Rejected before the cluster is touched"), and this is what
+// lets the CLI keep that promise.
+//
+// It does not replace the ValidatePhases and ValidatePhase calls: an SDK or
+// server caller reaches those directly and must stay guarded there. Calling
+// both is idempotent, since the guard only reads.
+//
+// Returns nil immediately when the skip list is empty, so a caller on the
+// default path pays nothing, not even a catalog load. Empty phases means the
+// full PhaseOrder, matching ValidatePhases, so the emptied-phase arm sees the
+// same phase set in both places.
+func (v *Validator) PreflightSkipChecks(
+	ctx context.Context,
+	phases []Phase,
+	validationInput *v1.ValidationInput,
+) error {
+
+	if len(v.SkipChecks) == 0 {
+		return nil
+	}
+	if len(phases) == 0 {
+		phases = PhaseOrder
+	}
+
+	cat, err := catalog.LoadWithDataProvider(ctx, v.dataProvider, v.Version, v.Commit)
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to load validator catalog")
+	}
+	return v.preflightSkipChecks(cat, phases, validationInput)
 }
 
 // skipsCheck reports whether name is on the caller's skip list.
