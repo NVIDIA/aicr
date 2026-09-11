@@ -205,6 +205,25 @@ func TestValidateIsSelfSufficientWithoutLoad(t *testing.T) {
 	}
 }
 
+// Validate is exported on an exported map type, so a caller can build a Set
+// with a nil record without ever going through Load, which never produces
+// one. That must report a violation naming the component, not panic.
+func TestValidateReportsANilRecordRatherThanPanicking(t *testing.T) {
+	set := Set{"c": nil}
+	comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "v1.0.0"}}
+
+	err := set.Validate(comps)
+	if err == nil {
+		t.Fatal("Validate = nil, want a violation for a nil record")
+	}
+	if !strings.Contains(err.Error(), `"c"`) {
+		t.Errorf("error %q does not name the component", err.Error())
+	}
+	if !strings.Contains(err.Error(), "nil record") {
+		t.Errorf("error %q does not explain the problem", err.Error())
+	}
+}
+
 // The same holds for a replaces block, which Load gates separately.
 func TestValidateReplacesIsSelfSufficientWithoutLoad(t *testing.T) {
 	set := Set{"c": &ComponentUpgrades{

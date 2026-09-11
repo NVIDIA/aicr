@@ -42,7 +42,7 @@ func (s Set) Validate(comps []Component) error {
 
 	violations := make([]string, 0, len(names))
 	for _, name := range names {
-		violations = append(violations, validateRecord(s[name], pins[name])...)
+		violations = append(violations, validateRecord(name, s[name], pins[name])...)
 	}
 	if len(violations) == 0 {
 		return nil
@@ -52,7 +52,13 @@ func (s Set) Validate(comps []Component) error {
 		len(violations), strings.Join(violations, "\n  - ")))
 }
 
-func validateRecord(u *ComponentUpgrades, pin string) []string {
+func validateRecord(name string, u *ComponentUpgrades, pin string) []string {
+	if u == nil {
+		// Validate is exported on an exported map type (see nonAuthorableVerdict
+		// above), so a caller-built Set can hold a nil record without ever
+		// going through Load, which never produces one.
+		return []string{fmt.Sprintf("component %q has a nil record", name)}
+	}
 	v := make([]string, 0, len(u.Transitions))
 	for i := range u.Transitions {
 		where := fmt.Sprintf("component %q transition %d", u.Component, i)
