@@ -1047,27 +1047,10 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"secure-accelerator-access",
 		"slinky-slurm-health",
 	}
-	// The gb200/gb300 EKS Slurm leaves differ from the h100 list above in two
-	// INDEPENDENT ways; do not collapse them into one explanation:
-	//   + slinky-slurm-imex-channel — added by the leaf, genuinely IMEX-specific.
-	//   - robust-controller, secure-accelerator-access — absent because
-	//     gb200-eks-training.yaml and gb300-eks-training.yaml do not declare
-	//     them while h100-eks-training.yaml does. That is a property of the
-	//     accelerator training bases, NOT of IMEX or of Slurm; gb300 is not
-	//     categorically excluded, since gb300-eks-ubuntu-inference-dynamo
-	//     declares both. Naming this fixture for IMEX would misattribute it.
-	gbEKSSlurmConformanceChecks := []string{
-		"platform-health",
-		"gpu-operator-health",
-		"dra-support",
-		"accelerator-metrics",
-		"ai-service-metrics",
-		"gang-scheduling",
-		"pod-autoscaling",
-		"cluster-autoscaling",
-		"slinky-slurm-health",
-		"slinky-slurm-imex-channel",
-	}
+	// The gb200/gb300 EKS Slurm leaves inherit the same ten conformance checks
+	// as the h100 list above from their accelerator training bases (#2563) and
+	// add slinky-slurm-imex-channel, which is genuinely IMEX-specific.
+	gbEKSSlurmConformanceChecks := append(slices.Clone(conformanceChecks), "slinky-slurm-imex-channel")
 	kindConformanceChecks := []string{
 		"platform-health",
 		"gpu-operator-health",
