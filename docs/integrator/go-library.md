@@ -964,17 +964,23 @@ conversion is what validates the section, a document setting both fails at
 that bundle. That is the same reach a malformed `fulcioURL` has always had. The
 `SigningKey` a derivation carries is already trimmed.
 
-The rule deliberately does NOT cover `signingKey` combined with
-`oidcDeviceFlow`. Conversion happens before the CLI's flag-over-config merge,
-so rejecting that pair there would make `--oidc-device-flow=false` unable to
-correct a document that sets both — the error would fire before that flag is
-ever read. The CLI's `validateSigningKeyExclusivity`, run on the flag-merged
-options, is what catches it for CLI invocations. An SDK caller deriving
-`BundleOptions()` directly and calling `MakeBundle` with no flag merge gets no
-equivalent guard for that specific pair — the resulting bundle still signs with
-the KMS key (`ResolveAttesterLazy` picks KMS whenever `SigningKey` is
-non-empty), matching the pre-#2245 behavior; avoid setting both in a document
-consumed outside the CLI.
+This conversion-time rule deliberately does NOT cover `signingKey` combined
+with `oidcDeviceFlow`. Conversion happens before the CLI's flag-over-config
+merge, so rejecting that pair there would make `--oidc-device-flow=false`
+unable to correct a document that sets both — the error would fire before that
+flag is ever read.
+
+That pair is rejected one layer later instead, by `ResolveAttester` and
+`ResolveAttesterLazy`, which is where KMS-versus-keyless is actually decided
+and which every caller reaches after applying its own precedence. The CLI
+merges flags first, so a corrected invocation never arrives there in conflict;
+an SDK caller that derives `BundleOptions()` straight from a document and calls
+`MakeBundle` without merging anything gets `ErrCodeInvalidRequest` rather than a
+bundle signed with the KMS key while its device-flow setting was ignored.
+
+`IdentityToken` is not part of that check. A CI environment can populate it
+without the caller asking for keyless signing, so a non-empty `SigningKey`
+still takes precedence over it rather than failing.
 
 **Device flow needs a prompt writer.** `spec.bundle.attestation.oidcDeviceFlow`
 sets `OIDCResolve.DeviceFlow`, but config cannot carry an `io.Writer`, so the

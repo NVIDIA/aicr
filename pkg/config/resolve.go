@@ -309,10 +309,10 @@ func resolveAttestation(a *AttestationSpec, out *BundleResolved) error {
 // eagerly would reject a document that sets both signingKey and
 // oidcDeviceFlow: true even when the caller passes --oidc-device-flow=false
 // specifically to correct it: the error would fire before that flag is ever
-// read. The CLI's validateSigningKeyExclusivity catches the config-only
-// combination on the merged opts, where a boolean flag's zero value can still
-// be told apart from "explicitly cleared" via cmd.IsSet. rekorURL is not a
-// conflict either; it has its own exclusivity rule against signingConfig.
+// read. It is rejected after every caller's own precedence is applied instead,
+// by attestation.checkSigningMode, so no path reaches signing with both.
+// rekorURL is not a conflict either; it has its own exclusivity rule against
+// signingConfig.
 //
 // Trimming happens here rather than at a consumer because a YAML block scalar
 // carries surrounding whitespace, and an untrimmed key fails late in the KMS
