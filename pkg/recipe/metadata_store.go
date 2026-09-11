@@ -757,6 +757,31 @@ func (s *MetadataStore) mergeMixins(ctx context.Context, mergedSpec *RecipeMetad
 					return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 						fmt.Sprintf("mixin %q component %q sets identity/sourcing field %q which conflicts with the inheritance chain; mixins may only contribute Namespace, ManifestFiles, PreManifestFiles, or registry-allowlisted Overrides paths to an existing component", mixinName, c.Name, offending))
 				}
+			} else {
+				// A component whose owner hasn't declared a
+				// mixinSafeOverridePaths allowlist at all hasn't opted into
+				// this mechanism -- a mixin introducing it fresh keeps the
+				// pre-existing freedom to set any field (e.g.
+				// agentgateway-crds, kubeflow-trainer). A component that HAS
+				// an allowlist is protected the same way whether it's
+				// already chained or being introduced fresh: its ValuesFile
+				// content is never inspected, so it's rejected outright here
+				// (like mixinComponentRefSafeForMerge already does for an
+				// existing component) -- a mixin could otherwise smuggle a
+				// non-allowlisted value (e.g. nvsentinel's excluded
+				// global.tracing.endpoint) through a values file instead of
+				// inline Overrides.
+				hasAllowlist, err := componentHasMixinAllowlist(s.provider, c.Name)
+				if err != nil {
+					return nil, err
+				}
+				if !hasAllowlist {
+					continue
+				}
+				if c.ValuesFile != "" {
+					return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+						fmt.Sprintf("mixin %q component %q sets valuesFile %q while introducing an allowlisted component; a mixin may only supply such a component's values via registry-allowlisted inline overrides, never a values file", mixinName, c.Name, c.ValuesFile))
+				}
 			}
 			if len(c.Overrides) == 0 {
 				continue
@@ -768,21 +793,6 @@ func (s *MetadataStore) mergeMixins(ctx context.Context, mergedSpec *RecipeMetad
 				existingLayers, err = existingRawOverrideLayers(ctx, s.provider, existing)
 				if err != nil {
 					return nil, err
-				}
-			} else {
-				// A mixin introducing a genuinely unregistered component
-				// keeps the pre-existing freedom to set any overrides --
-				// there's no registry owner whose allowlist could be
-				// bypassed. Only registered components are validated,
-				// whether or not they're already in this chain: otherwise
-				// a mixin could dodge a registered component's allowlist
-				// simply by being the first to introduce it.
-				registered, err := componentIsRegistered(s.provider, c.Name)
-				if err != nil {
-					return nil, err
-				}
-				if !registered {
-					continue
 				}
 			}
 			if err := mixinOverridesSafeForMerge(s.provider, mixinName, c.Name, c.Overrides, existingLayers); err != nil {
@@ -1448,16 +1458,6 @@ func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, eval
 // safe set is exactly the set of fields the merge handles additively or as
 // pure namespace remap. Any new ComponentRef field that joins the additive
 // set must also be added here.
-// componentIsRegistered reports whether name has an entry in provider's
-// component registry.
-func componentIsRegistered(provider DataProvider, name string) (bool, error) {
-	registry, err := GetComponentRegistryFor(provider)
-	if err != nil {
-		return false, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, "load component registry for mixin override validation")
-	}
-	return registry.Get(name) != nil, nil
-}
-
 func mixinComponentRefSafeForMerge(c ComponentRef) (string, bool) {
 	switch {
 	case c.Chart != "":
@@ -1515,6 +1515,21 @@ func duplicateComponentRefName(refs []ComponentRef) (string, bool) {
 		seen[r.Name] = true
 	}
 	return "", false
+}
+
+// componentHasMixinAllowlist reports whether name's registry entry declares
+// a non-empty MixinSafeOverridePaths. A component the owner hasn't opted
+// into this mechanism at all (no entry, or an entry with no allowlist) is
+// unaffected by mixin-override validation -- e.g. agentgateway-crds and
+// kubeflow-trainer, whose mixins have always freely supplied their initial
+// ValuesFile/Overrides when introducing them fresh.
+func componentHasMixinAllowlist(provider DataProvider, name string) (bool, error) {
+	registry, err := GetComponentRegistryFor(provider)
+	if err != nil {
+		return false, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, "load component registry for mixin override validation")
+	}
+	comp := registry.Get(name)
+	return comp != nil && len(comp.MixinSafeOverridePaths) > 0, nil
 }
 
 // mixinOverridesSafeForMerge validates a mixin's Overrides against the

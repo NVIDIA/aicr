@@ -741,3 +741,65 @@ func TestMergeMixins_UnregisteredNewComponentOverridesStayFree(t *testing.T) {
 		t.Fatalf("mergeMixins: %v, want success -- an unregistered component has no allowlist to enforce", err)
 	}
 }
+
+// TestMergeMixins_RejectsValuesFileOnNewRegisteredComponent covers a mixin
+// introducing a registered component fresh, supplying a non-allowlisted
+// value (nvsentinel's excluded global.tracing.endpoint) through ValuesFile
+// instead of inline Overrides -- a side channel mixinOverridesSafeForMerge
+// never inspects. Two shapes: ValuesFile alongside an allowlisted inline
+// Overrides path, and ValuesFile with no inline Overrides at all (which
+// would otherwise skip validation entirely via the len(c.Overrides)==0
+// early continue).
+func TestMergeMixins_RejectsValuesFileOnNewRegisteredComponent(t *testing.T) {
+	registryFiles := map[string][]byte{
+		"values/sneaky.yaml": []byte(`global:
+  tracing:
+    enabled: true
+    endpoint: sneaky.example:4317
+`),
+	}
+	allowlist := []string{"global.tracing.enabled"}
+
+	t.Run("alongside allowlisted inline overrides", func(t *testing.T) {
+		store := newNvsentinelAllowlistStore("valuesfile-with-overrides", allowlist, registryFiles)
+		addTestMixin(store, "test-mixin", []ComponentRef{
+			{
+				Name:       "nvsentinel",
+				Chart:      "nvsentinel",
+				Source:     "oci://ghcr.io/nvidia",
+				Type:       ComponentTypeHelm,
+				ValuesFile: "values/sneaky.yaml",
+				Overrides:  map[string]any{"global": map[string]any{"tracing": map[string]any{"enabled": true}}},
+			},
+		})
+		spec := RecipeMetadataSpec{Mixins: []string{"test-mixin"}, ComponentRefs: []ComponentRef{}}
+		_, err := store.mergeMixins(t.Context(), &spec)
+		if err == nil {
+			t.Fatal("expected mergeMixins to reject valuesFile on a newly-introduced registered component, got nil")
+		}
+		if !strings.Contains(err.Error(), "valuesFile") {
+			t.Errorf("error = %v, want a valuesFile rejection", err)
+		}
+	})
+
+	t.Run("valuesFile only, no inline overrides", func(t *testing.T) {
+		store := newNvsentinelAllowlistStore("valuesfile-only", allowlist, registryFiles)
+		addTestMixin(store, "test-mixin", []ComponentRef{
+			{
+				Name:       "nvsentinel",
+				Chart:      "nvsentinel",
+				Source:     "oci://ghcr.io/nvidia",
+				Type:       ComponentTypeHelm,
+				ValuesFile: "values/sneaky.yaml",
+			},
+		})
+		spec := RecipeMetadataSpec{Mixins: []string{"test-mixin"}, ComponentRefs: []ComponentRef{}}
+		_, err := store.mergeMixins(t.Context(), &spec)
+		if err == nil {
+			t.Fatal("expected mergeMixins to reject a valuesFile-only override on a newly-introduced registered component, got nil")
+		}
+		if !strings.Contains(err.Error(), "valuesFile") {
+			t.Errorf("error = %v, want a valuesFile rejection", err)
+		}
+	})
+}
