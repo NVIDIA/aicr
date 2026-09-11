@@ -30,12 +30,28 @@ import (
 // a bare URL, to avoid advice/comment false positives, and (b) emits a warning
 // for any download-looking line it cannot resolve, so the inventory never reads
 // as more complete than it is.
+// install-nvkind.sh is listed because it carries one of the two
+// `go install pkg@version` calls #2667 left in place, and it is the reason
+// sum.golang.org is still on the allowlist. The rest of the .github pass mines
+// `uses:` refs and never reads a `run:` body, so without it the inventory
+// reported the checksum database as unreached while CI still contacted it.
+//
+// The other survivor, the go-coverage-report install in
+// .github/workflows/on-push-comment.yaml, is deliberately NOT listed: a
+// workflow is YAML, and scanning it line-by-line as shell mines the markdown
+// badge URL in a PR-comment body (img.shields.io) as if the runner fetched it,
+// which it never does. A `run:`-aware workflow scanner is the real fix; until
+// then that file is named in uncoveredSources.
 var shellFiles = []string{
 	filepath.Join("tools", "setup-tools"),
+	filepath.Join(".github", "actions", "gpu-cluster-setup", "install-nvkind.sh"),
 }
 
 var (
 	shGoInstallRe = regexp.MustCompile(`\bgo install\s+(\S+?)@(\S+)`)
+	// `go build` of a tool that lives in the main module's dependency graph,
+	// as opposed to `go install pkg@version` which resolves outside it.
+	shGoBuildRe = regexp.MustCompile(`\bgo build\s`)
 	// The install verbs capture everything after `install` so multi-package
 	// lines (`apt-get install a b c`) and trailing tokens (`... 2>/dev/null \`)
 	// are handled by the tokenizer rather than a brittle end-anchor.
@@ -134,6 +150,21 @@ func shellSegmentRecords(src, line, trim string) (recs []Record, warnings []stri
 				Host: hostGoSum, PackageType: PkgGoModule, Direction: DirPull,
 				Consumer: ConsumerCIRunner, PinType: pt, Pin: cleanVar(ref), Detail: m[1], Source: src,
 			})
+	}
+	// `go build` resolves through the main module, so it pulls from the module
+	// proxy but verifies every dependency against the committed go.sum and never
+	// contacts the checksum database. Recording one host rather than two is the
+	// whole difference #2667 bought, and the pin is a digest rather than a tag
+	// because go.sum entries are cryptographic hashes.
+	//
+	// Checked after `go install` and not as an `else if`: the two verbs are
+	// independent, and a line carrying both should record both.
+	if shGoBuildRe.MatchString(line) {
+		recs = append(recs, Record{
+			Host: hostGoProxy, PackageType: PkgGoModule, Direction: DirPull,
+			Consumer: ConsumerCIRunner, PinType: PinDigest, Pin: "go.sum",
+			Detail: "go build (main module)", Source: src,
+		})
 	}
 	if m := shPipRe.FindStringSubmatch(line); m != nil {
 		for _, pkg := range installTokens(m[1]) {

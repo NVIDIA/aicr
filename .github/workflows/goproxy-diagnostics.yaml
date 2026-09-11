@@ -24,15 +24,25 @@
 #    not sumdb therefore leaves every build dependent on sum.golang.org being
 #    up, while looking fully routed.
 #
-# 2. **Can it serve modules outside this repo's go.mod?** The remaining
-#    `go install pkg@version` calls in .github/actions build outside the main
-#    module, so their transitive dependencies appear in no go.sum here. A tag
-#    build proves Artifactory serves this repo's own graph; it proves nothing
-#    about those.
+# 2. **Can it serve modules outside this repo's go.mod?** The tools probed
+#    below build outside the main module, so their transitive dependencies
+#    appear in no go.sum here. A tag build proves Artifactory serves this
+#    repo's own graph; it proves nothing about those.
 #
-# Together those decide #2667: whether the surviving `go install` calls can be
-# made outage-proof by routing, or whether they have to move to pinned binaries
-# the way oasdiff did in #2673.
+# #2667 is closed and did NOT take the routing option. Routing cannot work for
+# the qualification gate at all: this action authenticates via GitHub OIDC, and
+# a pull_request run from a fork cannot mint that credential, so a gate that
+# required the proxy would fail exactly where it has to pass. The gate instead
+# moved every tool off `go install` -- to pinned binary releases where upstream
+# publishes them (setup-envtest, addlicense, oasdiff), and to `go build` from
+# this module where it does not (apidiff, go-licenses). A main-module build
+# verifies against the committed go.sum and never contacts sum.golang.org.
+#
+# This workflow is kept because question 1 is still open for #2663, which asks
+# whether the *release* path -- where OIDC is available -- should route. The
+# tool list in the second step is now historical: those `go install` calls no
+# longer exist in the gate, and the step measures what Artifactory can serve
+# rather than what CI depends on.
 #
 # Diagnostic only. It changes nothing and gates nothing, so it is
 # workflow_dispatch rather than wired into the merge gate — the answer changes
@@ -147,7 +157,7 @@ jobs:
               echo "lookup_status=${lookup}" >> "$GITHUB_OUTPUT"
               if [[ "${lookup}" == "200" ]]; then
                 echo "verdict=proxied" >> "$GITHUB_OUTPUT"
-                echo "PROXIED. Checksum lookups resolve through Artifactory, so #2667 can be closed by routing." >> "$GITHUB_STEP_SUMMARY"
+                echo "PROXIED. Checksum lookups resolve through Artifactory, so the release path could route them (#2663)." >> "$GITHUB_STEP_SUMMARY"
               else
                 echo "verdict=broken" >> "$GITHUB_OUTPUT"
                 {
@@ -162,8 +172,9 @@ jobs:
               echo "verdict=not-proxied" >> "$GITHUB_OUTPUT"
               {
                 echo "NOT PROXIED. The go command falls back to a direct connection to"
-                echo "sum.golang.org, so routing alone does not remove the outage exposure"
-                echo "in #2667 -- the remaining \`go install\` calls need pinned binaries."
+                echo "sum.golang.org, so routing alone would not remove an outage exposure."
+                echo "This is what #2667 concluded for the gate, which moved off \`go install\`"
+                echo "entirely rather than routing; the same holds for #2663."
               } >> "$GITHUB_STEP_SUMMARY"
               ;;
             *)
@@ -173,14 +184,15 @@ jobs:
                 echo "go command treats as the database being unavailable -- it would fail"
                 echo "rather than fall back. Most likely a credential or WAF answer (the kit's"
                 echo "FINDINGS F-018/F-019), not a statement about sumdb support. Resolve it"
-                echo "before drawing a #2667 conclusion."
+                echo "before drawing a #2663 conclusion."
               } >> "$GITHUB_STEP_SUMMARY"
               ;;
           esac
 
-      # The four tools #2667 is about. Each builds outside the main module, so
-      # this is the only way to learn whether Artifactory can serve their
-      # dependency graphs -- a tag build never exercises them.
+      # The four tools #2667 was about. The gate no longer installs any of them
+      # this way, but each still builds outside the main module, which keeps them
+      # a usable probe of whether Artifactory can serve a dependency graph no
+      # local go.sum covers -- something a tag build never exercises.
       - name: Can it serve the out-of-module tools?
         env:
           GOPROXY_CONFIGURED: ${{ steps.proxy.outputs.goproxy }}
@@ -210,10 +222,12 @@ jobs:
           probe() {
             local name="$1" pkg="$2"
             local err="${RUNNER_TEMP}/probe-${name}.err"
-            # GOFLAGS is emptied for the same reason tools/setup-tools empties
-            # it: -mod=readonly is meaningless outside the main module. Written
-            # GOFLAGS="" rather than bare GOFLAGS= so shellcheck does not read
-            # it as a mistyped assignment (SC1007).
+            # GOFLAGS is emptied because -mod=readonly is meaningless outside
+            # the main module, which is where `go install pkg@version` resolves.
+            # (tools/setup-tools no longer has an equivalent line to mirror:
+            # #2667 removed its last `go install`.) Written GOFLAGS="" rather
+            # than bare GOFLAGS= so shellcheck does not read it as a mistyped
+            # assignment (SC1007).
             if GOFLAGS="" GOPROXY="${base}" go install "${pkg}" 2>"${err}"; then
               echo "| ${name} | ok |" >> "$GITHUB_STEP_SUMMARY"
               return
