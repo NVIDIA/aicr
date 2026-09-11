@@ -376,7 +376,11 @@ func TestMergeMixins_RejectsDuplicateComponentRefNameWithinOneMixin(t *testing.T
 		{Name: "nvsentinel", Overrides: map[string]any{"global": map[string]any{"tracing": map[string]any{"enabled": true}}}},
 		{Name: "nvsentinel", Overrides: map[string]any{"global": map[string]any{"tracing": map[string]any{"enabled": false}}}},
 	}
+	// store is the process-wide sync.Once-cached singleton (loadMetadataStore) --
+	// remove the synthetic entry after the test so it can't leak into other
+	// tests or race with concurrent readers.
 	store.Mixins["test-duplicate-refs"] = dup
+	t.Cleanup(func() { delete(store.Mixins, "test-duplicate-refs") })
 
 	spec := RecipeMetadataSpec{
 		Mixins: []string{"test-duplicate-refs"},

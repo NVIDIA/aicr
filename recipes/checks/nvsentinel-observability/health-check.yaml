@@ -60,6 +60,23 @@ spec:
                     ((volumes || `[]`)[?name == 'audit-logs' && hostPath.path == '/var/log/nvsentinel' && hostPath.type == 'DirectoryOrCreate'] | length(@) > `0`): true
                     (((initContainers || `[]`)[?name == 'fix-audit-log-permissions'].volumeMounts[] || `[]`) | [?name == 'audit-logs' && mountPath == '/var/log/nvsentinel'] | length(@) > `0`): true
                     (((containers || `[]`)[?name == 'platform-connector'].volumeMounts[] || `[]`) | [?name == 'audit-logs' && mountPath == '/var/log/nvsentinel'] | length(@) > `0`): true
+        # The assertions above only inspect the pod TEMPLATE -- a broken
+        # rollout (CrashLoopBackOff, ImagePullBackOff) can still satisfy
+        # them, since the template's spec is what was submitted, not what
+        # is actually running. Ordering comparator, not ==: an int64
+        # status field compared to a JMESPath numeric literal via == is
+        # type-strict and can silently never match (see
+        # recipes/checks/nvsentinel/health-check.yaml for the same
+        # gotcha); >= coerces numeric kinds reliably.
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: platform-connectors
+                namespace: nvsentinel
+              status:
+                (numberReady >= desiredNumberScheduled && desiredNumberScheduled > `0`): true
     - name: validate-labeler-audit-logging
       try:
         - assert:
@@ -75,3 +92,12 @@ spec:
                     ((volumes || `[]`)[?name == 'audit-logs' && hostPath.path == '/var/log/nvsentinel' && hostPath.type == 'DirectoryOrCreate'] | length(@) > `0`): true
                     (((initContainers || `[]`)[?name == 'fix-audit-log-permissions'].volumeMounts[] || `[]`) | [?name == 'audit-logs' && mountPath == '/var/log/nvsentinel'] | length(@) > `0`): true
                     (((containers || `[]`)[?name == 'labeler'].volumeMounts[] || `[]`) | [?name == 'audit-logs' && mountPath == '/var/log/nvsentinel'] | length(@) > `0`): true
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: labeler
+                namespace: nvsentinel
+              status:
+                (availableReplicas > `0`): true
