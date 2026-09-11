@@ -93,9 +93,14 @@ func TestLoadRejectsBadHeaders(t *testing.T) {
 		{
 			// ADR-021:149 and ADR-022:103 both put this kind on the beta track
 			// from the start: there is no alpha version to emit and later retire.
-			name:     "the alpha authoring version is not accepted",
-			body:     strings.Replace(validRecord("nw"), header.GroupVersionV1Beta1, header.AuthoringGroupVersion, 1),
-			wantText: []string{header.AuthoringGroupVersion, header.GroupVersionV1Beta1},
+			// The alpha value is a literal on purpose. This case first built it
+			// from header.AuthoringGroupVersion, which ADR-022's migration then
+			// repointed at v1beta1 — making the replacement a no-op and the case
+			// silently self-defeating. What matters here is that this specific
+			// legacy string is rejected, not which track alias happens to name it.
+			name:     "the legacy alpha version is not accepted",
+			body:     strings.Replace(validRecord("nw"), header.GroupVersionV1Beta1, "aicr.run/v1alpha2", 1),
+			wantText: []string{"aicr.run/v1alpha2", header.GroupVersionV1Beta1},
 		},
 		{
 			name:     "empty apiVersion is not tolerated",
