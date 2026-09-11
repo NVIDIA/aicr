@@ -1298,8 +1298,9 @@ spec:
       requireGpu: true
     execution:
       phases: [deployment, conformance]
-      skipChecks:                        # --skip-check; withheld and reported as skipped
-        - gpu-operator-health
+      # skipChecks:                      # --skip-check; withheld and reported as skipped.
+      #   - gpu-operator-health          # Shown commented out because it cannot be combined
+      #                                  # with evidence.cncf.dir below. See the next example.
       failOnError: true                  # default; false = don't fail on phase-check results (readiness pre-flight still exits 2)
       noCluster: false
       noCleanup: false
@@ -1315,6 +1316,36 @@ spec:
         push: ghcr.io/myorg/aicr-evidence  # tag optional; aicr derives :<recipe-slug>-<fingerprint>
         plainHTTP: false
         insecureTLS: false
+```
+
+**Withholding checks (`execution.skipChecks`):**
+
+A lane that deploys only part of a recipe can withhold the checks it cannot
+satisfy. Each named check is still reported, as skipped, so the run accounts for
+it; a name matching no check in the recipe's catalog, or a list that would leave
+a requested phase with nothing to run, is rejected before the cluster is
+touched.
+
+`skipChecks` cannot be combined with `evidence.cncf.dir`. The CNCF evidence
+renderer drops skipped checks entirely, so a withheld requirement would produce
+no file and no index entry and the submission would read as complete. That is
+why the schema above shows the field commented out, and why it gets its own
+config here:
+
+```yaml
+kind: AICRConfig
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: partial-lane-validate
+spec:
+  validate:
+    input:
+      recipe: ./recipe.yaml
+      snapshot: ./snapshot.yaml
+    execution:
+      phases: [deployment]
+      skipChecks:
+        - gpu-operator-health
 ```
 
 **Examples:**
