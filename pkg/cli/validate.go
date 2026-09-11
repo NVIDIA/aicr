@@ -337,6 +337,52 @@ func deployAgentForValidation(ctx context.Context, client *aicr.Client, cfg *val
 	return snap, nil
 }
 
+// facadePhases converts resolved validator phases into the facade's Phase
+// type. Shared by the skip-list preflight and the validation run so the two
+// cannot disagree about which phases they are talking about.
+func facadePhases(phases []validator.Phase) []aicr.Phase {
+	out := make([]aicr.Phase, len(phases))
+	for i, p := range phases {
+		out[i] = aicr.Phase(p)
+	}
+	return out
+}
+
+// logValidationModeBanner makes it explicit whether this run touches a live
+// cluster (issue #1383). --no-cluster is an offline dry-run that reports checks
+// as skipped; otherwise validation deploys validator Jobs against the active
+// kube-context.
+func logValidationModeBanner(noCluster bool) {
+	if noCluster {
+		slog.Info("validating in --no-cluster mode — offline dry-run; checks are reported as skipped, no cluster is contacted")
+		return
+	}
+	slog.Info("validating against the live cluster — validator Jobs will be deployed to the active kube-context")
+}
+
+// runSkipCheckPreflight rejects an unusable --skip-check list against the
+// recipe's own check catalog. Split out of the Action closure so the guard can
+// be read (and length-budgeted) independently, as validateFlagCombinations is.
+//
+// Phases are passed only when a subset was requested, matching runValidation,
+// because an empty selection means "all phases" on both sides: the preflight
+// must judge the same phase set the run will execute, or it would reject a list
+// the run would have accepted (or accept one it would not).
+func runSkipCheckPreflight(
+	ctx context.Context,
+	client *aicr.Client,
+	rec *aicr.RecipeResult,
+	phases []validator.Phase,
+	skipChecks []string,
+) error {
+
+	opts := []aicr.ValidateOption{aicr.WithValidationSkipChecks(skipChecks...)}
+	if len(phases) > 0 {
+		opts = append(opts, aicr.WithValidationPhases(facadePhases(phases)...))
+	}
+	return client.PreflightSkipChecks(ctx, rec, opts...)
+}
+
 // validationConfig holds all parameters for a validation run.
 type validationConfig struct {
 	// Input
@@ -449,11 +495,7 @@ func runValidation(
 	// WithValidationPhases(nil...) would be a no-op anyway — but keeping the
 	// option off the slice preserves the exact "run all phases" default path.
 	if len(cfg.phases) > 0 {
-		facadePhases := make([]aicr.Phase, len(cfg.phases))
-		for i, p := range cfg.phases {
-			facadePhases[i] = aicr.Phase(p)
-		}
-		opts = append(opts, aicr.WithValidationPhases(facadePhases...))
+		opts = append(opts, aicr.WithValidationPhases(facadePhases(cfg.phases)...))
 	}
 	// Same shape as phases: pass the option only when there is something to
 	// say, so the default path stays exactly the one that existed before the
@@ -898,11 +940,11 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			// the mode banner further down.
 			noCluster := boolFlagOrConfig(cmd, "no-cluster", opts.NoCluster)
 			explicitAttest := cmd.IsSet("emit-attestation") || cmd.IsSet(flagPush)
-			// Not parsed or checked here: the check catalog is resolved from
-			// the recipe inside the validator, so the names are validated
-			// against it there (before any cluster work) rather than against a
-			// second list kept in step by hand. Resolved this early only
-			// because the guard below needs it.
+			// Not checked against the catalog here: that needs the recipe,
+			// which is not loaded yet. runSkipCheckPreflight does it further
+			// down, once the recipe is in hand and still before the
+			// snapshot/agent branch touches the cluster. Resolved this early
+			// only because the flag-combination guard below needs it.
 			skipChecks := stringSliceFlagOrConfig(cmd, "skip-check", opts.SkipChecks)
 
 			if err = validateFlagCombinations(cncfSubmission, evidenceDir, features, noCluster, explicitAttest, skipChecks); err != nil {
@@ -949,15 +991,7 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 			failOnError := boolFlagOrConfig(cmd, "fail-on-error", derefBoolOr(input.FailOnError, true))
 			failFast := boolFlagOrConfig(cmd, "fail-fast", derefBoolOr(opts.FailFast, false))
 
-			// Mode banner: make it explicit whether this run touches a live
-			// cluster (issue #1383). --no-cluster is an offline dry-run that
-			// reports checks as skipped; otherwise validation deploys
-			// validator Jobs against the active kube-context.
-			if noCluster {
-				slog.Info("validating in --no-cluster mode — offline dry-run; checks are reported as skipped, no cluster is contacted")
-			} else {
-				slog.Info("validating against the live cluster — validator Jobs will be deployed to the active kube-context")
-			}
+			logValidationModeBanner(noCluster)
 
 			// Resolve shared fields once, before the snapshot/agent split, so
 			// CLI-overrides-config log lines fire exactly once per field even
@@ -1000,6 +1034,21 @@ constraint (e.g. K8s version) is not met — --fail-on-error scopes to phase che
 
 			rec, err := client.LoadRecipe(ctx, recipeFilePath, kubeconfig)
 			if err != nil {
+				return err
+			}
+
+			// The --skip-check help text promises rejection "before the
+			// cluster is touched". The guard that decides it is catalog-backed
+			// and lives inside ValidateState, which the agent-deploy branch
+			// below reaches only AFTER creating a ServiceAccount, a Role and a
+			// Job, so a typo'd name used to cost cluster resources before it
+			// was rejected. Run the same guard here, against the recipe just
+			// loaded and with the same phases and skip list runValidation will
+			// pass, so both decisions are identical. The guard inside
+			// ValidateState stays: pkg/server and other SDK callers reach it
+			// directly and must remain covered. An empty skip list returns
+			// immediately, without loading the catalog.
+			if err = runSkipCheckPreflight(ctx, client, rec, phases, skipChecks); err != nil {
 				return err
 			}
 
