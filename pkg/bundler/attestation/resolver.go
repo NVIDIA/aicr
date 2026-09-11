@@ -83,9 +83,12 @@ type ResolveOptions struct {
 
 	// SigningKey selects KMS-backed (key-based) signing instead of keyless OIDC.
 	// When non-empty it is a cosign-style KMS URI (awskms:// | gcpkms:// |
-	// azurekms:// | hashivault://) and takes precedence over all OIDC source fields, which are
-	// keyless-only. Mutual exclusivity with the keyless flags is enforced at the
-	// CLI boundary (pkg/cli). See issue #407.
+	// azurekms:// | hashivault://) and takes precedence over the OIDC source
+	// fields, which are keyless-only — except DeviceFlow, which ResolveAttester
+	// and ResolveAttesterLazy reject rather than override (see checkSigningMode).
+	// The remaining keyless settings are additionally rejected at their own
+	// boundaries: fulcioURL at the config conversion (config.resolveSigningKey)
+	// and --identity-token at the CLI (pkg/cli). See issue #407.
 	SigningKey string
 
 	// DisableTLogUpload skips the Rekor transparency-log upload for KMS

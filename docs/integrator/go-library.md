@@ -978,6 +978,11 @@ an SDK caller that derives `BundleOptions()` straight from a document and calls
 `MakeBundle` without merging anything gets `ErrCodeInvalidRequest` rather than a
 bundle signed with the KMS key while its device-flow setting was ignored.
 
+The rejection is conditional on attestation being enabled. Both resolvers
+short-circuit to a no-op attester when `Attest` is false, before the check —
+nothing signs in that case, so there is no mode to conflict over, and
+`MakeBundle` returns normally.
+
 `IdentityToken` is not part of that check. A CI environment can populate it
 without the caller asking for keyless signing, so a non-empty `SigningKey`
 still takes precedence over it rather than failing.
