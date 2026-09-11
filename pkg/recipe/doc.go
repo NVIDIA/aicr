@@ -205,7 +205,7 @@
 //
 //	type RecipeCriteria struct {
 //	    Kind       string    // Must be "RecipeCriteria"
-//	    APIVersion string    // Release N accepts "aicr.run/v1alpha2" or "aicr.run/v1"
+//	    APIVersion string    // emits "aicr.run/v1"; "aicr.run/v1alpha2" still accepted
 //	    Metadata   struct {
 //	        Name string       // Optional descriptive name
 //	    }
@@ -215,7 +215,7 @@
 // Example criteria file (criteria.yaml):
 //
 //	kind: RecipeCriteria
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1
 //	metadata:
 //	  name: gb200-eks-ubuntu-training
 //	spec:
@@ -286,7 +286,7 @@
 //
 // Base structure (recipes/overlays/base.yaml):
 //
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1beta1
 //	kind: Base
 //	metadata:
 //	  name: base
@@ -298,7 +298,7 @@
 //
 // Overlay structure (recipes/overlays/*.yaml):
 //
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1beta1
 //	kind: Overlay
 //	metadata:
 //	  name: h100-training

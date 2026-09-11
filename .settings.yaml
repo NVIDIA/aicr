@@ -19,7 +19,7 @@
 # Build Tools
 build_tools:
   # renovate: datasource=github-releases depName=goreleaser/goreleaser depType=build_tools
-  goreleaser: 'v2.18.0'
+  goreleaser: 'v2.18.1'
   # renovate: datasource=github-releases depName=ko-build/ko depType=build_tools
   ko: 'v0.19.1'
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
@@ -61,6 +61,32 @@ linting:
   yamllint: '1.38.0'
   # renovate: datasource=github-releases depName=google/addlicense depType=linting
   addlicense: 'v1.2.0'
+  # Same move off `go install` as setup_envtest in testing_tools (#2667).
+  # addlicense does publish a checksums.txt and this value was cross-checked
+  # against it, but the pin is still what the install step verifies: a manifest
+  # served beside the archive comes from the same release, so it catches
+  # corruption in transit and not a compromise of the release itself.
+  #
+  # A version bump must refresh this or the install step fails closed on the
+  # mismatch. tools/update-addlicense-checksums does it, wired to Renovate's
+  # postUpgradeTasks. That matters more here than elsewhere: addlicense is on
+  # the auto-merge list, so a stale pin would leave a PR that can never merge.
+  #
+  # Note the asset name is version-specific -- v1.1.1 published
+  # addlicense_1.1.1_..., v1.2.0 publishes addlicense_v1.2.0_... -- so a bump
+  # that changes the naming shows up as a refresher failure, not a silent skip.
+  addlicense_sha256_linux_amd64: '6924296771234b1ba6c969e109b4459cff75e15b259676b61df874a92734b242'
+  # This pins go-licenses' own SOURCE version, not its dependency set. #2667
+  # made it a `tool` directive in go.mod, so it is built from this module's
+  # graph: on the switch it linked golang.org/x/tools v0.49.0 and
+  # k8s.io/klog/v2 v2.140.0 against upstream's v0.36.0 and v2.90.1. x/tools is
+  # the go/packages library go-licenses uses to walk the graph and locate
+  # GOROOT, so an unrelated bump here can change the behaviour of
+  # `make license-check` and of THIRD_PARTY_NOTICES.md with this value
+  # untouched. It fails loudly (compile or gate error) rather than quietly.
+  #
+  # Kept equal to the go.mod require by TestToolPinsMatchGoMod; Renovate groups
+  # the two so they move together.
   # renovate: datasource=github-releases depName=google/go-licenses depType=linting
   go_licenses: 'v2.0.1'
   # MDX toolchain for tools/check-docs-mdx-parse (the parser-level docs gate) is
@@ -128,7 +154,7 @@ testing_tools:
   # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools
   nvkind: 'c57050497cffee36f10c8b918d2727c4f26d886e'
   # renovate: datasource=github-releases depName=tilt-dev/ctlptl depType=testing_tools
-  ctlptl: '0.9.5'
+  ctlptl: '0.9.6'
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
   tilt: '0.37.7'
   # Keep in step with sigs.k8s.io/controller-runtime in go.mod: setup-envtest is
@@ -137,8 +163,26 @@ testing_tools:
   # controller-runtime the tests link against.
   # renovate: datasource=go depName=sigs.k8s.io/controller-runtime/tools/setup-envtest depType=testing_tools
   setup_envtest: 'v0.25.0'
+  # CI installs the released linux/amd64 binary rather than `go install`ing the
+  # module, so the gate no longer depends on sum.golang.org being up (#2667).
+  # The two are the same code: `tools/setup-envtest/v0.25.0` and `v0.25.0` are
+  # the same commit (e8f9455), and the release asset is built from it.
+  #
+  # controller-runtime publishes no checksums.txt beside the binary, so unlike
+  # oasdiff and oras there is nothing to cross-check this against -- it is the
+  # only integrity check on the download, computed from the asset and reviewed
+  # at this SHA. A version bump must refresh it or the install step fails
+  # closed on the mismatch; tools/update-setup-envtest-checksums does that,
+  # wired to Renovate's postUpgradeTasks. Because there is no upstream manifest,
+  # that script hashes whatever the release serves at refresh time -- review the
+  # resulting diff as a new trust-on-first-use record, not a corroboration.
+  #
+  # linux/amd64 only, for the reason on oasdiff_sha256_linux_amd64: this feeds
+  # the setup-build-tools action, which runs on ubuntu runners, while
+  # tools/setup-tools covers local dev on other platforms.
+  setup_envtest_sha256_linux_amd64: 'c20be44bade1c38a8ead39f191acc35bbb50f2f2d796ba4f45c18c77e76029c7'
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
-  helm: 'v4.2.4'
+  helm: 'v4.3.0'
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
   helm_diff: 'v3.15.12'
   # helm_diff_checksums are refreshed automatically by tools/update-helm-diff-checksums
@@ -181,7 +225,7 @@ testing_tools:
   # Run with USE_SSL=1: sigstore's awskms signer hardcodes https://, so the e2e
   # serves TLS with a mkcert cert (see mkcert below).
   # renovate: datasource=docker depName=ministackorg/ministack depType=testing_tools
-  ministack_image: 'ministackorg/ministack:1.5.8'
+  ministack_image: 'ministackorg/ministack:1.5.9'
   # OpenBAO: the Linux Foundation Apache-2.0 fork of HashiCorp Vault, used by the
   # Vault KMS e2e to exercise the hashivault:// signing/verification path against
   # a real Transit secrets engine. API-identical to Vault; the sigstore hashivault

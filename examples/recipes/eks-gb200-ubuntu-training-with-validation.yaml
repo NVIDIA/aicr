@@ -16,7 +16,7 @@
 # This shows how to configure validation checks for different deployment phases
 
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
   appliedOverlays:

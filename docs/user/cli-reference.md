@@ -213,7 +213,7 @@ Drive `aicr snapshot` from an `AICRConfig` document so the snapshot inputs versi
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: gke-h100-training
 spec:
@@ -317,7 +317,7 @@ data:
 
 **Snapshot Structure:**
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 kind: Snapshot
 metadata:
   timestamp: "2025-12-31T10:30:00Z"
@@ -371,7 +371,7 @@ configuration choice. Select a non-default value with
 `--profile name=value`; omitting the flag applies the declaration's required
 default. A selection against a composition with no declaration, a wrong name,
 or an unknown value fails closed. Profile-bearing output records
-`metadata.selectedProfile`, uses recipe apiVersion `aicr.run/v1alpha3`, and
+`metadata.selectedProfile`, uses recipe apiVersion `aicr.run/v1beta2`, and
 locks every declared owned path: divergent `aicr bundle`/`aicr mirror`
 static overrides are rejected (identical values accepted), and
 argocd-helm install-time values are rejected on key *presence* alone —
@@ -432,7 +432,7 @@ The config file uses a Kubernetes-style envelope:
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: gb200-eks-ubuntu-training
 spec:
@@ -681,7 +681,7 @@ aicr recipe -s system.yaml --intent inference -o recipe.yaml --format yaml
 **Output structure:**
 
 ```yaml
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 kind: RecipeResult
 metadata:
   version: v1.0.0
@@ -721,7 +721,7 @@ apiVersion and records the selected identity and declaration-wide lock
 surface:
 
 ```yaml
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 kind: RecipeResult
 metadata:
   selectedProfile:
@@ -1114,21 +1114,21 @@ Validation can be run in different phases to validate different aspects of the d
 >
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
 >
-> **apiVersion gate:** During v0.21, the ADR-022 reader-first release, AICR still
-> emits `aicr.run/v1alpha2` for snapshots and default recipes, and
-> `aicr.run/v1alpha3` for profile-bearing recipes. Readers additionally
-> accept `aicr.run/v1` for snapshots and default recipes,
-> `aicr.run/v1beta1` for config and ordinary catalog inputs, and
-> `aicr.run/v1beta2` for profile-bearing inputs. Unsupported artifact headers
+> **apiVersion gate:** As of v0.22, the ADR-022 emitter switch, AICR emits
+> `aicr.run/v1` for snapshots and default recipes, `aicr.run/v1beta1` for config
+> and ordinary catalog inputs, and `aicr.run/v1beta2` for profile-bearing
+> recipes. Readers additionally still accept the superseded
+> `aicr.run/v1alpha2` and `aicr.run/v1alpha3`, so artifacts produced by v0.21 or
+> earlier keep loading. Unsupported artifact headers
 > fail fast; raw external catalog headers are checked before merge or
 > hydration. Recapture, regenerate, or update the authored header with a
 > version supported by the running AICR release. See
 > [ADR-011](https://github.com/NVIDIA/aicr/blob/main/docs/design/011-artifact-apiversion-policy.md)
 > and
-> [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md). v0.22 switches
-> the emitters to the target values and v0.23 stops accepting the alpha values,
-> along with the empty header that the snapshot, recipe, and criteria readers
-> still tolerate. `AICRConfig` and external catalog headers already reject an
+> [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md). v1.0.0 stops
+> accepting the alpha values, along with the empty header that the snapshot,
+> recipe, and criteria readers still tolerate. Reading either now logs a
+> deprecation warning naming the file. `AICRConfig` and external catalog headers already reject an
 > empty value, so they have no tolerance to retire.
 > [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
 > has the release-by-release table.
@@ -1273,7 +1273,7 @@ through the precedence chain described on `--identity-token`.
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: prod-validate
 spec:
@@ -1579,7 +1579,7 @@ When both `spec.recipe.output.path` and `spec.bundle.input.recipe` are set, they
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   bundle:
     input:
@@ -2158,7 +2158,7 @@ my-bundle/
 **`provenance.yaml`** sits at the bundle root and lists one entry per vendored chart, using the same K8s-style `apiVersion`/`kind` shape as the rest of AICR's persisted formats:
 
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 kind: BundleProvenance
 vendoredCharts:
   - name: gpu-operator
@@ -3139,7 +3139,7 @@ a downstream consumer enforces against it.
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: prod-verify
 spec:
@@ -3891,7 +3891,7 @@ mkdir -p my-data/components/my-operator
 2. **Create registry.yaml with custom component:**
 ```yaml
 # my-data/registry.yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: my-operator
@@ -3915,7 +3915,7 @@ image:
 ```yaml
 # my-data/overlays/my-custom-overlay.yaml
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: my-custom-overlay
 spec:

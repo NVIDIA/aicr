@@ -462,8 +462,8 @@ func TestRecipeMetadataHeaderGatesAgree(t *testing.T) {
 		apiVersion string
 	}{
 		{"empty", ""},
-		{"alpha authoring", header.AuthoringGroupVersion},
-		{"alpha profile", header.ProfileGroupVersion},
+		{"alpha authoring", header.GroupVersion},
+		{"alpha profile", header.RecipeResultGroupVersion},
 		{"target authoring", header.GroupVersionV1Beta1},
 		{"target profile", header.GroupVersionV1Beta2},
 		{"stable target belongs to another track", header.GroupVersionV1},

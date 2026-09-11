@@ -23,13 +23,23 @@ inputs:
     description: 'golangci-lint version to use (e.g., v2.6)'
     required: true
   addlicense_version:
-    description: 'addlicense version to use (e.g., v1.1.1)'
-    required: false
-    default: 'v1.1.1'
+    description: 'addlicense version pinned in .settings.yaml (linting.addlicense, via load-versions)'
+    required: true
+  addlicense_sha256:
+    description: 'Pinned linux/amd64 SHA256 for the addlicense release archive (linting.addlicense_sha256_linux_amd64, via load-versions)'
+    required: true
   lint_timeout:
     description: 'Lint timeout duration'
     required: false
     default: ''
+  privileged_ci:
+    description: >-
+      Whether this run checked out trusted content. Only trusted runs write any
+      cache: ok-to-test executes an untrusted PR head inside the default
+      branch's cache scope, so a write from there can plant an entry a later
+      trusted run consumes. Restore is unconditional either way.
+    required: false
+    default: 'true'
 
 runs:
   using: 'composite'
@@ -38,10 +48,57 @@ runs:
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
       with:
         go-version: '${{ inputs.go_version }}'
-        cache: true
-        cache-dependency-path: |
-          go.sum
+        # Caching is done explicitly below. setup-go's `cache` input cannot
+        # separate restore from save, and this job runs fork-controlled code
+        # under ok-to-test, whose `github.ref` is the default branch -- so its
+        # writes land in main's cache scope (#2670).
+        cache: false
         check-latest: true
+
+    - name: Resolve Go cache paths
+      id: gocache
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        echo "buildcache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+    # Restore-only, deliberately: there is no companion cache/save step, not
+    # even a privileged-gated one.
+    #
+    # This job shares go-test's key rather than owning a namespace, and cache
+    # entries are immutable, so whichever job saves first owns that key until
+    # go.sum moves. go-test gates its own save on `make test` having run,
+    # precisely so the banked GOCACHE contains the -race test objects; a lint
+    # run reaching the key first would bank a GOCACHE without them and every
+    # later go-test run would rebuild all of ./... under -race (#2663).
+    # Giving lint its own key prefix avoids that collision but adds another
+    # multi-GB entry, and this repo's cache scope is already over its storage
+    # ceiling and evicting (`gh api repos/NVIDIA/aicr/actions/cache/usage`), so
+    # a second copy of the same two directories is not free.
+    #
+    # Restore-only is cheap here because the prefix fallback matches go-test's
+    # most recent entry for the same Go version, so a go.sum change degrades to
+    # a near-warm cache rather than a cold one. That fallback is what makes
+    # reading another job's entry viable, and it is safe for the same reason it
+    # is safe in go-test: both directories are content-addressed, so Go
+    # consults what still matches and refetches or rebuilds what does not.
+    #
+    # The cost of the shared key is that three jobs now depend on one
+    # conditional writer. When go-test does not reach the end of `make test`
+    # -- a red `go mod tidy -diff`, a failed tool install, a timeout -- nothing
+    # banks the new go.sum, and lint keeps falling back to a progressively
+    # older entry against a 10-minute budget. It self-heals on the next
+    # completed test run, so this degrades rather than breaks.
+    - name: Restore Go modules and build output
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: |
+          ${{ steps.gocache.outputs.modcache }}
+          ${{ steps.gocache.outputs.buildcache }}
+        key: go-${{ runner.os }}-${{ runner.arch }}-${{ inputs.go_version }}-${{ hashFiles('go.sum') }}
+        restore-keys: |
+          go-${{ runner.os }}-${{ runner.arch }}-${{ inputs.go_version }}-
 
     - name: Lint Go
       if: hashFiles('.golangci.yaml') != ''
@@ -49,6 +106,14 @@ runs:
       with:
         version: ${{ inputs.golangci_lint_version }}
         args: --timeout=${{ inputs.lint_timeout || '5m' }}
+        # This action keeps its own cache, separate from the two directories
+        # restored above, and saves it by default -- a second write into main's
+        # scope from a fork-controlled checkout that #2670 does not enumerate.
+        # `skip-save-cache` suppresses only the write; restore still happens,
+        # so unprivileged runs keep the speedup without being able to plant
+        # anything. Its key namespace does not collide with `go-`, so trusted
+        # runs still save normally.
+        skip-save-cache: ${{ inputs.privileged_ci != 'true' }}
 
     - name: Lint YAML
       if: hashFiles('.yamllint.yaml') != ''
@@ -58,12 +123,11 @@ runs:
         make lint-yaml
 
     - name: Install addlicense
-      shell: bash
-      run: |
-        ADDLICENSE_VERSION="${{ inputs.addlicense_version }}"
-        ADDLICENSE_VERSION_NUM="${ADDLICENSE_VERSION#v}"
-        go install github.com/google/addlicense@${ADDLICENSE_VERSION}
-        echo "addlicense installed: $(addlicense -version 2>&1 || echo ${ADDLICENSE_VERSION_NUM})"
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_addlicense: 'true'
+        addlicense_version: '${{ inputs.addlicense_version }}'
+        addlicense_sha256: '${{ inputs.addlicense_sha256 }}'
 
     - name: Ensure License Headers
       shell: bash

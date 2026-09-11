@@ -26,12 +26,19 @@
 
 name: Merge Gate
 
-# The push trigger is a watchdog, not a second PR gate. A PR run gates the
-# merge commit GitHub predicts; nothing re-checks main after the merge lands,
-# so main can sit broken until an unrelated PR's gate reports it. #2678 merged
-# ten seconds before its own gate started, and the failure surfaced on the next
-# author's PR instead. Push runs check everything (see check-paths outputs)
-# because there is no base to diff a merged commit against.
+# The push trigger covers what on-push.yaml does not. on-push.yaml already runs
+# the full qualification on every main push, so this workflow skips its `tests`
+# job there (see below) and contributes only its own checks: actionlint,
+# verify-licenses, verify-renovate, docs-mdx, malware-scan, CodeQL and the
+# freshness gates.
+#
+# That matters because main's ruleset is bypassable and bypassing is routine
+# here -- a direct push reports "Bypassed rule violations ... 2 of 2 required
+# status checks are expected", meaning none of these ran before the commit
+# landed. Without this trigger they would not run after it either.
+#
+# Push runs force every check-paths output true, because a merged commit has no
+# base to diff against.
 on:
   pull_request:
     branches:
@@ -44,9 +51,17 @@ on:
 permissions:
   contents: read
 
+# Push runs key on the SHA, not the ref, and never cancel. Superseding a PR's
+# older run is the point of cancel-in-progress; superseding a merged commit's
+# run is how a broken commit goes unverified. On 2026-09-10 two merges landed 36
+# seconds apart and the first commit's On Push Qualification run was cancelled
+# while queued, so the commit that actually broke main was never tested and the
+# failure surfaced against the next commit instead. Sharing one ref-keyed group
+# across merges reproduces that; a SHA-keyed group gives every merged commit its
+# own run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
 
@@ -100,8 +115,9 @@ jobs:
               # defines the check itself, so a change to the gate cannot skip
               # its own gate: the Makefile recipe is the check's contract, the
               # install-go-licenses action supplies the binary it runs (that
-              # action clears GOFLAGS, without which -trimpath strips GOROOT and
-              # the check passes while inspecting zero packages), and this
+              # action pins GOFLAGS to -mod=readonly, without which an inherited
+              # -trimpath strips GOROOT and the check passes while inspecting
+              # zero packages), and this
               # workflow defines the job. The entry replaced here named
               # '.github/workflows/verify-licenses.yaml', which was deleted in
               # 3c9f6ec5 when the job moved into this workflow, so the filter
@@ -198,7 +214,7 @@ jobs:
               - 'validators/performance/requirements.txt'
               - 'validators/performance/licenses/**'
               # The actions that supply this job's toolchain. install-go-licenses
-              # matters most: it exists to clear GOFLAGS, and an install that
+              # matters most: it exists to pin GOFLAGS, and a build that
               # inherits -trimpath yields a go-licenses with no GOROOT. The
               # `deps` filter watches both too, but that gates verify-licenses,
               # which under -trimpath PASSES while inspecting zero packages —
@@ -289,9 +305,15 @@ jobs:
   # Qualification (Test, Lint, CLI E2E, E2E, Security Scan)
   # ---------------------------------------------------------------------------
 
+  # Not run on push: on-push.yaml already calls this same reusable workflow on
+  # every main push (`cancel-in-progress: false`, so it completes), and running
+  # it here too would qualify each merge twice for nothing. The push trigger on
+  # this workflow exists for the checks on-push does NOT run -- actionlint,
+  # verify-licenses, verify-renovate, docs-mdx, the freshness gates -- which is
+  # what a bypassed direct push to main would otherwise skip entirely.
   tests:
     needs: [check-paths]
-    if: needs.check-paths.outputs.code == 'true'
+    if: needs.check-paths.outputs.code == 'true' && github.event_name != 'push'
     uses: ./.github/workflows/qualification.yaml
     permissions:
       actions: read
@@ -303,11 +325,11 @@ jobs:
 
   tests-skip:
     needs: [check-paths]
-    if: needs.check-paths.outputs.code != 'true'
+    if: needs.check-paths.outputs.code != 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
-      - run: echo "Docs/non-code change — qualification tests not required"
+      - run: echo "Qualification not required here (docs-only change, or a push run that on-push.yaml already qualifies)"
 
   # ---------------------------------------------------------------------------
   # CodeQL (analyze)

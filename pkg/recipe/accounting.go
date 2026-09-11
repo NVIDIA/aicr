@@ -381,7 +381,7 @@ func (r *RecipeResult) validateAccountingConfiguration() error {
 	if !header.IsSupportedProfileAPIVersion(r.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("configuration.slurm.accounting requires apiVersion %q or %q (got %q)",
-				ConfiguredRecipeResultAPIVersion, header.GroupVersionV1Beta2, r.APIVersion))
+				header.RecipeResultGroupVersion, header.GroupVersionV1Beta2, r.APIVersion))
 	}
 	if r.Criteria == nil || r.Criteria.Platform != CriteriaPlatformSlurm {
 		return errors.New(errors.ErrCodeInvalidRequest,

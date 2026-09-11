@@ -128,7 +128,7 @@
 //
 // Snapshots contain a header and measurements:
 //
-//	apiVersion: aicr.run/v1alpha2
+//	apiVersion: aicr.run/v1
 //	kind: Snapshot
 //	metadata:
 //	  version: v1.0.0

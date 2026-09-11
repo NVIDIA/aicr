@@ -15,7 +15,7 @@ executable bits or `./script.sh` invocation.
 
 #### `go-test/`
 
-**Purpose**: Set up Go and Helm, verify vendored dependencies, and run unit tests with race detection and coverage
+**Purpose**: Set up Go and Helm, verify the module manifests are tidy, and run unit tests with race detection and coverage
 **When to use**: Go CI workflows that use the repository's `make test` target
 **Inputs**:
 - `go_version` (required): Go version to install
@@ -23,10 +23,22 @@ executable bits or `./script.sh` invocation.
 - `coverage_threshold` (optional): Minimum coverage percentage (default: empty)
 - `helm_version` (required): Helm version from `load-versions`
 - `setup_envtest_version` (required): setup-envtest version from `load-versions`
-- `apidiff_version` (optional): apidiff version from `load-versions`; when set, installs apidiff and runs `make api-diff` (default: empty, which skips both steps)
+- `setup_envtest_sha256` (**required**): pinned linux/amd64 SHA256 for the setup-envtest release binary, from `load-versions`. controller-runtime publishes no `checksums.txt` beside it, so this pin is the only integrity check on the download
+- `apidiff_version` (optional): apidiff version from `load-versions`; when set, builds apidiff and runs `make api-diff` (default: empty, which skips both steps). The input gates whether the check runs; the version actually built comes from `go.mod`, which `TestToolPinsMatchGoMod` holds equal to `.settings.yaml`
 - `oasdiff_version` (**required**): oasdiff version from `load-versions`; installs oasdiff before `make test` and runs `make openapi-diff` after. Not optional, because `make test` runs `tools/openapi-diff_test.sh`, which fails in CI when oasdiff is absent rather than skipping — the REST contract gate cannot be silently unverified
 - `oasdiff_sha256` (**required**): pinned linux/amd64 SHA256 for the oasdiff release archive, from `load-versions`. The install fails closed when it is missing or malformed rather than falling back to the release's own `checksums.txt`
 - `privileged_ci` (optional): whether the checked-out ref is trusted (default: `"true"`). Only trusted runs save the Go cache; restore is unconditional. `ok-to-test` passes `false` because it runs an untrusted PR head inside the default branch's cache scope
+
+`go-lint`, `e2e`, and `install-e2e-tools` take a `privileged_ci` input too, but
+each gates a different cache, so the name alone does not tell you what stops:
+`go-lint` gates only golangci-lint's own `~/.cache/golangci-lint` entry,
+`install-e2e-tools` gates its `/usr/local/bin` tool cache, and `e2e` only
+forwards the value. None of the three writes the Go module or build cache —
+they restore `go-test`'s entry and never save it. In all four, the input
+suppresses the writes an ordinary fork run makes by default; on the `ok-to-test`
+path these action files are themselves checked out from the fork, so the gate is
+not a boundary against a crafted PR. Job-level skipping in `qualification.yaml`
+(`cli-e2e`, `security-scan`) is the control that holds there.
 
 Callers that set `apidiff_version` must check out full history with
 `fetch-depth: 0` so `make api-diff` can resolve a reachable stable release tag.
@@ -71,18 +83,28 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 - Uses the same installation logic as local development
 
 #### `install-go-licenses/`
-**Purpose**: Install the pinned `go-licenses` with `GOFLAGS` cleared
+**Purpose**: Build the pinned `go-licenses` from this module with `GOFLAGS` pinned
 **When to use**: Any job running `make license-check`, `make notices`, or `make release`
 **Inputs**:
-- `version` (required): go-licenses version from `load-versions` (`.settings.yaml` `linting.go_licenses`)
+- `version` (required): go-licenses version from `load-versions` (`.settings.yaml` `linting.go_licenses`). Validated for presence only — the version built comes from `go.mod`, which `TestToolPinsMatchGoMod` holds equal to this pin
 
 `go-licenses` publishes no binary release, so it cannot come from
-`setup-build-tools` (which installs from binary releases) and must be
-`go install`ed. Clearing `GOFLAGS` is a correctness requirement rather than a
-preference: `-trimpath` strips the binary's baked-in `GOROOT`, which makes
-`go-licenses` classify every package as standard library and report an empty
-dependency graph while still exiting `0`. The install is centralized here so no
-caller can silently drop that contract.
+`setup-build-tools` (which installs from binary releases). It is instead a `tool`
+directive in `go.mod` and is built with `go build` from the main module, so its
+transitive dependencies are covered by the committed `go.sum` and the install
+never contacts `sum.golang.org` — the checksum database is consulted only when a
+module is being *added*. `go install pkg@version` resolves outside the module,
+where nothing is in `go.sum`, so it authenticated every dependency against the
+live checksum database and an outage there failed the gate (#2667).
+
+Pinning `GOFLAGS` to `-mod=readonly` is a correctness requirement rather than a
+preference, and applies to `go build` exactly as it did to `go install`:
+`-trimpath` strips the binary's baked-in `GOROOT`, which makes `go-licenses`
+classify every package as standard library and report an empty dependency graph
+while still exiting `0`. Measured on a `-trimpath` build of v2.0.1,
+`go-licenses csv` emits zero rows. `-mod=readonly` rather than an empty
+`GOFLAGS` so CI still cannot rewrite the manifest it is validating. The build is
+centralized here so no caller can silently drop either contract.
 
 **Example**:
 ```yaml
@@ -111,7 +133,7 @@ quality thresholds; not every settings key is exposed) — see
 ### Build & Release Actions
 
 #### `setup-build-tools/`
-**Purpose**: Install container build tools (ko, syft, crane, oras, oasdiff, goreleaser)  
+**Purpose**: Install pinned, checksum-verified tool binaries (ko, syft, crane, oras, oasdiff, setup-envtest, addlicense, goreleaser)  
 **When to use**: When you need specific build tools without full build pipeline  
 **Inputs**:
 - `install_ko` (optional): Install ko (default: "false")
@@ -124,6 +146,12 @@ quality thresholds; not every settings key is exposed) — see
 - `install_oasdiff` (optional): Install oasdiff (default: "false")
 - `oasdiff_version` (required when `install_oasdiff: "true"`): oasdiff version from `load-versions`
 - `oasdiff_sha256` (required when `install_oasdiff: "true"`): oasdiff linux/amd64 SHA256 from `load-versions`
+- `install_setup_envtest` (optional): Install setup-envtest (default: "false")
+- `setup_envtest_version` (required when `install_setup_envtest: "true"`): setup-envtest version from `load-versions`, matching a controller-runtime release tag
+- `setup_envtest_sha256` (required when `install_setup_envtest: "true"`): setup-envtest linux/amd64 SHA256 from `load-versions`. controller-runtime publishes no `checksums.txt` for this asset, so the pin is the only integrity check on it
+- `install_addlicense` (optional): Install addlicense (default: "false")
+- `addlicense_version` (required when `install_addlicense: "true"`): addlicense version from `load-versions`
+- `addlicense_sha256` (required when `install_addlicense: "true"`): addlicense linux/amd64 SHA256 from `load-versions`
 - `install_goreleaser` (optional): Install goreleaser (default: "false")
 - `goreleaser_version` (required when `install_goreleaser: "true"`): GoReleaser version from `load-versions`
 
@@ -360,6 +388,7 @@ jobs:
           go_version: ${{ steps.versions.outputs.go }}
           helm_version: ${{ steps.versions.outputs.helm }}
           setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
+          setup_envtest_sha256: ${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
           oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
           oasdiff_sha256: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
@@ -368,6 +397,8 @@ jobs:
         with:
           go_version: ${{ steps.versions.outputs.go }}
           golangci_lint_version: ${{ steps.versions.outputs.golangci_lint }}
+          addlicense_version: ${{ steps.versions.outputs.addlicense }}
+          addlicense_sha256: ${{ steps.versions.outputs.addlicense_sha256_linux_amd64 }}
       - uses: ./.github/actions/security-scan
 ```
 
@@ -387,6 +418,7 @@ jobs:
           go_version: ${{ steps.versions.outputs.go }}
           helm_version: ${{ steps.versions.outputs.helm }}
           setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
+          setup_envtest_sha256: ${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
           oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
           oasdiff_sha256: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
@@ -460,6 +492,7 @@ To use these actions in other repositories:
     go_version: '1.26'
     helm_version: 'v4.2.4'
     setup_envtest_version: 'v0.25.0'
+    setup_envtest_sha256: 'c20be44bade1c38a8ead39f191acc35bbb50f2f2d796ba4f45c18c77e76029c7'
     oasdiff_version: 'v1.31.0'
     oasdiff_sha256: '0177d4bc0bf04f4061e9277795b77335ee100a43b508e94fce5c46de083bbede'
     coverage_report: 'true'
@@ -470,9 +503,9 @@ without AICR's `make api-diff` target retain the original test behavior because
 an empty `apidiff_version` skips the API compatibility steps.
 
 Everything else shown is required and has no such escape hatch:
-`setup_envtest_version` and `oasdiff_sha256` are each checked at the top of
-their install step and fail the job when empty, so omitting one produces a
-failure at run time rather than a skipped step. A cross-repo caller has no
-`load-versions` to read `.settings.yaml`, hence the literals — keep them in step
-with the pins there, and note that `oasdiff_sha256` must be the digest for the
-`oasdiff_version` beside it.
+`setup_envtest_version`, `setup_envtest_sha256` and `oasdiff_sha256` are each
+checked at the top of their install step and fail the job when empty or
+malformed, so omitting one produces a failure at run time rather than a skipped
+step. A cross-repo caller has no `load-versions` to read `.settings.yaml`, hence
+the literals — keep them in step with the pins there, and note that each
+`*_sha256` must be the digest for the version beside it.

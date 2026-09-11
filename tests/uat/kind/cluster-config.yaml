@@ -20,7 +20,7 @@
 # composite action — NOT from this file. It exists to (a) satisfy the reservation
 # registry's required cluster-config-path field and (b) document the cluster
 # shape the nvkind lane targets. uat-kind.yaml does not feed it to any actuator.
-apiVersion: aicr.run/v1alpha1
+apiVersion: aicr.run/v1beta1
 kind: NvkindClusterDescriptor
 
 # The runner this lane leases (its physical single-GPU capacity is the

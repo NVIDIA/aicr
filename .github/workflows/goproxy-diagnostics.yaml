@@ -1,0 +1,262 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Answers two questions about the DGXC Artifactory Go proxy that nothing else
+# in this repo can, because setup-dgxc-goproxy only ever runs on a tag push.
+#
+# 1. **Does the repository proxy the checksum database?** GOPROXY and GOSUMDB
+#    are independent paths. Routing modules through Artifactory does not by
+#    itself route checksum lookups: the go command requests
+#    /sumdb/sum.golang.org/... from the proxy and, on 404 or 410, falls back to
+#    a DIRECT connection to sum.golang.org — including under `enforced` mode,
+#    where GOPROXY carries no `,direct`. A repository that serves modules but
+#    not sumdb therefore leaves every build dependent on sum.golang.org being
+#    up, while looking fully routed.
+#
+# 2. **Can it serve modules outside this repo's go.mod?** The tools probed
+#    below build outside the main module, so their transitive dependencies
+#    appear in no go.sum here. A tag build proves Artifactory serves this
+#    repo's own graph; it proves nothing about those.
+#
+# #2667 is closed and did NOT take the routing option. Routing cannot work for
+# the qualification gate at all: this action authenticates via GitHub OIDC, and
+# a pull_request run from a fork cannot mint that credential, so a gate that
+# required the proxy would fail exactly where it has to pass. The gate instead
+# moved every tool off `go install` -- to pinned binary releases where upstream
+# publishes them (setup-envtest, addlicense, oasdiff), and to `go build` from
+# this module where it does not (apidiff, go-licenses). A main-module build
+# verifies against the committed go.sum and never contacts sum.golang.org.
+#
+# This workflow is kept because question 1 is still open for #2663, which asks
+# whether the *release* path -- where OIDC is available -- should route. The
+# tool list in the second step is now historical: those `go install` calls no
+# longer exist in the gate, and the step measures what Artifactory can serve
+# rather than what CI depends on.
+#
+# Diagnostic only. It changes nothing and gates nothing, so it is
+# workflow_dispatch rather than wired into the merge gate — the answer changes
+# when Artifactory's configuration changes, not when this repo does.
+
+name: Go Proxy Diagnostics
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'setup-dgxc-goproxy mode to probe under'
+        required: false
+        default: routed
+        type: choice
+        options: [routed, enforced]
+
+permissions:
+  contents: read
+
+jobs:
+
+  probe:
+    name: Probe the DGXC Go proxy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Minting the Artifactory credential via GitHub OIDC. The proxy action
+      # needs this; nothing else in this workflow does.
+      id-token: write
+    steps:
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: '${{ steps.versions.outputs.go }}'
+          cache: false
+
+      - name: Configure the DGXC Go proxy
+        id: proxy
+        uses: ./.github/actions/setup-dgxc-goproxy
+        with:
+          mode: ${{ inputs.mode }}
+
+      # Probes from here rather than from inside the action: the kit is
+      # vendored verbatim from NVIDIA-dev/dgxc-depproxy and an in-place edit
+      # forks it silently, which tools/check-depproxy-kit exists to prevent.
+      # GOAUTH is exported to the environment, so the same credential helper
+      # the go command will use is available to a caller.
+      - name: Is the checksum database proxied?
+        id: sumdb
+        env:
+          # Taken from the action's own output rather than restating its
+          # host/repo-key defaults, so the probe cannot drift from the endpoint
+          # the go command was actually pointed at.
+          GOPROXY_CONFIGURED: ${{ steps.proxy.outputs.goproxy }}
+        run: |
+          set -euo pipefail
+          auth_header="$("${GOAUTH}" < /dev/null | sed -n 's/^Authorization: //p' | head -1)"
+          if [[ -z "${auth_header}" ]]; then
+            echo "::error::GOAUTH helper produced no Authorization header."
+            exit 1
+          fi
+
+          # routed mode appends ",direct"; the probe wants the Artifactory base.
+          base="${GOPROXY_CONFIGURED%%,*}"
+
+          probe_status() {
+            # curl's -w already prints 000 on a connection failure, and it also
+            # exits non-zero -- `|| echo 000` would append a second one and
+            # record 000000. Disarm errexit instead of adding a fallback value.
+            local url="$1" code
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 \
+              -H "Authorization: ${auth_header}" "${url}")" || true
+            printf '%s' "${code:-000}"
+          }
+
+          # /supported is the endpoint the go command itself fetches to decide
+          # whether a proxy speaks the checksum-database protocol.
+          supported="$(probe_status "${base}/sumdb/sum.golang.org/supported")"
+          echo "sumdb_status=${supported}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Checksum database"
+            echo ""
+            echo "\`/sumdb/sum.golang.org/supported\` -> HTTP ${supported}"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Three outcomes, not two. From cmd/go/internal/modfetch/sumdb.go:
+          # 200 commits the client to the proxy and it NEVER falls back; 404 or
+          # 410 sends it to the next proxy and then direct; "any other response
+          # is treated as the database being unavailable" -- a hard failure.
+          # Collapsing those last two would misreport a 403 (which the vendored
+          # kit records edge returning, FINDINGS F-018) as a benign fallback.
+          case "${supported}" in
+            200)
+              # A 200 is the dangerous direction: it removes the direct fallback
+              # for the whole build, so protocol support alone is not enough.
+              # Confirm a real lookup resolves before calling this closed.
+              lookup="$(probe_status "${base}/sumdb/sum.golang.org/lookup/golang.org/x/text@v0.3.0")"
+              echo "\`/sumdb/sum.golang.org/lookup/...\` -> HTTP ${lookup}" >> "$GITHUB_STEP_SUMMARY"
+              echo "lookup_status=${lookup}" >> "$GITHUB_OUTPUT"
+              if [[ "${lookup}" == "200" ]]; then
+                echo "verdict=proxied" >> "$GITHUB_OUTPUT"
+                echo "PROXIED. Checksum lookups resolve through Artifactory, so the release path could route them (#2663)." >> "$GITHUB_STEP_SUMMARY"
+              else
+                echo "verdict=broken" >> "$GITHUB_OUTPUT"
+                {
+                  echo "**DANGEROUS.** \`/supported\` answers 200, so the go command commits to"
+                  echo "the proxy and never falls back -- but a real lookup returned ${lookup}."
+                  echo "Enforced builds would hard-fail on checksum verification."
+                  echo "Do not route until this is fixed upstream."
+                } >> "$GITHUB_STEP_SUMMARY"
+              fi
+              ;;
+            404|410)
+              echo "verdict=not-proxied" >> "$GITHUB_OUTPUT"
+              {
+                echo "NOT PROXIED. The go command falls back to a direct connection to"
+                echo "sum.golang.org, so routing alone would not remove an outage exposure."
+                echo "This is what #2667 concluded for the gate, which moved off \`go install\`"
+                echo "entirely rather than routing; the same holds for #2663."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "verdict=unavailable" >> "$GITHUB_OUTPUT"
+              {
+                echo "**INCONCLUSIVE.** HTTP ${supported} is neither 200 nor 404/410, which the"
+                echo "go command treats as the database being unavailable -- it would fail"
+                echo "rather than fall back. Most likely a credential or WAF answer (the kit's"
+                echo "FINDINGS F-018/F-019), not a statement about sumdb support. Resolve it"
+                echo "before drawing a #2663 conclusion."
+              } >> "$GITHUB_STEP_SUMMARY"
+              ;;
+          esac
+
+      # The four tools #2667 was about. The gate no longer installs any of them
+      # this way, but each still builds outside the main module, which keeps them
+      # a usable probe of whether Artifactory can serve a dependency graph no
+      # local go.sum covers -- something a tag build never exercises.
+      - name: Can it serve the out-of-module tools?
+        env:
+          GOPROXY_CONFIGURED: ${{ steps.proxy.outputs.goproxy }}
+          SETUP_ENVTEST_VERSION: ${{ steps.versions.outputs.setup_envtest }}
+          APIDIFF_VERSION: ${{ steps.versions.outputs.apidiff }}
+          GO_LICENSES_VERSION: ${{ steps.versions.outputs.go_licenses }}
+          ADDLICENSE_VERSION: ${{ steps.versions.outputs.addlicense }}
+        run: |
+          set -uo pipefail
+
+          # Always probe against the Artifactory base alone, never the routed
+          # form. GOPROXY is an ordered list consulted left to right on 404/410,
+          # so a `,direct` suffix makes every install succeed from the origin
+          # and the table would report `ok` for modules Artifactory cannot
+          # serve -- a fail-open answer to the one question this step asks.
+          base="${GOPROXY_CONFIGURED%%,*}"
+
+          {
+            echo "### Out-of-module \`go install\`"
+            echo ""
+            echo "Probed against \`${base}\` with no \`direct\` fallback."
+            echo ""
+            echo "| tool | result |"
+            echo "|---|---|"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          probe() {
+            local name="$1" pkg="$2"
+            local err="${RUNNER_TEMP}/probe-${name}.err"
+            # GOFLAGS is emptied because -mod=readonly is meaningless outside
+            # the main module, which is where `go install pkg@version` resolves.
+            # (tools/setup-tools no longer has an equivalent line to mirror:
+            # #2667 removed its last `go install`.) Written GOFLAGS="" rather
+            # than bare GOFLAGS= so shellcheck does not read it as a mistyped
+            # assignment (SC1007).
+            if GOFLAGS="" GOPROXY="${base}" go install "${pkg}" 2>"${err}"; then
+              echo "| ${name} | ok |" >> "$GITHUB_STEP_SUMMARY"
+              return
+            fi
+            # Full stderr to the log, last line to the table: `go install`
+            # prints "go: downloading ..." progress before the real error, so
+            # the first line is usually not the cause.
+            echo "::group::${name} failed"
+            cat "${err}"
+            echo "::endgroup::"
+            echo "| ${name} | FAILED -- $(tail -1 "${err}") |" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          probe setup-envtest "sigs.k8s.io/controller-runtime/tools/setup-envtest@${SETUP_ENVTEST_VERSION}"
+          probe apidiff       "golang.org/x/exp/cmd/apidiff@${APIDIFF_VERSION}"
+          probe go-licenses   "github.com/google/go-licenses/v2@${GO_LICENSES_VERSION}"
+          probe addlicense    "github.com/google/addlicense@${ADDLICENSE_VERSION}"
+
+      - name: Verdict
+        env:
+          SUMDB_STATUS: ${{ steps.sumdb.outputs.sumdb_status }}
+          VERDICT: ${{ steps.sumdb.outputs.verdict }}
+        run: |
+          echo "sumdb /supported: HTTP ${SUMDB_STATUS} -> ${VERDICT}"
+          echo "See the job summary for the full result."
+
+      # Required, not tidy: setup-dgxc-goproxy writes a live bearer token to
+      # RUNNER_TEMP and a composite action has no teardown hook, so every
+      # caller removes it. Matches all three call sites in on-tag.yaml.
+      - name: Remove the Artifactory credential
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/dgxc-goauth"

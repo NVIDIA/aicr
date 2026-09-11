@@ -13,7 +13,9 @@
 # limitations under the License.
 
 name: 'Setup Build Tools'
-description: 'Install build, release, and testing tools (ko, syft, crane, oras, oasdiff, goreleaser, chainsaw, helm, helmfile, kubectl, kind, yq, flux, hauler, zarf, ctlptl)'
+description: >-
+  Install build, release, and testing tools (ko, syft, crane, oras, oasdiff, setup-envtest,
+  addlicense, goreleaser, chainsaw, helm, helmfile, kubectl, kind, yq, flux, hauler, zarf, ctlptl)
 
 inputs:
   install_ko:
@@ -58,6 +60,30 @@ inputs:
     default: ''
   oasdiff_sha256:
     description: 'oasdiff SHA256 checksum for linux/amd64 (from .settings.yaml via load-versions; required when install_oasdiff=true)'
+    required: false
+    default: ''
+  install_setup_envtest:
+    description: 'Install setup-envtest (true/false)'
+    required: false
+    default: 'false'
+  setup_envtest_version:
+    description: 'setup-envtest version, matching a controller-runtime release tag (from .settings.yaml via load-versions; required when install_setup_envtest=true)'
+    required: false
+    default: ''
+  setup_envtest_sha256:
+    description: 'setup-envtest SHA256 checksum for linux/amd64 (from .settings.yaml via load-versions; required when install_setup_envtest=true)'
+    required: false
+    default: ''
+  install_addlicense:
+    description: 'Install addlicense (true/false)'
+    required: false
+    default: 'false'
+  addlicense_version:
+    description: 'addlicense version (from .settings.yaml via load-versions; required when install_addlicense=true)'
+    required: false
+    default: ''
+  addlicense_sha256:
+    description: 'addlicense SHA256 checksum for linux/amd64 (from .settings.yaml via load-versions; required when install_addlicense=true)'
     required: false
     default: ''
   install_goreleaser:
@@ -313,6 +339,92 @@ runs:
         sudo chmod +x /usr/local/bin/oasdiff
         rm -rf "${OASDIFF_TMP}"
         echo "oasdiff installed: $(oasdiff --version 2>&1 | head -1 || echo "${OASDIFF_VERSION}")"
+
+    # setup-envtest and addlicense follow the oasdiff block above, for the same
+    # reason and with the same integrity story: both replaced a `go install`,
+    # which resolves outside the main module and so authenticates every
+    # transitive dependency against sum.golang.org live. A checksum-database
+    # outage therefore failed the qualification gate on every PR (#2667), the
+    # same way it failed tests / E2E on the v0.21.1 release (#2664).
+    #
+    # Routing through the DGXC Artifactory proxy was the other candidate and is
+    # not usable here: it authenticates via GitHub OIDC, which a fork PR cannot
+    # mint. The gate has to pass from a fork, so the fix has to work without a
+    # credential.
+    #
+    # controller-runtime publishes setup-envtest as a bare binary with no
+    # checksums.txt, so the digest below is the only integrity check on it --
+    # computed from the released asset and reviewed at this SHA. addlicense does
+    # publish checksums.txt, and its pin was cross-checked against it; the pin is
+    # still what the step verifies, because a manifest fetched from the same
+    # release detects corruption in transit but not a compromise of the release.
+    - name: Install setup-envtest
+      if: inputs.install_setup_envtest == 'true'
+      shell: bash
+      env:
+        SETUP_ENVTEST_INPUT_VERSION: ${{ inputs.setup_envtest_version }}
+        SETUP_ENVTEST_INPUT_SHA256: ${{ inputs.setup_envtest_sha256 }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${SETUP_ENVTEST_INPUT_VERSION}" ]]; then
+          echo "::error::install_setup_envtest=true requires setup_envtest_version"
+          exit 1
+        fi
+        # Normalised to exactly one leading v: the asset lives under a
+        # controller-runtime release tag, which carries one.
+        SETUP_ENVTEST_VERSION="v${SETUP_ENVTEST_INPUT_VERSION#v}"
+        if [[ ! "${SETUP_ENVTEST_INPUT_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+          echo "::error::install_setup_envtest=true requires setup_envtest_sha256 to be a 64-character lowercase sha256 (got '${SETUP_ENVTEST_INPUT_SHA256}')"
+          exit 1
+        fi
+        SETUP_ENVTEST_URL="https://github.com/kubernetes-sigs/controller-runtime/releases/download/${SETUP_ENVTEST_VERSION}/setup-envtest-linux-amd64"
+        SETUP_ENVTEST_TMP="$(mktemp -d)"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 \
+          -o "${SETUP_ENVTEST_TMP}/setup-envtest" "${SETUP_ENVTEST_URL}"
+        ACTUAL=$(sha256sum "${SETUP_ENVTEST_TMP}/setup-envtest" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${SETUP_ENVTEST_INPUT_SHA256}" ]]; then
+          echo "::error::setup-envtest checksum mismatch: expected '${SETUP_ENVTEST_INPUT_SHA256}', got '${ACTUAL}'."
+          echo "::error::Refresh testing_tools.setup_envtest_sha256_linux_amd64 in .settings.yaml: tools/update-setup-envtest-checksums ${SETUP_ENVTEST_VERSION}"
+          exit 1
+        fi
+        sudo mv "${SETUP_ENVTEST_TMP}/setup-envtest" /usr/local/bin/setup-envtest
+        sudo chmod +x /usr/local/bin/setup-envtest
+        rm -rf "${SETUP_ENVTEST_TMP}"
+        echo "setup-envtest installed: ${SETUP_ENVTEST_VERSION}"
+
+    - name: Install addlicense
+      if: inputs.install_addlicense == 'true'
+      shell: bash
+      env:
+        ADDLICENSE_INPUT_VERSION: ${{ inputs.addlicense_version }}
+        ADDLICENSE_INPUT_SHA256: ${{ inputs.addlicense_sha256 }}
+      run: |
+        set -euo pipefail
+        if [[ -z "${ADDLICENSE_INPUT_VERSION}" ]]; then
+          echo "::error::install_addlicense=true requires addlicense_version"
+          exit 1
+        fi
+        ADDLICENSE_VERSION="v${ADDLICENSE_INPUT_VERSION#v}"
+        if [[ ! "${ADDLICENSE_INPUT_SHA256}" =~ ^[0-9a-f]{64}$ ]]; then
+          echo "::error::install_addlicense=true requires addlicense_sha256 to be a 64-character lowercase sha256 (got '${ADDLICENSE_INPUT_SHA256}')"
+          exit 1
+        fi
+        ADDLICENSE_BASE="https://github.com/google/addlicense/releases/download/${ADDLICENSE_VERSION}"
+        ADDLICENSE_TAR="addlicense_${ADDLICENSE_VERSION}_Linux_x86_64.tar.gz"
+        ADDLICENSE_TMP="$(mktemp -d)"
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --retry-max-time 60 \
+          -o "${ADDLICENSE_TMP}/${ADDLICENSE_TAR}" "${ADDLICENSE_BASE}/${ADDLICENSE_TAR}"
+        ACTUAL=$(sha256sum "${ADDLICENSE_TMP}/${ADDLICENSE_TAR}" | awk '{print $1}')
+        if [[ "${ACTUAL}" != "${ADDLICENSE_INPUT_SHA256}" ]]; then
+          echo "::error::addlicense checksum mismatch: expected '${ADDLICENSE_INPUT_SHA256}', got '${ACTUAL}'."
+          echo "::error::Refresh linting.addlicense_sha256_linux_amd64 in .settings.yaml: tools/update-addlicense-checksums ${ADDLICENSE_VERSION}"
+          exit 1
+        fi
+        tar -xzf "${ADDLICENSE_TMP}/${ADDLICENSE_TAR}" -C "${ADDLICENSE_TMP}"
+        sudo mv "${ADDLICENSE_TMP}/addlicense" /usr/local/bin/addlicense
+        sudo chmod +x /usr/local/bin/addlicense
+        rm -rf "${ADDLICENSE_TMP}"
+        echo "addlicense installed: $(addlicense -version 2>&1 | head -1 || echo "${ADDLICENSE_VERSION}")"
 
     - name: Validate GoReleaser version input
       if: inputs.install_goreleaser == 'true'

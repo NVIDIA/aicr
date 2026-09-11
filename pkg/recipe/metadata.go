@@ -47,9 +47,10 @@ const RecipeResultAPIVersion = header.StableGroupVersion
 // this aliases header.AuthoringGroupVersion; the track's target is
 // header.GroupVersionV1Beta1.
 //
-// This is deliberately a separate constant from RecipeResultAPIVersion even
-// though both carry aicr.run/v1alpha2 today: ADR-022 sends the two kinds to
-// different targets, so a single shared constant could not be flipped.
+// This is deliberately a separate constant from RecipeResultAPIVersion. The two
+// carried the same aicr.run/v1alpha2 through the reader-first release, which is
+// what made a shared constant look adequate; ADR-022 sends the kinds to
+// different targets, and since the v0.22 emitter switch they differ.
 const RecipeMetadataAPIVersion = header.AuthoringGroupVersion
 
 // ConfiguredRecipeResultAPIVersion is the strict RecipeResult schema used
@@ -790,7 +791,7 @@ type RecipeMetadataHeader struct {
 	// Kind is always "RecipeMetadata".
 	Kind string `json:"kind" yaml:"kind"`
 
-	// APIVersion is the API version (e.g., "aicr.run/v1alpha2").
+	// APIVersion is the API version (e.g., "aicr.run/v1beta1").
 	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 
 	// Metadata contains the name and other metadata.
