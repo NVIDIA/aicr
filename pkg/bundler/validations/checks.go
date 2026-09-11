@@ -1707,8 +1707,8 @@ func CheckNVSentinelDriverLabelDetectable(ctx context.Context, componentName str
 // defaultRuntimeClassName is the shared chart default: the gpu-operator
 // chart ships operator.runtimeClass: nvidia (v26.7.0, verified against
 // the pinned chart values), and nvsentinel's metadata-collector subchart
-// ships runtimeClassName: "nvidia" (v1.9.0, charts/metadata-collector/
-// values.yaml:31). Either side left unset therefore resolves to this
+// ships runtimeClassName: "nvidia" (v1.22.0, charts/metadata-collector/
+// values.yaml:35). Either side left unset therefore resolves to this
 // name.
 const defaultRuntimeClassName = "nvidia"
 
