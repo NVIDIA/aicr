@@ -16,6 +16,7 @@ package v1
 
 import (
 	"strings"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -71,8 +72,21 @@ type JobPlan struct {
 	// Resources are container resource requirements
 	Resources corev1.ResourceRequirements
 
-	// Timeout is the maximum execution time (Job activeDeadlineSeconds)
-	Timeout int64
+	// CheckTimeout is the budget the check itself is given, published to the
+	// container as AICR_CHECK_TIMEOUT. Informational only once BuildJobPlan has
+	// returned: buildEnv already baked the same timeout value into plan.Env at
+	// build time, so mutating this field afterwards does not change what the
+	// container receives.
+	CheckTimeout int64
+
+	// JobDeadline is the Job's activeDeadlineSeconds. It exceeds CheckTimeout
+	// by defaults.ValidatorJobDeadlineHeadroom so the check always terminates
+	// itself first and its pod survives for log extraction. Unlike
+	// CheckTimeout, RenderPlan reads this field directly, so it is not purely
+	// informational — but leaving it at its zero value yields a Job whose
+	// activeDeadlineSeconds is 0, which the Job controller treats as already
+	// exceeded, killing the pod instantly.
+	JobDeadline int64
 
 	// ServiceAccount is the Kubernetes ServiceAccount name
 	ServiceAccount string
@@ -180,6 +194,55 @@ func Plan(
 	return plans, nil
 }
 
+// JobDeadlineFor returns the Job activeDeadlineSeconds a given check timeout
+// renders to. Single source for the derivation so the renderer and any code
+// reporting the enforced deadline cannot drift apart.
+func JobDeadlineFor(checkTimeout time.Duration) time.Duration {
+	return checkTimeout + defaults.ValidatorJobDeadlineHeadroom
+}
+
+// OrchestratorWaitFor returns how much longer a caller should wait for a
+// validator Job to reach a terminal state, given the Job's observed start time
+// (see the observedStart contract below) and the check's own budget.
+//
+// The two clocks do not share an origin. Kubernetes measures
+// activeDeadlineSeconds from the Job's status.startTime, whereas a caller can
+// only begin waiting once the create/apply response reaches it. Anchoring the
+// wait to observedStart instead of to now removes that delay from the
+// comparison, so a caller that waits checkTimeout+defaults.ValidatorWaitBuffer
+// still expires before the Job's checkTimeout+defaults.ValidatorJobDeadlineHeadroom
+// for all but a pathologically slow response (see the floor below for where
+// that stops holding). Without the rebase the effective margin between the
+// two is only defaults.JobEnvelopeMargin, and a response slower than that
+// lets the Job controller win and delete the still-active pod whose logs
+// carry the verdict (issue #2473).
+//
+// observedStart is status.startTime when the caller has seen it, else the Job's
+// creationTimestamp — never later than status.startTime, so the fallback ends
+// the wait earlier rather than later. A zero observedStart means no start time
+// was observed at all and yields the unrebased budget.
+//
+// The result is capped at that same unrebased budget, because apiserver clock
+// skew can place observedStart in the caller's future, and floored at
+// defaults.ValidatorMinCompletionWait so a pathological response delay does not
+// produce a wait too short to observe a terminal condition. Once the floor
+// engages, the Job's own deadline can fire first again — later than without
+// the rebase, but no longer guaranteed to trail it.
+func OrchestratorWaitFor(observedStart, now time.Time, checkTimeout time.Duration) time.Duration {
+	budget := checkTimeout + defaults.ValidatorWaitBuffer
+	if observedStart.IsZero() {
+		return budget
+	}
+	remaining := observedStart.Add(budget).Sub(now)
+	if remaining > budget {
+		return budget
+	}
+	if remaining < defaults.ValidatorMinCompletionWait {
+		return defaults.ValidatorMinCompletionWait
+	}
+	return remaining
+}
+
 // BuildJobPlan creates a JobPlan from a validator entry.
 // Exposed as public for verification and testing purposes.
 //
@@ -258,7 +321,8 @@ func BuildJobPlan(
 		Volumes:          volumes,
 		VolumeMounts:     volumeMounts,
 		Resources:        resources,
-		Timeout:          int64(timeout.Seconds()),
+		CheckTimeout:     int64(timeout.Seconds()),
+		JobDeadline:      int64(JobDeadlineFor(timeout).Seconds()),
 		ServiceAccount:   serviceAccount,
 		Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
 		ImagePullSecrets: imagePullSecrets,
@@ -288,7 +352,7 @@ func RenderPlan(plan JobPlan) *batchv1.Job {
 			Labels:    plan.Labels,
 		},
 		Spec: batchv1.JobSpec{
-			ActiveDeadlineSeconds:   &plan.Timeout,
+			ActiveDeadlineSeconds:   &plan.JobDeadline,
 			BackoffLimit:            int32Ptr(0),
 			TTLSecondsAfterFinished: int32Ptr(int32(defaults.JobTTLAfterFinished.Seconds())),
 			Template: corev1.PodTemplateSpec{
@@ -398,7 +462,7 @@ func RenderPlanToApplyConfig(plan JobPlan, jobName string) *applybatchv1.JobAppl
 	return applybatchv1.Job(jobName, plan.Namespace).
 		WithLabels(plan.Labels).
 		WithSpec(applybatchv1.JobSpec().
-			WithActiveDeadlineSeconds(plan.Timeout).
+			WithActiveDeadlineSeconds(plan.JobDeadline).
 			WithBackoffLimit(0).
 			WithTTLSecondsAfterFinished(int32(defaults.JobTTLAfterFinished.Seconds())).
 			WithTemplate(applycorev1.PodTemplateSpec().

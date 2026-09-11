@@ -29,6 +29,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
@@ -77,6 +78,11 @@ type Config struct {
 type Deployer struct {
 	config  Config
 	jobName string // Unique name generated client-side (set by DeployJob)
+	// jobStart is the apiserver-side moment Kubernetes began measuring the
+	// Job's activeDeadlineSeconds, read off the apply response by DeployJob.
+	// WaitForCompletion anchors its own deadline to it so both clocks share an
+	// origin; zero until DeployJob succeeds.
+	jobStart time.Time
 }
 
 // NewDeployer creates a Deployer for a single validator catalog entry.
@@ -147,13 +153,35 @@ func (d *Deployer) DeployJob(ctx context.Context) error {
 	}
 
 	d.jobName = applied.Name
+	d.jobStart = observedJobStart(applied)
 
 	slog.Debug("validator Job applied",
 		"job", d.jobName,
 		"validator", d.config.Entry.Name,
-		"namespace", d.config.Namespace)
+		"namespace", d.config.Namespace,
+		"jobStart", d.jobStart)
 
 	return nil
+}
+
+// observedJobStart returns the apiserver-side moment Kubernetes started
+// measuring the Job's activeDeadlineSeconds.
+//
+// status.startTime is the field the Job controller measures against, but it
+// stamps it on its first reconcile, so it is normally still absent from the
+// response to the create/apply that produced the Job. creationTimestamp is the
+// fallback: it is never later than status.startTime, which keeps any deadline
+// derived from it on the earlier-expiring side. A nil Job, or one the apiserver
+// returned without either timestamp, yields the zero time — see
+// v1.OrchestratorWaitFor for how callers treat that.
+func observedJobStart(job *batchv1.Job) time.Time {
+	if job == nil {
+		return time.Time{}
+	}
+	if job.Status.StartTime != nil {
+		return job.Status.StartTime.Time
+	}
+	return job.CreationTimestamp.Time
 }
 
 // Stable reason codes for affinityScanWarning, suitable for log filtering
@@ -313,8 +341,14 @@ func (d *Deployer) CleanupJob(ctx context.Context) error {
 // in the validator orchestrator, not in the shared pod.WaitForJobTerminal
 // helper, which intentionally treats both Complete and Failed Jobs as
 // legitimate completions and lets the caller classify them.
+//
+// The wait is anchored to the Job's observed start time rather than to the
+// moment this method was called, so it and the Job's own activeDeadlineSeconds
+// are measured from the same origin and the orchestrator stays the tighter
+// clock for all but a pathologically slow apply response. v1.OrchestratorWaitFor
+// carries the derivation, including where that guarantee stops holding.
 func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration) error {
-	waitTimeout := timeout + defaults.ValidatorWaitBuffer
+	waitTimeout := v1.OrchestratorWaitFor(d.jobStart, time.Now(), timeout)
 	// pod.WaitForJobTerminal already returns structured errors with proper
 	// codes (ErrCodeTimeout, ErrCodeUnavailable, ErrCodeInternal). Propagate
 	// as-is so callers can distinguish retryable from terminal failures.

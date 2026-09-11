@@ -2112,7 +2112,8 @@ func (c *Client) ValidateState(
 	// Apply a facade-level deadline only as opted into by WithValidationTimeout,
 	// mirroring MakeBundle. The default (cfg.timeout == nil) keeps the
 	// ValidationOperationTimeout cap (75m), which sits ABOVE the largest
-	// per-check Job timeout (the 65m inference-perf catalog timeout; the
+	// rendered per-check Job deadline (the 65m inference-perf catalog timeout
+	// plus the 3m30s ValidatorJobDeadlineHeadroom, i.e. 68m30s; the
 	// CheckExecutionTimeout fallback is 55m), so a single hung check fires its
 	// own per-check timeout first and surfaces as a structured check failure
 	// rather than a wrapping deadline-exceeded that loses the per-check signal —

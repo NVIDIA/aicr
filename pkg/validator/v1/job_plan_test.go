@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	corev1 "k8s.io/api/core/v1"
@@ -672,7 +673,7 @@ func TestRenderPlan(t *testing.T) {
 		Volumes:          []corev1.Volume{{Name: "snapshot"}},
 		VolumeMounts:     []corev1.VolumeMount{{Name: "snapshot", MountPath: "/data"}},
 		Resources:        corev1.ResourceRequirements{},
-		Timeout:          300,
+		JobDeadline:      300,
 		ServiceAccount:   "test-sa",
 		Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
 		ImagePullSecrets: []string{"my-secret"},
@@ -764,7 +765,7 @@ func TestRenderPlanTagOverridePullPolicy(t *testing.T) {
 				Namespace:        "ns",
 				Image:            tt.image,
 				ImageTagOverride: tt.override,
-				Timeout:          300,
+				JobDeadline:      300,
 			}
 
 			// Typed render path (job_plan.go RenderPlan).
@@ -798,7 +799,7 @@ func TestRenderPlanToApplyConfig(t *testing.T) {
 		Volumes:          []corev1.Volume{{Name: "snapshot"}},
 		VolumeMounts:     []corev1.VolumeMount{{Name: "snapshot", MountPath: "/data"}},
 		Resources:        corev1.ResourceRequirements{},
-		Timeout:          600,
+		JobDeadline:      600,
 		ServiceAccount:   "apply-sa",
 		Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
 		ImagePullSecrets: []string{"apply-secret"},
@@ -898,7 +899,7 @@ func TestRenderPlanToApplyConfig_EnvAndVolumeTypes(t *testing.T) {
 		},
 		VolumeMounts:     []corev1.VolumeMount{{Name: "configmap-vol", MountPath: "/data"}},
 		Resources:        corev1.ResourceRequirements{},
-		Timeout:          300,
+		JobDeadline:      300,
 		ServiceAccount:   "sa",
 		Tolerations:      []corev1.Toleration{{Operator: corev1.TolerationOpExists}},
 		ImagePullSecrets: []string{"secret"},
@@ -1361,5 +1362,124 @@ func TestBuildResources_NilOrEmptyUsesDefaults(t *testing.T) {
 				t.Errorf("defaults not applied: got cpu=%v memory=%v", got.Requests.Cpu(), got.Requests.Memory())
 			}
 		})
+	}
+}
+
+// TestOrchestratorWaitForRebasesOntoJobStart is the regression test for the
+// clock-origin half of issue #2473. Kubernetes measures activeDeadlineSeconds
+// from the Job's start time, but the orchestrator can only start waiting once
+// the create/apply response reaches it. Anchoring the wait to the observed
+// start time is what keeps the orchestrator the tighter clock when that
+// response is slow; without it the effective margin between the two deadlines
+// is only defaults.JobEnvelopeMargin, and a slower response lets the Job
+// controller fire first and delete the still-active pod holding the verdict.
+//
+// Each case asserts the property that matters — observedStart + wait must land
+// strictly before observedStart + JobDeadlineFor(checkTimeout), i.e. the whole
+// orchestrator wait fits inside the Job's own deadline measured from the same
+// origin.
+func TestOrchestratorWaitForRebasesOntoJobStart(t *testing.T) {
+	t.Parallel()
+
+	const checkTimeout = 5 * time.Minute
+	budget := checkTimeout + defaults.ValidatorWaitBuffer // 5m + 2m30s = 7m30s
+	jobDeadline := JobDeadlineFor(checkTimeout)           // 5m + 3m30s = 8m30s
+	start := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name       string
+		applyDelay time.Duration // how long the apply response took to arrive
+		want       time.Duration
+		// floored marks the case where the remainder was clamped to
+		// defaults.ValidatorMinCompletionWait. That can happen well before the
+		// Job deadline is reached, not only once it is already in the past
+		// (see the cases below for both); either way the fit-inside-the-
+		// deadline invariant is not guaranteed to hold, so floored cases skip
+		// it. The floor's job is only to leave enough wall clock to read the
+		// terminal condition Kubernetes stamped.
+		floored bool
+	}{
+		{
+			name:       "instant apply response leaves the full budget",
+			applyDelay: 0,
+			want:       budget,
+		},
+		{
+			name:       "delay inside JobEnvelopeMargin still shortens the wait",
+			applyDelay: 30 * time.Second,
+			want:       budget - 30*time.Second, // 7m
+		},
+		{
+			// The pre-fix failure mode: a 90s apply response is 30s past
+			// JobEnvelopeMargin, so an unrebased wait would have ended at
+			// 90s+7m30s = 9m after job start — 30s AFTER the 8m30s Job
+			// deadline. Rebased, it ends at 7m30s after job start, 1m early.
+			name:       "delay beyond JobEnvelopeMargin no longer outlives the Job deadline",
+			applyDelay: 90 * time.Second,
+			want:       budget - 90*time.Second, // 6m
+		},
+		{
+			name:       "pathological delay is floored, not driven negative",
+			applyDelay: budget + time.Hour,
+			want:       defaults.ValidatorMinCompletionWait, // 30s
+			floored:    true,
+		},
+		{
+			// applyDelay=8m15s falls inside [checkTimeout+180s, checkTimeout+210s)
+			// = [8m, 8m30s): the floor still engages (remaining would be
+			// negative), but jobDeadline (8m30s) has not elapsed yet when the
+			// wait begins. The floored 30s wait ends at 8m45s, past jobDeadline,
+			// so the Job's own deadline — not this wait — is what ends up
+			// bounding how long the still-active pod survives.
+			name:       "floor engages before the Job deadline, but the floored wait outlives it",
+			applyDelay: 8*time.Minute + 15*time.Second,      // 495s, inside [8m, 8m30s)
+			want:       defaults.ValidatorMinCompletionWait, // 30s
+			floored:    true,
+		},
+		{
+			// Apiserver clock skew can place the observed start in the
+			// caller's future; the wait must not exceed the nominal budget.
+			name:       "start time in the caller's future is capped at the budget",
+			applyDelay: -time.Hour,
+			want:       budget,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			now := start.Add(tt.applyDelay)
+			got := OrchestratorWaitFor(start, now, checkTimeout)
+			if got != tt.want {
+				t.Errorf("OrchestratorWaitFor(start, start+%v, %v) = %v, want %v",
+					tt.applyDelay, checkTimeout, got, tt.want)
+			}
+			if tt.floored {
+				return
+			}
+			// The invariant the fix exists to hold: the orchestrator's wait,
+			// measured from the same origin Kubernetes uses, ends before the
+			// Job's activeDeadlineSeconds does.
+			orchestratorEnd := now.Add(got)
+			jobEnd := start.Add(jobDeadline)
+			if !orchestratorEnd.Before(jobEnd) {
+				t.Errorf("orchestrator wait ends at %v, want strictly before the Job deadline at %v",
+					orchestratorEnd, jobEnd)
+			}
+		})
+	}
+}
+
+// TestOrchestratorWaitForUnobservedStart pins the zero-time contract: a caller
+// that never saw a start time gets the unrebased budget, which is the
+// pre-#2473 behavior and still strictly under the Job deadline as long as the
+// apply response itself was not the thing that was slow.
+func TestOrchestratorWaitForUnobservedStart(t *testing.T) {
+	t.Parallel()
+
+	const checkTimeout = 5 * time.Minute
+	want := checkTimeout + defaults.ValidatorWaitBuffer
+	if got := OrchestratorWaitFor(time.Time{}, time.Now(), checkTimeout); got != want {
+		t.Errorf("OrchestratorWaitFor(zero, now, %v) = %v, want %v", checkTimeout, got, want)
 	}
 }

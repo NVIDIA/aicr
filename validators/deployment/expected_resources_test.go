@@ -17,9 +17,14 @@ package main
 import (
 	"context"
 	stderrors "errors"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/NVIDIA/aicr/pkg/chainsaw"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
@@ -1030,6 +1035,148 @@ func TestIsRuntimeRequiredTaint(t *testing.T) {
 	}
 }
 
+// probeRendezvousTimeout bounds how long one arm of the rendezvous below waits
+// for its sibling. It elapses only when the probes did NOT overlap — i.e. only
+// on the path where the test is already failing — so the passing run never
+// spends it.
+const probeRendezvousTimeout = 10 * time.Second
+
+// rendezvous releases all its arms only once `want` of them have arrived, so a
+// serial implementation cannot satisfy it: arm 1 would have to complete before
+// arm 2 arrives, and completing requires a release that only arm 2's arrival
+// can trigger.
+type rendezvous struct {
+	mu       sync.Mutex
+	arrived  int
+	want     int
+	released chan struct{}
+}
+
+func newRendezvous(want int) *rendezvous {
+	return &rendezvous{want: want, released: make(chan struct{})}
+}
+
+// arrive blocks until every arm has arrived. Late arrivals (a probe that calls
+// the same API more than once) pass straight through on the closed channel.
+// t.Errorf, not t.Fatalf: this runs on a probe goroutine.
+func (r *rendezvous) arrive(t *testing.T, arm string) {
+	t.Helper()
+	r.mu.Lock()
+	r.arrived++
+	if r.arrived == r.want {
+		close(r.released)
+	}
+	r.mu.Unlock()
+
+	select {
+	case <-r.released:
+	case <-time.After(probeRendezvousTimeout):
+		t.Errorf("%s probe waited %s at the rendezvous and its sibling never arrived — the probes ran serially, not concurrently",
+			arm, probeRendezvousTimeout)
+	}
+}
+
+// TestVerifyGPUReadinessSignalsPreservesOrderConcurrently pins the two
+// properties the fan-out must preserve end to end: every enabled signal reports
+// (one failure never truncates its siblings), and failures come back in the
+// fixed nodewright → DRA → RDMA order the firstStructuredErr precedence depends
+// on, whichever probe finishes first.
+//
+// That the probes genuinely overlap is proven by
+// TestRunGPUReadinessProbesOverlap, not here: both real probes reach the
+// cluster through client-go fakes, and testing.Fake.Invokes holds one mutex
+// across the whole reaction chain, so a barrier installed in a reactor blocks
+// every other call on the same fake — including the sibling probe's — and
+// self-deadlocks regardless of whether the implementation is concurrent.
+func TestVerifyGPUReadinessSignalsPreservesOrderConcurrently(t *testing.T) {
+	t.Parallel()
+
+	refs := []recipe.ComponentRef{
+		{Name: nodewrightCustomizationsComponent, Namespace: "skyhook", ManifestFiles: []string{testNodewrightManifest}},
+		{Name: draDriverComponent, Namespace: "nvidia-dra-driver"},
+	}
+	// The Nodewright GroupVersion must be registered (extraRegistered) or the
+	// CRD-not-registered skip (#607) returns nil before the signal ever fails —
+	// this proves both signals report, not just that one CRD is absent.
+	ctx := newDeploymentTestContextWithDiscovery(t, nil, nil, []schema.GroupVersion{nodewrightGVR.GroupVersion()}, nil, refs)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel() // force every probe's poll loop to exit on its first iteration
+	ctx.Ctx = canceled
+
+	failures, firstStructured := verifyGPUReadinessSignals(ctx, refs)
+	if len(failures) != 2 {
+		t.Fatalf("got %d failures, want 2 — every enabled signal must report", len(failures))
+	}
+	if !strings.Contains(failures[0], "Nodewright") {
+		t.Errorf("failures[0] = %q, want the nodewright signal first", failures[0])
+	}
+	// firstStructuredErr precedence is fixed-order, not completion-order: it
+	// must resolve to the nodewright signal (index 0) even though both probes
+	// ran concurrently and either could have finished first.
+	if firstStructured == nil || firstStructured.Error() != failures[0] {
+		t.Errorf("firstStructured = %v, want it to match failures[0] (%q)", firstStructured, failures[0])
+	}
+}
+
+// TestRunGPUReadinessProbesOverlap proves the fan-out is concurrent rather than
+// a loop that happens to produce the same results. Each probe arrives at a
+// rendezvous that releases nobody until every probe has arrived, so a serial
+// implementation cannot get past it: probe 1 would have to return before probe
+// 2 arrives, and returning requires probe 2's arrival.
+//
+// Nothing sleeps on the passing path — probeRendezvousTimeout elapses only when
+// the probes did not overlap, which is already a failure. Results are still
+// asserted in index order to pin that they are read back by index and not in
+// completion order: probe 1 is released first but deliberately returns last.
+func TestRunGPUReadinessProbesOverlap(t *testing.T) {
+	t.Parallel()
+
+	rv := newRendezvous(2)
+	firstDone := make(chan struct{})
+	errFirst := errors.New(errors.ErrCodeInternal, "first probe")
+	errSecond := errors.New(errors.ErrCodeNotFound, "second probe")
+
+	results := runGPUReadinessProbes([]gpuReadinessProbe{
+		{
+			component: "first",
+			signal:    "first signal",
+			run: func() error {
+				rv.arrive(t, "first")
+				// Finish after the sibling so completion order is the reverse
+				// of index order; the assertions below must not notice. Bounded
+				// for the same reason arrive is: on a serial implementation the
+				// sibling never runs, and an unbounded receive would hang the
+				// package instead of reporting a failure.
+				select {
+				case <-firstDone:
+				case <-time.After(probeRendezvousTimeout):
+					t.Errorf("first probe waited %s for the second to finish; the second never ran", probeRendezvousTimeout)
+				}
+				return errFirst
+			},
+		},
+		{
+			component: "second",
+			signal:    "second signal",
+			run: func() error {
+				rv.arrive(t, "second")
+				close(firstDone)
+				return errSecond
+			},
+		},
+	})
+
+	if len(results) != 2 {
+		t.Fatalf("got %d results, want one per probe", len(results))
+	}
+	if !stderrors.Is(results[0], errFirst) {
+		t.Errorf("results[0] = %v, want the first probe's error regardless of completion order", results[0])
+	}
+	if !stderrors.Is(results[1], errSecond) {
+		t.Errorf("results[1] = %v, want the second probe's error", results[1])
+	}
+}
+
 func stringSlicesEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
@@ -1721,4 +1868,195 @@ func TestGatedHealthCheckSuppressed(t *testing.T) {
 			t.Fatal("gatedHealthCheckSuppressed() error = nil, want cancellation")
 		}
 	})
+}
+
+// TestCheckExpectedResourcesFailsClosedOnExhaustedBudget is the regression test
+// for issue #2473's second half: a check whose budget expires must not report a
+// healthy verdict. Before the fix the ctx.Done() branches returned before the
+// reporting block, and with no collected failures the function fell through to
+// "All deployment resources ... are healthy" and returned nil.
+func TestCheckExpectedResourcesFailsClosedOnExhaustedBudget(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContext(t, nil, nil, []recipe.ComponentRef{
+		{Name: "app-component", Namespace: "app-ns"},
+	})
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel() // budget already spent before the first component is examined
+	ctx.Ctx = canceled
+
+	err := checkExpectedResources(ctx)
+	if err == nil {
+		t.Fatal("checkExpectedResources returned nil on an exhausted budget; it must fail closed")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("error = %v, want ErrCodeTimeout", err)
+	}
+	if !strings.Contains(err.Error(), "budget exhausted") {
+		t.Errorf("error = %q, want it to name budget exhaustion", err.Error())
+	}
+	// verifyNamespacesActive runs before the enabledRefs loop and, against the
+	// nil-kubeObjects fake clientset, produces exactly one NotFound failure for
+	// app-ns before the loop's own ctx.Done() check trips budgetExhausted. This
+	// pins that collected failures survive into the fail-closed report rather
+	// than being discarded — the commit's headline behavior.
+	if !strings.Contains(err.Error(), "1 issue(s) collected") {
+		t.Errorf("error = %q, want it to report 1 issue(s) collected", err.Error())
+	}
+}
+
+// TestCheckExpectedResourcesReportsUnreachedWorkOnExhaustedBudget is the
+// regression for the reporting half of issue #2473: a budget that expires
+// partway through must account for the components the iteration never reached
+// and the GPU probes it skipped, not just the asserts it happened to queue
+// first. Under-reporting is the dangerous direction — an operator reading three
+// namespace failures concludes the other six signals were fine.
+//
+// The context is pre-canceled, so the loop breaks on its very first guard and
+// every enabled ref is unreached. Expected tally, all deterministic:
+//   - 3 namespace failures (verifyNamespacesActive runs before the loop and
+//     every namespace is absent from the empty fake clientset)
+//   - 2 unreached health checks (gpu-operator, network-operator; dra-driver
+//     carries none and must not produce a line)
+//   - 2 skipped GPU probes (network-operator's RDMA fabric, selected by its
+//     NicClusterPolicy manifest, and the DRA kubelet plugin)
+//
+// Before the fix the count was 3.
+func TestCheckExpectedResourcesReportsUnreachedWorkOnExhaustedBudget(t *testing.T) {
+	t.Parallel()
+
+	refs := []recipe.ComponentRef{
+		{Name: "gpu-operator", Namespace: "gpu-ns", HealthCheckAsserts: "apiVersion: v1\nkind: Namespace\n"},
+		{
+			Name:               networkOperatorComponent,
+			Namespace:          "network-operator",
+			HealthCheckAsserts: "apiVersion: v1\nkind: Namespace\n",
+			ManifestFiles:      []string{"components/network-operator/" + nicClusterPolicyManifestMarker + ".yaml"},
+		},
+		{Name: draDriverComponent, Namespace: "nvidia-dra-driver"},
+	}
+
+	ctx := newDeploymentTestContext(t, nil, nil, refs)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel() // budget already spent before the first component is examined
+	ctx.Ctx = canceled
+
+	err := checkExpectedResources(ctx)
+	if err == nil {
+		t.Fatal("checkExpectedResources returned nil on an exhausted budget; it must fail closed")
+	}
+	if !strings.Contains(err.Error(), "7 issue(s) collected") {
+		t.Errorf("error = %q, want 7 issue(s) collected (3 namespaces + 2 unreached health checks + 2 skipped GPU probes)",
+			err.Error())
+	}
+}
+
+// TestEnabledGPUReadinessProbesSelection pins which enabled components select
+// which probe, since markUndispatched reports the skipped set from this list
+// without running any of it — a selection drift would silently shrink the
+// budget-exhausted report.
+func TestEnabledGPUReadinessProbesSelection(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		refs []recipe.ComponentRef
+		want []string
+	}{
+		{
+			name: "no GPU components enabled",
+			refs: []recipe.ComponentRef{{Name: "gpu-operator", Namespace: "gpu-ns"}},
+			want: nil,
+		},
+		{
+			name: "dra driver alone",
+			refs: []recipe.ComponentRef{{Name: draDriverComponent, Namespace: "dra-ns"}},
+			want: []string{draDriverComponent},
+		},
+		{
+			name: "network operator without a NicClusterPolicy manifest selects nothing",
+			refs: []recipe.ComponentRef{{Name: networkOperatorComponent, Namespace: "net-ns"}},
+			want: nil,
+		},
+		{
+			name: "network operator with a NicClusterPolicy manifest selects the fabric probe",
+			refs: []recipe.ComponentRef{{
+				Name:          networkOperatorComponent,
+				Namespace:     "net-ns",
+				ManifestFiles: []string{nicClusterPolicyManifestMarker + ".yaml"},
+			}},
+			want: []string{networkOperatorComponent},
+		},
+		{
+			name: "order follows the fixed nodewright → dra → rdma sequence, not ref order",
+			refs: []recipe.ComponentRef{
+				{Name: networkOperatorComponent, Namespace: "net-ns", ManifestFiles: []string{nicClusterPolicyManifestMarker + ".yaml"}},
+				{Name: draDriverComponent, Namespace: "dra-ns"},
+			},
+			want: []string{draDriverComponent, networkOperatorComponent},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := newDeploymentTestContext(t, nil, nil, tt.refs)
+			var got []string
+			for _, p := range enabledGPUReadinessProbes(ctx, tt.refs) {
+				if p.signal == "" {
+					t.Errorf("probe %q has an empty signal label; the skipped-probe report needs it", p.component)
+				}
+				got = append(got, p.component)
+			}
+			if !stringSlicesEqual(got, tt.want) {
+				t.Errorf("enabledGPUReadinessProbes() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestMarkUndispatched proves every piece of work an exhausted run left undone
+// is reported as not evaluated rather than silently dropped — otherwise an
+// operator reads a short failure list and concludes the rest of the cluster is
+// fine. All three categories must appear: asserts queued but never dispatched,
+// components the iteration never reached, and GPU probes that were skipped.
+//
+// Unit-tested against the helper rather than through checkExpectedResources:
+// reaching that path in an integration test needs a context that is live while
+// the enabledRefs loop queues asserts and dead by the chainsaw guard a few
+// statements later, which is not deterministically arrangeable.
+func TestMarkUndispatched(t *testing.T) {
+	t.Parallel()
+
+	got := markUndispatched(
+		[]string{"[expectedResources] existing failure"},
+		[]chainsaw.ComponentAssert{{Name: "gpu-operator"}, {Name: "network-operator"}},
+		[]recipe.ComponentRef{
+			{Name: "unreached-with-check", HealthCheckAsserts: "apiVersion: v1"},
+			// No HealthCheckAsserts: there was no verdict to lose, so it must
+			// NOT produce a line or the report inflates the unchecked count.
+			{Name: "unreached-without-check"},
+		},
+		[]gpuReadinessProbe{{component: "dra-driver", signal: "DRA kubelet plugin readiness"}},
+		"chainsaw dispatch",
+	)
+
+	if len(got) != 5 {
+		t.Fatalf("got %d failures (%q), want 5 (1 pre-existing + 2 queued + 1 unreached + 1 GPU probe)", len(got), got)
+	}
+	for _, want := range []string{
+		"[chainsaw] gpu-operator: not evaluated — budget exhausted during chainsaw dispatch",
+		"[chainsaw] network-operator: not evaluated — budget exhausted during chainsaw dispatch",
+		"[chainsaw] unreached-with-check: not evaluated — budget exhausted during chainsaw dispatch",
+		"[gpuReadiness] dra-driver (DRA kubelet plugin readiness): not evaluated — budget exhausted during chainsaw dispatch",
+	} {
+		if !slices.Contains(got, want) {
+			t.Errorf("failures %q missing %q", got, want)
+		}
+	}
+	for _, f := range got {
+		if strings.Contains(f, "unreached-without-check") {
+			t.Errorf("failures %q names a component that carries no health check", got)
+		}
+	}
 }

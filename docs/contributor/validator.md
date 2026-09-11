@@ -656,10 +656,15 @@ enumerates any RDMA-candidate node (with `nodesValidated=0` — nothing is
 certified mid-poll) and again at the terminal outcome.
 `parseExtraSentinels` keeps the last valid sentinel, so the terminal emit
 wins on a clean exit; the floor exists only so a cordoned-node narrowing
-still reaches the signed bundle if the Job's `activeDeadlineSeconds`
-SIGKILLs the process at the no-margin poll budget before the terminal emit
-runs (#1952). The gate stays fail-closed: "could not observe the fabric"
-reports `0` validated and never reads as ready.
+still reaches the signed bundle on the rarer path where the process is
+SIGKILLed before the terminal emit runs (#1952). The broader no-margin kill
+race this once described (#2473) is now bounded generally by
+`ValidatorJobDeadlineHeadroom`: the Job's `activeDeadlineSeconds` adds that
+headroom on top of the catalog `timeout:`, so an exhausted poll has margin to
+unwind and reach the terminal emit before the Job's SIGKILL, and this floor
+remains defense-in-depth for a probe call that blocks past its own
+poll-budget cancellation. The gate stays fail-closed: "could not observe the
+fabric" reports `0` validated and never reads as ready.
 
 Unlike `check-nvidia-smi`, the RDMA gate never *skips* — it either
 certifies the cohort or fails closed — so it mints no `skipReason`
@@ -1271,14 +1276,18 @@ but a readiness test copied from a validator check (`assert: 5m`) is
 now capped at the gate's 2m per evaluation rather than overrunning it.
 
 The `expected-resources` catalog timeout (8m in
-`recipes/validators/catalog.yaml`) is the **outer** envelope. It must
-exceed the longest in-tree `assert` value plus headroom for
-pre-chainsaw work, chainsaw teardown, and log flush
-(`defaults.JobEnvelopeMargin`). If assert runs too close to that
-catalog deadline, the Job can SIGKILL the pod before chainsaw reports
-the failing step — operators see truncated output instead of a useful
-failure. Raise the catalog `timeout` in tandem when you need a longer
-assert budget (`TestExpectedResourcesCatalogEnvelope` guards this).
+`recipes/validators/catalog.yaml`) is the **outer** envelope for the
+check's own budget (`AICR_CHECK_TIMEOUT`). It must exceed the longest
+in-tree `assert` value plus headroom for pre-chainsaw work, chainsaw
+teardown, and log flush (`defaults.JobEnvelopeMargin`). If assert runs
+too close to that catalog deadline, the check's own context can expire
+before chainsaw reports the failing step — operators see truncated
+output instead of a useful failure. The Job's `activeDeadlineSeconds`
+(this catalog timeout plus `defaults.ValidatorJobDeadlineHeadroom`) is
+a separate, later backstop and no longer the deadline this margin
+protects against. Raise the catalog `timeout` in tandem when you need
+a longer assert budget (`TestExpectedResourcesCatalogEnvelope` guards
+this).
 
 ## Constraint evaluation algorithm
 

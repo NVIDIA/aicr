@@ -146,14 +146,16 @@ const (
 	// ValidationOperationTimeout is the facade-level upper bound for
 	// Client.ValidateState when the caller's context has no deadline
 	// (controller/library callers; the CLI runs uncapped). It must exceed the
-	// LARGEST per-check Job timeout so that inner timeout fires first and the
+	// LARGEST rendered per-check Job deadline (catalog timeout plus
+	// ValidatorJobDeadlineHeadroom) so that inner timeout fires first and the
 	// run surfaces a structured per-check error rather than the wrapping
 	// context's bare deadline-exceeded. The largest is the inference-perf
 	// catalog timeout (65m, which covers the model-cache populate + cold-start
-	// benchmark phases), not CheckExecutionTimeout (55m, the fallback when no
-	// catalog timeout is set). 75m keeps margin above 65m for orchestration
-	// overhead (snapshot agent, RBAC, namespace setup, cleanup). The
-	// catalog-vs-facade relationship is asserted in
+	// benchmark phases) plus the 3m30s headroom, i.e. 68m30s — not
+	// CheckExecutionTimeout (55m, the fallback when no catalog timeout is
+	// set). 75m keeps margin above that 68m30s rendered deadline for
+	// orchestration overhead (snapshot agent, RBAC, namespace setup,
+	// cleanup). The catalog-vs-facade relationship is asserted in
 	// pkg/validator/catalog/catalog_test.go.
 	ValidationOperationTimeout = 75 * time.Minute
 
@@ -579,7 +581,9 @@ const (
 const (
 	// CheckExecutionTimeout is the parent context timeout for checks running
 	// inside a K8s Job. Must be long enough for the slowest behavioral check
-	// and shorter than the catalog-level Job timeout (activeDeadlineSeconds).
+	// and shorter than the catalog's own check timeout (AICR_CHECK_TIMEOUT) —
+	// not the Job's activeDeadlineSeconds, which adds
+	// ValidatorJobDeadlineHeadroom on top of that check timeout.
 	//
 	// The ceiling is set by the cold-start inference benchmark, which runs
 	// the following phases serially under the parent ctx:
@@ -1140,9 +1144,31 @@ const (
 
 // Validator constants.
 const (
-	// ValidatorWaitBuffer is added to the catalog timeout when waiting for Job
-	// completion. Accounts for pod scheduling, image pull, and graceful termination.
-	ValidatorWaitBuffer = 30 * time.Second
+	// ValidatorWaitBuffer is added to the catalog timeout when the orchestrator
+	// waits for Job completion. It must exceed the delay between Job creation
+	// and the validator container's first instruction, or the orchestrator
+	// abandons the wait before the check's own clean exit and reports an
+	// orchestrator timeout in place of the check's verdict.
+	ValidatorWaitBuffer = K8sPodReadyTimeout + ValidatorTerminationGracePeriod
+
+	// ValidatorJobDeadlineHeadroom is the gap between a check's own budget
+	// (AICR_CHECK_TIMEOUT) and the Job's activeDeadlineSeconds. Sized so the
+	// orchestrator is always the tighter clock: on exhaustion the check
+	// self-terminates and its pod stays Failed-but-present for log extraction,
+	// instead of the Job controller deleting it as an active pod (issue #2473).
+	ValidatorJobDeadlineHeadroom = ValidatorWaitBuffer + JobEnvelopeMargin
+
+	// ValidatorMinCompletionWait floors the orchestrator's Job-completion wait
+	// once that wait has been rebased onto the Job's observed start time. The
+	// rebase subtracts however long the create/apply response took to arrive,
+	// and the floor engages as soon as the rebased remainder drops below it —
+	// not only once that remainder goes zero or negative — since an unfloored
+	// wait that short risks reporting an orchestrator timeout before the check
+	// ran. One SIGTERM-to-SIGKILL window is the shortest span in which a Job
+	// can still stamp a terminal condition for the orchestrator to read,
+	// whether or not its own activeDeadlineSeconds has already elapsed by the
+	// time the floor engages.
+	ValidatorMinCompletionWait = ValidatorTerminationGracePeriod
 
 	// ValidatorDefaultTimeout is the default per-validator timeout if not
 	// specified in the catalog. Used as fallback only.
