@@ -142,8 +142,28 @@ check "the script carries no floating nvml-mock tag in operative code" "0" \
 # including the control plane; without the mock driver root it reports no
 # devices at all.
 manifest="$(device_plugin_manifest)"
-check "the plugin image is pinned to a released tag" "1" \
-    "$(printf '%s' "$manifest" | grep -cF "image: ${DEVICE_PLUGIN_IMAGE}" | tr -d ' ')"
+# The SHAPE of the rendered reference, not equality with the constant.
+# Comparing the manifest against "image: ${DEVICE_PLUGIN_IMAGE}" only proves
+# the heredoc interpolates the variable: change the variable back to a mutable
+# tag and that check still passes. These read the reference back out of the
+# rendered manifest and require it to be a digest, which is the property the
+# lane actually needs.
+check "the manifest renders exactly one plugin image" "1" \
+    "$(printf '%s' "$manifest" | grep -cE '^[[:space:]]*image:' | tr -d ' ')"
+plugin_image="$(printf '%s' "$manifest" | awk '$1 == "image:" {print $2}')"
+check "the plugin image is pinned by digest, not by tag" "digest" \
+    "$(grep -qE '^[A-Za-z0-9._/-]+@sha256:[0-9a-f]{64}$' <<<"$plugin_image" \
+        && echo digest || echo "not-a-digest:${plugin_image}")"
+check "the rendered plugin image is the one the install logs and applies" \
+    "${DEVICE_PLUGIN_IMAGE}" "${plugin_image}"
+
+# The mirror of the nvml-mock tag guard above: reintroducing a floating tag as
+# an operative value, anywhere in the script, not just in the manifest.
+# Comment lines are stripped first, because naming the release a digest came
+# from in prose is not the regression.
+check "the script carries no floating device-plugin tag in operative code" "0" \
+    "$(grep -vE '^[[:space:]]*#' "${SCRIPT_DIR}/setup-gpu-sim.sh" \
+        | grep -cE 'k8s-device-plugin:' | tr -d ' ')"
 check "the plugin targets only the mock-labelled nodes" "1" \
     "$(printf '%s' "$manifest" | grep -cF "${MOKKA_NODE_TYPE_LABEL}: ${MOKKA_NODE_TYPE}" | tr -d ' ')"
 check "the plugin reads the mock driver root" "1" \
