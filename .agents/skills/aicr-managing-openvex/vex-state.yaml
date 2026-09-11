@@ -30,6 +30,9 @@
 #                           resolves it. `resolves_when` must name that outcome,
 #                           never the event that merely makes the check
 #                           runnable: "the release published" is not a result.
+#                           Bind it to the specific run the check names, too: a
+#                           later green run does not discharge an unexamined
+#                           earlier failure.
 #                           A failed check is not a resolution either -- it is
 #                           the finding you are now triaging. Any caveat on
 #                           the evidence that made the check necessary lives on
@@ -74,11 +77,13 @@ deferred_verifications:
         ghcr.io/nvidia/aicr@<linux/amd64 digest> \
         | jq -rs '.[0].payload | @base64d | fromjson | .predicate.tooling'
     resolves_when: >-
-      the command above has been run against a release published after revision
-      16 AND returned the openvex-bind identifier. A release publishing is what
-      makes the check runnable, not what resolves it: if the command has not
-      been run, or returns anything else, the entry stays and the mismatch is
-      the finding.
+      the command above has been run against THE FIRST release published after
+      revision 16 AND returned the openvex-bind identifier. Three ways this does
+      not resolve: the command has not been run; it returned anything else; or
+      it passed against some later release while the first one was never
+      checked. A release publishing is what makes the check runnable, not what
+      resolves it, and a failure on the first release is the finding to triage
+      rather than something a subsequent green release discharges.
 
 known_negatives:
   - id: aiperf-pins-block-pillow-and-aiohttp-fixes
