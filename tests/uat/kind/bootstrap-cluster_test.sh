@@ -161,15 +161,22 @@ unset -f kubectl
 # possible, and nothing else in the tree forces the two to agree.
 check "the CI lane exists" "yes" \
     "$([[ -f "${WORKFLOW}" ]] && echo yes || echo no)"
+# Captured ONCE, then matched against, rather than piped into each grep.
+# `grep -q` exits the instant it matches, closing the pipe under a producer
+# that is still writing; `operative` then dies of EPIPE, and pipefail promotes
+# that to the pipeline's status -- so a SUCCESSFUL match reports "no". It is a
+# race on the producer's second write (this workflow renders ~9KB through a
+# 4KB stdio buffer), which is why it fires on CI and not on a developer box.
+workflow_ops="$(operative "${WORKFLOW}")"
 check "the CI lane calls the shared bootstrap" "yes" \
-    "$(operative "${WORKFLOW}" | grep -qF 'tests/uat/kind/bootstrap-cluster.sh' && echo yes || echo no)"
+    "$(grep -qF 'tests/uat/kind/bootstrap-cluster.sh' <<<"${workflow_ops}" && echo yes || echo no)"
 check "the CI lane drives the sim runner" "yes" \
-    "$(operative "${WORKFLOW}" | grep -qF 'tests/uat/kind/run-sim' && echo yes || echo no)"
+    "$(grep -qF 'tests/uat/kind/run-sim' <<<"${workflow_ops}" && echo yes || echo no)"
 # The nvkind runner would apply that lane's cluster assumptions to this one:
 # EXPECTED_GPU_NODES=skip drops the four-worker census, and
 # TRAINJOB_NUM_NODES=1 describes a single-GPU node this cluster does not have.
 check "the CI lane does not drive the nvkind runner" "0" \
-    "$(operative "${WORKFLOW}" | grep -cE 'tests/uat/kind/run[^-]' | tr -d ' ')"
+    "$(grep -cE 'tests/uat/kind/run[^-]' <<<"${workflow_ops}" | tr -d ' ')"
 
 # No second copy of the create sequence anywhere a lane could reach. Scoped to
 # the workflows and the UAT tree (a doc may legitimately quote the command).
@@ -192,7 +199,12 @@ duplicates="$(grep -rl 'kind create cluster' \
         base == "bootstrap-cluster.sh" || base == "bootstrap-cluster_test.sh" { next }
         base ~ /\.(ya?ml|sh)$/ || base !~ /\./ { print }' \
     | while IFS= read -r f; do
-        operative "$f" | grep -q 'kind create cluster' && printf '%s\n' "$f"
+        # Capture before matching, for the reason given above. Here the stakes
+        # invert: a SIGPIPEd producer makes a file that DOES restate the create
+        # sequence report as no-match, so this guard would drop a real
+        # duplicate and pass. That direction is silent.
+        file_ops="$(operative "$f")"
+        grep -q 'kind create cluster' <<<"${file_ops}" && printf '%s\n' "$f"
       done)"
 check "nothing else creates the slurm cluster" "" "${duplicates}"
 

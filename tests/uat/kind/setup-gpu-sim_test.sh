@@ -96,7 +96,7 @@ check "the kind config declares exactly one control plane" "1" \
 # with no change on our side, which is exactly what a test has to catch.
 ref="$(nvml_mock_image_ref)"
 check "the image reference is a digest, not a tag" "canonical" \
-    "$(printf '%s' "$ref" | grep -qE '^ghcr\.io/nvidia/nvml-mock@sha256:[0-9a-f]{64}$' && echo canonical || echo "not-canonical:${ref}")"
+    "$(grep -qE '^ghcr\.io/nvidia/nvml-mock@sha256:[0-9a-f]{64}$' <<<"$ref" && echo canonical || echo "not-canonical:${ref}")"
 
 # The chart renders image as "{{ repository }}:{{ tag }}", so the digest is
 # split across the two values. If the split drifts, helm renders a reference
@@ -110,7 +110,7 @@ check "the split --set values reassemble to the pinned digest" "$ref" \
     "${repo_arg#*=}:${tag_arg#*=}"
 
 check "the chart version reads as an exact release" "release" \
-    "$(printf '%s' "$NVML_MOCK_CHART_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' && echo release || echo "not-a-release:${NVML_MOCK_CHART_VERSION}")"
+    "$(grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"$NVML_MOCK_CHART_VERSION" && echo release || echo "not-a-release:${NVML_MOCK_CHART_VERSION}")"
 
 # A SEMVER-SHAPED STRING IS NOT A PIN. `--version 0.3.0` resolves through a
 # MUTABLE tag, and this one moved: the digest recorded when the lane was written
@@ -123,7 +123,7 @@ check "the chart version reads as an exact release" "release" \
 # So the resolution has to happen by digest. These assert the reference the
 # install actually passes to helm, not the constants in isolation.
 check "the chart digest is a full sha256 reference" "digest" \
-    "$(printf '%s' "$NVML_MOCK_CHART_DIGEST" | grep -qE '^sha256:[0-9a-f]{64}$' && echo digest || echo "not-a-digest:${NVML_MOCK_CHART_DIGEST}")"
+    "$(grep -qE '^sha256:[0-9a-f]{64}$' <<<"$NVML_MOCK_CHART_DIGEST" && echo digest || echo "not-a-digest:${NVML_MOCK_CHART_DIGEST}")"
 check "the chart reference resolves by digest, not by tag" \
     "${NVML_MOCK_CHART}@${NVML_MOCK_CHART_DIGEST}" "$(nvml_mock_chart_ref)"
 
