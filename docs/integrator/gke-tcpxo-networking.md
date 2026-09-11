@@ -140,9 +140,10 @@ time: `--set`/`--set-json`/`--set-file`/`--dynamic`
 paths intersecting `kubeflow-trainer:tcpxoInterfaces` are rejected, and the
 bundle fails if the final resolved value disagrees with what the recipe
 records. (This is ownership enforcement, not the profile lock — the lock is
-unavailable to this value, see issue #2296.) Editing the generated artifact
-outside AICR is detected at validation time as part of #2297's
-recipe-versus-deployed comparison.
+unavailable to this value, see issue #2296.) One gap remains open by design:
+editing the generated artifact *after* AICR produced it is not yet detected
+at validation time — that recipe-versus-deployed comparison is #2297's
+work, tracked separately.
 
 **Re-bundling a pre-existing recipe:** the obligation follows the
 declaration. Recipes generated before this runtime existed do not declare

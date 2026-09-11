@@ -39,8 +39,11 @@ var gkeTCXOPluginToDaemonPair = map[string]string{
 }
 
 var (
-	gkeTCXOPluginImageRe = regexp.MustCompile(`nccl-plugin-gpudirecttcpx-dev:(v[0-9.]+)`)
-	gkeTCXODaemonImageRe = regexp.MustCompile(`tcpgpudmarxd-dev:(v[0-9.]+)`)
+	// The tag capture is boundary-delimited so a pre-release suffix cannot
+	// match as its stable prefix (v1.0.21-rc1 must not read as v1.0.21):
+	// an unrecognized tag shape produces no match, which the callers report.
+	gkeTCXOPluginImageRe = regexp.MustCompile(`nccl-plugin-gpudirecttcpx-dev:(v[0-9]+(?:\.[0-9]+)*)(?:[@\s"']|$)`)
+	gkeTCXODaemonImageRe = regexp.MustCompile(`tcpgpudmarxd-dev:(v[0-9]+(?:\.[0-9]+)*)(?:[@\s"']|$)`)
 )
 
 func pluginTagFromInstaller(t *testing.T) string {
@@ -211,5 +214,39 @@ func TestTCPXORuntimeFailsVisibleWithoutMapping(t *testing.T) {
 	out := string(rendered)
 	if !strings.Contains(out, `networking.gke.io/interfaces: '[{"interfaceName":"eth0","network":"default"}]'`) {
 		t.Error("without the mapping the annotation should render eth0-only (visibly broken), not be omitted")
+	}
+}
+
+// TestTCPIXOTagRegexBoundary pins the boundary-delimited tag capture: a
+// pre-release suffix must not read as the stable release it starts with.
+func TestTCPXOTagRegexBoundary(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		wantTag string
+		wantAny bool
+	}{
+		{name: "plain tag", content: "image: x/tcpgpudmarxd-dev:v1.0.21", wantTag: "v1.0.21", wantAny: true},
+		{name: "digest pinned", content: `image: "x/tcpgpudmarxd-dev:v1.0.21@sha256:abc"`, wantTag: "v1.0.21", wantAny: true},
+		{name: "newline terminated", content: "image: x/tcpgpudmarxd-dev:v1.0.21\n", wantTag: "v1.0.21", wantAny: true},
+		{name: "pre-release suffix does not match", content: "image: x/tcpgpudmarxd-dev:v1.0.21-rc1", wantAny: false},
+		{name: "longer patch train does not prefix-match", content: "image: x/tcpgpudmarxd-dev:v1.0.219", wantTag: "v1.0.219", wantAny: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			match := gkeTCXODaemonImageRe.FindStringSubmatch(tt.content)
+			if !tt.wantAny {
+				if match != nil {
+					t.Errorf("matched %v for %q, want no match", match, tt.content)
+				}
+				return
+			}
+			if match == nil || match[1] != tt.wantTag {
+				t.Errorf("match = %v, want tag %q", match, tt.wantTag)
+			}
+		})
 	}
 }
