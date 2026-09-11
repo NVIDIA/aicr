@@ -71,24 +71,32 @@ export REAL_DF REAL_UNAME
 cat >"${STUB_DIR}/df" <<'STUB'
 #!/usr/bin/env bash
 if [[ -z "${DF_STUB:-}" ]]; then exec "${REAL_DF}" "$@"; fi
-echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
+# The name is validated BEFORE anything reaches stdout. Emitting the header
+# first left a mistyped DF_STUB printing a well-formed header and exiting 64,
+# and the subject reads `df -Pk / | tail -1`: it got the header and reported
+# exit 5, figures unparseable. Four cases in this suite assert exit 5 on
+# purpose, so a typo in any of their fixture names passed for the wrong reason.
+# Selecting the row first and printing only on success keeps an unknown name
+# silent on stdout, which is what the stub-integrity checks below pin.
 case "${DF_STUB}" in
-  low)          echo "/dev/fake 77000000 74000000 3000000 97% /" ;;
-  healthy)      echo "/dev/fake 77000000 47000000 30000000 62% /" ;;
-  at_floor)     echo "/dev/fake 77000000 69300000 7700000 90% /" ;;
-  below_floor)  echo "/dev/fake 77000000 69300001 7699999 90% /" ;;
-  garbage)      echo "/dev/fake - - - - /" ;;
+  low)          row="/dev/fake 77000000 74000000 3000000 97% /" ;;
+  healthy)      row="/dev/fake 77000000 47000000 30000000 62% /" ;;
+  at_floor)     row="/dev/fake 77000000 69300000 7700000 90% /" ;;
+  below_floor)  row="/dev/fake 77000000 69300001 7699999 90% /" ;;
+  garbage)      row="/dev/fake - - - - /" ;;
   # Numeric and well formed, but a total of zero. This is the ONLY fixture that
   # reaches the `total_k -le 0` clause: `garbage` is rejected by the regex arm
   # one clause earlier, so without this the zero-total guard has no case at all.
-  zero_total)   echo "/dev/fake 0 0 0 100% /" ;;
+  zero_total)   row="/dev/fake 0 0 0 100% /" ;;
   # One unreadable field each, the other sound. `garbage` sets BOTH, so it fires
   # whichever clause is asked first and proves only that the disjunction works,
   # never that either half of it does.
-  garbage_total) echo "/dev/fake - 47000000 30000000 62% /" ;;
-  garbage_avail) echo "/dev/fake 77000000 47000000 - 62% /" ;;
+  garbage_total) row="/dev/fake - 47000000 30000000 62% /" ;;
+  garbage_avail) row="/dev/fake 77000000 47000000 - 62% /" ;;
   *) echo "df stub: unknown DF_STUB '${DF_STUB}'" >&2; exit 64 ;;
 esac
+echo "Filesystem 1024-blocks Used Available Capacity Mounted on"
+echo "${row}"
 STUB
 chmod +x "${STUB_DIR}/df"
 
@@ -364,13 +372,25 @@ stub_rc=$?
 check "a mistyped DF_STUB writes nothing to stdout" "" "${stub_out}"
 check "a mistyped DF_STUB fails closed with the stub's own code" "64" "${stub_rc}"
 
-reset_env
-export DF_STUB=not_a_real_fixture
-export AICR_FOOTPRINT_MEMINFO="${STUB_DIR}/meminfo-healthy"
-run_subject "mistyped df fixture"
-check "a mistyped DF_STUB is not mistakable for the unparseable-figures case" \
-    "distinct-from-5" \
-    "$([[ "${RC}" -ne 5 ]] && echo distinct-from-5 || echo "reported-exit-5-for-a-harness-typo")"
+# WHAT THE REORDER DOES NOT FIX, and why the check below is the real defense.
+# The subject reads `df -Pk / | tail -1`: a pipeline, so the stub's exit 64
+# never reaches it, and an EMPTY read is as unparseable to it as a garbage one.
+# A mistyped fixture therefore still exits 5. Giving it its own code would be a
+# change to the gate's documented exit-code contract, which is not this
+# harness's call to make. So the typo is made impossible instead: every DF_STUB
+# value this suite sets, apart from the deliberate unknown-name control above,
+# must name an arm the stub actually has.
+df_known="$(grep -oE '^  [a-z_]+\)[[:space:]]+row=' "${BASH_SOURCE[0]}" | sed -E 's/\).*//; s/^ +//' | sort -u)"
+df_used="$(grep -oE 'DF_STUB=[A-Za-z_][A-Za-z0-9_]*' "${BASH_SOURCE[0]}" \
+    | cut -d= -f2 | grep -vx 'not_a_real_fixture' | sort -u)"
+# Floors first: an extractor that matched nothing would make the comparison
+# below pass over an empty set and report a green it never earned.
+check "the fixture-name extractor found the stub's arms" "yes" \
+    "$([[ -n "${df_known}" ]] && echo yes || echo no)"
+check "the fixture-name extractor found the suite's DF_STUB values" "yes" \
+    "$([[ -n "${df_used}" ]] && echo yes || echo no)"
+check "every DF_STUB value this suite sets names a fixture the stub has" "" \
+    "$(comm -23 <(printf '%s\n' "${df_used}") <(printf '%s\n' "${df_known}") | tr '\n' ' ' | sed -E 's/ +$//')"
 
 # --- Memory arm: applicability ------------------------------------------------
 # Not Linux and no explicit source: the arm does not apply. It must record n/a
