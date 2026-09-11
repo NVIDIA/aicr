@@ -701,7 +701,7 @@ func (s *MetadataStore) filterToMaximalLeaves(matches []*RecipeMetadata) []*Reci
 //
 // The Mixins field is cleared from the result afterward. Returns the set of
 // mixin-contributed constraint names for post-compose evaluation.
-func (s *MetadataStore) mergeMixins(mergedSpec *RecipeMetadataSpec) (map[string]bool, error) {
+func (s *MetadataStore) mergeMixins(ctx context.Context, mergedSpec *RecipeMetadataSpec) (map[string]bool, error) {
 	mixinConstraintNames := make(map[string]bool)
 	if len(mergedSpec.Mixins) == 0 {
 		return mixinConstraintNames, nil
@@ -760,7 +760,11 @@ func (s *MetadataStore) mergeMixins(mergedSpec *RecipeMetadataSpec) (map[string]
 			}
 			if len(c.Overrides) > 0 {
 				existing, _ := findComponentRefByName(mergedSpec.ComponentRefs, c.Name)
-				if err := mixinOverridesSafeForMerge(s.provider, mixinName, c.Name, c.Overrides, existing.Overrides); err != nil {
+				existingOverrides, err := resolveComponentValues(ctx, s.provider, &existing)
+				if err != nil {
+					return nil, err
+				}
+				if err := mixinOverridesSafeForMerge(s.provider, mixinName, c.Name, c.Overrides, existingOverrides); err != nil {
 					return nil, err
 				}
 			}
@@ -817,6 +821,7 @@ type mixinEvalResult struct {
 // (e.g., monitoring-hpa) are preserved. This maintains the existing
 // maximal-leaf filtering behavior for non-mixin overlays.
 func (s *MetadataStore) evaluateMixinConstraints(
+	ctx context.Context,
 	mergedSpec *RecipeMetadataSpec,
 	evaluator ConstraintEvaluatorFunc,
 	mixinConstraintNames map[string]bool,
@@ -905,7 +910,7 @@ func (s *MetadataStore) evaluateMixinConstraints(
 	if err != nil {
 		return mixinEvalResult{}, err
 	}
-	if _, err := s.mergeMixins(&rebuiltSpec); err != nil {
+	if _, err := s.mergeMixins(ctx, &rebuiltSpec); err != nil {
 		return mixinEvalResult{}, err
 	}
 
@@ -1121,7 +1126,7 @@ func (s *MetadataStore) BuildRecipeResultWithProfile(ctx context.Context, criter
 	}
 
 	// Merge mixin fragments referenced by overlays in the chain
-	if _, mixinErr := s.mergeMixins(&mergedSpec); mixinErr != nil {
+	if _, mixinErr := s.mergeMixins(ctx, &mergedSpec); mixinErr != nil {
 		return nil, mixinErr
 	}
 
@@ -1240,7 +1245,7 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluatorAndProfile(
 	}
 
 	// Merge mixin fragments referenced by overlays in the chain.
-	mixinConstraintNames, err := s.mergeMixins(&mergedSpec)
+	mixinConstraintNames, err := s.mergeMixins(ctx, &mergedSpec)
 	if err != nil {
 		return nil, err
 	}
@@ -1254,7 +1259,7 @@ func (s *MetadataStore) BuildRecipeResultWithEvaluatorAndProfile(
 	for _, overlay := range filteredOverlays {
 		candidateOverlays = append(candidateOverlays, overlay.Metadata.Name)
 	}
-	mixinResult, err := s.evaluateMixinConstraints(&mergedSpec, evaluator, mixinConstraintNames, candidateOverlays)
+	mixinResult, err := s.evaluateMixinConstraints(ctx, &mergedSpec, evaluator, mixinConstraintNames, candidateOverlays)
 	if err != nil {
 		return nil, err
 	}

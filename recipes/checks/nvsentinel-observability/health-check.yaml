@@ -77,6 +77,25 @@ spec:
                 namespace: nvsentinel
               status:
                 (numberReady >= desiredNumberScheduled && desiredNumberScheduled > `0`): true
+        # Stale-rollout guard: numberReady alone can pass on a node still
+        # running the previous revision. Mirrors
+        # recipes/checks/nvsentinel/health-check.yaml.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: platform-connectors
+                namespace: nvsentinel
+              ((status.updatedNumberScheduled || `0`) < status.desiredNumberScheduled): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: platform-connectors
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true
     - name: validate-labeler-audit-logging
       try:
         - assert:
@@ -101,3 +120,20 @@ spec:
                 namespace: nvsentinel
               status:
                 (availableReplicas > `0`): true
+        # Stale-rollout guard, same reasoning as the DaemonSet above.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: labeler
+                namespace: nvsentinel
+              ((status.updatedReplicas || `0`) < (status.replicas || `0`)): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: labeler
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true

@@ -1468,7 +1468,7 @@ func TestMixinOSTalos_AppliesPrivilegedNamespacesAndPreManifests(t *testing.T) {
 		},
 	}
 
-	if _, err := store.mergeMixins(&spec); err != nil {
+	if _, err := store.mergeMixins(t.Context(), &spec); err != nil {
 		t.Fatalf("mergeMixins: %v", err)
 	}
 
@@ -2333,6 +2333,7 @@ func TestEvaluateMixinConstraintsReturnsErrorWhenConstraintCannotBeMappedToCandi
 	}
 
 	result, err := store.evaluateMixinConstraints(
+		t.Context(),
 		&RecipeMetadataSpec{
 			Constraints: []Constraint{
 				{Name: "OS.kernel", Value: ">= 6.8"},
@@ -2387,6 +2388,7 @@ func TestEvaluateMixinConstraintsRejectsIncompleteConstraint(t *testing.T) {
 			}
 
 			_, err := store.evaluateMixinConstraints(
+				t.Context(),
 				&RecipeMetadataSpec{Constraints: []Constraint{tt.constraint}},
 				func(_ Constraint) ConstraintEvalResult {
 					return ConstraintEvalResult{
