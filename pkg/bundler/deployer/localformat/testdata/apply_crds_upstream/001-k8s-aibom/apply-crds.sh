@@ -35,6 +35,29 @@ if ! command -v kubectl >/dev/null 2>&1; then
   exit 1
 fi
 
+# Upgrades only. Helm installs a chart's crds/ directory itself on first
+# install, which is the whole reason this script exists for upgrades and
+# nowhere else. Running it on a fresh cluster would add a registry round-trip
+# and a failure mode to the install path in order to apply CRDs helm is about
+# to create a moment later.
+if ! helm status k8s-aibom --namespace k8s-aibom-system ${KUBECONFIG_FLAG:-} >/dev/null 2>&1; then
+  echo "k8s-aibom: no existing release; helm install creates the chart's CRDs."
+  exit 0
+fi
+
+# Bound the registry read. This runs inside the deploy path, where an
+# unbounded call would hang the whole rollout rather than fail it; deploy.sh
+# retries a failed component but cannot interrupt one that never returns.
+# `timeout` is absent on stock macOS, so fall back to running unbounded there
+# rather than failing outright.
+run_bounded() {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 90 "$@"
+  else
+    "$@"
+  fi
+}
+
 # shellcheck source=/dev/null
 source ./upstream.env
 
@@ -45,7 +68,7 @@ source ./upstream.env
 # writes "Pulled:" and "Digest:" lines to stdout, and those two parse as a
 # valid YAML mapping, so kubectl rejects the stream with
 # "error validating data: [apiVersion not set, kind not set]".
-crds="$(helm show crds "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" \
+crds="$(run_bounded helm show crds "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" \
   | sed -n '/^---$/,$p')"
 
 # An ownsCRDs component whose chart ships no CRDs is a no-op, not a failure:

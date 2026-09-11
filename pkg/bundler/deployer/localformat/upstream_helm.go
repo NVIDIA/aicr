@@ -23,6 +23,7 @@ import (
 	"text/template"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
@@ -56,16 +57,23 @@ var applyCRDsTmpl = template.Must(
 // folder, or "./" for a vendored wrapper whose subchart tarball sits under
 // charts/.
 type applyCRDsData struct {
-	Name            string
-	FromUpstreamEnv bool
+	Name                   string
+	Namespace              string
+	FromUpstreamEnv        bool
+	ShowCRDsTimeoutSeconds int
 }
 
 // writeApplyCRDsScript renders apply-crds.sh into folderDir and returns its
 // path relative to the bundle root, or "" when the component does not own its
 // CRDs. Non-owning components get no file at all, so the absence of the step
 // is visible on disk rather than encoded as a no-op script.
-func writeApplyCRDsScript(folderDir, dir, name string, fromUpstreamEnv bool) (string, error) {
-	data := applyCRDsData{Name: name, FromUpstreamEnv: fromUpstreamEnv}
+func writeApplyCRDsScript(folderDir, dir, name, namespace string, fromUpstreamEnv bool) (string, error) {
+	data := applyCRDsData{
+		Name:                   name,
+		Namespace:              namespace,
+		FromUpstreamEnv:        fromUpstreamEnv,
+		ShowCRDsTimeoutSeconds: int(defaults.BundleShowCRDsTimeout.Seconds()),
+	}
 	if err := renderTemplateToFile(applyCRDsTmpl, data, folderDir, "apply-crds.sh", 0o755); err != nil {
 		return "", err
 	}
@@ -128,7 +136,7 @@ func writeUpstreamHelmFolder(outputDir, dir string, idx int, c Component) (Folde
 		filepath.Join(dir, "install.sh"),
 	}
 	if c.OwnsCRDs {
-		crdScript, crdErr := writeApplyCRDsScript(folderDir, dir, c.Name, true)
+		crdScript, crdErr := writeApplyCRDsScript(folderDir, dir, c.Name, c.Namespace, true)
 		if crdErr != nil {
 			return Folder{}, crdErr
 		}

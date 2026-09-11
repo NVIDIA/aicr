@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
@@ -169,6 +170,62 @@ func TestWrite_NoApplyCRDsOnInjectedWrappers(t *testing.T) {
 		}
 		if !wantApplies && !os.IsNotExist(statErr) {
 			t.Errorf("folder %s: apply-crds.sh present on an injected wrapper (stat err: %v)", f.Dir, statErr)
+		}
+	}
+}
+
+// TestApplyCRDsScript_GatesAndBounds pins two properties a golden diff alone
+// would not defend, because regenerating goldens with -update would silently
+// bless their removal.
+//
+// The release gate is the load-bearing one. Helm installs a chart's crds/
+// directory itself on first install, so this script is only needed on upgrade.
+// Without the gate every fresh install pays a registry round-trip to apply CRDs
+// helm is about to create anyway, and any registry trouble becomes an install
+// failure. That is not hypothetical: it hung the KWOK helm lanes, which deploy
+// to a fresh cluster, until the gate was added.
+//
+// The bound matters because this runs inside deploy.sh's retry loop, which
+// retries a component that exits non-zero but cannot interrupt one that never
+// returns. An unbounded registry read therefore hangs the whole rollout rather
+// than failing one component.
+func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
+	outDir := t.TempDir()
+
+	res, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir:  outDir,
+		Components: []localformat.Component{ownsCRDsComponent(true)},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	script, err := os.ReadFile(filepath.Join(outDir, res.Folders[0].Dir, "apply-crds.sh"))
+	if err != nil {
+		t.Fatalf("read apply-crds.sh: %v", err)
+	}
+	got := string(script)
+
+	for _, want := range []string{
+		// Skip unless the release already exists.
+		"helm status k8s-aibom --namespace k8s-aibom-system",
+		// Exit 0 on that path: a fresh install is not an error.
+		"exit 0",
+		// Bound the registry read.
+		"timeout 90",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("apply-crds.sh missing %q\n%s", want, got)
+		}
+	}
+
+	// The registry read must go through the bounded wrapper, not directly.
+	for _, banned := range []string{
+		"$(helm show crds",
+		"$(helm show crds ./",
+	} {
+		if strings.Contains(got, banned) {
+			t.Errorf("apply-crds.sh calls %q outside run_bounded; an unbounded "+
+				"registry read hangs the rollout instead of failing it\n%s", banned, got)
 		}
 	}
 }
