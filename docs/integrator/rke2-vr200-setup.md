@@ -9,7 +9,7 @@ Bare-metal setup guide for the four Preview coordinates AICR publishes on VR200
 - [`rke2/vr200-ubuntu/inference`](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference) — platform-neutral inference base (resolves when `--platform` is omitted)
 - [`rke2/vr200-ubuntu/inference-dynamo`](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo)
 
-> **`service=rke2` and `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence for these Preview coordinates at [validation.aicr.run](https://validation.aicr.run/); freshness against the current recipe is captured in the **Evidence status** note below.
+> **`service=rke2` and `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. Published validation evidence exists for three of the four coordinates at [validation.aicr.run](https://validation.aicr.run/); `training-kubeflow` has none yet, and freshness of the rest is captured in the **Evidence status** note below.
 
 **Evidence status.** The recipes for the three evidence-linked coordinates
 above have changed since evidence publication (`aicr evidence digest` reports
@@ -18,9 +18,16 @@ evidence as historical precedent for the recipe content at publication time,
 not as validating the current recipe. The `training-kubeflow` coordinate has no
 published evidence at all — it is newer than the last publication run.
 
-Every prerequisite in this guide applies to **all four** coordinates. They share
-one base overlay chain, so the kernel-cmdline, Skyhook reboot, and host
-`nvidia-imex` masking requirements are identical on the Kubeflow leaf.
+**Which prerequisites apply where.** The node-level requirements — Ubuntu 26.04
+with the 64k-page kernel, the Skyhook-driven kernel-cmdline reboots, and the
+host `nvidia-imex` masking — apply to **all four** coordinates. The Kubeflow
+leaf inherits them from `vr200-rke2-ubuntu-training`.
+
+The two families do **not** otherwise share a chain: training resolves through
+`vr200-rke2-ubuntu-training -> rke2-training -> rke2`, inference through
+`rke2-inference -> rke2`. Requirements that follow from the inference chain —
+the `< 1.36.0` Kubernetes cap and the Gateway API / LoadBalancer prerequisites
+— are inference-only and are marked as such where they appear below.
 
 ## Cluster Prerequisites
 

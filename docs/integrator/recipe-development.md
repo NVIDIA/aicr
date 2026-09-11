@@ -367,7 +367,7 @@ A Preview coordinate promises that:
 - `aicr bundle` generates deployable artifacts for it.
 - It passes the repository's static, render, and KWOK coverage gates on
   every merge to `main`.
-- Evidence has been published at [validation.aicr.run](https://validation.aicr.run/); freshness may lag recipe iteration, so consult each coordinate's row in the table below for its evidence status.
+- Evidence is published at [validation.aicr.run](https://validation.aicr.run/) once the coordinate has had a validation run. Publication can lag the coordinate's introduction, and freshness can lag recipe iteration after that, so consult each coordinate's row in the table below for its actual evidence status rather than assuming a link exists.
 
 A Preview coordinate deliberately does **not** promise broader coverage.
 Per the [VR200 Preview epic (#2326)](https://github.com/NVIDIA/aicr/issues/2326),
@@ -386,7 +386,7 @@ land later; none is implied by Preview alone.
 
 The platform-neutral `inference` row is the base the Dynamo leaf inherits from; it exists so that resolving `rke2/vr200/ubuntu/inference` **without** `--platform` resolves to the VR200-safe overlay rather than falling through to the generic `rke2-inference` base.
 
-> **Evidence status (evidence-linked VR200 rows).** The recipes have changed since evidence publication (`aicr evidence digest` reports a mismatch against each pointer's `predicate.recipe.digest`); treat the linked evidence as historical precedent for the recipe content at publication time, not as validating the current recipe. The `training / kubeflow` row has no published evidence at all — it is newer than the last publication run. Every VR200 row shares one overlay chain and therefore the same hardware prerequisites, including the mandatory host `nvidia-imex` masking described in the setup guide.
+> **Evidence status (evidence-linked VR200 rows).** The recipes have changed since evidence publication (`aicr evidence digest` reports a mismatch against each pointer's `predicate.recipe.digest`); treat the linked evidence as historical precedent for the recipe content at publication time, not as validating the current recipe. The `training / kubeflow` row has no published evidence at all — it is newer than the last publication run. Every VR200 row shares the same node-level prerequisites, including the mandatory host `nvidia-imex` masking described in the setup guide; requirements that follow from the inference chain are inference-only.
 
 Promotion from Preview to Supported is tracked as its own separately-scoped
 work with fresh evidence; a Preview coordinate does not auto-promote by
