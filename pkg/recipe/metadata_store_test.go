@@ -1578,13 +1578,16 @@ func TestMixinComponentRefSafeForMerge(t *testing.T) {
 			wantOffending: "valuesFile",
 		},
 		{
-			name: "overrides set -> conflict",
+			// mixinComponentRefSafeForMerge alone no longer flags Overrides:
+			// it is validated separately by mixinOverridesSafeForMerge
+			// (registry allowlist + collision check), see
+			// TestMixinOverridesSafeForMerge.
+			name: "overrides set alone -> safe at this layer",
 			ref: ComponentRef{
 				Name:      "gpu-operator",
 				Overrides: map[string]any{"driver": map[string]any{"enabled": false}},
 			},
-			wantSafe:      false,
-			wantOffending: "overrides",
+			wantSafe: true,
 		},
 		{
 			name: "dependencyRefs set -> conflict",

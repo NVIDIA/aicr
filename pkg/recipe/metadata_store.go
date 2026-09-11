@@ -23,6 +23,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -685,14 +686,18 @@ func (s *MetadataStore) filterToMaximalLeaves(matches []*RecipeMetadata) []*Reci
 // merge semantic, so a name collision is unambiguously a conflict.
 //
 // ComponentRef semantics: a mixin componentRef whose name already exists is
-// allowed ONLY when the mixin entry sets nothing beyond the safe additive
-// field set ({Namespace, ManifestFiles, PreManifestFiles}). Identity /
-// sourcing fields (Chart, Type, Source, Version, Tag, Path, ValuesFile,
-// Overrides, Patches, DependencyRefs, Cleanup, ExpectedResources,
-// HealthCheckAsserts) STILL conflict — this preserves ADR-005's "no silent
-// chart identity override" mitigation while letting OS-conditional mixins
-// like os-talos contribute namespace + preManifestFiles overrides to
-// components already declared upstream.
+// allowed when the mixin entry sets nothing beyond the safe additive field
+// set ({Namespace, ManifestFiles, PreManifestFiles}), OR sets only Overrides
+// paths the target component's own registry entry has explicitly
+// allowlisted for mixin use (see mixinOverridesSafeForMerge). Every other
+// identity/sourcing field (Chart, Type, Source, Version, Tag, Path,
+// ValuesFile, Patches, DependencyRefs, Cleanup, ExpectedResources,
+// HealthCheckAsserts) still conflicts unconditionally — this preserves
+// ADR-005's "no silent chart identity override" mitigation while letting
+// OS-conditional mixins like os-talos contribute namespace +
+// preManifestFiles overrides, and opted-in mixins like
+// nvsentinel-observability contribute allowlisted values, to components
+// already declared upstream.
 //
 // The Mixins field is cleared from the result afterward. Returns the set of
 // mixin-contributed constraint names for post-compose evaluation.
@@ -729,15 +734,35 @@ func (s *MetadataStore) mergeMixins(mergedSpec *RecipeMetadataSpec) (map[string]
 			}
 		}
 
+		// A mixin's own componentRefs list must not repeat a component
+		// name: mergeMixins validates each entry against the pre-mixin
+		// state (see below), never against a sibling entry in the SAME
+		// mixin, and RecipeMetadataSpec.Merge collapses same-named refs
+		// last-writer-wins with no further check -- two contradictory
+		// entries for one component would both pass validation
+		// individually and then silently resolve to whichever was last.
+		if dupName, dup := duplicateComponentRefName(mixin.Spec.ComponentRefs); dup {
+			return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("mixin %q declares component %q more than once in its own componentRefs list", mixinName, dupName))
+		}
+
 		// ComponentRef collision: allowed only when the mixin entry sets
-		// only safe additive fields. See mixinComponentRefSafeForMerge.
+		// only safe additive fields, plus Overrides paths the component's
+		// registry entry has explicitly allowlisted for mixin use (see
+		// mixinOverridesSafeForMerge). See mixinComponentRefSafeForMerge.
 		for _, c := range mixin.Spec.ComponentRefs {
 			if !existingComponents[c.Name] {
 				continue
 			}
 			if offending, ok := mixinComponentRefSafeForMerge(c); !ok {
 				return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-					fmt.Sprintf("mixin %q component %q sets identity/sourcing field %q which conflicts with the inheritance chain; mixins may only contribute Namespace, ManifestFiles, or PreManifestFiles to an existing component", mixinName, c.Name, offending))
+					fmt.Sprintf("mixin %q component %q sets identity/sourcing field %q which conflicts with the inheritance chain; mixins may only contribute Namespace, ManifestFiles, PreManifestFiles, or registry-allowlisted Overrides paths to an existing component", mixinName, c.Name, offending))
+			}
+			if len(c.Overrides) > 0 {
+				existing, _ := findComponentRefByName(mergedSpec.ComponentRefs, c.Name)
+				if err := mixinOverridesSafeForMerge(s.provider, mixinName, c.Name, c.Overrides, existing.Overrides); err != nil {
+					return nil, err
+				}
 			}
 		}
 
@@ -1372,14 +1397,27 @@ func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, eval
 }
 
 // mixinComponentRefSafeForMerge reports whether a mixin's componentRef sets
-// only fields that are safe to merge into an existing component (Name,
-// Namespace, ManifestFiles, PreManifestFiles). Identity / sourcing fields
-// (Chart, Type, Source, Version, Tag, Path, ValuesFile, Overrides, Patches,
-// DependencyRefs, Cleanup, ExpectedResources, HealthCheckAsserts) silently
-// override the chain's chosen chart and so a mixin must NOT set them — see
-// ADR-005's "Silent constraint override" mitigation. Returns the first
-// offending field name so the resolver's error message names the violation
-// rather than handing the recipe author a generic "conflict" message.
+// only fields that are unconditionally safe to merge into an existing
+// component (Name, Namespace, ManifestFiles, PreManifestFiles). Identity /
+// sourcing fields (Chart, Type, Source, Version, Tag, Path, ValuesFile,
+// Patches, DependencyRefs, Cleanup, ExpectedResources, HealthCheckAsserts)
+// silently override the chain's chosen chart and so a mixin must NOT set
+// them — see ADR-005's "Silent constraint override" mitigation. Returns the
+// first offending field name so the resolver's error message names the
+// violation rather than handing the recipe author a generic "conflict"
+// message.
+//
+// Overrides is deliberately NOT one of the unconditionally-safe fields, but
+// also not unconditionally rejected here: mergeMixins checks it separately
+// via mixinOverridesSafeForMerge, which allows only registry-allowlisted
+// paths (ComponentConfig.MixinSafeOverridePaths, declared by the target
+// component's own owner) that don't collide with a value the chain already
+// set. Allowing Overrides unconditionally would let any mixin silently
+// change any already-chained component's behavior with no code-review-
+// visible signal at the composing leaf — exactly the hazard ADR-005's
+// "Silent constraint override" mitigation exists to block; the per-path
+// allowlist is what keeps that mitigation intact while still letting a
+// mixin touch values its target explicitly opted in for.
 //
 // The check is symmetric with the merge semantics in mergeComponentRef: the
 // safe set is exactly the set of fields the merge handles additively or as
@@ -1401,8 +1439,6 @@ func mixinComponentRefSafeForMerge(c ComponentRef) (string, bool) {
 		return "path", false
 	case c.ValuesFile != "":
 		return "valuesFile", false
-	case len(c.Overrides) > 0:
-		return "overrides", false
 	case len(c.Patches) > 0:
 		return "patches", false
 	case len(c.DependencyRefs) > 0:
@@ -1417,6 +1453,207 @@ func mixinComponentRefSafeForMerge(c ComponentRef) (string, bool) {
 		return "healthCheckSkip", false
 	}
 	return "", true
+}
+
+// findComponentRefByName returns the ComponentRef named name from refs, and
+// whether it was found. Linear scan: refs holds at most a few dozen
+// components, and this only runs once per mixin componentRef collision.
+func findComponentRefByName(refs []ComponentRef, name string) (ComponentRef, bool) {
+	for _, r := range refs {
+		if r.Name == name {
+			return r, true
+		}
+	}
+	return ComponentRef{}, false
+}
+
+// duplicateComponentRefName returns the first component name that appears
+// more than once in refs, and whether one was found. refs is a single
+// mixin's own componentRefs list -- at most a handful of entries, so a
+// linear scan with a small seen-set is simplest.
+func duplicateComponentRefName(refs []ComponentRef) (string, bool) {
+	seen := make(map[string]bool, len(refs))
+	for _, r := range refs {
+		if seen[r.Name] {
+			return r.Name, true
+		}
+		seen[r.Name] = true
+	}
+	return "", false
+}
+
+// mixinOverridesSafeForMerge validates a mixin's Overrides against the
+// target component's registry-declared MixinSafeOverridePaths allowlist,
+// and against paths already set by the leaf's own inheritance chain or an
+// earlier-merged mixin. existingOverrides is the CURRENT state of the
+// target component's Overrides at the point this mixin is being merged —
+// mergeMixins folds each mixin's contribution into mergedSpec.ComponentRefs
+// before moving to the next, so this one check against the current state
+// covers both leaf-vs-mixin and mixin-vs-mixin collisions without separate
+// bookkeeping.
+func mixinOverridesSafeForMerge(provider DataProvider, mixinName, componentName string, mixinOverrides, existingOverrides map[string]any) error {
+	registry, err := GetComponentRegistryFor(provider)
+	if err != nil {
+		return aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, "load component registry for mixin override validation")
+	}
+	var allowlist []string
+	if comp := registry.Get(componentName); comp != nil {
+		allowlist = comp.MixinSafeOverridePaths
+	}
+
+	mixinContext := fmt.Sprintf("mixin %q component %q overrides", mixinName, componentName)
+
+	// Checked before either walk below -- see rejectEmptyMapValues' doc
+	// comment for why an empty map must be rejected outright rather than
+	// caught by the path-level checks that follow.
+	if emptyMapErr := rejectEmptyMapValues(mixinOverrides, mixinContext); emptyMapErr != nil {
+		return emptyMapErr
+	}
+
+	mixinPaths, err := overrideLeafPaths(mixinOverrides, mixinContext)
+	if err != nil {
+		return err
+	}
+
+	for _, p := range mixinPaths {
+		if !slices.Contains(allowlist, p) {
+			return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("mixin %q component %q sets overrides path %q, which is not in the component's registry-declared mixinSafeOverridePaths allowlist %v — a mixin may only set paths its target component has explicitly opted in for mixin use", mixinName, componentName, p, allowlist))
+		}
+	}
+
+	existingPaths, err := overrideLeafPaths(existingOverrides, fmt.Sprintf("component %q existing overrides", componentName))
+	if err != nil {
+		return err
+	}
+	if mixinPath, existingPath, collide := mixinOverrideCollision(mixinPaths, existingPaths); collide {
+		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("mixin %q component %q overrides path %q collides with path %q already set by the leaf's own chain or another mixin — mixins may not silently overwrite a value the chain already configured", mixinName, componentName, mixinPath, existingPath))
+	}
+
+	// The target may already be disabled by the chain (e.g. an OCP overlay
+	// setting overrides.enabled: false on nvsentinel) -- composing the
+	// mixin is still allowed (a recipe author may be layering values ahead
+	// of a future re-enable, or simply hasn't noticed), but silently
+	// producing a values block nothing ever reads would be a confusing,
+	// invisible no-op. Warn rather than block: disabling the target is a
+	// legitimate, deliberate chain decision this validation doesn't own.
+	if enabledVal, ok := existingOverrides["enabled"].(bool); ok && !enabledVal {
+		slog.Warn(fmt.Sprintf("mixin %q sets overrides on component %q, which the recipe's inheritance chain already disables (overrides.enabled: false) -- these values will have no effect unless something later re-enables the component", mixinName, componentName),
+			"mixin", mixinName, "component", componentName)
+	}
+	return nil
+}
+
+// rejectEmptyMapValues walks overrides and errors on the first empty map
+// value found at any depth, naming contextLabel (e.g. mixin+component) in
+// the message since the walk itself has no notion of where overrides came
+// from. Scoped to mixin overrides only (not leaf/chain overrides, which
+// are not mixin-constrained): a mixin declaring an empty map anywhere is
+// always a mistake, whether it sits at an ancestor of an allowlisted path
+// (would silently blank whatever the leaf already set there) or at the
+// exact leaf path itself (would pass the allowlist check verbatim and
+// write a map where the chart expects a scalar).
+func rejectEmptyMapValues(overrides map[string]any, contextLabel string) error {
+	var walk func(map[string]any, string) error
+	walk = func(values map[string]any, prefix string) error {
+		for key, value := range values {
+			path := key
+			if prefix != "" {
+				path = prefix + "." + key
+			}
+			nested, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			if len(nested) == 0 {
+				return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("%s: path %q is an empty map ({}); a mixin override must set a real "+
+						"scalar or non-empty map, never an empty one -- an empty map can silently blank an "+
+						"existing value at an ancestor path, or pass an allowlist check on the leaf path "+
+						"itself and write a map where the chart expects a scalar", contextLabel, path))
+			}
+			if err := walk(nested, path); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return walk(overrides, "")
+}
+
+// overrideLeafPaths flattens a nested Overrides map into sorted dotted leaf
+// paths, e.g. {"global":{"tracing":{"enabled":true}}} produces
+// ["global.tracing.enabled"]. An empty nested map still contributes its own
+// path (not skipped): deepMergeMap treats a map-typed source value, even an
+// empty one, as authoritative over a non-map destination and REPLACES it
+// (dst[k] = DeepCopyAnyMap(svMap), regardless of len(svMap)) -- so
+// {"global":{"tracing":{}}} can silently blank an existing scalar at
+// global.tracing during the real merge. Reporting the path itself lets the
+// allowlist/collision checks catch that: the empty-map path won't match any
+// leaf-level allowlist entry, so it's rejected the same as any other
+// non-allowlisted path, and it collides with an existing "global.tracing"
+// entry the normal way. contextLabel is named in the one error this can
+// return, since the walk itself has no notion of where overrides came from.
+func overrideLeafPaths(overrides map[string]any, contextLabel string) ([]string, error) {
+	var paths []string
+	var walk func(map[string]any, string) error
+	walk = func(values map[string]any, prefix string) error {
+		for key, value := range values {
+			if key == "" || strings.Contains(key, ".") {
+				return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("%s: override key %q must be nonempty and may not contain a literal dot", contextLabel, key))
+			}
+			path := key
+			if prefix != "" {
+				path = prefix + "." + key
+			}
+			if nested, ok := value.(map[string]any); ok {
+				if len(nested) == 0 {
+					paths = append(paths, path)
+					continue
+				}
+				if err := walk(nested, path); err != nil {
+					return err
+				}
+				continue
+			}
+			paths = append(paths, path)
+		}
+		return nil
+	}
+	if err := walk(overrides, ""); err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+// pathsIntersect reports whether a and b name the same value, or one is an
+// ancestor of the other in dotted-path notation (e.g. "global.tracing" and
+// "global.tracing.enabled" intersect: a map set at the parent path replaces
+// everything under it, and a leaf set at the child path collides with
+// whatever the parent already established). Mirrors the ancestor/
+// descendant intersection test pkg/bundler/validations/checks.go's
+// dynamicPathIntersections uses for the equivalent --dynamic-path problem.
+func pathsIntersect(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b+".") || strings.HasPrefix(b, a+".")
+}
+
+// mixinOverrideCollision returns the first colliding pair between mixinPaths
+// and existingPaths (see pathsIntersect), or ("", "", false) if none
+// collide. A collision must hard-error rather than let deepMergeMap's
+// last-writer-wins semantics silently overwrite a value the chain already
+// configured — see mixinOverridesSafeForMerge.
+func mixinOverrideCollision(mixinPaths, existingPaths []string) (string, string, bool) {
+	for _, mp := range mixinPaths {
+		for _, ep := range existingPaths {
+			if pathsIntersect(mp, ep) {
+				return mp, ep, true
+			}
+		}
+	}
+	return "", "", false
 }
 
 // applyRegistryDefaults fills in ComponentRef fields from ComponentConfig

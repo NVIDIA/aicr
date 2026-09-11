@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -186,6 +187,29 @@ type ComponentConfig struct {
 	// ClusterTrainingRuntime CR of the CRD shipped in the chart's
 	// crds/).
 	ManifestsUseChartCRDs bool `yaml:"manifestsUseChartCRDs,omitempty"`
+
+	// MixinSafeOverridePaths declares the exact dotted value paths (e.g.
+	// "global.tracing.enabled") that a RecipeMixin is permitted to set via
+	// ComponentRef.Overrides on THIS component when it is already present
+	// in a recipe's inheritance chain. This is the only way a mixin may
+	// touch an already-chained component's values at all -- every other
+	// identity/sourcing field (Chart, Type, Source, Version, ValuesFile,
+	// and Overrides paths outside this list) still unconditionally
+	// conflicts, per ADR-005's "Silent constraint override" mitigation
+	// (docs/design/005-overlay-refactoring.md).
+	//
+	// Declared here, by the component owner, not by the mixin author: a
+	// mixin cannot self-grant permission to reach into a component it
+	// doesn't own. Empty (the default) means no mixin may set Overrides on
+	// this component at all. A path is matched exactly, not as a prefix --
+	// list every leaf path the mixin needs, not an ancestor of it.
+	//
+	// A collision with a path the leaf's own inheritance chain (or an
+	// earlier-merged mixin) already set is rejected even when the path is
+	// allowlisted: this prevents deepMergeMap's last-writer-wins semantics
+	// from silently overwriting a value the chain already configured. See
+	// mixinOverridesSafeForMerge (metadata_store.go).
+	MixinSafeOverridePaths []string `yaml:"mixinSafeOverridePaths,omitempty"`
 }
 
 // HealthCheckConfig defines custom health check settings for a component.
@@ -488,6 +512,9 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("registry component %q is Kustomize but declares manifestFiles; a component may declare either Kustomize (tag/path) or raw manifest files, not both — manifestFiles defaults apply only to Helm components", comp.Name))
 		}
+		if err := validateMixinSafeOverridePaths(comp); err != nil {
+			return nil, err
+		}
 	}
 
 	// Build index for fast lookup
@@ -498,6 +525,42 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 	}
 
 	return &registry, nil
+}
+
+// validateMixinSafeOverridePaths rejects a malformed mixinSafeOverridePaths
+// declaration at registry load time rather than letting it silently
+// misbehave the first time a mixin actually collides with it: an empty or
+// dot-malformed entry can never match a real leaf path flattened by
+// overrideLeafPaths (so it would be dead, misleading configuration); a
+// literal duplicate is always redundant; and one entry that is an ancestor
+// or descendant of another (e.g. declaring both "global.tracing" and
+// "global.tracing.enabled") is ambiguous under overrideLeafPaths' exact-path
+// matching -- the broader entry can never actually be satisfied by a real
+// mixin override (which always flattens to full leaf paths), so it would
+// silently do nothing while looking like it grants access to the whole
+// subtree.
+func validateMixinSafeOverridePaths(comp *ComponentConfig) error {
+	seen := make(map[string]bool, len(comp.MixinSafeOverridePaths))
+	for _, p := range comp.MixinSafeOverridePaths {
+		if p == "" || strings.HasPrefix(p, ".") || strings.HasSuffix(p, ".") || strings.Contains(p, "..") {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("registry component %q declares mixinSafeOverridePaths entry %q, which is not a well-formed dotted path", comp.Name, p))
+		}
+		if seen[p] {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("registry component %q declares mixinSafeOverridePaths entry %q more than once", comp.Name, p))
+		}
+		seen[p] = true
+	}
+	for i, a := range comp.MixinSafeOverridePaths {
+		for _, b := range comp.MixinSafeOverridePaths[i+1:] {
+			if a != b && pathsIntersect(a, b) {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("registry component %q declares mixinSafeOverridePaths entries %q and %q, one an ancestor of the other -- list only exact leaf paths, since a mixin override always flattens to full leaf paths and the ancestor entry could never match one", comp.Name, a, b))
+			}
+		}
+	}
+	return nil
 }
 
 func validateComponentRegistryHeader(registry *ComponentRegistry, source string) error {

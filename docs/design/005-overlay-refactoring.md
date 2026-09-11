@@ -4,6 +4,7 @@
 
 **Accepted, implemented** — 2026-03-19
 **Revised** — 2026-04-06 (prototype findings, resequenced phases)
+**Revised** — 2026-09-10 (issue #2617): the "Component names" conflict policy below is amended, not superseded. `Overrides` is no longer an unconditional hard error for a mixin componentRef colliding with the inheritance chain -- a component may now opt in per-path via a new registry field, `ComponentConfig.MixinSafeOverridePaths` (`recipes/registry.yaml`), declared by the *target component's own owner*, not the mixin author. A mixin path outside that allowlist, or one colliding (exact match or ancestor/descendant) with a path the leaf's chain or an earlier mixin already set, still hard-errors exactly as this ADR originally specified. See `pkg/recipe/metadata_store.go`'s `mixinOverridesSafeForMerge` and `recipes/mixins/nvsentinel-observability.yaml` for the reference implementation. This narrower mechanism replaces an unconditional relaxation that was tried and reverted for being unsafe (it would have let any mixin set any value on any already-chained component) -- see `docs/contributor/recipe.md`'s "Mixin Composition" section for the current, authoritative rule.
 
 The mixin-based refactor has shipped: shared OS/platform fragments now live in
 `recipes/mixins/` (e.g. `os-ubuntu.yaml`, `os-talos.yaml`,
@@ -283,14 +284,19 @@ are truly orthogonal and reused enough to justify the indirection.
      entry sets nothing beyond the additive set
      `{Namespace, ManifestFiles, PreManifestFiles}`. Identity / sourcing
      fields (`Chart`, `Type`, `Source`, `Version`, `Tag`, `Path`,
-     `ValuesFile`, `Overrides`, `Patches`, `DependencyRefs`, `Cleanup`,
-     `ExpectedResources`, `HealthCheckAsserts`) still produce a hard error
-     — those are exactly the fields the original "Silent constraint override"
-     risk row (see Risk Table) was protecting. The carve-out keeps that
-     mitigation intact while letting OS-conditional mixins (e.g.
-     `os-talos`) contribute namespace and pre/post manifest overrides to
-     components already declared upstream without forcing every Talos leaf
-     overlay to re-author those fields by hand.
+     `ValuesFile`, `Patches`, `DependencyRefs`, `Cleanup`,
+     `ExpectedResources`, `HealthCheckAsserts`) still produce an
+     unconditional hard error — those are exactly the fields the original
+     "Silent constraint override" risk row (see Risk Table) was
+     protecting. `Overrides` is a narrower case as of the 2026-09-10
+     revision above: still a hard error by default, except for the exact
+     paths a component's own registry entry has explicitly allowlisted for
+     mixin use. The carve-out keeps the mitigation intact while letting
+     OS-conditional mixins (e.g. `os-talos`) contribute namespace and
+     pre/post manifest overrides, and opted-in mixins (e.g.
+     `nvsentinel-observability`) contribute allowlisted values, to
+     components already declared upstream without forcing every adopting
+     leaf overlay to re-author those fields by hand.
    Implemented as loader-time validation in `mergeMixins()` plus a field-set
    helper `mixinComponentRefSafeForMerge()` that returns the first offending
    identity field so error messages are precise.

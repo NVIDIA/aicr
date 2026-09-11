@@ -1,0 +1,77 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVSentinel Observability (audit logging) Health Check
+#
+# Opt-in only: adopted via spec.mixins: [nvsentinel-observability], not
+# shipped on any recipe by default. `make check-health-all` derives its
+# component list from recipes/registry.yaml's healthCheck.assertFile
+# entries, and no component references this file there, so this check is
+# excluded from that sweep by construction -- run it directly with
+# `make check-health COMPONENT=nvsentinel-observability` after bundling and
+# deploying with the mixin's values (see
+# docs/user/component-catalog.md#audit-logging-and-tracing).
+#
+# TestNVSentinelObservabilityChartRender (pkg/bundler/validations) asserts
+# this same mount shape against the rendered chart without needing a
+# cluster, but it pulls the chart over the network, so it is gated on
+# testing.Short() like this repo's other network-dependent tests -- it does
+# NOT run as part of `make test`/`make qualify` (both always pass -short).
+# It does run in CI, weekly, via the scheduled-only
+# .github/workflows/nvsentinel-observability-render-check.yaml (not gated
+# on any PR). Run it on demand:
+# `go test ./pkg/bundler/validations/... -run TestNVSentinelObservabilityChartRender`.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: nvsentinel-observability-health-check
+spec:
+  timeouts:
+    assert: 90s
+  steps:
+    - name: validate-platform-connectors-audit-logging
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: platform-connectors
+                namespace: nvsentinel
+              spec:
+                template:
+                  spec:
+                    # JMESPath projection, not a literal one-element slice:
+                    # platform-connectors' initContainers list already has a
+                    # second, conditional entry (postgresql-client-cert), so
+                    # a positional match would break depending on datastore
+                    # configuration.
+                    ((volumes || `[]`)[?name == 'audit-logs' && hostPath.path == '/var/log/nvsentinel' && hostPath.type == 'DirectoryOrCreate'] | length(@) > `0`): true
+                    (((initContainers || `[]`)[?name == 'fix-audit-log-permissions'].volumeMounts[] || `[]`) | [?name == 'audit-logs' && mountPath == '/var/log/nvsentinel'] | length(@) > `0`): true
+                    (((containers || `[]`)[?name == 'platform-connector'].volumeMounts[] || `[]`) | [?name == 'audit-logs' && mountPath == '/var/log/nvsentinel'] | length(@) > `0`): true
+    - name: validate-labeler-audit-logging
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: labeler
+                namespace: nvsentinel
+              spec:
+                template:
+                  spec:
+                    ((volumes || `[]`)[?name == 'audit-logs' && hostPath.path == '/var/log/nvsentinel' && hostPath.type == 'DirectoryOrCreate'] | length(@) > `0`): true
+                    (((initContainers || `[]`)[?name == 'fix-audit-log-permissions'].volumeMounts[] || `[]`) | [?name == 'audit-logs' && mountPath == '/var/log/nvsentinel'] | length(@) > `0`): true
+                    (((containers || `[]`)[?name == 'labeler'].volumeMounts[] || `[]`) | [?name == 'audit-logs' && mountPath == '/var/log/nvsentinel'] | length(@) > `0`): true

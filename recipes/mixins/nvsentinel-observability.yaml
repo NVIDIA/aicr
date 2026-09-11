@@ -1,0 +1,49 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# nvsentinel-observability mixin: turns on NVSentinel's audit logging and
+# distributed tracing, off by default in every shipped recipe. Every path
+# here is allowlisted by nvsentinel's registry entry
+# (mixinSafeOverridePaths, recipes/registry.yaml); see
+# docs/contributor/recipe.md#mixin-composition for the enforcement
+# mechanism.
+#
+# global.tracing.endpoint is deliberately absent -- not on the allowlist --
+# so the operator must supply it via
+# --set nv-sentinel:global.tracing.endpoint=<host:port>. A recipe composing
+# this mixin with no endpoint still resolves fine; the bundle fails at
+# `aicr bundle` time instead (CheckNVSentinelTracingEndpointRequired).
+#
+# See docs/user/component-catalog.md#audit-logging-and-tracing for what
+# each value below means and how to adopt this mixin.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: nvsentinel-observability
+spec:
+  componentRefs:
+    - name: nvsentinel
+      overrides:
+        global:
+          auditLogging:
+            enabled: true
+            logRequestBody: false
+            maxSizeMB: 100
+            maxBackups: 7
+            maxAgeDays: 30
+            compress: true
+          tracing:
+            enabled: true
+            insecure: false
