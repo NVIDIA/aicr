@@ -371,12 +371,14 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
   a mixin cannot self-grant permission to reach into a component it
   doesn't own. This applies the same way whether the mixin is
   introducing the component fresh or it's already in the chain — a
-  registered component's allowlist can't be bypassed by claiming to
-  add it as new. (An *unregistered* component has no allowlist to
-  enforce, so a mixin introducing one fresh keeps unrestricted
-  overrides — this compatibility carve-out only ever applied to
-  components with no registry entry at all.)
-  `nvsentinel-observability` is the reference example —
+  component with a *non-empty* declared allowlist can't have it
+  bypassed by claiming to add the component as new. A component whose
+  owner has never declared `mixinSafeOverridePaths` at all (no
+  registry entry, or a registry entry with no allowlist — most
+  components today, e.g. `agentgateway-crds`, `kubeflow-trainer`)
+  hasn't opted into this mechanism: a mixin introducing it fresh keeps
+  unrestricted `valuesFile`/`overrides`, exactly as before this
+  mechanism existed. `nvsentinel-observability` is the reference example —
   see its own file and `recipes/registry.yaml`'s `nvsentinel` entry.
 - When a snapshot evaluator is wired in, mixin constraints are
   evaluated against it after merging; failure invalidates the entire

@@ -1748,19 +1748,31 @@ func existingRawOverrideLayers(ctx context.Context, provider DataProvider, ref C
 	if ref.ValuesFile != "" {
 		baseValuesFile := fmt.Sprintf("components/%s/values.yaml", ref.Name)
 		if ref.ValuesFile != baseValuesFile {
-			if baseData, err := provider.ReadFile(ctx, baseValuesFile); err == nil {
+			baseData, err := provider.ReadFile(ctx, baseValuesFile)
+			switch {
+			case err == nil:
 				var baseValues map[string]any
-				if err := yaml.Unmarshal(baseData, &baseValues); err != nil {
+				if unmarshalErr := yaml.Unmarshal(baseData, &baseValues); unmarshalErr != nil {
 					return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal,
-						fmt.Sprintf("parse base values file %q for component %q mixin collision check", baseValuesFile, ref.Name), err)
+						fmt.Sprintf("parse base values file %q for component %q mixin collision check", baseValuesFile, ref.Name), unmarshalErr)
 				}
 				layers = append(layers, baseValues)
+			case stderrors.Is(err, fs.ErrNotExist):
+				// No base values.yaml for this component -- fine, just no
+				// base layer to check.
+			default:
+				// A transient/permission/timeout error must not be treated
+				// as "no base layer": that would silently drop a
+				// collision-check layer and let a mixin overwrite a value
+				// the base file actually sets.
+				return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal,
+					fmt.Sprintf("read base values file %q for component %q mixin collision check", baseValuesFile, ref.Name))
 			}
 		}
 		data, err := provider.ReadFile(ctx, ref.ValuesFile)
 		if err != nil {
-			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal,
-				fmt.Sprintf("read values file %q for component %q mixin collision check", ref.ValuesFile, ref.Name), err)
+			return nil, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal,
+				fmt.Sprintf("read values file %q for component %q mixin collision check", ref.ValuesFile, ref.Name))
 		}
 		var vfValues map[string]any
 		if err := yaml.Unmarshal(data, &vfValues); err != nil {

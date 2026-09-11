@@ -16,8 +16,12 @@ package recipe
 
 import (
 	"context"
+	stderrors "errors"
+	"io/fs"
 	"strings"
 	"testing"
+
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // newNvsentinelAllowlistStore builds a MetadataStore backed by an
@@ -802,4 +806,110 @@ func TestMergeMixins_RejectsValuesFileOnNewRegisteredComponent(t *testing.T) {
 			t.Errorf("error = %v, want a valuesFile rejection", err)
 		}
 	})
+}
+
+// pathErrorProvider wraps a DataProvider and returns a fixed error for one
+// specific path, delegating everything else -- used to test that
+// existingRawOverrideLayers propagates a non-not-found read error instead
+// of silently treating it as "no base layer."
+type pathErrorProvider struct {
+	delegate DataProvider
+	failPath string
+	failErr  error
+}
+
+func (p *pathErrorProvider) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if path == p.failPath {
+		return nil, p.failErr
+	}
+	return p.delegate.ReadFile(ctx, path)
+}
+
+func (p *pathErrorProvider) WalkDir(ctx context.Context, root string, fn fs.WalkDirFunc) error {
+	return p.delegate.WalkDir(ctx, root, fn)
+}
+
+func (p *pathErrorProvider) Source(path string) string { return p.delegate.Source(path) }
+
+// TestMergeMixins_PropagatesTransientBaseValuesReadError covers a
+// non-not-found failure reading an existing component's implicit base
+// values.yaml (e.g. a transient provider/NFS/permission error).
+// existingRawOverrideLayers must propagate it, not silently treat it as
+// "no base layer" -- otherwise a mixin could overwrite an allowlisted path
+// the (unreadable) base file actually sets, since that layer would simply
+// be missing from the collision check.
+func TestMergeMixins_PropagatesTransientBaseValuesReadError(t *testing.T) {
+	base := newNvsentinelAllowlistStore("transient-base-read-error", []string{"global.auditLogging.enabled"}, map[string][]byte{
+		"values/overlay.yaml": []byte("global:\n  tracing:\n    insecure: false\n"),
+	})
+	store := &MetadataStore{
+		provider: &pathErrorProvider{
+			delegate: base.provider,
+			failPath: "components/nvsentinel/values.yaml",
+			failErr:  stderrors.New("connection reset by peer"),
+		},
+		Mixins: map[string]*RecipeMixin{},
+	}
+	addTestMixin(store, "test-mixin", []ComponentRef{
+		{Name: "nvsentinel", Overrides: map[string]any{"global": map[string]any{"auditLogging": map[string]any{"enabled": true}}}},
+	})
+
+	spec := RecipeMetadataSpec{
+		Mixins: []string{"test-mixin"},
+		ComponentRefs: []ComponentRef{
+			{Name: "nvsentinel", ValuesFile: "values/overlay.yaml"},
+		},
+	}
+	_, err := store.mergeMixins(t.Context(), &spec)
+	if err == nil {
+		t.Fatal("expected mergeMixins to propagate the transient base-values read error, got nil")
+	}
+	if !strings.Contains(err.Error(), "connection reset by peer") {
+		t.Errorf("error = %v, want it to wrap the underlying transient error", err)
+	}
+}
+
+// TestMergeMixins_PreservesStructuredErrorCodeFromValuesRead covers a
+// structured error (e.g. ErrCodeTimeout, as EmbeddedDataProvider.ReadFile
+// returns on a canceled context) surfacing from a values-file read during
+// collision-layer construction. It must reach the caller with its original
+// code intact, not be flattened to ErrCodeInternal, so SDK/HTTP callers can
+// distinguish a retryable timeout from a genuine internal failure.
+func TestMergeMixins_PreservesStructuredErrorCodeFromValuesRead(t *testing.T) {
+	base := newNvsentinelAllowlistStore("structured-error-propagation", []string{"global.auditLogging.enabled"}, nil)
+	store := &MetadataStore{
+		provider: &pathErrorProvider{
+			delegate: base.provider,
+			failPath: "values/overlay.yaml",
+			failErr:  aicrerrors.New(aicrerrors.ErrCodeTimeout, "context canceled before reading"),
+		},
+		Mixins: map[string]*RecipeMixin{},
+	}
+	addTestMixin(store, "test-mixin", []ComponentRef{
+		{Name: "nvsentinel", Overrides: map[string]any{"global": map[string]any{"auditLogging": map[string]any{"enabled": true}}}},
+	})
+
+	spec := RecipeMetadataSpec{
+		Mixins: []string{"test-mixin"},
+		ComponentRefs: []ComponentRef{
+			{Name: "nvsentinel", ValuesFile: "values/overlay.yaml"},
+		},
+	}
+	_, err := store.mergeMixins(t.Context(), &spec)
+	if err == nil {
+		t.Fatal("expected mergeMixins to propagate the values-file read error, got nil")
+	}
+	// Checked on the OUTERMOST error (err itself, not something further
+	// down its Unwrap chain), not via errors.Is: errors.Is would still find
+	// ErrCodeTimeout by walking the chain even if Wrap had demoted it to
+	// Cause under a new ErrCodeInternal wrapper -- callers that read the
+	// top-level code directly (e.g. an HTTP status mapper) only see this
+	// level.
+	se, ok := stderrors.AsType[*aicrerrors.StructuredError](err)
+	if !ok {
+		t.Fatalf("error = %#v, want a top-level *StructuredError", err)
+	}
+	if se.Code != aicrerrors.ErrCodeTimeout {
+		t.Errorf("top-level code = %v, want ErrCodeTimeout preserved, not flattened to ErrCodeInternal", se.Code)
+	}
 }
