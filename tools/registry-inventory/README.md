@@ -17,7 +17,7 @@ inventory and a CI gate so a newly introduced registry can't slip in unnoticed.
 | `.goreleaser.yaml`, `.ko.yaml` | compiled-in base image (pull) + ko `repositories:` (push) |
 | `**/Dockerfile`, `**/*.Dockerfile` | `FROM` base images (build-stage aliases and `scratch` skipped) |
 | `.github/**/*.y{a,}ml` | GitHub Actions `uses:` refs + pin quality |
-| `tools/setup-tools` | dev/CI tool installers (**best-effort**): `go install`, `pip`, `apt`, `brew`, and literal download URLs (`github.com`, `get.helm.sh`, `dl.k8s.io`, `kind.sigs.k8s.io`, `raw.githubusercontent.com`) |
+| `tools/setup-tools`, `.github/actions/gpu-cluster-setup/install-nvkind.sh` | dev/CI tool installers (**best-effort**): `go build` from the main module, `go install`, `pip`, `apt`, `brew`, and literal download URLs (`github.com`, `get.helm.sh`, `dl.k8s.io`, `kind.sigs.k8s.io`, `raw.githubusercontent.com`) |
 
 The shell pass is deliberately conservative: it matches on a command **verb**
 (not a bare URL) so advice strings and comments — e.g. `log_info "install from

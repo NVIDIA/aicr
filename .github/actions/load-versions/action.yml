@@ -43,6 +43,9 @@ outputs:
   addlicense:
     description: 'addlicense version'
     value: ${{ steps.versions.outputs.addlicense }}
+  addlicense_sha256_linux_amd64:
+    description: 'Pinned linux/amd64 SHA256 for the addlicense release archive (linting.addlicense_sha256_linux_amd64)'
+    value: ${{ steps.versions.outputs.addlicense_sha256_linux_amd64 }}
   go_licenses:
     description: 'go-licenses version'
     value: ${{ steps.versions.outputs.go_licenses }}
@@ -61,6 +64,9 @@ outputs:
   setup_envtest:
     description: 'setup-envtest version'
     value: ${{ steps.versions.outputs.setup_envtest }}
+  setup_envtest_sha256_linux_amd64:
+    description: 'Pinned linux/amd64 SHA256 for the setup-envtest release binary (testing_tools.setup_envtest_sha256_linux_amd64)'
+    value: ${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}
   helm:
     description: 'Helm version'
     value: ${{ steps.versions.outputs.helm }}
@@ -191,6 +197,7 @@ runs:
         echo "oasdiff_sha256_linux_amd64=$(yq eval '.linting.oasdiff_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "yamllint=$(yq eval '.linting.yamllint' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "addlicense=$(yq eval '.linting.addlicense' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "addlicense_sha256_linux_amd64=$(yq eval '.linting.addlicense_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "go_licenses=$(yq eval '.linting.go_licenses' .settings.yaml)" >> $GITHUB_OUTPUT
 
         # Security tools
@@ -207,6 +214,7 @@ runs:
         echo "ctlptl=$(yq eval '.testing_tools.ctlptl' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "tilt=$(yq eval '.testing_tools.tilt' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "setup_envtest=$(yq eval '.testing_tools.setup_envtest' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "setup_envtest_sha256_linux_amd64=$(yq eval '.testing_tools.setup_envtest_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "helm=$(yq eval '.testing_tools.helm' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "helmfile=$(yq eval '.testing_tools.helmfile' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "helmfile_sha256_linux_amd64=$(yq eval '.testing_tools.helmfile_checksums.linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT

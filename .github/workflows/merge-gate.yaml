@@ -115,8 +115,9 @@ jobs:
               # defines the check itself, so a change to the gate cannot skip
               # its own gate: the Makefile recipe is the check's contract, the
               # install-go-licenses action supplies the binary it runs (that
-              # action clears GOFLAGS, without which -trimpath strips GOROOT and
-              # the check passes while inspecting zero packages), and this
+              # action pins GOFLAGS to -mod=readonly, without which an inherited
+              # -trimpath strips GOROOT and the check passes while inspecting
+              # zero packages), and this
               # workflow defines the job. The entry replaced here named
               # '.github/workflows/verify-licenses.yaml', which was deleted in
               # 3c9f6ec5 when the job moved into this workflow, so the filter
@@ -213,7 +214,7 @@ jobs:
               - 'validators/performance/requirements.txt'
               - 'validators/performance/licenses/**'
               # The actions that supply this job's toolchain. install-go-licenses
-              # matters most: it exists to clear GOFLAGS, and an install that
+              # matters most: it exists to pin GOFLAGS, and a build that
               # inherits -trimpath yields a go-licenses with no GOROOT. The
               # `deps` filter watches both too, but that gates verify-licenses,
               # which under -trimpath PASSES while inspecting zero packages —

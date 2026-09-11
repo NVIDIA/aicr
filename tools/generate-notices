@@ -59,7 +59,9 @@ PYTHON_REQUIREMENTS="${PYTHON_REQUIREMENTS:-validators/performance/requirements.
 
 if ! command -v go-licenses >/dev/null 2>&1; then
     echo "ERROR: go-licenses is not installed." >&2
-    echo "Install it with 'make tools-setup' or 'go install github.com/google/go-licenses/v2@\$(yq -r .linting.go_licenses .settings.yaml)'." >&2
+    echo "Install it with 'make tools-setup', or build it from this module" >&2
+    echo "(run from the repository root, so the package resolves):" >&2
+    echo "  GOFLAGS=-mod=readonly go build -o \"\$(go env GOBIN || echo \"\$(go env GOPATH)/bin\")/go-licenses\" github.com/google/go-licenses/v2" >&2
     exit 1
 fi
 
@@ -320,8 +322,8 @@ for platform in "${PLATFORMS[@]}"; do
         echo "ERROR: 'go-licenses save' collected no licenses for ${goos}/${goarch}." >&2
         echo "The tool exits 0 in this state, so this is almost always go-licenses" >&2
         echo "failing to locate GOROOT and treating every package as standard library." >&2
-        echo "Reinstall it without -trimpath:" >&2
-        echo "  GOFLAGS= go install github.com/google/go-licenses/v2@\$(yq -r .linting.go_licenses .settings.yaml)" >&2
+        echo "Rebuild it without -trimpath, from the repository root:" >&2
+        echo "  GOFLAGS=-mod=readonly go build -o \"\$(go env GOBIN || echo \"\$(go env GOPATH)/bin\")/go-licenses\" github.com/google/go-licenses/v2" >&2
         exit 1
     fi
 

@@ -46,6 +46,9 @@ inputs:
   setup_envtest_version:
     description: 'setup-envtest version pinned in .settings.yaml (testing_tools.setup_envtest, via load-versions)'
     required: true
+  setup_envtest_sha256:
+    description: 'Pinned linux/amd64 SHA256 for the setup-envtest release binary (testing_tools.setup_envtest_sha256_linux_amd64, via load-versions)'
+    required: true
   privileged_ci:
     description: >-
       Whether this run checked out trusted content. Only trusted runs write the
@@ -142,7 +145,8 @@ runs:
     #
     # Nothing is lost on integrity either. Vendored source was never hashed
     # against go.sum at build time; resolution from the module cache is, against
-    # go.sum and sum.golang.org, on every build.
+    # the committed go.sum on every build, with sum.golang.org consulted when a
+    # module is first added.
     - name: Verify go.mod and go.sum are tidy
       shell: bash
       run: |
@@ -163,24 +167,44 @@ runs:
     # Pinned, not @latest: this runs in the merge gate, so an unpinned install
     # lets an upstream release change what every PR is tested against with no
     # commit here. Kept in step with sigs.k8s.io/controller-runtime in go.mod.
-    - name: Install envtest binaries
-      shell: bash
-      env:
-        SETUP_ENVTEST_VERSION: ${{ inputs.setup_envtest_version }}
-      run: |
-        [ -n "${SETUP_ENVTEST_VERSION}" ] \
-          || { echo "setup_envtest_version input is required" >&2; exit 1; }
-        go install "sigs.k8s.io/controller-runtime/tools/setup-envtest@${SETUP_ENVTEST_VERSION}"
-        setup-envtest use --print path >/dev/null 2>&1
+    - name: Install setup-envtest
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_setup_envtest: 'true'
+        setup_envtest_version: '${{ inputs.setup_envtest_version }}'
+        setup_envtest_sha256: '${{ inputs.setup_envtest_sha256 }}'
 
+    # Separate from the install: this downloads the envtest control-plane
+    # binaries (etcd, kube-apiserver) that setup-envtest manages, which is a
+    # different artifact from setup-envtest itself.
+    - name: Fetch envtest control-plane binaries
+      shell: bash
+      # stdout is the resolved path and is not needed; stderr is kept so a failed
+      # control-plane download says why instead of only "exit code 1".
+      run: setup-envtest use --print path >/dev/null
+
+    # `go build` from the main module, not `go install pkg@version`. apidiff is
+    # a tool dependency in go.mod, so its transitive dependencies are in go.sum
+    # and are verified against it locally -- the checksum database is consulted
+    # only when a module is being added. `go install pkg@version` resolves
+    # outside the module, where nothing is in go.sum, so every dependency was
+    # authenticated against sum.golang.org on every run and an outage there
+    # failed the gate (#2667).
+    #
+    # Measured against a logging proxy: the `go install` form requests
+    # /sumdb/sum.golang.org/supported, this form makes no /sumdb/ request at all.
     - name: Install API-diff tool
       if: inputs.apidiff_version != ''
       shell: bash
-      env:
-        APIDIFF_VERSION: ${{ inputs.apidiff_version }}
       run: |
         set -euo pipefail
-        GOFLAGS= go install "golang.org/x/exp/cmd/apidiff@${APIDIFF_VERSION}"
+        mkdir -p "${RUNNER_TEMP}/gotools"
+        # GOFLAGS pinned rather than inherited, for the reason spelled out in
+        # .github/actions/install-go-licenses: an inherited -trimpath strips the
+        # GOROOT these go/packages-based tools need. -mod=readonly rather than
+        # empty so CI still cannot rewrite the manifest it is validating.
+        GOFLAGS=-mod=readonly go build -o "${RUNNER_TEMP}/gotools/apidiff" golang.org/x/exp/cmd/apidiff
+        echo "${RUNNER_TEMP}/gotools" >> "${GITHUB_PATH}"
 
     # Installed before `make test`, not after: test-shell runs
     # tools/openapi-diff_test.sh, which exercises the real oasdiff rather than a

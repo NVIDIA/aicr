@@ -13,12 +13,15 @@
 # limitations under the License.
 
 name: 'Install go-licenses'
-description: 'Install the pinned go-licenses with GOFLAGS cleared so the binary keeps a usable GOROOT'
+description: 'Build the pinned go-licenses from this module with GOFLAGS pinned so the binary keeps a usable GOROOT'
 
-# go-licenses has no binary release, so it must be `go install`ed rather than
-# fetched like the tools in setup-build-tools. The install is centralized here
-# because clearing GOFLAGS is a correctness requirement, not a preference, and a
-# caller that forgets it fails silently:
+# go-licenses has no binary release, so unlike the tools in setup-build-tools it
+# cannot be fetched as a verified artifact. It is instead a `tool` directive in
+# go.mod and is built from the main module (#2667) -- which also means its
+# dependencies are covered by the committed go.sum and the build never contacts
+# sum.golang.org. The build is centralized here because pinning GOFLAGS is a
+# correctness requirement, not a preference, and a caller that forgets it fails
+# silently:
 #
 #   * -trimpath strips the binary's baked-in GOROOT. go-licenses decides whether
 #     a package is standard library by matching its source path against
@@ -26,16 +29,28 @@ description: 'Install the pinned go-licenses with GOFLAGS cleared so the binary 
 #     absolute path matches, and the ENTIRE dependency graph is reported as
 #     stdlib — the tool then writes nothing and exits 0. `make license-check`
 #     passes while inspecting zero packages; `make notices` emits nothing.
-#   * Any -mod pin the caller happens to be carrying applies to the install too,
-#     resolving go-licenses against this module's graph rather than its own. It
-#     is not a dependency here, so the install fails or picks a wrong version.
+#     Measured on v2.0.1: a -trimpath build emits zero rows from
+#     `go-licenses csv`.
+#   * GOFLAGS is pinned to -mod=readonly rather than emptied. Empty keeps
+#     -trimpath out but also drops readonly, and CI must not rewrite the
+#     manifest it is validating.
 #
-# Mirrors the `GOFLAGS= go install` convention in tools/setup-tools, which
-# tools/setup-tools_test.sh asserts for every versioned Go tool install.
+# Resolving go-licenses against this module's graph is deliberate, and it has a
+# consequence worth knowing: the binary is built with THIS repo's versions of
+# its dependencies, not upstream's. golang.org/x/tools in particular is the
+# go/packages library go-licenses uses to walk the graph and locate GOROOT, so a
+# bump here can change this tool's behavior with linting.go_licenses untouched.
+# It fails loudly (compile or gate error) rather than silently.
+#
+# tools/generate-notices_test.sh asserts the build shape below, and rejects any
+# `go install` of go-licenses anywhere under .github/.
 
 inputs:
   version:
-    description: 'go-licenses version pinned in .settings.yaml (linting.go_licenses, via load-versions)'
+    description: >-
+      go-licenses version pinned in .settings.yaml (linting.go_licenses, via load-versions).
+      Validated for presence only — the version built comes from go.mod, which
+      TestToolPinsMatchGoMod holds equal to this pin.
     required: true
 
 runs:
@@ -52,10 +67,26 @@ runs:
           exit 1
         fi
 
+    # `go build` from the main module, not `go install pkg@version`. go-licenses
+    # is a tool dependency in go.mod, so its transitive dependencies are in
+    # go.sum and are verified against it locally; the checksum database is
+    # consulted only when a module is being added. `go install pkg@version`
+    # resolves outside the module, where nothing is in go.sum, so every
+    # dependency was authenticated against sum.golang.org on every run and an
+    # outage there failed the gate (#2667).
+    #
+    # go-licenses publishes no release binaries, so unlike addlicense and
+    # setup-envtest there is no pinned-artifact option; the module route is what
+    # removes the sumdb dependency. The version still comes from go.mod, which
+    # TestToolPinsMatchGoMod holds equal to .settings.yaml.
+    #
+    # GOFLAGS is pinned rather than inherited for the GOROOT reason in the file
+    # header above -- the previous `go install` form cleared it for the same
+    # reason.
     - name: Install go-licenses
       shell: bash
-      env:
-        GO_LICENSES_VERSION: ${{ inputs.version }}
       run: |
         set -euo pipefail
-        GOFLAGS= go install "github.com/google/go-licenses/v2@${GO_LICENSES_VERSION}"
+        mkdir -p "${RUNNER_TEMP}/gotools"
+        GOFLAGS=-mod=readonly go build -o "${RUNNER_TEMP}/gotools/go-licenses" github.com/google/go-licenses/v2
+        echo "${RUNNER_TEMP}/gotools" >> "${GITHUB_PATH}"
