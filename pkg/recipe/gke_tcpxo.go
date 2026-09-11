@@ -249,8 +249,10 @@ func applyGKETCPXOInterfaces(result *RecipeResult, mapping *[]NetworkInterfaceMa
 }
 
 func validateGKETCPXOApplicability(result *RecipeResult) error {
-	if result.Criteria == nil || result.Criteria.Service != CriteriaServiceGKE || result.Criteria.Accelerator != CriteriaAcceleratorH100 {
-		return errors.New(errors.ErrCodeInvalidRequest, "configuration.gke.tcpxoInterfaces is only valid for an h100 GKE recipe")
+	if result.Criteria == nil || result.Criteria.Service != CriteriaServiceGKE || result.Criteria.Accelerator != CriteriaAcceleratorH100 ||
+		result.Criteria.Platform != CriteriaPlatformKubeflow {
+
+		return errors.New(errors.ErrCodeInvalidRequest, "configuration.gke.tcpxoInterfaces is only valid for an h100 GKE kubeflow recipe")
 	}
 	if !result.ShipsGKETCPXORuntime() || !componentPresentAndEnabled(result, gkeNCCLTCPXOComponentName) {
 		return errors.New(errors.ErrCodeInvalidRequest,

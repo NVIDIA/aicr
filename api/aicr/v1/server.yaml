@@ -1850,8 +1850,9 @@ components:
         - $ref: "#/components/schemas/RecipeResponse"
         - type: object
           description: >
-            Closed accounting-configured RecipeResult shape without a selected
-            profile. aicr.run/v1beta2 is emitted; the superseded
+            Closed typed-configuration RecipeResult shape without a selected
+            profile (Slurm accounting, runtime inventory, or GKE TCPXO
+            interfaces). aicr.run/v1beta2 is emitted; the superseded
             aicr.run/v1alpha3 is still accepted until v1.0.0.
           required: [metadata, configuration, componentRefs]
           additionalProperties: false
@@ -1903,7 +1904,6 @@ components:
               allOf:
                 - $ref: "#/components/schemas/ConfiguredRecipeConfiguration"
                 - type: object
-                  required: [slurm]
             componentRefs:
               type: array
               minItems: 1
@@ -2033,7 +2033,8 @@ components:
         Version-partitioned RecipeResult accepted by POST /v1/bundle.
         Default input with apiVersion aicr.run/v1alpha2, aicr.run/v1, or no
         apiVersion remains additive; v1alpha3/v1beta2 input is closed and requires either
-        metadata.selectedProfile or configuration.slurm.accounting. The
+        metadata.selectedProfile or a typed configuration section
+        (configuration.slurm, configuration.runtimeInventory, or configuration.gke). The
         branches are disjoint on apiVersion:
         the default branch admits only absent/empty/v1alpha2/v1 and prohibits
         selectedProfile, while both configured branches require the profile track.

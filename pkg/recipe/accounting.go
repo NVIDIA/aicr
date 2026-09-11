@@ -136,6 +136,12 @@ func resolveBuildConfig(criteria *Criteria, opts ...BuildOption) (*buildConfig, 
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"GKE TCPXO interfaces are supported on h100 (a3-megagpu-8g) recipes only")
 		}
+		if criteria != nil && criteria.Platform != "" && criteria.Platform != CriteriaPlatformAny &&
+			criteria.Platform != CriteriaPlatformKubeflow {
+
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"GKE TCPXO interfaces can only be set when recipe platform is kubeflow")
+		}
 		if err := ValidateGKETCPXOInterfaces(*cfg.tcpxoInterfaces); err != nil {
 			return nil, err
 		}

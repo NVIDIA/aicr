@@ -443,7 +443,10 @@ curl "http://localhost:8080/v1/recipe?service=gke&accelerator=h100&os=cos&intent
 the plain criteria object, not a `RecipeCriteria` resource. Profile selection
 may be supplied in the envelope, as the `profile` query parameter, or in both
 places when the values agree. `slurmAccountingMode` is supplied as the same
-query parameter used by GET. Conflicting selections are rejected:
+query parameter used by GET, as is `gkeTcpxoInterfaces` (required for the GKE
+h100 kubeflow training family — e.g.
+`gkeTcpxoInterfaces=eth1=gpu-nic-0,...,eth8=gpu-nic-7`). Conflicting selections
+are rejected:
 
 ```yaml
 criteria:
