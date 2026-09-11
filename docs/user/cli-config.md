@@ -47,6 +47,12 @@ Each `spec.*` section is optional and each command reads only its own section,
 so a file may carry just one section or any combination. A document with none
 of the five sections is rejected.
 
+Reading is per-command; **validation is not**. Every section present in the file
+is checked when the file loads, whichever command loaded it — so a malformed
+`spec.bundle` fails `aicr snapshot --config` too, naming the spec path that is
+wrong. Keep that in mind for a single document spanning several sections: an
+error can name a section the running command never reads.
+
 `AICRConfig` is an authored file, so its `apiVersion` is yours to set. From
 v0.22 the documented value is `aicr.run/v1beta1`; the loader still accepts the
 superseded `aicr.run/v1alpha2` and warns, naming your config file, while empty

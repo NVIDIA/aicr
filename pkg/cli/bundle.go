@@ -517,6 +517,12 @@ func validateTLogUpload(opts *bundleCmdOptions) error {
 // Conflicts are evaluated against the resolved opts (which merge flags, env,
 // and config) rather than cmd.IsSet alone, so a config-sourced keyless option
 // cannot bypass the check and then be silently ignored by the KMS path.
+//
+// config.resolveSigningKey enforces the same exclusivity for every caller of
+// Resolve; this one is not redundant with it. It runs on merged values, the only
+// layer that sees a flag-introduced conflict against a clean config,
+// --identity-token, an explicitly blank --signing-key (via cmd.IsSet), and the
+// --oidc-device-flow correction that rule deliberately leaves to it.
 func validateSigningKeyExclusivity(cmd *cli.Command, opts *bundleCmdOptions) error {
 	// A signing key that is present but blank must not reach the KMS resolver:
 	// it selects the KMS path (non-empty opts.signingKey) yet fails late at

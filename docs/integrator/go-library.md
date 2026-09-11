@@ -955,20 +955,26 @@ keeps the two in agreement (`opts.Attest` and `opts.OIDCResolve.Attest` come
 from the same `spec.bundle.attestation.enabled` value), so this only matters
 for a caller who assembles `BundleOptions` by hand.
 
-A KMS key and keyless OIDC are mutually exclusive. `BundleOptions()` rejects a
-whitespace-only `signingKey` (must not be blank after trimming) and rejects
-`signingKey` combined with `fulcioURL`. It deliberately does NOT reject
-`signingKey` combined with `oidcDeviceFlow` at this layer: `BundleOptions()`
-runs before the CLI's flag-over-config merge, so an eager rejection here would
-make `--oidc-device-flow=false` unable to correct a document that sets both —
-the error would fire before that flag is ever read. The CLI's
-`validateSigningKeyExclusivity`, run on the flag-merged options, is what
-catches the `signingKey` + `oidcDeviceFlow` combination for CLI invocations.
-An SDK caller deriving `BundleOptions()` directly and calling `MakeBundle`
-with no flag merge gets no equivalent guard for that specific pair — the
-resulting bundle still signs with the KMS key (`ResolveAttesterLazy` picks KMS
-whenever `SigningKey` is non-empty), matching the pre-#2245 behavior; avoid
-setting both in a document consumed outside the CLI.
+A KMS key and keyless OIDC are mutually exclusive, and the rule lives where
+`spec.bundle` is converted to its typed form rather than in any one derivation:
+a whitespace-only `signingKey` is rejected (it must not be blank after
+trimming), as is `signingKey` combined with `fulcioURL`. Because that
+conversion is what validates the section, a document setting both fails at
+`LoadConfig`, for every command that loads a config rather than only the ones
+that bundle. That is the same reach a malformed `fulcioURL` has always had. The
+`SigningKey` a derivation carries is already trimmed.
+
+The rule deliberately does NOT cover `signingKey` combined with
+`oidcDeviceFlow`. Conversion happens before the CLI's flag-over-config merge,
+so rejecting that pair there would make `--oidc-device-flow=false` unable to
+correct a document that sets both — the error would fire before that flag is
+ever read. The CLI's `validateSigningKeyExclusivity`, run on the flag-merged
+options, is what catches it for CLI invocations. An SDK caller deriving
+`BundleOptions()` directly and calling `MakeBundle` with no flag merge gets no
+equivalent guard for that specific pair — the resulting bundle still signs with
+the KMS key (`ResolveAttesterLazy` picks KMS whenever `SigningKey` is
+non-empty), matching the pre-#2245 behavior; avoid setting both in a document
+consumed outside the CLI.
 
 **Device flow needs a prompt writer.** `spec.bundle.attestation.oidcDeviceFlow`
 sets `OIDCResolve.DeviceFlow`, but config cannot carry an `io.Writer`, so the

@@ -270,9 +270,10 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 
 // resolveAttestation projects the bundle attestation spec onto the resolved
 // output. It is a no-op when a is nil (the section is optional). Signing
-// endpoints are validated at this conversion boundary so a malformed config
-// value fails here with spec-path attribution (and is caught for non-CLI
-// callers of Resolve too), rather than only later in CLI flag parsing.
+// endpoints, signing mode, and the signing key's normal form are all settled at
+// this conversion boundary so a malformed config value fails here with
+// spec-path attribution (and is caught for non-CLI callers of Resolve too),
+// rather than only later in CLI flag parsing.
 func resolveAttestation(a *AttestationSpec, out *BundleResolved) error {
 	if a == nil {
 		return nil
@@ -280,13 +281,54 @@ func resolveAttestation(a *AttestationSpec, out *BundleResolved) error {
 	if err := validateAttestationEndpoints(a); err != nil {
 		return err
 	}
+	signingKey, err := resolveSigningKey(a)
+	if err != nil {
+		return err
+	}
 	out.Attest = a.Enabled
 	out.CertIDRegexp = a.CertificateIdentityRegexp
 	out.OIDCDeviceFlow = a.OIDCDeviceFlow
 	out.FulcioURL = a.FulcioURL
 	out.RekorURL = a.RekorURL
-	out.SigningKey = a.SigningKey
+	out.SigningKey = signingKey
 	return nil
+}
+
+// resolveSigningKey returns the normalized spec.bundle.attestation.signingKey,
+// rejecting a present-but-blank value and the one keyless setting that cannot
+// coexist with it.
+//
+// Signing mode is exclusive: a KMS key or keyless OIDC, never both.
+// attestation.ResolveAttesterLazy takes the KMS branch whenever SigningKey is
+// non-empty, so a document setting both would sign with the key while its
+// fulcioURL setting did nothing — the caller believing they signed against a
+// named Fulcio.
+//
+// oidcDeviceFlow is deliberately NOT part of that rule here, unlike fulcioURL.
+// Resolve runs before the CLI's flag-over-config merge, so rejecting the pair
+// eagerly would reject a document that sets both signingKey and
+// oidcDeviceFlow: true even when the caller passes --oidc-device-flow=false
+// specifically to correct it: the error would fire before that flag is ever
+// read. The CLI's validateSigningKeyExclusivity catches the config-only
+// combination on the merged opts, where a boolean flag's zero value can still
+// be told apart from "explicitly cleared" via cmd.IsSet. rekorURL is not a
+// conflict either; it has its own exclusivity rule against signingConfig.
+//
+// Trimming happens here rather than at a consumer because a YAML block scalar
+// carries surrounding whitespace, and an untrimmed key fails late in the KMS
+// URI parser instead of at the boundary that produced it.
+func resolveSigningKey(a *AttestationSpec) (string, error) {
+	key := strings.TrimSpace(a.SigningKey)
+	if a.SigningKey != "" && key == "" {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"spec.bundle.attestation.signingKey must not be blank")
+	}
+	if key != "" && a.FulcioURL != "" {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"spec.bundle.attestation.signingKey is mutually exclusive with "+
+				"spec.bundle.attestation.fulcioURL")
+	}
+	return key, nil
 }
 
 // validateAttestationEndpoints rejects malformed private Sigstore endpoints in
