@@ -610,12 +610,20 @@ func TestHasPublishedEvidence(t *testing.T) {
 		t.Fatalf("%q is no longer in the presence manifest; pick another published coordinate", co.Path())
 	}
 
+	// A concrete coordinate the manifest does not list. Asserted below rather
+	// than assumed: any specific coordinate can gain evidence later (this case
+	// previously used rke2/vr200 training-kubeflow, which did), so the test
+	// fails loudly with a clear message instead of silently inverting.
 	unpublished := &recipe.Criteria{
 		Service:     recipe.CriteriaServiceRKE2,
 		Accelerator: recipe.CriteriaAcceleratorVR200,
 		OS:          recipe.CriteriaOSUbuntu,
-		Intent:      recipe.CriteriaIntentTraining,
-		Platform:    recipe.CriteriaPlatformKubeflow,
+		Intent:      recipe.CriteriaIntentInference,
+	}
+	if co, coErr := recipe.CoordinateFor(unpublished); coErr != nil {
+		t.Fatalf("CoordinateFor(unpublished) error = %v", coErr)
+	} else if presence.Has(co) {
+		t.Fatalf("%q is now in the presence manifest; pick another unpublished coordinate", co.Path())
 	}
 
 	tests := []struct {
