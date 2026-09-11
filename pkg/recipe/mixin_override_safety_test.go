@@ -706,3 +706,38 @@ func TestMergeMixins_StructuralOnlyMixinSkipsValuesFileIO(t *testing.T) {
 		t.Fatalf("mergeMixins: %v, want success -- a structural-only mixin must not need to read the target's values", err)
 	}
 }
+
+// TestMergeMixins_UnregisteredNewComponentOverridesStayFree covers a mixin
+// introducing a component with NO registry entry at all: unlike a
+// registered component (e.g. nvsentinel), there's no owner-declared
+// allowlist to bypass, so the mixin keeps the pre-existing freedom to set
+// any overrides. Only registered components are validated on introduction
+// -- scoping the check to "registered" rather than "already in this
+// chain" is what lets an unrelated, private mixin-introduced component
+// stay override-free without every component needing a registry entry.
+func TestMergeMixins_UnregisteredNewComponentOverridesStayFree(t *testing.T) {
+	provider := newInMemoryProvider("unregistered-new-component", map[string][]byte{
+		"registry.yaml": []byte("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents: []\n"),
+	})
+	store := &MetadataStore{
+		provider: provider,
+		Mixins:   map[string]*RecipeMixin{},
+	}
+	addTestMixin(store, "test-mixin", []ComponentRef{
+		{
+			Name:      "my-addon",
+			Chart:     "my-addon",
+			Source:    "oci://ghcr.io/example",
+			Type:      ComponentTypeHelm,
+			Overrides: map[string]any{"replicaCount": 3},
+		},
+	})
+
+	spec := RecipeMetadataSpec{
+		Mixins:        []string{"test-mixin"},
+		ComponentRefs: []ComponentRef{},
+	}
+	if _, err := store.mergeMixins(t.Context(), &spec); err != nil {
+		t.Fatalf("mergeMixins: %v, want success -- an unregistered component has no allowlist to enforce", err)
+	}
+}

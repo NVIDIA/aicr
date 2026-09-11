@@ -2484,6 +2484,38 @@ func TestDeepMergeMap_NoSliceAliasing(t *testing.T) {
 	}
 }
 
+// TestRecipeMetadataSpecMerge_DoesNotCorruptSourceOverrides covers Merge's
+// initial componentMap population: s.ComponentRefs can itself alias a cached
+// source (e.g. initBaseMergedSpec copies s.Base.Spec.ComponentRefs by
+// struct, which doesn't deep-copy the Overrides map). Without cloning on
+// entry, a second layer's Overrides for the same component would be
+// deep-merged straight into that aliased map, corrupting the cached source
+// for every later build that reuses it.
+func TestRecipeMetadataSpecMerge_DoesNotCorruptSourceOverrides(t *testing.T) {
+	source := RecipeMetadataSpec{
+		ComponentRefs: []ComponentRef{
+			{Name: "x", Overrides: map[string]any{"a": 1}},
+		},
+	}
+
+	// Mirrors initBaseMergedSpec's copy pattern: a struct-level copy that
+	// leaves the Overrides map aliased to source.
+	merged := RecipeMetadataSpec{
+		ComponentRefs: make([]ComponentRef, len(source.ComponentRefs)),
+	}
+	copy(merged.ComponentRefs, source.ComponentRefs)
+
+	merged.Merge(&RecipeMetadataSpec{
+		ComponentRefs: []ComponentRef{
+			{Name: "x", Overrides: map[string]any{"b": 2}},
+		},
+	})
+
+	if _, leaked := source.ComponentRefs[0].Overrides["b"]; leaked {
+		t.Fatalf("source was mutated by the merge: %#v", source.ComponentRefs[0].Overrides)
+	}
+}
+
 // TestRecipeResultNormalizeKind pins the ingest-boundary kind contract: the
 // legacy shapes this API accepted through v0.18.0 are rewritten to the
 // canonical kind so the emitted artifact reloads, the canonical value is a

@@ -769,6 +769,21 @@ func (s *MetadataStore) mergeMixins(ctx context.Context, mergedSpec *RecipeMetad
 				if err != nil {
 					return nil, err
 				}
+			} else {
+				// A mixin introducing a genuinely unregistered component
+				// keeps the pre-existing freedom to set any overrides --
+				// there's no registry owner whose allowlist could be
+				// bypassed. Only registered components are validated,
+				// whether or not they're already in this chain: otherwise
+				// a mixin could dodge a registered component's allowlist
+				// simply by being the first to introduce it.
+				registered, err := componentIsRegistered(s.provider, c.Name)
+				if err != nil {
+					return nil, err
+				}
+				if !registered {
+					continue
+				}
 			}
 			if err := mixinOverridesSafeForMerge(s.provider, mixinName, c.Name, c.Overrides, existingLayers); err != nil {
 				return nil, err
@@ -1433,6 +1448,16 @@ func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, eval
 // safe set is exactly the set of fields the merge handles additively or as
 // pure namespace remap. Any new ComponentRef field that joins the additive
 // set must also be added here.
+// componentIsRegistered reports whether name has an entry in provider's
+// component registry.
+func componentIsRegistered(provider DataProvider, name string) (bool, error) {
+	registry, err := GetComponentRegistryFor(provider)
+	if err != nil {
+		return false, aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, "load component registry for mixin override validation")
+	}
+	return registry.Get(name) != nil, nil
+}
+
 func mixinComponentRefSafeForMerge(c ComponentRef) (string, bool) {
 	switch {
 	case c.Chart != "":
