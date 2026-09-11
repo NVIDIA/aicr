@@ -1284,6 +1284,17 @@ const (
 	HelmValueResolutionConcurrency = 8
 )
 
+// Bundle deploy-time timeouts.
+const (
+	// BundleShowCRDsTimeout bounds the `helm show crds` registry read in a
+	// bundle's generated apply-crds.sh. That script runs inside the deploy
+	// path, where an unbounded call hangs the whole rollout instead of
+	// failing it: deploy.sh retries a component that exits non-zero but
+	// cannot interrupt one that never returns. Matches
+	// MirrorHelmTemplateTimeout, the other per-chart helm invocation.
+	BundleShowCRDsTimeout = 90 * time.Second
+)
+
 // Mirror discovery timeouts and defaults.
 const (
 	// MirrorHelmTemplateTimeout is the per-component timeout for helm
