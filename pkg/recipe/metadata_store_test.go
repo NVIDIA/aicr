@@ -1047,10 +1047,27 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"secure-accelerator-access",
 		"slinky-slurm-health",
 	}
-	// The gb200/gb300 EKS Slurm leaves inherit the same ten conformance checks
-	// as the h100 list above from their accelerator training bases (#2563) and
-	// add slinky-slurm-imex-channel, which is genuinely IMEX-specific.
-	gbEKSSlurmConformanceChecks := append(slices.Clone(conformanceChecks), "slinky-slurm-imex-channel")
+	// The gb200/gb300 EKS Slurm leaves differ from the h100 list above in two
+	// INDEPENDENT ways; do not collapse them into one explanation:
+	//   + slinky-slurm-imex-channel — added by the leaf, genuinely IMEX-specific.
+	//   - robust-controller, secure-accelerator-access — the GB families declare
+	//     these on their training-kubeflow leaves (#2563), not on the shared
+	//     training base, so the Slurm siblings do not inherit them.
+	//     secure-accelerator-access launches a pod requesting nvidia.com/gpu,
+	//     which a Slinky NodeSet that reserves every GPU cannot honor, and
+	//     robust-controller has no AI operator to exercise on a Slurm leaf.
+	gbEKSSlurmConformanceChecks := []string{
+		"platform-health",
+		"gpu-operator-health",
+		"dra-support",
+		"accelerator-metrics",
+		"ai-service-metrics",
+		"gang-scheduling",
+		"pod-autoscaling",
+		"cluster-autoscaling",
+		"slinky-slurm-health",
+		"slinky-slurm-imex-channel",
+	}
 	kindConformanceChecks := []string{
 		"platform-health",
 		"gpu-operator-health",
