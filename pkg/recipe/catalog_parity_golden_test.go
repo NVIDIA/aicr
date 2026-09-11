@@ -71,9 +71,6 @@ func TestCatalogParityGolden(t *testing.T) {
 
 	leaves, err := recipe.ResolveLeaves(ctx, recipe.ResolveLeavesOptions{
 		Version: catalogParityVersion,
-		// The fingerprint leaf's golden pins the introspection mapping — a
-		// fixed value, so parity stays deterministic.
-		BuildOptionsForCriteria: recipe.GKETCPXOIntrospectionBuildOptions,
 	})
 	if err != nil {
 		t.Fatalf("ResolveLeaves: %v", err)

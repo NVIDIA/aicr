@@ -18,6 +18,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // tcpxoTestMapping returns a valid ordered mapping with distinct networks.
@@ -526,5 +528,21 @@ func TestWithGKETCPXOInterfacesDefensiveCopy(t *testing.T) {
 	opt(cfg)
 	if (*cfg.tcpxoInterfaces)[0].Network == "mutated-after-construction" {
 		t.Error("build option aliased the caller's slice; later mutation changed the recorded value")
+	}
+}
+
+func TestIsMissingGKETCPXOInterfaces(t *testing.T) {
+	t.Parallel()
+
+	result := tcpxoTestResult()
+	missingErr := applyGKETCPXOInterfaces(result, nil)
+	if !IsMissingGKETCPXOInterfaces(missingErr) {
+		t.Fatal("IsMissingGKETCPXOInterfaces() = false for the fail-closed error")
+	}
+	if IsMissingGKETCPXOInterfaces(errors.New(errors.ErrCodeInvalidRequest, "some other rejection")) {
+		t.Fatal("IsMissingGKETCPXOInterfaces() = true for an unrelated invalid-request error")
+	}
+	if IsMissingGKETCPXOInterfaces(nil) {
+		t.Fatal("IsMissingGKETCPXOInterfaces() = true for nil")
 	}
 }

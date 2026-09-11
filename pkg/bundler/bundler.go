@@ -691,12 +691,14 @@ func (b *DefaultBundler) enforceOwnedPaths(result *recipe.RecipeResult, domain r
 // render a usable runtime at all, so there is nothing to tolerate. Do not
 // "align" this branch with the accounting warning.
 //
-// The fail-closed also runs before the bundler-config nil check: the missing
-// mapping is a defect of the recipe itself, so the values-only SDK path
-// (nil config) must reject it too. There is no bundlers-filter clause — the
-// accounting one protects required database components from being filtered
-// out, while this mapping is data on a component the recipe already
-// requires.
+// The fail-closed runs before the bundler-config nil check. The values-only
+// SDK path (BundleComponents) never reaches this function — its fail-closed
+// comes from CheckGKETCPXOInterfacesCoherence via runComponentValidations —
+// and Make rejects a nil config before this point, so the ordering is
+// defense-in-depth against future callers, not a live path. There is no
+// bundlers-filter clause — the accounting one protects required database
+// components from being filtered out, while this mapping is data on a
+// component the recipe already requires.
 func (b *DefaultBundler) enforceGKETCPXOOwnership(result *recipe.RecipeResult) error {
 	if !result.ShipsGKETCPXORuntime() {
 		return nil

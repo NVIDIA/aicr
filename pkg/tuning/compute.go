@@ -86,9 +86,6 @@ func Compute(ctx context.Context, opts Options) (*Report, error) {
 		Provider: opts.Provider,
 		Version:  opts.Version,
 		Filter:   opts.Filter,
-		// The TCPXO fingerprint leaf fails closed without the interface
-		// mapping; introspection tooling uses the fixed labeled value.
-		BuildOptionsForCriteria: recipe.GKETCPXOIntrospectionBuildOptions,
 	})
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err,

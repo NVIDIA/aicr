@@ -197,10 +197,10 @@ func TestEnforceGKETCPXOOwnershipNonFingerprintRecipe(t *testing.T) {
 	}
 }
 
-// TestEnforceGKETCPXOOwnershipNilConfig covers the values-only SDK path
-// (BundleComponents passes a nil bundler config): the missing mapping is a
-// defect of the recipe itself, so fail-closed must fire even with no bundle
-// config to enforce against.
+// TestEnforceGKETCPXOOwnershipNilConfig covers the defensive nil-config
+// branch: Make rejects a nil bundler config before reaching this gate, so
+// production never enters it — the test clears Config after New to pin the
+// branch's behavior for future callers.
 func TestEnforceGKETCPXOOwnershipNilConfig(t *testing.T) {
 	t.Parallel()
 

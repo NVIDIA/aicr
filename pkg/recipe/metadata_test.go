@@ -2258,15 +2258,6 @@ func TestComponentRefMergeWithPath(t *testing.T) {
 	})
 }
 
-// TestNFDTopologyUpdater_OverlayCoverage verifies that every GPU overlay
-// rooted at a real-cluster platform base resolves to
-// componentRefs[nfd].overrides.topologyUpdater.enable=true, and that the
-// kind-chain overlays leave it off — across both the directly-edited
-// platform+intent layer and the deeper specialized leaves users actually
-// resolve to (Ubuntu / Kubeflow / Dynamo / NIM / COS variants). Guards
-// against regressions in both directions: an accidentally-omitted
-// overlay loses NRT publishing for that recipe, and a kind-chain
-// override would CrashLoopBackOff TU on KWOK clusters.
 // tcpxoRequiredBuildOpts supplies the generation-time TCPXO interface mapping
 // when (and only when) the criteria select the h100 GKE kubeflow family — the
 // one recipe that ships torch-distributed-tcpxo and therefore fails closed
@@ -2280,6 +2271,15 @@ func tcpxoRequiredBuildOpts(cr *Criteria) []BuildOption {
 	return nil
 }
 
+// TestNFDTopologyUpdater_OverlayCoverage verifies that every GPU overlay
+// rooted at a real-cluster platform base resolves to
+// componentRefs[nfd].overrides.topologyUpdater.enable=true, and that the
+// kind-chain overlays leave it off — across both the directly-edited
+// platform+intent layer and the deeper specialized leaves users actually
+// resolve to (Ubuntu / Kubeflow / Dynamo / NIM / COS variants). Guards
+// against regressions in both directions: an accidentally-omitted
+// overlay loses NRT publishing for that recipe, and a kind-chain
+// override would CrashLoopBackOff TU on KWOK clusters.
 func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 	// Verify the builder is functional before running the table. This assertion
 	// is within the first 50 lines so the test-quality lint hook recognizes the

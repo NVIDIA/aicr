@@ -70,10 +70,17 @@ fi
 # the provisioner's own naming instead of a committed placeholder. A config
 # written for a cluster provisioned by other means should carry its real
 # mapping and run with DEPLOYMENT_ID unset.
+# GKE caps Device-type Network names at 41 characters, so a very long
+# deployment ID (daytime lane: slug + slot + 13-digit run ID) would fail
+# recipe validation here — that failure is the intended signal, not something
+# to truncate away: the provisioner owns the names and would have created the
+# same over-limit objects.
 if [[ -n "${DEPLOYMENT_ID:-}" && -n "${2:-}" && -f "${2}" ]]; then
   recipe_criteria="$(yq -r '[.spec.recipe.criteria.service, .spec.recipe.criteria.accelerator, .spec.recipe.criteria.platform] | join("/")' "${2}")"
   if [[ "${recipe_criteria}" == "gke/h100/kubeflow" ]]; then
-    derived_config="$(mktemp /tmp/aicr-uat-tcpxo-config.XXXXXX.yaml)"
+    # One deterministic path per run, rewritten per phase — no temp-file
+    # accumulation across phases or repeated local runs.
+    derived_config="/tmp/aicr-uat-tcpxo-config.${DEPLOYMENT_ID}.yaml"
     cp "${2}" "${derived_config}"
     yq -i 'del(.spec.recipe.configuration.gke.tcpxoInterfaces)' "${derived_config}"
     for i in 0 1 2 3 4 5 6 7; do

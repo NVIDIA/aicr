@@ -15,6 +15,7 @@
 package recipe
 
 import (
+	stderrors "errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -100,6 +101,13 @@ func FormatGKETCPXOInterfaces(mapping []NetworkInterfaceMapping) string {
 	return strings.Join(parts, ",")
 }
 
+// IsGKETCPXOInterfaceName reports whether name is one of the eth1..eth8
+// secondary interfaces the a3-megagpu-8g contract covers. Exported for the
+// performance validator, which asserts the same contract on realized pods.
+func IsGKETCPXOInterfaceName(name string) bool {
+	return gkeTCPXOInterfaceNamePattern.MatchString(name)
+}
+
 // ValidateGKETCPXOInterfaces requires eth1..eth8 exactly once and eight unique
 // Device-type Network names. The pair sequence may be in any order; only the
 // explicit interfaceName determines an assignment. The name alphabet also
@@ -160,6 +168,24 @@ func componentPresentAndEnabled(r *RecipeResult, name string) bool {
 	return ref != nil && ref.IsEnabled()
 }
 
+// IsMissingGKETCPXOInterfaces reports whether err is the fail-closed
+// missing-mapping error from recipe generation. ResolveLeaves uses it to
+// retry the fingerprint leaf with introspection input while leaving every
+// other resolve failure untouched.
+func IsMissingGKETCPXOInterfaces(err error) bool {
+	for cur := err; cur != nil; {
+		var se *errors.StructuredError
+		if !stderrors.As(cur, &se) {
+			return false
+		}
+		if missing, ok := se.Context["missingGKETCPXOInterfaces"].(bool); ok && missing {
+			return true
+		}
+		cur = se.Unwrap()
+	}
+	return false
+}
+
 // GKETCPXOIntrospectionInterfaces provides fresh synthetic inputs for offline
 // catalog analysis and tests. These are not discovered deployment values.
 func GKETCPXOIntrospectionInterfaces() []NetworkInterfaceMapping {
@@ -194,8 +220,9 @@ func GKETCPXOOwnership() OwnershipDomain {
 func applyGKETCPXOInterfaces(result *RecipeResult, mapping *[]NetworkInterfaceMapping) error {
 	if mapping == nil {
 		if result.ShipsGKETCPXORuntime() {
-			return errors.New(errors.ErrCodeInvalidRequest,
-				"this recipe ships torch-distributed-tcpxo and requires configuration.gke.tcpxoInterfaces; supply --gke-tcpxo-interfaces eth1=<network>,...,eth8=<network> or spec.recipe.configuration.gke.tcpxoInterfaces")
+			return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+				"this recipe ships torch-distributed-tcpxo and requires configuration.gke.tcpxoInterfaces; supply --gke-tcpxo-interfaces eth1=<network>,...,eth8=<network> or spec.recipe.configuration.gke.tcpxoInterfaces",
+				map[string]any{"missingGKETCPXOInterfaces": true})
 		}
 		return nil
 	}

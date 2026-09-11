@@ -33,7 +33,7 @@ That single limitation decides the rest:
 
 | Fabric | Platform | Needs a sidecar? | Where the wiring goes |
 |---|---|---|---|
-| GPUDirect TCPXO | GKE, A3 Mega | yes (`tcpxo-daemon`) | a `TrainingRuntime` you author |
+| GPUDirect TCPXO | GKE, A3 Mega | yes (`tcpxo-daemon`) | the shipped `torch-distributed-tcpxo` ClusterTrainingRuntime (or a `TrainingRuntime` you author) |
 | EFA | EKS | no | your `TrainJob` |
 | InfiniBand / RDMA | AKS | no | your `TrainJob` |
 

@@ -85,9 +85,6 @@ func TestStockRenderParityGolden(t *testing.T) {
 
 	leaves, err := recipe.ResolveLeaves(ctx, recipe.ResolveLeavesOptions{
 		Version: stockRenderVersion,
-		// Satisfy the TCPXO fingerprint leaf's required mapping with the
-		// fixed introspection value so the render golden stays deterministic.
-		BuildOptionsForCriteria: recipe.GKETCPXOIntrospectionBuildOptions,
 	})
 	if err != nil {
 		t.Fatalf("ResolveLeaves: %v", err)

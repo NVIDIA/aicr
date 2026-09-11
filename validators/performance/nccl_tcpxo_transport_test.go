@@ -17,6 +17,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -26,12 +27,14 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-// workerLabels are the JobSet labels the watcher selects on. The test pods
-// must carry them or the watcher never sees them — as with the real JobSet.
-func workerLabels() map[string]string {
+// workerLabels are the JobSet labels the watcher selects on, plus the job
+// index the per-slot accounting keys on. The test pods must carry them or the
+// watcher never sees them — as with the real JobSet.
+func workerLabels(index int) map[string]string {
 	return map[string]string{
 		"jobset.sigs.k8s.io/jobset-name":        "nccl-all-reduce-tj",
 		"jobset.sigs.k8s.io/replicatedjob-name": "node",
+		"jobset.sigs.k8s.io/job-index":          strconv.Itoa(index),
 	}
 }
 
@@ -72,7 +75,7 @@ func withInterfaces(t *testing.T, mutate func([]gkeTCXOInterfaceEntry) []gkeTCXO
 
 func withoutDaemonStarted(p *v1.Pod) { p.Status.InitContainerStatuses = nil }
 
-func tcpxoWorkerPod(t *testing.T, name string, opts ...podOpt) *v1.Pod {
+func tcpxoWorkerPod(t *testing.T, name string, index int, opts ...podOpt) *v1.Pod {
 	t.Helper()
 	started := true
 	restartAlways := v1.ContainerRestartPolicyAlways
@@ -80,7 +83,7 @@ func tcpxoWorkerPod(t *testing.T, name string, opts ...podOpt) *v1.Pod {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: "nccl-test",
-			Labels:    workerLabels(),
+			Labels:    workerLabels(index),
 			Annotations: map[string]string{
 				gkeTCXODefaultAnnotation:    "eth0",
 				gkeTCXOInterfacesAnnotation: tcpxoInterfacesAnnotation(t, nil),
@@ -139,30 +142,30 @@ func TestTCPXOWorkerWatch(t *testing.T) {
 	}{
 		{
 			name:    "two wired workers pass",
-			pods:    []*v1.Pod{tcpxoWorkerPod(t, "node-0"), tcpxoWorkerPod(t, "node-1")},
+			pods:    []*v1.Pod{tcpxoWorkerPod(t, "node-0", 0), tcpxoWorkerPod(t, "node-1", 1)},
 			workers: 2,
 		},
 		{
 			name:    "one wired and one unwired worker fails",
-			pods:    []*v1.Pod{tcpxoWorkerPod(t, "node-0"), tcpxoWorkerPod(t, "node-1", withoutDaemon)},
+			pods:    []*v1.Pod{tcpxoWorkerPod(t, "node-0", 0), tcpxoWorkerPod(t, "node-1", 1, withoutDaemon)},
 			workers: 2,
 			wantErr: "has no tcpxo-daemon sidecar",
 		},
 		{
 			name:    "daemon never started on one worker fails",
-			pods:    []*v1.Pod{tcpxoWorkerPod(t, "node-0"), tcpxoWorkerPod(t, "node-1", withoutDaemonStarted)},
+			pods:    []*v1.Pod{tcpxoWorkerPod(t, "node-0", 0), tcpxoWorkerPod(t, "node-1", 1, withoutDaemonStarted)},
 			workers: 2,
-			wantErr: "observed started on 1 of 2",
+			wantErr: "never observed started on worker index 1",
 		},
 		{
 			name:    "missing interfaces annotation fails",
-			pods:    []*v1.Pod{tcpxoWorkerPod(t, "node-0", withInterfaces(t, func(e []gkeTCXOInterfaceEntry) []gkeTCXOInterfaceEntry { return e[:8] }))},
+			pods:    []*v1.Pod{tcpxoWorkerPod(t, "node-0", 0, withInterfaces(t, func(e []gkeTCXOInterfaceEntry) []gkeTCXOInterfaceEntry { return e[:8] }))},
 			workers: 1,
 			wantErr: "want 9",
 		},
 		{
 			name: "duplicate network fails",
-			pods: []*v1.Pod{tcpxoWorkerPod(t, "node-0", withInterfaces(t, func(e []gkeTCXOInterfaceEntry) []gkeTCXOInterfaceEntry {
+			pods: []*v1.Pod{tcpxoWorkerPod(t, "node-0", 0, withInterfaces(t, func(e []gkeTCXOInterfaceEntry) []gkeTCXOInterfaceEntry {
 				e[5].Network = e[4].Network
 				return e
 			}))},
@@ -171,7 +174,7 @@ func TestTCPXOWorkerWatch(t *testing.T) {
 		},
 		{
 			name: "unknown interface name fails",
-			pods: []*v1.Pod{tcpxoWorkerPod(t, "node-0", withInterfaces(t, func(e []gkeTCXOInterfaceEntry) []gkeTCXOInterfaceEntry {
+			pods: []*v1.Pod{tcpxoWorkerPod(t, "node-0", 0, withInterfaces(t, func(e []gkeTCXOInterfaceEntry) []gkeTCXOInterfaceEntry {
 				e[3].InterfaceName = "eth9"
 				return e
 			}))},
@@ -180,7 +183,7 @@ func TestTCPXOWorkerWatch(t *testing.T) {
 		},
 		{
 			name: "eth0 not first fails",
-			pods: []*v1.Pod{tcpxoWorkerPod(t, "node-0", withInterfaces(t, func(e []gkeTCXOInterfaceEntry) []gkeTCXOInterfaceEntry {
+			pods: []*v1.Pod{tcpxoWorkerPod(t, "node-0", 0, withInterfaces(t, func(e []gkeTCXOInterfaceEntry) []gkeTCXOInterfaceEntry {
 				e[0], e[1] = e[1], e[0]
 				return e
 			}))},
@@ -192,7 +195,7 @@ func TestTCPXOWorkerWatch(t *testing.T) {
 			// interfaceName keys are the mapping, not the list position.
 			// Consistent with recipe-level validation, which accepts this.
 			name: "reordered explicit pairs pass",
-			pods: []*v1.Pod{tcpxoWorkerPod(t, "node-0", withInterfaces(t, func(e []gkeTCXOInterfaceEntry) []gkeTCXOInterfaceEntry {
+			pods: []*v1.Pod{tcpxoWorkerPod(t, "node-0", 0, withInterfaces(t, func(e []gkeTCXOInterfaceEntry) []gkeTCXOInterfaceEntry {
 				e[3], e[4] = e[4], e[3]
 				return e
 			}))},
@@ -235,7 +238,7 @@ func TestTCPXOWorkerWatchTeardownRace(t *testing.T) {
 	clientset := fake.NewClientset()
 	w := startGKETCPXOWorkerWatch(context.Background(), clientset, "nccl-test")
 
-	pod := tcpxoWorkerPod(t, "node-0")
+	pod := tcpxoWorkerPod(t, "node-0", 0)
 	if _, err := clientset.CoreV1().Pods("nccl-test").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
@@ -274,4 +277,35 @@ func waitForRecorded(t *testing.T, w *tcpxoWorkerWatcher, n int) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("watcher recorded %d pods, want %d", w.recordedCount(), n)
+}
+
+// TestTCPXOWorkerWatchRestartMasking pins the per-slot accounting: a slot
+// whose only pod never started the daemon must fail even when another slot
+// produced extra started pods (a restarted worker). Counting started pods
+// without the index would mask the missing slot.
+func TestTCPXOWorkerWatchRestartMasking(t *testing.T) {
+	t.Parallel()
+
+	clientset := fake.NewClientset()
+	w := startGKETCPXOWorkerWatch(context.Background(), clientset, "nccl-test")
+
+	// Slot 0 was restarted: both its pods started the daemon. Slot 1's only
+	// pod never did. Per-name counting would report 2 started of 2 wanted and
+	// pass; per-index accounting must fail slot 1.
+	for _, pod := range []*v1.Pod{
+		tcpxoWorkerPod(t, "node-0-a", 0),
+		tcpxoWorkerPod(t, "node-0-b", 0),
+		tcpxoWorkerPod(t, "node-1", 1, withoutDaemonStarted),
+	} {
+		if _, err := clientset.CoreV1().Pods("nccl-test").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("create pod: %v", err)
+		}
+	}
+	waitForRecorded(t, w, 3)
+	w.Stop()
+
+	err := w.Assert(2)
+	if err == nil || !strings.Contains(err.Error(), "never observed started on worker index 1") {
+		t.Fatalf("Assert() error = %v, want the never-started slot flagged", err)
+	}
 }

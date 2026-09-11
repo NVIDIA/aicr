@@ -61,20 +61,8 @@ type ResolveLeavesOptions struct {
 	BuildOptionsForCriteria func(*Criteria) []BuildOption
 }
 
-// alwaysSatisfiedEvaluator reports every constraint satisfied, so the
-// constraint-aware resolution path runs offline: no overlay is excluded and no
-// snapshot measurement is consulted. This exercises the merge/compose machinery
-// (populating merged Constraints and Metadata) without cluster or snapshot state.
 func alwaysSatisfiedEvaluator(Constraint) ConstraintEvalResult {
 	return ConstraintEvalResult{Passed: true}
-}
-
-// buildOptionsForCriteria nil-safely resolves the per-leaf build options.
-func buildOptionsForCriteria(fn func(*Criteria) []BuildOption, c *Criteria) []BuildOption {
-	if fn == nil {
-		return nil
-	}
-	return fn(c)
 }
 
 // ResolveLeaves enumerates every leaf overlay in the catalog and resolves each
@@ -111,8 +99,17 @@ func ResolveLeaves(ctx context.Context, opts ResolveLeavesOptions) ([]ResolvedLe
 		if !entry.IsLeaf && (opts.RetainNonLeaf == nil || !opts.RetainNonLeaf(entry)) {
 			continue
 		}
-		result, buildErr := builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, alwaysSatisfiedEvaluator,
-			buildOptionsForCriteria(opts.BuildOptionsForCriteria, entry.Criteria)...)
+		result, buildErr := builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, alwaysSatisfiedEvaluator)
+		if IsMissingGKETCPXOInterfaces(buildErr) {
+			// The one catalog family with a required typed input: retry with
+			// the fixed introspection mapping so enumeration tooling covers
+			// this leaf without a cluster to name real networks for. A leaf
+			// that does not ship the runtime never reaches this branch — its
+			// plain build succeeded — so external catalogs that shadow the
+			// family without the runtime are unaffected.
+			result, buildErr = builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, alwaysSatisfiedEvaluator,
+				WithGKETCPXOInterfaces(GKETCPXOIntrospectionInterfaces()))
+		}
 		leaves = append(leaves, ResolvedLeaf{Entry: entry, Result: result, Err: buildErr})
 	}
 
