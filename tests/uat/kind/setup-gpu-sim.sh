@@ -106,7 +106,26 @@ NVML_MOCK_HOST_ROOT="/var/lib/nvml-mock"
 NVML_MOCK_GPU_PROFILE="h100"
 GPUS_PER_WORKER=8
 
-DEVICE_PLUGIN_IMAGE="nvcr.io/nvidia/k8s-device-plugin:v0.18.2"
+# The device plugin, pinned by DIGEST for the same reason the nvml-mock chart
+# and its image above are: a tag is mutable, and a CI gate must not change the
+# bytes it runs without a commit. nvcr.io release tags are not immutable.
+#
+# The digest is the multi-arch manifest LIST (linux/amd64 and linux/arm64), not
+# a single-platform manifest, so it is valid on both the amd64 CI runners and
+# arm64 developer machines.
+#
+# To re-resolve after an upstream release, taking the top-level digest:
+#   regctl manifest digest nvcr.io/nvidia/k8s-device-plugin:<version>
+#   docker buildx imagetools inspect nvcr.io/nvidia/k8s-device-plugin:<version>
+# Both printed sha256:b5788e2... for v0.18.2 on 2026-09-11.
+#
+# DEVICE_PLUGIN_VERSION records which release the digest was taken from. It is
+# documentation: nothing resolves through it, and setup-gpu-sim_test.sh fails
+# if a tag reference reappears in operative code.
+DEVICE_PLUGIN_REPOSITORY="nvcr.io/nvidia/k8s-device-plugin"
+DEVICE_PLUGIN_VERSION="v0.18.2"
+DEVICE_PLUGIN_DIGEST="sha256:b5788e29e7ae5272de8de863ebe386d6611e608421a6ecc5b4e7d5952aba637f"
+DEVICE_PLUGIN_IMAGE="${DEVICE_PLUGIN_REPOSITORY}@${DEVICE_PLUGIN_DIGEST}"
 DEVICE_PLUGIN_NAME="nvidia-device-plugin-mock"
 DEVICE_PLUGIN_NAMESPACE="kube-system"
 
@@ -328,7 +347,9 @@ install_nvml_mock() {
 # install_device_plugin <context>
 install_device_plugin() {
     local context="$1"
-    echo "installing the device plugin at ${DEVICE_PLUGIN_IMAGE}"
+    # The version is logged alongside the digest because a digest alone tells
+    # an operator reading CI output nothing about which release is running.
+    echo "installing the device plugin ${DEVICE_PLUGIN_VERSION} at ${DEVICE_PLUGIN_IMAGE}"
     device_plugin_manifest |
         kubectl --context "${context}" --request-timeout="${KUBECTL_TIMEOUT}" apply -f -
 }
