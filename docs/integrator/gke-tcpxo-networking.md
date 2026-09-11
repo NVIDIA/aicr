@@ -149,9 +149,12 @@ work, tracked separately.
 declaration. Recipes generated before this runtime existed do not declare
 its manifest, so they bundle exactly as before — no runtime, no required
 input. Only a recipe whose kubeflow-trainer component attaches the
-`torch-distributed-tcpxo` manifest must record the mapping; a hand-edited
-recipe that adds the manifest without the configuration fails closed at
-load and at bundle time.
+`torch-distributed-tcpxo` manifest must record the mapping: generation fails
+closed without it, and a hand-edited recipe that adds the manifest without
+the configuration is rejected at bundle time. (Recipe *loading* does not
+fail closed on this shape — the metadata store's coherence check also serves
+catalog introspection paths that never deploy, so the enforcement lives at
+generation and bundling, where artifacts are produced.)
 
 **Residual limitation, stated plainly:** the runtime is an opt-in sibling —
 workloads that keep referencing `torch-distributed` get TCP as before, and
