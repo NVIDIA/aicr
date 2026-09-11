@@ -51,6 +51,16 @@ type Component struct {
 	// Values hydrated by the component bundler
 	Values       map[string]any
 	DynamicPaths []string // paths moved from values.yaml into cluster-values.yaml
+	// OwnsCRDs emits an apply-crds.sh beside install.sh, which applies the
+	// chart's CRDs ahead of `helm upgrade` (see the template for why Helm
+	// alone leaves them at their day-one schema). Callers set it from
+	// deployer.ResolveCRDOwners, never from the registry flag directly:
+	// the flag records an audit of the registry-pinned chart, so a ref
+	// overriding source, chart, or version must not inherit it.
+	//
+	// Only primary Helm folders honor it. Injected -pre/-post/-readiness
+	// wrappers carry AICR-rendered manifests, not a chart with crds/.
+	OwnsCRDs bool
 }
 
 // WriteResult is the typed return shape from Write. Callers consume

@@ -1,19 +1,14 @@
 # AI Cluster Runtime Deployment
 
-Recipe Version: {{ .RecipeVersion }}
-Bundler Version: {{ .BundlerVersion }}
+Recipe Version: v0.1.0
+Bundler Version: v1.0.0
 
 Per-component bundle for deploying NVIDIA AI Cluster Runtime components
 for GPU-accelerated Kubernetes workloads.
 
 ## Configuration
 
-{{ if .Criteria }}
-**Target Environment:**
-{{ range .Criteria }}
-{{ . -}}
-{{ end }}
-{{ end }}
+
 
 ## Components
 
@@ -23,21 +18,10 @@ via its own `install.sh`:
 
 | Component | Version | Namespace | Source |
 |-----------|---------|-----------|--------|
-{{ range .Components -}}
-| {{ .Name }} | {{ if .Version }}{{ .Version }}{{ else }}N/A{{ end }} | {{ .Namespace }} | {{ if .Repository }}{{ .ChartName }} ({{ .Repository }}){{ else }}local{{ end }} |
-{{ end }}
+| k8s-aibom | 1.2.0 | k8s-aibom-system | k8s-aibom (oci://ghcr.io/googlecloudplatform/charts) |
 
-{{ if .Constraints }}
-## Constraints
 
-The following constraints must be satisfied:
 
-| Constraint | Value |
-|------------|-------|
-{{ range .Constraints -}}
-| {{ .Name }} | {{ .Value }} |
-{{ end }}
-{{ end }}
 
 ## Quick Start
 
@@ -112,12 +96,10 @@ deployment order using `helm uninstall` directly — one command per
 `NNN-<release>/` folder the deploy script installs, including any
 injected `*-pre` / `*-post` auxiliaries:
 
-{{ range .ReleasesReversed -}}
 ```bash
-helm uninstall {{ .Name }} -n {{ .Namespace }}
+helm uninstall k8s-aibom -n k8s-aibom-system
 ```
 
-{{ end -}}
 CRDs installed by these charts are intentionally not deleted by Helm; remove
 them only when you are sure no other release depends on them. See the
 [deployer-native uninstall walkthrough](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md#bundle-uninstall) in the AICR CLI reference for details on
@@ -129,7 +111,7 @@ ArgoCD+Helm bundles.
 ### Check deployment status
 
 ```bash
-kubectl get pods -A | grep -E '{{ range $i, $c := .Components }}{{ if $i }}|{{ end }}{{ $c.Name }}{{ end }}'
+kubectl get pods -A | grep -E 'k8s-aibom'
 ```
 
 ### View component logs
@@ -140,25 +122,8 @@ with one of the entries from the table above):
 ```bash
 kubectl logs -n <namespace> -l app.kubernetes.io/instance=<component>
 ```
-{{ $hasGPU := false }}
-{{- range .Components -}}{{- if eq .Name "gpu-operator" -}}{{- $hasGPU = true -}}{{- end -}}{{- end -}}
-{{- if $hasGPU }}
-### Verify GPU access
 
-```bash
-kubectl get nodes -o jsonpath='{.items[*].status.allocatable}' | jq '.["nvidia.com/gpu"]'
-```
-{{ end }}
 
 ## References
 
 - [AICR CLI Reference](https://github.com/NVIDIA/aicr/blob/main/docs/user/cli-reference.md)
-{{- $hasGPUOp := false }}
-{{- $hasNetOp := false }}
-{{- range .Components }}{{ if eq .Name "gpu-operator" }}{{ $hasGPUOp = true }}{{ end }}{{ if eq .Name "network-operator" }}{{ $hasNetOp = true }}{{ end }}{{ end }}
-{{- if $hasGPUOp }}
-- [GPU Operator Documentation](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/)
-{{- end }}
-{{- if $hasNetOp }}
-- [Network Operator Documentation](https://docs.nvidia.com/networking/display/cokan10/network+operator)
-{{- end }}

@@ -457,21 +457,21 @@ closed. Zero `AIBOM` objects is healthy before any namespace opts in.
 
 The check also requires both shipped CRDs, `aiboms.aibom.k8saibom.dev` and
 `aibomcontrollerconfigs.aibom.k8saibom.dev`, to report the storage version of
-the chart version pinned in the registry. It matters because Helm and Helmfile
-skip a chart's `crds/` directory on upgrade, so a cluster can run a new
-controller against the previous schema while the older version stays served
-and the controller keeps working.
+the chart version pinned in the registry. It matters because Helm skips a
+chart's `crds/` directory on upgrade, so a cluster that missed the CRD step can
+run a new controller against the previous schema while the older version stays
+served and the controller keeps working.
 
-Flux is the exception for this component: `k8s-aibom` is marked `ownsCRDs` in
-the registry, so its generated `HelmRelease` sets
-`spec.upgrade.crds: CreateReplace` and Flux applies the CRDs itself. Argo CD
-applies them as ordinary manifests each sync. The assertion is still worth
-making on every deployer, because it proves the deployed CRDs match the pinned
-chart rather than merely that some deployer was expected to update them.
+`k8s-aibom` is marked `ownsCRDs` in the registry, so every deployer does update
+its CRDs: Flux through `spec.upgrade.crds: CreateReplace`, `helm` and
+`helmfile` through the generated `apply-crds.sh`, and Argo CD by applying them
+as ordinary manifests each sync. The assertion is still worth making on every
+deployer, because it proves the deployed CRDs match the pinned chart rather
+than merely that some deployer was expected to update them.
 
 Both CRDs are asserted separately, so a failure names which one is stranded
 and a partially applied CRD set cannot pass. If this check fails after a chart
-bump, the pre-upgrade CRD step in
+bump, the CRD command in
 [Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
 is the thing to run.
 
@@ -572,15 +572,19 @@ image: chart, CRDs, status API, and image are one qualified set. Quiesce
 configuration changes during rollback and confirm that
 `AIBOMControllerConfig/default` returns to a current `Ready=True` state.
 
-**Apply CRDs before the bundle upgrade — `helm` and `helmfile` only.** The
-chart ships its CRDs under `crds/`. Helm installs that directory on first
-install and never touches it again on upgrade, so a chart bump whose CRDs
-changed leaves the previous schema in place and the API server silently prunes
-the new controller's writes to added fields.
+**CRDs are applied for you; the manual command is a fallback.** The chart
+ships its CRDs under `crds/`. Helm installs that directory on first install and
+never touches it again on upgrade, so a chart bump whose CRDs changed would
+leave the previous schema in place and the API server would silently prune the
+new controller's writes to added fields.
 
-The `flux`, `argocd`, and `argocd-helm` bundles handle this themselves for this
-component and need no manual step; see the deployer table below. For `helm` and
-`helmfile`, apply the CRDs from the exact qualified chart first, then upgrade:
+Every deployer closes that on its own, by a different route; see the deployer
+table below. `helm` and `helmfile` bundles carry an `apply-crds.sh` in the
+component's folder, run automatically before the upgrade; `flux` and Argo CD
+apply the CRDs through their own controllers.
+
+Run the command below by hand only when you are upgrading outside a generated
+bundle, or when `apply-crds.sh` failed and you are reproducing it:
 
 ```bash
 CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
@@ -609,12 +613,17 @@ Verified against a live GKE cluster across a 1.2.0 to 1.3.0 upgrade.
 
 Which deployers need that step differs, so check yours:
 
-| Deployer | CRD behavior on upgrade | Pre-upgrade step needed |
+| Deployer | CRD behavior on upgrade | Manual step needed |
 |---|---|---|
-| `helm` | `helm upgrade` skips `crds/` | Yes |
-| `helmfile` | `helmfile apply` upgrades through Helm, so it also skips `crds/` | Yes |
+| `helm` | `helm upgrade` skips `crds/`, so the bundle emits `apply-crds.sh` for components the registry marks `ownsCRDs` and `install.sh` runs it first | Only for components without `ownsCRDs` |
+| `helmfile` | Upgrades through Helm, so it skips `crds/` too; the release carries a `presync` hook running the same `apply-crds.sh` | Only for components without `ownsCRDs` |
 | `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
 | `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
+
+Argo CD is the one deployer that upgrades CRDs for *every* component rather
+than only the opted-in ones, because including them is how it renders a Helm
+source at all. Suppressing that per component is not available: `skipCrds`
+would also drop the CRDs on first install.
 
 `ownsCRDs` is opt-in, and narrow on purpose. Of the 15 registry components
 that ship CRDs under `crds/`, 11 share at least one CRD with another
@@ -628,11 +637,9 @@ that today, so it stays the default.
 A component qualifies only if it solely owns every CRD it ships and ships none
 using `spec.conversion.strategy: Webhook`, since replace discards a `caBundle`
 injected at runtime. `kubeflow-trainer` is excluded for that second reason.
-Currently `gatekeeper`, `k8s-aibom`, and `nvsentinel` qualify.
-
-`helm` and `helmfile` always need the step, because skipping `crds/` on
-upgrade is Helm's own behavior rather than something the generated bundle can
-change.
+Currently `gatekeeper`, `k8s-aibom`, `nvcre`, and `nvsentinel` qualify; the
+audited chart version for each is pinned in `pkg/recipe/ownscrds_audit_test.go`,
+so bumping a pin without re-auditing fails CI.
 
 Uninstall in this order. Removing the component from the overlay and applying a
 regenerated bundle does **not** remove the previously installed release: the

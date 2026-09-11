@@ -1,0 +1,23 @@
+repositories:
+  - name: ghcr-io-googlecloudplatform-charts
+    url: ghcr.io/googlecloudplatform/charts
+    oci: true
+helmDefaults:
+  wait: true
+  timeout: 600
+  createNamespace: true
+releases:
+  - name: k8s-aibom
+    namespace: k8s-aibom-system
+    chart: ghcr-io-googlecloudplatform-charts/k8s-aibom
+    version: 1.3.0
+    values:
+      - ./001-k8s-aibom/values.yaml
+    disableValidation: true
+    hooks:
+      - events:
+          - presync
+        command: bash
+        args:
+          - ./001-k8s-aibom/apply-crds.sh
+        showlogs: true

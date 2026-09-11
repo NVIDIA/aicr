@@ -152,7 +152,8 @@ func writeVendoredHelmFolder(
 		Name            string
 		Namespace       string
 		CreateNamespace bool
-	}{c.Name, c.Namespace, true}
+		OwnsCRDs        bool
+	}{c.Name, c.Namespace, true, c.OwnsCRDs}
 	if err = renderTemplateToFile(localHelmInstallTmpl, installData, folderDir, "install.sh", 0o755); err != nil {
 		return Folder{}, VendorRecord{}, err
 	}
@@ -166,6 +167,17 @@ func writeVendoredHelmFolder(
 		filepath.Join(dir, "install.sh"),
 	}
 
+	// 6. apply-crds.sh. The vendored variant reads the wrapper chart itself, so
+	// it needs no network at deploy time; `helm show crds ./` recurses into
+	// the subchart tarball written above.
+	if c.OwnsCRDs {
+		crdScript, crdErr := writeApplyCRDsScript(folderDir, dir, c.Name, false)
+		if crdErr != nil {
+			return Folder{}, VendorRecord{}, crdErr
+		}
+		files = append(files, crdScript)
+	}
+
 	// VendorRecord carries the audit fields plus context (folder name).
 	// Force-canonicalize TarballName to the value we actually wrote
 	// under charts/ so provenance.yaml can never point at a file that
@@ -175,13 +187,14 @@ func writeVendoredHelmFolder(
 	rec.TarballName = tarball
 
 	return Folder{
-		Index:     idx,
-		Dir:       dir,
-		Kind:      KindLocalHelm,
-		Name:      c.Name,
-		Namespace: c.Namespace,
-		Parent:    c.Name,
-		Files:     files,
+		Index:       idx,
+		Dir:         dir,
+		Kind:        KindLocalHelm,
+		Name:        c.Name,
+		Namespace:   c.Namespace,
+		Parent:      c.Name,
+		Files:       files,
+		AppliesCRDs: c.OwnsCRDs,
 		// Vendored folders wrap an upstream chart that AICR does not
 		// render; the chart-owns-Namespace detection does not apply
 		// here. Default to true to match the upstream-helm path.

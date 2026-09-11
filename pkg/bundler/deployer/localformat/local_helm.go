@@ -211,11 +211,17 @@ func writeLocalHelmFolder(
 	// target namespace (see createNamespace doc comment for the full
 	// rationale and call shapes).
 	effectiveCreateNamespace := createNamespace && !hasNamespaceTemplate
+	// OwnsCRDs is always false here. This path emits AICR-rendered wrappers
+	// (manifest-only, kustomize, and the injected -pre/-post/-readiness
+	// folders), none of which carry an upstream chart's crds/ directory. The
+	// vendored primary shares this template but renders it from
+	// writeVendoredHelmFolder.
 	installData := struct {
 		Name            string
 		Namespace       string
 		CreateNamespace bool
-	}{name, c.Namespace, effectiveCreateNamespace}
+		OwnsCRDs        bool
+	}{name, c.Namespace, effectiveCreateNamespace, false}
 	if err = renderTemplateToFile(localHelmInstallTmpl, installData, folderDir, "install.sh", 0o755); err != nil {
 		return Folder{}, err
 	}
