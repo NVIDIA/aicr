@@ -548,10 +548,21 @@ func lowerAtOrBelow(lo, hi bound) bool {
 	return lo.inclusive && hi.inclusive
 }
 
-// hookDir is where ADR-021 puts a hook manifest. The location is load-bearing
-// rather than a convention: tools/bom walks only .../manifests, and
-// recipes/manifest_images_test.go skips any path without /manifests/, so a
-// hook outside that tree carries an image nothing pins and the BOM never sees.
+// hookDir is where ADR-021 puts a hook manifest. The location is
+// load-bearing rather than a convention, but only tools/bom actually covers
+// it today: it walks each component's manifests/ tree with
+// filepath.WalkDir, which descends into migrations/. The embedded-FS
+// image-pin test (recipes/manifest_images_test.go) does not — it walks
+// recipes.FS, and recipes/data.go's //go:embed pattern for that tree is
+// components/*/manifests/*.yaml, whose `*` does not cross `/`, so a file
+// under manifests/migrations/ is never embedded and that test never sees
+// it. The first PR to add a real hook manifest must also add
+// components/*/manifests/*/*.yaml to recipes/data.go's embed directive, or
+// the hook's images stay outside the pin gate; that pattern cannot be added
+// here because a //go:embed pattern matching zero files fails to compile,
+// and no such file exists yet. This is the same interlock
+// pkg/recipe/upgrade_records_test.go already documents for
+// recipes/upgrades/*.yaml.
 const hookDir = "manifests/migrations/"
 
 // checkHooks implements rule 9, an addition to ADR-021. Hooks are the
@@ -580,7 +591,7 @@ func checkHooks(where string, t *Transition) []string {
 				"%s hook %d file %q must be a local path under the bundle", where, i, h.File))
 		case !strings.HasPrefix(filepath.ToSlash(filepath.Clean(h.File)), hookDir):
 			v = append(v, fmt.Sprintf(
-				"%s hook %d file %q must live under %s, the only tree the BOM and the image-pin test walk",
+				"%s hook %d file %q must live under %s, the tree tools/bom walks",
 				where, i, h.File, hookDir))
 		}
 	}
