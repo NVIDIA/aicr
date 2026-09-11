@@ -171,6 +171,12 @@ context). A configured policy forces the mechanism at
 secure-accelerator-access, dra-support's behavioral subtest, and
 inference-perf's worker wiring and node discovery.
 
+`secure-accelerator-access` also routes on the resolved recipe before any
+probe: when `slinky-slurm` resolves, it skips with the reason recorded. The
+Slinky NodeSet reserves every GPU on a node for its `slurmd` pod and Slurm
+GRES/cgroups isolate access, so the check's Kubernetes per-pod probe could
+either never schedule or attest the wrong access path (#2721).
+
 `PhaseAll` (the string `"all"`) is the CLI / recipe wildcard;
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is
 **exclusive** — combining `all` with any other phase is rejected.

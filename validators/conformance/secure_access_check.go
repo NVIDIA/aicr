@@ -305,6 +305,21 @@ func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
 	}
 
+	// Slinky Slurm recipes hand every GPU on a node to the slurmd pod and
+	// route workloads through Slurm GRES/cgroup isolation, not through a
+	// per-pod Kubernetes allocation. This check's device-plugin probe is a
+	// Kubernetes pod requesting one nvidia.com/gpu: against a fully reserved
+	// NodeSet it can never schedule, and with spare capacity it attests the
+	// Kubernetes access path rather than the one the recipe's workloads use.
+	// Skip with the reason recorded instead of false-failing or attesting the
+	// wrong path (#2721). Routing on the resolved recipe mirrors
+	// CheckRobustController and the slinky-slurm-* checks.
+	if recipeHasComponent(ctx, slinkySlurmComponent) {
+		return validators.Skip("recipe resolves " + slinkySlurmComponent +
+			": GPUs are reserved by the Slinky NodeSet and isolated by Slurm GRES/cgroups, " +
+			"so the Kubernetes per-pod accelerator access probe does not apply")
+	}
+
 	// Bound ALL work to the check-local budget so one bounded namespace
 	// cleanup plus scheduling-skew/result-flush margin always fit inside the
 	// check's deadline — see gpuCheckWorkBudget in consts.go. Fail fast (no

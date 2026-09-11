@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -2158,6 +2160,85 @@ func TestGrantProbePrologueBehavior(t *testing.T) {
 						t.Errorf("%s = %q contains an empty entry (implicit CWD)", check.name, check.got)
 					}
 				}
+			}
+		})
+	}
+}
+
+// TestCheckSecureAcceleratorAccess_SkipsOnSlinkySlurmRecipe verifies the
+// Slurm-aware routing (#2721): a recipe that resolves slinky-slurm must skip
+// before any allocation-mode detection or pod creation, because the Slinky
+// NodeSet reserves every GPU and Slurm, not Kubernetes, isolates access. A
+// recipe without slinky-slurm (or with it disabled) must take the normal path,
+// which on this GPU-less fake cluster fails with "no usable GPU allocation
+// mechanism" rather than skipping.
+func TestCheckSecureAcceleratorAccess_SkipsOnSlinkySlurmRecipe(t *testing.T) {
+	tests := []struct {
+		name       string
+		recipe     *recipe.RecipeResult
+		expectSkip bool
+	}{
+		{
+			name: "slinky-slurm resolved skips",
+			recipe: &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
+				{Name: "gpu-operator"},
+				{Name: slinkySlurmComponent},
+			}},
+			expectSkip: true,
+		},
+		{
+			name: "slinky-slurm disabled does not skip",
+			recipe: &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{
+				{Name: "gpu-operator"},
+				{Name: slinkySlurmComponent, Overrides: map[string]any{"enabled": false}},
+			}},
+			expectSkip: false,
+		},
+		{
+			name:       "no slinky-slurm does not skip",
+			recipe:     &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: "gpu-operator"}}},
+			expectSkip: false,
+		},
+		{
+			name:       "nil recipe does not skip",
+			recipe:     nil,
+			expectSkip: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clientset := k8sfake.NewClientset(testNode("node1")) // Ready node, no GPUs
+			withDRAAPIDiscovery(t, clientset)
+			ctx := &validators.Context{
+				Ctx:             context.Background(),
+				Clientset:       clientset,
+				DynamicClient:   newDRAFakeDynamicClient(),
+				ValidationInput: v1.ToValidationInput(tt.recipe),
+			}
+
+			err := CheckSecureAcceleratorAccess(ctx)
+			if err == nil {
+				t.Fatal("expected a skip or a failure on a GPU-less cluster, got nil")
+			}
+			if got := validators.IsSkip(err); got != tt.expectSkip {
+				t.Fatalf("IsSkip = %v, want %v (err: %v)", got, tt.expectSkip, err)
+			}
+			if tt.expectSkip {
+				if !strings.Contains(err.Error(), slinkySlurmComponent) {
+					t.Errorf("skip reason should name %s, got: %v", slinkySlurmComponent, err)
+				}
+				// Skipping must happen before any probe: no pods created.
+				pods, listErr := clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
+				if listErr != nil {
+					t.Fatalf("list pods: %v", listErr)
+				}
+				if len(pods.Items) != 0 {
+					t.Errorf("expected no pods created on skip, found %d", len(pods.Items))
+				}
+				return
+			}
+			if !strings.Contains(err.Error(), "no usable GPU allocation mechanism") {
+				t.Errorf("expected the normal detection path, got: %v", err)
 			}
 		})
 	}
