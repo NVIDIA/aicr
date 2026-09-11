@@ -17,6 +17,7 @@ package localformat_test
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -174,62 +175,6 @@ func TestWrite_NoApplyCRDsOnInjectedWrappers(t *testing.T) {
 	}
 }
 
-// TestApplyCRDsScript_GatesAndBounds pins two properties a golden diff alone
-// would not defend, because regenerating goldens with -update would silently
-// bless their removal.
-//
-// The release gate is the load-bearing one. Helm installs a chart's crds/
-// directory itself on first install, so this script is only needed on upgrade.
-// Without the gate every fresh install pays a registry round-trip to apply CRDs
-// helm is about to create anyway, and any registry trouble becomes an install
-// failure. That is not hypothetical: it hung the KWOK helm lanes, which deploy
-// to a fresh cluster, until the gate was added.
-//
-// The bound matters because this runs inside deploy.sh's retry loop, which
-// retries a component that exits non-zero but cannot interrupt one that never
-// returns. An unbounded registry read therefore hangs the whole rollout rather
-// than failing one component.
-func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
-	outDir := t.TempDir()
-
-	res, err := localformat.Write(context.Background(), localformat.Options{
-		OutputDir:  outDir,
-		Components: []localformat.Component{ownsCRDsComponent(true)},
-	})
-	if err != nil {
-		t.Fatalf("Write: %v", err)
-	}
-	script, err := os.ReadFile(filepath.Join(outDir, res.Folders[0].Dir, "apply-crds.sh"))
-	if err != nil {
-		t.Fatalf("read apply-crds.sh: %v", err)
-	}
-	got := string(script)
-
-	for _, want := range []string{
-		// Skip unless the release already exists.
-		"helm status k8s-aibom --namespace k8s-aibom-system",
-		// Exit 0 on that path: a fresh install is not an error.
-		"exit 0",
-		// Bound the registry read.
-		"timeout 90",
-	} {
-		if !strings.Contains(got, want) {
-			t.Errorf("apply-crds.sh missing %q\n%s", want, got)
-		}
-	}
-
-	// The registry read must go through the bounded wrapper, not directly.
-	for _, banned := range []string{
-		"$(helm show crds",
-		"$(helm show crds ./",
-	} {
-		if strings.Contains(got, banned) {
-			t.Errorf("apply-crds.sh calls %q outside run_bounded; an unbounded "+
-				"registry read hangs the rollout instead of failing it\n%s", banned, got)
-		}
-	}
-}
-
 // assertExecutable fails when path is not executable. deploy.sh and the
 // helmfile presync hook both invoke the script through `bash`, but an
 // operator running it directly is the documented fallback.
@@ -242,4 +187,140 @@ func assertExecutable(t *testing.T, path string) {
 	if info.Mode().Perm()&0o111 == 0 {
 		t.Errorf("%s mode = %v, want executable", path, info.Mode().Perm())
 	}
+}
+
+// TestApplyCRDsScript_GatesAndBounds pins properties a golden diff alone would
+// not defend, because regenerating goldens with -update would silently bless
+// their removal.
+//
+// The release gate is the load-bearing one. Helm installs a chart's crds/
+// directory itself on first install, so this script is only needed on upgrade.
+// Without the gate every fresh install pays a registry round-trip to apply CRDs
+// helm is about to create anyway, and any registry trouble becomes an install
+// failure. That is not hypothetical: it hung the KWOK helm lanes, which deploy
+// to a fresh cluster, until the gate was added.
+//
+// The gate must also fail closed. `helm list` exits 0 whenever the query
+// succeeded, matched or not, so an absent release is distinguishable from an
+// unreachable cluster. Flattening the two would let an auth blip skip the CRD
+// step while the following `helm upgrade` still succeeds, stranding the
+// previous schema: exactly the defect this script exists to prevent.
+func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
+	got := renderApplyCRDs(t, ownsCRDsComponent(true))
+
+	// Whole blocks, not loose tokens. An earlier version of this test asserted
+	// a bare "exit 0", which the chart-ships-no-CRDs branch also satisfies, so
+	// it would have passed with the release gate's skip removed entirely.
+	blocks := map[string]string{
+		"release gate queries helm":  `if ! existing="$(run_bounded helm list --namespace "${NAMESPACE}" \`,
+		"indeterminate state aborts": "  exit 1\nfi\nif [[ -z \"${existing//[[:space:]]/}\" ]]; then",
+		"absent release skips":       "  exit 0\nfi",
+		"registry read is bounded":   `    timeout 90 "$@"`,
+	}
+	for name, block := range blocks {
+		if !strings.Contains(got, block) {
+			t.Errorf("apply-crds.sh missing the %q block:\n--- want ---\n%s\n--- got ---\n%s",
+				name, block, got)
+		}
+	}
+
+	// The registry read must go through the bounded wrapper, never directly.
+	if strings.Contains(got, "$(helm show crds") {
+		t.Errorf("apply-crds.sh calls helm show crds outside run_bounded; an unbounded "+
+			"registry read hangs the rollout instead of failing it\n%s", got)
+	}
+}
+
+// TestApplyCRDsScript_RejectsInjectedRecipeValues runs the generated script
+// with a hostile component name and namespace and asserts nothing injected
+// executes.
+//
+// Asserting this by execution rather than by pattern: the question is whether
+// bash evaluates the value, and only bash answers that. Component names are
+// validated as path components (IsSafePathComponent rejects separators, not
+// shell metacharacters) and the namespace is not validated here at all, so the
+// script has to neutralize them itself.
+func TestApplyCRDsScript_RejectsInjectedRecipeValues(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	// The canary is a bare filename, not a path: localformat.Write rejects a
+	// component name containing a separator (IsSafePathComponent), so a
+	// payload with a slash would never reach the template and the test would
+	// pass without proving anything. The script cds to its own folder, so an
+	// executed `touch` lands there.
+	const canary = "pwned"
+
+	c := ownsCRDsComponent(true)
+	c.Name = "evil$(touch " + canary + ")"
+	c.Namespace = "ns'; touch " + canary + "; '"
+
+	outDir := t.TempDir()
+	res, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir:  outDir,
+		Components: []localformat.Component{c},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	scriptPath := filepath.Join(outDir, res.Folders[0].Dir, "apply-crds.sh")
+
+	// Syntactic validity first: an unbalanced quote from a bad escape would
+	// otherwise surface as a confusing runtime error below.
+	if out, perr := exec.Command("bash", "-n", scriptPath).CombinedOutput(); perr != nil {
+		t.Fatalf("generated script is not valid bash: %v\n%s", perr, out)
+	}
+
+	// Stub helm and kubectl so the script runs offline. helm list reports no
+	// release, which is the earliest exit and still passes through every
+	// interpolation above it.
+	stub := t.TempDir()
+	for _, name := range []string{"helm", "kubectl"} {
+		if werr := os.WriteFile(filepath.Join(stub, name),
+			[]byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); werr != nil {
+			t.Fatalf("write %s stub: %v", name, werr)
+		}
+	}
+	// Prepend rather than replace: the script calls dirname and pwd, so a
+	// stub-only PATH kills it at the first line and every assertion below
+	// passes without the interpolated values ever being evaluated.
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+stub+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, runErr := cmd.CombinedOutput()
+	t.Logf("script output (exit=%v):\n%s", runErr, out)
+
+	// Guard against a vacuous pass: the script must actually have reached the
+	// release gate, which is downstream of every interpolation under test.
+	if runErr != nil {
+		t.Fatalf("script did not run to the release gate (exit %v); the injection "+
+			"assertion below would prove nothing\n%s", runErr, out)
+	}
+	if !strings.Contains(string(out), "no existing release") {
+		t.Fatalf("script did not reach the release gate; output:\n%s", out)
+	}
+
+	canaryPath := filepath.Join(outDir, res.Folders[0].Dir, canary)
+	if _, statErr := os.Stat(canaryPath); !os.IsNotExist(statErr) {
+		t.Fatalf("injected command executed: %s exists (stat err %v)\nscript output:\n%s",
+			canaryPath, statErr, out)
+	}
+}
+
+// renderApplyCRDs writes a single-component bundle and returns its
+// apply-crds.sh contents.
+func renderApplyCRDs(t *testing.T, c localformat.Component) string {
+	t.Helper()
+	outDir := t.TempDir()
+	res, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir:  outDir,
+		Components: []localformat.Component{c},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(outDir, res.Folders[0].Dir, "apply-crds.sh"))
+	if err != nil {
+		t.Fatalf("read apply-crds.sh: %v", err)
+	}
+	return string(b)
 }

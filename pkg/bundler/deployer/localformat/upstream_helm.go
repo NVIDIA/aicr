@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 
@@ -48,8 +49,15 @@ var upstreamHelmTmpl = template.Must(
 	template.ParseFS(upstreamHelmTemplates, "templates/install-upstream-helm.sh.tmpl"),
 )
 
+// applyCRDsTmpl registers shq so recipe-supplied names reach the generated
+// shell as single-quoted literals. Component names are validated only as path
+// components (IsSafePathComponent rejects separators, not shell
+// metacharacters), and namespaces are not validated here at all, so neither is
+// safe to interpolate bare into a command.
 var applyCRDsTmpl = template.Must(
-	template.ParseFS(applyCRDsTemplates, "templates/apply-crds.sh.tmpl"),
+	template.New("apply-crds.sh.tmpl").
+		Funcs(template.FuncMap{"shq": shellSingleQuote}).
+		ParseFS(applyCRDsTemplates, "templates/apply-crds.sh.tmpl"),
 )
 
 // applyCRDsData is the render input for apply-crds.sh. FromUpstreamEnv picks
@@ -57,8 +65,11 @@ var applyCRDsTmpl = template.Must(
 // folder, or "./" for a vendored wrapper whose subchart tarball sits under
 // charts/.
 type applyCRDsData struct {
-	Name                   string
-	Namespace              string
+	Name      string
+	Namespace string
+	// ReleaseFilter anchors Name as a `helm list --filter` regex, so a release
+	// whose name merely contains Name cannot be mistaken for this one.
+	ReleaseFilter          string
 	FromUpstreamEnv        bool
 	ShowCRDsTimeoutSeconds int
 }
@@ -71,6 +82,7 @@ func writeApplyCRDsScript(folderDir, dir, name, namespace string, fromUpstreamEn
 	data := applyCRDsData{
 		Name:                   name,
 		Namespace:              namespace,
+		ReleaseFilter:          "^" + regexp.QuoteMeta(name) + "$",
 		FromUpstreamEnv:        fromUpstreamEnv,
 		ShowCRDsTimeoutSeconds: int(defaults.BundleShowCRDsTimeout.Seconds()),
 	}
