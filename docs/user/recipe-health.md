@@ -40,8 +40,8 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 {/* BEGIN AICR-HEALTH */}
 ## Summary
 
-- Recipes: **53**
-- Pass: **53** · Warn: **0** · Fail: **0** · Unknown: **0**
+- Recipes: **55**
+- Pass: **55** · Warn: **0** · Fail: **0** · Unknown: **0**
 
 ## Recipes
 
@@ -62,7 +62,7 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | h100-aks-ubuntu-training-kubeflow | aks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
 | h100-aks-ubuntu-training-slurm | aks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | bcm-inference | bcm | — | — | inference | — | pass | R:0 D:0 P:0 C:5 | pending |
-| h100-bcm-ubuntu-training | bcm | h100 | ubuntu | training | — | pass | R:0 D:4 P:0 C:5 | pending |
+| h100-bcm-ubuntu-training-kubeflow | bcm | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:6 | pending |
 | a100-eks-ubuntu-training-kubeflow | eks | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | gb200-eks-ubuntu-inference-dynamo | eks | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | gb200-eks-ubuntu-training-kubeflow | eks | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:8 | pending |
@@ -75,7 +75,7 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | h100-eks-ubuntu-training-kubeflow | eks | h100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:10 | [eks/h100-ubuntu/training-kubeflow](https://validation.aicr.run/#/eks/h100-ubuntu/training-kubeflow) |
 | h100-eks-ubuntu-training-slurm | eks | h100 | ubuntu | training | slurm | pass | R:0 D:4 P:0 C:11 | pending |
 | h200-eks-inference | eks | h200 | — | inference | — | pass | R:0 D:4 P:0 C:5 | pending |
-| h200-eks-training | eks | h200 | — | training | — | pass | R:0 D:4 P:1 C:10 | pending |
+| h200-eks-training-kubeflow | eks | h200 | — | training | kubeflow | pass | R:0 D:4 P:1 C:10 | pending |
 | rtx-pro-6000-eks-ubuntu-inference-dynamo | eks | rtx-pro-6000 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | rtx-pro-6000-eks-ubuntu-inference-nim | eks | rtx-pro-6000 | ubuntu | inference | nim | pass | R:0 D:4 P:0 C:11 | pending |
 | rtx-pro-6000-eks-ubuntu-training-kubeflow | eks | rtx-pro-6000 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:8 | pending |
@@ -91,15 +91,16 @@ The deep-link is the current Evidence rendering. It is distinct from — and coe
 | h100-kind-training-kubeflow | kind | h100 | — | training | kubeflow | pass | R:0 D:4 P:0 C:10 | pending |
 | h100-kind-training-slurm | kind | h100 | — | training | slurm | pass | R:0 D:4 P:0 C:10 | pending |
 | rtx-pro-6000-lke-ubuntu-inference | lke | rtx-pro-6000 | ubuntu | inference | — | pass | R:0 D:4 P:0 C:8 | pending |
-| rtx-pro-6000-lke-ubuntu-training | lke | rtx-pro-6000 | ubuntu | training | — | pass | R:0 D:4 P:0 C:8 | pending |
+| rtx-pro-6000-lke-ubuntu-training-kubeflow | lke | rtx-pro-6000 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:9 | pending |
 | ocp-inference-nim | ocp | — | — | inference | nim | pass | R:0 D:3 P:0 C:11 | pending |
 | ocp-training | ocp | — | — | training | — | pass | R:0 D:3 P:0 C:1 | pending |
 | a100-oke-ubuntu-training-kubeflow | oke | a100 | ubuntu | training | kubeflow | pass | R:0 D:4 P:0 C:8 | pending |
 | gb200-oke-ubuntu-inference-dynamo | oke | gb200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:1 C:11 | pending |
 | gb200-oke-ubuntu-training-kubeflow | oke | gb200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:2 C:8 | pending |
 | l40s-oke-inference | oke | l40s | ol | inference | — | pass | R:0 D:4 P:0 C:8 | pending |
-| l40s-oke-training | oke | l40s | ol | training | — | pass | R:0 D:4 P:0 C:8 | pending |
+| l40s-oke-training-kubeflow | oke | l40s | ol | training | kubeflow | pass | R:0 D:4 P:0 C:9 | pending |
 | vr200-rke2-ubuntu-inference-dynamo | rke2 | vr200 | ubuntu | inference | dynamo | pass | R:0 D:4 P:0 C:10 | [rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
 | vr200-rke2-ubuntu-training | rke2 | vr200 | ubuntu | training | — | pass | R:0 D:4 P:1 C:8 | [rke2/vr200-ubuntu/training](https://validation.aicr.run/#/rke2/vr200-ubuntu/training) |
+| vr200-rke2-ubuntu-training-kubeflow | rke2 | vr200 | ubuntu | training | kubeflow | pass | R:0 D:4 P:1 C:9 | pending |
 
 {/* END AICR-HEALTH */}

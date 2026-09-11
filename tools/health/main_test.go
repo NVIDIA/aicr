@@ -543,3 +543,103 @@ func repoRoot(t *testing.T) string {
 		dir = parent
 	}
 }
+
+// TestEveryPublishedCoordinateHasARow is the invariant the RetainNonLeaf wiring
+// exists to hold (#2564): every coordinate in the committed presence manifest
+// must appear in the generated matrix, so its Evidence deep-link is always
+// rendered. Without the predicate a coordinate silently loses its row — and its
+// only live validation.aicr.run link — the moment a platform sibling is added
+// beneath its overlay.
+func TestEveryPublishedCoordinateHasARow(t *testing.T) {
+	presence, err := testgrid.LoadPresence()
+	if err != nil {
+		t.Fatalf("LoadPresence() error = %v", err)
+	}
+
+	report, err := health.Compute(context.Background(), health.Options{
+		RetainNonLeaf: hasPublishedEvidence(presence),
+	})
+	if err != nil {
+		t.Fatalf("health.Compute() error = %v", err)
+	}
+
+	scored := make(map[string]struct{}, len(report.Combos))
+	for _, combo := range report.Combos {
+		co, coErr := recipe.CoordinateFor(combo.Criteria)
+		if coErr != nil {
+			continue
+		}
+		scored[co.Path()] = struct{}{}
+	}
+
+	paths := presence.Paths()
+	if len(paths) == 0 {
+		t.Fatal("presence manifest is empty; this test would pass vacuously")
+	}
+	for _, path := range paths {
+		if _, ok := scored[path]; !ok {
+			t.Errorf("published coordinate %q has no row in the health matrix; "+
+				"its Evidence link would be dropped", path)
+		}
+	}
+}
+
+// TestHasPublishedEvidence covers the RetainNonLeaf predicate directly: a
+// concrete coordinate listed in the manifest is retained, one that is not is
+// dropped, criteria with no concrete coordinate can never match, and a nil
+// presence degrades to the leaf-only behavior.
+func TestHasPublishedEvidence(t *testing.T) {
+	presence, err := testgrid.LoadPresence()
+	if err != nil {
+		t.Fatalf("LoadPresence() error = %v", err)
+	}
+	if len(presence.Paths()) == 0 {
+		t.Fatal("presence manifest is empty; this test would pass vacuously")
+	}
+
+	published := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceRKE2,
+		Accelerator: recipe.CriteriaAcceleratorVR200,
+		OS:          recipe.CriteriaOSUbuntu,
+		Intent:      recipe.CriteriaIntentTraining,
+	}
+	if co, coErr := recipe.CoordinateFor(published); coErr != nil {
+		t.Fatalf("CoordinateFor(published) error = %v", coErr)
+	} else if !presence.Has(co) {
+		t.Fatalf("%q is no longer in the presence manifest; pick another published coordinate", co.Path())
+	}
+
+	unpublished := &recipe.Criteria{
+		Service:     recipe.CriteriaServiceRKE2,
+		Accelerator: recipe.CriteriaAcceleratorVR200,
+		OS:          recipe.CriteriaOSUbuntu,
+		Intent:      recipe.CriteriaIntentTraining,
+		Platform:    recipe.CriteriaPlatformKubeflow,
+	}
+
+	tests := []struct {
+		name     string
+		presence *testgrid.Presence
+		criteria *recipe.Criteria
+		want     bool
+	}{
+		{"published coordinate is retained", presence, published, true},
+		{"unpublished coordinate is not retained", presence, unpublished, false},
+		{"non-concrete criteria is not retained", presence, recipe.NewCriteria(), false},
+		{"nil presence retains nothing", nil, published, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			retain := hasPublishedEvidence(tt.presence)
+			if retain == nil {
+				if tt.want {
+					t.Fatal("hasPublishedEvidence returned nil, want a predicate")
+				}
+				return
+			}
+			if got := retain(recipe.CatalogEntry{Criteria: tt.criteria}); got != tt.want {
+				t.Errorf("retain() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
