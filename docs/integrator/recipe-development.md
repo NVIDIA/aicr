@@ -367,7 +367,7 @@ A Preview coordinate promises that:
 - `aicr bundle` generates deployable artifacts for it.
 - It passes the repository's static, render, and KWOK coverage gates on
   every merge to `main`.
-- Evidence is published at [validation.aicr.run](https://validation.aicr.run/) once the coordinate has had a validation run. Publication can lag the coordinate's introduction, and freshness can lag recipe iteration after that, so consult each coordinate's row in the table below for its actual evidence status rather than assuming a link exists.
+- Evidence has been published at [validation.aicr.run](https://validation.aicr.run/); freshness may lag recipe iteration, so consult each coordinate's row in the table below for its evidence status.
 
 A Preview coordinate deliberately does **not** promise broader coverage.
 Per the [VR200 Preview epic (#2326)](https://github.com/NVIDIA/aicr/issues/2326),

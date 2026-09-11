@@ -20,9 +20,11 @@ metadata:
 spec:
   # PREVIEW: inherits the Preview status of vr200-rke2-ubuntu-training — see
   # that overlay for the VR200 caveats (SKU auto-detection, host IMEX
-  # conflict, Skyhook reboot sequencing). The Kubeflow path on VR hardware is
-  # confirmed by resolution only; kubeflow-trainer has not been exercised on a
-  # VR reference cluster.
+  # conflict, Skyhook reboot sequencing). The Kubeflow path has been exercised
+  # on a VR reference cluster — deployment, conformance (including
+  # robust-controller against kubeflow-trainer in namespace kubeflow) and the
+  # NVLS performance gate all passed — but that run is not published evidence,
+  # so this coordinate carries no validation.aicr.run pointer yet.
   #
   # Inherits from vr200-rke2-ubuntu-training recipe (VR200 + RKE2 + Ubuntu + training settings)
   # This overlay adds Kubeflow Trainer for distributed training with TrainJob
