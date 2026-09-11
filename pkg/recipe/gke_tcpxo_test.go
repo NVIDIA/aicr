@@ -546,3 +546,34 @@ func TestIsMissingGKETCPXOInterfaces(t *testing.T) {
 		t.Fatal("IsMissingGKETCPXOInterfaces() = true for nil")
 	}
 }
+
+// TestValidateGKEConfigurationRejectsNonKubeflowPlatform covers the criteria
+// consistency rule: a recipe that records the mapping but claims a non-kubeflow
+// platform is rejected, because the runtime only ships on the kubeflow family.
+func TestValidateGKEConfigurationRejectsNonKubeflowPlatform(t *testing.T) {
+	t.Parallel()
+
+	result := tcpxoTestResult()
+	mapping := tcpxoTestMapping()
+	if err := applyGKETCPXOInterfaces(result, &mapping); err != nil {
+		t.Fatalf("applyGKETCPXOInterfaces() error = %v", err)
+	}
+	result.Criteria.Platform = CriteriaPlatformSlurm
+	err := result.validateGKEConfiguration()
+	if err == nil || !strings.Contains(err.Error(), "kubeflow") {
+		t.Fatalf("validateGKEConfiguration() error = %v, want platform rejection", err)
+	}
+}
+
+// TestApplyGKETCPXOInterfacesRejectsNonKubeflowPlatform covers the apply-time
+// side of the criteria-consistency rule.
+func TestApplyGKETCPXOInterfacesRejectsNonKubeflowPlatform(t *testing.T) {
+	t.Parallel()
+
+	result := tcpxoTestResult()
+	result.Criteria.Platform = CriteriaPlatformSlurm
+	mapping := tcpxoTestMapping()
+	if err := applyGKETCPXOInterfaces(result, &mapping); err == nil {
+		t.Fatal("applyGKETCPXOInterfaces() = nil on a slurm recipe, want rejection")
+	}
+}

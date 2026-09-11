@@ -84,7 +84,11 @@ if [[ -n "${DEPLOYMENT_ID:-}" && -n "${2:-}" && -f "${2}" ]]; then
     cp "${2}" "${derived_config}"
     yq -i 'del(.spec.recipe.configuration.gke.tcpxoInterfaces)' "${derived_config}"
     for i in 0 1 2 3 4 5 6 7; do
-      yq -i ".spec.recipe.configuration.gke.tcpxoInterfaces += [{\"interfaceName\": \"eth$((i + 1))\", \"network\": \"${DEPLOYMENT_ID}-gpu-nic-${i}\"}]" "${derived_config}"
+      # DEPLOYMENT_ID flows to yq through the environment (strenv), never by
+      # interpolation into the yq program — a value is data, not expression.
+      NET_NAME="${DEPLOYMENT_ID}-gpu-nic-${i}" yq -i \
+        ".spec.recipe.configuration.gke.tcpxoInterfaces += [{\"interfaceName\": \"eth$((i + 1))\", \"network\": strenv(NET_NAME)}]" \
+        "${derived_config}"
     done
     set -- "$1" "${derived_config}"
     echo "TCPXO interface mapping derived from DEPLOYMENT_ID (${DEPLOYMENT_ID}-gpu-nic-0..7)"

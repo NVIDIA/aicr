@@ -175,8 +175,10 @@ Two details are easy to miss because they are not in the pod spec:
 This is the part no example can fill in for you. The
 `networking.gke.io/interfaces` annotation must name the eight GPU NIC `Network`
 objects **as they exist on your cluster**, mapped to the right guest interface.
-AICR requires only that each name contain `gpu-nic`; the rest is chosen by
-whoever provisioned it, so prefixed forms such as `aicr-demo2-gpu-nic-0` are
+AICR requires that each name contain `gpu-nic` and satisfy the GKE
+Device-Network name format (lowercase letters, digits, dashes; starts with a
+letter; ends with a letter or digit; at most 41 characters); the rest is chosen
+by whoever provisioned it, so prefixed forms such as `aicr-demo2-gpu-nic-0` are
 common.
 
 The `eth1`–`eth8` assignment is a provisioning decision: take the ordered
