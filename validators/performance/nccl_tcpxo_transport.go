@@ -61,38 +61,93 @@ type tcpxoWorkerRecord struct {
 type tcpxoWorkerWatcher struct {
 	mu      sync.Mutex
 	records map[string]*tcpxoWorkerRecord
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
-// startGKETCPXOWorkerWatch watches the benchmark's worker pods from TrainJob
-// creation until stop is called. It answers the question the log-marker check
-// cannot answer on GKE (NCCL_DEBUG=WARN suppresses the "Using network" banner,
-// deliberately — #1712): did the realized worker pods carry and activate the
-// TCPXO wiring?
+// startGKETCPXOWorkerWatch watches the benchmark's worker pods, recording
+// what each one carried while it is alive. It answers the question the
+// log-marker check cannot answer on GKE (NCCL_DEBUG=WARN suppresses the
+// "Using network" banner, deliberately — #1712): did the realized worker
+// pods carry and activate the TCPXO wiring?
 //
-// Observations are recorded while pods are alive because the JobSet controller
-// deletes active worker Jobs as soon as the JobSet completes — by the time the
-// launcher is known to have succeeded, the workers may already be gone, and a
-// completed native sidecar's Started flag reads false. Asserting from state
-// read only after completion would fail successful runs at random.
+// Start it BEFORE the benchmark's TrainJob is created, so no worker pod can
+// predate the watch: an empty ResourceVersion watch first lists existing
+// objects, and pod creation cannot precede TrainJob creation by
+// construction. Assert only after Stop has joined the goroutine — records
+// are complete exactly then.
 //
-// The returned assert must be called after stop, once the benchmark outcome is
-// known. The watcher is scoped to the benchmark's JobSet labels, so unrelated
-// pods in the namespace are never inspected.
-func startGKETCPXOWorkerWatch(ctx context.Context, clientset kubernetes.Interface, namespace string) (assert func(wantWorkers int) error, stop func()) {
+// Observations are recorded while pods are alive because the JobSet
+// controller deletes active worker Jobs as soon as the JobSet completes — by
+// the time the launcher is known to have succeeded, the workers may already
+// be gone, and a completed native sidecar's Started flag reads false.
+// Asserting from state read only after completion would fail successful runs
+// at random.
+//
+// The watcher is scoped to the benchmark's JobSet labels, so unrelated pods
+// in the namespace are never inspected.
+func startGKETCPXOWorkerWatch(ctx context.Context, clientset kubernetes.Interface, namespace string) *tcpxoWorkerWatcher {
 	watchCtx, cancel := context.WithCancel(ctx)
-	w := &tcpxoWorkerWatcher{records: make(map[string]*tcpxoWorkerRecord)}
-	done := make(chan struct{})
+	w := &tcpxoWorkerWatcher{
+		records: make(map[string]*tcpxoWorkerRecord),
+		cancel:  cancel,
+		done:    make(chan struct{}),
+	}
 	go func() {
-		defer close(done)
+		defer close(w.done)
 		w.run(watchCtx, clientset, namespace)
 	}()
+	return w
+}
 
-	stop = func() {
-		cancel()
-		<-done
+// Stop cancels the watch and joins the goroutine. Idempotent.
+func (w *tcpxoWorkerWatcher) Stop() {
+	w.cancel()
+	<-w.done
+}
+
+// Assert evaluates the collected records once the benchmark outcome is known.
+// Call only after Stop: records are complete once the goroutine has joined.
+// wantWorkers is the benchmark's worker count: that many workers must have
+// been observed with the daemon provably started, and no observed worker may
+// carry broken wiring.
+func (w *tcpxoWorkerWatcher) Assert(wantWorkers int) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if len(w.records) == 0 {
+		return aicrErrors.New(aicrErrors.ErrCodeInternal,
+			"no NCCL worker pods were observed during the benchmark; the TCPXO wiring cannot be attested")
 	}
-	assert = func(wantWorkers int) error { return w.assert(wantWorkers) }
-	return assert, stop
+	var problems []string
+	started := 0
+	for name, rec := range w.records {
+		if rec.wiringErr != nil {
+			problems = append(problems, fmt.Sprintf("%s: %v", name, rec.wiringErr))
+		}
+		if rec.daemonStarted {
+			started++
+		}
+	}
+	if len(problems) > 0 {
+		sort.Strings(problems)
+		return aicrErrors.New(aicrErrors.ErrCodeInternal,
+			"benchmark worker pods did not carry the TCPXO wiring: "+strings.Join(problems, "; "))
+	}
+	if started < wantWorkers {
+		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
+			"the %s sidecar was observed started on %d of %d benchmark workers; "+
+				"the bandwidth result cannot attest to the fabric on the full cohort",
+			gkeTCXODaemonContainer, started, wantWorkers))
+	}
+	return nil
+}
+
+// recordedCount reports how many distinct worker pods the watcher has seen.
+// Tests use it to wait for observations; production reads only Assert.
+func (w *tcpxoWorkerWatcher) recordedCount() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.records)
 }
 
 func (w *tcpxoWorkerWatcher) run(ctx context.Context, clientset kubernetes.Interface, namespace string) {
@@ -146,41 +201,6 @@ func (w *tcpxoWorkerWatcher) record(pod *v1.Pod) {
 	if tcpxoDaemonStarted(pod) {
 		rec.daemonStarted = true
 	}
-}
-
-// assert evaluates the collected records once the benchmark outcome is known.
-// wantWorkers is the benchmark's worker count: that many workers must have
-// been observed with the daemon provably started, and no observed worker may
-// carry broken wiring.
-func (w *tcpxoWorkerWatcher) assert(wantWorkers int) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if len(w.records) == 0 {
-		return aicrErrors.New(aicrErrors.ErrCodeInternal,
-			"no NCCL worker pods were observed during the benchmark; the TCPXO wiring cannot be attested")
-	}
-	var problems []string
-	started := 0
-	for name, rec := range w.records {
-		if rec.wiringErr != nil {
-			problems = append(problems, fmt.Sprintf("%s: %v", name, rec.wiringErr))
-		}
-		if rec.daemonStarted {
-			started++
-		}
-	}
-	if len(problems) > 0 {
-		sort.Strings(problems)
-		return aicrErrors.New(aicrErrors.ErrCodeInternal,
-			"benchmark worker pods did not carry the TCPXO wiring: "+strings.Join(problems, "; "))
-	}
-	if started < wantWorkers {
-		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf(
-			"the %s sidecar was observed started on %d of %d benchmark workers; "+
-				"the bandwidth result cannot attest to the fabric on the full cohort",
-			gkeTCXODaemonContainer, started, wantWorkers))
-	}
-	return nil
 }
 
 // validateTCPXOWorkerWiring checks the immutable wiring on one benchmark

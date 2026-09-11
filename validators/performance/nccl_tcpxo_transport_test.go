@@ -109,22 +109,23 @@ func tcpxoWorkerPod(t *testing.T, name string, opts ...podOpt) *v1.Pod {
 }
 
 // runWatch starts the watcher, creates the pods through the fake clientset
-// (delivering watch events), and stops. The returned assert evaluates the
-// observations collected while the pods existed.
-func runWatch(t *testing.T, pods ...*v1.Pod) func(int) error {
+// (delivering watch events), waits until every one is recorded, and stops.
+// The returned watcher is already stopped; Assert evaluates the observations
+// collected while the pods existed.
+func runWatch(t *testing.T, pods ...*v1.Pod) *tcpxoWorkerWatcher {
 	t.Helper()
 	clientset := fake.NewClientset()
-	assert, stop := startGKETCPXOWorkerWatch(context.Background(), clientset, "nccl-test")
+	w := startGKETCPXOWorkerWatch(context.Background(), clientset, "nccl-test")
 	for _, pod := range pods {
 		if _, err := clientset.CoreV1().Pods("nccl-test").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
 			t.Fatalf("create pod: %v", err)
 		}
 	}
 	if len(pods) > 0 {
-		waitForRecorded(t, assert, len(pods))
+		waitForRecorded(t, w, len(pods))
 	}
-	stop()
-	return assert
+	w.Stop()
+	return w
 }
 
 func TestTCPXOWorkerWatch(t *testing.T) {
@@ -208,16 +209,16 @@ func TestTCPXOWorkerWatch(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			assert := runWatch(t, tt.pods...)
-			err := assert(tt.workers)
+			w := runWatch(t, tt.pods...)
+			err := w.Assert(tt.workers)
 			if tt.wantErr == "" {
 				if err != nil {
-					t.Fatalf("assert() error = %v, want nil", err)
+					t.Fatalf("Assert() error = %v, want nil", err)
 				}
 				return
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
-				t.Fatalf("assert() error = %v, want substring %q", err, tt.wantErr)
+				t.Fatalf("Assert() error = %v, want substring %q", err, tt.wantErr)
 			}
 		})
 	}
@@ -232,13 +233,13 @@ func TestTCPXOWorkerWatchTeardownRace(t *testing.T) {
 	t.Parallel()
 
 	clientset := fake.NewClientset()
-	assert, stop := startGKETCPXOWorkerWatch(context.Background(), clientset, "nccl-test")
+	w := startGKETCPXOWorkerWatch(context.Background(), clientset, "nccl-test")
 
 	pod := tcpxoWorkerPod(t, "node-0")
 	if _, err := clientset.CoreV1().Pods("nccl-test").Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("create pod: %v", err)
 	}
-	waitForRecorded(t, assert, 1)
+	waitForRecorded(t, w, 1)
 
 	// The JobSet controller deletes completed workers; kubelet flips Started
 	// to false as the sidecar terminates. Simulate the final state reaching us
@@ -254,24 +255,23 @@ func TestTCPXOWorkerWatchTeardownRace(t *testing.T) {
 		t.Fatalf("delete pod: %v", err)
 	}
 
-	stop()
-	if err := assert(1); err != nil {
-		t.Fatalf("assert() error = %v, want nil: the started observation must survive teardown", err)
+	w.Stop()
+	if err := w.Assert(1); err != nil {
+		t.Fatalf("Assert() error = %v, want nil: the started observation must survive teardown", err)
 	}
 }
 
-// waitForRecorded polls assert until n pods are recorded or the deadline
-// passes. It reads through the public assertion because the watcher's record
-// map is deliberately private.
-func waitForRecorded(t *testing.T, assert func(int) error, n int) {
+// waitForRecorded polls until the watcher has recorded n pods or the deadline
+// passes. It reads the watcher's own count rather than Assert's errors, so a
+// wiring failure under test cannot end the wait early.
+func waitForRecorded(t *testing.T, w *tcpxoWorkerWatcher, n int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		err := assert(n)
-		if err == nil || !strings.Contains(err.Error(), "no NCCL worker pods were observed") {
+		if w.recordedCount() == n {
 			return
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("watcher never recorded %d pods", n)
+	t.Fatalf("watcher recorded %d pods, want %d", w.recordedCount(), n)
 }
