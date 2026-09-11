@@ -346,6 +346,32 @@ run_subject "df available that will not parse"
 check "an unreadable df available exits 5, not a pass on 0.0 GiB free" "5" "${RC}"
 contains "the error names the available figure it could not read" "avail='-'" "${OUT}"
 
+# --- the stub's own integrity -------------------------------------------------
+#
+# Every case above trusts that its DF_STUB value names a real fixture. The stub
+# emitted its header BEFORE the `case` that validates the name, so a mistyped
+# value still printed a well-formed header on stdout and exited 64. The subject
+# reads `df -Pk / | tail -1`, so it got the HEADER and reported exit 5, figures
+# unparseable: the same code the four cases above assert on purpose. A typo in
+# any of their fixture names would have passed, for entirely the wrong reason.
+#
+# The first check is the property directly: an unknown name produces no stdout
+# at all. The second is the consequence, that such a run stays distinguishable
+# from the unparseable-figures case it used to impersonate.
+reset_env
+stub_out="$(PATH="${STUB_DIR}:${PATH}" DF_STUB=not_a_real_fixture df -Pk / 2>/dev/null)"
+stub_rc=$?
+check "a mistyped DF_STUB writes nothing to stdout" "" "${stub_out}"
+check "a mistyped DF_STUB fails closed with the stub's own code" "64" "${stub_rc}"
+
+reset_env
+export DF_STUB=not_a_real_fixture
+export AICR_FOOTPRINT_MEMINFO="${STUB_DIR}/meminfo-healthy"
+run_subject "mistyped df fixture"
+check "a mistyped DF_STUB is not mistakable for the unparseable-figures case" \
+    "distinct-from-5" \
+    "$([[ "${RC}" -ne 5 ]] && echo distinct-from-5 || echo "reported-exit-5-for-a-harness-typo")"
+
 # --- Memory arm: applicability ------------------------------------------------
 # Not Linux and no explicit source: the arm does not apply. It must record n/a
 # and pass, which is the developer case, and the n/a is the evidence that it was
