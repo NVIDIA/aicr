@@ -121,6 +121,10 @@ spec:
               status:
                 (availableReplicas > `0`): true
         # Stale-rollout guard, same reasoning as the DaemonSet above.
+        # Compared against spec.replicas, not status.replicas: during a
+        # scale-up (e.g. 1 -> 3) status.replicas can itself still lag
+        # spec.replicas, so a status-vs-status comparison passes vacuously
+        # before the rollout reaches the desired count.
         - error:
             resource:
               apiVersion: apps/v1
@@ -128,7 +132,15 @@ spec:
               metadata:
                 name: labeler
                 namespace: nvsentinel
-              ((status.updatedReplicas || `0`) < (status.replicas || `0`)): true
+              ((status.updatedReplicas || `0`) < (spec.replicas || `1`)): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: labeler
+                namespace: nvsentinel
+              ((status.availableReplicas || `0`) < (spec.replicas || `1`)): true
         - error:
             resource:
               apiVersion: apps/v1

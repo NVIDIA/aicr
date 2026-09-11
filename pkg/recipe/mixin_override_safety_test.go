@@ -20,6 +20,35 @@ import (
 	"testing"
 )
 
+// newNvsentinelAllowlistStore builds a MetadataStore backed by an
+// in-memory provider whose registry.yaml declares nvsentinel with the
+// given mixinSafeOverridePaths allowlist, plus any extraFiles (e.g. a
+// values file a test's ComponentRef points at via ValuesFile).
+func newNvsentinelAllowlistStore(tag string, allowlist []string, extraFiles map[string][]byte) *MetadataStore {
+	var registry strings.Builder
+	registry.WriteString("apiVersion: aicr.run/v1beta1\nkind: ComponentRegistry\ncomponents:\n  - name: nvsentinel\n    displayName: NVSentinel\n    mixinSafeOverridePaths:\n")
+	for _, p := range allowlist {
+		registry.WriteString("      - " + p + "\n")
+	}
+	files := map[string][]byte{"registry.yaml": []byte(registry.String())}
+	for k, v := range extraFiles {
+		files[k] = v
+	}
+	return &MetadataStore{
+		provider: newInMemoryProvider(tag, files),
+		Mixins:   map[string]*RecipeMixin{},
+	}
+}
+
+// addTestMixin registers a RecipeMixin named name with the given
+// componentRefs into store.Mixins.
+func addTestMixin(store *MetadataStore, name string, refs []ComponentRef) {
+	m := &RecipeMixin{}
+	m.Metadata.Name = name
+	m.Spec.ComponentRefs = refs
+	store.Mixins[name] = m
+}
+
 // TestMixinOverridesSafeForMerge covers mixinOverridesSafeForMerge's
 // allowlist and collision rules directly, independent of any real mixin
 // file: only registry-allowlisted paths compose, and only when they don't
@@ -123,7 +152,11 @@ func TestMixinOverridesSafeForMerge(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := mixinOverridesSafeForMerge(provider, "test-mixin", tt.componentName, tt.mixinOverrides, tt.existingOverrides)
+			var existingLayers []map[string]any
+			if tt.existingOverrides != nil {
+				existingLayers = []map[string]any{tt.existingOverrides}
+			}
+			err := mixinOverridesSafeForMerge(provider, "test-mixin", tt.componentName, tt.mixinOverrides, existingLayers)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("expected error, got nil")
@@ -153,9 +186,10 @@ func TestMixinOverridesSafeForMerge_DisabledTargetDoesNotBlock(t *testing.T) {
 		t.Fatalf("loadMetadataStore: %v", err)
 	}
 
+	disabledOverrides := map[string]any{"enabled": false}
 	err = mixinOverridesSafeForMerge(store.provider, "nvsentinel-observability", "nvsentinel",
 		map[string]any{"global": map[string]any{"tracing": map[string]any{"enabled": true}}},
-		map[string]any{"enabled": false})
+		[]map[string]any{disabledOverrides})
 	if err != nil {
 		t.Fatalf("expected composing onto a disabled component to warn, not error, got: %v", err)
 	}
@@ -402,31 +436,15 @@ func TestMergeMixins_RejectsDuplicateComponentRefNameWithinOneMixin(t *testing.T
 // that sets an allowlisted path via ValuesFile instead of inline Overrides:
 // mixinOverridesSafeForMerge must still treat it as already set.
 func TestMergeMixins_DetectsValuesFileCollision(t *testing.T) {
-	provider := newInMemoryProvider("values-file-collision", map[string][]byte{
-		"registry.yaml": []byte(`apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components:
-  - name: nvsentinel
-    displayName: NVSentinel
-    mixinSafeOverridePaths:
-      - global.auditLogging.enabled
-`),
+	store := newNvsentinelAllowlistStore("values-file-collision", []string{"global.auditLogging.enabled"}, map[string][]byte{
 		"values/nvsentinel-existing.yaml": []byte(`global:
   auditLogging:
     enabled: false
 `),
 	})
-
-	store := &MetadataStore{
-		provider: provider,
-		Mixins:   map[string]*RecipeMixin{},
-	}
-	mixin := &RecipeMixin{}
-	mixin.Metadata.Name = "test-mixin"
-	mixin.Spec.ComponentRefs = []ComponentRef{
+	addTestMixin(store, "test-mixin", []ComponentRef{
 		{Name: "nvsentinel", Overrides: map[string]any{"global": map[string]any{"auditLogging": map[string]any{"enabled": true}}}},
-	}
-	store.Mixins["test-mixin"] = mixin
+	})
 
 	spec := RecipeMetadataSpec{
 		Mixins: []string{"test-mixin"},
@@ -450,15 +468,7 @@ components:
 // resolveComponentValues loads base then overlays ValuesFile on top, so the
 // collision check must see the merged result, not just the overlay file.
 func TestMergeMixins_DetectsBaseValuesFileCollision(t *testing.T) {
-	provider := newInMemoryProvider("base-values-file-collision", map[string][]byte{
-		"registry.yaml": []byte(`apiVersion: aicr.run/v1beta1
-kind: ComponentRegistry
-components:
-  - name: nvsentinel
-    displayName: NVSentinel
-    mixinSafeOverridePaths:
-      - global.auditLogging.enabled
-`),
+	store := newNvsentinelAllowlistStore("base-values-file-collision", []string{"global.auditLogging.enabled"}, map[string][]byte{
 		"components/nvsentinel/values.yaml": []byte(`global:
   auditLogging:
     enabled: false
@@ -468,17 +478,9 @@ components:
     insecure: false
 `),
 	})
-
-	store := &MetadataStore{
-		provider: provider,
-		Mixins:   map[string]*RecipeMixin{},
-	}
-	mixin := &RecipeMixin{}
-	mixin.Metadata.Name = "test-mixin"
-	mixin.Spec.ComponentRefs = []ComponentRef{
+	addTestMixin(store, "test-mixin", []ComponentRef{
 		{Name: "nvsentinel", Overrides: map[string]any{"global": map[string]any{"auditLogging": map[string]any{"enabled": true}}}},
-	}
-	store.Mixins["test-mixin"] = mixin
+	})
 
 	spec := RecipeMetadataSpec{
 		Mixins: []string{"test-mixin"},
@@ -493,5 +495,214 @@ components:
 	}
 	if !strings.Contains(err.Error(), "collides with path") {
 		t.Errorf("error = %v, want a collision rejection", err)
+	}
+}
+
+// TestMergeMixins_ValidatesOverridesOnNewlyIntroducedComponent covers a
+// mixin that introduces a component NOT already in the recipe's chain:
+// mergeMixins must still run mixinOverridesSafeForMerge on its Overrides.
+// Without this, the existingComponents[c.Name] continue skips validation
+// entirely, letting a mixin set a registered component's non-allowlisted
+// path (e.g. nvsentinel's global.tracing.endpoint) just by being the first
+// to introduce that component into a given chain.
+func TestMergeMixins_ValidatesOverridesOnNewlyIntroducedComponent(t *testing.T) {
+	store := newNvsentinelAllowlistStore("new-component-overrides", []string{"global.auditLogging.enabled"}, nil)
+	addTestMixin(store, "test-mixin", []ComponentRef{
+		{
+			Name:   "nvsentinel",
+			Chart:  "nvsentinel",
+			Source: "oci://ghcr.io/nvidia",
+			Type:   ComponentTypeHelm,
+			Overrides: map[string]any{
+				"global": map[string]any{"tracing": map[string]any{"endpoint": "sneaky.example:4317"}},
+			},
+		},
+	})
+
+	// nvsentinel is deliberately absent from ComponentRefs: the mixin is
+	// the one introducing it.
+	spec := RecipeMetadataSpec{
+		Mixins:        []string{"test-mixin"},
+		ComponentRefs: []ComponentRef{},
+	}
+
+	_, err := store.mergeMixins(t.Context(), &spec)
+	if err == nil {
+		t.Fatal("expected mergeMixins to reject a non-allowlisted override on a newly-introduced component, got nil")
+	}
+	if !strings.Contains(err.Error(), "global.tracing.endpoint") {
+		t.Errorf("error = %v, want rejection naming global.tracing.endpoint", err)
+	}
+}
+
+// TestMergeMixins_DoesNotCorruptCachedMixinOnSecondMixin covers two mixins
+// applied to the same recipe, where the first introduces a component fresh
+// and the second sets an allowlisted override on that now-existing
+// component. Merge's "new component from overlay" path stores the
+// ComponentRef by value, aliasing its Overrides map with the cached mixin's
+// own map (store.Mixins is process-wide cached, sync.Once). If the second
+// mixin's merge writes into that aliased map, it permanently corrupts the
+// first mixin's cached definition for every later build sharing this store.
+func TestMergeMixins_DoesNotCorruptCachedMixinOnSecondMixin(t *testing.T) {
+	store := newNvsentinelAllowlistStore("cache-corruption", []string{"global.auditLogging.enabled", "global.tracing.enabled"}, nil)
+	addTestMixin(store, "introduces-nvsentinel", []ComponentRef{
+		{
+			Name:   "nvsentinel",
+			Chart:  "nvsentinel",
+			Source: "oci://ghcr.io/nvidia",
+			Type:   ComponentTypeHelm,
+			Overrides: map[string]any{
+				"global": map[string]any{"auditLogging": map[string]any{"enabled": true}},
+			},
+		},
+	})
+	addTestMixin(store, "adds-tracing", []ComponentRef{
+		{
+			Name:      "nvsentinel",
+			Overrides: map[string]any{"global": map[string]any{"tracing": map[string]any{"enabled": true}}},
+		},
+	})
+
+	spec := RecipeMetadataSpec{
+		Mixins:        []string{"introduces-nvsentinel", "adds-tracing"},
+		ComponentRefs: []ComponentRef{},
+	}
+	if _, err := store.mergeMixins(t.Context(), &spec); err != nil {
+		t.Fatalf("mergeMixins: %v", err)
+	}
+
+	// The cached introducer mixin must be untouched by the second mixin's
+	// merge: it should still declare only auditLogging.enabled.
+	cachedOverrides := store.Mixins["introduces-nvsentinel"].Spec.ComponentRefs[0].Overrides
+	global, _ := cachedOverrides["global"].(map[string]any)
+	if _, hasTracing := global["tracing"]; hasTracing {
+		t.Fatalf("cached mixin %q was mutated by a later mixin's merge: %+v", "introduces-nvsentinel", cachedOverrides)
+	}
+}
+
+// TestMergeMixins_NullClearedPathStillCollides covers a leaf that
+// explicitly clears an allowlisted path with YAML null, leaving a sibling
+// key at the same parent untouched. resolveComponentValues' merged result
+// can no longer see the cleared key (mergeValues deletes a nil-valued key
+// outright), so collision detection must use the raw, unmerged layers
+// instead -- otherwise a mixin can silently reinstate a value the leaf
+// deliberately unset.
+func TestMergeMixins_NullClearedPathStillCollides(t *testing.T) {
+	store := newNvsentinelAllowlistStore("null-cleared-collision", []string{"global.auditLogging.enabled"}, map[string][]byte{
+		"values/existing.yaml": []byte(`global:
+  auditLogging:
+    enabled: true
+    maxSizeMB: 50
+`),
+	})
+	addTestMixin(store, "test-mixin", []ComponentRef{
+		{Name: "nvsentinel", Overrides: map[string]any{"global": map[string]any{"auditLogging": map[string]any{"enabled": true}}}},
+	})
+
+	spec := RecipeMetadataSpec{
+		Mixins: []string{"test-mixin"},
+		ComponentRefs: []ComponentRef{
+			{
+				Name:       "nvsentinel",
+				ValuesFile: "values/existing.yaml",
+				Overrides:  map[string]any{"global": map[string]any{"auditLogging": map[string]any{"enabled": nil}}},
+			},
+		},
+	}
+
+	_, err := store.mergeMixins(t.Context(), &spec)
+	if err == nil {
+		t.Fatal("expected mergeMixins to reject the mixin override colliding with a leaf's explicit null, got nil")
+	}
+	if !strings.Contains(err.Error(), "collides with path") {
+		t.Errorf("error = %v, want a collision rejection", err)
+	}
+}
+
+// TestMergeMixins_UnrelatedDottedKeyDoesNotBreakComposition covers a
+// component whose existing values contain an unrelated key with a literal
+// dot (e.g. a podAnnotations entry, a common Helm/K8s pattern) elsewhere in
+// the tree. Collision detection must never have to walk or validate that
+// key: it only indexes the exact segments of the mixin's own allowlisted
+// paths, so composition must succeed.
+func TestMergeMixins_UnrelatedDottedKeyDoesNotBreakComposition(t *testing.T) {
+	store := newNvsentinelAllowlistStore("dotted-key", []string{"global.auditLogging.enabled"}, map[string][]byte{
+		"values/existing.yaml": []byte(`podAnnotations:
+  example.com/key: value
+`),
+	})
+	addTestMixin(store, "test-mixin", []ComponentRef{
+		{Name: "nvsentinel", Overrides: map[string]any{"global": map[string]any{"auditLogging": map[string]any{"enabled": true}}}},
+	})
+
+	spec := RecipeMetadataSpec{
+		Mixins: []string{"test-mixin"},
+		ComponentRefs: []ComponentRef{
+			{Name: "nvsentinel", ValuesFile: "values/existing.yaml"},
+		},
+	}
+
+	if _, err := store.mergeMixins(t.Context(), &spec); err != nil {
+		t.Fatalf("mergeMixins: %v, want success despite the unrelated dotted key", err)
+	}
+}
+
+// TestMergeMixins_EmptyMapAncestorStillCollides covers a leaf that
+// explicitly clears a whole subtree to {} (e.g. global.auditLogging: {}),
+// then a mixin tries to populate a path underneath it
+// (global.auditLogging.enabled). pathConfiguredInRaw must treat the empty
+// map itself as a configured ancestor: deeper segments of the mixin's path
+// cannot exist inside an empty map, so walking off the end of it must not
+// be read as "not configured."
+func TestMergeMixins_EmptyMapAncestorStillCollides(t *testing.T) {
+	store := newNvsentinelAllowlistStore("empty-map-ancestor", []string{"global.auditLogging.enabled"}, nil)
+	addTestMixin(store, "test-mixin", []ComponentRef{
+		{Name: "nvsentinel", Overrides: map[string]any{"global": map[string]any{"auditLogging": map[string]any{"enabled": true}}}},
+	})
+
+	spec := RecipeMetadataSpec{
+		Mixins: []string{"test-mixin"},
+		ComponentRefs: []ComponentRef{
+			{
+				Name:      "nvsentinel",
+				Overrides: map[string]any{"global": map[string]any{"auditLogging": map[string]any{}}},
+			},
+		},
+	}
+
+	_, err := store.mergeMixins(t.Context(), &spec)
+	if err == nil {
+		t.Fatal("expected mergeMixins to reject the mixin populating a path under a leaf's empty-map ancestor, got nil")
+	}
+	if !strings.Contains(err.Error(), "collides with path") {
+		t.Errorf("error = %v, want a collision rejection", err)
+	}
+}
+
+// TestMergeMixins_StructuralOnlyMixinSkipsValuesFileIO covers a mixin that
+// only sets structural fields (Namespace, PreManifestFiles -- the os-talos
+// shape) on an existing component with no Overrides at all. mergeMixins
+// must not read that component's ValuesFile to build collision layers: an
+// unrelated, unavailable/malformed values file must not be able to break
+// composition for a mixin that never touches overrides.
+func TestMergeMixins_StructuralOnlyMixinSkipsValuesFileIO(t *testing.T) {
+	store := newNvsentinelAllowlistStore("structural-only", []string{"global.auditLogging.enabled"}, nil)
+	addTestMixin(store, "test-mixin", []ComponentRef{
+		{Name: "nvsentinel", Namespace: "privileged-nvsentinel"},
+	})
+
+	spec := RecipeMetadataSpec{
+		Mixins: []string{"test-mixin"},
+		ComponentRefs: []ComponentRef{
+			// ValuesFile points at a path the provider doesn't have: if
+			// mergeMixins tried to read it (it shouldn't, since the mixin
+			// sets no Overrides), this would fail with a read error
+			// instead of the success this test expects.
+			{Name: "nvsentinel", ValuesFile: "values/does-not-exist.yaml"},
+		},
+	}
+
+	if _, err := store.mergeMixins(t.Context(), &spec); err != nil {
+		t.Fatalf("mergeMixins: %v, want success -- a structural-only mixin must not need to read the target's values", err)
 	}
 }

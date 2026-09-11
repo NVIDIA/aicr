@@ -1294,8 +1294,14 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 			// Merge overlay into base - overlay takes precedence for non-empty fields
 			componentMap[overlay.Name] = mergeComponentRef(base, overlay)
 		} else {
-			// New component from overlay
-			componentMap[overlay.Name] = overlay
+			// New component from overlay. Clone it: overlay's map/slice
+			// fields (e.g. Overrides) would otherwise alias the source --
+			// for a mixin's ComponentRefs, that source is the process-wide
+			// cached *RecipeMixin (store.Mixins), so a later merge into
+			// this entry (e.g. a second mixin targeting the same
+			// now-existing component) would mutate the cached mixin
+			// definition itself.
+			componentMap[overlay.Name] = cloneComponentRef(overlay)
 		}
 	}
 	s.ComponentRefs = make([]ComponentRef, 0, len(componentMap))

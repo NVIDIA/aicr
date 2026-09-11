@@ -785,25 +785,14 @@ check-health: ## Runs chainsaw health check directly against Kind cluster (COMPO
 
 .PHONY: check-health-all
 # Iterates registry.yaml's healthCheck.assertFile entries, not a raw glob of
-# recipes/checks/*/: every shipped recipe's default bundle exercises exactly
-# those checks, so this is the set that can actually pass on a stock
-# cluster. A check directory with no assertFile reference (opt-in-only,
-# e.g. nvsentinel-observability -- no shipped recipe enables the feature it
-# verifies) is excluded by construction, without a maintained skip-list;
-# run it directly with `make check-health COMPONENT=<name>` after deploying
-# with its values.
+# recipes/checks/*/: this is the set every shipped recipe actually exercises,
+# so opt-in-only checks (e.g. nvsentinel-observability) are excluded by
+# construction -- run those directly via `make check-health COMPONENT=<name>`.
 #
-# yq's own exit status is captured separately from the grep/sed/sort
-# transform pipeline that follows: `set -e` does not observe a failing
-# command that isn't the LAST stage of a pipeline (no `set -o pipefail`,
-# and this target doesn't pin SHELL to bash to rely on PIPESTATUS either),
-# so a broken/missing yq piped straight into the for-loop would silently
-# produce an empty component list -- zero iterations, zero failures,
-# "All health checks passed" on a completely unexercised run. Assigning
-# yq's own output first and checking `$$?` immediately (POSIX-portable,
-# not bash-specific) catches that; the empty-list check below is a second,
-# independent guard against the same failure mode surviving some other way
-# (e.g. a registry.yaml with no healthCheck.assertFile entries at all).
+# yq's exit status is captured separately from the pipeline that follows:
+# without `set -o pipefail`, a failing yq piped straight into the loop would
+# silently yield zero components and a false "All health checks passed".
+# The empty-list check below is a second guard against the same outcome.
 check-health-all: ## Runs chainsaw health checks for every registry-linked component against Kind cluster
 	@set -e; \
 	FAILED=""; \

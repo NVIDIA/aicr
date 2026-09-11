@@ -746,27 +746,32 @@ func (s *MetadataStore) mergeMixins(ctx context.Context, mergedSpec *RecipeMetad
 				fmt.Sprintf("mixin %q declares component %q more than once in its own componentRefs list", mixinName, dupName))
 		}
 
-		// ComponentRef collision: allowed only when the mixin entry sets
-		// only safe additive fields, plus Overrides paths the component's
-		// registry entry has explicitly allowlisted for mixin use (see
-		// mixinOverridesSafeForMerge). See mixinComponentRefSafeForMerge.
+		// ComponentRef collision: a mixin may set any field freely on a
+		// genuinely new component, but on one already in the chain, only
+		// safe additive fields plus registry-allowlisted Overrides paths
+		// (mixinOverridesSafeForMerge). See mixinComponentRefSafeForMerge.
 		for _, c := range mixin.Spec.ComponentRefs {
-			if !existingComponents[c.Name] {
+			isExisting := existingComponents[c.Name]
+			if isExisting {
+				if offending, ok := mixinComponentRefSafeForMerge(c); !ok {
+					return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+						fmt.Sprintf("mixin %q component %q sets identity/sourcing field %q which conflicts with the inheritance chain; mixins may only contribute Namespace, ManifestFiles, PreManifestFiles, or registry-allowlisted Overrides paths to an existing component", mixinName, c.Name, offending))
+				}
+			}
+			if len(c.Overrides) == 0 {
 				continue
 			}
-			if offending, ok := mixinComponentRefSafeForMerge(c); !ok {
-				return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-					fmt.Sprintf("mixin %q component %q sets identity/sourcing field %q which conflicts with the inheritance chain; mixins may only contribute Namespace, ManifestFiles, PreManifestFiles, or registry-allowlisted Overrides paths to an existing component", mixinName, c.Name, offending))
-			}
-			if len(c.Overrides) > 0 {
+			var existingLayers []map[string]any
+			if isExisting {
 				existing, _ := findComponentRefByName(mergedSpec.ComponentRefs, c.Name)
-				existingOverrides, err := resolveComponentValues(ctx, s.provider, &existing)
+				var err error
+				existingLayers, err = existingRawOverrideLayers(ctx, s.provider, existing)
 				if err != nil {
 					return nil, err
 				}
-				if err := mixinOverridesSafeForMerge(s.provider, mixinName, c.Name, c.Overrides, existingOverrides); err != nil {
-					return nil, err
-				}
+			}
+			if err := mixinOverridesSafeForMerge(s.provider, mixinName, c.Name, c.Overrides, existingLayers); err != nil {
+				return nil, err
 			}
 		}
 
@@ -1490,13 +1495,11 @@ func duplicateComponentRefName(refs []ComponentRef) (string, bool) {
 // mixinOverridesSafeForMerge validates a mixin's Overrides against the
 // target component's registry-declared MixinSafeOverridePaths allowlist,
 // and against paths already set by the leaf's own inheritance chain or an
-// earlier-merged mixin. existingOverrides is the CURRENT state of the
-// target component's Overrides at the point this mixin is being merged —
-// mergeMixins folds each mixin's contribution into mergedSpec.ComponentRefs
-// before moving to the next, so this one check against the current state
-// covers both leaf-vs-mixin and mixin-vs-mixin collisions without separate
-// bookkeeping.
-func mixinOverridesSafeForMerge(provider DataProvider, mixinName, componentName string, mixinOverrides, existingOverrides map[string]any) error {
+// earlier-merged mixin (existingLayers — nil for a component the mixin is
+// introducing fresh). mergeMixins folds each mixin's contribution into
+// mergedSpec.ComponentRefs before moving to the next, so this one check
+// covers both leaf-vs-mixin and mixin-vs-mixin collisions.
+func mixinOverridesSafeForMerge(provider DataProvider, mixinName, componentName string, mixinOverrides map[string]any, existingLayers []map[string]any) error {
 	registry, err := GetComponentRegistryFor(provider)
 	if err != nil {
 		return aicrerrors.PropagateOrWrap(err, aicrerrors.ErrCodeInternal, "load component registry for mixin override validation")
@@ -1527,27 +1530,46 @@ func mixinOverridesSafeForMerge(provider DataProvider, mixinName, componentName 
 		}
 	}
 
-	existingPaths, err := overrideLeafPaths(existingOverrides, fmt.Sprintf("component %q existing overrides", componentName))
-	if err != nil {
-		return err
-	}
-	if mixinPath, existingPath, collide := mixinOverrideCollision(mixinPaths, existingPaths); collide {
-		return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			fmt.Sprintf("mixin %q component %q overrides path %q collides with path %q already set by the leaf's own chain or another mixin — mixins may not silently overwrite a value the chain already configured", mixinName, componentName, mixinPath, existingPath))
+	// Checked per mixin path against each raw existing layer (base
+	// values.yaml, ValuesFile, inline Overrides), not a flattened walk of
+	// the existing side: pathConfiguredInRaw only ever indexes a mixin's
+	// own (small, allowlisted) leaf paths, so an unrelated dotted key or a
+	// null-cleared value elsewhere in the tree never has to be interpreted.
+	for _, mp := range mixinPaths {
+		for _, layer := range existingLayers {
+			if existingPath, collide := pathConfiguredInRaw(layer, mp); collide {
+				return aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("mixin %q component %q overrides path %q collides with path %q already set by the leaf's own chain or another mixin — mixins may not silently overwrite a value the chain already configured", mixinName, componentName, mp, existingPath))
+			}
+		}
 	}
 
-	// The target may already be disabled by the chain (e.g. an OCP overlay
-	// setting overrides.enabled: false on nvsentinel) -- composing the
-	// mixin is still allowed (a recipe author may be layering values ahead
-	// of a future re-enable, or simply hasn't noticed), but silently
-	// producing a values block nothing ever reads would be a confusing,
-	// invisible no-op. Warn rather than block: disabling the target is a
-	// legitimate, deliberate chain decision this validation doesn't own.
-	if enabledVal, ok := existingOverrides["enabled"].(bool); ok && !enabledVal {
+	// Composing onto an already-disabled target (overrides.enabled: false)
+	// is allowed but likely a no-op the recipe author should know about --
+	// warn rather than block, since disabling is a legitimate chain
+	// decision this validation doesn't own.
+	if enabledVal, ok := existingConfiguredBool(existingLayers, "enabled"); ok && !enabledVal {
 		slog.Warn(fmt.Sprintf("mixin %q sets overrides on component %q, which the recipe's inheritance chain already disables (overrides.enabled: false) -- these values will have no effect unless something later re-enables the component", mixinName, componentName),
 			"mixin", mixinName, "component", componentName)
 	}
 	return nil
+}
+
+// existingConfiguredBool returns the value and presence of key in the
+// highest-precedence layer of existingLayers (ordered low to high, as
+// existingRawOverrideLayers returns them) that sets it at all, mirroring
+// resolveComponentValues' merge precedence without needing the merged
+// result: a layer that sets key to a non-bool (including explicit null)
+// still wins over a lower layer's bool, matching mergeValues' last-
+// writer-wins semantics.
+func existingConfiguredBool(existingLayers []map[string]any, key string) (bool, bool) {
+	for i := len(existingLayers) - 1; i >= 0; i-- {
+		if v, exists := existingLayers[i][key]; exists {
+			b, isBool := v.(bool)
+			return b, isBool
+		}
+	}
+	return false, false
 }
 
 // rejectEmptyMapValues walks overrides and errors on the first empty map
@@ -1645,20 +1667,74 @@ func pathsIntersect(a, b string) bool {
 	return a == b || strings.HasPrefix(a, b+".") || strings.HasPrefix(b, a+".")
 }
 
-// mixinOverrideCollision returns the first colliding pair between mixinPaths
-// and existingPaths (see pathsIntersect), or ("", "", false) if none
-// collide. A collision must hard-error rather than let deepMergeMap's
-// last-writer-wins semantics silently overwrite a value the chain already
-// configured — see mixinOverridesSafeForMerge.
-func mixinOverrideCollision(mixinPaths, existingPaths []string) (string, string, bool) {
-	for _, mp := range mixinPaths {
-		for _, ep := range existingPaths {
-			if pathsIntersect(mp, ep) {
-				return mp, ep, true
+// pathConfiguredInRaw walks path's dotted segments through raw (an
+// unmerged, un-null-deleted values map) and reports the shallowest dotted
+// prefix raw has explicitly set (any value, including null or an empty
+// map), or ("", false) if no prefix is present. Stops at the first
+// non-map or empty-map segment, since path can't exist any deeper there,
+// and that ancestor is itself a configured value. Only ever indexes
+// path's own segments, so it never has to interpret unrelated keys
+// elsewhere in raw (e.g. a dotted podAnnotations entry).
+func pathConfiguredInRaw(raw map[string]any, path string) (string, bool) {
+	segments := strings.Split(path, ".")
+	cur := raw
+	for i, seg := range segments {
+		val, exists := cur[seg]
+		if !exists {
+			return "", false
+		}
+		prefix := strings.Join(segments[:i+1], ".")
+		nested, isMap := val.(map[string]any)
+		if !isMap || len(nested) == 0 || i == len(segments)-1 {
+			return prefix, true
+		}
+		cur = nested
+	}
+	return "", false
+}
+
+// existingRawOverrideLayers returns the unmerged raw values maps that
+// configure ref — component base values.yaml (if ref.ValuesFile is set
+// and differs from it), ref.ValuesFile's content, and ref.Overrides — for
+// collision detection via pathConfiguredInRaw. Deliberately not
+// resolveComponentValues' merged result: null-deletion during that merge
+// would make "never mentioned" indistinguishable from "explicitly cleared."
+func existingRawOverrideLayers(ctx context.Context, provider DataProvider, ref ComponentRef) ([]map[string]any, error) {
+	if provider == nil {
+		provider = defaultEmbeddedProvider
+	}
+	var layers []map[string]any
+
+	if ref.ValuesFile != "" {
+		baseValuesFile := fmt.Sprintf("components/%s/values.yaml", ref.Name)
+		if ref.ValuesFile != baseValuesFile {
+			if baseData, err := provider.ReadFile(ctx, baseValuesFile); err == nil {
+				var baseValues map[string]any
+				if err := yaml.Unmarshal(baseData, &baseValues); err != nil {
+					return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal,
+						fmt.Sprintf("parse base values file %q for component %q mixin collision check", baseValuesFile, ref.Name), err)
+				}
+				layers = append(layers, baseValues)
 			}
 		}
+		data, err := provider.ReadFile(ctx, ref.ValuesFile)
+		if err != nil {
+			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal,
+				fmt.Sprintf("read values file %q for component %q mixin collision check", ref.ValuesFile, ref.Name), err)
+		}
+		var vfValues map[string]any
+		if err := yaml.Unmarshal(data, &vfValues); err != nil {
+			return nil, aicrerrors.Wrap(aicrerrors.ErrCodeInternal,
+				fmt.Sprintf("parse values file %q for component %q mixin collision check", ref.ValuesFile, ref.Name), err)
+		}
+		layers = append(layers, vfValues)
 	}
-	return "", "", false
+
+	if len(ref.Overrides) > 0 {
+		layers = append(layers, ref.Overrides)
+	}
+
+	return layers, nil
 }
 
 // applyRegistryDefaults fills in ComponentRef fields from ComponentConfig
