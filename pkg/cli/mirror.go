@@ -239,6 +239,15 @@ func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *aicr.Con
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--gke-tcpxo-interfaces applies during criteria resolution and cannot be combined with --recipe; the recipe file already records the mapping")
 		}
+		// The config-file mapping is equally a criteria-resolution input; the
+		// recipe file on disk already records its mapping. Mirror the profile
+		// guard's flag-or-config check.
+		if _, set, cfgErr := cfg.RecipeGKETCPXOInterfaces(); cfgErr != nil {
+			return nil, cfgErr
+		} else if set {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"spec.recipe.configuration.gke.tcpxoInterfaces applies during criteria resolution and cannot be combined with --recipe; the recipe file already records the mapping")
+		}
 		slog.Info("loading recipe from file", "path", recipePath)
 
 		loaded, err := client.LoadRecipe(ctx, recipePath, cmd.String("kubeconfig"))
