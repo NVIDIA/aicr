@@ -67,6 +67,9 @@ TRAINJOB_NAME="${TRAINJOB_NAME:-pytorch-mnist}"
 # fabric-wired sibling set TRAINJOB_RUNTIME to it (tests/uat/gcp/run sets
 # torch-distributed-tcpxo, exercising the recipe-shipped runtime end to end).
 TRAINJOB_RUNTIME="${TRAINJOB_RUNTIME:-torch-distributed}"
+# GPUs the smoke requests per node. Lanes on a full-node fabric runtime set 8;
+# the default keeps the single-GPU smoke used elsewhere.
+TRAINJOB_GPUS_PER_NODE="${TRAINJOB_GPUS_PER_NODE:-1}"
 TRAINJOB_IMAGE="${TRAINJOB_IMAGE:-kubeflow/pytorch-dist-mnist:v1-9e12c68}"
 TRAINJOB_TIMEOUT_SECONDS="${TRAINJOB_TIMEOUT_SECONDS:-1200}" # 20 min
 # TrainJob node count. Defaults to 2 to span the cloud lanes' 2-GPU pools (and
@@ -1250,9 +1253,9 @@ spec:
       - --epochs=1
     resourcesPerNode:
       requests:
-        nvidia.com/gpu: 1
+        nvidia.com/gpu: ${TRAINJOB_GPUS_PER_NODE}
       limits:
-        nvidia.com/gpu: 1
+        nvidia.com/gpu: ${TRAINJOB_GPUS_PER_NODE}
   runtimeRef:
     name: ${TRAINJOB_RUNTIME}
     apiGroup: trainer.kubeflow.org
