@@ -739,7 +739,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"robust-controller",
 				"secure-accelerator-access",
 			},
-			wantDRAConstraint: false,
+			wantDRAConstraint: true,
 		},
 		{
 			name: "gb200-oke-ubuntu-training-kubeflow",
@@ -771,7 +771,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"robust-controller",
 				"secure-accelerator-access",
 			},
-			wantDRAConstraint: false,
+			wantDRAConstraint: true,
 		},
 		{
 			name: "gb300-eks-ubuntu-training-kubeflow",
@@ -803,7 +803,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"robust-controller",
 				"secure-accelerator-access",
 			},
-			wantDRAConstraint: false,
+			wantDRAConstraint: true,
 		},
 	}
 
