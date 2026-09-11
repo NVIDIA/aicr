@@ -30,6 +30,7 @@ import (
 // a bare URL, to avoid advice/comment false positives, and (b) emits a warning
 // for any download-looking line it cannot resolve, so the inventory never reads
 // as more complete than it is.
+//
 // install-nvkind.sh is listed because it carries one of the two
 // `go install pkg@version` calls #2667 left in place, and it is the reason
 // sum.golang.org is still on the allowlist. The rest of the .github pass mines
@@ -156,6 +157,11 @@ func shellSegmentRecords(src, line, trim string) (recs []Record, warnings []stri
 	// contacts the checksum database. Recording one host rather than two is the
 	// whole difference #2667 bought, and the pin is a digest rather than a tag
 	// because go.sum entries are cryptographic hashes.
+	//
+	// This holds even if go.sum were incomplete: the callers pin
+	// GOFLAGS=-mod=readonly, under which a missing entry is a hard error
+	// ("missing go.sum entry ... to add: go get") rather than a checksum-database
+	// lookup. `go mod tidy -diff` in the gate keeps it complete regardless.
 	//
 	// Checked after `go install` and not as an `else if`: the two verbs are
 	// independent, and a line carrying both should record both.

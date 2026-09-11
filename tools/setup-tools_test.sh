@@ -53,21 +53,36 @@ if [[ "${#install_lines[@]}" -ne 0 ]]; then
     exit 1
 fi
 
-# A floor, so deleting the installs outright cannot make the check above pass
-# vacuously. Two tools are built from the module: apidiff and go-licenses,
-# neither of which publishes a binary release. Tools that do publish one
+# Assert the module-built tools BY PACKAGE, so deleting the installs outright
+# cannot make the check above pass vacuously. Counting alone is not enough: two
+# `build_module_tool apidiff ...` lines satisfy a floor of 2 while go-licenses
+# silently disappears and `make license-check` loses its tool.
+#
+# These two are here because neither publishes a binary release. Tools that do
 # (addlicense, oasdiff, ctlptl, ...) are downloaded and checksum-verified
-# instead, and are deliberately not counted here.
+# instead, and are deliberately not listed.
+REQUIRED_MODULE_TOOLS=(
+    "golang.org/x/exp/cmd/apidiff"
+    "github.com/google/go-licenses/v2"
+)
+
 mapfile -t module_builds < <(
     grep -nE '(^|[[:space:]])build_module_tool ' "${SETUP_TOOLS}" \
         | grep -vE '^[0-9]+:[[:space:]]*#' | grep -v 'build_module_tool()' || true
 )
 
-readonly MIN_MODULE_BUILDS=2
-if [[ "${#module_builds[@]}" -lt "${MIN_MODULE_BUILDS}" ]]; then
-    echo "FAIL: found ${#module_builds[@]} 'build_module_tool' call(s), expected at least ${MIN_MODULE_BUILDS};" >&2
-    echo "      if a tool was intentionally moved to a binary release, lower MIN_MODULE_BUILDS with it" >&2
-    exit 1
-fi
+missing_tools=0
+for pkg in "${REQUIRED_MODULE_TOOLS[@]}"; do
+    # Match the package as a whole argument, so a longer path that merely
+    # contains this one cannot vouch for it.
+    if ! printf '%s\n' "${module_builds[@]}" \
+        | grep -qE "(^|[[:space:]])${pkg//./\\.}([[:space:]]|\$)"; then
+        echo "FAIL: no 'build_module_tool' call builds ${pkg}." >&2
+        echo "      It has no binary release, so building it from the main module is what" >&2
+        echo "      keeps its install off sum.golang.org (#2667)." >&2
+        missing_tools=1
+    fi
+done
+[[ "${missing_tools}" -eq 0 ]] || exit 1
 
-echo "No checksum-database-dependent installs; ${#module_builds[@]} tools built from the main module"
+echo "No checksum-database-dependent installs; ${#REQUIRED_MODULE_TOOLS[@]} required tools built from the main module"

@@ -96,13 +96,22 @@ verify_sha256() {
         return 0
     fi
 
-    if ! command_exists shasum; then
-        log_warning "shasum not available; skipping checksum verification for $file_path"
-        return 0
+    # Fail closed when no digest tool is available. This used to warn and
+    # return 0, which meant the caller went on to extract the archive and
+    # `sudo mv` the binary into /usr/local/bin with nothing verified -- the one
+    # outcome a checksum helper must never produce. Accept either tool: shasum
+    # is the perl one macOS ships, sha256sum is coreutils on Linux.
+    local actual_sha
+    if command_exists shasum; then
+        actual_sha=$(shasum -a 256 "$file_path" | awk '{print $1}')
+    elif command_exists sha256sum; then
+        actual_sha=$(sha256sum "$file_path" | awk '{print $1}')
+    else
+        log_error "Neither shasum nor sha256sum is available; cannot verify $file_path."
+        log_error "Refusing to install an unverified binary. Install coreutils (or perl's shasum) and retry."
+        exit 1
     fi
 
-    local actual_sha
-    actual_sha=$(shasum -a 256 "$file_path" | awk '{print $1}')
     if [[ "$actual_sha" != "$expected_sha" ]]; then
         log_error "Checksum mismatch for $file_path"
         log_error "Expected: $expected_sha"
