@@ -149,6 +149,31 @@ func TestLoadRejectsBadHeaders(t *testing.T) {
 	}
 }
 
+// Header identity must be established before the document's contents are
+// judged: a record that is both on the wrong apiVersion and empty must report
+// the apiVersion mismatch, naming both values, rather than the emptiness.
+func TestLoadRejectsBadAPIVersionBeforeCheckingEmptyRecord(t *testing.T) {
+	body := "apiVersion: aicr.run/v9\n" +
+		"kind: " + ComponentUpgradesKind + "\n" +
+		"component: nw\n" +
+		"transitions: []\n"
+	src := mapSource{"upgrades/nw.yaml": []byte(body)}
+	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+
+	_, err := Load(context.Background(), src, comps)
+	if err == nil {
+		t.Fatal("Load = nil error, want rejection")
+	}
+	for _, want := range []string{"aicr.run/v9", header.GroupVersionV1Beta1} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err.Error(), want)
+		}
+	}
+	if strings.Contains(err.Error(), "neither transitions nor a replaces") {
+		t.Errorf("error %q reports the emptiness instead of the apiVersion mismatch", err.Error())
+	}
+}
+
 // A second YAML document silently vanishes rather than firing any rule, which
 // is no more "no record exists" than the apiVersion case in
 // TestLoadRejectsBadHeaders.

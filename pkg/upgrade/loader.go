@@ -117,11 +117,9 @@ func decodeRecord(data []byte, c Component) (*ComponentUpgrades, error) {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 			"failed to parse %s past its first document", c.File), err)
 	}
-	if len(u.Transitions) == 0 && u.Replaces == nil {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-			"%s declares neither transitions nor a replaces block; a record that asserts nothing must not read as well-formed",
-			c.File))
-	}
+	// Header identity is established before the document's contents are
+	// judged: an empty transitions list is only meaningful once the document
+	// is known to be a ComponentUpgrades at all.
 	if u.Kind != ComponentUpgradesKind {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 			"%s has kind %q, expected %q; use a ComponentUpgrades document compatible with this aicr release",
@@ -133,6 +131,11 @@ func decodeRecord(data []byte, c Component) (*ComponentUpgrades, error) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
 			"%s has apiVersion %q, expected %q for %s; update the record header for this aicr release",
 			c.File, u.APIVersion, header.GroupVersionV1Beta1, ComponentUpgradesKind))
+	}
+	if len(u.Transitions) == 0 && u.Replaces == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s declares neither transitions nor a replaces block; a record that asserts nothing must not read as well-formed",
+			c.File))
 	}
 	if u.Component != c.Name {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
