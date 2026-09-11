@@ -51,6 +51,15 @@
 # are hardware identifiers / driver diagnostics — no Secrets, and intentionally
 # captured for RMA (issue #1860) — but treated as sensitive like the rest.
 
+# Platform-to-workload-CRD map (platform_workload_crd,
+# platform_workload_platforms), shared with phase_conformance's coordinate
+# cross-check so the CRs captured here cannot drift from the platforms the gate
+# knows. Sourced explicitly rather than relying on the caller's source order;
+# the map file has no side effects at source time, so sourcing it twice in one
+# shell (phases.sh sources it too) is harmless.
+# shellcheck source=./platform-crd-map.sh
+source "$(dirname "${BASH_SOURCE[0]}")/platform-crd-map.sh"
+
 # Directory the bundle is written into (relative to $PWD, matching serve-logs/
 # and train-logs/); the workflow adds `cluster-debug/**` to the upload artifact.
 CLUSTER_DEBUG_DIR="${CLUSTER_DEBUG_DIR:-cluster-debug}"
@@ -409,8 +418,14 @@ collect_cluster_debug() {
     _cd_section "CR ${res} (yaml)" "cr-${res%%.*}.yaml" \
       kubectl get "${res}" -A -o yaml
   done
-  # Platform workload CRs (Dynamo / Kubeflow) if the CRD exists.
-  for res in dynamographdeployments.nvidia.com trainjobs.trainer.kubeflow.org; do
+  # Platform workload CRs (Dynamo / Kubeflow / Slurm) if the CRD exists. The
+  # platform set and its CRD names come from lib/platform-crd-map.sh, the same
+  # map phase_conformance cross-checks the TestGrid coordinate against: a
+  # platform the gate knows must also have its CRs captured here, or the bundle
+  # for a failing cell of that platform arrives missing its workload state.
+  local platform
+  for platform in $(platform_workload_platforms); do
+    res="$(platform_workload_crd "${platform}")" || continue
     _cd_bounded kubectl get crd "${res}" >/dev/null 2>&1 || continue
     _cd_section "CR ${res} (yaml)" "cr-${res%%.*}.yaml" \
       kubectl get "${res}" -A -o yaml

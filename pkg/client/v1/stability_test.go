@@ -320,6 +320,7 @@ func TestStability_Validate(t *testing.T) {
 	t.Parallel()
 
 	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, *aicr.Snapshot, ...aicr.ValidateOption) ([]*aicr.PhaseResult, error)]((*aicr.Client).ValidateState)
+	requireSignature[func(*aicr.Client, context.Context, *aicr.RecipeResult, ...aicr.ValidateOption) error]((*aicr.Client).PreflightSkipChecks)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationKubeconfig)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationNamespace)
 	requireSignature[func(string) aicr.ValidateOption](aicr.WithValidationRunID)

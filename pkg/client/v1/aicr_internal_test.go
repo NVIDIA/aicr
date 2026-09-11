@@ -21,6 +21,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1067,6 +1068,45 @@ func TestWithValidationFailFast_RoundTrip(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestWithValidationSkipChecks_RoundTrip pins that WithValidationSkipChecks
+// captures the names into validateConfig and that validateOptionsFromConfig
+// lands them on the Validator, so a lane-config skip list reaches the preflight
+// that acts on it. An unset list must emit no option at all: pre-seeding a
+// validator and confirming the translation leaves it alone is what catches a
+// regression that always emitted WithSkipChecks(nil) and quietly cleared a
+// caller-supplied list.
+func TestWithValidationSkipChecks_RoundTrip(t *testing.T) {
+	t.Run("set", func(t *testing.T) {
+		cfg := buildValidateConfig([]ValidateOption{
+			WithValidationSkipChecks("gpu-operator-health", "dra-support"),
+		})
+		v := validator.New(validateOptionsFromConfig(cfg)...)
+		if !slices.Equal(v.SkipChecks, []string{"gpu-operator-health", "dra-support"}) {
+			t.Errorf("validator.SkipChecks = %v, want [gpu-operator-health dra-support]", v.SkipChecks)
+		}
+	})
+
+	t.Run("unset emits no option", func(t *testing.T) {
+		cfg := buildValidateConfig(nil)
+		v := validator.New(append(
+			[]validator.Option{validator.WithSkipChecks("pre-seeded")},
+			validateOptionsFromConfig(cfg)...)...)
+		if !slices.Equal(v.SkipChecks, []string{"pre-seeded"}) {
+			t.Errorf("validator.SkipChecks = %v; an unset list must emit no option", v.SkipChecks)
+		}
+	})
+
+	t.Run("the slice is copied", func(t *testing.T) {
+		names := []string{"gpu-operator-health"}
+		cfg := buildValidateConfig([]ValidateOption{WithValidationSkipChecks(names...)})
+		names[0] = "mutated-after-handoff"
+		v := validator.New(validateOptionsFromConfig(cfg)...)
+		if !slices.Equal(v.SkipChecks, []string{"gpu-operator-health"}) {
+			t.Errorf("validator.SkipChecks = %v; the caller mutated the facade's copy", v.SkipChecks)
+		}
+	})
 }
 
 // TestValidateState_ThreadsClientVersion pins FIX B: ValidateState threads

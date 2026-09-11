@@ -718,6 +718,63 @@ regardless of earlier failures. Pass `--fail-fast` to stop after the first
 phase that fails (e.g., to skip a 65-minute inference-perf run when deployment
 already failed).
 
+## Skipping checks a run cannot satisfy
+
+`--phase` selects whole phases. `--skip-check` (or
+`spec.validate.execution.skipChecks` in a config file) works one level down,
+withholding named checks from every phase that runs:
+
+```bash
+aicr validate --recipe recipe.yaml --snapshot snapshot.yaml \
+  --phase conformance \
+  --skip-check gpu-operator-health --skip-check dra-support
+```
+
+It is for a caller that cannot satisfy a check the recipe declares, typically a
+CI lane that deploys only part of the recipe or runs against simulated devices.
+It narrows the **run**, not the recipe: every other consumer of that recipe
+still gets the check, which is why this is not expressed as a recipe edit.
+
+Three properties make it a scoping tool rather than a way to hide a failure:
+
+- **A skipped check is reported, not dropped, and its reason reaches the signed
+  bundle.** It appears in the CTRF report as `skipped` with the reason
+  `named in skipChecks`, and as the structured code
+  `extra.skipReason: named-in-skip-checks`. The default (minimal) recipe-evidence
+  bundle (`--emit-attestation`) does not carry the report verbatim: its
+  redaction policy blanks every test's `message` and `stdout`, which is why the
+  reason also rides the allowlisted `extra` channel. So both the withheld check
+  and why it was withheld travel with the attestation; `--full` keeps the prose
+  message too.
+- **The run fails closed on a list that would not do what it says.** A name
+  matching no check in the catalog is rejected before the cluster is touched,
+  and so is a list that would leave a requested phase with nothing to run (that
+  phase would otherwise report `passed` while running nothing, because the
+  skipped entries keep its test count above zero). Stop requesting the phase
+  instead.
+- **A check added later is not silenced.** A skip list names what to withhold,
+  so a new check in a recipe runs and can fail, which forces a decision rather
+  than hiding one.
+
+The CNCF conformance evidence path is different, and the two flags are refused
+together for that reason. `pkg/evidence/cncf` renders one markdown file per
+*requirement* and drops every skipped entry before grouping, so a requirement
+whose checks were all skipped would produce no file and no index entry, with
+nothing recording the omission. A submission that silently omits a requirement
+reads as complete when it is not, so `--skip-check` with `--evidence-dir` (and
+therefore with `--cncf-submission`, which requires it) is rejected up front:
+
+```
+[INVALID_REQUEST] --skip-check cannot be combined with --evidence-dir: the CNCF
+evidence renderer omits skipped checks entirely, so a withheld requirement would
+leave no file and no index entry and the rendered evidence would read as a
+complete submission
+```
+
+Lifting that restriction means deciding how a withheld requirement should be
+represented in a submission, which is a change to what the submission contains
+rather than a detail of this flag.
+
 ## Scoping CNCF submission evidence to specific features
 
 The `--feature` flag scopes which CNCF AI conformance features get behavioral
@@ -1017,6 +1074,7 @@ Common reasons and their cause:
 | `nccl-benchmark-runtime … must be a … TrainingRuntime … must declare a "node" replicatedJob` | `stdout` | The referenced file is not a Kubeflow `trainer.kubeflow.org/v1alpha1` `TrainingRuntime`, or lacks the `node` replicatedJob | Fix the runtime file to be a valid `TrainingRuntime` with a `node` replicatedJob |
 | `nccl-benchmark-runtime and nccl-benchmark-profile are mutually exclusive` | `stdout` | The recipe declares both escape hatches at once | Keep only one: borrow an embedded profile **or** supply your own runtime |
 | `skipped - no-cluster mode` | `message` | `--no-cluster` was passed — the runner short-circuits every phase before dispatching any Job | Remove the flag to run behavioral checks |
+| `named in skipChecks` | `message`, and `extra.skipReason` as `named-in-skip-checks` (the channel that survives bundle redaction) | The caller withheld this check with `--skip-check` or `spec.validate.execution.skipChecks` | Drop the name from the skip list to run it again; see [Skipping checks a run cannot satisfy](#skipping-checks-a-run-cannot-satisfy) |
 | `skipped due to previous phase failure` | `message` | `--fail-fast` was set and an earlier phase failed, so subsequent phases were skipped | Fix the earlier phase first, or drop `--fail-fast` to run all phases regardless |
 
 ### `ai-service-metrics` fails with "Prometheus unreachable"

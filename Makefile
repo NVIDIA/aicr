@@ -272,8 +272,8 @@ license-check: ## Check license is approved
         --ignore=$$STDLIB_IGNORE
 
 .PHONY: test-shell
-test-shell: ## Runs shell unit tests (tools/*_test.sh; hermetic, no cluster)
-	@set -e; for t in tools/*_test.sh; do [ -e "$$t" ] || continue; echo "Running $$t..."; bash "$$t"; done
+test-shell: ## Runs shell unit tests (tools/*_test.sh, tests/uat/lib/*_test.sh, tests/uat/kind/*_test.sh; hermetic, no cluster)
+	@set -e; for t in tools/*_test.sh tests/uat/lib/*_test.sh tests/uat/kind/*_test.sh; do [ -e "$$t" ] || continue; echo "Running $$t..."; bash "$$t"; done
 
 # validators/ tests run as part of `make test` but are excluded from the
 # coverage.out this target emits: per-package coverage there runs 41-92%

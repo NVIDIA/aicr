@@ -73,7 +73,11 @@ const (
 	// v2 added the per-test CTRF Extra allowlist (ctrfExtraAllowlist):
 	// allowlisted structured keys whose values match the key's canonical shape
 	// (count / enum code) now survive minimal redaction.
-	PolicyVersion = "v2"
+	//
+	// v3 added the `named-in-skip-checks` skipReason code, so a check the
+	// CALLER withheld (--skip-check) reaches the bundle with its reason and not
+	// only its name; the message that used to carry it is blanked here.
+	PolicyVersion = "v3"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -189,13 +193,15 @@ func isCountValue(v string) bool { return ctrfCountValue.MatchString(v) }
 // regex on kebab-case shape is not enough — it would still pass an arbitrary
 // low-cardinality identifier like "customer-prod-cluster". Only codes minted by
 // a check (see validators/deployment/nvidia_smi.go's skipReason* constants) are
-// listed; any other value, including a well-formed but unlisted code, is dropped
+// listed, plus the one pkg/validator mints for a caller-declared skip
+// (skipCheckReasonCode); any other value, including a well-formed but unlisted code, is dropped
 // fail-closed. A new skip code must be added here in the same change that emits
 // it — same discipline as the key allowlist.
 var ctrfSkipReasons = map[string]struct{}{
 	"no-gpu-nodes":             {}, // cluster has no GPU nodes at all
 	"no-schedulable-gpu-nodes": {}, // GPU nodes exist but all cordoned/unschedulable
 	"nodes-busy":               {}, // schedulable GPU nodes exist but are busy with workloads
+	"named-in-skip-checks":     {}, // the CALLER withheld the check (--skip-check / spec.validate.execution.skipChecks)
 }
 
 func isSkipReason(v string) bool { _, ok := ctrfSkipReasons[v]; return ok }

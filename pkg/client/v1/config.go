@@ -534,7 +534,12 @@ type ValidateSettings struct {
 	Tolerations        []corev1.Toleration
 	RequireGPU         bool
 	Phases             []Phase
-	NoCluster          bool
+
+	// SkipChecks is spec.validate.execution.skipChecks verbatim. It reaches
+	// ValidateState through WithValidationSkipChecks.
+	SkipChecks []string
+
+	NoCluster bool
 
 	// Cleanup is INVERTED against spec.validate.execution.noCleanup. The
 	// config field says "do not clean up"; this says "clean up". Passing it
@@ -646,6 +651,7 @@ func (c *Config) ValidateSettings() (ValidateSettings, bool, error) {
 		Tolerations:        resolved.Tolerations,
 		RequireGPU:         resolved.RequireGPU,
 		Phases:             phases,
+		SkipChecks:         resolved.SkipChecks,
 		NoCluster:          resolved.NoCluster,
 		// Inverted on purpose. See the field godoc.
 		Cleanup:  !resolved.NoCleanup,

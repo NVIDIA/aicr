@@ -180,12 +180,30 @@ func (b *Builder) AddResult(r *ValidatorResult) {
 
 // AddSkipped appends a skipped entry for a validator that was not executed.
 func (b *Builder) AddSkipped(name, phase, reason string) {
-	b.tests = append(b.tests, TestResult{
+	b.AddSkippedWithExtra(name, phase, reason, nil)
+}
+
+// AddSkippedWithExtra is AddSkipped with a structured Extra map attached.
+//
+// The human reason goes in Message, which the default (minimal) redaction
+// policy blanks unconditionally, so a reason that must reach a signed evidence
+// bundle also has to ride Extra, the only per-test channel redaction preserves,
+// and only for keys and values on pkg/evidence/redact's fail-closed allowlist.
+// Pass a low-cardinality enum code or count, never free-form text.
+func (b *Builder) AddSkippedWithExtra(name, phase, reason string, extra map[string]string) {
+	tr := TestResult{
 		Name:    name,
 		Status:  StatusSkipped,
 		Suite:   []string{phase},
 		Message: reason,
-	})
+	}
+	if len(extra) > 0 {
+		// Defensive copy for the same reason AddResult makes one: the caller
+		// keeps ownership of the map it passed in.
+		tr.Extra = make(map[string]string, len(extra))
+		maps.Copy(tr.Extra, extra)
+	}
+	b.tests = append(b.tests, tr)
 }
 
 // Build produces the final CTRF Report with computed summary.

@@ -366,6 +366,13 @@ type ValidateResolved struct {
 	// Phases is spec.validate.execution.phases. Nil if unset.
 	Phases []string
 
+	// SkipChecks is spec.validate.execution.skipChecks. Nil if unset. The
+	// names are not validated against the check catalog here: the catalog is
+	// resolved from the recipe at validation time, and this layer has no
+	// recipe. pkg/validator's preflight rejects an unmatched name before any
+	// cluster work, so a typo still fails closed.
+	SkipChecks []string
+
 	// FailOnError is spec.validate.execution.failOnError. Nil pointer
 	// signals "config did not set the field" so the caller can defer to
 	// the CLI flag's default.
@@ -484,6 +491,13 @@ func (v *ValidateSpec) Resolve() (*ValidateResolved, error) {
 			}
 		}
 		out.Phases = slices.Clone(v.Execution.Phases)
+		for _, c := range v.Execution.SkipChecks {
+			if strings.TrimSpace(c) == "" {
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					"invalid spec.validate.execution.skipChecks entry: check names must not be empty")
+			}
+		}
+		out.SkipChecks = slices.Clone(v.Execution.SkipChecks)
 		out.NoCluster = v.Execution.NoCluster
 		out.NoCleanup = v.Execution.NoCleanup
 		if v.Execution.FailOnError != nil {

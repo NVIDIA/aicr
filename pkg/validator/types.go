@@ -82,6 +82,14 @@ type Validator struct {
 	// StatusFailed. By default (false) all phases run and produce results.
 	FailFast bool
 
+	// SkipChecks names checks the caller has declared out of scope for this
+	// run: they are withheld from every requested phase and recorded in that
+	// phase's report as skipped. Empty (the default) runs every check the
+	// validation declares. See skip_checks.go for what this is for, why it is
+	// a skip list rather than an allow list, and the two guards that keep it
+	// from turning a red run green.
+	SkipChecks []string
+
 	// dataProvider supplies the recipe data files used to load the validator
 	// catalog. When nil, catalog.Load falls back to the package-global provider.
 	dataProvider recipe.DataProvider

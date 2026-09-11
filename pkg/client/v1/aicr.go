@@ -2055,6 +2055,92 @@ func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
 // failed phase (useful for skipping expensive checks like inference-perf
 // when deployment already failed). Callers wanting per-phase control can
 // reach into pkg/validator.ValidatePhase directly.
+// PreflightSkipChecks runs ValidateState's skip-list guard on its own, without
+// running any validation, so a caller that does cluster work of its own before
+// ValidateState can reject an unusable skip list first.
+//
+// The CLI is that caller: `aicr validate` with neither --snapshot nor
+// --no-cluster deploys a snapshot-capture agent before it has a Snapshot to
+// hand ValidateState, so without this the guard fired only after a
+// ServiceAccount, a Role and a Job existed, while the --skip-check help text
+// promised rejection "before the cluster is touched".
+//
+// It reads WithValidationSkipChecks and WithValidationPhases from opts and
+// ignores the rest; pass the same options ValidateState will get. recipe must
+// come from a prior call on this Client, as for ValidateState. No Kubernetes
+// call is made, so it is safe on a caller with no cluster access.
+//
+// It does not replace the guard inside ValidateState, which stays for callers
+// that reach ValidateState directly. Running both is idempotent.
+//
+// Returns nil immediately when no skip list was passed, so the default path
+// pays no catalog load. The Client and recipe guards still run first, so a
+// closed Client is reported as such either way.
+//
+// Errors:
+//   - ErrCodeInvalidRequest when the Client or recipe is nil, when recipe
+//     lacks internal state, when the Client has been Closed, or when an entry
+//     names no validator in the catalog (or would empty a requested phase).
+//   - ErrCodeInternal when the catalog cannot be loaded.
+func (c *Client) PreflightSkipChecks(
+	ctx context.Context,
+	recipe *RecipeResult,
+	opts ...ValidateOption,
+) error {
+
+	if c == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if ctx == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
+	}
+	if recipe == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "nil RecipeResult")
+	}
+	if recipe.internal == nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"RecipeResult has no internal recipe state: call Client.ResolveRecipe to obtain a validatable RecipeResult")
+	}
+	if err := c.assertOwns(recipe); err != nil {
+		return err
+	}
+
+	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
+	}
+	dp := c.dp
+	clientVersion := c.version
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	// After the Client guards, not before, so a closed Client is reported as
+	// such whether or not there is a list to check: a caller must not learn
+	// that its Client is unusable only on the next call. The catalog load and
+	// the validator below are what the empty list actually skips.
+	cfg := buildValidateConfig(opts)
+	if len(cfg.skipChecks) == 0 {
+		return nil
+	}
+
+	valOpts := append(validateOptionsFromConfig(cfg),
+		validator.WithDataProvider(dp),
+		validator.WithVersion(clientVersion))
+	v := validator.New(valOpts...)
+
+	internalPhases := make([]validator.Phase, len(cfg.phases))
+	for i, p := range cfg.phases {
+		internalPhases[i] = validator.Phase(p)
+	}
+	validationInput, err := validatorv1.ToValidationInputWithContext(ctx, recipe.internal)
+	if err != nil {
+		return err
+	}
+	return v.PreflightSkipChecks(ctx, internalPhases, validationInput)
+}
+
 func (c *Client) ValidateState(
 	ctx context.Context,
 	recipe *RecipeResult,

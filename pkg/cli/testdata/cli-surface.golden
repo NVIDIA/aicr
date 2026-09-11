@@ -223,6 +223,7 @@ flag    aicr validate  --push  type=string default= required=false hidden=false 
 flag    aicr validate  --recipe,-r  type=string default= required=false hidden=false env=
 flag    aicr validate  --require-gpu  type=bool default=false required=false hidden=false env=AICR_REQUIRE_GPU
 flag    aicr validate  --service-account-name  type=string default="aicr" required=false hidden=false env=
+flag    aicr validate  --skip-check  type=string default= required=false hidden=false env=
 flag    aicr validate  --snapshot,-s  type=string default= required=false hidden=false env=
 flag    aicr validate  --timeout  type=duration default=5m0s required=false hidden=false env=
 flag    aicr validate  --toleration  type=string default= required=false hidden=false env=

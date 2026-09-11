@@ -85,7 +85,7 @@ jobs:
     runs-on: ubuntu-latest
     # Budget = uncapped non-UAT steps (build, validator image push, GKE
     # provisioning, evidence upload ~30m) + UAT phase steps (prep 15 + install 90
-    # + validate 40 + the intent-selected CUJ (train 25 OR serve 40) + verify 5
+    # + validate 40 + the selected CUJ (train 25 OR serve 40) + verify 5
     # = up to 190) + the always()-run Destroy Cluster teardown (3 retries, ~10m
     # each = up to ~40m). Only one of train/serve runs per intent, so the budget
     # counts the larger (serve). The teardown MUST fit in this budget: a job-level
@@ -678,11 +678,17 @@ jobs:
           RUN_ID: ${{ github.run_id }}
         run: ./tests/uat/gcp/run conformance "${TEST_CONFIG}"
 
-      # The CUJ phase is intent-selected, mirroring the runner's intent-aware
-      # `all`: training runs the Kubeflow TrainJob; inference would run the
-      # served DynamoGraphDeployment (phase_serve, DC3). For training, the
-      # TrainJob fires; for inference the serve step is currently disabled (see
-      # below), so verify/evidence cover the deployed stack either way.
+      # The CUJ phase is selected by intent AND platform, mirroring the
+      # runner's `all` (cuj_phase_for, tests/uat/lib/cuj-dispatch.sh): platform
+      # decides whether a Kubernetes-native CUJ exists at all, intent decides
+      # which one. Every cell this pipeline runs declares kubeflow or dynamo,
+      # so the intent-only condition below selects the same phase `all` would;
+      # the one platform with no CUJ (slurm, where a TrainJob would bypass
+      # slurmd) has no cell here. Training runs the Kubeflow TrainJob;
+      # inference would run the served DynamoGraphDeployment (phase_serve,
+      # DC3). For training, the TrainJob fires; for inference the serve step is
+      # currently disabled (see below), so verify/evidence cover the deployed
+      # stack either way.
       - name: UAT - train (TrainJob)
         id: train
         if: steps.conformance.outcome == 'success' && inputs.intent == 'training'
@@ -812,6 +818,12 @@ jobs:
           SUMMARY_AICR_VERSION: ${{ inputs.aicr_version }}
           SUMMARY_INTENT: ${{ inputs.intent }}
           SUMMARY_LIFECYCLE: ${{ inputs.lifecycle }}
+          # Via env, not inline ${{ }} in the run block: github.ref_name can
+          # carry shell-active characters (expression injection), which
+          # `git check-ref-format --branch 'feat/a$(id)b'` accepts. sha is safe
+          # but is routed the same way, as uat-azure.yaml does.
+          SUMMARY_SHA: ${{ github.sha }}
+          SUMMARY_REF: ${{ github.ref_name }}
         run: |
           {
             echo "## UAT Results (GCP)"
@@ -820,7 +832,7 @@ jobs:
               "$SUMMARY_RESERVATION" "$SUMMARY_INTENT" "$SUMMARY_LIFECYCLE"
             printf '**Cluster:** `%s`\n' "$DEPLOYMENT_ID"
             printf '**AICR version:** `%s`\n' "${SUMMARY_AICR_VERSION:-main (build from source)}"
-            echo "**Build:** \`${{ github.sha }}\` (branch: \`${{ github.ref_name }}\`)"
+            printf '**Build:** `%s` (branch: `%s`)\n' "$SUMMARY_SHA" "$SUMMARY_REF"
             echo ""
             echo "| Phase | Status |"
             echo "|-------|--------|"

@@ -14,24 +14,32 @@
 
 # slinky-topograph Health Check
 #
-# Validates that slinky-topograph and its sub-charts (node-observer,
-# node-data-broker) are running and healthy, and that the topology generation
-# pipeline has produced a result. Specifically:
+# Validates that slinky-topograph and its companion components
+# (node-observer, node-data-broker) are running and healthy, and that the
+# topology generation pipeline has produced a result. Those two are rendered
+# from the topograph chart's own templates/ tree, not from sub-charts: the
+# chart ships no charts/ directory. Specifically:
 #   1. Both Deployments are available (topograph API, node-observer).
-#   2. The node-data-broker DaemonSet (enabled by default in the shared
-#      component values) has completed rollout.
+#   2. The node-data-broker DaemonSet (enabled by the chart's own default;
+#      the shared component values leave nodeDataBroker empty) has completed
+#      rollout.
 #   3. No pods in the topograph namespace are in a failed/stuck state.
 #   4. The topology ConfigMap (slinky-slurm-config-extra) in the slurm
 #      namespace has a topology.conf key whose value contains a SwitchName
-#      line, i.e. Topograph has completed a real sync. slinky-slurm's chart
-#      seeds this key with an 'aicr-preseed'-marked placeholder, and the
-#      check requires SwitchName content without that marker, so it fails
-#      closed — the 5m assert retry times out — until Topograph patches in
-#      real topology/tree output. The Kind leaf's inline healthCheckAsserts
-#      variant asserts the exact fixture content.
+#      line, i.e. Topograph has completed a real sync. Each leaf overlay
+#      seeds this key itself through slinky-slurm's configFiles (the slurm
+#      chart defaults configFiles to an empty map, and the shared component
+#      values supply only cgroup.conf, gres.conf and plugstack.conf), using
+#      an 'aicr-preseed'-marked placeholder. The check requires SwitchName
+#      content without that marker, so it fails closed (the 5m assert retry
+#      times out) until Topograph patches in real topology/tree output.
+#      That SwitchName form describes the
+#      topology/tree leaves; the Kind leaf runs the topology/block plugin,
+#      so its topology.conf carries BlockName lines instead and it overrides
+#      this step with its own inline healthCheckAsserts.
 # This file is read-only (assert/error operations only); overlays that
-# disable node-data-broker or need exact-content assertions (e.g. the
-# deterministic Kind test provider) carry their own inline
+# disable node-data-broker or whose topology output does not match the
+# topology/tree shape above (the Kind leaf) carry their own inline
 # healthCheckAsserts on the componentRef instead of a conditional script.
 # Deployment names are stabilized via fullnameOverride in
 # components/slinky-topograph/values.yaml.
@@ -66,9 +74,11 @@ spec:
               status:
                 (availableReplicas > `0`): true
     - name: validate-node-data-broker-daemonset
-      # node-data-broker is enabled by default in the shared component values.
-      # This registry-level check asserts the default-enabled shape (full
-      # rollout). The h100-kind-training-slurm overlay disables the DaemonSet
+      # node-data-broker is enabled by the topograph chart's own default; the
+      # shared component values leave nodeDataBroker empty rather than
+      # setting it. This registry-level check asserts the default-enabled
+      # shape (full rollout). The h100-kind-training-slurm overlay disables
+      # the DaemonSet
       # and therefore carries its own inline healthCheckAsserts on the
       # componentRef (which omits this step) — the read-only allowlist for
       # registry checks permits only assert/error operations, so a conditional
@@ -148,11 +158,14 @@ spec:
               status:
                 ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true
     - name: validate-topology-configmap
-      # Sync-success gate, provider-agnostic: the chart-owned
-      # slinky-slurm-config-extra ConfigMap is mounted into slurmctld via
-      # configFileRefs, and Topograph patches its topology.conf key after
-      # each successful sync. The chart seeds that key with a syntactically
-      # valid one-switch placeholder marked 'aicr-preseed' (a comment-only
+      # Sync-success gate, provider-agnostic: the slinky-slurm-config-extra
+      # ConfigMap is rendered and owned by the slurm chart (its name follows
+      # the Helm release name, which AICR sets to slinky-slurm) and is
+      # mounted into slurmctld via configFileRefs, and Topograph patches its
+      # topology.conf key after each successful sync. The seed for that key
+      # comes from the consuming leaf overlay's own configFiles, not from a
+      # chart default: a syntactically valid one-switch placeholder marked
+      # 'aicr-preseed' (a comment-only
       # zero-switch seed would fatal slurmctld on reconfigure/restart once
       # nodes register — see the overlay seed comment). Real topology/tree
       # output contains SwitchName lines and never the marker. Asserting the
@@ -160,9 +173,10 @@ spec:
       # completes a real sync: an unconfigured provider (e.g. GKE without
       # Workload Identity) never patches the key, so the 5m assert retry
       # times out instead of passing vacuously on the seed. contains(null,
-      # ...) on a missing key also fails closed. The Kind leaf's inline
-      # healthCheckAsserts adds the exact-content assertion for the
-      # deterministic test provider.
+      # ...) on a missing key also fails closed. The Kind leaf overrides this
+      # step with its own inline healthCheckAsserts: it runs the
+      # topology/block plugin, so its topology.conf carries BlockName lines
+      # rather than SwitchName.
       try:
         - assert:
             resource:
