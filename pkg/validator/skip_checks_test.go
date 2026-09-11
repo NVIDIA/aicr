@@ -269,3 +269,106 @@ func TestSelectEntriesSkipReasonSurvivesRedaction(t *testing.T) {
 			"withheld must reach the signed bundle", got, "named-in-skip-checks")
 	}
 }
+
+// TestPreflightSkipChecksExported covers what the exported wrapper adds over
+// the unexported guard above: it loads the catalog itself, and it normalizes an
+// empty phase list to PhaseOrder. Both matter to its one caller, pkg/cli, which
+// runs it before the agent-deploy branch touches the cluster and therefore has
+// no catalog of its own.
+//
+// The catalog here is the REAL one, loaded from the default provider, because
+// the names the CLI rejects have to be judged against the catalog a run will
+// actually use. A fixture catalog would let a name that no longer exists keep
+// passing.
+func TestPreflightSkipChecksExported(t *testing.T) {
+	checks := map[Phase][]string{PhaseConformance: {"gpu-operator-health", "dra-support"}}
+
+	tests := []struct {
+		name        string
+		phases      []Phase
+		skip        []string
+		wantErr     bool
+		wantSubstrs []string
+	}{
+		{
+			name:   "a name in the real catalog is accepted",
+			phases: []Phase{PhaseConformance},
+			skip:   []string{"gpu-operator-health"},
+		},
+		{
+			name:        "a name in no catalog entry is rejected",
+			phases:      []Phase{PhaseConformance},
+			skip:        []string{"gpu-operator-helth"},
+			wantErr:     true,
+			wantSubstrs: []string{"gpu-operator-helth", "matches no validator in the catalog"},
+		},
+		{
+			// Empty phases must mean PhaseOrder, as it does in ValidatePhases.
+			// If it meant "no phases" instead, the emptied-phase arm would
+			// have nothing to walk and this list would be accepted.
+			name:        "an empty phase list is judged as the full phase order",
+			skip:        []string{"gpu-operator-health", "dra-support"},
+			wantErr:     true,
+			wantSubstrs: []string{"conformance", "every declared check"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v := New(WithVersion("1.0.0"), WithSkipChecks(tt.skip...))
+
+			err := v.PreflightSkipChecks(t.Context(), tt.phases, validationWithChecks(checks))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("PreflightSkipChecks() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				return
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want %s", err, errors.ErrCodeInvalidRequest)
+			}
+			for _, want := range tt.wantSubstrs {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err.Error(), want)
+				}
+			}
+		})
+	}
+}
+
+// TestPreflightSkipChecksExported_EmptyListSkipsTheCatalogLoad pins the early
+// return, which is what keeps the default path (no --skip-check) from paying
+// for a catalog load it has no use for.
+//
+// The discriminator is a data provider that cannot serve the catalog: with a
+// skip list the load is reached and fails, and without one the call returns
+// nil. A provider that worked would leave both cases returning nil and prove
+// nothing about whether the load happened.
+func TestPreflightSkipChecksExported_EmptyListSkipsTheCatalogLoad(t *testing.T) {
+	broken := &fakeDataProvider{readErr: errors.New(errors.ErrCodeNotFound, "no catalog here")}
+	vi := validationWithChecks(map[Phase][]string{PhaseConformance: {"gpu-operator-health"}})
+
+	empty := New(WithVersion("1.0.0"), WithDataProvider(broken))
+	if err := empty.PreflightSkipChecks(t.Context(), nil, vi); err != nil {
+		t.Errorf("an empty skip list must return before the catalog load, got %v", err)
+	}
+	if len(broken.reads) != 0 {
+		t.Errorf("an empty skip list read %v from the data provider; it must read nothing", broken.reads)
+	}
+
+	withSkip := New(WithVersion("1.0.0"), WithDataProvider(broken),
+		WithSkipChecks("gpu-operator-health"))
+	err := withSkip.PreflightSkipChecks(t.Context(), nil, vi)
+	if err == nil {
+		t.Fatal("a non-empty skip list must reach the catalog load and surface its failure, got nil")
+	}
+	// The catalog's own coded error propagates rather than being re-wrapped,
+	// per the repo's no-double-wrap rule, so this is the message the loader
+	// produced and not one PreflightSkipChecks added.
+	if !strings.Contains(err.Error(), "failed to read catalog") {
+		t.Errorf("error = %v, want the catalog-load failure", err)
+	}
+	if len(broken.reads) == 0 {
+		t.Error("a non-empty skip list read nothing from the data provider; the load was not reached")
+	}
+}

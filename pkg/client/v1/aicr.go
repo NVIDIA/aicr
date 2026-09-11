@@ -2074,7 +2074,8 @@ func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
 // that reach ValidateState directly. Running both is idempotent.
 //
 // Returns nil immediately when no skip list was passed, so the default path
-// pays nothing, not even a catalog load.
+// pays no catalog load. The Client and recipe guards still run first, so a
+// closed Client is reported as such either way.
 //
 // Errors:
 //   - ErrCodeInvalidRequest when the Client or recipe is nil, when recipe
@@ -2104,13 +2105,6 @@ func (c *Client) PreflightSkipChecks(
 		return err
 	}
 
-	cfg := buildValidateConfig(opts)
-	// Checked before the Client lock so a run without --skip-check does not
-	// even take it: there is nothing to preflight.
-	if len(cfg.skipChecks) == 0 {
-		return nil
-	}
-
 	c.mu.RLock()
 	if c.builder == nil {
 		c.mu.RUnlock()
@@ -2121,6 +2115,15 @@ func (c *Client) PreflightSkipChecks(
 	c.inflight.Add(1)
 	c.mu.RUnlock()
 	defer c.inflight.Done()
+
+	// After the Client guards, not before, so a closed Client is reported as
+	// such whether or not there is a list to check: a caller must not learn
+	// that its Client is unusable only on the next call. The catalog load and
+	// the validator below are what the empty list actually skips.
+	cfg := buildValidateConfig(opts)
+	if len(cfg.skipChecks) == 0 {
+		return nil
+	}
 
 	valOpts := append(validateOptionsFromConfig(cfg),
 		validator.WithDataProvider(dp),
