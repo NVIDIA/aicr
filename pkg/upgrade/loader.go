@@ -17,7 +17,9 @@ package upgrade
 import (
 	"bytes"
 	"context"
+	stderrors "errors"
 	"fmt"
+	"io"
 
 	"gopkg.in/yaml.v3"
 
@@ -96,6 +98,24 @@ func decodeRecord(data []byte, c Component) (*ComponentUpgrades, error) {
 	if err := dec.Decode(&u); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("failed to parse upgrades file %q for component %q", c.File, c.Name), err)
+	}
+	// A second document silently vanishes rather than firing any rule: "a
+	// record exists and it was not looked at" is no more "no record exists"
+	// than the apiVersion case below. A bare trailing `---` decodes cleanly
+	// to an empty second document rather than reaching io.EOF, and it is
+	// rejected the same as any other second document rather than
+	// special-cased as harmless — telling an intentionally empty document
+	// apart from a truncated one is exactly the ambiguity this package fails
+	// closed on elsewhere.
+	switch err := dec.Decode(new(ComponentUpgrades)); {
+	case stderrors.Is(err, io.EOF):
+		// The sole document was the last one, as required.
+	case err == nil:
+		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s contains more than one YAML document; a %s file holds exactly one", c.File, ComponentUpgradesKind))
+	default:
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"failed to parse %s past its first document", c.File), err)
 	}
 	if len(u.Transitions) == 0 && u.Replaces == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(

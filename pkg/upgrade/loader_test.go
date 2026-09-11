@@ -149,6 +149,67 @@ func TestLoadRejectsBadHeaders(t *testing.T) {
 	}
 }
 
+// A second YAML document silently vanishes rather than firing any rule, which
+// is no more "no record exists" than the apiVersion case in
+// TestLoadRejectsBadHeaders.
+func TestLoadRejectsMultiDocumentFile(t *testing.T) {
+	body := validRecord("nw") + "---\n" + validRecord("nw")
+	src := mapSource{"upgrades/nw.yaml": []byte(body)}
+	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+
+	_, err := Load(context.Background(), src, comps)
+	if err == nil {
+		t.Fatal("Load = nil error, want rejection of the second document")
+	}
+	if !strings.Contains(err.Error(), "upgrades/nw.yaml") {
+		t.Errorf("error %q does not name the file", err.Error())
+	}
+	if !strings.Contains(err.Error(), "more than one") {
+		t.Errorf("error %q does not explain the problem", err.Error())
+	}
+}
+
+// A bare trailing `---` opens a second, empty YAML document exactly as the
+// YAML spec defines it (it decodes to a zero-value record, not io.EOF). This
+// package rejects it the same as any other second document rather than
+// special-casing it as harmless: telling an intentionally empty document
+// apart from a truncated one is exactly the ambiguity this package fails
+// closed on elsewhere, and a bare `---` is exactly as likely to be a
+// mid-edit truncation as a deliberate no-op.
+func TestLoadRejectsTrailingDocumentMarker(t *testing.T) {
+	body := validRecord("nw") + "---\n"
+	src := mapSource{"upgrades/nw.yaml": []byte(body)}
+	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+
+	_, err := Load(context.Background(), src, comps)
+	if err == nil {
+		t.Fatal("Load = nil error, want rejection of the trailing document marker")
+	}
+	if !strings.Contains(err.Error(), "more than one") {
+		t.Errorf("error %q does not explain the problem", err.Error())
+	}
+}
+
+// A second document that is not valid YAML at all (as opposed to a second,
+// well-formed record) is a distinct failure from "more than one document":
+// the file could not even be parsed past the first document.
+func TestLoadRejectsUnparseableSecondDocument(t *testing.T) {
+	body := validRecord("nw") + "---\n[1, 2\n"
+	src := mapSource{"upgrades/nw.yaml": []byte(body)}
+	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+
+	_, err := Load(context.Background(), src, comps)
+	if err == nil {
+		t.Fatal("Load = nil error, want rejection of the unparseable second document")
+	}
+	if !strings.Contains(err.Error(), "upgrades/nw.yaml") {
+		t.Errorf("error %q does not name the file", err.Error())
+	}
+	if !strings.Contains(err.Error(), "past its first document") {
+		t.Errorf("error %q does not explain the problem", err.Error())
+	}
+}
+
 // An unknown or misspelled field must be an error, not silently dropped: a
 // typo'd hooks: or verifedBy: would otherwise weaken a record with no rule
 // firing at all.
