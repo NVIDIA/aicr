@@ -621,6 +621,89 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			},
 			wantDRAConstraint: true,
 		},
+		// The five training-kubeflow leaves added for #2564. Each must resolve
+		// kubeflow-trainer (with its manifest, which the bundler turns into the
+		// kubeflow-trainer-post release) and declare robust-controller, which
+		// routes to checkRobustKubeflowTrainer only when kubeflow-trainer is
+		// present in the recipe.
+		{
+			name: "h100-bcm-ubuntu-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceBCM
+				c.Accelerator = CriteriaAcceleratorH100
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			requiredChecks:             []string{"platform-health", "robust-controller"},
+			wantDRAConstraint:          true,
+		},
+		{
+			name: "h200-eks-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorH200
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			// robust-controller is inherited from h200-eks-training rather than
+			// declared on the leaf; assert it resolves all the same.
+			requiredChecks: []string{"platform-health", "robust-controller", "secure-accelerator-access"},
+		},
+		{
+			name: "rtx-pro-6000-lke-ubuntu-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceLKE
+				c.Accelerator = CriteriaAcceleratorRTXPro6000
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			requiredChecks:             []string{"platform-health", "robust-controller"},
+		},
+		{
+			name: "l40s-oke-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceOKE
+				c.Accelerator = CriteriaAcceleratorL40S
+				c.OS = CriteriaOSOracleLinux
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			requiredChecks:             []string{"platform-health", "robust-controller"},
+		},
+		{
+			name: "vr200-rke2-ubuntu-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceRKE2
+				c.Accelerator = CriteriaAcceleratorVR200
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			requiredChecks:             []string{"platform-health", "robust-controller", "secure-accelerator-access"},
+			wantDRAConstraint:          true,
+		},
 	}
 
 	for _, tt := range tests {

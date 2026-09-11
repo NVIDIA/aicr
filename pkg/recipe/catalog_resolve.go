@@ -40,6 +40,17 @@ type ResolveLeavesOptions struct {
 	// Filter narrows enumeration to leaves matching every set criteria dimension.
 	// Nil enumerates all leaf combos.
 	Filter *Criteria
+	// RetainNonLeaf opts a non-leaf catalog entry back into the enumeration.
+	// Nil (the default) keeps the leaf-only behavior.
+	//
+	// It exists so a coordinate that carries published validation evidence is
+	// not silently dropped the moment a platform sibling is added beneath it
+	// — adding e.g. a `-kubeflow` leaf turns the plain training overlay into a
+	// non-leaf, and without this the evidence-backed coordinate would vanish
+	// from every leaf-only consumer (NVIDIA/aicr#2564). The predicate is
+	// supplied by the caller rather than read here so pkg/recipe stays free of
+	// a dependency on the evidence/presence manifest.
+	RetainNonLeaf func(entry CatalogEntry) bool
 }
 
 // alwaysSatisfiedEvaluator reports every constraint satisfied, so the
@@ -81,7 +92,7 @@ func ResolveLeaves(ctx context.Context, opts ResolveLeavesOptions) ([]ResolvedLe
 			return nil, errors.Wrap(errors.ErrCodeTimeout,
 				"catalog resolution canceled before completing the catalog", cerr)
 		}
-		if !entry.IsLeaf {
+		if !entry.IsLeaf && (opts.RetainNonLeaf == nil || !opts.RetainNonLeaf(entry)) {
 			continue
 		}
 		result, buildErr := builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, alwaysSatisfiedEvaluator)

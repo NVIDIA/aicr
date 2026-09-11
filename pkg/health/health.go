@@ -86,6 +86,15 @@ type Options struct {
 	// Filter narrows enumeration to leaf overlays matching every explicitly
 	// set criteria dimension. Nil enumerates all leaf combos.
 	Filter *recipe.Criteria
+
+	// RetainNonLeaf opts a non-leaf catalog entry back into the report. Nil
+	// (the default) scores leaves only.
+	//
+	// The recipe-health generator passes a predicate matching the committed
+	// dashboard-presence manifest, so a coordinate with published evidence
+	// keeps its row — and its Evidence deep-link — after a platform sibling
+	// turns its overlay into a non-leaf (NVIDIA/aicr#2564).
+	RetainNonLeaf func(entry recipe.CatalogEntry) bool
 }
 
 // PhaseCoverage records which named checks and how many phase-level
@@ -152,7 +161,8 @@ type StructureHealth struct {
 	Coverage *DeclaredCoverage `json:"coverage,omitempty" yaml:"coverage,omitempty"`
 }
 
-// ComboHealth is the health of a single leaf recipe / criteria combination.
+// ComboHealth is the health of a single recipe / criteria combination. Entries
+// are leaves unless Options.RetainNonLeaf opted a non-leaf overlay back in.
 type ComboHealth struct {
 	// Criteria is the leaf overlay's criteria combination.
 	Criteria *recipe.Criteria `json:"criteria" yaml:"criteria"`
@@ -190,6 +200,8 @@ func Compute(ctx context.Context, opts Options) (*Report, error) {
 		Provider: opts.Provider,
 		Version:  opts.Version,
 		Filter:   opts.Filter,
+
+		RetainNonLeaf: opts.RetainNonLeaf,
 	})
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err,
