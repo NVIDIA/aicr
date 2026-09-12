@@ -442,7 +442,7 @@ digest you verify against depends on what you are asking for:
 
 | Predicate | Attached to | Verify against |
 |-----------|-------------|----------------|
-| SLSA provenance (`slsaprovenance1`) | multi-arch index | `crane digest <image>:<tag>` |
+| SLSA provenance (`slsaprovenance1`) | multi-arch index **and** each per-platform child manifest | `crane digest <image>:<tag>`, or `crane digest --platform <os>/<arch> <image>:<tag>` |
 | SBOM (`cyclonedx`) | per-platform child manifest | `crane digest --platform <os>/<arch> <image>:<tag>` |
 | OpenVEX (`openvex`) | per-platform child manifest | `crane digest --platform <os>/<arch> <image>:<tag>` |
 
@@ -475,7 +475,9 @@ gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/performance@${PERF_I
 gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/conformance@${CONF_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/aiperf-bench@${AIPERF_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
-# Cosign — only provenance is on the index. Pin the workflow *and* the exact
+# Cosign — provenance is the only predicate on the index (it is also on each
+# child manifest; the index copy is what an admission policy can reach). Pin
+# the workflow *and* the exact
 # tag ref (same binding as --source-ref above): without
 # --certificate-github-workflow-ref, the identity regexp alone would accept
 # an attestation signed for any release tag on a digest this tag was
