@@ -1,0 +1,35 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# StorageClass for a4x-highgpu-4g (GB200) nodes on GKE. Those nodes can't
+# attach Persistent Disk at all, only Hyperdisk (see
+# docs/integrator/gke-gb200-networking.md#storage-prerequisites), so AICR
+# provisions this itself rather than assuming the cluster already has a
+# compatibly-typed StorageClass under some other name. Not the cluster
+# default: most clusters also run CPU node pools whose machine types can't
+# attach Hyperdisk, so forcing it cluster-wide would break those.
+#
+# The inference-model-cache-storage-class performance constraint points the
+# inference-perf model-weights cache PVC at this StorageClass by name.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: a4x-compatible
+  labels:
+    app.kubernetes.io/managed-by: aicr
+provisioner: pd.csi.storage.gke.io
+parameters:
+  type: hyperdisk-balanced
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
