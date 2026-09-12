@@ -630,9 +630,9 @@ that ship CRDs under `crds/`, 11 share at least one CRD with another
 component: `nfd`, `gpu-operator`, and `network-operator` all ship the
 NodeFeature CRDs, and `nfd`, `gpu-operator`, and `kai-scheduler` all appear
 together in `base.yaml`. If every release replaced CRDs on upgrade, two or
-three `HelmRelease` objects would rewrite the same CRD on every reconcile,
-each with the schema its own chart pins. The `Skip` default is what prevents
-that today, so it stays the default.
+three releases would rewrite the same CRD on every reconcile or redeploy,
+each with the schema its own chart pins. Requiring the opt-in is what
+prevents that, so it stays opt-in.
 
 A component qualifies only if it solely owns every CRD it ships and ships none
 using `spec.conversion.strategy: Webhook`, since replace discards a `caBundle`

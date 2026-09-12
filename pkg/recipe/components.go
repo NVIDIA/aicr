@@ -143,6 +143,9 @@ type ComponentConfig struct {
 	// never touches it again, and Flux's helm-controller inherits that via
 	// its `spec.upgrade.crds: Skip` default, so a chart bump whose CRDs
 	// changed otherwise runs a new controller against the previous schema.
+	// Flux, helm, and helmfile consume this through
+	// deployer.ResolveCRDOwners. Argo CD does not: it applies a chart's CRDs
+	// on every sync regardless, so it needs no opt-in and honors none.
 	//
 	// This is opt-in, and deliberately so. An audit of every Helm
 	// component in the registry found 15 ship CRDs under `crds/`, and 11
@@ -150,9 +153,9 @@ type ComponentConfig struct {
 	// gpu-operator, and network-operator all ship the NodeFeature CRDs,
 	// and nfd plus gpu-operator plus kai-scheduler all appear together in
 	// `base.yaml`. Replacing unconditionally would have two or three
-	// HelmReleases rewrite the same CRD on every reconcile, each with the
-	// schema its own chart pins. The `Skip` default is what keeps that
-	// from happening today.
+	// releases rewrite the same CRD on every reconcile or redeploy, each
+	// with the schema its own chart pins. Requiring the opt-in is what
+	// keeps that from happening.
 	//
 	// Set this only for a component that both (a) solely owns every CRD it
 	// ships — including against charts that ship CRDs through `templates/`
