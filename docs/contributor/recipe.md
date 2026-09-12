@@ -99,6 +99,7 @@ components:
 | `sharedStorageClassPaths` | []string | no | Helm value paths where `--shared-storage-class` is written for shared filesystem PVCs |
 | `validations` | []`ComponentValidationConfig` | no | Bundle-time validation checks (function, severity, conditions, message) |
 | `healthCheck.assertFile` | string | **yes** | Chainsaw assert YAML (relative to data dir) consumed by `aicr validate --phase deployment` (runtime — #1220) and by `make check-health` locally. Content is restricted to the read-only `assert` / `error` operation allowlist. Enforced at PR time by `pkg/recipe.TestComponentRegistry_RequiresHealthCheck` (every component must declare a path) and `pkg/chainsaw.TestValidateTestReadOnly_RegistryContent` (every declared path must pass the allowlist) — see #1223. |
+| `upgrades.file` | string | no | Path to a `ComponentUpgrades` transition record (relative to data dir, e.g. `upgrades/nodewright-operator.yaml`), ADR-021. Empty means the component has no transition records. See [Transition records](#transition-records) below. |
 | `gkeCriticalPriority` | bool | no | Synthesize ResourceQuota on GKE so `system-*-critical` pods admit |
 | `hasSelfRefCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` (chart ships CRD + CR in same release) |
 | `manifestsUseChartCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` on the release carrying the attached manifests — the injected `-post` wrapper under both vendored and non-vendored layouts (manifests create CRs of CRDs the chart installs) |
@@ -119,6 +120,31 @@ components) is the single source of truth for a component's version;
 `base`, overlay, and mixin `componentRefs` alike carry no version pins
 except exemption-declared divergences — see
 [Version pinning is single-source](#version-pinning-is-single-source).
+
+### Transition records
+
+- A record lives at `recipes/upgrades/<component>.yaml` with
+  `kind: ComponentUpgrades` and `apiVersion: aicr.run/v1beta1`, and is
+  wired to a component via the registry's `upgrades.file` (see the
+  field table above).
+- Transitions are keyed by semver ranges (`from`/`to`), not explicit
+  version pairs — e.g. `>=1.0.0 <2.0.0`.
+- Three verdicts are authorable — `safe`, `manual`, `blocked`. `unknown`
+  and `unversioned` are computed by the matcher and must never appear in
+  a file.
+- `safe` requires `verifiedBy`, naming the UAT lane, KWOK run, or
+  upstream release note that backs it — otherwise a coverage gate would
+  measure coverage rather than assessment.
+- The loader fails closed: an unreadable or unrecognized record is an
+  error naming what was found and expected, never a skip and never
+  degraded to `unknown`.
+- Steps are grouped by deployer; a group omitting `deployers` is *the*
+  remainder, and an explicitly empty `deployers: []` is rejected.
+- `make lint` validates every committed record via
+  `check-upgrade-records`.
+
+See [ADR-021](../design/021-component-upgrade-safety.md) for the full
+field reference.
 
 ## Overlay (`recipes/overlays/`)
 
@@ -865,5 +891,6 @@ prevents.
 - [validator.md](validator.md) — adding a validator check or health check
 - [ADR-005](../design/005-overlay-refactoring.md) — overlay refactoring rationale (mixin composition, maximal-leaf resolver, wildcard overlays)
 - [ADR-007](../design/007-recipe-evidence.md) — fingerprint, evidence bundle, verification
+- [ADR-021](../design/021-component-upgrade-safety.md) — component upgrade transition records: schema, verdicts, well-formedness rules
 - [pkg/recipe godoc](https://github.com/NVIDIA/aicr/tree/main/pkg/recipe) — implementation
 - [api/aicr/v1/server.yaml](https://github.com/NVIDIA/aicr/blob/main/api/aicr/v1/server.yaml) — recipe API contract and criteria enums

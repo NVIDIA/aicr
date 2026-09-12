@@ -121,6 +121,7 @@ workspace paths. Use local file paths only when explicitly requested.
 | `pkg/chainsaw` | In-process Chainsaw Test executor (assert/error only) + read-only allowlist; no external chainsaw binary | Yes |
 | `pkg/errors` | Structured error handling with codes | Yes |
 | `pkg/manifest` | Shared Helm-compatible manifest rendering | Yes |
+| `pkg/upgrade` | ADR-021 component upgrade transition records: schema, fail-closed loader, well-formedness rules | Yes |
 | `pkg/evidence` | Conformance evidence capture and formatting | Yes |
 | `pkg/collector/topology` | Cluster-wide node taint/label topology collection | Yes |
 | `pkg/snapshotter` | System state snapshot orchestration | Yes |

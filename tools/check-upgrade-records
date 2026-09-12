@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Verify every committed ComponentUpgrades record is well-formed (ADR-021 AC7).
+#
+# A malformed or reverse-matching record must fail `make lint` rather than be
+# silently skipped. Inert while recipes/upgrades/ is empty.
+
+set -euo pipefail
+
+readonly TEST_NAME=TestRealUpgradeRecordsWellFormed
+
+echo "Checking upgrade transition records..."
+
+# -v, and then a grep for the PASS line, because `go test -run` exits 0 with
+# "[no tests to run]" when the pattern matches nothing: renaming or deleting
+# the test would otherwise disable this gate silently and permanently.
+output=""
+if ! output="$(go test ./pkg/recipe/... -run "^${TEST_NAME}\$" -count=1 -v 2>&1)"; then
+	printf '%s\n' "${output}"
+	exit 1
+fi
+
+if ! printf '%s\n' "${output}" | grep -qE -- "^--- PASS: ${TEST_NAME} \("; then
+	printf '%s\n' "${output}"
+	echo "check-upgrade-records: ${TEST_NAME} did not run to a PASS; the gate is not checking anything" >&2
+	exit 1
+fi
+
+printf '%s\n' "${output}" | grep -E -- "^--- PASS: ${TEST_NAME} \(|checking [0-9]+ component"
