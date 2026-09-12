@@ -913,3 +913,36 @@ func TestMergeMixins_PreservesStructuredErrorCodeFromValuesRead(t *testing.T) {
 		t.Errorf("top-level code = %v, want ErrCodeTimeout preserved, not flattened to ErrCodeInternal", se.Code)
 	}
 }
+
+// TestMergeMixins_TreatsStructuredNotFoundAsNoBaseLayer covers a custom
+// DataProvider (e.g. an external --data source) that reports a missing
+// implicit base values.yaml via a structured ErrCodeNotFound instead of
+// fs.ErrNotExist -- a pattern already used elsewhere in this codebase
+// (pkg/recipe/catalog's stubProvider). This must compose successfully using
+// the overlay ValuesFile alone, not fail the whole composition.
+func TestMergeMixins_TreatsStructuredNotFoundAsNoBaseLayer(t *testing.T) {
+	base := newNvsentinelAllowlistStore("structured-not-found-base", []string{"global.auditLogging.enabled"}, map[string][]byte{
+		"values/overlay.yaml": []byte("global:\n  auditLogging:\n    maxSizeMB: 50\n"),
+	})
+	store := &MetadataStore{
+		provider: &pathErrorProvider{
+			delegate: base.provider,
+			failPath: "components/nvsentinel/values.yaml",
+			failErr:  aicrerrors.New(aicrerrors.ErrCodeNotFound, "file not found"),
+		},
+		Mixins: map[string]*RecipeMixin{},
+	}
+	addTestMixin(store, "test-mixin", []ComponentRef{
+		{Name: "nvsentinel", Overrides: map[string]any{"global": map[string]any{"auditLogging": map[string]any{"enabled": true}}}},
+	})
+
+	spec := RecipeMetadataSpec{
+		Mixins: []string{"test-mixin"},
+		ComponentRefs: []ComponentRef{
+			{Name: "nvsentinel", ValuesFile: "values/overlay.yaml"},
+		},
+	}
+	if _, err := store.mergeMixins(t.Context(), &spec); err != nil {
+		t.Fatalf("mergeMixins: %v, want success -- a structured not-found base-values read must compose using the overlay alone", err)
+	}
+}
