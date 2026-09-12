@@ -43,17 +43,37 @@ if ! command -v kubectl >/dev/null 2>&1; then
   exit 1
 fi
 
-# Bound every cluster and registry read. This runs inside the deploy path,
-# where an unbounded call hangs the whole rollout rather than failing it:
-# deploy.sh retries a component that exits non-zero but cannot interrupt one
-# that never returns. `timeout` is absent on stock macOS, so fall back to
-# running unbounded there rather than failing outright.
-run_bounded() {
-  if command -v timeout >/dev/null 2>&1; then
-    timeout 90 "$@"
-  else
-    "$@"
+# Every helm and kubectl call below runs through run_bounded. This script runs
+# inside the deploy path, where a command that never returns hangs the whole
+# rollout rather than failing it: deploy.sh retries a component that exits
+# non-zero but has no way to interrupt one that is still running. A wedged
+# registry and a wedged apiserver both produce that, so the reads and the write
+# are bounded alike.
+#
+# No unbounded fallback. Stock macOS ships no timeout(1), and running
+# unbounded there would reintroduce exactly the hang this guards against on the
+# one platform least likely to be exercised in CI. Failing closed with an
+# actionable message is the safer trade: the operator can install coreutils, or
+# apply the CRDs by hand with the command in the component catalog.
+CRD_STEP_TIMEOUT="${AICR_CRD_STEP_TIMEOUT:-90}"
+TIMEOUT_BIN=""
+for candidate in timeout gtimeout; do
+  if command -v "${candidate}" >/dev/null 2>&1; then
+    TIMEOUT_BIN="${candidate}"
+    break
   fi
+done
+if [[ -z "${TIMEOUT_BIN}" ]]; then
+  echo "ERROR: neither timeout(1) nor gtimeout(1) is available, so the ${RELEASE} CRD" >&2
+  echo "       step cannot be bounded and will not run unbounded inside a deploy." >&2
+  echo "       Install GNU coreutils (macOS: brew install coreutils), or apply this" >&2
+  echo "       chart's CRDs manually before upgrading; see the upgrade section of" >&2
+  echo "       docs/user/component-catalog.md." >&2
+  exit 1
+fi
+
+run_bounded() {
+  "${TIMEOUT_BIN}" "${CRD_STEP_TIMEOUT}" "$@"
 }
 
 # Upgrades only. Helm installs a chart's crds/ directory itself on first
@@ -112,4 +132,4 @@ fi
 # annotation cap client-side apply depends on. --force-conflicts is required
 # because Helm created them on install and owns their fields.
 printf '%s\n' "${crds}" \
-  | kubectl apply --server-side --force-conflicts ${KUBECONFIG_FLAG:-} -f -
+  | run_bounded kubectl apply --server-side --force-conflicts ${KUBECONFIG_FLAG:-} -f -

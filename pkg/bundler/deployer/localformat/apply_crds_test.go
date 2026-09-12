@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 )
@@ -212,10 +213,12 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 	// a bare "exit 0", which the chart-ships-no-CRDs branch also satisfies, so
 	// it would have passed with the release gate's skip removed entirely.
 	blocks := map[string]string{
-		"release gate queries helm":  `if ! existing="$(run_bounded helm list --namespace "${NAMESPACE}" \`,
-		"indeterminate state aborts": "  exit 1\nfi\nif [[ -z \"${existing//[[:space:]]/}\" ]]; then",
-		"absent release skips":       "  exit 0\nfi",
-		"registry read is bounded":   `    timeout 90 "$@"`,
+		"release gate queries helm":        `if ! existing="$(run_bounded helm list --namespace "${NAMESPACE}" \`,
+		"indeterminate state aborts":       "  exit 1\nfi\nif [[ -z \"${existing//[[:space:]]/}\" ]]; then",
+		"absent release skips":             "  exit 0\nfi",
+		"bound uses a real timeout binary": `  "${TIMEOUT_BIN}" "${CRD_STEP_TIMEOUT}" "$@"`,
+		"missing timeout fails closed":     "cannot be bounded",
+		"the apply is bounded too":         "| run_bounded kubectl apply --server-side",
 	}
 	for name, block := range blocks {
 		if !strings.Contains(got, block) {
@@ -224,10 +227,13 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 		}
 	}
 
-	// The registry read must go through the bounded wrapper, never directly.
-	if strings.Contains(got, "$(helm show crds") {
-		t.Errorf("apply-crds.sh calls helm show crds outside run_bounded; an unbounded "+
-			"registry read hangs the rollout instead of failing it\n%s", got)
+	// Every helm and kubectl call must go through the wrapper. The apply is the
+	// one originally left out, so absence is checked as well as presence.
+	for _, banned := range []string{"$(helm show crds", "$(helm list", "| kubectl apply"} {
+		if strings.Contains(got, banned) {
+			t.Errorf("apply-crds.sh runs %q outside run_bounded; an unbounded call hangs "+
+				"the rollout instead of failing it\n%s", banned, got)
+		}
 	}
 }
 
@@ -284,6 +290,13 @@ func TestApplyCRDsScript_RejectsInjectedRecipeValues(t *testing.T) {
 	// Prepend rather than replace: the script calls dirname and pwd, so a
 	// stub-only PATH kills it at the first line and every assertion below
 	// passes without the interpolated values ever being evaluated.
+	// The script fails closed when no timeout(1) exists, which stock macOS does
+	// not ship. A pass-through keeps this test about quoting, not the bound.
+	if werr := os.WriteFile(filepath.Join(stub, "timeout"),
+		[]byte("#!/usr/bin/env bash\nshift\nexec \"$@\"\n"), 0o755); werr != nil {
+		t.Fatalf("write timeout stub: %v", werr)
+	}
+
 	cmd := exec.Command("bash", scriptPath)
 	cmd.Env = append(os.Environ(), "PATH="+stub+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, runErr := cmd.CombinedOutput()
@@ -377,4 +390,174 @@ func helmVersion(t *testing.T, helmBin string) string {
 		return "unknown"
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// minimalPATH builds a directory holding only what apply-crds.sh needs from
+// the environment, so a test can control exactly which binaries exist.
+//
+// The script's external dependencies are dirname, sed, helm, and kubectl;
+// everything else it uses is a bash builtin. Linking precisely those lets the
+// timeout-absent case be exercised without a PATH so empty the script dies for
+// an unrelated reason, which is how an earlier version of the injection test
+// passed vacuously.
+func minimalPATH(t *testing.T, stubs map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, tool := range []string{"bash", "dirname", "sed"} {
+		real, err := exec.LookPath(tool)
+		if err != nil {
+			t.Skipf("%s not available", tool)
+		}
+		if err := os.Symlink(real, filepath.Join(dir, tool)); err != nil {
+			t.Fatalf("link %s: %v", tool, err)
+		}
+	}
+	for name, body := range stubs {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
+			t.Fatalf("write %s stub: %v", name, err)
+		}
+	}
+	return dir
+}
+
+// stubPATH writes stubs into a fresh directory and returns a PATH with it
+// ahead of the real one.
+//
+// Prefer this over minimalPATH unless the test's whole point is that some
+// binary is *absent*. A hand-built PATH has to enumerate every tool the script
+// and the stubs transitively need (bash, sleep, ...), and each one missed
+// makes the script die early, which reads as a pass in any test whose
+// assertion is merely "it failed".
+func stubPATH(t *testing.T, stubs map[string]string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for name, body := range stubs {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o755); err != nil {
+			t.Fatalf("write %s stub: %v", name, err)
+		}
+	}
+	return dir + string(os.PathListSeparator) + os.Getenv("PATH")
+}
+
+// writeApplyCRDs renders a bundle for c and returns the path to its
+// apply-crds.sh.
+func writeApplyCRDs(t *testing.T, c localformat.Component) string {
+	t.Helper()
+	outDir := t.TempDir()
+	res, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir:  outDir,
+		Components: []localformat.Component{c},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	return filepath.Join(outDir, res.Folders[0].Dir, "apply-crds.sh")
+}
+
+// TestApplyCRDsScript_FailsClosedWithoutTimeout pins that the script refuses to
+// run rather than running unbounded when no timeout(1) or gtimeout(1) exists.
+//
+// Stock macOS ships neither. An unbounded fallback would reintroduce the hang
+// the bound exists to prevent, on the one platform least likely to be covered
+// by CI, and deploy.sh cannot interrupt a command that never returns.
+func TestApplyCRDsScript_FailsClosedWithoutTimeout(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	scriptPath := writeApplyCRDs(t, ownsCRDsComponent(true))
+
+	// helm and kubectl succeed; only timeout/gtimeout are missing, so a
+	// failure can only come from the guard under test.
+	pathDir := minimalPATH(t, map[string]string{
+		"helm":    "#!/usr/bin/env bash\nexit 0\n",
+		"kubectl": "#!/usr/bin/env bash\nexit 0\n",
+	})
+
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+pathDir)
+	out, err := cmd.CombinedOutput()
+
+	if err == nil {
+		t.Fatalf("script succeeded with no timeout(1) available; it must fail closed\n%s", out)
+	}
+	if !strings.Contains(string(out), "cannot be bounded") {
+		t.Errorf("script failed for some other reason than the missing bound:\n%s", out)
+	}
+}
+
+// TestApplyCRDsScript_BoundsStalledApply pins that a wedged apiserver fails the
+// component instead of hanging the rollout.
+//
+// The apply is the write half of the step and was originally left unbounded
+// while only the registry reads were wrapped, so a stalled `kubectl apply`
+// would hang deploy.sh indefinitely. AICR_CRD_STEP_TIMEOUT keeps this test
+// fast; the generated default is far too long to wait on.
+func TestApplyCRDsScript_BoundsStalledApply(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	scriptPath := writeApplyCRDs(t, ownsCRDsComponent(true))
+	// The stub touches this before stalling, so the assertions below can tell
+	// "the apply was reached and bounded" from "something earlier was bounded",
+	// which otherwise look identical from the outside.
+	reached := filepath.Join(t.TempDir(), "apply-invoked")
+
+	// helm reports the release exists and then emits one CRD document, so the
+	// script reaches the apply. kubectl hangs, standing in for a wedged
+	// apiserver.
+	stalledPATH := stubPATH(t, map[string]string{
+		"helm": "#!/usr/bin/env bash\n" +
+			"case \"$1\" in\n" +
+			"  list) echo k8s-aibom ;;\n" +
+			"  show) printf -- '---\\napiVersion: apiextensions.k8s.io/v1\\nkind: CustomResourceDefinition\\n' ;;\n" +
+			"esac\nexit 0\n",
+		// exec, so the stub process *becomes* sleep. Without it the wrapper
+		// is killed but sleep is orphaned, and the orphan holds the stdout
+		// pipe open, so the harness blocks for the full 300s even though the
+		// script already returned.
+		"kubectl": "#!/usr/bin/env bash\ntouch " + reached + "\nexec sleep 300\n",
+		// A bash implementation of the bound, so this runs on a host with no
+		// timeout(1) (stock macOS ships none). What is under test is that the
+		// apply is routed through run_bounded at all, which is platform
+		// independent; HelmFlagsExist covers the real binaries.
+		"timeout": "#!/usr/bin/env bash\n" +
+			"dur=\"$1\"; shift\n" +
+			"\"$@\" & pid=$!\n" +
+			"( sleep \"$dur\"; kill -9 \"$pid\" 2>/dev/null ) & guard=$!\n" +
+			"wait \"$pid\"; rc=$?\n" +
+			"kill \"$guard\" 2>/dev/null || true\n" +
+			"exit $rc\n",
+	})
+
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+stalledPATH, "AICR_CRD_STEP_TIMEOUT=2")
+
+	start := time.Now()
+	out, err := cmd.CombinedOutput()
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatalf("script succeeded despite a kubectl that never returns\n%s", out)
+	}
+	// Guard against a vacuous pass. Any early exit also produces a non-zero
+	// status in well under the bound, so "it failed" alone proves nothing about
+	// the apply: an earlier version of this test passed because the stubs could
+	// not exec and the script died at the release gate.
+	if strings.Contains(string(out), "cannot determine whether release") {
+		t.Fatalf("script failed at the release gate, never reaching the apply:\n%s", out)
+	}
+	if _, statErr := os.Stat(reached); statErr != nil {
+		t.Fatalf("kubectl apply was never invoked (%v), so whatever was bounded here "+
+			"was not the apply\n%s", statErr, out)
+	}
+	if elapsed < time.Second {
+		t.Fatalf("returned in %s, faster than the %s bound; the apply cannot have been "+
+			"reached and waited on\n%s", elapsed, 2*time.Second, out)
+	}
+	// Generous ceiling: the point is that it returned at all rather than
+	// running for the stub's full 300s.
+	if elapsed > 60*time.Second {
+		t.Errorf("apply was not bounded: took %s\n%s", elapsed, out)
+	}
+	t.Logf("bounded apply returned after %s (exit %v); script output:\n%s", elapsed, err, out)
 }

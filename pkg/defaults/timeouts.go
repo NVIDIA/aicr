@@ -1286,13 +1286,16 @@ const (
 
 // Bundle deploy-time timeouts.
 const (
-	// BundleShowCRDsTimeout bounds the `helm show crds` registry read in a
-	// bundle's generated apply-crds.sh. That script runs inside the deploy
-	// path, where an unbounded call hangs the whole rollout instead of
-	// failing it: deploy.sh retries a component that exits non-zero but
-	// cannot interrupt one that never returns. Matches
+	// BundleCRDStepTimeout bounds every helm and kubectl call in a bundle's
+	// generated apply-crds.sh: the release lookup, the registry read, and the
+	// apply. That script runs inside the deploy path, where a command that
+	// never returns hangs the whole rollout instead of failing it, since
+	// deploy.sh retries a component that exits non-zero but cannot interrupt
+	// one still running. A wedged registry and a wedged apiserver both produce
+	// that, so reads and the write are bounded alike. Matches
 	// MirrorHelmTemplateTimeout, the other per-chart helm invocation.
-	BundleShowCRDsTimeout = 90 * time.Second
+	// Operators can override per-run with AICR_CRD_STEP_TIMEOUT.
+	BundleCRDStepTimeout = 90 * time.Second
 )
 
 // Mirror discovery timeouts and defaults.
