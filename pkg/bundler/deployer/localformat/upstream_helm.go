@@ -19,15 +19,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 //go:embed templates/install-upstream-helm.sh.tmpl
 var upstreamHelmTemplates embed.FS
+
+//go:embed templates/apply-crds.sh.tmpl
+var applyCRDsTemplates embed.FS
 
 // shellSingleQuote wraps s in single quotes for safe inclusion in a shell
 // `source`-able file (e.g. KEY='value'). Embedded single quotes are escaped
@@ -43,6 +48,49 @@ func shellSingleQuote(s string) string {
 var upstreamHelmTmpl = template.Must(
 	template.ParseFS(upstreamHelmTemplates, "templates/install-upstream-helm.sh.tmpl"),
 )
+
+// applyCRDsTmpl registers shq so recipe-supplied names reach the generated
+// shell as single-quoted literals. Component names are validated only as path
+// components (IsSafePathComponent rejects separators, not shell
+// metacharacters), and namespaces are not validated here at all, so neither is
+// safe to interpolate bare into a command.
+var applyCRDsTmpl = template.Must(
+	template.New("apply-crds.sh.tmpl").
+		Funcs(template.FuncMap{"shq": shellSingleQuote}).
+		ParseFS(applyCRDsTemplates, "templates/apply-crds.sh.tmpl"),
+)
+
+// applyCRDsData is the render input for apply-crds.sh. FromUpstreamEnv picks
+// how the script names the chart: sourcing upstream.env for a non-vendored
+// folder, or "./" for a vendored wrapper whose subchart tarball sits under
+// charts/.
+type applyCRDsData struct {
+	Name      string
+	Namespace string
+	// ReleaseFilter anchors Name as a `helm list --filter` regex, so a release
+	// whose name merely contains Name cannot be mistaken for this one.
+	ReleaseFilter          string
+	FromUpstreamEnv        bool
+	ShowCRDsTimeoutSeconds int
+}
+
+// writeApplyCRDsScript renders apply-crds.sh into folderDir and returns its
+// path relative to the bundle root, or "" when the component does not own its
+// CRDs. Non-owning components get no file at all, so the absence of the step
+// is visible on disk rather than encoded as a no-op script.
+func writeApplyCRDsScript(folderDir, dir, name, namespace string, fromUpstreamEnv bool) (string, error) {
+	data := applyCRDsData{
+		Name:                   name,
+		Namespace:              namespace,
+		ReleaseFilter:          "^" + regexp.QuoteMeta(name) + "$",
+		FromUpstreamEnv:        fromUpstreamEnv,
+		ShowCRDsTimeoutSeconds: int(defaults.BundleShowCRDsTimeout.Seconds()),
+	}
+	if err := renderTemplateToFile(applyCRDsTmpl, data, folderDir, "apply-crds.sh", 0o755); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "apply-crds.sh"), nil
+}
 
 // writeUpstreamHelmFolder writes values.yaml + cluster-values.yaml + upstream.env + install.sh
 // into outputDir/dir. Returns the Folder manifest (Files are all relative to outputDir).
@@ -87,9 +135,24 @@ func writeUpstreamHelmFolder(outputDir, dir string, idx int, c Component) (Folde
 	installData := struct {
 		Name      string
 		Namespace string
-	}{c.Name, c.Namespace}
+		OwnsCRDs  bool
+	}{c.Name, c.Namespace, c.OwnsCRDs}
 	if err = renderTemplateToFile(upstreamHelmTmpl, installData, folderDir, "install.sh", 0o755); err != nil {
 		return Folder{}, err
+	}
+
+	files := []string{
+		filepath.Join(dir, "values.yaml"),
+		filepath.Join(dir, "cluster-values.yaml"),
+		filepath.Join(dir, "upstream.env"),
+		filepath.Join(dir, "install.sh"),
+	}
+	if c.OwnsCRDs {
+		crdScript, crdErr := writeApplyCRDsScript(folderDir, dir, c.Name, c.Namespace, true)
+		if crdErr != nil {
+			return Folder{}, crdErr
+		}
+		files = append(files, crdScript)
 	}
 
 	return Folder{
@@ -104,12 +167,8 @@ func writeUpstreamHelmFolder(outputDir, dir string, idx int, c Component) (Folde
 			Repo:    c.Repository,
 			Version: c.Version,
 		},
-		Files: []string{
-			filepath.Join(dir, "values.yaml"),
-			filepath.Join(dir, "cluster-values.yaml"),
-			filepath.Join(dir, "upstream.env"),
-			filepath.Join(dir, "install.sh"),
-		},
+		Files:       files,
+		AppliesCRDs: c.OwnsCRDs,
 		// Upstream Helm folders don't ship AICR-rendered templates, so
 		// the chart-owns-Namespace detection in local_helm doesn't apply
 		// here. Default to true to match install.sh's --create-namespace.

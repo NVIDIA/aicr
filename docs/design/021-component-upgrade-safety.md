@@ -72,7 +72,7 @@ This matters for scoping: an AICR-level hook mechanism would duplicate a facilit
 
 ### Existing AICR precedents this builds on
 
-- **`ownsCRDs`** (`pkg/recipe/components.go:129-154`) is already an upgrade-safety mechanism: a registry-declared, per-component, human-audited fact that a deployer consumes to change upgrade behavior. Its doc comment encodes the audit criteria (sole CRD ownership, no webhook conversion strategy). Four standalone `-crds` components in the registry solve the same problem a second way.
+- **`ownsCRDs`** (`pkg/recipe/components.go`) is already an upgrade-safety mechanism: a registry-declared, per-component, human-audited fact that a deployer consumes to change upgrade behavior. Its doc comment encodes the audit criteria (sole CRD ownership, no webhook conversion strategy). Four standalone `-crds` components in the registry solve the same problem a second way.
 - **`healthCheck.assertFile`** references a per-component file outside `registry.yaml`. 43 registry entries reference one today, across 41 distinct check files.
 - **Everything in a bundle is a Helm release.** `pkg/bundler/deployer/localformat/doc.go` wraps Kustomize components and raw manifests into generated charts, so `helm list -A` enumerates every component of an AICR-deployed stack under a release name matching its ComponentRef name in `registry.yaml`.
 
@@ -453,9 +453,15 @@ Reproducibility is unaffected. The AICR version already travels in every bundle 
 
 ### Decision 8: Close the `ownsCRDs` deployer gap
 
-`ownsCRDs` is consumed by exactly one deployer, `pkg/bundler/deployer/flux/flux.go:994`. On helm, helmfile, argocd, and argocd-helm, CRDs still sit at day-one schema after every upgrade. That is a live upgrade defect, not a hypothetical one.
+`ownsCRDs` is consumed by exactly one deployer. On **helm and helmfile**, CRDs still sit at day-one schema after every upgrade. That is a live upgrade defect, not a hypothetical one.
 
-This ADR records `ownsCRDs` as the precedent the transition-record design follows, and names the deployer gap as in-scope work that must land **before** verdicts ship. A `safe` transition whose CRDs changed is not actually safe on a deployer that never upgrades CRDs, so leaving this open would have the check assert a safety it cannot deliver on four of five deployers. It is independent of the rest of this ADR and can ship as its own issue and PR, which is why the Implementation Plan puts it first rather than last.
+Both upgrade through Helm, which installs a chart's `crds/` directory on first install and never touches it again. [#2525](https://github.com/NVIDIA/aicr/issues/2525) closes the gap: `localformat` emits an `apply-crds.sh` into the folder of every component the registry marks `ownsCRDs` whose ref still points at the registry-pinned chart, `install.sh` runs it before `helm upgrade`, and the helmfile release gets a `presync` hook running the same script.
+
+**Argo CD is not part of the gap, and cannot be.** Its repo-server renders Helm sources with `--include-crds` unless the Application sets `helm.skipCrds`, so CRDs are ordinary manifests re-applied on every sync and it upgrades them without an opt-in. Gating that on `ownsCRDs` for symmetry would be actively wrong: `skipCrds` suppresses CRDs on *first install* too, breaking a fresh install of every CRD-shipping chart. Its two load-bearing properties, no `skipCrds` and `ServerSideApply=true`, are pinned by a regression test rather than reimplemented. [#2264](https://github.com/NVIDIA/aicr/issues/2264) and [the deployer table in the component catalog](../user/component-catalog.md#upgrade-uninstall-and-troubleshooting) record the per-deployer behavior, verified against a live GKE cluster across a 1.2.0 to 1.3.0 upgrade.
+
+Note that "which deployer reads the flag" and "which deployer strands CRDs" are different questions. Only Flux reads it; only helm and helmfile strand CRDs. Grepping for consumers of `ownsCRDs` answers the first and will mislead on the second.
+
+This ADR records `ownsCRDs` as the precedent the transition-record design follows, and names the deployer gap as in-scope work that must land **before** verdicts ship. A `safe` transition whose CRDs changed is not actually safe on a deployer that never upgrades CRDs, so leaving this open would have the check assert a safety it cannot deliver on two of five deployers. It is independent of the rest of this ADR and can ship as its own issue and PR, which is why the Implementation Plan puts it first rather than last.
 
 ### Decision 9: UAT covers upgrade and rollback
 
@@ -786,7 +792,7 @@ Preconditions are structured prose today, rendered and not evaluated. Making the
 
 Ordered so each step is independently useful and independently revertible.
 
-1. **`ownsCRDs` deployer gap** (Decision 8). First, because it is a prerequisite for a verdict meaning what it says: a `safe` transition whose CRDs changed is not safe on a deployer that leaves CRDs at their day-one schema, which today is four of five. Independent of everything below, so it can ship as its own PR in parallel.
+1. **`ownsCRDs` deployer gap** (Decision 8). First, because it is a prerequisite for a verdict meaning what it says: a `safe` transition whose CRDs changed is not safe on a deployer that leaves CRDs at their day-one schema, which is helm and helmfile. Independent of everything below, so it can ship as its own PR in parallel.
 2. **Wrapper chart versioning** (Decision 7) — **shipped** ([#2526](https://github.com/NVIDIA/aicr/issues/2526)). Template change, dev-build normalization, golden updates. No new feature depends on it landing first, but online mode is wrong without it.
 3. **Transition record schema and loader.** `recipes/upgrades/<component>.yaml`, the `upgrades.file` registry field, semver range matching with strict directionality, and a lint gate rejecting a record that matches in reverse. The loader calls the `apiVersion` gate and fails closed on an unrecognized value; it does not skip and does not degrade to `unknown`.
 4. **Offline check.** `--from`/`--to` over recipes and bundles, table and JSON output, non-zero exit by default via `--fail-on-error`. This is the whole feature for CI and GitOps.

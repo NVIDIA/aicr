@@ -94,6 +94,17 @@ cd NNN-<component-name>
 bash install.sh
 ```
 
+> **CRDs on upgrade.** Helm installs a chart's `crds/` directory on first
+> install and never touches it again, so a chart bump whose CRDs changed would
+> otherwise run the new controller against the old schema. Folders that also
+> contain an `apply-crds.sh` have `install.sh` run it first, which applies the
+> pinned chart's CRDs with `kubectl apply --server-side --force-conflicts`.
+> Those folders therefore need `kubectl` on `$PATH` in addition to `helm`, and
+> the step is skipped when `DRY_RUN_FLAG` is set. Only components audited as
+> the sole owner of every CRD they ship get the script; for the rest, replacing
+> CRDs is unsafe because another component's release ships the same CRD with a
+> different schema.
+
 ## Uninstall
 
 Bundles do not ship an `undeploy.sh`. Uninstall releases in reverse

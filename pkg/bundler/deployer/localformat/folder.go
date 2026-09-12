@@ -75,4 +75,11 @@ type Folder struct {
 	// ManifestsUseChartCRDs components) instead of re-deriving the
 	// folder shape from release-name suffixes alone.
 	CarriesPostManifests bool
+	// AppliesCRDs is true when this folder carries an apply-crds.sh: the
+	// component owns its CRDs and that script must run before the
+	// release's `helm upgrade`. install.sh already invokes it; the field
+	// exposes the same decision to deployers that bypass install.sh
+	// (helmfile emits a presync hook from it), so the hook cannot name a
+	// script the writers did not emit.
+	AppliesCRDs bool
 }

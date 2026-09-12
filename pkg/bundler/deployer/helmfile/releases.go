@@ -105,6 +105,43 @@ type Release struct {
 	// (ManifestsUseChartCRDs). All other wrappers keep the safety
 	// check. Issues #914, #929.
 	DisableValidation bool `yaml:"disableValidation,omitempty"`
+	// Hooks runs commands around this release's lifecycle. Emitted for
+	// exactly one purpose: a presync step applying the chart's CRDs for
+	// components the registry marks ownsCRDs. See applyCRDsHook.
+	Hooks []Hook `yaml:"hooks,omitempty"`
+}
+
+// Hook is one entry in a release's hooks: list. Field names match
+// helmfile's schema; ShowLogs surfaces the command's output in
+// `helmfile apply` rather than swallowing it.
+type Hook struct {
+	Events   []string `yaml:"events"`
+	Command  string   `yaml:"command"`
+	Args     []string `yaml:"args,omitempty"`
+	ShowLogs bool     `yaml:"showlogs,omitempty"`
+}
+
+// applyCRDsHook returns the presync hook that runs a folder's
+// apply-crds.sh before helmfile upgrades the release.
+//
+// Helm installs a chart's crds/ directory on first install and never
+// touches it again, and helmfile upgrades through Helm, so without this a
+// chart bump whose CRDs changed leaves the previous schema in place and the
+// API server silently prunes the new controller's writes to added fields.
+// The helm deployer gets the same step from install.sh, which helmfile does
+// not use.
+//
+// Emitted only for folders localformat marked AppliesCRDs, so the hook can
+// never name a script that was not written. The path is relative to the
+// helmfile document, matching the release's values: entries; sub-helmfiles
+// in the stratified layout sit in the same directory as the folders.
+func applyCRDsHook(dir string) Hook {
+	return Hook{
+		Events:   []string{"presync"},
+		Command:  "bash",
+		Args:     []string{"./" + dir + "/apply-crds.sh"},
+		ShowLogs: true,
+	}
 }
 
 // overrides carries per-component helm flag overrides.
@@ -267,6 +304,10 @@ func buildHelmfile(folders []localformat.Folder, namespaceByComponent map[string
 		// CRDs) keep the mapper sanity check per issue #929.
 		if f.CarriesPostManifests && flags[f.Parent].ManifestsUseChartCRDs {
 			rel.DisableValidation = true
+		}
+
+		if f.AppliesCRDs {
+			rel.Hooks = []Hook{applyCRDsHook(f.Dir)}
 		}
 
 		releases = append(releases, rel)

@@ -1257,6 +1257,54 @@ metadata:
 	assertBundleGolden(t, outDir, "testdata/mixed_with_pre")
 }
 
+// TestBundleGolden_OwnsCRDs covers a component the registry marks ownsCRDs:
+// the folder gains an apply-crds.sh and install.sh invokes it ahead of
+// `helm upgrade`. Helm never updates a chart's crds/ directory on upgrade, so
+// without the script a bumped chart runs its new controller against the
+// day-one schema (#2525).
+//
+// The ref matches the registry pin exactly; UsesRegistryChart disqualifies
+// anything else, which TestBundleGolden_OwnsCRDsChartOverride covers.
+func TestBundleGolden_OwnsCRDs(t *testing.T) {
+	outDir := t.TempDir()
+	g := &Generator{
+		RecipeResult: singleComponentRecipe(
+			"k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.3.0",
+			"oci://ghcr.io/googlecloudplatform/charts"),
+		ComponentValues: map[string]map[string]any{
+			"k8s-aibom": {"replicaCount": 1},
+		},
+		Version: "v1.0.0",
+	}
+	if _, err := g.Generate(context.Background(), outDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	assertBundleGolden(t, outDir, "testdata/owns_crds")
+}
+
+// TestBundleGolden_OwnsCRDsChartOverride is the guard's negative case: the
+// same ownsCRDs component pointed at a different chart version. No
+// apply-crds.sh, and install.sh is byte-identical to any other component's.
+// The audit the flag records covers one specific chart, so carrying the flag
+// to an unaudited one is the destructive case the opt-in design exists to
+// avoid.
+func TestBundleGolden_OwnsCRDsChartOverride(t *testing.T) {
+	outDir := t.TempDir()
+	g := &Generator{
+		RecipeResult: singleComponentRecipe(
+			"k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.2.0",
+			"oci://ghcr.io/googlecloudplatform/charts"),
+		ComponentValues: map[string]map[string]any{
+			"k8s-aibom": {"replicaCount": 1},
+		},
+		Version: "v1.0.0",
+	}
+	if _, err := g.Generate(context.Background(), outDir); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	assertBundleGolden(t, outDir, "testdata/owns_crds_chart_override")
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
