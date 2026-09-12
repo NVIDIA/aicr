@@ -127,7 +127,7 @@ get_tool_metadata() {
             echo "tilt:::tilt version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+':::major_minor"
             ;;
         helm)
-            echo "helm:::helm version --short 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::major"
+            echo "helm:::helm version --short 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+':::strict_exact"
             ;;
         helmfile)
             echo "helmfile:::helmfile --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+':::major_minor"

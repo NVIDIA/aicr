@@ -166,6 +166,53 @@ prompt_continue() {
     return 0
 }
 
+install_helm() {
+    installed_helm_version=""
+    if command_exists helm; then
+        installed_helm_version=$(helm version --template '{{.Version}}' 2>/dev/null || true)
+    fi
+    if [[ "${installed_helm_version}" == "${HELM_VERSION}" && "${UPGRADE}" != "true" ]]; then
+        log_success "Helm already installed: ${installed_helm_version}"
+    else
+        log_info "Installing Helm ${HELM_VERSION}..."
+        if prompt_continue; then
+            if [[ "${OS}" == "darwin" ]]; then
+                # installed_helm_version only proves helm is on PATH, not that
+                # Homebrew manages it; `brew upgrade` fails on a manually
+                # installed binary because there's no Homebrew keg to upgrade.
+                if brew list --versions helm >/dev/null 2>&1; then
+                    brew upgrade helm
+                else
+                    brew install helm
+                fi
+            elif [[ "${OS}" == "linux" ]]; then
+                HELM_TMP=$(mktemp -d)
+                HELM_TAR="helm-${HELM_VERSION}-linux-${GO_ARCH}.tar.gz"
+                HELM_URL="https://get.helm.sh/${HELM_TAR}"
+                if verify_download_url "$HELM_URL" "helm ${HELM_VERSION} for Linux ${GO_ARCH}"; then
+                    curl -fsSL "$HELM_URL" | tar -xzC "$HELM_TMP"
+                    sudo mv "$HELM_TMP/linux-${GO_ARCH}/helm" /usr/local/bin/helm
+                    sudo chmod +x /usr/local/bin/helm
+                    rm -rf "$HELM_TMP"
+                else
+                    log_error "Failed to install helm. Please install manually."
+                    rm -rf "$HELM_TMP"
+                fi
+            fi
+            installed_helm_version=$(helm version --template '{{.Version}}' 2>/dev/null || echo "unknown")
+            if [[ "${installed_helm_version}" == "${HELM_VERSION}" ]]; then
+                log_success "Helm installed: ${installed_helm_version}"
+            elif [[ "${OS}" == "darwin" ]]; then
+                log_error "Helm ${installed_helm_version} installed, but ${HELM_VERSION} is pinned in .settings.yaml. Homebrew only ships the current stable release; install ${HELM_VERSION} manually from https://github.com/helm/helm/releases if it differs."
+                return 1
+            else
+                log_error "Helm ${installed_helm_version} installed, but ${HELM_VERSION} is pinned in .settings.yaml. Install ${HELM_VERSION} manually from https://github.com/helm/helm/releases."
+                return 1
+            fi
+        fi
+    fi
+}
+
 show_help() {
     cat << EOF
 AICR Development Environment Setup
@@ -202,6 +249,15 @@ EXAMPLES:
 
 EOF
 }
+
+# Test hook: lets setup-tools_test.sh source this file to reach the function
+# definitions above (command_exists, prompt_continue, install_helm, ...) and
+# call them directly with mocked commands, without running the argument
+# parser or the rest of the script, which would try to install every tool
+# pinned in .settings.yaml.
+if [[ "${SETUP_TOOLS_SOURCE_ONLY:-false}" == "true" ]]; then
+    return 0
+fi
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -429,30 +485,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     #   curl -fsSL "https://raw.githubusercontent.com/golangci/golangci-lint/$(yq '.linting.golangci_lint' .settings.yaml)/install.sh" | shasum -a 256
     GOLANGCI_LINT_INSTALL_SHA256=${GOLANGCI_LINT_INSTALL_SHA256:-"1022ddb4d87ed252350ed03fc9677e250a4ae95cc6bcd4658c2a20a8a23d390f"}
 
-    if command_exists helm && [[ "${UPGRADE}" != "true" ]]; then
-        log_success "Helm already installed: $(helm version --short)"
-    else
-        log_info "Installing Helm ${HELM_VERSION}..."
-        if prompt_continue; then
-            if [[ "${OS}" == "darwin" ]]; then
-                brew install helm
-            elif [[ "${OS}" == "linux" ]]; then
-                HELM_TMP=$(mktemp -d)
-                HELM_TAR="helm-${HELM_VERSION}-linux-${GO_ARCH}.tar.gz"
-                HELM_URL="https://get.helm.sh/${HELM_TAR}"
-                if verify_download_url "$HELM_URL" "helm ${HELM_VERSION} for Linux ${GO_ARCH}"; then
-                    curl -fsSL "$HELM_URL" | tar -xzC "$HELM_TMP"
-                    sudo mv "$HELM_TMP/linux-${GO_ARCH}/helm" /usr/local/bin/helm
-                    sudo chmod +x /usr/local/bin/helm
-                    rm -rf "$HELM_TMP"
-                else
-                    log_error "Failed to install helm. Please install manually."
-                    rm -rf "$HELM_TMP"
-                fi
-            fi
-            log_success "Helm installed"
-        fi
-    fi
+    install_helm
 
     # helmfile (declarative release graph for --deployer helmfile bundles)
     if command_exists helmfile && [[ "${UPGRADE}" != "true" ]]; then

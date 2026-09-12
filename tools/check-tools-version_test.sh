@@ -36,11 +36,14 @@ GO_LICENSES_PINNED_VERSION="v2.0.1"
 GO_LICENSES_MISMATCH_VERSION="v1.6.0"
 ORAS_PINNED_VERSION="1.3.3"
 ORAS_MISMATCH_VERSION="1.3.4"
+HELM_PINNED_VERSION="v4.3.0"
+HELM_MISMATCH_VERSION="v4.2.4"
 DOCKER_VERSION="27.3.1"
 export APIDIFF_PINNED_VERSION APIDIFF_MISMATCH_VERSION
 export ADDLICENSE_PINNED_VERSION ADDLICENSE_MISMATCH_VERSION
 export GO_LICENSES_PINNED_VERSION GO_LICENSES_MISMATCH_VERSION
-export ORAS_PINNED_VERSION ORAS_MISMATCH_VERSION DOCKER_VERSION
+export ORAS_PINNED_VERSION ORAS_MISMATCH_VERSION
+export HELM_PINNED_VERSION HELM_MISMATCH_VERSION DOCKER_VERSION
 
 cat >"${STUB_DIR}/go" <<'STUB'
 #!/usr/bin/env bash
@@ -99,13 +102,16 @@ cat >"${STUB_DIR}/yq" <<'STUB'
 #!/usr/bin/env bash
 case "${1:-}" in
     'keys | .[]')
-        printf 'linting\nsecurity_tools\n'
+        printf 'linting\nsecurity_tools\ntesting_tools\n'
         ;;
     '.linting | keys | .[]')
         printf 'apidiff\naddlicense\ngo_licenses\n'
         ;;
     '.security_tools | keys | .[]')
         echo oras
+        ;;
+    '.testing_tools | keys | .[]')
+        echo helm
         ;;
     '.linting.apidiff')
         echo "${APIDIFF_PINNED_VERSION}"
@@ -118,6 +124,9 @@ case "${1:-}" in
         ;;
     '.security_tools.oras')
         echo "${ORAS_PINNED_VERSION}"
+        ;;
+    '.testing_tools.helm')
+        echo "${HELM_PINNED_VERSION}"
         ;;
     *)
         exit 2
@@ -153,6 +162,27 @@ fi
 printf 'Version: %s+Homebrew\n' "${version}"
 STUB
 
+cat >"${STUB_DIR}/helm" <<'STUB'
+#!/usr/bin/env bash
+version="${HELM_PINNED_VERSION}"
+if [[ "${TOOL_TARGET:-}" == "helm" ]]; then
+    case "${TOOL_MODE:-correct}" in
+        correct)
+            ;;
+        mismatch)
+            version="${HELM_MISMATCH_VERSION}"
+            ;;
+        unreadable)
+            exit 1
+            ;;
+        *)
+            exit 2
+            ;;
+    esac
+fi
+printf '%s+g1234567\n' "${version}"
+STUB
+
 cat >"${STUB_DIR}/docker" <<'STUB'
 #!/usr/bin/env bash
 if [[ "${1:-}" != "version" ]]; then
@@ -166,7 +196,7 @@ STUB
 
 chmod +x "${STUB_DIR}/go" "${STUB_DIR}/yq" \
     "${STUB_DIR}/apidiff" "${STUB_DIR}/addlicense" \
-    "${STUB_DIR}/go-licenses" "${STUB_DIR}/oras" "${STUB_DIR}/docker"
+    "${STUB_DIR}/go-licenses" "${STUB_DIR}/oras" "${STUB_DIR}/helm" "${STUB_DIR}/docker"
 
 # Keep missing-tool cases hermetic: after a stub is moved aside, PATH must not
 # fall through to a copy of that tool preinstalled on the host or CI runner.
@@ -277,6 +307,15 @@ check_tools_row "rejects-unreadable-oras" oras unreadable 1 \
     "${ORAS_PINNED_VERSION}|unknown|⚠"
 check_tools_row "rejects-missing-oras" oras missing 1 \
     "${ORAS_PINNED_VERSION}|-|✗"
+
+check_tools_row "accepts-exact-helm" helm correct 0 \
+    "${HELM_PINNED_VERSION}|${HELM_PINNED_VERSION}|✓"
+check_tools_row "rejects-mismatched-helm" helm mismatch 1 \
+    "${HELM_PINNED_VERSION}|${HELM_MISMATCH_VERSION}|⚠"
+check_tools_row "rejects-unreadable-helm" helm unreadable 1 \
+    "${HELM_PINNED_VERSION}|unknown|⚠"
+check_tools_row "rejects-missing-helm" helm missing 1 \
+    "${HELM_PINNED_VERSION}|-|✗"
 
 check_tools_row "reports-any-running-docker-version" docker correct 0 \
     "any|${DOCKER_VERSION}|✓"
