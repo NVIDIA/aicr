@@ -35,12 +35,10 @@ import (
 // skipCrds suppresses CRDs on *first install* too, so gating it on ownsCRDs
 // would break a fresh install of every CRD-shipping chart.
 //
-// This is why #2525's premise is wrong, and why this deployer needs no code
-// change: argocd and argocd-helm do not strand CRDs at their day-one schema the
-// way helm and helmfile do. It is also why the properties are worth
-// pinning: they are load-bearing by omission, so nothing else would fail if a
-// future change dropped them. See the origin issue #2264, whose table had this
-// right, and docs/user/component-catalog.md.
+// So argocd and argocd-helm need no code to honor ownsCRDs, which is why the
+// properties are worth pinning here: they are load-bearing by omission, and
+// nothing else would fail if a future change dropped them. Per-deployer CRD
+// behavior is recorded in docs/user/component-catalog.md and #2264.
 //
 // Scoped to the upstream-chart source, which is the only shape with a `helm:`
 // stanza to put skipCrds in. A vendored component becomes a path-based source
