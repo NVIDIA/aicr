@@ -86,3 +86,124 @@ done
 [[ "${missing_tools}" -eq 0 ]] || exit 1
 
 echo "No checksum-database-dependent installs; ${#REQUIRED_MODULE_TOOLS[@]} required tools built from the main module"
+
+if ! grep -qE 'installed_helm_version.*==.*HELM_VERSION' "${SETUP_TOOLS}"; then
+    echo "FAIL: helm install block no longer compares the installed version against HELM_VERSION" >&2
+    exit 1
+fi
+echo "Helm install block still enforces its version pin"
+
+# The grep checks above only prove the relevant tokens exist in the script,
+# not that install_helm() actually picks the right Homebrew action or
+# reports a mismatch. Exercise the real decision logic in a subshell with
+# fake `helm`/`brew` binaries on PATH: setup-tools' own `set -euo pipefail`
+# (sourced from tools/common) must not escape into this test process, and
+# each scenario needs its own PATH/env without clobbering the others.
+#
+# homebrew_managed: "true" makes the fake `brew list --versions helm` exit 0
+#   (a Homebrew-owned keg), "false" makes it exit 1 (a manually installed
+#   binary Homebrew doesn't know about).
+# post_install_version: what the fake `brew upgrade|install helm` leaves
+#   installed, fed back to install_helm()'s post-install version check.
+run_install_helm() {
+    local homebrew_managed="$1" post_install_version="$2"
+    (
+        set -euo pipefail
+        scratch=$(mktemp -d)
+        trap 'rm -rf "${scratch}"' EXIT
+
+        fake_bin="${scratch}/bin"
+        mkdir -p "${fake_bin}"
+        helm_version_file="${scratch}/helm_version"
+        echo "9.8.0" > "${helm_version_file}" # stale, pre-install version
+        brew_call_log="${scratch}/brew_calls"
+        : > "${brew_call_log}"
+
+        cat > "${fake_bin}/helm" << EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "version" ]]; then
+    cat "${helm_version_file}" 2>/dev/null
+    exit 0
+fi
+exit 1
+EOF
+        chmod +x "${fake_bin}/helm"
+
+        cat > "${fake_bin}/brew" << EOF
+#!/usr/bin/env bash
+echo "\$*" >> "${brew_call_log}"
+case "\$1" in
+    list)
+        if [[ "${homebrew_managed}" == "true" ]]; then
+            echo "helm 9.8.0"
+            exit 0
+        fi
+        exit 1
+        ;;
+    upgrade|install)
+        echo "${post_install_version}" > "${helm_version_file}"
+        exit 0
+        ;;
+esac
+EOF
+        chmod +x "${fake_bin}/brew"
+
+        export PATH="${fake_bin}:${PATH}"
+        export HELM_VERSION="9.9.9" # fake pin, independent of any real Helm release
+        export UPGRADE="false"
+        export AUTO_MODE="true" # skip the interactive prompt_continue read
+        export SETUP_TOOLS_SOURCE_ONLY="true"
+        # shellcheck source=tools/setup-tools
+        source "${SETUP_TOOLS}"
+        OS="darwin" # override the real-host detection sourcing just ran
+
+        # Capture the exit code explicitly rather than relying on `set -e` to
+        # halt this subshell on failure: this whole function runs as the
+        # tested command of a caller's `if`, and bash ignores -e for the full
+        # extent of a compound command under test that way -- including
+        # nested subshells that re-enable it themselves. Without this, a
+        # failing install_helm would silently fall through to the two lines
+        # below and this subshell would still exit 0.
+        rc=0
+        install_helm || rc=$?
+        echo "---BREW_CALLS---"
+        cat "${brew_call_log}"
+        exit "${rc}"
+    )
+}
+
+output=$(run_install_helm "true" "9.9.9")
+if ! printf '%s\n' "${output}" | grep -q '^upgrade helm$'; then
+    echo "FAIL: a stale Homebrew-managed Helm did not run 'brew upgrade helm'" >&2
+    echo "${output}" >&2
+    exit 1
+fi
+if printf '%s\n' "${output}" | grep -q '^install helm$'; then
+    echo "FAIL: a stale Homebrew-managed Helm ran 'brew install helm' instead of upgrading" >&2
+    exit 1
+fi
+echo "Stale Homebrew-managed Helm runs 'brew upgrade helm'"
+
+output=$(run_install_helm "false" "9.9.9")
+if ! printf '%s\n' "${output}" | grep -q '^install helm$'; then
+    echo "FAIL: a stale unmanaged PATH Helm did not run 'brew install helm'" >&2
+    echo "${output}" >&2
+    exit 1
+fi
+if printf '%s\n' "${output}" | grep -q '^upgrade helm$'; then
+    echo "FAIL: a stale unmanaged PATH Helm ran 'brew upgrade helm', which fails on a binary Homebrew doesn't own" >&2
+    exit 1
+fi
+echo "Stale unmanaged PATH Helm runs 'brew install helm'"
+
+if output=$(run_install_helm "true" "9.9.8"); then
+    echo "FAIL: a post-install version mismatch (got 9.9.8, pinned 9.9.9) did not fail install_helm" >&2
+    echo "${output}" >&2
+    exit 1
+fi
+if ! printf '%s\n' "${output}" | grep -q 'is pinned in .settings.yaml'; then
+    echo "FAIL: a post-install version mismatch (got 9.9.8, pinned 9.9.9) did not report the pin-mismatch error" >&2
+    echo "${output}" >&2
+    exit 1
+fi
+echo "Post-install version mismatch fails install_helm and reports the pin-mismatch error"

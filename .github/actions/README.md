@@ -253,7 +253,9 @@ attestations land through the OCI referrers path by our decision rather than by
 an installer default. The SBOM and the VEX share a per-platform subject and are
 deliberately in different formats so a referrers listing can tell them apart;
 `tools/openvex-bind` rewrites `.openvex.json` product identifiers to the
-platform manifest digest before the VEX is signed. Both the committed source and
+platform manifest digest before the VEX is signed, and replaces the
+document-level `tooling` field with an identifier of itself so committed prose
+cannot reach a signature. Both the committed source and
 every generated projection are validated by `openvex-guard.sh`, which holds the
 rules and the pinned v0.2.0 `@context` once so the two checks cannot drift; the
 only rule that differs is that a projection may carry an empty `statements`
