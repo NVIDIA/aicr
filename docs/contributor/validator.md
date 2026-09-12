@@ -1066,7 +1066,10 @@ Kind cluster after `aicr bundle` + `helm install`) via the
 The same assertion file now powers TWO surfaces:
 
 1. **`make check-health` / `make check-health-all`** — local Kind-cluster
-   sanity invoked manually by chart authors.
+   sanity invoked manually by chart authors. `check-health-all` sweeps
+   only registry-linked components (`registry.yaml`'s
+   `healthCheck.assertFile` entries); an opt-in-only check like
+   `nvsentinel-observability` runs via `check-health COMPONENT=<name>`.
 2. **`aicr validate --phase deployment`** — registry-declared content is
    loaded into `ComponentRef.HealthCheckAsserts` during recipe
    resolution (PR #1219) and executed by the deployment validator's
@@ -1240,7 +1243,7 @@ into the validator image):
 
 ```bash
 make check-health COMPONENT=gpu-operator   # one component
-make check-health-all                      # everything in recipes/checks/
+make check-health-all                      # every registry-linked component
 make validate-local RECIPE=recipe.yaml     # full pipeline in Kind
 ```
 

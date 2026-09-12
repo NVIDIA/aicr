@@ -91,9 +91,8 @@ func TestMixinOverridesSafeForMerge(t *testing.T) {
 			},
 		},
 		{
-			// This is the exact shape of round 1/2's original bug: a mixin
-			// reaching into an unrelated, already-chained component and
-			// disabling its driver. gpu-operator declares no
+			// A mixin reaching into an unrelated, already-chained component
+			// and disabling its driver. gpu-operator declares no
 			// mixinSafeOverridePaths, so every path on it is rejected.
 			name:          "arbitrary override on an unrelated component (gpu-operator.driver.enabled) -> rejected",
 			componentName: "gpu-operator",
@@ -106,7 +105,8 @@ func TestMixinOverridesSafeForMerge(t *testing.T) {
 		{
 			// global.tracing.endpoint is deliberately excluded from
 			// nvsentinel's allowlist (recipes/registry.yaml) so a mixin can
-			// never supply it -- only an operator --set can.
+			// never supply it -- it must come from outside the mixin (a
+			// leaf recipe's own override, or an operator --set).
 			name:          "nvsentinel path outside the allowlist (tracing.endpoint) -> rejected",
 			componentName: "nvsentinel",
 			mixinOverrides: map[string]any{
@@ -270,7 +270,110 @@ func TestMixinNVSentinelObservability_ComposesCleanly(t *testing.T) {
 		t.Errorf("tracing.insecure = %v, want false", got)
 	}
 	if _, present := tracing["endpoint"]; present {
-		t.Errorf("tracing.endpoint = %v, want absent -- endpoint must come only from an operator --set", tracing["endpoint"])
+		t.Errorf("tracing.endpoint = %v, want absent -- the endpoint must come from outside the mixin (leaf override or --set)", tracing["endpoint"])
+	}
+}
+
+// TestMixinNVSentinelObservability_ComposesOntoRealBaseChain composes the
+// real mixin onto the nvsentinel ComponentRef the base chain ACTUALLY
+// declares -- crucially including its valuesFile, which is what pulls
+// recipes/components/nvsentinel/values.yaml into the collision layers.
+//
+// The sibling ComposesCleanly test builds a synthetic ref with no
+// valuesFile, so existingRawOverrideLayers yields no file layers there and
+// the collision guard never sees real base values. Without this test, a
+// future edit to nvsentinel's base values that sets any allowlisted path
+// (e.g. global.auditLogging.enabled) would make production reject the mixin
+// as a collision while every other test stayed green.
+func TestMixinNVSentinelObservability_ComposesOntoRealBaseChain(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("loadMetadataStore: %v", err)
+	}
+
+	var baseRef ComponentRef
+	found := false
+	for _, c := range store.Base.Spec.ComponentRefs {
+		if c.Name == "nvsentinel" {
+			baseRef = c
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("nvsentinel componentRef not present in the base chain; check recipes/overlays/base.yaml")
+	}
+	if baseRef.ValuesFile == "" {
+		t.Fatal("base chain's nvsentinel ref declares no valuesFile; this test exists to exercise that layer")
+	}
+
+	spec := RecipeMetadataSpec{
+		Mixins:        []string{"nvsentinel-observability"},
+		ComponentRefs: []ComponentRef{baseRef},
+	}
+	if _, err := store.mergeMixins(t.Context(), &spec); err != nil {
+		t.Fatalf("mergeMixins onto the real base chain: %v -- the mixin's allowlisted paths now collide with %s; either the base values or the mixin must change",
+			err, baseRef.ValuesFile)
+	}
+}
+
+// TestMixinNVSentinelObservability_LeafSuppliesEndpoint covers the exact
+// adoption shape docs/user/component-catalog.md documents: the leaf sets
+// ONLY global.tracing.endpoint (the one path the mixin's allowlist
+// deliberately excludes) and the mixin supplies enabled/insecure. This must
+// compose -- sibling paths under the same parent are not a collision -- and
+// the result must carry all three.
+//
+// Covered here rather than in the chart-render test, which injects the
+// endpoint into an already-composed values map and so cannot catch a
+// mergeMixins regression on this path.
+func TestMixinNVSentinelObservability_LeafSuppliesEndpoint(t *testing.T) {
+	ctx := context.Background()
+	store, err := loadMetadataStore(ctx)
+	if err != nil {
+		t.Fatalf("loadMetadataStore: %v", err)
+	}
+
+	const endpoint = "otel-collector.example:4317"
+	spec := RecipeMetadataSpec{
+		Mixins: []string{"nvsentinel-observability"},
+		ComponentRefs: []ComponentRef{
+			{
+				Name: "nvsentinel", Chart: "nvsentinel", Version: "v1.20.0",
+				Source: "oci://ghcr.io/nvidia", Type: ComponentTypeHelm, Namespace: "nvsentinel",
+				Overrides: map[string]any{
+					"global": map[string]any{"tracing": map[string]any{"endpoint": endpoint}},
+				},
+			},
+		},
+	}
+
+	if _, err := store.mergeMixins(t.Context(), &spec); err != nil {
+		t.Fatalf("mergeMixins: %v -- a leaf supplying only tracing.endpoint must compose with the mixin, since endpoint is not an allowlisted path and does not collide with enabled/insecure", err)
+	}
+
+	var nvsentinel *ComponentRef
+	for i := range spec.ComponentRefs {
+		if spec.ComponentRefs[i].Name == "nvsentinel" {
+			nvsentinel = &spec.ComponentRefs[i]
+		}
+	}
+	if nvsentinel == nil {
+		t.Fatal("nvsentinel component missing from merged spec")
+	}
+	global, _ := nvsentinel.Overrides["global"].(map[string]any)
+	tracing, _ := global["tracing"].(map[string]any)
+	if tracing == nil {
+		t.Fatal("overrides.global.tracing missing after merge")
+	}
+	if got := tracing["endpoint"]; got != endpoint {
+		t.Errorf("tracing.endpoint = %v, want %q (the leaf's own value must survive the merge)", got, endpoint)
+	}
+	if got := tracing["enabled"]; got != true {
+		t.Errorf("tracing.enabled = %v, want true (from the mixin)", got)
+	}
+	if got := tracing["insecure"]; got != false {
+		t.Errorf("tracing.insecure = %v, want false (from the mixin)", got)
 	}
 }
 

@@ -316,8 +316,13 @@ are truly orthogonal and reused enough to justify the indirection.
   - Duplicate constraint names between a mixin and the inheritance chain
     or between mixins in the same leaf produce a hard error.
   - Duplicate component names are allowed when the mixin's entry sets only
-    fields in the additive set `{Namespace, ManifestFiles, PreManifestFiles}`;
-    setting any identity/sourcing field on a colliding name still errors.
+    fields in the additive set `{Namespace, ManifestFiles, PreManifestFiles}`,
+    plus `Overrides` paths that are both allowlisted by the target
+    component's own registry entry (`ComponentConfig.MixinSafeOverridePaths`)
+    and non-colliding — an allowlisted path is still rejected when the
+    leaf's chain or an earlier-merged mixin already configured it. Setting
+    any identity/sourcing field, or an `Overrides` path outside that
+    allowlist, on a colliding name still errors.
 
 ### Deferred A: Intermediates + Reparenting
 
@@ -344,7 +349,7 @@ verified safe via regression tests.
 | Specificity fix changes overlay merge order | Silent recipe regression | Golden-file tests for all leaf overlays; regression test for zero-value criteria | 1 |
 | Candidate selection changes recipe output | Unexpected constraint or component changes | Characterization tests through both build paths | 2 |
 | Mixin loaded as normal overlay by resolver | Double-application of constraints/components | Distinct `kind: RecipeMixin` schema; loader excludes `recipes/mixins/` | 3 |
-| Mixin-vs-inheritance constraint conflict | Silent constraint override | Loader-time validation in `mergeMixins()`: constraint name collisions always error; component name collisions error only when the mixin sets identity/sourcing fields (additive-only fields are explicitly allowed for OS-conditional namespace + pre/post manifest overrides) | 3 |
+| Mixin-vs-inheritance constraint conflict | Silent constraint override | Loader-time validation in `mergeMixins()`: constraint name collisions always error; component name collisions error only when the mixin sets identity/sourcing fields, or an `Overrides` path that is outside the target component's registry-declared allowlist **or** collides with one the chain/an earlier mixin already set (additive-only fields are explicitly allowed for OS-conditional namespace + pre/post manifest overrides, and allowlisted, non-colliding `Overrides` paths for opted-in components) | 3 |
 | Constraint evaluator misses mixin constraints | Mixin OS/platform constraints not validated against snapshot | Move constraint evaluation to run on fully composed candidate (post-merge) | 3 |
 | `spec.mixins` leaks into recipe output | Downstream consumer confusion | Strip `Mixins` field after merge, before materialization | 3 |
 

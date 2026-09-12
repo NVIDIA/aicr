@@ -20,8 +20,9 @@
 # mechanism.
 #
 # global.tracing.endpoint is deliberately absent -- not on the allowlist --
-# so the operator must supply it via
-# --set nv-sentinel:global.tracing.endpoint=<host:port>. A recipe composing
+# so it must be supplied outside this mixin: either the leaf recipe's own
+# override, or an operator --set
+# (nv-sentinel:global.tracing.endpoint=<host:port>). A recipe composing
 # this mixin with no endpoint still resolves fine; the bundle fails at
 # `aicr bundle` time instead (CheckNVSentinelTracingEndpointRequired).
 #

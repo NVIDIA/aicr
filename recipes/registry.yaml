@@ -397,10 +397,11 @@ components:
     # Opt-in surface for the nvsentinel-observability mixin (#2617): the
     # exact audit-logging and tracing leaf paths a mixin may set on this
     # already-base-chained component. global.tracing.endpoint is
-    # deliberately absent -- it must come from the operator (--set), never
-    # from a mixin, so CheckNVSentinelTracingEndpointRequired always has a
-    # real value to demand. See pkg/recipe/metadata_store.go's
-    # mixinOverridesSafeForMerge for how this allowlist is enforced.
+    # deliberately absent -- it must come from outside the mixin (a leaf
+    # recipe's own override, or an operator --set), never from a mixin, so
+    # CheckNVSentinelTracingEndpointRequired always has a real value to
+    # demand. See pkg/recipe/metadata_store.go's mixinOverridesSafeForMerge
+    # for how this allowlist is enforced.
     mixinSafeOverridePaths:
       - global.auditLogging.enabled
       - global.auditLogging.logRequestBody

@@ -479,7 +479,7 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make kwok-test-all` | Test all recipes with KWOK (serial, shared cluster) |
 | `make kwok-e2e RECIPE=<name>` | Test single recipe with KWOK (e.g., gb200-eks-training) |
 | `make check-health COMPONENT=<name>` | Run chainsaw health check directly against Kind cluster |
-| `make check-health-all` | Run all chainsaw health checks against Kind cluster |
+| `make check-health-all` | Run chainsaw health checks for every registry-linked component against Kind cluster (opt-in-only checks like `nvsentinel-observability` run via `check-health COMPONENT=<name>`) |
 | `make validate-local RECIPE=<path>` | Build validator image, load into Kind, run deployment validation |
 
 ### Build & Release
@@ -671,7 +671,8 @@ Runs chainsaw directly against the Kind cluster. Fast (~5s), validates YAML synt
 # Run health check for a single component
 make check-health COMPONENT=nvsentinel
 
-# Run all health checks
+# Run health checks for every registry-linked component
+# (opt-in-only checks are excluded; run those with check-health COMPONENT=<name>)
 make check-health-all
 
 # List available components

@@ -100,6 +100,7 @@ components:
 | `validations` | []`ComponentValidationConfig` | no | Bundle-time validation checks (function, severity, conditions, message) |
 | `healthCheck.assertFile` | string | **yes** | Chainsaw assert YAML (relative to data dir) consumed by `aicr validate --phase deployment` (runtime — #1220) and by `make check-health` locally. Content is restricted to the read-only `assert` / `error` operation allowlist. Enforced at PR time by `pkg/recipe.TestComponentRegistry_RequiresHealthCheck` (every component must declare a path) and `pkg/chainsaw.TestValidateTestReadOnly_RegistryContent` (every declared path must pass the allowlist) — see #1223. |
 | `upgrades.file` | string | no | Path to a `ComponentUpgrades` transition record (relative to data dir, e.g. `upgrades/nodewright-operator.yaml`), ADR-021. Empty means the component has no transition records. See [Transition records](#transition-records) below. |
+| `mixinSafeOverridePaths` | []string | no | Exact dotted value paths a `RecipeMixin` may set on this component via `Overrides` (see [Mixin Composition](#mixin-composition)). Empty (the default) means the component hasn't opted in: a mixin introducing it fresh keeps unrestricted `valuesFile`/`overrides`, but once it's already in the chain every mixin `Overrides` path is rejected. Entries must be exact leaf paths — an ancestor/descendant pair is rejected at registry load |
 | `gkeCriticalPriority` | bool | no | Synthesize ResourceQuota on GKE so `system-*-critical` pods admit |
 | `hasSelfRefCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` (chart ships CRD + CR in same release) |
 | `manifestsUseChartCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` on the release carrying the attached manifests — the injected `-post` wrapper under both vendored and non-vendored layouts (manifests create CRs of CRDs the chart installs) |
@@ -345,9 +346,9 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
 - Resolution order: base chain merged first, then mixins applied to
   the merged result, in `spec.mixins` list order. A leaf adopts a
   mixin by listing its file basename in `spec.mixins`.
-- Mixin componentRefs are restricted to additive merges via
-  `mixinComponentRefSafeForMerge` (see
-  `pkg/recipe/metadata_store.go`). A mixin componentRef may
+- Mixin componentRefs targeting a component **already in the chain**
+  are restricted to additive merges via `mixinComponentRefSafeForMerge`
+  (see `pkg/recipe/metadata_store.go`). Such a componentRef may
   unconditionally set `name`, `namespace`, `manifestFiles`,
   `preManifestFiles`. Setting any of `chart`, `type`, `source`,
   `version`, `tag`, `path`, `valuesFile`, `patches`,
@@ -356,6 +357,18 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
   silently override the chain's chosen chart, so the resolver names
   the offending field and refuses to merge (see ADR-005 "Silent
   constraint override" mitigation).
+- A mixin **introducing a genuinely new component** (one not already in
+  the chain) may set those structural fields — that is how
+  `platform-kubeflow` and `platform-inference` add their components.
+  The restriction above exists to stop a mixin silently redefining a
+  component the chain already chose, so it only applies on collision.
+  **One exception:** if that fresh component's registry entry declares a
+  non-empty `mixinSafeOverridePaths`, its `valuesFile` is rejected too —
+  a values file's contents are never matched against the allowlist, so
+  permitting it would let a mixin smuggle in a non-allowlisted value
+  (e.g. `nvsentinel`'s deliberately-excluded `global.tracing.endpoint`)
+  that it could not set via `overrides`. Such a component must receive
+  its values through allowlisted `overrides` only.
 - `overrides` is neither unconditionally allowed nor unconditionally
   rejected: `mixinOverridesSafeForMerge` (see
   `pkg/recipe/metadata_store.go`) permits it path-by-path, gated by

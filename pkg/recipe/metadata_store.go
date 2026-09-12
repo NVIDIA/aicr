@@ -1733,12 +1733,6 @@ func pathConfiguredInRaw(raw map[string]any, path string) (string, bool) {
 	return "", false
 }
 
-// existingRawOverrideLayers returns the unmerged raw values maps that
-// configure ref — component base values.yaml (if ref.ValuesFile is set
-// and differs from it), ref.ValuesFile's content, and ref.Overrides — for
-// collision detection via pathConfiguredInRaw. Deliberately not
-// resolveComponentValues' merged result: null-deletion during that merge
-// would make "never mentioned" indistinguishable from "explicitly cleared."
 // isNotFoundReadError reports whether err is a DataProvider.ReadFile
 // not-found signal, either form: the stdlib fs.ErrNotExist a
 // filesystem-backed provider (embedded, layered) surfaces, or the
@@ -1747,6 +1741,12 @@ func isNotFoundReadError(err error) bool {
 	return stderrors.Is(err, fs.ErrNotExist) || stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeNotFound, ""))
 }
 
+// existingRawOverrideLayers returns the unmerged raw values maps that
+// configure ref — component base values.yaml (if ref.ValuesFile is set
+// and differs from it), ref.ValuesFile's content, and ref.Overrides — for
+// collision detection via pathConfiguredInRaw. Deliberately not
+// resolveComponentValues' merged result: null-deletion during that merge
+// would make "never mentioned" indistinguishable from "explicitly cleared."
 func existingRawOverrideLayers(ctx context.Context, provider DataProvider, ref ComponentRef) ([]map[string]any, error) {
 	if provider == nil {
 		provider = defaultEmbeddedProvider

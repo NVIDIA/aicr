@@ -141,6 +141,16 @@ spec:
                 name: labeler
                 namespace: nvsentinel
               ((status.availableReplicas || `0`) < (spec.replicas || `1`)): true
+        # Old pods can still be ready while new ones are stuck, passing both
+        # guards above; mirrors kubectl rollout status's drain check.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: labeler
+                namespace: nvsentinel
+              ((status.replicas || `0`) > (status.updatedReplicas || `0`)): true
         - error:
             resource:
               apiVersion: apps/v1

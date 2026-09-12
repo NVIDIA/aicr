@@ -2041,10 +2041,10 @@ func CheckNVSentinelTracingEndpointRequired(ctx context.Context, componentName s
 	// Relation-aware dynamic guard: a --dynamic declaration on ONE of
 	// {enabled, endpoint} is only a hazard if the OTHER field's static
 	// state can't already rule out "enabled=true, endpoint empty" after
-	// an install-time edit. Blocking both unconditionally (as an earlier
-	// version of this check did) rejected safe configurations too --
-	// e.g. dynamic enabled with a real static endpoint can never reach
-	// the bad combination, since nothing dynamic can blank the endpoint.
+	// an install-time edit. Blocking both unconditionally rejects safe
+	// configurations too -- e.g. dynamic enabled with a real static
+	// endpoint can never reach the bad combination, since nothing dynamic
+	// can blank the endpoint.
 	enabledDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{"global.tracing.enabled"})) > 0
 	endpointDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{"global.tracing.endpoint"})) > 0
 	if enabledDynamic || endpointDynamic {

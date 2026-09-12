@@ -788,6 +788,9 @@ check-health: ## Runs chainsaw health check directly against Kind cluster (COMPO
 # recipes/checks/*/: this is the set every shipped recipe actually exercises,
 # so opt-in-only checks (e.g. nvsentinel-observability) are excluded by
 # construction -- run those directly via `make check-health COMPONENT=<name>`.
+# --test-dir/--test-file are derived from each declared path rather than
+# reconstructed from a component name, so a non-conventional assertFile
+# (e.g. checks/shared/foo.yaml) is honored as declared.
 #
 # yq's exit status is captured separately from the pipeline that follows:
 # without `set -o pipefail`, a failing yq piped straight into the loop would
@@ -797,27 +800,28 @@ check-health-all: ## Runs chainsaw health checks for every registry-linked compo
 	@set -e; \
 	FAILED=""; \
 	ASSERT_FILES=$$(yq -r '.components[].healthCheck.assertFile' recipes/registry.yaml) || { echo "Error: yq failed to read recipes/registry.yaml"; exit 1; }; \
-	COMPONENTS=$$(printf '%s\n' "$$ASSERT_FILES" | grep -v '^null$$' | sed -e 's#^checks/##' -e 's#/health-check.yaml$$##' | sort -u); \
-	if [ -z "$$COMPONENTS" ]; then \
+	PATHS=$$(printf '%s\n' "$$ASSERT_FILES" | grep -v '^null$$' | sort -u); \
+	if [ -z "$$PATHS" ]; then \
 		echo "Error: no registry-linked health checks found in recipes/registry.yaml -- refusing to report success on zero checks"; \
 		exit 1; \
 	fi; \
-	for COMPONENT in $$COMPONENTS; do \
-		dir="recipes/checks/$$COMPONENT/"; \
-		echo "=== $$COMPONENT ==="; \
-		if chainsaw test --test-dir "$$dir" --test-file health-check.yaml --no-color; then \
-			echo "PASS: $$COMPONENT"; \
+	for ASSERT in $$PATHS; do \
+		dir="recipes/$$(dirname "$$ASSERT")/"; \
+		file="$$(basename "$$ASSERT")"; \
+		echo "=== $$ASSERT ==="; \
+		if chainsaw test --test-dir "$$dir" --test-file "$$file" --no-color; then \
+			echo "PASS: $$ASSERT"; \
 		else \
-			echo "FAIL: $$COMPONENT"; \
-			FAILED="$$FAILED $$COMPONENT"; \
+			echo "FAIL: $$ASSERT"; \
+			FAILED="$$FAILED $$ASSERT"; \
 		fi; \
 		echo ""; \
 	done; \
 	if [ -n "$$FAILED" ]; then \
-		echo "Failed components:$$FAILED"; \
+		echo "Failed checks:$$FAILED"; \
 		exit 1; \
 	fi; \
-	echo "All health checks passed"
+	echo "All registry-linked health checks passed"
 
 .PHONY: validate-local
 validate-local: image-validators ## Builds validator images and runs validation in Kind (RECIPE=<path>)
