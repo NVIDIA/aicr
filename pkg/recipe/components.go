@@ -85,6 +85,9 @@ type ComponentConfig struct {
 	// HealthCheck defines custom health check configuration for this component.
 	HealthCheck HealthCheckConfig `yaml:"healthCheck,omitempty"`
 
+	// Upgrades references this component's transition records (ADR-021).
+	Upgrades UpgradesConfig `yaml:"upgrades,omitempty"`
+
 	// ManifestFiles lists manifest files (relative to the recipes data
 	// root, e.g. "components/kueue/manifests/cluster-queue.yaml") bundled
 	// with the component whenever a recipe references it and the
@@ -191,6 +194,14 @@ type HealthCheckConfig struct {
 	// When set, the expected-resources check uses Chainsaw CLI to evaluate assertions
 	// instead of the default auto-discovery + typed replica checks.
 	AssertFile string `yaml:"assertFile,omitempty"`
+}
+
+// UpgradesConfig references a component's ComponentUpgrades document.
+type UpgradesConfig struct {
+	// File is the path to a ComponentUpgrades YAML file, relative to the
+	// data directory (e.g. "upgrades/nodewright-operator.yaml"). Empty
+	// means the component has no transition records.
+	File string `yaml:"file,omitempty"`
 }
 
 // HelmConfig contains default Helm chart settings for a component.

@@ -83,6 +83,7 @@ operator:
 
 - `validations:` — bundle-time misconfiguration warnings ([validator.md](validator.md#component-validations-bundle-time))
 - `healthCheck.assertFile:` — chainsaw conformance assertions ([validator.md](validator.md))
+- `upgrades.file:` — path to a `ComponentUpgrades` transition record ([recipe.md](recipe.md#transition-records))
 - `manifestFiles:` — manifest YAMLs (paths relative to the recipes data
   root) bundled with the component whenever a recipe references it and the
   componentRef declares none; shipped in the injected `-post` local chart
@@ -145,6 +146,7 @@ One-liner per field:
 | `sharedStorageClassPaths` | Where `--shared-storage-class` is written for shared filesystem PVCs |
 | `validations` | Bundle-time component check list ([validator.md](validator.md#component-validations-bundle-time)) |
 | `healthCheck.assertFile` | Chainsaw assert YAML path (relative to data dir) |
+| `upgrades.file` | Path to a `ComponentUpgrades` transition record (relative to data dir); empty means no transition records ([recipe.md](recipe.md#transition-records)) |
 | `manifestFiles` | Default manifest YAML paths bundled when the componentRef declares none (ref-declared lists take precedence). No opt-out: an empty ref-declared list is indistinguishable from absent (len == 0 → defaults filled) — to suppress the defaults, declare a replacement list. Helm components only; the loader rejects the combination with `kustomize:` |
 | `gkeCriticalPriority`, `hasSelfRefCRDs`, `manifestsUseChartCRDs` | Narrow service-specific flags (see godoc) |
 
