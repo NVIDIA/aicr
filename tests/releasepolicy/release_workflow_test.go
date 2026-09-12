@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"slices"
 	"sort"
@@ -331,6 +332,11 @@ func TestReleaseCosignAttestationsAreBounded(t *testing.T) {
 func TestReleaseProvenanceCoversEverySubject(t *testing.T) {
 	t.Parallel()
 	const provenanceAction = "actions/attest-build-provenance@"
+	// A mutable ref (`@v3.2.0`, or a bare `@`) satisfies the shared-pin check
+	// below just as well as a commit SHA does, and would hand a rewritable tag
+	// the id-token and attestations permissions this job runs with. Require the
+	// immutable form outright.
+	pinned := regexp.MustCompile(`^` + regexp.QuoteMeta(provenanceAction) + `[0-9a-f]{40}$`)
 	doc := loadYAML(t, ".github/actions/sbom-and-attest/action.yml")
 	steps := sliceValue(t, mapValue(t, doc, "runs"), "steps")
 
@@ -348,8 +354,8 @@ func TestReleaseProvenanceCoversEverySubject(t *testing.T) {
 		}
 		step := steps[index].(map[string]any)
 		uses := stringValue(t, step, "uses")
-		if !strings.HasPrefix(uses, provenanceAction) {
-			t.Errorf("%s must use %s, got %q", name, provenanceAction, uses)
+		if !pinned.MatchString(uses) {
+			t.Errorf("%s must use %s pinned to a 40-character commit SHA, got %q", name, provenanceAction, uses)
 		}
 		pins[uses] = struct{}{}
 		with := mapValue(t, step, "with")
