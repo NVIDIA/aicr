@@ -380,6 +380,8 @@ Air-gapped OpenShift deployments must separately mirror the relevant Red Hat cer
 
 The trade-off is intentional. Pinning an image gives reproducibility; deferring to the upstream chart lets security patches flow without an AICR release. The split is policy, not oversight — see the [supply chain epic](https://github.com/NVIDIA/aicr/issues/739) for how each component's policy is being made explicit.
 
+**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Known case: adopting the `nvsentinel-observability` mixin (see [Audit Logging and Tracing](component-catalog.md#audit-logging-and-tracing)), which sets `global.auditLogging.enabled: true` on `nvsentinel`, conditionally adds a `fix-audit-log-permissions` init container (`docker.io/bitnamilegacy/os-shell:12-debian-12-r30`) to the `platform-connectors` DaemonSet and `labeler` Deployment. It is not counted in the `nvsentinel` row's image count above, and it is a third-party image AICR does not otherwise mirror.
+
 ### Registries spanned
 
 AICR pulls from a deliberately diverse set of registries:

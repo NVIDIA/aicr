@@ -403,4 +403,49 @@ func TestRunComponentValidations(t *testing.T) {
 			t.Fatal("expected context-cancellation error, got nil")
 		}
 	})
+
+	// These two cover the check end-to-end through the real registry
+	// wiring (recipes/registry.yaml's severity:error entry), not just the
+	// bare function -- proving CheckNVSentinelTracingEndpointRequired
+	// actually blocks a bundle rather than only returning messages a
+	// caller could ignore, and that removing/miswiring the registry entry
+	// would be caught by this test failing to block.
+	nvsentinelTracing := func(enabled, endpoint any) *recipe.RecipeResult {
+		tracing := map[string]any{}
+		if enabled != nil {
+			tracing["enabled"] = enabled
+		}
+		if endpoint != nil {
+			tracing["endpoint"] = endpoint
+		}
+		return &recipe.RecipeResult{
+			ComponentRefs: []recipe.ComponentRef{{
+				Name:      "nvsentinel",
+				Overrides: map[string]any{"global": map[string]any{"tracing": tracing}},
+			}},
+		}
+	}
+
+	t.Run("nvsentinel tracing enabled with no endpoint → blocking error via registry wiring", func(t *testing.T) {
+		_, err := RunComponentValidations(context.Background(), nvsentinelTracing(true, nil), nil)
+		if err == nil {
+			t.Fatal("expected blocking error for tracing enabled with no endpoint, got nil")
+		}
+		if !strings.Contains(err.Error(), "global.tracing.endpoint") {
+			t.Errorf("error missing tracing-endpoint context: %v", err)
+		}
+	})
+
+	t.Run("nvsentinel tracing.enabled declared --dynamic → blocking error via registry wiring", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithDynamicValues(map[string][]string{
+			"nv-sentinel": {"global.tracing.enabled"},
+		}))
+		_, err := RunComponentValidations(context.Background(), nvsentinelTracing(nil, nil), cfg)
+		if err == nil {
+			t.Fatal("expected blocking error for --dynamic on the tracing-enabled gate, got nil")
+		}
+		if !strings.Contains(err.Error(), "--dynamic") {
+			t.Errorf("error missing dynamic-guard context: %v", err)
+		}
+	})
 }
