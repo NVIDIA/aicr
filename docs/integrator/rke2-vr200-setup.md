@@ -4,19 +4,19 @@ Bare-metal setup guide for the four Preview coordinates AICR publishes on VR200
 (Vera Rubin) NVL72 hardware running RKE2:
 
 - [`rke2/vr200-ubuntu/training`](https://validation.aicr.run/#/rke2/vr200-ubuntu/training)
-- `rke2/vr200-ubuntu/training-kubeflow` — adds Kubeflow Trainer to the training
-  leaf; no published evidence yet
+- [`rke2/vr200-ubuntu/training-kubeflow`](https://validation.aicr.run/#/rke2/vr200-ubuntu/training-kubeflow) — adds Kubeflow Trainer to
+  the training leaf
 - [`rke2/vr200-ubuntu/inference`](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference) — platform-neutral inference base (resolves when `--platform` is omitted)
 - [`rke2/vr200-ubuntu/inference-dynamo`](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo)
 
-> **`service=rke2` and `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. Published validation evidence exists for three of the four coordinates at [validation.aicr.run](https://validation.aicr.run/); `training-kubeflow` has none yet, and freshness of the rest is captured in the **Evidence status** note below.
+> **`service=rke2` and `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. Published validation evidence exists for all four coordinates at [validation.aicr.run](https://validation.aicr.run/); freshness against the current recipe is captured in the **Evidence status** note below.
 
-**Evidence status.** The recipes for the three evidence-linked coordinates
-above have changed since evidence publication (`aicr evidence digest` reports
-a mismatch against each pointer's `predicate.recipe.digest`); treat the linked
-evidence as historical precedent for the recipe content at publication time,
-not as validating the current recipe. The `training-kubeflow` coordinate has no
-published evidence at all — it is newer than the last publication run.
+**Evidence status.** The recipes for the three original coordinates have
+changed since evidence publication (`aicr evidence digest` reports a mismatch
+against each pointer's `predicate.recipe.digest`); treat that linked evidence
+as historical precedent for the recipe content at publication time, not as
+validating the current recipe. The `training-kubeflow` evidence is current — it
+was published from a three-phase run against the recipe as it ships today.
 
 **Which prerequisites apply where.** The node-level requirements — Ubuntu 26.04
 with the 64k-page kernel, the Skyhook-driven kernel-cmdline reboots, and the
