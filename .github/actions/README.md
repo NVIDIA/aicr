@@ -243,15 +243,19 @@ attestations for an image whose digests are already known
 **When to use**: When you already have the digests (e.g., from build output)
 **Inputs**:
 - `image_name` (required): One of the seven fixed AICR release image names
-- `image_digest` (required): Multi-platform index digest; subject for the provenance attestation
-- `amd64_digest` (required): `linux/amd64` manifest digest; subject for the amd64 SBOM and VEX
-- `arm64_digest` (required): `linux/arm64` manifest digest; subject for the arm64 SBOM and VEX
+- `image_digest` (required): Multi-platform index digest; subject for the index provenance attestation
+- `amd64_digest` (required): `linux/amd64` manifest digest; subject for the amd64 SBOM, VEX and provenance
+- `arm64_digest` (required): `linux/arm64` manifest digest; subject for the arm64 SBOM, VEX and provenance
 
 Cosign is pinned from `.settings.yaml` via `load-versions`, and every
 `cosign attest` call sets `--new-bundle-format=true` explicitly so the
 attestations land through the OCI referrers path by our decision rather than by
-an installer default. The SBOM and the VEX share a per-platform subject and are
-deliberately in different formats so a referrers listing can tell them apart;
+an installer default. Provenance is attested once per subject — the index and
+each platform manifest — through `actions/attest-build-provenance`, so every
+call mints the in-toto subject it publishes under rather than re-pushing one
+document to subjects its own statement does not name. The SBOM and the VEX share
+a per-platform subject and are deliberately in different formats so a referrers
+listing can tell them apart;
 `tools/openvex-bind` rewrites `.openvex.json` product identifiers to the
 platform manifest digest before the VEX is signed. Both the committed source and
 every generated projection are validated by `openvex-guard.sh`, which holds the
