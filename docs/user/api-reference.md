@@ -402,8 +402,9 @@ Same as `GET /v1/query` — see the [GET /v1/query error responses](#get-v1query
 
 The `v1` in the route and the `apiVersion` in a recipe document are
 independent version axes. The route segment versions the HTTP contract;
-`aicr.run/v1alpha2` and `aicr.run/v1alpha3` are the recipe schemas emitted by
-this reader-first release. `/v1/bundle` also accepts their ADR-022 targets:
+`aicr.run/v1` and `aicr.run/v1beta2` are the recipe schemas emitted from v0.22.
+`/v1/bundle` also still accepts the superseded `aicr.run/v1alpha2` and
+`aicr.run/v1alpha3`, retired in v1.0.0:
 `aicr.run/v1` for a default recipe and `aicr.run/v1beta2` for a
 profile/configuration recipe, plus versionless legacy artifacts. Selecting a
 profile or resolving a Slurm accounting mode determines which schema track
@@ -488,15 +489,15 @@ curl -fsS -X POST "http://localhost:8080/v1/bundle" \
 
 Profile-bearing responses record `metadata.selectedProfile`; accounting-aware
 responses record `configuration.slurm.accounting`. Both use recipe apiVersion
-`aicr.run/v1alpha3`. Their owned paths are immutable across AICR's supported
+`aicr.run/v1beta2` (the superseded `aicr.run/v1alpha3` is still read). Their owned paths are immutable across AICR's supported
 override surfaces: divergent static values, intersecting dynamic paths,
 owned-component removal, and argocd-helm install-time values fail closed before
 output.
 
 A recipe resolved without an explicit profile or `slurmAccountingMode` uses
-the default-track response shape. That track is `aicr.run/v1alpha2` today, and
-the schema also admits its ADR-022 target `aicr.run/v1` so a client generated
-from this spec tolerates the value a release before AICR emits it. Profile and
+the default-track response shape. That track is `aicr.run/v1` from v0.22, and
+the schema also still admits the superseded `aicr.run/v1alpha2` so a client
+generated from this spec reads artifacts captured earlier. Profile and
 Slurm-accounting selection are available on every endpoint; no composition
 needs special routing.
 
@@ -545,9 +546,9 @@ Generate deployment bundles from a recipe.
 **Request Body:**
 
 The request body is the recipe (`RecipeResult`) directly. No wrapper object is
-needed. This release emits `apiVersion: aicr.run/v1alpha2` or
-`aicr.run/v1alpha3` and `kind: RecipeResult`; its bundle readers additionally
-accept `aicr.run/v1` and `aicr.run/v1beta2`, respectively. The profile track identifies
+needed. This release emits `apiVersion: aicr.run/v1` or
+`aicr.run/v1beta2` and `kind: RecipeResult`; its bundle readers additionally
+accept the superseded `aicr.run/v1alpha2` and `aicr.run/v1alpha3`, respectively. The profile track identifies
 recipes carrying `metadata.selectedProfile`, typed
 `configuration.slurm.accounting`, or both; profile-bearing artifacts must use
 `/v1/bundle`. New clients should preserve the version emitted by recipe
@@ -579,14 +580,17 @@ The shared artifact gate rejects any `apiVersion` outside
 `aicr.run/v1alpha2`, `aicr.run/v1`, `aicr.run/v1alpha3`, and
 `aicr.run/v1beta2` with a 400, on this endpoint as well as on the CLI file-load
 path. An absent or empty `apiVersion` is still admitted as the legacy shape on
-`RecipeResult` inputs through v0.22, and v0.23 stops admitting it along with the
+`RecipeResult` inputs through v0.22, and v1.0.0 stops admitting it along with the
 alpha values. The tolerance is scoped to `RecipeResult`, which predates the
 field: a `RecipeMetadata` overlay is a catalog document however it arrives, so
 `aicr bundle -r` and `aicr validate -r` reject a headerless one exactly as a
 `--data` catalog scan does. The reader and emitter clocks are separate: v0.21
 and v0.22 both read the alpha values, the target values, and the empty header,
-while generated recipes keep their alpha headers until v0.22 switches the
-emitters. See
+while generated recipes carried alpha headers through v0.21 and carry the target
+values from v0.22 onward. On the CLI file-load path, reading an alpha or
+headerless artifact logs a deprecation warning naming the file; these endpoints
+take the artifact as a request body, so there is no file to name and no
+equivalent signal. See
 [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
 for the release-by-release table.
 

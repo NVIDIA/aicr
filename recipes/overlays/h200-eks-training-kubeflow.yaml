@@ -1,0 +1,44 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: h200-eks-training-kubeflow
+
+spec:
+  # Inherits from h200-eks-training recipe (H200 + EKS + training settings)
+  # This overlay adds Kubeflow Trainer for distributed training with TrainJob
+  base: h200-eks-training
+
+  criteria:
+    service: eks
+    accelerator: h200
+    intent: training
+    platform: kubeflow
+
+  # No OS mixin: the h200/eks chain has no OS-specific leaf today, so this
+  # overlay stays OS-agnostic like its base.
+  mixins:
+    - platform-kubeflow
+
+  # H200 + EKS specific constraints; kept aligned with h200-eks-training.
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+
+  componentRefs: []
+
+  # robust-controller is already declared by h200-eks-training and is inherited
+  # here; with kubeflow-trainer resolved it routes to checkRobustKubeflowTrainer.

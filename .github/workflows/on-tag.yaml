@@ -145,13 +145,12 @@ jobs:
       # is the same zero-fetch false pass the retired probe workflow existed to
       # catch.
       #
-      # The cost of ordering it here: the `go install` in install-go-licenses
-      # (inside go-build-release) now also resolves through the proxy, which
-      # inverts the usual guidance to install build tooling first. Accepted
-      # because the repository is virtual and re-fetches from upstream on a
-      # miss, so an unmirrored public module is a cache fill rather than a
-      # failure. Every other release tool — ko, syft, goreleaser, crane, helm —
-      # comes from a GitHub release over curl and never touches GOPROXY.
+      # The cost of ordering it here used to be that the `go install` in
+      # install-go-licenses (inside go-build-release) resolved a module the warm
+      # cache did not cover. #2667 removed that: go-licenses is now built from
+      # the main module, so `go mod download` above covers it and the build needs
+      # no fetch at all. Every other release tool — ko, syft, goreleaser, crane,
+      # helm — comes from a GitHub release over curl and never touches GOPROXY.
       - name: Configure the DGXC Go proxy
         uses: ./.github/actions/setup-dgxc-goproxy
         with:
@@ -219,11 +218,17 @@ jobs:
         with:
           workflow_file: on-tag.yaml
 
-      # Re-mint rather than reuse. One straggler still needs a live credential
-      # this late: the `go install` of go-licenses inside go-build-release
-      # resolves its own module, which the warm cache above does not cover. By
-      # the time we get here the original token may be past its ~15-minute
-      # lifetime, and a 401 would fail the release intermittently.
+      # Re-mint rather than reuse. The straggler this was originally added for
+      # is gone: #2667 moved go-licenses from `go install` -- which resolved its
+      # own module outside the warm cache -- to a `go build` from the main
+      # module, whose graph the `go mod download` above already covers. Measured
+      # on a cold module cache, `go mod download` followed by `go build` of both
+      # go-licenses and apidiff succeeds with GOPROXY=off.
+      #
+      # Kept because the step below still resolves through the proxy under
+      # `enforced` mode on any cache miss -- goreleaser cross-builds six
+      # binaries here -- and by this point the original token may be past its
+      # ~15-minute lifetime, where a 401 would fail the release intermittently.
       #
       # This is safe and cheap. GitHub's OIDC request credential
       # (ACTIONS_ID_TOKEN_REQUEST_URL/_TOKEN) is available for the life of the

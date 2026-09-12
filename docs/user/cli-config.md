@@ -32,7 +32,7 @@ The schema's source of truth is
 
 ```yaml
 kind: AICRConfig               # required, exactly this value
-apiVersion: aicr.run/v1alpha2  # required; v1beta1 also accepted, see below
+apiVersion: aicr.run/v1beta1   # required; v1alpha2 still accepted, see below
 metadata:
   name: gke-h100-training      # optional, identifying only
 spec:
@@ -47,11 +47,17 @@ Each `spec.*` section is optional and each command reads only its own section,
 so a file may carry just one section or any combination. A document with none
 of the five sections is rejected.
 
-`AICRConfig` is an authored file, so its `apiVersion` is yours to set. v0.21
-writes and documents `aicr.run/v1alpha2` and the loader also accepts the
-target `aicr.run/v1beta1`; empty and unknown values are rejected. v0.22 switches
-the documented value to the target and v0.23 stops accepting `aicr.run/v1alpha2`,
-so edit your config before upgrading to v0.23. The full release-by-release table
+Reading is per-command; **validation is not**. Every section present in the file
+is checked when the file loads, whichever command loaded it — so a malformed
+`spec.bundle` fails `aicr snapshot --config` too, naming the spec path that is
+wrong. Keep that in mind for a single document spanning several sections: an
+error can name a section the running command never reads.
+
+`AICRConfig` is an authored file, so its `apiVersion` is yours to set. From
+v0.22 the documented value is `aicr.run/v1beta1`; the loader still accepts the
+superseded `aicr.run/v1alpha2` and warns, naming your config file, while empty
+and unknown values are rejected. v1.0.0 stops accepting `aicr.run/v1alpha2`
+entirely, so edit your config before upgrading to it. The full release-by-release table
 is in
 [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility);
 the policy behind it is
@@ -85,7 +91,7 @@ by attestation and evidence push is deliberately absent — supply it via the
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: eks-h100-training
 spec:

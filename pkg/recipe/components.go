@@ -512,8 +512,12 @@ func validateComponentRegistryHeader(registry *ComponentRegistry, source string)
 	if !header.IsSupportedAuthoringAPIVersion(registry.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("%s has apiVersion %q, expected %q or %q for %s; update the registry header for this aicr release",
-				source, registry.APIVersion, ComponentRegistryAPIVersion, header.GroupVersionV1Beta1, ComponentRegistryKind))
+				source, registry.APIVersion, header.GroupVersion, header.GroupVersionV1Beta1, ComponentRegistryKind))
 	}
+	// source is a label ("registry.yaml", "external registry.yaml") rather than
+	// a path, so this names the document a user can act on without pretending
+	// to a precision the caller does not have.
+	header.WarnDeprecatedAPIVersion(source, registry.APIVersion, header.GroupVersionV1Beta1)
 	return nil
 }
 

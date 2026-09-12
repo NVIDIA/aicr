@@ -65,7 +65,7 @@ Even if your directory only adds overlays (no new components), AICR requires a
 `registry.yaml` at the root. The minimal stub is:
 
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 ```
@@ -112,7 +112,7 @@ Which binary accepts which catalog:
 | v0.20 and earlier | anything — catalog headers were ungated | current |
 | v0.21 | current and target | current |
 | v0.22 | current and target | target |
-| v0.23 and later | target only | target |
+| v1.0.0 and later | target only | target |
 
 **v0.20 and earlier cannot tell you whether your catalog is compatible.** Those
 releases did not gate catalog headers at all: an external `registry.yaml` whose
@@ -124,7 +124,7 @@ did in v0.21 (issue
 [#1812](https://github.com/NVIDIA/aicr/issues/1812)). Treat v0.20 as unable to
 validate your catalog rather than as a compatibility floor you can rely on.
 
-Switch to the **target** value before v0.23, which stops accepting the current
+Switch to the **target** value before v1.0.0, which stops accepting the current
 one. Catalogs are authored inputs, so this is a manual edit in your tree. AICR
 does not rewrite them, and there is no conversion layer.
 
@@ -145,7 +145,7 @@ the direct path accepted it and hydrated silently
 ([#2421](https://github.com/NVIDIA/aicr/issues/2421)); if you author overlays
 outside a catalog tree, confirm each one carries a header. The empty-value
 tolerance that remains is for hydrated `RecipeResult` inputs only, and it
-retires in v0.23.
+retires in v1.0.0.
 
 ## Adding a criteria value
 
@@ -158,7 +158,7 @@ a valid CLI / API input.** No code change, no rebuild.
 Example overlay for an internal NCP:
 
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: ncp-internal-h100-training
@@ -219,7 +219,7 @@ See [Supplying a benchmark runtime for a private service](../user/validation.md#
 `registry.yaml` declares the component's identity and source:
 
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: my-internal-operator

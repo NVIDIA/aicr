@@ -71,6 +71,7 @@ jobs:
           coverage_report: ${{ inputs.coverage_report }}
           coverage_threshold: ${{ steps.versions.outputs.coverage_threshold }}
           setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
+          setup_envtest_sha256: ${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}
           helm_version: ${{ steps.versions.outputs.helm }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
           oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
@@ -99,6 +100,7 @@ jobs:
           go_version: ${{ steps.versions.outputs.go }}
           golangci_lint_version: ${{ steps.versions.outputs.golangci_lint }}
           addlicense_version: ${{ steps.versions.outputs.addlicense }}
+          addlicense_sha256: ${{ steps.versions.outputs.addlicense_sha256_linux_amd64 }}
           lint_timeout: ${{ steps.versions.outputs.lint_timeout }}
           privileged_ci: ${{ inputs.privileged_ci }}
 

@@ -94,6 +94,11 @@ func LoadFromFileWithProviderProfile(
 	if versionErr := validateRecipeInputAPIVersion(rec.Kind, inputAPIVersion); versionErr != nil {
 		return nil, versionErr
 	}
+	// Warned here rather than inside validateRecipeInputAPIVersion because the
+	// helper takes only kind and apiVersion, and a warning that cannot name the
+	// file is not the warning RELEASE.md promises.
+	header.WarnDeprecatedAPIVersion(path, inputAPIVersion,
+		deprecatedInputTarget(rec.Kind, inputAPIVersion))
 
 	// Users often pass overlay files directly; auto-hydrate so they don't need
 	// a separate "aicr recipe" step before consuming the recipe.
@@ -224,8 +229,8 @@ func validateRecipeInputAPIVersion(kind, apiVersion string) error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("recipe metadata file has apiVersion %q, which this aicr build does not support (expected %q, %q, %q, or %q); "+
 				"update the catalog header for this aicr release",
-				apiVersion, RecipeMetadataAPIVersion, header.GroupVersionV1Beta1,
-				RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
+				apiVersion, header.GroupVersion, header.GroupVersionV1Beta1,
+				header.RecipeResultGroupVersion, header.GroupVersionV1Beta2))
 	}
 
 	if apiVersion == "" {
@@ -238,8 +243,21 @@ func validateRecipeInputAPIVersion(kind, apiVersion string) error {
 	return errors.New(errors.ErrCodeInvalidRequest,
 		fmt.Sprintf("recipe file has apiVersion %q, which this aicr build does not support (expected %q, %q, %q, or %q); "+
 			"regenerate the recipe with a matching aicr version",
-			apiVersion, RecipeResultAPIVersion, header.GroupVersionV1,
-			RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
+			apiVersion, header.GroupVersion, header.GroupVersionV1,
+			header.RecipeResultGroupVersion, header.GroupVersionV1Beta2))
+}
+
+// deprecatedInputTarget is the §2 value a recipe input should carry, given its
+// wire kind and whatever it carries today. An alpha profile document keeps the
+// profile track (v1beta2); everything else follows its kind.
+func deprecatedInputTarget(kind, apiVersion string) string {
+	if apiVersion == header.RecipeResultGroupVersion {
+		return header.GroupVersionV1Beta2
+	}
+	if kind == RecipeMetadataKind {
+		return header.GroupVersionV1Beta1
+	}
+	return header.GroupVersionV1
 }
 
 func ensureDirectOverlayProfileApplied(

@@ -379,6 +379,64 @@
       },
     },
 
+    // ---- addlicense bumps refresh the pinned linux/amd64 SHA256 ----
+    // Same contract as oasdiff above. #2667 moved addlicense off `go install`
+    // onto a checksum-verified release binary, so a version bump without a
+    // refreshed digest fails the lint job on the Renovate PR. addlicense is on
+    // the auto-merge list above, which makes the refresh load-bearing rather
+    // than convenient: without it the automerge never fires and the PR sits red
+    // until someone computes a digest by hand.
+    {
+      matchDepNames: ["google/addlicense"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-addlicense-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
+    // ---- setup-envtest bumps refresh the pinned linux/amd64 SHA256 ----
+    // Same contract, with one difference worth knowing when reviewing the diff:
+    // controller-runtime publishes no checksums.txt for this asset, so the
+    // script hashes the downloaded binary. The value it writes records what the
+    // release served at refresh time rather than corroborating an upstream
+    // claim.
+    {
+      matchDepNames: ["sigs.k8s.io/controller-runtime/tools/setup-envtest"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-setup-envtest-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
+    // ---- Keep .settings.yaml and go.mod in step for tools built from the module ----
+    // #2667 made apidiff and go-licenses `tool` directives in go.mod, so their
+    // version now lives in two files: go.mod (what `go build` produces) and
+    // .settings.yaml (what tools/check-tools verifies and the actions report).
+    // TestToolPinsMatchGoMod holds them equal.
+    //
+    // Two managers see them, and by default they would move independently: the
+    // custom.regex manager bumps .settings.yaml, while the gomod manager skips
+    // both modules because each is `// indirect` (nothing in this repo imports
+    // them -- they are built, not linked). That would red every such PR. The
+    // two rules below enable the gomod side for exactly these modules and put
+    // both bumps in one PR.
+    {
+      matchManagers: ["gomod"],
+      matchDepTypes: ["indirect"],
+      matchDepNames: ["golang.org/x/exp", "github.com/google/go-licenses/v2"],
+      enabled: true,
+    },
+    {
+      matchDepNames: [
+        "golang.org/x/exp",
+        "github.com/google/go-licenses/v2",
+        "google/go-licenses",
+      ],
+      groupName: "module-built lint tools (apidiff, go-licenses)",
+    },
+
     // ---- aiperf-bench base image is capped below python 3.14 ----
     // PR #1906 auto-bumped this to 3.14 and broke the UAT validator image
     // build (aiperf's pyzmq/uvloop had no cp314 wheels, and the single-stage

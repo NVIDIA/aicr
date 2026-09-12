@@ -1,4 +1,4 @@
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 componentRefs:
 - chart: cert-manager
   name: cert-manager

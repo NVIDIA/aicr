@@ -55,7 +55,7 @@ type adr022Row struct {
 // routes to the right gate and target. It does not verify that an individual
 // emit site selected the right constant. A catalog emitter that referenced
 // RecipeResultAPIVersion instead of RecipeMetadataAPIVersion is invisible here,
-// because the stable and authoring constants carry the same string until the
+// because the stable and authoring constants carried the same string until the
 // emitter switch. That half lives in adr022_emit_test.go, which asserts the
 // observed apiVersion on a real artifact against its track's constant.
 //
@@ -145,11 +145,11 @@ func TestADR022EmittedValueIsReadable(t *testing.T) {
 	}
 }
 
-// TestADR022TargetIsReadableBeforeTheEmitterSwitch asserts the ADR-022 §3
-// reader-first invariant: every §2 target parses now, a release before any
-// emitter writes it. Without this a rollback to the current release cannot
-// read artifacts the next release produced.
-func TestADR022TargetIsReadableBeforeTheEmitterSwitch(t *testing.T) {
+// TestADR022TargetIsReadable asserts every §2 target parses. It was the
+// reader-first invariant before the v0.22 switch; now that emitted == target it
+// overlaps TestADR022EmittedValueIsReadable, and it stays because the two
+// diverge again the moment a future kind is added on a target no gate accepts.
+func TestADR022TargetIsReadable(t *testing.T) {
 	t.Parallel()
 
 	for _, row := range adr022Map() {
@@ -164,15 +164,15 @@ func TestADR022TargetIsReadableBeforeTheEmitterSwitch(t *testing.T) {
 	}
 }
 
-// TestADR022EmittersAreStillOnAlpha pins the migration stage. AICR is in
-// ADR-022 §3 Release N: readers accept both tracks, emitters still write the
-// alpha values.
+// TestADR022EmittersAreOnTarget pins the migration stage. AICR is in ADR-022 §3
+// Release N+1 (v0.22, issue #2416): every emitter writes its §2 target, and the
+// readers still accept the alpha values until N+2 (v1.0.0, issue #2417).
 //
-// The emitter switch (v0.22, issue #2416) makes this test fail, which is the
-// point — it forces that release to update this table rather than flipping
-// constants and discovering the blast radius in review. When it does, invert
-// this to assert emitted == target and delete the alpha branch.
-func TestADR022EmittersAreStillOnAlpha(t *testing.T) {
+// This is the inverted form of the Release N test, which asserted the opposite
+// and failed at the switch by design. Keep it: an emitter silently reverting to
+// an alpha value — most likely by aliasing header.GroupVersion directly instead
+// of its track constant — is exactly what this catches.
+func TestADR022EmittersAreOnTarget(t *testing.T) {
 	t.Parallel()
 
 	alpha := map[string]bool{
@@ -183,48 +183,53 @@ func TestADR022EmittersAreStillOnAlpha(t *testing.T) {
 	for _, row := range adr022Map() {
 		t.Run(row.kind, func(t *testing.T) {
 			t.Parallel()
-			if !alpha[row.emitted] {
-				t.Errorf("emitted apiVersion %q is not an alpha value; if this is the "+
-					"ADR-022 emitter switch, update this test and the migration table "+
-					"in RELEASE.md together", row.emitted)
+			if alpha[row.emitted] {
+				t.Errorf("emitted apiVersion %q is still an alpha value; Release N+1 "+
+					"switched every emitter to its §2 target", row.emitted)
 			}
-			if row.emitted == row.target {
-				t.Errorf("emitted apiVersion equals the target %q; emitters do not "+
-					"switch until Release N+1", row.target)
+			if row.emitted != row.target {
+				t.Errorf("emitted apiVersion %q is not the §2 target %q; update this "+
+					"table and the migration table in RELEASE.md together",
+					row.emitted, row.target)
 			}
 		})
 	}
 }
 
-// TestADR022TracksShareAlphaButNotTargets is why the stable and authoring
-// emitter constants are separate despite carrying the same string today.
+// TestADR022TracksHaveDiverged is why the stable and authoring emitter
+// constants are separate.
 //
-// header.StableGroupVersion == header.AuthoringGroupVersion during the
-// reader-first release, so a package that aliases either one, or aliases
-// header.GroupVersion directly, looks correct now and silently emits the wrong
-// value at the switch. Snapshot goes to aicr.run/v1 while AICRConfig goes to
-// aicr.run/v1beta1; one shared constant cannot serve both.
-func TestADR022TracksShareAlphaButNotTargets(t *testing.T) {
+// They carried the same string through the reader-first release, which is what
+// made a package aliasing either one — or aliasing header.GroupVersion directly
+// — look correct while silently emitting the wrong value at the switch. Release
+// N+1 separated them: Snapshot emits aicr.run/v1 while AICRConfig emits
+// aicr.run/v1beta1, so a collapsed alias now shows up as a wrong value rather
+// than a latent one.
+func TestADR022TracksHaveDiverged(t *testing.T) {
 	t.Parallel()
 
-	if header.StableGroupVersion != header.AuthoringGroupVersion {
-		t.Fatalf("the tracks have already diverged (stable %q, authoring %q); "+
-			"this test documents the reader-first release and needs updating",
-			header.StableGroupVersion, header.AuthoringGroupVersion)
+	tracks := map[string]string{
+		"stable":    header.StableGroupVersion,
+		"authoring": header.AuthoringGroupVersion,
+		"profile":   header.ProfileGroupVersion,
 	}
 
-	if header.GroupVersionV1 == header.GroupVersionV1Beta1 {
-		t.Errorf("stable and authoring targets are both %q; ADR-022 §2 sends them "+
-			"to different maturities", header.GroupVersionV1)
+	seen := make(map[string]string, len(tracks))
+	for name, gv := range tracks {
+		if other, dup := seen[gv]; dup {
+			t.Errorf("tracks %q and %q both emit %q; ADR-022 §2 sends them to "+
+				"different maturities", other, name, gv)
+		}
+		seen[gv] = name
 	}
 }
 
 // TestADR022RowUsesItsTracksGate asserts each kind is guarded by the gate for
 // its own track, not merely by some gate that happens to accept the alpha
-// value all three share today.
+// value all three still share.
 //
-// Every gate accepts header.GroupVersion during the reader-first release, so a
-// kind wired to the wrong one still reads its own artifacts and looks correct.
+// Every gate accepts header.GroupVersion until #2417, so a kind wired to the
+// wrong one still reads its own artifacts and looks correct.
 // The targets are what distinguish the tracks, so that is what this checks: a
 // gate must accept its row's target and reject the other two.
 func TestADR022RowUsesItsTracksGate(t *testing.T) {

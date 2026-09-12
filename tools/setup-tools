@@ -96,13 +96,22 @@ verify_sha256() {
         return 0
     fi
 
-    if ! command_exists shasum; then
-        log_warning "shasum not available; skipping checksum verification for $file_path"
-        return 0
+    # Fail closed when no digest tool is available. This used to warn and
+    # return 0, which meant the caller went on to extract the archive and
+    # `sudo mv` the binary into /usr/local/bin with nothing verified -- the one
+    # outcome a checksum helper must never produce. Accept either tool: shasum
+    # is the perl one macOS ships, sha256sum is coreutils on Linux.
+    local actual_sha
+    if command_exists shasum; then
+        actual_sha=$(shasum -a 256 "$file_path" | awk '{print $1}')
+    elif command_exists sha256sum; then
+        actual_sha=$(sha256sum "$file_path" | awk '{print $1}')
+    else
+        log_error "Neither shasum nor sha256sum is available; cannot verify $file_path."
+        log_error "Refusing to install an unverified binary. Install coreutils (or perl's shasum) and retry."
+        exit 1
     fi
 
-    local actual_sha
-    actual_sha=$(shasum -a 256 "$file_path" | awk '{print $1}')
     if [[ "$actual_sha" != "$expected_sha" ]]; then
         log_error "Checksum mismatch for $file_path"
         log_error "Expected: $expected_sha"
@@ -113,6 +122,34 @@ verify_sha256() {
 
 command_exists() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# Where `go install` would have placed a binary, so a tool built with `go build`
+# lands on PATH in the same place and command_exists keeps finding it.
+go_bin_dir() {
+    local dir
+    dir="$(go env GOBIN)"
+    [[ -n "${dir}" ]] || dir="$(go env GOPATH)/bin"
+    printf '%s' "${dir}"
+}
+
+# Build a tool from this module's own dependency graph instead of
+# `go install pkg@version`. The module form resolves against go.mod and verifies
+# against go.sum, so it never consults the checksum database; the pkg@version
+# form resolves outside the module, where nothing is in go.sum, and so depended
+# on sum.golang.org being reachable (#2667). Mirrors what CI does.
+build_module_tool() {
+    local name="$1" pkg="$2" bin_dir
+    bin_dir="$(go_bin_dir)"
+    mkdir -p "${bin_dir}"
+    # Run from the repository root: `go build <pkg>` resolves the package
+    # through the main module, so the working directory has to be inside it.
+    #
+    # GOFLAGS is pinned rather than inherited: an inherited -trimpath yields a
+    # go-licenses with an empty GOROOT, which then reports the entire dependency
+    # graph as standard library and writes nothing while exiting 0. See
+    # tools/generate-notices_test.sh for the full failure mode.
+    (cd "${REPO_ROOT}" && GOFLAGS=-mod=readonly go build -o "${bin_dir}/${name}" "${pkg}")
 }
 
 prompt_continue() {
@@ -127,6 +164,53 @@ prompt_continue() {
         return 1
     fi
     return 0
+}
+
+install_helm() {
+    installed_helm_version=""
+    if command_exists helm; then
+        installed_helm_version=$(helm version --template '{{.Version}}' 2>/dev/null || true)
+    fi
+    if [[ "${installed_helm_version}" == "${HELM_VERSION}" && "${UPGRADE}" != "true" ]]; then
+        log_success "Helm already installed: ${installed_helm_version}"
+    else
+        log_info "Installing Helm ${HELM_VERSION}..."
+        if prompt_continue; then
+            if [[ "${OS}" == "darwin" ]]; then
+                # installed_helm_version only proves helm is on PATH, not that
+                # Homebrew manages it; `brew upgrade` fails on a manually
+                # installed binary because there's no Homebrew keg to upgrade.
+                if brew list --versions helm >/dev/null 2>&1; then
+                    brew upgrade helm
+                else
+                    brew install helm
+                fi
+            elif [[ "${OS}" == "linux" ]]; then
+                HELM_TMP=$(mktemp -d)
+                HELM_TAR="helm-${HELM_VERSION}-linux-${GO_ARCH}.tar.gz"
+                HELM_URL="https://get.helm.sh/${HELM_TAR}"
+                if verify_download_url "$HELM_URL" "helm ${HELM_VERSION} for Linux ${GO_ARCH}"; then
+                    curl -fsSL "$HELM_URL" | tar -xzC "$HELM_TMP"
+                    sudo mv "$HELM_TMP/linux-${GO_ARCH}/helm" /usr/local/bin/helm
+                    sudo chmod +x /usr/local/bin/helm
+                    rm -rf "$HELM_TMP"
+                else
+                    log_error "Failed to install helm. Please install manually."
+                    rm -rf "$HELM_TMP"
+                fi
+            fi
+            installed_helm_version=$(helm version --template '{{.Version}}' 2>/dev/null || echo "unknown")
+            if [[ "${installed_helm_version}" == "${HELM_VERSION}" ]]; then
+                log_success "Helm installed: ${installed_helm_version}"
+            elif [[ "${OS}" == "darwin" ]]; then
+                log_error "Helm ${installed_helm_version} installed, but ${HELM_VERSION} is pinned in .settings.yaml. Homebrew only ships the current stable release; install ${HELM_VERSION} manually from https://github.com/helm/helm/releases if it differs."
+                return 1
+            else
+                log_error "Helm ${installed_helm_version} installed, but ${HELM_VERSION} is pinned in .settings.yaml. Install ${HELM_VERSION} manually from https://github.com/helm/helm/releases."
+                return 1
+            fi
+        fi
+    fi
 }
 
 show_help() {
@@ -165,6 +249,15 @@ EXAMPLES:
 
 EOF
 }
+
+# Test hook: lets setup-tools_test.sh source this file to reach the function
+# definitions above (command_exists, prompt_continue, install_helm, ...) and
+# call them directly with mocked commands, without running the argument
+# parser or the rest of the script, which would try to install every tool
+# pinned in .settings.yaml.
+if [[ "${SETUP_TOOLS_SOURCE_ONLY:-false}" == "true" ]]; then
+    return 0
+fi
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -277,6 +370,13 @@ APIDIFF_VERSION=$(yq '.linting.apidiff' .settings.yaml)
 OASDIFF_VERSION=$(yq '.linting.oasdiff' .settings.yaml)
 YAMLLINT_VERSION=$(yq '.linting.yamllint' .settings.yaml)
 ADDLICENSE_VERSION=$(yq '.linting.addlicense' .settings.yaml)
+# Committed linux/amd64 digest, used in preference to the release's own
+# checksums.txt when this host matches it. A manifest served beside the archive
+# comes from the same release, so it detects corruption in transit but not a
+# compromise of the release; the committed value was reviewed at a known SHA.
+# Using it here also makes a local run a second check on the pin CI depends on,
+# which nothing outside CI otherwise exercises.
+ADDLICENSE_SHA256_LINUX_AMD64=$(yq '.linting.addlicense_sha256_linux_amd64' .settings.yaml)
 GO_LICENSES_VERSION=$(yq '.linting.go_licenses' .settings.yaml)
 GRYPE_VERSION=$(yq '.security_tools.grype' .settings.yaml)
 COSIGN_VERSION=$(yq '.security_tools.cosign' .settings.yaml)
@@ -385,30 +485,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]]; then
     #   curl -fsSL "https://raw.githubusercontent.com/golangci/golangci-lint/$(yq '.linting.golangci_lint' .settings.yaml)/install.sh" | shasum -a 256
     GOLANGCI_LINT_INSTALL_SHA256=${GOLANGCI_LINT_INSTALL_SHA256:-"1022ddb4d87ed252350ed03fc9677e250a4ae95cc6bcd4658c2a20a8a23d390f"}
 
-    if command_exists helm && [[ "${UPGRADE}" != "true" ]]; then
-        log_success "Helm already installed: $(helm version --short)"
-    else
-        log_info "Installing Helm ${HELM_VERSION}..."
-        if prompt_continue; then
-            if [[ "${OS}" == "darwin" ]]; then
-                brew install helm
-            elif [[ "${OS}" == "linux" ]]; then
-                HELM_TMP=$(mktemp -d)
-                HELM_TAR="helm-${HELM_VERSION}-linux-${GO_ARCH}.tar.gz"
-                HELM_URL="https://get.helm.sh/${HELM_TAR}"
-                if verify_download_url "$HELM_URL" "helm ${HELM_VERSION} for Linux ${GO_ARCH}"; then
-                    curl -fsSL "$HELM_URL" | tar -xzC "$HELM_TMP"
-                    sudo mv "$HELM_TMP/linux-${GO_ARCH}/helm" /usr/local/bin/helm
-                    sudo chmod +x /usr/local/bin/helm
-                    rm -rf "$HELM_TMP"
-                else
-                    log_error "Failed to install helm. Please install manually."
-                    rm -rf "$HELM_TMP"
-                fi
-            fi
-            log_success "Helm installed"
-        fi
-    fi
+    install_helm
 
     # helmfile (declarative release graph for --deployer helmfile bundles)
     if command_exists helmfile && [[ "${UPGRADE}" != "true" ]]; then
@@ -1070,7 +1147,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
         fi
         log_info "Installing apidiff ${APIDIFF_VERSION}..."
         if prompt_continue; then
-            GOFLAGS= go install golang.org/x/exp/cmd/apidiff@"${APIDIFF_VERSION}"
+            build_module_tool apidiff golang.org/x/exp/cmd/apidiff
             log_success "apidiff ${APIDIFF_VERSION} installed"
         fi
     fi
@@ -1119,14 +1196,72 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
         fi
     fi
 
-    # addlicense
-    if command_exists addlicense && [[ "${UPGRADE}" != "true" ]]; then
-        log_success "addlicense already installed"
+    # addlicense. Existence alone is not enough, for the same reason spelled out
+    # on oasdiff above and one more specific to this block: #2667 moved the
+    # install from `go install` (which wrote to GOPATH/bin) to a release binary
+    # in /usr/local/bin. Anyone who ran this script before that still has a
+    # GOPATH/bin copy, and it shadows the new one wherever GOPATH/bin comes
+    # first on PATH. A bare existence check would report success while
+    # `addlicense` still resolved to the old binary, and tools/check-tools would
+    # then fail strict_exact with no hint that a second copy exists.
+    addlicense_current=""
+    if command_exists addlicense; then
+        addlicense_current="$(go version -m "$(command -v addlicense)" 2>/dev/null |
+            awk '$1 == "mod" && $2 == "github.com/google/addlicense" {print $3; exit}')"
+    fi
+    if [[ "${addlicense_current}" == "${ADDLICENSE_VERSION}" && "${UPGRADE}" != "true" ]]; then
+        log_success "addlicense ${ADDLICENSE_VERSION} already installed"
     else
+        if [[ -n "${addlicense_current}" && "${addlicense_current}" != "${ADDLICENSE_VERSION}" ]]; then
+            log_warning "addlicense ${addlicense_current} found at $(command -v addlicense); installing the pinned ${ADDLICENSE_VERSION}"
+            if [[ "$(command -v addlicense)" != "/usr/local/bin/addlicense" ]]; then
+                log_warning "It will be installed to /usr/local/bin; remove $(command -v addlicense) if it keeps taking precedence on PATH"
+            fi
+        fi
         log_info "Installing addlicense ${ADDLICENSE_VERSION}..."
         if prompt_continue; then
-            GOFLAGS= go install github.com/google/addlicense@"${ADDLICENSE_VERSION}"
-            log_success "addlicense installed"
+            # Binary release rather than `go install`, matching what CI does so
+            # the two agree (#2667); see the oasdiff block above for the same
+            # move. The asset names use uname's own spellings, so ARCH is used
+            # here rather than GO_ARCH.
+            case "${OS}" in
+                linux)  ADDLICENSE_OS="Linux" ;;
+                darwin) ADDLICENSE_OS="macOS" ;;
+                *)
+                    log_error "No addlicense release build for ${OS}; install it manually."
+                    exit 1
+                    ;;
+            esac
+            ADDLICENSE_TAR="addlicense_${ADDLICENSE_VERSION}_${ADDLICENSE_OS}_${ARCH}.tar.gz"
+            ADDLICENSE_BASE="https://github.com/google/addlicense/releases/download/${ADDLICENSE_VERSION}"
+            if verify_download_url "${ADDLICENSE_BASE}/${ADDLICENSE_TAR}" "addlicense ${ADDLICENSE_VERSION} for ${ADDLICENSE_OS} ${ARCH}"; then
+                ADDLICENSE_TMP=$(mktemp -d)
+                curl -fsSL -o "${ADDLICENSE_TMP}/${ADDLICENSE_TAR}" "${ADDLICENSE_BASE}/${ADDLICENSE_TAR}"
+                # Prefer the committed pin on the one platform it covers; fall
+                # back to the release manifest elsewhere. .settings.yaml carries
+                # linux/amd64 only because that is what the CI action needs.
+                if [[ "${OS}" == "linux" && "${GO_ARCH}" == "amd64" &&
+                      "${ADDLICENSE_SHA256_LINUX_AMD64}" =~ ^[0-9a-f]{64}$ ]]; then
+                    ADDLICENSE_EXPECTED="${ADDLICENSE_SHA256_LINUX_AMD64}"
+                else
+                    curl -fsSL -o "${ADDLICENSE_TMP}/checksums.txt" "${ADDLICENSE_BASE}/checksums.txt"
+                    ADDLICENSE_EXPECTED=$(grep "  ${ADDLICENSE_TAR}$" "${ADDLICENSE_TMP}/checksums.txt" | awk '{print $1}')
+                fi
+                if [[ -n "${ADDLICENSE_EXPECTED}" ]]; then
+                    verify_sha256 "${ADDLICENSE_TMP}/${ADDLICENSE_TAR}" "${ADDLICENSE_EXPECTED}"
+                else
+                    log_error "Could not extract checksum for ${ADDLICENSE_TAR} from checksums file; aborting install"
+                    rm -rf "$ADDLICENSE_TMP"
+                    exit 1
+                fi
+                tar -xzC "$ADDLICENSE_TMP" -f "${ADDLICENSE_TMP}/${ADDLICENSE_TAR}"
+                sudo mv "$ADDLICENSE_TMP/addlicense" /usr/local/bin/addlicense
+                sudo chmod +x /usr/local/bin/addlicense
+                rm -rf "$ADDLICENSE_TMP"
+                log_success "addlicense ${ADDLICENSE_VERSION} installed"
+            else
+                log_error "Failed to install addlicense. Please install manually."
+            fi
         fi
     fi
 
@@ -1136,7 +1271,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
     else
         log_info "Installing go-licenses ${GO_LICENSES_VERSION}..."
         if prompt_continue; then
-            GOFLAGS= go install github.com/google/go-licenses/v2@"${GO_LICENSES_VERSION}"
+            build_module_tool go-licenses github.com/google/go-licenses/v2
             log_success "go-licenses installed"
         fi
     fi

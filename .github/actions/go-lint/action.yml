@@ -23,9 +23,11 @@ inputs:
     description: 'golangci-lint version to use (e.g., v2.6)'
     required: true
   addlicense_version:
-    description: 'addlicense version to use (e.g., v1.1.1)'
-    required: false
-    default: 'v1.1.1'
+    description: 'addlicense version pinned in .settings.yaml (linting.addlicense, via load-versions)'
+    required: true
+  addlicense_sha256:
+    description: 'Pinned linux/amd64 SHA256 for the addlicense release archive (linting.addlicense_sha256_linux_amd64, via load-versions)'
+    required: true
   lint_timeout:
     description: 'Lint timeout duration'
     required: false
@@ -121,12 +123,11 @@ runs:
         make lint-yaml
 
     - name: Install addlicense
-      shell: bash
-      run: |
-        ADDLICENSE_VERSION="${{ inputs.addlicense_version }}"
-        ADDLICENSE_VERSION_NUM="${ADDLICENSE_VERSION#v}"
-        go install github.com/google/addlicense@${ADDLICENSE_VERSION}
-        echo "addlicense installed: $(addlicense -version 2>&1 || echo ${ADDLICENSE_VERSION_NUM})"
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_addlicense: 'true'
+        addlicense_version: '${{ inputs.addlicense_version }}'
+        addlicense_sha256: '${{ inputs.addlicense_sha256 }}'
 
     - name: Ensure License Headers
       shell: bash

@@ -380,12 +380,13 @@ land later; none is implied by Preview alone.
 | Coordinate | Setup guide | Evidence |
 |---|---|---|
 | `rke2 / vr200 / ubuntu / training` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/training](https://validation.aicr.run/#/rke2/vr200-ubuntu/training) |
+| `rke2 / vr200 / ubuntu / training / kubeflow` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | pending — no published evidence yet |
 | `rke2 / vr200 / ubuntu / inference` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/inference](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference) |
 | `rke2 / vr200 / ubuntu / inference / dynamo` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
 
 The platform-neutral `inference` row is the base the Dynamo leaf inherits from; it exists so that resolving `rke2/vr200/ubuntu/inference` **without** `--platform` resolves to the VR200-safe overlay rather than falling through to the generic `rke2-inference` base.
 
-> **Evidence status (all VR200 rows).** The recipes have changed since evidence publication (`aicr evidence digest` reports a mismatch against each pointer's `predicate.recipe.digest`); treat the linked evidence as historical precedent for the recipe content at publication time, not as validating the current recipe. Fresh hardware validation is pending VR cluster access.
+> **Evidence status (evidence-linked VR200 rows).** The recipes have changed since evidence publication (`aicr evidence digest` reports a mismatch against each pointer's `predicate.recipe.digest`); treat the linked evidence as historical precedent for the recipe content at publication time, not as validating the current recipe. The `training / kubeflow` row has no published evidence at all — it is newer than the last publication run. Every VR200 row shares the same node-level prerequisites, including the mandatory host `nvidia-imex` masking described in the setup guide; requirements that follow from the inference chain are inference-only.
 
 Promotion from Preview to Supported is tracked as its own separately-scoped
 work with fresh evidence; a Preview coordinate does not auto-promote by
@@ -480,11 +481,11 @@ embedded adopter is the AKS family: `recipes/overlays/aks.yaml` declares
 `gpuStack` (`azure-managed` default, `operator-managed` alternative) over the GPU
 driver/toolkit ownership paths.
 
-A declaring overlay uses recipe apiVersion `aicr.run/v1alpha3`:
+A declaring overlay uses recipe apiVersion `aicr.run/v1beta2`:
 
 ```yaml
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   name: example-service
 spec:
@@ -731,7 +732,7 @@ Profile declarations are intentionally narrow:
   gates and closure-locks the allocation-policy selector paths.
 
 Select with `aicr recipe --profile name=value`; omission uses the declared
-default. A profiled result uses `aicr.run/v1alpha3` and records
+default. A profiled result uses `aicr.run/v1beta2` and records
 `metadata.selectedProfile`, including declaration-wide `ownedPaths`. The
 lock on owned paths is enforced per surface:
 
@@ -940,7 +941,7 @@ go test -v ./pkg/recipe/... -run TestConstraintPathsUseValidMeasurementTypes
 **Example:**
 ```yaml
 # recipes/overlays/gb200-eks-ubuntu-training.yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: gb200-eks-ubuntu-training
