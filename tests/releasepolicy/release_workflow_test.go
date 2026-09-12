@@ -309,10 +309,73 @@ func TestReleaseCosignAttestationsAreBounded(t *testing.T) {
 	if strings.Contains(action, "spdxjson") {
 		t.Error("the SPDX container SBOM attestation was removed; do not reintroduce --type spdxjson")
 	}
-	// Provenance is the only index-scoped attestation, and it is produced by
-	// actions/attest-build-provenance rather than by cosign.
+	// Provenance is the only attestation that still names the index, and it is
+	// produced by actions/attest-build-provenance rather than by cosign.
 	if strings.Contains(action, "${IMAGE_DIGEST}\"") {
 		t.Error("no cosign attest call may take the multi-platform index digest as its subject")
+	}
+}
+
+// TestReleaseProvenanceCoversEverySubject pins the provenance subject set. A
+// consumer that resolved linux/amd64 enumerates referrers on that child
+// manifest, so provenance published only against the index left that consumer
+// holding an SBOM and a VEX but no build claim (#2728). The fix is one
+// attest-build-provenance call per subject, because `subject-digest` takes a
+// single digest and each call mints the in-toto subject it also publishes
+// under: a shared document re-pushed to extra OCI subjects would disagree with
+// its own statement, which is the failure this must not regress into.
+//
+// The index call stays. Admission control resolves a tag to the index and
+// cannot span an index and a child manifest, so dropping it in favor of the
+// per-platform pair would break the only subject a policy can reach.
+func TestReleaseProvenanceCoversEverySubject(t *testing.T) {
+	t.Parallel()
+	const provenanceAction = "actions/attest-build-provenance@"
+	doc := loadYAML(t, ".github/actions/sbom-and-attest/action.yml")
+	steps := sliceValue(t, mapValue(t, doc, "runs"), "steps")
+
+	subjects := map[string]string{
+		"Attest index build provenance": "${{ steps.validate.outputs.image_digest }}",
+		"Attest amd64 build provenance": "${{ steps.validate.outputs.amd64_digest }}",
+		"Attest arm64 build provenance": "${{ steps.validate.outputs.arm64_digest }}",
+	}
+	pins := map[string]struct{}{}
+	for name, digest := range subjects {
+		index := stepIndex(steps, name)
+		if index < 0 {
+			t.Errorf("missing step %q", name)
+			continue
+		}
+		step := steps[index].(map[string]any)
+		uses := stringValue(t, step, "uses")
+		if !strings.HasPrefix(uses, provenanceAction) {
+			t.Errorf("%s must use %s, got %q", name, provenanceAction, uses)
+		}
+		pins[uses] = struct{}{}
+		with := mapValue(t, step, "with")
+		if got := fmt.Sprint(with["subject-digest"]); got != digest {
+			t.Errorf("%s attests subject-digest %q, want %q", name, got, digest)
+		}
+		if got := fmt.Sprint(with["subject-name"]); got != "${{ steps.validate.outputs.image_name }}" {
+			t.Errorf("%s must name the validated image, got %q", name, got)
+		}
+		// Without this the statement is minted but never becomes an OCI
+		// referrer, so the subject it names cannot be queried for it.
+		if push, ok := with["push-to-registry"].(bool); !ok || !push {
+			t.Errorf("%s must push the attestation to the registry", name)
+		}
+	}
+	// One pin for all three: a split would let two subjects carry predicates
+	// built by different action versions.
+	if len(pins) > 1 {
+		t.Errorf("provenance steps use %d different action pins, want 1", len(pins))
+	}
+
+	action := string(readFile(t, ".github/actions/sbom-and-attest/action.yml"))
+	// Exactly three: the index and the two platform manifests. A fourth means a
+	// subject was duplicated; a smaller count means one lost its provenance.
+	if got := strings.Count(action, provenanceAction); got != len(subjects) {
+		t.Errorf("sbom-and-attest issues %d provenance attestations, want %d", got, len(subjects))
 	}
 }
 
