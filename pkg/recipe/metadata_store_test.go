@@ -1050,12 +1050,12 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 	// The gb200/gb300 EKS Slurm leaves differ from the h100 list above in two
 	// INDEPENDENT ways; do not collapse them into one explanation:
 	//   + slinky-slurm-imex-channel — added by the leaf, genuinely IMEX-specific.
-	//   - robust-controller, secure-accelerator-access — absent because
-	//     gb200-eks-training.yaml and gb300-eks-training.yaml do not declare
-	//     them while h100-eks-training.yaml does. That is a property of the
-	//     accelerator training bases, NOT of IMEX or of Slurm; gb300 is not
-	//     categorically excluded, since gb300-eks-ubuntu-inference-dynamo
-	//     declares both. Naming this fixture for IMEX would misattribute it.
+	//   - robust-controller, secure-accelerator-access — the GB families declare
+	//     these on their training-kubeflow leaves (#2563), not on the shared
+	//     training base, so the Slurm siblings do not inherit them.
+	//     secure-accelerator-access launches a pod requesting nvidia.com/gpu,
+	//     which a Slinky NodeSet that reserves every GPU cannot honor, and
+	//     robust-controller has no AI operator to exercise on a Slurm leaf.
 	gbEKSSlurmConformanceChecks := []string{
 		"platform-health",
 		"gpu-operator-health",
