@@ -69,9 +69,9 @@ type applyCRDsData struct {
 	Namespace string
 	// ReleaseFilter anchors Name as a `helm list --filter` regex, so a release
 	// whose name merely contains Name cannot be mistaken for this one.
-	ReleaseFilter          string
-	FromUpstreamEnv        bool
-	ShowCRDsTimeoutSeconds int
+	ReleaseFilter         string
+	FromUpstreamEnv       bool
+	CRDStepTimeoutSeconds int
 }
 
 // writeApplyCRDsScript renders apply-crds.sh into folderDir and returns its
@@ -80,11 +80,11 @@ type applyCRDsData struct {
 // is visible on disk rather than encoded as a no-op script.
 func writeApplyCRDsScript(folderDir, dir, name, namespace string, fromUpstreamEnv bool) (string, error) {
 	data := applyCRDsData{
-		Name:                   name,
-		Namespace:              namespace,
-		ReleaseFilter:          "^" + regexp.QuoteMeta(name) + "$",
-		FromUpstreamEnv:        fromUpstreamEnv,
-		ShowCRDsTimeoutSeconds: int(defaults.BundleShowCRDsTimeout.Seconds()),
+		Name:                  name,
+		Namespace:             namespace,
+		ReleaseFilter:         "^" + regexp.QuoteMeta(name) + "$",
+		FromUpstreamEnv:       fromUpstreamEnv,
+		CRDStepTimeoutSeconds: int(defaults.BundleCRDStepTimeout.Seconds()),
 	}
 	if err := renderTemplateToFile(applyCRDsTmpl, data, folderDir, "apply-crds.sh", 0o755); err != nil {
 		return "", err

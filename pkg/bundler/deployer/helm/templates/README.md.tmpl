@@ -99,8 +99,13 @@ bash install.sh
 > otherwise run the new controller against the old schema. Folders that also
 > contain an `apply-crds.sh` have `install.sh` run it first, which applies the
 > pinned chart's CRDs with `kubectl apply --server-side --force-conflicts`.
-> Those folders therefore need `kubectl` on `$PATH` in addition to `helm`, and
-> the step is skipped when `DRY_RUN_FLAG` is set. Only components audited as
+> Those folders need `kubectl` and `timeout` (GNU coreutils) on `$PATH` in
+> addition to `helm`; the script refuses to run rather than run unbounded
+> inside a deploy, so on macOS install coreutils or apply the CRDs by hand.
+> Every helm and kubectl call it makes is bounded, 90s by default and
+> overridable with `AICR_CRD_STEP_TIMEOUT`. The step is skipped when
+> `DRY_RUN_FLAG` is set, and on a release that does not exist yet, since
+> `helm install` creates the chart's CRDs itself. Only components audited as
 > the sole owner of every CRD they ship get the script; for the rest, replacing
 > CRDs is unsafe because another component's release ships the same CRD with a
 > different schema.
