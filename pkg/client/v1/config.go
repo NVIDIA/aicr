@@ -16,7 +16,6 @@ package aicr
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -377,43 +376,9 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 		return BundleOptions{}, err
 	}
 
-	// Signing mode is exclusive: a KMS key or keyless OIDC, never both.
-	// ResolveAttesterLazy picks KMS whenever SigningKey is non-empty, so a
-	// document setting both would silently sign with the key while its
-	// fulcioURL/oidcDeviceFlow settings did nothing. The CLI rejects that
-	// combination on the MERGED opts (validateSigningKeyExclusivity, and
-	// TestValidateSigningKeyExclusivity_ConfigSourcedConflict covers exactly
-	// the config-sourced case) — this is what an SDK caller who never merges
-	// flags relies on for the same guarantee.
-	//
-	// oidcDeviceFlow is deliberately NOT checked here, unlike fulcioURL. This
-	// method runs before the CLI's flag-over-config merge (BundleOptions is
-	// derived, then the CLI layers flags on top — see parseBundleCmdOptions),
-	// so an eager oidcDeviceFlow check would reject a document that sets both
-	// signingKey and oidcDeviceFlow: true even when the caller passes
-	// --oidc-device-flow=false specifically to correct it: the error fires
-	// before that flag is ever read, and validateSigningKeyExclusivity on the
-	// merged opts never gets a chance to see the correction. Checking it only
-	// on the merged opts — the same layer that already re-validates
-	// fulcioURL — restores that per-field override for a boolean flag whose
-	// zero value (false) cannot be told apart from "explicitly cleared"
-	// without cmd.IsSet, which only the CLI layer has.
-	//
-	// Trimmed first for the same reason the CLI trims: a YAML block scalar
-	// carries surrounding whitespace, and an untrimmed key fails late in the
-	// KMS URI parser instead of here. rekorURL is deliberately not a conflict;
-	// it has its own exclusivity rule against signingConfig.
-	signingKey := strings.TrimSpace(resolved.SigningKey)
-	if resolved.SigningKey != "" && signingKey == "" {
-		return BundleOptions{}, errors.New(errors.ErrCodeInvalidRequest,
-			"spec.bundle.attestation.signingKey must not be blank")
-	}
-	if signingKey != "" && resolved.FulcioURL != "" {
-		return BundleOptions{}, errors.New(errors.ErrCodeInvalidRequest,
-			"spec.bundle.attestation.signingKey is mutually exclusive with "+
-				"spec.bundle.attestation.fulcioURL")
-	}
-
+	// Signing-mode exclusivity and the key's normal form are settled by
+	// Resolve (config.resolveSigningKey), so every caller of it inherits them
+	// rather than each derivation repeating the rule.
 	return BundleOptions{
 		Deployer:                   resolved.Deployer,
 		Repo:                       resolved.Repo,
@@ -442,7 +407,7 @@ func (c *Config) BundleOptions() (BundleOptions, error) {
 			DeviceFlow: resolved.OIDCDeviceFlow,
 			FulcioURL:  resolved.FulcioURL,
 			RekorURL:   resolved.RekorURL,
-			SigningKey: signingKey,
+			SigningKey: resolved.SigningKey,
 			// Mirrors the CLI's signingTargetFromFlags: with no explicit Rekor
 			// URL, sign against the TUF-distributed signing config (Rekor v2,
 			// #1650) rather than falling through transparencyForOptions to

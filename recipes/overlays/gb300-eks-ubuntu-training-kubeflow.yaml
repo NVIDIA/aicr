@@ -43,3 +43,18 @@ spec:
       value: ">= 1.34"
 
   componentRefs: []
+
+  validation:
+    conformance:
+      # Union-merged onto the checks inherited from gb300-eks-ubuntu-training. Declared on
+      # the kubeflow leaf, not the shared training base, for two reasons:
+      # robust-controller routes to checkRobustKubeflowTrainer only on leaves
+      # that resolve kubeflow-trainer (it would skip on the plain base), and
+      # secure-accelerator-access launches a Kubernetes pod requesting one
+      # nvidia.com/gpu, which the sibling Slinky Slurm leaf cannot honor (its
+      # slurmd pod reserves every GPU on the node) and would not attest the
+      # Slurm GRES/cgroup access path even if it could. Placing both here
+      # keeps the Slurm leaves out of their inheritance.
+      checks:
+        - robust-controller
+        - secure-accelerator-access
