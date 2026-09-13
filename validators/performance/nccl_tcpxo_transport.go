@@ -77,10 +77,11 @@ type tcpxoWorkerWatcher struct {
 // pods carry and activate the TCPXO wiring?
 //
 // Start it BEFORE the benchmark's TrainJob is created, so no worker pod can
-// predate the watch: an empty ResourceVersion watch first lists existing
-// objects, and pod creation cannot precede TrainJob creation by
-// construction. Assert only after Stop has joined the goroutine — records
-// are complete exactly then.
+// predate the watch. The watch is a list-then-watch with an explicit
+// resourceVersion: the List seeds any pod already present and the watch resumes
+// from the list's RV, so an apiserver-initiated reconnect cannot silently drop a
+// worker created during the gap. Assert only after Stop has joined the
+// goroutine — records are complete exactly then.
 //
 // Observations are recorded while pods are alive because the JobSet
 // controller deletes active worker Jobs as soon as the JobSet completes — by
@@ -162,22 +163,46 @@ func (w *tcpxoWorkerWatcher) run(ctx context.Context, clientset kubernetes.Inter
 	selector := fmt.Sprintf("jobset.sigs.k8s.io/jobset-name=%s,jobset.sigs.k8s.io/replicatedjob-name=%s",
 		ncclTrainJobName, nodeJobName)
 	for ctx.Err() == nil {
-		w.watchOnce(ctx, clientset, namespace, selector)
+		// List-then-watch with an explicit resourceVersion. A raw Watch with an
+		// empty RV starts at latest and replays nothing, so across an apiserver-
+		// initiated reconnect it would miss a worker created in the gap; the List
+		// both seeds records with pods already present and returns the RV the
+		// watch resumes from, closing that gap. record is idempotent and sticky,
+		// so re-listing already-seen pods is safe.
+		rv := w.listOnce(ctx, clientset, namespace, selector)
+		w.watchOnce(ctx, clientset, namespace, selector, rv)
 		if ctx.Err() != nil {
 			return
 		}
 		// Pace re-establishment: the API server rotates long watches every few
 		// minutes, and an immediate reconnect under apiserver stress would spin.
-		// Reconnecting with an empty resourceVersion re-lists current state, so
-		// the pause loses no observations.
 		time.Sleep(time.Second)
 	}
 }
 
-// watchOnce streams one watch session; the outer run loop re-establishes after
-// the API server closes the channel, which it does routinely.
-func (w *tcpxoWorkerWatcher) watchOnce(ctx context.Context, clientset kubernetes.Interface, namespace, selector string) {
-	watcher, err := clientset.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{LabelSelector: selector})
+// listOnce records every currently-matching worker pod and returns the list's
+// resourceVersion for the watch to resume from. A stale RV surfaces as a watch
+// error and the outer loop re-lists, obtaining a fresh one.
+func (w *tcpxoWorkerWatcher) listOnce(ctx context.Context, clientset kubernetes.Interface, namespace, selector string) string {
+	list, err := clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{LabelSelector: selector})
+	if err != nil {
+		if ctx.Err() == nil {
+			slog.Warn("TCPXO worker list failed; retrying", "error", err)
+			time.Sleep(time.Second)
+		}
+		return ""
+	}
+	for i := range list.Items {
+		w.record(&list.Items[i])
+	}
+	return list.GetResourceVersion()
+}
+
+// watchOnce streams one watch session from resourceVersion; the outer run loop
+// re-lists and re-establishes after the API server closes the channel, which it
+// does routinely.
+func (w *tcpxoWorkerWatcher) watchOnce(ctx context.Context, clientset kubernetes.Interface, namespace, selector, resourceVersion string) {
+	watcher, err := clientset.CoreV1().Pods(namespace).Watch(ctx, metav1.ListOptions{LabelSelector: selector, ResourceVersion: resourceVersion})
 	if err != nil {
 		if ctx.Err() == nil {
 			slog.Warn("TCPXO worker watch failed to start; retrying", "error", err)

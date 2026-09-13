@@ -318,3 +318,24 @@ func TestTCPXOWorkerWatchRestartMasking(t *testing.T) {
 		t.Fatalf("Assert() error = %v, want the never-started slot flagged", err)
 	}
 }
+
+// TestTCPXOWorkerWatchListSeedsPreExistingPod pins the list-then-watch fix: a
+// worker pod that already exists when a watch session (re)starts must be caught
+// by the initial List, not missed because a raw empty-RV watch replays nothing.
+func TestTCPXOWorkerWatchListSeedsPreExistingPod(t *testing.T) {
+	t.Parallel()
+
+	clientset := fake.NewClientset()
+	// Create the pod BEFORE starting the watcher: it is present in the store but
+	// no watch ADDED event will fire for it, so only the list path records it.
+	if _, err := clientset.CoreV1().Pods("nccl-test").Create(context.Background(), tcpxoWorkerPod(t, "node-0", 0), metav1.CreateOptions{}); err != nil {
+		t.Fatalf("create pod: %v", err)
+	}
+
+	w := startGKETCPXOWorkerWatch(context.Background(), clientset, "nccl-test")
+	waitForRecorded(t, w, 1)
+	w.Stop()
+	if err := w.Assert(1); err != nil {
+		t.Fatalf("Assert() error = %v, want nil: a pre-existing worker must be caught by the list", err)
+	}
+}
