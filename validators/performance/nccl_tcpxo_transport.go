@@ -310,6 +310,10 @@ func checkTCXOAnnotations(pod *v1.Pod) error {
 				pod.Name, gkeTCXOInterfacesAnnotation, entry.InterfaceName)
 		}
 		seenInterfaces[entry.InterfaceName] = struct{}{}
+		if entry.Network == gkeTCXODefaultNetwork {
+			return fmt.Errorf("pod %q: %s maps secondary interface %q to reserved network %q — eth0 already uses it; a secondary must name a distinct GPU NIC network",
+				pod.Name, gkeTCXOInterfacesAnnotation, entry.InterfaceName, entry.Network)
+		}
 		if _, dup := seenNetworks[entry.Network]; dup {
 			return fmt.Errorf("pod %q: %s maps two interfaces to network %q",
 				pod.Name, gkeTCXOInterfacesAnnotation, entry.Network)

@@ -102,6 +102,7 @@ func TestParseGKETCPXOInterfaces(t *testing.T) {
 		{name: "non-eth interface", input: "ens1=a,eth2=b,eth3=c,eth4=d,eth5=e,eth6=f,eth7=g,eth8=h"},
 		{name: "duplicate interface", input: "eth1=a,eth1=b,eth3=c,eth4=d,eth5=e,eth6=f,eth7=g,eth8=h"},
 		{name: "duplicate network", input: "eth1=a,eth2=a,eth3=b,eth4=c,eth5=d,eth6=e,eth7=f,eth8=g"},
+		{name: "default network reserved for eth0", input: "eth1=default,eth2=a,eth3=b,eth4=c,eth5=d,eth6=e,eth7=f,eth8=g"},
 		{name: "uppercase network", input: "eth1=GPU-NIC-0,eth2=b,eth3=c,eth4=d,eth5=e,eth6=f,eth7=g,eth8=h"},
 		{name: "network with underscore", input: "eth1=gpu_nic_0,eth2=b,eth3=c,eth4=d,eth5=e,eth6=f,eth7=g,eth8=h"},
 		{name: "network starting with digit", input: "eth1=0gpu-nic,eth2=b,eth3=c,eth4=d,eth5=e,eth6=f,eth7=g,eth8=h"},

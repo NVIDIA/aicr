@@ -173,6 +173,15 @@ func TestTCPXOWorkerWatch(t *testing.T) {
 			wantErr: "two interfaces",
 		},
 		{
+			name: "secondary maps to reserved default network fails",
+			pods: []*v1.Pod{tcpxoWorkerPod(t, "node-0", 0, withInterfaces(t, func(e []gkeTCXOInterfaceEntry) []gkeTCXOInterfaceEntry {
+				e[3].Network = gkeTCXODefaultNetwork
+				return e
+			}))},
+			workers: 1,
+			wantErr: "reserved network",
+		},
+		{
 			name: "unknown interface name fails",
 			pods: []*v1.Pod{tcpxoWorkerPod(t, "node-0", 0, withInterfaces(t, func(e []gkeTCXOInterfaceEntry) []gkeTCXOInterfaceEntry {
 				e[3].InterfaceName = "eth9"

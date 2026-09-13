@@ -31,6 +31,11 @@ const (
 	gkeTCPXOInterfacesValueKey     = "tcpxoInterfaces"
 	gkeTCPXORuntimeManifest        = "components/kubeflow-trainer/manifests/torch-distributed-tcpxo-cluster-training-runtime.yaml"
 	gkeTCPXORequiredInterfaceCount = 8
+	// gkeTCPXODefaultNetwork is the reserved network the runtime always maps to
+	// eth0. A secondary interface must not map to it: the manifest prepends
+	// eth0→default unconditionally, so ethN=default would attach the default
+	// network twice.
+	gkeTCPXODefaultNetwork = "default"
 )
 
 // Device-type Network names are limited by GKE's UNIX socket path length.
@@ -130,6 +135,11 @@ func ValidateGKETCPXOInterfaces(mapping []NetworkInterfaceMapping) error {
 				fmt.Sprintf("duplicate GKE TCPXO interface name %q", entry.InterfaceName))
 		}
 		seenInterfaces[entry.InterfaceName] = struct{}{}
+		if entry.Network == gkeTCPXODefaultNetwork {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid GKE TCPXO network %q for %s: %q is reserved for eth0 and always prepended by the runtime",
+					entry.Network, entry.InterfaceName, gkeTCPXODefaultNetwork))
+		}
 		if len(entry.Network) > gkeNetworkObjectNameMaxLen || !gkeNetworkNamePattern.MatchString(entry.Network) {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("invalid GKE Device Network name %q for %s: use 1-41 lowercase letters, digits or dashes, starting with a letter and ending with a letter or digit",
