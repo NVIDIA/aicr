@@ -468,21 +468,27 @@ redaction policy for that carrier (`redact.boundRuntimeProvenance`, rule
 `ctrf.tests.runtimeProvenance.bound`): both digests must be lowercase sha256
 hex or the record is dropped; paths are template *keys* only and must match
 the dotted key grammar; every named-list selector (`containers[node]`,
-`volumes[x]`, `volumeMounts[x]`, `env[x]`) collapses to `[*]` unless it names
-a fabric env variable (`NCCL_*`, `CUDA_*`, `UCX_*`, `LD_LIBRARY_PATH`), which
-is kept because it is the evidence; keys under operator-authored maps
+`volumes[x]`, `volumeMounts[x]`, `env[x]`) collapses to `[*]` unless it is an
+`env` selector naming a variable in the **exact** fabric set
+(`redact.ctrfFabricEnvNames`: the GPUDirect-TCPXO NCCL configuration the
+shipped runtime declares, plus `CUDA_VISIBLE_DEVICES` and `LD_LIBRARY_PATH`),
+which is kept because it is the evidence; keys under operator-authored maps
 (`metadata.labels`, `metadata.annotations`, `spec.nodeSelector`) collapse to
-the parent unless the key's domain is in the **exact** vendor set
-(`networking.gke.io`, `devices.gke.io`, `cloud.google.com`, `kubernetes.io`,
-`node.kubernetes.io`, `nvidia.com`, `trainer.kubeflow.org` — a subdomain is
-not ownership), so `metadata.annotations.networking.gke.io/interfaces` and
+the parent unless the **whole key** is in the exact vendor set
+(`redact.ctrfVendorKeys`: `networking.gke.io/interfaces`,
+`networking.gke.io/default-interface`, `devices.gke.io/container.tcpxo-daemon`,
+`cloud.google.com/gke-accelerator`, `trainer.kubeflow.org/trainjob-ancestor-step`,
+`nvidia.com/gpu.present`, `node.kubernetes.io/instance-type`). There is no
+prefix or domain rule anywhere in the policy: `NCCL_CUSTOMER_ACME_PROD` and
+`networking.gke.io/customer-prod` are operator text and collapse like any
+other name. So `metadata.annotations.networking.gke.io/interfaces` and
 `spec.containers[*].env[NCCL_FASTRAK_IFNAME].value` are kept while an
 operator's `spec.nodeSelector.my-org/pool` becomes `spec.nodeSelector` and
 `spec.volumes[customer-cache].secret.secretName` becomes
 `spec.volumes[*].secret.secretName`; lists are deduplicated, sorted and capped
-at 1024 entries. The live runtime is operator-modifiable, so any name it
-carries is treated as operator text unless one of these closed rules keeps it.
-No value — network name, node name, env value — ever appears. The deployment check `gke-gpu-nic-networks` runs the same recipe →
+at 1024 entries. Adding a variable or key to the shipped runtime that the
+inventory should name means adding it to the corresponding set in the same
+change. No value — network name, node name, env value — ever appears. The deployment check `gke-gpu-nic-networks` runs the same recipe →
 deployed → cluster arms, gated on the same predicate, so a base
 `h100-gke-cos-training` recipe (TCPXO, no runtime) keeps its census-only
 behaviour.

@@ -251,12 +251,45 @@ var ctrfProvenancePath = regexp.MustCompile(`^[A-Za-z0-9._/*\-\[\]]{1,256}$`)
 // ctrfListSelector matches a named-list selector segment ("[name]") in a path.
 var ctrfListSelector = regexp.MustCompile(`\[([^\[\]]*)\]`)
 
-// ctrfFabricEnvName is the closed grammar of env names a selector may keep:
-// the NCCL/CUDA/UCX tuning namespace and the loader path — the variables the
-// inherited inventory exists to prove were carried. Every other list element
-// name (containers, volumes, mounts, other env) is operator- or vendor-chosen
-// text and collapses to "[*]".
-var ctrfFabricEnvName = regexp.MustCompile(`^((NCCL|CUDA|UCX)_[A-Z0-9_]+|LD_LIBRARY_PATH)$`)
+// ctrfFabricEnvNames is the EXACT set of env names an env selector may keep:
+// the GPUDirect-TCPXO NCCL configuration the shipped torch-distributed-tcpxo
+// runtime declares (Google's v1.0.15 plugin set) plus the two loader/device
+// variables — the variables the inherited inventory exists to prove were
+// carried. A prefix rule (NCCL_*) was rejected because an operator can name a
+// variable NCCL_CUSTOMER_ACME_PROD; only names on this list are vendor-defined.
+// Every other list element name (containers, volumes, mounts, other env) is
+// operator- or vendor-chosen text and collapses to "[*]". Adding a variable to
+// the shipped runtime that the inventory should name means adding it here in
+// the same change.
+var ctrfFabricEnvNames = map[string]struct{}{
+	"CUDA_VISIBLE_DEVICES":                          {},
+	"LD_LIBRARY_PATH":                               {},
+	"NCCL_BUFFSIZE":                                 {},
+	"NCCL_CROSS_NIC":                                {},
+	"NCCL_DEBUG":                                    {},
+	"NCCL_DEBUG_SUBSYS":                             {},
+	"NCCL_FASTRAK_CTRL_DEV":                         {},
+	"NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL":           {},
+	"NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING":           {},
+	"NCCL_FASTRAK_IFNAME":                           {},
+	"NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY":            {},
+	"NCCL_FASTRAK_NUM_FLOWS":                        {},
+	"NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS":         {},
+	"NCCL_FASTRAK_USE_LLCM":                         {},
+	"NCCL_FASTRAK_USE_SNAP":                         {},
+	"NCCL_MIN_NCHANNELS":                            {},
+	"NCCL_NET_GDR_LEVEL":                            {},
+	"NCCL_NVLS_ENABLE":                              {},
+	"NCCL_NVLSTREE_MAX_CHUNKSIZE":                   {},
+	"NCCL_P2P_NET_CHUNKSIZE":                        {},
+	"NCCL_P2P_NVL_CHUNKSIZE":                        {},
+	"NCCL_P2P_PCI_CHUNKSIZE":                        {},
+	"NCCL_PROTO":                                    {},
+	"NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE": {},
+	"NCCL_SOCKET_IFNAME":                            {},
+	"NCCL_TUNER_CONFIG_PATH":                        {},
+	"NCCL_TUNER_PLUGIN":                             {},
+}
 
 // ctrfProvenanceMaxPaths caps each path list; a derived PodTemplateSpec has a
 // few hundred leaves, so a longer list is not a template inventory.
@@ -269,32 +302,35 @@ const ctrfProvenanceMaxPaths = 1024
 // is collapsed to the parent unless it sits under a vendor API domain.
 var ctrfOperatorKeyedMaps = []string{"metadata.annotations.", "metadata.labels.", "spec.nodeSelector."}
 
-// ctrfVendorKeyDomains is the EXACT set of key domains whose label/annotation/
-// nodeSelector keys are vendor-defined API surface, not operator text, and stay
-// in minimal evidence (e.g. networking.gke.io/interfaces — the fabric wiring
-// this carrier exists to prove was inherited). Exact match, not suffix: an
-// operator can name a key under any subdomain, so "ends with gke.io" is not an
-// ownership check.
-var ctrfVendorKeyDomains = map[string]struct{}{
-	"networking.gke.io":    {},
-	"devices.gke.io":       {},
-	"cloud.google.com":     {},
-	"kubernetes.io":        {},
-	"node.kubernetes.io":   {},
-	"nvidia.com":           {},
-	"trainer.kubeflow.org": {},
+// ctrfVendorKeys is the EXACT set of full label/annotation/nodeSelector keys
+// that are vendor-defined API surface, not operator text, and stay in minimal
+// evidence: the two GKE fabric annotations this carrier exists to prove were
+// inherited, the NRI device annotation, the GKE accelerator selector, the
+// Trainer ancestry label, and the two scheduling keys AICR itself stamps. A
+// domain rule was rejected because the local part is operator-writable
+// (networking.gke.io/customer-prod is a legal key); only whole keys on this
+// list survive, every other key collapses to its map.
+var ctrfVendorKeys = map[string]struct{}{
+	"networking.gke.io/interfaces":                {},
+	"networking.gke.io/default-interface":         {},
+	"devices.gke.io/container.tcpxo-daemon":       {},
+	"cloud.google.com/gke-accelerator":            {},
+	"trainer.kubeflow.org/trainjob-ancestor-step": {},
+	"nvidia.com/gpu.present":                      {},
+	"node.kubernetes.io/instance-type":            {},
 }
 
 // boundRuntimeProvenance applies the minimal-evidence policy to a derived
 // runtime's provenance record: both digests must be lowercase sha256 hex or
 // the whole record is dropped (fail-closed — a record that cannot bind is not
 // evidence); each path must match the template-key grammar; named-list
-// selectors collapse to "[*]" unless they name a fabric env variable; keys
-// under operator-keyed maps collapse to the parent unless the key's domain is
-// in the exact vendor set; lists are deduplicated, sorted and capped. The live
-// runtime is operator-modifiable, so any name it carries is treated as
-// operator text unless a closed rule says otherwise. Returns a fresh record;
-// never mutates in.
+// selectors collapse to "[*]" unless they name a variable in the exact fabric
+// env set; keys under operator-keyed maps collapse to the parent unless the
+// whole key is in the exact vendor-key set; lists are deduplicated, sorted and
+// capped. The live runtime is operator-modifiable, so any name it carries is
+// treated as operator text unless an exact allowlist keeps it — there is no
+// prefix or domain rule anywhere in this policy. Returns a fresh record; never
+// mutates in.
 func boundRuntimeProvenance(in *ctrf.RuntimeProvenance) *ctrf.RuntimeProvenance {
 	if in == nil || !ctrfSHA256Value.MatchString(in.ShippedDigest) || !ctrfSHA256Value.MatchString(in.DerivedDigest) {
 		return nil
@@ -335,20 +371,16 @@ func boundProvenancePaths(in []string) []string {
 }
 
 // collapseOperatorKey returns p unchanged unless it addresses a key under an
-// operator-keyed map, in which case the key is kept only when its domain (the
-// part before "/") is, or is a subdomain of, a vendor API domain; otherwise the
-// path collapses to the map itself.
+// operator-keyed map, in which case the whole key must be in ctrfVendorKeys;
+// otherwise the path collapses to the map itself.
 func collapseOperatorKey(p string) string {
 	for _, prefix := range ctrfOperatorKeyedMaps {
 		key, ok := strings.CutPrefix(p, prefix)
 		if !ok {
 			continue
 		}
-		domain, _, hasDomain := strings.Cut(key, "/")
-		if hasDomain {
-			if _, vendor := ctrfVendorKeyDomains[domain]; vendor {
-				return p
-			}
+		if _, vendor := ctrfVendorKeys[key]; vendor {
+			return p
 		}
 		return strings.TrimSuffix(prefix, ".")
 	}
@@ -356,14 +388,14 @@ func collapseOperatorKey(p string) string {
 }
 
 // collapseListSelectors rewrites every "[name]" selector in p to "[*]" except
-// an env selector naming a fabric variable (ctrfFabricEnvName), which is kept
+// an env selector naming a variable in ctrfFabricEnvNames, which is kept
 // because it is the evidence. Container, volume, mount and arbitrary env names
 // are whatever the live runtime carries and are not published.
 func collapseListSelectors(p string) string {
 	return ctrfListSelector.ReplaceAllStringFunc(p, func(sel string) string {
 		name := sel[1 : len(sel)-1]
 		start := strings.Index(p, sel)
-		if start >= 0 && strings.HasSuffix(p[:start], "env") && ctrfFabricEnvName.MatchString(name) {
+		if _, fabric := ctrfFabricEnvNames[name]; fabric && start >= 0 && strings.HasSuffix(p[:start], "env") {
 			return sel
 		}
 		return "[*]"

@@ -681,7 +681,9 @@ func TestCTRFBoundsRuntimeProvenance(t *testing.T) {
 				InheritedPaths: []string{
 					"metadata.annotations.networking.gke.io/interfaces",
 					"metadata.annotations.devices.gke.io/container.tcpxo-daemon",
-					"metadata.annotations.evil.gke.io/customer-x", // subdomain is not ownership
+					"metadata.annotations.evil.gke.io/customer-x",              // subdomain is not ownership
+					"metadata.annotations.networking.gke.io/customer-prod",     // exact domain, operator local part
+					"spec.containers[node].env[NCCL_CUSTOMER_ACME_PROD].value", // allowed prefix, operator name
 					"metadata.labels.team-payments-prod",
 					"spec.nodeSelector.cloud.google.com/gke-accelerator",
 					"spec.nodeSelector.my-org/private-pool-10.0.0.5",
@@ -732,7 +734,7 @@ func TestCTRFRuntimeProvenancePathBounds(t *testing.T) {
 	sha := func(c byte) string { return string(bytes.Repeat([]byte{c}, 64)) }
 	many := make([]string, 0, 1100)
 	for i := range 1100 {
-		many = append(many, "spec.containers[node].env[NCCL_V"+strconv.Itoa(i)+"].value")
+		many = append(many, "spec.field"+strconv.Itoa(i))
 	}
 	out, _ := redact.CTRF(reportWithProvenance(&ctrf.RuntimeProvenance{
 		ShippedDigest: sha('a'), DerivedDigest: sha('b'),
