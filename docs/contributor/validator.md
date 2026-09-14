@@ -366,7 +366,9 @@ emit(map[string]string{"skipReason": "no-gpu-nodes"})
 **Transport.** `EmitExtra` marshals the map to one JSON line prefixed with
 `ctrf.ExtraLinePrefix` (`##AICR-EXTRA##` followed by one space) on stdout — the
 only channel that crosses the pod boundary besides the exit code and termination
-log. The orchestrator (`pkg/validator/job.ExtractResult`) parses each sentinel
+log. `EmitRuntimeProvenance` uses the same transport under
+`ctrf.ProvenanceLinePrefix` (`##AICR-PROVENANCE##` + space) for the derived
+runtime's `RuntimeProvenance` record. The orchestrator (`pkg/validator/job.ExtractResult`) parses each sentinel
 line, keeps the **last valid non-empty** payload as `TestResult.Extra`, and
 strips every sentinel line from the stored `stdout` (transport, not human
 evidence). A malformed line is non-fatal: it is logged and skipped without
@@ -441,13 +443,27 @@ derived at apply time from the skeleton rendered with the run's real template
 data, so placeholder types survive (`containers[].args` stay strings, which
 Trainer's structural CRD requires; `numProcPerNode` stays an integer).
 
-Evidence carrier: `runtimeSource` rides `Extra` and survives minimal redaction.
-The audit record — sha256 of the normalized shipped and applied worker
-templates, the paths at which they differ (benchmark overrides plus stamped
-scheduling), and the inventory of shipped paths inherited unchanged — is
-computed against the object as applied and printed to stdout, so it ships only
-in `--full` bundles, since template paths can name cluster-specific mounts and
-env. The deployment check `gke-gpu-nic-networks` runs the same recipe →
+**Evidence carrier.** `runtimeSource` rides `Extra` and is emitted the moment
+the class is decided — before the delivered path's live verification — so a run
+that fails on a missing runtime or a mapping drift still records that it was a
+`delivered-artifact` measurement. The audit record — sha256 of the normalized
+shipped and applied worker templates, the paths at which they differ
+(benchmark overrides plus stamped scheduling), and the inventory of shipped
+paths inherited unchanged — is computed against the object as applied and
+published twice: as a human-readable listing on stdout (`--full` only), and as
+the bounded `TestResult.RuntimeProvenance` carrier (`##AICR-PROVENANCE## `
+sentinel → `pkg/validator/job`), which **survives minimal redaction**. The
+redaction policy for that carrier (`redact.boundRuntimeProvenance`, rule
+`ctrf.tests.runtimeProvenance.bound`): both digests must be lowercase sha256
+hex or the record is dropped; paths are template *keys* only and must match
+the dotted key grammar; keys under operator-authored maps
+(`metadata.labels`, `metadata.annotations`, `spec.nodeSelector`) collapse to
+the parent unless they sit under a vendor API domain (`gke.io`,
+`cloud.google.com`, `kubernetes.io`, `k8s.io`, `nvidia.com`, `kubeflow.org`),
+so `metadata.annotations.networking.gke.io/interfaces` is kept while an
+operator's `spec.nodeSelector.my-org/pool` becomes `spec.nodeSelector`; lists
+are deduplicated, sorted and capped at 1024 entries. No value — network name,
+node name, env value — ever appears. The deployment check `gke-gpu-nic-networks` runs the same recipe →
 deployed → cluster arms, gated on the same predicate, so a base
 `h100-gke-cos-training` recipe (TCPXO, no runtime) keeps its census-only
 behaviour.
@@ -729,8 +745,8 @@ reports `0` validated and never reads as ready.
 Unlike `check-nvidia-smi`, the RDMA gate never *skips* — it either
 certifies the cohort or fails closed — so it mints no `skipReason`
 enum. Its coverage rides the existing `nodesValidated`/`nodesTotal`
-allowlist keys unchanged (see below), so the redaction
-`PolicyVersion` stays `v2`.
+allowlist keys unchanged (see below), so that change did not move the
+redaction `PolicyVersion`.
 
 Cluster-aggregate checks that assert on an operator's aggregate status
 (`gpu-operator-health`) remain unaffected — DaemonSet operands ignore

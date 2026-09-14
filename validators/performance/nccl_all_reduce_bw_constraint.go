@@ -411,9 +411,6 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 		return "", false, err
 	}
 	customRuntime = plan.carrier
-	// Record the class now, before any cluster mutation, so a run that fails
-	// later still says which artifact it set out to measure.
-	emitRuntimeSource(plan)
 
 	sizingSelector := ctx.NodeSelector
 	if customRuntime != "" && len(sizingSelector) == 0 {
@@ -482,7 +479,8 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	if err != nil {
 		return "", false, err
 	}
-	// The run completed: print the derived-runtime audit record (--full only).
+	// The run completed: publish the derived-runtime audit record (stdout for
+	// --full, and the bounded carrier that survives minimal evidence).
 	emitRuntimeProvenance(plan)
 
 	// Parse bandwidth from logs (shared across all service types).

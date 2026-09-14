@@ -15,6 +15,7 @@
 package gkenet
 
 import (
+	"context"
 	stderrors "errors"
 	"strings"
 	"testing"
@@ -319,6 +320,32 @@ func TestNodeTemplateOfMalformedShapes(t *testing.T) {
 			_, err := NodeTemplateOf(tt.obj)
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("err = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestReadDeployedTCPXORuntimeClassifiesContextFailures: a stalled or canceled
+// read is an outcome of the run's context, not an internal fault.
+func TestReadDeployedTCPXORuntimeClassifiesContextFailures(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want errors.ErrorCode
+	}{
+		{"deadline", context.DeadlineExceeded, errors.ErrCodeTimeout},
+		{"canceled", context.Canceled, errors.ErrCodeCanceled},
+		{"other", stderrors.New("boom"), errors.ErrCodeInternal},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dyn := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
+			dyn.PrependReactor("get", "clustertrainingruntimes", func(k8stesting.Action) (bool, runtime.Object, error) {
+				return true, nil, tt.err
+			})
+			_, err := ReadDeployedTCPXORuntime(context.Background(), dyn)
+			if err == nil || !stderrors.Is(err, errors.New(tt.want, "")) {
+				t.Fatalf("want %s, got %v", tt.want, err)
 			}
 		})
 	}

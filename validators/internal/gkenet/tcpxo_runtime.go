@@ -17,6 +17,7 @@ package gkenet
 import (
 	"context"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -126,10 +127,25 @@ func ReadDeployedTCPXORuntime(ctx context.Context, dyn dynamic.Interface) (*unst
 			return nil, errors.Wrap(errors.ErrCodeNotFound,
 				fmt.Sprintf("the recipe ships ClusterTrainingRuntime %q but it is not deployed", TCPXORuntimeName), err)
 		}
-		return nil, errors.Wrap(errors.ErrCodeInternal,
+		return nil, errors.Wrap(ReadErrorCode(err),
 			fmt.Sprintf("failed to read ClusterTrainingRuntime %q", TCPXORuntimeName), err)
 	}
 	return obj, nil
+}
+
+// ReadErrorCode classifies a non-NotFound Kubernetes read failure: an expired
+// deadline is ErrCodeTimeout and an operator abort is ErrCodeCanceled — both
+// are outcomes of the run's context, not product faults — and anything else
+// is ErrCodeInternal. Callers already handle NotFound before reaching this.
+func ReadErrorCode(err error) errors.ErrorCode {
+	switch {
+	case stderrors.Is(err, context.DeadlineExceeded):
+		return errors.ErrCodeTimeout
+	case stderrors.Is(err, context.Canceled):
+		return errors.ErrCodeCanceled
+	default:
+		return errors.ErrCodeInternal
+	}
 }
 
 // NodeTemplateOf returns the shipped runtime's worker PodTemplateSpec — the

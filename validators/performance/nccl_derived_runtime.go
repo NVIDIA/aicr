@@ -28,6 +28,7 @@ import (
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/internal/gkenet"
@@ -90,10 +91,12 @@ func (p *benchmarkRuntimePlan) derived() bool { return p != nil && p.shipped != 
 
 // derivedRuntimeProvenance is the audit record for a derived runtime, computed
 // against the object that was actually applied (after scheduling was stamped)
-// so it describes what ran, not an intermediate. It is printed to stdout only:
-// minimal evidence strips stdout, so a --full bundle carries it while the
-// default never ships template paths that can name cluster-specific mounts or
-// env — the minimal bundle carries just the runtimeSource class.
+// so it describes what ran, not an intermediate. It is published two ways: the
+// human-readable listing on stdout (--full evidence), and the bounded
+// ctrf.RuntimeProvenance carrier via EmitRuntimeProvenance, which survives
+// minimal redaction — digests and template KEYS only, operator-keyed map keys
+// collapsed by pkg/evidence/redact — so a default attestation still binds the
+// number to the exact templates compared (#2297's evidence carrier).
 type derivedRuntimeProvenance struct {
 	shippedDigest  string
 	derivedDigest  string
@@ -130,11 +133,18 @@ func resolveBenchmarkRuntimeSource(ctx *validators.Context, customRuntime string
 					perfConstraintNCCLBenchmarkRuntime, perfConstraintNCCLBenchmarkRuntimeRef,
 					gkenet.TCPXORuntimeName, recipe.GKETCPXOInterfacesOverrideKey))
 		}
+		emitRuntimeSource(runtimeSourceRecipeSupplied)
 		return &benchmarkRuntimePlan{carrier: customRuntime, source: runtimeSourceRecipeSupplied}, nil
 	}
 	if !delivered {
+		emitRuntimeSource(runtimeSourceCapability)
 		return &benchmarkRuntimePlan{source: runtimeSourceCapability}, nil
 	}
+	// The class is recipe-determined and is settled here, BEFORE the live
+	// verification below: a missing runtime, a mapping drift, or an absent
+	// network fails the run, and that failure must still say it was a
+	// delivered-artifact measurement that failed, not a fixture that never ran.
+	emitRuntimeSource(runtimeSourceDelivered)
 	if ctx.DynamicClient == nil {
 		return nil, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest, "dynamic client is not available")
 	}
@@ -199,7 +209,9 @@ func verifyDeliveredTCPXORuntime(ctx *validators.Context, recorded []recipe.Netw
 	}
 	discovered, err := gkenet.DiscoverGPUNICNetworks(ctx.Ctx, ctx.DynamicClient)
 	if err != nil {
-		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to discover GKE GPU NIC networks", err)
+		// The raw API error is deliberately unwrapped by the discoverer; give a
+		// stalled or canceled read its own code rather than an internal fault.
+		return nil, aicrErrors.Wrap(gkenet.ReadErrorCode(err), "failed to discover GKE GPU NIC networks", err)
 	}
 	if err := gkenet.VerifyNetworksExist(deployed, discovered); err != nil {
 		return nil, err
@@ -472,26 +484,30 @@ func finalizeRuntimeProvenance(plan *benchmarkRuntimePlan, applied *unstructured
 	return nil
 }
 
-// emitRuntimeSource publishes the provenance class the moment it is decided,
-// before any cluster mutation, so a run that fails later still records which
-// artifact it set out to measure. The class rides EmitExtra and survives
-// minimal redaction (redact allowlist key runtimeSource).
-func emitRuntimeSource(plan *benchmarkRuntimePlan) {
-	fmt.Printf("Benchmark runtime source: %s\n", plan.source)
-	if err := validators.EmitExtra(runtimeProvenanceExtra(plan)); err != nil {
+// emitRuntimeSource publishes the provenance class the moment it is decided —
+// inside resolveBenchmarkRuntimeSource, before the delivered path's live
+// verification and before any cluster mutation — so a run that fails at any
+// later point still records which artifact it set out to measure. The class
+// rides EmitExtra and survives minimal redaction (redact allowlist key
+// runtimeSource).
+func emitRuntimeSource(source ncclRuntimeSource) {
+	fmt.Printf("Benchmark runtime source: %s\n", source)
+	if err := validators.EmitExtra(runtimeProvenanceExtra(&benchmarkRuntimePlan{source: source})); err != nil {
 		slog.Warn("failed to emit runtime source extra", "error", err)
 	}
 }
 
-// emitRuntimeProvenance prints the derived-runtime audit record after the run:
-// both content identities, the paths at which the applied runtime differs from
-// the shipped one, and the inventory of shipped paths it inherited unchanged.
-// Stdout only — minimal evidence strips it, --full carries it (see
-// derivedRuntimeProvenance). No-op for the other two sources.
+// emitRuntimeProvenance publishes the derived-runtime audit record after the
+// run: the human-readable listing on stdout (--full evidence) and the bounded
+// ctrf.RuntimeProvenance carrier, which survives minimal redaction. No-op for
+// the other two sources.
 func emitRuntimeProvenance(plan *benchmarkRuntimePlan) {
 	prov := plan.provenance
 	if prov == nil {
 		return
+	}
+	if err := validators.EmitRuntimeProvenance(runtimeProvenanceCarrier(prov)); err != nil {
+		slog.Warn("failed to emit runtime provenance carrier", "error", err)
 	}
 	fmt.Printf("Benchmark runtime derived from %s: shipped node template sha256 %s, applied sha256 %s\n",
 		gkenet.TCPXORuntimeName, prov.shippedDigest, prov.derivedDigest)
@@ -506,11 +522,21 @@ func emitRuntimeProvenance(plan *benchmarkRuntimePlan) {
 }
 
 // runtimeProvenanceExtra is the allowlisted Extra payload for a plan: the
-// provenance class only. Digests and paths are deliberately NOT here — they
-// are stdout evidence for --full bundles. Pure so it can be unit-tested
-// without capturing the stdout sentinel.
+// provenance class only. Digests and paths ride their own bounded carrier
+// (runtimeProvenanceCarrier), never Extra, whose values must be counts or
+// codes. Pure so it can be unit-tested without capturing the stdout sentinel.
 func runtimeProvenanceExtra(plan *benchmarkRuntimePlan) map[string]string {
 	return map[string]string{extraKeyRuntimeSource: string(plan.source)}
+}
+
+// runtimeProvenanceCarrier maps the audit record onto the ctrf carrier.
+func runtimeProvenanceCarrier(prov *derivedRuntimeProvenance) *ctrf.RuntimeProvenance {
+	return &ctrf.RuntimeProvenance{
+		ShippedDigest:   prov.shippedDigest,
+		DerivedDigest:   prov.derivedDigest,
+		OverriddenPaths: append([]string(nil), prov.overridePaths...),
+		InheritedPaths:  append([]string(nil), prov.inheritedPaths...),
+	}
 }
 
 // --- template plumbing -------------------------------------------------------

@@ -15,8 +15,10 @@
 package redact_test
 
 import (
+	"bytes"
 	"reflect"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/evidence/redact"
@@ -639,5 +641,98 @@ func TestSnapshotDropsItemsFromAllowlistedSubtype(t *testing.T) {
 	}
 	if _, err := st.GetInt64("node-count"); err != nil {
 		t.Errorf("allowlisted key node-count did not survive redaction: %v", err)
+	}
+}
+
+func reportWithProvenance(p *ctrf.RuntimeProvenance) *ctrf.Report {
+	r := reportWithExtra(nil)
+	r.Results.Tests[0].RuntimeProvenance = p
+	return r
+}
+
+// TestCTRFBoundsRuntimeProvenance covers #2297's evidence carrier policy: the
+// record survives minimal redaction only as digests plus template KEYS, with
+// operator-authored keys collapsed and ill-formed records dropped whole.
+func TestCTRFBoundsRuntimeProvenance(t *testing.T) {
+	sha := func(c byte) string { return string(bytes.Repeat([]byte{c}, 64)) }
+	tests := []struct {
+		name string
+		in   *ctrf.RuntimeProvenance
+		want *ctrf.RuntimeProvenance
+	}{
+		{"absent stays absent", nil, nil},
+		{
+			name: "well-formed record survives with keys sorted and deduplicated",
+			in: &ctrf.RuntimeProvenance{ShippedDigest: sha('a'), DerivedDigest: sha('b'),
+				OverriddenPaths: []string{"spec.containers[node].image", "spec.containers[node].args", "spec.containers[node].args"},
+				InheritedPaths:  []string{"spec.containers[node].env[NCCL_SOCKET_IFNAME].value"}},
+			want: &ctrf.RuntimeProvenance{ShippedDigest: sha('a'), DerivedDigest: sha('b'),
+				OverriddenPaths: []string{"spec.containers[node].args", "spec.containers[node].image"},
+				InheritedPaths:  []string{"spec.containers[node].env[NCCL_SOCKET_IFNAME].value"}},
+		},
+		{
+			name: "malformed digest drops the whole record",
+			in:   &ctrf.RuntimeProvenance{ShippedDigest: "ABC", DerivedDigest: sha('b'), InheritedPaths: []string{"spec.hostNetwork"}},
+			want: nil,
+		},
+		{
+			name: "vendor-domain keys kept, operator keys collapsed, free text dropped",
+			in: &ctrf.RuntimeProvenance{ShippedDigest: sha('a'), DerivedDigest: sha('b'),
+				InheritedPaths: []string{
+					"metadata.annotations.networking.gke.io/interfaces",
+					"metadata.annotations.devices.gke.io/container.tcpxo-daemon",
+					"metadata.labels.team-payments-prod",
+					"spec.nodeSelector.cloud.google.com/gke-accelerator",
+					"spec.nodeSelector.my-org/private-pool-10.0.0.5",
+					"spec.nodeSelector.pool",
+					"spec.volumes[nvtcpxo-libraries].hostPath.path",
+					"free text with spaces",
+					"spec.containers[node].env[X].value=10.0.0.5",
+				}},
+			want: &ctrf.RuntimeProvenance{ShippedDigest: sha('a'), DerivedDigest: sha('b'),
+				InheritedPaths: []string{
+					"metadata.annotations.devices.gke.io/container.tcpxo-daemon",
+					"metadata.annotations.networking.gke.io/interfaces",
+					"metadata.labels",
+					"spec.nodeSelector",
+					"spec.nodeSelector.cloud.google.com/gke-accelerator",
+					"spec.volumes[nvtcpxo-libraries].hostPath.path",
+				}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out, rules := redact.CTRF(reportWithProvenance(tt.in))
+			got := out.Results.Tests[0].RuntimeProvenance
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("bounded provenance = %+v, want %+v", got, tt.want)
+			}
+			if !slices.Contains(rules, "ctrf.tests.runtimeProvenance.bound") {
+				t.Errorf("applied rules must name the provenance bound, got %v", rules)
+			}
+		})
+	}
+}
+
+func TestCTRFRuntimeProvenancePathBounds(t *testing.T) {
+	sha := func(c byte) string { return string(bytes.Repeat([]byte{c}, 64)) }
+	many := make([]string, 0, 1100)
+	for i := range 1100 {
+		many = append(many, "spec.containers[node].env[V"+strconv.Itoa(i)+"].value")
+	}
+	out, _ := redact.CTRF(reportWithProvenance(&ctrf.RuntimeProvenance{
+		ShippedDigest: sha('a'), DerivedDigest: sha('b'),
+		OverriddenPaths: many,
+		InheritedPaths:  []string{"has space", "bad;char"},
+	}))
+	got := out.Results.Tests[0].RuntimeProvenance
+	if got == nil {
+		t.Fatal("well-formed digests must keep the record")
+	}
+	if len(got.OverriddenPaths) != 1024 {
+		t.Errorf("override list = %d entries, want capped at 1024", len(got.OverriddenPaths))
+	}
+	if got.InheritedPaths != nil {
+		t.Errorf("paths failing the key grammar must drop to nil, got %v", got.InheritedPaths)
 	}
 }

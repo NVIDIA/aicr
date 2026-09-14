@@ -112,7 +112,7 @@ func (d *Deployer) ExtractResult(ctx context.Context) *ctrf.ValidatorResult {
 		slog.Warn("failed to capture pod logs", "pod", jobPod.Name, "error", logErr)
 		// Not fatal — we still have exit code and termination message
 	} else if logs != "" {
-		result.Extra, result.Stdout = processValidatorLogs(logs)
+		result.Extra, result.RuntimeProvenance, result.Stdout = processValidatorLogs(logs)
 	}
 
 	return result
@@ -226,34 +226,37 @@ func (d *Deployer) jobFailedCondition(ctx context.Context) (*batchv1.Job, batchv
 	return nil, batchv1.JobCondition{}, false
 }
 
-// processValidatorLogs turns raw pod logs into the structured Extra map and the
-// human-readable Stdout lines. Order matters and is the invariant both call
-// sites rely on: the Extra sentinel is parsed from the FULL logs BEFORE any
-// tail-truncation, so a sentinel emitted after more than ValidatorMaxStdoutLines
-// of output still survives; only then is the sentinel-stripped remainder
-// truncated and length-capped for human display.
-func processValidatorLogs(logs string) (extra map[string]string, stdout []string) {
-	cleaned, extra := parseExtraSentinels(logs)
+// processValidatorLogs turns raw pod logs into the structured Extra map, the
+// RuntimeProvenance carrier, and the human-readable Stdout lines. Order matters
+// and is the invariant both call sites rely on: the sentinels are parsed from
+// the FULL logs BEFORE any tail-truncation, so a sentinel emitted after more
+// than ValidatorMaxStdoutLines of output still survives; only then is the
+// sentinel-stripped remainder truncated and length-capped for human display.
+func processValidatorLogs(logs string) (extra map[string]string, prov *ctrf.RuntimeProvenance, stdout []string) {
+	cleaned, extra, prov := parseExtraSentinels(logs)
 	stdout = filterStdoutLines(
 		truncateLogLines(cleaned, defaults.ValidatorMaxStdoutLines),
 		defaults.ValidatorMaxStdoutLineLength,
 	)
-	return extra, stdout
+	return extra, prov, stdout
 }
 
-// parseExtraSentinels scans the raw pod logs for ctrf.ExtraLinePrefix sentinel
-// lines (the transport for a check's structured Extra map) and returns the logs
-// with every sentinel line removed plus the LAST VALID non-empty payload.
+// parseExtraSentinels scans the raw pod logs for the two sentinel transports —
+// ctrf.ExtraLinePrefix (a check's structured Extra map) and
+// ctrf.ProvenanceLinePrefix (a derived runtime's RuntimeProvenance record) —
+// and returns the logs with every sentinel line removed plus the LAST VALID
+// non-empty payload of each.
 //
 // Each sentinel is parsed as it is encountered: a malformed one is logged at
 // WARN and skipped WITHOUT discarding an earlier valid payload, so a valid
 // coverage/skip line followed by a garbled line still yields the valid map. A
 // merged/garbled line must never flip a passing check to an error — the exit
-// code, not this map, is the verdict. Returns (logs, nil) when no sentinel is
-// present, and extra is nil unless some line parsed to a non-empty object.
-func parseExtraSentinels(logs string) (cleaned string, extra map[string]string) {
-	if !strings.Contains(logs, ctrf.ExtraLinePrefix) {
-		return logs, nil
+// code, not this map, is the verdict. Returns (logs, nil, nil) when no sentinel
+// is present; extra is nil unless some line parsed to a non-empty object, and
+// prov is nil unless some line parsed to a record carrying both digests.
+func parseExtraSentinels(logs string) (cleaned string, extra map[string]string, prov *ctrf.RuntimeProvenance) {
+	if !strings.Contains(logs, ctrf.ExtraLinePrefix) && !strings.Contains(logs, ctrf.ProvenanceLinePrefix) {
+		return logs, nil, nil
 	}
 	lines := strings.Split(logs, "\n")
 	kept := make([]string, 0, len(lines))
@@ -267,9 +270,18 @@ func parseExtraSentinels(logs string) (cleaned string, extra map[string]string) 
 			}
 			continue // transport, not human evidence — strip it
 		}
+		if payload, ok := strings.CutPrefix(line, ctrf.ProvenanceLinePrefix); ok {
+			var parsed ctrf.RuntimeProvenance
+			if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+				slog.Warn("failed to parse validator provenance sentinel; dropping", "error", err)
+			} else if parsed.ShippedDigest != "" && parsed.DerivedDigest != "" {
+				prov = &parsed
+			}
+			continue
+		}
 		kept = append(kept, line)
 	}
-	return strings.Join(kept, "\n"), extra
+	return strings.Join(kept, "\n"), extra, prov
 }
 
 // HandleTimeout extracts whatever result is available when the orchestrator's
@@ -314,7 +326,7 @@ func (d *Deployer) HandleTimeout(ctx context.Context, waitCause error) *ctrf.Val
 	// sentinel here too: a check that emits coverage counts before hitting the
 	// timeout still yields structured evidence.
 	if logs, logErr := pod.GetPodLogs(ctx, d.config.Clientset, d.config.Namespace, jobPod.Name, ValidatorContainerName); logErr == nil && logs != "" {
-		result.Extra, result.Stdout = processValidatorLogs(logs)
+		result.Extra, result.RuntimeProvenance, result.Stdout = processValidatorLogs(logs)
 	}
 
 	if cs.State.Terminated != nil {

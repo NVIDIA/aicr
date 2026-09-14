@@ -307,9 +307,12 @@ mismatch in either comparison fails the run rather than being recorded; a
 divergent deployed artifact is a finding, never something validation repairs.
 
 ```shell
-aicr validate --recipe recipes/overlays/h100-gke-cos-training.yaml \
+aicr validate --recipe recipes/overlays/h100-gke-cos-training-kubeflow.yaml \
   --phase performance
 ```
+
+(The base `h100-gke-cos-training` recipe ships TCPXO but no runtime, so it
+measures the validator's own fixture and reports `cluster-capability`.)
 
 The validator runs the all-reduce sweep over the validator-fixed `1K`–`16G`
 message-size range and asserts the busBW floor. It deploys the

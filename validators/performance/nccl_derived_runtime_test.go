@@ -15,7 +15,11 @@
 package main
 
 import (
+	"encoding/json"
 	stderrors "errors"
+	"io"
+	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -28,6 +32,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
+	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/internal/gkenet"
@@ -566,4 +571,72 @@ func TestFinalizeRuntimeProvenanceDescribesAppliedObject(t *testing.T) {
 	}
 	emitRuntimeProvenance(plan)                                                   // prints the record; must not panic
 	emitRuntimeProvenance(&benchmarkRuntimePlan{source: runtimeSourceCapability}) // no record: no-op
+}
+
+// captureStdout runs fn with os.Stdout redirected and returns what it wrote.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	done := make(chan string)
+	go func() {
+		b, _ := io.ReadAll(r)
+		done <- string(b)
+	}()
+	fn()
+	os.Stdout = orig
+	_ = w.Close()
+	return <-done
+}
+
+// TestRuntimeSourceEmittedBeforeDeliveredVerification pins the review finding:
+// the class is recipe-determined, so a delivered run that fails its live
+// verification (here: runtime not deployed) must still have published
+// delivered-artifact — the failure describes a delivered measurement, not a
+// fixture that never ran.
+func TestRuntimeSourceEmittedBeforeDeliveredVerification(t *testing.T) {
+	m := shippedMapping()
+	ctx := &validators.Context{Ctx: t.Context(), DynamicClient: fakeDyn(),
+		ValidationInput: validatorv1.ToValidationInput(&recipe.RecipeResult{ComponentRefs: tcpxoRefs(m)})}
+	var err error
+	out := captureStdout(t, func() {
+		_, err = resolveBenchmarkRuntimeSource(ctx, "", recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault, fabricEFA)
+	})
+	if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		t.Fatalf("control: want NotFound from the delivered verification, got %v", err)
+	}
+	want := ctrf.ExtraLinePrefix + `{"runtimeSource":"delivered-artifact"}`
+	if !strings.Contains(out, want) {
+		t.Errorf("stdout lacks the early source sentinel %q:\n%s", want, out)
+	}
+}
+
+// TestRuntimeProvenanceCarrierIsEmitted checks the audit record reaches the
+// bounded ctrf carrier (the evidence that survives minimal redaction), not just
+// the human listing.
+func TestRuntimeProvenanceCarrierIsEmitted(t *testing.T) {
+	prov := &derivedRuntimeProvenance{shippedDigest: strings.Repeat("a", 64), derivedDigest: strings.Repeat("b", 64),
+		overridePaths: []string{"spec.containers[node].args"}, inheritedPaths: []string{"spec.hostNetwork"}}
+	out := captureStdout(t, func() { emitRuntimeProvenance(&benchmarkRuntimePlan{source: runtimeSourceDelivered, provenance: prov}) })
+	var line string
+	for _, l := range strings.Split(out, "\n") {
+		if p, ok := strings.CutPrefix(l, ctrf.ProvenanceLinePrefix); ok {
+			line = p
+		}
+	}
+	if line == "" {
+		t.Fatalf("no provenance sentinel in:\n%s", out)
+	}
+	var got ctrf.RuntimeProvenance
+	if err := json.Unmarshal([]byte(line), &got); err != nil {
+		t.Fatal(err)
+	}
+	want := *runtimeProvenanceCarrier(prov)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("carrier = %+v, want %+v", got, want)
+	}
 }

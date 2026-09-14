@@ -55,7 +55,9 @@ package redact
 
 import (
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -74,9 +76,11 @@ const (
 	// allowlisted structured keys whose values match the key's canonical shape
 	// (count / enum code) now survive minimal redaction.
 	// v3 (#2297): the per-test Extra allowlist admits the NCCL runtime-
-	// provenance key runtimeSource (closed set). Nothing previously published
-	// changed shape; verifiers on v2 will see a key they do not expect, which
-	// is exactly why the version moves.
+	// provenance key runtimeSource (closed set), and the new bounded
+	// TestResult.RuntimeProvenance carrier survives under the rules in
+	// boundRuntimeProvenance. Nothing previously published changed shape;
+	// verifiers on v2 will see fields they do not expect, which is exactly why
+	// the version moves.
 	PolicyVersion = "v3"
 )
 
@@ -236,11 +240,105 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	"runtimeSource": isRuntimeSource, // closed-set code: delivered-artifact | recipe-supplied-runtime | cluster-capability
 }
 
+// ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.
+var ctrfSHA256Value = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// ctrfProvenancePath bounds a RuntimeProvenance path: the dotted template-key
+// grammar (map keys, [name]-addressed list elements, label/annotation keys with
+// their "/" and "-"), and nothing that could carry free text or an address.
+var ctrfProvenancePath = regexp.MustCompile(`^[A-Za-z0-9._/\-\[\]]{1,256}$`)
+
+// ctrfProvenanceMaxPaths caps each path list; a derived PodTemplateSpec has a
+// few hundred leaves, so a longer list is not a template inventory.
+const ctrfProvenanceMaxPaths = 1024
+
+// ctrfOperatorKeyedMaps are the PodTemplateSpec maps whose KEYS an operator
+// authors (label/annotation/nodeSelector keys). Every other key in a template
+// path is a Kubernetes or Kubeflow API field name or a name from the shipped
+// manifest, but a key under one of these can be an operator's own label, so it
+// is collapsed to the parent unless it sits under a vendor API domain.
+var ctrfOperatorKeyedMaps = []string{"metadata.annotations.", "metadata.labels.", "spec.nodeSelector."}
+
+// ctrfVendorKeyDomains are the API domains whose label/annotation keys are
+// vendor-defined surface, not operator text, and stay in minimal evidence
+// (e.g. networking.gke.io/interfaces — the fabric wiring this carrier exists to
+// prove was inherited).
+var ctrfVendorKeyDomains = []string{"kubernetes.io", "k8s.io", "gke.io", "cloud.google.com", "nvidia.com", "kubeflow.org"}
+
+// boundRuntimeProvenance applies the minimal-evidence policy to a derived
+// runtime's provenance record: both digests must be lowercase sha256 hex or
+// the whole record is dropped (fail-closed — a record that cannot bind is not
+// evidence); each path must match the template-key grammar; keys under
+// operator-keyed maps collapse to the parent unless vendor-domained; lists are
+// deduplicated, sorted and capped. Returns a fresh record; never mutates in.
+func boundRuntimeProvenance(in *ctrf.RuntimeProvenance) *ctrf.RuntimeProvenance {
+	if in == nil || !ctrfSHA256Value.MatchString(in.ShippedDigest) || !ctrfSHA256Value.MatchString(in.DerivedDigest) {
+		return nil
+	}
+	return &ctrf.RuntimeProvenance{
+		ShippedDigest:   in.ShippedDigest,
+		DerivedDigest:   in.DerivedDigest,
+		OverriddenPaths: boundProvenancePaths(in.OverriddenPaths),
+		InheritedPaths:  boundProvenancePaths(in.InheritedPaths),
+	}
+}
+
+func boundProvenancePaths(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		if !ctrfProvenancePath.MatchString(p) {
+			continue
+		}
+		p = collapseOperatorKey(p)
+		if _, dup := seen[p]; dup {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	if len(out) > ctrfProvenanceMaxPaths {
+		out = out[:ctrfProvenanceMaxPaths]
+	}
+	return out
+}
+
+// collapseOperatorKey returns p unchanged unless it addresses a key under an
+// operator-keyed map, in which case the key is kept only when its domain (the
+// part before "/") is, or is a subdomain of, a vendor API domain; otherwise the
+// path collapses to the map itself.
+func collapseOperatorKey(p string) string {
+	for _, prefix := range ctrfOperatorKeyedMaps {
+		key, ok := strings.CutPrefix(p, prefix)
+		if !ok {
+			continue
+		}
+		domain, _, hasDomain := strings.Cut(key, "/")
+		if hasDomain {
+			for _, d := range ctrfVendorKeyDomains {
+				if domain == d || strings.HasSuffix(domain, "."+d) {
+					return p
+				}
+			}
+		}
+		return strings.TrimSuffix(prefix, ".")
+	}
+	return p
+}
+
 // ctrfAppliedRules is the static, sorted description of the CTRF scrub.
 var ctrfAppliedRules = []string{
 	"ctrf.tests.extra.allowlist",
 	"ctrf.tests.omit:message",
 	"ctrf.tests.omit:stdout",
+	"ctrf.tests.runtimeProvenance.bound",
 }
 
 // Snapshot returns a redacted deep copy of in and the sorted list of applied
@@ -351,6 +449,7 @@ func CTRF(in *ctrf.Report) (*ctrf.Report, []string) {
 			tr.Stdout = nil
 			tr.Message = ""
 			tr.Extra = allowlistExtra(tr.Extra)
+			tr.RuntimeProvenance = boundRuntimeProvenance(tr.RuntimeProvenance)
 			tests[i] = tr
 		}
 		out.Results.Tests = tests
