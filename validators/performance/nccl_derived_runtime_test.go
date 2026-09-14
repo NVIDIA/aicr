@@ -241,6 +241,54 @@ func TestDeriveBenchmarkRuntimeRefusesShippedWorkerEntrypoint(t *testing.T) {
 	}
 }
 
+// TestDeriveBenchmarkRuntimeBaselineCoversEveryOverriddenPath pins the
+// acceptance criterion that every overridden source path has an explicit
+// precondition: a shipped change under resources or terminationMessagePolicy
+// must fail rather than vanish under the override, while the shipped shape as
+// it is today passes.
+func TestDeriveBenchmarkRuntimeBaselineCoversEveryOverriddenPath(t *testing.T) {
+	skel := loadGKESkeleton(t)
+	mutate := func(fn func(worker map[string]any)) *unstructured.Unstructured {
+		shipped := shippedTCPXORuntime(shippedMapping())
+		tmpl, _ := gkenet.NodeTemplateOf(shipped)
+		fn(workerContainer(tmpl))
+		if err := setNodeTemplate(shipped, tmpl); err != nil {
+			t.Fatal(err)
+		}
+		return shipped
+	}
+	tests := []struct {
+		name    string
+		shipped *unstructured.Unstructured
+		wantErr string
+	}{
+		{"shipped shape today passes", mutate(func(map[string]any) {}), ""},
+		{"extra resource under limits", mutate(func(w map[string]any) {
+			w["resources"].(map[string]any)["limits"].(map[string]any)["vpc.amazonaws.com/efa"] = "8"
+		}), `carry "vpc.amazonaws.com/efa"`},
+		{"unknown resources section", mutate(func(w map[string]any) {
+			w["resources"].(map[string]any)["claims"] = []any{map[string]any{"name": "gpu"}}
+		}), `carry "claims"`},
+		{"terminationMessagePolicy set", mutate(func(w map[string]any) {
+			w["terminationMessagePolicy"] = "FallbackToLogsOnError"
+		}), "sets terminationMessagePolicy"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := deriveBenchmarkRuntime(skel, tt.shipped)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) || !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Fatalf("want InvalidRequest containing %q, got %v", tt.wantErr, err)
+			}
+		})
+	}
+}
+
 func TestDiffTemplatePathsAndOverlap(t *testing.T) {
 	a := map[string]any{"spec": map[string]any{
 		"containers": []any{

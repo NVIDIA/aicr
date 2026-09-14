@@ -200,8 +200,10 @@ type TestResult struct {
 	// belong in Stdout, which is redacted by default. The redact package enforces this at the
 	// publication boundary with a fail-closed key AND value allowlist: only
 	// listed keys survive, and only values matching the key's canonical shape
-	// (decimal count / kebab-case enum code) — so an identifier smuggled under
-	// an allowed key is dropped, not published (see pkg/evidence/redact).
+	// (decimal count / member of that key's closed enum set — a kebab-case
+	// regex would still admit an arbitrary identifier) — so an identifier
+	// smuggled under an allowed key is dropped, not published (see
+	// pkg/evidence/redact).
 	Extra map[string]string `json:"extra,omitempty"`
 
 	// RuntimeProvenance binds a derived-runtime measurement to the templates it

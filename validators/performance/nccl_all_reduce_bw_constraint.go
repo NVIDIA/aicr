@@ -476,12 +476,16 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Each platform has a per-platform TrainingRuntime with all platform-specific
 	// configuration (image, mpirun args, resources, sidecars). The TrainJob is shared.
 	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime, plan)
+	// Publish the derived-runtime audit record (stdout for --full, and the
+	// bounded carrier that survives minimal evidence) whether or not the run
+	// succeeded: the record describes the runtime that was applied, and a
+	// failed measurement of a delivered artifact is exactly the case where
+	// knowing which templates were compared matters. No-op unless a derived
+	// runtime reached apply.
+	emitRuntimeProvenance(plan)
 	if err != nil {
 		return "", false, err
 	}
-	// The run completed: publish the derived-runtime audit record (stdout for
-	// --full, and the bounded carrier that survives minimal evidence).
-	emitRuntimeProvenance(plan)
 
 	// Parse bandwidth from logs (shared across all service types).
 	bandwidth, err := parseBandwidthFromLogs(logs)

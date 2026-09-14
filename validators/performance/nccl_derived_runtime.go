@@ -366,8 +366,45 @@ func checkShippedWorkerBaseline(tmpl map[string]any) error {
 				fmt.Sprintf("shipped %s worker does not declare %s as env; the derivation carries fabric configuration only through env, so the benchmark would run without it", gkenet.TCPXORuntimeName, need))
 		}
 	}
+	// resources: the skeleton's block is the GPU request/limit alone, so the
+	// override is lossless only while the shipped block asks for nothing else.
+	// A fabric device or an extended resource added under the shipped
+	// resources later would be dropped silently under the override — fail here
+	// instead, naming the key.
+	if res, ok := worker["resources"].(map[string]any); ok {
+		for section, raw := range res {
+			if section != "limits" && section != "requests" {
+				return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+					fmt.Sprintf("shipped %s worker resources carry %q, which the benchmark override would drop", gkenet.TCPXORuntimeName, section))
+			}
+			m, _ := raw.(map[string]any)
+			for name := range m {
+				if name != shippedWorkerGPUResource {
+					return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+						fmt.Sprintf("shipped %s worker resources.%s carry %q beyond %s, which the benchmark override would drop", gkenet.TCPXORuntimeName, section, name, shippedWorkerGPUResource))
+				}
+			}
+		}
+	}
+	// terminationMessagePolicy: the benchmark sets its own to recover results
+	// from pod status; a shipped value would be a diagnostics choice for the
+	// training workload with no bearing on the measurement, but one exists only
+	// if the shipped runtime changed shape, which must be seen rather than
+	// absorbed.
+	if _, ok := worker["terminationMessagePolicy"]; ok {
+		return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("shipped %s worker sets terminationMessagePolicy, which the benchmark overrides; confirm the derivation still measures what the recipe ships and update the baseline deliberately", gkenet.TCPXORuntimeName))
+	}
+	// image is the one override with no precondition by design: the benchmark
+	// binary (nccl-tests under MPI) lives in the fixture image, and the shipped
+	// training image carries neither. Replacing it is inherent to measuring at
+	// all; the fabric plugin is mounted from the host, not the image.
 	return nil
 }
+
+// shippedWorkerGPUResource is the only resource the shipped worker may request
+// for the derivation's resources override to be lossless.
+const shippedWorkerGPUResource = "nvidia.com/gpu"
 
 // deliveredWorkerBootstrap is the worker entrypoint for a DERIVED runtime. It
 // is the fixture's sshd bootstrap minus the one line that made the fixture

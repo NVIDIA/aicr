@@ -429,9 +429,13 @@ and only the paths in `benchmarkOwnedNodePaths` (worker `image`, `command`,
 `args`, `resources`, `terminationMessagePolicy`) are re-applied from the MPI
 skeleton, with volumes and mounts merged additively. An override-path guard
 fails the run if the derived template differs from the shipped one anywhere
-else, and a baseline precondition fails it if the shipped worker sets its own
-`command`/`args` or lacks the NCCL fabric env — the two ways a fabric change
-could hide under an overridden path.
+else, and a baseline precondition covers every overridden path — the shipped
+worker must set no `command`/`args` (an entrypoint would hide fabric
+activation), must declare the NCCL fabric env, must request only
+`nvidia.com/gpu` under `resources`, and must set no
+`terminationMessagePolicy`; `image` is the one override with no precondition,
+since the benchmark binary lives only in the fixture image and the fabric
+plugin is mounted from the host.
 
 The measurement runs under the **shipped** environment. The derived worker's
 bootstrap exports the container's own `NCCL_*`/`CUDA_*`/`LD_LIBRARY_PATH` to
@@ -450,8 +454,9 @@ that fails on a missing runtime or a mapping drift still records that it was a
 shipped and applied worker templates, the paths at which they differ
 (benchmark overrides plus stamped scheduling), and the inventory of shipped
 paths inherited unchanged — is computed against the object as applied and
-published twice: as a human-readable listing on stdout (`--full` only), and as
-the bounded `TestResult.RuntimeProvenance` carrier (`##AICR-PROVENANCE## `
+published — whether or not the run then succeeds, since it describes the
+runtime that was applied — twice: as a human-readable listing on stdout
+(`--full` only), and as the bounded `TestResult.RuntimeProvenance` carrier (`##AICR-PROVENANCE## `
 sentinel → `pkg/validator/job`), which **survives minimal redaction**. The
 redaction policy for that carrier (`redact.boundRuntimeProvenance`, rule
 `ctrf.tests.runtimeProvenance.bound`): both digests must be lowercase sha256

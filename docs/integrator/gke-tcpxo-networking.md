@@ -291,6 +291,14 @@ The GKE H100 training recipe (`h100-gke-cos-training`) already selects the
 automated `nccl-all-reduce-bw` performance check (floor `>= 300` GB/s), so the
 benchmark is fully driven for you:
 
+```shell
+aicr validate --recipe recipes/overlays/h100-gke-cos-training.yaml \
+  --phase performance
+```
+
+That base recipe ships TCPXO but no runtime, so it measures the validator's
+own fixture and labels the result `runtimeSource: cluster-capability`.
+
 On a recipe that ships the `torch-distributed-tcpxo` runtime
 (`h100-gke-cos-training-kubeflow`), the performance validator does not measure
 a fixture of its own. Before creating anything it verifies **recipe → deployed →
@@ -302,17 +310,14 @@ wholesale (metadata and spec), re-applying only the benchmark's own worker
 `image`, `command`, `args`, `resources`, and `terminationMessagePolicy`, and
 merging volumes and mounts additively, so the workers run under the shipped
 NCCL environment rather than the fixture's — and labels the result
-`runtimeSource: delivered-artifact`. A
-mismatch in either comparison fails the run rather than being recorded; a
-divergent deployed artifact is a finding, never something validation repairs.
+`runtimeSource: delivered-artifact`. A mismatch in either comparison fails the
+run rather than being recorded; a divergent deployed artifact is a finding,
+never something validation repairs.
 
 ```shell
 aicr validate --recipe recipes/overlays/h100-gke-cos-training-kubeflow.yaml \
   --phase performance
 ```
-
-(The base `h100-gke-cos-training` recipe ships TCPXO but no runtime, so it
-measures the validator's own fixture and reports `cluster-capability`.)
 
 The validator runs the all-reduce sweep over the validator-fixed `1K`–`16G`
 message-size range and asserts the busBW floor. It deploys the
