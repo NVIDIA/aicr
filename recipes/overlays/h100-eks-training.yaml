@@ -116,5 +116,4 @@ spec:
         - gang-scheduling
         - pod-autoscaling
         - cluster-autoscaling
-        - robust-controller
         - secure-accelerator-access
