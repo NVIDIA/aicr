@@ -116,7 +116,7 @@ Mixins use `kind: RecipeMixin` and carry only `constraints` and `componentRefs`.
 
 **A mixin only composes when its overlay is part of the resolved catalog.** Passing a leaf overlay file directly — `aicr bundle -r <file>`, `aicr validate -r <file>` — hydrates it by re-resolving `spec.criteria` against the catalog. Only `spec.criteria` is read from the file; `spec.mixins` is not.
 
-An overlay that is neither embedded in `recipes/overlays/` nor registered under an external `--data <dir>/overlays/` therefore contributes no mixin content during criteria-only hydration. AICR rejects the direct load rather than proceeding, naming the file and the mixins that were dropped. Register the overlay via `--data` so its own declaration composes.
+An overlay that is neither embedded in `recipes/overlays/` nor supplied in the `overlays/` directory of an external data tree therefore contributes no mixin content during criteria-only hydration. AICR rejects the direct load rather than proceeding, naming the file and the mixins that were dropped. Place the overlay at `<dir>/overlays/` and pass `--data <dir>` so its own declaration composes.
 
 The case to watch for is copying an embedded overlay and adding a mixin to your copy. The copy keeps the original `metadata.name` and `spec.criteria`, so the catalog's overlay of that name still resolves — which is why matching on name alone would not notice that the mixin you added never composed.
 

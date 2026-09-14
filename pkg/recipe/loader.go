@@ -294,8 +294,8 @@ func ensureDirectOverlayMixinsApplied(
 	return errors.New(errors.ErrCodeInvalidRequest,
 		fmt.Sprintf("mixins %v declared by directly loaded overlay %q were not applied; only "+
 			"spec.criteria is read from a directly loaded file, so a mixin composes only when its "+
-			"overlay is in the active catalog — register the overlay under an external "+
-			"--data <dir>/overlays/ directory before loading it directly", missing, path))
+			"overlay is in the active catalog — place the overlay at <dir>/overlays/ and pass "+
+			"--data <dir> before loading it directly", missing, path))
 }
 
 // unappliedDirectOverlayMixins returns the mixins the direct overlay declares
