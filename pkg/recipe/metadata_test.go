@@ -2258,6 +2258,19 @@ func TestComponentRefMergeWithPath(t *testing.T) {
 	})
 }
 
+// tcpxoRequiredBuildOpts supplies the generation-time TCPXO interface mapping
+// when (and only when) the criteria select the h100 GKE kubeflow family — the
+// one recipe that ships torch-distributed-tcpxo and therefore fails closed
+// without the recorded mapping.
+func tcpxoRequiredBuildOpts(cr *Criteria) []BuildOption {
+	if cr.Service == CriteriaServiceGKE && cr.Accelerator == CriteriaAcceleratorH100 &&
+		cr.Platform == CriteriaPlatformKubeflow {
+
+		return []BuildOption{WithGKETCPXOInterfaces(tcpxoTestMapping())}
+	}
+	return nil
+}
+
 // TestNFDTopologyUpdater_OverlayCoverage verifies that every GPU overlay
 // rooted at a real-cluster platform base resolves to
 // componentRefs[nfd].overrides.topologyUpdater.enable=true, and that the
@@ -2390,7 +2403,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 				cr.Platform = tt.c.platform
 			}
 
-			result, err := builder.BuildFromCriteria(ctx, cr)
+			result, err := builder.BuildFromCriteria(ctx, cr, tcpxoRequiredBuildOpts(cr)...)
 			if err != nil {
 				t.Fatalf("BuildFromCriteria(%+v): %v", tt.c, err)
 				return

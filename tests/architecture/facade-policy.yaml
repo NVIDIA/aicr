@@ -325,8 +325,8 @@ constrained:
       pkg/client/v1's own non-aliased Criteria struct used for the
       resolution entry points. Second, CLI flag-string parsing with no
       facade equivalent -- GetCriteria*Types (flag help/choices),
-      ParseAccountingMode, ParseRuntimeInventoryMode, AccountingModes,
-      RuntimeInventoryModes. Wrapping either would add a parallel type or a
+      ParseAccountingMode, ParseRuntimeInventoryMode, ParseGKETCPXOInterfaces,
+      AccountingModes, RuntimeInventoryModes. Wrapping either would add a parallel type or a
       parsing shim purely to satisfy this gate, at the cost of the
       wire-format guarantee the current design buys.
     permanent: true
@@ -355,6 +355,7 @@ constrained:
       NewCriteriaRegistry: behavioral
       ParseAccountingMode: behavioral
       ParseCriteriaFromRequest: behavioral
+      ParseGKETCPXOInterfaces: behavioral
       ParseRuntimeInventoryMode: behavioral
       QueryRequest: type
       RecipeResult: type
