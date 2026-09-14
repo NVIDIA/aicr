@@ -182,6 +182,12 @@ runs:
       run: |
         set -euo pipefail
 
+        # apidiff and go-licenses are built from the main module (#2667), so
+        # go.mod holds their only pin. Reuse the repo's parser rather than a
+        # second copy of the require-line regex.
+        # shellcheck source=tools/common
+        . tools/common
+
         # Languages — Go version is owned by .go-version (single source of truth)
         echo "go=$(cat .go-version)" >> $GITHUB_OUTPUT
 
@@ -192,13 +198,13 @@ runs:
 
         # Linting
         echo "golangci_lint=$(yq eval '.linting.golangci_lint' .settings.yaml)" >> $GITHUB_OUTPUT
-        echo "apidiff=$(yq eval '.linting.apidiff' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "apidiff=$(go_mod_required_version golang.org/x/exp go.mod)" >> $GITHUB_OUTPUT
         echo "oasdiff=$(yq eval '.linting.oasdiff' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "oasdiff_sha256_linux_amd64=$(yq eval '.linting.oasdiff_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "yamllint=$(yq eval '.linting.yamllint' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "addlicense=$(yq eval '.linting.addlicense' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "addlicense_sha256_linux_amd64=$(yq eval '.linting.addlicense_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
-        echo "go_licenses=$(yq eval '.linting.go_licenses' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "go_licenses=$(go_mod_required_version github.com/google/go-licenses/v2 go.mod)" >> $GITHUB_OUTPUT
 
         # Security tools
         echo "grype=$(yq eval '.security_tools.grype' .settings.yaml)" >> $GITHUB_OUTPUT

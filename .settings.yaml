@@ -29,8 +29,6 @@ build_tools:
 
 # Linting
 linting:
-  # renovate: datasource=go depName=golang.org/x/exp depType=linting
-  apidiff: 'v0.0.0-20260824195058-e88cd73687aa'
   # The annotation must stay on the line directly above the value: the
   # customManagers regexes in .github/renovate.json5 match `# renovate: ...`
   # followed immediately by `key: 'value'`, so any comment between them silently
@@ -76,19 +74,6 @@ linting:
   # addlicense_1.1.1_..., v1.2.0 publishes addlicense_v1.2.0_... -- so a bump
   # that changes the naming shows up as a refresher failure, not a silent skip.
   addlicense_sha256_linux_amd64: '6924296771234b1ba6c969e109b4459cff75e15b259676b61df874a92734b242'
-  # This pins go-licenses' own SOURCE version, not its dependency set. #2667
-  # made it a `tool` directive in go.mod, so it is built from this module's
-  # graph: on the switch it linked golang.org/x/tools v0.49.0 and
-  # k8s.io/klog/v2 v2.140.0 against upstream's v0.36.0 and v2.90.1. x/tools is
-  # the go/packages library go-licenses uses to walk the graph and locate
-  # GOROOT, so an unrelated bump here can change the behaviour of
-  # `make license-check` and of THIRD_PARTY_NOTICES.md with this value
-  # untouched. It fails loudly (compile or gate error) rather than quietly.
-  #
-  # Kept equal to the go.mod require by TestToolPinsMatchGoMod; Renovate groups
-  # the two so they move together.
-  # renovate: datasource=github-releases depName=google/go-licenses depType=linting
-  go_licenses: 'v2.0.1'
   # MDX toolchain for tools/check-docs-mdx-parse (the parser-level docs gate) is
   # owned by tools/mdx/package.json + package-lock.json, not listed here. The
   # lockfile freezes the full transitive tree, which a version string cannot;

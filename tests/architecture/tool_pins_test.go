@@ -25,50 +25,34 @@ import (
 )
 
 // toolPins are the tools #2667 moved off `go install pkg@version` and onto a
-// `go build` from this module. That build takes its version from go.mod, while
-// the rest of the repo -- tools/check-tools, the composite-action inputs, the
-// setup-tools console output -- still reads .settings.yaml. Two files now
-// describe one version.
+// `go build` from this module. That build takes its version from go.mod, so
+// go.mod is their only pin: .settings.yaml deliberately does not repeat it and
+// tools/check-tools, tools/api-diff and the load-versions action all read the
+// require line instead.
 //
-// Renovate updates them through different managers (the native gomod manager
-// for go.mod, a customManagers regex for .settings.yaml), so they can be bumped
-// in separate PRs and drift. Drift is not cosmetic: `make api-diff` and
-// `make license-check` would run a different tool version than the one the
-// repository documents and than tools/check-tools verifies against, and
-// check-tools would start failing locally with no obvious cause.
+// #2741 is why. While the version lived in both files, Renovate updated them
+// through different managers -- the native gomod manager for go.mod, a
+// customManagers regex for .settings.yaml -- and shipped a PR that moved only
+// one. tools/api-diff compares the built binary against the pin and exits 17 on
+// drift, so the half-update failed nine unrelated-looking shell tests. The two
+// assertions below keep the second copy from coming back.
 var toolPins = []struct {
-	settingsPath []string // key path within .settings.yaml
+	settingsPath []string // key path that must NOT reappear in .settings.yaml
 	toolPackage  string   // package named by the go.mod tool directive
-	goModModule  string   // module whose go.mod version must match
+	goModModule  string   // module whose require line is the pin
 }{
 	{[]string{"linting", "apidiff"}, "golang.org/x/exp/cmd/apidiff", "golang.org/x/exp"},
 	{[]string{"linting", "go_licenses"}, "github.com/google/go-licenses/v2", "github.com/google/go-licenses/v2"},
 }
 
-// TestToolPinsMatchGoMod holds .settings.yaml and go.mod to the same version for
+// TestToolPinsLiveOnlyInGoMod holds go.mod as the single source of truth for
 // every tool built from the main module.
-func TestToolPinsMatchGoMod(t *testing.T) {
+func TestToolPinsLiveOnlyInGoMod(t *testing.T) {
 	root := repoRoot(t)
 
 	settings := loadSettings(t, filepath.Join(root, ".settings.yaml"))
 	mf := parseGoMod(t, filepath.Join(root, "go.mod"))
 	versions := requiredVersions(mf)
-
-	// A `replace` that retargets one of these modules makes the require line a
-	// lie about what `go build` produces, and this test would then demand
-	// .settings.yaml match the pre-replacement version -- failing the engineer
-	// who correctly recorded the real one. Refuse to render a verdict instead.
-	for _, rep := range mf.Replace {
-		for _, tp := range toolPins {
-			if rep.Old.Path == tp.goModModule {
-				t.Fatalf("go.mod replaces %s; this test compares .settings.yaml against the "+
-					"require line, which no longer describes what `go build` produces. "+
-					"Teach it to resolve the replacement before relying on it again.",
-					tp.goModModule)
-			}
-		}
-	}
-
 	tools := toolDirectives(mf)
 
 	for _, tp := range toolPins {
@@ -86,20 +70,19 @@ func TestToolPinsMatchGoMod(t *testing.T) {
 				return
 			}
 
-			want, ok := settingsString(t, settings, tp.settingsPath)
-			if !ok {
-				t.Fatalf(".settings.yaml is missing %s", strings.Join(tp.settingsPath, "."))
+			if _, ok := versions[tp.goModModule]; !ok {
+				t.Errorf("go.mod has no require for %s, which is the only pin this "+
+					"tool has.", tp.goModModule)
 			}
-			got, ok := versions[tp.goModModule]
-			if !ok {
-				t.Fatalf("go.mod has no require for %s", tp.goModModule)
-			}
-			if got != want {
-				t.Errorf("%s pins %s but go.mod requires %s.\n"+
-					"Both describe the version of the same tool, which is built from this "+
-					"module. Bump whichever is stale; a version bump to one is not complete "+
-					"without the other.",
-					strings.Join(tp.settingsPath, "."), want, got)
+
+			if got, ok := settingsString(t, settings, tp.settingsPath); ok {
+				t.Errorf(".settings.yaml pins %s = %s, but go.mod is the single source "+
+					"of truth for tools built from this module.\n"+
+					"A second copy drifts: Renovate moves the two files through "+
+					"different managers and #2741 shipped a PR that updated only one, "+
+					"failing the api-diff gate with exit 17. Delete the key and read "+
+					"the version from the go.mod require line instead.",
+					strings.Join(tp.settingsPath, "."), got)
 			}
 		})
 	}

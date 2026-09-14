@@ -105,7 +105,7 @@ case "${1:-}" in
         printf 'linting\nsecurity_tools\ntesting_tools\n'
         ;;
     '.linting | keys | .[]')
-        printf 'apidiff\naddlicense\ngo_licenses\n'
+        printf 'addlicense\n'
         ;;
     '.security_tools | keys | .[]')
         echo oras
@@ -113,14 +113,8 @@ case "${1:-}" in
     '.testing_tools | keys | .[]')
         echo helm
         ;;
-    '.linting.apidiff')
-        echo "${APIDIFF_PINNED_VERSION}"
-        ;;
     '.linting.addlicense')
         echo "${ADDLICENSE_PINNED_VERSION}"
-        ;;
-    '.linting.go_licenses')
-        echo "${GO_LICENSES_PINNED_VERSION}"
         ;;
     '.security_tools.oras')
         echo "${ORAS_PINNED_VERSION}"
@@ -245,6 +239,7 @@ check_tools_row() {
         mv "${executable}" "${unavailable}"
     fi
     output=$(TOOL_TARGET="${tool_name}" TOOL_MODE="${mode}" \
+        CHECK_TOOLS_GO_MOD_FILE="${STUB_DIR}/go.mod" \
         bash "${CHECK_TOOLS}" 2>&1)
     rc=$?
     if [[ "${mode}" == "missing" ]]; then
@@ -265,6 +260,17 @@ check_tools_row() {
         fail "${name}" "want rc=${want_rc} row='${want_row}', got rc=${rc} row='${row}'"
     fi
 }
+
+cat >"${STUB_DIR}/go.mod" <<EOF
+module github.com/NVIDIA/aicr
+
+go 1.26
+
+require (
+	github.com/google/go-licenses/v2 ${GO_LICENSES_PINNED_VERSION}
+	golang.org/x/exp ${APIDIFF_PINNED_VERSION}
+)
+EOF
 
 check_helper "extracts-exact-module-version" correct 0 \
     "${APIDIFF_PINNED_VERSION}"
