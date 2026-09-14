@@ -96,6 +96,16 @@ build_binary
 
 export REPO_ROOT="${ROOT}"
 
+# ci!=true drops the suites that need a CI-attested binary. Suites labelled
+# requires=docker (they start a throwaway container) run whenever a Docker
+# daemon answers; without one they are dropped rather than failed, so a
+# Docker-less workstation still gets a green `make e2e`. CI always has Docker.
+SELECTOR='ci!=true'
+if ! docker info >/dev/null 2>&1; then
+  msg "Docker daemon not reachable; skipping requires=docker suites"
+  SELECTOR="${SELECTOR},requires!=docker"
+fi
+
 msg "Running chainsaw tests (CLI + bundle template tests)"
 chainsaw test \
   --no-cluster \
@@ -103,6 +113,6 @@ chainsaw test \
   --test-dir "${ROOT}/tests/chainsaw/cli/" \
   --test-dir "${ROOT}/tests/chainsaw/signing/" \
   --test-dir "${ROOT}/tests/chainsaw/bundle-templates/" \
-  --selector 'ci!=true'
+  --selector "${SELECTOR}"
 
 msg "All tests passed!"

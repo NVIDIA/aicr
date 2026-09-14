@@ -1,0 +1,16 @@
+apiVersion: aicr.run/v1
+componentRefs:
+    - chart: gpu-operator
+      name: gpu-operator
+      namespace: gpu-operator
+      source: ""
+      type: Helm
+criteria:
+    accelerator: h100
+    intent: training
+    os: ubuntu
+    service: eks
+deploymentOrder:
+    - gpu-operator
+kind: RecipeResult
+metadata: {}
