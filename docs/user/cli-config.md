@@ -137,6 +137,10 @@ spec:
     #   slurm:                       # only valid when the resolved recipe platform is slurm
     #     accounting:
     #       mode: disabled           # disabled | customer-managed | aicr-provided
+    #   gke:                         # only valid for the h100 gke-cos kubeflow training leaf
+    #     tcpxoInterfaces:           # required when that leaf ships torch-distributed-tcpxo;
+    #       - {interfaceName: eth1, network: <cluster>-gpu-nic-0}  # ordered eth1..eth8 (8 entries);
+    #                                                          # names from the cluster provisioner
     # input:
     #   snapshot: snapshot.yaml      # derive criteria from a snapshot instead
     output:

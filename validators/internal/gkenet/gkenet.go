@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
@@ -41,16 +42,17 @@ import (
 // separately.
 const RequiredGPUNICNetworks = 8
 
-// GPUNICNameSubstring identifies a GPU NIC network by name.
+// GPU NIC networks are identified by a name substring. Network names are chosen
+// by whoever provisions the cluster, not assigned by GKE — Google's own sample
+// manifests name them "vpc1".."vpc8". Matching a substring rather than exact
+// names is what lets a cluster carry a local prefix (e.g. "aicr-demo2-gpu-nic-0")
+// while still being discoverable. The substring itself lives in pkg/recipe
+// (recipe.GPUNICNameSubstring) so recipe-time validation and deployment-time
+// discovery share one source of truth.
 //
-// Network names are chosen by whoever provisions the cluster, not assigned by
-// GKE — Google's own sample manifests name them "vpc1".."vpc8". Matching a
-// substring rather than exact names is what lets a cluster carry a local prefix
-// (e.g. "aicr-demo2-gpu-nic-0") while still being discoverable. Because the
-// names are operator-chosen, containing this substring is a documented
+// containing this substring is a documented
 // provisioning REQUIREMENT, not an observation about GKE's behavior; see
 // docs/integrator/gke-tcpxo-networking.md.
-const GPUNICNameSubstring = "gpu-nic"
 
 // NetworkGVR is the cluster-scoped GKE Network CR that multi-networking
 // binds into the cluster. Its absence is what this package detects.
@@ -84,7 +86,7 @@ func DiscoverGPUNICNetworks(ctx context.Context, dynamicClient dynamic.Interface
 
 	var gpuNICs []string
 	for _, n := range networks.Items {
-		if name := n.GetName(); strings.Contains(name, GPUNICNameSubstring) {
+		if name := n.GetName(); strings.Contains(name, recipe.GPUNICNameSubstring) {
 			gpuNICs = append(gpuNICs, name)
 		}
 	}

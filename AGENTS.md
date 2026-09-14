@@ -69,7 +69,7 @@ make tools-check  # Verify versions match .settings.yaml
 
 # Local health check validation
 make check-health COMPONENT=nvsentinel  # Direct chainsaw against Kind
-make check-health-all                   # All components
+make check-health-all                   # Registry-linked components only
 make validate-local RECIPE=recipe.yaml  # Full pipeline in Kind
 ```
 
