@@ -30,7 +30,7 @@ build_tools:
 # Linting
 linting:
   # renovate: datasource=go depName=golang.org/x/exp depType=linting
-  apidiff: 'v0.0.0-20260824195058-e88cd73687aa'
+  apidiff: 'v0.0.0-20260908205506-85c1c2202aba'
   # The annotation must stay on the line directly above the value: the
   # customManagers regexes in .github/renovate.json5 match `# renovate: ...`
   # followed immediately by `key: 'value'`, so any comment between them silently
