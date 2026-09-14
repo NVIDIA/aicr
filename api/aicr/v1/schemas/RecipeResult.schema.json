@@ -114,6 +114,29 @@
     "configuration": {
       "type": "object",
       "properties": {
+        "gke": {
+          "type": "object",
+          "properties": {
+            "tcpxoInterfaces": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "interfaceName": {
+                    "type": "string"
+                  },
+                  "network": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "interfaceName",
+                  "network"
+                ]
+              }
+            }
+          }
+        },
         "runtimeInventory": {
           "type": "object",
           "properties": {
