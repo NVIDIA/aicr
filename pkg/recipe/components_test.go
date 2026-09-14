@@ -1662,7 +1662,7 @@ func TestComponentConfigUpgradesFile(t *testing.T) {
 		"  - name: nodewright-operator\n" +
 		"    displayName: NodeWright Operator\n" +
 		"    upgrades:\n" +
-		"      file: upgrades/nodewright-operator.yaml\n")
+		"      file: components/nodewright-operator/upgrades.yaml\n")
 
 	var registry ComponentRegistry
 	if err := yaml.Unmarshal(registryYAML, &registry); err != nil {
@@ -1671,8 +1671,8 @@ func TestComponentConfigUpgradesFile(t *testing.T) {
 	if len(registry.Components) != 1 {
 		t.Fatalf("components = %d, want 1", len(registry.Components))
 	}
-	if got := registry.Components[0].Upgrades.File; got != "upgrades/nodewright-operator.yaml" {
-		t.Errorf("Upgrades.File = %q, want %q", got, "upgrades/nodewright-operator.yaml")
+	if got := registry.Components[0].Upgrades.File; got != "components/nodewright-operator/upgrades.yaml" {
+		t.Errorf("Upgrades.File = %q, want %q", got, "components/nodewright-operator/upgrades.yaml")
 	}
 }
 
