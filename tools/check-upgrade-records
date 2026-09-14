@@ -5,7 +5,7 @@
 # Verify every committed ComponentUpgrades record is well-formed (ADR-021 AC7).
 #
 # A malformed or reverse-matching record must fail `make lint` rather than be
-# silently skipped. Inert while recipes/upgrades/ is empty.
+# silently skipped. Inert while no components/<name>/upgrades.yaml exists.
 
 set -euo pipefail
 
