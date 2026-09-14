@@ -42,6 +42,14 @@ const (
 // https://docs.cloud.google.com/kubernetes-engine/docs/how-to/setup-multinetwork-support-for-pods
 const gkeNetworkObjectNameMaxLen = 41
 
+// GPUNICNameSubstring identifies a GPU NIC network by name. AICR's GKE
+// provisioning names them <cluster>-gpu-nic-<i> and discovery filters on this
+// substring (gkenet.DiscoverGPUNICNetworks), so a mapping whose names lack it
+// would never be found at deployment — enforced at generation to fail fast.
+// Prefixed forms (e.g. "aicr-demo2-gpu-nic-0") remain valid. Exported so the
+// validator's discovery uses the same single source of truth.
+const GPUNICNameSubstring = "gpu-nic"
+
 var (
 	gkeTCPXOInterfaceNamePattern = regexp.MustCompile(`^eth[1-8]$`)
 	gkeNetworkNamePattern        = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)
@@ -145,6 +153,11 @@ func ValidateGKETCPXOInterfaces(mapping []NetworkInterfaceMapping) error {
 				fmt.Sprintf("invalid GKE Device Network name %q for %s: use 1-41 lowercase letters, digits or dashes, starting with a letter and ending with a letter or digit",
 					entry.Network, entry.InterfaceName))
 		}
+		if !strings.Contains(entry.Network, GPUNICNameSubstring) {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("invalid GKE TCPXO network %q for %s: name must contain %q (AICR GPU NIC naming, e.g. <cluster>-gpu-nic-0); discovery filters on this substring, so any other name fails at deployment",
+					entry.Network, entry.InterfaceName, GPUNICNameSubstring))
+		}
 		if _, dup := seenNetworks[entry.Network]; dup {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("duplicate VPC network name %q: each interface must map to a distinct GKE Network", entry.Network))
@@ -206,16 +219,6 @@ func GKETCPXOIntrospectionInterfaces() []NetworkInterfaceMapping {
 	return mapping
 }
 
-// GKETCPXOIntrospectionBuildOptions supplies fixture data only for the embedded
-// catalog's TCPXO leaf. Deployment callers must supply their provisioned mapping.
-func GKETCPXOIntrospectionBuildOptions(c *Criteria) []BuildOption {
-	if c == nil || c.Service != CriteriaServiceGKE ||
-		c.Accelerator != CriteriaAcceleratorH100 || c.Platform != CriteriaPlatformKubeflow {
-
-		return nil
-	}
-	return []BuildOption{WithGKETCPXOInterfaces(GKETCPXOIntrospectionInterfaces())}
-}
 
 // GKETCPXOOwnership declares the mapping's non-profile ownership domain.
 func GKETCPXOOwnership() OwnershipDomain {
