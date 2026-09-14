@@ -344,9 +344,11 @@ func (d *Deployer) CleanupJob(ctx context.Context) error {
 //
 // The wait is anchored to the Job's observed start time rather than to the
 // moment this method was called, so it and the Job's own activeDeadlineSeconds
-// are measured from the same origin and the orchestrator stays the tighter
-// clock for all but a pathologically slow apply response. v1.OrchestratorWaitFor
-// carries the derivation, including where that guarantee stops holding.
+// are measured from the same origin, and v1.OrchestratorWaitFor caps the result
+// short of that deadline. The orchestrator therefore stays the tighter clock
+// for every apply response that arrives while the Job deadline is still more
+// than defaults.ValidatorPreDeadlineMargin away. That function carries the
+// derivation, including what the wait is still good for once it is not.
 func (d *Deployer) WaitForCompletion(ctx context.Context, timeout time.Duration) error {
 	waitTimeout := v1.OrchestratorWaitFor(d.jobStart, time.Now(), timeout)
 	// pod.WaitForJobTerminal already returns structured errors with proper

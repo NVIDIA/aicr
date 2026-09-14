@@ -1374,30 +1374,34 @@ func TestBuildResources_NilOrEmptyUsesDefaults(t *testing.T) {
 // is only defaults.JobEnvelopeMargin, and a slower response lets the Job
 // controller fire first and delete the still-active pod holding the verdict.
 //
-// Each case asserts the property that matters — observedStart + wait must land
-// strictly before observedStart + JobDeadlineFor(checkTimeout), i.e. the whole
+// Each case asserts the property that matters — the wait must end strictly
+// before observedStart + JobDeadlineFor(checkTimeout), i.e. the whole
 // orchestrator wait fits inside the Job's own deadline measured from the same
-// origin.
+// origin. That now holds for the floored cases too, which is what the
+// deadline bound in OrchestratorWaitFor added; the sole exception is a
+// deadline already gone by the time the wait begins, where no wait can keep
+// the pod alive.
 func TestOrchestratorWaitForRebasesOntoJobStart(t *testing.T) {
 	t.Parallel()
 
 	const checkTimeout = 5 * time.Minute
 	budget := checkTimeout + defaults.ValidatorWaitBuffer // 5m + 2m30s = 7m30s
 	jobDeadline := JobDeadlineFor(checkTimeout)           // 5m + 3m30s = 8m30s
+	floor := defaults.ValidatorMinCompletionWait          // 30s
+	margin := defaults.ValidatorPreDeadlineMargin         // 1s
 	start := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
 
 	tests := []struct {
 		name       string
 		applyDelay time.Duration // how long the apply response took to arrive
 		want       time.Duration
-		// floored marks the case where the remainder was clamped to
-		// defaults.ValidatorMinCompletionWait. That can happen well before the
-		// Job deadline is reached, not only once it is already in the past
-		// (see the cases below for both); either way the fit-inside-the-
-		// deadline invariant is not guaranteed to hold, so floored cases skip
-		// it. The floor's job is only to leave enough wall clock to read the
-		// terminal condition Kubernetes stamped.
-		floored bool
+		// deadlineGone marks the cases where the Job deadline has already
+		// elapsed, or sits within margin of firing, by the time the wait
+		// begins. The fit-inside-the-deadline assertion is not meaningful
+		// there — the pod is gone either way — so those cases assert instead
+		// that the wait is still positive, which is what lets
+		// WaitForJobTerminal's fast-path Get read the terminal Job.
+		deadlineGone bool
 	}{
 		{
 			name:       "instant apply response leaves the full budget",
@@ -1419,22 +1423,49 @@ func TestOrchestratorWaitForRebasesOntoJobStart(t *testing.T) {
 			want:       budget - 90*time.Second, // 6m
 		},
 		{
-			name:       "pathological delay is floored, not driven negative",
-			applyDelay: budget + time.Hour,
-			want:       defaults.ValidatorMinCompletionWait, // 30s
-			floored:    true,
+			// 7m59s: the remainder is already negative so the floor engages,
+			// and the floored 30s is the longest wait that still ends margin
+			// short of the 8m30s deadline. The boundary case for the bound.
+			name:       "floor fits inside the Job deadline by exactly the margin",
+			applyDelay: jobDeadline - floor - margin, // 7m59s
+			want:       floor,
 		},
 		{
-			// applyDelay=8m15s falls inside [checkTimeout+180s, checkTimeout+210s)
-			// = [8m, 8m30s): the floor still engages (remaining would be
-			// negative), but jobDeadline (8m30s) has not elapsed yet when the
-			// wait begins. The floored 30s wait ends at 8m45s, past jobDeadline,
-			// so the Job's own deadline — not this wait — is what ends up
-			// bounding how long the still-active pod survives.
-			name:       "floor engages before the Job deadline, but the floored wait outlives it",
-			applyDelay: 8*time.Minute + 15*time.Second,      // 495s, inside [8m, 8m30s)
-			want:       defaults.ValidatorMinCompletionWait, // 30s
-			floored:    true,
+			// One second later the floor no longer fits, so the deadline —
+			// not the floor — sets the wait.
+			name:       "deadline one second nearer than the floor caps the wait",
+			applyDelay: jobDeadline - floor, // 8m
+			want:       floor - margin,      // 29s
+		},
+		{
+			// The case that motivated the bound: 8m15s leaves 15s until the
+			// 8m30s deadline, and the pre-fix floor returned 30s — a wait the
+			// function could compute would outlive the deadline it exists to
+			// beat, handing the still-active pod (and its verdict) to the Job
+			// controller's deleteActivePods.
+			name:       "floor would outlive the Job deadline, so the wait is capped short of it",
+			applyDelay: 8*time.Minute + 15*time.Second, // 495s, inside [8m, 8m30s)
+			want:       15*time.Second - margin,        // 14s
+		},
+		{
+			// Inside the margin: no positive wait both fits and is worth
+			// issuing, so the floor comes back to serve the fast-path Get.
+			name:         "deadline within the pre-deadline margin returns the floor",
+			applyDelay:   jobDeadline - margin, // 8m29s
+			want:         floor,
+			deadlineGone: true,
+		},
+		{
+			name:         "deadline exactly elapsed returns the floor",
+			applyDelay:   jobDeadline, // 8m30s
+			want:         floor,
+			deadlineGone: true,
+		},
+		{
+			name:         "pathological delay is floored, not driven negative",
+			applyDelay:   budget + time.Hour,
+			want:         floor,
+			deadlineGone: true,
 		},
 		{
 			// Apiserver clock skew can place the observed start in the
@@ -1454,7 +1485,14 @@ func TestOrchestratorWaitForRebasesOntoJobStart(t *testing.T) {
 				t.Errorf("OrchestratorWaitFor(start, start+%v, %v) = %v, want %v",
 					tt.applyDelay, checkTimeout, got, tt.want)
 			}
-			if tt.floored {
+			if tt.deadlineGone {
+				// A zero or negative wait would expire the context before
+				// WaitForJobTerminal's initial Get could observe the
+				// already-terminal Job, turning its verdict into an
+				// infrastructure error.
+				if got <= 0 {
+					t.Errorf("wait past the Job deadline = %v, want a positive wait for the terminal Get", got)
+				}
 				return
 			}
 			// The invariant the fix exists to hold: the orchestrator's wait,

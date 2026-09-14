@@ -1164,11 +1164,26 @@ const (
 	// and the floor engages as soon as the rebased remainder drops below it —
 	// not only once that remainder goes zero or negative — since an unfloored
 	// wait that short risks reporting an orchestrator timeout before the check
-	// ran. One SIGTERM-to-SIGKILL window is the shortest span in which a Job
-	// can still stamp a terminal condition for the orchestrator to read,
-	// whether or not its own activeDeadlineSeconds has already elapsed by the
-	// time the floor engages.
+	// ran. The floor does not license outrunning the Job's own deadline:
+	// v1.OrchestratorWaitFor caps it to ValidatorPreDeadlineMargin short of
+	// that deadline while the deadline is still ahead. Once it is not, the
+	// floored wait is all that remains, and one SIGTERM-to-SIGKILL window is
+	// the shortest span in which the orchestrator can still read the terminal
+	// condition Kubernetes stamped on the Job it has already ended.
 	ValidatorMinCompletionWait = ValidatorTerminationGracePeriod
+
+	// ValidatorPreDeadlineMargin is how far short of the Job's
+	// activeDeadlineSeconds v1.OrchestratorWaitFor holds the orchestrator's
+	// Job-completion wait. That wait exists to read the check's own verdict,
+	// and the Job deadline destroys it: the Job controller deletes the
+	// still-active pod whose logs carry it (issue #2473). A wait ending at the
+	// same instant as the deadline leaves which of the two lands first to
+	// scheduling chance, so the margin is subtracted to make the ordering
+	// strict. It is a tie-breaker rather than a budget for any work, sized to
+	// exceed the resolution at which the two events can be distinguished while
+	// staying negligible against ValidatorMinCompletionWait, the shortest wait
+	// it ever trims.
+	ValidatorPreDeadlineMargin = 1 * time.Second
 
 	// ValidatorDefaultTimeout is the default per-validator timeout if not
 	// specified in the catalog. Used as fallback only.
