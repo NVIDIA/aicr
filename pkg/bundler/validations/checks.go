@@ -54,6 +54,7 @@ func init() {
 	registerCheck("CheckMariaDBOperatorOwnershipCoherence", CheckMariaDBOperatorOwnershipCoherence)
 	registerCheck("CheckNVSentinelDriverLabelDetectable", CheckNVSentinelDriverLabelDetectable)
 	registerCheck("CheckNVSentinelRuntimeClassCoherence", CheckNVSentinelRuntimeClassCoherence)
+	registerCheck("CheckNVSentinelTracingEndpointRequired", CheckNVSentinelTracingEndpointRequired)
 }
 
 // registerCheck is a helper to register validation functions from checks.go.
@@ -1984,6 +1985,117 @@ func CheckNVSentinelRuntimeClassCoherence(ctx context.Context, componentName str
 		nvsentinelMetadataCollectorRuntimeClassPath, operatorClass)
 	slog.Warn(msg, logKeyComponent, componentName)
 	return []string{msg}, nil
+}
+
+// nvsentinelTracingEnabled reports whether the resolved nvsentinel values
+// turn on distributed tracing. The root chart gates tracing with a raw
+// `{{- if .Values.global.tracing.enabled }}`, so this matches Helm's truth
+// rule via helmTruthy rather than a strict Go bool assertion.
+func nvsentinelTracingEnabled(values map[string]any) bool {
+	global, ok := values["global"].(map[string]any)
+	if !ok {
+		return false
+	}
+	tracing, ok := global["tracing"].(map[string]any)
+	if !ok {
+		return false
+	}
+	raw, present := tracing["enabled"]
+	if !present {
+		return false
+	}
+	return helmTruthy(raw)
+}
+
+// CheckNVSentinelTracingEndpointRequired blocks a bundle that enables
+// NVSentinel distributed tracing without supplying an OTLP collector
+// endpoint. The chart has no fail-closed guard of its own:
+// templates/daemonset.yaml sets OTEL_EXPORTER_OTLP_ENDPOINT to
+// .Values.global.tracing.endpoint with no `required` guard, so
+// global.tracing.enabled=true with an empty endpoint renders and deploys
+// without error — the pod starts, and the OTel exporter fails at runtime
+// with no signal visible to `aicr bundle`/`aicr validate`. This gate is
+// the only point in the pipeline that inspects resolved Helm values
+// (including --set/--set-json/--dynamic) before a bundle is produced, so
+// it is the only mechanism that can catch this before deploy. Registration
+// details (severity, no-op conditions) are in recipes/registry.yaml.
+func CheckNVSentinelTracingEndpointRequired(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	sentinelRef := recipeResult.GetComponentRef(componentName)
+	if sentinelRef == nil {
+		return nil, nil
+	}
+	provider := recipeResult.DataProvider()
+	sentinelKeys := componentOverrideKeys(componentName, provider)
+	if componentDisabled(sentinelRef, bundlerConfig, sentinelKeys) {
+		return nil, nil
+	}
+
+	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, sentinelKeys, "NVSentinel tracing endpoint")
+	if err != nil {
+		return nil, []error{err}
+	}
+
+	// Relation-aware dynamic guard: a --dynamic declaration on ONE of
+	// {enabled, endpoint} is only a hazard if the OTHER field's static
+	// state can't already rule out "enabled=true, endpoint empty" after
+	// an install-time edit. Blocking both unconditionally rejects safe
+	// configurations too -- e.g. dynamic enabled with a real static
+	// endpoint can never reach the bad combination, since nothing dynamic
+	// can blank the endpoint.
+	enabledDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{"global.tracing.enabled"})) > 0
+	endpointDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{"global.tracing.endpoint"})) > 0
+	if enabledDynamic || endpointDynamic {
+		staticEndpoint, _, staticEndpointValid := resolvedStringValue(values, "global.tracing.endpoint")
+		// Reliable only when NOT itself dynamic -- a dynamic endpoint
+		// can be edited to empty at install time regardless of what
+		// the static layer currently resolves to.
+		endpointReliablyNonEmpty := staticEndpointValid && strings.TrimSpace(staticEndpoint) != "" && !endpointDynamic
+		// Reliable only when NOT itself dynamic -- a dynamic enabled
+		// can be flipped to true at install time regardless of the
+		// static/default value.
+		enabledReliablyOff := !nvsentinelTracingEnabled(values) && !enabledDynamic
+
+		hazard := (enabledDynamic && !endpointReliablyNonEmpty) || (endpointDynamic && !enabledReliablyOff)
+		if hazard {
+			var paths []string
+			if enabledDynamic {
+				paths = append(paths, "global.tracing.enabled")
+			}
+			if endpointDynamic {
+				paths = append(paths, "global.tracing.endpoint")
+			}
+			dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys, paths,
+				"controls whether the OTLP exporter is enabled and where it sends traces, and the other field's "+
+					"current static state can't rule out enabled=true with an empty endpoint after an install-time edit")
+			for _, msg := range dynMsgs {
+				slog.Warn(msg, logKeyComponent, componentName)
+			}
+			return dynMsgs, nil
+		}
+	}
+
+	if !nvsentinelTracingEnabled(values) {
+		return nil, nil
+	}
+
+	// A non-string endpoint is blocked outright, not skipped: this gate
+	// exists specifically to catch a broken tracing config before deploy.
+	endpoint, _, valid := resolvedStringValue(values, "global.tracing.endpoint")
+	if !valid {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: global.tracing.endpoint must be a string", componentName))}
+	}
+	if strings.TrimSpace(endpoint) != "" {
+		return nil, nil
+	}
+
+	return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+		fmt.Sprintf("component %q: global.tracing.enabled=true but global.tracing.endpoint is empty; "+
+			"the chart renders an OTLP exporter with no destination and fails silently at runtime -- "+
+			"set --set nv-sentinel:global.tracing.endpoint=<host:port>", componentName))}
 }
 
 // CheckMariaDBOperatorOwnershipCoherence enforces the snapshot-driven
