@@ -117,10 +117,12 @@ go_mod_required_version() {
 
     # Tracks the require block rather than matching any `<module> v...` line:
     # `exclude` and `replace` blocks have that shape too, and a left-hand side
-    # there names a version the build never uses.
+    # there names a version the build never uses. The block opener is matched on
+    # the whole line because go.mod's lexer tokenizes `(` separately, so
+    # `require(` with no space is accepted and would not split into fields.
     module_version=$(awk -v module="${module_path}" '
         $1 == "require" && $2 == module && $3 ~ /^v/ { print $3; exit }
-        $1 == "require" && $2 == "(" { in_require = 1; next }
+        $0 ~ /^[[:space:]]*require[[:space:]]*\([[:space:]]*(\/\/.*)?$/ { in_require = 1; next }
         in_require && $1 == ")" { in_require = 0; next }
         in_require && $1 == module && $2 ~ /^v/ { print $2; exit }
     ' "${go_mod}" 2>/dev/null)

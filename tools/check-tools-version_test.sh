@@ -340,6 +340,15 @@ require (
 	golang.org/x/exp v1.4.4 // indirect
 )
 ' 0 v1.4.4
+check_gomod_version "reads-require-without-space-before-paren" \
+    'module m
+
+go 1.26
+
+require(
+\tgolang.org/x/exp v1.6.6 // indirect
+)
+' 0 v1.6.6
 check_gomod_version "fails-when-module-is-absent" \
     'module m
 
