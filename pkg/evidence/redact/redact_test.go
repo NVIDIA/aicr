@@ -484,6 +484,43 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			in:   map[string]string{},
 			want: nil,
 		},
+		{
+			// #2297 provenance: the closed-set runtime-source code survives
+			// minimal redaction so a reader can tell a delivered-artifact number
+			// from a cluster-capability one without --full.
+			name: "listed runtime source survives",
+			in:   map[string]string{"runtimeSource": "delivered-artifact"},
+			want: map[string]string{"runtimeSource": "delivered-artifact"},
+		},
+		{
+			name: "unlisted runtime source is dropped",
+			in:   map[string]string{"runtimeSource": "my-cluster-runtime"},
+			want: nil,
+		},
+		{
+			// Content identities bind the provenance claim to the exact templates
+			// compared; a digest is the one non-enumerated shape admitted because
+			// it is fixed-length and cannot smuggle an identifier.
+			name: "sha256 template digests survive",
+			in: map[string]string{
+				"runtimeSource":        "delivered-artifact",
+				"shippedRuntimeDigest": "cab912550bf2999744b2c685f40cd96ec010bf7e615da59847ce55090cae4bae",
+				"derivedRuntimeDigest": "4e3e8f09d0000000000000000000000000000000000000000000000000000000",
+			},
+			want: map[string]string{
+				"runtimeSource":        "delivered-artifact",
+				"shippedRuntimeDigest": "cab912550bf2999744b2c685f40cd96ec010bf7e615da59847ce55090cae4bae",
+				"derivedRuntimeDigest": "4e3e8f09d0000000000000000000000000000000000000000000000000000000",
+			},
+		},
+		{
+			name: "malformed digest is dropped under an allowed key",
+			in: map[string]string{
+				"shippedRuntimeDigest": "CAB912550BF2999744B2C685F40CD96EC010BF7E615DA59847CE55090CAE4BAE",
+				"derivedRuntimeDigest": "cab9125",
+			},
+			want: nil,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

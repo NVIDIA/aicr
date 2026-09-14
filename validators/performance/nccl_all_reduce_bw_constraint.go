@@ -399,6 +399,19 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// launcher wait times out with a diagnostic, never a false pass. Operators
 	// wanting the sized and scheduled cohorts to match exactly pass
 	// --node-selector.
+	// Decide where the benchmark runtime comes from (#2297): a recipe-supplied
+	// runtime, a runtime DERIVED from the ClusterTrainingRuntime the recipe
+	// ships, or the embedded capability fixture. For a delivered artifact this
+	// also runs the recipe -> deployed -> cluster verification and the
+	// derivation before anything is applied; the derived runtime then rides the
+	// same carrier as a recipe-supplied one, so every downstream branch that
+	// leaves a self-wired runtime's fabric alone (customRuntime != "") applies.
+	plan, err := resolveBenchmarkRuntimeSource(ctx, customRuntime, target.accelerator, target.service, variant, fabric)
+	if err != nil {
+		return "", false, err
+	}
+	customRuntime = plan.carrier
+
 	sizingSelector := ctx.NodeSelector
 	if customRuntime != "" && len(sizingSelector) == 0 {
 		rs, rsErr := customRuntimeNodeSelector(customRuntime)
@@ -453,7 +466,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// artifacts the workers never start sshd and the launcher mpirun fails
 	// with an opaque "pod failed" minutes later. Fail fast with an actionable
 	// error naming the unready nodes instead.
-	if customRuntime == "" && gkeTCPXOPreflightApplies(variant, target.accelerator, target.service) {
+	if plan.source.runsGKETCPXOChecks() && gkeTCPXOPreflightApplies(variant, target.accelerator, target.service) {
 		if pfErr := preflightGKETCPXOReady(ctx, gpuConfig.Nodes); pfErr != nil {
 			return "", false, pfErr
 		}
@@ -462,10 +475,12 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Run the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
 	// Each platform has a per-platform TrainingRuntime with all platform-specific
 	// configuration (image, mpirun args, resources, sidecars). The TrainJob is shared.
-	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime)
+	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime, plan.source)
 	if err != nil {
 		return "", false, err
 	}
+	// The run completed: record which artifact the bandwidth below describes.
+	emitRuntimeProvenance(plan)
 
 	// Parse bandwidth from logs (shared across all service types).
 	bandwidth, err := parseBandwidthFromLogs(logs)
@@ -817,7 +832,7 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 // pod to complete, and returns the benchmark logs.
 func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType,
-	customRuntime string) (logs string, err error) {
+	customRuntime string, source ncclRuntimeSource) (logs string, err error) {
 
 	dynamicClient := ctx.DynamicClient
 
@@ -914,7 +929,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// after the goroutine is stopped and joined. A recipe-supplied runtime
 	// owns its fabric end to end and is out of scope here.
 	var tcpxoWatch *tcpxoWorkerWatcher
-	if customRuntime == "" && gkeTCPXOPreflightApplies(variant, accelerator, service) {
+	if source.runsGKETCPXOChecks() && gkeTCPXOPreflightApplies(variant, accelerator, service) {
 		tcpxoWatch = startGKETCPXOWorkerWatch(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
 		defer tcpxoWatch.Stop() // covers the error returns below
 	}

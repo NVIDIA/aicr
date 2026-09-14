@@ -249,3 +249,132 @@ func TestCheckGKEGPUNICNetworksApplicability(t *testing.T) {
 		}
 	})
 }
+
+// --- #2297: delivered-runtime arms -------------------------------------------
+
+func tcpxoMapping(prefix string) []recipe.NetworkInterfaceMapping {
+	out := make([]recipe.NetworkInterfaceMapping, 0, 8)
+	for i := range 8 {
+		out = append(out, recipe.NetworkInterfaceMapping{
+			InterfaceName: fmt.Sprintf("eth%d", i+1), Network: fmt.Sprintf("%s-gpu-nic-%d", prefix, i)})
+	}
+	return out
+}
+
+func tcpxoNetworkObjects(m []recipe.NetworkInterfaceMapping) []runtime.Object {
+	objs := make([]runtime.Object, 0, len(m))
+	for _, e := range m {
+		objs = append(objs, &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "networking.gke.io/v1", "kind": "Network",
+			"metadata": map[string]any{"name": e.Network}}})
+	}
+	return objs
+}
+
+func tcpxoRuntimeObject(m []recipe.NetworkInterfaceMapping) *unstructured.Unstructured {
+	ann := `[{"interfaceName":"eth0","network":"default"}`
+	for _, e := range m {
+		ann += fmt.Sprintf(`,{"interfaceName":"%s","network":"%s"}`, e.InterfaceName, e.Network)
+	}
+	ann += "]"
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "trainer.kubeflow.org/v1alpha1", "kind": "ClusterTrainingRuntime",
+		"metadata": map[string]any{"name": gkenet.TCPXORuntimeName},
+		"spec": map[string]any{"template": map[string]any{"spec": map[string]any{"replicatedJobs": []any{map[string]any{
+			"name": gkenet.TCPXONodeJob,
+			"template": map[string]any{"spec": map[string]any{"template": map[string]any{
+				"metadata": map[string]any{"annotations": map[string]any{
+					gkenet.InterfacesAnnotation: ann, gkenet.DefaultInterfaceAnnotation: "eth0"}},
+				"spec": map[string]any{"containers": []any{map[string]any{"name": "node"}}},
+			}}},
+		}}}}},
+	}}
+}
+
+func deliveredClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
+	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{
+			gkenet.NetworkGVR:                "NetworkList",
+			gkenet.ClusterTrainingRuntimeGVR: "ClusterTrainingRuntimeList",
+		}, objects...)
+}
+
+// deliveredContext declares gke-nccl-tcpxo AND a kubeflow-trainer ref carrying
+// the recorded mapping — the shape h100-gke-cos-training-kubeflow produces.
+func deliveredContext(client *dynamicfake.FakeDynamicClient, recorded []recipe.NetworkInterfaceMapping) *validators.Context {
+	raw := make([]any, 0, len(recorded))
+	for _, e := range recorded {
+		raw = append(raw, map[string]any{"interfaceName": e.InterfaceName, "network": e.Network})
+	}
+	return &validators.Context{Ctx: context.Background(), DynamicClient: client,
+		ValidationInput: &v1.ValidationInput{ComponentRefs: []recipe.ComponentRef{
+			{Name: tcpxoComponent},
+			{Name: recipe.KubeflowTrainerComponentName, Overrides: map[string]any{recipe.GKETCPXOInterfacesOverrideKey: raw}},
+		}}}
+}
+
+func TestCheckGKEGPUNICNetworksDeliveredRuntimeArms(t *testing.T) {
+	recorded := tcpxoMapping("c1")
+	nets := tcpxoNetworkObjects(recorded)
+	drift := append([]recipe.NetworkInterfaceMapping(nil), recorded...)
+	drift[2].Network = "c1-gpu-nic-9"
+
+	tests := []struct {
+		name     string
+		ctx      *validators.Context
+		wantErr  error  // sentinel code, nil for pass
+		wantText string // substring of the error
+	}{
+		{
+			// Base h100-gke-cos-training: TCPXO declared, no runtime/mapping. The
+			// census must still be the whole check — this is the false-fail the
+			// predicate gate exists to prevent.
+			name: "tcpxo without a delivered runtime keeps census-only behaviour",
+			ctx:  tcpxoContext(gkeNetworkClient(nets...), true),
+		},
+		{
+			name: "delivered runtime consistent with recipe and cluster passes",
+			ctx:  deliveredContext(deliveredClient(append([]runtime.Object{tcpxoRuntimeObject(recorded)}, nets...)...), recorded),
+		},
+		{
+			name:     "deployed mapping diverging from the recipe fails",
+			ctx:      deliveredContext(deliveredClient(append([]runtime.Object{tcpxoRuntimeObject(drift)}, nets...)...), recorded),
+			wantErr:  errors.New(errors.ErrCodeInvalidRequest, ""),
+			wantText: "diverges from the recipe",
+		},
+		{
+			name:     "recipe ships the runtime but it is not deployed",
+			ctx:      deliveredContext(deliveredClient(nets...), recorded),
+			wantErr:  errors.New(errors.ErrCodeNotFound, ""),
+			wantText: "not deployed",
+		},
+		{
+			// Recipe and deployed agree with each other but name a network this
+			// cluster does not have: the census counts 8 (a stray extra network
+			// stands in for the missing one), so only the set comparison catches it.
+			name: "deployed mapping selects a network the cluster lacks",
+			ctx: deliveredContext(deliveredClient(append(
+				[]runtime.Object{tcpxoRuntimeObject(recorded), tcpxoNetworkObjects(tcpxoMapping("other"))[0]},
+				nets[1:]...)...), recorded),
+			wantErr:  errors.New(errors.ErrCodeNotFound, ""),
+			wantText: "do not exist on this cluster",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := checkGKEGPUNICNetworks(tt.ctx)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			if err == nil || !stderrors.Is(err, tt.wantErr) {
+				t.Fatalf("err = %v, want code of %v", err, tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantText) {
+				t.Fatalf("err = %q, want substring %q", err.Error(), tt.wantText)
+			}
+		})
+	}
+}

@@ -200,6 +200,30 @@ var ctrfSkipReasons = map[string]struct{}{
 
 func isSkipReason(v string) bool { _, ok := ctrfSkipReasons[v]; return ok }
 
+// ctrfRuntimeSources is the CLOSED set of NCCL benchmark runtime-provenance
+// codes (validators/performance, #2297). The value names WHERE the measured
+// runtime came from — not whether the bandwidth passed — so a reader can tell a
+// number that describes the artifact the recipe ships from one that describes
+// a validator fixture. As with skip reasons, only codes the check mints are
+// listed; a new code must be added here in the same change that emits it.
+var ctrfRuntimeSources = map[string]struct{}{
+	"delivered-artifact":      {}, // derived from the ClusterTrainingRuntime the recipe ships
+	"recipe-supplied-runtime": {}, // nccl-benchmark-runtime(-ref): the recipe supplied the runtime itself
+	"cluster-capability":      {}, // the validator's embedded fixture: proves the fabric, not the shipped artifact
+}
+
+func isRuntimeSource(v string) bool { _, ok := ctrfRuntimeSources[v]; return ok }
+
+// ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.
+// A content identity is the one non-enumerated value shape this allowlist
+// admits: it is fixed-length, cannot encode an identifier, and is what lets the
+// minimal bundle bind a provenance claim to the exact templates that were
+// compared without shipping the templates themselves (they can carry
+// cluster-identifying names and are --full-only evidence).
+var ctrfSHA256Value = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+func isSHA256Digest(v string) bool { return ctrfSHA256Value.MatchString(v) }
+
 // ctrfExtraAllowlist is the fail-closed set of TestResult.Extra keys safe to
 // publish in a minimal (default) evidence bundle, each paired with the
 // validator its value must pass. Every key carries only low-cardinality counts
@@ -212,6 +236,11 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	"nodesValidated": isCountValue, // count of nodes a coverage check actually verified
 	"nodesTotal":     isCountValue, // count of candidate nodes (validated + skipped/cordoned)
 	"skipReason":     isSkipReason, // closed-set code for why a check skipped
+	// NCCL benchmark runtime provenance (#2297): which artifact the bandwidth
+	// number describes, plus content identities of the two templates compared.
+	"runtimeSource":        isRuntimeSource, // closed-set code: delivered-artifact | recipe-supplied-runtime | cluster-capability
+	"shippedRuntimeDigest": isSHA256Digest,  // sha256 of the normalized deployed ClusterTrainingRuntime node template
+	"derivedRuntimeDigest": isSHA256Digest,  // sha256 of the normalized benchmark runtime node template derived from it
 }
 
 // ctrfAppliedRules is the static, sorted description of the CTRF scrub.

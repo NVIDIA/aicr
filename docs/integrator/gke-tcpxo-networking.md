@@ -291,6 +291,18 @@ The GKE H100 training recipe (`h100-gke-cos-training`) already selects the
 automated `nccl-all-reduce-bw` performance check (floor `>= 300` GB/s), so the
 benchmark is fully driven for you:
 
+On a recipe that ships the `torch-distributed-tcpxo` runtime
+(`h100-gke-cos-training-kubeflow`), the performance validator does not measure
+a fixture of its own. Before creating anything it verifies **recipe → deployed →
+cluster**: the recipe's recorded `configuration.gke.tcpxoInterfaces` must equal
+the mapping on the deployed `ClusterTrainingRuntime` exactly and in order, and
+every network that mapping selects must exist on the cluster. It then derives
+the benchmark runtime from the deployed one — copying the worker pod template
+wholesale and overriding only the benchmark's own image, entrypoint, and
+resources — and labels the result `runtimeSource: delivered-artifact`. A
+mismatch in either comparison fails the run rather than being recorded; a
+divergent deployed artifact is a finding, never something validation repairs.
+
 ```shell
 aicr validate --recipe recipes/overlays/h100-gke-cos-training.yaml \
   --phase performance

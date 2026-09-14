@@ -158,7 +158,8 @@ type TestResult struct {
 	// `extra` object.
 	//
 	// CONTRACT: values MUST be low-cardinality counts or enum codes only —
-	// e.g. "1", "2", "no-schedulable-gpu-nodes", "no-gpu-nodes". NEVER node names, IPs,
+	// e.g. "1", "2", "no-schedulable-gpu-nodes", "no-gpu-nodes", or a sha256 hex
+	// content identity such as the #2297 runtime-provenance digests. NEVER node names, IPs,
 	// hostnames, or any operator-identifying free text; those belong in Stdout,
 	// which is redacted by default. The redact package enforces this at the
 	// publication boundary with a fail-closed key AND value allowlist: only
