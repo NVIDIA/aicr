@@ -152,6 +152,7 @@ func LoadFromFileWithProviderProfile(
 		if profileErr := ensureDirectOverlayProfileApplied(ctx, path, &overlay, rec, dp, selection); profileErr != nil {
 			return nil, profileErr
 		}
+		warnUnappliedDirectOverlayMixins(path, &overlay, rec)
 
 		slog.Info("overlay hydrated successfully",
 			"appliedOverlays", rec.Metadata.AppliedOverlays)
@@ -258,6 +259,32 @@ func deprecatedInputTarget(kind, apiVersion string) string {
 		return header.GroupVersionV1Beta1
 	}
 	return header.GroupVersionV1
+}
+
+// warnUnappliedDirectOverlayMixins reports a directly-passed overlay whose
+// spec.mixins did not reach the hydrated recipe. Hydration rebuilds from
+// spec.criteria alone and never reads spec.mixins, so an overlay file outside
+// the resolved catalog contributes none of them: the bundle still succeeds and
+// still accepts --set against the mixin's paths, but ships none of its values.
+//
+// Presence in AppliedOverlays is the discriminator. A name that resolved from
+// the catalog composed through the normal mixin path, so only an absent name
+// indicates the silent drop.
+func warnUnappliedDirectOverlayMixins(path string, overlay *RecipeMetadata, rec *RecipeResult) {
+	if len(overlay.Spec.Mixins) == 0 {
+		return
+	}
+	for _, applied := range rec.Metadata.AppliedOverlays {
+		if applied == overlay.Metadata.Name {
+			return
+		}
+	}
+	slog.Warn("overlay declares mixins that were not applied; hydration rebuilds from spec.criteria "+
+		"and does not read spec.mixins from a file outside the resolved catalog. "+
+		"Register the overlay under an external --data <dir>/overlays/ directory so its mixins compose",
+		"file", path,
+		"overlay", overlay.Metadata.Name,
+		"mixins", overlay.Spec.Mixins)
 }
 
 func ensureDirectOverlayProfileApplied(
