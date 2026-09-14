@@ -104,15 +104,27 @@ export REPO_ROOT="${ROOT}"
 # green `make e2e` and the skip is stated in the log. CI runners have both.
 SELECTOR='ci!=true'
 REGISTRY_IMAGE="$(sed -n "s/^  registry_image: '\(.*\)'$/\1/p" "${ROOT}/.settings.yaml")"
-if ! docker info >/dev/null 2>&1; then
-  msg "Docker daemon not reachable; skipping requires=docker suites"
+# Every probe is time-bounded: a stalled daemon or a hanging pull must turn
+# into "prerequisite unavailable, skip", never a hung make e2e. `timeout` is
+# coreutils (present on CI runners; brew coreutils on macOS); without it the
+# probe runs unbounded, as before.
+bounded() { # <seconds> <command...>
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$@"
+  else
+    shift
+    "$@"
+  fi
+}
+if ! bounded 15 docker info >/dev/null 2>&1; then
+  msg "Docker daemon not reachable within 15s; skipping requires=docker suites"
   SELECTOR="${SELECTOR},requires!=docker"
 elif [ -z "${REGISTRY_IMAGE}" ]; then
   msg "testing_tools.registry_image not found in .settings.yaml; skipping requires=docker suites"
   SELECTOR="${SELECTOR},requires!=docker"
-elif ! docker image inspect "${REGISTRY_IMAGE}" >/dev/null 2>&1 \
-    && ! docker pull -q "${REGISTRY_IMAGE}" >/dev/null 2>&1; then
-  msg "Cannot pull ${REGISTRY_IMAGE}; skipping requires=docker suites"
+elif ! bounded 15 docker image inspect "${REGISTRY_IMAGE}" >/dev/null 2>&1 \
+    && ! bounded 120 docker pull -q "${REGISTRY_IMAGE}" >/dev/null 2>&1; then
+  msg "Cannot pull ${REGISTRY_IMAGE} within 120s; skipping requires=docker suites"
   SELECTOR="${SELECTOR},requires!=docker"
 fi
 
