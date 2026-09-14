@@ -211,7 +211,10 @@ Discover them and run locally against a Kind cluster:
 
 ```bash
 make check-health COMPONENT=gpu-operator       # single component
-make check-health-all                           # all components
+make check-health-all                           # registry-linked components
+# opt-in-only checks (e.g. nvsentinel-observability) aren't in that
+# sweep -- run them directly:
+make check-health COMPONENT=nvsentinel-observability
 make validate-local RECIPE=recipe.yaml          # full pipeline
 ```
 
