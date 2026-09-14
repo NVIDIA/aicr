@@ -15,10 +15,10 @@
 // Package upgrade implements ADR-021 component upgrade transition records.
 //
 // A record answers "is this component version transition safe?" as
-// machine-readable data: per-component YAML under recipes/upgrades/, referenced
-// from registry.yaml via upgrades.file, holding semver-range-keyed transitions
-// with a verdict, operator steps grouped by deployer, and the evidence backing
-// a safe claim.
+// machine-readable data: recipes/components/<component>/upgrades.yaml,
+// referenced from registry.yaml via upgrades.file, holding semver-range-keyed
+// transitions with a verdict, operator steps grouped by deployer, and the
+// evidence backing a safe claim.
 //
 // # Loading versus validating
 //

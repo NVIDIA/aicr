@@ -53,8 +53,8 @@ func validRecord(component string) string {
 }
 
 func TestLoadSuccess(t *testing.T) {
-	src := mapSource{"upgrades/nw.yaml": []byte(validRecord("nw"))}
-	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+	src := mapSource{"components/nw/upgrades.yaml": []byte(validRecord("nw"))}
+	comps := []Component{{Name: "nw", File: "components/nw/upgrades.yaml", PinnedVersion: "v0.18.0"}}
 
 	set, err := Load(context.Background(), src, comps)
 	if err != nil {
@@ -135,8 +135,8 @@ func TestLoadRejectsBadHeaders(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			src := mapSource{"upgrades/nw.yaml": []byte(tt.body)}
-			comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+			src := mapSource{"components/nw/upgrades.yaml": []byte(tt.body)}
+			comps := []Component{{Name: "nw", File: "components/nw/upgrades.yaml", PinnedVersion: "v0.18.0"}}
 
 			_, err := Load(context.Background(), src, comps)
 			if err == nil {
@@ -162,8 +162,8 @@ func TestLoadRejectsBadAPIVersionBeforeCheckingEmptyRecord(t *testing.T) {
 		"kind: " + ComponentUpgradesKind + "\n" +
 		"component: nw\n" +
 		"transitions: []\n"
-	src := mapSource{"upgrades/nw.yaml": []byte(body)}
-	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+	src := mapSource{"components/nw/upgrades.yaml": []byte(body)}
+	comps := []Component{{Name: "nw", File: "components/nw/upgrades.yaml", PinnedVersion: "v0.18.0"}}
 
 	_, err := Load(context.Background(), src, comps)
 	if err == nil {
@@ -184,14 +184,14 @@ func TestLoadRejectsBadAPIVersionBeforeCheckingEmptyRecord(t *testing.T) {
 // TestLoadRejectsBadHeaders.
 func TestLoadRejectsMultiDocumentFile(t *testing.T) {
 	body := validRecord("nw") + "---\n" + validRecord("nw")
-	src := mapSource{"upgrades/nw.yaml": []byte(body)}
-	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+	src := mapSource{"components/nw/upgrades.yaml": []byte(body)}
+	comps := []Component{{Name: "nw", File: "components/nw/upgrades.yaml", PinnedVersion: "v0.18.0"}}
 
 	_, err := Load(context.Background(), src, comps)
 	if err == nil {
 		t.Fatal("Load = nil error, want rejection of the second document")
 	}
-	if !strings.Contains(err.Error(), "upgrades/nw.yaml") {
+	if !strings.Contains(err.Error(), "components/nw/upgrades.yaml") {
 		t.Errorf("error %q does not name the file", err.Error())
 	}
 	if !strings.Contains(err.Error(), "more than one") {
@@ -208,8 +208,8 @@ func TestLoadRejectsMultiDocumentFile(t *testing.T) {
 // mid-edit truncation as a deliberate no-op.
 func TestLoadRejectsTrailingDocumentMarker(t *testing.T) {
 	body := validRecord("nw") + "---\n"
-	src := mapSource{"upgrades/nw.yaml": []byte(body)}
-	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+	src := mapSource{"components/nw/upgrades.yaml": []byte(body)}
+	comps := []Component{{Name: "nw", File: "components/nw/upgrades.yaml", PinnedVersion: "v0.18.0"}}
 
 	_, err := Load(context.Background(), src, comps)
 	if err == nil {
@@ -225,14 +225,14 @@ func TestLoadRejectsTrailingDocumentMarker(t *testing.T) {
 // the file could not even be parsed past the first document.
 func TestLoadRejectsUnparseableSecondDocument(t *testing.T) {
 	body := validRecord("nw") + "---\n[1, 2\n"
-	src := mapSource{"upgrades/nw.yaml": []byte(body)}
-	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+	src := mapSource{"components/nw/upgrades.yaml": []byte(body)}
+	comps := []Component{{Name: "nw", File: "components/nw/upgrades.yaml", PinnedVersion: "v0.18.0"}}
 
 	_, err := Load(context.Background(), src, comps)
 	if err == nil {
 		t.Fatal("Load = nil error, want rejection of the unparseable second document")
 	}
-	if !strings.Contains(err.Error(), "upgrades/nw.yaml") {
+	if !strings.Contains(err.Error(), "components/nw/upgrades.yaml") {
 		t.Errorf("error %q does not name the file", err.Error())
 	}
 	if !strings.Contains(err.Error(), "past its first document") {
@@ -246,8 +246,8 @@ func TestLoadRejectsUnparseableSecondDocument(t *testing.T) {
 func TestLoadRejectsUnknownFields(t *testing.T) {
 	body := strings.Replace(validRecord("nw"), "    summary: the rename",
 		"    verifedBy: a uat lane\n    summary: the rename", 1)
-	src := mapSource{"upgrades/nw.yaml": []byte(body)}
-	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+	src := mapSource{"components/nw/upgrades.yaml": []byte(body)}
+	comps := []Component{{Name: "nw", File: "components/nw/upgrades.yaml", PinnedVersion: "v0.18.0"}}
 
 	_, err := Load(context.Background(), src, comps)
 	if err == nil {
@@ -264,8 +264,8 @@ func TestLoadRejectsRecordWithNoAssertions(t *testing.T) {
 		"kind: " + ComponentUpgradesKind + "\n" +
 		"component: nw\n" +
 		"transitions: []\n"
-	src := mapSource{"upgrades/nw.yaml": []byte(body)}
-	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+	src := mapSource{"components/nw/upgrades.yaml": []byte(body)}
+	comps := []Component{{Name: "nw", File: "components/nw/upgrades.yaml", PinnedVersion: "v0.18.0"}}
 
 	_, err := Load(context.Background(), src, comps)
 	if err == nil {
@@ -279,12 +279,12 @@ func TestLoadRejectsRecordWithNoAssertions(t *testing.T) {
 // Last-wins on a duplicate name would silently never validate the first record.
 func TestLoadRejectsDuplicateComponentNames(t *testing.T) {
 	src := mapSource{
-		"upgrades/a.yaml": []byte(validRecord("nw")),
-		"upgrades/b.yaml": []byte(validRecord("nw")),
+		"components/a/upgrades.yaml": []byte(validRecord("nw")),
+		"components/b/upgrades.yaml": []byte(validRecord("nw")),
 	}
 	comps := []Component{
-		{Name: "nw", File: "upgrades/a.yaml", PinnedVersion: "v0.18.0"},
-		{Name: "nw", File: "upgrades/b.yaml", PinnedVersion: "v0.18.0"},
+		{Name: "nw", File: "components/a/upgrades.yaml", PinnedVersion: "v0.18.0"},
+		{Name: "nw", File: "components/b/upgrades.yaml", PinnedVersion: "v0.18.0"},
 	}
 	if _, err := Load(context.Background(), src, comps); err == nil {
 		t.Fatal("Load = nil error, want rejection of the duplicate name")
@@ -297,8 +297,8 @@ func TestLoadAllowsPrereleaseInTo(t *testing.T) {
 	body := strings.Replace(validRecord("pre"),
 		`to: ">=0.18.0 <=0.18.0"`, `to: ">=0.1.0-alpha.1 <=0.1.0-alpha.12"`, 1)
 	body = strings.Replace(body, `from: "<0.18.0"`, `from: "<0.1.0"`, 1)
-	src := mapSource{"upgrades/pre.yaml": []byte(body)}
-	comps := []Component{{Name: "pre", File: "upgrades/pre.yaml", PinnedVersion: "v0.1.0-alpha.12"}}
+	src := mapSource{"components/pre/upgrades.yaml": []byte(body)}
+	comps := []Component{{Name: "pre", File: "components/pre/upgrades.yaml", PinnedVersion: "v0.1.0-alpha.12"}}
 
 	if _, err := Load(context.Background(), src, comps); err != nil {
 		t.Fatalf("Load error = %v", err)
@@ -308,7 +308,7 @@ func TestLoadAllowsPrereleaseInTo(t *testing.T) {
 // A structured ReadFile error keeps its own code rather than flattening, and
 // the wrap this layer adds still names the component and file it was reading.
 func TestLoadPropagatesReadError(t *testing.T) {
-	comps := []Component{{Name: "nw", File: "upgrades/missing.yaml", PinnedVersion: "v0.18.0"}}
+	comps := []Component{{Name: "nw", File: "components/nw/upgrades.yaml", PinnedVersion: "v0.18.0"}}
 	_, err := Load(context.Background(), mapSource{}, comps)
 	if err == nil {
 		t.Fatal("Load = nil error, want failure")
@@ -316,7 +316,7 @@ func TestLoadPropagatesReadError(t *testing.T) {
 	if !stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
 		t.Errorf("error = %v, want inner ErrCodeNotFound preserved", err)
 	}
-	if !strings.Contains(err.Error(), "nw") || !strings.Contains(err.Error(), "upgrades/missing.yaml") {
+	if !strings.Contains(err.Error(), "nw") || !strings.Contains(err.Error(), "components/nw/upgrades.yaml") {
 		t.Errorf("error %q does not name the component and file being read", err.Error())
 	}
 }
@@ -324,7 +324,7 @@ func TestLoadPropagatesReadError(t *testing.T) {
 // A nil Source with a record to read is a caller bug, but panicking on it
 // turns a misconfiguration into a crash in whatever process called Load.
 func TestLoadRejectsNilSource(t *testing.T) {
-	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+	comps := []Component{{Name: "nw", File: "components/nw/upgrades.yaml", PinnedVersion: "v0.18.0"}}
 	_, err := Load(context.Background(), nil, comps)
 	if err == nil {
 		t.Fatal("Load = nil error, want rejection of the nil source")
@@ -332,7 +332,7 @@ func TestLoadRejectsNilSource(t *testing.T) {
 	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 		t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
 	}
-	if !strings.Contains(err.Error(), "upgrades/nw.yaml") {
+	if !strings.Contains(err.Error(), "components/nw/upgrades.yaml") {
 		t.Errorf("error %q does not name the file it could not read", err.Error())
 	}
 }
@@ -398,10 +398,10 @@ replaces:
         - id: uninstall-old
           description: uninstall old-widget-operator before installing this one
 `
-	src := mapSource{"upgrades/widget-operator.yaml": []byte(body)}
+	src := mapSource{"components/widget-operator/upgrades.yaml": []byte(body)}
 	comps := []Component{{
 		Name:          "widget-operator",
-		File:          "upgrades/widget-operator.yaml",
+		File:          "components/widget-operator/upgrades.yaml",
 		PinnedVersion: "v0.22.0",
 	}}
 
@@ -427,8 +427,8 @@ replaces:
 func TestLoadHonorsContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	src := mapSource{"upgrades/nw.yaml": []byte(validRecord("nw"))}
-	comps := []Component{{Name: "nw", File: "upgrades/nw.yaml", PinnedVersion: "v0.18.0"}}
+	src := mapSource{"components/nw/upgrades.yaml": []byte(validRecord("nw"))}
+	comps := []Component{{Name: "nw", File: "components/nw/upgrades.yaml", PinnedVersion: "v0.18.0"}}
 
 	if _, err := Load(ctx, src, comps); err == nil {
 		t.Fatal("Load = nil error on a canceled context, want failure")

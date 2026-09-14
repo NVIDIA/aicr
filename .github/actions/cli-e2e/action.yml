@@ -151,6 +151,40 @@ runs:
           echo "::warning::No binary attestation found (attestation tests will skip)"
         fi
 
+    ## Image cache for the requires=docker suite (tests/chainsaw/cli/evidence-publish).
+    ## Restore the pinned registry image (.settings.yaml testing_tools.registry_image)
+    ## from the tarball the prime-images job in kwok-recipes.yaml saves, so this
+    ## job does not pull it from ECR Public: anonymous pulls there are throttled
+    ## per runner egress IP (toomanyrequests), the same failure the KWOK matrix
+    ## hit in #2483. Best effort, like the KWOK lanes: a cache miss is logged and
+    ## the suite falls back to pulling.
+    - name: Install yq
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_yq: 'true'
+
+    - name: Resolve image pins and cache keys
+      id: images
+      shell: bash
+      run: |
+        set -euo pipefail
+        bash kwok/scripts/lib/image-cache.sh settings .settings.yaml | tee -a "$GITHUB_OUTPUT"
+
+    - name: Restore registry image
+      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      with:
+        path: /tmp/kwok-image-cache/registry
+        key: ${{ steps.images.outputs.registry_key }}
+
+    - name: Load cached registry image
+      shell: bash
+      env:
+        REGISTRY_IMAGE: ${{ steps.images.outputs.registry_image }}
+      run: |
+        if ! bash kwok/scripts/lib/image-cache.sh load /tmp/kwok-image-cache/registry "${REGISTRY_IMAGE}"; then
+          echo "::warning::Image cache miss for ${REGISTRY_IMAGE} — the evidence-publish suite will pull it from the registry"
+        fi
+
     ## Forked repos: skip CI-gated tests (no OIDC for attestation). ci!=true
     ## drops every ci="true" test across both dirs.
     - name: Run CLI chainsaw tests (forked repository)
