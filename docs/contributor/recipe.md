@@ -99,7 +99,7 @@ components:
 | `sharedStorageClassPaths` | []string | no | Helm value paths where `--shared-storage-class` is written for shared filesystem PVCs |
 | `validations` | []`ComponentValidationConfig` | no | Bundle-time validation checks (function, severity, conditions, message) |
 | `healthCheck.assertFile` | string | **yes** | Chainsaw assert YAML (relative to data dir) consumed by `aicr validate --phase deployment` (runtime — #1220) and by `make check-health` locally. Content is restricted to the read-only `assert` / `error` operation allowlist. Enforced at PR time by `pkg/recipe.TestComponentRegistry_RequiresHealthCheck` (every component must declare a path) and `pkg/chainsaw.TestValidateTestReadOnly_RegistryContent` (every declared path must pass the allowlist) — see #1223. |
-| `upgrades.file` | string | no | Path to a `ComponentUpgrades` transition record (relative to data dir, e.g. `upgrades/nodewright-operator.yaml`), ADR-021. Empty means the component has no transition records. See [Transition records](#transition-records) below. |
+| `upgrades.file` | string | no | Path to a `ComponentUpgrades` transition record (relative to data dir, e.g. `components/nodewright-operator/upgrades.yaml`), ADR-021. Empty means the component has no transition records. See [Transition records](#transition-records) below. |
 | `mixinSafeOverridePaths` | []string | no | Exact dotted value paths a `RecipeMixin` may set on this component via `Overrides` (see [Mixin Composition](#mixin-composition)). Empty (the default) means the component hasn't opted in: a mixin introducing it fresh keeps unrestricted `valuesFile`/`overrides`, but once it's already in the chain every mixin `Overrides` path is rejected. Entries must be exact leaf paths — an ancestor/descendant pair is rejected at registry load |
 | `gkeCriticalPriority` | bool | no | Synthesize ResourceQuota on GKE so `system-*-critical` pods admit |
 | `hasSelfRefCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` (chart ships CRD + CR in same release) |
@@ -124,7 +124,7 @@ except exemption-declared divergences — see
 
 ### Transition records
 
-- A record lives at `recipes/upgrades/<component>.yaml` with
+- A record lives at `recipes/components/<component>/upgrades.yaml` with
   `kind: ComponentUpgrades` and `apiVersion: aicr.run/v1beta1`, and is
   wired to a component via the registry's `upgrades.file` (see the
   field table above).

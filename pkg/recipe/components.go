@@ -214,8 +214,8 @@ type HealthCheckConfig struct {
 // UpgradesConfig references a component's ComponentUpgrades document.
 type UpgradesConfig struct {
 	// File is the path to a ComponentUpgrades YAML file, relative to the
-	// data directory (e.g. "upgrades/nodewright-operator.yaml"). Empty
-	// means the component has no transition records.
+	// data directory (e.g. "components/nodewright-operator/upgrades.yaml").
+	// Empty means the component has no transition records.
 	File string `yaml:"file,omitempty"`
 }
 
