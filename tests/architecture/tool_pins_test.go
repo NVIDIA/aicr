@@ -75,6 +75,29 @@ func TestToolPinsLiveOnlyInGoMod(t *testing.T) {
 					"tool has.", tp.goModModule)
 			}
 
+			// Every reader of this pin -- tools/api-diff, tools/check-tools and
+			// the load-versions action, all via go_mod_required_version -- is a
+			// text scan of the require line. None of them can see a `replace`,
+			// but `go build` honors one, so a replaced module makes the require
+			// line describe a version that is never built. That reads as a
+			// passing pin over a tool built from somewhere else, which is the
+			// dangerous direction. Rejected here rather than taught to every
+			// reader: a wildcard replace has no version for them to report at
+			// all. Both forms are rejected -- a version-specific replace still
+			// diverts the build whenever the left side matches.
+			for _, rep := range mf.Replace {
+				if rep.Old.Path != tp.goModModule {
+					continue
+				}
+				t.Errorf("go.mod replaces %s with %s, but the require line is this "+
+					"tool's only pin and every reader of it parses that line as text.\n"+
+					"`go build` would use the replacement while tools/api-diff and "+
+					"tools/check-tools reported the require version, so a fork or a "+
+					"local path would pass as the pinned release. Drop the replace, or "+
+					"teach go_mod_required_version to resolve it before relying on it.",
+					tp.goModModule, rep.New.Path)
+			}
+
 			if got, ok := settingsString(t, settings, tp.settingsPath); ok {
 				t.Errorf(".settings.yaml pins %s = %s, but go.mod is the single source "+
 					"of truth for tools built from this module.\n"+
