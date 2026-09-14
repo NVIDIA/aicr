@@ -322,20 +322,16 @@ func unappliedDirectOverlayMixins(
 		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
 			fmt.Sprintf("failed to verify mixins declared by directly loaded overlay %q", path))
 	}
+	// The root base is deliberately not consulted: initBaseMergedSpec seeds the
+	// merged spec with its constraints, componentRefs and validation but not
+	// its mixins, so a mixin declared there never composes and must not count
+	// as applied.
 	composed := make(map[string]bool)
-	collect := func(declared []string) {
-		for _, mixin := range declared {
-			composed[mixin] = true
-		}
-	}
-	// mergeOverlayChains skips the root base when recording AppliedOverlays,
-	// so its declaration is folded in separately.
-	if store.Base != nil {
-		collect(store.Base.Spec.Mixins)
-	}
 	for _, name := range rec.Metadata.AppliedOverlays {
 		if applied, ok := store.Overlays[name]; ok && applied != nil {
-			collect(applied.Spec.Mixins)
+			for _, mixin := range applied.Spec.Mixins {
+				composed[mixin] = true
+			}
 		}
 	}
 	var missing []string
