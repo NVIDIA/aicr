@@ -3290,7 +3290,10 @@ aicr evidence digest -r recipes/overlays/h100-aks-ubuntu-training.yaml \
 # CI drift gate: compare the digest pinned in a signed evidence bundle
 # against the recipe currently on the PR branch. For a profiled pointer,
 # replay its recorded selection — recomputing without it hydrates the
-# declaration default and false-stales every non-default value.
+# declaration default and false-stales every non-default value. For the
+# h100 GKE kubeflow training leaf (ships torch-distributed-tcpxo), replay
+# the recorded configuration.gke.tcpxoInterfaces too — overlay-direct
+# digest fails closed without it; hydrate the recipe first, then digest it.
 ptr=recipes/evidence/<slug>/<src>/<digest>.yaml
 prof=$(yq -r '.profile // ""' "$ptr")
 signed=$(aicr evidence verify "$ptr" --format json \
