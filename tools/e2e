@@ -97,12 +97,22 @@ build_binary
 export REPO_ROOT="${ROOT}"
 
 # ci!=true drops the suites that need a CI-attested binary. Suites labelled
-# requires=docker (they start a throwaway container) run whenever a Docker
-# daemon answers; without one they are dropped rather than failed, so a
-# Docker-less workstation still gets a green `make e2e`. CI always has Docker.
+# requires=docker start the registry image pinned in .settings.yaml
+# (testing_tools.registry_image). They run only when a Docker daemon answers
+# AND that image is present or can be pulled now; otherwise they are dropped
+# rather than failed, so a Docker-less or egress-less workstation still gets a
+# green `make e2e` and the skip is stated in the log. CI runners have both.
 SELECTOR='ci!=true'
+REGISTRY_IMAGE="$(sed -n "s/^  registry_image: '\(.*\)'$/\1/p" "${ROOT}/.settings.yaml")"
 if ! docker info >/dev/null 2>&1; then
   msg "Docker daemon not reachable; skipping requires=docker suites"
+  SELECTOR="${SELECTOR},requires!=docker"
+elif [ -z "${REGISTRY_IMAGE}" ]; then
+  msg "testing_tools.registry_image not found in .settings.yaml; skipping requires=docker suites"
+  SELECTOR="${SELECTOR},requires!=docker"
+elif ! docker image inspect "${REGISTRY_IMAGE}" >/dev/null 2>&1 \
+    && ! docker pull -q "${REGISTRY_IMAGE}" >/dev/null 2>&1; then
+  msg "Cannot pull ${REGISTRY_IMAGE}; skipping requires=docker suites"
   SELECTOR="${SELECTOR},requires!=docker"
 fi
 
