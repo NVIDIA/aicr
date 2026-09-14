@@ -148,6 +148,7 @@ One-liner per field:
 | `healthCheck.assertFile` | Chainsaw assert YAML path (relative to data dir) |
 | `upgrades.file` | Path to a `ComponentUpgrades` transition record (relative to data dir); empty means no transition records ([recipe.md](recipe.md#transition-records)) |
 | `manifestFiles` | Default manifest YAML paths bundled when the componentRef declares none (ref-declared lists take precedence). No opt-out: an empty ref-declared list is indistinguishable from absent (len == 0 → defaults filled) — to suppress the defaults, declare a replacement list. Helm components only; the loader rejects the combination with `kustomize:` |
+| `mixinSafeOverridePaths` | Exact dotted value paths (e.g. `global.tracing.enabled`) a `RecipeMixin` may set on this component via `Overrides`. Empty (the default) means the component hasn't opted into mixin overrides — a mixin introducing it fresh still has unrestricted `valuesFile`/`overrides`, but once the component is already in the chain (or has a non-empty allowlist), every mixin Overrides path is validated against this list ([recipe.md](recipe.md#mixin-composition)) |
 | `gkeCriticalPriority`, `hasSelfRefCRDs`, `manifestsUseChartCRDs` | Narrow service-specific flags (see godoc) |
 
 ## `nodeScheduling.system` vs `accelerated`
