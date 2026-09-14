@@ -83,6 +83,13 @@ func recipeCmdFlags() []cli.Flag {
 				strings.Join(recipe.RuntimeInventoryModes(), ", ")),
 			Category: catQueryParameters,
 		}, recipe.RuntimeInventoryModes),
+		&cli.StringFlag{
+			Name: flagGKETCPXOInterfaces,
+			Usage: "Ordered GKE GPU-NIC interface mapping for the torch-distributed-tcpxo runtime, " +
+				"as eth1=<network>,...,eth8=<network>. Required when the resolved recipe ships that " +
+				"runtime (h100 GKE kubeflow training); recorded in the generated recipe",
+			Category: catQueryParameters,
+		},
 		&cli.IntFlag{
 			Name:     "nodes",
 			Usage:    "Number of worker/GPU nodes in the cluster",
@@ -165,7 +172,7 @@ Override snapshot-detected criteria:
 		Flags: recipeCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS,
-				flagPlatform, flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, "snapshot", "config", flagOutput,
+				flagPlatform, flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, flagGKETCPXOInterfaces, "snapshot", "config", flagOutput,
 				flagFormat); err != nil {
 				return err
 			}
