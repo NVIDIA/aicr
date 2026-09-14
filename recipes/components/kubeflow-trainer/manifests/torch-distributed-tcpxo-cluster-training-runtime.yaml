@@ -1,0 +1,240 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# torch-distributed-tcpxo — GPUDirect-TCPXO-wired sibling of torch-distributed
+# for a3-megagpu-8g (h100) GKE clusters. Carries the fabric wiring a TrainJob
+# cannot express at the TrainJob level: the eight-NIC networking.gke.io
+# annotations, the tcpxo-daemon native sidecar (NRI device injection instead
+# of privileged mode), the hostPath volumes, IPC_LOCK, and the complete
+# versioned NCCL configuration for the plugin the gke-nccl-tcpxo installer
+# ships.
+#
+# The network names in networking.gke.io/interfaces are cluster-specific.
+# They are a REQUIRED recipe-generation input (--gke-tcpxo-interfaces),
+# recorded in the recipe under configuration.gke.tcpxoInterfaces and projected
+# here from the kubeflow-trainer values path tcpxoInterfaces. Recipe
+# generation and bundle generation both fail closed when a recipe that ships
+# this runtime omits the mapping — which is why this template deliberately
+# does NOT guard the annotation with a 'with' block: an unset value rendering a
+# complete-looking runtime with no interfaces is the exact silently-degraded
+# failure this design exists to prevent. Render unconditionally; if the value
+# is absent the output is visibly broken (empty mapping), never silently
+# fabric-flavored.
+#
+# Version pairing: the tcpxo-daemon image (tcpgpudmarxd-dev) must match the
+# NCCL plugin the gke-nccl-tcpxo installer ships. Google ships them as a
+# coupled release pair — plugin v1.0.15 pairs with daemon v1.0.21. A bump of
+# either side must move both; recipes/gke_tcpxo_pairing_test.go enforces it.
+{{ $kft := index .Values "kubeflow-trainer" -}}
+apiVersion: trainer.kubeflow.org/v1alpha1
+kind: ClusterTrainingRuntime
+metadata:
+  name: torch-distributed-tcpxo
+  labels:
+    trainer.kubeflow.org/framework: torch
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  mlPolicy:
+    # Deliberate default, not inherited from torch-distributed's numNodes: 1 —
+    # a single-node default for a multi-node fabric runtime would exercise
+    # nothing. Two is the smallest topology that crosses the fabric; TrainJobs
+    # override via spec.trainer.numNodes.
+    numNodes: 2
+    # numProcPerNode was removed from mlPolicy.torch in kubeflow-trainer v2.2.0
+    # (kubeflow/trainer#3239) — Torch now infers parallelism from
+    # the container's nvidia.com/gpu resource limit.
+    torch: {}
+  template:
+    spec:
+      replicatedJobs:
+        - name: node
+          template:
+            metadata:
+              labels:
+                trainer.kubeflow.org/trainjob-ancestor-step: trainer
+            spec:
+              template:
+                metadata:
+                  annotations:
+                    # NRI device injection: expose the 8 GPUs plus control and
+                    # DMA devices to the tcpxo-daemon sidecar without
+                    # privileged mode. Static list: a3-megagpu-8g is the only
+                    # shape this runtime supports.
+                    devices.gke.io/container.tcpxo-daemon: |
+                      - path: /dev/nvidia0
+                      - path: /dev/nvidia1
+                      - path: /dev/nvidia2
+                      - path: /dev/nvidia3
+                      - path: /dev/nvidia4
+                      - path: /dev/nvidia5
+                      - path: /dev/nvidia6
+                      - path: /dev/nvidia7
+                      - path: /dev/nvidiactl
+                      - path: /dev/nvidia-uvm
+                      - path: /dev/dmabuf_import_helper
+                    networking.gke.io/default-interface: eth0
+                    # eth0 → default is fixed; eth1..eth8 come from the
+                    # recipe-recorded mapping, in recorded order. See the file
+                    # header for why there is no 'with' guard here.
+                    networking.gke.io/interfaces: '[{"interfaceName":"eth0","network":"default"}{{- range $kft.tcpxoInterfaces }},{"interfaceName":"{{ .interfaceName }}","network":"{{ .network }}"}{{- end }}]'
+                spec:
+                  # nodeSelector and tolerations are injected by the AICR bundler
+                  # from --accelerated-node-selector / --accelerated-node-toleration
+                  # flags via the registry's nodeScheduling.accelerated paths
+                  # (see recipes/registry.yaml), same as torch-distributed.
+                  {{- with $kft.acceleratedNodeSelector }}
+                  nodeSelector:
+                    {{- toYaml . | nindent 20 }}
+                  {{- end }}
+                  {{- with $kft.acceleratedTolerations }}
+                  tolerations:
+                    {{- toYaml . | nindent 20 }}
+                  {{- end }}
+                  initContainers:
+                    # TCPXO FastRak native sidecar — runs the RxDM manager
+                    # alongside the worker. Pairs with the NCCL plugin the
+                    # gke-nccl-tcpxo installer ships (v1.0.15 ↔ v1.0.21); see
+                    # the file header before bumping either side.
+                    - name: tcpxo-daemon
+                      image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21@sha256:8d9e10fd589a34ab8a0aa64f7e70ad075c8f1c69bea176350f8d211367697e3d
+                      imagePullPolicy: Always
+                      restartPolicy: Always
+                      command: ["/bin/sh", "-c"]
+                      args:
+                        - |
+                          set -ex
+                          chmod 755 /fts/entrypoint_rxdm_container.sh
+                          /fts/entrypoint_rxdm_container.sh --num_hops=2 --num_nics 8
+                      securityContext:
+                        capabilities:
+                          add: ["NET_ADMIN", "NET_BIND_SERVICE"]
+                      volumeMounts:
+                        - name: nvtcpxo-libraries
+                          mountPath: /usr/local/nvidia
+                          readOnly: true
+                        - name: nvtcpxo-sys
+                          mountPath: /hostsysfs
+                        - name: nvtcpxo-proc-sys
+                          mountPath: /hostprocsysfs
+                      env:
+                        - name: LD_LIBRARY_PATH
+                          value: "/usr/local/nvidia/lib64"
+                  containers:
+                    - name: node
+                      image: pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be
+                      resources:
+                        # a3-megagpu-8g: 8 GPUs per node; kubeflow-trainer
+                        # v2.2.0 infers torch parallelism from this limit.
+                        limits:
+                          nvidia.com/gpu: "8"
+                        requests:
+                          nvidia.com/gpu: "8"
+                      securityContext:
+                        capabilities:
+                          # NCCL registers/pins GPU and NIC memory regions.
+                          add: ["IPC_LOCK"]
+                      env:
+                        # The GPUDirect-TCPXO NCCL configuration set for the v1.0.15
+                        # plugin the installer ships, from Google's release notes for that
+                        # pair (v1.0.15 / v1.0.21) — kept version-pinned with the plugin.
+                        # Sourcing the host nccl-env-profile.sh is documented by Google as
+                        # an optional shortcut, not the contract.
+                        #
+                        # Two additions the release list does not carry because it assumes
+                        # a privileged container: LD_LIBRARY_PATH locates the mounted
+                        # plugin, and NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY points at the
+                        # aperture devices the NRI annotation injects. NCCL_DEBUG=WARN is
+                        # deliberate (INFO rotates the payload out of retrievable logs,
+                        # #1712); re-enable INFO ad hoc when debugging.
+                        - name: LD_LIBRARY_PATH
+                          value: "/usr/lib/x86_64-linux-gnu:/usr/local/nvidia/lib64:/usr/local/cuda/lib64"
+                        - name: NCCL_FASTRAK_CTRL_DEV
+                          value: eth0
+                        - name: NCCL_FASTRAK_IFNAME
+                          value: eth1,eth2,eth3,eth4,eth5,eth6,eth7,eth8
+                        - name: NCCL_SOCKET_IFNAME
+                          value: eth0
+                        - name: NCCL_CROSS_NIC
+                          value: "0"
+                        - name: NCCL_PROTO
+                          value: Simple,LL128
+                        - name: NCCL_MIN_NCHANNELS
+                          value: "4"
+                        - name: NCCL_TUNER_PLUGIN
+                          value: libnccl-tuner.so
+                        - name: NCCL_TUNER_CONFIG_PATH
+                          value: /usr/local/nvidia/lib64/a3plus_tuner_config.textproto
+                        - name: NCCL_SHIMNET_GUEST_CONFIG_CHECKER_CONFIG_FILE
+                          value: /usr/local/nvidia/lib64/a3plus_guest_config.textproto
+                        - name: CUDA_VISIBLE_DEVICES
+                          value: 0,1,2,3,4,5,6,7
+                        - name: NCCL_NVLSTREE_MAX_CHUNKSIZE
+                          value: "131072"
+                        - name: NCCL_P2P_NET_CHUNKSIZE
+                          value: "524288"
+                        - name: NCCL_P2P_PCI_CHUNKSIZE
+                          value: "524288"
+                        - name: NCCL_P2P_NVL_CHUNKSIZE
+                          value: "1048576"
+                        - name: NCCL_FASTRAK_NUM_FLOWS
+                          value: "2"
+                        - name: NCCL_FASTRAK_USE_SNAP
+                          value: "1"
+                        - name: NCCL_FASTRAK_PLUGIN_ACCEPT_TIMEOUT_MS
+                          value: "600000"
+                        - name: NCCL_FASTRAK_ENABLE_CONTROL_CHANNEL
+                          value: "0"
+                        - name: NCCL_BUFFSIZE
+                          value: "8388608"
+                        - name: NCCL_NET_GDR_LEVEL
+                          value: PIX
+                        - name: NCCL_FASTRAK_ENABLE_HOTPATH_LOGGING
+                          value: "0"
+                        - name: NCCL_FASTRAK_USE_LLCM
+                          value: "1"
+                        - name: NCCL_FASTRAK_LLCM_DEVICE_DIRECTORY
+                          value: /dev/aperture_devices
+                        - name: NCCL_NVLS_ENABLE
+                          value: "1"
+                        - name: NCCL_DEBUG
+                          value: WARN
+                        - name: NCCL_DEBUG_SUBSYS
+                          value: INIT,NET,ENV,COLL,GRAPH
+                      volumeMounts:
+                        - name: dshm
+                          mountPath: /dev/shm
+                        - name: nvtcpxo-libraries
+                          mountPath: /usr/local/nvidia
+                          readOnly: true
+                        - name: nvtcpxo-aperture-devices
+                          mountPath: /dev/aperture_devices
+                  volumes:
+                    - name: dshm
+                      emptyDir:
+                        medium: Memory
+                    - name: nvtcpxo-libraries
+                      hostPath:
+                        path: /home/kubernetes/bin/nvidia
+                    - name: nvtcpxo-sys
+                      hostPath:
+                        path: /sys
+                    - name: nvtcpxo-proc-sys
+                      hostPath:
+                        path: /proc/sys
+                    - name: nvtcpxo-aperture-devices
+                      hostPath:
+                        path: /dev/aperture_devices

@@ -19,6 +19,7 @@ import (
 	"log/slog"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/internal/gkenet"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -117,5 +118,5 @@ func absentPrerequisiteMsg(detail string) string {
 			"(--enable-multi-networking) cannot be enabled after cluster creation. "+
 			"Verify with: kubectl get network.networking.gke.io "+
 			"(see docs/integrator/gke-tcpxo-networking.md)",
-		tcpxoComponent, detail, gkenet.GPUNICNameSubstring)
+		tcpxoComponent, detail, recipe.GPUNICNameSubstring)
 }

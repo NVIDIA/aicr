@@ -560,9 +560,7 @@ func lowerAtOrBelow(lo, hi bound) bool {
 // components/*/manifests/*/*.yaml to recipes/data.go's embed directive, or
 // the hook's images stay outside the pin gate; that pattern cannot be added
 // here because a //go:embed pattern matching zero files fails to compile,
-// and no such file exists yet. This is the same interlock
-// pkg/recipe/upgrade_records_test.go already documents for
-// recipes/upgrades/*.yaml.
+// and no such file exists yet.
 const hookDir = "manifests/migrations/"
 
 // checkHooks implements rule 9, an addition to ADR-021. Hooks are the

@@ -34,7 +34,8 @@
 #   nodeScheduling:    Paths in Helm values where node selectors/tolerations are injected
 #   upgrades:          Component upgrade transition records (ADR-021)
 #     file:              Path to a ComponentUpgrades YAML file, relative to
-#                        the data directory (e.g., "upgrades/nodewright-operator.yaml")
+#                        the data directory (e.g.,
+#                        "components/nodewright-operator/upgrades.yaml")
 #
 # Note: A component must have either 'helm' OR 'kustomize' configuration, not both.
 # Node scheduling paths define WHERE CLI flags like --system-node-selector are applied.
@@ -394,6 +395,23 @@ components:
           - global.systemNodeSelector
         tolerationPaths:
           - global.systemNodeTolerations
+    # Opt-in surface for the nvsentinel-observability mixin (#2617): the
+    # exact audit-logging and tracing leaf paths a mixin may set on this
+    # already-base-chained component. global.tracing.endpoint is
+    # deliberately absent -- it must come from outside the mixin (a leaf
+    # recipe's own override, or an operator --set), never from a mixin, so
+    # CheckNVSentinelTracingEndpointRequired always has a real value to
+    # demand. See pkg/recipe/metadata_store.go's mixinOverridesSafeForMerge
+    # for how this allowlist is enforced.
+    mixinSafeOverridePaths:
+      - global.auditLogging.enabled
+      - global.auditLogging.logRequestBody
+      - global.auditLogging.maxSizeMB
+      - global.auditLogging.maxBackups
+      - global.auditLogging.maxAgeDays
+      - global.auditLogging.compress
+      - global.tracing.enabled
+      - global.tracing.insecure
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
@@ -431,6 +449,14 @@ components:
       # label gets the collector scheduled, the runtime class gets its
       # pods admitted. Issue #2176.
       - function: CheckNVSentinelRuntimeClassCoherence
+        severity: error
+      # Blocking: the chart has no `required` guard on
+      # global.tracing.endpoint (templates/daemonset.yaml), so
+      # global.tracing.enabled=true with no endpoint renders and deploys
+      # silently — the OTel exporter fails at runtime with nothing visible
+      # to `aicr bundle`/`aicr validate`. A no-op for every recipe that
+      # doesn't set global.tracing.enabled.
+      - function: CheckNVSentinelTracingEndpointRequired
         severity: error
 
   - name: nvidia-dra-driver-gpu
@@ -826,6 +852,19 @@ components:
           - acceleratedNodeSelector
         tolerationPaths:
           - acceleratedTolerations
+    validations:
+      # Blocking: on recipes shipping torch-distributed-tcpxo (h100 GKE
+      # kubeflow training), the final resolved tcpxoInterfaces value must
+      # equal the mapping recorded in configuration.gke.tcpxoInterfaces —
+      # the recipe must not attest to one wiring while the bundle renders
+      # another. See issue #2296.
+      - function: CheckGKETCPXOInterfacesCoherence
+        severity: error
+        conditions:
+          service:
+            - gke
+          accelerator:
+            - h100
 
   # NVIDIA Cluster Readiness Engine — GPU cluster burn-in certification
   # controller. Named `nvcre` after the chart nameOverride, install

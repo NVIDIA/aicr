@@ -48,6 +48,27 @@ spec:
       os: cos
       intent: training
       platform: kubeflow
+    # Required on this family (issue #2296): the ordered eth1..eth8 ->
+    # GPU-NIC network mapping. The values below are placeholders for LOCAL
+    # runs against a cluster provisioned with these names. In CI the run
+    # script (tests/uat/gcp/run) replaces them with the names derived from
+    # the run's DEPLOYMENT_ID — the provisioner (mchmarny/cluster,
+    # provider/gke/terraform/main.tf) names networks "<deployment.id>-gpu-nic-N"
+    # and the workflow writes the run-scoped ID into deployment.id first.
+    # For any other cluster, take the ordered mapping from whoever
+    # provisioned it (the GKENetworkParamSet configuration); listing Network
+    # names alone does not establish the interface assignment.
+    configuration:
+      gke:
+        tcpxoInterfaces:
+          - {interfaceName: eth1, network: aicr-uat-gpu-nic-0}
+          - {interfaceName: eth2, network: aicr-uat-gpu-nic-1}
+          - {interfaceName: eth3, network: aicr-uat-gpu-nic-2}
+          - {interfaceName: eth4, network: aicr-uat-gpu-nic-3}
+          - {interfaceName: eth5, network: aicr-uat-gpu-nic-4}
+          - {interfaceName: eth6, network: aicr-uat-gpu-nic-5}
+          - {interfaceName: eth7, network: aicr-uat-gpu-nic-6}
+          - {interfaceName: eth8, network: aicr-uat-gpu-nic-7}
     output:
       path: recipe.yaml
 
