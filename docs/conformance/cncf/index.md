@@ -98,8 +98,10 @@ names are `dra`, `gang`, `secure`, `accelerator-metrics`, `service-metrics`,
 Each section writes exactly one **PASS**, **SKIP**, or **FAIL** verdict.
 **SKIP** marks an absent optional prerequisite (no inference gateway, no
 supported operator, an unsupported cluster-autoscaling provider, or an
-operator present with no workload to reconcile) and is not a failure. A
-**FAIL** — an unhealthy present capability, a failed query, or a missing/
+operator present with no workload to reconcile) and is not a failure. A check
+whose access path the recipe does not use also skips — see the Slinky Slurm
+note under the GPU allocation test below.
+A **FAIL** — an unhealthy present capability, a failed query, or a missing/
 malformed verdict — fails closed and makes the collection exit non-zero, so a
 recorded section failure is no longer masked as overall success.
 
@@ -111,7 +113,7 @@ recorded section failure is no longer masked as overall success.
 | **Speed** | ~3 minutes | ~5-10 minutes |
 | **Deploys workloads** | Yes (GPU allocation via DRA or device plugin, gang, HPA, secure access) | Yes (all + GPU stress test) |
 | **Output** | Pass/fail + diagnostic artifacts | Detailed behavioral evidence (command outputs, logs, metrics) |
-| **GPU allocation test** | secure-accelerator-access deploys a test pod via DRA or the device plugin (capability-driven) and verifies GPU access + isolation; dra-support's full-GPU DRA behavioral subtest is recorded N/A on ComputeDomain-only clusters | Mode-aware evidence script (recipe policy selects the mode, standalone runs detect capability): behavioral full-GPU ResourceClaim test under DRA, device-plugin two-container isolation test + ResourceSlice evidence otherwise; nvidia-smi output capture |
+| **GPU allocation test** | secure-accelerator-access deploys a test pod via DRA or the device plugin (capability-driven) and verifies GPU access + isolation; dra-support's full-GPU DRA behavioral subtest is recorded N/A on ComputeDomain-only clusters. On Slinky Slurm recipes secure-accelerator-access **skips**: the NodeSet reserves every GPU on a node for its `slurmd` pod and Slurm allocates per job through GRES and cgroups, so a Kubernetes-scheduled probe would either never schedule or attest an access path the workloads never use. **Secure GPU access and isolation are therefore not verified on those recipes.** `slinky-slurm-health` confirms only that a GPU-requesting Slurm job is allocated and its container starts (it runs `cat /etc/os-release`, not a GPU workload), and `slinky-slurm-imex-channel` — selected by the two GB EKS Slurm leaves only — confirms concurrent jobs receive distinct IMEX channels. Neither shows that an allocated job can use its GPU, nor that a job without an allocation cannot reach the devices. A Slurm-path probe for that is tracked in #2756 | Mode-aware evidence script (recipe policy selects the mode, standalone runs detect capability): behavioral full-GPU ResourceClaim test under DRA, device-plugin two-container isolation test + ResourceSlice evidence otherwise; nvidia-smi output capture |
 | **Gang scheduling test** | Deploys PodGroup, verifies co-scheduling | Two-phase all-or-nothing test on one pinned GPU node: a blocker leaves exactly one GPU free — neither worker may be **bound** (`spec.nodeName`, not pod phase) during the barrier window — then the blocker is removed and both workers must complete together; worker logs captured. Requires a **fully idle, Ready, schedulable GPU node with ≥ 2 allocatable GPUs**. Barrier credit requires the scheduler's AFFIRMATIVE gang decision, both parts verified live: each worker shows `PodScheduled=False/Unschedulable` AND the named PodGroup's scheduling status carries KAI's one-of-two gang refusal ("Resources were found for 1 pods while 2 are required for gang scheduling") — so merely-unbound pods (down/restarting/backlogged scheduler) and generically-refused pods (queue quota, transient fit errors) are never credited. Pods associate to the PodGroup via the `pod-group-name` annotation (the `pod-group.scheduling.run.ai/*` labels alone do NOT associate — KAI's pod-grouper ignores them and creates per-pod groups) |
 | **HPA autoscaling** | Metrics API + scale-up validation | CUDA GPU stress test + scale-up |
 | **Metrics** | Custom metrics API data-path verification | DCGM exporter + Prometheus queries |
