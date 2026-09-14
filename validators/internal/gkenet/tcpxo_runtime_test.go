@@ -104,6 +104,11 @@ func TestFabricRuntimeDelivered(t *testing.T) {
 			ManifestFiles: []string{recipe.GKETCPXORuntimeManifest},
 			Overrides:     map[string]any{"enabled": false, recipe.GKETCPXOInterfacesOverrideKey: rawGood},
 		}}, false, false},
+		{"well-shaped but incomplete mapping fails closed", []recipe.ComponentRef{{
+			Name:          recipe.KubeflowTrainerComponentName,
+			ManifestFiles: []string{recipe.GKETCPXORuntimeManifest},
+			Overrides:     map[string]any{recipe.GKETCPXOInterfacesOverrideKey: rawGood[:7]},
+		}}, false, true},
 		{"malformed override fails closed", []recipe.ComponentRef{{
 			Name:          recipe.KubeflowTrainerComponentName,
 			ManifestFiles: []string{recipe.GKETCPXORuntimeManifest},

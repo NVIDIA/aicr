@@ -106,6 +106,14 @@ func FabricRuntimeDelivered(refs []recipe.ComponentRef) ([]recipe.NetworkInterfa
 				"recipe records a "+recipe.GKETCPXOInterfacesOverrideKey+" override on "+
 					recipe.KubeflowTrainerComponentName+" that does not normalize", err)
 		}
+		// Shape alone is not a mapping: the same completeness/uniqueness rules
+		// recipe generation enforces apply here, so a hand-edited validation
+		// input carrying seven interfaces or a duplicated network cannot pass
+		// the equality arms below by matching an equally malformed deployment.
+		if err := recipe.ValidateGKETCPXOInterfaces(mapping); err != nil {
+			return nil, false, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+				"recipe records an invalid "+recipe.GKETCPXOInterfacesOverrideKey+" override on "+recipe.KubeflowTrainerComponentName)
+		}
 		return mapping, true, nil
 	}
 	return nil, false, nil
