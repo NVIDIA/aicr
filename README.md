@@ -72,7 +72,7 @@ AICR recipes compose components from the following groups:
 | Group | Examples |
 |-------|----------|
 | **GPU stack** | GPU Operator, DRA GPU Driver, Network Operator, NFD, NVSentinel |
-| **Cloud integration** | AWS EFA, AWS EBS CSI, GKE NCCL TCPxO |
+| **Cloud integration** | AWS EFA, AWS EBS CSI, GKE NCCL TCPXO |
 | **Node tuning** | Nodewright Operator and customizations, cert-manager |
 | **Observability** | kube-prometheus-stack, Prometheus Operator CRDs, Prometheus Adapter, ephemeral-storage metrics |
 | **Training platforms** | Kubeflow Trainer, Slinky Slurm Operator, KAI Scheduler, Kueue |

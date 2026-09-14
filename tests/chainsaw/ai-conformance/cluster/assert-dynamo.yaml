@@ -13,12 +13,13 @@
 # limitations under the License.
 
 # Assert Dynamo platform components are healthy.
-# Chart: dynamo-platform 1.2.1
+# Chart: dynamo-platform 1.4.2
 # Provides NVIDIA Dynamo inference serving: OpenAI-compatible endpoints,
 # KV-cache-aware routing, disaggregated prefill/decode, SLA-driven autoscaling.
 #
-# AICR uses Kubernetes-native discovery, so etcd remains disabled. NATS is
-# enabled for Dynamo's Kubernetes event plane and worker KV-cache events.
+# AICR uses Kubernetes-native discovery, so etcd remains disabled. As of
+# Dynamo 1.4+, the request plane defaults to TCP and the KV event plane to
+# ZMQ, so bundled NATS is no longer installed by default (NVIDIA/aicr#1836).
 
 # Dynamo Operator — manages DynamoComponent and DynamoGraphDeployment CRs
 apiVersion: apps/v1
@@ -29,15 +30,6 @@ metadata:
 status:
   (conditions[?type == 'Available']):
     - status: "True"
----
-# NATS — event plane used by Dynamo KV-cache-aware routing on Kubernetes
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: dynamo-platform-nats
-  namespace: dynamo-system
-status:
-  (readyReplicas > `0`): true
 ---
 # Grove Operator — pod lifecycle management for DynamoGraphDeployments
 apiVersion: apps/v1

@@ -27,31 +27,27 @@ import (
 	"github.com/urfave/cli/v3"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	"github.com/NVIDIA/aicr/pkg/config"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/logging"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 const (
-	name                   = "aicr"
-	versionDefault         = "dev"
+	name                   = defaults.AgentName
+	versionDefault         = defaults.DevVersion
 	functionalCategoryName = "Functional"
-	agentImageBase         = "ghcr.io/nvidia/aicr"
 	shellCompletionFlag    = "--generate-shell-completion"
 )
 
 // defaultAgentImage returns the agent container image reference matching the
 // CLI version. Release builds (e.g. "0.8.10") produce "ghcr.io/…:v0.8.10".
 // Dev builds ("dev") and snapshot builds ("v0.8.10-next") use ":latest".
+//
+// The rule lives in pkg/defaults because Client.CollectSnapshot applies the
+// same one — the SDK deploys the same Job, and two copies would drift.
 func defaultAgentImage() string {
-	if version == versionDefault || strings.Contains(version, "-next") {
-		return agentImageBase + ":latest"
-	}
-	if strings.HasPrefix(version, "v") {
-		return agentImageBase + ":" + version
-	}
-	return agentImageBase + ":v" + version
+	return defaults.AgentImageForVersion(version)
 }
 
 var (
@@ -371,7 +367,7 @@ func sanitizeCompletionArgs(args []string) []string {
 
 // recipeClientFromCmd constructs an aicr.Client bound to the command's
 // resolved recipe data source. The data directory is read from the --data
-// flag, falling back to spec.recipe.data on the supplied AICRConfig when the
+// flag, falling back to spec.recipe.data on the supplied Config when the
 // flag is not set (cfg may be nil; only the flag is consulted then). A
 // non-empty data dir yields a FilesystemSource (the external dir layered over
 // the embedded data); an empty data dir yields the EmbeddedSource. The CLI
@@ -388,17 +384,25 @@ func sanitizeCompletionArgs(args []string) []string {
 func recipeClientFromCmd(
 	ctx context.Context,
 	cmd *cli.Command,
-	cfg *config.AICRConfig,
+	cfg *aicr.Config,
 ) (*aicr.Client, error) {
 
 	source := aicr.EmbeddedSource()
 	if dataDir := cmd.String("data"); dataDir != "" {
 		slog.Info("initializing external data provider", "directory", dataDir)
 		source = aicr.FilesystemSource(dataDir)
-	} else if configured, ok := aicr.WrapConfig(cfg).RecipeSource(); ok {
+	} else if configured, ok := cfg.RecipeSource(); ok {
 		// spec.recipe.data, derived through the facade so an SDK caller
 		// building a Client from the same document gets the same source.
-		slog.Info("initializing external data provider", "source", "spec.recipe.data")
+		// Log the concrete directory as the --data branch does: the audit line
+		// exists so an operator can tell which catalog a run actually read, and
+		// naming only the spec field leaves that unanswered. Unwrap() here is
+		// the raw-document escape hatch documented on Config.Unwrap: the facade
+		// has no RecipeDataDir() accessor, and adding one only for a log line
+		// would be new public API for a cleanup commit. Read from the same
+		// underlying field RecipeSource() uses, so the two cannot disagree.
+		slog.Info("initializing external data provider",
+			"directory", cfg.Unwrap().Recipe().DataDir(), "source", "spec.recipe.data")
 		source = configured
 	}
 	client, err := aicr.NewClientContext(ctx,
@@ -437,34 +441,6 @@ func embeddedClient(ctx context.Context) (*aicr.Client, error) {
 	return client, nil
 }
 
-// loadCmdConfig reads --config from the command and returns a parsed
-// *AICRConfig (or nil when the flag is not set). The returned config is
-// fully validated; callers can rely on enum fields parsing without
-// re-checking.
-//
-// Errors from config.Load are propagated unchanged so their pkg/errors
-// codes survive (ErrCodeNotFound for missing files, ErrCodeInvalidRequest
-// for malformed input or strict-decode rejections, ErrCodeUnavailable for
-// HTTP failures). Wrapping here would clobber those codes.
-//
-// (nil, nil) is the deliberate "config flag not set" signal — a sentinel
-// error would force every caller into a useless error-check branch.
-//
-//nolint:nilnil
-func loadCmdConfig(ctx context.Context, cmd *cli.Command) (*config.AICRConfig, error) {
-	cfg, err := loadFacadeConfig(ctx, cmd)
-	if err != nil {
-		return nil, err
-	}
-	// Unwrap rather than load again: aicr.LoadConfig is the single loader for
-	// the CLI, so there is no second path whose validation or error handling
-	// could drift from what an SDK consumer sees. Commands still holding the
-	// internal type are the ones whose spec sections the facade does not
-	// project yet (bundle, validate, snapshot); each converts here, not by
-	// loading independently.
-	return cfg.Unwrap(), nil
-}
-
 // stringFlagOrConfig returns the resolved value for a string CLI flag with
 // CLI-overrides-config-overrides-default precedence:
 //
@@ -483,6 +459,37 @@ func stringFlagOrConfig(cmd *cli.Command, flagName, fallback string) string {
 			return fallback
 		}
 		return cmd.String(flagName)
+	}
+	v := cmd.String(flagName)
+	if fallback != "" && fallback != v {
+		slog.Info("CLI flag overriding config value", "flag", flagName, "config", fallback, "override", v)
+	}
+	return v
+}
+
+// explicitStringFlagOrConfig is stringFlagOrConfig for a flag whose declared
+// Value: default must keep appearing in `--help` — it is part of the v1 CLI
+// surface pinned by testdata/cli-surface.golden — but must NOT be substituted
+// for the caller's silence downstream:
+//
+//   - Explicit CLI flag (cmd.IsSet) → CLI value, with an INFO log if it
+//     differs from a non-empty config fallback.
+//   - No CLI flag, non-empty config fallback → fallback (a value in --config
+//     is an operator choice too, so it counts as explicit input).
+//   - Neither → "", NOT the flag's compile-time Value: default.
+//
+// The distinction is load-bearing for the agent's --job-name and
+// --service-account-name, where "" is a value rather than a missing one: it
+// tells pkg/k8s/agent that no prefix was named, so one is derived from
+// Config.NameBase and this run's ID. Substituting the declared default there
+// would hand agent.Deployer.resolveServiceAccount a name aicr picked rather
+// than one the operator typed, and on any cluster still carrying a leftover
+// "aicr" ServiceAccount from a pre-ADR-020 install EVERY run would silently
+// resolve to exact-ServiceAccount mode and manage no RBAC at all. Exact mode
+// must be reachable only from a name the operator actually supplied.
+func explicitStringFlagOrConfig(cmd *cli.Command, flagName, fallback string) string {
+	if !cmd.IsSet(flagName) {
+		return fallback
 	}
 	v := cmd.String(flagName)
 	if fallback != "" && fallback != v {
@@ -535,17 +542,16 @@ func durationFlagOrConfig(cmd *cli.Command, flagName string, fallback *time.Dura
 // on cmd.IsSet, which distinguishes "user passed the zero value" from "user
 // said nothing" — a distinction the facade's plain-struct options cannot make.
 //
-// (nil, nil) is the deliberate "config flag not set" signal, matching
-// loadCmdConfig; a sentinel error would force every caller into a useless
-// error-check branch when --config is simply absent.
+// (nil, nil) is the deliberate "config flag not set" signal — a sentinel
+// error would force every caller into a useless error-check branch when
+// --config is simply absent.
 //
 //nolint:nilnil
 func loadFacadeConfig(ctx context.Context, cmd *cli.Command) (*aicr.Config, error) {
 	src := cmd.String("config")
 	if src == "" {
-		// (nil, nil) is the deliberate "flag not set" signal, matching
-		// loadCmdConfig. Every derivation on a nil *aicr.Config is nil-safe,
-		// so callers need no branch.
+		// (nil, nil) is the deliberate "flag not set" signal. Every derivation
+		// on a nil *aicr.Config is nil-safe, so callers need no branch.
 		return nil, nil
 	}
 	// aicr.LoadConfig, not pkg/config.Load: routing through the facade is the

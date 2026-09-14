@@ -71,6 +71,25 @@ cluster:
 
 network:
   eks:
+    # No securityGroups.additionalRules. This block carried a single 4222
+    # ingress rule for NATS, which AICR no longer installs by default as of
+    # the dynamo-platform 1.4+ bump (#1983) — the subchart is still bundled,
+    # the chart just defaults global.nats.install to false.
+    #
+    # Its replacement planes need no rule here. Dynamo now talks
+    # frontend<->worker directly: request and response streams on OS-assigned
+    # TCP ports, KV events over ZMQ on fixed TCP 5557. UAT puts both roles on
+    # the gpu-worker node group (SERVE_GPU_NODE_SELECTOR_* in
+    # tests/uat/lib/phases.sh), and the actuator's worker security group
+    # already allows all traffic from itself, so that traffic never needs an
+    # explicit rule — nor does it if the roles move between worker node
+    # groups, which share that security group.
+    #
+    # Two things WOULD need rules. Re-enabling NATS on a standing cluster
+    # (docs/user/component-catalog.md) brings back the 4222 requirement.
+    # Splitting Frontend and Worker across separate security groups instead
+    # needs bidirectional OS-assigned-port rules plus TCP 5557 — see
+    # docs/integrator/eks-dynamo-networking.md for that contract.
     cidrs:
       host: 10.0.0.0/16
       pod: 100.65.0.0/16
@@ -97,17 +116,6 @@ network:
         - cidr: 100.65.0.0/16
           zone: us-east-1-dfw-2a
           disableEndpoints: true
-    securityGroups:
-      additionalRules:
-        - target: system
-          direction: ingress
-          fromPort: 4222
-          toPort: 4222
-          protocol: tcp
-          # VPC-CNI does not SNAT in-VPC pod-to-pod traffic, so NATS on the
-          # system node sees the pod source IP (pod subnet), not the node IP.
-          cidrBlocks: ["10.0.128.0/17", "100.65.0.0/16"]  # worker node + pod subnet CIDRs
-          description: "Allow NATS from worker nodes and pods"
 
 compute:
   eks:
@@ -146,7 +154,10 @@ compute:
             desired: 2
             reservation:
               preference: capacity-reservations-only
-              target: cr-0e2f3833a602809a6
+              # Capacity Block CR ID removed: the GB200 block is retired and this
+              # lane is no longer in the reservation registry. Re-fill with the
+              # successor reservation's id before re-enabling.
+              target: ""
               marketType: capacity-block    # REQUIRED — GB200 CRs are Capacity Blocks
           labels:
             nodeGroup: gpu-worker

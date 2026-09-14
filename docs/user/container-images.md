@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **43**
-- Unique images: **98**
+- Components: **47**
+- Unique images: **111**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -31,44 +31,48 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 
 | Component | Type | Chart | Pinned Version | Images |
 |-----------|------|-------|----------------|--------|
-| agentgateway | helm | agentgateway | v1.3.1 | 1 |
-| agentgateway-crds | helm | agentgateway-crds | v1.3.1 | 0 |
+| agentgateway | helm | agentgateway | v1.5.0 | 1 |
+| agentgateway-crds | helm | agentgateway-crds | v1.5.0 | 0 |
 | aws-ebs-csi-driver | helm | aws-ebs-csi-driver/aws-ebs-csi-driver | 2.59.0 | 6 |
 | aws-efa | helm | aws-efa-k8s-device-plugin | v0.5.29 | 1 |
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
 | cert-manager-ocp | manifest | — | — | 0 |
 | cert-manager-ocp-olm | manifest | — | — | 0 |
-| dynamo-platform | helm | dynamo-platform | 1.2.1 | 3 |
+| dranet | manifest | — | — | 1 |
+| dynamo-platform | helm | dynamo-platform | 1.4.2 | 1 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
+| gcp-driver-installer | manifest | — | — | 3 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
-| gpu-operator | helm | nvidia/gpu-operator | v26.3.3 | 15 |
+| gpu-operator | helm | nvidia/gpu-operator | v26.7.0 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
 | gpu-operator-ocp-olm | manifest | — | — | 0 |
-| grove | helm | grove-charts | v0.1.0-alpha.8 | 1 |
+| grove | helm | grove-charts | v0.1.0-alpha.12 | 1 |
 | k8s-aibom | helm | k8s-aibom | 1.3.0 | 1 |
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
-| kai-scheduler | helm | kai-scheduler | v0.14.1 | 11 |
+| kai-scheduler | helm | kai-scheduler | v0.16.9 | 12 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
-| kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
-| kueue | helm | kueue | 0.18.2 | 1 |
+| kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
+| kueue | helm | kueue | 0.19.3 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.6.0 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.6.0 | 0 |
-| network-operator | helm | nvidia/network-operator | 26.4.1 | 5 |
+| network-operator | helm | nvidia/network-operator | 26.4.1 | 12 |
 | network-operator-ocp | manifest | — | — | 0 |
 | network-operator-ocp-olm | manifest | — | — | 0 |
 | nfd | helm | node-feature-discovery | 0.19.0 | 1 |
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
-| nodewright-customizations | manifest | — | — | 5 |
+| nodewright-customizations | manifest | — | — | 6 |
 | nodewright-operator | helm | nodewright | v0.17.1 | 3 |
-| nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.4.1 | 1 |
-| nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.4.1 | 1 |
-| nvsentinel | helm | nvsentinel | v1.9.0 | 6 |
+| nvcre | helm | cluster-readiness-engine | v0.2.0 | 1 |
+| nvidia-dra-driver-gpu | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
+| nvidia-dra-driver-gpu-ocp | helm | dra-driver-nvidia-gpu | 0.5.0 | 1 |
+| nvsentinel | helm | nvsentinel | v1.20.0 | 6 |
 | prometheus-adapter | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-adapter-ocp | helm | prometheus-community/prometheus-adapter | 5.3.0 | 1 |
 | prometheus-operator-crds | helm | prometheus-community/prometheus-operator-crds | 28.0.1 | 0 |
+| rdma-netns-exclusive | manifest | — | — | 1 |
 | slinky-slurm | helm | slurm | 1.2.0 | 5 |
 | slinky-slurm-operator | helm | slurm-operator | 1.2.0 | 2 |
 | slinky-slurm-operator-crds | helm | slurm-operator-crds | 1.2.0 | 0 |
@@ -88,7 +92,7 @@ from the component's registry default above.
 
 ### agentgateway
 
-- `cr.agentgateway.dev/controller:v1.3.1`
+- `cr.agentgateway.dev/controller:v1.5.0`
 
 ### agentgateway-crds
 
@@ -122,11 +126,13 @@ _No images extracted._
 
 _No images extracted._
 
+### dranet
+
+- `registry.k8s.io/networking/dranet:stable@sha256:3248d8a520584100a5e87a2b92039591ea3b83a5492cc3e2d881b20d3b18ada6`
+
 ### dynamo-platform
 
-- `nats:2.10.21-alpine`
-- `natsio/nats-server-config-reloader:0.16.0`
-- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.2.1`
+- `nvcr.io/nvidia/ai-dynamo/kubernetes-operator:1.4.2`
 
 ### gatekeeper
 
@@ -134,30 +140,36 @@ _No images extracted._
 - `openpolicyagent/gatekeeper-crds:v3.22.2`
 - `openpolicyagent/gatekeeper:v3.22.2`
 
+### gcp-driver-installer
+
+- `cos-nvidia-installer:fixed`
+- `gcr.io/gke-release/nvidia-partition-gpu@sha256:e226275da6c45816959fe43cde907ee9a85c6a2aa8a429418a4cadef8ecdb86a`
+- `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
+
 ### gke-nccl-tcpxo
 
 - `gcr.io/gke-release/nri-device-injector:1.0.25-gke.6@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
-- `ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b`
+- `ubuntu:26.04@sha256:513c074113a871b51a8d16ab445c88779d6452d937a164fb5cc479f32668a41d`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4`
 
 ### gpu-operator
 
 - `docker.io/library/busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616`
-- `nvcr.io/nvidia/cloud-native/dcgm:4.5.2-1-ubuntu22.04`
-- `nvcr.io/nvidia/cloud-native/gdrdrv:v2.5.2`
-- `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.0`
-- `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.11.0`
-- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.14.2`
-- `nvcr.io/nvidia/cloud-native/nvidia-fs:2.27.3`
-- `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.3`
-- `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.4.2`
+- `nvcr.io/nvidia/cloud-native/dcgm:4.6.0-1-ubuntu24.04`
+- `nvcr.io/nvidia/cloud-native/gdrdrv:v2.6`
+- `nvcr.io/nvidia/cloud-native/k8s-cc-manager:v0.4.3`
+- `nvcr.io/nvidia/cloud-native/k8s-driver-manager:v0.12.0`
+- `nvcr.io/nvidia/cloud-native/k8s-mig-manager:v0.15.0`
+- `nvcr.io/nvidia/cloud-native/nvidia-fs:2.29.4`
+- `nvcr.io/nvidia/cloud-native/nvidia-sandbox-device-plugin:v0.0.5`
+- `nvcr.io/nvidia/cloud-native/vgpu-device-manager:v0.5.0`
 - `nvcr.io/nvidia/driver:580.173.02`
-- `nvcr.io/nvidia/gpu-operator:v26.3.3`
-- `nvcr.io/nvidia/k8s-device-plugin:v0.19.3`
-- `nvcr.io/nvidia/k8s/container-toolkit:v1.19.1`
-- `nvcr.io/nvidia/k8s/dcgm-exporter:4.5.3-4.8.2-distroless`
-- `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.5.0`
+- `nvcr.io/nvidia/gpu-operator:v26.7.0`
+- `nvcr.io/nvidia/k8s-device-plugin:v0.20.0`
+- `nvcr.io/nvidia/k8s/container-toolkit:v1.20.0`
+- `nvcr.io/nvidia/k8s/dcgm-exporter:4.6.0-4.8.3-distroless`
+- `nvcr.io/nvidia/kubevirt-gpu-device-plugin:v1.6.0`
 
 ### gpu-operator-ocp
 
@@ -169,7 +181,7 @@ _No images extracted._
 
 ### grove
 
-- `ghcr.io/ai-dynamo/grove/grove-operator:v0.1.0-alpha.8`
+- `ghcr.io/ai-dynamo/grove/grove-operator:v0.1.0-alpha.12`
 
 ### k8s-aibom
 
@@ -189,17 +201,18 @@ _No images extracted._
 
 ### kai-scheduler
 
-- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.14.1`
+- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/numa-placement-exporter:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.16.9`
 
 ### kube-prometheus-stack
 
@@ -217,10 +230,11 @@ _No images extracted._
 - `ghcr.io/kubeflow/trainer/trainer-controller-manager:v2.2.0`
 - `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be`
 - `registry.k8s.io/jobset/jobset:v0.11.0`
+- `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21@sha256:8d9e10fd589a34ab8a0aa64f7e70ad075c8f1c69bea176350f8d211367697e3d`
 
 ### kueue
 
-- `registry.k8s.io/kueue/kueue:v0.18.2`
+- `registry.k8s.io/kueue/kueue:v0.19.3`
 
 ### mariadb-operator
 
@@ -233,9 +247,16 @@ _No images extracted._
 ### network-operator
 
 - `docker.io/library/busybox:1.38.0@sha256:dc2d74b28e4cf8984fa52af1f39bc7c3d9c73760b41a74d629f5d11b1ab28616`
+- `ghcr.io/k8snetworkplumbingwg/multus-cni:v4.2.1`
+- `ghcr.io/k8snetworkplumbingwg/plugins:v1.6.2-update.1`
+- `ghcr.io/k8snetworkplumbingwg/sriov-network-device-plugin:v3.9.0`
+- `ghcr.io/mellanox/nic-configuration-operator-daemon:v1.3.1`
+- `ghcr.io/mellanox/nic-configuration-operator:v1.3.1`
+- `ghcr.io/mellanox/nvidia-k8s-ipam:v0.2.0`
 - `nvcr.io/nvidia/cloud-native/network-operator:v26.4.1`
 - `nvcr.io/nvidia/doca/doca_telemetry:1.22.5-doca3.1.0-host`
 - `nvcr.io/nvidia/mellanox/doca-driver:doca3.2.0-25.10-1.2.8.0-2`
+- `nvcr.io/nvidia/mellanox/doca-driver:doca3.4.0-26.04-0.8.6.0-0`
 - `nvcr.io/nvidia/mellanox/k8s-rdma-shared-dev-plugin:network-operator-v26.4.1`
 
 ### network-operator-ocp
@@ -263,31 +284,36 @@ _No images extracted._
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.3.0@sha256:f17c951d60b519d097c20a3d9f49668f043a996adb31b9bb4db24a112a8f60a2`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.5.0@sha256:f3994267c9b5e62fb7720012dcd4d473fc2f8474f4276e203bba842c970307ad`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.2@sha256:a8bdca40dbe36de9d7a13e6afada49870714784fd9a3b9ce08717d675978c2b6`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.9.0@sha256:a33d0d5e0a0c7f192a34042f7ff14b7a98f10bae97bb4cf820ea9cd0ce013320`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2@sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1`
 
 ### nodewright-operator
 
-- `alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
+- `docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
 - `ghcr.io/nvidia/nodewright/operator:v0.17.0@sha256:1511449bf51f2844b6bb3a03bde3d5590caf2ca283e3e39c0745a8016af2132f`
 - `quay.io/brancz/kube-rbac-proxy:v0.15.0@sha256:2c7b120590cbe9f634f5099f2cbb91d0b668569023a81505ca124a5c437e7663`
 
+### nvcre
+
+- `ghcr.io/nvidia/cluster-readiness-engine/manager:v0.2.0`
+
 ### nvidia-dra-driver-gpu
 
-- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1`
+- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.5.0`
 
 ### nvidia-dra-driver-gpu-ocp
 
-- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1`
+- `registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.5.0`
 
 ### nvsentinel
 
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.9.0-dcgm-3.x`
-- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.9.0-dcgm-4.x`
-- `ghcr.io/nvidia/nvsentinel/labeler:v1.9.0`
-- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.9.0`
-- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.9.0`
-- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.9.0`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.20.0-dcgm-3.x`
+- `ghcr.io/nvidia/nvsentinel/gpu-health-monitor:v1.20.0-dcgm-4.x`
+- `ghcr.io/nvidia/nvsentinel/labeler:v1.20.0`
+- `ghcr.io/nvidia/nvsentinel/metadata-collector:v1.20.0`
+- `ghcr.io/nvidia/nvsentinel/platform-connectors:v1.20.0`
+- `ghcr.io/nvidia/nvsentinel/syslog-health-monitor:v1.20.0`
 
 ### prometheus-adapter
 
@@ -300,6 +326,10 @@ _No images extracted._
 ### prometheus-operator-crds
 
 _No images extracted._
+
+### rdma-netns-exclusive
+
+- `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1@sha256:5414b06e52c090d0842704f2580798064362d771f12421ccc8888186b5f5a3cf`
 
 ### slinky-slurm
 
@@ -350,6 +380,8 @@ AICR pins some images directly in this repository — in `recipes/components/<na
 Air-gapped OpenShift deployments must separately mirror the relevant Red Hat certified-operator catalog (`redhat-operators`) alongside the images this BOM does track. See the [OpenShift documentation on mirroring Operator catalogs](https://docs.openshift.com/container-platform/latest/operators/admin/olm-restricted-networks.html) and this repo's [air-gap mirroring guide](https://github.com/NVIDIA/aicr/issues/743) for the OLM-specific mirroring workflow.
 
 The trade-off is intentional. Pinning an image gives reproducibility; deferring to the upstream chart lets security patches flow without an AICR release. The split is policy, not oversight — see the [supply chain epic](https://github.com/NVIDIA/aicr/issues/739) for how each component's policy is being made explicit.
+
+**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Known case: adopting the `nvsentinel-observability` mixin (see [Audit Logging and Tracing](component-catalog.md#audit-logging-and-tracing)), which sets `global.auditLogging.enabled: true` on `nvsentinel`, conditionally adds a `fix-audit-log-permissions` init container (`docker.io/bitnamilegacy/os-shell:12-debian-12-r30`) to the `platform-connectors` DaemonSet and `labeler` Deployment. It is not counted in the `nvsentinel` row's image count above, and it is a third-party image AICR does not otherwise mirror.
 
 ### Registries spanned
 
@@ -443,7 +475,7 @@ Y = artifact attached, - = artifact absent, ? = could not probe.
 
   Image                                                           Sig  SBOM  Prov  Notes
   --------------------------------------------------------------  ---  ----  ----  -----
-  registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.4.1  Y    -     -
+  registry.k8s.io/dra-driver-nvidia/dra-driver-nvidia-gpu:v0.5.0  Y    -     -
 
 Summary: 1/1 signed · 0/1 SBOM · 0/1 provenance
 ```

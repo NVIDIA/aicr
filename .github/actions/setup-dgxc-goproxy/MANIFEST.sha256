@@ -1,0 +1,6 @@
+e08ad60a43389768d1c86aac2c250dcbc04e8e2c6c9d7a968bce5733fe0e7672  .github/actions/setup-dgxc-goproxy/action.yml
+ac4f725a800cc49128ef03d32002bccdf685bfab0346adf4f279a7ad482e5668  .github/actions/setup-dgxc-goproxy/oidc-exchange.sh
+832dfa6ea16471ac6279cc69538fc0ece3260f3d0a65a37fa7187ee3e63efd3a  .github/workflows/go-build.yml
+31e04ceb95074717d0ad78f9b8eb97b5f10377ffd96a8f077a1976fec4591329  .github/workflows/pr-gate.yml
+de1e0c50e3d843ab9c4ac5ccd2fc3a54974d5ec8c02c03e3fc7ed0ed26801a00  ADOPTION.md
+18c06d9ed14f928b2151cd8c4748d5a3ca9bdd95ff0b7df1078c84b715795e3c  VERSION

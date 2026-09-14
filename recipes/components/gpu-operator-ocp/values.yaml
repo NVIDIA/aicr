@@ -160,7 +160,7 @@ daemonsets:
 # operator.upgradeCRD: Helm chart setting, not a ClusterPolicy field.
 # operator.resources: Helm chart setting for the operator Deployment, not CR.
 # driver.version: OCP operator manages driver version via the certified driver container.
-# driver.useOpenKernelModules: OCP uses pre-built driver containers from the certified catalog.
+# driver.kernelModuleType: OCP uses pre-built driver containers from the certified catalog.
 # driver.maxParallelUpgrades: Use daemonsets.rollingUpdate.maxUnavailable instead.
 # devicePlugin.env: OCP sets device plugin env via the operator's own defaults.
 # validator: OCP operator manages validation internally.

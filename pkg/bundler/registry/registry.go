@@ -17,6 +17,7 @@ package registry
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
@@ -147,9 +148,7 @@ func (r *Registry) GetAll() map[types.BundleType]Bundler {
 	defer r.mu.RUnlock()
 
 	bundlers := make(map[types.BundleType]Bundler, len(r.bundlers))
-	for k, v := range r.bundlers {
-		bundlers[k] = v
-	}
+	maps.Copy(bundlers, r.bundlers)
 	return bundlers
 }
 

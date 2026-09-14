@@ -19,6 +19,10 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+
+	"github.com/sigstore/sigstore-go/pkg/root"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // ResolveOptions selects an OIDC token source for keyless signing. Callers
@@ -68,11 +72,23 @@ type ResolveOptions struct {
 	// #1650.
 	UseTUFSigningConfig bool
 
+	// SigningConfig is an already-parsed signing config that takes precedence
+	// over SigningConfigPath, UseTUFSigningConfig, and RekorURL.
+	//
+	// Set it when the config had to be inspected before use: re-loading from
+	// SigningConfigPath after validating it would sign against whatever the file
+	// holds at that later moment. Client.SignCatalog populates this after
+	// checking the config targets public-good Sigstore. See SignOptions.SigningConfig.
+	SigningConfig *root.SigningConfig
+
 	// SigningKey selects KMS-backed (key-based) signing instead of keyless OIDC.
 	// When non-empty it is a cosign-style KMS URI (awskms:// | gcpkms:// |
-	// azurekms:// | hashivault://) and takes precedence over all OIDC source fields, which are
-	// keyless-only. Mutual exclusivity with the keyless flags is enforced at the
-	// CLI boundary (pkg/cli). See issue #407.
+	// azurekms:// | hashivault://) and takes precedence over the OIDC source
+	// fields, which are keyless-only — except DeviceFlow, which ResolveAttester
+	// and ResolveAttesterLazy reject rather than override (see checkSigningMode).
+	// The remaining keyless settings are additionally rejected at their own
+	// boundaries: fulcioURL at the config conversion (config.resolveSigningKey)
+	// and --identity-token at the CLI (pkg/cli). See issue #407.
 	SigningKey string
 
 	// DisableTLogUpload skips the Rekor transparency-log upload for KMS
@@ -171,12 +187,41 @@ func ResolveOIDCToken(ctx context.Context, opts ResolveOptions) (string, error) 
 	}
 }
 
+// checkSigningMode rejects a SigningKey combined with DeviceFlow, the one
+// pairing the resolver would otherwise decide silently: the KMS branch below
+// wins on a non-empty SigningKey and issues no OIDC token at all, so a caller
+// asking for device flow would be handed a key signature and never see the
+// verification prompt they were waiting for.
+//
+// Enforced here rather than where the values are parsed because this is the
+// layer every caller reaches after its own precedence has been applied. The
+// CLI merges flags over config first, so --oidc-device-flow=false still
+// corrects a config that sets both and never arrives here in conflict; an SDK
+// caller that derives options straight from a document and never merges
+// anything gets the same guarantee at the point the mode is actually chosen.
+//
+// FulcioURL is deliberately not part of this check. It is rejected earlier, at
+// the config conversion boundary (config.resolveSigningKey), where it can carry
+// spec-path attribution; a caller who reaches here with both has already passed
+// that gate by assembling options by hand.
+func checkSigningMode(opts ResolveOptions) error {
+	if opts.SigningKey != "" && opts.DeviceFlow {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"signing key is mutually exclusive with OIDC device flow: "+
+				"a signing key selects KMS signing, which issues no OIDC token")
+	}
+	return nil
+}
+
 // ResolveAttester returns the Attester implementation selected by opts.
 // Wraps ResolveOIDCToken with the NoOpAttester short-circuit for
 // callers that gate attestation behind opts.Attest.
 func ResolveAttester(ctx context.Context, opts ResolveOptions) (Attester, error) {
 	if !opts.Attest {
 		return NewNoOpAttester(), nil
+	}
+	if err := checkSigningMode(opts); err != nil {
+		return nil, err
 	}
 	if opts.SigningKey != "" {
 		var kopts []KMSAttesterOption
@@ -189,7 +234,7 @@ func ResolveAttester(ctx context.Context, opts ResolveOptions) (Attester, error)
 	if err != nil {
 		return nil, err
 	}
-	return NewKeylessAttester(token, opts.FulcioURL, opts.RekorURL, opts.SigningConfigPath, opts.UseTUFSigningConfig), nil
+	return NewKeylessAttesterFromOptions(token, opts), nil
 }
 
 // ResolveAttesterLazy is the deferred-token variant of ResolveAttester.
@@ -203,12 +248,14 @@ func ResolveAttester(ctx context.Context, opts ResolveOptions) (Attester, error)
 //
 // The disabled (Attest=false) and NoOpAttester branches match
 // ResolveAttester exactly so callers can swap entry points without
-// changing the test surface.
-//
-//nolint:unparam // error return mirrors ResolveAttester so callers can swap entry points; the token-resolution error is deferred to Attest.
+// changing the test surface. Token-resolution errors are deferred to
+// Attest; the error returned here is the signing-mode conflict below.
 func ResolveAttesterLazy(_ context.Context, opts ResolveOptions) (Attester, error) {
 	if !opts.Attest {
 		return NewNoOpAttester(), nil
+	}
+	if err := checkSigningMode(opts); err != nil {
+		return nil, err
 	}
 	if opts.SigningKey != "" {
 		var kopts []KMSAttesterOption
@@ -255,7 +302,7 @@ func (l *LazyKeylessAttester) Attest(ctx context.Context, subject AttestSubject)
 			l.mu.Unlock()
 			return nil, err
 		}
-		l.inner = NewKeylessAttester(token, l.opts.FulcioURL, l.opts.RekorURL, l.opts.SigningConfigPath, l.opts.UseTUFSigningConfig)
+		l.inner = NewKeylessAttesterFromOptions(token, l.opts)
 	}
 	inner := l.inner
 	l.mu.Unlock()

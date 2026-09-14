@@ -126,11 +126,9 @@ jobs:
           cache: true
           cache-dependency-path: |
             go.sum
-            vendor/modules.txt
       - name: Enumerate daytime rotation
         id: list
         env:
-          GOFLAGS: -mod=vendor
           ACTION: ${{ steps.action.outputs.action }}
         run: |
           set -euo pipefail

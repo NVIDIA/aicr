@@ -43,15 +43,11 @@ runs:
     - name: Build standalone aicr CLI binary
       if: inputs.build_cli == 'true'
       shell: bash
-      env:
-        GOFLAGS: -mod=vendor
       run: bash "${{ github.action_path }}/build-cli.sh"
 
     - name: Build snapshot agent CLI binary
       if: inputs.build_cli != 'true' && inputs.build_snapshot_agent == 'true'
       shell: bash
-      env:
-        GOFLAGS: -mod=vendor
       run: bash "${{ github.action_path }}/build-cli.sh"
 
     - name: Load snapshot agent image version
@@ -70,7 +66,6 @@ runs:
       if: "!(inputs.validator_phases == 'none' || (inputs.validator_phases == '' && inputs.build_validators == 'false'))"
       shell: bash
       env:
-        GOFLAGS: -mod=vendor
         VALIDATOR_PHASES: ${{ inputs.validator_phases }}
       run: bash "${{ github.action_path }}/build-validator-images.sh"
 

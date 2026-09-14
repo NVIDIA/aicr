@@ -809,15 +809,14 @@ func TestDaytimeAssignmentsNone(t *testing.T) {
 }
 
 // TestCommittedRegistryValid guards the actual checked-in registry: it must
-// parse, validate, and carry the launch reservations plus the aws-gb200
-// bring-up row. A bad data edit fails here before it can break the broker
-// workflows.
+// parse, validate, and carry the launch reservations. A bad data edit fails
+// here before it can break the broker workflows.
 func TestCommittedRegistryValid(t *testing.T) {
 	reg, err := LoadRegistryFile(filepath.Join("..", "..", "infra", "uat", "reservations.yaml"))
 	if err != nil {
 		t.Fatalf("committed reservations.yaml invalid: %v", err)
 	}
-	want := map[string]string{"aws-h100": CloudAWS, "gcp-h100": CloudGCP, "azure-h100": CloudAzure, "aws-gb200": CloudAWS, "kind-h100": CloudKind}
+	want := map[string]string{"aws-h100": CloudAWS, "gcp-h100": CloudGCP, "azure-h100": CloudAzure, "kind-h100": CloudKind}
 	for name, cloud := range want {
 		res, err := reg.Lookup(name)
 		if err != nil {
@@ -829,6 +828,17 @@ func TestCommittedRegistryValid(t *testing.T) {
 		}
 	}
 
+	// The registry must carry EXACTLY these reservations. The positive lookup
+	// loop above would still pass if the retired aws-gb200 row (or any other)
+	// were re-added, so lock the full set here — a re-add or a stray row fails
+	// closed rather than sliding in unnoticed.
+	gotNames := append([]string(nil), reg.Names()...)
+	slices.Sort(gotNames)
+	wantNames := []string{"aws-h100", "azure-h100", "gcp-h100", "kind-h100"}
+	if !slices.Equal(gotNames, wantNames) {
+		t.Errorf("committed registry reservations = %v, want exactly %v", gotNames, wantNames)
+	}
+
 	// The committed daytime-name discovery slugs (ADR-017). Locked here so a
 	// future edit cannot silently rename or collide a slug — the daytime
 	// cluster name (aicr-uat-day-<slug>-<slot>-<run_id>) and its guard/teardown
@@ -837,7 +847,6 @@ func TestCommittedRegistryValid(t *testing.T) {
 		"aws-h100":   "ah1",
 		"gcp-h100":   "gh1",
 		"azure-h100": "zh1",
-		"aws-gb200":  "ag2",
 		"kind-h100":  "kh1",
 	}
 	for name, slug := range wantSlug {
@@ -890,13 +899,6 @@ func TestCommittedRegistryValid(t *testing.T) {
 		// acceptance run (29125390442); inference joined after a green
 		// manual intent=inference dispatch.
 		"azure-h100": {IntentTraining, IntentInference},
-		// aws-gb200 enrolled with both intents once the GB200 EKS UAT lane
-		// shipped (v0.18.0) and the Capacity Block was confirmed booked active
-		// through 2029 (cr-0e2f3833a602809a6). Release cells are gated to
-		// v0.18.0 via nightly-intent-min-versions (the config first shipped
-		// there), so only `main` runs GB200 nightly until v0.18.0 ages into the
-		// window.
-		"aws-gb200": {IntentTraining, IntentInference},
 		// kind-h100 (nvkind real-silicon lane, DC5 #1278) enrolled with both
 		// intents after green manual H100 acceptance runs (training 29954092703,
 		// inference 29965464868). Release cells are gated to v0.18.0 via
@@ -920,12 +922,10 @@ func TestCommittedRegistryValid(t *testing.T) {
 	// a future edit cannot silently drop a gate — which would let a release cell
 	// run a pre-fix aicr and emit failing/unusable evidence. azure-h100 gates its
 	// AKS perf + driver-only fixes; kind-h100 gates the uat-kind lane + the
-	// os-agnostic coordinate fix (#1851); aws-gb200 gates the GB200 EKS UAT
-	// config, which first shipped in v0.18.0. All landed post-v0.17.0.
+	// os-agnostic coordinate fix (#1851). All landed post-v0.17.0.
 	wantMinVersions := map[string]map[string]string{
 		"azure-h100": {IntentTraining: "v0.18.0", IntentInference: "v0.18.0"},
 		"kind-h100":  {IntentTraining: "v0.18.0", IntentInference: "v0.18.0"},
-		"aws-gb200":  {IntentTraining: "v0.18.0", IntentInference: "v0.18.0"},
 	}
 	for name, want := range wantMinVersions {
 		res, lookupErr := reg.Lookup(name)

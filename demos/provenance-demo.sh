@@ -16,9 +16,11 @@
 # provenance-demo.sh — interactive walkthrough of the consumer-side
 # verification chain for AICR binary and image attestations:
 #
-#   Resolve   — tag -> immutable digest via `crane digest`
-#   Verify    — SLSA Provenance v1 via `gh attestation verify`
-#   SBOM      — SPDX attestation via `cosign verify-attestation`
+#   Resolve   — tag -> immutable index digest -> platform manifest digest
+#               via `crane digest` / `crane digest --platform`
+#   Verify    — SLSA Provenance v1 via `gh attestation verify` (index)
+#   SBOM      — CycloneDX attestation via `cosign verify-attestation` (platform)
+#   VEX       — OpenVEX attestation via `cosign verify-attestation` (platform)
 #   Use       — vulnerability scan + license query off the SBOM
 #   Audit     — Rekor transparency-log lookup
 #
@@ -119,6 +121,8 @@ note "Optional:   grype=$( ((HAVE_GRYPE)) && echo yes || echo NO )  rekor-cli=$(
 mkdir -p "$WORKDIR"
 PREDICATE="$WORKDIR/predicate.json"
 SBOM="$WORKDIR/sbom.json"
+VEX_PREDICATE="$WORKDIR/vex-predicate.json"
+VEX="$WORKDIR/openvex.json"
 
 # --- resolve the tag ---------------------------------------------------------
 
@@ -139,6 +143,15 @@ note "Resolved digest: $DIGEST"
 IMAGE_DIGEST="$IMAGE@$DIGEST"
 note "Pinned ref: $IMAGE_DIGEST"
 
+note "The tag resolves to a multi-platform index. Provenance describes the whole"
+note "build and lives there; the SBOM and the VEX each describe one root filesystem,"
+note "so they live on the platform's own child manifest. Resolve it from the pinned"
+note "index, never from the tag."
+PLATFORM="linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+DIGEST_PLATFORM="$(crane digest --platform "$PLATFORM" "$IMAGE_DIGEST")"
+IMAGE_PLATFORM="$IMAGE@$DIGEST_PLATFORM"
+note "Pinned $PLATFORM manifest: $IMAGE_PLATFORM"
+
 # --- verify the image (SLSA provenance) --------------------------------------
 
 banner "Verify the image: SLSA Provenance v1 (via gh)"
@@ -158,40 +171,70 @@ run gh attestation verify "oci://$IMAGE_AICRD@$DIGEST_AICRD" --repo "$OWNER/aicr
 
 # --- verify the SBOM attestation ---------------------------------------------
 
-banner "Verify the SPDX SBOM attestation (via cosign)"
+banner "Verify the CycloneDX SBOM attestation (via cosign)"
 note "cosign verify-attestation enforces the OIDC issuer + identity pattern and writes"
 note "the verified DSSE envelope to disk. Identity is pinned to NVIDIA/aicr CI workflows."
+note "Subject is the platform manifest, not the index; asking the index for this"
+note "predicate type returns nothing."
 pause "Press Enter to verify the SBOM attestation"
 run cosign verify-attestation \
-  --type spdxjson \
+  --type cyclonedx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
-  "$IMAGE_DIGEST" \
+  "$IMAGE_PLATFORM" \
   --output-file "$PREDICATE"
 
-note "Extracting the SPDX predicate (the actual SBOM JSON) from the DSSE payload."
+note "Extracting the CycloneDX predicate (the actual SBOM JSON) from the DSSE payload."
 pause "Press Enter to extract sbom.json"
 # The cosign --output-file writes a DSSE envelope; the inner predicate is the SBOM.
-run bash -c "jq -r .payload '$PREDICATE' | base64 -d | jq .predicate > '$SBOM' && jq '.SPDXID, .name, (.packages|length)' '$SBOM'"
+# `set -o pipefail` inside the child: a child bash -c does not inherit it, and
+# without it a failed jq or base64 mid-pipeline still exits 0, leaving an empty
+# sbom.json that the scan below would happily report as clean.
+run bash -c "set -o pipefail; jq -r .payload '$PREDICATE' | base64 -d | jq .predicate > '$SBOM' && jq '.bomFormat, .specVersion, (.components|length)' '$SBOM'"
+
+# --- verify the VEX attestation ----------------------------------------------
+
+banner "Verify the OpenVEX attestation (same subject, different predicate type)"
+note "The SBOM says what is in the image. The VEX records AICR's triage verdict"
+note "for each CVE it covers, and why. Both hang off the same platform manifest; they are"
+note "in different formats so a referrers listing can tell them apart without"
+note "downloading either one."
+pause "Press Enter to verify the VEX attestation"
+run cosign verify-attestation \
+  --type openvex \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
+  "$IMAGE_PLATFORM" \
+  --output-file "$VEX_PREDICATE"
+
+note "Each statement's product purl carries the platform digest, so the claim binds"
+note "to this exact manifest. An empty statements array is a valid answer, not a"
+note "failure: it means AICR has asserted no exceptions for this image."
+pause "Press Enter to extract openvex.json"
+# Report what the document actually says rather than predicting it. The count
+# and the status set are properties of the release being verified, and the
+# format carries affected / fixed / under_investigation as well as not_affected.
+run bash -c "set -o pipefail; jq -r .payload '$VEX_PREDICATE' | base64 -d | jq .predicate > '$VEX' && jq '{statements: (.statements|length), statuses: ([.statements[].status] | unique), products: ([.statements[].products[][\"@id\"]] | unique)}' '$VEX'"
 
 # --- SBOM use cases ----------------------------------------------------------
 
 banner "SBOM use case #1: vulnerability scan"
 if [ "$HAVE_GRYPE" = "1" ]; then
-  note "Grype reads SPDX directly. No re-pull, no re-derive — the SBOM IS the input."
+  note "Grype reads CycloneDX directly. No re-pull, no re-derive — the SBOM IS the input."
+  note "Passing --vex applies the triage above, so already-analyzed CVEs stay quiet."
   pause "Press Enter to run grype against the SBOM"
-  run grype "sbom:$SBOM"
+  run grype "sbom:$SBOM" --vex "$VEX"
 else
   note "grype not installed — skipping. (Install: brew install grype)"
-  note "The command would be: grype sbom:$SBOM"
+  note "The command would be: grype sbom:$SBOM --vex $VEX"
 fi
 
 banner "SBOM use case #2: license compliance"
 note "Every package's declared license, one jq filter away."
 pause "Press Enter to list declared licenses (first 10)"
-run bash -c "jq -r '.packages[]
-  | select(.licenseDeclared != \"NOASSERTION\")
-  | \"\(.name) \(.versionInfo) \(.licenseDeclared)\"' '$SBOM' | head -10"
+run bash -c "jq -r '.components[]
+  | select(.licenses != null)
+  | \"\(.name) \(.version) \(.licenses[0].license.id // .licenses[0].license.name)\"' '$SBOM' | head -10"
 
 # --- Rekor audit lookup ------------------------------------------------------
 
@@ -210,10 +253,12 @@ fi
 # --- done --------------------------------------------------------------------
 
 banner "Done"
-printf '%sFive verifications, one trust model.%s\n' "$GREEN" "$RESET"
+printf '%sSix verifications, one trust model.%s\n' "$GREEN" "$RESET"
 note "Pinned image:  $IMAGE_DIGEST"
+note "Pinned $PLATFORM: $IMAGE_PLATFORM"
 note "Pinned aicrd:  $IMAGE_AICRD@$DIGEST_AICRD"
 note "SBOM:          $SBOM"
+note "VEX:           $VEX"
 note "DSSE payload:  $PREDICATE"
 note ""
 note "Next: enforce these at admission time — see demos/provenance.md §'In-cluster verification'."

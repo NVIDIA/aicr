@@ -394,7 +394,7 @@ func TestPythonLicensesSanitizesProseLicense(t *testing.T) {
 		t.Fatalf("read output: %v", err)
 	}
 
-	for _, line := range strings.Split(string(content), "\n") {
+	for line := range strings.SplitSeq(string(content), "\n") {
 		if !strings.HasPrefix(line, "| `") {
 			continue
 		}

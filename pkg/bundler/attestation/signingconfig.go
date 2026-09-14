@@ -57,18 +57,9 @@ func NewSigningConfigPolicyFromPath(path string) (TransparencyPolicy, error) {
 	// user-supplied CLI/env argument, so cap it before the bytes hit memory to
 	// keep an attacker-influenced path (a /proc symlink, an NFS/FUSE mount) from
 	// OOMing the process, mirroring loadPEMPublicKey / the trusted-root loader.
-	f, err := os.Open(path) //nolint:gosec // path is an operator-supplied signer input, bounded below
+	data, err := readSigningConfigBytes(path)
 	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to open signing config", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxSigningConfigBytes+1))
-	if err != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to read signing config", err)
-	}
-	if int64(len(data)) > defaults.MaxSigningConfigBytes {
-		return nil, errors.New(errors.ErrCodeInvalidRequest, "signing config file exceeds size limit")
+		return nil, err
 	}
 
 	sc, err := root.NewSigningConfigFromJSON(data)
@@ -77,6 +68,20 @@ func NewSigningConfigPolicyFromPath(path string) (TransparencyPolicy, error) {
 	}
 	// A user-supplied config file may legitimately be v1, so a v1 selection here
 	// is not a downgrade — no warning.
+	return newSigningConfigPolicy(sc, time.Now(), false)
+}
+
+// NewSigningConfigPolicy returns a TransparencyPolicy for an already-parsed
+// SigningConfig.
+//
+// This exists so a caller that has to INSPECT a config before signing with it
+// can pass the very bytes it inspected. Re-loading from the path instead leaves
+// a window in which the file changes between the check and the use, which for a
+// signing target means signing against endpoints nobody validated.
+//
+// A caller-supplied config may legitimately be v1, so a v1 selection here is not
+// a downgrade — no warning, matching NewSigningConfigPolicyFromPath.
+func NewSigningConfigPolicy(sc *root.SigningConfig) (TransparencyPolicy, error) {
 	return newSigningConfigPolicy(sc, time.Now(), false)
 }
 
@@ -183,3 +188,26 @@ func selectSigningServices(sc *root.SigningConfig, now time.Time) (rekor, tsa []
 func (p signingConfigPolicy) Logs() []sign.Transparency { return p.logs }
 
 func (p signingConfigPolicy) TimestampAuthorities() []*sign.TimestampAuthority { return p.tsas }
+
+// readSigningConfigBytes reads a signing config with a size cap.
+//
+// Bounded instead of a bare os.ReadFile because the path is a user-supplied
+// CLI/env argument: capping before the bytes hit memory keeps an
+// attacker-influenced path (a /proc symlink, an NFS/FUSE mount) from OOMing the
+// process, mirroring loadPEMPublicKey and the trusted-root loader.
+func readSigningConfigBytes(path string) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // path is an operator-supplied signer input, bounded below
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to open signing config", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxSigningConfigBytes+1))
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to read signing config", err)
+	}
+	if int64(len(data)) > defaults.MaxSigningConfigBytes {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "signing config file exceeds size limit")
+	}
+	return data, nil
+}

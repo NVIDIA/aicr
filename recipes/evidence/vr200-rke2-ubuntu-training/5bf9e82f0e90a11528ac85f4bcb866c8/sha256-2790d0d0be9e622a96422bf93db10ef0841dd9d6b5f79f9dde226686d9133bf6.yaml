@@ -1,0 +1,12 @@
+attestations:
+  - attestedAt: 2026-09-04T01:45:12Z
+    bundle:
+      digest: sha256:2790d0d0be9e622a96422bf93db10ef0841dd9d6b5f79f9dde226686d9133bf6
+      oci: ghcr.io/yuanchen8911/aicr-evidence:vr200-rke2-ubuntu-training-7df3dbb0532a
+      predicateType: https://aicr.run/recipe-evidence/v1
+    signer:
+      identity: https://github.com/yuanchen8911/aicr/.github/workflows/evidence-publish.yaml@refs/heads/evidence/aks-h100-training-inference
+      issuer: https://token.actions.githubusercontent.com
+      rekorLogIndex: 94930261
+recipe: vr200-rke2-ubuntu-training
+schemaVersion: 1.0.0

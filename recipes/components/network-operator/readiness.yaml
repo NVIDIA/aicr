@@ -1,0 +1,91 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Helm network-operator readiness gate (issue #2251).
+#
+# Asserts the recipe-managed NicClusterPolicy has reconciled to
+# state=ready. This is the deploy-time signal that none of Helm --wait /
+# Argo CD / Flux can assess natively: the network-operator Deployment
+# going Available only means the operator process started, not that
+# OFED/DOCA, the RDMA shared device plugin, nv-ipam, and any SR-IOV/IB
+# operands have rolled out across NIC nodes. The operator folds all
+# operand rollouts into NicClusterPolicy.status.state, flipping it to
+# "ready" only once the NIC stack is usable for RDMA workloads.
+#
+# Emission gate — this file is loaded by the bundler only when the
+# resolved recipe attaches a NicClusterPolicy CR through a componentRef
+# manifest (recipeDeclaresRDMAFabric in pkg/bundler/readiness.go). The
+# pinned upstream Helm chart (26.4.1) does not template NCP even with
+# deployCR=true, so overlays that include network-operator without
+# attaching an NCP have nothing to gate on and the gate would poll to
+# --max-wait timeout. At this commit, only aks.yaml (via
+# manifests/nic-cluster-policy-aks.yaml) and its derivatives —
+# h100-aks-training.yaml and h100-aks-ubuntu-training-slurm.yaml — meet
+# that predicate; kind.yaml and the os-talos mixin include
+# network-operator but attach no NCP and are skipped. OCP recipes use
+# the separate network-operator-ocp component with its own NCP
+# manifest and gate mechanism, and are not affected by this file.
+#
+# The gate uses the operator's aggregate state rather than enumerating operand
+# DaemonSets, which would duplicate that authoritative signal and drift across
+# names and OS variants. Unlike the gpu-operator gate's single positive assert,
+# this gate pairs its positive assertion with a negative assertion so every
+# live NicClusterPolicy must be ready. The gate CLI's --stability-window (see
+# defaults.ReadinessGateStabilityWindow) provides the sleep and re-assert
+# cadence for catching transient flaps during driver deployment.
+#
+# NicClusterPolicy is cluster-scoped, so the assertion is
+# namespace-agnostic; the gate's --namespace flag (set to the resolved
+# component namespace by the bundler) governs only namespaced lookups,
+# of which this test has none.
+#
+# The positive assert requires at least one ready NicClusterPolicy. The
+# following negative assert rejects any live policy whose state is not ready,
+# supplying all-items semantics because an unnamed positive Chainsaw assert
+# otherwise passes when any one item matches. An overlay that renames the NCP
+# (or a downstream override that does the same) still gates correctly. The
+# primary "no NCP exists" failure mode is also covered by the positive assert
+# and by the recipeDeclaresRDMAFabric emission gate — this Test is not loaded
+# when the resolved recipe attaches no NCP CR.
+#
+# Verified against network-operator chart 26.4.1 (recipes/registry.yaml).
+# Re-verify on defaultVersion bump — the aggregate status.state field is
+# a stable v1alpha1 contract but the reduction rules for appliedStates
+# have evolved across chart minor versions.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: network-operator-readiness
+spec:
+  # The gate CLI owns the outer retry/poll loop (--poll-interval /
+  # --max-wait) and the stability window, so a single assert pass only
+  # needs a short window to confirm the current NicClusterPolicy state.
+  timeouts:
+    assert: 30s
+  steps:
+    - name: nicclusterpolicy-ready
+      try:
+        - assert:
+            resource:
+              apiVersion: mellanox.com/v1alpha1
+              kind: NicClusterPolicy
+              # Require at least one ready policy. The error operation below
+              # rejects every non-ready policy that may coexist with it.
+              status:
+                state: ready
+        - error:
+            resource:
+              apiVersion: mellanox.com/v1alpha1
+              kind: NicClusterPolicy
+              (status.state != 'ready'): true

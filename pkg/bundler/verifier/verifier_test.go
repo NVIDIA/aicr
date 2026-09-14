@@ -441,7 +441,7 @@ func TestReadBoundedFile_OversizedFile(t *testing.T) {
 	}
 	// Write 11 MiB (over the 10 MiB limit)
 	buf := make([]byte, 1024*1024)
-	for i := 0; i < 11; i++ {
+	for range 11 {
 		if _, writeErr := f.Write(buf); writeErr != nil {
 			t.Fatal(writeErr)
 		}
@@ -885,11 +885,9 @@ func TestVerificationSnapshot_Cleanup(t *testing.T) {
 	errs := make([]error, callers)
 	var wg sync.WaitGroup
 	for index := range errs {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			errs[index] = snapshot.cleanup()
-		}()
+		})
 	}
 	wg.Wait()
 	for index, cleanupErr := range errs {

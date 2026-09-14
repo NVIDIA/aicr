@@ -693,7 +693,7 @@ func actuatorReferenceTokens(value string) ([]string, error) {
 
 func containsActuatorReferenceCandidate(value string) bool {
 	candidateValue := strings.ReplaceAll(value, "\\\n", "")
-	for _, field := range strings.Fields(candidateValue) {
+	for field := range strings.FieldsSeq(candidateValue) {
 		if !looksLikeRegistryReference(field) && !strings.Contains(field, "$'") {
 			continue
 		}
@@ -701,10 +701,8 @@ func containsActuatorReferenceCandidate(value string) bool {
 		if err != nil {
 			return true
 		}
-		for _, word := range words {
-			if looksLikeRegistryReference(word) {
-				return true
-			}
+		if slices.ContainsFunc(words, looksLikeRegistryReference) {
+			return true
 		}
 	}
 	return false
@@ -736,10 +734,8 @@ func shellEnablesXtrace(text string) bool {
 		if segmentErr != nil {
 			return true
 		}
-		for _, segment := range segments {
-			if shellSegmentEnablesXtrace(segment) {
-				return true
-			}
+		if slices.ContainsFunc(segments, shellSegmentEnablesXtrace) {
+			return true
 		}
 		for _, word := range lineWords {
 			if !strings.Contains(word, "$(") && !strings.ContainsRune(word, '`') {
@@ -749,10 +745,8 @@ func shellEnablesXtrace(text string) bool {
 			if nestedErr != nil {
 				return true
 			}
-			for _, segment := range nestedSegments {
-				if shellSegmentEnablesXtrace(segment) {
-					return true
-				}
+			if slices.ContainsFunc(nestedSegments, shellSegmentEnablesXtrace) {
+				return true
 			}
 		}
 	}
@@ -958,7 +952,7 @@ func parseDockerInvocations(script string) ([]dockerInvocation, error) {
 
 		dockerIndex := -1
 		imageIndex := -1
-		for index := 0; index < len(arguments); index++ {
+		for index := range arguments {
 			if filepath.Base(arguments[index]) != "docker" {
 				continue
 			}

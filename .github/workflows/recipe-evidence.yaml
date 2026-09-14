@@ -52,7 +52,6 @@ on:
       - 'cmd/aicr/**'
       - 'go.mod'
       - 'go.sum'
-      - 'vendor/**'
       - '.github/workflows/recipe-evidence.yaml'
       - '.github/scripts/recipe-evidence-check.sh'
 
@@ -86,8 +85,6 @@ jobs:
           cache: false
 
       - name: Build aicr
-        env:
-          GOFLAGS: -mod=vendor
         run: go build -o ./bin/aicr ./cmd/aicr
 
       - name: Run evidence check

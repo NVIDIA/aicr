@@ -23,7 +23,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
-	"github.com/NVIDIA/aicr/pkg/diff"
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
@@ -111,13 +111,13 @@ func TestWriteTable_ToFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	outFile := filepath.Join(tmpDir, "out.txt")
 
-	result := &diff.Result{Changes: make([]diff.Change, 0)}
+	result := &aicr.SnapshotDiff{Changes: make([]aicr.SnapshotChange, 0)}
 	f, err := os.Create(outFile)
 	if err != nil {
 		t.Fatalf("failed to create output file: %v", err)
 	}
 
-	err = diff.WriteTable(f, result)
+	err = aicr.WriteSnapshotDiffTable(f, result)
 	if closeErr := f.Close(); closeErr != nil && err == nil {
 		err = closeErr
 	}
@@ -135,10 +135,10 @@ func TestWriteTable_ToFile(t *testing.T) {
 }
 
 func TestWriteTable_ToStdout(t *testing.T) {
-	result := &diff.Result{Changes: make([]diff.Change, 0)}
+	result := &aicr.SnapshotDiff{Changes: make([]aicr.SnapshotChange, 0)}
 
 	// WriteTable to stdout should not error.
-	err := diff.WriteTable(os.Stdout, result)
+	err := aicr.WriteSnapshotDiffTable(os.Stdout, result)
 	if err != nil {
 		t.Errorf("WriteTable to stdout failed: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestWriteDiffResult_TableToFile(t *testing.T) {
 	outFile := filepath.Join(tmpDir, "out.txt")
 
 	cmd := buildDiffCommandWithOutput(t, outFile)
-	result := &diff.Result{Changes: make([]diff.Change, 0)}
+	result := &aicr.SnapshotDiff{Changes: make([]aicr.SnapshotChange, 0)}
 
 	if err := writeDiffResult(t.Context(), cmd, serializer.FormatTable, "", result); err != nil {
 		t.Fatalf("writeDiffResult failed: %v", err)
@@ -358,7 +358,7 @@ func TestWriteDiffResult_CreateFails(t *testing.T) {
 	bogusPath := filepath.Join(t.TempDir(), "does-not-exist", "out.txt")
 
 	cmd := buildDiffCommandWithOutput(t, bogusPath)
-	result := &diff.Result{Changes: make([]diff.Change, 0)}
+	result := &aicr.SnapshotDiff{Changes: make([]aicr.SnapshotChange, 0)}
 
 	err := writeDiffResult(t.Context(), cmd, serializer.FormatTable, "", result)
 	if err == nil {
@@ -380,7 +380,7 @@ func TestWriteDiffResult_KubeconfigPropagatesToConfigMap(t *testing.T) {
 	bogusKubeconfig := filepath.Join(tmpDir, "missing-kubeconfig.yaml")
 
 	cmd := buildDiffCommandWithOutput(t, "cm://aicr/test")
-	result := &diff.Result{Changes: make([]diff.Change, 0)}
+	result := &aicr.SnapshotDiff{Changes: make([]aicr.SnapshotChange, 0)}
 
 	err := writeDiffResult(t.Context(), cmd, serializer.FormatJSON, bogusKubeconfig, result)
 	if err == nil {

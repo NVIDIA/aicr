@@ -844,7 +844,7 @@ func TestEvidenceResultPropagatesThroughCollector(t *testing.T) {
 // the parser never fails closed on a healthy check.
 func countColumnZeroVerdicts(evidence string) int {
 	count := 0
-	for _, line := range strings.Split(evidence, "\n") {
+	for line := range strings.SplitSeq(evidence, "\n") {
 		if strings.HasPrefix(line, "**Result:") {
 			count++
 		}

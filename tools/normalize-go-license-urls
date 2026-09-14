@@ -1,0 +1,200 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -euo pipefail
+
+readonly CONNECT_TIMEOUT_SECONDS=10
+readonly TOTAL_TIMEOUT_SECONDS=30
+readonly RETRIES=2
+readonly PARALLEL_REQUESTS=8
+
+if [[ $# -ne 1 || ! -s "$1" ]]; then
+    echo "Usage: $0 <go-licenses.csv>" >&2
+    exit 2
+fi
+
+readonly INPUT=$1
+readonly CURL_BIN=${CURL_BIN:-curl}
+
+if ! command -v "${CURL_BIN}" >/dev/null 2>&1; then
+    echo "ERROR: curl is required to verify license source URLs." >&2
+    exit 1
+fi
+
+normalized_candidate() {
+    local url=$1
+    local before_blob=${url%%/blob/*}
+    local after_blob=${url#*/blob/}
+    if [[ "${after_blob}" == "${url}" ]]; then
+        printf '%s\n' "${url}"
+        return
+    fi
+
+    local -a segments
+    IFS=/ read -r -a segments <<< "${after_blob}"
+
+    local ref_end=-1
+    local i
+    for i in "${!segments[@]}"; do
+        if [[ "${segments[$i]}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+].*)?$ ]] ||
+            [[ "${segments[$i]}" =~ ^[0-9a-f]{12,40}$ ]]; then
+            ref_end=$i
+            break
+        fi
+    done
+
+    local last_index=$((${#segments[@]} - 1))
+    if (( ref_end < 0 || ref_end + 2 > last_index )); then
+        printf '%s\n' "${url}"
+        return
+    fi
+
+    local normalized="${before_blob}/blob"
+    for ((i = 0; i <= ref_end; i++)); do
+        normalized+="/${segments[$i]}"
+    done
+    printf '%s/%s\n' "${normalized}" "${segments[$last_index]}"
+}
+
+# Repositories that moved after their Go module path was already fixed. A module
+# path is immutable, so go-licenses keeps deriving the license URL from the
+# original host path; when the project transfers the repo and GitHub serves no
+# redirect, that URL 404s even though the license itself never changed. Remap the
+# dead path to the live one so the notices cite genuine upstream provenance
+# rather than a copy committed into this repo.
+#
+# Format: <old-repo-path>|<new-repo-path>
+#
+# github.com/google/cel-go: the CEL project moved out of the google org to its
+# own (see the sibling cel.dev/expr module); github.com/google/cel-go returns a
+# hard 404, not a redirect, so nothing upstream rescues the emitted URL.
+MOVED_REPOSITORIES=(
+    "github.com/google/cel-go|github.com/cel-expr/cel-go"
+)
+
+remapped_candidate() {
+    local url=$1
+    local entry old new
+    for entry in "${MOVED_REPOSITORIES[@]}"; do
+        # Trailing slashes keep a prefix from matching a longer sibling repo
+        # (a cel-go entry must not rewrite a cel-go-extra URL).
+        old="${entry%%|*}/"
+        new="${entry##*|}/"
+        if [[ "${url}" == *"${old}"* ]]; then
+            printf '%s\n' "${url/"${old}"/"${new}"}"
+            return
+        fi
+    done
+    printf '%s\n' "${url}"
+}
+
+# Every URL worth probing for one CSV row, best-provenance first and deduplicated
+# while preserving that order. Normalization is applied to the remapped URL too,
+# so a moved repo that also needs the nested-module fixup is still resolvable.
+url_candidates() {
+    local url=$1
+    local remapped
+    remapped=$(remapped_candidate "${url}")
+    printf '%s\n' \
+        "${url}" \
+        "$(normalized_candidate "${url}")" \
+        "${remapped}" \
+        "$(normalized_candidate "${remapped}")" \
+        | awk '!seen[$0]++'
+}
+
+# Status lookup for an already-probed URL. Empty means curl reported nothing.
+url_status() {
+    awk -F '\t' -v url="$1" '$1 == url { print $2; exit }' "${CANDIDATE_STATUS}"
+}
+
+TMP=$(mktemp -d)
+trap 'rm -rf "${TMP}"' EXIT
+readonly CANDIDATE_URLS="${TMP}/candidate-urls"
+readonly CANDIDATE_STATUS="${TMP}/candidate-status"
+
+: > "${CANDIDATE_URLS}"
+while IFS=, read -r package url license; do
+    [[ -z "${package}" ]] && continue
+    url_candidates "${url}" >> "${CANDIDATE_URLS}"
+done < "${INPUT}"
+
+check_urls() {
+    local input=$1
+    local output=$2
+    local -a requests=()
+    local url
+    while IFS= read -r url; do
+        requests+=(--output /dev/null "${url}")
+    done < <(LC_ALL=C sort -u "${input}")
+    if (( ${#requests[@]} == 0 )); then
+        : > "${output}"
+        return
+    fi
+
+    if ! "${CURL_BIN}" \
+        --parallel \
+        --parallel-max "${PARALLEL_REQUESTS}" \
+        --head \
+        --location \
+        --silent \
+        --connect-timeout "${CONNECT_TIMEOUT_SECONDS}" \
+        --max-time "${TOTAL_TIMEOUT_SECONDS}" \
+        --retry "${RETRIES}" \
+        --retry-connrefused \
+        --write-out '%{url}\t%{http_code}\n' \
+        "${requests[@]}" > "${output}"; then
+        echo "ERROR: failed to check license source URLs." >&2
+        exit 1
+    fi
+}
+
+check_urls "${CANDIDATE_URLS}" "${CANDIDATE_STATUS}"
+
+# Unreachable packages are collected rather than fatal on the first one. curl has
+# already probed every candidate by this point, so reporting only the first
+# failure hides the rest behind another full release cycle.
+unreachable=0
+while IFS=, read -r package url license; do
+    [[ -z "${package}" ]] && continue
+
+    resolved=""
+    while IFS= read -r candidate; do
+        if [[ "$(url_status "${candidate}")" == "200" ]]; then
+            resolved=${candidate}
+            break
+        fi
+    done < <(url_candidates "${url}")
+
+    if [[ -n "${resolved}" ]]; then
+        printf '%s,%s,%s\n' "${package}" "${resolved}" "${license}"
+        continue
+    fi
+
+    unreachable=$((unreachable + 1))
+    {
+        echo "ERROR: no reachable license source URL for ${package}:"
+        while IFS= read -r candidate; do
+            code=$(url_status "${candidate}")
+            echo "  tried (${code:-no response}): ${candidate}"
+        done < <(url_candidates "${url}")
+    } >&2
+done < "${INPUT}"
+
+if (( unreachable > 0 )); then
+    echo "ERROR: ${unreachable} package(s) have no reachable license source URL." >&2
+    echo "If a repository moved, add it to MOVED_REPOSITORIES in $0." >&2
+    exit 1
+fi

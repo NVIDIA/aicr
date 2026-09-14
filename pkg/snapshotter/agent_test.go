@@ -15,14 +15,21 @@
 package snapshotter
 
 import (
+	"bytes"
+	"encoding/json"
 	stderrors "errors"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/k8s/agent"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -84,9 +91,48 @@ func TestBuildAgentConfigTolerations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := buildAgentConfig(&AgentConfig{Tolerations: tt.input}, "snapshot.yaml").Tolerations
+			got := buildAgentConfig(&AgentConfig{Tolerations: tt.input}, "20260821-142233-9f3a1c0b7e2d4a55", "snapshot.yaml", false).Tolerations
 			if !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("buildAgentConfig().Tolerations = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBuildAgentConfigPropagatesRunIDAndOwnership confirms buildAgentConfig
+// forwards its runID argument, AgentConfig.NameBase, and its ownsOutput
+// parameter onto agent.Config.RunID / agent.Config.NameBase /
+// agent.Config.OwnsOutputConfigMap — the projection deployAndWaitForResult
+// relies on so the deployer scopes every resource name to this run, applies
+// the caller's naming prefix, and Cleanup knows whether it may delete the
+// staging ConfigMap.
+//
+// runID is a parameter, not a read of AgentConfig.RunID: DeployAndCollect
+// resolves it into a local and never writes a generated ID back into the
+// caller's config. The AgentConfig below deliberately leaves RunID empty so a
+// projection that regressed to reading config.RunID would produce "" and fail
+// here.
+func TestBuildAgentConfigPropagatesRunIDAndOwnership(t *testing.T) {
+	tests := []struct {
+		name       string
+		ownsOutput bool
+	}{
+		{name: "owned staging ConfigMap", ownsOutput: true},
+		{name: "user-supplied ConfigMap", ownsOutput: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildAgentConfig(&AgentConfig{
+				NameBase: "aicr-validate",
+			}, "20260821-142233-9f3a1c0b7e2d4a55", "cm://ns/name", tt.ownsOutput)
+			if got.RunID != "20260821-142233-9f3a1c0b7e2d4a55" {
+				t.Errorf("agent.Config.RunID = %q, want the runID argument", got.RunID)
+			}
+			if got.NameBase != "aicr-validate" {
+				t.Errorf("agent.Config.NameBase = %q, want the AgentConfig.NameBase value", got.NameBase)
+			}
+			if got.OwnsOutputConfigMap != tt.ownsOutput {
+				t.Errorf("agent.Config.OwnsOutputConfigMap = %v, want %v", got.OwnsOutputConfigMap, tt.ownsOutput)
 			}
 		})
 	}
@@ -501,11 +547,15 @@ func TestParseTolerationsOperator(t *testing.T) {
 
 // TestAgentOutputURILogic exercises agentConfigMapTarget — the rule that
 // decides where the agent Job stages its result:
-//  1. A file path leaves the Job on the default ConfigMap in its namespace.
-//  2. A cm:// URI makes that ConfigMap the Job's target AND the delivery
-//     vehicle, so a rewrite failure must be fatal rather than a warning.
+//  1. A file path leaves the Job on the run-scoped internal ConfigMap in its
+//     namespace, which this run owns.
+//  2. A cm:// URI makes that ConfigMap the Job's target directly; this run
+//     does NOT own it (the caller supplied it), so a rewrite failure must be
+//     fatal rather than a warning.
 //  3. Stdout (empty or "-") behaves like a file path.
 func TestAgentOutputURILogic(t *testing.T) {
+	const testRunID = "20260821-142233-9f3a1c0b7e2d4a55"
+
 	tests := []struct {
 		name               string
 		agentNamespace     string
@@ -514,24 +564,24 @@ func TestAgentOutputURILogic(t *testing.T) {
 		wantUsesUserOutput bool   // whether agentOutput should equal userOutput
 	}{
 		{
-			name:               "file output uses default ConfigMap with agent namespace",
+			name:               "file output uses run-scoped internal ConfigMap",
 			agentNamespace:     "default",
 			userOutput:         "snapshot.yaml",
-			wantAgentOutputHas: "cm://default/aicr-snapshot",
+			wantAgentOutputHas: "cm://default/aicr-agent-snapshot-" + testRunID,
 			wantUsesUserOutput: false,
 		},
 		{
-			name:               "stdout uses default ConfigMap with agent namespace",
+			name:               "stdout uses run-scoped internal ConfigMap",
 			agentNamespace:     "default",
 			userOutput:         "",
-			wantAgentOutputHas: "cm://default/aicr-snapshot",
+			wantAgentOutputHas: "cm://default/aicr-agent-snapshot-" + testRunID,
 			wantUsesUserOutput: false,
 		},
 		{
-			name:               "dash stdout uses default ConfigMap with agent namespace",
+			name:               "dash stdout uses run-scoped internal ConfigMap",
 			agentNamespace:     "default",
 			userOutput:         "-",
-			wantAgentOutputHas: "cm://default/aicr-snapshot",
+			wantAgentOutputHas: "cm://default/aicr-agent-snapshot-" + testRunID,
 			wantUsesUserOutput: false,
 		},
 		{
@@ -542,20 +592,20 @@ func TestAgentOutputURILogic(t *testing.T) {
 			wantUsesUserOutput: true,
 		},
 		{
-			name:               "custom namespace uses that namespace for default ConfigMap",
+			name:               "custom namespace uses that namespace for the run-scoped ConfigMap",
 			agentNamespace:     "custom-namespace",
 			userOutput:         "output.yaml",
-			wantAgentOutputHas: "cm://custom-namespace/aicr-snapshot",
+			wantAgentOutputHas: "cm://custom-namespace/aicr-agent-snapshot-" + testRunID,
 			wantUsesUserOutput: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			agentOutput, deliverViaConfigMap, err := agentConfigMapTarget(&AgentConfig{
+			agentOutput, ownsOutput, err := agentConfigMapTarget(&AgentConfig{
 				Namespace: tt.agentNamespace,
 				Output:    tt.userOutput,
-			})
+			}, testRunID)
 			if err != nil {
 				t.Fatalf("agentConfigMapTarget: %v", err)
 			}
@@ -569,12 +619,60 @@ func TestAgentOutputURILogic(t *testing.T) {
 					t.Errorf("agentOutput = %q, want %q", agentOutput, tt.wantAgentOutputHas)
 				}
 			}
-			if deliverViaConfigMap != tt.wantUsesUserOutput {
-				t.Errorf("deliverViaConfigMap = %v, want %v — the flag must track whether the "+
-					"ConfigMap is the user's delivery vehicle, since it decides whether an "+
-					"AKS-pool-merge rewrite failure is fatal", deliverViaConfigMap, tt.wantUsesUserOutput)
+			// ownsOutput is the logical inverse of "the user supplied this
+			// output": the run owns (and Cleanup may delete) the staging
+			// ConfigMap only when it did NOT come from the user.
+			wantOwnsOutput := !tt.wantUsesUserOutput
+			if ownsOutput != wantOwnsOutput {
+				t.Errorf("ownsOutput = %v, want %v — it must track whether this run owns the "+
+					"ConfigMap, since it decides whether Cleanup may delete it and whether an "+
+					"AKS-pool-merge rewrite failure is fatal", ownsOutput, wantOwnsOutput)
 			}
 		})
+	}
+}
+
+// TestAgentConfigMapTargetIsRunScoped and TestAgentConfigMapTargetLeavesUserURIAlone
+// pin the ownsOutput inversion: the run owns (and Cleanup may delete) the
+// staging ConfigMap only when the user did NOT name a cm:// destination.
+// Getting this backwards deletes the user's own output ConfigMap.
+func TestAgentConfigMapTargetIsRunScoped(t *testing.T) {
+	const runID = "20260821-142233-9f3a1c0b7e2d4a55"
+	cfg := &AgentConfig{Namespace: "gpu-operator"}
+	uri, ownsOutput, err := agentConfigMapTarget(cfg, runID)
+	if err != nil {
+		t.Fatalf("agentConfigMapTarget() error = %v", err)
+	}
+	// The staging ConfigMap is deliberately prefixed "aicr-agent-snapshot",
+	// NOT "aicr-snapshot": pkg/validator names its own snapshot data
+	// ConfigMap "aicr-snapshot-<runID>", and `aicr validate` gives both
+	// subsystems the same run ID in the same namespace. See
+	// TestStagingConfigMapNameDoesNotCollideWithValidator in pkg/k8s/agent.
+	want := "cm://gpu-operator/aicr-agent-snapshot-20260821-142233-9f3a1c0b7e2d4a55"
+	if uri != want {
+		t.Errorf("uri = %q, want %q", uri, want)
+	}
+	// The URI must be built from the one exported helper the agent package
+	// also deletes by, not from a second copy of the format string.
+	if wantHelper := "cm://gpu-operator/" + agent.StagingConfigMapName(runID); uri != wantHelper {
+		t.Errorf("uri = %q, want %q (agent.StagingConfigMapName)", uri, wantHelper)
+	}
+	if !ownsOutput {
+		t.Error("ownsOutput = false, want true for the internal staging ConfigMap")
+	}
+}
+
+func TestAgentConfigMapTargetLeavesUserURIAlone(t *testing.T) {
+	cfg := &AgentConfig{Namespace: "gpu-operator", Output: "cm://gpu-operator/aicr-snapshot"}
+	uri, ownsOutput, err := agentConfigMapTarget(cfg, "20260821-142233-9f3a1c0b7e2d4a55")
+	if err != nil {
+		t.Fatalf("agentConfigMapTarget() error = %v", err)
+	}
+	if uri != cfg.Output {
+		t.Errorf("uri = %q, want the user's URI %q unchanged", uri, cfg.Output)
+	}
+	if ownsOutput {
+		t.Error("ownsOutput = true; a user-supplied cm:// output is delivered, not run-owned")
 	}
 }
 
@@ -623,6 +721,294 @@ func TestDeliverSnapshot_FileIsByteIdentical(t *testing.T) {
 	}
 	if string(got) != snapshotFixture {
 		t.Errorf("delivered bytes differ from the agent's output\n got:\n%s\nwant:\n%s", got, snapshotFixture)
+	}
+}
+
+// TestDeliverSnapshot_HonorsFormat is the regression test for issue #2398:
+// `aicr snapshot --format json` used to write the agent's YAML into whatever
+// destination the user named, so a .json file held a YAML document and every
+// downstream consumer (aicr diff, which picks its decoder from the file
+// extension, and jq) failed on it. The agent always stages YAML, so delivery
+// is the only place the requested format can be applied.
+func TestDeliverSnapshot_HonorsFormat(t *testing.T) {
+	tests := []struct {
+		name       string
+		format     serializer.Format
+		wantPrefix string
+		wantHas    []string
+	}{
+		{
+			name:       "json",
+			format:     serializer.FormatJSON,
+			wantPrefix: "{",
+			wantHas:    []string{`"apiVersion": "aicr.run/v1alpha2"`, `"fromANewerAgent": true`},
+		},
+		{
+			name:       "table",
+			format:     serializer.FormatTable,
+			wantPrefix: "FIELD",
+			wantHas:    []string{"APIVersion", "aicr.run/v1alpha2"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			out := filepath.Join(t.TempDir(), "snapshot.out")
+			if err := DeliverSnapshot(t.Context(), []byte(snapshotFixture), SnapshotDelivery{
+				Output: out,
+				Format: tt.format,
+			}); err != nil {
+				t.Fatalf("DeliverSnapshot(%s): %v", tt.format, err)
+			}
+
+			got, err := os.ReadFile(out)
+			if err != nil {
+				t.Fatalf("read delivered snapshot: %v", err)
+			}
+			if !strings.HasPrefix(string(got), tt.wantPrefix) {
+				t.Errorf("delivered %s output does not start with %q — the agent's YAML was "+
+					"written unconverted:\n%s", tt.format, tt.wantPrefix, got)
+			}
+			for _, want := range tt.wantHas {
+				if !strings.Contains(string(got), want) {
+					t.Errorf("delivered %s output missing %q:\n%s", tt.format, want, got)
+				}
+			}
+		})
+	}
+}
+
+// TestDeliverSnapshot_JSONDecodesAsSnapshot closes the loop the issue
+// reported: the JSON rendering must be readable by the same decoders that
+// consume a .json snapshot, and it must carry fields this binary's Snapshot
+// type does not model (the generic-map path, not a typed round trip).
+func TestDeliverSnapshot_JSONDecodesAsSnapshot(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "snapshot.json")
+	if err := DeliverSnapshot(t.Context(), []byte(snapshotFixture), SnapshotDelivery{
+		Output: out,
+		Format: serializer.FormatJSON,
+	}); err != nil {
+		t.Fatalf("DeliverSnapshot(json): %v", err)
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read delivered snapshot: %v", err)
+	}
+
+	var snap Snapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
+		t.Fatalf("delivered .json does not decode as JSON: %v\n%s", err, data)
+	}
+	if snap.APIVersion != "aicr.run/v1alpha2" || snap.Metadata["version"] != "v9.9.9" {
+		t.Errorf("decoded snapshot = %+v, want the fixture's apiVersion and metadata", snap.Header)
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("unmarshal delivered JSON: %v", err)
+	}
+	if _, ok := doc["unmodeledField"]; !ok {
+		t.Error("JSON rendering dropped unmodeledField; it must go through a generic map so " +
+			"a newer agent image's fields survive delivery")
+	}
+}
+
+// TestDeliverSnapshot_UnsetFormatStaysByteIdentical protects SDK callers that
+// predate SnapshotDelivery.Format: the zero value must keep meaning "the
+// agent's YAML, unchanged".
+func TestDeliverSnapshot_UnsetFormatStaysByteIdentical(t *testing.T) {
+	for _, format := range []serializer.Format{"", serializer.FormatYAML} {
+		out := filepath.Join(t.TempDir(), "snapshot.yaml")
+		if err := DeliverSnapshot(t.Context(), []byte(snapshotFixture), SnapshotDelivery{
+			Output: out,
+			Format: format,
+		}); err != nil {
+			t.Fatalf("DeliverSnapshot(%q): %v", format, err)
+		}
+		got, err := os.ReadFile(out)
+		if err != nil {
+			t.Fatalf("read delivered snapshot: %v", err)
+		}
+		if string(got) != snapshotFixture {
+			t.Errorf("format %q altered the agent's bytes\n got:\n%s\nwant:\n%s", format, got, snapshotFixture)
+		}
+	}
+}
+
+// captureStdout redirects os.Stdout for the duration of fn and returns what
+// was written. The pipe is drained concurrently: a snapshot is larger than the
+// OS pipe buffer, so reading only after fn returns would deadlock on write.
+func captureStdout(t *testing.T, fn func()) []byte {
+	t.Helper()
+
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe(): %v", err)
+	}
+	saved := os.Stdout
+	os.Stdout = writer
+	t.Cleanup(func() { os.Stdout = saved })
+
+	drained := make(chan []byte, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, copyErr := io.Copy(&buf, reader)
+		if copyErr != nil {
+			t.Errorf("drain stdout: %v", copyErr)
+		}
+		drained <- buf.Bytes()
+	}()
+
+	fn()
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close stdout pipe: %v", err)
+	}
+	out := <-drained
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close stdout reader: %v", err)
+	}
+	return out
+}
+
+// TestDeliverSnapshot_StdoutMatchesFile pins stdout as a delivery destination
+// like any other: `aicr snapshot > snapshot.yaml` has to produce the same
+// artifact as `-o snapshot.yaml`, for every format. Stdout used to append a
+// newline the file path did not, so the two differed by a byte and a piped
+// hash could not reproduce the file.
+func TestDeliverSnapshot_StdoutMatchesFile(t *testing.T) {
+	for _, format := range []serializer.Format{"", serializer.FormatYAML, serializer.FormatJSON, serializer.FormatTable} {
+		t.Run(string(format), func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), "snapshot.out")
+			if err := DeliverSnapshot(t.Context(), []byte(snapshotFixture), SnapshotDelivery{
+				Output: file,
+				Format: format,
+			}); err != nil {
+				t.Fatalf("DeliverSnapshot(file, %q): %v", format, err)
+			}
+			wantBytes, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatalf("read delivered snapshot: %v", err)
+			}
+
+			var deliverErr error
+			got := captureStdout(t, func() {
+				deliverErr = DeliverSnapshot(t.Context(), []byte(snapshotFixture), SnapshotDelivery{
+					Output: "-",
+					Format: format,
+				})
+			})
+			if deliverErr != nil {
+				t.Fatalf("DeliverSnapshot(stdout, %q): %v", format, deliverErr)
+			}
+
+			if !bytes.Equal(got, wantBytes) {
+				t.Errorf("stdout and file delivery differ for format %q\n stdout (%d bytes):\n%s\n file (%d bytes):\n%s",
+					format, len(got), got, len(wantBytes), wantBytes)
+			}
+			// Every rendering terminates itself, which is what lets
+			// stdout add nothing without gluing the next shell prompt
+			// to the output.
+			if len(wantBytes) > 0 && wantBytes[len(wantBytes)-1] != '\n' {
+				t.Errorf("format %q rendering is not newline-terminated; stdout would leave a "+
+					"dangling prompt:\n%s", format, wantBytes)
+			}
+		})
+	}
+}
+
+// TestDeliverSnapshot_StdoutPreservesTrailingNewline is the byte-identity
+// guarantee on the stdout path. The agent's document always ends in a newline
+// (MarshalYAMLDeterministic), and appending another gave it a trailing blank
+// line; an SDK caller can also hand over bytes with no terminator, and stdout
+// must not invent one. Neither input may be rewritten.
+func TestDeliverSnapshot_StdoutPreservesTrailingNewline(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{"trailing newline", snapshotFixture},
+		{"no trailing newline", strings.TrimSuffix(snapshotFixture, "\n")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var deliverErr error
+			got := captureStdout(t, func() {
+				deliverErr = DeliverSnapshot(t.Context(), []byte(tt.data), SnapshotDelivery{Output: "-"})
+			})
+			if deliverErr != nil {
+				t.Fatalf("DeliverSnapshot(stdout): %v", deliverErr)
+			}
+			if string(got) != tt.data {
+				t.Errorf("stdout altered the agent's bytes\n got  (%d bytes): %q\n want (%d bytes): %q",
+					len(got), got, len(tt.data), tt.data)
+			}
+		})
+	}
+}
+
+// TestDeliverSnapshot_RejectsUnknownFormat keeps an unrecognized format from
+// silently degrading to another encoding — the exact failure mode of issue
+// #2398. The CLI validates --format up front, so this is the SDK-caller guard.
+//
+// Every destination must reject the same set. The cm:// case is the one that
+// needs the explicit check: serializer's ConfigMap writer coerces an unknown
+// format to JSON, so without it that destination would succeed where stdout
+// and file delivery fail.
+func TestDeliverSnapshot_RejectsUnknownFormat(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	file := filepath.Join(dir, "snapshot.out")
+
+	tests := []struct {
+		name   string
+		output string
+	}{
+		{"file", file},
+		{"stdout", "-"},
+		{"configmap", "cm://default/aicr-snapshot"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := DeliverSnapshot(t.Context(), []byte(snapshotFixture), SnapshotDelivery{
+				Output: tt.output,
+				Format: serializer.Format("toml"),
+			})
+			if err == nil {
+				t.Fatalf("DeliverSnapshot(%s, format=toml) = nil error, want a rejection", tt.output)
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want code ErrCodeInvalidRequest", err)
+			}
+		})
+	}
+
+	// The rejection must land before any destination is touched — no
+	// truncated file, and for cm:// no cluster contact (this test has no
+	// cluster, so a format check that ran late would surface as a
+	// connection error instead of ErrCodeInvalidRequest above).
+	entries, readErr := os.ReadDir(dir)
+	if readErr != nil {
+		t.Fatalf("read working dir: %v", readErr)
+	}
+	if len(entries) != 0 {
+		t.Errorf("rejected format still wrote to the destination: %v", entries)
+	}
+}
+
+// TestRawSnapshotDocMarshalJSON pins the wrapper's JSON contract: it has no
+// exported fields, so without MarshalJSON a cm:// destination in JSON format
+// would receive "{}" — a successful write of an empty snapshot.
+func TestRawSnapshotDocMarshalJSON(t *testing.T) {
+	got, err := json.Marshal(rawSnapshotDoc{doc: map[string]any{
+		"kind":           "Snapshot",
+		"futureTopLevel": "keep-me",
+	}})
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	want := `{"futureTopLevel":"keep-me","kind":"Snapshot"}`
+	if string(got) != want {
+		t.Errorf("MarshalJSON = %s, want %s", got, want)
 	}
 }
 
@@ -759,7 +1145,7 @@ func TestAgentConfigMapTargetRejectsMalformedURI(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, _, err := agentConfigMapTarget(&AgentConfig{Namespace: "default", Output: tt.output})
+			_, _, err := agentConfigMapTarget(&AgentConfig{Namespace: "default", Output: tt.output}, "20260821-142233-9f3a1c0b7e2d4a55")
 			if err == nil {
 				t.Fatalf("agentConfigMapTarget(%q) = nil error, want rejection before any cluster access", tt.output)
 			}
@@ -822,6 +1208,20 @@ func TestDeployAndCollectRejectsBeforeClusterAccess(t *testing.T) {
 			},
 			wantMsg: "Namespace is required",
 		},
+		{
+			// Ruling 5 mitigation: nameWithRunID (pkg/k8s/agent) silently
+			// falls back to unscoped, collision-prone names when RunID is
+			// empty. A caller-supplied all-whitespace RunID bypasses the
+			// simple "== \"\"" default check, so it must fail closed here
+			// rather than reach that fallback deep in agent.Deploy.
+			name: "whitespace-only RunID",
+			config: &AgentConfig{
+				Namespace:  "default",
+				Kubeconfig: badKubeconfig,
+				RunID:      "   ",
+			},
+			wantMsg: "RunID must not be all-whitespace",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -837,5 +1237,55 @@ func TestDeployAndCollectRejectsBeforeClusterAccess(t *testing.T) {
 					"input check ran too late)", err, tt.wantMsg)
 			}
 		})
+	}
+}
+
+// TestDeployAndCollectGeneratesRunIDWithoutMutatingConfig confirms
+// DeployAndCollect resolves an empty RunID to a freshly generated one before
+// it is folded into the internal staging ConfigMap's name, AND that it leaves
+// the caller's *AgentConfig untouched while doing so.
+//
+// The non-mutation half is the load-bearing one. Writing the generated ID
+// back into the caller's config would turn a caller who reuses one config
+// pointer for a second run into a caller pinning a duplicate RunID — the one
+// state ADR-020 declares unsupported — and run 2 would hard-fail
+// ErrCodeInternal on the first still-existing run-scoped object. In-tree
+// callers reach this through the pkg/client/v1 facade, which builds a fresh
+// internal config per call, but pkg/snapshotter is public.
+//
+// The generated value is observed through the "snapshot agent run" log line,
+// which is emitted just before the malformed-Output rejection below fires;
+// there is no other seam that does not require cluster access.
+func TestDeployAndCollectGeneratesRunIDWithoutMutatingConfig(t *testing.T) {
+	runIDPattern := regexp.MustCompile(`runID=(\d{8}-\d{6}-[0-9a-f]{16})`)
+
+	var logs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
+
+	cfg := &AgentConfig{
+		Namespace:  "default",
+		Kubeconfig: filepath.Join(t.TempDir(), "does-not-exist.kubeconfig"),
+		Output:     "cm://aicr-snapshot", // malformed: no namespace — rejected after RunID resolution
+	}
+	if cfg.RunID != "" {
+		t.Fatalf("test precondition: cfg.RunID = %q, want empty", cfg.RunID)
+	}
+
+	_, _, err := DeployAndCollect(t.Context(), cfg)
+	if err == nil {
+		t.Fatal("DeployAndCollect() = nil error, want rejection from the malformed Output")
+	}
+
+	if !runIDPattern.MatchString(logs.String()) {
+		t.Errorf("no generated run ID matching %s in log output; DeployAndCollect must "+
+			"resolve an empty RunID with runid.Generate(). Logs:\n%s", runIDPattern, logs.String())
+	}
+
+	if cfg.RunID != "" {
+		t.Errorf("cfg.RunID = %q after DeployAndCollect, want it left empty — the generated ID "+
+			"must stay in a local so a caller reusing this config for a second run does not "+
+			"silently pin a duplicate RunID", cfg.RunID)
 	}
 }

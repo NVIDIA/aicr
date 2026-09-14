@@ -129,7 +129,7 @@ func TestClusterFetcher_Fetch(t *testing.T) {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
-				if obj["metadata"].(map[string]interface{})["name"] != tt.resourceName {
+				if obj["metadata"].(map[string]any)["name"] != tt.resourceName {
 					t.Errorf("returned object name mismatch: %v", obj["metadata"])
 				}
 				return
@@ -248,7 +248,7 @@ func TestClusterFetcher_List(t *testing.T) {
 			}
 			got := make([]string, 0, len(items))
 			for _, it := range items {
-				if md, ok := it["metadata"].(map[string]interface{}); ok {
+				if md, ok := it["metadata"].(map[string]any); ok {
 					if n, ok := md["name"].(string); ok {
 						got = append(got, n)
 					}

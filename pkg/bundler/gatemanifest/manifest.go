@@ -80,7 +80,7 @@ rules:
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
     verbs: ["get", "list", "watch"]
----
+%[12]s---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -140,9 +140,30 @@ spec:
 		defaults.ReadinessGateStabilityWindow.String(),
 		defaults.ReadinessGateMaxWait.String(),
 		jobAnnotations,
-		defaults.ReadinessGateBackoffLimit)
+		defaults.ReadinessGateBackoffLimit,
+		componentClusterRoleRules(componentName))
 
 	return []byte(sb.String()), nil
+}
+
+// componentClusterRoleRules returns any component-specific ClusterRole rules
+// appended to the uniform base rules above. Emitting a rule only for the
+// component whose readiness Test actually reads its API group keeps unused
+// permissions off gate ServiceAccounts of unrelated components (PR #2337
+// review). Kept as a switch rather than a data-driven scan of testYAML so
+// the emitter's RBAC surface stays statically auditable — the trade-off is
+// that a new readiness gate for a new API group must be registered here.
+func componentClusterRoleRules(componentName string) string {
+	switch componentName { //nolint:gocritic // one permission family today; kept as a switch so future readiness API groups remain explicitly allowlisted.
+	case "network-operator", "network-operator-ocp":
+		// See recipes/components/network-operator*/readiness.yaml — both
+		// gates assert on mellanox.com/v1alpha1 NicClusterPolicy.
+		return `  - apiGroups: ["mellanox.com"]
+    resources: ["nicclusterpolicies"]
+    verbs: ["get", "list", "watch"]
+`
+	}
+	return ""
 }
 
 func jobMetadataAnnotations(deployer config.DeployerType) string {
@@ -152,8 +173,30 @@ func jobMetadataAnnotations(deployer config.DeployerType) string {
     helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation`
 	case config.DeployerArgoCD, config.DeployerArgoCDHelm:
+		// The Job's spec.selector and spec.template.metadata.labels are
+		// server-generated/immutable, and the rendered manifest correctly
+		// omits them. Plain Replace=true maps to `kubectl replace`, which the
+		// API server rejects on any upgrade that changes the Job spec (e.g.
+		// an image tag bump), leaving the Application permanently
+		// OutOfSync. Force=true is ArgoCD's documented option to
+		// delete-and-recreate when a replace fails. This alone would
+		// delete-and-recreate the Job on EVERY sync, including no-op
+		// resyncs where nothing changed — see the ApplyOutOfSyncOnly=true
+		// entry this deployer adds to the readiness folder's
+		// Application-level spec.syncPolicy.syncOptions
+		// (pkg/bundler/deployer/argocd/argocd.go's buildApplicationData),
+		// which excludes already-in-sync resources from a sync operation
+		// and stops the needless rerun. The two mechanisms are
+		// complementary: Job-level Replace+Force handles genuine spec
+		// diffs (e.g. an image tag bump); Application-level
+		// ApplyOutOfSyncOnly prevents unnecessary reruns when there is no
+		// diff at all. Deliberately NOT using a Helm-style sync hook
+		// (helm.sh/hook) here: per
+		// pkg/bundler/deployer/localformat/hooks.go's stripHelmHooks doc,
+		// hook-annotated resources are excluded from ArgoCD's normal drift
+		// detection, so an image-tag-only bump could silently go undetected.
 		return `  annotations:
-    argocd.argoproj.io/sync-options: Replace=true`
+    argocd.argoproj.io/sync-options: Replace=true,Force=true`
 	case config.DeployerFlux, config.DeployerHelmfile:
 		return ""
 	default:

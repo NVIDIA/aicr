@@ -438,8 +438,7 @@ func TestObserveCatchUpDivergesGoesDegraded(t *testing.T) {
 	if lastErr == nil {
 		t.Fatal("run 4: observe() = nil, want a degraded not-converging error")
 	}
-	var stalled *catchUpStalledError
-	if !stderrors.As(lastErr, &stalled) {
+	if _, ok := stderrors.AsType[*catchUpStalledError](lastErr); !ok {
 		t.Fatalf("run 4: error type = %T, want *catchUpStalledError", lastErr)
 	}
 	if got := classify(lastErr); got != classDegraded {

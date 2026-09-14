@@ -516,7 +516,7 @@ func dockerfileRunCommands(raw string) []runCommand {
 		runIndex++
 	}
 
-	for _, line := range strings.Split(raw, "\n") {
+	for line := range strings.SplitSeq(raw, "\n") {
 		trimmed := strings.TrimSpace(stripShellComment(line))
 		if trimmed == "" {
 			continue
@@ -553,8 +553,8 @@ func stripShellComment(line string) string {
 	if strings.HasPrefix(strings.TrimSpace(line), "#") {
 		return ""
 	}
-	if i := strings.Index(line, " #"); i >= 0 {
-		return line[:i]
+	if before, _, ok := strings.Cut(line, " #"); ok {
+		return before
 	}
 	return line
 }

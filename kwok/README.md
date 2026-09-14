@@ -122,8 +122,18 @@ Currently on disk:
 |---------|-------------|----------------|-------------|
 | eks | h100 | `eks/system-m7i.yaml` | `eks/p5-h100.yaml` |
 | eks | gb200 | `eks/system-m7i.yaml` | `eks/p6-gb200.yaml` |
+| eks | gb300 | `eks/system-m7i.yaml` | `eks/p6e-gb300.yaml` |
 
-**Cluster defaults:** 2 system nodes, 4 GPU nodes (32 GPUs), Kubernetes v1.33.5, region `us-east-1`.
+**Cluster defaults:** 2 system nodes, 4 GPU nodes, region `us-east-1`. The cluster's GPU total is `4 × spec.gpu.count` of the selected GPU profile, so it varies by accelerator — read the count from the profile rather than assuming a fixed total.
+
+**Two Kubernetes versions are in play; recipe constraints are evaluated against the control plane, not the simulated nodes:**
+
+| Version | Set by | Is |
+|---------|--------|----|
+| `kindest/node:v1.36.1` | `kind_node_image` in `.settings.yaml` | the real Kind **control plane** — what `discoveryClient.ServerVersion()` reports, and therefore what `K8s.server.version` constraints are checked against |
+| `v1.33.5` | `DEFAULT_K8S_VERSION` in `kwok/scripts/apply-nodes.sh` | the **cosmetic** `kubeletVersion` stamped onto simulated nodes via `node.yaml.tmpl` |
+
+So a recipe requiring `K8s.server.version >= 1.34` is satisfied by the Kind image; the simulated `v1.33.5` is not the cluster's Kubernetes version and does not gate anything. (The two are three minor versions apart — the maximum supported kubelet/API-server skew — but the policy is moot here because no kubelet runs.)
 
 ## Makefile Targets
 
@@ -170,7 +180,7 @@ A recipe is auto-discovered for KWOK testing if it has `spec.criteria.service` d
 
 ```yaml
 kind: recipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: your-recipe-name
 spec:
@@ -230,6 +240,24 @@ Manual trigger:
 ```bash
 gh workflow run kwok-recipes.yaml -f recipe=your-recipe-name
 ```
+
+### Public image cache
+
+The lanes need two images from public registries — the in-cluster OCI registry and, for the `*-git` deployers, Gitea. Both are pinned in `.settings.yaml` under `testing_tools`.
+
+A full Tier 3 run fans out to well over a hundred concurrent jobs, and a job that pulls these itself competes with every sibling for the same per-IP quota at the registry: 127 jobs pulling at once reliably gets one or two shed, which reddens the run with nothing wrong in the repo (#2483). So CI pulls each image exactly once, in the `prime-images` job, and carries it to the matrix as a tarball in `actions/cache`. Each test job loads from that tarball, and `preload_image` then finds the image already in the host Docker cache and never contacts the registry.
+
+`kwok/scripts/lib/image-cache.sh` owns both ends, so the priming job and the test jobs derive the cache key from the same code:
+
+```bash
+bash kwok/scripts/lib/image-cache.sh settings .settings.yaml   # resolve pins + keys
+bash kwok/scripts/lib/image-cache.sh save <dir> <image>        # pull once, write the tarball
+bash kwok/scripts/lib/image-cache.sh load <dir> <image>        # restore it into Docker
+```
+
+Priming is a hard gate: if an image is genuinely unreachable, the run fails there rather than in every lane. Loading is best effort — a cache miss falls back to `preload_image`'s pull, and the kubelet pull behind that, so a cold cache degrades to the old behavior instead of failing.
+
+Local runs (`make kwok-test-all`) do not use the cache; they pull through `preload_image` as before.
 
 ## Troubleshooting
 

@@ -123,6 +123,7 @@ func TestBundleCmd_FlagsAloneStillWork(t *testing.T) {
 		"--repo", "https://example.git",
 		"--system-node-selector", "role=system",
 		"--accelerated-node-toleration", "nvidia.com/gpu=present:NoSchedule",
+		"--dra-eviction-node-label", "example.com/dra-ready=enabled",
 		"--nodes", "16",
 		"--storage-class", "gp3",
 		"-o", tmp,
@@ -141,6 +142,9 @@ func TestBundleCmd_FlagsAloneStillWork(t *testing.T) {
 	}
 	if len(captured.acceleratedNodeTolerations) == 0 {
 		t.Errorf("expected toleration, got none")
+	}
+	if got := captured.draEvictionNodeLabel.String(); got != "example.com/dra-ready=enabled" {
+		t.Errorf("draEvictionNodeLabel = %q, want example.com/dra-ready=enabled", got)
 	}
 	if captured.storageClass != "gp3" {
 		t.Errorf("storageClass = %q, want gp3", captured.storageClass)
@@ -168,7 +172,7 @@ func tryCaptureBundleOpts(t *testing.T, args []string) (*bundleCmdOptions, error
 	var captured *bundleCmdOptions
 	cmd := bundleCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}
@@ -225,6 +229,7 @@ spec:
         nodeGroup: gpu-nodes
       acceleratedNodeTolerations:
         - "nvidia.com/gpu=present:NoSchedule"
+      draEvictionNodeLabel: example.com/dra-ready=enabled
       workloadGate: "nvidia.com/training=true:NoSchedule"
       workloadSelector:
         workload: training
@@ -264,6 +269,7 @@ spec:
 		{"acceleratedNodeSelector nodeGroup", opts.acceleratedNodeSelector["nodeGroup"], "gpu-nodes"},
 		{"systemNodeTolerations count", len(opts.systemNodeTolerations), 1},
 		{"acceleratedNodeTolerations count", len(opts.acceleratedNodeTolerations), 1},
+		{"draEvictionNodeLabel", opts.draEvictionNodeLabel.String(), "example.com/dra-ready=enabled"},
 		{"workloadSelector", opts.workloadSelector["workload"], "training"},
 		{"estimatedNodeCount", opts.estimatedNodeCount, 12},
 		{"storageClass", opts.storageClass, "gp3"},
@@ -284,11 +290,19 @@ spec:
 }
 
 // TestBundleCmd_SigningKeyFromConfig verifies the KMS --signing-key is
-// config-driven: a config-sourced spec.bundle.attestation.signingKey lands on
-// the resolved options, the CLI flag wins over the config value, and a
-// config-sourced signingKey combined with a config-sourced keyless input
-// (fulcioURL) is rejected by the mutual-exclusion guard through the resolved
-// layer (cmd.IsSet is false for both, so only resolved opts catch it). See #1566.
+// config-driven end to end: a config-sourced spec.bundle.attestation.signingKey
+// lands on the resolved options, the CLI flag wins over the config value, and a
+// config-sourced signingKey combined with a config-sourced keyless input is
+// rejected with no flag set (cmd.IsSet is false for both, so nothing at the flag
+// layer alone would see it). See #1566.
+//
+// Which layer does the rejecting differs by case, and this test deliberately
+// does not distinguish: the fulcioURL and blank-key cases now fail in
+// config.resolveSigningKey when the document loads, while oidcDeviceFlow is
+// excluded from that rule and is caught only by validateSigningKeyExclusivity on
+// the merged opts. Those two functions are covered directly by
+// TestBundleResolve_SigningKey (pkg/config) and TestValidateSigningKeyExclusivity
+// below, so a regression in either is caught there rather than here.
 func TestBundleCmd_SigningKeyFromConfig(t *testing.T) {
 	const configKey = "awskms://alias/aicr-signing"
 	const flagKey = "gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k"
@@ -352,9 +366,9 @@ spec:
 	}
 
 	// Rejection cases: a config-sourced signingKey that conflicts with a
-	// config-sourced keyless input must be caught through the resolved layer
-	// (cmd.IsSet is false for both), and a blank config signingKey must fail
-	// fast rather than reaching the KMS resolver. See #1566.
+	// config-sourced keyless input must be rejected with no flag set (cmd.IsSet
+	// is false for both), and a blank config signingKey must fail fast rather
+	// than reaching the KMS resolver. See #1566.
 	rejectTests := []struct {
 		name        string
 		attestation string
@@ -390,6 +404,51 @@ spec:
 	}
 }
 
+// TestBundleCmd_OIDCDeviceFlowFlagOverridesConfigSigningKeyConflict is the
+// regression test for the eager-exclusivity review finding on
+// Config.BundleOptions: that method used to reject a document setting both
+// signingKey and oidcDeviceFlow: true BEFORE the CLI ever read
+// --oidc-device-flow, so a caller trying to correct a self-contradictory
+// config with --oidc-device-flow=false got the error anyway — the flag was
+// never given a chance to be read. The rule now lives one layer down in
+// config.resolveSigningKey, which leaves oidcDeviceFlow out for that same
+// reason; only the merged-opts validateSigningKeyExclusivity checks it, so the
+// flag wins as every other per-field override does.
+// TestBundleCmd_SigningKeyFromConfig's rejectTests above still prove the
+// config-only combination (no flag) is rejected.
+func TestBundleCmd_OIDCDeviceFlowFlagOverridesConfigSigningKeyConflict(t *testing.T) {
+	const configKey = "awskms://alias/aicr-signing"
+
+	tmp := t.TempDir()
+	recipePath := filepath.Join(tmp, "recipe.yaml")
+	if err := os.WriteFile(recipePath, []byte("kind: Recipe\n"), 0o600); err != nil {
+		t.Fatalf("write recipe: %v", err)
+	}
+	cfgPath := filepath.Join(tmp, "config.yaml")
+	cfg := fmt.Sprintf(`kind: AICRConfig
+apiVersion: aicr.run/v1alpha2
+spec:
+  bundle:
+    input:
+      recipe: %s
+    attestation:
+      enabled: true
+      signingKey: %s
+      oidcDeviceFlow: true
+`, recipePath, configKey)
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	opts := captureBundleOpts(t, []string{"--config", cfgPath, "--oidc-device-flow=false"})
+	if opts.signingKey != configKey {
+		t.Errorf("signingKey = %q, want %q", opts.signingKey, configKey)
+	}
+	if opts.oidcDeviceFlow {
+		t.Error("oidcDeviceFlow = true, want false: --oidc-device-flow=false must override the config value")
+	}
+}
+
 // TestBundleCmd_FlagOverridesEverySection verifies that for each major
 // section, a CLI flag wins over the same field in --config.
 func TestBundleCmd_FlagOverridesEverySection(t *testing.T) {
@@ -413,6 +472,7 @@ spec:
       deployer: argocd
       repo: https://config.example.git
     scheduling:
+      draEvictionNodeLabel: example.com/config-dra=enabled
       nodes: 4
       storageClass: standard
     attestation:
@@ -432,6 +492,7 @@ spec:
 		"--repo", "https://flag.example.git",
 		"--nodes", "16",
 		"--storage-class", "premium",
+		"--dra-eviction-node-label", "example.com/cli-dra=true",
 		"--insecure-tls",
 		"--plain-http",
 		"-o", tmp,
@@ -451,6 +512,9 @@ spec:
 	}
 	if opts.storageClass != "premium" {
 		t.Errorf("--storage-class should override: got %q", opts.storageClass)
+	}
+	if got := opts.draEvictionNodeLabel.String(); got != "example.com/cli-dra=true" {
+		t.Errorf("--dra-eviction-node-label should override: got %q", got)
 	}
 	if !opts.insecureTLS {
 		t.Errorf("--insecure-tls should override config false")

@@ -179,6 +179,52 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			wantDRAConstraint: true,
 		},
 		{
+			// gb200 EKS + OKE Dynamo leaves: pinned by name so gang-scheduling
+			// cannot silently drop out again (#2390). requiredChecks is a
+			// subset assertion, so listing it here is what makes the check
+			// asserted rather than only covered by catalog golden digests.
+			name: "gb200-eks-ubuntu-inference-dynamo",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorGB200
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentInference
+				c.Platform = CriteriaPlatformDynamo
+				return c
+			},
+			requiredComponents: []string{
+				"kai-scheduler",
+				"grove",
+				"dynamo-platform",
+			},
+			requiredChecks: []string{
+				"gang-scheduling",
+				"inference-gateway",
+			},
+		},
+		{
+			name: "gb200-oke-ubuntu-inference-dynamo",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceOKE
+				c.Accelerator = CriteriaAcceleratorGB200
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentInference
+				c.Platform = CriteriaPlatformDynamo
+				return c
+			},
+			requiredComponents: []string{
+				"kai-scheduler",
+				"grove",
+				"dynamo-platform",
+			},
+			requiredChecks: []string{
+				"gang-scheduling",
+				"inference-gateway",
+			},
+		},
+		{
 			name: "h100-eks-ubuntu-inference-dynamo",
 			criteria: func() *Criteria {
 				c := NewCriteria()
@@ -567,6 +613,190 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"accelerator-metrics",
 				"ai-service-metrics",
 				"inference-gateway",
+				"gang-scheduling",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+				"robust-controller",
+				"secure-accelerator-access",
+			},
+			wantDRAConstraint: true,
+		},
+		// The five training-kubeflow leaves added for #2564. Each must resolve
+		// kubeflow-trainer (with its manifest, which the bundler turns into the
+		// kubeflow-trainer-post release) and declare robust-controller, which
+		// routes to checkRobustKubeflowTrainer only when kubeflow-trainer is
+		// present in the recipe.
+		{
+			name: "h100-bcm-ubuntu-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceBCM
+				c.Accelerator = CriteriaAcceleratorH100
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			requiredChecks:             []string{"platform-health", "robust-controller"},
+			wantDRAConstraint:          true,
+		},
+		{
+			name: "h200-eks-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorH200
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			// robust-controller is inherited from h200-eks-training rather than
+			// declared on the leaf; assert it resolves all the same.
+			requiredChecks: []string{"platform-health", "robust-controller", "secure-accelerator-access"},
+		},
+		{
+			name: "rtx-pro-6000-lke-ubuntu-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceLKE
+				c.Accelerator = CriteriaAcceleratorRTXPro6000
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			requiredChecks:             []string{"platform-health", "robust-controller"},
+		},
+		{
+			name: "l40s-oke-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceOKE
+				c.Accelerator = CriteriaAcceleratorL40S
+				c.OS = CriteriaOSOracleLinux
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			requiredChecks:             []string{"platform-health", "robust-controller"},
+		},
+		{
+			name: "vr200-rke2-ubuntu-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceRKE2
+				c.Accelerator = CriteriaAcceleratorVR200
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			requiredChecks:             []string{"platform-health", "robust-controller", "secure-accelerator-access"},
+			wantDRAConstraint:          true,
+		},
+		{
+			// Grace-Blackwell training-kubeflow leaves: robust-controller and
+			// secure-accelerator-access are declared on these leaves (#2563),
+			// not on the shared training base, so the Slurm siblings do not
+			// inherit them. robust-controller only does real work when
+			// kubeflow-trainer is present, so pin the kubeflow leaf.
+			name: "gb200-eks-ubuntu-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorGB200
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents: []string{
+				"gpu-operator",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"kubeflow-trainer",
+			},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"gang-scheduling",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+				"robust-controller",
+				"secure-accelerator-access",
+			},
+			wantDRAConstraint: true,
+		},
+		{
+			name: "gb200-oke-ubuntu-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceOKE
+				c.Accelerator = CriteriaAcceleratorGB200
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents: []string{
+				"gpu-operator",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"kubeflow-trainer",
+			},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"gang-scheduling",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+				"robust-controller",
+				"secure-accelerator-access",
+			},
+			wantDRAConstraint: true,
+		},
+		{
+			name: "gb300-eks-ubuntu-training-kubeflow",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorGB300
+				c.OS = CriteriaOSUbuntu
+				c.Intent = CriteriaIntentTraining
+				c.Platform = CriteriaPlatformKubeflow
+				return c
+			},
+			requiredComponents: []string{
+				"gpu-operator",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"kubeflow-trainer",
+			},
+			requiredManifestComponents: []string{"kubeflow-trainer"},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
 				"gang-scheduling",
 				"pod-autoscaling",
 				"cluster-autoscaling",

@@ -74,14 +74,37 @@ The Go pieces:
    reservation row and scoped to H100 x1, single-GPU (whatever the runner
    physically has).
 
-## Dashboard refresh
+## Downstream publishes
 
 A successful ingest lands new evidence in the bucket, so the last job,
-`trigger-dashboard`, dispatches
-[`evidence-dashboard-publish.yaml`](evidence-dashboard-publish.md) to
-re-render the site. It runs `needs: publish`, so it inherits the
+`trigger-publishes`, dispatches the two downstream consumers of that
+evidence:
+
+- [`evidence-dashboard-publish.yaml`](evidence-dashboard-publish.md), to
+  re-render the static evidence dashboard.
+- `testgrid-publish.yml` (TG5), passing the same verified, digest-pinned
+  `bundle_ref` this ingest consumed — but only for the first-party UAT path
+  (`bundle_ref` set) on `main` or a `release/*` ref. A feature-branch UAT or a
+  push-triggered community/partner ingest does not dispatch TestGrid
+  automatically; an allowlisted external bundle can be backfilled manually.
+
+TestGrid treats every dispatch as a hint, not as proof of provenance. Before it
+exchanges GCP credentials, it independently pulls the immutable bundle, verifies
+its signature, and derives trust from the checked-in signer allowlist:
+
+- a verified NVIDIA UAT identity on `main` or `release/*` becomes
+  `source_class=uat`;
+- a verified, allowlisted community or partner identity becomes
+  `source_class=community`; and
+- unsigned, unallowlisted, untrusted-registry, feature-branch first-party, or
+  unexpected-class bundles fail closed.
+
+The workflow has no caller-controlled source-class input, so a manual backfill
+cannot promote external evidence to first-party UAT.
+
+Both dispatches run `needs: publish`, so they inherit the
 `produced == 'true'` gate — a no-op ingest (allowlist-only change, deleted
-pointer) never fires it.
+pointer) never fires either.
 
 The push-to-`main` ingest path already re-triggers the dashboard through
 that workflow's own `push:` trigger; the dispatch exists for the
@@ -89,15 +112,18 @@ that workflow's own `push:` trigger; the dispatch exists for the
 `workflow_call` (`uat-run` → `uat-{aws,gcp,azure}` → `evidence-ingest`,
 already at GitHub's four-level reuse limit). A nested call emits no
 top-level run event and cannot nest a fifth reusable workflow, so a
-`workflow_dispatch` is the only way to start a fresh top-level dashboard
-run from that depth. It needs `actions: write`, threaded down from the
-`uat-run` `run-*` jobs through each cloud pipeline's `ingest-evidence`
-job.
+`workflow_dispatch` is the only way to start a fresh top-level run — for
+the dashboard or for TestGrid — from that depth. It needs `actions:
+write`, threaded down from the `uat-run` `run-*` jobs through each cloud
+pipeline's `ingest-evidence` job.
 
 The dashboard's `concurrency: { group: pages, cancel-in-progress: false }`
 serializes to one running build and one queued build, the newest dispatch
 superseding the queued one — so a multi-cell nightly batch collapses its
 flurry of ingests into a single coalesced rebuild rather than a backlog.
+Both dispatches are best-effort: a transient failure warns instead of
+failing the calling UAT run, and either can be backfilled manually
+afterward.
 
 ## meta.json
 

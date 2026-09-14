@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
@@ -71,15 +72,10 @@ func ParseAccountingMode(value string) (AccountingMode, error) {
 type RecipeConfiguration struct {
 	Slurm *SlurmConfiguration `json:"slurm,omitempty" yaml:"slurm,omitempty"`
 
-	// RuntimeInventory records the generation-time selection for the runtime
-	// AI inventory component. See runtimeinventory.go.
-	//
-	// This is the second entry here, and the pattern is one bespoke selection
-	// per optional component. That is deliberate for two (ADR-019 asks for
-	// this component specifically, and a generic per-component disable needs
-	// a policy for which components may be declined at all). If a third
-	// arrives, revisit rather than extending by reflex.
+	// Selections remain typed because each needs component-specific validation
+	// and application rules, rather than a generic per-component parameter map.
 	RuntimeInventory *RuntimeInventoryConfiguration `json:"runtimeInventory,omitempty" yaml:"runtimeInventory,omitempty"`
+	GKE              *GKEConfiguration              `json:"gke,omitempty" yaml:"gke,omitempty"`
 }
 
 // SlurmConfiguration records Slurm-specific desired state.
@@ -98,6 +94,7 @@ type BuildOption func(*buildConfig)
 type buildConfig struct {
 	accountingMode       *AccountingMode
 	runtimeInventoryMode *RuntimeInventoryMode
+	tcpxoInterfaces      *[]NetworkInterfaceMapping
 }
 
 // WithAccountingMode selects the Slurm accounting ownership mode for one
@@ -121,6 +118,35 @@ func resolveBuildConfig(criteria *Criteria, opts ...BuildOption) (*buildConfig, 
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			"Slurm accounting mode can only be set when recipe platform is slurm")
 	}
+
+	// The GKE TCPXO mapping is platform-independent at this layer: reject
+	// only when a concrete criteria dimension already rules the family out,
+	// and defer the component-presence question to applyGKETCPXOInterfaces,
+	// which sees the resolved recipe.
+	if cfg.tcpxoInterfaces != nil {
+		if criteria != nil && criteria.Service != "" && criteria.Service != CriteriaServiceAny &&
+			criteria.Service != CriteriaServiceGKE {
+
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"GKE TCPXO interfaces can only be set when recipe service is gke")
+		}
+		if criteria != nil && criteria.Accelerator != "" && criteria.Accelerator != CriteriaAcceleratorAny &&
+			criteria.Accelerator != CriteriaAcceleratorH100 {
+
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"GKE TCPXO interfaces are supported on h100 (a3-megagpu-8g) recipes only")
+		}
+		if criteria != nil && criteria.Platform != "" && criteria.Platform != CriteriaPlatformAny &&
+			criteria.Platform != CriteriaPlatformKubeflow {
+
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"GKE TCPXO interfaces can only be set when recipe platform is kubeflow")
+		}
+		if err := ValidateGKETCPXOInterfaces(*cfg.tcpxoInterfaces); err != nil {
+			return nil, err
+		}
+	}
+
 	if !isSlurm {
 		return cfg, nil
 	}
@@ -216,6 +242,13 @@ func applyBuildConfig(result *RecipeResult, cfg *buildConfig) error {
 			return err
 		}
 		selected = true
+	}
+	// Runs unconditionally — including builds that supply no mapping —
+	// because fail-closed on a recipe that ships torch-distributed-tcpxo is
+	// the contract. It does not change component enablement, so it does not
+	// participate in the deployment-order recompute `selected` tracks.
+	if err := applyGKETCPXOInterfaces(result, cfg.tcpxoInterfaces); err != nil {
+		return err
 	}
 	if cfg.accountingMode == nil {
 		// Deployment order still has to be refreshed: a selection that ran
@@ -377,10 +410,10 @@ func (r *RecipeResult) validateAccountingConfiguration() error {
 	if !present {
 		return nil
 	}
-	if r.APIVersion != ConfiguredRecipeResultAPIVersion {
+	if !header.IsSupportedProfileAPIVersion(r.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("configuration.slurm.accounting requires apiVersion %q (got %q)",
-				ConfiguredRecipeResultAPIVersion, r.APIVersion))
+			fmt.Sprintf("configuration.slurm.accounting requires apiVersion %q or %q (got %q)",
+				header.RecipeResultGroupVersion, header.GroupVersionV1Beta2, r.APIVersion))
 	}
 	if r.Criteria == nil || r.Criteria.Platform != CriteriaPlatformSlurm {
 		return errors.New(errors.ErrCodeInvalidRequest,

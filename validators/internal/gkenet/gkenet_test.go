@@ -36,10 +36,10 @@ func newFakeClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
 }
 
 func testNetwork(name string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{Object: map[string]interface{}{
+	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "networking.gke.io/v1",
 		"kind":       "Network",
-		"metadata":   map[string]interface{}{"name": name},
+		"metadata":   map[string]any{"name": name},
 	}}
 }
 
@@ -165,7 +165,7 @@ func TestDiscoverGPUNICNetworksReturnsRawError(t *testing.T) {
 func TestDiscoverGPUNICNetworksSortsResult(t *testing.T) {
 	client := newFakeClient()
 	client.PrependReactor("list", "networks", func(k8stesting.Action) (bool, runtime.Object, error) {
-		list := &unstructured.UnstructuredList{Object: map[string]interface{}{
+		list := &unstructured.UnstructuredList{Object: map[string]any{
 			"apiVersion": "networking.gke.io/v1",
 			"kind":       "NetworkList",
 		}}

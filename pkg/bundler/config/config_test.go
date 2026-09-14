@@ -17,6 +17,8 @@ package config
 import (
 	"testing"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
+
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -169,6 +171,13 @@ func TestConfigValidate(t *testing.T) {
 			config:  NewConfig(),
 			wantErr: false,
 		},
+		{
+			name: "invalid DRA eviction label",
+			config: NewConfig(WithDRAEvictionNodeLabel(NodeLabel{
+				Key: "not a label key", Value: "true",
+			})),
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -178,6 +187,58 @@ func TestConfigValidate(t *testing.T) {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestDRAEvictionNodeLabel(t *testing.T) {
+	tests := []struct {
+		name    string
+		raw     string
+		want    NodeLabel
+		wantErr bool
+	}{
+		{
+			name: "valid qualified label",
+			raw:  "example.com/dra-ready=enabled",
+			want: NodeLabel{Key: "example.com/dra-ready", Value: "enabled"},
+		},
+		{name: "empty value is valid", raw: "example.com/dra-ready=", want: NodeLabel{Key: "example.com/dra-ready"}},
+		{name: "missing equals", raw: "example.com/dra-ready", wantErr: true},
+		{name: "invalid key", raw: "not a key=true", wantErr: true},
+		{name: "invalid value", raw: "example.com/dra-ready=not valid", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseNodeLabel(tt.raw)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("ParseNodeLabel() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && got != tt.want {
+				t.Errorf("ParseNodeLabel() = %+v, want %+v", got, tt.want)
+			}
+			if !tt.wantErr && got.String() != tt.raw {
+				t.Errorf("NodeLabel.String() = %q, want %q", got.String(), tt.raw)
+			}
+		})
+	}
+
+	// The DRA eviction contract is opt-in (#2469): an unconfigured Config
+	// yields the zero label, which the bundler reads as "not requested".
+	if got := NewConfig().DRAEvictionNodeLabel(); got != (NodeLabel{}) {
+		t.Errorf("unconfigured DRA eviction label = %+v, want zero (opt-in)", got)
+	}
+	if got := NewConfig(WithDRAEvictionNodeLabel(NodeLabel{})).DRAEvictionNodeLabel(); got != (NodeLabel{}) {
+		t.Errorf("zero DRA eviction label should stay unset: got %+v, want zero", got)
+	}
+	want := DefaultDRAEvictionNodeLabel()
+	if got := NewConfig(WithDRAEvictionNodeLabel(want)).DRAEvictionNodeLabel(); got != want {
+		t.Errorf("configured DRA eviction label = %+v, want %+v", got, want)
+	}
+	// The documented default is still what the opt-in uses when a caller asks
+	// for it by name.
+	if want.Key != defaults.DRAEvictionNodeLabelKey || want.Value != defaults.DRAEvictionNodeLabelValue {
+		t.Errorf("DefaultDRAEvictionNodeLabel() = %+v, want %s=%s",
+			want, defaults.DRAEvictionNodeLabelKey, defaults.DRAEvictionNodeLabelValue)
 	}
 }
 

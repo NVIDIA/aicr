@@ -2857,10 +2857,10 @@ webhooks operational, and custom resources reconciled.
 ## Summary
 
 1. **Dynamo Operator** — Controller manager running in `dynamo-system`
-2. **Custom Resource Definitions** — 6 Dynamo CRDs registered (DynamoGraphDeployment, DynamoComponentDeployment, etc.)
+2. **Custom Resource Definitions** — Dynamo CRDs registered (DynamoGraphDeployment, DynamoComponentDeployment, etc. — see the live-queried list below; the count varies by Dynamo version)
 3. **Webhooks Operational** — a webhook-invalid DynamoGraphDeployment must be rejected with a webhook-attributed message
 4. **Custom Resource Reconciled** — `DynamoGraphDeployment/vllm-agg` reconciled into running workload pods via PodCliques
-5. **Supporting Services** — NATS running for Dynamo's Kubernetes event plane
+5. **Supporting Services** — KV-cache event plane (transport is workload-configured via `DYN_EVENT_PLANE`; this collector accepts whatever `DynamoGraphDeployment` already exists and does not inspect that setting)
 
 The result is stated by the verdict line at the end of this section, after the checks run.
 

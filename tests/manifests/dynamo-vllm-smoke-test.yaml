@@ -20,11 +20,11 @@
 # serving Qwen/Qwen3-0.6B (public, ungated, ~1.2GB).
 # No HuggingFace token required.
 #
-# Uses the Dynamo 1.2 Kubernetes path: Kubernetes-native discovery plus the
-# NATS-backed event plane from the dynamo-platform chart. Request/response
-# traffic uses Dynamo's request plane default (TCP). The frontend runs
-# KV-cache-aware routing; the local vLLM engine publishes KV events through
-# ZMQ and the Dynamo worker runtime relays them onto the NATS event plane.
+# Uses the Dynamo 1.4+ Kubernetes path: Kubernetes-native discovery, with
+# the request plane on TCP (default) and the KV event plane on ZMQ
+# (default) — no bundled NATS relay in between. The frontend runs
+# KV-cache-aware routing; the local vLLM engine publishes KV events over
+# ZMQ and the KV router consumes them directly, end-to-end.
 #
 # Usage:
 #   kubectl apply -f tests/manifests/dynamo-vllm-smoke-test.yaml -n dynamo-system
@@ -49,12 +49,16 @@ spec:
         spec:
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.2
               env:
                 - name: SERVED_MODEL_NAME
                   value: Qwen/Qwen3-0.6B
                 - name: DYN_ROUTER_MODE
                   value: kv
+                - name: DYN_REQUEST_PLANE
+                  value: tcp
+                - name: DYN_EVENT_PLANE
+                  value: zmq
     - name: VllmDecodeWorker
       type: worker
       replicas: 1
@@ -67,9 +71,14 @@ spec:
               effect: NoSchedule
           containers:
             - name: main
-              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1
+              image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.2
               workingDir: /workspace/examples/backends/vllm
               command: ["python3", "-m", "dynamo.vllm"]
+              env:
+                - name: DYN_REQUEST_PLANE
+                  value: tcp
+                - name: DYN_EVENT_PLANE
+                  value: zmq
               args:
                 - --model
                 - Qwen/Qwen3-0.6B

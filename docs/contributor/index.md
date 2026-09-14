@@ -169,6 +169,8 @@ output. **They contain no business logic.** All business logic lives
 in functional packages, composed by the `pkg/client/v1` facade so
 both entry points share it. Adding business logic to `pkg/cli` or
 `pkg/server` handlers is a boundary violation and will be rejected.
+This boundary is enforced mechanically by a CI gate — see
+[architecture-gate.md](architecture-gate.md).
 
 ## Packages
 
@@ -201,7 +203,6 @@ both entry points share it. Adding business logic to `pkg/cli` or
 | `pkg/oci` | OCI artifact push/pull for evidence and bundles |
 | `pkg/mirror` | Air-gap mirror for charts and images |
 | `pkg/trust` | Sigstore trust root management |
-| `pkg/build` | Build provenance metadata |
 | **Cross-cutting** | |
 | `pkg/k8s/client` | Singleton Kubernetes clientset (in-cluster + kubeconfig) |
 | `pkg/k8s/pod` | Shared K8s Job/Pod helpers (wait, logs, ConfigMap URI parsing) |
@@ -309,19 +310,24 @@ By contributor task:
 - **Adding an HTTP endpoint** → [api-server.md](api-server.md)
 - **Adding a snapshot collector** → [collector.md](collector.md)
 - **Adding a validator check** → [validator.md](validator.md)
+- **Understanding or fixing a facade boundary gate failure** → [architecture-gate.md](architecture-gate.md)
 - **Adding a bundle-time component validation** → [validator.md](validator.md#component-validations-bundle-time)
 - **Producing and signing recipe evidence** → [evidence-publishing.md](evidence-publishing.md)
 - **Ingesting published evidence into the source-keyed tree (GP2)** → [evidence-ingest.md](evidence-ingest.md)
 - **Publishing the evidence dashboard to GitHub Pages (GP5)** → [evidence-dashboard-publish.md](evidence-dashboard-publish.md)
 - **Maintaining recipes and cutting releases** → [maintaining.md](maintaining.md)
 - **Writing or running tests (unit, chainsaw, KWOK, e2e)** → [tests.md](tests.md)
+- **Requesting a real-hardware UAT run or adding a reservation** → [uat.md](uat.md)
+- **Signing with Rekor v2** → [rekor-v2-signing.md](rekor-v2-signing.md)
+- **Allowlisting registry egress for CI and air-gapped builds** → [registry-egress.md](registry-egress.md)
+- **Investigating inference-perf run-to-run fluctuation** → [inference-perf-fluctuation.md](inference-perf-fluctuation.md)
 - **Using the project's Claude skills (snapshot analysis, docs audit, demos, decks, OpenVEX, release notes)** → [skills.md](skills.md)
 
 By reference:
 
 - [CONTRIBUTING.md](https://github.com/NVIDIA/aicr/blob/main/CONTRIBUTING.md) — contribution process, DCO, CI/CD, E2E testing
 - [DEVELOPMENT.md](https://github.com/NVIDIA/aicr/blob/main/DEVELOPMENT.md) — dev environment setup and Make targets
-- [RELEASING.md](https://github.com/NVIDIA/aicr/blob/main/RELEASING.md) — release process for maintainers
+- [RELEASE.md](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md) — release process for maintainers
 - [SECURITY.md](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md) — supply-chain security, attestation verification
 - [CLAUDE.md](https://github.com/NVIDIA/aicr/blob/main/.claude/CLAUDE.md) — coding rules, error wrapping, context, HTTP, logging, K8s patterns
 - [docs/design/](https://github.com/NVIDIA/aicr/tree/main/docs/design) — accepted ADRs

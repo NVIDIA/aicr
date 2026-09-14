@@ -81,11 +81,15 @@ spec:
               metadata:
                 name: slinky-topograph-node-data-broker
                 namespace: topograph
-              status:
-                # Non-omitempty fields only: NumberUnavailable is omitempty and
-                # absent when healthy. desired > 0 guards the vacuous pass.
-                (desiredNumberScheduled > `0`): true
-                (numberReady == desiredNumberScheduled): true
+              # Non-omitempty fields only: NumberUnavailable is omitempty and
+              # absent when healthy. desired > 0 guards the vacuous pass.
+              ((status.desiredNumberScheduled || `0`) > `0`): true
+              ((status.numberReady || `0`) == status.desiredNumberScheduled): true
+              # updatedNumberScheduled/observedGeneration guard against a stale
+              # rollout: a node still on the previous revision also reports
+              # numberReady, so that alone can't distinguish current from stale.
+              ((status.updatedNumberScheduled || `0`) == status.desiredNumberScheduled): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
     - name: validate-all-pods-healthy
       try:
         # Assert no pods are in unhealthy phases (Pending / Failed /

@@ -157,7 +157,7 @@ capture_aibom() {
     # ahead of the hash. That is not cosmetic: the validator's banner embeds
     # the component count, so the "digest change moved inputHash" assertion
     # could be satisfied by a differing banner while inputHash never moved.
-    GOFLAGS='-mod=vendor' go run "${SCRIPT_DIR}/validate-bom" "${bom_json}" \
+    go run "${SCRIPT_DIR}/validate-bom" "${bom_json}" \
         >"${OUTPUT_DIR}/cyclonedx-${label}.txt" 2>&1 \
         || {
             cat "${OUTPUT_DIR}/cyclonedx-${label}.txt" >&2

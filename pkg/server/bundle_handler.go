@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -32,7 +33,10 @@ import (
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/serializer"
+	"gopkg.in/yaml.v3"
 )
 
 // attesterBuilder constructs an Attester from resolve options. Injectable so
@@ -51,13 +55,13 @@ var bundleZipResponseHeaders = []string{
 
 type streamZipFunc func(context.Context, http.ResponseWriter, string, *result.Output) error
 
-// bundleHandler backs the /v1/bundle and /v2/bundle endpoints with an
+// bundleHandler backs the /v1/bundle endpoint with an
 // aicr.Client. The v1 handler reproduces
 // pkg/bundler.(*DefaultBundler).HandleBundles exactly — same method gate, body
 // decode, allowlist check, query-param parsing, and zip response — swapping
 // the direct bundler.New + Make for the Client facade (AdoptRecipe +
 // MakeBundle). Its headers and status codes match the legacy handler;
-// error-body detail strings may differ where the facade wraps decode errors. The v2 handler shares that path and additionally accepts
+// error-body detail strings may differ where the facade wraps decode errors. The handler accepts
 // strict v1alpha3 profile recipes.
 type bundleHandler struct {
 	client    *aicr.Client
@@ -100,37 +104,37 @@ func newBundleHandler(client *aicr.Client, allowLists *aicr.AllowLists, signing 
 // deployer, node selectors/tolerations, repo, workload-gate, workload-selector,
 // nodes, vendor-charts, app-name). The response is a zip archive of the bundle.
 func (h *bundleHandler) HandleBundles(w http.ResponseWriter, r *http.Request) {
-	h.handleBundles(w, r, false)
-}
-
-// HandleBundlesV2 accepts legacy recipes and strict v1alpha3 profile recipes.
-func (h *bundleHandler) HandleBundlesV2(w http.ResponseWriter, r *http.Request) {
-	h.handleBundles(w, r, true)
+	h.handleBundles(w, r)
 }
 
 func decodeBundleRecipe(
 	input io.Reader,
 	contentType string,
-	v2 bool,
 ) (recipe.RecipeResult, error) {
 
 	var result recipe.RecipeResult
-	if !v2 {
-		if err := decodeRecipeResultRequest(input, &result); err != nil {
-			return result, aicrerrors.PropagateOrWrap(
-				err, aicrerrors.ErrCodeInvalidRequest, "failed to decode bundle recipe")
-		}
-		return result, nil
-	}
 	bodyData, err := io.ReadAll(input)
 	if err != nil {
 		return result, aicrerrors.PropagateOrWrap(
 			err, aicrerrors.ErrCodeInvalidRequest, "failed to read bundle recipe")
 	}
-	format, err := v2BodyFormat(contentType)
+	format, err := strictBodyFormat(contentType)
 	if err != nil {
 		return result, err
 	}
+	// Check the wire kind before strict decoding. A Snapshot or RecipeMetadata
+	// body fails strict decoding on its unknown fields, which reports a field
+	// name rather than the actual mistake — posting the wrong artifact. The
+	// legacy handler named the kind because it decoded loosely first; this
+	// preserves that message without giving up strict decoding.
+	if kind, ok := peekArtifactKind(bodyData, format); ok &&
+		kind != "" && kind != recipe.RecipeResultKind {
+
+		return result, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("recipe artifact has kind %q, expected %q",
+				kind, recipe.RecipeResultKind))
+	}
+
 	decoded, err := recipe.DecodeRecipeResult(bodyData, format)
 	if err != nil {
 		return result, aicrerrors.PropagateOrWrap(
@@ -139,10 +143,35 @@ func decodeBundleRecipe(
 	return *decoded, nil
 }
 
-func (h *bundleHandler) handleBundles(w http.ResponseWriter, r *http.Request, v2 bool) {
+// peekArtifactKind reads only the kind discriminator, tolerating anything else
+// in the document. ok is false when the body does not parse at all, leaving the
+// strict decoder to produce the parse error.
+func peekArtifactKind(bodyData []byte, format serializer.Format) (string, bool) {
+	var probe struct {
+		Kind string `json:"kind" yaml:"kind"`
+	}
+	switch format {
+	case serializer.FormatJSON:
+		if json.Unmarshal(bodyData, &probe) != nil {
+			return "", false
+		}
+	case serializer.FormatYAML:
+		if yaml.Unmarshal(bodyData, &probe) != nil {
+			return "", false
+		}
+	case serializer.FormatTable:
+		// Not a request body format; strictBodyFormat never returns it.
+		return "", false
+	default:
+		return "", false
+	}
+	return probe.Kind, true
+}
+
+func (h *bundleHandler) handleBundles(w http.ResponseWriter, r *http.Request) {
 	logger := slog.With("requestID", RequestIDFromContext(r.Context()))
 
-	if bundleRequestRejected(w, r, v2) {
+	if bundleRequestRejected(w, r) {
 		return
 	}
 
@@ -174,12 +203,10 @@ func (h *bundleHandler) handleBundles(w http.ResponseWriter, r *http.Request, v2
 	recipeResult, err := decodeBundleRecipe(
 		http.MaxBytesReader(w, r.Body, defaults.MaxBundlePOSTBytes),
 		r.Header.Get("Content-Type"),
-		v2,
 	)
 
 	if err != nil {
-		var maxBytesErr *http.MaxBytesError
-		if stderrors.As(err, &maxBytesErr) {
+		if maxBytesErr, ok := stderrors.AsType[*http.MaxBytesError](err); ok {
 			logger.Warn("bundle POST body exceeded size limit",
 				"limit", defaults.MaxBundlePOSTBytes,
 				"received", maxBytesErr.Limit,
@@ -196,12 +223,6 @@ func (h *bundleHandler) handleBundles(w http.ResponseWriter, r *http.Request, v2
 			})
 		return
 	}
-	if !v2 && recipeResult.Metadata.SelectedProfile != nil {
-		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
-			"Profiled recipes are available only on /v2/bundle", false, nil)
-		return
-	}
-
 	// Validate recipe has component references.
 	if len(recipeResult.ComponentRefs) == 0 {
 		WriteError(w, r, http.StatusBadRequest, aicrerrors.ErrCodeInvalidRequest,
@@ -328,7 +349,7 @@ func (h *bundleHandler) vendorChartsRejected(w http.ResponseWriter, r *http.Requ
 	return true
 }
 
-func bundleRequestRejected(w http.ResponseWriter, r *http.Request, v2 bool) bool {
+func bundleRequestRejected(w http.ResponseWriter, r *http.Request) bool {
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", http.MethodPost)
 		WriteError(w, r, http.StatusMethodNotAllowed, aicrerrors.ErrCodeMethodNotAllowed,
@@ -338,19 +359,17 @@ func bundleRequestRejected(w http.ResponseWriter, r *http.Request, v2 bool) bool
 		return true
 	}
 
-	if v2 {
-		if err := validateV2BundleQueryParameters(r); err != nil {
-			WriteErrorFromErr(w, r, err, "Invalid query parameters", nil)
-			return true
-		}
+	if err := validateBundleQueryParameters(r); err != nil {
+		WriteErrorFromErr(w, r, err, "Invalid query parameters", nil)
+		return true
 	}
 	return false
 }
 
-func validateV2BundleQueryParameters(r *http.Request) error {
+func validateBundleQueryParameters(r *http.Request) error {
 	allowed := bundler.SupportedBundleQueryParameters()
 	allowed["attest"] = struct{}{}
-	return validateV2QueryParameters(r, allowed)
+	return validateStrictQueryParameters(r, allowed)
 }
 
 func decodeRecipeResultRequest(body io.Reader, result *recipe.RecipeResult) error {
@@ -359,16 +378,16 @@ func decodeRecipeResultRequest(body io.Reader, result *recipe.RecipeResult) erro
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
 			"failed to read request body", err)
 	}
-	var header struct {
+	var artifactHeader struct {
 		APIVersion string `json:"apiVersion"`
 	}
-	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&header); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&artifactHeader); err != nil {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInvalidRequest,
 			"failed to inspect request apiVersion", err)
 	}
 
 	decoder := json.NewDecoder(bytes.NewReader(data))
-	if header.APIVersion == recipe.ConfiguredRecipeResultAPIVersion {
+	if header.IsSupportedProfileAPIVersion(artifactHeader.APIVersion) {
 		decoder.DisallowUnknownFields()
 	}
 	if err := decoder.Decode(result); err != nil {

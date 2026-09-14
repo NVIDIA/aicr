@@ -16,9 +16,12 @@ package cli
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 
 	"github.com/urfave/cli/v3"
+
+	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // runWith builds a Command with the given Flags and runs it with args, calling
@@ -248,4 +251,16 @@ func TestResolveNodeSelector(t *testing.T) {
 			}
 		})
 	})
+}
+
+func TestResolveDRAEvictionNodeLabelRejectsMalformedCLIValue(t *testing.T) {
+	flag := &cli.StringFlag{Name: "dra-eviction-node-label"}
+	var gotErr error
+	runWith(t, []cli.Flag{flag}, []string{"--dra-eviction-node-label", "not-a-key-value-label"}, func(c *cli.Command) {
+		_, gotErr = resolveDRAEvictionNodeLabel(c, nil)
+	})
+
+	if !stderrors.Is(gotErr, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("resolveDRAEvictionNodeLabel() error = %v, want ErrCodeInvalidRequest", gotErr)
+	}
 }

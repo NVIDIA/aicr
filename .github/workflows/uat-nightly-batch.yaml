@@ -83,11 +83,8 @@ jobs:
           cache: true
           cache-dependency-path: |
             go.sum
-            vendor/modules.txt
       - name: Enumerate reservations
         id: list
-        env:
-          GOFLAGS: -mod=vendor
         run: |
           set -euo pipefail
           go build -o ./bin/uat-broker ./tools/uat-broker
@@ -141,11 +138,9 @@ jobs:
           cache: true
           cache-dependency-path: |
             go.sum
-            vendor/modules.txt
       - name: Run version-matrix cells (sequential, time-boxed)
         env:
           GH_TOKEN: ${{ github.token }}
-          GOFLAGS: -mod=vendor
           REPO: ${{ github.repository }}
           REF: ${{ github.ref_name }}
           RESERVATION: ${{ matrix.reservation }}

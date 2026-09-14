@@ -1,0 +1,46 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# network-operator Helm values for GB200 OKE (OCI) InfiniBand.
+#
+# OCI GB200 NVL72 model (vs L40S RoCE / Forge IB): NO ofedDriver — nodes carry host
+# MOFED — and no SR-IOV/nv-ipam/multus either. East-west is InfiniBand (rdma0-3),
+# served by rdmaSharedDevicePlugin from the post-install NicClusterPolicy manifest,
+# NOT the chart. deployCR off so that manifest CR is authoritative.
+# nfd.enabled: false — GPU Operator's NFD is used; no second NFD.
+# deployNodeFeatureRules stays at the chart default (true): the chart's
+# nvidia-nics-rules NodeFeatureRule labels vendor-15b3 class-0200/0207 nodes
+# feature.node.kubernetes.io/pci-15b3.present=true, which the deployment
+# validator's RDMA readiness gate uses as its node cohort. Do NOT copy AKS's
+# deployNodeFeatureRules: false here — AKS disables it only because it ships
+# its own targeted rule manifest; without either source the gate's cohort is
+# empty and it fails closed on every deploy.
+deployCR: false
+nvIpam:
+  enabled: false
+secondaryNetwork:
+  deploy: false
+nfd:
+  enabled: false
+# Operator placement comes from the bundler's system-node scheduling
+# injection (registry nodeScheduling: operator.nodeSelector /
+# operator.tolerations) — no hardcoded affinity here.
+operator:
+  resources:
+    limits:
+      cpu: "1"
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 2Gi

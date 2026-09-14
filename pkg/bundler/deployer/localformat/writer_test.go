@@ -198,7 +198,8 @@ func TestWrite_LocalHelmManifestOnly(t *testing.T) {
 	outDir := t.TempDir()
 
 	res, err := localformat.Write(context.Background(), localformat.Options{
-		OutputDir: outDir,
+		OutputDir:   outDir,
+		AICRVersion: "v1.0.0",
 		Components: []localformat.Component{{
 			Name:       "skyhook-customizations",
 			Namespace:  "skyhook",
@@ -543,7 +544,7 @@ func TestWrite_FolderLimit_CountsEmissionsNotComponents(t *testing.T) {
 	// Helper: build n primary-only upstream-Helm components.
 	makeComponents := func(n int) []localformat.Component {
 		out := make([]localformat.Component, n)
-		for i := 0; i < n; i++ {
+		for i := range n {
 			name := fmt.Sprintf("c%04d", i)
 			out[i] = localformat.Component{
 				Name:       name,

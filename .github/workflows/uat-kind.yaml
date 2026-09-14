@@ -199,7 +199,6 @@ jobs:
       - name: Build aicr binary
         if: inputs.aicr_version == '' && inputs.skip_tests != true
         env:
-          GOFLAGS: -mod=vendor
           COMMIT_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail

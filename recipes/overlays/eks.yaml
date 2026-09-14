@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: eks
 
@@ -28,7 +28,7 @@ spec:
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
     - name: K8s.server.version
-      value: ">= 1.28"
+      value: ">= 1.32"
 
   # EKS-specific components
   componentRefs:

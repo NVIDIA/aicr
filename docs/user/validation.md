@@ -38,7 +38,7 @@ any phase. If pre-flight fails, no validator Jobs are deployed.
 - `kubectl` configured for the target cluster (validator dispatches K8s Jobs; pre-flight only needs the snapshot).
 - Cluster service account with RBAC to create Jobs, ConfigMaps, and read cluster state (AICR creates its own `aicr-validation` namespace on first run).
 - **AKS profiled recipes**: the readiness pre-flight re-evaluates the recipe's profile constraint (`K8s.aks-gpu-pools.gpu-driver`), so the snapshot must carry that reading — capture it with `aicr snapshot --aks-gpu-pools <az dump>`, or pass the same flag to `aicr validate` when it captures live. A snapshot without the reading fails readiness closed (exit 2).
-- **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `driver-installer` requires every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin is the sole advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate without the flag; a cap larger than the node count truncates nothing and validates normally). No provider projection flag is needed on GKE — the constraint reads node labels the standard snapshot already carries. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
+- **GKE recipes**: the readiness pre-flight re-evaluates the recipe's `gpuStack` profile constraint over the GPU-node set (nodes carrying `cloud.google.com/gke-accelerator`): the default `gke-default` value requires that **no** GPU node carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin` (GKE's managed plugin stays the `nvidia.com/gpu` advertiser), while `bundle-installer` requires every GPU node to carry `gke-no-default-nvidia-gpu-device-plugin=true` (so the GPU Operator's plugin is the sole advertiser). The check fails closed (exit 2) on labels contradicting the selected value, mixed labels, malformed or ambiguous label readings, a snapshot with no identifiable GPU nodes, and when `--max-nodes-per-entry` actually truncated a participating label reading (a truncated node list cannot prove set membership — regenerate without the flag; a cap larger than the node count truncates nothing and validates normally). No provider projection flag is needed on GKE — the constraint reads node labels the standard snapshot already carries. See [GKE GPU Setup](../integrator/gke-gpu-setup.md#gpu-device-plugin-ownership) for the full setup and the qualification matrix.
 
 ## Training performance validation
 
@@ -50,8 +50,8 @@ ones) that match the target fabric:
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`) | GB200 + EKS. Asserts EFA actually carried traffic — catches silent fallback to Socket when the NVIDIA driver is missing `NVreg_GrdmaPciTopoCheckOverride=1`. |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 + EKS, and GB200 + OKE. Asserts the NVLS communicator actually initialized — catches silent fallback to EFA (EKS) or Socket (OKE) when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the default fabric — see [GB200 NET preflight](#gb200-net-preflight-gpudirect-rdma-prerequisites). |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 (EKS, OKE); GB300 (generic); VR200 (RKE2). Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
@@ -61,7 +61,7 @@ whose fabric matches its hardware, or, for a private service whose fabric
 matches no embedded template, by
 [supplying its own benchmark runtime](#supplying-a-benchmark-runtime-for-a-private-service).
 
-The `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster
+On EKS, the `-net` check defaults to the AWS EFA fabric. On a ConnectX **RoCE** cluster
 (e.g. DGXC GB300 `p6e-gb300r`), set `AICR_NCCL_FABRIC=roce` in the `aicr
 validate` environment to run the NET test over NCCL's built-in IB/verbs
 transport across `roce.networking.k8s.aws` DRA devices instead. The value is
@@ -78,9 +78,13 @@ GB200/EKS recipes (both `training` and `inference` intents) enable `-net` and
 expose two inter-node fabrics simultaneously and a single auto-detect test
 would only exercise one of them.
 
-GB200/OKE recipes enable `-nvls` only: OKE NET/RDMA stays out of the support
-matrix until the OCI testbed proves a non-Socket NCCL transport end to end, so
-OKE validates the NVL72 IMEX fabric without an EFA/NET counterpart.
+GB200/OKE training recipes follow the same pattern and enable `-net` and
+`-nvls` together, with the same `>= 40` / `>= 500` GB/s floors as GB200/EKS.
+On OKE, `-net` exercises the NVL72 rack's InfiniBand east-west fabric
+(`rdma0-3`, advertised as `nvidia.com/mlnxnics` by the recipe's
+`rdmaSharedDevicePlugin` NicClusterPolicy) over NCCL's built-in IB/verbs
+transport — no EFA or RoCE plumbing is involved. Both variants were validated
+end to end on a `BM.GPU.GB200.4` NVL72 rack.
 
 ```bash
 # Capture snapshot, generate training recipe, validate the performance phase.
@@ -106,10 +110,23 @@ can false-fail a healthy run. Making the NCCL gate fabric/transport-class
 aware is tracked in [#1256](https://github.com/NVIDIA/aicr/issues/1256).
 
 Expected flow (~5–10 min per variant): readiness pre-flight → deploy
-`TrainingRuntime` + `TrainJob` in `aicr-validation` → worker pods reach
-`Running` → run `all_reduce_perf` → parse peak bus bandwidth → verify the
-intended transport actually carried traffic (for `-net` / `-nvls`) → compare
-to recipe constraint (10 % tolerance) → cleanup.
+`TrainingRuntime` + `TrainJob` in a per-run namespace named
+`aicr-nccl-perf-<variant>-<run-id>` → worker pods reach `Running` → run
+`all_reduce_perf` → parse peak bus bandwidth → verify the intended transport
+actually carried traffic (for `-net` / `-nvls`) → compare to recipe
+constraint (10 % tolerance) → cleanup.
+
+Each variant (`-net`, `-nvls`, default) gets its own namespace, deleted on
+exit along with its `TrainingRuntime`/`TrainJob`. A namespace left behind by
+an interrupted run is reclaimed by a same-run-ID retry only if no
+`Pending`/`Running`/`Unknown` pod remains in it and its execution lock (a
+`Lease` named `aicr-nccl-run-lock` in that namespace) has gone stale, 20
+minutes past its last renewal. Otherwise the retry fails with a conflict
+rather than risk two executions sharing one namespace; check
+`kubectl get pods -n <namespace>` and the Lease's age to find and clear
+whichever is actually stuck. A standalone run (no run ID) is never retried
+into its old namespace; that namespace is only pruned automatically, on a
+later run once an hour has passed and both conditions above hold.
 
 A passing CTRF entry:
 
@@ -136,6 +153,67 @@ driver, and Kubeflow Trainer are installed and healthy before the benchmark):
 ```bash
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
 ```
+
+### GB200 NET preflight: GPUDirect RDMA prerequisites
+
+Before running `nccl-all-reduce-bw-net` on GB200 (EKS or OKE), a preflight
+checks each GPU node for the driver-side prerequisite of GPUDirect RDMA.
+Without it NCCL falls back to the Socket transport. The `-net` check catches
+that on its own — it fails on a `Using network Socket` banner rather than
+reporting a figure — so the preflight exists to fail fast, naming the driver,
+instead of after a full benchmark run.
+
+The preflight runs on the default fabric only: EFA on EKS, built-in IB/verbs on
+OKE. `AICR_NCCL_FABRIC=roce` is EKS-only: there it selects a different template
+and skips the preflight, so the benchmark runs ungated. On OKE the RoCE
+combination is unsupported, so carrying the variable over makes the declared
+`-net` check skip entirely rather than run.
+
+**Before R595** — which includes `580.173.02`, the version AICR pins — the
+driver must be loaded with `NVreg_GrdmaPciTopoCheckOverride=1`. Without it the
+driver refuses to let a PCIe-attached NIC (EFA on EKS, ConnectX IB on OKE)
+attach dma-buf handles to GPU memory, and the kernel logs:
+
+```text
+NVRM: dma-buf attach failed: topology not supported for mapping type FORCE_PCIE
+```
+
+Set the parameter according to who owns the driver:
+
+| Driver owner | How to set it |
+|---|---|
+| GPU Operator | Point ClusterPolicy `spec.driver.kernelModuleConfig.name` at a ConfigMap in `gpu-operator` containing `nvidia.conf: options nvidia NVreg_GrdmaPciTopoCheckOverride=1` |
+| Node image (OKE default `gpuStack=oci-managed`) | Set the module parameter in the image or node bootstrap (`/etc/modprobe.d`), then reboot the GPU nodes |
+
+**Deleting the `nvidia-driver` DaemonSet pods does not apply the change, and
+neither does editing only the ConfigMap.** The reload decision is keyed off the
+ClusterPolicy spec, so the spec itself has to change. Setting
+`kernelModuleConfig.name` is such a change, but AICR's GB200/GB300 overlays
+already set it — where it is present, point it at a differently-named ConfigMap
+so the spec actually differs. Confirm on a node afterwards:
+
+```shell
+grep GrdmaPciTopoCheckOverride /proc/driver/nvidia/params
+```
+
+**On R595 and later** the parameter no longer exists, and setting it has no
+effect because the kernel silently ignores unknown module options. R595 replaced
+it with a PCIe topology requirement the preflight cannot check, so validation
+fails closed instead of assuming. On EKS `p6e-gb200`/`gb300` that requirement is
+known not to be satisfied — the measurement is recorded alongside the driver pin
+in `recipes/components/gpu-operator/values.yaml`; on OKE it is unmeasured.
+
+The remedy on R595+ is a driver at R580 — AICR ships `580.173.02` — pinned
+through the ClusterPolicy where the GPU Operator owns the driver, or through the
+node image where it does not.
+
+**Undetermined** is a third outcome, reached without either verdict above: if
+`/proc/driver/nvidia/version` or `params` cannot be read, or the version banner
+does not parse, the preflight reports the state as undetermined rather than
+assuming one. SELinux denying the read inside the container, or a
+driver-container remount leaving the path empty, produces this. Changing the
+driver version does not address it — read the file on a target node to see
+whether it is unreadable or carries an unrecognised banner.
 
 ### Opting external recipes into a benchmark profile
 
@@ -177,7 +255,7 @@ is passed it replaces the automatic filters rather than narrowing them.
 
 Valid profiles are the pairs in the applicability table above: `b200/any`,
 `gb200/any`, `gb200/eks`, `gb200/oke`, `h100/aks`, `h100/eks`, `h100/gke`,
-`h200/eks`. A
+`h200/eks`, `vr200/rke2`. A
 malformed or unknown value **fails** the check rather than silently skipping
 it. A valid profile that doesn't implement a requested variant (e.g.
 `gb200/eks` with the auto-detect `nccl-all-reduce-bw` check) skips just that
@@ -377,35 +455,39 @@ per overlay to tune model and load for each accelerator, or override globally
 with the `AICR_INFERENCE_PERF_MODEL` / `AICR_INFERENCE_PERF_CONCURRENCY_PER_GPU`
 catalog knobs (recipe wins over catalog env wins over default).
 
-`inference-routing-mode` selects the Dynamo 1.2 Kubernetes routing path. The
+`inference-routing-mode` selects the Dynamo Kubernetes routing path. The
 default `dynamo-router` mode deploys a Dynamo frontend with load-aware
 least-loaded routing (`DYN_ROUTER_MODE=least-loaded`), which balances by each
 worker's active in-flight load so a transiently-slow worker stops receiving its
 full share (see issue #1197). Normal frontend-to-worker request/response traffic
-uses Dynamo's request plane (Dynamo 1.2 defaults to TCP); AICR does not set
-`DYN_REQUEST_PLANE=nats`. Workers still run the vLLM ZMQ KV-cache event
-publisher relayed onto the NATS event plane, but least-loaded routing does not
-consume those events. Set it to `gateway-epp`
+uses Dynamo's request plane (Dynamo 1.4+ defaults to TCP); AICR does not set
+`DYN_REQUEST_PLANE=nats`. Workers publish KV-cache events directly over ZMQ
+with no NATS relay, but least-loaded routing does not consume those events —
+only `DYN_ROUTER_MODE=kv` does. Set it to `gateway-epp`
 to exercise GAIE/EPP: the validator deploys an EPP component, worker frontend
 sidecars in direct mode, and an HTTPRoute through the AICR-managed inference
-gateway. The direct-mode sidecars honor EPP routing headers; they are not the
-ZMQ-to-NATS relay.
+gateway. The direct-mode sidecars honor EPP routing headers; they do not
+relay KV events.
 
 **Model-weights cache and `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`.** The benchmark downloads
 the model **once** into a PVC and serves all workers from it (on by default;
 avoids per-IP Hugging Face throttling). The cache PVC needs a StorageClass: it
-uses the cluster's **default** StorageClass unless you set
-`AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`. On a cluster with **no default
-StorageClass** (common on EKS — e.g. only a non-default `gp2`) and no value set,
-the check **fails fast** in seconds with guidance rather than hanging; set
+uses the cluster's **default** StorageClass unless you set one, with
+precedence **recipe constraint > catalog env > cluster default**. Set it
+per accelerator via the `inference-model-cache-storage-class` performance
+constraint, or globally via
 `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS=<name>` (e.g. `gp2`/`gp3` on EKS,
-`standard-rwo` on GKE) on the `inference-perf` catalog entry's `env` (or via a
-catalog overlay in the `aicr validate --data <dir>` directory), or disable the cache with
-`AICR_INFERENCE_PERF_MODEL_CACHE_SIZE=off`. Like the other
-`AICR_INFERENCE_PERF_*` knobs, this is a **catalog/`--data`** setting — it is
-**not** read from the shell environment of the process running `aicr validate`
-(only `HF_TOKEN` is). AICR-deployed EKS clusters get a default `gp3` StorageClass
-from the `aws-ebs-csi-driver` component, so the cache works there with no knob.
+`standard-rwo` on GKE, though not every StorageClass attaches to every node
+machine family) on the `inference-perf` catalog entry's `env` (or via a
+catalog overlay in the `aicr validate --data <dir>` directory). On a cluster
+with **no default StorageClass** (common on EKS, since some clusters ship
+only a non-default `gp2`) and neither set, the check **fails fast** in
+seconds with guidance rather than hanging. Disable the cache instead with
+`AICR_INFERENCE_PERF_MODEL_CACHE_SIZE=off`. Unlike the recipe constraint, the
+catalog env knob is **not** read from the shell environment of the process
+running `aicr validate` (only `HF_TOKEN` is). AICR-deployed EKS clusters get a
+default `gp3` StorageClass from the `aws-ebs-csi-driver` component, so the
+cache works there with no knob.
 
 **Debugging a failed run with `AICR_INFERENCE_PERF_NO_CLEANUP`.** By default the
 validator deletes the per-run namespace (DGD, workers, frontend, AIPerf Job) on

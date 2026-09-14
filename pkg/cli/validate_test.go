@@ -79,15 +79,16 @@ func TestResolveCNCFAllocationPolicy(t *testing.T) {
 			var gotPolicy string
 			cmd := validateCmd()
 			cmd.Action = func(ctx context.Context, c *cli.Command) error {
-				cfg, err := loadCmdConfig(ctx, c)
+				cfg, err := loadFacadeConfig(ctx, c)
 				if err != nil {
 					return err
 				}
-				resolved, err := cfg.Validation().Resolve()
+				resolved, err := cfg.Unwrap().Validation().Resolve()
 				if err != nil {
 					return err
 				}
-				gotPolicy, err = resolveCNCFAllocationPolicy(ctx, c, cfg, resolved)
+				recipeFilePath := stringFlagOrConfig(c, "recipe", resolved.RecipePath)
+				gotPolicy, err = resolveCNCFAllocationPolicy(ctx, c, cfg, recipeFilePath)
 				return err
 			}
 			err := cmd.Run(t.Context(), args)
@@ -470,6 +471,222 @@ func TestDeployAgentForValidation_ExplicitKubeconfigFailsFast(t *testing.T) {
 	}
 }
 
+// TestValidateAgentConfig_ToAgentConfig_ForwardsRunID covers ONLY the
+// toAgentConfig projection boundary: given a validateAgentConfig whose
+// runID field is already set, toAgentConfig must copy it onto the facade
+// AgentConfig.RunID unchanged (and set NameBase to validateNameBase rather
+// than leaving JobName/ServiceAccountName to carry the naming prefix).
+//
+// What this does NOT cover: it never runs the validateCmd Action, so it
+// says nothing about whether `aicr validate` generates exactly one RunID
+// per invocation and hands that SAME value to both the live-capture
+// snapshot agent and the validator Jobs — that single-generation invariant
+// (ADR-020 Ruling 7) is not exercised by an automated test at all; see the
+// WARNING comment on the Action's `runID := v1.GenerateRunID()` call in
+// validate.go for why, and TestParseValidateAgentConfig_ForwardsCallerRunID
+// below for the adjacent (also boundary-only) coverage on the parsing side.
+func TestValidateAgentConfig_ToAgentConfig_ForwardsRunID(t *testing.T) {
+	cfg := &validateAgentConfig{
+		namespace: "aicr-validation-test",
+		runID:     "20260821-142233-9f3a1c0b7e2d4a55",
+	}
+
+	ac := cfg.toAgentConfig()
+
+	if ac.RunID != cfg.runID {
+		t.Errorf("AgentConfig.RunID = %q, want %q (validateAgentConfig.runID)", ac.RunID, cfg.runID)
+	}
+	if ac.NameBase != validateNameBase {
+		t.Errorf("AgentConfig.NameBase = %q, want %q", ac.NameBase, validateNameBase)
+	}
+}
+
+// TestParseValidateAgentConfig_ForwardsCallerRunID covers ONLY
+// parseValidateAgentConfig's own mapping: the runID parameter it is given
+// lands unchanged on the returned validateAgentConfig.runID field.
+//
+// This test replaces cmd.Action outright (to isolate that mapping from
+// recipe/snapshot I/O without touching a cluster), so NONE of the
+// production Action code at validate.go's `runID := v1.GenerateRunID()`
+// call through the parseValidateAgentConfig call site actually runs here.
+// It cannot detect a regression in how the real Action generates or
+// threads runID — in particular it says nothing about ADR-020 Ruling 7's
+// single-generation invariant (one v1.GenerateRunID() call feeding BOTH
+// the live-capture agent and the validator Jobs). See the WARNING comment
+// on that call site in validate.go: no automated test in this package
+// enforces single-generation. The two consumer sites are NOT mutually
+// exclusive — with neither --snapshot nor --no-cluster, the live-capture
+// branch and runValidation both consume the id in one invocation. What
+// blocks the test is that exercising both requires live-cluster I/O (both
+// branches deploy Jobs) with no injectable seam in the Action to fake it.
+func TestParseValidateAgentConfig_ForwardsCallerRunID(t *testing.T) {
+	const wantRunID = "20260821-142233-9f3a1c0b7e2d4a55"
+
+	var captured *validateAgentConfig
+	cmd := validateCmd()
+	cmd.Action = func(ctx context.Context, c *cli.Command) error {
+		cfg, err := loadFacadeConfig(ctx, c)
+		if err != nil {
+			return err
+		}
+		opts, _, err := cfg.ValidateSettings()
+		if err != nil {
+			return err
+		}
+		shared := validateSharedResolved{namespace: "aicr-validation-test"}
+		captured = parseValidateAgentConfig(c, opts, shared, wantRunID)
+		return nil
+	}
+	if err := cmd.Run(t.Context(), []string{"validate", "--no-cluster"}); err != nil {
+		t.Fatalf("validate run: %v", err)
+	}
+
+	if captured.runID != wantRunID {
+		t.Errorf("validateAgentConfig.runID = %q, want %q", captured.runID, wantRunID)
+	}
+}
+
+// TestValidateCmd_NoConfigDefaultsToCleanup is the regression test for the
+// fix-round-2 security defect: a plain `aicr validate` — no --config, no
+// --no-cleanup, which is the common invocation — must clean up by default.
+//
+// Before the fix, ValidateSettings() returned only (ValidateSettings, error),
+// and its zero value (Cleanup: false, returned for both a nil Config and an
+// absent spec.validate) was trusted directly as the fallback for
+// --no-cleanup. That silently flipped the CLI's own default: a plain
+// invocation left the cluster-admin ClusterRoleBinding and validator Jobs
+// active. The Action is overridden here to isolate exactly the computation
+// that broke — loadFacadeConfig, ValidateSettings' presence bool,
+// validateCleanupFallback, then the same boolFlagOrConfig call the
+// production Action makes — without needing a live cluster to reach it.
+func TestValidateCmd_NoConfigDefaultsToCleanup(t *testing.T) {
+	var gotNoCleanup bool
+	cmd := validateCmd()
+	cmd.Action = func(ctx context.Context, c *cli.Command) error {
+		cfg, err := loadFacadeConfig(ctx, c)
+		if err != nil {
+			return err
+		}
+		opts, present, err := cfg.ValidateSettings()
+		if err != nil {
+			return err
+		}
+		cleanupFallback := validateCleanupFallback(opts, present)
+		gotNoCleanup = boolFlagOrConfig(c, "no-cleanup", !cleanupFallback)
+		return nil
+	}
+	if err := cmd.Run(t.Context(), []string{"validate"}); err != nil {
+		t.Fatalf("validate run: %v", err)
+	}
+
+	if gotNoCleanup {
+		t.Error("noCleanup = true, want false: a plain `aicr validate` " +
+			"(no --config, no --no-cleanup) must clean up by default")
+	}
+}
+
+// TestValidateCleanupFallback drives validateCleanupFallback directly for
+// both branches. present=false is also exercised indirectly by
+// TestValidateCmd_NoConfigDefaultsToCleanup through a full command run; the
+// two present=true rows here are not exercised by any other test — present's
+// whole point is to gate ONLY when spec.validate was actually evaluated, so
+// a present=true document that decided Cleanup=false must flow through
+// unmodified rather than being silently overridden by the CLI's own
+// clean-up-by-default.
+func TestValidateCleanupFallback(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    aicr.ValidateSettings
+		present bool
+		want    bool
+	}{
+		{"absent spec.validate defaults to cleanup", aicr.ValidateSettings{Cleanup: false}, false, true},
+		{"present spec.validate with cleanup true", aicr.ValidateSettings{Cleanup: true}, true, true},
+		{"present spec.validate with cleanup false", aicr.ValidateSettings{Cleanup: false}, true, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := validateCleanupFallback(tt.opts, tt.present); got != tt.want {
+				t.Errorf("validateCleanupFallback(%+v, present=%t) = %t, want %t",
+					tt.opts, tt.present, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestValidateCmd_DeclaredNameDefaultsNeverReachTheAgent is the validate-side
+// half of TestSnapshotCmd_DeclaredNameDefaultsNeverReachTheDeployer; see that
+// test for why an unset --service-account-name must not resolve to a name aicr
+// chose. The released v1 defaults here are "aicr-validate" for --job-name and
+// "aicr" for --service-account-name, and both stay declared for `--help` and
+// testdata/cli-surface.golden while neither is delivered as a value.
+//
+// The prefix the agent's objects actually get comes from
+// AgentConfig.NameBase (validateNameBase) instead, which is what keeps this
+// command's agent resources distinguishable from `aicr snapshot`'s.
+func TestValidateCmd_DeclaredNameDefaultsNeverReachTheAgent(t *testing.T) {
+	cmd := validateCmd()
+	if got := stringFlagValue(t, cmd, "job-name"); got != validateNameBase {
+		t.Errorf("--job-name declared default = %q, want the released %q",
+			got, validateNameBase)
+	}
+	if got := stringFlagValue(t, cmd, "service-account-name"); got != name {
+		t.Errorf("--service-account-name declared default = %q, want the released %q",
+			got, name)
+	}
+
+	capture := func(t *testing.T, args ...string) *validateAgentConfig {
+		t.Helper()
+		var captured *validateAgentConfig
+		c := validateCmd()
+		c.Action = func(ctx context.Context, cc *cli.Command) error {
+			cfg, err := loadFacadeConfig(ctx, cc)
+			if err != nil {
+				return err
+			}
+			opts, _, err := cfg.ValidateSettings()
+			if err != nil {
+				return err
+			}
+			shared := validateSharedResolved{namespace: "aicr-validation-test"}
+			captured = parseValidateAgentConfig(cc, opts, shared, "20260821-142233-9f3a1c0b7e2d4a55")
+			return nil
+		}
+		if err := c.Run(t.Context(), append([]string{"validate", "--no-cluster"}, args...)); err != nil {
+			t.Fatalf("validate run: %v", err)
+		}
+		return captured
+	}
+
+	unset := capture(t)
+	if unset.serviceAccountName != "" {
+		t.Errorf("serviceAccountName = %q for an unset flag, want empty; a "+
+			"non-empty value is probed for existence and a hit disables RBAC "+
+			"management for the whole run", unset.serviceAccountName)
+	}
+	if unset.jobName != "" {
+		t.Errorf("jobName = %q for an unset flag, want empty", unset.jobName)
+	}
+	if base := unset.toAgentConfig().NameBase; base != validateNameBase {
+		t.Errorf("AgentConfig.NameBase = %q, want %q — it is what supplies the "+
+			"prefix once the declared defaults stop being delivered",
+			base, validateNameBase)
+	}
+
+	// Guard against the vacuous pass: an operator-supplied name must survive,
+	// since that is the only route into exact-ServiceAccount mode.
+	explicit := capture(t, "--job-name", "validate-gpu-nodes",
+		"--service-account-name", "irsa-snapshotter")
+	if explicit.serviceAccountName != "irsa-snapshotter" {
+		t.Errorf("serviceAccountName = %q, want the operator's %q",
+			explicit.serviceAccountName, "irsa-snapshotter")
+	}
+	if explicit.jobName != "validate-gpu-nodes" {
+		t.Errorf("jobName = %q, want the operator's %q",
+			explicit.jobName, "validate-gpu-nodes")
+	}
+}
+
 // TestClassifyIgnoredAKSGPUPools pins the provenance matrix of the
 // ignored-projection note: explicit CLI presence (either flag form) always
 // warns; a purely ambient env source is demoted to debug; nothing logs
@@ -481,6 +698,7 @@ func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
 		envValue      string
 		poolsPath     string
 		snapshotPath  string
+		flagName      string // empty means aks-gpu-pools
 		wantShouldLog bool
 		wantAtWarn    bool
 	}{
@@ -529,6 +747,25 @@ func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
 			wantAtWarn:    true,
 		},
 		{
+			name:          "oke-addons explicit flag: warn",
+			args:          []string{"validate", "--oke-addons", "a.json", "-s", "snap.yaml"},
+			poolsPath:     "a.json",
+			snapshotPath:  "snap.yaml",
+			flagName:      "oke-addons",
+			wantShouldLog: true,
+			wantAtWarn:    true,
+		},
+		{
+			name:          "oke-addons ambient env only (AICR_OKE_ADDONS_PATH): debug",
+			args:          []string{"validate", "-s", "snap.yaml"},
+			envValue:      "a.json",
+			poolsPath:     "a.json",
+			snapshotPath:  "snap.yaml",
+			flagName:      "oke-addons",
+			wantShouldLog: true,
+			wantAtWarn:    false,
+		},
+		{
 			name: "similarly-prefixed flag is not a false positive",
 			args: []string{"validate", "--aks-gpu-pools-extra", "x", "-s", "snap.yaml"},
 			// pools path resolvable only via env in this shape.
@@ -542,7 +779,11 @@ func TestClassifyIgnoredAKSGPUPools(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			shouldLog, atWarn := classifyIgnoredAKSGPUPools(tt.args, tt.envValue, tt.poolsPath, tt.snapshotPath)
+			flagName := tt.flagName
+			if flagName == "" {
+				flagName = "aks-gpu-pools"
+			}
+			shouldLog, atWarn := classifyIgnoredProjection(tt.args, tt.envValue, tt.poolsPath, tt.snapshotPath, flagName)
 			if shouldLog != tt.wantShouldLog || atWarn != tt.wantAtWarn {
 				t.Fatalf("classify = (log=%v, warn=%v), want (log=%v, warn=%v)",
 					shouldLog, atWarn, tt.wantShouldLog, tt.wantAtWarn)

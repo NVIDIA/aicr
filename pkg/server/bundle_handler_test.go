@@ -91,8 +91,17 @@ func TestDecodeRecipeResultRequestStrictForConfiguredRecipes(t *testing.T) {
 			body: `{"apiVersion":"aicr.run/v1alpha3","kind":"RecipeResult","configuration":{"slurm":{"accounting":{"mode":"disabled"}}}}`,
 		},
 		{
+			name: "Release N target configured recipe succeeds",
+			body: `{"apiVersion":"aicr.run/v1beta2","kind":"RecipeResult","configuration":{"slurm":{"accounting":{"mode":"disabled"}}}}`,
+		},
+		{
 			name:    "configured rejects unknown field",
 			body:    `{"apiVersion":"aicr.run/v1alpha3","kind":"RecipeResult","configuration":{"slurm":{"accounting":{"mode":"disabled"}}},"unknownField":true}`,
+			wantErr: true,
+		},
+		{
+			name:    "Release N target configured rejects unknown field",
+			body:    `{"apiVersion":"aicr.run/v1beta2","kind":"RecipeResult","unknownField":true}`,
 			wantErr: true,
 		},
 		{
@@ -223,7 +232,7 @@ func TestDecodeBundleRecipeV2ContentType(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := decodeBundleRecipe(bytes.NewReader(body), tt.contentType, true)
+			_, err := decodeBundleRecipe(bytes.NewReader(body), tt.contentType)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("decodeBundleRecipe() error: %v", err)
@@ -239,33 +248,17 @@ func TestDecodeBundleRecipeV2ContentType(t *testing.T) {
 
 func TestProfileAwareBundleEndpoints(t *testing.T) {
 	h := newTestBundleHandler(t)
-	post := func(t *testing.T, v2 bool, query string, body []byte) *httptest.ResponseRecorder {
+	post := func(t *testing.T, query string, body []byte) *httptest.ResponseRecorder {
 		t.Helper()
-		path := "/v1/bundle"
-		if v2 {
-			path = "/v2/bundle"
-		}
-		path += query
-		req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/v1/bundle"+query, bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		w := httptest.NewRecorder()
-		if v2 {
-			h.HandleBundlesV2(w, req)
-		} else {
-			h.HandleBundles(w, req)
-		}
+		h.HandleBundles(w, req)
 		return w
 	}
 
-	t.Run("v1 rejects profile artifact", func(t *testing.T) {
-		w := post(t, false, "", profileBundleBody(t))
-		if w.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
-		}
-	})
-
-	t.Run("v2 accepts profile artifact", func(t *testing.T) {
-		w := post(t, true, "", profileBundleBody(t))
+	t.Run("accepts profile artifact", func(t *testing.T) {
+		w := post(t, "", profileBundleBody(t))
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 		}
@@ -274,23 +267,36 @@ func TestProfileAwareBundleEndpoints(t *testing.T) {
 		}
 	})
 
-	t.Run("v2 accepts legacy artifact", func(t *testing.T) {
-		w := post(t, true, "", resolveEmbeddedBundleBody(t))
+	t.Run("accepts Release N target profile artifact", func(t *testing.T) {
+		body := bytes.Replace(
+			profileBundleBody(t),
+			[]byte(recipe.RecipeProfileAPIVersion),
+			[]byte(header.GroupVersionV1Beta2),
+			1,
+		)
+		w := post(t, "", body)
 		if w.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
 		}
 	})
 
-	t.Run("v2 strictly rejects unknown artifact field", func(t *testing.T) {
+	t.Run("accepts legacy artifact", func(t *testing.T) {
+		w := post(t, "", resolveEmbeddedBundleBody(t))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+		}
+	})
+
+	t.Run("strictly rejects unknown artifact field", func(t *testing.T) {
 		body := profileBundleBody(t)
 		body = bytes.Replace(body, []byte(`"componentRefs"`), []byte(`"profie":true,"componentRefs"`), 1)
-		w := post(t, true, "", body)
+		w := post(t, "", body)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 		}
 	})
 
-	t.Run("v2 strictly rejects unknown excluded overlay field", func(t *testing.T) {
+	t.Run("strictly rejects unknown excluded overlay field", func(t *testing.T) {
 		body := profileBundleBody(t)
 		body = bytes.Replace(
 			body,
@@ -298,7 +304,7 @@ func TestProfileAwareBundleEndpoints(t *testing.T) {
 			[]byte(`"metadata":{"excludedOverlays":[{"name":"overlay-a","reasn":"constraint-failed"}],`),
 			1,
 		)
-		w := post(t, true, "", body)
+		w := post(t, "", body)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 		}
@@ -328,14 +334,14 @@ func TestProfileAwareBundleEndpoints(t *testing.T) {
 				[]byte(tt.replacement),
 				1,
 			)
-			w := post(t, true, "", body)
+			w := post(t, "", body)
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 			}
 		})
 	}
 
-	t.Run("v2 rejects profile version without selection", func(t *testing.T) {
+	t.Run("rejects profile version without selection", func(t *testing.T) {
 		var result recipe.RecipeResult
 		if err := json.Unmarshal(profileBundleBody(t), &result); err != nil {
 			t.Fatalf("decode fixture: %v", err)
@@ -345,14 +351,14 @@ func TestProfileAwareBundleEndpoints(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshal fixture: %v", err)
 		}
-		w := post(t, true, "", body)
+		w := post(t, "", body)
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 		}
 	})
 
-	t.Run("v2 rejects unknown query parameter", func(t *testing.T) {
-		w := post(t, true, "?profie=gpuStack%3Ddriver-installed", profileBundleBody(t))
+	t.Run("rejects unknown query parameter", func(t *testing.T) {
+		w := post(t, "?profie=gpuStack%3Ddriver-installed", profileBundleBody(t))
 		if w.Code != http.StatusBadRequest {
 			t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 		}
@@ -372,7 +378,7 @@ func TestProfileAwareBundleEndpoints(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			w := post(t, true, tt.query, profileBundleBody(t))
+			w := post(t, tt.query, profileBundleBody(t))
 			if w.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d, want 400; body: %s", w.Code, w.Body.String())
 			}
@@ -715,11 +721,12 @@ func TestBundleHandler_IncoherentComponentRef(t *testing.T) {
 
 // TestBundleHandler_LegacyRecipeHeaders pins the backward compatibility the
 // BundleRecipeRequest schema advertises: POST /v1/bundle accepts a recipe whose
-// header fields are absent, empty, or carry the legacy Recipe kind this
-// contract published through v0.18.0.
+// header fields are absent or empty.
 //
-// The handler validates supported non-empty apiVersions while preserving this
-// explicit legacy window. The canonical case is included deliberately as a
+// The handler validates supported non-empty apiVersions while preserving the
+// absent/empty tolerance for artifacts that predate those fields. The legacy
+// `kind: Recipe` this contract published through v0.18.0 is no longer
+// accepted; see TestBundleHandler_RejectsLegacyRecipeKind. The canonical case is included deliberately as a
 // control: it proves a 200 here means the body was accepted, not that the
 // assertion is vacuous.
 func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
@@ -736,8 +743,8 @@ func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 	if got := fixture["kind"]; got != recipe.RecipeResultKind {
 		t.Fatalf("fixture kind = %v, want %q", got, recipe.RecipeResultKind)
 	}
-	if got := fixture["apiVersion"]; got != recipe.RecipeAPIVersion {
-		t.Fatalf("fixture apiVersion = %v, want %q", got, recipe.RecipeAPIVersion)
+	if got := fixture["apiVersion"]; got != recipe.RecipeResultAPIVersion {
+		t.Fatalf("fixture apiVersion = %v, want %q", got, recipe.RecipeResultAPIVersion)
 	}
 
 	tests := []struct {
@@ -747,6 +754,12 @@ func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 		{
 			name:   "canonical headers (control)",
 			mutate: func(map[string]any) {},
+		},
+		{
+			name: "Release N target apiVersion",
+			mutate: func(body map[string]any) {
+				body["apiVersion"] = header.GroupVersionV1
+			},
 		},
 		{
 			name: "both headers absent",
@@ -791,19 +804,6 @@ func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 			name: "apiVersion empty, kind canonical",
 			mutate: func(body map[string]any) {
 				body["apiVersion"] = ""
-			},
-		},
-		{
-			name: "legacy Recipe kind with apiVersion absent",
-			mutate: func(body map[string]any) {
-				body["kind"] = string(header.KindRecipe)
-				delete(body, "apiVersion")
-			},
-		},
-		{
-			name: "legacy Recipe kind",
-			mutate: func(body map[string]any) {
-				body["kind"] = string(header.KindRecipe)
 			},
 		},
 	}
@@ -866,7 +866,7 @@ func TestBundleHandler_LegacyRecipeHeaders(t *testing.T) {
 // kind contract: only the shapes BundleRecipeRequest advertises ("",
 // RecipeResult, and the legacy Recipe) are accepted. An off-contract kind is
 // rejected rather than echoed into an artifact the CLI file loader would then
-// refuse to read back — matching the file loader and the strict /v2/bundle
+// refuse to read back — matching the file loader and the strict /v1/bundle
 // decode path. See issue #1953.
 func TestBundleHandler_UnsupportedRecipeKind(t *testing.T) {
 	t.Parallel()
@@ -899,6 +899,9 @@ func TestBundleHandler_UnsupportedRecipeKind(t *testing.T) {
 			var resp struct {
 				Code    string `json:"code"`
 				Message string `json:"message"`
+				Details struct {
+					Error string `json:"error"`
+				} `json:"details"`
 			}
 			if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 				t.Fatalf("unmarshal error response: %v (body: %s)", err, w.Body.String())
@@ -906,8 +909,17 @@ func TestBundleHandler_UnsupportedRecipeKind(t *testing.T) {
 			if resp.Code != string(aicrerrors.ErrCodeInvalidRequest) {
 				t.Errorf("error code = %q, want %q", resp.Code, aicrerrors.ErrCodeInvalidRequest)
 			}
-			if !strings.Contains(resp.Message, kind) {
-				t.Errorf("error message %q does not name the rejected kind %q", resp.Message, kind)
+			// The cause lands in details.error, which is where WriteErrorFromErr
+			// puts it for 4xx (see the HTTP server rules in AGENTS.md). What
+			// matters is that the client is told which kind was rejected rather
+			// than being handed a field-name decode error.
+			if !strings.Contains(resp.Details.Error, kind) {
+				t.Errorf("error detail %q does not name the rejected kind %q",
+					resp.Details.Error, kind)
+			}
+			if !strings.Contains(resp.Details.Error, string(recipe.RecipeResultKind)) {
+				t.Errorf("error detail %q does not name the expected kind %q",
+					resp.Details.Error, recipe.RecipeResultKind)
 			}
 		})
 	}
@@ -1030,5 +1042,47 @@ func TestBundleHandler_StreamZipFailureAfterCommit(t *testing.T) {
 	}
 	if contentType := recorder.Header().Get("Content-Type"); contentType != "application/zip" {
 		t.Errorf("Content-Type = %q, want application/zip", contentType)
+	}
+}
+
+// TestBundleHandler_RejectsLegacyRecipeKind pins a deliberate contract removal.
+//
+// Before #2112 collapsed the two REST families into one, /v1/bundle normalized
+// `kind: Recipe` — the value this contract published through v0.18.0 — into
+// RecipeResult on ingest, while /v2/bundle decoded strictly and rejected it.
+// The collapse keeps the strict contract, so that tolerance is gone.
+//
+// This is a breaking change to an accepted input, made deliberately while the
+// REST API had no consumers. It is asserted rather than merely dropped so the
+// removal is a pinned decision and not an accident of the refactor: silently
+// losing the old test would leave nothing describing what the endpoint does
+// with a legacy body.
+func TestBundleHandler_RejectsLegacyRecipeKind(t *testing.T) {
+	t.Parallel()
+
+	canonical := resolveEmbeddedBundleBody(t)
+	var body map[string]any
+	if err := json.Unmarshal(canonical, &body); err != nil {
+		t.Fatalf("unmarshal fixture: %v", err)
+	}
+	body["kind"] = string(header.KindRecipe)
+
+	mutated, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal body: %v", err)
+	}
+
+	h := newTestBundleHandler(t)
+	req := httptest.NewRequest(http.MethodPost, "/v1/bundle", bytes.NewReader(mutated))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.HandleBundles(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d for kind %q. Body: %s",
+			rec.Code, http.StatusBadRequest, header.KindRecipe, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), string(recipe.RecipeResultKind)) {
+		t.Errorf("rejection does not name the expected kind; body: %s", rec.Body.String())
 	}
 }

@@ -231,7 +231,7 @@ spec:
     # Helm chart from upstream
     - repoURL: https://helm.ngc.nvidia.com/nvidia
       chart: gpu-operator
-      targetRevision: v26.3.3
+      targetRevision: v26.7.0
       helm:
         valueFiles:
           # Values live under the numbered bundle dir (NNN-<component>/)
@@ -362,18 +362,17 @@ API responses are cacheable (recipe and query responses carry
 HTTP response cache only; the server's internal per-`Client` provider caches
 are not time-bounded and persist until `Client.Close()` is called.
 
-> **Route note:** these helpers use `GET /v2/recipe` — it serves every
+> **Route note:** these helpers use `GET /v1/recipe` — it serves every
 > family (profiled and unprofiled) with the same criteria parameters, plus
 > optional `profile=gpuStack=azure-managed` or
 > `profile=gpuStack=operator-managed` on AKS, and
-> `profile=gpuStack=gke-default` or `profile=gpuStack=driver-installer`
+> `profile=gpuStack=gke-default` or `profile=gpuStack=bundle-installer`
 > on GKE
 > (see [GKE GPU Setup](gke-gpu-setup.md#gpu-device-plugin-ownership)).
-> `/v1/recipe` still works for unprofiled compositions but rejects any
-> composition that resolves with a profile — the embedded AKS and GKE
-> families both carry `gpuStack`, so requests for them reject, while
-> unprofiled external AKS/GKE overlays keep `/v1` access. See
-> [API Reference › Configured v2 endpoints](../user/api-reference.md#configured-v2-endpoints).
+> `/v1/recipe` serves profiled and unprofiled compositions alike: omit
+> `profile=` to take the composition's declared default, or select one
+> explicitly. See
+> [API Reference › Profile and Slurm-accounting endpoints](../user/api-reference.md#profile-and-slurm-accounting-endpoints).
 
 ```python
 import requests
@@ -386,7 +385,7 @@ def get_recipe_cached(params):
     cache_key = frozenset(params.items())
     
     if cache_key not in recipe_cache:
-        response = requests.get('http://localhost:8080/v2/recipe', params=params)
+        response = requests.get('http://localhost:8080/v1/recipe', params=params)
         recipe_cache[cache_key] = response.json()
     
     return recipe_cache[cache_key]
@@ -403,7 +402,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
     wait=wait_exponential(multiplier=1, min=4, max=10)
 )
 def get_recipe_with_retry(params):
-    response = requests.get('http://localhost:8080/v2/recipe', params=params)
+    response = requests.get('http://localhost:8080/v1/recipe', params=params)
     response.raise_for_status()
     return response.json()
 ```
@@ -415,7 +414,7 @@ from concurrent.futures import ThreadPoolExecutor
 import requests
 
 def get_recipe(params):
-    response = requests.get('http://localhost:8080/v2/recipe', params=params)
+    response = requests.get('http://localhost:8080/v1/recipe', params=params)
     return response.json()
 
 # Generate recipes for multiple environments in parallel
@@ -497,7 +496,8 @@ metadata:
 spec:
   podSelector:
     matchLabels:
-      job-name: aicr
+      app.kubernetes.io/name: aicr
+      app.kubernetes.io/component: snapshot-agent
   policyTypes:
     - Egress
   egress:
@@ -514,14 +514,14 @@ spec:
 
 ```bash
 # Verbose curl
-curl -v "http://localhost:8080/v2/recipe?os=ubuntu&accelerator=h100"
+curl -v "http://localhost:8080/v1/recipe?service=eks&os=ubuntu&accelerator=h100&intent=training"
 
 # With timing
 curl -w "\nTime: %{time_total}s\n" \
-  "http://localhost:8080/v2/recipe?os=ubuntu&accelerator=h100"
+  "http://localhost:8080/v1/recipe?service=eks&os=ubuntu&accelerator=h100&intent=training"
 
-# Check headers
-curl -I "http://localhost:8080/v2/recipe?os=ubuntu&accelerator=h100"
+# Check headers. HEAD returns the same headers as GET without the body.
+curl -I "http://localhost:8080/v1/recipe?service=eks&os=ubuntu&accelerator=h100&intent=training"
 ```
 
 ### Validate Snapshots

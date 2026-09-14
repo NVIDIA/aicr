@@ -381,7 +381,7 @@ func (f *clusterFetcher) refreshDiscovery() (bool, uint64) {
 	return false, f.resetGen
 }
 
-func (f *clusterFetcher) Fetch(ctx context.Context, apiVersion, kind, namespace, name string) (map[string]interface{}, error) {
+func (f *clusterFetcher) Fetch(ctx context.Context, apiVersion, kind, namespace, name string) (map[string]any, error) {
 	gv, err := schema.ParseGroupVersion(apiVersion)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid apiVersion %q", apiVersion), err)
@@ -427,7 +427,7 @@ func (f *clusterFetcher) Fetch(ctx context.Context, apiVersion, kind, namespace,
 //
 // Returns an empty slice (not error) when no resources match; callers
 // distinguish "no matches" from "list failed".
-func (f *clusterFetcher) List(ctx context.Context, apiVersion, kind, namespace string, labels map[string]string) ([]map[string]interface{}, error) {
+func (f *clusterFetcher) List(ctx context.Context, apiVersion, kind, namespace string, labels map[string]string) ([]map[string]any, error) {
 	gv, err := schema.ParseGroupVersion(apiVersion)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, fmt.Sprintf("invalid apiVersion %q", apiVersion), err)
@@ -470,7 +470,7 @@ func (f *clusterFetcher) List(ctx context.Context, apiVersion, kind, namespace s
 			fmt.Sprintf("failed to list %s in namespace %q", gvk, namespace), err)
 	}
 
-	out := make([]map[string]interface{}, 0, len(list.Items))
+	out := make([]map[string]any, 0, len(list.Items))
 	for i := range list.Items {
 		out = append(out, list.Items[i].UnstructuredContent())
 	}

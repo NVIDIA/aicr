@@ -24,9 +24,7 @@ import (
 	"github.com/urfave/cli/v3"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 )
@@ -96,11 +94,11 @@ Use in shell scripts:
 		Flags: queryCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform",
-				flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, "snapshot", "config", "format", "selector"); err != nil {
+				flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, flagGKETCPXOInterfaces, "snapshot", "config", "format", "selector"); err != nil {
 				return err
 			}
 
-			cfg, err := loadCmdConfig(ctx, cmd)
+			cfg, err := loadFacadeConfig(ctx, cmd)
 			if err != nil {
 				return err
 			}
@@ -161,9 +159,9 @@ Use in shell scripts:
 // overlay validates against the same DataProvider the Client resolves with.
 // The Client's catalog must already be loaded (LoadCatalog) so that registry
 // is seeded.
-func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*aicr.RecipeResult, error) {
+func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, client *aicr.Client) (*aicr.RecipeResult, error) {
 	reg := client.CriteriaRegistry()
-	profile := stringFlagOrConfig(cmd, flagProfile, aicr.WrapConfig(cfg).RecipeProfile())
+	profile := stringFlagOrConfig(cmd, flagProfile, cfg.RecipeProfile())
 	resolveOpts, err := buildSelectionResolveOptions(cmd, cfg)
 	if err != nil {
 		return nil, err
@@ -172,7 +170,7 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		resolveOpts = append(resolveOpts, aicr.WithProfile(profile))
 	}
 
-	snapFilePath := stringFlagOrConfig(cmd, "snapshot", aicr.WrapConfig(cfg).SnapshotPath())
+	snapFilePath := stringFlagOrConfig(cmd, "snapshot", cfg.SnapshotPath())
 
 	if snapFilePath != "" {
 		slog.Info("loading snapshot from", "uri", snapFilePath)
@@ -186,10 +184,15 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 		// snapshot fingerprint below. Everything unmarked is fair game for the
 		// facade's relax-and-retry — see aicr.WithSnapshotCriteriaRelaxation.
 		touched := map[aicr.CriteriaDimension]bool{}
-		// Unwrap to reach the measurements: fingerprinting still reads the
-		// internal shape. The resolve calls below take the facade snapshot
-		// directly.
-		criteria := fingerprint.FromMeasurements(snap.Unwrap().Measurements).ToCriteria(reg)
+		// Derived through the facade so this workflow needs only pkg/client/v1
+		// (#2437). The Client parses against its own provider-scoped registry,
+		// so an external --data catalog's registered values resolve here the
+		// same way they will at resolve time.
+		facadeCriteria, criteriaErr := client.CriteriaFromSnapshot(snap)
+		if criteriaErr != nil {
+			return nil, criteriaErr
+		}
+		criteria := aicr.ToInternalCriteria(facadeCriteria)
 		if applyErr := applyCriteriaFromConfig(criteria, cfg, reg, touched); applyErr != nil {
 			return nil, applyErr
 		}
@@ -242,13 +245,13 @@ func buildRecipeFromCmdWithConfig(ctx context.Context, cmd *cli.Command, cfg *ap
 	return client.ResolveRecipeFromCriteriaWithOptions(ctx, aicr.WrapCriteria(criteria), resolveOpts...)
 }
 
-func accountingResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.RecipeResolveOption, error) {
+func accountingResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aicr.RecipeResolveOption, error) {
 	value := cmd.String(flagSlurmAccountingMode)
 	if !cmd.IsSet(flagSlurmAccountingMode) {
 		if cfg == nil {
 			return nil, nil
 		}
-		mode, present, err := aicr.WrapConfig(cfg).RecipeAccountingMode()
+		mode, present, err := cfg.RecipeAccountingMode()
 		if err != nil {
 			return nil, err
 		}
@@ -267,13 +270,13 @@ func accountingResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.
 // equivalent AICRConfig field, into a resolve option. Mirrors
 // accountingResolveOptions: the flag wins, the config file is the fallback,
 // and an absent selection leaves the recipe's own declaration alone.
-func runtimeInventoryResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.RecipeResolveOption, error) {
+func runtimeInventoryResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aicr.RecipeResolveOption, error) {
 	value := cmd.String(flagRuntimeInventory)
 	if !cmd.IsSet(flagRuntimeInventory) {
 		if cfg == nil {
 			return nil, nil
 		}
-		mode, present, err := aicr.WrapConfig(cfg).RecipeRuntimeInventoryMode()
+		mode, present, err := cfg.RecipeRuntimeInventoryMode()
 		if err != nil {
 			return nil, err
 		}
@@ -288,9 +291,36 @@ func runtimeInventoryResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([
 	return []aicr.RecipeResolveOption{aicr.WithRuntimeInventoryMode(value)}, nil
 }
 
+// gkeTCPXOInterfacesResolveOptions turns the --gke-tcpxo-interfaces flag, or
+// the equivalent AICRConfig field, into a resolve option. Mirrors
+// accountingResolveOptions: the flag wins, the config file is the fallback.
+// Unlike the mode selections there is no absent-means-default case — the
+// mapping is cluster-specific — so an unset value passes no option at all,
+// and the recipe builder fails closed when the resolved recipe needs it.
+func gkeTCPXOInterfacesResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aicr.RecipeResolveOption, error) {
+	value := cmd.String(flagGKETCPXOInterfaces)
+	if !cmd.IsSet(flagGKETCPXOInterfaces) {
+		if cfg == nil {
+			return nil, nil
+		}
+		mapping, present, err := cfg.RecipeGKETCPXOInterfaces()
+		if err != nil {
+			return nil, err
+		}
+		if !present {
+			return nil, nil
+		}
+		value = mapping
+	}
+	if _, err := recipe.ParseGKETCPXOInterfaces(value); err != nil {
+		return nil, err
+	}
+	return []aicr.RecipeResolveOption{aicr.WithGKETCPXOInterfaces(value)}, nil
+}
+
 // buildSelectionResolveOptions gathers every generation-time selection into one
 // option slice, so callers cannot wire one and forget the other.
-func buildSelectionResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]aicr.RecipeResolveOption, error) {
+func buildSelectionResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aicr.RecipeResolveOption, error) {
 	opts, err := accountingResolveOptions(cmd, cfg)
 	if err != nil {
 		return nil, err
@@ -299,7 +329,12 @@ func buildSelectionResolveOptions(cmd *cli.Command, cfg *appcfg.AICRConfig) ([]a
 	if err != nil {
 		return nil, err
 	}
-	return append(opts, riOpts...), nil
+	opts = append(opts, riOpts...)
+	tcpxoOpts, err := gkeTCPXOInterfacesResolveOptions(cmd, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return append(opts, tcpxoOpts...), nil
 }
 
 // statedDimensions converts the touched set into the argument

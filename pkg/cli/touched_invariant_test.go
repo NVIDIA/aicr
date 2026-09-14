@@ -148,9 +148,9 @@ func TestApplyCriteriaFromConfigMarksTouched(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			touched := map[aicr.CriteriaDimension]bool{}
-			cfg := &appcfg.AICRConfig{
+			cfg := aicr.WrapConfig(&appcfg.AICRConfig{
 				Spec: appcfg.Spec{Recipe: &appcfg.RecipeSpec{Criteria: tt.criteria}},
-			}
+			})
 			if err := applyCriteriaFromConfig(recipe.NewCriteria(), cfg, recipe.NewCriteriaRegistry(), touched); err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -244,7 +244,7 @@ func TestRecipeCmd_Snapshot_StatedDimensionNotRelaxed(t *testing.T) {
 }
 
 // constraintFailingKindSnapshotYAML fingerprints to service=kind on a
-// Kubernetes version below the kind overlay's `K8s.server.version >= 1.25`
+// Kubernetes version below the kind overlay's `K8s.server.version >= 1.32`
 // constraint, so the only overlay covering service=kind is excluded by
 // constraint evaluation rather than absent from the catalog.
 const constraintFailingKindSnapshotYAML = `kind: Snapshot

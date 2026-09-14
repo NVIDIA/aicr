@@ -258,7 +258,7 @@ func TestNewClient_IsolatedDataProvider(t *testing.T) {
 	dirB := t.TempDir()
 	for _, dir := range []string{dirA, dirB} {
 		if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
-			[]byte("components: []\n"), 0o600); err != nil {
+			[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 			t.Fatalf("setup: write registry.yaml in %s: %v", dir, err)
 		}
 	}
@@ -306,12 +306,12 @@ func TestClient_ConcurrentResolveAndClose(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 
 	const goroutines = 50
-	for trial := 0; trial < 5; trial++ {
+	for trial := range 5 {
 		client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
 		if err != nil {
 			t.Fatalf("trial %d: NewClient: %v", trial, err)
@@ -324,7 +324,7 @@ func TestClient_ConcurrentResolveAndClose(t *testing.T) {
 		// ResolveRecipe; correctness is "no panic, no race
 		// flagged by -race, errors are well-typed."
 		wg.Add(goroutines + 1)
-		for i := 0; i < goroutines; i++ {
+		for range goroutines {
 			go func() {
 				defer wg.Done()
 				_, _ = client.ResolveRecipe(context.Background(), aicr.RecipeRequest{
@@ -357,7 +357,7 @@ func TestClient_CloseIsIdempotent(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 
@@ -397,7 +397,7 @@ func TestResolveRecipeRejectsPinnedReferences(t *testing.T) {
 	// contain a registry.yaml. Write a minimal one so setup succeeds
 	// and we can exercise ResolveRecipe's pinned-rejection path.
 	tmp := t.TempDir()
-	minimalRegistry := "components: []\n"
+	minimalRegistry := "apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
 		[]byte(minimalRegistry), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
@@ -458,7 +458,7 @@ func TestBundleComponents_RequiresInternalRecipeResult(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
@@ -497,7 +497,7 @@ func TestBundleComponents_NilInputsRejected(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 
@@ -579,7 +579,7 @@ func TestResolveRecipe_RejectsNegativeNodes(t *testing.T) {
 	// never runs (negative Nodes rejection short-circuits before that),
 	// but NewClient still validates the source on construction.
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
@@ -638,7 +638,7 @@ func TestResolveRecipe_OSEnablesOSPinnedOverlays(t *testing.T) {
 	// ones) remain reachable for resolution.
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
@@ -688,7 +688,7 @@ func TestBundleAndValidate_RejectCrossClientRecipeResult(t *testing.T) {
 		t.Helper()
 		tmp := t.TempDir()
 		if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-			[]byte("components: []\n"), 0o600); err != nil {
+			[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 			t.Fatalf("setup: write registry.yaml: %v", err)
 		}
 		c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
@@ -719,8 +719,7 @@ func TestBundleAndValidate_RejectCrossClientRecipeResult(t *testing.T) {
 	if _, err := clientB.BundleComponents(t.Context(), resultA); err == nil {
 		t.Error("BundleComponents: expected cross-client rejection, got nil error")
 	} else {
-		var se *aicrerrors.StructuredError
-		if !errors.As(err, &se) {
+		if se, ok := errors.AsType[*aicrerrors.StructuredError](err); !ok {
 			t.Errorf("BundleComponents: expected *aicrerrors.StructuredError, got %T: %v", err, err)
 		} else if se.Code != aicrerrors.ErrCodeInvalidRequest {
 			t.Errorf("BundleComponents: expected ErrCodeInvalidRequest, got %s", se.Code)
@@ -733,8 +732,7 @@ func TestBundleAndValidate_RejectCrossClientRecipeResult(t *testing.T) {
 	if _, err := clientB.ValidateState(t.Context(), resultA, &aicr.Snapshot{}); err == nil {
 		t.Error("ValidateState: expected cross-client rejection, got nil error")
 	} else {
-		var se *aicrerrors.StructuredError
-		if !errors.As(err, &se) {
+		if se, ok := errors.AsType[*aicrerrors.StructuredError](err); !ok {
 			t.Errorf("ValidateState: expected *aicrerrors.StructuredError, got %T: %v", err, err)
 		} else if se.Code != aicrerrors.ErrCodeInvalidRequest {
 			t.Errorf("ValidateState: expected ErrCodeInvalidRequest, got %s", se.Code)
@@ -802,7 +800,7 @@ spec:
 		t.Helper()
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
-			[]byte("components: []\n"), 0o600); err != nil {
+			[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 			t.Fatalf("setup %s: registry.yaml: %v", marker, err)
 		}
 		if err := os.MkdirAll(filepath.Join(dir, "overlays"), 0o755); err != nil {
@@ -938,7 +936,7 @@ func TestResolveRecipeWithProfile(t *testing.T) {
 		t.Fatalf("setup overlays directory: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup registry.yaml: %v", err)
 	}
 	overlay := []byte(`apiVersion: aicr.run/v1alpha3
@@ -1780,14 +1778,14 @@ func TestClient_NoCacheGrowthAcrossManyCloseCycles(t *testing.T) {
 
 	tmp := t.TempDir()
 	if err := os.WriteFile(filepath.Join(tmp, "registry.yaml"),
-		[]byte("components: []\n"), 0o600); err != nil {
+		[]byte("apiVersion: aicr.run/v1alpha2\nkind: ComponentRegistry\ncomponents: []\n"), 0o600); err != nil {
 		t.Fatalf("setup: write registry.yaml: %v", err)
 	}
 
 	baselineStore := recipe.CachedStoreCountForTesting()
 	baselineRegistry := recipe.CachedRegistryCountForTesting()
 
-	for i := 0; i < N; i++ {
+	for i := range N {
 		c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.FilesystemSource(tmp)))
 		if err != nil {
 			t.Fatalf("iteration %d: NewClient: %v", i, err)
@@ -1934,6 +1932,148 @@ componentRefs: []
 	}
 }
 
+// TestResolveRecipeFromSnapshot_OKEGpuStackQualification proves the OKE
+// gpuStack profile qualifies fail-closed end to end against a snapshot: the
+// add-on projection is the canonical signal for both values, and the legacy
+// device-plugin tripwire (in-cluster reading) additionally guards
+// operator-managed — a legacy cluster (add-on absent, legacy DaemonSet
+// active) can qualify NEITHER value, and a snapshot missing either reading
+// fails with "reading … is unavailable" rather than passing open.
+func TestResolveRecipeFromSnapshot_OKEGpuStackQualification(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		profile string
+		snap    *aicr.Snapshot
+		wantErr string // "" => resolution succeeds
+	}{
+		{
+			name:    "add-on installed qualifies the default oci-managed",
+			profile: "",
+			snap:    okeQualificationSnapshot("installed", "none"),
+		},
+		{
+			name:    "add-on installed fails operator-managed closed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("installed", "active"),
+			wantErr: `constraint "K8s.oke-addons.nvidia-gpu-plugin" failed`,
+		},
+		{
+			name:    "add-on absent with no legacy plugin qualifies operator-managed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("absent", "none"),
+		},
+		{
+			name:    "add-on absent fails the default oci-managed closed",
+			profile: "",
+			snap:    okeQualificationSnapshot("absent", "none"),
+			wantErr: `constraint "K8s.oke-addons.nvidia-gpu-plugin" failed`,
+		},
+		{
+			name:    "non-ACTIVE lifecycle marker fails oci-managed closed",
+			profile: "",
+			snap:    okeQualificationSnapshot("addon-deleting", "none"),
+			wantErr: `constraint "K8s.oke-addons.nvidia-gpu-plugin" failed`,
+		},
+		{
+			name:    "non-ACTIVE lifecycle marker fails operator-managed closed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("addon-deleting", "none"),
+			wantErr: `constraint "K8s.oke-addons.nvidia-gpu-plugin" failed`,
+		},
+		{
+			name:    "legacy plugin active trips operator-managed (double-advertisement guard)",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("absent", "active"),
+			wantErr: `constraint "K8s.oke-legacy-plugin.nvidia-gpu-device-plugin" failed`,
+		},
+		{
+			name:    "legacy plugin unknown (clientless snapshot) fails operator-managed closed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("absent", "unknown"),
+			wantErr: `constraint "K8s.oke-legacy-plugin.nvidia-gpu-device-plugin" failed`,
+		},
+		{
+			name:    "legacy plugin active does not gate oci-managed (the add-on manages the same DaemonSet)",
+			profile: "",
+			snap:    okeQualificationSnapshot("installed", "active"),
+		},
+		{
+			name:    "snapshot without the add-on projection fails closed (reading unavailable)",
+			profile: "",
+			snap:    okeQualificationSnapshot("", "none"),
+			wantErr: `reading "K8s.oke-addons.nvidia-gpu-plugin" is unavailable`,
+		},
+		{
+			name:    "snapshot without the legacy-plugin reading fails operator-managed closed",
+			profile: "gpuStack=operator-managed",
+			snap:    okeQualificationSnapshot("absent", ""),
+			wantErr: `reading "K8s.oke-legacy-plugin.nvidia-gpu-device-plugin" is unavailable`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			c, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+			if err != nil {
+				t.Fatalf("NewClient: %v", err)
+			}
+			t.Cleanup(func() { _ = c.Close() })
+
+			crit, err := recipe.BuildCriteriaWithRegistry(nil,
+				recipe.WithServiceRegistry("oke"),
+				recipe.WithAcceleratorRegistry("l40s"),
+				recipe.WithIntentRegistry("training"),
+				recipe.WithOSRegistry("ol"),
+			)
+			if err != nil {
+				t.Fatalf("BuildCriteria: %v", err)
+			}
+
+			_, err = c.ResolveRecipeFromSnapshotWithProfile(t.Context(), aicr.WrapCriteria(crit), tt.snap, tt.profile)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ResolveRecipeFromSnapshotWithProfile error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ResolveRecipeFromSnapshotWithProfile: %v", err)
+			}
+		})
+	}
+}
+
+// okeQualificationSnapshot builds a Snapshot for the OKE l40s/ol training
+// chain: the K8s server version plus the two gpuStack qualification readings.
+// An empty addonState or legacyState OMITS that subtype entirely, producing
+// the "reading … is unavailable" fail-closed path.
+func okeQualificationSnapshot(addonState, legacyState string) *aicr.Snapshot {
+	k8s := measurement.NewMeasurement(measurement.TypeK8s).
+		WithSubtypeBuilder(
+			measurement.NewSubtypeBuilder("server").
+				SetString(measurement.KeyVersion, "v1.34.0"),
+		)
+	if addonState != "" {
+		k8s = k8s.WithSubtypeBuilder(
+			measurement.NewSubtypeBuilder("oke-addons").
+				SetString("nvidia-gpu-plugin", addonState),
+		)
+	}
+	if legacyState != "" {
+		k8s = k8s.WithSubtypeBuilder(
+			measurement.NewSubtypeBuilder("oke-legacy-plugin").
+				SetString("nvidia-gpu-device-plugin", legacyState),
+		)
+	}
+	return aicr.WrapSnapshot(&snapshotter.Snapshot{
+		Measurements: []*measurement.Measurement{k8s.Build()},
+	})
+}
+
 // k8sVersionSnapshot builds a minimal Snapshot whose K8s/server/version
 // reading satisfies the readiness constraints carried by the embedded
 // h100-eks-training chain (the strictest is ">= 1.32.4").
@@ -1977,6 +2117,17 @@ func gpuHardwareSnapshotPools(poolMode string, driverLoaded bool) *aicr.Snapshot
 				WithSubtypeBuilder(
 					measurement.NewSubtypeBuilder("server").
 						SetString("version", version),
+				).
+				// k8s.node.provider is the fingerprint source of truth for
+				// service (pkg/fingerprint.FromMeasurements), which
+				// NodeTopology.gpu-nodes.label reads to select its
+				// pre-deployment universe label per service (#2359). Real
+				// collector snapshots always include it; only the historical
+				// test fixtures didn't. Kept alongside "aks-gpu-pools" because
+				// both are AKS-shaped fixtures that also cover GKE flows.
+				WithSubtypeBuilder(
+					measurement.NewSubtypeBuilder("node").
+						SetString("provider", "gke"),
 				).
 				// The AKS gpuProfile.driver projection the pool-mode
 				// collector emits (Install = AKS preinstall, None =

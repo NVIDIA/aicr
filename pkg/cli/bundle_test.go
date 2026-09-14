@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -635,15 +636,32 @@ func TestValidateSigningKeyExclusivity_ConfigSourcedConflict(t *testing.T) {
 	}
 }
 
+// TestValidateSigningKeyExclusivity_BlankNonFlagKey covers the blank-key branch
+// that cmd.IsSet cannot reach: a signingKey that is present but whitespace-only
+// with no --signing-key flag set. config.resolveSigningKey now rejects that
+// shape when the document loads, so no config-driven invocation reaches here
+// anymore, but the branch is the fail-closed guard for any opts assembled
+// without going through Resolve — blank is non-empty enough to select the KMS
+// path and would otherwise fail late in the cosign URI parser.
+func TestValidateSigningKeyExclusivity_BlankNonFlagKey(t *testing.T) {
+	cmd := bundleCmd() // unparsed: cmd.IsSet(flagSigningKey) is false
+	opts := &bundleCmdOptions{signingKey: "   \t "}
+	err := validateSigningKeyExclusivity(cmd, opts)
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Fatalf("want ErrCodeInvalidRequest for a blank non-flag signingKey, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "must not be blank") {
+		t.Errorf("error %q must name the blank-key rule", err.Error())
+	}
+}
+
 // TestBundleCmd_SigningKeyFlag verifies the --signing-key flag is wired onto
 // the bundle command.
 func TestBundleCmd_SigningKeyFlag(t *testing.T) {
 	cmd := bundleCmd()
 	for _, flag := range cmd.Flags {
-		for _, name := range flag.Names() {
-			if name == flagSigningKey {
-				return
-			}
+		if slices.Contains(flag.Names(), flagSigningKey) {
+			return
 		}
 	}
 	t.Errorf("expected flag %q to be defined", flagSigningKey)

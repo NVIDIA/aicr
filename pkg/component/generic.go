@@ -17,6 +17,7 @@ package component
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"time"
 
@@ -139,9 +140,7 @@ func GenerateBundleMetadataWithExtensions(config map[string]string, cfg Componen
 
 	// Merge extensions from component config
 	if cfg.MetadataExtensions != nil {
-		for k, v := range cfg.MetadataExtensions {
-			meta.Extensions[k] = v
-		}
+		maps.Copy(meta.Extensions, cfg.MetadataExtensions)
 	}
 
 	return meta

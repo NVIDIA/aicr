@@ -123,7 +123,7 @@ func TestAllMetadataFilesHaveRequiredFields(t *testing.T) {
 				t.Errorf("invalid kind: got %q, want %q", metadata.Kind, RecipeMetadataKind)
 			}
 			switch metadata.APIVersion {
-			case RecipeAPIVersion:
+			case RecipeMetadataAPIVersion:
 				if metadata.Spec.Profile != nil {
 					t.Errorf("overlay declares a profile but keeps apiVersion %q; want %q",
 						metadata.APIVersion, RecipeProfileAPIVersion)
@@ -134,7 +134,7 @@ func TestAllMetadataFilesHaveRequiredFields(t *testing.T) {
 				}
 			default:
 				t.Errorf("invalid apiVersion: got %q, want %q or %q",
-					metadata.APIVersion, RecipeAPIVersion, RecipeProfileAPIVersion)
+					metadata.APIVersion, RecipeMetadataAPIVersion, RecipeProfileAPIVersion)
 			}
 		})
 	}
@@ -395,8 +395,8 @@ func validateConstraintValue(value string) error {
 
 	// Check for operator prefix
 	for _, op := range validConstraintOperators {
-		if strings.HasPrefix(value, op) {
-			remainder := strings.TrimSpace(strings.TrimPrefix(value, op))
+		if after, ok := strings.CutPrefix(value, op); ok {
+			remainder := strings.TrimSpace(after)
 			if remainder == "" {
 				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("operator %q without value", op))
 			}

@@ -19,10 +19,10 @@ component added on top of an approved base image to be retrievable by whoever
 pulls the image, regardless of license. Attribution (THIRD_PARTY_NOTICES.md) is
 a separate obligation and does not satisfy this one.
 
-The six Go images already satisfy it: their dependencies are vendored, so the
-GitHub release source archive for the matching tag contains the complete source
-of every module compiled in. Only aiperf-bench installs from wheels (built
-distributions), leaving nothing that holds its source.
+The six Go images already satisfy it: the GitHub release source archive names
+every module at an immutable version in go.mod/go.sum, and those exact sources
+are retrievable from the public Go module proxy. Only aiperf-bench installs from
+wheels (built distributions), leaving nothing that holds its source.
 
 Why a referrer rather than baking it into the image
 ---------------------------------------------------
@@ -350,9 +350,10 @@ def build_archive(out_dir: pathlib.Path) -> tuple[pathlib.Path, int, list[str]]:
         + "".join(f"  {n}: {KNOWN_NO_SDIST[n]}\n" for n in sorted(unavailable))
         + "\nThe base image (nvcr.io/nvidia/distroless/python) ships its own source\n"
         "under its own approval; it is not duplicated here.\n\n"
-        "Source for the Go components of AICR is in the GitHub release archive for\n"
-        "the matching tag at https://github.com/NVIDIA/aicr, which contains the\n"
-        "complete vendor/ tree.\n\n"
+        "Source for AICR's Go code is in the GitHub release archive for the\n"
+        "matching tag at https://github.com/NVIDIA/aicr. Its go.mod and go.sum\n"
+        "name every third-party module at an immutable version retrievable from\n"
+        "the public Go module proxy.\n\n"
         "License texts for all of the above are in THIRD_PARTY_NOTICES.md,\n"
         "published as an asset on each AICR release.\n",
         encoding="utf-8",

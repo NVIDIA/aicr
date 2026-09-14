@@ -84,6 +84,11 @@ type BundleResolved struct {
 	// AcceleratedNodeTolerations is the parsed slice.
 	AcceleratedNodeTolerations []corev1.Toleration
 
+	// DRAEvictionNodeLabel is the parsed
+	// spec.bundle.scheduling.draEvictionNodeLabel. Nil when unset so command
+	// consumers can apply the NVIDIA-documented default.
+	DRAEvictionNodeLabel *bundlercfg.NodeLabel
+
 	// WorkloadGate is the parsed spec.bundle.scheduling.workloadGate taint.
 	// Nil when config did not set it.
 	WorkloadGate *corev1.Taint
@@ -219,6 +224,11 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 		out.SystemNodeSelector = maps.Clone(b.Scheduling.SystemNodeSelector)
 		out.AcceleratedNodeSelector = maps.Clone(b.Scheduling.AcceleratedNodeSelector)
 		out.WorkloadSelector = maps.Clone(b.Scheduling.WorkloadSelector)
+		var err error
+		out.DRAEvictionNodeLabel, err = resolveDRAEvictionNodeLabel(b.Scheduling.DRAEvictionNodeLabel)
+		if err != nil {
+			return nil, err
+		}
 
 		if b.Scheduling.SystemNodeTolerations != nil {
 			tols, err := snapshotter.ParseTolerations(b.Scheduling.SystemNodeTolerations)
@@ -260,9 +270,10 @@ func (b *BundleSpec) Resolve() (*BundleResolved, error) {
 
 // resolveAttestation projects the bundle attestation spec onto the resolved
 // output. It is a no-op when a is nil (the section is optional). Signing
-// endpoints are validated at this conversion boundary so a malformed config
-// value fails here with spec-path attribution (and is caught for non-CLI
-// callers of Resolve too), rather than only later in CLI flag parsing.
+// endpoints, signing mode, and the signing key's normal form are all settled at
+// this conversion boundary so a malformed config value fails here with
+// spec-path attribution (and is caught for non-CLI callers of Resolve too),
+// rather than only later in CLI flag parsing.
 func resolveAttestation(a *AttestationSpec, out *BundleResolved) error {
 	if a == nil {
 		return nil
@@ -270,13 +281,54 @@ func resolveAttestation(a *AttestationSpec, out *BundleResolved) error {
 	if err := validateAttestationEndpoints(a); err != nil {
 		return err
 	}
+	signingKey, err := resolveSigningKey(a)
+	if err != nil {
+		return err
+	}
 	out.Attest = a.Enabled
 	out.CertIDRegexp = a.CertificateIdentityRegexp
 	out.OIDCDeviceFlow = a.OIDCDeviceFlow
 	out.FulcioURL = a.FulcioURL
 	out.RekorURL = a.RekorURL
-	out.SigningKey = a.SigningKey
+	out.SigningKey = signingKey
 	return nil
+}
+
+// resolveSigningKey returns the normalized spec.bundle.attestation.signingKey,
+// rejecting a present-but-blank value and the one keyless setting that cannot
+// coexist with it.
+//
+// Signing mode is exclusive: a KMS key or keyless OIDC, never both.
+// attestation.ResolveAttesterLazy takes the KMS branch whenever SigningKey is
+// non-empty, so a document setting both would sign with the key while its
+// fulcioURL setting did nothing — the caller believing they signed against a
+// named Fulcio.
+//
+// oidcDeviceFlow is deliberately NOT part of that rule here, unlike fulcioURL.
+// Resolve runs before the CLI's flag-over-config merge, so rejecting the pair
+// eagerly would reject a document that sets both signingKey and
+// oidcDeviceFlow: true even when the caller passes --oidc-device-flow=false
+// specifically to correct it: the error would fire before that flag is ever
+// read. It is rejected after every caller's own precedence is applied instead,
+// by attestation.checkSigningMode, so no path reaches signing with both.
+// rekorURL is not a conflict either; it has its own exclusivity rule against
+// signingConfig.
+//
+// Trimming happens here rather than at a consumer because a YAML block scalar
+// carries surrounding whitespace, and an untrimmed key fails late in the KMS
+// URI parser instead of at the boundary that produced it.
+func resolveSigningKey(a *AttestationSpec) (string, error) {
+	key := strings.TrimSpace(a.SigningKey)
+	if a.SigningKey != "" && key == "" {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"spec.bundle.attestation.signingKey must not be blank")
+	}
+	if key != "" && a.FulcioURL != "" {
+		return "", errors.New(errors.ErrCodeInvalidRequest,
+			"spec.bundle.attestation.signingKey is mutually exclusive with "+
+				"spec.bundle.attestation.fulcioURL")
+	}
+	return key, nil
 }
 
 // validateAttestationEndpoints rejects malformed private Sigstore endpoints in
@@ -287,6 +339,18 @@ func validateAttestationEndpoints(a *AttestationSpec) error {
 		return err
 	}
 	return bundlercfg.ValidateHTTPSURL("spec.bundle.attestation.rekorURL", a.RekorURL)
+}
+
+func resolveDRAEvictionNodeLabel(raw string) (*bundlercfg.NodeLabel, error) {
+	if raw == "" {
+		return nil, nil //nolint:nilnil // nil means the config omitted the optional label.
+	}
+	label, err := bundlercfg.ParseNodeLabel(raw)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"invalid spec.bundle.scheduling.draEvictionNodeLabel")
+	}
+	return &label, nil
 }
 
 // ValidateResolved is the typed-domain projection of ValidateSpec produced
@@ -315,10 +379,19 @@ type ValidateResolved struct {
 	// config did not set the field.
 	ImagePullSecrets []string
 
-	// JobName is spec.validate.agent.jobName.
+	// JobName is spec.validate.agent.jobName — an optional Job name
+	// prefix, not a required name. Empty (config unset and no
+	// --job-name) lets the CLI's own default prefix ("aicr-validate")
+	// apply instead; either way the run ID is appended, so the deployed
+	// Job name is always run-scoped.
 	JobName string
 
-	// ServiceAccountName is spec.validate.agent.serviceAccountName.
+	// ServiceAccountName is spec.validate.agent.serviceAccountName. It is
+	// exact-if-exists: when a ServiceAccount of exactly this name already
+	// exists in the namespace, the live snapshot-capture agent runs as it
+	// verbatim and creates no RBAC for the run; otherwise it is an
+	// optional name prefix with the same empty-value behavior as JobName.
+	// See pkg/snapshotter.AgentConfig.ServiceAccountName.
 	ServiceAccountName string
 
 	// NodeSelector is spec.validate.agent.nodeSelector. Nil if unset;
@@ -619,10 +692,19 @@ type SnapshotResolved struct {
 	// config did not set the field.
 	ImagePullSecrets []string
 
-	// JobName is spec.snapshot.agent.jobName.
+	// JobName is spec.snapshot.agent.jobName — an optional Job name
+	// prefix, not a required name. Empty (config unset and no
+	// --job-name) lets the CLI's own default prefix ("aicr") apply
+	// instead; either way the run ID is appended, so the deployed Job
+	// name is always run-scoped.
 	JobName string
 
-	// ServiceAccountName is spec.snapshot.agent.serviceAccountName.
+	// ServiceAccountName is spec.snapshot.agent.serviceAccountName. It is
+	// exact-if-exists: when a ServiceAccount of exactly this name already
+	// exists in the namespace, the agent runs as it verbatim and creates
+	// no RBAC for the run; otherwise it is an optional name prefix with
+	// the same empty-value behavior as JobName. See
+	// pkg/snapshotter.AgentConfig.ServiceAccountName.
 	ServiceAccountName string
 
 	// NodeSelector is spec.snapshot.agent.nodeSelector. Nil if unset;
@@ -844,6 +926,23 @@ func (r *RecipeSpec) ResolveRuntimeInventoryMode() (recipe.RuntimeInventoryMode,
 			"invalid spec.recipe.configuration.runtimeInventory.mode")
 	}
 	return mode, true, nil
+}
+
+// ResolveGKETCPXOInterfaces validates
+// spec.recipe.configuration.gke.tcpxoInterfaces. The bool reports whether
+// the field was explicitly present; there is no default — the mapping is
+// cluster-specific and recipe generation fails closed when a TCPXO recipe
+// omits it.
+func (r *RecipeSpec) ResolveGKETCPXOInterfaces() ([]recipe.NetworkInterfaceMapping, bool, error) {
+	if r == nil || r.Configuration == nil || r.Configuration.GKE == nil {
+		return nil, false, nil
+	}
+	mapping := r.Configuration.GKE.TCPXOInterfaces
+	if err := recipe.ValidateGKETCPXOInterfaces(mapping); err != nil {
+		return nil, false, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+			"invalid spec.recipe.configuration.gke.tcpxoInterfaces")
+	}
+	return mapping, true, nil
 }
 
 // boolPtrOrFalse dereferences a *bool, treating nil (absent in

@@ -127,13 +127,13 @@ spec:
             check:
               ($error == null): true
 
-    - name: assert-cr-follows-readiness-gate
-      description: Verify every CR folder follows its corresponding readiness gate.
+    - name: assert-cr-follows-olm-readiness-gate
+      description: Verify every operator CR folder follows its OLM readiness gate.
       try:
         - script:
             content: |
               WORK="/tmp/chainsaw-bundle-ocp"
-              for rdns_dir in "${WORK}"/bundle/[0-9][0-9][0-9]-*-readiness/; do
+              for rdns_dir in "${WORK}"/bundle/[0-9][0-9][0-9]-*-olm-readiness/; do
                 [ -d "${rdns_dir}" ] || continue
                 rdns_seq=$(basename "${rdns_dir}" | grep -o '^[0-9]*')
                 cr_name=$(basename "${rdns_dir}" | sed 's/^[0-9]*-//; s/-readiness$//' | sed 's/-olm$//')
@@ -144,6 +144,38 @@ spec:
                 [ "${rdns_seq}" -lt "${cr_seq}" ] \
                   || { echo "readiness gate (${rdns_seq}) must precede CR ${cr_name} (${cr_seq})" >&2; exit 1; }
               done
+            check:
+              ($error == null): true
+
+    - name: assert-network-readiness-barrier-precedes-gpu-policy
+      description: >-
+        Verify the NicClusterPolicy readiness gate blocks the peermem-enabled
+        GPU ClusterPolicy until Network Operator reports DOCA/OFED ready.
+      try:
+        - script:
+            content: |
+              set -eu
+              WORK="/tmp/chainsaw-bundle-ocp"
+              network_dir=$(ls -d "${WORK}"/bundle/[0-9][0-9][0-9]-network-operator-ocp 2>/dev/null | head -1)
+              network_readiness_dir=$(ls -d "${WORK}"/bundle/[0-9][0-9][0-9]-network-operator-ocp-readiness 2>/dev/null | head -1)
+              gpu_dir=$(ls -d "${WORK}"/bundle/[0-9][0-9][0-9]-gpu-operator-ocp 2>/dev/null | head -1)
+              [ -n "${network_dir}" ] && [ -n "${network_readiness_dir}" ] && [ -n "${gpu_dir}" ] \
+                || { echo "missing OCP network/GPU ordering folder" >&2; exit 1; }
+
+              network_seq=$(basename "${network_dir}" | grep -o '^[0-9]*')
+              network_readiness_seq=$(basename "${network_readiness_dir}" | grep -o '^[0-9]*')
+              gpu_seq=$(basename "${gpu_dir}" | grep -o '^[0-9]*')
+              [ "${network_seq}" -lt "${network_readiness_seq}" ] \
+                || { echo "network-operator-ocp (${network_seq}) must precede its readiness gate (${network_readiness_seq})" >&2; exit 1; }
+              [ "${network_readiness_seq}" -lt "${gpu_seq}" ] \
+                || { echo "network readiness gate (${network_readiness_seq}) must precede gpu-operator-ocp (${gpu_seq})" >&2; exit 1; }
+
+              grep -R -q 'kind: NicClusterPolicy' "${network_readiness_dir}/templates" \
+                || { echo "network readiness gate does not assert NicClusterPolicy" >&2; exit 1; }
+              grep -R -q 'state: ready' "${network_readiness_dir}/templates" \
+                || { echo "network readiness gate does not assert state=ready" >&2; exit 1; }
+              grep -R -q 'nicclusterpolicies' "${network_readiness_dir}/templates" \
+                || { echo "network readiness gate lacks NicClusterPolicy RBAC" >&2; exit 1; }
             check:
               ($error == null): true
 

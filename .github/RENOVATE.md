@@ -9,7 +9,7 @@ Self-hosted Renovate keeps the project's dependencies up to date across `go.mod`
 
 - Configuration: [`.github/renovate.json5`](renovate.json5)
 - Workflow: [`.github/workflows/renovate.yaml`](workflows/renovate.yaml)
-- Companion scripts: [`tools/update-chainsaw-checksums`](../tools/update-chainsaw-checksums), [`tools/update-helmfile-checksums`](../tools/update-helmfile-checksums), [`tools/update-helm-diff-checksums`](../tools/update-helm-diff-checksums)
+- Companion scripts: [`tools/update-chainsaw-checksums`](../tools/update-chainsaw-checksums), [`tools/update-helmfile-checksums`](../tools/update-helmfile-checksums), [`tools/update-helm-diff-checksums`](../tools/update-helm-diff-checksums), [`tools/update-oras-checksums`](../tools/update-oras-checksums), [`tools/update-oasdiff-checksums`](../tools/update-oasdiff-checksums), [`tools/update-addlicense-checksums`](../tools/update-addlicense-checksums), [`tools/update-setup-envtest-checksums`](../tools/update-setup-envtest-checksums)
 
 Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are documented inline in `renovate.json5`. This doc covers what's covered, how to extend coverage, and the known gotchas.
 
@@ -27,6 +27,11 @@ Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are d
 | `.settings.yaml` `chainsaw_checksums` | `postUpgradeTasks` → `tools/update-chainsaw-checksums` |
 | `.settings.yaml` `helmfile_checksums` | `postUpgradeTasks` → `tools/update-helmfile-checksums` |
 | `.settings.yaml` `helm_diff_checksums` | `postUpgradeTasks` → `tools/update-helm-diff-checksums` |
+| `.settings.yaml` `oras_sha256_*` | `postUpgradeTasks` → `tools/update-oras-checksums` |
+| `.settings.yaml` `oasdiff_sha256_linux_amd64` | `postUpgradeTasks` → `tools/update-oasdiff-checksums` |
+| `.settings.yaml` `addlicense_sha256_linux_amd64` | `postUpgradeTasks` → `tools/update-addlicense-checksums` |
+| `.settings.yaml` `setup_envtest_sha256_linux_amd64` | `postUpgradeTasks` → `tools/update-setup-envtest-checksums` (hashes the asset; controller-runtime publishes no `checksums.txt`) |
+| `.settings.yaml` `linting.apidiff` / `linting.go_licenses` ↔ `go.mod` | grouped with their `gomod` entries so both files move in one PR — `TestToolPinsMatchGoMod` requires them equal |
 | `.go-version` (Go toolchain) | dedicated `golang-version` customManager (`go-toolchain` group) |
 
 The `go` directive in `go.mod` is intentionally not bumped — the Go toolchain version is owned by `.go-version`. Makefile (`GOTOOLCHAIN`), the `load-versions` composite action, `install-karpenter-kwok`, and validator Dockerfiles (`--build-arg GO_VERSION`) all read from that single file.

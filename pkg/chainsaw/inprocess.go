@@ -424,10 +424,7 @@ func runAssertWithRetry(ctx context.Context, a *v1alpha1.Assert, fetcher Resourc
 		if remaining <= 0 {
 			return preferSubstantiveErr(lastSubstantiveErr, lastErr)
 		}
-		wait := defaults.AssertRetryInterval
-		if remaining < wait {
-			wait = remaining
-		}
+		wait := min(remaining, defaults.AssertRetryInterval)
 		select {
 		case <-ctx.Done():
 			return preferSubstantiveErr(lastSubstantiveErr,
@@ -461,10 +458,7 @@ func runErrorWithRetry(ctx context.Context, e *v1alpha1.Error, fetcher ResourceF
 		if remaining <= 0 {
 			return preferSubstantiveErr(lastSubstantiveErr, lastErr)
 		}
-		wait := defaults.AssertRetryInterval
-		if remaining < wait {
-			wait = remaining
-		}
+		wait := min(remaining, defaults.AssertRetryInterval)
 		select {
 		case <-ctx.Done():
 			return preferSubstantiveErr(lastSubstantiveErr,

@@ -19,7 +19,7 @@
 # inference-specific components (agentgateway, DRA driver, KAI scheduler, Dynamo),
 # and standard GPU stack components.
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   selectedProfile:
     name: gpuStack
@@ -40,6 +40,7 @@ componentRefs: ## alphabetically sorted
   - name: agentgateway-crds
   - name: cert-manager
   - name: dynamo-platform
+  - name: gcp-driver-installer
   - name: gpu-operator
   - name: grove
   - name: k8s-ephemeral-storage-metrics
@@ -56,6 +57,7 @@ deploymentOrder:
   - agentgateway-crds
   - cert-manager
   - agentgateway
+  - gcp-driver-installer
   - grove
   - nfd
   - nodewright-operator

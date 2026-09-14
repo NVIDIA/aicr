@@ -171,12 +171,14 @@ jobs:
         ${{ inputs.test_config_dir }}/${{ inputs.accelerator }}-${{ inputs.intent }}${{
           inputs.deployer != 'helmfile' && format('-{0}', inputs.deployer) || ''
         }}-config.yaml
-      # v0.4.27 — required for node-group taints in the cluster-config schema
-      # (GPU pool carries skyhook.nvidia.com=runtime-required:NoSchedule until
-      # NodeWrite finishes tuning + reboot). Earlier v0.4.x pins predate taint
-      # support; v0.2.6 read .compute.nodeGroups.* directly and failed
-      # Terraform parse with "object with 1 attribute eks".
-      EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:8bc33d14e6e5659d242aa2cdbcd69fca389cfcdb9e94f7a7a1b82fd33176befa"
+      # v0.5.1 — GPU-conditional worker taints (non-GPU worker pools stay
+      # untainted) + native GB300 (p6e-gb300/p6e-gb300r) EFA layout, on top of the
+      # node-group taint schema introduced in v0.4.27 (GPU pool carries
+      # skyhook.nvidia.com=runtime-required:NoSchedule until NodeWrite finishes
+      # tuning + reboot). Earlier v0.4.x pins predate taint support; v0.2.6 read
+      # .compute.nodeGroups.* directly and failed Terraform parse with
+      # "object with 1 attribute eks".
+      EKS_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:91762c28d63c6f47774e86a922b84596a8daed031b225b9e7a25bd4910829f9b"
       VALIDATOR_IMAGE_PREFIX: "ghcr.io/nvidia/aicr-validators"
       VALIDATOR_TAG: "uat-${{ github.run_id }}"
       # Target platform(s) for the main-cell image builds (snapshot-agent + the
@@ -296,7 +298,6 @@ jobs:
           cache: true
           cache-dependency-path: |
             go.sum
-            vendor/modules.txt
 
       # Main cell (aicr_version empty): build the aicr binary from the
       # checked-out source (tip). Release cells install the released binary
@@ -305,7 +306,6 @@ jobs:
       - name: Build aicr binary
         if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
-          GOFLAGS: -mod=vendor
           # github.sha via env (never inline ${{ }} in a shell run — expression
           # injection). It is a 40-hex commit, so no real risk, but env is the
           # repo norm and keeps zizmor/CodeRabbit quiet.
@@ -357,7 +357,7 @@ jobs:
       # up because the multi-platform build path uses `buildx build --push`.
       - name: Set up QEMU
         if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down' && contains(env.BUILD_PLATFORMS, 'arm64')
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4.3.0
       - name: Set up Docker Buildx
         if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
@@ -367,7 +367,9 @@ jobs:
       - name: Build and push validator images
         if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         run: |
-          GO_VERSION="$(cat .go-version)"
+          set -euo pipefail
+          VALIDATOR_ARCHES="${BUILD_PLATFORMS//linux\//}" \
+            ./tools/build-validator-binaries
           # CHAINSAW_* args dropped in #1236 — the deployment validator
           # no longer ships /usr/local/bin/chainsaw; it executes Chainsaw
           # Test format in-process via pkg/chainsaw/inprocess.go.
@@ -377,8 +379,8 @@ jobs:
           # through the same AICR_VALIDATOR_IMAGE_TAG=uat-<run_id> override as
           # the Go validators. It MUST be built+pushed here too, or the AIPerf
           # pod ImagePullBackOffs on a nonexistent uat-<run_id> tag and hangs
-          # until the job timeout (#1636). It uses a different Dockerfile path
-          # and takes no GO_VERSION build-arg. Keep the phase set in sync with
+          # until the job timeout (#1636). It uses a different Dockerfile and
+          # does not consume a prebuilt Go binary. Keep the phase set in sync with
           # VALIDATOR_PHASES in on-push.yaml / on-tag.yaml.
           #
           # buildx build --push emits a multi-arch manifest for GB200
@@ -397,7 +399,6 @@ jobs:
               *)
                 docker buildx build --platform="${BUILD_PLATFORMS}" \
                   -f "validators/${phase}/Dockerfile" \
-                  --build-arg "GO_VERSION=${GO_VERSION}" \
                   -t "${IMAGE}" --push .
                 ;;
             esac
@@ -415,7 +416,7 @@ jobs:
       # default, so we deliberately do NOT set role-duration-seconds here.
       - name: Configure AWS credentials
         id: auth
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
@@ -639,7 +640,6 @@ jobs:
       - name: Build and push snapshot-agent image
         if: inputs.aicr_version == '' && inputs.skip_tests != true && inputs.lifecycle != 'daytime-down'
         env:
-          GOFLAGS: -mod=vendor
           KO_DOCKER_REPO: ghcr.io/nvidia/aicr-validators/agent
         run: |
           set -euo pipefail
@@ -717,7 +717,7 @@ jobs:
       # paths, matching the install step's own gate.
       - name: Refresh AWS credentials before install
         if: steps.prep.outcome == 'success'
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
@@ -765,7 +765,7 @@ jobs:
       # daytime-up stops after install and leaves the cluster up for handoff.
       - name: Refresh AWS credentials before validate
         if: steps.install.outcome == 'success' && inputs.lifecycle != 'daytime-up'
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
@@ -797,7 +797,7 @@ jobs:
       # re-enabled it shares this same gate, so exactly one CUJ runs per intent.
       - name: Refresh AWS credentials before CUJ
         if: steps.conformance.outcome == 'success'
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
@@ -888,7 +888,7 @@ jobs:
       # configure-aws-credentials can re-assume here.
       - name: Refresh AWS credentials before debug collection
         if: failure() && steps.prep.outcome != 'skipped'
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}
@@ -1031,7 +1031,7 @@ jobs:
             (inputs.lifecycle == 'nightly' && inputs.skip_delete != true && steps.infra.outcome != 'skipped') ||
             (inputs.lifecycle == 'daytime-up' && (failure() || cancelled()) && steps.infra.outcome != 'skipped')
           )
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c  # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.GITHUB_ACTIONS_ROLE_NAME }}"
           aws-region: ${{ env.AWS_REGION }}

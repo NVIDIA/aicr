@@ -92,7 +92,7 @@ func TestImageCollector_Collect(t *testing.T) {
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
 	// Should have 6 subtypes, including Slinky and MariaDB detection.
-	assert.Len(t, m.Subtypes, 6)
+	assert.Len(t, m.Subtypes, 7)
 
 	// Find the image subtype
 	var imageSubtype *measurement.Subtype
@@ -189,10 +189,7 @@ func installPaginatedPodReactor(t *testing.T, c *fake.Clientset, pods []corev1.P
 			pageCalls.Add(1)
 		}
 		startIdx := callIdx * pageSize
-		end := startIdx + pageSize
-		if end > len(pods) {
-			end = len(pods)
-		}
+		end := min(startIdx+pageSize, len(pods))
 		if startIdx >= len(pods) {
 			return true, &corev1.PodList{}, nil
 		}
@@ -212,7 +209,7 @@ func installPaginatedPodReactor(t *testing.T, c *fake.Clientset, pods []corev1.P
 // aggregator's deduplication does not mask missed pages.
 func makePods(n int) []corev1.Pod {
 	pods := make([]corev1.Pod, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		pods[i] = corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      fmt.Sprintf("pod-%d", i),
@@ -299,10 +296,7 @@ func TestImageCollector_Pagination_ContextCancellationBreaksLoop(t *testing.T) {
 		callIdx := int(calls.Add(1)) - 1
 		pageCalls.Add(1)
 		startIdx := callIdx * pageSize
-		end := startIdx + pageSize
-		if end > len(pods) {
-			end = len(pods)
-		}
+		end := min(startIdx+pageSize, len(pods))
 		page := &corev1.PodList{}
 		for i := startIdx; i < end; i++ {
 			page.Items = append(page.Items, pods[i])

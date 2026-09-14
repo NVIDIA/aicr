@@ -36,7 +36,6 @@ runs:
         cache: true
         cache-dependency-path: |
           go.sum
-          vendor/modules.txt
         check-latest: true
 
     - name: Setup build tools
@@ -48,8 +47,6 @@ runs:
 
     - name: Build aicr binary
       shell: bash
-      env:
-        GOFLAGS: -mod=vendor
       run: go build -o dist/e2e/aicr ./cmd/aicr
 
     - name: Run AI-conformance offline tests

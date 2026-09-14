@@ -473,7 +473,7 @@ func extractContainerImages(obj *unstructured.Unstructured) string {
 
 	images := make([]string, 0, len(containers))
 	for _, c := range containers {
-		container, ok := c.(map[string]interface{})
+		container, ok := c.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -508,7 +508,7 @@ func extractCRDVersions(obj *unstructured.Unstructured) string {
 
 	names := make([]string, 0, len(versions))
 	for _, v := range versions {
-		ver, ok := v.(map[string]interface{})
+		ver, ok := v.(map[string]any)
 		if !ok {
 			continue
 		}

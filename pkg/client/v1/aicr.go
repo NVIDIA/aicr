@@ -32,6 +32,8 @@
 //   - LoadSnapshot — read a previously captured *Snapshot from a file,
 //     URL, or cm:// ConfigMap, for the common case where the snapshot
 //     already exists and no cluster is needed.
+//   - DiffSnapshots — compare two loaded or collected snapshots in memory and
+//     return facade-owned field-level changes for drift detection.
 //   - ValidateState — evaluate a resolved recipe against a snapshot,
 //     running deployment / conformance / performance phases.
 //   - LoadConfig — read and validate the AICRConfig a team commits, from a
@@ -62,10 +64,10 @@
 //   - VerifyBinaryAttestation — package-level; prove an aicr binary was
 //     built by NVIDIA CI.
 //
-// All facade types (Snapshot, AgentConfig, Criteria, RecipeRequest,
-// RecipeResult, ComponentBundle, ComponentRef, PhaseResult, and AllowLists)
-// are facade-owned structs translated to and from the upstream pkg/*
-// shapes, so internal field renames don't churn external callers.
+// All facade types (Snapshot, SnapshotDiff, SnapshotChange, AgentConfig,
+// Criteria, RecipeRequest, RecipeResult, ComponentBundle, ComponentRef,
+// PhaseResult, AllowLists) are facade-owned structs translated to and from the
+// upstream pkg/* shapes, so internal field renames don't churn external callers.
 //
 // Seven types remain deliberate transparent aliases: BundleConfig,
 // BundleAttester, BundleArtifact, OIDCResolveOptions, CriteriaRegistry,
@@ -157,6 +159,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/constraints"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/recipe/ocisource"
@@ -197,6 +200,18 @@ type Client struct {
 	// change after construction, so it doesn't need locking.
 	version string
 
+	// deps holds the injectable entry points (OCI provider construction,
+	// snapshot-Job deployment). Populated once in NewClient from
+	// defaultClientDependencies; only tests substitute anything. Doesn't
+	// change after construction, so it doesn't need locking.
+	//
+	// A POINTER, not a value: clientDependencies holds func fields, and funcs
+	// are not comparable, so embedding it by value would silently make Client
+	// itself non-comparable. That is a breaking change to a frozen v1 type
+	// (api-diff reports "Client: old is comparable, new is not"), and no test
+	// seam is worth spending it.
+	deps *clientDependencies
+
 	// allowLists fences which criteria values the resolve path accepts.
 	// nil means "no fencing — all values allowed". Set by WithAllowLists;
 	// enforced in enforceAllowLists on the shared resolve path. Doesn't
@@ -232,6 +247,15 @@ type clientDependencies struct {
 		*recipe.EmbeddedDataProvider,
 		ocisource.Config,
 	) (recipe.DataProvider, error)
+
+	// deployAndCollect is the snapshot-Job deployment entry point. It is a
+	// seam because everything CollectSnapshot decides about the Job —
+	// including the fields it defaults — is otherwise observable only from a
+	// live apiserver, which is exactly where the #2256 foot-gun surfaced.
+	deployAndCollect func(
+		context.Context,
+		*snapshotter.AgentConfig,
+	) (*snapshotter.Snapshot, []byte, error)
 }
 
 func defaultClientDependencies() clientDependencies {
@@ -244,6 +268,7 @@ func defaultClientDependencies() clientDependencies {
 
 			return ocisource.New(ctx, embedded, config)
 		},
+		deployAndCollect: snapshotter.DeployAndCollect,
 	}
 }
 
@@ -293,7 +318,7 @@ func newClientWithContextAndDependencies(
 	if err := clientConstructionContextError(ctx); err != nil {
 		return nil, err
 	}
-	c := &Client{}
+	c := &Client{deps: &deps}
 
 	for _, opt := range opts {
 		// Skip nil Option entries defensively — a caller building a
@@ -612,6 +637,67 @@ func (c *Client) CriteriaRegistry() *CriteriaRegistry {
 	return c.criteriaRegistry(recipe.GetCriteriaRegistryFor)
 }
 
+// CriteriaFromSnapshot derives recipe criteria from a snapshot's measurements.
+//
+// This is the snapshot-to-recipe entry point. Without it the workflow could not
+// be completed through pkg/client/v1 alone: the CLI reached into
+// pkg/fingerprint and pkg/recipe to do this, and the integrator guide had to
+// document that escape hatch, which contradicts this package's promise to be
+// the whole integration surface (#2437, #2016).
+//
+// Criteria are parsed against this Client's provider-scoped registry, so an
+// external --data catalog that registers its own accelerator or service values
+// resolves them the same way the Client will when it resolves the recipe. A
+// package-level helper could not do that.
+//
+// The returned criteria are a starting point, not a verdict: callers layer
+// config and flag overrides on top before resolving. Every dimension the
+// snapshot could not determine is left as the "any" wildcard rather than
+// guessed.
+//
+// Returns ErrCodeInvalidRequest for a nil snapshot, since a caller asking for
+// criteria from nothing has a bug rather than an empty result.
+func (c *Client) CriteriaFromSnapshot(snap *Snapshot) (*Criteria, error) {
+	// The lifecycle guards are not boilerplate here. CriteriaRegistry() is
+	// deliberately lenient -- a nil or closed Client gets a fresh ephemeral
+	// registry so callers can use it defensively -- so without these checks a
+	// nil or closed Client silently derived criteria against the DEFAULT
+	// registry and returned them with no error. That is the one thing this
+	// method exists to avoid: an external --data catalog's registered values
+	// would be missing and the caller would never know.
+	if c == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
+	}
+	if snap == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"snapshot is required to derive criteria")
+	}
+
+	c.mu.RLock()
+	if c.builder == nil {
+		c.mu.RUnlock()
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"aicr client not initialized (or already closed)")
+	}
+	c.inflight.Add(1)
+	c.mu.RUnlock()
+	defer c.inflight.Done()
+
+	internal := snap.Unwrap()
+	if internal == nil {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			"snapshot could not be read")
+	}
+
+	// A snapshot with no measurements yields the all-"any" criteria rather than
+	// an error: that is a legitimate result for a cluster the collectors could
+	// not characterize, and the caller's own minimum-specificity check is what
+	// decides whether it is usable.
+	derived := fingerprint.FromMeasurements(internal.Measurements).
+		ToCriteria(c.CriteriaRegistry())
+	return WrapCriteria(derived), nil
+}
+
 // criteriaRegistry isolates the cache getter so the Close lifecycle can be
 // tested with a deterministically blocked cache access.
 func (c *Client) criteriaRegistry(
@@ -752,6 +838,9 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	if req.AccountingMode != "" {
 		resolveOpts = append(resolveOpts, WithAccountingMode(req.AccountingMode))
 	}
+	if req.GKETCPXOInterfaces != "" {
+		resolveOpts = append(resolveOpts, WithGKETCPXOInterfaces(req.GKETCPXOInterfaces))
+	}
 	internal, err := c.resolveCriteria(ctx, builder, criteria, resolveOpts...)
 	if err != nil {
 		// Don't re-wrap with ErrCodeInternal — the builder already
@@ -812,6 +901,9 @@ func recipeBuildOptions(opts ...RecipeResolveOption) (*recipeResolveConfig, []re
 	}
 	if cfg.runtimeInventoryMode != nil {
 		buildOpts = append(buildOpts, recipe.WithRuntimeInventoryMode(*cfg.runtimeInventoryMode))
+	}
+	if cfg.tcpxoInterfaces != nil {
+		buildOpts = append(buildOpts, recipe.WithGKETCPXOInterfaces(*cfg.tcpxoInterfaces))
 	}
 	return cfg, buildOpts, nil
 }
@@ -1723,9 +1815,34 @@ func resolveHelmComponentValues(
 // without breaking signatures. CollectSnapshot is therefore safe even
 // on a Client whose recipe source is unrelated to the target cluster.
 //
-// cfg.Kubeconfig is the path (or empty for in-cluster). cfg.Namespace,
-// cfg.Image, cfg.ServiceAccountName must be set; other fields fall
-// back to package defaults documented on snapshotter.AgentConfig.
+// cfg.Kubeconfig is the path (or empty for in-cluster).
+//
+// # Required and defaulted fields
+//
+// cfg.Namespace is the only field you must set: it is where the Job, its RBAC,
+// and the result ConfigMap are created, and deploying a privileged
+// cluster-reading Job into an unstated namespace is not a safe default. An
+// empty one is rejected with ErrCodeInvalidRequest before any cluster access.
+//
+// cfg.Image is defaulted when empty to the tag matching this Client's
+// WithVersion (a Client with no version, like a development build, gets
+// :latest). Set it explicitly to pin a different agent generation or a
+// mirrored registry.
+//
+// cfg.JobName and cfg.ServiceAccountName are optional naming PREFIXES, not
+// exact names. Leaving them empty is fine: cfg.NameBase (default
+// defaults.AgentName) supplies the prefix instead. cfg.RunID is appended to
+// whichever prefix applies, so two callers that both omit these names still
+// get distinct objects rather than shared ones — see Concurrency. Other
+// fields fall back to the defaults documented on snapshotter.AgentConfig.
+//
+// One exception to the prefix rule, because it is the point of the mode: a
+// cfg.ServiceAccountName that names a ServiceAccount already present in
+// cfg.Namespace is used VERBATIM, and this call then creates and deletes no
+// RBAC at all. That is how a caller runs the agent under an IRSA or Workload
+// Identity account, whose cloud trust is pinned to the account name and so
+// cannot survive a run-scoped rename. It waives per-run permission isolation:
+// concurrent runs sharing that account share its grants.
 //
 // # Output and delivery
 //
@@ -1782,8 +1899,25 @@ func resolveHelmComponentValues(
 //     carry the appropriate pkg/errors codes (ErrCodeInternal for
 //     deployment failures, ErrCodeTimeout for context expiry, etc.).
 //
-// Concurrent CollectSnapshot calls are safe; each call constructs an
-// independent run.
+// # Concurrency
+//
+// Concurrent CollectSnapshot calls are safe, at the Client level and against
+// the same cluster. Each call gets its own RunID (cfg.RunID when set,
+// otherwise generated) and, from it, its own Job, ServiceAccount, Role,
+// RoleBinding, ClusterRole, ClusterRoleBinding and — when cfg.Output does not
+// name one — its own staging ConfigMap. Every object is deleted under a UID
+// precondition recorded when this run created it, so no run can delete
+// something another run owns. This replaces the earlier one-at-a-time
+// constraint (#2120).
+//
+// Two effects remain shared, both by design:
+//
+//   - Two calls that set cfg.Output to the SAME explicit cm://namespace/name
+//     URI write to that one caller-named ConfigMap and overwrite each other.
+//     Output identifies a caller-owned destination, not a run-scoped one, so
+//     RunID does not disambiguate it.
+//   - Two calls naming the same existing cfg.ServiceAccountName run under that
+//     one identity and share its grants, since neither creates RBAC.
 func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapshot, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
@@ -1824,13 +1958,69 @@ func (c *Client) CollectSnapshot(ctx context.Context, cfg *AgentConfig) (*Snapsh
 	ctx, cancel := context.WithTimeout(ctx, budget+defaults.SnapshotOperationGrace)
 	defer cancel()
 
-	snap, raw, err := snapshotter.DeployAndCollect(ctx, toInternalAgentConfig(cfg))
+	// Defaults are applied to the internal copy, never to the caller's cfg:
+	// an AgentConfig the caller can reuse must not silently acquire fields
+	// after a call.
+	agentCfg := toInternalAgentConfig(cfg)
+	applyAgentDefaults(agentCfg, c.version)
+
+	// A Client built by anything but NewClient (a zero-value literal in a
+	// test) has no deps; fall back rather than nil-panic.
+	deploy := snapshotter.DeployAndCollect
+	if c.deps != nil && c.deps.deployAndCollect != nil {
+		deploy = c.deps.deployAndCollect
+	}
+
+	snap, raw, err := deploy(ctx, agentCfg)
 	if err != nil {
 		return nil, err
 	}
 	out := fromInternalSnapshot(snap)
 	out.Raw = raw
 	return out, nil
+}
+
+// applyAgentDefaults fills Image, the one agent field the CLI has always
+// supplied as a flag default and the facade did not.
+//
+// Image is copied verbatim into the Job's container and nothing under
+// pkg/k8s/agent defaults it, so omitting it surfaced as a raw apiserver
+// rejection from inside Deploy — after the ServiceAccount had already been
+// created, which with Cleanup false leaves it behind (#2256). The CLI never hit
+// it because pkg/cli/snapshot.go supplies it as a flag default; sharing the
+// definition through pkg/defaults is what keeps the two paths deploying the
+// same image.
+//
+// JobName and ServiceAccountName are deliberately NOT defaulted, though #2256
+// originally set both to defaults.AgentName here. Under run isolation
+// (ADR-020) they are naming PREFIXES that pkg/k8s/agent already defaults from
+// Config.NameBase before appending the run ID, so filling them adds nothing —
+// and for ServiceAccountName it actively harms. That field is exact-if-exists:
+// agent.Deployer.resolveServiceAccount probes for a ServiceAccount of exactly
+// the given name and, on a hit, runs under it and manages no RBAC for the run
+// at all. Defaulting it means every SDK caller who omits it probes "aicr", so
+// on any cluster carrying a leftover "aicr" ServiceAccount from a
+// pre-ADR-020 install every run would silently enter that mode. An unset name
+// is never probed, so exact mode stays reachable only from a name the caller
+// actually chose. See CollectSnapshot's godoc, which documents both as
+// optional prefixes.
+//
+// Namespace is deliberately NOT defaulted either. pkg/snapshotter already
+// rejects an empty one with a coded error naming the field, and quietly
+// deploying a privileged, cluster-reading Job into "default" is a worse outcome
+// than being told to choose. The CLI defaults it because a person is watching a
+// flag they can see; an SDK caller is not.
+//
+// A whitespace-only Image counts as unset: it cannot be a valid image
+// reference, so treating it as a typo'd omission beats forwarding it to the
+// apiserver. This mirrors how pkg/snapshotter reads Namespace.
+func applyAgentDefaults(cfg *snapshotter.AgentConfig, version string) {
+	if cfg == nil {
+		return
+	}
+	if strings.TrimSpace(cfg.Image) == "" {
+		cfg.Image = defaults.AgentImageForVersion(version)
+	}
 }
 
 // ValidateState evaluates a resolved recipe against an observed cluster

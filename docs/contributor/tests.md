@@ -91,7 +91,7 @@ command name — there is no Cobra-style `SetOut`/`SetArgs`/`Execute`.)
 Direct `fmt.Println` / `fmt.Printf` to stdout in `pkg/cli` breaks
 this pattern and is a review-blocker.
 
-**Coverage floor: 80%** (from `.settings.yaml`
+**Coverage floor: 83%** (from `.settings.yaml`
 `quality.coverage_threshold`; excludes `validators/`, see #1752). `make test-coverage` enforces it.
 Per-package decreases > 0.5% are flagged for justification.
 
@@ -148,11 +148,11 @@ descendants — pick the narrowest root that covers the diff.
 
 ```bash
 # 1. Profile the working tree (changes must be committed first).
-GOFLAGS="-mod=vendor" go test -coverprofile=cover.out ./pkg/recipe/...
+go test -coverprofile=cover.out ./pkg/recipe/...
 
 # 2. Profile origin/main from a clean worktree, outside the source tree.
 git worktree add $TMPDIR/baseline origin/main \
-  && (cd $TMPDIR/baseline && GOFLAGS="-mod=vendor" go test \
+  && (cd $TMPDIR/baseline && go test \
         -coverprofile=$TMPDIR/base.out ./pkg/recipe/...); \
   rc=$?; git worktree remove --force $TMPDIR/baseline; \
   (exit $rc)
@@ -167,7 +167,7 @@ profile inside the worktree disappears with `worktree remove --force`.
 
 **Gates:**
 
-- **Block** if `make test-coverage` fails (project-wide 80% floor).
+- **Block** if `make test-coverage` fails (project-wide 83% floor).
 - **Block** if any new exported function or method has 0% coverage
   in the diff — add tests before pushing.
 - **Flag** any per-package decrease > 0.5% and explain in the PR.
@@ -211,7 +211,10 @@ Discover them and run locally against a Kind cluster:
 
 ```bash
 make check-health COMPONENT=gpu-operator       # single component
-make check-health-all                           # all components
+make check-health-all                           # registry-linked components
+# opt-in-only checks (e.g. nvsentinel-observability) aren't in that
+# sweep -- run them directly:
+make check-health COMPONENT=nvsentinel-observability
 make validate-local RECIPE=recipe.yaml          # full pipeline
 ```
 
@@ -478,12 +481,23 @@ half of the pipeline and skips deploy-side assertions.
 
 `make qualify` is the canonical pre-push command. It runs:
 
-- `test-coverage` — `go test -race ./...` plus the 80% coverage floor.
+- `test-coverage` — `go test -race ./...` plus the 83% coverage floor.
 - `lint` — golangci-lint with `.golangci.yaml`, yamllint, and the docs checks
   (filenames, MDX patterns, MDX parse — see [Docs MDX Gate](#docs-mdx-gate)).
 - `e2e` — the end-to-end pipeline runner.
 - `scan` — Grype vulnerability scan.
 - `license-check` — license header / dependency-license sweep.
+- bundle layout — `TestBundleLayoutMatchesManifest` renders the frozen fixture
+  recipe through every deployer and compares the tree to
+  `pkg/bundler/testdata/layout/manifests/`. A removed or renamed path fails; an
+  added one is additive. See
+  [Bundle layout](../user/bundling.md#bundle-layout).
+- artifact schemas — `tools/schemagen` tests gate freshness, real-artifact
+  validity, and breaking changes against `api/aicr/v1/schemas/baseline/`. See
+  [API server](api-server.md#artifact-schema-gate).
+- `openapi-diff` — the REST contract in `api/aicr/v1/server.yaml` against its
+  committed baseline, failing on unacknowledged breaking changes and on stale
+  acknowledgements. See [API server](api-server.md#rest-contract-gate).
 - `api-diff` — exported `pkg/client/v1` compatibility, including the scoped
   repository-local type closure reachable through transparent aliases, against
   the latest stable release.
@@ -581,30 +595,32 @@ token or a dependency on Fern's service at merge time.
   re-render comparison) is its **opt-in** blocking check, and the weekly
   BOM-refresh workflow auto-detects it and opens a PR. So run
   `make bom-docs` locally any time the change touches charts.
-- **Forgetting `make notices`** after a `go.mod`, `go.sum`, or `vendor/`
-  change. `THIRD_PARTY_NOTICES.md` is the union of every vendored
+- **Assuming `make notices` is needed** after a `go.mod` or `go.sum` change.
+  `THIRD_PARTY_NOTICES.md` is the union of every redistributed
   dependency's license across the released OS/arch matrix
   (linux+darwin × amd64+arm64), so a dependency-graph change can add or
-  drop entries. `make tidy` regenerates the file as its last step (right
-  after `go mod vendor`), so the normal dependency-update flow keeps it
-  fresh with nothing to remember — but if you edit `go.mod`/vendor by
-  hand, run `make notices` yourself. The `notices-freshness` merge-gate
-  job regenerates the file and fails CI if the committed copy is stale.
+  drop entries. The file is not committed — `make release` regenerates it
+  from the tag being released and goreleaser uploads it — so there is
+  nothing to keep fresh and nothing to remember after a dependency bump.
+  The `notices-generator` merge-gate job runs the generator on dependency
+  changes and fails CI if it cannot complete, so a break surfaces on the
+  PR that causes it instead of blocking a release at tag time.
 - **Forgetting `make python-licenses`** after editing
   `validators/performance/requirements.txt`. The notices file also covers
   the Python closure installed into the `aiperf-bench` image, but that
-  closure is fetched from PyPI rather than vendored, so it cannot be
-  regenerated offline the way the Go half can. `make python-licenses`
+  closure is fetched from PyPI at image-build time and is not part of the
+  Go dependency graph, so `make notices` cannot regenerate it.
+  `make python-licenses`
   (needs network) refreshes the committed fragment at
   `validators/performance/licenses/python-notices.md`; `make notices`
   then folds it in. The fragment records the sha256 of the requirements
   file it came from, and `make notices` fails closed when that no longer
   matches, so any edit without a refresh is caught by the same
-  `notices-freshness` job rather than shipping stale attributions.
+  `notices-generator` job rather than shipping stale attributions.
   The generator sets a fixed platform matrix and `LC_ALL=C`, so
   `make notices` produces byte-identical output on macOS and Linux.
 - **Coverage decrease > 0.5%** is flagged for justification (the project-wide
-  80% floor is what blocks). Add tests rather than
+  83% floor is what blocks). Add tests rather than
   reaching for `// nolint` or `t.Skip` — both are review-blockers
   under the no-skip-tests rule in CLAUDE.md.
 - **Live-cluster connections from unit tests.** A test that forgets

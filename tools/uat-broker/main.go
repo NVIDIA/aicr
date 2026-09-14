@@ -331,7 +331,7 @@ func readTags(ctx context.Context, stdin io.Reader) ([]string, error) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "tag list on stdin exceeds size limit")
 	}
 	var tags []string
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			tags = append(tags, line)
 		}
@@ -379,7 +379,7 @@ func boolCount(flags ...bool) int {
 // empties.
 func splitCSV(csv string) []string {
 	var out []string
-	for _, p := range strings.Split(csv, ",") {
+	for p := range strings.SplitSeq(csv, ",") {
 		if p = strings.TrimSpace(p); p != "" {
 			out = append(out, p)
 		}

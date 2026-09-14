@@ -16,11 +16,14 @@ package attestation
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
 // TestSelectOIDCSource pins the source-precedence classifier that both
@@ -203,17 +206,16 @@ func TestResolveAttester(t *testing.T) {
 
 // TestResolveAttesterKMS verifies the eager resolver returns a KMSAttester
 // when SigningKey is set, without resolving an OIDC token. A non-empty
-// SigningKey takes precedence over the keyless OIDC source fields. See #407.
+// SigningKey takes precedence over an ambient identity token. See #407.
 func TestResolveAttesterKMS(t *testing.T) {
-	// SigningKey takes precedence over keyless OIDC fields: even with an
-	// identity token and device flow set, the resolver selects the KMS
-	// attester and never attempts OIDC. (The CLI rejects this combination up
-	// front; the resolver's contract is precedence, not rejection.)
+	// Precedence still holds for IdentityToken, which a CI environment can
+	// populate without the caller asking for keyless signing (see the
+	// ResolveOptions field doc). DeviceFlow is the one keyless field that is
+	// rejected rather than overridden — see TestResolveAttesterSigningModeConflict.
 	att, err := ResolveAttester(context.Background(), ResolveOptions{
 		Attest:        true,
 		SigningKey:    "awskms://arn:aws:kms:us-east-1:111:key/abc",
 		IdentityToken: "should-be-ignored",
-		DeviceFlow:    true,
 	})
 	if err != nil {
 		t.Fatalf("ResolveAttester: %v", err)
@@ -224,19 +226,96 @@ func TestResolveAttesterKMS(t *testing.T) {
 }
 
 // TestResolveAttesterLazyKMS verifies the lazy resolver returns a KMSAttester
-// when SigningKey is set, taking precedence over keyless OIDC fields. See #407.
+// when SigningKey is set, taking precedence over an ambient identity token.
+// See #407.
 func TestResolveAttesterLazyKMS(t *testing.T) {
 	att, err := ResolveAttesterLazy(context.Background(), ResolveOptions{
 		Attest:        true,
 		SigningKey:    "awskms://arn:aws:kms:us-east-1:111:key/abc",
 		IdentityToken: "should-be-ignored",
-		DeviceFlow:    true,
 	})
 	if err != nil {
 		t.Fatalf("ResolveAttesterLazy: %v", err)
 	}
 	if _, ok := att.(*KMSAttester); !ok {
 		t.Errorf("got %T, want *KMSAttester", att)
+	}
+}
+
+// TestResolveAttesterSigningModeConflict pins the one keyless field the
+// resolver rejects instead of overriding. Both entry points decide KMS-vs-
+// keyless on a non-empty SigningKey, so a caller asking for device flow
+// alongside a key used to receive a key signature and never see the
+// verification prompt it was waiting for. The CLI has always rejected the pair
+// on its merged options; an SDK caller deriving straight from a document never
+// merges anything, which is the path this closes (#2537).
+//
+// Attest=false keeps its short-circuit: nothing signs, so there is no mode to
+// conflict over.
+func TestResolveAttesterSigningModeConflict(t *testing.T) {
+	const key = "awskms://arn:aws:kms:us-east-1:111:key/abc"
+
+	tests := []struct {
+		name     string
+		opts     ResolveOptions
+		wantErr  bool
+		lazyOnly bool
+	}{
+		{
+			name:    "key with device flow is rejected",
+			opts:    ResolveOptions{Attest: true, SigningKey: key, DeviceFlow: true},
+			wantErr: true,
+		},
+		{
+			name:    "key alone is fine",
+			opts:    ResolveOptions{Attest: true, SigningKey: key},
+			wantErr: false,
+		},
+		{
+			// Lazy only: the eager resolver would run a real device-flow token
+			// exchange against the network before returning.
+			name:     "device flow alone is fine",
+			opts:     ResolveOptions{Attest: true, DeviceFlow: true},
+			wantErr:  false,
+			lazyOnly: true,
+		},
+		{
+			name:    "attestation disabled short-circuits before the check",
+			opts:    ResolveOptions{Attest: false, SigningKey: key, DeviceFlow: true},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		for _, entry := range []struct {
+			name    string
+			resolve func(context.Context, ResolveOptions) (Attester, error)
+		}{
+			{"eager", ResolveAttester},
+			{"lazy", ResolveAttesterLazy},
+		} {
+			if tt.lazyOnly && entry.name == "eager" {
+				continue
+			}
+			t.Run(tt.name+"/"+entry.name, func(t *testing.T) {
+				att, err := entry.resolve(context.Background(), tt.opts)
+				if (err != nil) != tt.wantErr {
+					t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+				}
+				if tt.wantErr {
+					if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+						t.Errorf("error = %v, want code %v", err, errors.ErrCodeInvalidRequest)
+					}
+					if att != nil {
+						t.Errorf("got attester %T alongside the error, want nil", att)
+					}
+					return
+				}
+				if att == nil {
+					t.Error("got nil attester without an error")
+				}
+			})
+		}
 	}
 }
 

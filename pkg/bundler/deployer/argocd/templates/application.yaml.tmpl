@@ -56,3 +56,49 @@ spec:
       # per-Application template branching and a confusing mix of sync
       # strategies in a single bundle.
       - ServerSideApply=true
+{{- if .ApplyOutOfSyncOnly }}
+      # ApplyOutOfSyncOnly: scoped to the readiness-gate Application only.
+      # Paired with the Job's Replace=true,Force=true annotation
+      # (pkg/bundler/gatemanifest/manifest.go), this skips resources ArgoCD's
+      # diff already considers in-sync so a no-op resync does not
+      # delete-and-recreate the readiness-gate Job (and rerun its checks)
+      # when nothing changed. See #2367.
+      - ApplyOutOfSyncOnly=true
+{{- end }}
+{{- if .IgnoreComputeDomainCRDDiff }}
+      # RespectIgnoreDifferences: required for the ignoreDifferences block
+      # below to take effect during sync, not just status/diff display. See
+      # https://argo-cd.readthedocs.io/en/stable/user-guide/sync-options/#respect-ignore-difference-configs
+      #
+      # One guard covers both halves deliberately: the syncOption and the
+      # ignoreDifferences block are only ever correct together — emitting
+      # either alone is a silent no-op.
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    # gpu-operator and nvidia-dra-driver-gpu both install
+    # computedomains.resource.nvidia.com, and as of gpu-operator v26.7.0
+    # the two copies disagree on four schema fields (spec.required plus
+    # numNodes.default/minimum/description). Under automated selfHeal,
+    # Argo CD perpetually reconciles the CRD toward whichever Application
+    # synced last. This keeps gpu-operator from fighting the DRA driver's
+    # copy over the divergent fields; the DRA driver's copy is treated as
+    # authoritative. Stopgap pending single CRD ownership or GPUCluster
+    # consolidation. See NVIDIA/aicr#2546.
+    #
+    # versions/0 assumes the CRD ships exactly one version — true of both
+    # charts today (v1beta1 only, verified against gpu-operator v26.7.0 and
+    # dra-driver-nvidia-gpu 0.5.0). The CRD's own numNodes description
+    # anticipates a v1beta2 ("deprecated and will be removed in the next API
+    # version"); if either chart adds or reorders versions these pointers
+    # silently address the wrong entry and the selfHeal fight resumes.
+    # jqPathExpressions over .spec.versions[] would be index-independent —
+    # see the follow-ups on NVIDIA/aicr#2546.
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      name: computedomains.resource.nvidia.com
+      jsonPointers:
+        - /spec/versions/0/schema/openAPIV3Schema/properties/spec/required
+        - /spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/default
+        - /spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/minimum
+        - /spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/description
+{{- end }}

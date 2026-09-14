@@ -245,8 +245,8 @@ func distinctLabelValues(st *measurement.Subtype, key string) []string {
 // the entire input as value and an empty node list when no separator
 // is present.
 func parseLabelEncoding(raw string) (value, nodes string) {
-	if i := strings.Index(raw, "|"); i >= 0 {
-		return raw[:i], raw[i+1:]
+	if before, after, ok := strings.Cut(raw, "|"); ok {
+		return before, after
 	}
 	return raw, ""
 }
@@ -347,7 +347,7 @@ func countGPUNodes(st *measurement.Subtype) int {
 		if nodeList == "" {
 			continue
 		}
-		for _, n := range strings.Split(nodeList, ",") {
+		for n := range strings.SplitSeq(nodeList, ",") {
 			n = strings.TrimSpace(n)
 			if n != "" {
 				nodes[n] = struct{}{}

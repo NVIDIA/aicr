@@ -762,6 +762,19 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 		r.Metadata.SelectedProfile = &recipe.SelectedProfile{Name: "gpuStack", Value: "azure-managed"}
 		return r
 	}
+	gcpInstallerRef := func(gate any) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: "gcp-driver-installer",
+			Overrides: map[string]any{"installer": map[string]any{"enabled": gate}}}
+	}
+	// A GKE+COS bundle-installer recipe whose snapshot (correctly) saw no
+	// driver: pools are created gpu-driver-version=disabled, the bundle's
+	// gcp-driver-installer supplies the driver.
+	resultBundleInstaller := func(gate any) *recipe.RecipeResult {
+		r := resultOS(recipe.GPUDriverStateAbsent, recipe.CriteriaServiceGKE,
+			recipe.CriteriaOSCOS, gpuOpRef(driverOff()), gcpInstallerRef(gate))
+		r.Metadata.SelectedProfile = &recipe.SelectedProfile{Name: "gpuStack", Value: "bundle-installer"}
+		return r
+	}
 	aks := recipe.CriteriaServiceAKS
 
 	tests := []struct {
@@ -852,9 +865,87 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 				recipe.CriteriaOSCOS, gpuOpRef(driverOff())),
 			wantMsgs: 1,
 			wantContains: []string{
-				"gpu-driver-version",
 				"On GKE COS node images the GPU Operator cannot install the driver",
+				"gpu-driver-version=default",
+				"--profile gpuStack=bundle-installer",
+				"gke-no-default-nvidia-gpu-device-plugin=true",
+				"gpu-driver-version=disabled",
+				"gcp-driver-installer",
+				"do not deploy a standalone DaemonSet alongside it",
 			},
+		},
+		{
+			// The bundle-installer regression (#2360 review): a correctly
+			// provisioned pool has no driver, so the snapshot records
+			// absent and driver.enabled=false — but the bundle's own
+			// gcp-driver-installer supplies the driver, so Rule 1 must
+			// stand down and let the pool generate its own bundle.
+			name:         "Rule 1: absent + enabled gcp-driver-installer → bundle supplies driver, no message",
+			recipeResult: resultBundleInstaller(true),
+		},
+		{
+			// Template parity: the manifest gate is toString == "true",
+			// so a string \"true\" renders the DaemonSet and counts as a
+			// driver producer too.
+			name:         "Rule 1: absent + string-true installer gate → suppressed (template parity)",
+			recipeResult: resultBundleInstaller("true"),
+		},
+		{
+			name:         "Rule 1: absent + disabled installer gate → still blocked",
+			recipeResult: resultBundleInstaller(false),
+			wantMsgs:     1,
+			wantContains: []string{"driverless", "On GKE COS node images"},
+		},
+		{
+			// Unrecognized gate types must not disarm the driverless gate.
+			name:         "Rule 1: absent + non-boolean installer gate → still blocked (fail closed)",
+			recipeResult: resultBundleInstaller(map[string]any{"oops": true}),
+			wantMsgs:     1,
+			wantContains: []string{"driverless"},
+		},
+		{
+			// The suppression keys off the EFFECTIVE gate, not the profile
+			// name: a --set that turns the installer off re-arms Rule 1.
+			name:         "Rule 1: absent + installer gate turned off via --set → still blocked",
+			recipeResult: resultBundleInstaller(true),
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"gcpdriverinstaller": {"installer.enabled": "false"},
+				}),
+			),
+			wantMsgs:     1,
+			wantContains: []string{"driverless"},
+		},
+		{
+			// TC3: the fail-closed propagation — gpu-operator resolves but
+			// the installer's effective values do not (a --set that
+			// descends through the scalar gate). Must surface as a hard
+			// error, never degrade to the driverless remediation.
+			name:         "Rule 1: absent + installer values unresolvable → hard error, no driverless remedy",
+			recipeResult: resultBundleInstaller(true),
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"gcpdriverinstaller": {"installer.enabled.bogus": "true"},
+				}),
+			),
+			wantErrs:        1,
+			wantErrContains: []string{"bundle-supplied driver detection"},
+		},
+		{
+			// installer present as a scalar rather than a map: not a
+			// producer — Rule 1 stays armed.
+			name: "Rule 1: absent + installer as non-map scalar → still blocked",
+			recipeResult: func() *recipe.RecipeResult {
+				r := resultBundleInstaller(true)
+				for i := range r.ComponentRefs {
+					if r.ComponentRefs[i].Name == "gcp-driver-installer" {
+						r.ComponentRefs[i].Overrides = map[string]any{"installer": "on"}
+					}
+				}
+				return r
+			}(),
+			wantMsgs:     1,
+			wantContains: []string{"driverless"},
 		},
 		{
 			name: "Rule 1: absent on GKE+ubuntu → operator-managed remedy, no COS instruction",
@@ -1239,7 +1330,7 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 			// the key together with its chart defaults, so .Values.driver
 			// is nil at render time and the chart's unconditional field
 			// accesses (_helpers.tpl .Values.driver.manager.repository,
-			// v26.3.3) fail at install. Reject rather than default. The
+			// v26.7.0) fail at install. Reject rather than default. The
 			// reachable vector is a top-level --set-json null: the typed
 			// merge assigns it verbatim (mergeTypedValueByPath), while the
 			// recipe-side overlay merge drops nil-valued keys before the
@@ -1266,7 +1357,7 @@ func TestCheckDriverOwnershipCoherence(t *testing.T) {
 			// hostPaths: null is the same hazard as a null driver/toolkit
 			// section: Helm null-coalescing deletes the chart defaults and
 			// clusterpolicy.yaml's unconditional .Values.hostPaths.rootFS
-			// access fails at install (v26.3.3).
+			// access fails at install (v26.7.0).
 			name:         "--set-json hostPaths=null → rejected",
 			recipeResult: result("", aks, gpuOpRef(driverOn())),
 			bundlerConfig: config.NewConfig(config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
@@ -1659,5 +1750,98 @@ func TestEffectiveComponentValues_PreservesResolverCode(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "driver-ownership coherence") {
 		t.Errorf("error %q missing coherence framing", err.Error())
+	}
+}
+
+// tcpxoCoherenceTestResult builds a fingerprint recipe (h100 GKE kubeflow
+// with the fabric component) that records the fixed introspection mapping and
+// projects it into the kubeflow-trainer overrides, as recipe generation does.
+func tcpxoCoherenceTestResult() *recipe.RecipeResult {
+	mapping := recipe.GKETCPXOIntrospectionInterfaces()
+	override := make([]any, 0, len(mapping))
+	for _, entry := range mapping {
+		override = append(override, map[string]any{
+			"interfaceName": entry.InterfaceName,
+			"network":       entry.Network,
+		})
+	}
+	return &recipe.RecipeResult{
+		Criteria: &recipe.Criteria{
+			Service:     recipe.CriteriaServiceGKE,
+			Accelerator: recipe.CriteriaAcceleratorH100,
+			Platform:    recipe.CriteriaPlatformKubeflow,
+		},
+		Configuration: &recipe.RecipeConfiguration{
+			GKE: &recipe.GKEConfiguration{TCPXOInterfaces: mapping},
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "gke-nccl-tcpxo"},
+			{Name: "kubeflow-trainer", Overrides: map[string]any{"tcpxoInterfaces": override}, ManifestFiles: []string{
+				"components/kubeflow-trainer/manifests/torch-distributed-tcpxo-cluster-training-runtime.yaml",
+			}},
+		},
+	}
+}
+
+func TestCheckGKETCPXOInterfacesCoherence(t *testing.T) {
+	t.Parallel()
+
+	nonFingerprint := tcpxoCoherenceTestResult()
+	nonFingerprint.ComponentRefs[1].ManifestFiles = nil
+	nonFingerprint.Configuration = nil
+
+	drifted := tcpxoCoherenceTestResult()
+	drifted.ComponentRefs[1].Overrides["tcpxoInterfaces"].([]any)[2].(map[string]any)["network"] = "reprovisioned-network"
+
+	overrideRemoved := tcpxoCoherenceTestResult()
+	delete(overrideRemoved.ComponentRefs[1].Overrides, "tcpxoInterfaces")
+
+	unrecorded := tcpxoCoherenceTestResult()
+	unrecorded.Configuration = nil
+
+	tests := []struct {
+		name         string
+		recipeResult *recipe.RecipeResult
+		wantErrors   int
+		wantContains string
+	}{
+		{name: "nil recipe skipped"},
+		{name: "non-fingerprint recipe skipped", recipeResult: nonFingerprint},
+		{name: "recorded and resolved agree", recipeResult: tcpxoCoherenceTestResult()},
+		{
+			name:         "valid but different resolved value blocks",
+			recipeResult: drifted,
+			wantErrors:   1,
+			wantContains: "disagrees",
+		},
+		{
+			name:         "override removed by hand blocks",
+			recipeResult: overrideRemoved,
+			wantErrors:   1,
+			wantContains: "no tcpxoInterfaces",
+		},
+		{
+			name:         "missing mapping fails closed",
+			recipeResult: unrecorded,
+			wantErrors:   1,
+			wantContains: "--gke-tcpxo-interfaces",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			warnings, errs := CheckGKETCPXOInterfacesCoherence(
+				context.Background(), "kubeflow-trainer", tt.recipeResult, nil, nil)
+			if len(warnings) != 0 {
+				t.Fatalf("warnings = %d (%v), want 0", len(warnings), warnings)
+			}
+			if len(errs) != tt.wantErrors {
+				t.Fatalf("errors = %d (%v), want %d", len(errs), errs, tt.wantErrors)
+			}
+			if tt.wantContains != "" && !strings.Contains(errs[0].Error(), tt.wantContains) {
+				t.Errorf("error %q missing %q", errs[0], tt.wantContains)
+			}
+		})
 	}
 }

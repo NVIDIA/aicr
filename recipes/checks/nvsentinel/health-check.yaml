@@ -119,6 +119,30 @@ spec:
                 namespace: nvsentinel
               status:
                 (numberReady < desiredNumberScheduled): true
+        # Stale-rollout guard: numberReady alone can't distinguish a node
+        # still running the previous revision's pod (also Ready) from a
+        # fully current rollout. Flat (not status:-nested) so
+        # metadata.generation is addressable below. `<` (not `!=`) states
+        # the violated invariant directly: fewer nodes updated than desired.
+        # updatedNumberScheduled is itself omitempty (unlike
+        # desiredNumberScheduled/numberReady), so it needs the `|| `0``
+        # null-coalescing too.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: metadata-collector
+                namespace: nvsentinel
+              ((status.updatedNumberScheduled || `0`) < status.desiredNumberScheduled): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: metadata-collector
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true
         # syslog-health-monitor-regular: same negative form — the
         # syslog-health-monitor subchart is switchable via its chart
         # condition (global.syslogHealthMonitor.enabled) exactly like
@@ -145,6 +169,28 @@ spec:
                 namespace: nvsentinel
               status:
                 (numberReady < desiredNumberScheduled): true
+        # Stale-rollout guard: numberReady alone can't distinguish a node
+        # still running the previous revision's pod (also Ready) from a
+        # fully current rollout. Flat (not status:-nested) so
+        # metadata.generation is addressable below. updatedNumberScheduled
+        # is itself omitempty (unlike desiredNumberScheduled/numberReady),
+        # so it needs the `|| `0`` null-coalescing too.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: syslog-health-monitor-regular
+                namespace: nvsentinel
+              ((status.updatedNumberScheduled || `0`) < status.desiredNumberScheduled): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: syslog-health-monitor-regular
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true
     - name: validate-all-pods-healthy
       try:
         # Assert no pods are in unhealthy phases (Pending / Failed /

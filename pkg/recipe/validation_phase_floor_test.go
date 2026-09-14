@@ -47,6 +47,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -126,12 +127,7 @@ func hasGPUOperatorVersionCheck(p *ValidationPhase) bool {
 	if p == nil {
 		return false
 	}
-	for _, name := range p.Checks {
-		if name == "gpu-operator-version" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(p.Checks, "gpu-operator-version")
 }
 
 // hasGPUOperatorVersionConstraint reports whether the deployment phase

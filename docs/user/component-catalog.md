@@ -15,13 +15,14 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **gpu-operator** | Manages the GPU driver and runtime lifecycle on Kubernetes nodes. Handles driver installation, container runtime configuration, device plugin, and GPU feature discovery. | [NVIDIA GPU Operator](https://github.com/NVIDIA/gpu-operator) |
 | **network-operator** | Manages high-performance networking for GPU workloads. Configures RDMA, SR-IOV, and host networking for multi-node communication. | [NVIDIA Network Operator](https://github.com/Mellanox/network-operator) |
 | **nfd** | Node Feature Discovery — labels nodes with hardware features (PCI device IDs, kernel modules, CPU capabilities). Both gpu-operator and network-operator consume these labels. On production GPU recipes, the Topology Updater publishes per-node `NodeResourceTopology` CRDs describing NUMA zones and GPU/NIC affinity for downstream NUMA-aware schedulers. | [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) |
-| **gke-nccl-tcpxo** | NCCL TCPxO network plugin for GKE. Provides optimized collective communication for multi-node GPU workloads on Google Kubernetes Engine. GKE-specific. | — |
+| **gke-nccl-tcpxo** | NCCL TCPXO network plugin for GKE. Provides optimized collective communication for multi-node GPU workloads on Google Kubernetes Engine. GKE-specific. | — |
+| **gcp-driver-installer** | Google's cos-gpu-installer DaemonSet as an AICR-managed, values-gated component. Present in every GKE COS recipe; renders only under the `gpuStack=bundle-installer` profile value, where it installs the recipe-pinned NVIDIA driver on pools created with `gpu-driver-version=disabled`. GKE-specific. | — |
 | **aws-efa** | Device plugin for AWS Elastic Fabric Adapter. Enables low-latency networking on EKS clusters with EFA-capable instances. EKS-specific. | [AWS EFA K8s Device Plugin](https://github.com/aws/eks-charts) |
 | **cert-manager** | Automates TLS certificate management. Required by several operators for webhook and API server certificates. | [cert-manager](https://github.com/cert-manager/cert-manager) |
 | **gatekeeper** | Admission controller for Kubernetes. Enforces policies and governance across the cluster using OPA (Open Policy Agent) ConstraintTemplates and Constraints. | [Open Policy Agent Gatekeeper](https://github.com/open-policy-agent/gatekeeper) |
 | **nodewright-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. | [Nodewright](https://github.com/nvidia/nodewright) |
 | **nodewright-customizations** | Environment-specific node tuning profiles applied via Nodewright. Extends the operator with kernel params, hugepages, and other host-level configurations. | — |
-| **nvsentinel** | GPU health monitoring and automated remediation. Detects GPU errors and can cordon or drain affected nodes. On platforms where the provider installs the driver but no driver pod is observable by NVSentinel, the recipes set `labeler.assumeDriverInstalled` for you — see [NVSentinel on provider-installed-driver platforms](#nvsentinel-on-provider-installed-driver-platforms). | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
+| **nvsentinel** | GPU health monitoring. Detects GPU errors and publishes health events; the components that cordon, drain, reboot or terminate a node are off by default — see [NVSentinel Deployment Posture](#nvsentinel-deployment-posture). On platforms where the provider installs the driver but no driver pod is observable by NVSentinel, the recipes set `labeler.assumeDriverInstalled` for you — see [NVSentinel on provider-installed-driver platforms](#nvsentinel-on-provider-installed-driver-platforms). | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
 | **nvidia-dra-driver-gpu** | Dynamic Resource Allocation (DRA) driver. Advertises devices via the Kubernetes `resource.k8s.io` API (`v1` on 1.34+, `v1beta1`/`v1beta2` on 1.32/1.33) — ComputeDomain/IMEX channels for MNNVL platforms, and optionally whole GPUs. Stock recipes disable whole-GPU DRA advertisement (`resources.gpus.enabled: false`) — the device plugin is the production default whole-GPU advertiser, and DRA whole-GPU allocation is an experimental recipe-level opt-in ([#1327](https://github.com/NVIDIA/aicr/issues/1327)). Whole-GPU DRA and the GPU Operator device plugin (`nvidia.com/gpu`) are mutually exclusive per node: recipe-backed validation rejects a configuration that enables both (at policy-resolution time — skipping validation bypasses the check), because the two allocators keep independent ledgers and concurrent advertisement can double-allocate the same physical GPUs (see the guidance in `recipes/components/nvidia-dra-driver-gpu/values.yaml`). See [AKS GPU Setup](../integrator/aks-gpu-setup.md#dynamic-resource-allocation-dra) for details. CLI alias: `dradriver`. | [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu) |
 | **prometheus-operator-crds** | Custom Resource Definitions for the prometheus-operator (`Alertmanager`, `AlertmanagerConfig`, `PodMonitor`, `Probe`, `Prometheus`, `PrometheusRule`, `ServiceMonitor`, `ThanosRuler`). Shipped as a separate release so the CRDs land before any chart that creates monitoring CRs; this breaks the helm-diff self-reference that otherwise blocks `helmfile apply` on a fresh cluster. | [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds) |
 | **kube-prometheus-stack** | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
@@ -29,14 +30,15 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **aws-ebs-csi-driver** | CSI driver for Amazon EBS volumes. Provides persistent storage for workloads on EKS. EKS-specific. **Cluster-wide default StorageClass:** AICR enables `defaultStorageClass.enabled`, so this component provisions a **cluster-default** gp3 StorageClass (`ebs-csi-default-sc`) on **every** EKS cluster that includes it — not just inference recipes; training overlays inherit it too. EKS ships no default SC of its own, so this makes dynamic provisioning (e.g. the inference-perf model cache) work zero-config. Two consequences to note: (1) if the cluster already has a default SC, Kubernetes treats multiple defaults as ambiguous — unset the other; (2) a PVC that previously failed-fast on "no default SC" will now silently bind gp3, which can mask a misconfiguration. | [AWS EBS CSI Driver](https://github.com/kubernetes-sigs/aws-ebs-csi-driver) |
 | **k8s-ephemeral-storage-metrics** | Exports ephemeral storage usage metrics per pod. Useful for monitoring scratch space consumption on GPU nodes. | [k8s-ephemeral-storage-metrics](https://github.com/jmcgrath207/k8s-ephemeral-storage-metrics) |
 | **k8s-aibom** | Optional runtime AI workload inventory. Produces namespace-scoped CycloneDX 1.6 ML-BOM resources for explicitly opted-in namespaces. Installed by one stock recipe, `h100-gke-cos-inference`; every other stock recipe leaves it out. Decline it with `aicr recipe --runtime-inventory disabled`. CLI aliases: `k8saibom`, `aibom`. See [k8s-aibom Runtime Inventory](#k8s-aibom-runtime-inventory). | [k8s-aibom](https://github.com/GoogleCloudPlatform/k8s-aibom) |
-| **kai-scheduler** | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
-| **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. | [Grove](https://github.com/ai-dynamo/grove) |
-| **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a NATS-backed Kubernetes event plane for KV-cache events, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
+| **kai-scheduler** | Gang scheduler with hierarchical queues and topology-aware placement; works with device-plugin (`nvidia.com/gpu`) and DRA GPU allocation alike. Ensures distributed training jobs land on nodes with optimal interconnect topology. AICR pins `defaultQueue.createDefaultQueue: true`, so the chart creates the `default-parent-queue`/`default-queue` hierarchy on install. The `gang-scheduling` conformance check submits its synthetic test PodGroup to `default-queue` by name, so that queue is a hard dependency of validation, not an optional extra. Note the chart creates the queues only on first install and annotates them `helm.sh/resource-policy: keep` — a `helm upgrade` will not recreate them if they are deleted, so restore them manually (or reinstall the release) if that happens. Workloads are not restricted to this queue: Dynamo submits to its own `dynamo`/`dynamo-default` hierarchy, which its chart creates via post-install and post-upgrade hooks. | [KAI Scheduler](https://github.com/kai-scheduler/KAI-Scheduler) |
+| **grove** | Pod lifecycle management for Dynamo inference platform. Installed as a standalone component. Upgrading from `v0.1.0-alpha.8` (or earlier) requires a CRD migration step — see [Upgrade Notes](#grove-v010-alpha8-or-earlier-to-v010-alpha12) below. | [Grove](https://github.com/ai-dynamo/grove) |
+| **dynamo-platform** | NVIDIA Dynamo inference serving platform with bundled CRDs. Distributed inference with KV-cache-aware routing, Dynamo request-plane traffic, a ZMQ-based KV-cache event plane, and disaggregated prefill/decode. | [Dynamo](https://github.com/ai-dynamo/dynamo) |
 | **agentgateway-crds** | Custom Resource Definitions for agentgateway (Kubernetes Gateway API implementation for AI/ML inference). | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **agentgateway** | Kubernetes Gateway API implementation for AI/ML inference. Implements the Gateway API Inference Extension for model-aware ingress routing to InferencePool backends. | [agentgateway](https://github.com/agentgateway/agentgateway) |
 | **k8s-nim-operator** | NVIDIA NIM Operator for managing NIM (NVIDIA Inference Microservices) deployments on Kubernetes. AICR installs the operator only — it creates no `NIMService` and no credentials; see [NIM workload credentials](#nim-workload-credentials). | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
-| **kueue** | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. Ships default quota CRs (ResourceFlavor `default-flavor`, ClusterQueue `cluster-queue`, LocalQueue `default` in the `default` namespace) so admission works out of the box — tune the ClusterQueue's nominal quotas to cluster capacity to enact real limits. Managed frameworks are pinned to batch/job, JobSet, and TrainJob. Upgrade note: the quota CRs are helm post-install/post-upgrade hooks with a delete-and-recreate policy — quiesce queues before upgrading the bundle (Kueue's resource-in-use finalizer on an active ClusterQueue/ResourceFlavor blocks the delete and can wedge the upgrade), and re-apply tuned quotas afterwards since upgrades reset them to the shipped defaults. Uninstalling leaves the hook-created CRs behind; delete them manually when removing Kueue. Overlays that override the component's `manifestFiles` (replacing the default quota CRs) must also override its health check — the shipped check asserts the default CR names above. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
+| **kueue** | Kubernetes-native job queuing system. Manages quotas and admits jobs for batch and AI workloads. Ships default quota CRs (ResourceFlavor `default-flavor`, ClusterQueue `cluster-queue`, LocalQueue `default` in the `default` namespace) so admission works out of the box — tune the ClusterQueue's nominal quotas to cluster capacity to enact real limits. Managed frameworks are pinned to batch/job, JobSet, and TrainJob. Upgrade note: the quota CRs are helm post-install/post-upgrade hooks with a delete-and-recreate policy — quiesce queues before upgrading the bundle (Kueue's resource-in-use finalizer on an active ClusterQueue/ResourceFlavor blocks the delete and can wedge the upgrade), and re-apply tuned quotas afterwards since upgrades reset them to the shipped defaults. Uninstalling leaves the hook-created CRs behind; delete them manually when removing Kueue. Overlays that override the component's `manifestFiles` (replacing the default quota CRs) must also override its health check — the shipped check asserts the default CR names above. Upgrading from a 0.18.x bundle needs two checks first: see [Upgrade Notes](#kueue-018x-to-019x) below. | [Kueue](https://github.com/kubernetes-sigs/kueue) |
 | **kubeflow-trainer** | Kubeflow Training Operator for distributed training jobs (PyTorch, etc.). Manages multi-node training job lifecycle with JobSet integration. | [Kubeflow Trainer](https://github.com/kubeflow/trainer) |
+| **nvcre** | NVIDIA Cluster Readiness Engine — GPU cluster burn-in certification controller. Runs training and NCCL workloads, measures goodput and bandwidth. **Not installed by default** — enabling it takes both a `valuesFile` and a Trainer source; see [Enabling NVCRE](#enabling-nvcre) for a fragment that resolves. With that values file referenced, `metrics.serviceMonitor.enabled` is **false** so install does not require prometheus-operator CRDs; turn it on with `--set cre:metrics.serviceMonitor.enabled=true` only after those CRDs exist, and add `prometheus-operator-crds` to `dependencyRefs`. The chart has no manager `nodeSelector`; for hard placement, set `manager.affinity` in `recipes/components/nvcre/values.yaml` or a complete JSON object, for example `--set-json cre:manager.affinity='{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"nvidia.com/gpu.present","operator":"Exists"}]}]}}}'` (scalar `--set cre:manager.affinity=...` renders an invalid string). CLI aliases: `cre`, `cluster-readiness-engine`. Shipped EKS H100 training still uses the TrainJob NCCL check. Opt-in AICR validators drive CRE with `Certification` (create, wait, delete), not `WorkloadRun`. | [Cluster Readiness Engine](https://github.com/NVIDIA/cluster-readiness-engine) |
 | **mariadb-operator-crds** | Official MariaDB Operator CRDs. Declared in every Slurm recipe but installed only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
 | **mariadb-operator** | Official MariaDB Operator controller, webhook, and certificate controller. AICR installs it only for `accounting.mode: aicr-provided`. | [MariaDB Operator](https://github.com/mariadb-operator/mariadb-operator) |
 | **slurm-accounting-mariadb** | Installation-managed MariaDB instance whose initial database, all-privileges accounting user, and generated Secret reference are configured atomically on the MariaDB resource. Declared in every Slurm recipe and rendered only for `accounting.mode: aicr-provided`. | [MariaDB Cluster chart](https://artifacthub.io/packages/helm/mariadb-operator/mariadb-cluster) |
@@ -56,6 +58,27 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **nvidia-dra-driver-gpu-ocp** | NVIDIA DRA GPU driver for OpenShift. Reuses the same upstream chart as `nvidia-dra-driver-gpu`, with an added SCC RoleBinding granting the kubelet-plugin DaemonSet the host device access OCP's default restricted-v2 SCC forbids. No certified OCP operator exists for this component. OCP-specific. Known limitation: some GPU-driver rollout protections and remedy hints do not yet cover the OCP aliases (`gpu-operator-ocp`, `nvidia-dra-driver-gpu-ocp`) — the deployer's stale-NVML migration wait/restart, driver-version annotation injection, and the driver-absent remedy's `gpuoperator:`/`dradriver:` override keys; tracked in [#2136](https://github.com/NVIDIA/aicr/issues/2136). | [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu) |
 | **k8s-nim-operator-ocp** | NVIDIA NIM Operator for OpenShift. Reuses the same upstream chart as `k8s-nim-operator`, with OCP-specific RBAC. Requires `cert-manager-ocp` for admission-webhook TLS. OCP-specific. | [K8s NIM Operator](https://github.com/NVIDIA/k8s-nim-operator) |
 
+## VR200 Preview coverage
+
+> **`service=rke2` and `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. Published validation evidence exists for all four coordinates at [validation.aicr.run](https://validation.aicr.run/); freshness against the current recipe is captured in the **Evidence status** note below.
+
+Four coordinates ship in v1:
+
+| Coordinate | Evidence |
+|---|---|
+| `rke2 / vr200 / ubuntu / training` | [validation.aicr.run/#/rke2/vr200-ubuntu/training](https://validation.aicr.run/#/rke2/vr200-ubuntu/training) |
+| `rke2 / vr200 / ubuntu / training / kubeflow` | [validation.aicr.run/#/rke2/vr200-ubuntu/training-kubeflow](https://validation.aicr.run/#/rke2/vr200-ubuntu/training-kubeflow) |
+| `rke2 / vr200 / ubuntu / inference` | [validation.aicr.run/#/rke2/vr200-ubuntu/inference](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference) |
+| `rke2 / vr200 / ubuntu / inference / dynamo` | [validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
+
+The platform-neutral `inference` coordinate is the base the Dynamo leaf inherits from; it exists so that resolving `rke2/vr200/ubuntu/inference` **without** `--platform` resolves to the VR200-safe overlay rather than falling through to the generic `rke2-inference` base. It carries the same VR200 hardware overrides as its Dynamo child.
+
+> **Evidence status.** The recipes for the three original coordinates have changed since evidence publication (`aicr evidence digest` reports a mismatch against each pointer's `predicate.recipe.digest`); treat that linked evidence as historical precedent for the recipe content at publication time, not as validating the current recipe. The `training / kubeflow` evidence is current — it was published from a three-phase run against the recipe as it ships today.
+
+> **Every VR200 coordinate carries the same node-level prerequisites** — the 64k-page kernel, the Skyhook kernel-cmdline reboots, and the mandatory host `nvidia-imex` masking. Other requirements differ by intent (the inference leaves additionally cap Kubernetes at `< 1.36.0`). See [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md) before deploying any of them.
+
+For the definitional Preview-vs-Supported distinction, see [Preview recipes](../integrator/recipe-development.md#preview-recipes). For bare-metal cluster prerequisites, Skyhook reboot behavior, and known gaps on this coordinate, see [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md).
+
 ## How Components Are Selected
 
 Not every component appears in every recipe. The recipe engine selects components based on the overlay chain for your environment:
@@ -71,7 +94,7 @@ Not every component appears in every recipe. The recipe engine selects component
 
 Production GPU leaf recipes (H100, GB200, RTX Pro 6000 on EKS / AKS / GKE / OKE / LKE) enable the NFD Topology Updater. It publishes per-node `NodeResourceTopology` CRDs that describe NUMA zones, GPU-to-NUMA affinity, and NIC-to-NUMA affinity. Runtime consumers (NUMA-aware schedulers, debugging via `kubectl get noderesourcetopologies`) can read these CRDs without further configuration.
 
-The Topology Updater requires the kubelet `podResources` gRPC socket. The `KubeletPodResources` feature gate has been on by default since Kubernetes 1.15 (Beta) and reached GA in Kubernetes 1.28; AICR's recipe constraints on the affected leaves require K8s ≥ 1.30 or higher, so this is satisfied in practice. Recipes targeting Kubernetes `< 1.15` must enable the feature gate explicitly. Kind / KWOK simulated clusters do not run a real kubelet and therefore leave the Topology Updater disabled — kind-based recipes will not see `NodeResourceTopology` CRDs.
+The Topology Updater requires the kubelet `podResources` gRPC socket. The `KubeletPodResources` feature gate has been on by default since Kubernetes 1.15 (Beta) and reached GA in Kubernetes 1.28; AICR's recipe constraints require K8s ≥ 1.32, so this is satisfied in practice. Recipes targeting Kubernetes `< 1.15` must enable the feature gate explicitly. Kind / KWOK simulated clusters do not run a real kubelet and therefore leave the Topology Updater disabled — kind-based recipes will not see `NodeResourceTopology` CRDs.
 
 See the upstream [Topology Updater docs](https://kubernetes-sigs.github.io/node-feature-discovery/stable/usage/nfd-topology-updater.html) for runtime consumer examples.
 
@@ -115,13 +138,13 @@ The output lists every component with its pinned version and configuration value
 **Device-plugin ownership is a configuration profile.** The GKE recipes declare an ADR-015 `gpuStack` profile with two qualified values, selected at recipe generation and recorded in `metadata.selectedProfile`:
 
 - **`gke-default` (the default)** — GKE's managed device plugin is the `nvidia.com/gpu` advertiser (recorded as `advertiser: external`), and the recipe disables the GPU Operator's plugin (`devicePlugin.enabled: false`, profile-owned). Its constraint requires that **no** GPU node — identified by its `cloud.google.com/gke-accelerator` label — carries the opt-out label `gke-no-default-nvidia-gpu-device-plugin`. This is the default GKE cluster shape: create GPU node pools normally (with `gpu-driver-version=default` or `latest` for GKE's managed driver install) and **no further cluster setup is required**.
-- **`driver-installer`** (`aicr recipe ... --profile gpuStack=driver-installer`) — the GPU Operator's device plugin is the sole advertiser (`devicePlugin.enabled: true`, profile-owned), and the constraint inverts: every GPU node must carry `gke-no-default-nvidia-gpu-device-plugin=true`. This value has real cluster prerequisites — the label on every GPU pool at creation **plus** Google's standalone `nvidia-driver-installer` DaemonSet, with pools created `gpu-driver-version=disabled`.
+- **`bundle-installer`** (`aicr recipe ... --profile gpuStack=bundle-installer`) — the GPU Operator's device plugin is the sole advertiser (`devicePlugin.enabled: true`, profile-owned), and the constraint inverts: every GPU node must carry `gke-no-default-nvidia-gpu-device-plugin=true` on pools created `gpu-driver-version=disabled`. The bundle's `gcp-driver-installer` component supplies the driver — the version is pinned in the recipe and upgrades roll with the bundle; nothing is applied by hand.
 
 For the end-to-end setup flow (snapshot → recipe → validate), the qualification and selection-vs-verification matrices, and troubleshooting, see [GKE GPU Setup](../integrator/gke-gpu-setup.md).
 
 Why exactly one advertiser: two plugins registering `nvidia.com/gpu` on one node is not a benign overlap. Kubelet's device manager keys its endpoint and device inventory by resource name, so competing registrations and `ListAndWatch` updates replace each other. Ownership becomes nondeterministic, and one plugin's device IDs (GKE uses `nvidia0`-style names, NVIDIA uses GPU UUIDs) can reach the other plugin's `Allocate`. Expect intermittent allocation and runtime failures.
 
-**Driver-installer cluster setup.** The opt-out label forfeits GKE's managed driver install: the managed install (`gpu-driver-version=default`/`latest`) is finalized by an init container of the **same** kube-system DaemonSet the label disables, so a labeled pool paired with `gpu-driver-version=default` comes up **driverless** — never combine the label with the managed driver install. Pools for the `driver-installer` value must instead be created with `gpu-driver-version=disabled`, with driver provisioning supplied by Google's standalone [`nvidia-driver-installer` DaemonSet](https://cloud.google.com/kubernetes-engine/docs/how-to/gpus#installing_drivers) applied to the cluster. (AICR's GKE-COS overlays keep `driver.enabled: false` in either mode — the GPU Operator cannot install a driver on COS node images.) The operational procedures live in [GKE GPU Setup](../integrator/gke-gpu-setup.md#alternative-let-gpu-operator-manage-the-device-plugin): pool creation with the label, [retrofitting an existing pool](../integrator/gke-gpu-setup.md#retrofitting-an-existing-pool) (a `--node-labels` update replaces the pool's full label set), [verifying the handoff](../integrator/gke-gpu-setup.md#verifying-the-handoff) after the asynchronous plugin eviction, and [the three driver-installer settings](../integrator/gke-gpu-setup.md#the-three-driver-installer-settings) and what each covers.
+**Bundle-installer cluster setup.** The opt-out label forfeits GKE's managed driver install: the managed install (`gpu-driver-version=default`/`latest`) is finalized by an init container of the **same** kube-system DaemonSet the label disables, so a labeled pool paired with `gpu-driver-version=default` comes up **driverless** — never combine the label with the managed driver install. Pools for the `bundle-installer` value must be created with `gpu-driver-version=disabled`; the bundle's `gcp-driver-installer` component carries the installer DaemonSet, so there is nothing to apply out-of-band. (AICR's GKE-COS overlays keep `driver.enabled: false` in either mode — the GPU Operator cannot install a driver on COS node images.) A previously hand-applied standalone `nvidia-driver-installer` DaemonSet must be deleted before deploying the bundle: the bundle's DaemonSet shares its name in `kube-system` and Helm will not adopt the pre-existing object. The operational procedures live in [GKE GPU Setup](../integrator/gke-gpu-setup.md#alternative-let-the-bundle-own-the-gpu-stack).
 
 **`aicr validate` enforces the selected value deterministically, before any phase runs.** The selected value's `NodeTopology.gpu-nodes.label` constraint ([#1755](https://github.com/NVIDIA/aicr/issues/1755)) is verified against the snapshot at recipe generation and re-evaluated by the validate readiness pre-flight. The check fails closed: labels contradicting the selected value, mixed labels, an empty GPU-node set, and readings that `--max-nodes-per-entry` actually truncated (a cap larger than the node count truncates nothing and validates normally) all fail with exit 2 and remediation text pointing back at this section, before any check Jobs deploy. See [Validation](validation.md) for the readiness-gate mechanics.
 
@@ -129,7 +152,115 @@ The profile also locks the ownership tuple: `devicePlugin.enabled` is profile-ow
 
 The selected constraint is the only deterministic detection point. `aicr bundle` is offline by design and cannot read node labels. The operator-health deployment check passes under the conflict because it verifies only that GPU Operator controller pods are Running — it never inspects the device plugin. Allocation probes such as `check-nvidia-smi` schedule a pod requesting `nvidia.com/gpu` on each schedulable GPU node, but skip cordoned nodes and skip entirely when any schedulable GPU node is busy; when they do run, they may fail nondeterministically without identifying the missing label as the cause.
 
-See GKE's [GPU node-pool guide](https://cloud.google.com/kubernetes-engine/docs/how-to/gpus) for the authoritative pool-creation and driver-installer procedures. The [NVIDIA GPU Operator GKE guide](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/google-gke.html) documents the same `gpu-driver-version=disabled` + driver-installer DaemonSet combination the `driver-installer` value builds on. Shipping the installer as an AICR-managed component (the ADR-015 `operator-selfdriver` direction) is tracked separately in [#1716](https://github.com/NVIDIA/aicr/issues/1716).
+See GKE's [GPU node-pool guide](https://cloud.google.com/kubernetes-engine/docs/how-to/gpus) for the authoritative pool-creation procedures. The [NVIDIA GPU Operator GKE guide](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/google-gke.html) documents the same `gpu-driver-version=disabled` + installer-DaemonSet combination the `bundle-installer` value builds on ([#1716](https://github.com/NVIDIA/aicr/issues/1716)) — with AICR, that DaemonSet ships inside the bundle rather than being applied by hand, and the two values are distinguished at generation time by the opt-out pool label alone (positive vs negated), which resolved ADR-015 Deferred Decision 5 by construction.
+
+## OKE Device-Plugin Ownership
+
+**Same profile mechanism as GKE, one control-plane signal.** The OKE recipes declare an ADR-015 `gpuStack` profile with two qualified values; because both ownership axes (driver and device plugin) move together on OKE, a single signal — the `NvidiaGpuPlugin` cluster add-on's control-plane state — qualifies a selection:
+
+- **`oci-managed` (the default)** — Oracle's GPU node image supplies the driver and toolkit, and the `NvidiaGpuPlugin` add-on is the `nvidia.com/gpu` advertiser (recorded as `advertiser: external`); the GPU Operator's driver, toolkit, and plugin are all off (profile-owned). Its constraint requires the add-on **installed and ACTIVE**.
+- **`operator-managed`** (`aicr recipe ... --profile gpuStack=operator-managed`) — bring-your-own driverless image with the add-on **removed**: the GPU Operator owns driver, toolkit, and plugin, and the DRA driver root moves to the operator install path in lockstep. Its constraint requires the add-on **absent**.
+
+The signal is supplied as an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump via `--oke-addons` on `aicr snapshot` and `aicr validate` (projected into `K8s.oke-addons.nvidia-gpu-plugin`); it is evaluated at snapshot-based generation and re-evaluated by the validate readiness pre-flight, failing closed on any other add-on lifecycle state or a missing reading. Per-node label disablement (`oci.oraclecloud.com/disable-gpu-device-plugin`) is out of contract — it leaves the add-on installed. The exactly-one-advertiser rationale is the same as [GKE's](#gke-device-plugin-ownership), and the profile closure-locks the ownership tuple the same way — switching modes is a recipe-generation decision, never a `--set`.
+
+**Legacy device-plugin tripwire.** Older OKE clusters ship the plugin through a second, pre-add-on mechanism — a `kube-system/nvidia-gpu-device-plugin` DaemonSet reconciled by the legacy Kubernetes addon-manager — which `list-addons` cannot see. The snapshot observes that DaemonSet directly (`K8s.oke-legacy-plugin.nvidia-gpu-device-plugin`), and `operator-managed` additionally requires it `none` (absent or fully disabled), so a legacy cluster whose add-on reads `absent` still fails closed instead of double-advertising; remediation is the per-pool `oci.oraclecloud.com/disable-gpu-device-plugin=true` label or migration to the managed add-on. `oci-managed` is deliberately not gated on it — the installed add-on reconciles the same DaemonSet. For the end-to-end flow and the qualification matrices, see [OKE GPU Setup](../integrator/oke-gpu-setup.md).
+
+## NVSentinel Deployment Posture
+
+AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration: it detects GPU and node faults and publishes health events, but takes no automatic action on a node. AICR does not disable remediation — the upstream chart ships it off, and AICR inherits that default rather than overriding it.
+
+`recipes/components/nvsentinel/values.yaml` enables and disables no NVSentinel *component*. It carries deployment-shaping values only: `fullnameOverride`, tolerate-all scheduling so GPU-node DaemonSets land on tainted nodes, `networkPolicy.enabled: false` (the metrics policy otherwise blocks cert-manager webhook traffic in the same namespace — this is the one upstream default AICR overrides here), `platformConnector` resources, and `janitor-provider.csp.provider: generic`, which selects the reboot mechanism used *if* remediation is later enabled but does not enable it. Every component on/off default below is the chart's.
+
+**On by default** — the detection path:
+
+| Component | Role |
+|---|---|
+| `gpuHealthMonitor` | DCGM-based GPU fault detection |
+| `syslogHealthMonitor` | node syslog fault detection (two DaemonSets) |
+| `metadataCollector` | node and GPU inventory |
+| `labeler` | applies `nvsentinel.dgxc.nvidia.com/driver.installed` |
+| `platformConnector` | health-event ingest socket |
+
+**Off by default** — the datastore and remediation path:
+
+| Component | What enabling it does |
+|---|---|
+| `mongodbStore` | deploys the in-cluster datastore |
+| `faultQuarantine` | cordons a node on a qualifying fault |
+| `nodeDrainer` | evicts workloads from a quarantined node |
+| `faultRemediation` | decides the remediation action |
+| `janitor` / `janitorProvider` | executes it — reboot or terminate |
+
+Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.20.0`, the version pinned in `recipes/registry.yaml`.
+
+**The practical effect.** A stock AICR bundle surfaces GPU faults; it does not act on them. A node that needs a reboot is reported, not rebooted, and an operator intervenes. That is deliberate: `janitor` can reboot or terminate nodes, and enabling it without the operator having chosen to is not a safe default.
+
+### Audit Logging and Tracing
+
+Both are off by default and independent of the detection/remediation path above — pure observability, no datastore, no remediation dependency.
+
+**Opt in via the `nvsentinel-observability` mixin** (`recipes/mixins/nvsentinel-observability.yaml`) on your own leaf overlay:
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-observability
+```
+
+**This overlay must be part of the resolved catalog** -- either an embedded overlay in `recipes/overlays/` (a real PR to this repo) or a file under an external `--data <dir>/overlays/` directory (`aicr recipe --data <dir> ...`, `aicr bundle --data <dir> ...`). An external `--data` directory must also carry a `registry.yaml` at its root even when it adds nothing but an overlay; see [the minimal stub](../integrator/data-extension.md#registryyaml-is-required). Passing your leaf overlay file directly to `aicr bundle -r <file>` or `aicr validate -r <file>` does **not** work for this (`aicr recipe` has no equivalent flag -- it only builds a recipe from criteria or an AICRConfig `--config` file, never loads an existing overlay directly): AICR auto-hydrates a directly-passed overlay by re-resolving its `spec.criteria` against the catalog (so a bare `aicr recipe` step isn't required first) -- it does not read `spec.mixins` or any other field from that file. A leaf overlay containing `mixins: [nvsentinel-observability]` that is never registered via `--data` silently composes without the mixin: the bundle still succeeds, still accepts `--set nv-sentinel:global.tracing.endpoint=...` with no error, but ships neither audit logging nor tracing. Confirm the mixin actually applied by checking the generated recipe's `nvsentinel` componentRef for `global.auditLogging`/`global.tracing` before bundling.
+
+**Has no effect if `nvsentinel` is disabled by the chain.** The OCP overlay, for example, sets `nvsentinel`'s `overrides.enabled: false`; composing this mixin on top still succeeds (a `slog.Warn` names the mixin and the disabled component, but the recipe/bundle call itself returns success either way) and produces values nothing ever reads. Confirm `nvsentinel` isn't disabled elsewhere in your chain before relying on this mixin.
+
+`nvsentinel` is always in a recipe's inheritance chain (`recipes/overlays/base.yaml`), so this mixin composes onto an already-chained component -- something AICR's mixin-merge guard (`pkg/recipe/metadata_store.go`, ADR-005's "Silent constraint override" mitigation) otherwise hard-errors on. The mixin is allowed through a narrower gate, not a blanket relaxation: `nvsentinel`'s own registry entry (`recipes/registry.yaml`) explicitly allowlists the exact leaf paths (`mixinSafeOverridePaths`) a mixin may set on it -- `global.auditLogging.*` and `global.tracing.enabled`/`.insecure` -- and `mixinOverridesSafeForMerge` rejects, at compose time, both a path outside that allowlist and a path that collides with one your own leaf (or another mixin) already set, rather than silently letting one value overwrite the other. `global.tracing.endpoint` is deliberately excluded from the allowlist: it must always come from you, not the mixin.
+
+The mixin sets:
+
+```yaml
+global:
+  auditLogging:
+    enabled: true
+    logRequestBody: false   # request bodies may carry sensitive data
+    maxSizeMB: 100           # explicit, not inherited -- matches chart default today
+    maxBackups: 7
+    maxAgeDays: 30
+    compress: true
+  tracing:
+    enabled: true
+    insecure: false          # collector endpoint is expected to use TLS
+```
+
+You must still supply the endpoint yourself -- either on your own leaf's `componentRefs` (the mixin's allowlist deliberately excludes it, but your leaf owns its own values) or at bundle time. `aicr bundle` fails closed without it:
+
+```shell
+aicr bundle -r <your-recipe>.yaml \
+  --set nv-sentinel:global.tracing.endpoint=otel-collector.example:4317 \
+  -o ./bundles
+```
+
+If your leaf needs a different value for something the mixin already sets (a different retention policy, for instance), you cannot set it on your leaf *and* adopt the mixin: the retention paths are allowlisted, but the mixin already owns them, so a leaf setting them too is rejected as a collision rather than silently overwritten. Set them directly on your own leaf's `componentRefs` *instead of* adopting the mixin -- the same pattern `recipes/overlays/vr200-rke2-ubuntu-training.yaml` uses for other `nvsentinel` values -- or override at bundle time with `--set`/`--set-json`.
+
+**Audit logging** (`global.auditLogging.enabled`) writes a durable, rotated JSON record of every write NVSentinel makes to the Kubernetes API or a cloud API, to `/var/log/nvsentinel/{POD_NAME}-audit.log` on `platform-connectors` (the root chart's DaemonSet — it renders under that name regardless of `fullnameOverride`) and `labeler`. Retention is set explicitly (`maxSizeMB: 100`, `maxBackups: 7`, `maxAgeDays: 30`, `compress: true`) rather than inherited from the chart default, so a future upstream default change can't silently alter it. `logRequestBody` stays `false`: request bodies may carry sensitive data. The mount is a hostPath (`DirectoryOrCreate`) — any process with host filesystem access can read the file once it exists, independent of Kubernetes RBAC. AICR ships no log forwarder; collecting the file off the node is the operator's responsibility.
+
+**Disk cost, precisely.** The filename embeds the pod's own name (`{POD_NAME}-audit.log`), and lumberjack's rotation only knows about the *current* process's own filename — it has no way to find or clean up files a previous pod instance left behind. So each live pod costs up to 100 MB (current file) plus 7 compressed backups before rotation catches up, and that's a **per-pod-identity** cost, not a bounded per-node cost: `platform-connectors` is a DaemonSet (one pod per node, so this recurs on every node, but a given node's pod identity is comparatively stable), while `labeler` is a Deployment whose pod gets a new name on every restart or reschedule — each restart starts a fresh rotation set, and the previous pod's files are never rotated away or deleted by NVSentinel itself. Left unmanaged, `/var/log/nvsentinel/` accumulates stale files from every past pod identity. Operators enabling this need their own retention or cleanup policy for the mount path, not just the mixin's built-in rotation numbers.
+
+**Tracing** (`global.tracing.enabled`) emits OpenTelemetry traces to an OTLP collector at `global.tracing.endpoint`. At the pinned chart version, under AICR's current base configuration, the exporter env (`OTEL_EXPORTER_OTLP_ENDPOINT`/`_INSECURE`) renders on the `platform-connectors` DaemonSet only — so enabling tracing does not instrument the other workloads AICR deploys today (including `labeler`, which does receive audit logging). The chart instruments additional workloads (event-exporter, fault-remediation, node-drainer) when those optional subcharts are enabled, which AICR's base values do not do. `TestNVSentinelObservabilityChartRender` asserts that env so a chart bump that drops it is caught. The chart has no `required` guard on that value — `global.tracing.enabled: true` with no endpoint renders and deploys without error, and the exporter fails silently at runtime. AICR closes that gap at bundle time: `CheckNVSentinelTracingEndpointRequired` fails the bundle unless an endpoint is supplied, e.g. `--set nv-sentinel:global.tracing.endpoint=<host:port>`. `insecure` defaults to `false` (the endpoint is expected to use TLS); override with `--set nv-sentinel:global.tracing.insecure=true` for a non-TLS collector.
+
+### Enabling Remediation
+
+**AICR does not support enabling remediation today, and this page does not carry a recipe for it.** [#1014](https://github.com/NVIDIA/aicr/issues/1014) tracks adding a qualified opt-in path.
+
+Turning the components on is not a matter of flipping the six `enabled` flags. Those flags start the pipeline but leave `fault-remediation.maintenance.actions` at the subchart defaults, where `COMPONENT_RESET` maps to `kind: RebootNode` — so a recoverable GPU fault cordons, drains and reboots the whole node. Upstream's own remediation configuration maps that same action to `kind: GPUReset`, scoped to the affected GPU UUID, and resets in place instead. A partial enablement is therefore not a milder version of remediation; it is a more destructive one.
+
+If you need remediation before #1014 lands, start from the chart's self-contained `values-remediation.yaml` (shipped inside the `nvsentinel` chart, pinned at the version in `recipes/registry.yaml`) rather than composing `--set` flags, and qualify the result on a cluster you can afford to have rebooted. Three further things apply whatever path you take:
+
+- **The reboot path is privileged.** AICR pins `janitor-provider.csp.provider: generic`, so remediation reboots run as a privileged Job executing `chroot /host /sbin/reboot` on the target node. That avoids requiring cloud IAM credentials, but it is a broad grant. Cloud providers are selectable instead, and need the corresponding credentials.
+- **The datastore is a real dependency.** `mongodbStore` deploys an in-cluster database. The chart also supports an external datastore and a `postgresql` provider; see the `global.datastore` block in the chart's values.
+- **Check arm64 before enabling on ARM.** The chart's default MongoDB image has no `linux/arm64` manifest. arm64 works via the Percona path ([NVIDIA/NVSentinel#1328](https://github.com/NVIDIA/NVSentinel/issues/1328)).
+
+**NVSentinel is included by default, not universally required.** `recipes/overlays/base.yaml` includes it unconditionally, so every recipe carries it unless something later removes it, and ADR-018 classifies it as `core` rather than `ops` on the rule that `ops` must be GPU-free and verifiable on CPU-only clusters. Two things can still remove it: an overlay that overrides `enabled` (the OCP overlay does), and a bundle-time exclusion on a platform whose presence is not profile-locked (EKS and OKE). Only the AKS and GKE-COS `gpuStack` profiles make its presence mandatory — see [NVSentinel is mandatory on the profiled families](#nvsentinel-on-provider-installed-driver-platforms) below.
+
+**The component values AICR sets are platform-correctness values, not remediation policy.** `labeler.assumeDriverInstalled` and `metadata-collector.runtimeClassName` describe facts about the target cluster that the chart cannot infer — who installs the driver, and what the RuntimeClass is named. The next section gives the per-platform values, when an explicit value is needed, and what each failure looks like when it is missing. Which components run is a different matter and stays upstream's call.
 
 ## NVSentinel on Provider-Installed-Driver Platforms
 
@@ -148,16 +279,17 @@ The recipes now carry that value wherever it is needed ([#2181](https://github.c
 | AKS `gpuStack=azure-managed` (default) | none — driver is in the node image | `true` | the `gpuStack` profile |
 | AKS `gpuStack=operator-managed` | the operator's driver pod | `false` | the `gpuStack` profile |
 | GKE COS `gpuStack=gke-default` (default) | none the labeler can observe — the driver is finalized by an init container of GKE's kube-system DaemonSet | `true` | the `gpuStack` profile |
-| GKE COS `gpuStack=driver-installer` | Google's standalone `nvidia-driver-installer` DaemonSet | `false` | the `gpuStack` profile |
-| OKE | none — driver is in the node image | `true` | the overlay (OKE has no profile) |
+| GKE COS `gpuStack=bundle-installer` | the bundle's `gcp-driver-installer` DaemonSet | `false` | the `gpuStack` profile |
+| OKE `gpuStack=oci-managed` (default) | none — driver is in the node image; OKE's `NvidiaGpuPlugin` add-on advertises | `true` | the `gpuStack` profile |
+| OKE `gpuStack=operator-managed` | the operator's driver pod | `false` | the `gpuStack` profile |
 | EKS | the operator's driver pod | unset (chart default `false`) | — |
 | Kind (nvkind) | none — driver is host-installed | `true` | the overlay (Kind has no profile) |
 
 The explicit `false` on the operator-managed variants is deliberate rather than redundant: it keeps the path profile-owned, so it cannot be flipped into an unsafe hybrid later. Do **not** assume a preinstalled driver where the GPU Operator installs one — skipping detection there would keep the label applied across an unloaded or unhealthy driver.
 
-**NVSentinel is mandatory on the profiled families.** Because the AKS and GKE-COS `gpuStack` profiles name nvsentinel, its presence is profile-owned: `--set nv-sentinel:enabled=false` and a `bundlers=` list that omits it are both rejected on those platforms. That is intended — NVSentinel is a required component for these deployments. It remains optional on platforms with no `gpuStack` profile, such as OKE and EKS.
+**NVSentinel is mandatory on the profiled families.** Because the AKS, GKE-COS, and OKE `gpuStack` profiles name nvsentinel, its presence is profile-owned: `--set nv-sentinel:enabled=false` and a `bundlers=` list that omits it are both rejected on those platforms. That is intended — NVSentinel is a required component for these deployments. It remains optional on platforms with no `gpuStack` profile, such as EKS.
 
-Only AKS and GKE-COS get the install-time profile lock; OKE and Kind set the value at overlay level, so a bundle-time or declared-dynamic change is still rejected by the gate below, but a manual post-generation edit to the rendered Helm values is not.
+AKS, GKE-COS, and OKE get the install-time profile lock; Kind sets the value at overlay level, so a bundle-time or declared-dynamic change is still rejected by the gate below, but a manual post-generation edit to the rendered Helm values is not.
 
 If you do need to set it yourself on an unlisted platform, it is an ordinary override:
 
@@ -197,6 +329,34 @@ aicr bundle -r recipe.yaml \
 ```
 
 See [AKS GPU Setup](../integrator/aks-gpu-setup.md#default-use-the-aks-azure-managed-profile) for the per-profile guidance.
+
+## Enabling NVCRE
+
+**nvcre** is not on any shipped overlay, so enabling it means writing the `componentRef` yourself. Two requirements are easy to miss, and each one produces a different failure.
+
+`dependencyRefs` only *orders* components that are already in `componentRefs` — it does not add one. Naming a component that is not present fails resolution outright with `component "nvcre" references unknown dependency "kubeflow-trainer"`. NVCRE drives its benchmarks through Kubeflow Trainer (`TrainJob` / `TrainingRuntime`) and the chart does not install Trainer, so Trainer has to come from somewhere else — the `platform-kubeflow` mixin is the cleanest source.
+
+Component values are also never auto-discovered from the component name: a ref with no `valuesFile` and no inline overrides resolves to an empty map. Omit it and the chart defaults apply, which means a `ServiceMonitor` you did not ask for (requiring prometheus-operator CRDs) and a release-prefixed Deployment name such as `aicr-stack-nvcre-manager`, which the shipped health check cannot match.
+
+Add this to an overlay that already inherits a stock AICR base:
+
+```yaml
+spec:
+  mixins:
+    - platform-kubeflow          # brings in kubeflow-trainer
+  componentRefs:
+    - name: nvcre
+      type: Helm
+      valuesFile: components/nvcre/values.yaml
+      dependencyRefs:
+        - kubeflow-trainer
+```
+
+Do not also declare `kubeflow-trainer` locally. The mixin's ref sets `type`, `valuesFile`, and `dependencyRefs`, all of which are prohibited collision fields, and overlay chains merge before mixins — so a local ref collides rather than overrides.
+
+Prerequisites: NVIDIA GPU Operator and cert-manager, both inherited from `base.yaml` by every stock recipe, plus Kubeflow Trainer, which is not — see the fragment above.
+
+NVCRE v0.2.0 expects Kubeflow Trainer **v2.2.1** — it pins `kubeflowTrainerVersion = "v2.2.1"` and its `setup status` reports the 2.2.0 that the registry defaults to as unsupported. No functional break is known between the two versions: the CRD delta is documentation text plus one embedded PodSpec field NVCRE does not set. Aligning the global Trainer default is tracked separately.
 
 ## NIM Workload Credentials
 
@@ -647,3 +807,455 @@ kubectl get configmap dcgm-exporter -n gpu-operator \
   -o jsonpath='{.metadata.annotations.meta\.helm\.sh/release-name}'
 # Expected: gpu-operator
 ```
+
+### `grove`: `v0.1.0-alpha.8` (or earlier) to `v0.1.0-alpha.12`
+
+alpha.8's `clustertopologies.grove.io` CRD (kind `ClusterTopology`, shortname
+`ct`) is dropped by alpha.12 in favor of `clustertopologybindings.grove.io`,
+which reuses shortname `ct`. `helm upgrade` never applies changed `crds/` (see
+the CRD-upgrade caveat above), so a plain chart bump alone never installs the
+new CRD and the operator crash-loops on `no matches for kind
+"ClusterTopologyBinding"` regardless of deployer. If the new CRD is applied
+before the old one is deleted, the shortname collision blocks it from ever
+reaching `Established`.
+
+Fresh installs are unaffected. To migrate an existing cluster:
+
+1. Check for any live `ClusterTopology` resources — if any exist, **stop**
+   for an explicit data migration before touching CRDs:
+   ```bash
+   kubectl get clustertopologies.grove.io -A
+   ```
+2. If zero exist, delete the obsolete CRD:
+   ```bash
+   kubectl delete crd clustertopologies.grove.io
+   ```
+3. Apply the new CRDs directly from the chart — this works from any
+   directory, no local checkout needed:
+   ```bash
+   helm show crds oci://ghcr.io/ai-dynamo/grove/grove-charts --version v0.1.0-alpha.12 \
+     | sed -n '/^---$/,$p' \
+     | kubectl apply --server-side --force-conflicts -f -
+   ```
+4. Resume whichever deployer you use (`helm`/`helmfile`: re-run `install.sh`
+   or `helmfile apply`; `flux`/`argocd`/`argocd-helm`: reconcile/sync as
+   usual). AICR's generated `install.sh` already passes `--force-conflicts`
+   on Helm 4.
+
+Verified live end-to-end on a real EKS cluster, 2026-09-02: dynamo-operator,
+grove-operator, and kai-scheduler gang-scheduling all confirmed healthy
+together post-migration.
+
+### `dynamo-platform`: opting back into bundled NATS on a standing cluster
+
+Dynamo 1.4+ no longer installs bundled NATS by default (the request plane
+defaults to TCP and the KV event plane to ZMQ). Re-enabling it needs to be
+done by **regenerating the bundle**, not by hand-editing a generated
+bundle's `values.yaml` or `cluster-values.yaml` -- both are covered by the
+bundle's checksum manifest, and `aicr verify` fails closed on any modified
+file:
+
+```bash
+aicr verify ./bundle
+# ✓ Checksums verified (87 files)
+# Bundle verification: PASSED
+
+# Hand-edit 017-dynamo-platform/values.yaml, then:
+aicr verify ./bundle
+# ✗ Checksum verification failed
+# - [INVALID_REQUEST] checksum mismatch for "017-dynamo-platform/values.yaml"
+# Bundle verification: FAILED (exit 4)
+```
+
+A modified bundle also invalidates the binding of any existing attestation
+to the original checksum digest. Regenerate instead, using the same
+`aicr bundle` command and flags you used originally, with the NATS
+overrides added:
+
+```bash
+aicr bundle --recipe recipe.yaml \
+  <your original --accelerated-node-selector / --system-node-selector / etc. flags> \
+  --set dynamoplatform:global.nats.install=true \
+  --output ./bundle
+```
+
+If your system node group is tainted or the cluster has no default
+StorageClass, add the scheduling/storage overrides a re-enabled NATS also
+needs -- AICR no longer targets NATS with `--system-node-selector`,
+`--system-node-toleration`, or `--storage-class` at bundle-generation time
+(those registry paths were removed along with bundled-by-default NATS), so
+pass them explicitly or the NATS pod/PVC can stay `Pending`. Use
+`--set-json` for `nodeSelector` and `tolerations` -- the scalar `--set`
+dot-path parser rejects qualified Kubernetes label keys that contain a `/`
+(e.g. `eks.amazonaws.com/nodegroup`), and there is no scalar form for a
+tolerations list at all:
+
+```bash
+  --set-json 'dynamoplatform:nats.podTemplate.merge.spec.nodeSelector={"<key>":"<value>"}' \
+  --set-json 'dynamoplatform:nats.podTemplate.merge.spec.tolerations=[{"key":"<key>","operator":"Equal","value":"<value>","effect":"NoSchedule"}]' \
+  --set dynamoplatform:nats.config.jetstream.fileStore.pvc.storageClassName=<name>
+```
+
+Verified against this exact sequence (generate → `aicr verify` passes →
+hand-edit → `aicr verify` fails with exit 4 → regenerate with the overrides
+above → rendered `nats.podTemplate.merge.spec` carries both the qualified
+nodeSelector and the toleration → `aicr verify` passes again), 2026-09-02.
+A scalar `--set …nodeSelector.eks.amazonaws.com/nodegroup=<value>` was
+separately confirmed to fail with exit 2 (`INVALID_REQUEST: invalid path
+segment "com/nodegroup"`), and `--system-node-toleration` alone was
+confirmed to not reach NATS (`nats.podTemplate.merge.spec.tolerations`
+rendered empty; only the operator's `controllerManager.tolerations` was
+set) -- both are why the overrides above are required rather than optional.
+
+On an in-place `helm upgrade` from the regenerated bundle, disabling NATS
+removes its StatefulSet but does not delete its PVC; inspect
+`kubectl get pvc -n dynamo-system -l app.kubernetes.io/name=nats` before
+deciding whether to retain or delete it.
+
+**Separately, and more importantly than the NATS opt-out above:** bumping
+the operator without also bumping any standing `DynamoGraphDeployment`'s
+runtime image is its own hazard, independent of NATS. An older runtime
+under a newer operator is the same version-skew class that caused the
+frontend discovery panic fixed in #1193 -- setting `DYN_EVENT_PLANE=zmq`
+on the old workload is defense in depth, not a substitute for bumping its
+image to match the operator.
+
+### `gpu-operator` and `nvidia-dra-driver-gpu`: ComputeDomain CRD ownership on Argo CD
+
+`gpu-operator` and `nvidia-dra-driver-gpu` (and `nvidia-dra-driver-gpu-ocp`) both
+ship the `computedomains.resource.nvidia.com` CRD. As of `gpu-operator`
+v26.7.0 the two chart copies disagree on schema (`spec.numNodes` required vs.
+optional with a default), so on `--deployer argocd` and `--deployer
+argocd-helm` — where every generated `Application` syncs with
+`automated.selfHeal: true` — Argo CD perpetually reconciles the CRD toward
+whichever `Application` last synced.
+
+When a bundle pairs a standalone DRA driver with `gpu-operator` **v26.7.0 or
+newer**, AICR scopes an `ignoreDifferences` entry to the divergent fields on
+the `gpu-operator` `Application`, so the DRA driver's copy stays the effective
+owner and the reconcile loop stops. This is generated automatically — no flag
+or override is needed. Bundles with only one of the two components, or with a
+`gpu-operator` older than v26.7.0 (whose chart ships no `computedomains` CRD
+to contend with), are unaffected and carry no such entry.
+
+**One side effect worth knowing about.** The entry is paired with the
+`RespectIgnoreDifferences=true` sync option, without which Argo CD would
+exclude the fields from its diff but still re-apply them on every sync. That
+option is *Application-wide*, not per-entry: Argo builds the sync-time
+normalizer from this `Application`'s `ignoreDifferences` **plus** any
+`resource.customizations.ignoreDifferences.*` configured cluster-wide in
+`argocd-cm`. So on an Argo instance carrying global ignore rules (webhook
+`caBundle`, HPA-managed `replicas`, aggregated ClusterRole rules), those
+fields also stop being enforced at sync time for the `gpu-operator`
+`Application` specifically — drift in them is preserved rather than corrected
+by `selfHeal`. Argo CD offers no way to scope the option to a single entry.
+
+This is a stopgap, not a durable fix. `Helm` and `Flux` bundles are not
+affected (both install CRDs once and never re-apply them), and the
+OLM-based OCP path (`gpu-operator-ocp`, `gpu-operator-ocp-olm`) is not
+covered — those components install no chart `crds/` of their own, so their
+CRDs come from the OLM `Subscription`/CSV and an `Application`-level
+`ignoreDifferences` has nothing to arbitrate. That conflict is tracked
+separately. See [NVIDIA/aicr#2546](https://github.com/NVIDIA/aicr/issues/2546).
+
+### `agentgateway`: upgrading across breaking releases
+
+AICR pins the `agentgateway` and `agentgateway-crds` charts in the component
+registry, and a pin bump can cross upstream releases that document breaking
+changes — to JWT claim enforcement, LLM token accounting, policy merging,
+cross-namespace route delegation, managed API-key metadata, Istio identity,
+Gateway API and `TCPRoute` handling, MCP guardrails, standalone auth, and image
+base. Whether any of that reaches you depends entirely on which agentgateway
+resources exist in your cluster, and the answer differs sharply between what
+AICR generates and what you author yourself.
+
+**AICR-generated bundles are unaffected.** A bundle creates exactly two
+agentgateway resources: an `AgentgatewayParameters` that carries deployment and
+service shape only, and the `inference-gateway` `Gateway`. It ships no
+`AgentgatewayPolicy`, `AgentgatewayBackend`, `AgentgatewayModel`, or
+`HTTPRoute` — so the breaking changes land on surface AICR never populates.
+
+**Resources you author yourself are exposed**, and AICR can neither detect nor
+migrate them. Before applying a bundle whose agentgateway pin moved, check
+whether you have any:
+
+```bash
+(
+  if ! kinds=$(kubectl api-resources --api-group=agentgateway.dev -o name); then
+    echo "discovery incomplete — retry; do not read this as clear" >&2; exit 1
+  fi
+  if [ -z "$kinds" ]; then
+    echo "no agentgateway.dev kinds registered — the chart is not installed" >&2; exit 0
+  fi
+  for kind in $kinds; do
+    kubectl get "$kind" -A || { echo "listing $kind failed — retry" >&2; exit 1; }
+  done
+)
+```
+
+The kinds are discovered rather than named because the API group grows across
+chart versions — `AgentgatewayModel` only exists from v1.4.0 — so naming them
+would fail with `the server doesn't have a resource type` on exactly the older
+pins whose operators most need to run this. The status checks matter for the
+same reason: an unhealthy aggregated APIService (a down metrics-server or
+custom-metrics adapter, and `prometheus-adapter` is in AICR's own component
+set) makes `kubectl api-resources` exit non-zero, the substitution yields an
+empty list, and the loop would silently report clean. Empty output *plus* an
+error means retry, not clear.
+
+Routes you authored live in the Gateway API group rather than
+`agentgateway.dev`, so the sweep above does not see them — and they are exactly
+what the cross-namespace route delegation change affects:
+
+```bash
+(
+  kubectl get httproutes,grpcroutes -A \
+    -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,PKIND:.spec.parentRefs[*].kind,PNS:.spec.parentRefs[*].namespace,PARENTS:.spec.parentRefs[*].name' \
+    || { echo "route listing failed — retry" >&2; exit 1; }
+)
+```
+
+Read the rows by their parent:
+
+- `PKIND: Gateway` naming `inference-gateway` — a route you attached to the
+  AICR gateway.
+- `PKIND: HTTPRoute` with a `PNS` that differs from `NS` — cross-namespace
+  route-to-route delegation. From v1.5.0 this requires a `ReferenceGrant` in
+  the child's namespace authorizing the parent's namespace, where previously
+  none was needed. Confirm `kubectl get referencegrants -A` covers each one
+  before upgrading, or the delegation stops being accepted.
+- `PKIND: HTTPRoute` with an empty `PNS` — same-namespace delegation, which the
+  change does not affect. `parentRefs[].namespace` is optional and defaults to
+  the route's own namespace, so empty is the same-namespace signal.
+
+One caveat on the command: a route with several `parentRefs` where only some
+set `namespace` will have its `PNS` column misalign, because JSONPath omits the
+missing entries rather than padding them. Describe those routes individually
+with `kubectl get <httproute-or-grpcroute> <name> -n <ns> -o yaml` rather than
+trusting the columns.
+
+AICR's own `AgentgatewayParameters` named `system-proxy` in
+`agentgateway-system` is expected. If nothing else appears here, nothing you
+authored in the `agentgateway.dev` group is affected — but that is not the
+whole check. A cluster with no custom agentgateway resources and no routes can
+still hold an `agentgateway` Gateway outside `agentgateway-system`, which stops
+reconciling once the namespace list is scoped. Finish with the Gateway
+inventory in
+[which namespaces the controller may provision Gateways in](#agentgateway-which-namespaces-the-controller-may-provision-gateways-in)
+before concluding the upgrade needs nothing from you. Anything else returned means read the upstream release notes
+for every version between the old and new pin and validate off-production
+first — a multi-version jump has to absorb every breaking change in between,
+not just the newest one. Use the
+[component version matrix](component-version-matrix.md) to find which versions
+those are.
+
+One limit worth stating plainly: AICR CI exercises **fresh installs** of a
+pinned chart, not in-place upgrades from an older pin. A green release
+validates that the new version deploys and passes its health checks. It is not
+an in-place upgrade certification.
+
+### `agentgateway`: which namespaces the controller may provision Gateways in
+
+From chart v1.5.0 the controller's write permissions are scoped by
+`rbac.gatewayNamespaces`, and AICR sets it to `agentgateway-system` — the one
+namespace it provisions the `inference-gateway` Gateway in. The chart's own
+default is an empty list, which binds the write role (Deployments, DaemonSets,
+Secrets, ServiceAccounts, ConfigMaps, Services, HPAs, PDBs) with a
+*ClusterRoleBinding*, letting a network-facing controller write those objects
+in every namespace on the cluster.
+
+Scoping narrows that **write** reach to the namespaces you name, and nothing
+else. Two things it does not contain. The controller's read role is a separate
+`ClusterRole` bound cluster-wide regardless of this value, and it carries
+`get`/`list`/`watch` on Secrets — so a scoped controller can still read every
+Secret in the cluster. And the write role still grants `daemonsets`, so a
+DaemonSet created in a permitted namespace still schedules pods onto every
+node. Treat the controller as privileged rather than contained; scoping is
+worth doing, but it is not the control that keeps it away from your Secrets.
+
+The consequence for you is that **only Gateways in the listed namespaces are
+provisioned**. A Gateway elsewhere is accepted by the API server but never gets
+an address — the controller cannot create its Deployment or Service there. The
+Gateway reports it: v1.5.0 sets `Programmed=False` with reason
+`DeploymentFailed` when those writes are denied, so
+`kubectl get gateway <name> -n <ns> -o yaml` shows the cause in `status.conditions`,
+with matching `forbidden` errors in the controller log. This is
+about where the *Gateway* lives; routes are unaffected, and `HTTPRoute`s in any
+namespace still attach to the AICR gateway.
+
+Upgrading an existing cluster is where this bites. A Gateway that reconciles
+today under the chart's unscoped default stops once the list is scoped without
+its namespace, so inventory what you have before upgrading:
+
+```bash
+(
+  kubectl get gateways.gateway.networking.k8s.io -A \
+    -o custom-columns='NS:.metadata.namespace,NAME:.metadata.name,CLASS:.spec.gatewayClassName' \
+    || { echo "Gateway listing failed — retry" >&2; exit 1; }
+)
+```
+
+Every namespace holding a Gateway with `CLASS: agentgateway` belongs in the
+list. To add them:
+
+```bash
+aicr bundle -r recipe.yaml \
+  --set-json agentgateway:rbac.gatewayNamespaces='["agentgateway-system","my-gateways"]'
+```
+
+Two constraints on that edit. The namespaces **must already exist** — the chart
+creates a `RoleBinding` in each, and naming one that has not been created fails
+the install. And the key is a list, so it needs `--set-json`: a plain
+`--set agentgateway:rbac.gatewayNamespaces=my-gateways` writes a bare string and
+the chart's `range` over it fails at render, the same list-versus-string trap
+described for `allowedSourceRanges` above.
+
+### `kueue`: 0.18.x to 0.19.x
+
+Upstream's 0.19 notes ask you to review the `.0` notes for every minor version
+you cross. Coming from AICR's previous pin of 0.18.2 that is discharged, so
+0.19.0 is the floor here. If you are upgrading from an AICR release older than
+the 0.18.2 pin, read the 0.17.0 and 0.18.0 notes as well.
+
+One change alters behavior on a default install. The rest apply only if you
+author Kueue objects yourself or have re-enabled an integration AICR trims.
+
+**`WaitForPodsReady` is on by default from 0.19.0.** The v1beta2 configuration
+has no enable switch for it: the controller defaults the block
+unconditionally, so an existing install that never set `waitForPodsReady`
+inherits it on upgrade. The effective values come from the Kueue binary rather
+than from the commented example in the chart, and a running 0.19.3 controller
+reports them as:
+
+```yaml
+waitForPodsReady:
+  blockAdmission: false
+  recoveryTimeout: 30m0s
+  requeuingStrategy:
+    backoffBaseSeconds: 60
+    backoffMaxSeconds: 3600
+    timestamp: Eviction
+  timeout: 30m0s
+```
+
+What changes for a running cluster: a workload whose pods do not all become
+ready inside 30 minutes is evicted and requeued instead of holding its quota,
+and a running workload that loses readiness for 30 minutes is evicted the same
+way. On 0.18.2 the first case held its GPU quota while never running, so for
+most clusters this is the better behavior. `blockAdmission` stays false, so an
+evicted workload does not stall the queue behind it.
+
+AICR inherits this rather than pinning it. If 30 minutes is wrong for your
+workloads, set a different timeout rather than trying to switch the feature
+off: the `DisableWaitForPodsReady` feature gate is already deprecated upstream
+and is slated for removal in 0.21. Note that AICR pins
+`managerConfig.controllerManagerConfigYaml` as a single string, and Helm does
+not merge into a string, so changing one key means supplying the whole block
+rather than overriding `waitForPodsReady` on its own.
+
+**Rename any device-class mapping or resource transformation named `pods`.**
+Kueue reserves that exact resource name for the request it synthesizes from the
+PodSet count, and refuses it in four positions: `resources.transformations[].input`,
+that entry's `multiplyBy`, any key of its `outputs`, and
+`resources.deviceClassMappings[].name` (the last additionally requires
+`KueueDRAIntegration`, which has defaulted on since 0.18). Through 0.19.2 an entry
+using it was accepted and then silently discarded, or left the Workload pending
+indefinitely. 0.19.3 adds a real
+refusal and holds it behind the alpha `ReservedResourceNameValidation` feature
+gate, which is off by default in 0.19 so that existing clusters can rename
+first.
+
+Upstream's release note says the controller-manager "will fail to start", which
+holds only once that gate is on. Checked against 0.19.3 on kind with
+`resources.transformations[0].input: pods` in the configuration: at the default
+gate setting the controller came up `1/1 Running` with 0 restarts, and adding
+`--feature-gates=ReservedResourceNameValidation=true` to the same
+configuration crash-looped it at startup with
+
+```text
+Unable to validate the configuration
+resources.transformations[0].input: Invalid value: "pods": the key is reserved for internal kueue use
+```
+
+So a 0.19.3 upgrade does not break on this by itself. Rename anyway, while the
+gate is still off. The check applies to the controller Configuration, not to
+ClusterQueue `coveredResources`. AICR ships neither block, so a default install
+has nothing to rename, but both are reachable through typed overrides on the
+`kueue` component:
+
+```bash
+kubectl get configmap kueue-manager-config -n kueue-system \
+  -o jsonpath='{.data.controller_manager_config\.yaml}' \
+  | grep -nE "^[[:space:]]*-?[[:space:]]*(input|multiplyBy|name)[[:space:]]*:[[:space:]]*[\"']?pods[\"']?([[:space:]]+#.*)?[[:space:]]*\$|^[[:space:]]*[\"']?pods[\"']?[[:space:]]*:"
+```
+
+Helm renders this ConfigMap through `fromYaml | toYaml`, so a value written as
+`input: "pods" # rename me` reaches it normalized to `input: pods`, quotes and
+comment dropped. The pattern accepts quotes, a trailing comment and arbitrary
+spacing anyway, so it still reports a hit against a ConfigMap that was applied
+directly or installed by another tool and never passed through that
+normalization.
+
+No output means nothing to do. Rename any hit to a qualified name such as
+`example.com/pods`. A rename also means updating the matching ClusterQueue
+`nominalQuota` entries in the same change, because the quota is keyed on the
+name you just changed.
+
+**Workloads you author yourself are validated more strictly from 0.19.1.**
+Topology-aware scheduling is on by default (`TopologyAwareScheduling` since
+0.14) and so is the new check (`TASValidateWorkloadSliceSize` at 0.19), so this
+needs no change in AICR to take effect. It reaches only `Workload` objects you
+create directly or through your own controller, not those Kueue builds from a
+Job. After upgrading, a Workload is rejected unless `podSetSliceRequiredTopology`
+is paired with a `podSetSliceSize` greater than zero, `podSetSliceSize` is
+absent when that topology field is absent, and every
+`podsetSliceRequiredTopologyConstraints` entry has a positive size. For a phased
+rollout, disable `TASValidateWorkloadSliceSize`, clean up the invalid Workloads,
+then re-enable it. While you are in there, fix any negative `subGroupCount` on a
+Workload: 0.19 only warns about it, but 0.20 rejects it at the API level.
+
+**If you turned topology-aware scheduling off, the gate the release note names
+is not enough.** `TASRecomputeAssignmentWithinSchedulingCycle` is new in 0.19
+and defaults on, and the 0.19.1 note tells you to set it false before upgrading
+when TAS is disabled. That is necessary and not sufficient. Checked against
+0.19.3 on kind: with `TopologyAwareScheduling=false` alone the manager exits at
+startup with `conflicting feature gates detected` and eight causes, and the
+Deployment crash-loops. Applying the release note's instruction on top of that,
+so `TASRecomputeAssignmentWithinSchedulingCycle=false` as well, still
+crash-loops. Seven sub-gates default on and each requires TAS
+(`TASHandleOverlappingFlavors`, `TASFailedNodeReplacement`,
+`TASFailedNodeReplacementFailFast`, `TASReplaceNodeOnPodTermination`,
+`TASReplaceNodeOnNodeTaints`, `TASMultiLayerTopology`,
+`TASRecomputeAssignmentWithinSchedulingCycle`), and `TASProfileMixed`, on by
+default since 0.15, fails on its own with `cannot use a TAS profile with TAS
+disabled`. The manager reached `1/1 Running` only with all nine set false
+together. AICR sets no feature gates for kueue, so a default install is
+unaffected and stays unaffected. This reaches only a cluster that disabled TAS
+through an override on the `kueue` component, in either
+`controllerManager.featureGates` or a `featureGates:` block inside
+`managerConfig.controllerManagerConfigYaml`; both were checked and fail
+identically, and kueue rejects setting the two at once. Given the cost, the
+cheaper path is to drop the override and leave TAS on.
+
+**If you re-enabled an integration AICR trims, check these too.** AICR pins
+`integrations.frameworks` to `batch/job`, JobSet and TrainJob, so the following
+are inert on a default install and matter only if you added the framework back
+through an override:
+
+- `ray.io/raycluster`: the autoscaler sidecar is now counted against quota.
+  Budget an extra 500m CPU and 512Mi memory per head pod, or whatever
+  `spec.autoscalerOptions.resources` sets, or admission starts failing.
+- `ray.io/rayjob` with `submissionMode: SidecarMode`: the submitter sidecar is
+  now counted against quota. Budget an extra 500m CPU and 200Mi memory per head
+  pod.
+- `leaderworkerset.x-k8s.io/leaderworkerset`: `spec.leaderWorkerTemplate.size`
+  is immutable while Kueue manages the LeaderWorkerSet. Recreate at the new size
+  rather than resizing in place. `spec.replicas` stays mutable.
+
+If you add MultiKueue through an override and use `locationType: Path`, the
+kubeconfig has to be mounted into the `kueue-controller-manager` pod under
+`/etc/multikueue/kubeconfigs`. Moving the file on a node is not enough, because
+the path is resolved inside the controller's own filesystem.
+`MultiKueueKubeConfigPathValidation` is alpha and off by default in 0.19 and
+upstream expects to turn it on later, so prefer `locationType: Secret` or
+`ClusterProfile` rather than taking that dependency.

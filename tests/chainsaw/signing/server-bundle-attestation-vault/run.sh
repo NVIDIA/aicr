@@ -312,7 +312,7 @@ build_or_locate_binaries() {
     has_tools goreleaser
     msg "Building aicr + aicrd (unattested snapshot; smoke mode)"
     cd "${ROOT}"
-    if ! GOFLAGS=-mod=vendor goreleaser build --clean --single-target --snapshot --timeout 10m 2>&1; then
+    if ! goreleaser build --clean --single-target --snapshot --timeout 10m 2>&1; then
       err "Failed to build binaries with goreleaser"
     fi
     [ -n "${AICRD_BIN}" ] || AICRD_BIN="$(find_dist_binary aicrd "${os_name}" "${arch_name}" || true)"

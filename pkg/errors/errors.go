@@ -163,8 +163,7 @@ func PropagateOrWrap(err error, fallbackCode ErrorCode, message string) error {
 	if err == nil {
 		return nil
 	}
-	var se *StructuredError
-	if stderrors.As(err, &se) {
+	if _, ok := stderrors.AsType[*StructuredError](err); ok {
 		return err
 	}
 	return Wrap(fallbackCode, message, err)

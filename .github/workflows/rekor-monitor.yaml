@@ -133,6 +133,10 @@ env:
 jobs:
   monitor:
     name: AICR release identity + log consistency (Rekor v2)
+    # Upstream only: forks that enable Actions would otherwise run this hourly,
+    # burning minutes and going red (no checkpoint history, no release identity
+    # to monitor) and opening alert/degraded issues in the fork.
+    if: github.repository == 'nvidia/aicr'
     runs-on: ubuntu-latest
     # Backstop the per-pass context timeout in the tool (defaultTimeout, 45m):
     # the job is killed if a network stall somehow outlives it. Sized so the
@@ -244,7 +248,7 @@ jobs:
         run: |
           set -uo pipefail
           set +e
-          GOFLAGS="-mod=vendor" go run ./tools/rekor-monitor \
+          go run ./tools/rekor-monitor \
             --file "${CHECKPOINT_FILE}" \
             --restore-zip checkpoint.zip \
             --cert-subject "${CERT_SUBJECT}" \

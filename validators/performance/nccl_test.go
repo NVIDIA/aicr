@@ -31,26 +31,26 @@ const testWorkerJobName = "node"
 
 func TestApplyNCCLWorkerScheduling_NodeSelector(t *testing.T) {
 	// Build a minimal TrainingRuntime-like unstructured object matching the real template structure.
-	workerPodSpec := map[string]interface{}{
-		"nodeSelector": map[string]interface{}{
+	workerPodSpec := map[string]any{
+		"nodeSelector": map[string]any{
 			"node.kubernetes.io/instance-type": "p5.48xlarge",
 		},
-		"tolerations": []interface{}{
-			map[string]interface{}{"operator": "Exists"},
+		"tolerations": []any{
+			map[string]any{"operator": "Exists"},
 		},
 	}
 	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"spec": map[string]interface{}{
-				"template": map[string]interface{}{
-					"spec": map[string]interface{}{
-						"replicatedJobs": []interface{}{
-							map[string]interface{}{"name": "launcher"},
-							map[string]interface{}{
+		Object: map[string]any{
+			"spec": map[string]any{
+				"template": map[string]any{
+					"spec": map[string]any{
+						"replicatedJobs": []any{
+							map[string]any{"name": "launcher"},
+							map[string]any{
 								"name": testWorkerJobName,
-								"template": map[string]interface{}{
-									"spec": map[string]interface{}{
-										"template": map[string]interface{}{
+								"template": map[string]any{
+									"spec": map[string]any{
+										"template": map[string]any{
 											"spec": workerPodSpec,
 										},
 									},
@@ -71,7 +71,7 @@ func TestApplyNCCLWorkerScheduling_NodeSelector(t *testing.T) {
 	// Verify the nodeSelector was replaced in the worker spec.
 	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
 	for _, j := range jobs {
-		jm, _ := j.(map[string]interface{})
+		jm, _ := j.(map[string]any)
 		name, _, _ := unstructured.NestedString(jm, "name")
 		if name != testWorkerJobName {
 			continue
@@ -88,23 +88,23 @@ func TestApplyNCCLWorkerScheduling_NodeSelector(t *testing.T) {
 
 func TestApplyNCCLWorkerScheduling_Tolerations(t *testing.T) {
 	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"spec": map[string]interface{}{
-				"template": map[string]interface{}{
-					"spec": map[string]interface{}{
-						"replicatedJobs": []interface{}{
-							map[string]interface{}{"name": "launcher"},
-							map[string]interface{}{
+		Object: map[string]any{
+			"spec": map[string]any{
+				"template": map[string]any{
+					"spec": map[string]any{
+						"replicatedJobs": []any{
+							map[string]any{"name": "launcher"},
+							map[string]any{
 								"name": testWorkerJobName,
-								"template": map[string]interface{}{
-									"spec": map[string]interface{}{
-										"template": map[string]interface{}{
-											"spec": map[string]interface{}{
-												"nodeSelector": map[string]interface{}{
+								"template": map[string]any{
+									"spec": map[string]any{
+										"template": map[string]any{
+											"spec": map[string]any{
+												"nodeSelector": map[string]any{
 													"cloud.google.com/gke-accelerator": "nvidia-h100-mega-80gb",
 												},
-												"tolerations": []interface{}{
-													map[string]interface{}{"operator": "Exists"},
+												"tolerations": []any{
+													map[string]any{"operator": "Exists"},
 												},
 											},
 										},
@@ -128,7 +128,7 @@ func TestApplyNCCLWorkerScheduling_Tolerations(t *testing.T) {
 	// nodeSelector should be unchanged (only tolerations overridden).
 	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
 	for _, j := range jobs {
-		jm, _ := j.(map[string]interface{})
+		jm, _ := j.(map[string]any)
 		name, _, _ := unstructured.NestedString(jm, "name")
 		if name != testWorkerJobName {
 			continue
@@ -141,32 +141,32 @@ func TestApplyNCCLWorkerScheduling_Tolerations(t *testing.T) {
 		if len(tolsRaw) != 1 {
 			t.Fatalf("tolerations count = %d, want 1", len(tolsRaw))
 		}
-		tol, _ := tolsRaw[0].(map[string]interface{})
-		if tol["key"] != "gpu-type" || tol["value"] != "h100" || tol["effect"] != "NoSchedule" {
-			t.Errorf("toleration = %v, want gpu-type=h100:NoSchedule", tol)
+		tol, _ := tolsRaw[0].(map[string]any)
+		if tol["key"] != "gpu-type" || tol["value"] != "h100" || tol["effect"] != "NoSchedule" || tol["operator"] != "Equal" {
+			t.Errorf("toleration = %v, want gpu-type=h100:NoSchedule operator=Equal", tol)
 		}
 	}
 }
 
 func TestApplyNCCLWorkerScheduling_Both(t *testing.T) {
 	obj := &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"spec": map[string]interface{}{
-				"template": map[string]interface{}{
-					"spec": map[string]interface{}{
-						"replicatedJobs": []interface{}{
-							map[string]interface{}{"name": "launcher"},
-							map[string]interface{}{
+		Object: map[string]any{
+			"spec": map[string]any{
+				"template": map[string]any{
+					"spec": map[string]any{
+						"replicatedJobs": []any{
+							map[string]any{"name": "launcher"},
+							map[string]any{
 								"name": testWorkerJobName,
-								"template": map[string]interface{}{
-									"spec": map[string]interface{}{
-										"template": map[string]interface{}{
-											"spec": map[string]interface{}{
-												"nodeSelector": map[string]interface{}{
+								"template": map[string]any{
+									"spec": map[string]any{
+										"template": map[string]any{
+											"spec": map[string]any{
+												"nodeSelector": map[string]any{
 													"node.kubernetes.io/instance-type": "p5.48xlarge",
 												},
-												"tolerations": []interface{}{
-													map[string]interface{}{"operator": "Exists"},
+												"tolerations": []any{
+													map[string]any{"operator": "Exists"},
 												},
 											},
 										},
@@ -190,7 +190,7 @@ func TestApplyNCCLWorkerScheduling_Both(t *testing.T) {
 
 	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
 	for _, j := range jobs {
-		jm, _ := j.(map[string]interface{})
+		jm, _ := j.(map[string]any)
 		name, _, _ := unstructured.NestedString(jm, "name")
 		if name != testWorkerJobName {
 			continue
@@ -208,9 +208,9 @@ func TestApplyNCCLWorkerScheduling_Both(t *testing.T) {
 		if len(tolsRaw) != 1 {
 			t.Fatalf("tolerations count = %d, want 1", len(tolsRaw))
 		}
-		tol, _ := tolsRaw[0].(map[string]interface{})
-		if tol["key"] != "custom-taint" || tol["value"] != "true" || tol["effect"] != "NoSchedule" {
-			t.Errorf("toleration = %v, want custom-taint=true:NoSchedule", tol)
+		tol, _ := tolsRaw[0].(map[string]any)
+		if tol["key"] != "custom-taint" || tol["value"] != "true" || tol["effect"] != "NoSchedule" || tol["operator"] != "Equal" {
+			t.Errorf("toleration = %v, want custom-taint=true:NoSchedule operator=Equal", tol)
 		}
 	}
 }
@@ -363,6 +363,9 @@ func TestAcceleratorProductMatchers(t *testing.T) {
 		{recipe.CriteriaAcceleratorGB200, "NVIDIA-GB200", true},
 		{recipe.CriteriaAcceleratorGB200, "NVIDIA-GB200-96GB", false}, // exact-match guard
 		{recipe.CriteriaAcceleratorGB200, "NVIDIA-H100-80GB-HBM3", false},
+		{recipe.CriteriaAcceleratorGB300, "NVIDIA-GB300", true},
+		{recipe.CriteriaAcceleratorGB300, "NVIDIA-GB300-288GB", false}, // exact-match guard
+		{recipe.CriteriaAcceleratorGB300, "NVIDIA-GB200", false},
 		{recipe.CriteriaAcceleratorB200, "NVIDIA-B200", true},
 		{recipe.CriteriaAcceleratorB200, "NVIDIA-GB200", false},
 		{recipe.CriteriaAcceleratorH100, "NVIDIA-H100-80GB-HBM3", true},
@@ -914,9 +917,17 @@ func TestNVLSRuntimeYAMLReferencesIMEXClaim(t *testing.T) {
 	// creates via buildComputeDomain. If these drift, the DRA driver
 	// generates one name and the worker pods reference another, and
 	// pod admission fails with an opaque "claim not found" error.
-	paths := []string{
-		filepath.Join("testdata", "gb200", "eks", "runtime-nvls.yaml"),
-		filepath.Join("testdata", "gb200", "oke", "runtime-nvls.yaml"),
+	// Derived by globbing rather than listed, so a new accelerator/service
+	// runtime is covered the moment its template lands. An explicit list
+	// silently excludes anything added later, which is how vr200/rke2 was
+	// left uncovered when it was introduced.
+	paths, err := filepath.Glob(filepath.Join("testdata", "*", "*", "runtime-nvls.yaml"))
+	if err != nil {
+		t.Fatalf("glob runtime-nvls templates: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no runtime-nvls.yaml templates found — the glob matched nothing, " +
+			"so this guard would pass without checking anything")
 	}
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
@@ -959,6 +970,14 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceOKE,
 			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+		},
+		{
+			// This table asserts only on explicitly listed service keys, so a
+			// new matrix entry passes silently unless a case is added here.
+			name:    "NVLS RKE2 VR200",
+			variant: variantNVLS,
+			service: recipe.CriteriaServiceRKE2,
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorVR200},
 		},
 	}
 	for _, tt := range tests {

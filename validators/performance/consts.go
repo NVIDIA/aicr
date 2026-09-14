@@ -17,10 +17,13 @@ package main
 // Cross-file string constants for the performance validator.
 const (
 	apiGroupAPIExtensions    = "apiextensions.k8s.io"
+	apiGroupApps             = "apps"
+	apiGroupRBAC             = "rbac.authorization.k8s.io"
 	resourceCRDs             = "customresourcedefinitions"
 	versionV1alpha1          = "v1alpha1"
 	versionV1beta1           = "v1beta1"
 	keyName                  = "name"
+	keyOperator              = "operator"
 	checkNameNCCLAllReduceBW = "nccl-all-reduce-bw"
 
 	// nodeJobName is the name of both the NCCL worker replicatedJob and its

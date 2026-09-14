@@ -31,3 +31,10 @@ spec:
       # per-Application template branching and a confusing mix of sync
       # strategies in a single bundle.
       - ServerSideApply=true
+      # ApplyOutOfSyncOnly: scoped to the readiness-gate Application only.
+      # Paired with the Job's Replace=true,Force=true annotation
+      # (pkg/bundler/gatemanifest/manifest.go), this skips resources ArgoCD's
+      # diff already considers in-sync so a no-op resync does not
+      # delete-and-recreate the readiness-gate Job (and rerun its checks)
+      # when nothing changed. See #2367.
+      - ApplyOutOfSyncOnly=true

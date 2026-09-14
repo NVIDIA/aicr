@@ -46,9 +46,13 @@ func TestParseCriteriaServiceType(t *testing.T) {
 		{"ocp", "ocp", CriteriaServiceOCP, false},
 		{"OCP uppercase", "OCP", CriteriaServiceOCP, false},
 		{"openshift alias", "openshift", CriteriaServiceOCP, false},
-		{"self-managed", "self-managed", CriteriaServiceAny, false},
-		{"self", "self", CriteriaServiceAny, false},
-		{"vanilla", "vanilla", CriteriaServiceAny, false},
+		{"k0s", "k0s", CriteriaServiceK0s, false},
+		{"K0S uppercase", "K0S", CriteriaServiceK0s, false},
+		// Self-managed spellings alias the concrete generic service (they
+		// historically normalized to the any wildcard).
+		{"self-managed", "self-managed", CriteriaServiceGeneric, false},
+		{"self", "self", CriteriaServiceGeneric, false},
+		{"vanilla", "vanilla", CriteriaServiceGeneric, false},
 		{"invalid", "invalid", CriteriaServiceAny, true},
 	}
 
@@ -713,7 +717,7 @@ func TestGetCriteriaServiceTypes(t *testing.T) {
 	types := GetCriteriaServiceTypes()
 
 	// Should return sorted list
-	expected := []string{"aks", "bcm", "eks", "gke", "kind", "lke", "metal3", "ocp", "oke"}
+	expected := []string{"aks", "bcm", "eks", "generic", "gke", "k0s", "kind", "lke", "metal3", "ocp", "oke", "rke2"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaServiceTypes() returned %d types, want %d", len(types), len(expected))
 	}
@@ -737,7 +741,7 @@ func TestGetCriteriaAcceleratorTypes(t *testing.T) {
 	types := GetCriteriaAcceleratorTypes()
 
 	// Should return sorted list
-	expected := []string{"a100", "b200", "gb200", "gb300", "h100", "h200", "l40", "l40s", "rtx-pro-6000"}
+	expected := []string{"a100", "b200", "gb200", "gb300", "h100", "h200", "l40", "l40s", "rtx-pro-6000", "vr200"}
 	if len(types) != len(expected) {
 		t.Errorf("GetCriteriaAcceleratorTypes() returned %d types, want %d", len(types), len(expected))
 	}
@@ -942,6 +946,21 @@ spec:
 			wantErr: false,
 		},
 		{
+			name:     "Release N target apiVersion",
+			filename: "target.yaml",
+			content: `kind: RecipeCriteria
+apiVersion: aicr.run/v1
+spec:
+  service: eks`,
+			want: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorAny,
+				Intent:      CriteriaIntentAny,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
+			},
+		},
+		{
 			name:     "partial fields - only spec.service",
 			filename: "partial.yaml",
 			content: `kind: RecipeCriteria
@@ -1013,6 +1032,24 @@ spec:
 			filename: "invalid_api.yaml",
 			content: `kind: RecipeCriteria
 apiVersion: wrong/v1
+spec:
+  service: eks`,
+			wantErr: true,
+		},
+		{
+			name:     "profile target rejected for RecipeCriteria",
+			filename: "profile_target.yaml",
+			content: `kind: RecipeCriteria
+apiVersion: aicr.run/v1beta2
+spec:
+  service: eks`,
+			wantErr: true,
+		},
+		{
+			name:     "authoring target rejected for RecipeCriteria",
+			filename: "authoring_target.yaml",
+			content: `kind: RecipeCriteria
+apiVersion: aicr.run/v1beta1
 spec:
   service: eks`,
 			wantErr: true,
@@ -1150,7 +1187,7 @@ func TestLoadCriteriaFromFileWithContext(t *testing.T) {
 	t.Run("local file", func(t *testing.T) {
 		// Create a temporary file with criteria
 		content := `kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   name: test-criteria
 spec:
@@ -1276,6 +1313,18 @@ func TestParseCriteriaFromBody(t *testing.T) {
 				Nodes:       0,
 			},
 			wantErr: false,
+		},
+		{
+			name:        "JSON body with Release N target apiVersion",
+			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1","spec":{"service":"eks"}}`,
+			contentType: "application/json",
+			want: &Criteria{
+				Service:     CriteriaServiceEKS,
+				Accelerator: CriteriaAcceleratorAny,
+				Intent:      CriteriaIntentAny,
+				OS:          CriteriaOSAny,
+				Platform:    CriteriaPlatformAny,
+			},
 		},
 		{
 			name: "YAML body with application/x-yaml",

@@ -68,6 +68,11 @@ const (
 	// io.LimitReader rule as MaxClusterConfigBytes; a real pool list is
 	// a few KiB.
 	MaxAKSGPUPoolsBytes = int64(1 << 20) // 1 MiB
+
+	// MaxOKEAddonsBytes caps the size of an --oke-addons JSON file
+	// (`oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json`); the dump is a
+	// short per-cluster add-on list, so 1 MiB is generous.
+	MaxOKEAddonsBytes = int64(1 << 20) // 1 MiB
 )
 
 // Handler timeouts for HTTP request processing.
@@ -666,11 +671,40 @@ const (
 	TrainerCRDEstablishedTimeout = 2 * time.Minute
 
 	// TrainerControllerReadyTimeout is the time to wait for the Kubeflow Trainer
-	// controller-manager Deployment to have at least one ready replica after installation.
-	TrainerControllerReadyTimeout = 2 * time.Minute
+	// controller-manager Deployment to have at least one ready replica after
+	// installation. Widened from 2m to 3m: on cold start the cert-controller
+	// sidecar's webhook-cert get-or-create can race a not-yet-synced informer
+	// cache, producing a resourceVersion conflict that the sidecar's own
+	// reconcile loop retries and self-heals from unassisted. This is expected
+	// behavior under cert-controller's optimistic-concurrency retry, not a
+	// defect in Trainer or in this validator — but each retry adds latency
+	// that could otherwise push first-ready past a tighter budget.
+	TrainerControllerReadyTimeout = 3 * time.Minute
+
+	// TrainerInstallPollInterval is the sleep between checks that a
+	// recipe-declared Kubeflow Trainer installation has become complete. The
+	// benchmark polls rather than failing on the first incomplete read, because a
+	// CRD that is present but not yet Established — or a controller Deployment
+	// that has not appeared — is an ordinary rollout state, not a failed deploy.
+	TrainerInstallPollInterval = 5 * time.Second
 
 	// NCCLTrainJobTimeout is the maximum time to wait for the NCCL all-reduce TrainJob to complete.
 	NCCLTrainJobTimeout = 30 * time.Minute
+
+	// NCCLStaleNamespacePruneAge is how old a leftover aicr-nccl-perf-* namespace
+	// must be before the best-effort prune in runNCCLTrainJob deletes it. Sized
+	// well past NCCLTrainJobTimeout so a namespace still owned by an in-progress
+	// sibling variant, or a run that is simply slow, is never touched.
+	NCCLStaleNamespacePruneAge = 2 * NCCLTrainJobTimeout
+
+	// NCCLExecutionLockStaleAge is how long an unrenewed run execution lock
+	// (see claimNCCLExecutionLock) is honored before a new caller may take
+	// it over. It only needs to cover the gaps between renewals, not the
+	// full run, since a live pod protects the namespace on its own via
+	// verifyNCCLNamespaceNotLive regardless of lock staleness. Kept short
+	// so a retry after a hard kill isn't stuck waiting out
+	// NCCLStaleNamespacePruneAge instead.
+	NCCLExecutionLockStaleAge = 20 * time.Minute
 
 	// NCCLLauncherPodTimeout is the maximum time to wait for the NCCL launcher pod to be created.
 	NCCLLauncherPodTimeout = 5 * time.Minute
@@ -687,6 +721,13 @@ const (
 	// against a separate lister that lags that strongly-consistent read — a freshness the
 	// client cannot observe. This bounds how long we let the webhook cache catch up.
 	TrainJobAdmissionRetryTimeout = 1 * time.Minute
+
+	// NCCLResourceRecreateWait bounds waitForResourceGone in createUnstructured's
+	// same-run TrainJob reclaim. A controller-serviced finalizer (Trainer v2 /
+	// JobSet ownership) can hold the delete for a while, so this gets its own
+	// bound instead of the much shorter DiagnosticTimeout used for the rest of
+	// createUnstructured's calls.
+	NCCLResourceRecreateWait = 5 * time.Minute
 )
 
 // Inference performance validation timeouts.
@@ -846,6 +887,14 @@ const (
 	// path (e.g., /proc symlink, NFS mount) before os.ReadFile would
 	// allocate the whole file into memory.
 	MaxBOMBytes int64 = 8 * 1024 * 1024 // 8 MiB
+
+	// MaxOpenVEXBytes caps the size of an OpenVEX document read from disk
+	// (the `.openvex.json` source that tools/openvex-bind projects onto a
+	// platform manifest digest). The committed document is well under
+	// 100 KiB even with per-statement impact prose; 1 MiB is generous
+	// headroom while bounding an attacker-influenced path before
+	// os.ReadFile would allocate the whole file into memory.
+	MaxOpenVEXBytes int64 = 1 * 1024 * 1024 // 1 MiB
 
 	// MaxConfigBytes caps the size of a user-supplied --config file. Real
 	// configs are well under 100 KiB; 1 MiB is generous headroom while
@@ -1247,8 +1296,13 @@ const (
 	// recipe constraints. Without this flag Helm uses its compiled-in
 	// default (currently v1.27.0 in Helm 3.x), which is too old for
 	// charts that declare a kubeVersion constraint (e.g., >=1.32.0-0).
-	// The value tracks the project's minimum supported Kubernetes version
-	// declared in recipes/overlays/base.yaml.
+	//
+	// This is a render-safe floor, not a support floor. This constant must
+	// stay at or above the strictest kubeVersion any bundled chart declares.
+	// Do NOT lower it to match the ">= 1.32" recipe floor in
+	// recipes/overlays/base.yaml: recipes are validated against their own
+	// constraints, while mirror discovery raises lower versions to this
+	// value solely for Helm rendering (see mirror.KubeVersionFromConstraints).
 	MirrorDefaultKubeVersion = "1.33.0"
 
 	// MirrorDiscoveryConcurrency caps the number of components rendered in

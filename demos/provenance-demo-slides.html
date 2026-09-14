@@ -162,12 +162,12 @@
     <div class="label">NVIDIA AI Cluster Runtime</div>
     <h1>Build provenance</h1>
     <p class="lede">Every released AICR image carries a signed SLSA Build Provenance v1
-      attestation and a signed SPDX SBOM — verifiable against NVIDIA CI without trusting the registry (released binaries ship a separate, unsigned SBOM asset).</p>
+      attestation and a signed CycloneDX SBOM — verifiable against NVIDIA CI without trusting the registry (released binaries ship a separate, unsigned SBOM asset).</p>
     <div class="chips">
       <span class="chip"><b>SLSA</b> provenance v1</span>
       <span class="chip"><b>Keyless</b> cosign + Fulcio</span>
       <span class="chip"><b>Public</b> Rekor transparency log</span>
-      <span class="chip"><b>SPDX</b> SBOM per artifact</span>
+      <span class="chip"><b>CycloneDX</b> SBOM per platform</span>
     </div>
     <p class="hint" style="margin-top:30px">←  →  or  Space  to navigate  ·  F for fullscreen</p>
   </div>
@@ -186,7 +186,7 @@
       <tbody>
         <tr><td>Did NVIDIA actually build this?</td><td>Sigstore signature pinned to NVIDIA&rsquo;s GitHub Actions identity</td></tr>
         <tr><td>From which source, on which workflow?</td><td>SLSA Build Provenance v1: repo + commit SHA + workflow ref</td></tr>
-        <tr><td>What&rsquo;s inside it?</td><td>SPDX SBOM attestation: every package, library, license</td></tr>
+        <tr><td>What&rsquo;s inside it?</td><td>CycloneDX SBOM attestation: every package, library, license</td></tr>
       </tbody>
     </table>
     <div class="grid2">
@@ -243,9 +243,9 @@
           <text x="442" y="232">externalParameters: source repo + commit SHA</text>
         </g>
         <rect class="node-g" x="426" y="260" width="404" height="82" rx="9"/>
-        <text class="ttl-g nlabel" x="442" y="284">SPDX SBOM attestation</text>
+        <text class="ttl-g nlabel" x="442" y="284">CycloneDX SBOM attestation</text>
         <g class="nsub" font-size="11.5">
-          <text x="442" y="304">predicateType: spdx.dev/Document</text>
+          <text x="442" y="304">predicateType: https://cyclonedx.org/bom</text>
           <text x="442" y="322">DSSE-signed, recorded in Rekor</text>
         </g>
       </svg>
@@ -282,7 +282,7 @@
         <text class="nsub" x="771" y="166" text-anchor="middle">artifact + attestation</text>
         <rect class="node-g" x="250" y="232" width="420" height="58" rx="9"/>
         <text class="nlabel ttl-g mono" x="460" y="256" text-anchor="middle" font-size="13">DSSE( in-toto Statement )</text>
-        <text class="nsub mono" x="460" y="275" text-anchor="middle" font-size="11">predicateType: slsa.dev/provenance/v1 &nbsp;or&nbsp; spdx.dev/Document</text>
+        <text class="nsub mono" x="460" y="275" text-anchor="middle" font-size="11">predicateType: slsa.dev/provenance/v1 &nbsp;or&nbsp; cyclonedx.org/bom</text>
         <path class="edge" d="M170,120 C210,96 220,60 246,52" marker-end="url(#pD2)"/>
         <text class="elabel" x="186" y="86">① id token</text>
         <path class="edge" d="M335,78 L335,116" marker-end="url(#pD2)"/>
@@ -338,14 +338,14 @@
 <section class="slide" data-title="SBOM attestation">
   <div class="slide-inner">
     <div class="label">04 · Verify · SBOM</div>
-    <h2>SPDX SBOM, signed and queryable</h2>
+    <h2>CycloneDX SBOM, signed and queryable</h2>
     <div class="code">
       <div class="bar"><span class="dot" style="background:#e5534b"></span><span class="dot" style="background:#e3a008"></span><span class="dot" style="background:#76b900"></span><span class="name">cosign verify-attestation + grype</span><button class="copy">copy</button></div>
-<pre><span class="c"># Pull and verify the SPDX SBOM attestation.</span>
-<span class="p">$</span> cosign verify-attestation --type spdxjson \
+<pre><span class="c"># Pull and verify the CycloneDX SBOM attestation (per-platform manifest digest).</span>
+<span class="p">$</span> cosign verify-attestation --type cyclonedx \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-    --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/on-tag\.yaml@refs/tags/.+$' \
-    "$IMAGE@$DIGEST" > predicate.json
+    --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
+    "$IMAGE@$DIGEST_AMD64" > predicate.json
 
 <span class="c"># Vulnerability scan, straight off the SBOM (no re-pull).</span>
 <span class="p">$</span> jq -r .payload predicate.json | base64 -d | jq .predicate > sbom.json
@@ -354,16 +354,16 @@
 <span class="d">stdlib          1.26.0      —          go-module   GHSA-…          Low</span>
 
 <span class="c"># License compliance, one jq away.</span>
-<span class="p">$</span> jq -r '.packages[]
-        | select(.licenseDeclared != "NOASSERTION")
-        | "\(.name) \(.versionInfo) \(.licenseDeclared)"' sbom.json | head -3
+<span class="p">$</span> jq -r '.components[]
+        | select(.licenses != null)
+        | "\(.name) \(.version) \(.licenses[0].license.id)"' sbom.json | head -3
 <span class="d">github.com/spf13/cobra v1.10.1 Apache-2.0</span>
 <span class="d">k8s.io/client-go      v0.34.2 Apache-2.0</span>
 <span class="d">sigs.k8s.io/yaml      v1.6.0  MIT</span></pre>
     </div>
     <div class="note">
       <span class="t info">The SBOM is the source of truth</span>
-      Vulnerability scanners and license tools read SPDX directly — no need to re-pull,
+      Vulnerability scanners and license tools read CycloneDX directly — no need to re-pull,
       re-scan, or re-derive. The signature pins the SBOM to the exact image digest.
     </div>
   </div>
@@ -455,7 +455,7 @@
     <div class="label">07 · Where it fits</div>
     <h2>One trust model, three subjects</h2>
     <div class="grid2">
-      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + signed SPDX SBOM on every published image (CLI binaries ship a separate SBOM asset), signed by NVIDIA CI. <em>You are here.</em></p></div>
+      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + signed CycloneDX SBOM and OpenVEX on every published image (CLI binaries ship a separate SPDX SBOM asset), signed by NVIDIA CI. <em>You are here.</em></p></div>
       <div class="mini"><h4>Deployment bundles</h4><p><code class="inl">aicr bundle --attest</code> signs the generated bundle with build provenance + trust levels. <code class="inl">demos/bundle-attestation.md</code></p></div>
       <div class="mini"><h4>Recipe evidence</h4><p>A signer-bound validation result for a recipe (proves who signed it, not cluster physicality), OCI-distributed with an in-tree pointer. <code class="inl">demos/evidence.md</code></p></div>
       <div class="mini"><h4>Same primitives</h4><p>Sigstore keyless + Fulcio + Rekor + in-toto across the board — different subjects, one verification model.</p></div>

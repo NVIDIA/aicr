@@ -143,7 +143,7 @@ func (h *TestHarness) createDefaultRecipe() *recipe.Recipe {
 			},
 		},
 	}
-	r.Init(header.KindRecipe, recipe.RecipeAPIVersion, "test")
+	r.Init(header.KindRecipe, recipe.RecipeResultAPIVersion, "test")
 	return r
 }
 
@@ -223,7 +223,7 @@ func (rb *RecipeBuilder) Build() *recipe.Recipe {
 	r := &recipe.Recipe{
 		Measurements: rb.measurements,
 	}
-	r.Init(header.KindRecipe, recipe.RecipeAPIVersion, "test")
+	r.Init(header.KindRecipe, recipe.RecipeResultAPIVersion, "test")
 	return r
 }
 
@@ -474,7 +474,7 @@ func createStandardTestRecipeResult(componentName string, overrides map[string]a
 
 	return &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: recipe.RecipeAPIVersion,
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:      componentName,
@@ -497,7 +497,7 @@ func createRecipeResultWithoutComponent(componentName string) *recipe.RecipeResu
 
 	return &recipe.RecipeResult{
 		Kind:       "RecipeResult",
-		APIVersion: recipe.RecipeAPIVersion,
+		APIVersion: recipe.RecipeResultAPIVersion,
 		ComponentRefs: []recipe.ComponentRef{
 			{
 				Name:    otherName,

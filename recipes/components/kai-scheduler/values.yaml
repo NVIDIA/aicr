@@ -21,16 +21,29 @@ global:
   tolerations:
     - operator: Exists
 
-# Disable runtimeClassName injection into GPU pods.
-# GPU Operator v25.10.0+ sets nvidia as the default containerd runtime,
-# so explicit runtimeClassName injection activates the CDI path and fails
-# with "unresolvable CDI devices". Fixed in KAI v0.13.0 (chart now respects
-# empty string instead of falling back to "nvidia").
-admission:
-  gpuPodRuntimeClassName: ""
-
 # Disable post-delete hook job — it does not inherit global.tolerations
 # and will hang Pending on clusters with tainted nodes.
 # Helm uninstall already removes the deployments this hook would delete.
 postCleanup:
   enabled: false
+
+# Default queue hierarchy — pinned explicitly rather than inherited.
+#
+# The gang-scheduling conformance validator submits its synthetic test
+# PodGroup to `default-queue` by name
+# (validators/conformance/gang_scheduling_check.go), so that queue is a hard
+# dependency of the check, not an optional extra. Workloads are unaffected —
+# Dynamo, for instance, uses the `dynamo` queue created by its own chart.
+# These are the chart's own defaults at v0.16.9; pinning them makes the
+# dependency visible here instead of relying on an upstream default that
+# could change under a version bump.
+#
+# Note the chart renders these only on first install:
+#   {{- if and .Values.defaultQueue.createDefaultQueue .Release.IsInstall }}
+# and annotates them `helm.sh/resource-policy: keep`. So a `helm upgrade`
+# will NOT recreate them if they are deleted — on a cluster where that has
+# happened, the queues must be restored manually or the release reinstalled.
+defaultQueue:
+  createDefaultQueue: true
+  parentName: default-parent-queue
+  childName: default-queue

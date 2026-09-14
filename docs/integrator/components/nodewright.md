@@ -2,7 +2,7 @@
 
 Nodewright and nodewright-customizations are two halves of the integration. [Nodewright](https://github.com/NVIDIA/nodewright) is a Kubernetes Operator that applies [nodewright packages](https://github.com/NVIDIA/nodewright-packages) with consistent, repeatable, and tested lifecycles within a cluster. Nodewright-customizations are instances of the [Skyhook Custom Resource](https://github.com/NVIDIA/nodewright/blob/main/chart/templates/skyhook-crd.yaml) that define one or more nodewright packages to deploy. These packages were selected to provide two main functions:
 1. Optimize a node for inference or training workloads via grub, sysctl and systemd service settings.
-2. Be able to install all of the necessary software to bring a vanilla kubernetes node to the AICR spec.
+2. Be able to install all of the necessary software to bring a vanilla Kubernetes node to the AICR spec.
 
 ## References
 
@@ -81,12 +81,15 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 | bcm     | h100         | -       | nvidia-setup 0.3.0 | -                       |
 | eks     | a100         | h100    | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
 | eks     | gb200        | -       | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
+| eks     | gb300        | -       | -                  | -                       |
 | eks     | h100         | -       | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
 | eks     | h200         | h100    | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
 | eks     | rtx-pro-6000 | generic | -                  | nvidia-tuned 0.3.2      |
+| generic | gb300        | -       | -                  | -                       |
 | gke     | a100         | h100    | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | b200         | -       | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | h100         | -       | -                  | nvidia-tuning-gke 0.1.2 |
+| rke2    | vr200        | -       | -                  | nvidia-tuned 0.9.0      |
 
 {/* END AICR-TUNING */}
 

@@ -177,6 +177,31 @@
       platformAutomerge: true,
     },
 
+    // ---- Auto-merge: digest rotations in component manifests ----
+    // Scoped to digest/pin deliberately. A digest rotation re-pins the same
+    // tag as upstream rebuilds it (ADR-006), which is mechanical; a tag bump
+    // changes what the component actually deploys and keeps a human on it.
+    //
+    // These bumps also change two derived artifacts —
+    // pkg/bundler/testdata/stock_render_golden.yaml and
+    // docs/user/container-images.md — that Renovate cannot regenerate for
+    // itself: postUpgradeTasks run inside the Renovate image, which ships
+    // neither Go nor Helm, while `make bom-docs` needs both plus network
+    // chart pulls. So these PRs fail their own gate until someone
+    // regenerates, and platformAutomerge is what makes that outcome safe:
+    // it hands the merge to GitHub, which merges only once the required
+    // `gate` check passes. #2678 broke main because it was merged ten
+    // seconds before its gate started running; a PR left open until it is
+    // green is the failure mode to prefer.
+    {
+      matchManagers: ["kubernetes"],
+      matchUpdateTypes: ["digest", "pin"],
+      minimumReleaseAge: "7 days",
+      automerge: true,
+      automergeType: "pr",
+      platformAutomerge: true,
+    },
+
     // ---- Grouping: bundle related bumps into single PRs ----
     // Preserve dependabot's gomod groups verbatim.
     {
@@ -329,6 +354,89 @@
       },
     },
 
+    // ---- oras bumps refresh the pinned linux/amd64 SHA256 via post-upgrade script ----
+    // Without this the version moves and the pin does not, so the release job's
+    // checksum verify fails closed on the next bump rather than at release time.
+    {
+      matchDepNames: ["oras-project/oras"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-oras-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
+    // ---- oasdiff bumps refresh the pinned linux/amd64 SHA256 via post-upgrade script ----
+    // Same contract as oras above. The setup-build-tools action verifies the
+    // downloaded archive against this pin, so a version bump without a refreshed
+    // digest fails the tests job on the Renovate PR itself rather than later.
+    {
+      matchDepNames: ["oasdiff/oasdiff"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-oasdiff-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
+    // ---- addlicense bumps refresh the pinned linux/amd64 SHA256 ----
+    // Same contract as oasdiff above. #2667 moved addlicense off `go install`
+    // onto a checksum-verified release binary, so a version bump without a
+    // refreshed digest fails the lint job on the Renovate PR. addlicense is on
+    // the auto-merge list above, which makes the refresh load-bearing rather
+    // than convenient: without it the automerge never fires and the PR sits red
+    // until someone computes a digest by hand.
+    {
+      matchDepNames: ["google/addlicense"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-addlicense-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
+    // ---- setup-envtest bumps refresh the pinned linux/amd64 SHA256 ----
+    // Same contract, with one difference worth knowing when reviewing the diff:
+    // controller-runtime publishes no checksums.txt for this asset, so the
+    // script hashes the downloaded binary. The value it writes records what the
+    // release served at refresh time rather than corroborating an upstream
+    // claim.
+    {
+      matchDepNames: ["sigs.k8s.io/controller-runtime/tools/setup-envtest"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-setup-envtest-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
+    // ---- Keep .settings.yaml and go.mod in step for tools built from the module ----
+    // #2667 made apidiff and go-licenses `tool` directives in go.mod, so their
+    // version now lives in two files: go.mod (what `go build` produces) and
+    // .settings.yaml (what tools/check-tools verifies and the actions report).
+    // TestToolPinsMatchGoMod holds them equal.
+    //
+    // Two managers see them, and by default they would move independently: the
+    // custom.regex manager bumps .settings.yaml, while the gomod manager skips
+    // both modules because each is `// indirect` (nothing in this repo imports
+    // them -- they are built, not linked). That would red every such PR. The
+    // two rules below enable the gomod side for exactly these modules and put
+    // both bumps in one PR.
+    {
+      matchManagers: ["gomod"],
+      matchDepTypes: ["indirect"],
+      matchDepNames: ["golang.org/x/exp", "github.com/google/go-licenses/v2"],
+      enabled: true,
+    },
+    {
+      matchDepNames: [
+        "golang.org/x/exp",
+        "github.com/google/go-licenses/v2",
+        "google/go-licenses",
+      ],
+      groupName: "module-built lint tools (apidiff, go-licenses)",
+    },
+
     // ---- aiperf-bench base image is capped below python 3.14 ----
     // PR #1906 auto-bumped this to 3.14 and broke the UAT validator image
     // build (aiperf's pyzmq/uvloop had no cp314 wheels, and the single-stage
@@ -363,13 +471,20 @@
   //   workload-side daemon (tcpgpudmarxd-dev) must move together; an
   //   independent Renovate bump on this image alone would create
   //   stack version skew. See docs/integrator/gke-tcpxo-networking.md.
+  // - tcpgpudmarxd-dev: the workload-side half of the same TCPXO pair.
+  //   Pre-emptive rather than an active guard today: the kubernetes manager
+  //   above is narrowed to recipes/components/*/manifests, and the daemon
+  //   appears only in demos/ and validators/**/testdata/, so Renovate does not
+  //   extract it at present. Listed so that widening those patterns cannot
+  //   silently let the daemon move on its own — the same stack version skew as
+  //   bumping the installer alone, from the opposite direction.
   ignoreDeps: [
     "602401143452.dkr.ecr.us-west-2.amazonaws.com/eks/aws-efa-k8s-device-plugin",
     "us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev",
+    "us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev",
   ],
 
   // Paths Renovate should not scan.
-  // - vendor/ contains pre-resolved Go modules (managed by `go mod vendor`).
   // - **/node_modules/**, **/dist/** are build artifacts.
   // - examples/ holds illustrative recipe YAMLs without `# renovate:`
   //   annotations; Renovate would not extract anything from them today
@@ -377,7 +492,6 @@
   // - **/testdata/** is unit-test fixture data; bumping tags inside
   //   fixtures would break tests that assert exact rendered output.
   ignorePaths: [
-    "vendor/**",
     "**/node_modules/**",
     "**/dist/**",
     "examples/**",

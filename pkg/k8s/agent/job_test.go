@@ -15,6 +15,7 @@
 package agent
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
@@ -81,13 +82,7 @@ func TestBuildPodSpec_TalosSkipsSystemDHostPath(t *testing.T) {
 				t.Errorf("expected no host-path volumes for OS=%q, got %v", tt.os, gotHostMounts)
 			}
 			for _, want := range tt.wantHostMounts {
-				found := false
-				for _, got := range gotHostMounts {
-					if got == want {
-						found = true
-						break
-					}
-				}
+				found := slices.Contains(gotHostMounts, want)
 				if !found {
 					t.Errorf("expected host-path volume %q for OS=%q, missing (have %v)", want, tt.os, gotHostMounts)
 				}

@@ -77,7 +77,7 @@ resolver injects into any `ComponentRef` that leaves the field unset.
 Top-level schema (`ComponentRegistry`):
 
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: <component-id>
@@ -99,6 +99,8 @@ components:
 | `sharedStorageClassPaths` | []string | no | Helm value paths where `--shared-storage-class` is written for shared filesystem PVCs |
 | `validations` | []`ComponentValidationConfig` | no | Bundle-time validation checks (function, severity, conditions, message) |
 | `healthCheck.assertFile` | string | **yes** | Chainsaw assert YAML (relative to data dir) consumed by `aicr validate --phase deployment` (runtime — #1220) and by `make check-health` locally. Content is restricted to the read-only `assert` / `error` operation allowlist. Enforced at PR time by `pkg/recipe.TestComponentRegistry_RequiresHealthCheck` (every component must declare a path) and `pkg/chainsaw.TestValidateTestReadOnly_RegistryContent` (every declared path must pass the allowlist) — see #1223. |
+| `upgrades.file` | string | no | Path to a `ComponentUpgrades` transition record (relative to data dir, e.g. `components/nodewright-operator/upgrades.yaml`), ADR-021. Empty means the component has no transition records. See [Transition records](#transition-records) below. |
+| `mixinSafeOverridePaths` | []string | no | Exact dotted value paths a `RecipeMixin` may set on this component via `Overrides` (see [Mixin Composition](#mixin-composition)). Empty (the default) means the component hasn't opted in: a mixin introducing it fresh keeps unrestricted `valuesFile`/`overrides`, but once it's already in the chain every mixin `Overrides` path is rejected. Entries must be exact leaf paths — an ancestor/descendant pair is rejected at registry load |
 | `gkeCriticalPriority` | bool | no | Synthesize ResourceQuota on GKE so `system-*-critical` pods admit |
 | `hasSelfRefCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` (chart ships CRD + CR in same release) |
 | `manifestsUseChartCRDs` | bool | no | Tells helmfile to emit `disableValidation: true` on the release carrying the attached manifests — the injected `-post` wrapper under both vendored and non-vendored layouts (manifests create CRs of CRDs the chart installs) |
@@ -120,6 +122,31 @@ components) is the single source of truth for a component's version;
 except exemption-declared divergences — see
 [Version pinning is single-source](#version-pinning-is-single-source).
 
+### Transition records
+
+- A record lives at `recipes/components/<component>/upgrades.yaml` with
+  `kind: ComponentUpgrades` and `apiVersion: aicr.run/v1beta1`, and is
+  wired to a component via the registry's `upgrades.file` (see the
+  field table above).
+- Transitions are keyed by semver ranges (`from`/`to`), not explicit
+  version pairs — e.g. `>=1.0.0 <2.0.0`.
+- Three verdicts are authorable — `safe`, `manual`, `blocked`. `unknown`
+  and `unversioned` are computed by the matcher and must never appear in
+  a file.
+- `safe` requires `verifiedBy`, naming the UAT lane, KWOK run, or
+  upstream release note that backs it — otherwise a coverage gate would
+  measure coverage rather than assessment.
+- The loader fails closed: an unreadable or unrecognized record is an
+  error naming what was found and expected, never a skip and never
+  degraded to `unknown`.
+- Steps are grouped by deployer; a group omitting `deployers` is *the*
+  remainder, and an explicitly empty `deployers: []` is rejected.
+- `make lint` validates every committed record via
+  `check-upgrade-records`.
+
+See [ADR-021](../design/021-component-upgrade-safety.md) for the full
+field reference.
+
 ## Overlay (`recipes/overlays/`)
 
 An overlay is a `RecipeMetadata` document with a `spec.criteria` block
@@ -128,7 +155,7 @@ that selects it for matching queries. Overlays live in
 
 ```yaml
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: gb200-eks-ubuntu-training
 spec:
@@ -156,8 +183,8 @@ Criteria fields (see `pkg/recipe/criteria.go` `type Criteria`):
 
 | Field | Type | Wildcard | Static OSS values |
 |---|---|---|---|
-| `service` | `CriteriaServiceType` | `any` or empty | `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3` |
-| `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb200`, `gb300`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000` |
+| `service` | `CriteriaServiceType` | `any` or empty | `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `k0s` |
+| `accelerator` | `CriteriaAcceleratorType` | `any` or empty | `h100`, `h200`, `gb200`, `gb300`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200` |
 | `intent` | `CriteriaIntentType` | `any` or empty | `training`, `inference` |
 | `os` | `CriteriaOSType` | `any` or empty | `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos` |
 | `platform` | `CriteriaPlatformType` | `any` or empty | `dynamo`, `kubeflow`, `nim`, `runai`, `slurm` |
@@ -209,12 +236,13 @@ names the ones at the end of a chain.
 
 `RecipeMetadata.Spec.Profile` declares one overlay-scoped enum for qualified
 configuration ownership modes. A declaration requires recipe apiVersion
-`aicr.run/v1alpha3`; that version without a declaration, or a declaration on
-the legacy version, is rejected. Profile-version metadata and recipe
-artifacts are strictly decoded so an unknown field cannot silently disappear.
+`aicr.run/v1beta2`, or the superseded `aicr.run/v1alpha3`; either profile
+track without a declaration, or a declaration on a default-track version, is
+rejected. Profile-version metadata and recipe artifacts are strictly decoded
+so an unknown field cannot silently disappear.
 
 The core `ProfileValue` contract is closed to `advertiser`, `constraints`,
-and `componentRefs{name,overrides}`. It rejects `valuesFile`, component
+`readinessConstraints`, and `componentRefs{name,overrides}`. It rejects `valuesFile`, component
 identity/deployment fields, root `overrides.enabled`, literal dotted keys,
 and nested empty maps. The `advertiser` field accepts exactly one non-empty
 value, `external` (validated against `pkg/allocpolicy`, the canonical
@@ -251,7 +279,13 @@ Resolution enforces these invariants:
    collisions.
 5. Evaluate selected profile constraints fail closed. A missing reading has a
    distinct invalid-request diagnostic; other evaluator failures propagate.
-6. Stamp the result `aicr.run/v1alpha3` and persist
+   A value's `readinessConstraints` are exempt from this step by design:
+   they name post-deployment properties (ADR-015 DD5) and route into
+   `spec.validation.readiness.constraints`, where the `aicr validate`
+   readiness pre-flight evaluates them fail closed. Names deduplicate
+   per phase — the same measurement path may carry a generation-time
+   pre-condition and a readiness-time post-deployment state.
+6. Stamp the result `aicr.run/v1beta2` and persist
    `metadata.selectedProfile`. Its sorted `ownedPaths` is the
    declaration-wide path union plus synthetic `enabled` for each referenced
    component.
@@ -261,8 +295,13 @@ profile-owned values. Bundle and mirror compare final candidate state with the
 hydrated recipe before creating output. Exact, ancestor, or descendant dynamic
 paths reject unconditionally; static writes reject only when the effective
 three-state observation (present bytes, absent, or blocked) diverges.
-Argocd-helm emits the corresponding structural template-time guard. Other
-deployers have no supported install-time value surface.
+That bundle-time rejection is the whole enforcement for `helm`, `flux`, and
+`helmfile`, whose install-time surface is closed — only the paths `--dynamic`
+declares. The `argocd-helm` deployer additionally emits a structural
+template-time guard, because it exposes component values through the parent
+chart's `.Values`, an open-ended surface the bundle-time gate cannot
+enumerate. Plain `argocd` rejects `--dynamic` and has no install-time value
+surface.
 
 Unprofiled compositions retain the legacy apiVersion and byte shape.
 Generation-side driver auto-detection skips a path owned by the selected
@@ -285,7 +324,7 @@ every leaf. **Mixins** are composable fragments referenced via
 ```yaml
 # recipes/mixins/os-ubuntu.yaml
 kind: RecipeMixin
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: os-ubuntu
 spec:
@@ -298,25 +337,62 @@ spec:
 ```
 
 Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
-`platform-inference`, `platform-kubeflow`.
+`platform-inference`, `platform-kubeflow`, `nvsentinel-observability`.
 
 **Mixin rules:**
 
 - A mixin carries only `constraints` and `componentRefs`. Setting
   `criteria`, `base`, `mixins`, or `validation` is rejected at load.
 - Resolution order: base chain merged first, then mixins applied to
-  the merged result. A leaf adopts a mixin by listing its file
-  basename in `spec.mixins`.
-- Mixin componentRefs are restricted to additive merges via
-  `mixinComponentRefSafeForMerge` (see
-  `pkg/recipe/metadata_store.go`). A mixin componentRef may only set
-  `name`, `namespace`, `manifestFiles`, `preManifestFiles`. Setting
-  any of `chart`, `type`, `source`, `version`, `tag`, `path`,
-  `valuesFile`, `overrides`, `patches`, `dependencyRefs`, `cleanup`,
-  `expectedResources`, `healthCheckAsserts` is rejected at compose
-  time — those fields silently override the chain's chosen chart, so
-  the resolver names the offending field and refuses to merge (see
-  ADR-005 "Silent constraint override" mitigation).
+  the merged result, in `spec.mixins` list order. A leaf adopts a
+  mixin by listing its file basename in `spec.mixins`.
+- Mixin componentRefs targeting a component **already in the chain**
+  are restricted to additive merges via `mixinComponentRefSafeForMerge`
+  (see `pkg/recipe/metadata_store.go`). Such a componentRef may
+  unconditionally set `name`, `namespace`, `manifestFiles`,
+  `preManifestFiles`. Setting any of `chart`, `type`, `source`,
+  `version`, `tag`, `path`, `valuesFile`, `patches`,
+  `dependencyRefs`, `cleanup`, `expectedResources`,
+  `healthCheckAsserts` is rejected at compose time — those fields
+  silently override the chain's chosen chart, so the resolver names
+  the offending field and refuses to merge (see ADR-005 "Silent
+  constraint override" mitigation).
+- A mixin **introducing a genuinely new component** (one not already in
+  the chain) may set those structural fields — that is how
+  `platform-kubeflow` and `platform-inference` add their components.
+  The restriction above exists to stop a mixin silently redefining a
+  component the chain already chose, so it only applies on collision.
+  **One exception:** if that fresh component's registry entry declares a
+  non-empty `mixinSafeOverridePaths`, its `valuesFile` is rejected too —
+  a values file's contents are never matched against the allowlist, so
+  permitting it would let a mixin smuggle in a non-allowlisted value
+  (e.g. `nvsentinel`'s deliberately-excluded `global.tracing.endpoint`)
+  that it could not set via `overrides`. Such a component must receive
+  its values through allowlisted `overrides` only.
+- `overrides` is neither unconditionally allowed nor unconditionally
+  rejected: `mixinOverridesSafeForMerge` (see
+  `pkg/recipe/metadata_store.go`) permits it path-by-path, gated by
+  the *target component's own* registry entry. A component opts in by
+  declaring `mixinSafeOverridePaths` (`recipes/registry.yaml`) —
+  the exact dotted leaf paths (e.g. `global.tracing.enabled`) any
+  mixin may set on it. A mixin path outside that allowlist is
+  rejected, and so is one that collides (exact match, or an
+  ancestor/descendant relationship) with a path the leaf's own chain
+  or an earlier-merged mixin already set — a collision fails closed
+  rather than letting the mixin's value silently overwrite it. The
+  allowlist is declared by the component owner, not the mixin author:
+  a mixin cannot self-grant permission to reach into a component it
+  doesn't own. This applies the same way whether the mixin is
+  introducing the component fresh or it's already in the chain — a
+  component with a *non-empty* declared allowlist can't have it
+  bypassed by claiming to add the component as new. A component whose
+  owner has never declared `mixinSafeOverridePaths` at all (no
+  registry entry, or a registry entry with no allowlist — most
+  components today, e.g. `agentgateway-crds`, `kubeflow-trainer`)
+  hasn't opted into this mechanism: a mixin introducing it fresh keeps
+  unrestricted `valuesFile`/`overrides`, exactly as before this
+  mechanism existed. `nvsentinel-observability` is the reference example —
+  see its own file and `recipes/registry.yaml`'s `nvsentinel` entry.
 - When a snapshot evaluator is wired in, mixin constraints are
   evaluated against it after merging; failure invalidates the entire
   composed candidate. In plain query mode mixin constraints are
@@ -492,14 +568,44 @@ on any overlay are rejected at load time (`ErrCodeInvalidRequest`) to
 prevent silent match-all behaviour; operators must remove or zero that
 field before upgrading.
 
-**Composition with the OS guard.** `requireOSIfNeeded` (the joint
-service+accelerator OS gate) is a separate, pre-existing check and runs
-*first*, before the merge. It is **not subsumed** by the coverage
-post-condition: coverage is satisfied when service and accelerator are each
-honored by *some* overlay independently, while the OS guard demands *one*
-overlay carry both service and accelerator together before it will consider
-the OS-agnostic tier served. Both checks apply; a request can trip either
-one independently.
+**Joint sufficiency.** Per-dimension coverage is necessary but not
+sufficient. It is satisfied when `service` and `accelerator` are each honored
+by *some* overlay independently, even when no single overlay carries the
+combination and the combination's content lives only on an OS-gated leaf. The
+caller then receives a recipe that silently omits that OS-gated content.
+`verifyCriteriaCoverage` therefore also enforces a second condition
+(issue #1782): resolution fails when **no applied overlay jointly carries
+every stated dimension** *and* stating a strict dimension would reach an
+overlay currently being skipped.
+
+Both halves matter. The first is the escape hatch that keeps the generic tier
+valid: `--service eks` resolves through `eks.yaml`, which carries the whole
+stated combination, and is never asked for an OS. The second is what detects
+the loss.
+
+`os` is the only **strict** dimension, and `coverage.go` records why. Every
+other dimension degrades to a smaller but coherent recipe when omitted: no
+`--platform` yields no Slurm or Kubeflow layer, no `--intent` yields untuned
+GPU Operator values. `os` decides whether the driver can be installed at all.
+On Ubuntu the GPU Operator installs it, so an OS-agnostic recipe is a real
+answer and `eks.yaml` carries no `os`; on COS the operator installs no driver
+and the device-plugin owner differs, which is why every `gke` overlay is
+OS-gated and no OS-agnostic GKE recipe exists to return. That is a property of
+installing NVIDIA drivers on Linux rather than of this catalog's shape, so it
+holds for external `--data` catalogs too.
+
+This condition replaced the `requireOSIfNeeded` guard, which ran before the
+merge and hardcoded three separate scopes: it only fired when `service` was
+stated, only compared `service`+`accelerator` regardless of what the caller
+asked for, and only ever demanded `os`. Only the last survives.
+`coverage_subsumption_test.go` keeps the retired guard as a test-only oracle
+and asserts over generated catalogs that every query it would have rejected is
+still rejected.
+
+A joint-sufficiency failure carries `details.strictDimensions`, **not**
+`details.uncovered`. The distinction is load-bearing: `pkg/client/v1`
+relaxation clears uncovered dimensions and retries, which here would discard
+the check and return the partial recipe that #1542 fixed.
 
 **Evaluator error classification is fail-closed.** During constraint
 evaluation on the snapshot-driven path, `ErrCodeNotFound` (the evaluator's
@@ -823,5 +929,6 @@ prevents.
 - [validator.md](validator.md) — adding a validator check or health check
 - [ADR-005](../design/005-overlay-refactoring.md) — overlay refactoring rationale (mixin composition, maximal-leaf resolver, wildcard overlays)
 - [ADR-007](../design/007-recipe-evidence.md) — fingerprint, evidence bundle, verification
+- [ADR-021](../design/021-component-upgrade-safety.md) — component upgrade transition records: schema, verdicts, well-formedness rules
 - [pkg/recipe godoc](https://github.com/NVIDIA/aicr/tree/main/pkg/recipe) — implementation
 - [api/aicr/v1/server.yaml](https://github.com/NVIDIA/aicr/blob/main/api/aicr/v1/server.yaml) — recipe API contract and criteria enums

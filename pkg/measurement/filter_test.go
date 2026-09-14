@@ -14,7 +14,10 @@
 
 package measurement
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestFilterOut(t *testing.T) {
 	t.Parallel()
@@ -97,13 +100,7 @@ func TestFilterOut(t *testing.T) {
 
 			// Check that no unexpected keys are present
 			for key := range result {
-				found := false
-				for _, wantKey := range tt.wantKeys {
-					if key == wantKey {
-						found = true
-						break
-					}
-				}
+				found := slices.Contains(tt.wantKeys, key)
 				if !found {
 					t.Errorf("FilterOut() contains unexpected key %q", key)
 				}
@@ -193,13 +190,7 @@ func Test_filterIn(t *testing.T) {
 
 			// Check that no unexpected keys are present
 			for key := range result {
-				found := false
-				for _, wantKey := range tt.wantKeys {
-					if key == wantKey {
-						found = true
-						break
-					}
-				}
+				found := slices.Contains(tt.wantKeys, key)
 				if !found {
 					t.Errorf("filterIn() contains unexpected key %q", key)
 				}

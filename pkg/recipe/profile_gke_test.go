@@ -17,6 +17,8 @@ package recipe
 import (
 	"context"
 	stderrors "errors"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -37,8 +39,8 @@ func gkeCriteria() *Criteria {
 // #1761 rollout PR 3): the gke-cos overlay declares gpuStack with default
 // gke-default (the only value a default-provisioned GKE cluster satisfies
 // — the opt-out label forfeits GKE's managed driver install, so
-// driver-installer requires the standalone installer) and alternative
-// driver-installer,
+// bundle-installer carries the bundle's own gcp-driver-installer) and
+// alternative bundle-installer,
 // leaves inherit it, the selection is recorded with the advertiser, and
 // the #1755 node-set constraint is carried per value with the correct
 // predicate direction.
@@ -60,9 +62,9 @@ func TestGKEGpuStackProfileResolution(t *testing.T) {
 			wantConstraint: "!gke-no-default-nvidia-gpu-device-plugin",
 		},
 		{
-			name:           "explicit driver-installer records no advertiser and the positive label predicate",
-			selection:      "gpuStack=driver-installer",
-			wantValue:      "driver-installer",
+			name:           "explicit bundle-installer records no advertiser and the positive label predicate",
+			selection:      "gpuStack=bundle-installer",
+			wantValue:      "bundle-installer",
 			wantAdvertiser: "",
 			wantConstraint: "gke-no-default-nvidia-gpu-device-plugin=true",
 		},
@@ -91,6 +93,13 @@ func TestGKEGpuStackProfileResolution(t *testing.T) {
 			owned := selected.OwnedPaths["gpu-operator"]
 			if len(owned) != 2 || owned[0] != "devicePlugin.enabled" || owned[1] != "enabled" {
 				t.Errorf("ownedPaths[gpu-operator] = %v, want [devicePlugin.enabled enabled]", owned)
+			}
+			// The installer's gate and presence are declaration-wide owned
+			// paths (issue #1716): locked for EVERY selection, including the
+			// two values where the component renders nothing.
+			installerOwned := selected.OwnedPaths["gcp-driver-installer"]
+			if len(installerOwned) != 2 || installerOwned[0] != "enabled" || installerOwned[1] != "installer.enabled" {
+				t.Errorf("ownedPaths[gcp-driver-installer] = %v, want [enabled installer.enabled]", installerOwned)
 			}
 			var found bool
 			for _, c := range result.Constraints {
@@ -135,13 +144,7 @@ func TestGKEGpuStackHappyPathThroughHydrationGate(t *testing.T) {
 	}
 	wantLocked := []string{"enabled", allocpolicy.PathDRAGPUsEnabledOverride, allocpolicy.PathDRAGPUsEnabled}
 	for _, want := range wantLocked {
-		found := false
-		for _, got := range draPaths {
-			if got == want {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(draPaths, want)
 		if !found {
 			t.Errorf("closure-locked paths %v missing %q", draPaths, want)
 		}
@@ -320,11 +323,11 @@ func TestCoherenceGateRejectsExternalWithDevicePluginEnabled(t *testing.T) {
 	}
 }
 
-// TestCoherenceGateRejectsDriverInstallerIncoherentTuples pins the
-// empty-advertiser (driver-installer) side of the gate/resolver symmetry
+// TestCoherenceGateRejectsBundleInstallerIncoherentTuples pins the
+// empty-advertiser (bundle-installer) side of the gate/resolver symmetry
 // over the shared #1327 tuple rows: the artifact gate applies the full
 // tuple verdicts for EVERY closure-triggering profile, not only a declared
-// external advertiser. A forged driver-installer artifact whose overrides
+// external advertiser. A forged bundle-installer artifact whose overrides
 // enable DRA whole-GPU advertisement next to the operator's device plugin
 // (dual advertisement), or leave an inert chart-guard waiver, must fail
 // PrepareAndValidateWithContext — the same tuple rows
@@ -332,7 +335,7 @@ func TestCoherenceGateRejectsExternalWithDevicePluginEnabled(t *testing.T) {
 // output writer, because validation is not guaranteed to run before deploy.
 // (The #1685 dual-operator rejection is resolver-side only and not mirrored
 // here; it is outside the tuple rows this test covers.)
-func TestCoherenceGateRejectsDriverInstallerIncoherentTuples(t *testing.T) {
+func TestCoherenceGateRejectsBundleInstallerIncoherentTuples(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -342,7 +345,7 @@ func TestCoherenceGateRejectsDriverInstallerIncoherentTuples(t *testing.T) {
 	}{
 		{
 			// Mark Chmarny's #2044 repro: operator plugin (enabled by the
-			// driver-installer fragment) plus DRA ResourceClaims would both
+			// bundle-installer fragment) plus DRA ResourceClaims would both
 			// advertise whole GPUs.
 			name: "dual advertisement: DRA gpus enabled with waiver next to the operator plugin",
 			overrides: map[string]any{
@@ -366,22 +369,22 @@ func TestCoherenceGateRejectsDriverInstallerIncoherentTuples(t *testing.T) {
 			wantMsg: "inert waiver",
 		},
 	}
-	t.Run("stock driver-installer tuple passes the gate", func(t *testing.T) {
+	t.Run("stock bundle-installer tuple passes the gate", func(t *testing.T) {
 		t.Parallel()
 		result, err := NewBuilder().BuildFromCriteriaWithProfile(
-			t.Context(), gkeCriteria(), "gpuStack=driver-installer")
+			t.Context(), gkeCriteria(), "gpuStack=bundle-installer")
 		if err != nil {
 			t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
 		}
 		if err := result.PrepareAndValidateWithContext(context.Background()); err != nil {
-			t.Fatalf("PrepareAndValidateWithContext() rejected the driver-installer happy path: %v", err)
+			t.Fatalf("PrepareAndValidateWithContext() rejected the bundle-installer happy path: %v", err)
 		}
 	})
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			result, err := NewBuilder().BuildFromCriteriaWithProfile(
-				t.Context(), gkeCriteria(), "gpuStack=driver-installer")
+				t.Context(), gkeCriteria(), "gpuStack=bundle-installer")
 			if err != nil {
 				t.Fatalf("BuildFromCriteriaWithProfile() failed: %v", err)
 			}
@@ -392,9 +395,7 @@ func TestCoherenceGateRejectsDriverInstallerIncoherentTuples(t *testing.T) {
 			if ref.Overrides == nil {
 				ref.Overrides = map[string]any{}
 			}
-			for key, value := range tt.overrides {
-				ref.Overrides[key] = value
-			}
+			maps.Copy(ref.Overrides, tt.overrides)
 
 			err = result.PrepareAndValidateWithContext(context.Background())
 			if err == nil || !strings.Contains(err.Error(), tt.wantMsg) {

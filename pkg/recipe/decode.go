@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
@@ -43,24 +44,24 @@ func DecodeRecipeResult(data []byte, format serializer.Format) (*RecipeResult, e
 		return nil, errors.PropagateOrWrap(headerErr, errors.ErrCodeInvalidRequest,
 			"failed to decode recipe artifact header")
 	}
-	if artifactHeader.APIVersion == RecipeProfileAPIVersion && artifactHeader.Kind == "" {
+	if header.IsSupportedProfileAPIVersion(artifactHeader.APIVersion) && artifactHeader.Kind == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("recipe artifact apiVersion %q requires kind %q",
-				RecipeProfileAPIVersion, RecipeResultKind))
+				artifactHeader.APIVersion, RecipeResultKind))
 	}
 	if artifactHeader.Kind != "" && artifactHeader.Kind != RecipeResultKind {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("recipe artifact has kind %q, expected %q",
 				artifactHeader.Kind, RecipeResultKind))
 	}
-	if artifactHeader.APIVersion == RecipeProfileAPIVersion {
+	if header.IsSupportedProfileAPIVersion(artifactHeader.APIVersion) {
 		if profileErr := validateProfileExcludedOverlays(data, format); profileErr != nil {
 			return nil, profileErr
 		}
 	}
 
 	var opts []serializer.ReaderOption
-	if artifactHeader.APIVersion == RecipeProfileAPIVersion {
+	if header.IsSupportedProfileAPIVersion(artifactHeader.APIVersion) {
 		opts = append(opts, serializer.WithStrict())
 	}
 	reader, err := serializer.NewReader(format, bytes.NewReader(data), opts...)

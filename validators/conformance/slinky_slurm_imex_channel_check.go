@@ -185,7 +185,7 @@ func slinkySlurmIMEXResourceLookupError(kind, namespace, name string, err error)
 
 func parseSlinkySlurmIMEXChannels(stdout string) ([2]string, error) {
 	channels := make([]string, 0, 2)
-	for _, line := range strings.Split(stdout, "\n") {
+	for line := range strings.SplitSeq(stdout, "\n") {
 		channel, found := strings.CutPrefix(strings.TrimSpace(line), "IMEX_CHANNEL=")
 		if !found {
 			continue

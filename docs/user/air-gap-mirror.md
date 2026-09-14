@@ -112,7 +112,7 @@ metadata:
   name: aicr-images
 spec:
   images:
-    - name: nvcr.io/nvidia/gpu-operator:v26.3.3
+    - name: nvcr.io/nvidia/gpu-operator:v26.7.0
     - name: registry.k8s.io/nfd/node-feature-discovery:v0.19.0
     # ...
 ---
@@ -124,7 +124,7 @@ spec:
   charts:
     - name: gpu-operator
       repoURL: oci://ghcr.io/nvidia
-      version: v26.3.3
+      version: v26.7.0
     # ...
 ```
 
@@ -187,13 +187,13 @@ components:
   - name: aicr-images
     required: true
     images:
-      - nvcr.io/nvidia/gpu-operator:v26.3.3
+      - nvcr.io/nvidia/gpu-operator:v26.7.0
       - registry.k8s.io/nfd/node-feature-discovery:v0.19.0
       # ...
     charts:
       - name: gpu-operator
         url: oci://ghcr.io/nvidia/gpu-operator
-        version: v26.3.3
+        version: v26.7.0
         namespace: gpu-operator
       # ...
 ```

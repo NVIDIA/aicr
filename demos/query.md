@@ -50,10 +50,10 @@ aicr query \
 
 ```yaml
 enabled: true
+kernelModuleType: auto
 maxParallelUpgrades: 5
 rdma:
   enabled: false
-useOpenKernelModules: true
 version: 580.173.02
 ```
 
@@ -110,14 +110,16 @@ aicr query --service gke --accelerator h100 --intent training --os cos \
   value: '>= 1.32'
 ```
 
-L40S (on OKE) relaxes K8s further (older accelerators run on older clusters):
+L40S (on OKE) resolves a different component set; its K8s floor now matches the
+catalog-wide minimum (every recipe carries the DRA driver, whose chart requires
+1.32):
 
 ```shell
 aicr query --service oke --accelerator l40s --intent training --os ol \
   --selector constraints
 ```
 
-> K8s minimum drops from `1.32.4` to `1.30`.
+> K8s minimum relaxes from `1.32.4` to `1.32`.
 
 ### Component set differs by intent
 

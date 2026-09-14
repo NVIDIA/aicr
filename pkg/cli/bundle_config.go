@@ -88,6 +88,33 @@ func resolveNodeSelector(cmd *cli.Command, flagName string, fallback map[string]
 	return maps.Clone(fallback), nil
 }
 
+// resolveDRAEvictionNodeLabel resolves the singular DRA eviction label from
+// CLI/config input. Unlike general node-selector flags, exactly one key=value
+// pair is accepted because GPU Operator consumes the key as a scalar env value.
+//
+// When neither source sets it the zero NodeLabel is returned, which the bundler
+// reads as "eviction contract not requested" and injects neither half. Setting
+// the flag or the config field is the opt-in (see issue #2469).
+func resolveDRAEvictionNodeLabel(cmd *cli.Command, fallback *bundlercfg.NodeLabel) (bundlercfg.NodeLabel, error) {
+	const flagName = "dra-eviction-node-label"
+	if cmd.IsSet(flagName) {
+		label, err := bundlercfg.ParseNodeLabel(cmd.String(flagName))
+		if err != nil {
+			return bundlercfg.NodeLabel{}, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
+				"invalid --dra-eviction-node-label")
+		}
+		if fallback != nil && *fallback != label {
+			slog.Info("CLI flag overriding config value", "flag", flagName,
+				"config", fallback.String(), "override", label.String())
+		}
+		return label, nil
+	}
+	if fallback != nil {
+		return *fallback, nil
+	}
+	return bundlercfg.NodeLabel{}, nil
+}
+
 // resolveTolerations returns the final tolerations slice for a flag,
 // preferring CLI input over the typed fallback (already parsed from
 // config). When neither source supplies a value, returns

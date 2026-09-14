@@ -1,0 +1,69 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# gcp-driver-installer Health Check
+#
+# Validates the values-gated cos-gpu-installer DaemonSet. The component
+# renders it only under gpuStack=bundle-installer (installer.enabled=true);
+# under every other profile value the render is empty and the deployment
+# validator suppresses this assert (render-aware gating, same mechanism as
+# nodewright-customizations, issue #1844) — a static assert cannot see value
+# gates and would otherwise fail on a healthy gke-default cluster.
+#
+# Ready semantics: numberReady is asserted rather than numberUnavailable,
+# which is omitempty and compares null when healthy (see
+# recipes/checks/nfd/health-check.yaml for the rationale).
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gcp-driver-installer-health-check
+spec:
+  # 5m: the in-process executor clamps any authored budget to its caller's
+  # 6m (pkg/chainsaw/inprocess.go), so the previous 10m never applied as
+  # written — but a never-true assert still burns the full clamped budget,
+  # and that pushed the expected-resources Job's aggregate run past its 8m
+  # activeDeadline (the #2186 failure shape, observed live). 5m keeps the
+  # worst case inside both bounds and fails with the real assert diff; the
+  # healthy path passes in seconds and a fresh node mid driver-install
+  # completes in ~2m.
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-nvidia-driver-installer-daemonset
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: nvidia-driver-installer
+                namespace: kube-system
+                labels:
+                  # Same DaemonSet name as the hand-applied installer this
+                  # component replaces; the label pins the assert to the
+                  # AICR-managed object so a leftover unmanaged DaemonSet
+                  # cannot false-pass a migration. part-of, not managed-by:
+                  # Helm 4 server-side apply rewrites managed-by to "Helm",
+                  # so that key can never match on a deployed bundle
+                  # (verified live on GKE, 2026-08-28).
+                  app.kubernetes.io/part-of: aicr
+              # numberReady alone accepts a stale rollout. A node still
+              # running the previous revision's pod counts as ready too,
+              # so updatedNumberScheduled must also match. observedGeneration
+              # confirms status reflects the current spec, not a reconcile
+              # from before the latest update.
+              ((status.desiredNumberScheduled || `0`) > `0`): true
+              ((status.numberReady || `0`) == status.desiredNumberScheduled): true
+              ((status.updatedNumberScheduled || `0`) == status.desiredNumberScheduled): true
+              ((status.observedGeneration || `0`) == metadata.generation): true

@@ -257,7 +257,7 @@ func ParseAllowListsFromEnv() (*AllowLists, error) {
 
 func parseTypeList[T ~string](s string, parse func(string) (T, error), anyVal T) ([]T, error) {
 	var result []T
-	for _, v := range strings.Split(s, ",") {
+	for v := range strings.SplitSeq(s, ",") {
 		v = strings.TrimSpace(v)
 		if v == "" {
 			continue

@@ -15,20 +15,20 @@ This is a **different axis** from the per-recipe **Coverage** column in the reci
 | Item | Exercised by | Hardware | Cadence | Status | Notes |
 |------|--------------|----------|---------|--------|-------|
 | `cuj1-training-kubeflow` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
-| `cuj2-inference-dynamo` | demo | GPU (unwired) | — | stubbed | the intent runs nightly and its stack is deployed and validated, but the journey's own workload step is disabled in the per-cloud UAT pipelines |
+| `cuj2-inference-dynamo` | uat, demo | GPU (H100, real) | nightly | covered | — |
 
 ## CLI verbs
 
 | Item | Exercised by | Hardware | Cadence | Status | Notes |
 |------|--------------|----------|---------|--------|-------|
 | `bundle` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
-| `diff` | — | — | — | not-yet-covered | — |
+| `diff` | chainsaw | simulated / none | per-PR | covered | — |
 | `evidence digest` | — | — | — | not-yet-covered | — |
 | `evidence publish` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
 | `evidence sign` | — | — | — | not-yet-covered | — |
 | `evidence verify` | uat, demo | GPU (H100, real) | nightly | covered | — |
 | `mirror list` | — | — | — | not-yet-covered | — |
-| `query` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
+| `query` | chainsaw, demo | simulated / none | per-PR | covered | — |
 | `recipe` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
 | `recipe list` | — | — | — | not-yet-covered | — |
 | `recipe verify-catalog` | — | — | — | not-yet-covered | — |

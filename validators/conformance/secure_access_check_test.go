@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -379,8 +381,8 @@ func TestCheckSecureAcceleratorAccess_FailurePathsStillFetchLogs(t *testing.T) {
 				dynClient = newDRAFakeDynamicClient(
 					testDeviceClass(draDriverGPU),
 					testResourceSlice("gpu-1", draDriverGPU, "node1", 1, 1,
-						map[string]interface{}{"nodeName": "node1"},
-						[]interface{}{plainDevice("gpu-0")}),
+						map[string]any{"nodeName": "node1"},
+						[]any{plainDevice("gpu-0")}),
 				)
 			}
 			clientset := k8sfake.NewClientset(node)
@@ -436,6 +438,92 @@ func TestCheckSecureAcceleratorAccess_NeitherUsable(t *testing.T) {
 	// The failure must explain both sides so operators can fix the environment.
 	if !strings.Contains(err.Error(), draDriverGPU) || !strings.Contains(err.Error(), resourceNVIDIAGPU) {
 		t.Errorf("error = %v, want details for both DRA and device plugin", err)
+	}
+}
+
+// TestCheckSecureAcceleratorAccess_SkipsForSlinkySlurm verifies that
+// slinky-slurm in the recipe skips this check.
+func TestCheckSecureAcceleratorAccess_SkipsForSlinkySlurm(t *testing.T) {
+	tests := []struct {
+		name       string
+		recipe     *recipe.RecipeResult
+		expectSkip bool
+	}{
+		{
+			name: "slinky-slurm present skips",
+			recipe: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator"},
+					{Name: "slinky-slurm"},
+				},
+			},
+			expectSkip: true,
+		},
+		{
+			name: "disabled slinky-slurm does not skip",
+			recipe: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator"},
+					{
+						Name:      "slinky-slurm",
+						Overrides: map[string]any{"enabled": false},
+					},
+				},
+			},
+			expectSkip: false,
+		},
+		{
+			name: "no slinky-slurm does not skip",
+			recipe: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator"},
+				},
+			},
+			expectSkip: false,
+		},
+		{
+			name:       "nil recipe does not skip",
+			recipe:     nil,
+			expectSkip: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			validation := v1.ToValidationInput(tt.recipe)
+			ctx := &validators.Context{
+				Ctx:             context.Background(),
+				Clientset:       k8sfake.NewClientset(),
+				ValidationInput: validation,
+			}
+
+			err := CheckSecureAcceleratorAccess(ctx)
+
+			if tt.expectSkip {
+				if err == nil {
+					t.Fatal("expected skip error, got nil")
+				}
+				if !validators.IsSkip(err) {
+					t.Errorf("expected a skip error, got: %v", err)
+				}
+				if !strings.Contains(err.Error(), "slinky-slurm") {
+					t.Errorf("expected skip reason to mention slinky-slurm, got: %v", err)
+				}
+				return
+			}
+
+			// Fell through the slinky-slurm gate. getDynamicClient then
+			// fails with ErrCodeInvalidRequest, not a skip.
+			if err == nil {
+				t.Fatal("expected a non-skip error, got nil")
+			}
+			if validators.IsSkip(err) {
+				t.Errorf("expected a non-skip error, got skip: %v", err)
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+		})
 	}
 }
 
@@ -673,8 +761,8 @@ func TestCheckSecureAcceleratorAccess_DRAPathUnchanged(t *testing.T) {
 		DynamicClient: newDRAFakeDynamicClient(
 			testDeviceClass(draDriverGPU),
 			testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-				map[string]interface{}{"nodeName": "node1"},
-				[]interface{}{plainDevice("gpu-0")}),
+				map[string]any{"nodeName": "node1"},
+				[]any{plainDevice("gpu-0")}),
 		),
 	}
 
@@ -743,13 +831,13 @@ func TestCheckSecureAcceleratorAccess_DRAPathBetaVersions(t *testing.T) {
 
 			device := plainDevice("gpu-0")
 			if tt.version == versionV1beta1 {
-				device = basicWrappedDevice("gpu-0", map[string]interface{}{})
+				device = basicWrappedDevice("gpu-0", map[string]any{})
 			}
 			dynClient := newDRAFakeDynamicClientAt(tt.version,
 				testDeviceClassAt(apiVersion, draDriverGPU),
 				testResourceSliceAt(apiVersion, "s1", draDriverGPU, "node1", 1, 1,
-					map[string]interface{}{"nodeName": "node1"},
-					[]interface{}{device}),
+					map[string]any{"nodeName": "node1"},
+					[]any{device}),
 			)
 			var createdClaim *unstructured.Unstructured
 			dynClient.PrependReactor("create", "resourceclaims",
@@ -786,12 +874,12 @@ func TestCheckSecureAcceleratorAccess_DRAPathBetaVersions(t *testing.T) {
 			if err != nil || !found || len(requests) != 1 {
 				t.Fatalf("claim requests = %v (found=%t err=%v), want exactly one request", requests, found, err)
 			}
-			request, ok := requests[0].(map[string]interface{})
+			request, ok := requests[0].(map[string]any)
 			if !ok {
 				t.Fatalf("claim request has unexpected type %T", requests[0])
 			}
 			if tt.wantExactly {
-				exactly, ok := request["exactly"].(map[string]interface{})
+				exactly, ok := request["exactly"].(map[string]any)
 				if !ok {
 					t.Fatalf("claim request = %v, want the `exactly` wrapper at %s", request, tt.version)
 				}
@@ -1127,8 +1215,8 @@ func TestCheckSecureAcceleratorAccess_AmbiguousPodCreateCleansUp(t *testing.T) {
 		dynClient := newDRAFakeDynamicClient(
 			testDeviceClass(draDriverGPU),
 			testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-				map[string]interface{}{"nodeName": "node1"},
-				[]interface{}{plainDevice("gpu-0")}),
+				map[string]any{"nodeName": "node1"},
+				[]any{plainDevice("gpu-0")}),
 		)
 		cascadeNamespaceDelete(t, clientset, dynClient)
 		ctx := &validators.Context{
@@ -1715,14 +1803,14 @@ func TestBuildResourceClaim(t *testing.T) {
 			if nestedErr != nil || !found || len(requests) != 1 {
 				t.Fatalf("requests = %v (found=%t err=%v), want exactly one", requests, found, nestedErr)
 			}
-			request, ok := requests[0].(map[string]interface{})
+			request, ok := requests[0].(map[string]any)
 			if !ok {
 				t.Fatalf("request has unexpected type %T", requests[0])
 			}
 			if request[keyName] != gpuClaimName {
 				t.Errorf("request name = %v, want %q", request[keyName], gpuClaimName)
 			}
-			exactly, hasExactly := request["exactly"].(map[string]interface{})
+			exactly, hasExactly := request["exactly"].(map[string]any)
 			if hasExactly != tt.wantExactly {
 				t.Fatalf("request `exactly` wrapper present = %t, want %t (request: %v)", hasExactly, tt.wantExactly, request)
 			}
@@ -2153,7 +2241,7 @@ func TestGrantProbePrologueBehavior(t *testing.T) {
 				if check.got != check.want {
 					t.Errorf("%s = %q, want %q", check.name, check.got, check.want)
 				}
-				for _, entry := range strings.Split(check.got, ":") {
+				for entry := range strings.SplitSeq(check.got, ":") {
 					if entry == "" {
 						t.Errorf("%s = %q contains an empty entry (implicit CWD)", check.name, check.got)
 					}

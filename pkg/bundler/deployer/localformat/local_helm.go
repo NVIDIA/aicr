@@ -42,7 +42,7 @@ var kindNamespaceRE = regexp.MustCompile(`(?m)^kind:\s+Namespace\s*$`)
 // fully-conditional manifests that rendered to nothing once values were
 // applied. Mirrors the helper that lived in the old helm deployer.
 func hasYAMLObjects(content []byte) bool {
-	for _, line := range strings.Split(string(content), "\n") {
+	for line := range strings.SplitSeq(string(content), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") || trimmed == "---" {
 			continue
@@ -60,7 +60,9 @@ var (
 		template.ParseFS(localHelmTemplates, "templates/install-local-helm.sh.tmpl"),
 	)
 	localHelmChartTmpl = template.Must(
-		template.ParseFS(localHelmTemplates, "templates/chart.yaml.tmpl"),
+		template.New("chart.yaml.tmpl").
+			Funcs(deployer.TemplateFuncs).
+			ParseFS(localHelmTemplates, "templates/chart.yaml.tmpl"),
 	)
 )
 
@@ -91,11 +93,13 @@ var (
 //     primary chart's later `helm install --create-namespace` is a no-op
 //     against the existing namespace.
 //
+// stamp carries the two versions written into the generated Chart.yaml.
+//
 // Returns the Folder manifest with Files listed in deterministic order.
 func writeLocalHelmFolder(
 	outputDir, dir string, idx int, c Component,
 	manifests map[string][]byte, renderInput manifest.RenderInput,
-	name, parent string, createNamespace bool,
+	name, parent string, createNamespace bool, stamp chartStamp,
 ) (Folder, error) {
 
 	folderDir, err := deployer.SafeJoin(outputDir, dir)
@@ -120,9 +124,11 @@ func writeLocalHelmFolder(
 
 	// Chart.yaml
 	chartData := struct {
-		Name   string
-		Parent string
-	}{name, parent}
+		Name             string
+		Parent           string
+		AICRVersion      string
+		ComponentVersion string
+	}{name, parent, stamp.AICRVersion, stamp.PayloadVersion}
 	if err = renderTemplateToFile(localHelmChartTmpl, chartData, folderDir, "Chart.yaml", 0o644); err != nil {
 		return Folder{}, err
 	}

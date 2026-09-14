@@ -56,6 +56,34 @@ CREATED_FAKE_GPU_OPERATOR_DEPLOYMENT=false
 CREATED_FAKE_CLUSTER_POLICY=false
 CREATED_FAKE_CLUSTER_POLICY_CRD=false
 
+# Seconds to wait for the concurrent runs' self-deleted Jobs to disappear from
+# the API before the self-cleanup assertion gives up. Deletion is asynchronous,
+# so the count settles shortly after the CLI returns rather than at that instant.
+AGENT_JOB_SETTLE_TIMEOUT="${AGENT_JOB_SETTLE_TIMEOUT:-60}"
+
+# Run IDs of the snapshot-agent runs this script launched, space separated.
+# cleanup_e2e deletes only these Jobs. Every agent run carries the same
+# app.kubernetes.io/{name,component} labels, so a label-only sweep would also
+# delete -- and thereby terminate -- a concurrent snapshot run someone else
+# started against the same cluster.
+E2E_AGENT_RUN_IDS=""
+
+# extract_run_id prints the agent run ID an `aicr snapshot` invocation logged
+# ("runID=<id>" on its "snapshot agent run" line), read from the log file
+# given as $1. Prints nothing when the run failed before generating one.
+extract_run_id() {
+  grep -o 'runID=[0-9a-f-]*' "$1" | head -1 | cut -d= -f2 || true
+}
+
+# remember_agent_run_id records a run ID in E2E_AGENT_RUN_IDS so cleanup_e2e
+# can sweep that run's Job. An empty argument is ignored: a run that never
+# reported an ID created no Job for cleanup to find.
+remember_agent_run_id() {
+  if [ -n "$1" ]; then
+    E2E_AGENT_RUN_IDS="${E2E_AGENT_RUN_IDS} $1"
+  fi
+}
+
 # Test counters
 TOTAL_TESTS=0
 PASSED_TESTS=0
@@ -101,6 +129,30 @@ skip() {
   local name=$1
   local reason=${2:-""}
   echo -e "${YELLOW}[SKIP]${NC} $name: $reason"
+}
+
+# run_stage invokes one suite stage and always returns 0, so a stage that
+# reports failure by returning nonzero cannot trip this script's `set -e` and
+# unwind main before cleanup_e2e runs. That unwind is the bug it guards: the
+# stages run inside the fake-GPU block create Jobs, RBAC and fixtures on a
+# cluster shared with other CI runs, and cleanup_e2e is the only thing that
+# sweeps them -- a stage's own local cleanup removes only what that stage made.
+#
+# Swallowing the status does not make the suite more forgiving. Stages report
+# their assertions through fail(), which has already counted them by the time
+# one returns; when a stage returns nonzero WITHOUT having recorded a [FAIL] --
+# an unexpected error rather than a failed assertion -- one is recorded here
+# under the stage's own name. Either way FAILED_TESTS ends up nonzero,
+# print_summary returns 1, and main exits nonzero.
+run_stage() {
+  local stage=$1
+  local before=$FAILED_TESTS
+  local rc=0
+  "$stage" || rc=$?
+  if [ "$rc" -ne 0 ] && [ "$FAILED_TESTS" -eq "$before" ]; then
+    fail "$stage" "returned ${rc} without recording a failure"
+  fi
+  return 0
 }
 
 check_command() {
@@ -222,11 +274,7 @@ test_api_recipe() {
   http_code=$(curl -s -w "%{http_code}" -o "$post_recipe" \
     -X POST "${aicrd_URL}/v1/recipe" \
     -H "Content-Type: application/x-yaml" \
-    -d 'kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: h100-training
-spec:
+    -d 'criteria:
   service: eks
   accelerator: h100
   intent: training')
@@ -356,38 +404,15 @@ setup_fake_gpu() {
   # Create namespace for snapshot tests (if it doesn't exist)
   kubectl create namespace "$SNAPSHOT_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
 
-  # Create RBAC for snapshot agent
-  msg "Creating RBAC for snapshot agent"
-  kubectl apply -f - << EOF
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: aicr
-  namespace: ${SNAPSHOT_NAMESPACE}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: aicr-e2e-reader
-rules:
-- apiGroups: [""]
-  resources: ["nodes", "pods", "configmaps"]
-  verbs: ["get", "list", "watch", "create", "update", "patch"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: aicr-e2e-reader
-subjects:
-- kind: ServiceAccount
-  name: aicr
-  namespace: ${SNAPSHOT_NAMESPACE}
-roleRef:
-  kind: ClusterRole
-  name: aicr-e2e-reader
-  apiGroup: rbac.authorization.k8s.io
-EOF
-  pass "setup/rbac"
+  # No RBAC is pre-provisioned here. Per ADR-020 the agent creates its own
+  # run-scoped ServiceAccount, Role/RoleBinding and ClusterRole/ClusterRoleBinding
+  # ("aicr-<run-id>" / "aicr-node-reader-<run-id>") and deletes exactly those at
+  # the end of the run. The fixture this replaced pre-created a ServiceAccount
+  # named "aicr" bound to an "aicr-e2e-reader" ClusterRole granting
+  # nodes/pods/configmaps — the same access the agent now grants itself. Nothing
+  # referenced that ServiceAccount once the agent stopped using a fixed name, and
+  # its presence tripped the agent's adoption-drift warning on every run because
+  # it collided with the default name prefix.
 
   return 0
 }
@@ -416,6 +441,7 @@ test_snapshot() {
   detail "Output: cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}"
 
   echo -e "${DIM}  \$ aicr snapshot --image ${AICR_IMAGE} --namespace ${SNAPSHOT_NAMESPACE} -o cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}${NC}"
+  local snapshot_log="${OUTPUT_DIR}/snapshot-agent.log"
   local snapshot_output
   snapshot_output=$("${AICR_BIN}" snapshot \
     --image "${AICR_IMAGE}" \
@@ -424,6 +450,8 @@ test_snapshot() {
     --timeout 120s \
     --privileged \
     --node-selector kubernetes.io/os=linux 2>&1) || true
+  printf '%s\n' "$snapshot_output" > "$snapshot_log"
+  remember_agent_run_id "$(extract_run_id "$snapshot_log")"
 
   if kubectl get cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" > /dev/null 2>&1; then
     pass "snapshot/agent"
@@ -433,19 +461,51 @@ test_snapshot() {
     return 1
   fi
 
-  # Verify ConfigMap was created
-  msg "--- Test: Snapshot ConfigMap ---"
-  if kubectl get cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" > /dev/null 2>&1; then
-    pass "snapshot/configmap-created"
-  else
-    fail "snapshot/configmap-created" "ConfigMap not found"
-    return 1
-  fi
-
   # Verify snapshot contains GPU data
   msg "--- Test: Snapshot GPU data ---"
-  local snapshot_data
-  snapshot_data=$(kubectl get cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" -o jsonpath='{.data.snapshot\.yaml}' 2>/dev/null)
+  local snapshot_data snapshot_read_stderr=""
+  local snapshot_stderr_file="${OUTPUT_DIR}/snapshot-gpu-data.stderr"
+  local snapshot_read_exit=0
+  snapshot_data=$(kubectl get cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" \
+    -o jsonpath='{.data.snapshot\.yaml}' 2>"$snapshot_stderr_file") || \
+    snapshot_read_exit=$?
+
+  if [ -s "$snapshot_stderr_file" ]; then
+    snapshot_read_stderr=$(<"$snapshot_stderr_file")
+  fi
+
+  if [ "$snapshot_read_exit" -ne 0 ]; then
+    fail "snapshot/gpu-data" \
+      "Could not read snapshot.yaml from ConfigMap (exit ${snapshot_read_exit}): ${snapshot_read_stderr}"
+    return 0
+  fi
+
+  if [ -z "$snapshot_data" ]; then
+    # The ConfigMap exists (asserted above) but carries no snapshot payload:
+    # that is a real defect, not an environment difference.
+    fail "snapshot/gpu-data" "Snapshot ConfigMap has no snapshot.yaml payload"
+    return 0
+  fi
+
+  # Keep malformed collector output inside the test accounting rather than
+  # letting yq + pipefail terminate the entire suite before the summary.
+  if ! printf '%s\n' "$snapshot_data" | yq eval '.' - > /dev/null; then
+    fail "snapshot/gpu-data" "Snapshot ConfigMap contains malformed snapshot.yaml"
+    return 0
+  fi
+
+  local gpu_measurement_count gpu_hardware_count gpu_hardware_complete_count
+  gpu_measurement_count=$(printf '%s\n' "$snapshot_data" | \
+    yq eval '[.measurements[]? | select(.type == "GPU")] | length' -)
+  gpu_hardware_count=$(printf '%s\n' "$snapshot_data" | \
+    yq eval '[.measurements[]? | select(.type == "GPU") | .subtypes[]? | select(.subtype == "hardware")] | length' -)
+  gpu_hardware_complete_count=$(printf '%s\n' "$snapshot_data" | \
+    yq eval '[.measurements[]? | select(.type == "GPU") | .subtypes[]? |
+      select(.subtype == "hardware") |
+      select((.data | has("gpu-present")) and
+             (.data | has("gpu-count")) and
+             (.data | has("driver-loaded")) and
+             (.data | has("detection-source")))] | length' -)
 
   # Extract and display GPU info from the driver-free "hardware" subtype
   # (the SMI subtype was removed; model is the PCI-derived accelerator SKU).
@@ -456,15 +516,298 @@ test_snapshot() {
   gpu_count=$(printf '%s\n' "$snapshot_data" | yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data["gpu-count"] // 0' - | head -1)
   driver_loaded=$(printf '%s\n' "$snapshot_data" | yq eval '.measurements[] | select(.type == "GPU") | .subtypes[] | select(.subtype == "hardware") | .data["driver-loaded"] // "unknown"' - | head -1)
 
-  if [ -n "$gpu_name" ] && [ "$gpu_name" != "unknown" ]; then
+  if [ "$gpu_measurement_count" -eq 0 ]; then
+    fail "snapshot/gpu-data" "Snapshot carries no GPU measurement"
+  elif [ "$gpu_hardware_count" -eq 0 ]; then
+    # The GPU collector deliberately degrades to an empty subtype list when
+    # sysfs/PCI detection is unavailable. Preserve that environment-dependent
+    # contract while keeping a missing GPU measurement itself as a hard failure.
+    skip "snapshot/gpu-data" "GPU hardware detection unavailable in the snapshot agent"
+  elif [ "$gpu_hardware_complete_count" -ne "$gpu_hardware_count" ]; then
+    fail "snapshot/gpu-data" \
+      "GPU hardware subtype is missing mandatory gpu-present, gpu-count, driver-loaded, or detection-source data"
+  elif [ -n "$gpu_name" ] && [ "$gpu_name" != "unknown" ]; then
     detail "GPU SKU: ${gpu_name}"
     detail "Count: ${gpu_count}"
     detail "Driver loaded: ${driver_loaded}"
     pass "snapshot/gpu-data"
   else
-    warn "No GPU SKU in snapshot (may be expected without fake-gpu-operator or for an unrecognized SKU)"
-    pass "snapshot/gpu-data"
+    # skip() does not increment the pass count, so an environment that cannot
+    # produce a SKU stops being reported as verified GPU coverage.
+    skip "snapshot/gpu-data" "No GPU SKU in snapshot (fake-gpu-operator absent or SKU unrecognized)"
   fi
+}
+
+# =============================================================================
+# Snapshot Run Isolation Tests (ADR-020, issue #2120)
+# =============================================================================
+
+# Objects snapshot_run_isolation_body creates that outlive its assertions.
+# Published as globals so cleanup_snapshot_run_isolation can remove them on
+# every exit path, including an early `return 1` from a failed assertion.
+ISOLATION_DECOY=""
+ISOLATION_RETAINED_ID=""
+
+# cleanup_snapshot_run_isolation removes the decoy ClusterRole and the
+# retained (--no-cleanup) run's objects. Safe to call when the body bailed
+# before creating either: both globals are empty then.
+cleanup_snapshot_run_isolation() {
+  if [ -n "$ISOLATION_DECOY" ]; then
+    kubectl delete clusterrole "$ISOLATION_DECOY" --ignore-not-found=true > /dev/null 2>&1 || true
+  fi
+  if [ -n "$ISOLATION_RETAINED_ID" ]; then
+    local ns="$SNAPSHOT_NAMESPACE"
+    kubectl delete job "aicr-${ISOLATION_RETAINED_ID}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
+    kubectl delete sa,role,rolebinding "aicr-${ISOLATION_RETAINED_ID}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
+    kubectl delete cm "aicr-agent-snapshot-${ISOLATION_RETAINED_ID}" -n "$ns" --ignore-not-found=true > /dev/null 2>&1 || true
+    kubectl delete clusterrole,clusterrolebinding "aicr-node-reader-${ISOLATION_RETAINED_ID}" --ignore-not-found=true > /dev/null 2>&1 || true
+  fi
+  ISOLATION_DECOY=""
+  ISOLATION_RETAINED_ID=""
+}
+
+# Verifies that concurrent snapshot runs own and delete only their own
+# Kubernetes resources. These checks are cluster-backed on purpose: the
+# unit tests in pkg/k8s/agent run against a fake clientset, which runs no
+# Job controller (so pod ownerReferences must be hand-seeded there) and does
+# not enforce metav1.Preconditions on delete. Only a real apiserver exercises
+# both.
+#
+# Scope note on UID preconditions: the delete-with-stale-UID race itself is
+# not reachable from outside the CLI process — the window between an object's
+# creation and the deferred Cleanup is the Job wait, and swapping a live
+# object's UID mid-run revokes the running agent's own credentials. That
+# mechanism is covered by TestCleanupPassesUIDPrecondition and
+# TestCleanupTreatsConflictAsSuccess in pkg/k8s/agent/deployer_test.go. What
+# is verified here is the ownership contract those preconditions enforce and
+# that IS externally observable: cleanup deletes only objects this run
+# created, never one that merely matches its labels or name shape.
+test_snapshot_run_isolation() {
+  local rc=0
+  snapshot_run_isolation_body || rc=$?
+  # Housekeeping must run whether the body passed or bailed early. Every
+  # `return 1` below used to skip it, leaving an aicr-labelled ClusterRole
+  # and a full set of run-scoped objects behind for later tests -- and later
+  # CI runs on the same cluster -- to trip over. The body's status is
+  # preserved so a failed assertion still fails the suite.
+  cleanup_snapshot_run_isolation
+  return "$rc"
+}
+
+snapshot_run_isolation_body() {
+  msg "=========================================="
+  msg "Testing snapshot run isolation"
+  msg "=========================================="
+
+  if [ "$FAKE_GPU_ENABLED" != "true" ]; then
+    skip "snapshot/isolation" "Fake GPU not enabled"
+    return 0
+  fi
+
+  local ns="$SNAPSHOT_NAMESPACE"
+  local decoy="aicr-node-reader-e2edecoy"
+  local rc=0
+
+  # --- Decoy: labelled like a run-owned object, but created by nobody's run ---
+  # A cleanup that swept by label or by name shape would collect this. A
+  # cleanup scoped to its own created-set must leave it alone.
+  msg "--- Test: cleanup is scoped to created objects, not to labels ---"
+  kubectl delete clusterrole "$decoy" --ignore-not-found=true > /dev/null 2>&1 || true
+  kubectl create clusterrole "$decoy" --verb=get --resource=nodes > /dev/null 2>&1 || true
+  kubectl label clusterrole "$decoy" \
+    app.kubernetes.io/name=aicr \
+    app.kubernetes.io/managed-by=aicr \
+    app.kubernetes.io/component=snapshot-agent \
+    aicr.run/run-id=e2edecoy --overwrite > /dev/null 2>&1 || true
+  ISOLATION_DECOY="$decoy"
+  local decoy_uid_before
+  decoy_uid_before=$(kubectl get clusterrole "$decoy" -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "")
+
+  # --- Retained run: --no-cleanup, so its objects must outlive later runs ---
+  msg "--- Test: a retained run's resources survive concurrent runs ---"
+  local retained_log="${OUTPUT_DIR}/isolation-retained.log"
+  "${AICR_BIN}" snapshot \
+    --image "${AICR_IMAGE}" \
+    --namespace "${ns}" \
+    --no-cleanup \
+    --output "${OUTPUT_DIR}/isolation-retained.yaml" \
+    --timeout 180s \
+    --privileged \
+    --node-selector kubernetes.io/os=linux > "$retained_log" 2>&1 || rc=$?
+
+  if [ "$rc" -ne 0 ]; then
+    cat "$retained_log"
+    fail "snapshot/isolation/retained-run" "retained snapshot run failed"
+    return 1
+  fi
+
+  # Take the run ID from THIS run's own output. A label query returning
+  # `.items[0]` would happily hand back an aborted run's Job, or a concurrent
+  # snapshot someone else started -- and everything below, including the
+  # housekeeping delete, is keyed on this value.
+  local retained_id
+  retained_id=$(extract_run_id "$retained_log")
+  if [ -z "$retained_id" ]; then
+    cat "$retained_log"
+    fail "snapshot/isolation/run-id-label" "retained run printed no runID"
+    return 1
+  fi
+  ISOLATION_RETAINED_ID="$retained_id"
+  remember_agent_run_id "$retained_id"
+
+  # That Job must carry the run ID as a label, and the stable
+  # component label consumers select on across runs.
+  local retained_job_labels
+  retained_job_labels=$(kubectl get job -n "$ns" "aicr-${retained_id}" \
+    -o jsonpath='{.metadata.labels.aicr\.run/run-id}/{.metadata.labels.app\.kubernetes\.io/component}' \
+    2>/dev/null || echo "")
+  if [ "$retained_job_labels" != "${retained_id}/snapshot-agent" ]; then
+    fail "snapshot/isolation/run-id-label" \
+      "Job aicr-${retained_id} labels run-id/component = '${retained_job_labels}', want '${retained_id}/snapshot-agent'"
+    return 1
+  fi
+  detail "retained run ID: ${retained_id}"
+  pass "snapshot/isolation/run-id-label"
+
+  # Every run-owned object must carry the run ID in its name.
+  local missing=""
+  kubectl get job     -n "$ns" "aicr-${retained_id}"                      > /dev/null 2>&1 || missing="${missing} job"
+  kubectl get sa      -n "$ns" "aicr-${retained_id}"                      > /dev/null 2>&1 || missing="${missing} sa"
+  kubectl get role    -n "$ns" "aicr-${retained_id}"                      > /dev/null 2>&1 || missing="${missing} role"
+  kubectl get rolebinding -n "$ns" "aicr-${retained_id}"                  > /dev/null 2>&1 || missing="${missing} rolebinding"
+  kubectl get cm      -n "$ns" "aicr-agent-snapshot-${retained_id}"       > /dev/null 2>&1 || missing="${missing} staging-cm"
+  kubectl get clusterrole        "aicr-node-reader-${retained_id}"        > /dev/null 2>&1 || missing="${missing} clusterrole"
+  kubectl get clusterrolebinding "aicr-node-reader-${retained_id}"        > /dev/null 2>&1 || missing="${missing} clusterrolebinding"
+  if [ -n "$missing" ]; then
+    fail "snapshot/isolation/run-scoped-names" "not found under run-scoped names:${missing}"
+    return 1
+  fi
+  pass "snapshot/isolation/run-scoped-names"
+
+  # The agent's staging ConfigMap must not reuse the validator's name shape.
+  # aicr validate hands one run ID to both subsystems in one namespace, so a
+  # shared aicr-snapshot- prefix would give two owners one object.
+  if kubectl get cm -n "$ns" "aicr-snapshot-${retained_id}" > /dev/null 2>&1; then
+    fail "snapshot/isolation/staging-cm-name" "found aicr-snapshot-${retained_id}; collides with the validator's data ConfigMap"
+    return 1
+  fi
+  pass "snapshot/isolation/staging-cm-name"
+
+  # The pod must be authorized by its controlling ownerReference, not by a
+  # label — pod labels are writable by anything that can update pods.
+  msg "--- Test: pod is owned by its Job (controlling ownerReference) ---"
+  local pod job_uid owner_uid
+  pod=$(kubectl get pods -n "$ns" -l "aicr.run/run-id=${retained_id}" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+  job_uid=$(kubectl get job -n "$ns" "aicr-${retained_id}" -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "")
+  owner_uid=$(kubectl get pod -n "$ns" "$pod" \
+    -o jsonpath='{.metadata.ownerReferences[?(@.controller==true)].uid}' 2>/dev/null || echo "")
+  if [ -n "$pod" ] && [ -n "$job_uid" ] && [ "$job_uid" = "$owner_uid" ]; then
+    detail "pod ${pod} controlled by Job UID ${job_uid}"
+    pass "snapshot/isolation/pod-owned-by-job"
+  else
+    fail "snapshot/isolation/pod-owned-by-job" "pod=${pod} jobUID=${job_uid} ownerUID=${owner_uid}"
+    return 1
+  fi
+
+  # --- Two concurrent runs, with the retained run's objects still present ---
+  msg "--- Test: two concurrent runs are independent ---"
+  local log_a="${OUTPUT_DIR}/isolation-a.log"
+  local log_b="${OUTPUT_DIR}/isolation-b.log"
+  local rc_a=0 rc_b=0 pid_a pid_b
+
+  "${AICR_BIN}" snapshot --image "${AICR_IMAGE}" --namespace "${ns}" \
+    --output "${OUTPUT_DIR}/isolation-a.yaml" --timeout 180s --privileged \
+    --node-selector kubernetes.io/os=linux > "$log_a" 2>&1 &
+  pid_a=$!
+  "${AICR_BIN}" snapshot --image "${AICR_IMAGE}" --namespace "${ns}" \
+    --output "${OUTPUT_DIR}/isolation-b.yaml" --timeout 180s --privileged \
+    --node-selector kubernetes.io/os=linux > "$log_b" 2>&1 &
+  pid_b=$!
+
+  wait "$pid_a" || rc_a=$?
+  wait "$pid_b" || rc_b=$?
+
+  if [ "$rc_a" -ne 0 ] || [ "$rc_b" -ne 0 ]; then
+    echo "--- concurrent run A ---"; tail -30 "$log_a"
+    echo "--- concurrent run B ---"; tail -30 "$log_b"
+    fail "snapshot/isolation/concurrent-runs" "run A rc=${rc_a}, run B rc=${rc_b}"
+    return 1
+  fi
+
+  local id_a id_b
+  id_a=$(extract_run_id "$log_a")
+  id_b=$(extract_run_id "$log_b")
+  if [ -z "$id_a" ] || [ -z "$id_b" ] || [ "$id_a" = "$id_b" ]; then
+    fail "snapshot/isolation/concurrent-runs" "expected two distinct run IDs, got '${id_a}' and '${id_b}'"
+    return 1
+  fi
+  remember_agent_run_id "$id_a"
+  remember_agent_run_id "$id_b"
+  detail "run A: ${id_a}"
+  detail "run B: ${id_b}"
+  if [ ! -s "${OUTPUT_DIR}/isolation-a.yaml" ] || [ ! -s "${OUTPUT_DIR}/isolation-b.yaml" ]; then
+    fail "snapshot/isolation/concurrent-runs" "a concurrent run produced an empty snapshot"
+    return 1
+  fi
+  pass "snapshot/isolation/concurrent-runs"
+
+  # The retained run's objects must be untouched by both concurrent runs.
+  # Before ADR-020 this is exactly what broke: a second run's ensureJob
+  # deleted the same-named Job and its cleanup deleted the shared RBAC.
+  local destroyed=""
+  kubectl get job     -n "$ns" "aicr-${retained_id}"                > /dev/null 2>&1 || destroyed="${destroyed} job"
+  kubectl get sa      -n "$ns" "aicr-${retained_id}"                > /dev/null 2>&1 || destroyed="${destroyed} sa"
+  kubectl get role    -n "$ns" "aicr-${retained_id}"                > /dev/null 2>&1 || destroyed="${destroyed} role"
+  kubectl get rolebinding -n "$ns" "aicr-${retained_id}"            > /dev/null 2>&1 || destroyed="${destroyed} rolebinding"
+  kubectl get clusterrole        "aicr-node-reader-${retained_id}"  > /dev/null 2>&1 || destroyed="${destroyed} clusterrole"
+  kubectl get clusterrolebinding "aicr-node-reader-${retained_id}"  > /dev/null 2>&1 || destroyed="${destroyed} clusterrolebinding"
+  if [ -n "$destroyed" ]; then
+    fail "snapshot/isolation/retained-run-survives" "concurrent runs destroyed:${destroyed}"
+    return 1
+  fi
+  pass "snapshot/isolation/retained-run-survives"
+
+  # Each concurrent run must have removed its own resources: exactly the
+  # retained Job survives.
+  #
+  # Poll rather than sample once. Kubernetes deletion is asynchronous -- a Job
+  # whose delete the CLI already issued and acked stays listable while its
+  # pods terminate and its finalizers clear, so a single read can legitimately
+  # still see it and report "found 2" for a cleanup that worked. Only the
+  # timing is tolerant; the assertion below is still exact.
+  local leftover_jobs=""
+  local agent_job_selector="app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent"
+  local deadline=$((SECONDS + AGENT_JOB_SETTLE_TIMEOUT))
+  while :; do
+    leftover_jobs=$(kubectl get jobs -n "$ns" -l "$agent_job_selector" -o name 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$leftover_jobs" = "1" ]; then
+      break
+    fi
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      kubectl get jobs -n "$ns" -l "$agent_job_selector" -o name || true
+      fail "snapshot/isolation/self-cleanup" \
+        "expected only the retained Job to remain after ${AGENT_JOB_SETTLE_TIMEOUT}s, found ${leftover_jobs}"
+      return 1
+    fi
+    sleep 2
+  done
+  pass "snapshot/isolation/self-cleanup"
+
+  # The decoy must have survived every run above.
+  local decoy_uid_after
+  decoy_uid_after=$(kubectl get clusterrole "$decoy" -o jsonpath='{.metadata.uid}' 2>/dev/null || echo "")
+  if [ -n "$decoy_uid_before" ] && [ "$decoy_uid_before" = "$decoy_uid_after" ]; then
+    pass "snapshot/isolation/cleanup-scoped-to-created"
+  else
+    fail "snapshot/isolation/cleanup-scoped-to-created" \
+      "aicr-labelled ClusterRole it never created was deleted or replaced (before=${decoy_uid_before} after=${decoy_uid_after})"
+    return 1
+  fi
+
+  # Housekeeping (the decoy and the retained run's objects) is the wrapper's
+  # job -- see cleanup_snapshot_run_isolation -- so it also happens on the
+  # `return 1` paths above.
 }
 
 # =============================================================================
@@ -514,11 +857,15 @@ test_recipe_from_snapshot() {
   # Test: View recipe constraints
   msg "--- Test: Recipe constraints ---"
   if [ -f "$snapshot_recipe" ]; then
-    if grep -q "constraints:" "$snapshot_recipe" 2>/dev/null; then
+    if ! yq eval '.' "$snapshot_recipe" > /dev/null; then
+      fail "recipe/constraints" "Generated recipe is not valid YAML"
+    elif yq eval -e '.constraints | (type == "!!seq" and length > 0)' \
+      "$snapshot_recipe" > /dev/null 2>&1; then
       pass "recipe/constraints"
     else
-      warn "No constraints in recipe (may be expected)"
-      pass "recipe/constraints"
+      # The resolved recipe above is valid RecipeResult, so a missing
+      # constraints block is a resolution defect, not an environment difference.
+      fail "recipe/constraints" "Generated recipe carries no top-level constraints"
     fi
   else
     skip "recipe/constraints" "No recipe file"
@@ -808,6 +1155,10 @@ test_validate_deployment_checks() {
   msg "=========================================="
 
   # Test: Validate with passing constraint
+  # The RecipeResult fixtures below deliberately keep the superseded
+  # aicr.run/v1alpha2 header: ADR-022 Release N+1 (#2416) requires the readers to
+  # keep accepting it until v1.0.0 (#2417), and these are the only end-to-end
+  # exercise of that path. Do not sweep them to the target value.
   local recipe_file="${validate_dir}/recipe-with-constraints.yaml"
   cat > "$recipe_file" <<RECIPE
 kind: RecipeResult
@@ -896,18 +1247,31 @@ RECIPE
     --phase deployment \
     --output "$deployment_fail_result" 2>&1) || true
 
+  # Negative test: the named constraint MUST report the intended version
+  # mismatch. A generic validator failure (context/RBAC/crash) is not proof that
+  # the comparison itself rejected v24.6.0.
   if [ -f "$deployment_fail_result" ] && \
-     grep -q "gpu-operator-version" "$deployment_fail_result"; then
-    if grep -A1 '"gpu-operator-version"' "$deployment_fail_result" | grep -q '"status": "failed"'; then
+     jq -e 'any(.results.tests[]?; .name == "gpu-operator-version")' \
+       "$deployment_fail_result" > /dev/null 2>&1; then
+    if jq -e 'any(.results.tests[]?;
+                  .name == "gpu-operator-version" and
+                  .status == "failed" and
+                  ((.message // "") |
+                    contains("GPU Operator version v24.6.0 does not satisfy constraint \">= v25.0.0\"")))' \
+         "$deployment_fail_result" > /dev/null 2>&1; then
       detail "GPU operator version constraint: FAIL (v24.6.0 < v25.0.0) - as expected"
       pass "validate/deployment-constraint-fail"
     else
-      warn "Constraint did not fail as expected"
-      pass "validate/deployment-constraint-fail"
+      local deployment_fail_actual
+      deployment_fail_actual=$(jq -c \
+        'first(.results.tests[]? | select(.name == "gpu-operator-version")) | {status, message}' \
+        "$deployment_fail_result" 2>/dev/null || echo "unavailable")
+      fail "validate/deployment-constraint-fail" \
+        "Expected the v24.6.0 versus >= v25.0.0 mismatch; got ${deployment_fail_actual}"
     fi
   else
-    warn "Constraint not evaluated (not found in output)"
-    pass "validate/deployment-constraint-fail"
+    fail "validate/deployment-constraint-fail" \
+      "Constraint not evaluated (gpu-operator-version absent from CTRF output)"
   fi
 
   # -----------------------------------------------------------------------
@@ -961,16 +1325,27 @@ RECIPE
     --image "${AICR_VALIDATOR_IMAGE}" \
     --output "$result_er_fail" 2>&1) || true
 
+  # Bind name, status, and the missing-resource diagnosis to the SAME CTRF test
+  # object. A generic expected-resources infrastructure failure is not proof
+  # that nonexistent-deployment was actually checked.
   if [ -f "$result_er_fail" ] && \
-     grep -q '"expected-resources"' "$result_er_fail"; then
-    if grep -A1 '"expected-resources"' "$result_er_fail" | grep -q '"status": "failed"'; then
+     jq -e 'any(.results.tests[]?; .name == "expected-resources")' \
+       "$result_er_fail" > /dev/null 2>&1; then
+    if jq -e 'any(.results.tests[]?;
+                  .name == "expected-resources" and
+                  .status == "failed" and
+                  ((.message // "") |
+                    contains("nonexistent-deployment") and contains("not found")))' \
+         "$result_er_fail" > /dev/null 2>&1; then
       detail "Expected-resources check: FAIL (nonexistent-deployment not found) - as expected"
       pass "validate/expected-resources-fail"
-    elif grep -q '"summary"' "$result_er_fail" && grep -q '"status": "failed"' "$result_er_fail"; then
-      detail "Expected-resources check: FAIL (from summary status) - as expected"
-      pass "validate/expected-resources-fail"
     else
-      fail "validate/expected-resources-fail" "Check did not fail for missing resource"
+      local expected_resources_fail_actual
+      expected_resources_fail_actual=$(jq -c \
+        'first(.results.tests[]? | select(.name == "expected-resources")) | {status, message}' \
+        "$result_er_fail" 2>/dev/null || echo "unavailable")
+      fail "validate/expected-resources-fail" \
+        "Expected nonexistent-deployment not found; got ${expected_resources_fail_actual}"
     fi
   else
     fail "validate/expected-resources-fail" "expected-resources not found in output"
@@ -1342,8 +1717,32 @@ RECIPE
   msg "--- Test: Validation Job in default namespace ---"
   echo -e "${DIM}  \$ aicr validate --recipe recipe.yaml --snapshot cm://... --phase deployment${NC}"
 
-  # Create validation namespace if it doesn't exist
-  kubectl create namespace aicr-validation 2>&1 || true
+  # Start from an empty namespace so stable labels cannot match resources from
+  # an aborted prior invocation. The bounded delete also finishes any
+  # best-effort --wait=false teardown still in progress from the previous run.
+  local default_validation_namespace="aicr-validation"
+  local default_namespace_setup_exit=0
+  kubectl delete namespace "$default_validation_namespace" \
+    --ignore-not-found --wait=true --timeout=60s 2>&1 || \
+    default_namespace_setup_exit=$?
+  if [ "$default_namespace_setup_exit" -eq 0 ]; then
+    kubectl create namespace "$default_validation_namespace" 2>&1 || \
+      default_namespace_setup_exit=$?
+  fi
+
+  if [ "$default_namespace_setup_exit" -ne 0 ]; then
+    fail "validate/job-rbac-serviceaccount" \
+      "Could not reset ${default_validation_namespace} (exit ${default_namespace_setup_exit})"
+    skip "validate/job-rbac-role" "Default validation namespace reset failed"
+    skip "validate/job-creation" "Default validation namespace reset failed"
+    skip "validate/job-success" "Default validation namespace reset failed"
+    skip "validate/command-success" "Default validation namespace reset failed"
+    skip "validate/job-custom-namespace" "Default validation namespace reset failed"
+    skip "validate/job-cleanup" "Default validation namespace reset failed"
+    skip "validate/job-result-format" "Default validation namespace reset failed"
+    cleanup_fake_gpu_operator_fixture
+    return 0
+  fi
 
   # Run validation (this should create Jobs)
   local validation_result="${validate_dir}/validation-default-ns.json"
@@ -1355,28 +1754,57 @@ RECIPE
     --output "$validation_result" \
     --no-cleanup 2>&1 || validation_exit=$?
 
-  # Check if RBAC resources were created. The SA and CRB names are
-  # suffixed with the per-run runID, so look up by the stable
-  # `app.kubernetes.io/name=aicr-validator` label rather than the literal name.
+  # Check if RBAC resources were created. Locate the run-specific ServiceAccount
+  # by its stable label, then use its generated name for the exact CRB lookup.
   local rbac_label_selector="app.kubernetes.io/name=aicr-validator"
-  local sa_name
-  sa_name=$(kubectl get sa -n aicr-validation -l "${rbac_label_selector}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-  if [ -n "${sa_name}" ]; then
+  local validation_job_label_selector="app.kubernetes.io/name=aicr"
+  local sa_name=""
+  local sa_query_exit=0
+  sa_name=$(kubectl get sa -n "$default_validation_namespace" \
+    -l "${rbac_label_selector}" -o jsonpath='{.items[*].metadata.name}' \
+    2>/dev/null) || sa_query_exit=$?
+  if [ "$sa_query_exit" -eq 0 ] && [ -n "${sa_name}" ]; then
     detail "ServiceAccount created: ${sa_name}"
     pass "validate/job-rbac-serviceaccount"
+  elif [ "$sa_query_exit" -ne 0 ]; then
+    fail "validate/job-rbac-serviceaccount" \
+      "Could not list validator ServiceAccounts (exit ${sa_query_exit})"
   else
     fail "validate/job-rbac-serviceaccount" "ServiceAccount not found after --no-cleanup"
   fi
 
-  local crb_name
-  crb_name=$(kubectl get clusterrolebinding -l "${rbac_label_selector}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-  if [ -n "${crb_name}" ]; then
-    local role_ref
-    role_ref=$(kubectl get clusterrolebinding "${crb_name}" -o jsonpath='{.roleRef.name}')
+  # The per-run ServiceAccount and ClusterRoleBinding have the same generated
+  # name. Querying that exact name prevents an orphaned CRB from a prior run
+  # satisfying this assertion through the stable label.
+  local crb_name="$sa_name"
+  local role_ref=""
+  local crb_query_exit=0
+  if [ -n "$crb_name" ]; then
+    role_ref=$(kubectl get clusterrolebinding "$crb_name" \
+      -o jsonpath='{.roleRef.name}' 2>/dev/null) || crb_query_exit=$?
+  fi
+  if [ "$crb_query_exit" -eq 0 ] && [ -n "$crb_name" ] && [ -n "$role_ref" ]; then
     detail "ClusterRoleBinding created: ${crb_name} → ${role_ref}"
     pass "validate/job-rbac-role"
+  elif [ "$crb_query_exit" -ne 0 ]; then
+    fail "validate/job-rbac-role" \
+      "Could not read ClusterRoleBinding ${crb_name} (exit ${crb_query_exit})"
   else
     fail "validate/job-rbac-role" "ClusterRoleBinding not found after --no-cleanup"
+  fi
+
+  # Identify the Job owned by this run's retained ServiceAccount. The later
+  # cleanup-enabled invocation must not delete this --no-cleanup Job while it
+  # removes only the Job it creates itself.
+  local retained_job_name=""
+  local retained_job_query_exit=0
+  if [ -n "$sa_name" ]; then
+    retained_job_name=$(kubectl get jobs -n aicr-validation \
+      -l "$validation_job_label_selector" -o json 2>/dev/null | \
+      jq -r --arg service_account "$sa_name" \
+        '[.items[]? |
+          select(.spec.template.spec.serviceAccountName == $service_account) |
+          .metadata.name][0] // empty') || retained_job_query_exit=$?
   fi
 
   # Check if jobs were created (they may not exist if recipe has no checks)
@@ -1427,31 +1855,81 @@ RECIPE
   fi
 
   # Test 2: Validation with custom namespace
+  local custom_validation_namespace="custom-validation"
   msg "--- Test: Validation Job in custom namespace ---"
-  echo -e "${DIM}  \$ aicr validate --namespace custom-validation${NC}"
+  echo -e "${DIM}  \$ aicr validate --namespace ${custom_validation_namespace}${NC}"
 
-  # Create custom validation namespace
-  kubectl create namespace custom-validation 2>&1 || true
+  # Start from an empty namespace so resources left by an aborted prior run
+  # cannot satisfy this run's assertions.
+  local custom_namespace_setup_exit=0
+  kubectl delete namespace "$custom_validation_namespace" \
+    --ignore-not-found --wait=true --timeout=60s 2>&1 || \
+    custom_namespace_setup_exit=$?
+  if [ "$custom_namespace_setup_exit" -eq 0 ]; then
+    kubectl create namespace "$custom_validation_namespace" 2>&1 || \
+      custom_namespace_setup_exit=$?
+  fi
 
-  # Run validation with custom namespace and cleanup enabled (tests both namespace + cleanup)
+  # --no-cleanup so the per-run RBAC outlives the call. With cleanup enabled
+  # (the default) deferClusterCleanup -> CleanupRBAC deletes the ServiceAccount
+  # before it can be observed, so asserting its presence afterwards could never
+  # hold. Cleanup is covered separately by validate/job-cleanup below, and the
+  # teardown at the end of this function removes the namespace and the labelled
+  # ClusterRoleBinding this leaves behind.
   local validation_custom="${validate_dir}/validation-custom-ns.json"
-  "${AICR_BIN}" validate \
-    --recipe "$recipe_file" \
-    --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
-    --phase deployment \
-    --namespace custom-validation \
-    --output "$validation_custom" \
-    2>&1 || true  # Keep || true here as this is just testing namespace config
+  local custom_validation_exit=0
+  if [ "$custom_namespace_setup_exit" -eq 0 ]; then
+    "${AICR_BIN}" validate \
+      --recipe "$recipe_file" \
+      --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
+      --phase deployment \
+      --namespace "$custom_validation_namespace" \
+      --output "$validation_custom" \
+      --no-cleanup \
+      2>&1 || custom_validation_exit=$?
+  fi
 
-  # Check if RBAC was created in custom namespace. Match by label since the
-  # SA name carries the per-run runID suffix.
-  local custom_sa_name
-  custom_sa_name=$(kubectl get sa -n custom-validation -l "app.kubernetes.io/name=aicr-validator" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-  if [ -n "${custom_sa_name}" ]; then
-    detail "ServiceAccount created in custom-validation namespace: ${custom_sa_name}"
-    pass "validate/job-custom-namespace"
+  # --no-cleanup preserves both resources. Since the namespace was empty before
+  # this invocation, a passing report plus a labelled SA and Job proves the
+  # current run deployed and completed in --namespace.
+  local custom_sa_name custom_sa_query_exit=0
+  local custom_job_name custom_job_query_exit=0
+  if [ "$custom_namespace_setup_exit" -eq 0 ]; then
+    custom_sa_name=$(kubectl get sa -n "$custom_validation_namespace" \
+      -l "$rbac_label_selector" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null) || \
+      custom_sa_query_exit=$?
+    custom_job_name=$(kubectl get jobs -n "$custom_validation_namespace" \
+      -l "$validation_job_label_selector" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null) || \
+      custom_job_query_exit=$?
+  fi
+
+  if [ "$custom_namespace_setup_exit" -ne 0 ]; then
+    fail "validate/job-custom-namespace" \
+      "Could not reset ${custom_validation_namespace} (exit ${custom_namespace_setup_exit})"
+  elif [ "$custom_validation_exit" -ne 0 ]; then
+    fail "validate/job-custom-namespace" \
+      "Validation command failed in ${custom_validation_namespace} (exit ${custom_validation_exit})"
+  elif [ ! -f "$validation_custom" ] || \
+       ! jq -e 'any(.results.tests[]?;
+                    .name == "expected-resources" and .status == "passed")' \
+            "$validation_custom" > /dev/null 2>&1; then
+    fail "validate/job-custom-namespace" \
+      "No passing expected-resources result from ${custom_validation_namespace}"
+  elif [ "$custom_sa_query_exit" -ne 0 ]; then
+    fail "validate/job-custom-namespace" \
+      "Could not list validator ServiceAccounts in ${custom_validation_namespace} (exit ${custom_sa_query_exit})"
+  elif [ -z "$custom_sa_name" ]; then
+    fail "validate/job-custom-namespace" \
+      "No ServiceAccount labelled ${rbac_label_selector} in ${custom_validation_namespace}"
+  elif [ "$custom_job_query_exit" -ne 0 ]; then
+    fail "validate/job-custom-namespace" \
+      "Could not list validator Jobs in ${custom_validation_namespace} (exit ${custom_job_query_exit})"
+  elif [ -z "$custom_job_name" ]; then
+    fail "validate/job-custom-namespace" \
+      "No Job labelled ${validation_job_label_selector} in ${custom_validation_namespace}"
   else
-    warn "ServiceAccount not found in custom namespace (may be expected if no checks defined)"
+    detail "ServiceAccount created in ${custom_validation_namespace}: ${custom_sa_name}"
+    detail "Validator Job created in ${custom_validation_namespace}: ${custom_job_name}"
     pass "validate/job-custom-namespace"
   fi
 
@@ -1459,56 +1937,140 @@ RECIPE
   msg "--- Test: Validation Job cleanup ---"
   echo -e "${DIM}  \$ aicr validate${NC}"
 
-  # Count existing jobs before cleanup test
-  local jobs_before
-  jobs_before=$(kubectl get jobs -n aicr-validation --no-headers 2>/dev/null | wc -l || echo "0")
+  # Record the Job name set before the run. Names are compared rather than
+  # counted so a Job leaked by this run cannot be masked by an unrelated Job
+  # disappearing over the same window.
+  local jobs_before_file="${validate_dir}/jobs-before.txt"
+  local jobs_after_file="${validate_dir}/jobs-after.txt"
+  local jobs_before_exit=0
+  kubectl get jobs -n aicr-validation \
+    -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
+    > "$jobs_before_file" 2>/dev/null || jobs_before_exit=$?
 
-  # Run validation with cleanup enabled
+  # Run validation with cleanup enabled. Keep check failures in CTRF so the CLI
+  # exit code is reserved for orchestration/serialization/cleanup errors; a
+  # passing expected-resources result below proves the validator Job ran.
+  local validation_cleanup="${validate_dir}/validation-cleanup.json"
+  local cleanup_exit=0
   "${AICR_BIN}" validate \
     --recipe "$recipe_file" \
     --snapshot "cm://${SNAPSHOT_NAMESPACE}/${SNAPSHOT_CM}" \
     --phase deployment \
-    2>&1 || true  # Keep || true here as this is just testing cleanup
+    --output "$validation_cleanup" \
+    --fail-on-error=false \
+    2>&1 || cleanup_exit=$?
 
-  # Wait for cleanup to complete
-  kubectl wait --for=delete jobs -l app.kubernetes.io/name=aicr -n aicr-validation --timeout=30s 2>/dev/null || true
+  # Retry only while Jobs introduced by this cleanup-enabled run remain. The
+  # retained --no-cleanup Job is part of the before-set, so it never drives the
+  # wait. A healthy synchronous cleanup completes on the first inventory.
+  local jobs_after_exit=0
+  local leaked_jobs=""
+  local job_diff_exit=0
+  local cleanup_inventory_attempt=0
+  local cleanup_inventory_attempts=30
+  while [ "$cleanup_inventory_attempt" -lt "$cleanup_inventory_attempts" ]; do
+    jobs_after_exit=0
+    kubectl get jobs -n aicr-validation \
+      -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}' \
+      > "$jobs_after_file" 2>/dev/null || jobs_after_exit=$?
 
-  # Count jobs after (should be cleaned up)
-  local jobs_after
-  jobs_after=$(kubectl get jobs -n aicr-validation --no-headers 2>/dev/null | wc -l || echo "0")
+    leaked_jobs=""
+    job_diff_exit=0
+    if [ "$jobs_before_exit" -eq 0 ] && [ "$jobs_after_exit" -eq 0 ]; then
+      leaked_jobs=$(grep -Fvx -f "$jobs_before_file" "$jobs_after_file") || \
+        job_diff_exit=$?
+      # grep returns 1 when every post-run Job was already present before the
+      # run. That is the expected no-leak result, not a comparison failure.
+      if [ "$job_diff_exit" -eq 1 ]; then
+        job_diff_exit=0
+      fi
+      leaked_jobs=${leaked_jobs//$'\n'/ }
+    fi
 
-  if [ "$jobs_after" -le "$jobs_before" ]; then
-    detail "Jobs cleaned up successfully"
-    pass "validate/job-cleanup"
+    if [ "$jobs_before_exit" -ne 0 ] || [ "$jobs_after_exit" -ne 0 ] || \
+       [ "$job_diff_exit" -ne 0 ] || [ -z "$leaked_jobs" ]; then
+      break
+    fi
+
+    cleanup_inventory_attempt=$((cleanup_inventory_attempt + 1))
+    if [ "$cleanup_inventory_attempt" -lt "$cleanup_inventory_attempts" ]; then
+      sleep 1
+    fi
+  done
+
+  local retained_job_check_output=""
+  local retained_job_check_exit=0
+  if [ "$retained_job_query_exit" -eq 0 ] && [ -n "$retained_job_name" ]; then
+    retained_job_check_output=$(kubectl get job "$retained_job_name" \
+      -n aicr-validation -o name 2>&1) || retained_job_check_exit=$?
+  fi
+
+  if [ "$jobs_before_exit" -ne 0 ]; then
+    fail "validate/job-cleanup" \
+      "Could not inventory Jobs before cleanup (exit ${jobs_before_exit})"
+  elif [ "$jobs_after_exit" -ne 0 ]; then
+    fail "validate/job-cleanup" \
+      "Could not inventory Jobs after cleanup (exit ${jobs_after_exit})"
+  elif [ "$job_diff_exit" -ne 0 ]; then
+    fail "validate/job-cleanup" \
+      "Could not compare Job inventories (exit ${job_diff_exit})"
+  elif [ "$retained_job_query_exit" -ne 0 ]; then
+    fail "validate/job-cleanup" \
+      "Could not identify the Job retained by --no-cleanup (exit ${retained_job_query_exit})"
+  elif [ -z "$retained_job_name" ]; then
+    fail "validate/job-cleanup" \
+      "No Job was associated with the ServiceAccount retained by --no-cleanup"
+  elif [ "$retained_job_check_exit" -ne 0 ]; then
+    fail "validate/job-cleanup" \
+      "Could not verify retained Job ${retained_job_name} after cleanup (exit ${retained_job_check_exit}): ${retained_job_check_output}"
+  elif [ -n "$leaked_jobs" ]; then
+    # Report leaks before command/report failures so the cleanup defect is not
+    # hidden by an unrelated validator outcome.
+    fail "validate/job-cleanup" \
+      "Validator Jobs not cleaned up after bounded retry: ${leaked_jobs}"
+  elif [ "$cleanup_exit" -ne 0 ]; then
+    fail "validate/job-cleanup" \
+      "Validation command failed (exit ${cleanup_exit}); cleanup could not be verified"
+  elif [ ! -f "$validation_cleanup" ] || \
+       ! jq -e 'any(.results.tests[]?;
+                    .name == "expected-resources" and .status == "passed")' \
+            "$validation_cleanup" > /dev/null 2>&1; then
+    fail "validate/job-cleanup" \
+      "Cleanup run produced no passing expected-resources result; cleanup could not be verified"
   else
-    warn "Jobs may not have been cleaned up (may be expected if new jobs created)"
+    detail "Retained --no-cleanup Job still present: ${retained_job_name}"
+    detail "Jobs cleaned up successfully (no new Jobs remain in aicr-validation)"
     pass "validate/job-cleanup"
   fi
 
   # Test 4: Validation result format
   msg "--- Test: Validation result format ---"
   if [ -f "$validation_result" ]; then
-    # Check for expected CTRF JSON structure
-    if grep -q '"reportFormat"' "$validation_result" || grep -q '"reportFormat"' "$validation_result"; then
+    # Assert the CTRF envelope the same way validate/result-structure does.
+    # The previous condition OR-ed the identical grep with itself, so the
+    # second operand could never change the outcome.
+    if jq -e '.reportFormat == "CTRF"' "$validation_result" > /dev/null 2>&1; then
       detail "Validation result has correct structure"
       pass "validate/job-result-format"
     else
-      warn "Validation result may have unexpected format"
-      pass "validate/job-result-format"
+      fail "validate/job-result-format" "reportFormat is not \"CTRF\" in ${validation_result}"
     fi
   else
-    warn "Validation result file not created"
-    pass "validate/job-result-format"
+    fail "validate/job-result-format" "Validation result file not created at ${validation_result}"
   fi
 
   # Cleanup test namespaces, then any per-run validator ClusterRoleBindings.
   # CRBs are cluster-scoped and survive namespace deletion, and the `--no-cleanup`
   # run earlier in this test intentionally leaves its CRB behind. Label-based
   # bulk delete also cleans up any stale CRBs from prior failed runs so they
-  # cannot be picked up by the label selector in the next invocation.
-  kubectl delete namespace aicr-validation 2>&1 || true
-  kubectl delete namespace custom-validation 2>&1 || true
-  kubectl delete clusterrolebinding -l app.kubernetes.io/name=aicr-validator 2>&1 || true
+  # cannot be picked up by the label selector in the next invocation. Namespace
+  # teardown is best-effort and non-blocking so stuck finalizers cannot suppress
+  # the test summary.
+  kubectl delete namespace aicr-validation \
+    --ignore-not-found --wait=false 2>&1 || true
+  kubectl delete namespace "$custom_validation_namespace" \
+    --ignore-not-found --wait=false 2>&1 || true
+  kubectl delete clusterrolebinding -l "$rbac_label_selector" 2>&1 || true
   cleanup_fake_gpu_operator_fixture
 }
 
@@ -1621,8 +2183,17 @@ cleanup_e2e() {
   msg "Cleaning up e2e resources"
   msg "=========================================="
 
-  # Clean up snapshot resources
-  kubectl delete job aicr-e2e-snapshot -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1 || true
+  # Clean up snapshot resources. The Job name is run-scoped ("aicr-<run-id>"),
+  # so select by label -- but scoped to the run IDs THIS script launched.
+  # A sweep of every Job matching the agent's labels would also delete, and
+  # so terminate, a concurrent snapshot run started against the same cluster
+  # by someone else.
+  local run_id
+  for run_id in $E2E_AGENT_RUN_IDS; do
+    kubectl delete job \
+      -l "app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent,aicr.run/run-id=${run_id}" \
+      -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1 || true
+  done
   kubectl delete cm "$SNAPSHOT_CM" -n "$SNAPSHOT_NAMESPACE" --ignore-not-found=true > /dev/null 2>&1 || true
 
   msg "Cleanup complete"
@@ -1687,6 +2258,10 @@ main() {
   # Setup fake GPU environment and run snapshot tests
   if setup_fake_gpu; then
     test_snapshot
+    # Guarded: this stage returns its assertion status, which `set -e` would
+    # otherwise take as the script's exit status -- skipping every stage below
+    # AND cleanup_e2e, and stranding this run's resources on a shared cluster.
+    run_stage test_snapshot_run_isolation
     test_recipe_from_snapshot
     test_validate
     test_validate_deployment_checks
@@ -1706,4 +2281,9 @@ main() {
   fi
 }
 
-main "$@"
+# Run main only when executed directly; sourcing exposes the pure helpers
+# (pass, fail, run_stage, print_summary) without contacting a cluster.
+# tools/e2e-run_test.sh drives them via `make test` (test-shell target).
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi

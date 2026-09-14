@@ -251,7 +251,7 @@ func TestAKSDefaultKeepsPreProfileEffectiveValues(t *testing.T) {
 		t.Fatal("embedded catalog is missing the aks overlay")
 	}
 	aksOverlay.Spec.Profile = nil
-	aksOverlay.APIVersion = RecipeAPIVersion
+	aksOverlay.APIVersion = RecipeMetadataAPIVersion
 
 	profiled, err := profiledStore.BuildRecipeResult(ctx, aksCriteria())
 	if err != nil {
@@ -384,7 +384,7 @@ func TestAKSLegacyExternalShadowStaysUnprofiled(t *testing.T) {
 	if unmarshalErr := yaml.Unmarshal(embeddedAKS, &doc); unmarshalErr != nil {
 		t.Fatalf("parse embedded aks overlay: %v", unmarshalErr)
 	}
-	doc["apiVersion"] = RecipeAPIVersion
+	doc["apiVersion"] = RecipeMetadataAPIVersion
 	spec, ok := doc["spec"].(map[string]any)
 	if !ok {
 		t.Fatalf("embedded aks overlay spec = %T, want map", doc["spec"])
@@ -445,8 +445,8 @@ func TestAKSLegacyExternalShadowStaysUnprofiled(t *testing.T) {
 		t.Fatalf("aks overlay still declares a profile (%#v); external shadow did not replace it",
 			aksOverlay.Spec.Profile)
 	}
-	if aksOverlay.APIVersion != RecipeAPIVersion {
-		t.Fatalf("aks overlay apiVersion = %q, want legacy %q", aksOverlay.APIVersion, RecipeAPIVersion)
+	if aksOverlay.APIVersion != RecipeMetadataAPIVersion {
+		t.Fatalf("aks overlay apiVersion = %q, want legacy %q", aksOverlay.APIVersion, RecipeMetadataAPIVersion)
 	}
 
 	result, err := store.BuildRecipeResult(ctx, aksCriteria())
@@ -458,8 +458,8 @@ func TestAKSLegacyExternalShadowStaysUnprofiled(t *testing.T) {
 		t.Fatalf("selectedProfile = %#v, want nil (unprofiled legacy shadow)",
 			result.Metadata.SelectedProfile)
 	}
-	if result.APIVersion != RecipeAPIVersion {
-		t.Fatalf("apiVersion = %q, want legacy %q", result.APIVersion, RecipeAPIVersion)
+	if result.APIVersion != RecipeResultAPIVersion {
+		t.Fatalf("apiVersion = %q, want legacy %q", result.APIVersion, RecipeResultAPIVersion)
 	}
 	for _, c := range result.Constraints {
 		if c.Name == "K8s.aks-gpu-pools.gpu-driver" {

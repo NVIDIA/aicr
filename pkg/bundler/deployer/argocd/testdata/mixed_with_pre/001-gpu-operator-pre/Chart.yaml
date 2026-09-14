@@ -16,5 +16,8 @@ apiVersion: v2
 name: gpu-operator-pre
 description: Generated wrapper chart for gpu-operator local content.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: "0.0.0-golden"
+appVersion: "v25.3.3"
+annotations:
+  aicr.run/component-version: "v25.3.3"
+  aicr.run/generated-by: "0.0.0-golden"

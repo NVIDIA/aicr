@@ -23,7 +23,6 @@ import (
 	"github.com/urfave/cli/v3"
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
@@ -84,6 +83,13 @@ func recipeCmdFlags() []cli.Flag {
 				strings.Join(recipe.RuntimeInventoryModes(), ", ")),
 			Category: catQueryParameters,
 		}, recipe.RuntimeInventoryModes),
+		&cli.StringFlag{
+			Name: flagGKETCPXOInterfaces,
+			Usage: "Ordered GKE GPU-NIC interface mapping for the torch-distributed-tcpxo runtime, " +
+				"as eth1=<network>,...,eth8=<network>. Required when the resolved recipe ships that " +
+				"runtime (h100 GKE kubeflow training); recorded in the generated recipe",
+			Category: catQueryParameters,
+		},
 		&cli.IntFlag{
 			Name:     "nodes",
 			Usage:    "Number of worker/GPU nodes in the cluster",
@@ -117,11 +123,15 @@ func recipeCmd() *cli.Command {
 		Name:     cmdNameRecipe,
 		Category: functionalCategoryName,
 		Usage:    "Create optimized recipe for given intent and environment parameters.",
-		Description: `Generate configuration recipe based on specified environment parameters including:
-  - Kubernetes service type (e.g. eks, gke, aks, oke, kind, lke, bcm)
-  - Accelerator type (e.g. h100, h200, gb200, b200, a100, l40, l40s, rtx-pro-6000)
-  - Workload intent (e.g. training, inference)
-  - GPU node operating system (e.g. ubuntu, rhel, cos, amazonlinux, ol, talos)
+		// Value lists are derived from the canonical criteria registry (the
+		// same source the --service/--accelerator/--intent/--os flag usage
+		// strings use) so a new criteria value cannot silently leave this
+		// help text advertising a supported coordinate as unsupported.
+		Description: fmt.Sprintf(`Generate configuration recipe based on specified environment parameters including:
+  - Kubernetes service type (e.g. %s)
+  - Accelerator type (e.g. %s)
+  - Workload intent (e.g. %s)
+  - GPU node operating system (e.g. %s)
   - Number of GPU nodes in the cluster
 
 The recipe returns a list of components with deployment order based on dependencies.
@@ -149,6 +159,11 @@ Override config file values with flags:
 
 Override snapshot-detected criteria:
   aicr recipe --snapshot cm://gpu-operator/aicr-snapshot --service gke`,
+			strings.Join(recipe.GetCriteriaServiceTypes(), ", "),
+			strings.Join(recipe.GetCriteriaAcceleratorTypes(), ", "),
+			strings.Join(recipe.GetCriteriaIntentTypes(), ", "),
+			strings.Join(recipe.GetCriteriaOSTypes(), ", "),
+		),
 		Commands: []*cli.Command{
 			recipeListCmd(),
 			recipeSignCatalogCmd(),
@@ -157,12 +172,12 @@ Override snapshot-detected criteria:
 		Flags: recipeCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, flagService, flagAccelerator, flagIntent, flagOS,
-				flagPlatform, flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, "snapshot", "config", flagOutput,
+				flagPlatform, flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, flagGKETCPXOInterfaces, "snapshot", "config", flagOutput,
 				flagFormat); err != nil {
 				return err
 			}
 
-			cfg, err := loadCmdConfig(ctx, cmd)
+			cfg, err := loadFacadeConfig(ctx, cmd)
 			if err != nil {
 				return err
 			}
@@ -263,16 +278,16 @@ Override snapshot-detected criteria:
 // registry is constructed, so only the flag and config need handling here.
 // Keep recipe and query on this shared path so both commands enforce the same
 // criteria policy for external filesystem and OCI catalogs.
-func applyClientCriteriaStrictMode(cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) {
-	if cmd.Bool("criteria-strict") || aicr.WrapConfig(cfg).IsCriteriaStrict() {
+func applyClientCriteriaStrictMode(cmd *cli.Command, cfg *aicr.Config, client *aicr.Client) {
+	if cmd.Bool("criteria-strict") || cfg.IsCriteriaStrict() {
 		client.CriteriaRegistry().SetStrict(true)
 	}
 }
 
 // recipeOutputPath returns the recipe output destination, with the CLI flag
 // overriding spec.recipe.output.path.
-func recipeOutputPath(cmd *cli.Command, cfg *appcfg.AICRConfig) string {
-	return stringFlagOrConfig(cmd, "output", cfg.Recipe().OutputPath())
+func recipeOutputPath(cmd *cli.Command, cfg *aicr.Config) string {
+	return stringFlagOrConfig(cmd, "output", cfg.RecipeOutputOptions().Path)
 }
 
 // parseRecipeOutputFormat reads --format with precedence
@@ -281,8 +296,8 @@ func recipeOutputPath(cmd *cli.Command, cfg *appcfg.AICRConfig) string {
 // non-empty config value over the flag's Value: default, and falls
 // through to cmd.String(flag) (which surfaces the Value: default) only
 // when both CLI and config are empty.
-func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializer.Format, error) {
-	raw := stringFlagOrConfig(cmd, "format", cfg.Recipe().OutputFormat())
+func parseRecipeOutputFormat(cmd *cli.Command, cfg *aicr.Config) (serializer.Format, error) {
+	raw := stringFlagOrConfig(cmd, "format", cfg.RecipeOutputOptions().Format)
 	out := serializer.Format(raw)
 	if out.IsUnknown() {
 		return "", errors.New(errors.ErrCodeInvalidRequest,
@@ -309,8 +324,8 @@ func parseRecipeOutputFormat(cmd *cli.Command, cfg *appcfg.AICRConfig) (serializ
 // user-stated rather than snapshot-derived. Callers not tracking that
 // distinction (e.g. the no-snapshot criteria path) may pass nil; marks are
 // then no-ops.
-func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *appcfg.AICRConfig, reg *recipe.CriteriaRegistry, touched map[aicr.CriteriaDimension]bool) error {
-	derived, err := aicr.WrapConfig(cfg).RecipeCriteria(reg)
+func applyCriteriaFromConfig(criteria *recipe.Criteria, cfg *aicr.Config, reg *recipe.CriteriaRegistry, touched map[aicr.CriteriaDimension]bool) error {
+	derived, err := cfg.RecipeCriteria(reg)
 	if err != nil {
 		return err
 	}
@@ -377,7 +392,7 @@ func logCriteriaOverride(field, prior, override string) {
 // (when cfg is non-nil) and overlays CLI flag values on top. Every enum value
 // — config-sourced and flag-sourced alike — is resolved against the supplied
 // per-provider registry so a `--data` overlay's non-OSS values validate.
-func mergeCriteriaFromCmdAndConfig(cmd *cli.Command, cfg *appcfg.AICRConfig, reg *recipe.CriteriaRegistry) (*recipe.Criteria, error) {
+func mergeCriteriaFromCmdAndConfig(cmd *cli.Command, cfg *aicr.Config, reg *recipe.CriteriaRegistry) (*recipe.Criteria, error) {
 	criteria := recipe.NewCriteria()
 	if err := applyCriteriaFromConfig(criteria, cfg, reg, nil); err != nil {
 		return nil, err

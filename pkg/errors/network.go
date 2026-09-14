@@ -47,18 +47,15 @@ func IsNetworkError(err error) bool {
 	// Specific network operation types (net.OpError, net.DNSError).
 	// We intentionally skip the broader net.Error interface because
 	// context.DeadlineExceeded and syscall.Errno also satisfy it.
-	var opErr *net.OpError
-	if errors.As(err, &opErr) {
+	if _, ok := errors.AsType[*net.OpError](err); ok {
 		return true
 	}
 
-	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) {
+	if _, ok := errors.AsType[*net.DNSError](err); ok {
 		return true
 	}
 
-	var errno syscall.Errno
-	if errors.As(err, &errno) {
+	if errno, ok := errors.AsType[syscall.Errno](err); ok {
 		switch errno { //nolint:exhaustive // only network-related errno values
 		case syscall.ECONNREFUSED, syscall.EHOSTUNREACH, syscall.ENETUNREACH:
 			return true

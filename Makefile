@@ -81,17 +81,14 @@ generate-validator: ## Generate scaffolding for a new check or constraint valida
 # Code Formatting & Dependencies
 # =============================================================================
 
+# Deliberately does NOT run `notices`. THIRD_PARTY_NOTICES.md is generated at
+# release time (see the `release` target) and is not tracked, so regenerating it
+# here would add ~2m20s to every tidy to produce an ignored file.
 .PHONY: tidy
-tidy: ## Formats code, updates Go module dependencies, and regenerates third-party notices
+tidy: ## Formats code and updates Go module dependencies
 	@set -e; \
 	go fmt ./...; \
-	go mod tidy; \
-	go mod vendor; \
-	$(MAKE) notices
-
-.PHONY: vendor
-vendor: ## Vendors Go module dependencies (run after changing go.mod/go.sum)
-	@go mod vendor
+	go mod tidy
 
 .PHONY: fmt-check
 fmt-check: ## Checks if code is formatted (CI-friendly, no modifications)
@@ -102,18 +99,21 @@ fmt-check: ## Checks if code is formatted (CI-friendly, no modifications)
 upgrade: ## Upgrades all dependencies to latest versions
 	@set -e; \
 	go get -u ./...; \
-	go mod tidy; \
-	go mod vendor
+	go mod tidy
 
 .PHONY: generate
 generate: ## Runs go generate for code generation
 	@echo "Running go generate..."
-	@GOFLAGS="-mod=vendor" go generate ./...
+	@GOFLAGS="-mod=readonly" go generate ./...
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse bom-pinning-check ## Lints the entire project (Go, YAML, license headers, and chart-version pins)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse bom-pinning-check check-depproxy-kit check-upgrade-records ## Lints the entire project (Go, YAML, license headers, chart-version pins, and vendored action digests)
 	@echo "Completed Go and YAML lints and ensured license headers"
+
+.PHONY: check-depproxy-kit
+check-depproxy-kit: ## Verifies the vendored Go proxy action matches upstream digests
+	@./tools/check-depproxy-kit
 
 # Standalone target — NOT part of `make lint` because it requires Docker
 # (the validator runs in the same image renovatebot/github-action wraps).
@@ -144,6 +144,10 @@ check-agents-sync: ## Verifies AGENTS.md is in sync with .claude/CLAUDE.md
 check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 	@./tools/check-docs-filenames
 
+.PHONY: check-upgrade-records
+check-upgrade-records: ## Verifies committed ComponentUpgrades records are well-formed (ADR-021)
+	@./tools/check-upgrade-records
+
 .PHONY: check-docs-mdx
 check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments, autolinks, bare <tags>)
 	@./tools/check-docs-mdx
@@ -167,9 +171,9 @@ check-docs-mdx-parse: ## Validates docs/ with the real MDX parser (requires Node
 lint-go: ## Lints Go files with golangci-lint and go vet
 	@set -e; \
 	echo "Running go vet..."; \
-	GOFLAGS="-mod=vendor" go vet ./...; \
+	GOFLAGS="-mod=readonly" go vet ./...; \
 	echo "Running golangci-lint..."; \
-	GOFLAGS="-mod=vendor" golangci-lint -c .golangci.yaml run --timeout=$(LINT_TIMEOUT)
+	GOFLAGS="-mod=readonly" golangci-lint -c .golangci.yaml run --timeout=$(LINT_TIMEOUT)
 
 .PHONY: lint-yaml
 lint-yaml: ## Lints YAML files with yamllint
@@ -195,14 +199,14 @@ LICENSE_IGNORES = \
 	-ignore '**/*pb2*' \
 	-ignore 'bundles/**' \
 	-ignore 'dist/**' \
-	-ignore 'vendor/**' \
 	-ignore '**/testdata/**' \
 	-ignore 'recipes/evidence/*.yaml' \
 	-ignore 'recipes/evidence/*/*/*.yaml' \
 	-ignore 'THIRD_PARTY_NOTICES.md' \
 	-ignore 'validators/performance/licenses/**' \
 	-ignore '.licenses-cache/**' \
-	-ignore 'tools/mdx/node_modules/**'
+	-ignore 'tools/mdx/node_modules/**' \
+	-ignore '.github/actions/setup-dgxc-goproxy/**'
 
 # The two recipes/evidence patterns in LICENSE_IGNORES match exactly the
 # generated, header-less pointer shapes MarshalPointer emits — the transient
@@ -230,6 +234,20 @@ license: ## Add/verify license headers in source files
 #### looks like stdlib, and this gate inspects nothing yet still exits 0 — a
 #### silent false PASS. Resolve GOROOT explicitly below so the check cannot pass
 #### vacuously regardless of how go-licenses was installed.
+####
+#### STDLIB_IGNORE passes FULL stdlib package paths. It used to pipe through
+#### `cut -d'/' -f1`, keeping only the first path segment — which yields the bare
+#### token `go` (from `go/ast`, `go/build`, ...). `--ignore` matches by PREFIX, so
+#### that token also matched every third-party module under `go.opentelemetry.io`,
+#### `go.yaml.in` and `go.uber.org`: 32 packages silently exempt from this policy
+#### gate. Same bug #2384 fixed in tools/generate-notices; this is the other copy.
+#### Full paths cannot collide that way.
+####
+#### The three in-toto/json-canonicalization ignores below are the counterpart to
+#### that PR's LICENSE_OVERRIDES: go-licenses cannot classify their LICENSE files,
+#### and `check` has no override mechanism. They are NOT undisclosed — `make
+#### notices` emits all three from committed Apache-2.0 copies, and its
+#### completeness gate fails the build if any linked package is missing an entry.
 license-check: ## Check license is approved
 	@echo "Checking license headers..."
 	@set -e; \
@@ -239,7 +257,7 @@ license-check: ## Check license is approved
 	    exit 1; \
 	fi; \
 	export GOROOT; \
-	STDLIB_IGNORE=$$(go list std 2>/dev/null | cut -d'/' -f1 | sort -u | paste -sd ',' -) && \
+	STDLIB_IGNORE=$$(go list std 2>/dev/null | sort -u | paste -sd ',' -) && \
 	go-licenses check ./... \
         --allowed_licenses=MIT,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC,Zlib \
         --ignore=github.com/hashicorp/go-cleanhttp \
@@ -252,6 +270,9 @@ license-check: ## Check license is approved
         --ignore=github.com/hashicorp/go-secure-stdlib/strutil \
         --ignore=github.com/hashicorp/go-sockaddr \
         --ignore=github.com/hashicorp/hcl \
+        --ignore=github.com/in-toto/attestation \
+        --ignore=github.com/in-toto/in-toto-golang \
+        --ignore=github.com/cyberphone/json-canonicalization \
         --ignore=$$STDLIB_IGNORE
 
 .PHONY: test-shell
@@ -261,13 +282,32 @@ test-shell: ## Runs shell unit tests (tools/*_test.sh; hermetic, no cluster)
 # validators/ tests run as part of `make test` but are excluded from the
 # coverage.out this target emits: per-package coverage there runs 41-92%
 # (see #1752), which would pull the project-wide gate from ~80% to ~75.8%.
+#
+# ---------------------------------------------------------------------------
+# Every `go` invocation in this file sets GOFLAGS explicitly. That looks
+# redundant — `-mod=readonly` is already Go's default — but it is not: assigning
+# GOFLAGS REPLACES whatever the developer has in their environment or in
+# `go env -w`.
+#
+# These recipes carried `GOFLAGS="-mod=vendor"` until #2374 for the vendor mode,
+# and were silently relying on that second effect. Removing the pins outright
+# exposed it: with an ambient `GOFLAGS=-trimpath`, `runtime.Caller` returns
+# trimmed paths, so the `repositoryPath` helper in tests/notices and
+# tests/releasepolicy resolves the repo root to the literal module path
+# "github.com/NVIDIA/aicr" and every file open fails. Reproduced and confirmed —
+# both suites fail with ambient -trimpath and pass with GOFLAGS assigned.
+#
+# So: keep the assignment. It pins the resolution mode AND makes these targets
+# independent of ambient Go configuration, which is what `make test` behaving
+# the same everywhere depends on.
+# ---------------------------------------------------------------------------
 .PHONY: test
 test: test-shell ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
 	echo "Running tests with race detector..."; \
 	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path 2>/dev/null || echo "") \
 	AICR_CRITERIA_STRICT=1 \
-	GOFLAGS="-mod=vendor" go test -short -count=1 -race -timeout=$(TEST_TIMEOUT) -covermode=atomic -coverprofile=coverage.full.out $$(go list ./... | grep -v -e /tests/chainsaw/) || exit 1; \
+	GOFLAGS="-mod=readonly" go test -short -count=1 -race -timeout=$(TEST_TIMEOUT) -covermode=atomic -coverprofile=coverage.full.out $$(go list ./... | grep -v -e /tests/chainsaw/) || exit 1; \
 	grep -v '^github.com/NVIDIA/aicr/validators/' coverage.full.out > coverage.out; \
 	echo "Test coverage:"; \
 	go tool cover -func=coverage.out | tail -1
@@ -296,10 +336,15 @@ test-coverage: check-coverage-threshold test ## Runs tests and enforces coverage
 	fi; \
 	echo "Coverage check passed"
 
+.PHONY: update-goldens
+update-goldens: ## Regenerates golden test fixtures (catalog/coverage/render parity); review with git diff before committing
+	@GOFLAGS="-mod=readonly" AICR_UPDATE_GOLDEN=1 go test -count=1 -run 'TestCatalogParityGolden|TestCoverageGoldenMatrix' ./pkg/recipe/
+	@GOFLAGS="-mod=readonly" AICR_UPDATE_GOLDEN=1 go test -count=1 -run 'TestStockRenderParityGolden' ./pkg/bundler/
+
 .PHONY: bench
 bench: ## Runs benchmarks
 	@echo "Running benchmarks..."
-	@GOFLAGS="-mod=vendor" go test -bench=. -benchmem ./...
+	@GOFLAGS="-mod=readonly" go test -bench=. -benchmem ./...
 
 .PHONY: e2e
 e2e: ## Runs end-to-end integration tests (CLI only)
@@ -329,8 +374,85 @@ scan: ## Scans for vulnerabilities with grype
 api-diff: ## Checks pkg/client/v1 and transparent-alias target compatibility against the latest stable release
 	@bash tools/api-diff
 
+.PHONY: bundle-layout-baseline
+bundle-layout-baseline: ## Accepts the current per-deployer bundle trees as the frozen layout
+	@printf '%s\n' "Regenerating pkg/bundler/testdata/layout/manifests/ from the fixture recipe." \
+		"A removed path is a broken promise to integrator automation -- read the diff."
+# Every manifest is rendered under $$tmp first and copied over the committed
+# files only after all five deployers succeed. Writing them in place meant a
+# failure partway left a mixed old/new baseline set, which is worse than no
+# refresh: the manifests would disagree with each other and with the bundler.
+#
+# The enumeration is deliberately not a pipeline. A shell pipeline exits with
+# the status of its LAST stage, so `find ... | sed | sort` reports success even
+# when find fails, and set -e never fires -- the target would commit a
+# truncated manifest. That fails open in the worst direction: paths missing
+# from a manifest read as additions, which this gate allows, so those paths
+# silently lose removal protection. pipefail would fix it but is not portable
+# to /bin/sh (dash lacks it), so each stage is a separate simple command that
+# set -e can catch.
+	@set -e; tmp=$$(mktemp -d); \
+	  trap 'rm -rf "$$tmp"' EXIT; \
+	  for d in helm argocd argocd-helm flux helmfile; do \
+	    GOFLAGS="-mod=readonly" go run ./cmd/aicr bundle \
+	      -r pkg/bundler/testdata/layout/recipe.yaml \
+	      --deployer "$$d" -o "$$tmp/bundle-$$d" >/dev/null; \
+	    ( cd "$$tmp/bundle-$$d" && find . -type f > "$$tmp/raw-$$d.txt" ); \
+	    sed 's|^\./||' "$$tmp/raw-$$d.txt" > "$$tmp/rel-$$d.txt"; \
+	    LC_ALL=C sort "$$tmp/rel-$$d.txt" > "$$tmp/$$d.txt"; \
+	  done; \
+	  for d in helm argocd argocd-helm flux helmfile; do \
+	    cp "$$tmp/$$d.txt" pkg/bundler/testdata/layout/manifests/"$$d".txt; \
+	  done
+	@echo "Bundle layout manifests updated."
+
+.PHONY: schemas
+schemas: ## Regenerates the committed artifact JSON Schemas from the Go types
+	@GOFLAGS="-mod=readonly" go run ./tools/schemagen
+	@echo "Artifact schemas regenerated. Review the diff before committing."
+
+.PHONY: schema-baseline
+schema-baseline: schemas ## Accepts the current artifact schemas as the frozen contract
+	@printf '%s\n' "Accepting the current artifact schemas as the frozen contract." \
+		"Every difference below becomes part of the v1 surface -- read the diff."
+	@rm -rf api/aicr/v1/schemas/baseline
+	@mkdir -p api/aicr/v1/schemas/baseline
+	@cp api/aicr/v1/schemas/*.schema.json api/aicr/v1/schemas/baseline/
+	@echo "Schema baseline updated."
+
+.PHONY: openapi-diff
+openapi-diff: ## Checks the REST contract in api/aicr/v1/server.yaml against its committed baseline
+	@bash tools/openapi-diff
+
+.PHONY: openapi-baseline
+openapi-baseline: ## Accepts the current REST spec as the frozen contract (regenerates the baseline)
+	@printf '%s\n' "Regenerating api/aicr/v1/server.baseline.yaml from api/aicr/v1/server.yaml." \
+		"This accepts every current difference into the frozen contract, so the" \
+		"resulting diff is the change under review -- read it before committing."
+# The header is taken from the existing baseline rather than a hardcoded line
+# count, so editing the explanatory comment cannot make regeneration lossy. The
+# spec's own license header is dropped because the baseline carries its own.
+	@awk '/^[^#]/ && NF {exit} {print}' api/aicr/v1/server.baseline.yaml \
+		> api/aicr/v1/server.baseline.yaml.tmp
+	@awk 'p {print} /^openapi:/ && !p {p=1; print} END {exit !p}' api/aicr/v1/server.yaml \
+		>> api/aicr/v1/server.baseline.yaml.tmp \
+		|| { rm -f api/aicr/v1/server.baseline.yaml.tmp; \
+		     echo "ERROR: no 'openapi:' key in api/aicr/v1/server.yaml; refusing to write a header-only baseline" >&2; \
+		     exit 1; }
+# The openapi: guard above proves a marker exists, not that the result is a
+# document oasdiff can read. Validate with the actual consumer -- a self-diff
+# loads and parses the file -- so a spec that is malformed below that line
+# cannot replace the committed baseline.
+	@oasdiff breaking api/aicr/v1/server.baseline.yaml.tmp \
+		api/aicr/v1/server.baseline.yaml.tmp >/dev/null 2>&1 \
+		|| { rm -f api/aicr/v1/server.baseline.yaml.tmp; \
+		     echo "ERROR: generated baseline is not a document oasdiff can load; refusing to replace the committed baseline" >&2; \
+		     exit 1; }
+	@mv api/aicr/v1/server.baseline.yaml.tmp api/aicr/v1/server.baseline.yaml
+	@echo "Baseline updated."
+
 .PHONY: qualify
-qualify: test-coverage lint tuning-check coverage-check e2e scan license-check api-diff ## Qualifies the codebase (test-coverage, lint, tuning-check, coverage-check, e2e, scan, API compatibility)
+qualify: test-coverage lint tuning-check coverage-check e2e scan license-check api-diff openapi-diff ## Qualifies the codebase (test-coverage, lint, tuning-check, coverage-check, e2e, scan, SDK and REST API compatibility)
 	@echo "Codebase qualification completed"
 
 .PHONY: bom
@@ -340,7 +462,7 @@ bom: ## Generates container image BOM (CycloneDX 1.6 + Markdown) at $(BOM_OUT_DI
 	AICR_VERSION="$${AICR_VERSION:-$$(git describe --tags --always --dirty 2>/dev/null || echo dev)}"; \
 	mkdir -p "$${BOM_OUT_DIR}"; \
 	echo "Generating BOM into $${BOM_OUT_DIR}..."; \
-	GOFLAGS="-mod=vendor" go run ./tools/bom \
+	GOFLAGS="-mod=readonly" go run ./tools/bom \
 	  -repo-root "$(CURDIR)" \
 	  -out-dir "$(CURDIR)/$${BOM_OUT_DIR}" \
 	  -aicr-version "$${AICR_VERSION}" \
@@ -365,7 +487,7 @@ bom-docs: ## Regenerates the auto-generated section of $(BOM_DOC_PATH) from the 
 	TMP="$$(mktemp -d)"; \
 	trap 'rm -rf "$$TMP"' EXIT; \
 	echo "Regenerating auto-generated section of $(BOM_DOC_PATH) (helm rendering, ~30s)..."; \
-	GOFLAGS="-mod=vendor" go run ./tools/bom \
+	GOFLAGS="-mod=readonly" go run ./tools/bom \
 	  -repo-root "$(CURDIR)" \
 	  -out-dir "$$TMP" \
 	  -aicr-version "main" \
@@ -407,7 +529,7 @@ COVERAGE_DOC_PATH := docs/user/coverage-matrix.md
 coverage-docs: ## Regenerates $(COVERAGE_DOC_PATH) from the CLI registry and in-repo test signals
 	@set -e; \
 	echo "Regenerating $(COVERAGE_DOC_PATH) from the CLI registry and test signals..."; \
-	GOFLAGS="-mod=vendor" go run ./tools/coverage \
+	GOFLAGS="-mod=readonly" go run ./tools/coverage \
 	  -repo-root "$(CURDIR)" \
 	  -out "$(CURDIR)/$(COVERAGE_DOC_PATH)" \
 	  -deterministic; \
@@ -424,13 +546,34 @@ coverage-check: ## Verifies $(COVERAGE_DOC_PATH) is up to date (run by qualify a
 	fi; \
 	echo "$(COVERAGE_DOC_PATH) is up to date"
 
+VERSION_MATRIX_DOC_PATH := docs/user/component-version-matrix.md
+
+.PHONY: version-matrix-docs
+version-matrix-docs: ## Regenerates the component version matrix in $(VERSION_MATRIX_DOC_PATH) from git history
+	@set -e; \
+	if ! grep -q '<!-- BEGIN AICR-VERSION-MATRIX -->' $(VERSION_MATRIX_DOC_PATH) || \
+	   ! grep -q '<!-- END AICR-VERSION-MATRIX -->' $(VERSION_MATRIX_DOC_PATH); then \
+	   echo "ERROR: $(VERSION_MATRIX_DOC_PATH) is missing AICR-VERSION-MATRIX markers." >&2; exit 1; \
+	fi; \
+	TMP="$$(mktemp -d)"; \
+	trap 'rm -rf "$$TMP"' EXIT; \
+	{ ./tools/upgrade-matrix --releases 8; echo; echo "## Transitions"; echo; \
+	  ./tools/upgrade-matrix --releases 8 --transitions; } > "$$TMP/matrix.md"; \
+	awk -v body="$$TMP/matrix.md" ' \
+	  /<!-- BEGIN AICR-VERSION-MATRIX -->/ { print; while ((getline line < body) > 0) print line; close(body); skip = 1; next } \
+	  /<!-- END AICR-VERSION-MATRIX -->/   { skip = 0 } \
+	  !skip                                { print } \
+	' $(VERSION_MATRIX_DOC_PATH) > "$$TMP/merged.md"; \
+	mv "$$TMP/merged.md" $(VERSION_MATRIX_DOC_PATH); \
+	echo "Updated $(VERSION_MATRIX_DOC_PATH)"
+
 .PHONY: bom-pinning-check
 bom-pinning-check: ## Verifies every Helm component in the registry has a pinned chart version (per ADR-006)
 	@set -e; \
 	echo "Verifying chart-version pins (ADR-006)..."; \
 	TMP="$$(mktemp -d)"; \
 	trap 'rm -rf "$$TMP"' EXIT; \
-	GOFLAGS="-mod=vendor" go run ./tools/bom \
+	GOFLAGS="-mod=readonly" go run ./tools/bom \
 	  -repo-root "$(CURDIR)" \
 	  -out-dir "$$TMP" \
 	  -aicr-version "qualify" \
@@ -439,13 +582,13 @@ bom-pinning-check: ## Verifies every Helm component in the registry has a pinned
 
 .PHONY: registry-inventory
 registry-inventory: ## Extracts the build/CI registry & package egress inventory (YAML + Markdown) from structured sources
-	@GOFLAGS="-mod=vendor" go run ./tools/registry-inventory \
+	@GOFLAGS="-mod=readonly" go run ./tools/registry-inventory \
 	  -repo-root "$(CURDIR)" \
 	  -out-dir "$${REGISTRY_OUT_DIR:-dist/registry-inventory}"
 
 .PHONY: registry-check
 registry-check: ## Fails if a build/CI source reaches a registry host absent from tools/registry-inventory/registry-allowlist.yaml
-	@GOFLAGS="-mod=vendor" go run ./tools/registry-inventory -repo-root "$(CURDIR)" -check
+	@GOFLAGS="-mod=readonly" go run ./tools/registry-inventory -repo-root "$(CURDIR)" -check
 
 # Committed host-level egress doc. Regenerated by `make registry-docs`, checked
 # fresh by TestCommittedRegistryEgressDocFresh under `make test`.
@@ -453,7 +596,7 @@ REGISTRY_DOC_PATH := docs/contributor/registry-egress.md
 
 .PHONY: registry-docs
 registry-docs: ## Regenerates $(REGISTRY_DOC_PATH) from the live build/CI sources
-	@GOFLAGS="-mod=vendor" go run ./tools/registry-inventory \
+	@GOFLAGS="-mod=readonly" go run ./tools/registry-inventory \
 	  -repo-root "$(CURDIR)" -doc-out "$(REGISTRY_DOC_PATH)"
 
 # Path of the committed recipe-health matrix doc. Regenerated by
@@ -468,7 +611,7 @@ HEALTH_DOC_PATH := docs/user/recipe-health.md
 SUMMARY_OUT ?= /dev/stdout
 
 .PHONY: recipe-health-docs
-recipe-health-docs: ## Regenerates the auto-generated section of $(HEALTH_DOC_PATH) from the recipe catalog (hermetic, no network)
+recipe-health-docs: ## Regenerates the auto-generated section of $(HEALTH_DOC_PATH) from the recipe catalog
 	@set -e; \
 	if [ ! -f $(HEALTH_DOC_PATH) ]; then \
 	   echo "ERROR: $(HEALTH_DOC_PATH) does not exist; cannot splice." >&2; exit 1; \
@@ -479,8 +622,8 @@ recipe-health-docs: ## Regenerates the auto-generated section of $(HEALTH_DOC_PA
 	fi; \
 	TMP="$$(mktemp -d)"; \
 	trap 'rm -rf "$$TMP"' EXIT; \
-	echo "Regenerating auto-generated section of $(HEALTH_DOC_PATH) (hermetic, no network)..."; \
-	GOFLAGS="-mod=vendor" go run ./tools/health \
+	echo "Regenerating auto-generated section of $(HEALTH_DOC_PATH)..."; \
+	GOFLAGS="-mod=readonly" go run ./tools/health \
 	  -out-dir "$$TMP" \
 	  -aicr-version "main" \
 	  -deterministic \
@@ -498,7 +641,7 @@ recipe-health-summary: ## Renders the per-dimension structural detail to $(SUMMA
 	@set -e; \
 	TMP="$$(mktemp -d)"; \
 	trap 'rm -rf "$$TMP"' EXIT; \
-	GOFLAGS="-mod=vendor" go run ./tools/health \
+	GOFLAGS="-mod=readonly" go run ./tools/health \
 	  -out-dir "$$TMP" \
 	  -summary-out "$(SUMMARY_OUT)" \
 	  -aicr-version "main" \
@@ -517,11 +660,11 @@ recipe-health-check: ## Verifies $(HEALTH_DOC_PATH) is up to date with the recip
 	echo "$(HEALTH_DOC_PATH) is up to date"
 
 # Path of the committed nodewright tuning-status doc. Regenerated by
-# `make tuning-docs`, checked-fresh by `make tuning-check`. Hermetic (no network).
+# `make tuning-docs`, checked-fresh by `make tuning-check`.
 TUNING_DOC_PATH := docs/integrator/components/nodewright.md
 
 .PHONY: tuning-docs
-tuning-docs: ## Regenerates the auto-generated tuning-status table in $(TUNING_DOC_PATH) from the recipe catalog (hermetic, no network)
+tuning-docs: ## Regenerates the auto-generated tuning-status table in $(TUNING_DOC_PATH) from the recipe catalog
 	@set -e; \
 	if [ ! -f $(TUNING_DOC_PATH) ]; then \
 	   echo "ERROR: $(TUNING_DOC_PATH) does not exist; cannot splice." >&2; exit 1; \
@@ -532,8 +675,8 @@ tuning-docs: ## Regenerates the auto-generated tuning-status table in $(TUNING_D
 	fi; \
 	TMP="$$(mktemp -d)"; \
 	trap 'rm -rf "$$TMP"' EXIT; \
-	echo "Regenerating tuning-status table in $(TUNING_DOC_PATH) (hermetic, no network)..."; \
-	GOFLAGS="-mod=vendor" go run ./tools/tuning \
+	echo "Regenerating tuning-status table in $(TUNING_DOC_PATH)..."; \
+	GOFLAGS="-mod=readonly" go run ./tools/tuning \
 	  -out-dir "$$TMP" \
 	  -aicr-version "main" \
 	  -deterministic \
@@ -561,7 +704,7 @@ tuning-check: ## Verifies $(TUNING_DOC_PATH) tuning-status table is up to date (
 server: ## Starts a local development server with debug logging
 	@set -e; \
 	echo "Starting local development server..."; \
-	GOFLAGS="-mod=vendor" LOG_LEVEL=debug go run cmd/aicrd/main.go
+	GOFLAGS="-mod=readonly" LOG_LEVEL=debug go run cmd/aicrd/main.go
 
 .PHONY: docs
 docs: ## Serves Go documentation on http://localhost:6060
@@ -574,7 +717,7 @@ docs: ## Serves Go documentation on http://localhost:6060
 .PHONY: testgrid-publish
 testgrid-publish: ## Build testgrid-publish binary to ./dist/testgrid-publish
 	@mkdir -p ./dist
-	GOFLAGS="-mod=vendor" go build -o ./dist/testgrid-publish ./tools/testgrid-publish
+	GOFLAGS="-mod=readonly" go build -o ./dist/testgrid-publish ./tools/testgrid-publish
 
 .PHONY: testgrid-publish-dryrun
 testgrid-publish-dryrun: testgrid-publish ## Dry-run testgrid-publish against BUNDLE_DIR (usage: make testgrid-publish-dryrun BUNDLE_DIR=<path>)
@@ -593,13 +736,20 @@ image: ## Builds and pushes container image (IMAGE_REGISTRY, IMAGE_TAG)
 	echo "Building and pushing image to $(IMAGE_REGISTRY)/aicr:$(IMAGE_TAG)"; \
 	KO_DOCKER_REPO=$(IMAGE_REGISTRY) ko build --bare --sbom=none --tags=$(IMAGE_TAG) ./cmd/aicr
 
+.PHONY: validator-binaries
+validator-binaries: ## Builds Linux validator binaries (VALIDATOR_PHASES, VALIDATOR_ARCHES)
+	@VALIDATOR_PHASES="$(VALIDATOR_PHASES)" VALIDATOR_ARCHES="$(VALIDATOR_ARCHES)" \
+		./tools/build-validator-binaries
+
 .PHONY: image-validators
 image-validators: build ## Builds per-phase validator images (IMAGE_REGISTRY, IMAGE_TAG)
 	@set -e; \
+	arch="$$(go env GOARCH)"; \
+	VALIDATOR_ARCHES="$${arch}" ./tools/build-validator-binaries; \
 	for phase in deployment performance conformance; do \
 		echo "Building validator image: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
 		docker build -f validators/$${phase}/Dockerfile \
-			--build-arg GO_VERSION=$(GO_VERSION) \
+			--build-arg TARGETARCH=$${arch} \
 			-t $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG) .; \
 		if [ -n "$(IMAGE_REGISTRY)" ] && [ "$(IMAGE_REGISTRY)" != "localhost:5005" ]; then \
 			echo "Pushing: $(IMAGE_REGISTRY)/aicr-validators/$${phase}:$(IMAGE_TAG)"; \
@@ -634,25 +784,44 @@ check-health: ## Runs chainsaw health check directly against Kind cluster (COMPO
 	chainsaw test --test-dir "recipes/checks/$(COMPONENT)/" --test-file health-check.yaml --no-color
 
 .PHONY: check-health-all
-check-health-all: ## Runs all chainsaw health checks against Kind cluster
+# Iterates registry.yaml's healthCheck.assertFile entries, not a raw glob of
+# recipes/checks/*/: this is the set every shipped recipe actually exercises,
+# so opt-in-only checks (e.g. nvsentinel-observability) are excluded by
+# construction -- run those directly via `make check-health COMPONENT=<name>`.
+# --test-dir/--test-file are derived from each declared path rather than
+# reconstructed from a component name, so a non-conventional assertFile
+# (e.g. checks/shared/foo.yaml) is honored as declared.
+#
+# yq's exit status is captured separately from the pipeline that follows:
+# without `set -o pipefail`, a failing yq piped straight into the loop would
+# silently yield zero components and a false "All health checks passed".
+# The empty-list check below is a second guard against the same outcome.
+check-health-all: ## Runs chainsaw health checks for every registry-linked component against Kind cluster
 	@set -e; \
 	FAILED=""; \
-	for dir in recipes/checks/*/; do \
-		COMPONENT=$$(basename "$$dir"); \
-		echo "=== $$COMPONENT ==="; \
-		if chainsaw test --test-dir "$$dir" --test-file health-check.yaml --no-color; then \
-			echo "PASS: $$COMPONENT"; \
+	ASSERT_FILES=$$(yq -r '.components[].healthCheck.assertFile' recipes/registry.yaml) || { echo "Error: yq failed to read recipes/registry.yaml"; exit 1; }; \
+	PATHS=$$(printf '%s\n' "$$ASSERT_FILES" | grep -v '^null$$' | sort -u); \
+	if [ -z "$$PATHS" ]; then \
+		echo "Error: no registry-linked health checks found in recipes/registry.yaml -- refusing to report success on zero checks"; \
+		exit 1; \
+	fi; \
+	for ASSERT in $$PATHS; do \
+		dir="recipes/$$(dirname "$$ASSERT")/"; \
+		file="$$(basename "$$ASSERT")"; \
+		echo "=== $$ASSERT ==="; \
+		if chainsaw test --test-dir "$$dir" --test-file "$$file" --no-color; then \
+			echo "PASS: $$ASSERT"; \
 		else \
-			echo "FAIL: $$COMPONENT"; \
-			FAILED="$$FAILED $$COMPONENT"; \
+			echo "FAIL: $$ASSERT"; \
+			FAILED="$$FAILED $$ASSERT"; \
 		fi; \
 		echo ""; \
 	done; \
 	if [ -n "$$FAILED" ]; then \
-		echo "Failed components:$$FAILED"; \
+		echo "Failed checks:$$FAILED"; \
 		exit 1; \
 	fi; \
-	echo "All health checks passed"
+	echo "All registry-linked health checks passed"
 
 .PHONY: validate-local
 validate-local: image-validators ## Builds validator images and runs validation in Kind (RECIPE=<path>)
@@ -687,19 +856,22 @@ python-licenses: ## Refreshes the committed Python license section for the aiper
 notices: ## Generates THIRD_PARTY_NOTICES.md aggregating every dependency's license
 	@bash tools/generate-notices
 
-.PHONY: notices-check
-notices-check: ## Verifies THIRD_PARTY_NOTICES.md is up to date (run by the merge-gate on dependency changes)
-	@set -e; \
-	$(MAKE) notices; \
-	if ! git diff --quiet -- THIRD_PARTY_NOTICES.md; then \
-	   echo "ERROR: THIRD_PARTY_NOTICES.md is stale. Run 'make notices' and commit the change." >&2; \
-	   git --no-pager diff --stat -- THIRD_PARTY_NOTICES.md >&2; \
-	   exit 1; \
-	fi; \
-	echo "THIRD_PARTY_NOTICES.md is up to date"
-
+# `notices` is a prerequisite so the THIRD_PARTY_NOTICES.md that goreleaser
+# attaches is generated from the tag being released, not inherited from whatever
+# happened to be committed. OSRB requires the notices published with a release to
+# match that release; nothing requires the source tree to be current between
+# releases, so this is the only place the guarantee has to hold.
+#
+# .goreleaser.yaml's release.extra_files globs the file from the repo root, and
+# --clean only wipes dist/, so it survives the run.
+#
+# The file is gitignored, so regenerating it leaves the tree clean and
+# goreleaser's dirty-state validation is unaffected. That is why it must stay
+# untracked: were it tracked, a regeneration that differed from the committed
+# copy would abort the release with "git is currently in a dirty state", which
+# names neither the file nor the cause.
 .PHONY: release
-release: ## Runs the full release process with goreleaser
+release: notices ## Runs the full release process with goreleaser (regenerates THIRD_PARTY_NOTICES.md first)
 	@set -e; \
 	goreleaser release --clean --config .goreleaser.yaml --fail-fast --timeout 60m0s
 
@@ -1125,8 +1297,7 @@ help-full: ## Displays commands grouped by category
 	@echo "\033[1m=== Build & Release ===\033[0m"
 	@echo "  make build          Build binaries for current OS/arch"
 	@echo "  make image          Build and push container image"
-	@echo "  make notices        Generate THIRD_PARTY_NOTICES.md from Go deps"
-	@echo "  make notices-check  Verify THIRD_PARTY_NOTICES.md is up to date"
+	@echo "  make notices        Generate THIRD_PARTY_NOTICES.md from Go deps (untracked; made by 'make release')"
 	@echo "  make release        Full release with goreleaser"
 	@echo "  make bump-rc        Tag RC pre-release (v1.2.3 -> v1.3.0-rc1)"
 	@echo "  make bump-promote   Promote RC to stable (TAG=v1.2.4-rc1)"

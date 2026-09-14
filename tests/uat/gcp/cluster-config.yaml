@@ -59,8 +59,9 @@ network:
       # consumes the gVNIC network. See docs/integrator/gke-tcpxo-networking.md.
     firewallRules:
       # Allows all intra-VPC TCP/UDP/ICMP from 10.0.0.0/8, which covers node
-      # subnets and the GKE pod secondary ranges. NATS (4222) is already
-      # permitted by this rule, so no dedicated allow-nats rule is needed.
+      # subnets and the GKE pod secondary ranges — including Dynamo's TCP
+      # request plane and its fixed ZMQ KV-event port (5557), so no
+      # per-service rule is needed.
       - name: nccl-internal
         direction: INGRESS
         priority: 900
@@ -139,6 +140,6 @@ compute:
               # 30930940652). The pool matches the gpuStack profile's
               # gke-default default (#1761 PR 3), whose constraint requires
               # the label ABSENT on every GPU node; the label belongs only
-              # to the driver-installer value, paired with a label-surviving
-              # driver path (gpu-driver-version=disabled + Google's
-              # standalone nvidia-driver-installer DaemonSet).
+              # to the bundle-installer value, paired with a label-surviving
+              # driver path (gpu-driver-version=disabled + the bundle's
+              # gcp-driver-installer DaemonSet).

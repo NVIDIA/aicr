@@ -29,29 +29,18 @@ fi
 
 : "${KIND_CLUSTER_NAME:?KIND_CLUSTER_NAME must be set}"
 
-mkdir -p dist/validator
-for phase in ${PHASES//,/ }; do
-  if ! [[ "${phase}" =~ ^[a-z][a-z0-9_-]*$ ]]; then
-    echo "::error::invalid validator phase '${phase}'; expected ^[a-z][a-z0-9_-]*$"
-    exit 1
-  fi
-  echo "Building validator binary: ${phase}"
-  CGO_ENABLED=0 go build -trimpath -o "dist/validator/${phase}" "./validators/${phase}"
-done
+TARGET_ARCH="$(go env GOARCH)"
+VALIDATOR_PHASES="${PHASES}" VALIDATOR_ARCHES="${TARGET_ARCH}" \
+  ./tools/build-validator-binaries
 
 for phase in ${PHASES//,/ }; do
   if [[ ! -d "validators/${phase}/testdata" ]]; then
     echo "::error::validators/${phase}/testdata is missing"
     exit 1
   fi
-  docker build -t "ko.local/aicr-validators/${phase}:latest" -f - . <<DOCKERFILE
-FROM nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
-COPY dist/validator/${phase} /${phase}
-COPY validators/${phase}/testdata /app/testdata
-WORKDIR /app
-USER nvs
-ENTRYPOINT ["/${phase}"]
-DOCKERFILE
+  docker build --build-arg "TARGETARCH=${TARGET_ARCH}" \
+    -t "ko.local/aicr-validators/${phase}:latest" \
+    -f "validators/${phase}/Dockerfile" .
   timeout 600 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}" || {
     echo "::warning::kind load attempt 1 failed for ko.local/aicr-validators/${phase}:latest, retrying..."
     timeout 600 kind load docker-image "ko.local/aicr-validators/${phase}:latest" --name "${KIND_CLUSTER_NAME}"

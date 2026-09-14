@@ -50,8 +50,8 @@ func TestCheckSecureAcceleratorAccess_PolicyForcesDevicePluginPath(t *testing.T)
 		DynamicClient: newDRAFakeDynamicClient(
 			testDeviceClass(draDriverGPU),
 			testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-				map[string]interface{}{"nodeName": "node1"},
-				[]interface{}{plainDevice("gpu-0")}),
+				map[string]any{"nodeName": "node1"},
+				[]any{plainDevice("gpu-0")}),
 		),
 		ValidationInput: policyInput(v1.GPUAllocationPolicyDevicePluginExtendedResource),
 	}
@@ -84,8 +84,8 @@ func TestCheckSecureAcceleratorAccess_PolicyDRAForcesDRAPath(t *testing.T) {
 		DynamicClient: newDRAFakeDynamicClient(
 			testDeviceClass(draDriverGPU),
 			testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-				map[string]interface{}{"nodeName": "node1"},
-				[]interface{}{plainDevice("gpu-0")}),
+				map[string]any{"nodeName": "node1"},
+				[]any{plainDevice("gpu-0")}),
 		),
 		ValidationInput: policyInput(v1.GPUAllocationPolicyDRAResourceClaim),
 	}
@@ -141,8 +141,8 @@ func TestCheckSecureAcceleratorAccess_PolicyMismatchFailsClosed(t *testing.T) {
 				dynClient = newDRAFakeDynamicClient(
 					testDeviceClass(draDriverGPU),
 					testResourceSlice("s1", draDriverGPU, "node1", 1, 1,
-						map[string]interface{}{"nodeName": "node1"},
-						[]interface{}{plainDevice("gpu-0")}),
+						map[string]any{"nodeName": "node1"},
+						[]any{plainDevice("gpu-0")}),
 				)
 			}
 			ctx := &validators.Context{
@@ -198,8 +198,8 @@ func TestCheckDRASupport_PolicyClaimRequiresFullGPUDRA(t *testing.T) {
 				Clientset: client,
 				DynamicClient: newDRAFakeDynamicClient(
 					testResourceSlice("cd-1", draDriverComputeDomain, "node1", 1, 1,
-						map[string]interface{}{"nodeName": "node1"},
-						[]interface{}{plainDevice("channel-0")}),
+						map[string]any{"nodeName": "node1"},
+						[]any{plainDevice("channel-0")}),
 				),
 				ValidationInput: input,
 			}
@@ -284,8 +284,8 @@ func TestCheckDRASupport_PolicySelectsSubtestMechanism(t *testing.T) {
 				DynamicClient: newDRAFakeDynamicClient(
 					testDeviceClass(draDriverGPU),
 					testResourceSlice("gpu-1", draDriverGPU, "node1", 1, 1,
-						map[string]interface{}{"nodeName": "node1"},
-						[]interface{}{plainDevice("gpu-0")}),
+						map[string]any{"nodeName": "node1"},
+						[]any{plainDevice("gpu-0")}),
 				),
 				ValidationInput: input,
 			}

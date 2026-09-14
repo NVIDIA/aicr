@@ -204,7 +204,7 @@ func parseBOMVersionTable(section string) (map[string]string, error) {
 	nameCol, verCol := -1, -1
 	inTable := false
 
-	for _, line := range strings.Split(section, "\n") {
+	for line := range strings.SplitSeq(section, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if !strings.HasPrefix(trimmed, "|") {
 			// A blank/non-table line ends the current table; reset so a later
@@ -422,7 +422,7 @@ func parseBOMVariantsTable(section string) (map[variantKey]string, bool, error) 
 	underHeading := false
 	headings, tables := 0, 0
 
-	for _, line := range strings.Split(section, "\n") {
+	for line := range strings.SplitSeq(section, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.EqualFold(trimmed, sectionHeading) {
 			headings++

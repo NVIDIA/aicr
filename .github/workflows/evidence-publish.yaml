@@ -31,6 +31,13 @@
 # declaration default, and intent/platform are author-selected (not in
 # the fingerprint), so state the target leaf's intent and optional
 # platform explicitly.
+#
+# The h100 GKE kubeflow training leaf also ships torch-distributed-tcpxo,
+# which requires the ordered GPU-NIC interface mapping. Overlay-direct
+# `validate`/`bundle`/`evidence digest` on it fails closed (auto-hydration
+# supplies no mapping), so hydrate the recipe first and add
+# `--gke-tcpxo-interfaces eth1=<net>,...,eth8=<net>` (or set
+# spec.recipe.configuration.gke.tcpxoInterfaces in --config).
 # See docs/contributor/evidence-publishing.md.
 #
 # They then run THIS workflow from their fork's Actions tab. It scans every
@@ -138,8 +145,6 @@ jobs:
           cache: false
 
       - name: Build aicr
-        env:
-          GOFLAGS: -mod=vendor
         run: |
           # Verify the vendored dependency tree against go.sum before building
           # the binary that will sign with the runner's OIDC identity.

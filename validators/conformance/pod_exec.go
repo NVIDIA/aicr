@@ -128,8 +128,7 @@ func execPodCommand(
 		return result, nil
 	}
 
-	var exitErr k8sexec.ExitError
-	if stderrors.As(streamErr, &exitErr) {
+	if exitErr, ok := stderrors.AsType[k8sexec.ExitError](streamErr); ok {
 		result.ExitCode = exitErr.ExitStatus()
 		return result, nil
 	}

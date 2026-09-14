@@ -23,6 +23,7 @@ import (
 	stderrors "errors"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"sort"
@@ -372,7 +373,7 @@ func (s *rootOCIStore) ensureDirectory(name string, mode fs.FileMode) error {
 		return apperrors.Wrap(apperrors.ErrCodeInternal, "failed to create local OCI directory", err)
 	}
 	current := ""
-	for _, component := range strings.Split(name, "/") {
+	for component := range strings.SplitSeq(name, "/") {
 		current = path.Join(current, component)
 		info, err := s.deps.lstat(s.root, current)
 		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
@@ -540,9 +541,7 @@ func cloneRootStoreDescriptor(desc ociv1.Descriptor) ociv1.Descriptor {
 	clone := desc
 	if desc.Annotations != nil {
 		clone.Annotations = make(map[string]string, len(desc.Annotations))
-		for key, value := range desc.Annotations {
-			clone.Annotations[key] = value
-		}
+		maps.Copy(clone.Annotations, desc.Annotations)
 	}
 	if desc.URLs != nil {
 		clone.URLs = append([]string(nil), desc.URLs...)

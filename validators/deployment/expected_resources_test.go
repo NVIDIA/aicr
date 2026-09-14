@@ -23,6 +23,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
+	"github.com/NVIDIA/aicr/validators/helper"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -591,6 +592,77 @@ func TestCheckExpectedResources_IgnoresUnrelatedDaemonSetInNamespace(t *testing.
 	if err := checkExpectedResources(ctx); err != nil {
 		t.Fatalf("checkExpectedResources() error = %v, want nil — unrelated DaemonSet must be ignored", err)
 		return
+	}
+}
+
+// TestCheckExpectedResources_NodewrightLiveness pins that readiness keys on the
+// declared CR being live, not merely on some Skyhook reporting complete.
+//
+// The component health check's assert is deliberately name-agnostic, so a stale
+// or unrelated live complete Skyhook satisfies it on its own. Only this
+// per-name check binds liveness to the CR the recipe actually declared, so a
+// Terminating CR must fail even while it still reports complete — Nodewright
+// uses a deletion finalizer, so that state persists. Passing there would be a
+// false PASS on state about to disappear, the same direction the Chainsaw
+// executor guards by skipping ghosts on positive assertions (#2041).
+//
+// The live row is the control: without it a gate that rejected everything would
+// still satisfy the terminating row.
+func TestCheckExpectedResources_NodewrightLiveness(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		nodewrights []runtime.Object
+		wantErr     bool
+		wantNeedles []string
+	}{
+		{
+			name: "terminating declared CR fails despite a stale live complete CR",
+			nodewrights: []runtime.Object{
+				nodewrightTerminatingWithStatus("no-op", "complete"),
+				nodewrightWithStatus("some-other-skyhook", "complete"),
+			},
+			wantErr:     true,
+			wantNeedles: []string{"no-op", "terminating"},
+		},
+		{
+			name:        "live complete declared CR passes",
+			nodewrights: []runtime.Object{nodewrightWithStatus("no-op", "complete")},
+			wantErr:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := newDeploymentTestContext(t,
+				[]runtime.Object{activeNamespace("skyhook")},
+				tt.nodewrights,
+				[]recipe.ComponentRef{
+					{
+						Name:      nodewrightCustomizationsComponent,
+						Namespace: "skyhook",
+						ManifestFiles: []string{
+							"components/nodewright-customizations/manifests/no-op.yaml",
+						},
+					},
+				},
+			)
+
+			err := checkExpectedResources(ctx)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("checkExpectedResources() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			for _, needle := range tt.wantNeedles {
+				if !strings.Contains(err.Error(), needle) {
+					t.Fatalf("expected %q in failure, got: %v", needle, err)
+					return
+				}
+			}
+		})
 	}
 }
 
@@ -1337,18 +1409,30 @@ func nodeWithRuntimeRequiredTaint(name string) *corev1.Node {
 
 // nodewrightWithStatus builds a Nodewright fixture. Nodewright is a cluster-scoped CR,
 // so metadata.namespace is intentionally not set.
+// nodewrightTerminatingWithStatus builds a Skyhook that is mid-deletion
+// (deletionTimestamp set, as Nodewright's finalizer leaves it) while still
+// reporting the given status. The combination is the trap: status.status alone
+// says "ready" about a CR that is on its way out.
+func nodewrightTerminatingWithStatus(name, status string) *unstructured.Unstructured {
+	sk := nodewrightWithStatus(name, status)
+	meta, _ := sk.Object["metadata"].(map[string]interface{})
+	meta["deletionTimestamp"] = "2026-01-01T00:00:00Z"
+	meta["finalizers"] = []interface{}{"skyhook.nvidia.com/finalizer"}
+	return sk
+}
+
 func nodewrightWithStatus(name, status string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			"apiVersion": "skyhook.nvidia.com/v1alpha1",
 			"kind":       "Skyhook",
-			"metadata": map[string]interface{}{
+			"metadata": map[string]any{
 				"name": name,
-				"labels": map[string]interface{}{
+				"labels": map[string]any{
 					testAICRCreatedByLabelKey: testAICRCreatedByLabelValue,
 				},
 			},
-			"status": map[string]interface{}{
+			"status": map[string]any{
 				"status": status,
 			},
 		},
@@ -1483,7 +1567,7 @@ func TestRDMAFabricProbeCoverage_DisclosesCordoned(t *testing.T) {
 	)
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err != nil {
 		t.Fatalf("rdmaFabricProbeCoverage() error = %v, want nil (the one schedulable RDMA node carries the fabric)", err)
 	}
@@ -1512,7 +1596,7 @@ func TestRDMAFabricProbeCoverage_CountsCordonedOnFailClosed(t *testing.T) {
 	)
 	ctx := &validators.Context{Ctx: context.Background(), Clientset: clientset}
 
-	cov, err := rdmaFabricProbeCoverage(ctx)
+	cov, err := rdmaFabricProbeCoverage(ctx, helper.AKSRdmaSharedResource)
 	if err == nil {
 		t.Fatal("expected a fail-closed error while the fabric is absent, got nil")
 	}
@@ -1525,4 +1609,116 @@ func TestRDMAFabricProbeCoverage_CountsCordonedOnFailClosed(t *testing.T) {
 	if got := cov.total(); got != 2 {
 		t.Errorf("total() = %d, want 2 (cordoned counted even on failure)", got)
 	}
+}
+
+// TestGatedHealthCheckSuppressed pins the render-aware static-assert
+// suppression dispatch for values-gated components: the gcp-driver-installer
+// health check is skipped exactly when the effective values gate the render
+// off, other components' asserts queue unconditionally, and render/read
+// failures propagate rather than being read as "nothing to assert".
+func TestGatedHealthCheckSuppressed(t *testing.T) {
+	t.Parallel()
+
+	installerManifest := "components/gcp-driver-installer/manifests/nvidia-driver-installer.yaml"
+	tests := []struct {
+		name           string
+		ref            recipe.ComponentRef
+		wantSuppressed bool
+		wantErr        bool
+	}{
+		{
+			name: "installer gated off (default values) suppresses the assert",
+			ref: recipe.ComponentRef{
+				Name:          "gcp-driver-installer",
+				Type:          recipe.ComponentTypeHelm,
+				ValuesFile:    "components/gcp-driver-installer/values.yaml",
+				ManifestFiles: []string{installerManifest},
+			},
+			wantSuppressed: true,
+		},
+		{
+			// A wholesale override can drop the gate key entirely; the
+			// template must fail closed to not-rendering, never panic.
+			name: "missing gate key renders nothing and suppresses",
+			ref: recipe.ComponentRef{
+				Name:          "gcp-driver-installer",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{installerManifest},
+			},
+			wantSuppressed: true,
+		},
+		{
+			name: "installer gated on renders objects and keeps the assert",
+			ref: recipe.ComponentRef{
+				Name:          "gcp-driver-installer",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{installerManifest},
+				Overrides: map[string]any{
+					"installer": map[string]any{"enabled": true},
+				},
+			},
+			wantSuppressed: false,
+		},
+		{
+			name: "no manifests leaves the assert in place",
+			ref: recipe.ComponentRef{
+				Name: "gcp-driver-installer",
+				Type: recipe.ComponentTypeHelm,
+			},
+			wantSuppressed: false,
+		},
+		{
+			name: "unreadable manifest fails closed",
+			ref: recipe.ComponentRef{
+				Name:          "gcp-driver-installer",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{"components/gcp-driver-installer/manifests/no-such-file.yaml"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "non-gated component queues unconditionally",
+			ref: recipe.ComponentRef{
+				Name:          "gpu-operator",
+				Type:          recipe.ComponentTypeHelm,
+				ManifestFiles: []string{installerManifest},
+			},
+			wantSuppressed: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			suppressed, reason, err := gatedHealthCheckSuppressed(t.Context(), tt.ref)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("gatedHealthCheckSuppressed() error = nil, want failure")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("gatedHealthCheckSuppressed() error = %v", err)
+			}
+			if suppressed != tt.wantSuppressed {
+				t.Errorf("suppressed = %v, want %v", suppressed, tt.wantSuppressed)
+			}
+			if suppressed && reason == "" {
+				t.Error("suppressed with an empty reason — operators need the why")
+			}
+		})
+	}
+
+	t.Run("canceled context stops manifest evaluation", func(t *testing.T) {
+		t.Parallel()
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, _, err := gatedHealthCheckSuppressed(ctx, recipe.ComponentRef{
+			Name:          "gcp-driver-installer",
+			Type:          recipe.ComponentTypeHelm,
+			ManifestFiles: []string{installerManifest},
+		})
+		if err == nil {
+			t.Fatal("gatedHealthCheckSuppressed() error = nil, want cancellation")
+		}
+	})
 }

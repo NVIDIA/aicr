@@ -31,6 +31,16 @@ func TestGroupVersion(t *testing.T) {
 	if want := APIGroup + "/" + APIVersionV1Alpha2; GroupVersion != want {
 		t.Errorf("GroupVersion = %q, want %q", GroupVersion, want)
 	}
+	versions := map[string]string{
+		GroupVersionV1:      APIGroup + "/" + APIVersionV1,
+		GroupVersionV1Beta1: APIGroup + "/" + APIVersionV1Beta1,
+		GroupVersionV1Beta2: APIGroup + "/" + APIVersionV1Beta2,
+	}
+	for got, want := range versions {
+		if got != want {
+			t.Errorf("target group/version = %q, want %q", got, want)
+		}
+	}
 }
 
 func TestIsSupportedAPIVersion(t *testing.T) {
@@ -42,6 +52,9 @@ func TestIsSupportedAPIVersion(t *testing.T) {
 		want bool
 	}{
 		{"current", "aicr.run/v1alpha2", true},
+		{"target", "aicr.run/v1", true},
+		{"authoring target rejected", "aicr.run/v1beta1", false},
+		{"profile target rejected", "aicr.run/v1beta2", false},
 		{"old group+version rejected", "aicr.nvidia.com/v1alpha1", false},
 		{"old group new version rejected", "aicr.nvidia.com/v1alpha2", false},
 		{"new group old version rejected", "aicr.run/v1alpha1", false},
@@ -58,6 +71,45 @@ func TestIsSupportedAPIVersion(t *testing.T) {
 	}
 }
 
+func TestSchemaTrackAPIVersions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name     string
+		check    func(string) bool
+		accepted []string
+		rejected []string
+	}{
+		{
+			name:     "authoring",
+			check:    IsSupportedAuthoringAPIVersion,
+			accepted: []string{GroupVersion, GroupVersionV1Beta1},
+			rejected: []string{"", GroupVersionV1, RecipeResultGroupVersion, GroupVersionV1Beta2},
+		},
+		{
+			name:     "profile",
+			check:    IsSupportedProfileAPIVersion,
+			accepted: []string{RecipeResultGroupVersion, GroupVersionV1Beta2},
+			rejected: []string{"", GroupVersion, GroupVersionV1, GroupVersionV1Beta1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			for _, version := range tt.accepted {
+				if !tt.check(version) {
+					t.Errorf("%s track rejected %q", tt.name, version)
+				}
+			}
+			for _, version := range tt.rejected {
+				if tt.check(version) {
+					t.Errorf("%s track accepted %q", tt.name, version)
+				}
+			}
+		})
+	}
+}
+
 func TestIsSupportedRecipeResultAPIVersion(t *testing.T) {
 	t.Parallel()
 
@@ -67,6 +119,9 @@ func TestIsSupportedRecipeResultAPIVersion(t *testing.T) {
 	}{
 		{version: GroupVersion, want: true},
 		{version: RecipeResultGroupVersion, want: true},
+		{version: GroupVersionV1, want: true},
+		{version: GroupVersionV1Beta2, want: true},
+		{version: GroupVersionV1Beta1, want: false},
 		{version: "", want: false},
 		{version: "aicr.run/v1alpha4", want: false},
 	}

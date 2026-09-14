@@ -1,0 +1,8 @@
+README.md
+cert-manager/helmrelease.yaml
+checksums.txt
+kustomization.yaml
+nfd/helmrelease.yaml
+sources/gitrepo-github-com-your-org-your-repo.yaml
+sources/helmrepo-charts-jetstack-io.yaml
+sources/helmrepo-kubernetes-sigs-github-io-node-feature-discovery-charts.yaml

@@ -24,6 +24,14 @@ exclude:
   # go.mod files resurface already-fixed module findings. Local-only (CI
   # scans a fresh checkout, so this path never exists there).
   - './.claude/worktrees/**'
+  # `make notices` scratch tree — same failure mode, new cause. Since #2374
+  # removed vendor/, go-licenses collects from the Go module cache, and those
+  # copies carry each upstream module's OWN go.mod (vendored copies did not:
+  # `go mod vendor` prunes them). Grype catalogs those manifests and reports
+  # dependency versions this repo does not build — golang.org/x/crypto v0.17.0
+  # and v0.45.0 surfaced this way while go.mod pins v0.55.0. Gitignored and
+  # local-only, like the worktrees above.
+  - './.licenses-cache/**'
 
 # CVE suppressions for the aiperf-bench image are managed in
 # `.openvex.json` and consumed by scan-action via the `vex:` input in
@@ -31,15 +39,18 @@ exclude:
 # carries the structured status + justification + per-CVE
 # reachability evidence and is self-sufficient for suppression.
 # The image builds on python:3.13-slim (Debian trixie) and ships on
-# nvcr.io/nvidia/distroless/python:3.13-v4.0.8, so suppressed findings
-# come from CPython, pillow, and Debian libraries in that runtime base.
+# nvcr.io/nvidia/distroless/python:3.13-v4.1.2, so suppressed findings
+# now come from pillow and aiohttp in the copied venv only. The v4.1.2
+# bump (from v4.1.1) moved openssl 3.5.6-1~deb13u2 -> 3.5.7-1~deb13u2,
+# which retired all 7 openssl statements; the v4.1.1 bump (from v4.0.8)
+# had retired 24 libexpat1/CPython ones the same way.
 #
 # When scanning the aiperf-bench image locally, pass `--vex
 # .openvex.json` alongside `-c .grype.yaml`. Scans of the AICR Go
 # source tree (`make scan` → `grype dir:.`) don't need VEX since the
 # suppressed CVEs are all in Python / glibc / libcap2 / ncurses /
 # pillow / libexpat1 and never surface against Go source.
-# Reviewed: 2026-08-03
+# Reviewed: 2026-09-03
 
 # Go-source suppressions (accepted risk, not "not affected").
 #

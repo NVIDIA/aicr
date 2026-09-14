@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -276,12 +277,7 @@ func isOpenSourceRanges(ranges []string) bool {
 	if len(ranges) == 0 {
 		return true
 	}
-	for _, r := range ranges {
-		if netutil.IsAnySourceCIDR(r) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(ranges, netutil.IsAnySourceCIDR)
 }
 
 // gatewayControlPlaneNameMarkers identify co-located agentgateway control-plane
@@ -347,7 +343,7 @@ func validateGatewayDataPlane(ctx *validators.Context) (*gatewayDataPlaneReport,
 		if found {
 			report.ListenerCount = len(listeners)
 			for _, l := range listeners {
-				if lMap, ok := l.(map[string]interface{}); ok {
+				if lMap, ok := l.(map[string]any); ok {
 					name, _, _ := unstructured.NestedString(lMap, "name")
 					attached, _, _ := unstructured.NestedInt64(lMap, "attachedRoutes")
 					report.AttachedHTTPRoutes += int(attached)
@@ -369,7 +365,7 @@ func validateGatewayDataPlane(ctx *validators.Context) (*gatewayDataPlaneReport,
 				continue
 			}
 			for _, ref := range parentRefs {
-				if refMap, ok := ref.(map[string]interface{}); ok {
+				if refMap, ok := ref.(map[string]any); ok {
 					name, _, _ := unstructured.NestedString(refMap, "name")
 					if name == "inference-gateway" {
 						attached++

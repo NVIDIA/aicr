@@ -112,6 +112,9 @@ func TestStockRenderParityGolden(t *testing.T) {
 	}
 
 	if os.Getenv("AICR_UPDATE_GOLDEN") == "1" {
+		if t.Failed() {
+			t.Fatal("not writing golden: one or more leaves failed to resolve or render (see errors above)")
+		}
 		writeStockRenderGolden(t, got)
 		t.Logf("golden updated: %d leaves", len(got))
 		return
@@ -163,6 +166,7 @@ func renderLeafDigest(ctx context.Context, t *testing.T, rr *recipe.RecipeResult
 		// Suppresses wall-clock timestamps and derives attestation
 		// invocation IDs, without which two runs never agree.
 		config.WithDeterministic(true),
+		config.WithSystemNodeSelector(map[string]string{"nodeGroup": "system"}),
 		config.WithAcceleratedNodeSelector(map[string]string{"nvidia.com/gpu.present": "true"}),
 		config.WithAcceleratedNodeTolerations([]corev1.Toleration{{
 			Key:      "nvidia.com/gpu",

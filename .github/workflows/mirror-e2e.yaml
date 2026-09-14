@@ -74,7 +74,7 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version: ${{ steps.versions.outputs.go }}
-          cache: false  # vendor/ provides deps
+          cache: false  # This isolated E2E lane does not reuse Go caches
 
       - name: Prep runner for Kind
         uses: ./.github/actions/prep-kind-runner
@@ -116,8 +116,6 @@ jobs:
           zarf_version: '${{ steps.versions.outputs.zarf }}'
 
       - name: Run mirror E2E
-        env:
-          GOFLAGS: -mod=vendor
         run: |
           make mirror-e2e
 

@@ -126,6 +126,8 @@ This is the same shape `dynamo-platform` uses across the `*-inference-dynamo` le
 
 When authoring a recipe targeting Talos (`criteria.os: talos`), append the `os-talos` mixin to your overlay's `spec.mixins` list (e.g. `spec.mixins: [os-talos]`, or `[platform-kubeflow, os-talos]` if you already mix in a non-OS fragment). OS-scoped mixins are mutually exclusive — combining `os-ubuntu` and `os-talos` in one overlay is a recipe authoring error, not a supported composition. The mixin overrides namespaces for affected components and supplies PSA-privileged Namespace manifests via `componentRefs[].preManifestFiles`, which are applied before each chart — see [Talos integration](talos-integration.md) for the component list and labels.
 
+**`nvsentinel-observability`** turns on NVSentinel's audit logging and distributed tracing for a leaf that opts in (`spec.mixins: [nvsentinel-observability]`). `nvsentinel` is always base-chained, so this mixin sets `Overrides` on an already-present component — normally rejected outright (see [Mixin composition](../contributor/recipe.md#mixin-composition)) — but the specific `global.auditLogging.*`/`global.tracing.enabled`/`.insecure` paths it needs are explicitly allowlisted on `nvsentinel`'s own registry entry (`mixinSafeOverridePaths`, `recipes/registry.yaml`), and any path outside that allowlist, or one colliding with a value your leaf already set, fails the compose step rather than silently applying. See [component catalog](../user/component-catalog.md#audit-logging-and-tracing) for the values it sets and the bundle-time endpoint requirement.
+
 **Cross-cutting overlays with wildcard criteria** apply across one criteria dimension without being referenced via `spec.base` or listed in `spec.mixins`. The resolver can return multiple independent maximal-leaf overlays for a single query, so a `service: any` overlay is picked up alongside the service-specific maximal leaf and its inheritance chain:
 
 ```yaml
@@ -244,15 +246,27 @@ validation:
         value: "256"
       - name: inference-routing-mode        # optional; dynamo-router or gateway-epp
         value: dynamo-router
+      - name: inference-model-cache-storage-class # optional, StorageClass name (EKS example, GKE default is standard-rwo)
+        value: gp3
 ```
 
 `inference-model` and `inference-concurrency-per-gpu` resolve with precedence
 **recipe constraint > `AICR_INFERENCE_PERF_*` catalog env > compiled default**
-(Qwen3-8B at 256/GPU). Set them per overlay to pick the right model and load for
-each accelerator — exactly as the throughput/TTFT thresholds already vary per
-overlay — while the compiled defaults cover overlays that omit them. Because the
-thresholds are only meaningful at a specific model + concurrency, pin all four
-together in an overlay rather than relying on the global defaults for the inputs.
+(Qwen/Qwen3-8B at 256/GPU). Set them per overlay, exactly as the
+throughput/TTFT thresholds already vary per overlay, to pick the right model
+and load for each accelerator. The compiled defaults cover overlays that omit
+them. Because the thresholds are only meaningful at a specific model and
+concurrency, pin the model and concurrency together in an overlay rather than
+relying on the global defaults for the inputs.
+
+`inference-model-cache-storage-class` has no compiled default. It resolves
+from the recipe constraint, then the
+`AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` catalog env, then the
+cluster's own default StorageClass. Set it whenever the cluster's default
+StorageClass can't attach to the target node's machine family, or the
+cluster has no default StorageClass at all, since enabling the cache
+without either a configured StorageClass or a cluster default fails
+validation.
 `inference-routing-mode` resolves from the recipe only, defaulting to
 `dynamo-router`; set `gateway-epp` to validate the GAIE/EPP path through the
 AICR-managed inference gateway.
@@ -336,6 +350,49 @@ A component must have either `helm` OR `kustomize` configuration, not both.
 > applied by any deployer. An enabled ref that sets `patches` is rejected at
 > recipe resolution (rather than silently producing an unpatched bundle), so do
 > not use it. See [#1588](https://github.com/NVIDIA/aicr/issues/1588).
+
+## Preview recipes
+
+Recipe coordinates in AICR carry a maturity classification. The definitions
+are governed by [ROADMAP.md](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#maturity):
+
+- **Supported** — the upstream recipe resolves and bundles, deploys on real
+  hardware, passes its declared validation phases, and has published,
+  verifiable evidence.
+- **Preview** — the recipe path and evidence are useful for early adoption,
+  but AICR does not yet make the complete production support and lifecycle
+  commitment required for Supported status.
+
+A Preview coordinate promises that:
+
+- The recipe resolves for the exact coordinate declared as Preview.
+- `aicr bundle` generates deployable artifacts for it.
+- It passes the repository's static, render, and KWOK coverage gates on
+  every merge to `main`.
+- Evidence has been published at [validation.aicr.run](https://validation.aicr.run/); freshness may lag recipe iteration, so consult each coordinate's row in the table below for its evidence status.
+
+A Preview coordinate deliberately does **not** promise broader coverage.
+Per the [VR200 Preview epic (#2326)](https://github.com/NVIDIA/aicr/issues/2326),
+Preview status carries no commitment to full multi-cloud, DPF / BlueField,
+observability, upgrade, or operational-lifecycle support. Any of those may
+land later; none is implied by Preview alone.
+
+### Current Preview coordinates
+
+| Coordinate | Setup guide | Evidence |
+|---|---|---|
+| `rke2 / vr200 / ubuntu / training` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/training](https://validation.aicr.run/#/rke2/vr200-ubuntu/training) |
+| `rke2 / vr200 / ubuntu / training / kubeflow` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/training-kubeflow](https://validation.aicr.run/#/rke2/vr200-ubuntu/training-kubeflow) |
+| `rke2 / vr200 / ubuntu / inference` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/inference](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference) |
+| `rke2 / vr200 / ubuntu / inference / dynamo` | [RKE2 VR200 Setup](rke2-vr200-setup.md) | [validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo](https://validation.aicr.run/#/rke2/vr200-ubuntu/inference-dynamo) |
+
+The platform-neutral `inference` row is the base the Dynamo leaf inherits from; it exists so that resolving `rke2/vr200/ubuntu/inference` **without** `--platform` resolves to the VR200-safe overlay rather than falling through to the generic `rke2-inference` base.
+
+> **Evidence status (evidence-linked VR200 rows).** The recipes have changed since evidence publication (`aicr evidence digest` reports a mismatch against each pointer's `predicate.recipe.digest`); treat the linked evidence as historical precedent for the recipe content at publication time, not as validating the current recipe. The `training / kubeflow` row's evidence is current — it was published from a three-phase run against the recipe as it ships today. Every VR200 row shares the same node-level prerequisites, including the mandatory host `nvidia-imex` masking described in the setup guide; requirements that follow from the inference chain are inference-only.
+
+Promotion from Preview to Supported is tracked as its own separately-scoped
+work with fresh evidence; a Preview coordinate does not auto-promote by
+accumulating passing runs.
 
 ## Component Configuration
 
@@ -426,11 +483,11 @@ embedded adopter is the AKS family: `recipes/overlays/aks.yaml` declares
 `gpuStack` (`azure-managed` default, `operator-managed` alternative) over the GPU
 driver/toolkit ownership paths.
 
-A declaring overlay uses recipe apiVersion `aicr.run/v1alpha3`:
+A declaring overlay uses recipe apiVersion `aicr.run/v1beta2`:
 
 ```yaml
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   name: example-service
 spec:
@@ -464,16 +521,44 @@ identical to a sibling's — does not support the "validated against deployed
 config" claim and must not be declared. The snippet above shows the declaration
 shape only; it is not a declaration you should copy into an overlay.
 
+**When the distinguishing signal only exists after deployment**, declare it
+under the value's `readinessConstraints` instead of `constraints`. Both lists
+get the same catalog-load validation (names deduplicate per list; the same
+measurement path may appear in both, carrying a pre-condition at generation
+and a post-deployment state at readiness), but
+`readinessConstraints` are never evaluated at generation time — they route
+into `spec.validation.readiness.constraints` and are evaluated fail-closed by
+the `aicr validate` readiness pre-flight. Two kinds of state belong here:
+externally-grounded cluster state evaluated post-deployment (provider
+properties, node labels set at provisioning), and **deployment-outcome
+checks** — properties the value's own workload creates (the post-deployment
+form of a self-falsified pre-condition, or a node label its DaemonSet applies
+after a successful install), which a fresh deployment cannot find in the
+pre-deployment snapshot that generation-time constraints are checked against.
+Only the externally-grounded kind can **qualify** the value — establish that
+the cluster's pre-existing mode matches the selection. An outcome check
+observes post-deployment state without establishing which deployment
+produced it: the readiness gate compares only the snapshot value, with no
+deployment identity, owner, or timestamp binding, so a marker left by an
+earlier deployment satisfies a later check. Declare a workload-written
+marker only when its producer owns the marker's full lifecycle — clearing
+or versioning it when the outcome no longer holds. And because every
+value's own success satisfies its own markers, an outcome check can never
+distinguish one value from another (ADR-015, "Self-rendered readings do
+not qualify").
+
 **Constraint names must be measurement paths a supported snapshot producer
 actually emits** — a collector, or a provider projection attached at the
 snapshot orchestration layer (e.g. `K8s.aks-gpu-pools.gpu-driver` from
-`aicr snapshot --aks-gpu-pools`) — in
+`aicr snapshot --aks-gpu-pools`, or `K8s.oke-addons.nvidia-gpu-plugin` from
+`aicr snapshot --oke-addons`) — in
 `{Type}.{Subtype}.{Key}` form. The type must be one the snapshot carries —
 `K8s`, `GPU`, `OS`, `SystemD`, `NodeTopology`, or `NetworkTopology`.
 
 **Paths are validated when recipe data is loaded, not when a snapshot is
 evaluated.** Every constraint name in `spec.constraints`,
-`spec.validation.readiness.constraints`, and `spec.profile.values.*.constraints`
+`spec.validation.readiness.constraints`, `spec.profile.values.*.constraints`,
+and `spec.profile.values.*.readinessConstraints`
 is checked against the measurement catalog (`pkg/measurement/catalog.go`) as the
 overlay, mixin, or base file is read. A path the catalog cannot address fails
 the load with the file, the field, and — where there is a near match — a
@@ -548,7 +633,7 @@ directions fail closed on a truncated node list (a snapshot captured with
 reading), on an empty GPU-node universe, and on malformed or ambiguous
 label readings (an encoding collision between a disambiguated entry and a
 distinct dotted label name — see #2003). It is consumed by the GKE
-`gpuStack` profile values (the positive form qualifies `driver-installer`, the
+`gpuStack` profile values (the positive form qualifies `bundle-installer`, the
 negated form `gke-default`), where each selected value's constraint is
 verified at generation when generating from a snapshot (criteria-only
 generation has no snapshot evaluator and defers entirely to the
@@ -574,6 +659,13 @@ mixed pool values fail closed against either selection. ADR-015 resolves
 this signal. The AKS family above was the first embedded adopter; the GKE
 family's `gpuStack` (device-plugin ownership over the #1755 node-set form,
 with `advertiser: external` on `gke-default`) is the second.
+
+**OKE** projects the `NvidiaGpuPlugin` cluster add-on's control-plane state
+into a snapshot reading (`K8s.oke-addons.nvidia-gpu-plugin`, from the
+`--oke-addons` dump). The same qualification rules apply: `oci-managed`
+requires `installed`, `operator-managed` requires `absent`, and any other
+add-on lifecycle state — or a snapshot captured without the dump — fails
+closed against either selection.
 
 No equivalent reading exists for other services yet. Declare a
 driver-ownership profile only once the signal for that service exists, and
@@ -620,6 +712,21 @@ Profile declarations are intentionally narrow:
   for later validation. This qualification rule is enforced during catalog
   review; core admission does not infer whether arbitrary readings
   semantically distinguish two modes.
+- A profile constraint may reuse a constraint name the composition already
+  carries **only to tighten it**. Both expressions must be version ranges
+  written as a single clause of `>=`, `>`, `<=`, `<` terms; the composition
+  then takes their intersection, so a chain floor of `>= 1.32` under a value
+  declaring `>= 1.35` resolves to `>= 1.35`, and `>= 1.34.1 < 1.36.0` under
+  `>= 1.35` resolves to `>= 1.35 < 1.36.0`. Use this when a value is gated on
+  a feature with its own floor (DRA on GKE) that the other values do not
+  need. Three cases keep failing closed: a candidate that adds no restriction
+  is ignored, an empty intersection is rejected, and any pair that does
+  not order — an exact match, `!=`, a node-set label predicate, or an
+  expression with `||` alternatives — is rejected as a collision. Two
+  same-direction bounds written at different precisions (`>= 1.34` against
+  `>= 1.34.1`) are rejected too, with their own message: versions compare at
+  the lower precision, so those two read as equal and neither can be called
+  stricter. Restate one at the other's precision when you mean to tighten.
 - A profile value may declare `advertiser: external` (the GKE `gke-default`
   shape) to record a provider-managed plugin outside the recipe as THE
   `nvidia.com/gpu` advertiser; the vocabulary is closed (empty or
@@ -627,7 +734,7 @@ Profile declarations are intentionally narrow:
   gates and closure-locks the allocation-policy selector paths.
 
 Select with `aicr recipe --profile name=value`; omission uses the declared
-default. A profiled result uses `aicr.run/v1alpha3` and records
+default. A profiled result uses `aicr.run/v1beta2` and records
 `metadata.selectedProfile`, including declaration-wide `ownedPaths`. The
 lock on owned paths is enforced per surface:
 
@@ -836,7 +943,7 @@ go test -v ./pkg/recipe/... -run TestConstraintPathsUseValidMeasurementTypes
 **Example:**
 ```yaml
 # recipes/overlays/gb200-eks-ubuntu-training.yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: gb200-eks-ubuntu-training
@@ -861,7 +968,7 @@ spec:
 # recipes/registry.yaml
 - name: gpu-operator
   helm:
-    defaultVersion: v26.3.3  # Changed from v26.3.2
+    defaultVersion: v26.7.0  # Changed from v26.3.3
 ```
 
 **Adding components:**

@@ -19,6 +19,8 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -28,6 +30,7 @@ import (
 	"github.com/NVIDIA/aicr/validators"
 	batchv1 "k8s.io/api/batch/v1"
 	v1 "k8s.io/api/core/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -61,10 +64,21 @@ const (
 	defaultStorageClassAnnotationValue = "true"
 
 	// envModelCacheStorageClass sets the StorageClass for the cache PVC.
-	// Required on clusters without a default StorageClass — otherwise the PVC
+	// Required on clusters without a default StorageClass, otherwise the PVC
 	// stays Pending ("no persistent volumes available … and no storage class is
-	// set"). Unset uses the cluster's default StorageClass.
+	// set"). Unset uses the cluster's default StorageClass. A per-accelerator
+	// overlay can also set this via the `inference-model-cache-storage-class`
+	// performance constraint, which takes precedence (see
+	// resolveModelCacheStorageClass).
 	envModelCacheStorageClass = "AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS"
+
+	// envModelCacheExtraCompatibleTypes extends storageCompatibilityRules'
+	// compiled type allowlists with a comma-separated list of extra
+	// parameters.type values, without an AICR code change. Applies across
+	// every rule. Use it when a cloud provider ships a new disk type that is
+	// actually compatible with a restricted machine family before AICR's
+	// allowlist is updated to include it.
+	envModelCacheExtraCompatibleTypes = "AICR_INFERENCE_PERF_MODEL_CACHE_EXTRA_COMPATIBLE_TYPES"
 
 	// envModelCachePopulateTimeout overrides the wait bound for the one-time
 	// model-cache populate Job (default defaults.ModelCachePopulateTimeout). It is
@@ -101,7 +115,7 @@ const (
 	// ResolveImage for registry-override parity is tracked in #1159. Note that
 	// registry parity alone is not air-gap support: the populate Job's
 	// snapshot_download still reaches huggingface.co for the weights.
-	cacheWorkerImage = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1"
+	cacheWorkerImage = "nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.2"
 
 	// Resource requests for the populate container. snapshot_download is
 	// network/IO-bound, not compute-bound, so requests stay small; they exist so
@@ -124,6 +138,37 @@ const (
 	// same group ownership.
 	cacheWorkerFSGroup = int64(1000)
 )
+
+// storageCompatibilityRule declares that on a given CSI provisioner, the
+// listed machine families can only attach a StorageClass whose
+// parameters.type is in compatibleTypes, is named by
+// envModelCacheExtraCompatibleTypes, or exactly matches autoSelectType (a
+// driver-specific value that resolves to a compatible disk per-node rather
+// than naming one directly, e.g. GKE's "dynamic". Leave autoSelectType empty
+// for a provisioner with no such value). Anything else provisioned by that
+// driver is rejected at attach time. Add a rule here for any other
+// cloud/provisioner with the same shape of restriction. No other code in
+// this file needs to change.
+type storageCompatibilityRule struct {
+	provisioner     string
+	families        map[string]bool // node.kubernetes.io/instance-type family segment, e.g. "a4x" for "a4x-highgpu-4g"
+	compatibleTypes []string        // exact parameters.type values this family can attach, see docsRef
+	autoSelectType  string
+	docsRef         string
+}
+
+var storageCompatibilityRules = []storageCompatibilityRule{
+	{
+		provisioner:     "pd.csi.storage.gke.io", // GKE Persistent Disk CSI driver (also provisions Hyperdisk)
+		families:        map[string]bool{"a4x": true},
+		compatibleTypes: []string{"hyperdisk-balanced", "hyperdisk-ml", "hyperdisk-extreme"},
+		// "dynamic" auto-selects Hyperdisk vs Persistent Disk per the node's
+		// machine type (GKE 1.35.3-gke.1290000+); a4x can't attach Persistent
+		// Disk at all, so on a4x nodes it always resolves to Hyperdisk.
+		autoSelectType: "dynamic",
+		docsRef:        "docs/integrator/gke-gb200-networking.md#storage-prerequisites",
+	},
+}
 
 // modelCacheEnabled reports whether the PVC cache is active for this run.
 // config.modelCacheSize is "" only when the operator explicitly disabled it
@@ -162,23 +207,85 @@ func parseModelCacheSize(raw string) (string, bool, error) {
 	return raw, true, nil
 }
 
-// clusterHasDefaultStorageClass reports whether any StorageClass on the cluster
-// is annotated as the default. Used to fail fast before provisioning a cache
-// PVC with no StorageClass on a cluster that has no default.
-func clusterHasDefaultStorageClass(ctx *validators.Context) (bool, error) {
+// defaultStorageClass returns the cluster's effective default StorageClass,
+// or nil if none is annotated default. Kubernetes tolerates more than one
+// StorageClass annotated default; its own DefaultStorageClass admission
+// controller resolves the ambiguity by picking the most recently created one
+// (https://kubernetes.io/docs/concepts/storage/storage-classes/#default-storageclass).
+// Matching that here means this pre-flight checks the same StorageClass a PVC
+// with no storageClassName would actually bind to.
+func defaultStorageClass(ctx *validators.Context) (*storagev1.StorageClass, error) {
 	listCtx, cancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
 	defer cancel()
 	scs, err := ctx.Clientset.StorageV1().StorageClasses().List(listCtx, metav1.ListOptions{})
 	if err != nil {
-		return false, errors.Wrap(errors.ErrCodeInternal, "failed to list StorageClasses for cache pre-flight", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to list StorageClasses for cache pre-flight", err)
 	}
+	var best *storagev1.StorageClass
 	for i := range scs.Items {
-		ann := scs.Items[i].Annotations
-		if ann[defaultStorageClassAnnotation] == defaultStorageClassAnnotationValue || ann[defaultStorageClassAnnotationBeta] == defaultStorageClassAnnotationValue {
-			return true, nil
+		sc := &scs.Items[i]
+		ann := sc.Annotations
+		if ann[defaultStorageClassAnnotation] != defaultStorageClassAnnotationValue && ann[defaultStorageClassAnnotationBeta] != defaultStorageClassAnnotationValue {
+			continue
+		}
+		if best == nil || sc.CreationTimestamp.After(best.CreationTimestamp.Time) {
+			best = sc
 		}
 	}
-	return false, nil
+	// nil, nil means no default StorageClass is set, not an error.
+	//nolint:nilnil
+	return best, nil
+}
+
+// machineFamily returns the leading segment of a node.kubernetes.io/instance-type
+// value, e.g. "a4x" for "a4x-highgpu-4g". Empty for an empty or family-less input.
+func machineFamily(instanceType string) string {
+	family, _, _ := strings.Cut(instanceType, "-")
+	return family
+}
+
+// checkStorageClassNodeCompatibility reports an error when sc's disk type
+// can't attach to the worker node's machine family, per
+// storageCompatibilityRules. A nil sc (not found, e.g. a typo in the
+// explicit override) is not an error here; that surfaces via the normal
+// PVC-create path instead. fromRecipeConstraint indicates sc was selected by
+// the `inference-model-cache-storage-class` recipe constraint, see
+// resolveModelCacheStorageClass. That constraint takes precedence over
+// envModelCacheStorageClass, so the remediation must point at whichever one
+// actually controls the resolved value, since setting the other is a no-op.
+func checkStorageClassNodeCompatibility(instanceType string, sc *storagev1.StorageClass, fromRecipeConstraint bool) error {
+	if sc == nil {
+		return nil
+	}
+	family := machineFamily(instanceType)
+	for _, rule := range storageCompatibilityRules {
+		if sc.Provisioner != rule.provisioner || !rule.families[family] {
+			continue
+		}
+		typ := sc.Parameters["type"]
+		compatible := rule.compatibleTypes
+		for v := range strings.SplitSeq(os.Getenv(envModelCacheExtraCompatibleTypes), ",") {
+			if trimmed := strings.TrimSpace(v); trimmed != "" {
+				compatible = append(compatible, trimmed)
+			}
+		}
+		if slices.Contains(compatible, typ) || (rule.autoSelectType != "" && typ == rule.autoSelectType) {
+			continue
+		}
+		typeGuidance := fmt.Sprintf("parameters.type is one of %s", strings.Join(compatible, ", "))
+		if rule.autoSelectType != "" {
+			typeGuidance += fmt.Sprintf(" (or is %q)", rule.autoSelectType)
+		}
+		fixGuidance := fmt.Sprintf("set %s to", envModelCacheStorageClass)
+		if fromRecipeConstraint {
+			fixGuidance = fmt.Sprintf("change or remove the %q recipe constraint to select", perfConstraintModelCacheStorageClass)
+		}
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"model-weights cache PVC would bind to StorageClass %q (provisioner %s), which node machine family %q can't attach. "+
+				"%s a StorageClass whose %s, list it in %s if it is actually compatible, or disable the cache with %s=off. See %s.",
+			sc.Name, sc.Provisioner, family, fixGuidance, typeGuidance, envModelCacheExtraCompatibleTypes, envModelCacheSize, rule.docsRef))
+	}
+	return nil
 }
 
 // ensureModelCache provisions the model-weights cache when enabled: an RWO PVC
@@ -207,26 +314,53 @@ func ensureModelCache(ctx *validators.Context, config *inferenceWorkloadConfig) 
 			fmt.Sprintf("invalid %s=%q: must be a Kubernetes quantity (e.g. 100Gi)", envModelCacheSize, config.modelCacheSize), err)
 	}
 
-	// Fail fast when there is no StorageClass to bind the cache PVC to: with no
-	// explicit MODEL_CACHE_STORAGE_CLASS, the PVC relies on a cluster default,
-	// and without one it sits Pending until the populate Job times out (minutes).
-	// Surface an actionable error immediately instead.
-	if strings.TrimSpace(config.modelCacheStorageClass) == "" {
-		hasDefault, derr := clusterHasDefaultStorageClass(ctx)
+	// Resolve the StorageClass the cache PVC will bind to (explicit name, or
+	// the cluster default) for the checks below.
+	explicitSC := strings.TrimSpace(config.modelCacheStorageClass)
+	var resolvedSC *storagev1.StorageClass
+	if explicitSC == "" {
+		sc, derr := defaultStorageClass(ctx)
 		if derr != nil {
 			return derr
 		}
-		if !hasDefault {
+		if sc == nil {
 			return errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("model-weights cache is enabled but the cluster has no default StorageClass and %s is unset; "+
 					"set %s=<name> (e.g. gp2/gp3 on EKS, standard-rwo on GKE) or disable the cache with %s=off",
 					envModelCacheStorageClass, envModelCacheStorageClass, envModelCacheSize))
 		}
+		resolvedSC = sc
+	} else {
+		getCtx, getCancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
+		sc, gerr := ctx.Clientset.StorageV1().StorageClasses().Get(getCtx, explicitSC, metav1.GetOptions{})
+		getCancel()
+		switch {
+		case gerr == nil:
+			resolvedSC = sc
+		case apierrors.IsNotFound(gerr):
+			// Leave resolvedSC nil: fall through to the existing PVC-create
+			// path, which surfaces a nonexistent StorageClass the same way
+			// it always has.
+		default:
+			return errors.Wrap(errors.ErrCodeInternal, "failed to get StorageClass for cache pre-flight", gerr)
+		}
+	}
+	if cerr := checkStorageClassNodeCompatibility(config.gpuNodeInstanceType, resolvedSC, config.modelCacheStorageClassFromRecipe); cerr != nil {
+		return cerr
+	}
+
+	// Pin the StorageClass we just validated onto the PVC: if we resolved an
+	// implicit cluster default above, use its name explicitly rather than
+	// leaving StorageClassName nil, so a default that changes between this
+	// check and PVC admission can't silently bind an unvalidated StorageClass.
+	pvcStorageClass := explicitSC
+	if pvcStorageClass == "" && resolvedSC != nil {
+		pvcStorageClass = resolvedSC.Name
 	}
 
 	// Bound the create calls so a slow/wedged apiserver can't burn the check
 	// budget before the (separately bounded) populate-Job wait even starts.
-	pvc := buildModelCachePVC(config.namespace, qty, strings.TrimSpace(config.modelCacheStorageClass))
+	pvc := buildModelCachePVC(config.namespace, qty, pvcStorageClass)
 	pvcCtx, pvcCancel := context.WithTimeout(ctx.Ctx, defaults.DiagnosticTimeout)
 	_, err = ctx.Clientset.CoreV1().PersistentVolumeClaims(config.namespace).Create(pvcCtx, pvc, metav1.CreateOptions{})
 	pvcCancel()
@@ -380,38 +514,38 @@ func buildModelCachePopulateJob(name string, config *inferenceWorkloadConfig, pu
 // validator already enforces) and snapshot_download fetches the full repo
 // (tokenizer included), so offline frontend/EPP components still resolve model
 // metadata.
-func injectModelCacheMounts(podSpec map[string]interface{}) {
-	vols, _ := podSpec["volumes"].([]interface{})
-	vols = append(vols, map[string]interface{}{
+func injectModelCacheMounts(podSpec map[string]any) {
+	vols, _ := podSpec["volumes"].([]any)
+	vols = append(vols, map[string]any{
 		keyName: modelCacheVolumeName,
-		"persistentVolumeClaim": map[string]interface{}{
+		"persistentVolumeClaim": map[string]any{
 			"claimName": modelCachePVCName,
 			"readOnly":  true,
 		},
 	})
 	podSpec["volumes"] = vols
 
-	containers, _ := podSpec["containers"].([]interface{})
+	containers, _ := podSpec["containers"].([]any)
 	if len(containers) == 0 {
-		containers = []interface{}{map[string]interface{}{keyName: mainContainerName}}
+		containers = []any{map[string]any{keyName: mainContainerName}}
 	}
 	for i, raw := range containers {
-		container, ok := raw.(map[string]interface{})
+		container, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		mounts, _ := container["volumeMounts"].([]interface{})
-		mounts = append(mounts, map[string]interface{}{
+		mounts, _ := container["volumeMounts"].([]any)
+		mounts = append(mounts, map[string]any{
 			keyName:     modelCacheVolumeName,
 			"mountPath": modelCacheMountPath,
 			"readOnly":  true,
 		})
 		container["volumeMounts"] = mounts
 
-		env, _ := container["env"].([]interface{})
+		env, _ := container["env"].([]any)
 		env = append(env,
-			map[string]interface{}{keyName: "HF_HOME", "value": modelCacheMountPath},
-			map[string]interface{}{keyName: "HF_HUB_OFFLINE", "value": "1"},
+			map[string]any{keyName: "HF_HOME", "value": modelCacheMountPath},
+			map[string]any{keyName: "HF_HUB_OFFLINE", "value": "1"},
 		)
 		container["env"] = env
 		containers[i] = container

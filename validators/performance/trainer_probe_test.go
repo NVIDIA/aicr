@@ -17,7 +17,9 @@ package main
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -27,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -41,11 +44,11 @@ func webhookConfig(kind, name, webhookName string) *unstructured.Unstructured {
 // where Trainer is installed.
 func webhookConfigIn(kind, name, webhookName, namespace string) *unstructured.Unstructured {
 	obj := newTestObject("admissionregistration.k8s.io/v1", kind, "", name)
-	if err := unstructured.SetNestedSlice(obj.Object, []interface{}{
-		map[string]interface{}{
+	if err := unstructured.SetNestedSlice(obj.Object, []any{
+		map[string]any{
 			keyName: webhookName,
-			"clientConfig": map[string]interface{}{
-				"service": map[string]interface{}{
+			"clientConfig": map[string]any{
+				"service": map[string]any{
 					keyName:     trainerControllerService,
 					"namespace": namespace,
 				},
@@ -79,7 +82,7 @@ func trainerInstallIn(namespace string) []runtime.Object {
 func malformedWebhookConfig(kind, name string) *unstructured.Unstructured {
 	obj := newTestObject("admissionregistration.k8s.io/v1", kind, "", name)
 	if err := unstructured.SetNestedSlice(obj.Object,
-		[]interface{}{"not-an-object"}, "webhooks"); err != nil {
+		[]any{"not-an-object"}, "webhooks"); err != nil {
 		panic(err)
 	}
 	return obj
@@ -327,7 +330,7 @@ func TestApplyTrainerResources_RefusesForeignWebhookConfig(t *testing.T) {
 			trainerValidatingWebhookConfig, trainerValidatingWebhookName),
 	}
 
-	_, err := applyTrainerResources(context.Background(), client, newTrainerTestMapper(), objs)
+	_, err := applyTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs)
 	if err == nil {
 		t.Fatal("expected install to refuse overwriting a foreign webhook configuration")
 	}
@@ -341,7 +344,7 @@ func TestApplyTrainerResources_RefusesForeignWebhookConfig(t *testing.T) {
 	if len(entries) != 1 {
 		t.Fatalf("webhooks = %d entries, want 1", len(entries))
 	}
-	if name := entries[0].(map[string]interface{})[keyName]; name != "validator.other.example.com" {
+	if name := entries[0].(map[string]any)[keyName]; name != "validator.other.example.com" {
 		t.Errorf("foreign webhook config was clobbered: entry name = %v", name)
 	}
 }
@@ -360,7 +363,7 @@ func TestApplyTrainerResources_UpdatesOwnWebhookConfig(t *testing.T) {
 			trainerValidatingWebhookConfig, trainerValidatingWebhookName),
 	}
 
-	if _, err := applyTrainerResources(context.Background(), client, newTrainerTestMapper(), objs); err != nil {
+	if _, err := applyTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs); err != nil {
 		t.Fatalf("re-applying our own webhook configuration should succeed, got: %v", err)
 	}
 }
@@ -400,8 +403,8 @@ func TestWaitForJobSetControllerReady_AbsentIsNotAFailure(t *testing.T) {
 // install whose JobSet controller is stuck in ImagePullBackOff must be caught here
 // rather than surfacing much later as a TrainJob whose JobSet is never created.
 //
-// Run against both layouts because the controller's name differs between them and
-// the Helm one is release-derived, so only the shared label locates it reliably.
+// Run against the in-tree layout and an externally managed chart layout with a
+// custom name, so only the shared label locates both reliably.
 func TestWaitForJobSetControllerReady_PresentButNotReady(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -414,7 +417,7 @@ func TestWaitForJobSetControllerReady_PresentButNotReady(t *testing.T) {
 			deployment: "jobset-controller-manager",
 		},
 		{
-			name:       "helm chart layout with a release-derived name",
+			name:       "externally managed chart layout with a custom name",
 			namespace:  "kubeflow",
 			deployment: "kubeflow-trainer-jobset-controller",
 		},
@@ -717,6 +720,62 @@ func TestTrainerResourceRefString(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.ref.String(); got != tt.want {
 				t.Errorf("String() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsTrainerInstalled_MutatingConfigReasonsAreDistinct pins the two shapes of a
+// missing mutating webhook apart.
+//
+// "The configuration does not exist" and "the configuration exists but does not
+// serve our webhook" need different remedies, and flattening both to the first tells
+// an operator to create an object that is already on the cluster — which, on the
+// generic upstream configuration names another operator may own, is the shape most
+// likely to be hit. The validating-webhook discovery path already keeps them apart;
+// this is the same contract on the mutating one.
+func TestIsTrainerInstalled_MutatingConfigReasonsAreDistinct(t *testing.T) {
+	tests := []struct {
+		name         string
+		objs         []runtime.Object
+		wantContains string
+		wantAbsent   string
+	}{
+		{
+			name: "configuration absent",
+			objs: withoutObject(completeTrainerInstall(), dropByName(trainerMutatingWebhookConfig)),
+			wantContains: fmt.Sprintf("admission configuration %q is missing",
+				trainerMutatingWebhookConfig),
+		},
+		{
+			name: "configuration present but serving another operator's webhook",
+			objs: append(
+				withoutObject(completeTrainerInstall(), dropByName(trainerMutatingWebhookConfig)),
+				webhookConfig("MutatingWebhookConfiguration", trainerMutatingWebhookConfig,
+					"defaulter.other.example.com"),
+			),
+			wantContains: fmt.Sprintf("exists but does not contain the %q webhook",
+				trainerMutatingWebhookName),
+			wantAbsent: fmt.Sprintf("admission configuration %q is missing",
+				trainerMutatingWebhookConfig),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			install, installed, err := isTrainerInstalled(context.Background(), newTrainerFakeClient(tt.objs...))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if installed {
+				t.Fatal("incomplete Trainer installation reported as installed")
+			}
+			if !strings.Contains(install.Incomplete, tt.wantContains) {
+				t.Errorf("reason = %q, want it to contain %q", install.Incomplete, tt.wantContains)
+			}
+			if tt.wantAbsent != "" && strings.Contains(install.Incomplete, tt.wantAbsent) {
+				t.Errorf("reason %q tells the operator to create a configuration that "+
+					"already exists", install.Incomplete)
 			}
 		})
 	}

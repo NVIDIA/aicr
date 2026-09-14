@@ -17,9 +17,15 @@ Then render + serve (paths printed at the end):
 
 Stdlib only — no third-party deps. Lives under testdata/ so Go tooling ignores it.
 """
-import hashlib, json, os, sys, tempfile, datetime
+import datetime
+import hashlib
+import json
+import os
+import sys
+import tempfile
 
-OUT_ROOT = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(tempfile.gettempdir(), "corroborate-bigdemo")
+OUT_ROOT = (os.path.abspath(sys.argv[1]) if len(sys.argv) > 1
+            else os.path.join(tempfile.gettempdir(), "corroborate-bigdemo"))
 OUT = os.path.join(OUT_ROOT, "evidence", "results")
 BASE = datetime.datetime(2026, 6, 20, 3, 14, 7, tzinfo=datetime.timezone.utc)  # fixed, not now()
 N_BUILDS = 8
@@ -46,7 +52,8 @@ SIGNERS = {
                       identity="https://github.com/coreriver/attest/.github/workflows/a.yaml@refs/heads/main",
                       issuer="https://token.actions.githubusercontent.com"),
     "coreweave": dict(label="CoreWeave Lab", cls="partner",    allow=True,
-                      identity="https://oidc.coreweave-lab.example/attest", issuer="https://oidc.coreweave-lab.example"),
+                      identity="https://oidc.coreweave-lab.example/attest",
+                      issuer="https://oidc.coreweave-lab.example"),
     "bluefield": dict(label="BlueField",    cls="partner",     allow=True,
                       identity="https://oidc.bluefield.example/attest", issuer="https://oidc.bluefield.example"),
     "driveby":   dict(label="drive-by",     cls="community",   allow=False,  # verified-but-unknown => reported dot

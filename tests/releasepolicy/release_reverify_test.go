@@ -850,7 +850,7 @@ func TestReleaseReverifyGuardsAreLoadBearing(t *testing.T) {
 					"aicr_checksums.txt",
 					"recipe-catalog.sigstore.json",
 				}
-				for _, binary := range strings.Fields(reverifyWorkflowEnv(t, "EXPECTED_SBOM_BINARIES")) {
+				for binary := range strings.FieldsSeq(reverifyWorkflowEnv(t, "EXPECTED_SBOM_BINARIES")) {
 					opts.assets = append(opts.assets, binary+"_"+version+"_linux_amd64.sbom.json")
 				}
 			}
@@ -991,7 +991,7 @@ func TestReleaseReverifySBOMLoopIsolatesChildStdin(t *testing.T) {
 func verifiedSBOMs(output string) []string {
 	const marker = "SBOM attestation verified: "
 	var verified []string
-	for _, line := range strings.Split(output, "\n") {
+	for line := range strings.SplitSeq(output, "\n") {
 		if subject, found := strings.CutPrefix(strings.TrimSpace(line), marker); found {
 			verified = append(verified, subject)
 		}
@@ -1295,7 +1295,7 @@ func runReverifyCloseStep(t *testing.T, script, tag string, issues []closableIss
 	}
 	var closed []string
 	if data, readErr := os.ReadFile(closedFile); readErr == nil {
-		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 			if line != "" {
 				closed = append(closed, line)
 			}
@@ -1553,7 +1553,7 @@ func runReverifyClassifier(t *testing.T, script string, opts reverifyOptions) (s
 
 	published := ""
 	if data, readErr := os.ReadFile(outputs); readErr == nil {
-		for _, line := range strings.Split(string(data), "\n") {
+		for line := range strings.SplitSeq(string(data), "\n") {
 			if rest, found := strings.CutPrefix(line, "classification="); found {
 				published = rest
 			}

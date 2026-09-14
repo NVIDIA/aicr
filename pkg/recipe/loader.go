@@ -88,17 +88,17 @@ func LoadFromFileWithProviderProfile(
 
 	// Reject an artifact stamped with an apiVersion this build does not
 	// understand before an overlay can trigger provider-backed hydration.
-	// Empty is tolerated for legacy files, while v1alpha3 is the strict
-	// profile artifact version introduced by ADR-015.
-	if inputAPIVersion != "" &&
-		!header.IsSupportedAPIVersion(inputAPIVersion) &&
-		inputAPIVersion != RecipeProfileAPIVersion {
-
-		return nil, errors.New(errors.ErrCodeInvalidRequest,
-			fmt.Sprintf("recipe file has apiVersion %q, which this aicr build does not support (expected %q or %q); "+
-				"regenerate the recipe with a matching aicr version",
-				inputAPIVersion, header.GroupVersion, RecipeProfileAPIVersion))
+	// The accepted set is selected by wire kind/schema track; an empty value
+	// remains tolerated for pre-apiVersion RecipeResult files only, and is
+	// rejected for RecipeMetadata so this path agrees with the catalog scanner.
+	if versionErr := validateRecipeInputAPIVersion(rec.Kind, inputAPIVersion); versionErr != nil {
+		return nil, versionErr
 	}
+	// Warned here rather than inside validateRecipeInputAPIVersion because the
+	// helper takes only kind and apiVersion, and a warning that cannot name the
+	// file is not the warning RELEASE.md promises.
+	header.WarnDeprecatedAPIVersion(path, inputAPIVersion,
+		deprecatedInputTarget(rec.Kind, inputAPIVersion))
 
 	// Users often pass overlay files directly; auto-hydrate so they don't need
 	// a separate "aicr recipe" step before consuming the recipe.
@@ -107,7 +107,7 @@ func LoadFromFileWithProviderProfile(
 			"file", path)
 
 		var readerOpts []serializer.ReaderOption
-		if inputAPIVersion == RecipeProfileAPIVersion {
+		if header.IsSupportedProfileAPIVersion(inputAPIVersion) {
 			readerOpts = append(readerOpts, serializer.WithStrict())
 		}
 		overlayReader, parseErr := serializer.NewReader(
@@ -143,7 +143,9 @@ func LoadFromFileWithProviderProfile(
 			opts = append(opts, WithDataProvider(dp))
 		}
 		builder := NewBuilder(opts...)
-		rec, err = builder.BuildFromCriteriaWithProfile(ctx, overlay.Spec.Criteria, profile)
+		criteria := *overlay.Spec.Criteria
+		criteria.FillUnsetWithAny()
+		rec, err = builder.BuildFromCriteriaWithProfile(ctx, &criteria, profile)
 		if err != nil {
 			return nil, err
 		}
@@ -160,7 +162,7 @@ func LoadFromFileWithProviderProfile(
 					"is already baked into metadata.selectedProfile; a profile selection applies "+
 					"only to overlay inputs", path))
 		}
-		if inputAPIVersion == RecipeProfileAPIVersion {
+		if header.IsSupportedProfileAPIVersion(inputAPIVersion) {
 			rec, err = DecodeRecipeResult(sourceData, sourceFormat)
 			if err != nil {
 				return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest,
@@ -177,10 +179,10 @@ func LoadFromFileWithProviderProfile(
 
 	// The strict profile artifact version requires its discriminator. Empty
 	// kind remains allowed only for legacy RecipeResult files that predate it.
-	if rec.Kind == "" && inputAPIVersion == RecipeProfileAPIVersion {
+	if rec.Kind == "" && header.IsSupportedProfileAPIVersion(inputAPIVersion) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("recipe file apiVersion %q requires kind %q",
-				RecipeProfileAPIVersion, RecipeResultKind))
+				inputAPIVersion, RecipeResultKind))
 	}
 	if rec.Kind != "" && rec.Kind != RecipeResultKind {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
@@ -201,6 +203,61 @@ func LoadFromFileWithProviderProfile(
 	}
 
 	return rec, nil
+}
+
+// validateRecipeInputAPIVersion gates a directly supplied recipe input by wire
+// kind.
+//
+// RecipeMetadata is a catalog kind wherever it arrives from, so it is held to
+// the same fail-closed authoring gate the catalog scanner applies in
+// classifyRecipeMetadataCatalogHeader — including rejecting an empty value.
+// ADR-022 §8 requires that for in-scope catalog kinds, and §3's "existing
+// tolerances remain" clause does not reach a document the catalog path already
+// rejects; the two paths disagreeing on the same bytes was the fail-open seam
+// in #2421.
+//
+// The empty-value tolerance survives only for RecipeResult inputs, which
+// genuinely predate the apiVersion field. ADR-022 §3 retires that at Release
+// N+2 (#2417).
+func validateRecipeInputAPIVersion(kind, apiVersion string) error {
+	if kind == RecipeMetadataKind {
+		if header.IsSupportedAuthoringAPIVersion(apiVersion) ||
+			header.IsSupportedProfileAPIVersion(apiVersion) {
+
+			return nil
+		}
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("recipe metadata file has apiVersion %q, which this aicr build does not support (expected %q, %q, %q, or %q); "+
+				"update the catalog header for this aicr release",
+				apiVersion, header.GroupVersion, header.GroupVersionV1Beta1,
+				header.RecipeResultGroupVersion, header.GroupVersionV1Beta2))
+	}
+
+	if apiVersion == "" {
+		return nil
+	}
+
+	if header.IsSupportedRecipeResultAPIVersion(apiVersion) {
+		return nil
+	}
+	return errors.New(errors.ErrCodeInvalidRequest,
+		fmt.Sprintf("recipe file has apiVersion %q, which this aicr build does not support (expected %q, %q, %q, or %q); "+
+			"regenerate the recipe with a matching aicr version",
+			apiVersion, header.GroupVersion, header.GroupVersionV1,
+			header.RecipeResultGroupVersion, header.GroupVersionV1Beta2))
+}
+
+// deprecatedInputTarget is the §2 value a recipe input should carry, given its
+// wire kind and whatever it carries today. An alpha profile document keeps the
+// profile track (v1beta2); everything else follows its kind.
+func deprecatedInputTarget(kind, apiVersion string) string {
+	if apiVersion == header.RecipeResultGroupVersion {
+		return header.GroupVersionV1Beta2
+	}
+	if kind == RecipeMetadataKind {
+		return header.GroupVersionV1Beta1
+	}
+	return header.GroupVersionV1
 }
 
 func ensureDirectOverlayProfileApplied(

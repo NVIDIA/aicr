@@ -146,14 +146,14 @@ jobs:
     env:
       AWS_REGION: "us-east-1"
       JANITOR_CONFIG: "tests/uat/aws/cluster-config.yaml"
-      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:8bc33d14e6e5659d242aa2cdbcd69fca389cfcdb9e94f7a7a1b82fd33176befa"
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:91762c28d63c6f47774e86a922b84596a8daed031b225b9e7a25bd4910829f9b"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Authenticate to AWS
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::615299774277:role/github-actions-role-aicr"
           aws-region: ${{ env.AWS_REGION }}
@@ -184,14 +184,14 @@ jobs:
     env:
       AWS_REGION: "us-east-1"
       JANITOR_CONFIG: "tests/uat/aws/cluster-config-gb200.yaml"
-      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:8bc33d14e6e5659d242aa2cdbcd69fca389cfcdb9e94f7a7a1b82fd33176befa"
+      JANITOR_ACTUATOR_IMAGE: "ghcr.io/mchmarny/cluster/eks@sha256:91762c28d63c6f47774e86a922b84596a8daed031b225b9e7a25bd4910829f9b"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Authenticate to AWS (GB200 account)
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c # v6.2.4
         with:
           role-to-assume: "arn:aws:iam::897722687756:role/github-actions-role-aicr"
           aws-region: ${{ env.AWS_REGION }}
@@ -222,7 +222,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Authenticate to Azure
-        uses: azure/login@f5d393ae46f8fde4be8b75f32e3fc50e654ad0ca # v3.0.1
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: "047f0427-5dcf-4e7c-97c3-9c71d92c5abb"
           tenant-id: "43083d15-7273-40c1-b7db-39efd9ccc17a"

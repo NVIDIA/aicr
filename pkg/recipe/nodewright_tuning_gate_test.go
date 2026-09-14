@@ -16,6 +16,7 @@ package recipe
 
 import (
 	"context"
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -35,6 +36,7 @@ const nodewrightTuningManifest = "components/nodewright-customizations/manifests
 const (
 	nodewrightTuningGKEManifest     = "components/nodewright-customizations/manifests/tuning-gke.yaml"
 	nodewrightTuningGenericManifest = "components/nodewright-customizations/manifests/tuning-generic.yaml"
+	nodewrightTuningRKE2Manifest    = "components/nodewright-customizations/manifests/tuning-rke2.yaml"
 )
 
 // renderNodewrightTuning renders the tuning manifest with the given component
@@ -152,9 +154,7 @@ func TestNodewrightTuningGateAcrossCatalog(t *testing.T) {
 			t.Skip("no AKS leaf resolved; covered by the catalog assertions above")
 		}
 		values := make(map[string]any, len(aksValues))
-		for k, v := range aksValues {
-			values[k] = v
-		}
+		maps.Copy(values, aksValues)
 		values["tuningEnabled"] = true
 		packages, fullDependsOn := renderNodewrightTuning(t, aksContent, values)
 		if _, ok := packages["nvidia-tuned"]; !ok {
@@ -187,7 +187,8 @@ func renderNodewrightTuningRaw(t *testing.T, content []byte, values map[string]a
 
 // TestNodewrightTuningGateSinglePackageManifests pins the tuningEnabled
 // contract on the single-package tuning manifests (tuning-gke.yaml,
-// tuning-generic.yaml), for every catalog leaf that wires one:
+// tuning-generic.yaml, tuning-rke2.yaml), for every catalog leaf that wires
+// one:
 //
 //   - default (tuningEnabled absent, no leaf sets it on these manifests):
 //     the Skyhook CR renders — behavior identical to before the gate;
@@ -202,7 +203,11 @@ func TestNodewrightTuningGateSinglePackageManifests(t *testing.T) {
 		t.Fatalf("ResolveLeaves: %v", err)
 	}
 
-	singlePackageManifests := []string{nodewrightTuningGKEManifest, nodewrightTuningGenericManifest}
+	singlePackageManifests := []string{
+		nodewrightTuningGKEManifest,
+		nodewrightTuningGenericManifest,
+		nodewrightTuningRKE2Manifest,
+	}
 	seen := map[string]bool{}
 	for _, leaf := range leaves {
 		if leaf.Err != nil || leaf.Result == nil || leaf.Entry.Criteria == nil {
@@ -236,18 +241,14 @@ func TestNodewrightTuningGateSinglePackageManifests(t *testing.T) {
 				}
 
 				disabled := make(map[string]any, len(values)+1)
-				for k, v := range values {
-					disabled[k] = v
-				}
+				maps.Copy(disabled, values)
 				disabled["tuningEnabled"] = false
 				if got := renderNodewrightTuningRaw(t, content, disabled); strings.Contains(got, "kind: Skyhook") {
 					t.Errorf("tuningEnabled=false must suppress the whole Skyhook CR:\n%s", got)
 				}
 
 				enabled := make(map[string]any, len(values)+1)
-				for k, v := range values {
-					enabled[k] = v
-				}
+				maps.Copy(enabled, values)
 				enabled["tuningEnabled"] = true
 				if got := renderNodewrightTuningRaw(t, content, enabled); got != defaultRender {
 					t.Errorf("tuningEnabled=true must render identically to the default (absent):\ngot:\n%s\nwant:\n%s", got, defaultRender)

@@ -399,15 +399,15 @@ func TestCompactCoverage(t *testing.T) {
 }
 
 func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return before
 	}
 	return s
 }
 
 // lineContaining returns the first line of s containing sub, or "".
 func lineContaining(s, sub string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if strings.Contains(line, sub) {
 			return line
 		}

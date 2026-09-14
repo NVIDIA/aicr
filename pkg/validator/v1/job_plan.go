@@ -15,14 +15,11 @@
 package v1
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"fmt"
 	"strings"
-	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/runid"
 	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -105,16 +102,7 @@ type JobPlan struct {
 // exceptional and we prefer to fail fast rather than generate predictable IDs
 // that could collide across concurrent runs.
 func GenerateRunID() string {
-	timestamp := time.Now().Format("20060102-150405")
-	randomBytes := make([]byte, 8)
-	n, err := rand.Read(randomBytes)
-	if err != nil {
-		panic(fmt.Sprintf("failed to generate random bytes for runID: %v", err))
-	}
-	if n != len(randomBytes) {
-		panic(fmt.Sprintf("failed to generate runID: read %d bytes, expected %d", n, len(randomBytes)))
-	}
-	return fmt.Sprintf("%s-%s", timestamp, hex.EncodeToString(randomBytes))
+	return runid.Generate()
 }
 
 // ImagePullPolicy determines the pull policy for a container image.

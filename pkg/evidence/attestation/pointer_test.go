@@ -68,7 +68,7 @@ func TestMarshalPointer_TwoSpaceIndent(t *testing.T) {
 		t.Errorf("found 4-space sequence indent (would fail yamllint spaces:2):\n%s", got)
 	}
 	// Every indented line must use an even number of leading spaces.
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if n := len(line) - len(strings.TrimLeft(line, " ")); n%2 != 0 {
 			t.Errorf("odd leading-space count (%d) on line %q", n, line)
 		}

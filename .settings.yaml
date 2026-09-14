@@ -19,24 +19,74 @@
 # Build Tools
 build_tools:
   # renovate: datasource=github-releases depName=goreleaser/goreleaser depType=build_tools
-  goreleaser: 'v2.17.1'
+  goreleaser: 'v2.18.1'
   # renovate: datasource=github-releases depName=ko-build/ko depType=build_tools
   ko: 'v0.19.1'
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
-  crane: 'v0.21.9'
+  crane: 'v0.22.1'
   # renovate: datasource=github-releases depName=orhun/git-cliff depType=build_tools
-  git_cliff: '2.13.1'
+  git_cliff: '2.14.1'
 
 # Linting
 linting:
   # renovate: datasource=go depName=golang.org/x/exp depType=linting
-  apidiff: 'v0.0.0-20260813180055-c1d0aacb2297'
+  apidiff: 'v0.0.0-20260824195058-e88cd73687aa'
+  # The annotation must stay on the line directly above the value: the
+  # customManagers regexes in .github/renovate.json5 match `# renovate: ...`
+  # followed immediately by `key: 'value'`, so any comment between them silently
+  # drops this pin from Renovate's scan (#2657).
+  # renovate: datasource=github-releases depName=oasdiff/oasdiff depType=linting
+  oasdiff: 'v1.31.0'
+  # Refreshed automatically by tools/update-oasdiff-checksums via Renovate
+  # postUpgradeTasks whenever the version above is bumped. Same reasoning as the
+  # oras pin in security_tools: the checksums.txt served beside the tarball
+  # comes from the same release, so it detects corruption but not a compromise
+  # of the release itself. A digest committed and reviewed at this SHA does.
+  #
+  # This one matters specifically because #2663 moved oasdiff off `go install`,
+  # which authenticated every dependency against sum.golang.org -- a public
+  # transparency log. Dropping to an unpinned binary would have traded that for
+  # nothing; the pin is what keeps the integrity story from regressing.
+  #
+  # Flat, uniquely-named key rather than a nested `<tool>_checksums:` mapping,
+  # for the reason spelled out on oras_sha256_linux_amd64: the nested blocks all
+  # share sub-key names and the refresh scripts rewrite by sub-key.
+  #
+  # linux/amd64 only: this feeds the setup-build-tools action, which runs on
+  # ubuntu runners. tools/setup-tools handles local dev on other platforms.
+  oasdiff_sha256_linux_amd64: '0177d4bc0bf04f4061e9277795b77335ee100a43b508e94fce5c46de083bbede'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
-  golangci_lint: 'v2.12.2'
+  golangci_lint: 'v2.13.2'
   # renovate: datasource=pypi depName=yamllint depType=linting
   yamllint: '1.38.0'
   # renovate: datasource=github-releases depName=google/addlicense depType=linting
   addlicense: 'v1.2.0'
+  # Same move off `go install` as setup_envtest in testing_tools (#2667).
+  # addlicense does publish a checksums.txt and this value was cross-checked
+  # against it, but the pin is still what the install step verifies: a manifest
+  # served beside the archive comes from the same release, so it catches
+  # corruption in transit and not a compromise of the release itself.
+  #
+  # A version bump must refresh this or the install step fails closed on the
+  # mismatch. tools/update-addlicense-checksums does it, wired to Renovate's
+  # postUpgradeTasks. That matters more here than elsewhere: addlicense is on
+  # the auto-merge list, so a stale pin would leave a PR that can never merge.
+  #
+  # Note the asset name is version-specific -- v1.1.1 published
+  # addlicense_1.1.1_..., v1.2.0 publishes addlicense_v1.2.0_... -- so a bump
+  # that changes the naming shows up as a refresher failure, not a silent skip.
+  addlicense_sha256_linux_amd64: '6924296771234b1ba6c969e109b4459cff75e15b259676b61df874a92734b242'
+  # This pins go-licenses' own SOURCE version, not its dependency set. #2667
+  # made it a `tool` directive in go.mod, so it is built from this module's
+  # graph: on the switch it linked golang.org/x/tools v0.49.0 and
+  # k8s.io/klog/v2 v2.140.0 against upstream's v0.36.0 and v2.90.1. x/tools is
+  # the go/packages library go-licenses uses to walk the graph and locate
+  # GOROOT, so an unrelated bump here can change the behaviour of
+  # `make license-check` and of THIRD_PARTY_NOTICES.md with this value
+  # untouched. It fails loudly (compile or gate error) rather than quietly.
+  #
+  # Kept equal to the go.mod require by TestToolPinsMatchGoMod; Renovate groups
+  # the two so they move together.
   # renovate: datasource=github-releases depName=google/go-licenses depType=linting
   go_licenses: 'v2.0.1'
   # MDX toolchain for tools/check-docs-mdx-parse (the parser-level docs gate) is
@@ -49,50 +99,101 @@ linting:
 # Security Tools
 security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
-  grype: 'v0.117.0'
+  grype: 'v0.118.0'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.1.3'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
-  syft: 'v1.51.0'
-  # renovate: datasource=github-releases depName=oras-project/oras depType=security_tools
+  syft: 'v1.51.1'
   # Attaches the aiperf-bench third-party source archive as an OCI 1.1 referrer
   # (tools/generate-aiperf-source). Cosign cannot attach arbitrary artifacts, so
   # this is a separate dependency from the signing/attestation path.
   #
-  # Stored WITHOUT the leading 'v', unlike cosign/syft/grype above:
-  # oras-project/setup-oras looks the version up against bare release keys and
-  # throws on 'v1.3.0'. tools/setup-tools re-adds the prefix for the download URL.
-  oras: '1.3.0'
+  # Stored WITHOUT the leading 'v', unlike cosign/syft/grype above. Both
+  # consumers — tools/setup-tools and the setup-build-tools action — re-add the
+  # prefix for the download URL, and the bare form is what the release asset
+  # names embed (oras_1.3.4_linux_amd64.tar.gz).
+  #
+  # This is the only oras pin. It was previously paired with a separately pinned
+  # oras-project/setup-oras action that validated it against a bundled release
+  # list, which meant two bots owned two artifacts that had to stay compatible
+  # and nothing checked that they did (#2648).
+  #
+  # The annotation below must stay on the line directly above the value: the
+  # customManagers regexes in .github/renovate.json5 match `# renovate: ...`
+  # followed immediately by `key: 'value'`, so any comment between them silently
+  # drops this pin from Renovate's scan.
+  # renovate: datasource=github-releases depName=oras-project/oras depType=security_tools
+  oras: '1.3.4'
+  # Refreshed automatically by tools/update-oras-checksums via Renovate
+  # postUpgradeTasks whenever the version above is bumped. Pinning the digest
+  # here — rather than trusting the checksums.txt served beside the tarball —
+  # is what makes a later compromise of the upstream release assets detectable:
+  # an attacker who replaces both the archive and its checksum still fails
+  # against a value committed and reviewed at this SHA.
+  #
+  # Deliberately a flat, uniquely-named key rather than the nested
+  # `<tool>_checksums:` mapping the other pinned tools use. Those blocks all
+  # share the sub-keys linux_amd64/linux_arm64/..., and the existing refresh
+  # scripts rewrite by sub-key with no block scoping, so a nested block here
+  # would be corrupted by every sibling tool's script (#2658).
+  #
+  # linux/amd64 only: this pin feeds the setup-build-tools action, which runs on
+  # ubuntu runners. tools/setup-tools handles local dev on other platforms.
+  oras_sha256_linux_amd64: 'f27adb935022d94df8dc77719c322dda592c78a0d57a6f7dcdd8d900b248c454'
 
 # E2E Testing Tools
 testing_tools:
   # renovate: datasource=github-releases depName=kubernetes/kubernetes depType=testing_tools
-  kubectl: 'v1.36.3'
+  kubectl: 'v1.37.0'
   # kubelogin: Entra exec-plugin for AKS kubeconfigs, installed by uat-azure.yaml
   # via `az aks install-cli` (which defaults to latest without an explicit pin).
   # renovate: datasource=github-releases depName=Azure/kubelogin depType=testing_tools
   kubelogin: 'v0.2.19'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kind depType=testing_tools
-  kind: '0.32.0'
+  kind: '0.33.0'
   # renovate-digest: datasource=git-refs depName=nvkind packageName=https://github.com/NVIDIA/nvkind branch=main depType=testing_tools
   nvkind: 'c57050497cffee36f10c8b918d2727c4f26d886e'
   # renovate: datasource=github-releases depName=tilt-dev/ctlptl depType=testing_tools
-  ctlptl: '0.9.4'
+  ctlptl: '0.9.6'
   # renovate: datasource=github-releases depName=tilt-dev/tilt depType=testing_tools
   tilt: '0.37.7'
+  # Keep in step with sigs.k8s.io/controller-runtime in go.mod: setup-envtest is
+  # released from that repo under the tools/setup-envtest/vX.Y.Z tag series, and
+  # the envtest control-plane binaries it fetches are matched to the
+  # controller-runtime the tests link against.
+  # renovate: datasource=go depName=sigs.k8s.io/controller-runtime/tools/setup-envtest depType=testing_tools
+  setup_envtest: 'v0.25.0'
+  # CI installs the released linux/amd64 binary rather than `go install`ing the
+  # module, so the gate no longer depends on sum.golang.org being up (#2667).
+  # The two are the same code: `tools/setup-envtest/v0.25.0` and `v0.25.0` are
+  # the same commit (e8f9455), and the release asset is built from it.
+  #
+  # controller-runtime publishes no checksums.txt beside the binary, so unlike
+  # oasdiff and oras there is nothing to cross-check this against -- it is the
+  # only integrity check on the download, computed from the asset and reviewed
+  # at this SHA. A version bump must refresh it or the install step fails
+  # closed on the mismatch; tools/update-setup-envtest-checksums does that,
+  # wired to Renovate's postUpgradeTasks. Because there is no upstream manifest,
+  # that script hashes whatever the release serves at refresh time -- review the
+  # resulting diff as a new trust-on-first-use record, not a corroboration.
+  #
+  # linux/amd64 only, for the reason on oasdiff_sha256_linux_amd64: this feeds
+  # the setup-build-tools action, which runs on ubuntu runners, while
+  # tools/setup-tools covers local dev on other platforms.
+  setup_envtest_sha256_linux_amd64: 'c20be44bade1c38a8ead39f191acc35bbb50f2f2d796ba4f45c18c77e76029c7'
   # renovate: datasource=github-releases depName=helm/helm depType=testing_tools
-  helm: 'v4.2.4'
+  helm: 'v4.3.0'
   # renovate: datasource=github-releases depName=databus23/helm-diff depType=testing_tools
-  helm_diff: 'v3.15.11'
+  helm_diff: 'v3.15.12'
   # helm_diff_checksums are refreshed automatically by tools/update-helm-diff-checksums
   # via Renovate postUpgradeTasks whenever the helm-diff version above is bumped.
   # The darwin_* keys name GOOS (matching the sibling blocks); upstream labels
   # those release assets "macos".
   helm_diff_checksums:
-    linux_amd64: 'ed54aa5a14a51a6e44cf8ab6020aaa9e56779b4d33bc2adf07abea6b240a5e7c'
-    linux_arm64: '1c38c487ec348fe5ef2b10c61deddff79f0fa5bfbab762b302874578e6dc2d2c'
-    darwin_amd64: '833e1054d0cfe28bbd6f2edc4c1d5b786968b7732f8df6fe99b67c3bf12bf7bb'
-    darwin_arm64: 'ba489cc4a5998ad259fbc18c454f2319da26ba4c8f469e7acb587a07e61072cd'
+    linux_amd64: '977f92cd82269585a3ee7744d646462142333bb0be573fd8be0c983973175fc7'
+    linux_arm64: 'c3d240d4b284b57b6ab76bbfe47ac84edbf0de239f15c4ff759152fa2b7777f8'
+    darwin_amd64: 'b0f836ad0ca146f896d0da16ffd03bde4d414cd2e2920b11455cd551f3adf933'
+    darwin_arm64: 'cb9e5b6cb157e17bc70ca0f719635914fa9c39e89b82d67a0b78c4538632b580'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
   helmfile: 'v1.7.4'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
@@ -114,24 +215,24 @@ testing_tools:
     darwin_amd64: 'ddb56002ff8c6265f55ec40c82eb0ef0dddec5127dd12d4fc5e7953453481f4b'
     darwin_arm64: '502bef17dd822217e82590e9ccf01c1e26a56b3fa34a835789b9af73e82a169a'
   # renovate: datasource=github-releases depName=mikefarah/yq depType=testing_tools
-  yq: 'v4.53.3'
+  yq: 'v4.53.6'
   # AWS CLI used by the KMS e2e to provision keys against the MiniStack emulator.
   # renovate: datasource=pypi depName=awscli depType=testing_tools
-  awscli: '1.46.0'
+  awscli: '1.46.1'
   # MiniStack: MIT-licensed, token-free AWS emulator (https://ministack.org) used
   # by the KMS e2e in place of LocalStack, whose latest/stable images now refuse
   # to boot without a paid license token. Pinned (never :latest) for reproducibility.
   # Run with USE_SSL=1: sigstore's awskms signer hardcodes https://, so the e2e
   # serves TLS with a mkcert cert (see mkcert below).
   # renovate: datasource=docker depName=ministackorg/ministack depType=testing_tools
-  ministack_image: 'ministackorg/ministack:1.4.19'
+  ministack_image: 'ministackorg/ministack:1.5.10'
   # OpenBAO: the Linux Foundation Apache-2.0 fork of HashiCorp Vault, used by the
   # Vault KMS e2e to exercise the hashivault:// signing/verification path against
   # a real Transit secrets engine. API-identical to Vault; the sigstore hashivault
   # provider drives it over plain HTTP in dev mode (no TLS needed). Pinned (never
   # :latest) for reproducibility.
   # renovate: datasource=docker depName=openbao/openbao depType=testing_tools
-  openbao_image: 'openbao/openbao:2.6.1'
+  openbao_image: 'openbao/openbao:2.6.2'
   # mkcert issues a trusted localhost cert for MiniStack's TLS and installs its CA
   # into the system trust store, so the Go AWS SDK accepts the awskms:// endpoint.
   # renovate: datasource=github-releases depName=FiloSottile/mkcert depType=testing_tools
@@ -142,7 +243,7 @@ testing_tools:
     linux_amd64: '6d31c65b03972c6dc4a14ab429f2928300518b26503f58723e532d1b0a3bbb52'
     linux_arm64: 'b98f2cc69fd9147fe4d405d859c57504571adec0d3611c3eefd04107c7ac00d0'
   # renovate: datasource=github-releases depName=kubernetes-sigs/karpenter depType=testing_tools
-  karpenter: 'v1.14.0'
+  karpenter: 'v1.14.1'
   # In-cluster OCI registry for KWOK deployer-matrix CI (issue #843).
   # Pulled from ECR Public (AWS's first-party mirror of Docker official
   # images): anonymous Docker Hub pulls rate-limit on shared CI runners
@@ -164,7 +265,7 @@ testing_tools:
   # kustomize-controller and helm-controller are the only controllers the
   # bundle consumes (OCIRepository -> Kustomization -> HelmRelease).
   # renovate: datasource=github-releases depName=fluxcd/flux2 depType=testing_tools
-  flux_version: 'v2.9.4'
+  flux_version: 'v2.9.5'
   # In-cluster Git server for the KWOK flux-git deployer lane (issue #963).
   # Rootless variant so the admin-user bootstrap can `kubectl exec gitea
   # admin user create` directly without su gymnastics.
@@ -172,14 +273,14 @@ testing_tools:
   # Docker Hub pulls rate-limit on shared CI runners. Do not regress to a
   # Docker Hub pin on bump.
   # renovate: datasource=docker depName=docker.gitea.com/gitea depType=testing_tools
-  gitea_image: 'docker.gitea.com/gitea:1.26.4-rootless'
+  gitea_image: 'docker.gitea.com/gitea:1.27.0-rootless'
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
-  hauler: 'v2.0.3'
+  hauler: 'v2.1.0'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
-  zarf: 'v0.83.0'
+  zarf: 'v0.85.0'
 # Quality Thresholds
 quality:
-  coverage_threshold: '80'
+  coverage_threshold: '83'
   lint_timeout: '10m'
   test_timeout: '10m'
 
@@ -190,13 +291,13 @@ build:
 # Testing Configuration
 testing:
   # renovate: datasource=docker depName=kindest/node depType=testing
-  kind_node_image: 'kindest/node:v1.36.1'
+  kind_node_image: 'kindest/node:v1.37.0'
   # renovate: datasource=docker depName=kindest/node depType=testing
-  h100_kind_node_image: 'kindest/node:v1.36.1'
+  h100_kind_node_image: 'kindest/node:v1.37.0'
 
   # GPU CI runtime pins consumed through .github/actions/load-versions.
   # renovate: datasource=helm depName=gpu-operator depType=testing
-  gpu_operator_chart_version: 'v26.3.3'
+  gpu_operator_chart_version: 'v26.7.0'
   # Base image for the CI smoke-test snapshot-agent image. The agent binary is
   # static Go and detects GPUs driver-free via NFD/PCI, so it no longer needs a
   # CUDA base / nvidia-smi. Matches the NVIDIA static distroless base used for

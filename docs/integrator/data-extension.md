@@ -65,7 +65,7 @@ Even if your directory only adds overlays (no new components), AICR requires a
 `registry.yaml` at the root. The minimal stub is:
 
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components: []
 ```
@@ -88,6 +88,65 @@ freely without declaring anything or rebuilding AICR.) See issue
 [#1616](https://github.com/NVIDIA/aicr/issues/1616) and
 [Chart Version Pinning](recipe-development.md#chart-version-pinning).
 
+## Catalog and binary compatibility
+
+AICR validates every catalog header before it is used, so a catalog authored
+against a binary you are not running fails loudly instead of resolving something
+plausible and wrong. The accepted values per kind, and the releases in which
+they change, are defined by
+[ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md).
+
+Each catalog kind has a current value and a target value:
+
+| Kind | Current | Target |
+|---|---|---|
+| `ComponentRegistry` | `aicr.run/v1alpha2` | `aicr.run/v1beta1` |
+| `RecipeMetadata`, `RecipeMixin` (ordinary) | `aicr.run/v1alpha2` | `aicr.run/v1beta1` |
+| `RecipeMetadata` (profile-bearing) | `aicr.run/v1alpha3` | `aicr.run/v1beta2` |
+| `AICRConfig` (not a catalog file; see [CLI config](../user/cli-config.md)) | `aicr.run/v1alpha2` | `aicr.run/v1beta1` |
+
+Which binary accepts which catalog:
+
+| AICR release | Accepts | Writes and documents |
+|---|---|---|
+| v0.20 and earlier | anything — catalog headers were ungated | current |
+| v0.21 | current and target | current |
+| v0.22 | current and target | target |
+| v1.0.0 and later | target only | target |
+
+**v0.20 and earlier cannot tell you whether your catalog is compatible.** Those
+releases did not gate catalog headers at all: an external `registry.yaml` whose
+`apiVersion` differed was merged anyway and restamped with the embedded value,
+and `RecipeMetadata` and `RecipeMixin` headers were never checked. So a
+target-stamped catalog does not fail on them — it loads silently and may resolve
+something you did not intend. Closing that fail-open behavior is what ADR-022 §8
+did in v0.21 (issue
+[#1812](https://github.com/NVIDIA/aicr/issues/1812)). Treat v0.20 as unable to
+validate your catalog rather than as a compatibility floor you can rely on.
+
+Switch to the **target** value before v1.0.0, which stops accepting the current
+one. Catalogs are authored inputs, so this is a manual edit in your tree. AICR
+does not rewrite them, and there is no conversion layer.
+
+Empty, unknown, or wrong-kind AICR catalog headers fail with `INVALID_REQUEST`
+naming the value observed, the values expected for that kind, and the
+remediation. AICR validates the raw external `registry.yaml` header **before**
+merging it with the embedded registry, and checks metadata and mixin headers
+before hydration, so an unaccepted external header is never replaced by an
+embedded one and silently carried forward. Unrelated YAML in the tree keeps its
+existing skip behavior, and `ValidatorCatalog` sits on a separate API domain
+outside this contract.
+
+This gate follows the document, not the entry point. Passing a single overlay
+directly — `aicr bundle -r overlay.yaml`, `aicr validate -r overlay.yaml` —
+applies the same check as a `--data` catalog scan, so a `RecipeMetadata`
+with a missing or empty `apiVersion` is rejected on both paths. Through v0.20
+the direct path accepted it and hydrated silently
+([#2421](https://github.com/NVIDIA/aicr/issues/2421)); if you author overlays
+outside a catalog tree, confirm each one carries a header. The empty-value
+tolerance that remains is for hydrated `RecipeResult` inputs only, and it
+retires in v1.0.0.
+
 ## Adding a criteria value
 
 Criteria value validation (`service`, `accelerator`, `intent`, `os`,
@@ -99,7 +158,7 @@ a valid CLI / API input.** No code change, no rebuild.
 Example overlay for an internal NCP:
 
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: RecipeMetadata
 metadata:
   name: ncp-internal-h100-training
@@ -160,7 +219,7 @@ See [Supplying a benchmark runtime for a private service](../user/validation.md#
 `registry.yaml` declares the component's identity and source:
 
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: my-internal-operator
@@ -231,7 +290,7 @@ When in doubt, `aicr --debug recipe ... --data <dir>` logs the resolved source
 `recipes/overlays/aks.yaml` declares the `gpuStack` configuration profile
 (`azure-managed` default, `operator-managed` alternative) over the GPU driver/toolkit
 ownership paths, and `recipes/overlays/gke-cos.yaml` declares its own `gpuStack`
-(`gke-default` default, `driver-installer` alternative) over device-plugin ownership —
+(`gke-default` default, `bundle-installer` alternative) over device-plugin ownership —
 the GKE default value (`gke-default`) additionally declares
 `advertiser: external`, and both GKE values trigger the #1327
 allocation-policy closure, so their effective lock set is larger than the
@@ -244,12 +303,13 @@ mechanics:
 - **A same-path replacement replaces the declaration too.** An external
   `overlays/aks.yaml` completely replaces the embedded file — including its
   `spec.profile` block. Keep the declaration in the replacement — dropping it
-  while keeping `apiVersion: aicr.run/v1alpha3` fails catalog validation
+  while keeping profile apiVersion `aicr.run/v1alpha3` or
+  `aicr.run/v1beta2` fails catalog validation
   (the version⟺declaration cross-check). That guardrail protects an
-  integrator *editing* a v1alpha3 file: de-profiling one requires BOTH
+  integrator *editing* a profile-track file: de-profiling one requires BOTH
   removing the declaration AND downgrading the overlay to the legacy
   apiVersion. It does NOT protect the upgrade path — a pre-existing legacy
-  (`aicr.run/v1alpha2`) external `overlays/aks.yaml`, authored before the
+  (`aicr.run/v1alpha2` or `aicr.run/v1beta1`) external `overlays/aks.yaml`, authored before the
   family's conversion, already satisfies both conditions. Upgrading AICR
   with such a catalog in `--data` silently preserves the unprofiled family:
   resolution succeeds with no error, no `selectedProfile` on the recipe, and

@@ -84,208 +84,51 @@ func TestOpenAPIEnumsMatchGoTypes(t *testing.T) {
 	}
 }
 
-type openAPIContractSchema struct {
-	Ref        string                           `yaml:"$ref"`
-	AllOf      []openAPIContractSchema          `yaml:"allOf"`
-	Required   []string                         `yaml:"required"`
-	Properties map[string]openAPIContractSchema `yaml:"properties"`
-	Enum       []string                         `yaml:"enum"`
-}
-
-type openAPIContractMedia struct {
-	Schema openAPIContractSchema `yaml:"schema"`
-}
-
-// openAPIContractOperation models the two sides of an operation this gate
-// constrains: the request body schema, and the success-response schema. Both
-// are needed — checking only the component definitions would let a future edit
-// repoint an operation at a different schema with every assertion still green.
-type openAPIContractOperation struct {
-	RequestBody struct {
-		Content map[string]openAPIContractMedia `yaml:"content"`
-	} `yaml:"requestBody"`
-	Responses map[string]struct {
-		Content map[string]openAPIContractMedia `yaml:"content"`
-	} `yaml:"responses"`
-}
-
-type openAPIBundleContract struct {
-	Paths map[string]struct {
-		Get  openAPIContractOperation `yaml:"get"`
-		Post openAPIContractOperation `yaml:"post"`
-	} `yaml:"paths"`
-	Components struct {
-		Schemas map[string]openAPIContractSchema `yaml:"schemas"`
-	} `yaml:"components"`
-}
-
-// allOfConstraint splits a wrapper schema's allOf into the shared base $ref and
-// the wrapper's own inline constraint object, identifying each by content
-// rather than by position. allOf is semantically unordered, so a spec author
-// who swaps the two entries writes an equivalent contract and must not trip
-// this gate.
-//
-// It accounts for every entry rather than picking out the two it recognizes.
-// allOf intersects its branches, so an unrecognized third $ref would tighten
-// the effective contract — grafting a strict schema onto BundleRecipeRequest
-// would make validators reject the versionless requests this gate exists to
-// protect, and ignoring the entry would leave the test green while it happened.
-// A duplicated base $ref is rejected for the same reason: counted rather than
-// flagged by a boolean, so a second one cannot pass unnoticed.
-func allOfConstraint(t *testing.T, schema openAPIContractSchema, baseRef string) openAPIContractSchema {
-	t.Helper()
-
-	var constraints []openAPIContractSchema
-	var baseRefs int
-	for _, entry := range schema.AllOf {
-		switch {
-		case entry.Ref == baseRef:
-			baseRefs++
-		case entry.Ref != "":
-			t.Fatalf("allOf references unexpected schema %q; only %q plus one inline "+
-				"constraint object are allowed, and allOf intersects every branch",
-				entry.Ref, baseRef)
-		default:
-			constraints = append(constraints, entry)
-		}
-	}
-	if baseRefs != 1 {
-		t.Fatalf("allOf references %q %d times, want exactly 1", baseRef, baseRefs)
-	}
-	if len(constraints) != 1 {
-		t.Fatalf("allOf has %d inline constraint objects, want exactly 1", len(constraints))
-	}
-	return constraints[0]
-}
-
-func TestOpenAPIV1BundleRecipeContract(t *testing.T) {
+func TestOpenAPIDRAEvictionNodeLabelContract(t *testing.T) {
 	specPath := filepath.Join("..", "..", "api", "aicr", "v1", "server.yaml")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
 		t.Fatalf("read spec %q: %v", specPath, err)
 	}
-
-	var spec openAPIBundleContract
+	var spec map[string]any
 	if err := yaml.Unmarshal(data, &spec); err != nil {
 		t.Fatalf("parse spec: %v", err)
 	}
 
-	for _, tt := range []struct {
-		name string
-		got  string
-	}{
-		{
-			name: "v1 bundle request body",
-			got: spec.Paths["/v1/bundle"].Post.RequestBody.
-				Content["application/json"].Schema.Ref,
-		},
-		{
-			name: "deprecated bundle wrapper",
-			got:  spec.Components.Schemas["BundleRequest"].Properties["recipe"].Ref,
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			if want := "#/components/schemas/BundleRecipeRequest"; tt.got != want {
-				t.Errorf("$ref = %q, want %q", tt.got, want)
+	const parameterRef = "#/components/parameters/DRAEvictionNodeLabel"
+	for _, path := range []string{"/v1/bundle", "/v1/bundle"} {
+		t.Run(path, func(t *testing.T) {
+			operation := openAPIObjectAt(t, spec, "paths", path, "post")
+			parameters := openAPISequence(t, operation["parameters"], path+" parameters")
+			refCount := 0
+			for _, value := range parameters {
+				parameter := openAPIObject(t, value, path+" parameter")
+				if parameter["$ref"] == parameterRef {
+					refCount++
+				}
+				if parameter["name"] == "dra-eviction-node-label" {
+					t.Error("dra-eviction-node-label must use the shared component parameter")
+				}
+			}
+			if refCount != 1 {
+				t.Errorf("DRA eviction parameter reference count = %d, want 1", refCount)
 			}
 		})
 	}
 
-	// Response sites, checked separately from the RecipeResponse component
-	// below. Asserting only the component's shape would let a future edit
-	// repoint an operation's 200 at RecipeResponseBase or BundleRecipeRequest
-	// — silently relaxing responses to the permissive legacy enums — while
-	// every other assertion here stayed green.
-	recipePath := spec.Paths["/v1/recipe"]
-	for _, tt := range []struct {
-		name string
-		got  string
-	}{
-		{
-			name: "GET /v1/recipe 200",
-			got:  recipePath.Get.Responses["200"].Content["application/json"].Schema.Ref,
-		},
-		{
-			name: "POST /v1/recipe 200",
-			got:  recipePath.Post.Responses["200"].Content["application/json"].Schema.Ref,
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			if want := "#/components/schemas/LegacyRecipeResponse"; tt.got != want {
-				t.Errorf("$ref = %q, want %q", tt.got, want)
-			}
-		})
+	parameter := openAPIObjectAt(t, spec, "components", "parameters", "DRAEvictionNodeLabel")
+	if got := parameter["name"]; got != "dra-eviction-node-label" {
+		t.Errorf("component parameter name = %v, want dra-eviction-node-label", got)
 	}
-
-	for _, tt := range []struct {
-		name        string
-		schema      openAPIContractSchema
-		baseRef     string
-		required    []string
-		apiVersions []string
-		kinds       []string
-	}{
-		{
-			// /v1 responses are pinned to v1alpha2 by LegacyRecipeResponse,
-			// which wraps RecipeResponse and narrows the apiVersion enum.
-			// RecipeResponse itself now also admits v1alpha3 for /v2, so
-			// asserting on it directly would no longer prove v1 stays legacy.
-			// required and kind come from the RecipeResponse base and are
-			// checked there; this case owns the narrowing.
-			name:        "versioned response",
-			schema:      spec.Components.Schemas["LegacyRecipeResponse"],
-			baseRef:     "#/components/schemas/RecipeResponse",
-			apiVersions: []string{recipe.RecipeAPIVersion},
-		},
-		{
-			// The bundle request also admits the legacy Recipe kind: that was
-			// the value this contract published through v0.18.0, and the
-			// handler retains it for compatibility, so dropping it from the
-			// enum would make previously conforming clients spec-invalid
-			// against a request-validating gateway.
-			name:        "bundle request",
-			schema:      spec.Components.Schemas["BundleRecipeRequest"],
-			apiVersions: []string{"", recipe.RecipeAPIVersion, recipe.ConfiguredRecipeResultAPIVersion},
-			kinds:       []string{"", string(header.KindRecipe), recipe.RecipeResultKind},
-		},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			baseRef := tt.baseRef
-			if baseRef == "" {
-				baseRef = "#/components/schemas/RecipeResponseBase"
-			}
-			closure := allOfConstraint(t, tt.schema, baseRef)
-			if tt.required != nil && !equalStringsUnordered(closure.Required, tt.required) {
-				t.Errorf("required = %v, want %v", closure.Required, tt.required)
-			}
-			gotAPIVersions := closure.Properties["apiVersion"].Enum
-			if !equalStringsUnordered(gotAPIVersions, tt.apiVersions) {
-				t.Errorf("apiVersion enum = %v, want %v", gotAPIVersions, tt.apiVersions)
-			}
-			gotKinds := closure.Properties["kind"].Enum
-			if tt.kinds != nil && !equalStringsUnordered(gotKinds, tt.kinds) {
-				t.Errorf("kind enum = %v, want %v", gotKinds, tt.kinds)
-			}
-		})
-	}
-
-	base := spec.Components.Schemas["RecipeResponseBase"]
-	if len(base.Required) != 0 {
-		t.Fatal("RecipeResponseBase must not require apiVersion; wrappers own header requirements")
-	}
-	for _, name := range []string{"apiVersion", "kind"} {
-		property, ok := base.Properties[name]
-		if !ok {
-			t.Errorf("RecipeResponseBase is missing %s property", name)
-			continue
-		}
-		if got := property.Enum; len(got) != 0 {
-			t.Errorf("RecipeResponseBase %s enum = %v, want wrapper-owned enum", name, got)
-		}
+	schema := openAPIObjectAt(t, parameter, "schema")
+	// The eviction contract is opt-in (issue #2469): the parameter must carry
+	// no default, so an omitted parameter injects neither half.
+	if got, ok := schema["default"]; ok {
+		t.Errorf("component parameter default = %v, want none (opt-in)", got)
 	}
 }
 
-func TestOpenAPIV2BundleContract(t *testing.T) {
+func TestOpenAPIBundleContract(t *testing.T) {
 	specPath := filepath.Join("..", "..", "api", "aicr", "v1", "server.yaml")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
@@ -297,82 +140,82 @@ func TestOpenAPIV2BundleContract(t *testing.T) {
 	}
 
 	content := openAPIObjectAt(t, spec,
-		"paths", "/v2/bundle", "post", "requestBody", "content")
+		"paths", "/v1/bundle", "post", "requestBody", "content")
 	for _, mediaType := range []string{"application/json", "application/x-yaml"} {
 		schema := openAPIObjectAt(t, content, mediaType, "schema")
-		if got := schema["$ref"]; got != "#/components/schemas/BundleRecipeV2Request" {
-			t.Errorf("%s request schema = %v, want BundleRecipeV2Request", mediaType, got)
+		if got := schema["$ref"]; got != "#/components/schemas/BundleRecipeRequest" {
+			t.Errorf("%s request schema = %v, want BundleRecipeRequest", mediaType, got)
 		}
 	}
 
-	responses := openAPIObjectAt(t, spec, "paths", "/v2/bundle", "post", "responses")
+	responses := openAPIObjectAt(t, spec, "paths", "/v1/bundle", "post", "responses")
 	for _, status := range []string{"401", "404", "503", "504"} {
 		if _, ok := responses[status]; !ok {
-			t.Errorf("/v2/bundle response %s is not declared", status)
+			t.Errorf("/v1/bundle response %s is not declared", status)
 		}
 	}
 
 	schemas := openAPIObjectAt(t, spec, "components", "schemas")
-	union := openAPIObjectAt(t, schemas, "BundleRecipeV2Request")
+	union := openAPIObjectAt(t, schemas, "BundleRecipeRequest")
 	refs := map[string]bool{}
-	for _, item := range openAPISequence(t, union["oneOf"], "BundleRecipeV2Request.oneOf") {
-		schema := openAPIObject(t, item, "BundleRecipeV2Request.oneOf item")
+	for _, item := range openAPISequence(t, union["oneOf"], "BundleRecipeRequest.oneOf") {
+		schema := openAPIObject(t, item, "BundleRecipeRequest.oneOf item")
 		ref, _ := schema["$ref"].(string)
 		refs[ref] = true
 	}
 	for _, ref := range []string{
-		"#/components/schemas/LegacyBundleRecipeV2Request",
+		"#/components/schemas/LegacyBundleRecipeRequest",
 		"#/components/schemas/ProfileRecipeResponse",
 		"#/components/schemas/ConfiguredRecipeResponse",
 	} {
 		if !refs[ref] {
-			t.Errorf("BundleRecipeV2Request.oneOf does not reference %s", ref)
+			t.Errorf("BundleRecipeRequest.oneOf does not reference %s", ref)
 		}
 	}
 	// The strict response schema must NOT be a request branch: reusing it
 	// there re-requires kind: RecipeResult and re-rejects the legacy shapes
 	// (kind absent/empty) the v2 decode path accepts.
 	if refs["#/components/schemas/LegacyRecipeResponse"] {
-		t.Error("BundleRecipeV2Request.oneOf must not reuse the strict LegacyRecipeResponse response schema")
+		t.Error("BundleRecipeRequest.oneOf must not reuse the strict LegacyRecipeResponse response schema")
 	}
 
 	// The legacy request branch covers the whole accepted legacy square:
 	// apiVersion absent/""/v1alpha2 × kind absent/""/RecipeResult, headers
-	// optional. Anything narrower leaves /v2/bundle stricter than its own
+	// optional. Anything narrower leaves /v1/bundle stricter than its own
 	// server (DecodeRecipeResult enforces kind only when non-empty).
-	legacyBranch := openAPIObjectAt(t, schemas, "LegacyBundleRecipeV2Request")
-	legacyBranchAllOf := openAPISequence(t, legacyBranch["allOf"], "LegacyBundleRecipeV2Request.allOf")
-	legacyOverlay := openAPIObject(t, legacyBranchAllOf[1], "LegacyBundleRecipeV2Request overlay")
+	legacyBranch := openAPIObjectAt(t, schemas, "LegacyBundleRecipeRequest")
+	legacyBranchAllOf := openAPISequence(t, legacyBranch["allOf"], "LegacyBundleRecipeRequest.allOf")
+	legacyOverlay := openAPIObject(t, legacyBranchAllOf[1], "LegacyBundleRecipeRequest overlay")
 	if _, required := legacyOverlay["required"]; required {
-		t.Error("LegacyBundleRecipeV2Request must not require header fields")
+		t.Error("LegacyBundleRecipeRequest must not require header fields")
 	}
 	legacyAPIVersion := openAPIObjectAt(t, legacyOverlay, "properties", "apiVersion")
 	legacyAPIVersions := openAPISequence(t, legacyAPIVersion["enum"],
-		"LegacyBundleRecipeV2Request apiVersion enum")
-	for _, value := range []string{"", "aicr.run/v1alpha2"} {
+		"LegacyBundleRecipeRequest apiVersion enum")
+	for _, value := range []string{"", "aicr.run/v1alpha2", header.GroupVersionV1} {
 		if !openAPIHasString(legacyAPIVersions, value) {
-			t.Errorf("LegacyBundleRecipeV2Request apiVersion enum missing %q", value)
+			t.Errorf("LegacyBundleRecipeRequest apiVersion enum missing %q", value)
 		}
 	}
 	legacyKind := openAPIObjectAt(t, legacyOverlay, "properties", "kind")
 	legacyKinds := openAPISequence(t, legacyKind["enum"],
-		"LegacyBundleRecipeV2Request kind enum")
+		"LegacyBundleRecipeRequest kind enum")
 	for _, value := range []string{"", "RecipeResult"} {
 		if !openAPIHasString(legacyKinds, value) {
-			t.Errorf("LegacyBundleRecipeV2Request kind enum missing %q", value)
+			t.Errorf("LegacyBundleRecipeRequest kind enum missing %q", value)
 		}
 	}
 	legacyConfigurationNot := openAPIObjectAt(t, legacyOverlay, "not")
 	if !openAPIHasString(
 		openAPISequence(t, legacyConfigurationNot["required"],
-			"LegacyBundleRecipeV2Request not.required"),
+			"LegacyBundleRecipeRequest not.required"),
 		"configuration",
 	) {
 
-		t.Error("LegacyBundleRecipeV2Request does not prohibit configuration")
+		t.Error("LegacyBundleRecipeRequest does not prohibit configuration")
 	}
 	if _, ok := union["discriminator"]; ok {
-		t.Error("BundleRecipeV2Request must not discriminate a versionless branch by apiVersion")
+		t.Error("BundleRecipeRequest must not discriminate a versionless branch by apiVersion")
 	}
 
 	configured := openAPIObjectAt(t, schemas, "ConfiguredRecipeResponse")
@@ -577,22 +420,6 @@ func TestOpenAPIV2BundleContract(t *testing.T) {
 		}
 	}
 
-	legacy := openAPIObjectAt(t, schemas, "LegacyRecipeResponse")
-	legacyAllOf := openAPISequence(t, legacy["allOf"], "LegacyRecipeResponse.allOf")
-	if len(legacyAllOf) != 2 {
-		t.Fatalf("LegacyRecipeResponse.allOf has %d entries, want 2", len(legacyAllOf))
-	}
-	legacyMetadata := openAPIObjectAt(t,
-		openAPIObject(t, legacyAllOf[1], "LegacyRecipeResponse version schema"),
-		"properties", "metadata", "not")
-	if !openAPIHasString(
-		openAPISequence(t, legacyMetadata["required"], "LegacyRecipeResponse metadata.not.required"),
-		"selectedProfile",
-	) {
-
-		t.Error("LegacyRecipeResponse does not prohibit selectedProfile")
-	}
-
 	// The legacy request branch prohibits selectedProfile and keeps its
 	// header enums to the legacy square only — a v1alpha3 artifact must
 	// still fail this branch so oneOf matches exactly one.
@@ -600,15 +427,27 @@ func TestOpenAPIV2BundleContract(t *testing.T) {
 		"properties", "metadata", "not")
 	if !openAPIHasString(
 		openAPISequence(t, legacyBranchMetadata["required"],
-			"LegacyBundleRecipeV2Request metadata.not.required"),
+			"LegacyBundleRecipeRequest metadata.not.required"),
 		"selectedProfile",
 	) {
 
-		t.Error("LegacyBundleRecipeV2Request does not prohibit selectedProfile")
+		t.Error("LegacyBundleRecipeRequest does not prohibit selectedProfile")
 	}
 }
 
-func TestOpenAPIV1BundleLegacyConfigurationContract(t *testing.T) {
+// TestOpenAPIProfileTrackParametersAreUniversal asserts the profile-track query
+// parameters are declared on both methods of every recipe-resolving endpoint.
+//
+// This replaces TestOpenAPISlurmAccountingModeIsV2Only, whose whole assertion
+// was that slurmAccountingMode appeared on /v2 and not on /v1. Collapsing the
+// families deleted the distinction that test measured, and deleting it with its
+// premise would have left the parameter with no spec coverage at all — a
+// silent drop from the frozen v1 surface would not fail anything.
+//
+// profile is included for the same reason: it is the other half of what the
+// collapse made universal, and it was previously covered only as part of the
+// v1-versus-v2 split.
+func TestOpenAPIProfileTrackParametersAreUniversal(t *testing.T) {
 	specPath := filepath.Join("..", "..", "api", "aicr", "v1", "server.yaml")
 	data, err := os.ReadFile(specPath)
 	if err != nil {
@@ -619,91 +458,37 @@ func TestOpenAPIV1BundleLegacyConfigurationContract(t *testing.T) {
 		t.Fatalf("parse spec: %v", err)
 	}
 
-	bundleRequest := openAPIObjectAt(t, spec, "components", "schemas", "BundleRecipeRequest")
-	allOf := openAPISequence(t, bundleRequest["allOf"], "BundleRecipeRequest.allOf")
-	if len(allOf) != 2 {
-		t.Fatalf("BundleRecipeRequest.allOf has %d entries, want 2", len(allOf))
-	}
-	overlay := openAPIObject(t, allOf[1], "BundleRecipeRequest overlay")
-	thenNot := openAPIObjectAt(t, overlay, "then", "not")
-	if !openAPIHasString(
-		openAPISequence(t, thenNot["required"], "BundleRecipeRequest then.not.required"),
-		"configuration",
-	) {
-
-		t.Error("BundleRecipeRequest does not prohibit configuration for legacy headers")
-	}
-
-	legacyHeaders := map[string]bool{"absent": false, "": false, recipe.RecipeAPIVersion: false}
-	condition := openAPIObjectAt(t, overlay, "if")
-	branches := openAPISequence(t, condition["anyOf"], "BundleRecipeRequest if.anyOf")
-	for _, branchValue := range branches {
-		branch := openAPIObject(t, branchValue, "BundleRecipeRequest if.anyOf item")
-		if notValue, ok := branch["not"]; ok {
-			not := openAPIObject(t, notValue, "BundleRecipeRequest absent apiVersion condition")
-			if openAPIHasString(openAPISequence(t, not["required"],
-				"BundleRecipeRequest absent apiVersion required"), "apiVersion") {
-
-				legacyHeaders["absent"] = true
-			}
-		}
-		if propertiesValue, ok := branch["properties"]; ok {
-			properties := openAPIObject(t, propertiesValue,
-				"BundleRecipeRequest legacy apiVersion properties")
-			apiVersion := openAPIObjectAt(t, properties, "apiVersion")
-			for _, value := range openAPISequence(t, apiVersion["enum"],
-				"BundleRecipeRequest legacy apiVersion enum") {
-				if text, ok := value.(string); ok {
-					legacyHeaders[text] = true
-				}
-			}
-		}
-	}
-	for header, found := range legacyHeaders {
-		if !found {
-			t.Errorf("BundleRecipeRequest legacy configuration condition does not cover apiVersion %q", header)
-		}
-	}
-}
-
-func TestOpenAPISlurmAccountingModeIsV2Only(t *testing.T) {
-	specPath := filepath.Join("..", "..", "api", "aicr", "v1", "server.yaml")
-	data, err := os.ReadFile(specPath)
-	if err != nil {
-		t.Fatalf("read spec %q: %v", specPath, err)
-	}
-	var spec map[string]any
-	if err := yaml.Unmarshal(data, &spec); err != nil {
-		t.Fatalf("parse spec: %v", err)
-	}
-
-	tests := []struct {
-		path string
-		want bool
+	parameters := []struct {
+		name string
+		ref  string
 	}{
-		{path: "/v1/recipe"},
-		{path: "/v1/query"},
-		{path: "/v2/recipe", want: true},
-		{path: "/v2/query", want: true},
+		{name: "slurmAccountingMode", ref: "#/components/parameters/SlurmAccountingMode"},
+		{name: "profile", ref: "#/components/parameters/ProfileSelection"},
 	}
-	for _, tt := range tests {
-		for _, method := range []string{"get", "post"} {
-			t.Run(tt.path+" "+method, func(t *testing.T) {
-				operation := openAPIObjectAt(t, spec, "paths", tt.path, method)
-				parameters := openAPISequence(t, operation["parameters"], "operation.parameters")
-				found := false
-				for _, value := range parameters {
-					parameter := openAPIObject(t, value, "operation parameter")
-					if parameter["name"] == "slurmAccountingMode" ||
-						parameter["$ref"] == "#/components/parameters/SlurmAccountingMode" {
 
-						found = true
+	for _, path := range []string{"/v1/recipe", "/v1/query"} {
+		for _, method := range []string{"get", "post"} {
+			for _, want := range parameters {
+				t.Run(want.name+" "+method+" "+path, func(t *testing.T) {
+					operation := openAPIObjectAt(t, spec, "paths", path, method)
+					declared := openAPISequence(t, operation["parameters"],
+						"operation.parameters")
+					if len(declared) == 0 {
+						t.Fatalf("%s %s declares no parameters; the parse shape is "+
+							"wrong and this assertion would pass vacuously",
+							method, path)
 					}
-				}
-				if found != tt.want {
-					t.Errorf("slurmAccountingMode declared = %v, want %v", found, tt.want)
-				}
-			})
+
+					for _, value := range declared {
+						parameter := openAPIObject(t, value, "operation parameter")
+						if parameter["name"] == want.name || parameter["$ref"] == want.ref {
+							return
+						}
+					}
+					t.Errorf("%s %s does not declare %q; it is part of the frozen v1 "+
+						"surface and the handler reads it", method, path, want.name)
+				})
+			}
 		}
 	}
 }
@@ -858,17 +643,4 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
-}
-
-// equalStringsUnordered reports whether a and b hold the same elements in any
-// order. It is an order-insensitive slice compare, NOT set equality: duplicates
-// are significant, so ["a","a"] and ["a"] differ. That is the behavior wanted
-// for enum comparison — a repeated enum member is itself a spec defect worth
-// failing on, not something to silently collapse.
-func equalStringsUnordered(a, b []string) bool {
-	sortedA := append([]string(nil), a...)
-	sortedB := append([]string(nil), b...)
-	sort.Strings(sortedA)
-	sort.Strings(sortedB)
-	return equalStrings(sortedA, sortedB)
 }

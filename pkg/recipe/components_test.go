@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	stderrors "errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -323,6 +324,34 @@ func TestComponentRegistry_K8sAIBOMContract(t *testing.T) {
 	}
 }
 
+// TestKubeflowTrainerValues_UseJobSetInstallCondition pins AICR's values key to
+// the dependency condition exposed by the upstream Kubeflow Trainer chart.
+// Chart v2.2.0 gates its JobSet subchart on jobset.install; jobset.enabled is
+// ignored by Helm and would make the documented opt-out ineffective.
+func TestKubeflowTrainerValues_UseJobSetInstallCondition(t *testing.T) {
+	const valuesPath = "components/kubeflow-trainer/values.yaml"
+	content, err := GetEmbeddedFS().ReadFile(valuesPath)
+	if err != nil {
+		t.Fatalf("failed to read %s: %v", valuesPath, err)
+	}
+
+	var values map[string]any
+	if err := yaml.Unmarshal(content, &values); err != nil {
+		t.Fatalf("failed to parse %s: %v", valuesPath, err)
+	}
+	jobSet, ok := values["jobset"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s jobset = %T, want map[string]any", valuesPath, values["jobset"])
+	}
+	install, ok := jobSet["install"].(bool)
+	if !ok || !install {
+		t.Errorf("%s jobset.install = %v, want true", valuesPath, jobSet["install"])
+	}
+	if _, exists := jobSet["enabled"]; exists {
+		t.Errorf("%s must not set ignored key jobset.enabled", valuesPath)
+	}
+}
+
 func TestComponentRegistry_SlinkySlurmOperator_NodeSchedulingPaths(t *testing.T) {
 	registry, err := GetComponentRegistry()
 	if err != nil {
@@ -448,10 +477,25 @@ func TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths(t *testing.T) {
 		}
 	}
 
+	// Regression guard: an unpinned controller/restapi/login/accounting pod
+	// can land on a GPU node, whose zone then pins the StatefulSet's PVC and
+	// strands a later reschedule onto the correct system-node pool. This
+	// must stay a bundle-time failure, not a silent no-op, if
+	// requireNodeSelector is ever dropped from the registry entry.
+	if !slurmCluster.RequireSystemNodeSelector() {
+		t.Error("slinky-slurm nodeScheduling.system.requireNodeSelector must stay true (see registry.yaml comment)")
+	}
+
 	gotAccelSelector := slurmCluster.GetAcceleratedNodeSelectorPaths()
 	if !slices.Contains(gotAccelSelector, "nodesets.slinky.podSpec.nodeSelector") {
 		t.Errorf("slinky-slurm accelerated node selector paths missing %q (got %v)",
 			"nodesets.slinky.podSpec.nodeSelector", gotAccelSelector)
+	}
+	// Regression guard: an unpinned NodeSet/worker pod can land on a
+	// non-GPU node and strand a later reschedule onto the accelerated pool
+	// the same way.
+	if !slurmCluster.RequireAcceleratedNodeSelector() {
+		t.Error("slinky-slurm nodeScheduling.accelerated.requireNodeSelector must stay true (see registry.yaml comment)")
 	}
 	gotAccelToleration := slurmCluster.GetAcceleratedTolerationPaths()
 	if !slices.Contains(gotAccelToleration, "nodesets.slinky.podSpec.tolerations") {
@@ -498,6 +542,51 @@ func TestComponentRegistry_SlurmAccountingMariaDB_NodeSchedulingPaths(t *testing
 	if got := mariaDB.GetSystemTolerationPaths(); !slices.Contains(got, "mariadb.tolerations") {
 		t.Errorf("slurm-accounting-mariadb system toleration paths missing %q (got %v)",
 			"mariadb.tolerations", got)
+	}
+	// Regression guard: an unpinned mariadb pod can land on a GPU node and
+	// strand a later reschedule the same way slinky-slurm's pods can. This
+	// must stay a bundle-time failure, not a silent no-op, if
+	// requireNodeSelector is ever dropped from the registry entry.
+	if !mariaDB.RequireSystemNodeSelector() {
+		t.Error("slurm-accounting-mariadb nodeScheduling.system.requireNodeSelector must stay true (see registry.yaml comment)")
+	}
+}
+
+func TestComponentRegistry_KubePrometheusStack_NodeSchedulingPaths(t *testing.T) {
+	registry, err := GetComponentRegistry()
+	if err != nil {
+		t.Fatalf("failed to load component registry: %v", err)
+	}
+
+	prom := registry.Get("kube-prometheus-stack")
+	if prom == nil {
+		t.Fatal("kube-prometheus-stack not found in registry")
+	}
+	if got := prom.GetSystemNodeSelectorPaths(); !slices.Contains(got, "prometheus.prometheusSpec.nodeSelector") {
+		t.Errorf("kube-prometheus-stack system node selector paths missing %q (got %v)",
+			"prometheus.prometheusSpec.nodeSelector", got)
+	}
+	if got := prom.GetSystemTolerationPaths(); !slices.Contains(got, "prometheus.prometheusSpec.tolerations") {
+		t.Errorf("kube-prometheus-stack system toleration paths missing %q (got %v)",
+			"prometheus.prometheusSpec.tolerations", got)
+	}
+	// Regression guard. Once --storage-class gives it a PVC, an unpinned
+	// prometheus pod can land on a GPU node and strand a later reschedule
+	// the same way slinky-slurm's pods can. This must stay a bundle-time
+	// failure, not a silent no-op, if requireNodeSelectorIfStorageClassSet
+	// is ever dropped from the registry entry. Unconditional
+	// requireNodeSelector must stay off, since the chart defaults to
+	// emptyDir, so this base component appears in nearly every bundle
+	// regardless of whether a PVC is ever in play.
+	if !prom.RequireSystemNodeSelectorIfStorageClassSet() {
+		t.Error("kube-prometheus-stack nodeScheduling.system.requireNodeSelectorIfStorageClassSet must stay true (see registry.yaml comment)")
+	}
+	if prom.RequireSystemNodeSelector() {
+		t.Error("kube-prometheus-stack nodeScheduling.system.requireNodeSelector must stay false; use requireNodeSelectorIfStorageClassSet instead")
+	}
+	if got := prom.GetStorageClassPaths(); !slices.Contains(got, "prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName") {
+		t.Errorf("kube-prometheus-stack storageClassPaths missing %q (got %v); requireNodeSelectorIfStorageClassSet has nothing to condition on",
+			"prometheus.prometheusSpec.storageSpec.volumeClaimTemplate.spec.storageClassName", got)
 	}
 }
 
@@ -854,6 +943,147 @@ func TestComponentRegistry_Validate_EdgeCases(t *testing.T) {
 		}
 	})
 
+	t.Run("requireNodeSelector without nodeSelectorPaths is invalid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:        "comp1",
+					DisplayName: "Comp 1",
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{RequireNodeSelector: true},
+					},
+				},
+				{
+					Name:        "comp2",
+					DisplayName: "Comp 2",
+					NodeScheduling: NodeSchedulingConfig{
+						Accelerated: SchedulingPaths{RequireNodeSelector: true},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		wantSubstrings := []string{
+			`component "comp1": nodeScheduling.system requires a node selector but nodeSelectorPaths is empty`,
+			`component "comp2": nodeScheduling.accelerated requires a node selector but nodeSelectorPaths is empty`,
+		}
+		for _, want := range wantSubstrings {
+			found := false
+			for _, e := range errs {
+				if strings.Contains(e.Error(), want) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected an error containing %q, got: %v", want, errs)
+			}
+		}
+	})
+
+	t.Run("requireNodeSelector with nodeSelectorPaths is valid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:        "comp1",
+					DisplayName: "Comp 1",
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{
+							RequireNodeSelector: true,
+							NodeSelectorPaths:   []string{"controller.podSpec.nodeSelector"},
+						},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		if len(errs) != 0 {
+			t.Errorf("expected no validation errors, got: %v", errs)
+		}
+	})
+
+	t.Run("requireNodeSelectorIfStorageClassSet without storage class paths is invalid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:        "comp1",
+					DisplayName: "Comp 1",
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{
+							RequireNodeSelectorIfStorageClassSet: true,
+							NodeSelectorPaths:                    []string{"controller.podSpec.nodeSelector"},
+						},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		want := `component "comp1": nodeScheduling.system.requireNodeSelectorIfStorageClassSet is true but the component has no storageClassPaths or sharedStorageClassPaths to condition on`
+		found := false
+		for _, e := range errs {
+			if strings.Contains(e.Error(), want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected an error containing %q, got: %v", want, errs)
+		}
+	})
+
+	t.Run("requireNodeSelectorIfStorageClassSet with storage class paths is valid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:              "comp1",
+					DisplayName:       "Comp 1",
+					StorageClassPaths: []string{"controller.storage.storageClassName"},
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{
+							RequireNodeSelectorIfStorageClassSet: true,
+							NodeSelectorPaths:                    []string{"controller.podSpec.nodeSelector"},
+						},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		if len(errs) != 0 {
+			t.Errorf("expected no validation errors, got: %v", errs)
+		}
+	})
+
+	t.Run("requireNodeSelector and requireNodeSelectorIfStorageClassSet together is invalid", func(t *testing.T) {
+		registry := &ComponentRegistry{
+			Components: []ComponentConfig{
+				{
+					Name:              "comp1",
+					DisplayName:       "Comp 1",
+					StorageClassPaths: []string{"controller.storage.storageClassName"},
+					NodeScheduling: NodeSchedulingConfig{
+						System: SchedulingPaths{
+							RequireNodeSelector:                  true,
+							RequireNodeSelectorIfStorageClassSet: true,
+							NodeSelectorPaths:                    []string{"controller.podSpec.nodeSelector"},
+						},
+					},
+				},
+			},
+		}
+		errs := registry.Validate()
+		want := `component "comp1": nodeScheduling.system.requireNodeSelector and requireNodeSelectorIfStorageClassSet are mutually exclusive`
+		found := false
+		for _, e := range errs {
+			if strings.Contains(e.Error(), want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected an error containing %q, got: %v", want, errs)
+		}
+	})
+
 	t.Run("valid registry passes", func(t *testing.T) {
 		registry := &ComponentRegistry{
 			Components: []ComponentConfig{
@@ -1189,6 +1419,43 @@ func TestGetComponentRegistry_PerProviderIsolation(t *testing.T) {
 	}
 }
 
+func TestLoadComponentRegistry_ReleaseNHeaders(t *testing.T) {
+	tests := []struct {
+		name       string
+		apiVersion string
+		kind       string
+		wantErr    bool
+	}{
+		{name: "current alpha", apiVersion: ComponentRegistryAPIVersion, kind: ComponentRegistryKind},
+		{name: "target beta", apiVersion: "aicr.run/v1beta1", kind: ComponentRegistryKind},
+		{name: "empty version", apiVersion: "", kind: ComponentRegistryKind, wantErr: true},
+		{name: "unknown version", apiVersion: "aicr.run/v9", kind: ComponentRegistryKind, wantErr: true},
+		{name: "wrong kind", apiVersion: ComponentRegistryAPIVersion, kind: "RecipeMetadata", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dp := newInMemoryProvider("registry-header-"+tt.name, map[string][]byte{
+				"registry.yaml": fmt.Appendf(nil, "apiVersion: %s\nkind: %s\ncomponents: []\n", tt.apiVersion, tt.kind),
+			})
+			t.Cleanup(func() { EvictCachedRegistry(dp) })
+
+			_, err := GetComponentRegistryFor(dp)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("GetComponentRegistryFor() error = nil, want header rejection")
+				}
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Fatalf("error = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetComponentRegistryFor() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestEvictCachedRegistry_Refetches(t *testing.T) {
 	dp := buildProviderWithRegistry(t, "registry-evict.yaml")
 	first, err := GetComponentRegistryFor(dp)
@@ -1385,5 +1652,123 @@ func TestComponentRegistry_ManifestFilesResolve(t *testing.T) {
 	if !slices.Equal(kueue.ManifestFiles, wantManifests) {
 		t.Errorf("kueue manifestFiles = %v, want %v (dependency-ordered quota CRs)",
 			kueue.ManifestFiles, wantManifests)
+	}
+}
+
+func TestComponentConfigUpgradesFile(t *testing.T) {
+	registryYAML := []byte("apiVersion: " + ComponentRegistryAPIVersion + "\n" +
+		"kind: " + ComponentRegistryKind + "\n" +
+		"components:\n" +
+		"  - name: nodewright-operator\n" +
+		"    displayName: NodeWright Operator\n" +
+		"    upgrades:\n" +
+		"      file: components/nodewright-operator/upgrades.yaml\n")
+
+	var registry ComponentRegistry
+	if err := yaml.Unmarshal(registryYAML, &registry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(registry.Components) != 1 {
+		t.Fatalf("components = %d, want 1", len(registry.Components))
+	}
+	if got := registry.Components[0].Upgrades.File; got != "components/nodewright-operator/upgrades.yaml" {
+		t.Errorf("Upgrades.File = %q, want %q", got, "components/nodewright-operator/upgrades.yaml")
+	}
+}
+
+func TestComponentConfigUpgradesAbsent(t *testing.T) {
+	registryYAML := []byte("apiVersion: " + ComponentRegistryAPIVersion + "\n" +
+		"kind: " + ComponentRegistryKind + "\n" +
+		"components:\n" +
+		"  - name: nfd\n" +
+		"    displayName: Node Feature Discovery\n")
+
+	var registry ComponentRegistry
+	if err := yaml.Unmarshal(registryYAML, &registry); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got := registry.Components[0].Upgrades.File; got != "" {
+		t.Errorf("Upgrades.File = %q, want empty for a component with no upgrades key", got)
+	}
+}
+
+func TestValidateMixinSafeOverridePaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		paths   []string
+		wantErr string
+	}{
+		{name: "empty allowlist is valid"},
+		{name: "well-formed unique leaf paths", paths: []string{"global.tracing.enabled", "global.auditLogging.enabled"}},
+		{name: "empty string entry", paths: []string{""}, wantErr: "not a well-formed dotted path"},
+		{name: "leading dot", paths: []string{".global.tracing.enabled"}, wantErr: "not a well-formed dotted path"},
+		{name: "trailing dot", paths: []string{"global.tracing.enabled."}, wantErr: "not a well-formed dotted path"},
+		{name: "double dot", paths: []string{"global..enabled"}, wantErr: "not a well-formed dotted path"},
+		{name: "literal duplicate", paths: []string{"global.tracing.enabled", "global.tracing.enabled"}, wantErr: "more than once"},
+		{name: "ancestor/descendant pair", paths: []string{"global.tracing", "global.tracing.enabled"}, wantErr: "one an ancestor of the other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			comp := &ComponentConfig{Name: "test-component", MixinSafeOverridePaths: tt.paths}
+			err := validateMixinSafeOverridePaths(comp)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected no error, got: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %v, want containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestComponentRegistryValidate_MixinSafeOverridePaths pins the allowlist
+// rules to the EXPORTED contract, not just the loader path: a registry
+// constructed directly (SDK callers, an external --data catalog assembled in
+// Go) never goes through loadComponentRegistryFor, so Validate() is the only
+// gate it sees. The sibling test above calls the private helper and would
+// stay green even if Validate() dropped the check entirely.
+func TestComponentRegistryValidate_MixinSafeOverridePaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		paths   []string
+		wantErr string
+	}{
+		{name: "well-formed allowlist passes", paths: []string{"global.tracing.enabled"}},
+		{name: "malformed path is rejected", paths: []string{"global..enabled"}, wantErr: "not a well-formed dotted path"},
+		{name: "duplicate entry is rejected", paths: []string{"global.tracing.enabled", "global.tracing.enabled"}, wantErr: "more than once"},
+		{name: "ancestor/descendant pair is rejected", paths: []string{"global.tracing", "global.tracing.enabled"}, wantErr: "one an ancestor of the other"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			registry := &ComponentRegistry{
+				Components: []ComponentConfig{{
+					Name:                   "test-component",
+					DisplayName:            "Test Component",
+					MixinSafeOverridePaths: tt.paths,
+				}},
+			}
+			errs := registry.Validate()
+			if tt.wantErr == "" {
+				if len(errs) != 0 {
+					t.Fatalf("Validate() = %v, want no errors", errs)
+				}
+				return
+			}
+			found := false
+			for _, err := range errs {
+				if strings.Contains(err.Error(), tt.wantErr) {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("Validate() = %v, want an error containing %q", errs, tt.wantErr)
+			}
+		})
 	}
 }

@@ -34,6 +34,7 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -173,6 +174,57 @@ func TestParseBundleConfig_Bundlers(t *testing.T) {
 	}
 }
 
+func TestParseBundleConfig_DRAEvictionNodeLabel(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		target  string
+		want    config.NodeLabel
+		wantErr bool
+	}{
+		{
+			// Opt-in (issue #2469): an omitted parameter must leave the label
+			// unset so the bundler injects neither half of the contract.
+			name:   "absent opts out",
+			target: "/v1/bundle",
+			want:   config.NodeLabel{},
+		},
+		{
+			name:   "custom label",
+			target: "/v1/bundle?dra-eviction-node-label=example.com%2Fdra-ready%3Denabled",
+			want:   config.NodeLabel{Key: "example.com/dra-ready", Value: "enabled"},
+		},
+		{
+			name:    "invalid label",
+			target:  "/v1/bundle?dra-eviction-node-label=not-a-key-value-label",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := ParseBundleConfig(httptest.NewRequest("POST", tt.target, nil))
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("ParseBundleConfig() expected error, got nil")
+				}
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseBundleConfig() error = %v", err)
+			}
+			if got := cfg.DRAEvictionNodeLabel(); got != tt.want {
+				t.Errorf("DRAEvictionNodeLabel() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseBundleConfig_Serial(t *testing.T) {
 	t.Parallel()
 
@@ -219,6 +271,9 @@ func TestSupportedBundleQueryParametersReturnsDefensiveCopy(t *testing.T) {
 
 	if _, ok := SupportedBundleQueryParameters()[bundleQuerySet]; !ok {
 		t.Errorf("deleting %q from returned map mutated the supported parameter set", bundleQuerySet)
+	}
+	if _, ok := SupportedBundleQueryParameters()[bundleQueryDRAEvictionNodeLabel]; !ok {
+		t.Errorf("supported parameter set missing %q", bundleQueryDRAEvictionNodeLabel)
 	}
 }
 

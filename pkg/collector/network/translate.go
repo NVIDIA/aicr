@@ -17,6 +17,7 @@ package network
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/measurement"
@@ -253,12 +254,12 @@ func flattenNodeSelector(sel map[string]string) string {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	out := ""
+	var out strings.Builder
 	for i, k := range keys {
 		if i > 0 {
-			out += ","
+			out.WriteString(",")
 		}
-		out += k + "=" + sel[k]
+		out.WriteString(k + "=" + sel[k])
 	}
-	return out
+	return out.String()
 }

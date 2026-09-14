@@ -54,7 +54,7 @@ import (
 type ResourceFetcher interface {
 	// Fetch retrieves a single Kubernetes resource as an unstructured map.
 	// Returns ErrCodeNotFound when the resource doesn't exist.
-	Fetch(ctx context.Context, apiVersion, kind, namespace, name string) (map[string]interface{}, error)
+	Fetch(ctx context.Context, apiVersion, kind, namespace, name string) (map[string]any, error)
 
 	// List enumerates Kubernetes resources of the given kind in the
 	// given namespace, optionally narrowed by labels (empty = no
@@ -68,7 +68,7 @@ type ResourceFetcher interface {
 	// selector without specifying a resource name (the pod-phase /
 	// container-state patterns that dominate the registry-declared
 	// health checks).
-	List(ctx context.Context, apiVersion, kind, namespace string, labels map[string]string) ([]map[string]interface{}, error)
+	List(ctx context.Context, apiVersion, kind, namespace string, labels map[string]string) ([]map[string]any, error)
 }
 
 // ComponentAssert holds the data needed to run assertions for one component.
@@ -265,10 +265,7 @@ func assertRawResources(ctx context.Context, ca ComponentAssert, timeout time.Du
 		}
 
 		// Sleep for the retry interval or until the deadline, whichever is shorter.
-		wait := defaults.AssertRetryInterval
-		if remaining < wait {
-			wait = remaining
-		}
+		wait := min(remaining, defaults.AssertRetryInterval)
 
 		select {
 		case <-ctx.Done():
@@ -299,7 +296,7 @@ func assertRawResources(ctx context.Context, ca ComponentAssert, timeout time.Du
 }
 
 // assertAllDocuments checks all YAML documents against the cluster.
-func assertAllDocuments(ctx context.Context, docs []map[string]interface{}, fetcher ResourceFetcher) error {
+func assertAllDocuments(ctx context.Context, docs []map[string]any, fetcher ResourceFetcher) error {
 	for _, doc := range docs {
 		if err := assertSingleDocument(ctx, doc, fetcher); err != nil {
 			return err
@@ -309,11 +306,11 @@ func assertAllDocuments(ctx context.Context, docs []map[string]interface{}, fetc
 }
 
 // assertSingleDocument fetches one resource and asserts it matches expected fields.
-func assertSingleDocument(ctx context.Context, expected map[string]interface{}, fetcher ResourceFetcher) error {
+func assertSingleDocument(ctx context.Context, expected map[string]any, fetcher ResourceFetcher) error {
 	apiVersion, _ := expected["apiVersion"].(string)
 	kind, _ := expected["kind"].(string)
 
-	metadata, _ := expected["metadata"].(map[string]interface{})
+	metadata, _ := expected["metadata"].(map[string]any)
 	name, _ := metadata["name"].(string)
 	namespace, _ := metadata["namespace"].(string)
 
@@ -361,15 +358,15 @@ func formatFieldErrors(errs field.ErrorList) string {
 }
 
 // splitYAMLDocuments splits a multi-document YAML string into individual docs.
-func splitYAMLDocuments(raw string) ([]map[string]interface{}, error) {
-	var docs []map[string]interface{}
-	parts := strings.Split(raw, "\n---")
-	for _, part := range parts {
+func splitYAMLDocuments(raw string) ([]map[string]any, error) {
+	var docs []map[string]any
+	parts := strings.SplitSeq(raw, "\n---")
+	for part := range parts {
 		part = strings.TrimSpace(part)
 		if part == "" || part == "---" {
 			continue
 		}
-		var doc map[string]interface{}
+		var doc map[string]any
 		if err := yaml.Unmarshal([]byte(part), &doc); err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to unmarshal YAML document", err)
 		}

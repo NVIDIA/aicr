@@ -16,8 +16,11 @@ package cli
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -26,7 +29,6 @@ import (
 
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	"github.com/NVIDIA/aicr/pkg/collector"
-	"github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -38,19 +40,19 @@ import (
 // CLI-overrides-config precedence. The CLI flag is a repeated string in
 // key=value form; the config value is already a typed map. Either source
 // can be empty; the result preserves the same nil-vs-empty semantics.
-func resolveSnapshotNodeSelector(cmd *cli.Command, resolved *config.SnapshotResolved) (map[string]string, error) {
+func resolveSnapshotNodeSelector(cmd *cli.Command, agent *aicr.AgentConfig) (map[string]string, error) {
 	if cmd.IsSet("node-selector") {
 		ns, err := snapshotter.ParseNodeSelectors(cmd.StringSlice("node-selector"))
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid node-selector", err)
 		}
-		if resolved.NodeSelector != nil {
+		if agent.NodeSelector != nil {
 			slog.Info("CLI flag overriding config value", "flag", "node-selector",
-				"config", resolved.NodeSelector, "override", ns)
+				"config", agent.NodeSelector, "override", ns)
 		}
 		return ns, nil
 	}
-	return resolved.NodeSelector, nil
+	return agent.NodeSelector, nil
 }
 
 // resolveSnapshotTolerations resolves the snapshot toleration list with
@@ -64,20 +66,20 @@ func resolveSnapshotNodeSelector(cmd *cli.Command, resolved *config.SnapshotReso
 //     (the legacy snapshot behavior — without it, an aicr snapshot
 //     invocation that does not pass --toleration would suddenly stop
 //     tolerating tainted nodes).
-func resolveSnapshotTolerations(cmd *cli.Command, resolved *config.SnapshotResolved) ([]corev1.Toleration, error) {
+func resolveSnapshotTolerations(cmd *cli.Command, agent *aicr.AgentConfig) ([]corev1.Toleration, error) {
 	if cmd.IsSet("toleration") {
 		tols, err := snapshotter.ParseTolerations(cmd.StringSlice("toleration"))
 		if err != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid toleration", err)
 		}
-		if resolved.Tolerations != nil {
+		if agent.Tolerations != nil {
 			slog.Info("CLI flag overriding config value", "flag", "toleration",
-				"config", resolved.Tolerations, "override", tols)
+				"config", agent.Tolerations, "override", tols)
 		}
 		return tols, nil
 	}
-	if resolved.Tolerations != nil {
-		return resolved.Tolerations, nil
+	if agent.Tolerations != nil {
+		return agent.Tolerations, nil
 	}
 	return snapshotter.DefaultTolerations(), nil
 }
@@ -112,6 +114,11 @@ type snapshotCmdOptions struct {
 	// layer. Works in both agent Job mode (controller-side merge) and
 	// local mode; the file never enters the pod.
 	aksGPUPoolsPath string
+
+	// okeAddonsPath, when non-empty, projects an OKE cluster add-ons
+	// dump into the oke-addons subtype at the snapshot orchestration
+	// layer — same contract as aksGPUPoolsPath.
+	okeAddonsPath string
 	// discoverNetwork enables the network collector's live-discovery
 	// path. The collector calls l8k.Discover against the resolved
 	// kubeconfig; discovery is NOT read-only.
@@ -128,6 +135,12 @@ type snapshotCmdOptions struct {
 // by SDK consumers. Job mode is its only consumer: local (in-pod) collection
 // deploys no Job and builds a collector.Factory and serializer.Serializer from
 // opts directly, so it never needs an AgentConfig.
+//
+// NameBase carries the "aicr" prefix that --job-name and
+// --service-account-name declare as their default. Routing it through this
+// field rather than through JobName/ServiceAccountName is what lets an unset
+// flag stay empty (see explicitStringFlagOrConfig) while the deployed objects
+// keep the names the released defaults produced.
 func (o *snapshotCmdOptions) toAgentConfig() *aicr.AgentConfig {
 	return &aicr.AgentConfig{
 		Kubeconfig:         o.kubeconfig,
@@ -150,9 +163,25 @@ func (o *snapshotCmdOptions) toAgentConfig() *aicr.AgentConfig {
 		OS:                 o.os,
 		ClusterConfigPath:  o.clusterConfigPath,
 		AKSGPUPoolsPath:    o.aksGPUPoolsPath,
+		OKEAddonsPath:      o.okeAddonsPath,
 		DiscoverNetwork:    o.discoverNetwork,
 		Requests:           o.requests,
 		Limits:             o.limits,
+		NameBase:           name,
+	}
+}
+
+// toSnapshotDelivery projects the resolved output options onto the delivery
+// descriptor that Job mode writes through. It exists as a named projection —
+// like toAgentConfig — because delivery is where the user's --format is
+// applied: the agent Job always stages YAML in a ConfigMap, so a format
+// dropped here is a format silently ignored (issue #2398).
+func (o *snapshotCmdOptions) toSnapshotDelivery() snapshotter.SnapshotDelivery {
+	return snapshotter.SnapshotDelivery{
+		Output:       o.tmplOpts.outputPath,
+		TemplatePath: o.tmplOpts.templatePath,
+		Kubeconfig:   o.kubeconfig,
+		Format:       o.tmplOpts.format,
 	}
 }
 
@@ -160,20 +189,42 @@ func (o *snapshotCmdOptions) toAgentConfig() *aicr.AgentConfig {
 // flags with the optional --config (AICRConfig) source. CLI flags always win
 // over config values. Returns a fully-typed snapshotCmdOptions that callers
 // can pass to the snapshotter without further parsing.
-func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapshotCmdOptions, error) {
-	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config", "aks-gpu-pools"); err != nil {
+func parseSnapshotCmdOptions(cmd *cli.Command, cfg *aicr.Config) (*snapshotCmdOptions, error) {
+	if err := validateSingleValueFlags(cmd, "namespace", "image", "job-name", "service-account-name", flagAddRolesToSA, "timeout", "template", "max-nodes-per-entry", "runtime-class", "output", "format", "config", "os", "requests", "limits", "cluster-config", "aks-gpu-pools", "oke-addons"); err != nil {
 		return nil, err
 	}
 
-	resolved, err := cfg.Snapshot().Resolve()
+	agent, present, err := cfg.SnapshotAgentConfig()
 	if err != nil {
 		return nil, err
+	}
+	out, err := cfg.SnapshotOutputOptions()
+	if err != nil {
+		return nil, err
+	}
+
+	// SnapshotAgentConfig returns a bare zero-value AgentConfig — Cleanup and
+	// Privileged both false — when spec.snapshot is absent entirely (no
+	// --config, or a document that never mentions the section), because a
+	// document that made no snapshot decisions gets none invented for it (see
+	// the method's own godoc, and the "present" bool it returns for exactly
+	// this). That zero value is "not a working configuration": Cleanup=false
+	// and Privileged=false are the opposite of the CLI's own flag defaults
+	// (clean up; run privileged). When the section IS present, the derivation
+	// already applies those defaults (NoCleanup inverted, Privileged defaulted
+	// true), so agent.Cleanup and agent.Privileged are trustworthy fallbacks in
+	// that case.
+	cleanupFallback := agent.Cleanup
+	privilegedFallback := agent.Privileged
+	if !present {
+		cleanupFallback = true
+		privilegedFallback = true
 	}
 
 	// Normalize/validate the --os value via the recipe parser so that
 	// only documented OS criteria values reach the agent and the
 	// in-pod collector factory.
-	osVal := stringFlagOrConfig(cmd, "os", resolved.OS)
+	osVal := stringFlagOrConfig(cmd, "os", agent.OS)
 	if osVal != "" {
 		parsedOS, parseErr := recipe.NewCriteriaRegistry().ParseOS(osVal)
 		if parseErr != nil {
@@ -182,8 +233,8 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 		osVal = string(parsedOS)
 	}
 
-	requireGPU := boolFlagOrConfig(cmd, "require-gpu", resolved.RequireGPU)
-	runtimeClass := stringFlagOrConfig(cmd, "runtime-class", resolved.RuntimeClassName)
+	requireGPU := boolFlagOrConfig(cmd, "require-gpu", agent.RequireGPU)
+	runtimeClass := stringFlagOrConfig(cmd, "runtime-class", agent.RuntimeClassName)
 
 	// Mutual exclusion: --require-gpu and --runtime-class cannot be used together
 	if requireGPU && runtimeClass != "" {
@@ -195,8 +246,8 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 	// Parse output format. The config-provided format only kicks in
 	// when the CLI flag is not explicitly set; otherwise the CLI
 	// value wins. Validation of unknown formats happens here.
-	if !cmd.IsSet("format") && resolved.OutputFormat != "" {
-		if setErr := cmd.Set("format", resolved.OutputFormat); setErr != nil {
+	if !cmd.IsSet("format") && out.Format != "" {
+		if setErr := cmd.Set("format", out.Format); setErr != nil {
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "invalid spec.snapshot.output.format", setErr)
 		}
 	}
@@ -205,53 +256,182 @@ func parseSnapshotCmdOptions(cmd *cli.Command, cfg *config.AICRConfig) (*snapsho
 		return nil, err
 	}
 
-	tmplOpts, err := parseSnapshotTemplateOptions(cmd, outFormat, resolved)
+	tmplOpts, err := parseSnapshotTemplateOptions(cmd, outFormat, out)
 	if err != nil {
 		return nil, err
 	}
 
-	nodeSelector, err := resolveSnapshotNodeSelector(cmd, resolved)
+	nodeSelector, err := resolveSnapshotNodeSelector(cmd, agent)
 	if err != nil {
 		return nil, err
 	}
-	tolerations, err := resolveSnapshotTolerations(cmd, resolved)
+	tolerations, err := resolveSnapshotTolerations(cmd, agent)
 	if err != nil {
 		return nil, err
 	}
 
-	resourceRequests, err := snapshotter.ParseResourceList(stringFlagOrConfig(cmd, "requests", resolved.Requests))
-	if err != nil {
-		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --requests")
+	// agent.Requests/Limits are already parsed corev1.ResourceList (the
+	// facade derivation parses spec.snapshot.agent.requests/limits itself),
+	// so a CLI-set flag is parsed here and the two are merged post-parse
+	// rather than merging the raw strings and parsing once.
+	resourceRequests := agent.Requests
+	if cmd.IsSet("requests") {
+		v, perr := snapshotter.ParseResourceList(cmd.String("requests"))
+		if perr != nil {
+			return nil, errors.PropagateOrWrap(perr, errors.ErrCodeInvalidRequest, "invalid --requests")
+		}
+		if len(agent.Requests) > 0 {
+			slog.Info("CLI flag overriding config value", "flag", "requests", "config", agent.Requests, "override", v)
+		}
+		resourceRequests = v
 	}
-	resourceLimits, err := snapshotter.ParseResourceList(stringFlagOrConfig(cmd, "limits", resolved.Limits))
-	if err != nil {
-		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInvalidRequest, "invalid --limits")
+	resourceLimits := agent.Limits
+	if cmd.IsSet("limits") {
+		v, perr := snapshotter.ParseResourceList(cmd.String("limits"))
+		if perr != nil {
+			return nil, errors.PropagateOrWrap(perr, errors.ErrCodeInvalidRequest, "invalid --limits")
+		}
+		if len(agent.Limits) > 0 {
+			slog.Info("CLI flag overriding config value", "flag", "limits", "config", agent.Limits, "override", v)
+		}
+		resourceLimits = v
 	}
 
+	// Timeout's config-set/unset distinction lives in *time.Duration
+	// upstream, but AgentConfig.Timeout is a plain time.Duration (zero for
+	// both "unset" and an explicit 0). Treat zero as "config did not set
+	// it" so an absent config still yields the flag's own default.
+	var timeoutFallback *time.Duration
+	if agent.Timeout != 0 {
+		timeoutFallback = &agent.Timeout
+	}
+
+	// jobName and serviceAccountName resolve through
+	// explicitStringFlagOrConfig, not stringFlagOrConfig: the flags keep
+	// their released "aicr" default for --help, but only a name the operator
+	// actually supplied (flag or --config) may travel downstream. See
+	// toAgentConfig's NameBase for what supplies the prefix instead.
 	return &snapshotCmdOptions{
 		kubeconfig:         cmd.String("kubeconfig"),
-		namespace:          stringFlagOrConfig(cmd, "namespace", resolved.Namespace),
-		image:              stringFlagOrConfig(cmd, "image", resolved.Image),
-		imagePullSecrets:   stringSliceFlagOrConfig(cmd, "image-pull-secret", resolved.ImagePullSecrets),
-		jobName:            stringFlagOrConfig(cmd, "job-name", resolved.JobName),
-		serviceAccountName: stringFlagOrConfig(cmd, "service-account-name", resolved.ServiceAccountName),
+		namespace:          stringFlagOrConfig(cmd, "namespace", agent.Namespace),
+		image:              stringFlagOrConfig(cmd, "image", agent.Image),
+		imagePullSecrets:   stringSliceFlagOrConfig(cmd, "image-pull-secret", agent.ImagePullSecrets),
+		jobName:            explicitStringFlagOrConfig(cmd, "job-name", agent.JobName),
+		serviceAccountName: explicitStringFlagOrConfig(cmd, "service-account-name", agent.ServiceAccountName),
 		nodeSelector:       nodeSelector,
 		tolerations:        tolerations,
-		timeout:            durationFlagOrConfig(cmd, "timeout", resolved.Timeout),
-		cleanup:            !boolFlagOrConfig(cmd, "no-cleanup", resolved.NoCleanup),
-		debug:              cmd.Bool("debug"),
-		privileged:         boolFlagOrConfig(cmd, "privileged", derefBoolOr(resolved.Privileged, true)),
-		requireGPU:         requireGPU,
-		runtimeClass:       runtimeClass,
-		os:                 osVal,
-		maxNodesPerEntry:   intFlagOrConfig(cmd, "max-nodes-per-entry", resolved.MaxNodesPerEntry),
-		clusterConfigPath:  cmd.String("cluster-config"),
-		aksGPUPoolsPath:    cmd.String("aks-gpu-pools"),
-		discoverNetwork:    cmd.Bool("discover-network"),
-		requests:           resourceRequests,
-		limits:             resourceLimits,
-		tmplOpts:           tmplOpts,
+		timeout:            durationFlagOrConfig(cmd, "timeout", timeoutFallback),
+		// cleanupFallback is already the inverted spec.snapshot.execution.noCleanup;
+		// invert it back to merge with --no-cleanup, then invert once more.
+		cleanup:           !boolFlagOrConfig(cmd, "no-cleanup", !cleanupFallback),
+		debug:             cmd.Bool("debug"),
+		privileged:        boolFlagOrConfig(cmd, "privileged", privilegedFallback),
+		requireGPU:        requireGPU,
+		runtimeClass:      runtimeClass,
+		os:                osVal,
+		maxNodesPerEntry:  intFlagOrConfig(cmd, "max-nodes-per-entry", agent.MaxNodesPerEntry),
+		clusterConfigPath: cmd.String("cluster-config"),
+		aksGPUPoolsPath:   cmd.String("aks-gpu-pools"),
+		okeAddonsPath:     cmd.String("oke-addons"),
+		discoverNetwork:   cmd.Bool("discover-network"),
+		requests:          resourceRequests,
+		limits:            resourceLimits,
+		tmplOpts:          tmplOpts,
 	}, nil
+}
+
+// runWriteRoleManifests handles the generate-and-exit invocation
+// `aicr snapshot --add-roles-to-service-account <name>`: it writes the RBAC
+// manifests that would grant the agent's permissions to that ServiceAccount
+// and returns, applying nothing, contacting no cluster, and capturing
+// nothing.
+//
+// It takes no context because there is no I/O to bound beyond writing four
+// local files.
+//
+// It is a thin adapter — name derivation, the rule sets, the explanatory
+// headers, and the directory layout all live in pkg/snapshotter and
+// pkg/k8s/agent. What belongs here is only presenting the outcome, including
+// the two things an operator must not have to discover on their own: nothing
+// is live yet, and the exact commands that make it live and take it away
+// again.
+func runWriteRoleManifests(cmd *cli.Command, opts *snapshotCmdOptions, saName string) error {
+	res, err := snapshotter.WriteAgentRoleManifests(&snapshotter.AgentRolesConfig{
+		Namespace:          opts.namespace,
+		ServiceAccountName: saName,
+		DiscoverNetwork:    opts.discoverNetwork,
+	})
+	if err != nil {
+		return err
+	}
+
+	writeManifestReport(cmd.Root().Writer, res)
+	return nil
+}
+
+// writeManifestReport renders the outcome of a manifest-generating run. It is
+// split out from runWriteRoleManifests so the properties an operator must not
+// have to discover on their own — nothing was applied, how to apply it, how to
+// remove it again, and that a shared ServiceAccount waives per-run permission
+// isolation — are assertable without a cluster or a filesystem.
+func writeManifestReport(w io.Writer, res *snapshotter.AgentRolesResult) {
+	fmt.Fprintf(w, `Wrote the snapshot agent's RBAC manifests for ServiceAccount %[1]q in namespace
+%[2]q to:
+
+  %[3]s/
+
+NOTHING WAS APPLIED. No cluster was contacted, and %[1]s has no new permissions
+yet.
+
+`, res.ServiceAccountName, res.Namespace, res.Dir)
+
+	for _, obj := range res.Objects {
+		fmt.Fprintf(w, "  %-28s %s/%s\n", filepath.Base(obj.Path), strings.ToLower(obj.Kind), obj.Name)
+	}
+
+	fmt.Fprintf(w, `
+Read them — each file explains what it grants and why the agent needs it — then
+apply them yourself:
+  kubectl apply -f %[1]s/
+
+Capture a snapshot as this ServiceAccount with:
+  aicr snapshot --namespace %[2]s --service-account-name %[3]s
+
+Remove the grant when the ServiceAccount no longer needs it:
+  kubectl delete -f %[1]s/
+
+That delete is the only teardown: no aicr run creates, refreshes, or deletes
+these objects. Keep the directory for as long as you want the easy teardown.
+
+The ServiceAccount is not verified to exist — aicr contacted no cluster. Check
+it before you rely on the grant:
+  kubectl get serviceaccount %[3]s -n %[2]s
+
+Trade-off: runs that share this ServiceAccount share its permissions, so per-run
+permission isolation is waived for them.
+`, res.Dir, res.Namespace, res.ServiceAccountName)
+
+	if !res.DiscoverNetwork {
+		return
+	}
+	fmt.Fprintf(w, `
+WARNING: --discover-network means the ClusterRole in this directory also carries
+cluster-scoped MUTATING rules (nodes: patch, pods/exec: create, CRD/namespace/
+DaemonSet create-delete). Applying it grants them permanently, not for one run.
+Each rule and the discovery step it exists for is explained in %s.
+`, clusterRoleManifestName(res))
+}
+
+// clusterRoleManifestName returns the file name of the rendered ClusterRole,
+// looked up by kind rather than by position so the discovery warning keeps
+// pointing at the right file if the manifest order ever changes.
+func clusterRoleManifestName(res *snapshotter.AgentRolesResult) string {
+	for _, obj := range res.Objects {
+		if obj.Kind == "ClusterRole" {
+			return filepath.Base(obj.Path)
+		}
+	}
+	return "the ClusterRole manifest"
 }
 
 // snapshotTemplateOptions holds parsed template options for the snapshot command.
@@ -261,9 +441,9 @@ type snapshotTemplateOptions struct {
 	format       serializer.Format
 }
 
-func parseSnapshotTemplateOptions(cmd *cli.Command, outFormat serializer.Format, resolved *config.SnapshotResolved) (*snapshotTemplateOptions, error) {
-	templatePath := stringFlagOrConfig(cmd, "template", resolved.OutputTemplate)
-	outputPath := stringFlagOrConfig(cmd, "output", resolved.OutputPath)
+func parseSnapshotTemplateOptions(cmd *cli.Command, outFormat serializer.Format, out aicr.SnapshotOutputOptions) (*snapshotTemplateOptions, error) {
+	templatePath := stringFlagOrConfig(cmd, "template", out.Template)
+	outputPath := stringFlagOrConfig(cmd, "output", out.Path)
 
 	if templatePath != "" {
 		// Validate format is YAML when using template
@@ -328,16 +508,27 @@ func snapshotCmdFlags() []cli.Flag {
 			Usage:    "Secret name for pulling images from private registries (can be repeated)",
 			Category: catAgentDeployment,
 		},
+		// Value stays "aicr" on both name flags: it is the released v1
+		// default `--help` prints and testdata/cli-surface.golden pins.
+		// parseSnapshotCmdOptions reads them with
+		// explicitStringFlagOrConfig, so an unset flag reaches the deployer
+		// as "" rather than as this default — see that helper for why the
+		// two must not be conflated.
 		&cli.StringFlag{
 			Name:     "job-name",
-			Usage:    "Override default Job name",
+			Usage:    "Job name prefix; the run ID is always appended",
 			Value:    name,
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
 			Name:     "service-account-name",
-			Usage:    "Override default ServiceAccount name",
+			Usage:    "ServiceAccount to run the agent as. Exact-if-exists: when a ServiceAccount of exactly this name already exists in --namespace it is used verbatim and aicr creates and deletes no RBAC for the run (generate its RBAC manifests with --add-roles-to-service-account, then apply them yourself). Otherwise it is a name prefix and the run ID is appended. Leaving the flag unset is not the same as passing the default shown: an unset value is never probed for existence, so a stray ServiceAccount cannot capture the run.",
 			Value:    name,
+			Category: catAgentDeployment,
+		},
+		&cli.StringFlag{
+			Name:     flagAddRolesToSA,
+			Usage:    "WRITES MANIFESTS AND APPLIES NOTHING. Renders the Role, RoleBinding, ClusterRole and ClusterRoleBinding that grant the agent's permissions to the named ServiceAccount into ./snapshot-rbac-<run-id>/, then exits without taking a snapshot. No cluster is contacted, so no kubeconfig or privileges are needed. Review the files, then grant with 'kubectl apply -f <dir>/' and revoke with 'kubectl delete -f <dir>/' yourself. Add --discover-network to include the mutating live-discovery rules.",
 			Category: catAgentDeployment,
 		},
 		&cli.StringSliceFlag{
@@ -412,6 +603,12 @@ func snapshotCmdFlags() []cli.Flag {
 			Name:     "cluster-config",
 			Usage:    "Path to a pre-existing k8s-launch-kit (l8k) cluster-config.yaml. Ingests the file's network topology into the snapshot as a NetworkTopology Measurement. Local agent mode only (AICR_AGENT_MODE=true) — Job mode rejects this flag with INVALID_REQUEST until ConfigMap mounting is implemented; use --discover-network for live cluster discovery in Job mode. Mutually exclusive with --discover-network at the collector level — file path wins when both are set.",
 			Sources:  cli.EnvVars("AICR_CLUSTER_CONFIG_PATH"),
+			Category: catAgentDeployment,
+		},
+		&cli.StringFlag{
+			Name:     "oke-addons",
+			Usage:    "Path to an `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the local filesystem. Projects the NvidiaGpuPlugin add-on's control-plane state into the K8s oke-addons subtype (installed/absent; any other lifecycle state projects a value no profile constraint accepts). The --all flag on the oci command is required: without it removed and non-ACTIVE add-ons are omitted from the dump and would read as absent instead of failing closed. The projection runs controller-side in both agent Job mode (merged into the returned snapshot) and local mode, and a bad file fails the snapshot before any cluster work.",
+			Sources:  cli.EnvVars("AICR_OKE_ADDONS_PATH"),
 			Category: catAgentDeployment,
 		},
 		&cli.StringFlag{
@@ -504,13 +701,22 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 `,
 		Flags: snapshotCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
-			cfg, err := loadCmdConfig(ctx, cmd)
+			cfg, err := loadFacadeConfig(ctx, cmd)
 			if err != nil {
 				return err
 			}
 			opts, err := parseSnapshotCmdOptions(cmd, cfg)
 			if err != nil {
 				return err
+			}
+
+			// Generate-and-exit: --add-roles-to-service-account writes the
+			// RBAC manifests for an existing ServiceAccount, applies nothing,
+			// and takes no snapshot. Checked ahead of every collection path
+			// (including the in-pod one below) so the flag can never be
+			// combined with a capture.
+			if saName := cmd.String(flagAddRolesToSA); saName != "" {
+				return runWriteRoleManifests(cmd, opts, saName)
 			}
 
 			agentCfg := opts.toAgentConfig()
@@ -566,6 +772,7 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 					Serializer:      ser,
 					RequireGPU:      opts.requireGPU,
 					AKSGPUPoolsPath: opts.aksGPUPoolsPath,
+					OKEAddonsPath:   opts.okeAddonsPath,
 				}
 				return ns.Measure(ctx)
 			}
@@ -590,12 +797,9 @@ See examples/templates/snapshot-template.md.tmpl for a sample template.
 			// Deliver the RAW agent bytes, never a re-serialization of the
 			// parsed snapshot: a newer agent image can emit fields this
 			// binary's Snapshot type does not model, and a typed round trip
-			// would silently drop them.
-			return snapshotter.DeliverSnapshot(ctx, snap.Raw, snapshotter.SnapshotDelivery{
-				Output:       agentCfg.Output,
-				TemplatePath: agentCfg.TemplatePath,
-				Kubeconfig:   agentCfg.Kubeconfig,
-			})
+			// would silently drop them. YAML delivery is a byte copy for
+			// that reason; json and table necessarily re-render.
+			return snapshotter.DeliverSnapshot(ctx, snap.Raw, opts.toSnapshotDelivery())
 		},
 	}
 }

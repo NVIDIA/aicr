@@ -23,6 +23,7 @@ import (
 
 	"github.com/urfave/cli/v3"
 
+	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
 	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -48,7 +49,7 @@ func TestApplyCriteriaFromConfig_OverridesSnapshot(t *testing.T) {
 	criteria.Intent = recipe.CriteriaIntentType("training")
 	criteria.OS = recipe.CriteriaOSType("ubuntu")
 
-	cfg := &appcfg.AICRConfig{
+	cfg := aicr.WrapConfig(&appcfg.AICRConfig{
 		Spec: appcfg.Spec{
 			Recipe: &appcfg.RecipeSpec{
 				Criteria: &appcfg.CriteriaSpec{
@@ -58,7 +59,7 @@ func TestApplyCriteriaFromConfig_OverridesSnapshot(t *testing.T) {
 				},
 			},
 		},
-	}
+	})
 
 	if err := applyCriteriaFromConfig(criteria, cfg, recipe.NewCriteriaRegistry(), nil); err != nil {
 		t.Fatalf("apply: %v", err)
@@ -82,7 +83,7 @@ func TestApplyCriteriaFromConfig_OverridesSnapshot(t *testing.T) {
 // the criteria starts as NewCriteria (all "any") and config populates it.
 func TestApplyCriteriaFromConfig_FillsEmptyCriteria(t *testing.T) {
 	criteria := recipe.NewCriteria()
-	cfg := &appcfg.AICRConfig{
+	cfg := aicr.WrapConfig(&appcfg.AICRConfig{
 		Spec: appcfg.Spec{
 			Recipe: &appcfg.RecipeSpec{
 				Criteria: &appcfg.CriteriaSpec{
@@ -90,7 +91,7 @@ func TestApplyCriteriaFromConfig_FillsEmptyCriteria(t *testing.T) {
 				},
 			},
 		},
-	}
+	})
 	if err := applyCriteriaFromConfig(criteria, cfg, recipe.NewCriteriaRegistry(), nil); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -202,6 +203,7 @@ spec:
         role: system
       acceleratedNodeTolerations:
         - "nvidia.com/gpu=present:NoSchedule"
+      draEvictionNodeLabel: example.com/dra-ready=enabled
       nodes: 4
       storageClass: gp3
       sharedStorageClass: efs-sc
@@ -219,7 +221,7 @@ func tryRunBundleParse(t *testing.T, args []string) (*bundleCmdOptions, error) {
 	var captured *bundleCmdOptions
 	cmd := bundleCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}
@@ -271,6 +273,9 @@ func TestBundleCmd_ConfigFlag_PopulatesAllSections(t *testing.T) {
 	if len(opts.acceleratedNodeTolerations) == 0 {
 		t.Errorf("expected acceleratedNodeTolerations to be populated")
 	}
+	if got := opts.draEvictionNodeLabel.String(); got != "example.com/dra-ready=enabled" {
+		t.Errorf("draEvictionNodeLabel = %q, want example.com/dra-ready=enabled", got)
+	}
 	if opts.estimatedNodeCount != 4 {
 		t.Errorf("estimatedNodeCount = %d, want 4", opts.estimatedNodeCount)
 	}
@@ -295,6 +300,7 @@ func TestBundleCmd_ConfigFlag_FlagOverridesScalar(t *testing.T) {
 		"--deployer", "helm",
 		"--storage-class", "premium",
 		"--shared-storage-class", "custom-rwx",
+		"--dra-eviction-node-label", "example.com/cli-dra=true",
 		"-o", t.TempDir(),
 	})
 	if got := opts.deployer.String(); got != "helm" {
@@ -305,6 +311,9 @@ func TestBundleCmd_ConfigFlag_FlagOverridesScalar(t *testing.T) {
 	}
 	if opts.sharedStorageClass != "custom-rwx" {
 		t.Errorf("sharedStorageClass = %q, want custom-rwx (CLI override)", opts.sharedStorageClass)
+	}
+	if got := opts.draEvictionNodeLabel.String(); got != "example.com/cli-dra=true" {
+		t.Errorf("draEvictionNodeLabel = %q, want example.com/cli-dra=true (CLI override)", got)
 	}
 }
 
@@ -436,7 +445,7 @@ spec:
 `)
 	cmd := bundleCmd()
 	cmd.Action = func(ctx context.Context, c *cli.Command) error {
-		cfg, err := loadCmdConfig(ctx, c)
+		cfg, err := loadFacadeConfig(ctx, c)
 		if err != nil {
 			return err
 		}

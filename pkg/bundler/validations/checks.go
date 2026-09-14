@@ -19,7 +19,9 @@ import (
 	stderrors "errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
@@ -50,8 +52,10 @@ func init() {
 	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
 	registerCheck("CheckDriverOwnershipCoherence", CheckDriverOwnershipCoherence)
 	registerCheck("CheckMariaDBOperatorOwnershipCoherence", CheckMariaDBOperatorOwnershipCoherence)
+	registerCheck("CheckGKETCPXOInterfacesCoherence", CheckGKETCPXOInterfacesCoherence)
 	registerCheck("CheckNVSentinelDriverLabelDetectable", CheckNVSentinelDriverLabelDetectable)
 	registerCheck("CheckNVSentinelRuntimeClassCoherence", CheckNVSentinelRuntimeClassCoherence)
+	registerCheck("CheckNVSentinelTracingEndpointRequired", CheckNVSentinelTracingEndpointRequired)
 }
 
 // registerCheck is a helper to register validation functions from checks.go.
@@ -454,14 +458,15 @@ func driverAbsentRemedy(service recipe.CriteriaServiceType, os recipe.CriteriaOS
 				"(opt-out label absent) provision the GPU node pools with " +
 				"the GKE-managed driver install (node pool " +
 				"gpu-driver-version=default). With --profile " +
-				"gpuStack=driver-installer (pools labeled " +
-				"gke-no-default-nvidia-gpu-device-plugin=true) the label " +
-				"forfeits the managed install — deploy Google's standalone " +
-				"nvidia-driver-installer DaemonSet and create the pools " +
-				"with gpu-driver-version=disabled instead; see " +
+				"gpuStack=bundle-installer (pools labeled " +
+				"gke-no-default-nvidia-gpu-device-plugin=true and created " +
+				"with gpu-driver-version=disabled) the bundle's " +
+				"gcp-driver-installer component supplies the driver with a " +
+				"recipe-pinned version — do not deploy a standalone " +
+				"DaemonSet alongside it; see " +
 				"docs/integrator/gke-gpu-setup.md."
 		case recipe.CriteriaOSUbuntu:
-			// The pinned GPU Operator (v26.3.3) supports driver management
+			// The pinned GPU Operator supports driver management
 			// on GKE only on Ubuntu node images with containerd.
 			return "On GKE Ubuntu node images the GPU Operator can manage " +
 				"the driver: bundle in GPU-Operator-managed mode: " +
@@ -516,17 +521,15 @@ func componentOverrideKeys(componentName string, provider recipe.DataProvider) [
 // of the same name — see componentOverrideKeys for why it is duplicated.
 func mergeOverridesAcrossKeys[V any](allOverrides map[string]map[string]V, keys []string) map[string]V {
 	var merged map[string]V
-	for i := len(keys) - 1; i >= 0; i-- {
-		overrides, ok := allOverrides[keys[i]]
+	for _, key := range slices.Backward(keys) {
+		overrides, ok := allOverrides[key]
 		if !ok {
 			continue
 		}
 		if merged == nil {
 			merged = make(map[string]V, len(overrides))
 		}
-		for path, value := range overrides {
-			merged[path] = value
-		}
+		maps.Copy(merged, overrides)
 	}
 	return merged
 }
@@ -601,8 +604,7 @@ func effectiveComponentValues(ctx context.Context, recipeResult *recipe.RecipeRe
 		// from the outermost code. Non-coded errors default to
 		// invalid-request — the recipe content is what failed to resolve.
 		code := aicrerrors.ErrCodeInvalidRequest
-		var structured *aicrerrors.StructuredError
-		if stderrors.As(err, &structured) {
+		if structured, ok := stderrors.AsType[*aicrerrors.StructuredError](err); ok {
 			code = structured.Code
 		}
 		return nil, aicrerrors.WrapWithContext(code,
@@ -643,11 +645,11 @@ func effectiveComponentValues(ctx context.Context, recipeResult *recipe.RecipeRe
 // path.Clean'd (trailing-slash spellings compare equal, mirroring
 // pkg/recipe/driver_root_lockstep_test.go), declared empty string →
 // the default (the operator's own transformForDriverInstallDir treats
-// "" identically to the default, gpu-operator v26.3.3). An explicitly
+// "" identically to the default, gpu-operator v26.7.0). An explicitly
 // null or non-map hostPaths section is rejected with a blocking
 // message: Helm null-coalescing deletes a null key together with its
 // chart defaults, so the chart's unconditional .Values.hostPaths.rootFS
-// access (clusterpolicy.yaml, v26.3.3) fails at install. A declared
+// access (clusterpolicy.yaml, v26.7.0) fails at install. A declared
 // value that cleans to a relative path is rejected too — host-path
 // mounts require absolute paths.
 func resolveInstallDir(values map[string]any, componentName string) (string, bool, []string) {
@@ -680,7 +682,7 @@ func resolveInstallDir(values map[string]any, componentName string) (string, boo
 		// rejected rather than silently defaulted: the emitted values
 		// would carry it verbatim, and the pinned ClusterPolicy CRD
 		// types hostPaths.driverInstallDir as a string (gpu-operator
-		// v26.3.3 nvidia.com_clusterpolicies.yaml), so the install
+		// v26.7.0 nvidia.com_clusterpolicies.yaml), so the install
 		// fails while a defaulted check would have validated against
 		// /run/nvidia/driver instead.
 		return installDir, false, []string{fmt.Sprintf(
@@ -693,7 +695,7 @@ func resolveInstallDir(values map[string]any, componentName string) (string, boo
 	if dir == "" {
 		// Intentionally default-equivalent: the operator's own
 		// transformForDriverInstallDir early-returns on "" exactly like
-		// the default (gpu-operator v26.3.3, controllers/object_controls.go).
+		// the default (gpu-operator v26.7.0, controllers/object_controls.go).
 		return installDir, false, nil
 	}
 	cleaned := path.Clean(dir)
@@ -716,7 +718,7 @@ func resolveInstallDir(values map[string]any, componentName string) (string, boo
 
 // resolveDRARoot resolves the effective nvidia-dra-driver-gpu
 // nvidiaDriverRoot for Rule 2. Only a genuinely ABSENT key falls back to
-// the chart-default assumption ("/", DRA chart v0.4.1 values.yaml). A
+// the chart-default assumption ("/", DRA chart v0.5.0 values.yaml). A
 // present null, empty-string, or non-string value is rejected: unlike the
 // gpu-operator's driverInstallDir (where "" is default-equivalent, see
 // resolveInstallDir), the DRA chart pipes the raw value through
@@ -866,7 +868,7 @@ func nvsentinelDynamicGuardViolations(bundlerConfig *config.Config, componentNam
 //     null-coalescing deletes the key together with its chart defaults,
 //     so .Values.<section> is nil at render time and the gpu-operator
 //     templates fail on unconditional field access (e.g.
-//     .Values.driver.manager.repository in _helpers.tpl, v26.3.3) —
+//     .Values.driver.manager.repository in _helpers.tpl, v26.7.0) —
 //     ownership cannot be verified and the install would fail anyway.
 //     A non-boolean toggle is rejected because the chart renders the
 //     value unquoted, so YAML re-typing at install time can flip it to a
@@ -1155,14 +1157,31 @@ func CheckDriverOwnershipCoherence(ctx context.Context, componentName string, re
 	toolkitDisabled := toolkitToggle != nil && !*toolkitToggle
 
 	// Rule 1: recorded driverless cluster vs preinstalled-driver profile.
+	// An effectively enabled gcp-driver-installer disarms it: the bundle
+	// itself provisions the driver, so the driverless snapshot is the
+	// expected pre-deployment state (a correctly provisioned
+	// bundle-installer pool must be able to generate its own bundle). The
+	// supply check runs lazily inside the guard so its hard-fail surface
+	// exists only when Rule 1 would actually fire; there, a resolution
+	// failure for the installer's values fails closed as a hard error
+	// rather than degrading to the misleading driverless remediation.
 	if recipeResult.Metadata.GPUDriverState == recipe.GPUDriverStateAbsent && (!driverEnabled || toolkitDisabled) {
-		msgs = append(msgs, fmt.Sprintf(
-			"%s: the effective values assume a platform-preinstalled NVIDIA driver "+
-				"and container toolkit (driver.enabled=false and/or toolkit.enabled=false), "+
-				"but the snapshot that produced this recipe observed no NVIDIA kernel "+
-				"driver on the sampled GPU node. Deploying this bundle would leave GPU "+
-				"nodes driverless. %s",
-			componentName, driverAbsentRemedy(service, osCriteria, recipeResult.Metadata.SelectedProfile != nil)))
+		bundleSuppliesDriver, supplyErr := BundleSuppliesGKEDriver(ctx, recipeResult, bundlerConfig)
+		if supplyErr != nil {
+			for _, msg := range msgs {
+				slog.Warn(msg, logKeyComponent, componentName)
+			}
+			return msgs, []error{supplyErr}
+		}
+		if !bundleSuppliesDriver {
+			msgs = append(msgs, fmt.Sprintf(
+				"%s: the effective values assume a platform-preinstalled NVIDIA driver "+
+					"and container toolkit (driver.enabled=false and/or toolkit.enabled=false), "+
+					"but the snapshot that produced this recipe observed no NVIDIA kernel "+
+					"driver on the sampled GPU node. Deploying this bundle would leave GPU "+
+					"nodes driverless. %s",
+				componentName, driverAbsentRemedy(service, osCriteria, recipeResult.Metadata.SelectedProfile != nil)))
+		}
 	}
 
 	installDir, installDirDeclared, hostPathMsgs := resolveInstallDir(values, componentName)
@@ -1229,17 +1248,62 @@ const nvsentinelAssumeDriverInstalledOverrideSet = "--set nv-sentinel:labeler.as
 // so the override path is subchart-scoped rather than top-level.
 const nvsentinelDriverLabelPath = "labeler.assumeDriverInstalled"
 
-// gkeDriverInstallerProfileValue is the GKE gpuStack profile value whose
-// documented operational prerequisite is Google's standalone
-// nvidia-driver-installer DaemonSet (recipes/overlays/gke-cos.yaml). That
-// DaemonSet's pods ARE a driver pod the NVSentinel labeler detects, so
-// this value is the one driver.enabled=false shape that the label gate
-// below must not reject.
-const gkeDriverInstallerProfileValue = "driver-installer"
+// gkeBundleInstallerProfileValue is the GKE gpuStack value under which the
+// bundle's gcp-driver-installer component (issue #1716) carries the
+// cos-gpu-installer DaemonSet. Its pods ARE a driver pod the NVSentinel
+// labeler detects, so the label gate below must not reject this value.
+const gkeBundleInstallerProfileValue = "bundle-installer"
 
 // gpuStackProfileName is the ADR-015 configuration-profile name that
 // selects who installs the GPU driver on AKS and GKE.
 const gpuStackProfileName = "gpuStack"
+
+// gcpDriverInstallerComponentName is the values-gated GKE COS driver
+// component (issue #1716): present unconditionally in the GKE COS
+// composition, it renders the cos-gpu-installer DaemonSet only when its
+// nested installer.enabled gate is on.
+const gcpDriverInstallerComponentName = "gcp-driver-installer"
+
+// BundleSuppliesGKEDriver reports whether the composed bundle carries an
+// effectively enabled gcp-driver-installer — i.e. the bundle itself
+// provisions the NVIDIA kernel driver, so metadata.gpuDriverState=absent
+// is the expected pre-deployment state of a correctly provisioned pool
+// (gpu-driver-version=disabled) rather than a misconfiguration. It keys
+// off the EFFECTIVE installer gate (recipe values plus any --set
+// overrides in bundlerConfig), not the selected profile name: a --set
+// that flips the gate must flip this answer with it. The gate mirrors
+// the manifest template exactly (toString(installer.enabled) == "true"),
+// so only a value that actually renders the DaemonSet counts as a
+// producer; anything else — absent, false, or an unrecognized type —
+// leaves the driverless Rule 1 gate armed (fail closed). The lookup runs
+// against the declared-union view so a subset bundle
+// (--bundlers gpu-operator) still observes the installer its sibling
+// bundle carries. bundlerConfig may be nil (the resolution-time caller
+// in pkg/client/v1 has no override channel).
+func BundleSuppliesGKEDriver(ctx context.Context, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config) (bool, error) {
+	if recipeResult == nil {
+		return false, nil
+	}
+	unionView := declaredUnionView(recipeResult)
+	ref := unionView.GetComponentRef(gcpDriverInstallerComponentName)
+	if ref == nil {
+		return false, nil
+	}
+	keys := componentOverrideKeys(gcpDriverInstallerComponentName, unionView.DataProvider())
+	if componentDisabled(ref, bundlerConfig, keys) {
+		return false, nil
+	}
+	values, err := effectiveComponentValues(ctx, unionView, bundlerConfig,
+		gcpDriverInstallerComponentName, keys, "bundle-supplied driver detection")
+	if err != nil {
+		return false, err
+	}
+	installer, ok := values["installer"].(map[string]any)
+	if !ok {
+		return false, nil
+	}
+	return fmt.Sprint(installer["enabled"]) == "true", nil
+}
 
 // resolveGPUOperatorRef looks up the GPU Operator's ComponentRef by
 // trying every known name variant in turn, mirroring
@@ -1315,18 +1379,19 @@ func nvsentinelAssumesDriverInstalled(values map[string]any) bool {
 // Operator installs no driver.
 //
 // One shipping configuration qualifies: GKE COS with
-// --profile gpuStack=driver-installer, whose documented prerequisite is
+// --profile gpuStack=bundle-installer, whose bundle-carried installer is
 // Google's standalone nvidia-driver-installer DaemonSet on pools created
-// with gpu-driver-version=disabled (recipes/overlays/gke-cos.yaml). The
-// labeler's driver-pod detection sees those pods, so the driver.installed
-// label IS applied and the gate below must stay silent. Its sibling value
-// gke-default bakes the driver into the node at pool creation, so no
-// driver pod exists there — that value is affected.
+// with gpu-driver-version=disabled (recipes/overlays/gke-cos.yaml), the
+// bundle's gcp-driver-installer component carries the cos-gpu-installer
+// DaemonSet. The labeler's driver-pod detection sees those pods, so the
+// driver.installed label IS applied and the gate below must stay silent.
+// The sibling value gke-default bakes the driver into the node at pool
+// creation, so no driver pod exists there — that value is affected.
 //
 // The exemption is scoped to GKE COS recipes, not to the profile
 // identifier alone: profile names are not reserved, and an external
 // --data overlay on any service can declare a gpuStack profile whose
-// value happens to be named driver-installer — with no Google installer
+// value happens to be named bundle-installer — with no installer
 // DaemonSet ever deploying. Fail closed on anything but the one shape
 // the embedded catalog documents (recipes/overlays/gke-cos.yaml); a
 // recipe without criteria stays blocked for the same reason.
@@ -1341,7 +1406,7 @@ func labelerObservesDriverPod(recipeResult *recipe.RecipeResult) bool {
 	if selected == nil {
 		return false
 	}
-	return selected.Name == gpuStackProfileName && selected.Value == gkeDriverInstallerProfileValue
+	return selected.Name == gpuStackProfileName && selected.Value == gkeBundleInstallerProfileValue
 }
 
 // NVSENTINEL GATE POLICY — what an nvsentinel gate means when parts of
@@ -1399,7 +1464,7 @@ func labelerObservesDriverPod(recipeResult *recipe.RecipeResult) bool {
 //     --set/--set-json overrides), so the documented
 //     GPU-Operator-managed override set clears the gate,
 //   - no other driver pod source the labeler recognizes exists
-//     (labelerObservesDriverPod — GKE gpuStack=driver-installer), and
+//     (labelerObservesDriverPod — GKE gpuStack=bundle-installer), and
 //   - labeler.assumeDriverInstalled is not truthy in nvsentinel's
 //     effective values.
 //
@@ -1642,7 +1707,7 @@ func CheckNVSentinelDriverLabelDetectable(ctx context.Context, componentName str
 }
 
 // defaultRuntimeClassName is the shared chart default: the gpu-operator
-// chart ships operator.runtimeClass: nvidia (v26.3.3, verified against
+// chart ships operator.runtimeClass: nvidia (v26.7.0, verified against
 // the pinned chart values), and nvsentinel's metadata-collector subchart
 // ships runtimeClassName: "nvidia" (v1.9.0, charts/metadata-collector/
 // values.yaml:31). Either side left unset therefore resolves to this
@@ -1923,6 +1988,117 @@ func CheckNVSentinelRuntimeClassCoherence(ctx context.Context, componentName str
 	return []string{msg}, nil
 }
 
+// nvsentinelTracingEnabled reports whether the resolved nvsentinel values
+// turn on distributed tracing. The root chart gates tracing with a raw
+// `{{- if .Values.global.tracing.enabled }}`, so this matches Helm's truth
+// rule via helmTruthy rather than a strict Go bool assertion.
+func nvsentinelTracingEnabled(values map[string]any) bool {
+	global, ok := values["global"].(map[string]any)
+	if !ok {
+		return false
+	}
+	tracing, ok := global["tracing"].(map[string]any)
+	if !ok {
+		return false
+	}
+	raw, present := tracing["enabled"]
+	if !present {
+		return false
+	}
+	return helmTruthy(raw)
+}
+
+// CheckNVSentinelTracingEndpointRequired blocks a bundle that enables
+// NVSentinel distributed tracing without supplying an OTLP collector
+// endpoint. The chart has no fail-closed guard of its own:
+// templates/daemonset.yaml sets OTEL_EXPORTER_OTLP_ENDPOINT to
+// .Values.global.tracing.endpoint with no `required` guard, so
+// global.tracing.enabled=true with an empty endpoint renders and deploys
+// without error — the pod starts, and the OTel exporter fails at runtime
+// with no signal visible to `aicr bundle`/`aicr validate`. This gate is
+// the only point in the pipeline that inspects resolved Helm values
+// (including --set/--set-json/--dynamic) before a bundle is produced, so
+// it is the only mechanism that can catch this before deploy. Registration
+// details (severity, no-op conditions) are in recipes/registry.yaml.
+func CheckNVSentinelTracingEndpointRequired(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	sentinelRef := recipeResult.GetComponentRef(componentName)
+	if sentinelRef == nil {
+		return nil, nil
+	}
+	provider := recipeResult.DataProvider()
+	sentinelKeys := componentOverrideKeys(componentName, provider)
+	if componentDisabled(sentinelRef, bundlerConfig, sentinelKeys) {
+		return nil, nil
+	}
+
+	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, sentinelKeys, "NVSentinel tracing endpoint")
+	if err != nil {
+		return nil, []error{err}
+	}
+
+	// Relation-aware dynamic guard: a --dynamic declaration on ONE of
+	// {enabled, endpoint} is only a hazard if the OTHER field's static
+	// state can't already rule out "enabled=true, endpoint empty" after
+	// an install-time edit. Blocking both unconditionally rejects safe
+	// configurations too -- e.g. dynamic enabled with a real static
+	// endpoint can never reach the bad combination, since nothing dynamic
+	// can blank the endpoint.
+	enabledDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{"global.tracing.enabled"})) > 0
+	endpointDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{"global.tracing.endpoint"})) > 0
+	if enabledDynamic || endpointDynamic {
+		staticEndpoint, _, staticEndpointValid := resolvedStringValue(values, "global.tracing.endpoint")
+		// Reliable only when NOT itself dynamic -- a dynamic endpoint
+		// can be edited to empty at install time regardless of what
+		// the static layer currently resolves to.
+		endpointReliablyNonEmpty := staticEndpointValid && strings.TrimSpace(staticEndpoint) != "" && !endpointDynamic
+		// Reliable only when NOT itself dynamic -- a dynamic enabled
+		// can be flipped to true at install time regardless of the
+		// static/default value.
+		enabledReliablyOff := !nvsentinelTracingEnabled(values) && !enabledDynamic
+
+		hazard := (enabledDynamic && !endpointReliablyNonEmpty) || (endpointDynamic && !enabledReliablyOff)
+		if hazard {
+			var paths []string
+			if enabledDynamic {
+				paths = append(paths, "global.tracing.enabled")
+			}
+			if endpointDynamic {
+				paths = append(paths, "global.tracing.endpoint")
+			}
+			dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys, paths,
+				"controls whether the OTLP exporter is enabled and where it sends traces, and the other field's "+
+					"current static state can't rule out enabled=true with an empty endpoint after an install-time edit")
+			for _, msg := range dynMsgs {
+				slog.Warn(msg, logKeyComponent, componentName)
+			}
+			return dynMsgs, nil
+		}
+	}
+
+	if !nvsentinelTracingEnabled(values) {
+		return nil, nil
+	}
+
+	// A non-string endpoint is blocked outright, not skipped: this gate
+	// exists specifically to catch a broken tracing config before deploy.
+	endpoint, _, valid := resolvedStringValue(values, "global.tracing.endpoint")
+	if !valid {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: global.tracing.endpoint must be a string", componentName))}
+	}
+	if strings.TrimSpace(endpoint) != "" {
+		return nil, nil
+	}
+
+	return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+		fmt.Sprintf("component %q: global.tracing.enabled=true but global.tracing.endpoint is empty; "+
+			"the chart renders an OTLP exporter with no destination and fails silently at runtime -- "+
+			"set --set nv-sentinel:global.tracing.endpoint=<host:port>", componentName))}
+}
+
 // CheckMariaDBOperatorOwnershipCoherence enforces the snapshot-driven
 // installation-safety policy for AICR-provided Slurm accounting. Existing
 // MariaDB CRs and inconclusive discovery block bundling; an API with no
@@ -1984,4 +2160,65 @@ func CheckMariaDBOperatorOwnershipCoherence(_ context.Context, componentName str
 				"with this AICR version before bundling AICR-provided accounting",
 			componentName, state))}
 	}
+}
+
+// CheckGKETCPXOInterfacesCoherence compares the FINAL resolved
+// kubeflow-trainer tcpxoInterfaces value against the mapping the recipe
+// records in configuration.gke.tcpxoInterfaces. Validity alone is not
+// enough: a value that is well-formed but different from what the recipe
+// records is exactly the failure case — the recipe would attest to one
+// wiring while the bundle renders another (the realistic shape: networks
+// get reprovisioned and someone --sets the current names to make the bundle
+// work). The bundler's ownership enforcement already rejects all four
+// override channels for this path; this check is the defense-in-depth for
+// hand-edited recipes and any future channel.
+func CheckGKETCPXOInterfacesCoherence(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	if !declaredUnionView(recipeResult).ShipsGKETCPXORuntime() {
+		return nil, nil
+	}
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil {
+		return nil, nil
+	}
+	keys := componentOverrideKeys(componentName, recipeResult.DataProvider())
+	if componentDisabled(ref, bundlerConfig, keys) {
+		return nil, nil
+	}
+
+	recorded, present := recipeResult.GKETCPXOInterfaces()
+	if !present {
+		// Fail closed, defense-in-depth: the bundler's ownership enforcement
+		// already rejects this recipe before validations run, but the check
+		// registry is also reachable from the SDK preflight path.
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: recipe ships torch-distributed-tcpxo but records no "+
+				"configuration.gke.tcpxoInterfaces mapping; regenerate the recipe with "+
+				"--gke-tcpxo-interfaces eth1=<network>,...,eth8=<network>", componentName))}
+	}
+
+	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, keys,
+		"GKE TCPXO interface mapping coherence")
+	if err != nil {
+		return nil, []error{err}
+	}
+	rawResolved, ok := values["tcpxoInterfaces"]
+	if !ok {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: recipe records configuration.gke.tcpxoInterfaces but the resolved values carry "+
+				"no tcpxoInterfaces; regenerate the recipe rather than editing one half", componentName))}
+	}
+	resolved, normErr := recipe.NormalizeGKETCPXOInterfaces(rawResolved)
+	if normErr != nil {
+		return nil, []error{normErr}
+	}
+	if !slices.Equal(resolved, recorded) {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"%s: the resolved tcpxoInterfaces value disagrees with "+
+				"configuration.gke.tcpxoInterfaces; the bundle would render a different wiring "+
+				"than the recipe records", componentName))}
+	}
+	return nil, nil
 }

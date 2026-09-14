@@ -15,7 +15,9 @@
 package snapshotter
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -34,6 +36,7 @@ import (
 	k8sclient "github.com/NVIDIA/aicr/pkg/k8s/client"
 	"github.com/NVIDIA/aicr/pkg/k8s/pod"
 	"github.com/NVIDIA/aicr/pkg/measurement"
+	"github.com/NVIDIA/aicr/pkg/runid"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -62,7 +65,31 @@ type AgentConfig struct {
 	// JobName for the agent Job
 	JobName string
 
-	// ServiceAccountName for the agent
+	// ServiceAccountName selects the ServiceAccount the agent pod runs
+	// as. It is EXACT-IF-EXISTS, so it carries two meanings resolved once
+	// per deployment:
+	//
+	//   - A ServiceAccount of exactly this name already exists in
+	//     Namespace: it is used verbatim, and the run creates NO
+	//     ServiceAccount, Role, RoleBinding, ClusterRole or
+	//     ClusterRoleBinding — and deletes none at cleanup. aicr adds and
+	//     removes no permissions on an identity it did not create. This
+	//     is how a ServiceAccount carrying IRSA
+	//     (eks.amazonaws.com/role-arn) or GKE Workload Identity
+	//     (iam.gke.io/gcp-service-account) annotations stays usable: both
+	//     providers pin trust to the ServiceAccount NAME, which a
+	//     run-scoped name can never satisfy. Generate its RBAC manifests
+	//     with WriteAgentRoleManifests, then apply them out of band.
+	//   - Otherwise: a name prefix. The run creates "<prefix>-<RunID>"
+	//     and the full run-scoped RBAC set, and deletes them at cleanup.
+	//
+	// Empty falls back to NameBase and is never probed for existence, so
+	// a stray ServiceAccount sitting at the default base cannot silently
+	// capture the run.
+	//
+	// Using an existing ServiceAccount waives per-run permission
+	// isolation: concurrent runs sharing it share its grants, and grants
+	// provisioned for DiscoverNetwork persist beyond any one run.
 	ServiceAccountName string
 
 	// NodeSelector for targeting specific nodes
@@ -127,6 +154,13 @@ type AgentConfig struct {
 	// merges the aks-gpu-pools subtype into the snapshot the Job returns.
 	AKSGPUPoolsPath string
 
+	// OKEAddonsPath, when set, points at an operator-supplied
+	// `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump on the
+	// CALLER's filesystem. Same contract as AKSGPUPoolsPath: projected
+	// controller-side before deploying, merged into the returned
+	// snapshot as the oke-addons subtype.
+	OKEAddonsPath string
+
 	// DiscoverNetwork enables the in-pod network collector's live l8k
 	// discovery path. Discovery is NOT read-only — it writes node labels
 	// (nvidia.kubernetes-launch-kit.*) and patches NicClusterPolicy via
@@ -146,49 +180,103 @@ type AgentConfig struct {
 	// that key in Limits — e.g. --require-gpu --limits nvidia.com/gpu=4
 	// keeps 4, not 1.
 	Limits corev1.ResourceList
+
+	// RunID scopes every resource this deployment creates (Job, RBAC, and
+	// the internal staging ConfigMap when Output does not name one) to a
+	// single run, so concurrent snapshot-agent runs never collide on a
+	// shared resource name. DeployAndCollect generates one with
+	// runid.Generate() when this is empty — callers normally leave it
+	// unset; setting it explicitly is for correlating this run with an
+	// external identifier (e.g. sharing one ID with a downstream
+	// validator run).
+	//
+	// DeployAndCollect never writes the generated value back here: the
+	// AgentConfig belongs to the caller, and a caller reusing one config
+	// pointer across two runs would otherwise silently become a caller
+	// pinning a duplicate RunID — the one state ADR-020 declares
+	// unsupported, which fails the second run with ErrCodeInternal on the
+	// first still-existing run-scoped object.
+	RunID string
+
+	// NameBase prefixes generated resource names (Job, ServiceAccount,
+	// Role/RoleBinding). It applies per name: JobName falls back to it
+	// when JobName is empty, and ServiceAccountName (which also names the
+	// Role and RoleBinding) falls back to it when ServiceAccountName is
+	// empty — so setting only one of the two leaves NameBase governing the
+	// other. Forwarded verbatim to pkg/k8s/agent.Config.NameBase, which
+	// defaults to "aicr" when also empty.
+	NameBase string
 }
 
 // buildAgentConfig projects snapshotter configuration onto the deployer's
 // Job configuration. Keep scheduling defaults at this projection boundary so
 // every snapshot-agent caller gets the same nil-versus-empty behavior.
-func buildAgentConfig(config *AgentConfig, agentOutput string) agent.Config {
+//
+// ownsOutput is agentConfigMapTarget's second return value, forwarded
+// verbatim: it is true only when agentOutput is the internal staging
+// ConfigMap this run owns (the caller did not name a cm:// destination), so
+// Cleanup may delete it. A caller-supplied cm:// Output is never owned.
+//
+// runID is the resolved run ID for this invocation — config.RunID when the
+// caller pinned one, otherwise the value DeployAndCollect generated. It is
+// passed in rather than read from config because DeployAndCollect must not
+// write the generated ID back into the caller's AgentConfig (see
+// AgentConfig.RunID).
+func buildAgentConfig(config *AgentConfig, runID, agentOutput string, ownsOutput bool) agent.Config {
 	return agent.Config{
-		Namespace:          config.Namespace,
-		ServiceAccountName: config.ServiceAccountName,
-		JobName:            config.JobName,
-		Image:              config.Image,
-		ImagePullSecrets:   config.ImagePullSecrets,
-		NodeSelector:       config.NodeSelector,
-		Tolerations:        effectiveAgentTolerations(config.Tolerations),
-		Output:             agentOutput,
-		Debug:              config.Debug,
-		Privileged:         config.Privileged,
-		RequireGPU:         config.RequireGPU,
-		RuntimeClassName:   config.RuntimeClassName,
-		MaxNodesPerEntry:   config.MaxNodesPerEntry,
-		OS:                 config.OS,
-		ClusterConfigPath:  config.ClusterConfigPath,
-		DiscoverNetwork:    config.DiscoverNetwork,
-		Requests:           config.Requests,
-		Limits:             config.Limits,
+		Namespace:           config.Namespace,
+		ServiceAccountName:  config.ServiceAccountName,
+		JobName:             config.JobName,
+		RunID:               runID,
+		NameBase:            config.NameBase,
+		Image:               config.Image,
+		ImagePullSecrets:    config.ImagePullSecrets,
+		NodeSelector:        config.NodeSelector,
+		Tolerations:         effectiveAgentTolerations(config.Tolerations),
+		Output:              agentOutput,
+		Debug:               config.Debug,
+		Privileged:          config.Privileged,
+		RequireGPU:          config.RequireGPU,
+		RuntimeClassName:    config.RuntimeClassName,
+		MaxNodesPerEntry:    config.MaxNodesPerEntry,
+		OS:                  config.OS,
+		ClusterConfigPath:   config.ClusterConfigPath,
+		DiscoverNetwork:     config.DiscoverNetwork,
+		Requests:            config.Requests,
+		Limits:              config.Limits,
+		OwnsOutputConfigMap: ownsOutput,
 	}
 }
 
 // deployAndWaitForResult handles the common deploy-wait-retrieve lifecycle for an agent Job.
 // It creates the deployer, deploys RBAC and the Job, streams logs, waits for completion,
 // and retrieves the snapshot data from the result ConfigMap.
-func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, config *AgentConfig, agentOutput string, deliverViaConfigMap bool) ([]byte, error) {
+//
+// ownsOutput is agentConfigMapTarget's second return value: true when
+// agentOutput is the internal staging ConfigMap this run owns, false when it
+// is a caller-supplied cm:// destination. See buildAgentConfig and
+// rewriteMergedSnapshotConfigMap for how each consumes it.
+//
+// runID is the resolved run ID for this invocation; see buildAgentConfig.
+func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, config *AgentConfig, runID, agentOutput string, ownsOutput bool) ([]byte, error) {
 	// The pool projection is pure file processing on the caller's host —
 	// project it BEFORE deploying so a bad file fails in milliseconds,
 	// not after a Job round-trip, and merge it into the returned snapshot
 	// below. It deliberately does not ride the in-pod collector path.
-	var aksGPUPools *measurement.Subtype
+	var projections []measurement.Subtype
 	if config.AKSGPUPoolsPath != "" {
 		subtype, err := k8scollector.ProjectAKSGPUPools(ctx, config.AKSGPUPoolsPath)
 		if err != nil {
 			return nil, err
 		}
-		aksGPUPools = &subtype
+		projections = append(projections, subtype)
+	}
+	if config.OKEAddonsPath != "" {
+		subtype, err := k8scollector.ProjectOKEAddons(ctx, config.OKEAddonsPath)
+		if err != nil {
+			return nil, err
+		}
+		projections = append(projections, subtype)
 	}
 
 	// Auto-inject GPU node selector when no placement constraints are set.
@@ -196,7 +284,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	// name the injected selector (TOCTOU: node may be cordoned after detection).
 	autoInjectedGPUSelector := maybeInjectGPUNodeSelector(ctx, clientset, config)
 
-	agentConfig := buildAgentConfig(config, agentOutput)
+	agentConfig := buildAgentConfig(config, runID, agentOutput, ownsOutput)
 
 	deployer := agent.NewDeployer(clientset, agentConfig)
 
@@ -227,8 +315,11 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		timeout = defaults.K8sJobCompletionTimeout
 	}
 
+	// Log the run-scoped Job name, not agentConfig.JobName: that field is
+	// only the user's optional prefix and is empty by default, so logging it
+	// prints job="".
 	slog.Info("waiting for Job completion",
-		slog.String("job", agentConfig.JobName),
+		slog.String("job", deployer.JobName()),
 		slog.Duration("timeout", timeout))
 
 	// Stream logs in background while waiting for Job completion.
@@ -245,9 +336,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		logWG.Wait()
 	}()
 
-	logWG.Add(1)
-	go func() {
-		defer logWG.Done()
+	logWG.Go(func() {
 		if podErr := deployer.WaitForPodReady(logCtx, defaults.K8sPodReadyTimeout); podErr != nil {
 			// Only suppress logging when the parent context has been
 			// canceled (expected during cleanup). Genuine failures
@@ -256,7 +345,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 			if logCtx.Err() == nil {
 				slog.Warn("agent log streaming skipped: pod did not become ready",
 					slog.String("namespace", agentConfig.Namespace),
-					slog.String("job", agentConfig.JobName),
+					slog.String("job", deployer.JobName()),
 					"error", podErr)
 			}
 			return
@@ -267,7 +356,7 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 					"error", streamErr)
 			}
 		}
-	}()
+	})
 
 	if waitErr := deployer.WaitForCompletion(ctx, timeout); waitErr != nil {
 		if logs, logErr := deployer.GetPodLogs(ctx); logErr == nil && logs != "" {
@@ -306,10 +395,12 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to retrieve snapshot", err)
 	}
 
-	if aksGPUPools != nil {
-		snapshotData, err = mergeAKSGPUPools(snapshotData, *aksGPUPools)
-		if err != nil {
-			return nil, err
+	if len(projections) > 0 {
+		for _, projection := range projections {
+			snapshotData, err = mergeProviderProjection(snapshotData, projection)
+			if err != nil {
+				return nil, err
+			}
 		}
 		// The Job stored the PRE-merge snapshot in the result ConfigMap,
 		// and Cleanup removes Job+RBAC but never that ConfigMap. Rewrite
@@ -325,8 +416,10 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 		// merged reading, so a transient Apply failure on the internal
 		// hygiene rewrite must not discard an already-captured snapshot;
 		// warn loudly instead (the orphaned ConfigMap stays pre-merge).
+		// ownsOutput is the run-owns-the-staging-ConfigMap flag, so its
+		// logical inverse is "the ConfigMap is the user's delivery vehicle".
 		if err := rewriteMergedSnapshotConfigMap(ctx, agentOutput, config.Kubeconfig,
-			snapshotData, deliverViaConfigMap); err != nil {
+			snapshotData, !ownsOutput); err != nil {
 			return nil, err
 		}
 	}
@@ -334,7 +427,8 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 	return snapshotData, nil
 }
 
-// mergeAKSGPUPools attaches the controller-side pool projection to the
+// mergeProviderProjection attaches a controller-side provider projection
+// (aks-gpu-pools, oke-addons) to the
 // snapshot the agent Job returned. The merge is performed on generic maps,
 // NOT through the controller's typed Snapshot struct: the agent image is
 // user-pinnable, so a newer agent may emit fields this binary's struct does
@@ -342,11 +436,11 @@ func deployAndWaitForResult(ctx context.Context, clientset k8sclient.Interface, 
 // the returned snapshot and the rewritten ConfigMap. The subtype cannot
 // affect the cluster fingerprint (fingerprint dimensions read no
 // aks-gpu-pools key), so merging after the in-pod derivation is sound.
-func mergeAKSGPUPools(snapshotData []byte, subtype measurement.Subtype) ([]byte, error) {
+func mergeProviderProjection(snapshotData []byte, subtype measurement.Subtype) ([]byte, error) {
 	var doc map[string]any
 	if err := yaml.Unmarshal(snapshotData, &doc); err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to parse agent snapshot for AKS GPU pools merge", err)
+			"failed to parse agent snapshot for provider projection merge", err)
 	}
 	if doc == nil {
 		// An empty or `null` document unmarshals to a nil map without
@@ -360,12 +454,12 @@ func mergeAKSGPUPools(snapshotData []byte, subtype measurement.Subtype) ([]byte,
 	subtypeYAML, err := yaml.Marshal(subtype)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to serialize AKS GPU pools subtype", err)
+			"failed to serialize provider projection subtype", err)
 	}
 	var subtypeNode map[string]any
 	if reshapeErr := yaml.Unmarshal(subtypeYAML, &subtypeNode); reshapeErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to reshape AKS GPU pools subtype", reshapeErr)
+			"failed to reshape provider projection subtype", reshapeErr)
 	}
 
 	measurements, _ := doc["measurements"].([]any)
@@ -392,7 +486,7 @@ func mergeAKSGPUPools(snapshotData []byte, subtype measurement.Subtype) ([]byte,
 	merged, err := serializer.MarshalYAMLDeterministic(doc)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal,
-			"failed to serialize snapshot after AKS GPU pools merge", err)
+			"failed to serialize snapshot after provider projection merge", err)
 	}
 	return merged, nil
 }
@@ -482,10 +576,32 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 			"Namespace is required: it is where the agent Job, its RBAC, and the result ConfigMap are created")
 	}
 
+	// Default RunID before any cluster access — and before
+	// agentConfigMapTarget below, which folds it into the internal staging
+	// ConfigMap's name — so every resource this run creates shares one
+	// scope. pkg/k8s/agent's Deploy independently rejects an empty or
+	// malformed RunID, but only as an ErrCodeInvalidRequest naming a Config
+	// field a CLI user never set — so catch the whitespace-only value that
+	// slips past this simple emptiness check here, where the message can
+	// point at the knob the caller actually controls.
+	//
+	// The resolved value stays in a local: writing it back into the
+	// caller-owned *AgentConfig would turn a caller who reuses one config
+	// pointer for a second run into a caller pinning a duplicate RunID.
+	runID := config.RunID
+	if runID == "" {
+		runID = runid.Generate()
+	}
+	if strings.TrimSpace(runID) == "" {
+		return nil, nil, errors.New(errors.ErrCodeInvalidRequest,
+			"RunID must not be all-whitespace; leave it unset to auto-generate one")
+	}
+	slog.Info("snapshot agent run", slog.String("runID", runID))
+
 	// Resolve (and validate) the Job's ConfigMap target before any cluster
 	// access: a malformed cm:// Output must not cost the caller a deployed
 	// Job and a cluster-admin binding.
-	agentOutput, deliverViaConfigMap, err := agentConfigMapTarget(config)
+	agentOutput, ownsOutput, err := agentConfigMapTarget(config, runID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -497,7 +613,7 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 		return nil, nil, err
 	}
 
-	snapshotData, err := deployAndWaitForResult(ctx, clientset, config, agentOutput, deliverViaConfigMap)
+	snapshotData, err := deployAndWaitForResult(ctx, clientset, config, runID, agentOutput, ownsOutput)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -513,21 +629,35 @@ func DeployAndCollect(ctx context.Context, config *AgentConfig) (*Snapshot, []by
 }
 
 // agentConfigMapTarget resolves where the agent Job stages its result and
-// whether that ConfigMap is the user's delivery vehicle.
+// whether this run owns that ConfigMap.
 //
 // The Job always writes to a ConfigMap. When config.Output is a cm:// URI the
-// user asked for that exact ConfigMap, so the Job targets it directly and
-// deliverViaConfigMap is true — which makes a failed AKS-pool-merge rewrite
-// fatal rather than a warning, because the bytes the user will read live
-// there. Any other Output (file, stdout, template, or unset) stages to an
-// internal ConfigMap in config.Namespace that the caller never sees.
+// user asked for that exact ConfigMap, so the Job targets it directly,
+// ownsOutput is false, and a failed provider-projection-merge rewrite is fatal rather
+// than a warning — the bytes the user will read live there, and this run
+// must never delete an artifact it does not own. Any other Output (file,
+// stdout, template, or unset) stages to an internal, run-scoped ConfigMap in
+// config.Namespace that the caller never names: ownsOutput is true, so
+// Cleanup may delete it.
+//
+// runID is the resolved run ID for this invocation (config.RunID when the
+// caller pinned one, otherwise the value DeployAndCollect generated); it is a
+// parameter rather than a config field read because DeployAndCollect never
+// writes the generated ID back into the caller's AgentConfig.
+//
+// In the owned case the returned uri is exactly
+// cm://<config.Namespace>/<agent.StagingConfigMapName(runID)>. Cleanup
+// in pkg/k8s/agent relies on both halves of that invariant rather than
+// re-parsing the URI: deleteStagingConfigMap deletes in Config.Namespace, and
+// deleteUnrecordedStagingConfigMap (the sweep for a run that failed before
+// the ConfigMap's UID was observed) looks it up by that same generated name.
 //
 // A cm:// Output is fully parsed here, not merely prefix-matched. The
 // namespace/name only has to be well-formed for the in-pod writer much later,
 // so a typo like "cm://aicr-snapshot" (no namespace) would otherwise surface
 // as a Job failure — after RBAC and the Job exist, and with Cleanup false
 // (the zero value) they stay behind. Returns ErrCodeInvalidRequest instead.
-func agentConfigMapTarget(config *AgentConfig) (uri string, deliverViaConfigMap bool, err error) {
+func agentConfigMapTarget(config *AgentConfig, runID string) (uri string, ownsOutput bool, err error) {
 	if strings.HasPrefix(config.Output, serializer.ConfigMapURIScheme) {
 		if _, _, parseErr := pod.ParseConfigMapURI(config.Output); parseErr != nil {
 			// Wrap with the same code rather than PropagateOrWrap: the inner
@@ -537,9 +667,9 @@ func agentConfigMapTarget(config *AgentConfig) (uri string, deliverViaConfigMap 
 				fmt.Sprintf("invalid ConfigMap output URI %q (expected cm://namespace/name)", config.Output),
 				parseErr)
 		}
-		return config.Output, true, nil
+		return config.Output, false, nil
 	}
-	return fmt.Sprintf("%s%s/aicr-snapshot", serializer.ConfigMapURIScheme, config.Namespace), false, nil
+	return serializer.ConfigMapURIScheme + config.Namespace + "/" + agent.StagingConfigMapName(runID), true, nil
 }
 
 // SnapshotDelivery describes where DeliverSnapshot writes captured bytes.
@@ -561,6 +691,15 @@ type SnapshotDelivery struct {
 	// Empty means in-cluster or the standard discovery chain. Ignored for
 	// every other destination.
 	Kubeconfig string
+
+	// Format is the rendering the caller asked for. The zero value and
+	// serializer.FormatYAML both deliver the agent's bytes verbatim to
+	// stdout and file destinations; JSON and table re-render the document
+	// (see renderSnapshotFormat). A cm:// destination always re-serializes,
+	// whatever the format — see the ConfigMap section on DeliverSnapshot.
+	// Ignored when TemplatePath is set, since a template supplies its own
+	// rendering.
+	Format serializer.Format
 }
 
 // DeliverSnapshot writes captured snapshot bytes to the user's destination:
@@ -569,9 +708,10 @@ type SnapshotDelivery struct {
 // file.
 //
 // data must be the RAW bytes from DeployAndCollect, not a re-serialization of
-// the parsed Snapshot — see DeployAndCollect for why. The one exception is the
-// template path, which necessarily parses the document to expose fields to the
-// template.
+// the parsed Snapshot — see DeployAndCollect for why. Stdout and file
+// destinations copy those bytes when Format is YAML (or unset). Three modes
+// necessarily parse the document instead: a template, which exposes Snapshot
+// fields to the template, a non-YAML Format, and any cm:// destination.
 //
 // # ConfigMap destinations
 //
@@ -582,34 +722,147 @@ type SnapshotDelivery struct {
 // default internal ConfigMap and then delivers to cm://ns/name gets the
 // artifact it asked for instead of a silent no-op. Failures surface; a
 // destination the caller named is not something to log and skip past.
+//
+// A ConfigMap is a structured resource, not a byte sink: the writer derives
+// the snapshot.<ext> data key, the format and timestamp entries, and the
+// resource labels from the parsed document. So this destination re-serializes
+// even for YAML — deterministically, via serializer.MarshalYAMLDeterministic,
+// and through a generic map so no unmodeled field is lost. Only the exact
+// bytes are not preserved. A caller that needs byte-identical YAML should
+// deliver to a file or stdout.
 func DeliverSnapshot(ctx context.Context, data []byte, dest SnapshotDelivery) error {
 	if dest.TemplatePath != "" {
 		return deliverWithTemplate(ctx, data, dest.TemplatePath, dest.Output)
 	}
 
-	switch {
-	case dest.Output == "" || dest.Output == "-" || dest.Output == serializer.StdoutURI:
-		// Output snapshot data to stdout for consumption by caller. A short write
-		// or broken pipe must surface, not silently drop the snapshot.
-		if _, err := os.Stdout.Write(data); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to write snapshot to stdout", err)
-		}
-		if _, err := os.Stdout.Write([]byte("\n")); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to write snapshot to stdout", err)
-		}
-	case strings.HasPrefix(dest.Output, serializer.ConfigMapURIScheme):
-		if err := writeSnapshotConfigMap(ctx, dest.Output, dest.Kubeconfig, data); err != nil {
-			return err
-		}
-		slog.Info("snapshot saved to ConfigMap", slog.String("uri", dest.Output))
-	default:
-		if err := serializer.WriteToFile(dest.Output, data); err != nil {
-			return errors.Wrap(errors.ErrCodeInternal, "failed to write snapshot to file", err)
-		}
-		slog.Info("snapshot saved to file", slog.String("path", dest.Output))
+	// Resolve up front so every destination rejects the same set of
+	// formats. It matters most for the ConfigMap branch: serializer's
+	// ConfigMap writer coerces an unrecognized format to JSON, so without
+	// this a cm:// destination would quietly accept what stdout and file
+	// delivery reject.
+	format, err := resolveDeliveryFormat(dest.Format)
+	if err != nil {
+		return err
 	}
 
+	// A ConfigMap carries its format in the resource itself — the data key
+	// is snapshot.<ext> alongside a "format" entry, which is what the
+	// reader in pkg/serializer keys off — so the ConfigMap writer does the
+	// rendering rather than this function.
+	if strings.HasPrefix(dest.Output, serializer.ConfigMapURIScheme) {
+		if writeErr := writeSnapshotConfigMap(ctx, dest.Output, dest.Kubeconfig, data, format); writeErr != nil {
+			return writeErr
+		}
+		slog.Info("snapshot saved to ConfigMap",
+			slog.String("uri", dest.Output),
+			slog.String("format", string(format)))
+		return nil
+	}
+
+	rendered, err := renderSnapshotFormat(ctx, data, format)
+	if err != nil {
+		return err
+	}
+
+	if dest.Output == "" || dest.Output == "-" || dest.Output == serializer.StdoutURI {
+		// Exactly the rendered bytes, no added terminator: stdout is a
+		// delivery destination like any other, so `aicr snapshot >
+		// snapshot.yaml` has to hash the same as `-o snapshot.yaml`.
+		// Every rendering already ends in a newline — the agent's
+		// document because it comes from MarshalYAMLDeterministic, JSON
+		// and table because renderSnapshotFormat terminates them — so
+		// this does not leave a terminal prompt dangling. A short write
+		// or broken pipe must surface, not silently drop the snapshot.
+		if _, err := os.Stdout.Write(rendered); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "failed to write snapshot to stdout", err)
+		}
+		return nil
+	}
+
+	if err := serializer.WriteToFile(dest.Output, rendered); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to write snapshot to file", err)
+	}
+	slog.Info("snapshot saved to file",
+		slog.String("path", dest.Output),
+		slog.String("format", string(format)))
+
 	return nil
+}
+
+// resolveDeliveryFormat resolves the delivery format and rejects anything
+// unsupported. The zero value is YAML: delivery predates
+// SnapshotDelivery.Format, so an SDK caller that never sets it must keep
+// getting the agent's YAML bytes.
+func resolveDeliveryFormat(format serializer.Format) (serializer.Format, error) {
+	if format == "" {
+		return serializer.FormatYAML, nil
+	}
+	if format.IsUnknown() {
+		return "", errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			"unsupported snapshot output format",
+			map[string]any{"format": string(format), "supported": serializer.SupportedFormats()})
+	}
+	return format, nil
+}
+
+// renderSnapshotFormat converts the agent's raw YAML document into an already
+// resolved format, for stdout and file destinations.
+//
+// YAML returns data untouched: those bytes are byte-identical to what the
+// agent emitted, including fields this binary's Snapshot type does not model.
+// JSON re-encodes through a generic map for the same reason — a typed round
+// trip would drop those fields, and a JSON document with the same keys is
+// what `aicr diff --target snapshot.json` and jq consumers expect. Table is a
+// human rendering that goes through the typed struct, so it is the one format
+// that is lossy by construction; it matches what in-pod (local) collection
+// emits for the same flag.
+func renderSnapshotFormat(ctx context.Context, data []byte, format serializer.Format) ([]byte, error) {
+	switch format {
+	case serializer.FormatYAML:
+		return data, nil
+
+	case serializer.FormatJSON:
+		var doc map[string]any
+		if err := yaml.Unmarshal(data, &doc); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse snapshot for JSON output", err)
+		}
+		// json.Marshal sorts map keys, so the rendering is deterministic
+		// for a given document.
+		out, err := json.MarshalIndent(doc, "", "  ")
+		if err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to render snapshot as JSON", err)
+		}
+		return append(out, '\n'), nil
+
+	case serializer.FormatTable:
+		snap, err := parseSnapshotDocument(data, "table")
+		if err != nil {
+			return nil, err
+		}
+		var buf bytes.Buffer
+		if err := serializer.NewWriter(serializer.FormatTable, &buf).Serialize(ctx, snap); err != nil {
+			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to render snapshot as a table", err)
+		}
+		return buf.Bytes(), nil
+
+	default:
+		// Unreachable via DeliverSnapshot, which resolves first; kept so a
+		// future caller cannot skip the check and fall through to YAML.
+		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
+			"unsupported snapshot output format",
+			map[string]any{"format": string(format), "supported": serializer.SupportedFormats()})
+	}
+}
+
+// parseSnapshotDocument unmarshals an agent document into this binary's
+// Snapshot type for the delivery modes that cannot copy bytes.
+func parseSnapshotDocument(data []byte, mode string) (*Snapshot, error) {
+	var snap Snapshot
+	if err := yaml.Unmarshal(data, &snap); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal,
+			fmt.Sprintf("failed to parse snapshot for %s output", mode), err)
+	}
+	return &snap, nil
 }
 
 // ParseResourceList converts a comma-separated "name=quantity" list
@@ -629,7 +882,7 @@ func ParseResourceList(spec string) (corev1.ResourceList, error) {
 		return nil, nil
 	}
 	result := corev1.ResourceList{}
-	for _, raw := range strings.Split(spec, ",") {
+	for raw := range strings.SplitSeq(spec, ",") {
 		entry := strings.TrimSpace(raw)
 		if entry == "" {
 			continue
@@ -852,7 +1105,11 @@ func (n *NodeSnapshotter) measureWithAgent(ctx context.Context) error {
 // carry the merged reading, and a transient Apply failure on the internal
 // hygiene rewrite must not discard an already-captured snapshot.
 func rewriteMergedSnapshotConfigMap(ctx context.Context, uri, kubeconfig string, snapshotData []byte, deliverViaConfigMap bool) error {
-	err := writeSnapshotConfigMap(ctx, uri, kubeconfig, snapshotData)
+	// YAML regardless of the caller's --format: this ConfigMap is the
+	// agent-to-controller staging vehicle, and pkg/k8s/agent's GetSnapshot
+	// reads its snapshot.yaml key. When the user asked for a cm://
+	// destination in another format, DeliverSnapshot re-applies it below.
+	err := writeSnapshotConfigMap(ctx, uri, kubeconfig, snapshotData, serializer.FormatYAML)
 	if err == nil {
 		return nil
 	}
@@ -866,27 +1123,52 @@ func rewriteMergedSnapshotConfigMap(ctx context.Context, uri, kubeconfig string,
 }
 
 // writeSnapshotConfigMap applies snapshot bytes to a cm://namespace/name
-// destination, replacing whatever is there. Shared by DeliverSnapshot (the
-// caller's chosen destination) and the AKS-pool merge rewrite (replacing the
-// pre-merge content the agent Job stored).
-func writeSnapshotConfigMap(ctx context.Context, uri, kubeconfig string, snapshotData []byte) error {
+// destination in the requested format, replacing whatever is there. Shared by
+// DeliverSnapshot (the caller's chosen destination) and the provider-projection merge
+// rewrite (replacing the pre-merge content the agent Job stored), which pins
+// YAML: pkg/k8s/agent reads the staging ConfigMap's snapshot.yaml key.
+//
+// The format is resolved here as well as in DeliverSnapshot, because the
+// ConfigMap writer coerces an unrecognized format to JSON — an unsupported
+// format must fail, not change the artifact's encoding.
+func writeSnapshotConfigMap(ctx context.Context, uri, kubeconfig string, snapshotData []byte, format serializer.Format) error {
 	namespace, name, err := pod.ParseConfigMapURI(uri)
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse snapshot ConfigMap URI", err)
 	}
-	// Generic-map round trip, same reason as mergeAKSGPUPools: the typed
-	// Snapshot struct would drop fields a newer agent image emitted. The
-	// rawSnapshotDoc wrapper keeps the ConfigMap's kind/version labels
-	// populated from the document header.
-	var doc map[string]any
-	if err := yaml.Unmarshal(snapshotData, &doc); err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to parse snapshot for ConfigMap write", err)
+	format, err = resolveDeliveryFormat(format)
+	if err != nil {
+		return err
 	}
-	writer := serializer.NewConfigMapWriterWithKubeconfig(namespace, name, kubeconfig, serializer.FormatYAML)
-	if err := writer.Serialize(ctx, rawSnapshotDoc{doc: doc}); err != nil {
+	payload, err := configMapPayload(snapshotData, format)
+	if err != nil {
+		return err
+	}
+	writer := serializer.NewConfigMapWriterWithKubeconfig(namespace, name, kubeconfig, format)
+	if err := writer.Serialize(ctx, payload); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "failed to write snapshot ConfigMap", err)
 	}
 	return nil
+}
+
+// configMapPayload picks what the ConfigMap writer serializes.
+//
+// YAML and JSON go through the generic-map wrapper, same reason as
+// mergeAKSGPUPools: the typed Snapshot struct would drop fields a newer agent
+// image emitted, and rawSnapshotDoc still exposes the kind/version the writer
+// puts on the ConfigMap's labels. A table is a flattened FIELD/VALUE view the
+// writer derives by reflecting over exported fields, which a generic map
+// collapses into a single row — so that mode hands over the typed struct and
+// accepts the lossy round trip.
+func configMapPayload(snapshotData []byte, format serializer.Format) (any, error) {
+	if format == serializer.FormatTable {
+		return parseSnapshotDocument(snapshotData, "table")
+	}
+	var doc map[string]any
+	if err := yaml.Unmarshal(snapshotData, &doc); err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to parse snapshot for ConfigMap write", err)
+	}
+	return rawSnapshotDoc{doc: doc}, nil
 }
 
 // rawSnapshotDoc lets a generic snapshot document flow through serializers
@@ -899,6 +1181,16 @@ type rawSnapshotDoc struct {
 
 //nolint:unparam // the (any, error) shape is yaml.Marshaler's fixed contract
 func (r rawSnapshotDoc) MarshalYAML() (any, error) { return r.doc, nil }
+
+// MarshalJSON keeps the no-field-loss guarantee on the JSON path: without it
+// the wrapper has no exported fields and would serialize as "{}".
+func (r rawSnapshotDoc) MarshalJSON() ([]byte, error) {
+	out, err := json.Marshal(r.doc)
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to serialize snapshot document as JSON", err)
+	}
+	return out, nil
+}
 
 func (r rawSnapshotDoc) GetKind() header.Kind {
 	kind, _ := r.doc["kind"].(string)

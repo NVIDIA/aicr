@@ -1878,11 +1878,30 @@ func (g *Generator) chartName() string {
 	return g.ChartName
 }
 
+// chartVersion is the version written into the bundle chart's Chart.yaml and,
+// by default, used as its Argo CD targetRevision and OCI tag.
+//
+// The explicit BundleChartVersion override is already validated as strict
+// SemVer at Generate time. The recipe-derived fallback goes through
+// NormalizeChartVersion rather than NormalizeVersionWithDefault because
+// `metadata.version` carries the AICR build version verbatim — including the
+// "dev" of an unstamped build, which Helm rejects for `version:`, making the
+// whole generated bundle chart unloadable.
+//
+// The source stays `metadata.version` — the build that generated the RECIPE —
+// deliberately, and does NOT match the per-component wrapper charts inside the
+// same bundle, which localformat stamps from the build that ran `bundle`
+// (ADR-021 Decision 7). The two differ whenever a recipe is generated once and
+// bundled later by a newer binary. This value also defaults the Argo CD
+// targetRevision and the OCI push tag, so it tracks the configuration the
+// chart encodes rather than the tool run that serialized it. The root chart
+// carries no aicr.run/generated-by annotation, so nothing reads it as the
+// wrapper-provenance signal.
 func (g *Generator) chartVersion() string {
 	if g.BundleChartVersion != "" {
 		return g.BundleChartVersion
 	}
-	return deployer.NormalizeVersionWithDefault(g.RecipeResult.Metadata.Version)
+	return deployer.NormalizeChartVersion(g.RecipeResult.Metadata.Version)
 }
 
 func (g *Generator) targetRevision() string {

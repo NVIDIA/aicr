@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
 
@@ -77,8 +78,8 @@ var errBoom = stderrors.New("boom")
 // installed-state probe and the post-install wait both require.
 func establishedCRD(name string) *unstructured.Unstructured {
 	obj := newTestObject(apiGroupAPIExtensions+"/v1", "CustomResourceDefinition", "", name)
-	if err := unstructured.SetNestedSlice(obj.Object, []interface{}{
-		map[string]interface{}{"type": "Established", "status": "True"},
+	if err := unstructured.SetNestedSlice(obj.Object, []any{
+		map[string]any{"type": "Established", "status": "True"},
 	}, "status", "conditions"); err != nil {
 		panic(err)
 	}
@@ -102,8 +103,8 @@ func notReadyTrainerDeployment() *unstructured.Unstructured {
 }
 
 // readyTrainerDeploymentNamed builds a controller Deployment reporting one ready
-// replica under an arbitrary name, covering the Helm path where the name is
-// derived from the release rather than fixed by the overlay.
+// replica under an arbitrary name, covering an externally managed chart
+// installation with a custom name.
 func readyTrainerDeploymentNamed(namespace, name string) *unstructured.Unstructured {
 	return trainerDeploymentNamed(namespace, name, 1)
 }
@@ -123,10 +124,10 @@ func trainerDeploymentNamed(namespace, name string, readyReplicas int64) *unstru
 }
 
 func newTestObject(apiVersion, kind, namespace, name string) *unstructured.Unstructured {
-	obj := &unstructured.Unstructured{Object: map[string]interface{}{
+	obj := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": apiVersion,
 		"kind":       kind,
-		"metadata":   map[string]interface{}{"name": name},
+		"metadata":   map[string]any{"name": name},
 	}}
 	if namespace != "" {
 		obj.SetNamespace(namespace)
@@ -168,7 +169,7 @@ func TestInstallTrainerResources_RollsBackOnApplyFailure(t *testing.T) {
 		newTestObject("v1", "Secret", trainerNamespace, "kubeflow-trainer-webhook-cert"),
 	}
 
-	refs, err := installTrainerResources(context.Background(), client, newTrainerTestMapper(), objs)
+	refs, err := installTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs)
 	if err == nil {
 		t.Fatal("expected apply failure, got nil error")
 	}
@@ -177,6 +178,39 @@ func TestInstallTrainerResources_RollsBackOnApplyFailure(t *testing.T) {
 	}
 	if configMapExists(t, client) {
 		t.Error("ConfigMap created before the failure was not rolled back")
+	}
+}
+
+// TestApplyTrainerResources_PersistsEachCreateBeforeReturning checks that
+// each created resource lands in the manifest immediately, not only once
+// the whole install returns. A process killed right after this call must
+// not lose track of what it already created.
+func TestApplyTrainerResources_PersistsEachCreateBeforeReturning(t *testing.T) {
+	dynamicClient := newTrainerFakeClient()
+	dynamicClient.PrependReactor("create", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewInternalError(errBoom)
+	})
+	clientset := fake.NewClientset()
+
+	objs := []*unstructured.Unstructured{
+		newTestObject("v1", "ConfigMap", trainerNamespace, trainerConfigMapName),
+		newTestObject("v1", "Secret", trainerNamespace, "kubeflow-trainer-webhook-cert"),
+	}
+
+	created, err := applyTrainerResources(context.Background(), dynamicClient, clientset, newTrainerTestMapper(), objs)
+	if err == nil {
+		t.Fatal("expected the Secret create to fail")
+	}
+	if len(created) != 1 {
+		t.Fatalf("created = %d, want 1 (the ConfigMap, before the Secret failed)", len(created))
+	}
+
+	_, recorded, loadErr := loadTrainerInstallManifest(context.Background(), clientset)
+	if loadErr != nil {
+		t.Fatalf("loadTrainerInstallManifest() error = %v", loadErr)
+	}
+	if len(recorded) != 1 || recorded[0].Name != trainerConfigMapName {
+		t.Fatalf("recorded manifest = %v, want the ConfigMap recorded before the call returned", recorded)
 	}
 }
 
@@ -195,7 +229,7 @@ func TestInstallTrainerResources_LeavesPreexistingResources(t *testing.T) {
 		newTestObject("v1", "Secret", trainerNamespace, "kubeflow-trainer-webhook-cert"),
 	}
 
-	if _, err := installTrainerResources(context.Background(), client, newTrainerTestMapper(), objs); err == nil {
+	if _, err := installTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs); err == nil {
 		t.Fatal("expected apply failure, got nil error")
 	}
 	if !configMapExists(t, client) {
@@ -218,7 +252,7 @@ func TestInstallTrainerResources_UpdateFailureStopsInstall(t *testing.T) {
 		newTestObject("v1", "Secret", trainerNamespace, "kubeflow-trainer-webhook-cert"),
 	}
 
-	_, err := installTrainerResources(context.Background(), client, newTrainerTestMapper(), objs)
+	_, err := installTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs)
 	if err == nil {
 		t.Fatal("expected update failure to abort installation, got nil error")
 	}
@@ -242,7 +276,7 @@ func TestInstallTrainerResources_RollsBackOnCRDEstablishTimeout(t *testing.T) {
 		newTestObject("v1", "ConfigMap", trainerNamespace, trainerConfigMapName),
 	}
 
-	refs, err := installTrainerResources(context.Background(), client, newTrainerTestMapper(), objs)
+	refs, err := installTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs)
 	if err == nil {
 		t.Fatal("expected CRD establishment timeout, got nil error")
 	}
@@ -272,7 +306,7 @@ func TestInstallTrainerResources_RollsBackOnControllerReadyTimeout(t *testing.T)
 	})
 	defer cancel()
 
-	refs, err := installTrainerResources(ctx, client, newTrainerTestMapper(), objs)
+	refs, err := installTrainerResources(ctx, client, fake.NewClientset(), newTrainerTestMapper(), objs)
 	if err == nil {
 		t.Fatal("expected controller readiness timeout, got nil error")
 	}
@@ -298,7 +332,7 @@ func TestInstallTrainerResources_SucceedsWhenReady(t *testing.T) {
 		newTestObject("v1", "ConfigMap", trainerNamespace, trainerConfigMapName),
 	}
 
-	refs, err := installTrainerResources(context.Background(), client, newTrainerTestMapper(), objs)
+	refs, err := installTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -327,7 +361,7 @@ func TestInstallTrainerResources_CleanupFailureNamesResource(t *testing.T) {
 		newTestObject("v1", "Secret", trainerNamespace, "kubeflow-trainer-webhook-cert"),
 	}
 
-	_, err := installTrainerResources(context.Background(), client, newTrainerTestMapper(), objs)
+	_, err := installTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -349,7 +383,7 @@ func TestInstallTrainerResources_StopsApplyingOnCanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	refs, err := installTrainerResources(ctx, client, newTrainerTestMapper(), objs)
+	refs, err := installTrainerResources(ctx, client, fake.NewClientset(), newTrainerTestMapper(), objs)
 	if err == nil {
 		t.Fatal("expected canceled context to abort the install, got nil error")
 	}
@@ -456,7 +490,7 @@ func TestApplyTrainerResources_ClassifiesTransientCreateFailure(t *testing.T) {
 		newTestObject("v1", "ConfigMap", trainerNamespace, trainerConfigMapName),
 	}
 
-	_, err := installTrainerResources(context.Background(), client, newTrainerTestMapper(), objs)
+	_, err := installTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs)
 	if err == nil {
 		t.Fatal("expected create failure, got nil")
 	}
@@ -519,7 +553,7 @@ func TestApplyTrainerResources_ClaimsAmbiguousCreate(t *testing.T) {
 		newTestObject("v1", "ConfigMap", trainerNamespace, trainerConfigMapName),
 	}
 
-	created, err := applyTrainerResources(context.Background(), client, newTrainerTestMapper(), objs)
+	created, err := applyTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs)
 	if err == nil {
 		t.Fatal("expected the ambiguous create to surface as an error")
 	}
@@ -573,7 +607,7 @@ func TestApplyTrainerResources_DoesNotClaimForeignObjects(t *testing.T) {
 				newTestObject("v1", "ConfigMap", trainerNamespace, trainerConfigMapName),
 			}
 
-			created, err := applyTrainerResources(context.Background(), client, newTrainerTestMapper(), objs)
+			created, err := applyTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs)
 			if err == nil {
 				t.Fatal("expected the create failure to surface")
 			}
@@ -592,7 +626,7 @@ func TestApplyTrainerResources_StampsCreatedObjects(t *testing.T) {
 		newTestObject("v1", "ConfigMap", trainerNamespace, trainerConfigMapName),
 	}
 
-	if _, err := applyTrainerResources(context.Background(), client, newTrainerTestMapper(), objs); err != nil {
+	if _, err := applyTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -621,7 +655,7 @@ func TestApplyTrainerResources_RefusesToRepointForeignInstall(t *testing.T) {
 			trainerValidatingWebhookName, trainerNamespace),
 	}
 
-	_, err := applyTrainerResources(context.Background(), client, newTrainerTestMapper(), objs)
+	_, err := applyTrainerResources(context.Background(), client, fake.NewClientset(), newTrainerTestMapper(), objs)
 	if err == nil {
 		t.Fatal("expected the installer to refuse repointing another installation's webhooks")
 	}

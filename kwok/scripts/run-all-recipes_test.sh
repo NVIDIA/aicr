@@ -172,7 +172,7 @@ write_profile() {
     dir=$(dirname "${path}")
     mkdir -p "${dir}"
     {
-        echo "apiVersion: aicr.run/v1alpha2"
+        echo "apiVersion: aicr.run/v1beta1"
         echo "kind: KWOKNodeProfile"
         echo "metadata:"
         echo "  name: ${name}"
@@ -191,7 +191,7 @@ write_overlay() {
     dir=$(dirname "${path}")
     mkdir -p "${dir}"
     cat > "${path}" <<EOF
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: recipeMetadata
 metadata:
   name: ${name}

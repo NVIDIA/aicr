@@ -30,10 +30,10 @@ import (
 // resourceObservedErr would latch sawResource=true on the first iteration and
 // the absent-resource fast-fail grace would never fire in assertRawResources.
 func TestAssertSingleDocument_PropagatesStructuredCode(t *testing.T) {
-	expected := map[string]interface{}{
+	expected := map[string]any{
 		"apiVersion": "v1",
 		"kind":       "Pod",
-		"metadata": map[string]interface{}{
+		"metadata": map[string]any{
 			"name":      "missing",
 			"namespace": "ns",
 		},

@@ -25,6 +25,7 @@ import (
 
 	k8scollector "github.com/NVIDIA/aicr/pkg/collector/k8s"
 	"github.com/NVIDIA/aicr/pkg/measurement"
+	"github.com/NVIDIA/aicr/pkg/serializer"
 )
 
 func writePoolsFile(t *testing.T, content string) string {
@@ -37,12 +38,16 @@ func writePoolsFile(t *testing.T, content string) string {
 }
 
 func findAKSGPUPools(snap *Snapshot) *measurement.Subtype {
+	return findK8sSubtype(snap, k8scollector.SubtypeAKSGPUPools)
+}
+
+func findK8sSubtype(snap *Snapshot, name string) *measurement.Subtype {
 	for _, m := range snap.Measurements {
 		if m == nil || m.Type != measurement.TypeK8s {
 			continue
 		}
 		for i := range m.Subtypes {
-			if m.Subtypes[i].Name == k8scollector.SubtypeAKSGPUPools {
+			if m.Subtypes[i].Name == name {
 				return &m.Subtypes[i]
 			}
 		}
@@ -104,7 +109,7 @@ func TestMeasureFailsLoudOnBadPoolsFile(t *testing.T) {
 // case: explicit input survives even when no K8s measurement was collected.
 func TestAttachAKSGPUPoolsCreatesK8sMeasurement(t *testing.T) {
 	snap := NewSnapshot()
-	attachAKSGPUPools(snap, measurement.Subtype{
+	attachProviderProjection(snap, measurement.Subtype{
 		Name: k8scollector.SubtypeAKSGPUPools,
 		Data: map[string]measurement.Reading{"gpu-driver": measurement.Str("None")},
 	})
@@ -130,12 +135,12 @@ func TestMergeAKSGPUPools(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	merged, err := mergeAKSGPUPools(raw, measurement.Subtype{
+	merged, err := mergeProviderProjection(raw, measurement.Subtype{
 		Name: k8scollector.SubtypeAKSGPUPools,
 		Data: map[string]measurement.Reading{"gpu-driver": measurement.Str("Install")},
 	})
 	if err != nil {
-		t.Fatalf("mergeAKSGPUPools() error = %v", err)
+		t.Fatalf("mergeProviderProjection() error = %v", err)
 	}
 
 	var got Snapshot
@@ -150,20 +155,20 @@ func TestMergeAKSGPUPools(t *testing.T) {
 		t.Fatalf("gpu-driver = %v, want Install", subtype.Data["gpu-driver"].Any())
 	}
 
-	if _, err := mergeAKSGPUPools([]byte("{not yaml"), measurement.Subtype{}); err == nil {
-		t.Fatal("mergeAKSGPUPools(garbage) = nil, want parse error")
+	if _, err := mergeProviderProjection([]byte("{not yaml"), measurement.Subtype{}); err == nil {
+		t.Fatal("mergeProviderProjection(garbage) = nil, want parse error")
 	}
 
 	// An empty or `null` agent document (malfunctioning agent image)
 	// unmarshals to a nil map without error; the merge must produce a
 	// document carrying the subtype instead of panicking.
 	for _, degenerate := range [][]byte{nil, []byte(""), []byte("null" + "\n")} {
-		merged, err := mergeAKSGPUPools(degenerate, measurement.Subtype{
+		merged, err := mergeProviderProjection(degenerate, measurement.Subtype{
 			Name: k8scollector.SubtypeAKSGPUPools,
 			Data: map[string]measurement.Reading{"gpu-driver": measurement.Str("Install")},
 		})
 		if err != nil {
-			t.Fatalf("mergeAKSGPUPools(degenerate %q) error = %v", degenerate, err)
+			t.Fatalf("mergeProviderProjection(degenerate %q) error = %v", degenerate, err)
 		}
 		var got Snapshot
 		if err := yaml.Unmarshal(merged, &got); err != nil {
@@ -172,6 +177,99 @@ func TestMergeAKSGPUPools(t *testing.T) {
 		if findAKSGPUPools(&got) == nil {
 			t.Fatalf("degenerate %q merge dropped the subtype", degenerate)
 		}
+	}
+}
+
+// TestMeasureAttachesBothProviderProjections pins the generalized
+// projection loop in local mode: aks-gpu-pools and oke-addons supplied
+// together both land on the snapshot's K8s measurement (the loop does not
+// stop after the first projection).
+func TestMeasureAttachesBothProviderProjections(t *testing.T) {
+	ser := &mockSerializer{}
+	ns := &NodeSnapshotter{
+		Version:    "1.0.0",
+		Factory:    &mockFactory{},
+		Serializer: ser,
+		AKSGPUPoolsPath: writePoolsFile(t,
+			`[{"name":"gpu1","vmSize":"Standard_ND96isr_H100_v5","gpuProfile":{"driver":"Install"}}]`),
+		OKEAddonsPath: writePoolsFile(t,
+			`{"data": [{"name": "NvidiaGpuPlugin", "lifecycle-state": "ACTIVE"}]}`),
+	}
+
+	if err := ns.Measure(t.Context()); err != nil {
+		t.Fatalf("Measure() error = %v", err)
+	}
+	snap, ok := ser.data.(*Snapshot)
+	if !ok {
+		t.Fatalf("serialized %T, want *Snapshot", ser.data)
+	}
+	aks := findK8sSubtype(snap, k8scollector.SubtypeAKSGPUPools)
+	if aks == nil {
+		t.Fatal("snapshot is missing the aks-gpu-pools subtype")
+	}
+	if got, _ := aks.Data["gpu-driver"].Any().(string); got != "Install" {
+		t.Fatalf("gpu-driver = %v, want Install", aks.Data["gpu-driver"].Any())
+	}
+	oke := findK8sSubtype(snap, k8scollector.SubtypeOKEAddons)
+	if oke == nil {
+		t.Fatal("snapshot is missing the oke-addons subtype")
+	}
+	if got, _ := oke.Data["nvidia-gpu-plugin"].Any().(string); got != "installed" {
+		t.Fatalf("nvidia-gpu-plugin = %v, want installed", oke.Data["nvidia-gpu-plugin"].Any())
+	}
+}
+
+// TestMergeOKEAddons pins the agent Job-mode path for the OKE projection:
+// mergeProviderProjection is subtype-agnostic, the oke-addons subtype lands
+// on the existing K8s measurement the same way aks-gpu-pools does, and a
+// second projection merged onto the result leaves both in place.
+func TestMergeOKEAddons(t *testing.T) {
+	snap := NewSnapshot()
+	snap.Measurements = append(snap.Measurements,
+		measurement.NewMeasurement(measurement.TypeK8s).Build())
+	raw, err := yaml.Marshal(snap)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	merged, err := mergeProviderProjection(raw, measurement.Subtype{
+		Name: k8scollector.SubtypeOKEAddons,
+		Data: map[string]measurement.Reading{"nvidia-gpu-plugin": measurement.Str("installed")},
+	})
+	if err != nil {
+		t.Fatalf("mergeProviderProjection() error = %v", err)
+	}
+
+	var got Snapshot
+	if uerr := yaml.Unmarshal(merged, &got); uerr != nil {
+		t.Fatalf("unmarshal merged: %v", uerr)
+	}
+	subtype := findK8sSubtype(&got, k8scollector.SubtypeOKEAddons)
+	if subtype == nil {
+		t.Fatal("merged snapshot is missing the oke-addons subtype")
+	}
+	if got, _ := subtype.Data["nvidia-gpu-plugin"].Any().(string); got != "installed" {
+		t.Fatalf("nvidia-gpu-plugin = %v, want installed", subtype.Data["nvidia-gpu-plugin"].Any())
+	}
+
+	// Two projections at once: merging aks-gpu-pools onto the already-merged
+	// document must keep both subtypes, mirroring the agent-mode loop.
+	remerged, err := mergeProviderProjection(merged, measurement.Subtype{
+		Name: k8scollector.SubtypeAKSGPUPools,
+		Data: map[string]measurement.Reading{"gpu-driver": measurement.Str("Install")},
+	})
+	if err != nil {
+		t.Fatalf("mergeProviderProjection(second projection) error = %v", err)
+	}
+	var both Snapshot
+	if uerr := yaml.Unmarshal(remerged, &both); uerr != nil {
+		t.Fatalf("unmarshal re-merged: %v", uerr)
+	}
+	if findK8sSubtype(&both, k8scollector.SubtypeOKEAddons) == nil {
+		t.Fatal("second merge dropped the oke-addons subtype")
+	}
+	if findK8sSubtype(&both, k8scollector.SubtypeAKSGPUPools) == nil {
+		t.Fatal("second merge did not attach the aks-gpu-pools subtype")
 	}
 }
 
@@ -190,12 +288,12 @@ measurements:
             version: v1.35.0
           futureSubtypeField: keep-me-three
 `)
-	merged, err := mergeAKSGPUPools(raw, measurement.Subtype{
+	merged, err := mergeProviderProjection(raw, measurement.Subtype{
 		Name: k8scollector.SubtypeAKSGPUPools,
 		Data: map[string]measurement.Reading{"gpu-driver": measurement.Str("None")},
 	})
 	if err != nil {
-		t.Fatalf("mergeAKSGPUPools() error = %v", err)
+		t.Fatalf("mergeProviderProjection() error = %v", err)
 	}
 	for _, want := range []string{"futureTopLevel: keep-me", "futureMeasurementField: keep-me-too",
 		"futureSubtypeField: keep-me-three", "gpu-driver: None"} {
@@ -208,10 +306,10 @@ measurements:
 // TestWriteSnapshotConfigMapRejectsBadInput pins the guard branches; the
 // live write path requires a cluster and is covered by e2e.
 func TestWriteSnapshotConfigMapRejectsBadInput(t *testing.T) {
-	if err := writeSnapshotConfigMap(t.Context(), "not-a-cm-uri", "", []byte("{}")); err == nil {
+	if err := writeSnapshotConfigMap(t.Context(), "not-a-cm-uri", "", []byte("{}"), serializer.FormatYAML); err == nil {
 		t.Fatal("writeSnapshotConfigMap(bad URI) = nil, want error")
 	}
-	if err := writeSnapshotConfigMap(t.Context(), "cm://ns/name", "", []byte("{not yaml")); err == nil {
+	if err := writeSnapshotConfigMap(t.Context(), "cm://ns/name", "", []byte("{not yaml"), serializer.FormatYAML); err == nil {
 		t.Fatal("writeSnapshotConfigMap(garbage snapshot) = nil, want parse error")
 	}
 }

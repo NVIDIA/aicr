@@ -29,7 +29,6 @@ reviews:
     base_branches:
       - ".*"
   path_filters:
-    - "!vendor/**"
     - "!testdata/**"
     - "!dist/**"
     - "!**/*_generated.go"

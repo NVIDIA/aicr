@@ -34,9 +34,18 @@ outputs:
   apidiff:
     description: 'API-diff version pinned in .settings.yaml'
     value: ${{ steps.versions.outputs.apidiff }}
+  oasdiff:
+    description: 'oasdiff version from .settings.yaml (linting.oasdiff)'
+    value: ${{ steps.versions.outputs.oasdiff }}
+  oasdiff_sha256_linux_amd64:
+    description: 'Pinned linux/amd64 SHA256 for the oasdiff release archive (linting.oasdiff_sha256_linux_amd64)'
+    value: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
   addlicense:
     description: 'addlicense version'
     value: ${{ steps.versions.outputs.addlicense }}
+  addlicense_sha256_linux_amd64:
+    description: 'Pinned linux/amd64 SHA256 for the addlicense release archive (linting.addlicense_sha256_linux_amd64)'
+    value: ${{ steps.versions.outputs.addlicense_sha256_linux_amd64 }}
   go_licenses:
     description: 'go-licenses version'
     value: ${{ steps.versions.outputs.go_licenses }}
@@ -52,6 +61,12 @@ outputs:
   tilt:
     description: 'Tilt version'
     value: ${{ steps.versions.outputs.tilt }}
+  setup_envtest:
+    description: 'setup-envtest version'
+    value: ${{ steps.versions.outputs.setup_envtest }}
+  setup_envtest_sha256_linux_amd64:
+    description: 'Pinned linux/amd64 SHA256 for the setup-envtest release binary (testing_tools.setup_envtest_sha256_linux_amd64)'
+    value: ${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}
   helm:
     description: 'Helm version'
     value: ${{ steps.versions.outputs.helm }}
@@ -73,6 +88,9 @@ outputs:
   oras:
     description: 'ORAS version (attaches the aiperf-bench source archive as an OCI 1.1 referrer; cosign cannot attach arbitrary artifacts)'
     value: ${{ steps.versions.outputs.oras }}
+  oras_sha256_linux_amd64:
+    description: 'ORAS SHA256 for linux/amd64'
+    value: ${{ steps.versions.outputs.oras_sha256_linux_amd64 }}
   yamllint:
     description: 'yamllint version'
     value: ${{ steps.versions.outputs.yamllint }}
@@ -175,14 +193,18 @@ runs:
         # Linting
         echo "golangci_lint=$(yq eval '.linting.golangci_lint' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "apidiff=$(yq eval '.linting.apidiff' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "oasdiff=$(yq eval '.linting.oasdiff' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "oasdiff_sha256_linux_amd64=$(yq eval '.linting.oasdiff_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "yamllint=$(yq eval '.linting.yamllint' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "addlicense=$(yq eval '.linting.addlicense' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "addlicense_sha256_linux_amd64=$(yq eval '.linting.addlicense_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "go_licenses=$(yq eval '.linting.go_licenses' .settings.yaml)" >> $GITHUB_OUTPUT
 
         # Security tools
         echo "grype=$(yq eval '.security_tools.grype' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "cosign=$(yq eval '.security_tools.cosign' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "oras=$(yq eval '.security_tools.oras' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "oras_sha256_linux_amd64=$(yq eval '.security_tools.oras_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
 
         # Testing tools
         echo "kubectl=$(yq eval '.testing_tools.kubectl' .settings.yaml)" >> $GITHUB_OUTPUT
@@ -191,6 +213,8 @@ runs:
         echo "nvkind=$(yq eval '.testing_tools.nvkind' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "ctlptl=$(yq eval '.testing_tools.ctlptl' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "tilt=$(yq eval '.testing_tools.tilt' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "setup_envtest=$(yq eval '.testing_tools.setup_envtest' .settings.yaml)" >> $GITHUB_OUTPUT
+        echo "setup_envtest_sha256_linux_amd64=$(yq eval '.testing_tools.setup_envtest_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "helm=$(yq eval '.testing_tools.helm' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "helmfile=$(yq eval '.testing_tools.helmfile' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "helmfile_sha256_linux_amd64=$(yq eval '.testing_tools.helmfile_checksums.linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
@@ -235,6 +259,7 @@ runs:
         echo "  crane: ${{ steps.versions.outputs.crane }}"
         echo "  golangci_lint: ${{ steps.versions.outputs.golangci_lint }}"
         echo "  apidiff: ${{ steps.versions.outputs.apidiff }}"
+        echo "  oasdiff: ${{ steps.versions.outputs.oasdiff }}"
         echo "  yamllint: ${{ steps.versions.outputs.yamllint }}"
         echo "  addlicense: ${{ steps.versions.outputs.addlicense }}"
         echo "  go_licenses: ${{ steps.versions.outputs.go_licenses }}"

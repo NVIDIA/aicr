@@ -26,10 +26,10 @@ The AICR API Server provides HTTP REST access to recipe generation and bundle cr
 
 | Feature | API | CLI |
 |---------|-----|-----|
-| Recipe generation | ✅ GET/POST `/v1/recipe`; profile- and Slurm-accounting-aware GET/POST `/v2/recipe` | ✅ `aicr recipe` |
-| Value query | ✅ GET/POST `/v1/query`; profile- and Slurm-accounting-aware GET/POST `/v2/query` | ✅ `aicr query` |
-| Bundle creation | ✅ POST `/v1/bundle`; profile- and Slurm-accounting-aware POST `/v2/bundle` | ✅ `aicr bundle` |
-| Bundle attestation | ✅ POST `/v1/bundle?attest=true`; profile- and Slurm-accounting-aware POST `/v2/bundle?attest=true` (server signs as itself) | ✅ `aicr bundle --attest` (interactive or ambient OIDC) |
+| Recipe generation | ✅ profile- and Slurm-accounting-aware GET/POST `/v1/recipe` | ✅ `aicr recipe` |
+| Value query | ✅ profile- and Slurm-accounting-aware GET/POST `/v1/query` | ✅ `aicr query` |
+| Bundle creation | ✅ profile- and Slurm-accounting-aware POST `/v1/bundle` | ✅ `aicr bundle` |
+| Bundle attestation | ✅ POST `/v1/bundle?attest=true` (server signs as itself) | ✅ `aicr bundle --attest` (interactive or ambient OIDC) |
 | Snapshot capture | ❌ Use CLI | ✅ `aicr snapshot` |
 | ConfigMap I/O | ❌ Use CLI | ✅ `cm://` URIs |
 | Agent deployment | ❌ Use CLI | ✅ `aicr snapshot` |
@@ -60,14 +60,10 @@ curl "http://localhost:8080/v1/recipe?accelerator=h100&service=eks"
 # GET: Training workload on Ubuntu
 curl "http://localhost:8080/v1/recipe?accelerator=h100&service=eks&intent=training&os=ubuntu"
 
-# POST: Recipe from criteria file (YAML body)
+# POST: Recipe from a criteria envelope (YAML body)
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
-  -d 'kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: my-config
-spec:
+  -d 'criteria:
   service: eks
   accelerator: h100
   intent: training'
@@ -111,8 +107,7 @@ curl "http://localhost:8080/"
   "service": "aicrd",
   "version": "v0.14.0",
   "routes": [
-    "/v1/recipe", "/v1/query", "/v1/bundle",
-    "/v2/recipe", "/v2/query", "/v2/bundle"
+    "/v1/recipe", "/v1/query", "/v1/bundle"
   ]
 }
 ```
@@ -127,13 +122,15 @@ Generate an optimized configuration recipe based on environment parameters.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `any` |
-| `accelerator` | string | any | GPU type: `h100`, `h200`, `gb200`, `gb300`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `any` |
+| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `k0s`, `any`. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; aliases: `self-managed`, `self`, `vanilla`); `any` is the wildcard and does not select `generic` recipes. `generic` is never inferred from a snapshot (the fingerprint reports the detected provisioner, such as `metal3` or `rke2`), so `generic` recipes require `service=generic` explicitly, also when a snapshot is supplied |
+| `accelerator` | string | any | GPU type: `h100`, `h200`, `gb200`, `gb300`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200`, `any` |
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
 | `os` | string | any | Node OS: `ubuntu`, `rhel`, `cos`, `amazonlinux`, `ol`, `talos`, `any` |
 | `platform` | string | any | Platform/framework: `dynamo`, `kubeflow`, `nim`, `runai`, `slurm`, `any` |
 | `nodes` | integer | 0 | GPU node count hint (0 = unspecified). Advisory metadata — does not select or filter overlays. |
+
+> **`service=rke2` and `accelerator=vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence at [validation.aicr.run](https://validation.aicr.run/) for current coverage.
 
 **Examples:**
 
@@ -147,10 +144,8 @@ curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100"
 # Full specification
 curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&nodes=8"
 
-# Using gpu alias. Note: the profiled families (service=aks, service=gke)
-# are rejected on /v1 — use /v2/recipe for those (see the AKS/GKE
-# cut-over note below).
-curl "http://localhost:8080/v1/recipe?gpu=gb200&service=eks&os=ubuntu"
+# Using gpu alias
+curl "http://localhost:8080/v1/recipe?gpu=gb200&service=eks&os=ubuntu&intent=training"
 
 # Pretty print with jq
 curl -s "http://localhost:8080/v1/recipe?accelerator=h100" | jq '.'
@@ -160,29 +155,34 @@ curl -s "http://localhost:8080/v1/recipe?accelerator=h100" | jq '.'
 
 ### POST /v1/recipe
 
-Generate an optimized configuration recipe from a criteria file body. This endpoint provides an alternative to query parameters, accepting a Kubernetes-style `RecipeCriteria` resource in the request body.
+Generate an optimized configuration recipe from a criteria body. This endpoint provides an alternative to query parameters.
 
 **Content Types:**
 - `application/json` - JSON format
 - `application/x-yaml` - YAML format
 
+An explicit, supported `Content-Type` is required; a missing, aliased, or unsupported media type is rejected.
+
+`GET` and `POST` return **identical documents** for equivalent criteria, including the `criteria` object echoed in the response: unspecified dimensions are reported as `any` on both. `HEAD` is accepted wherever `GET` is and returns the same headers without a body — it resolves the recipe to produce them, so it costs what `GET` costs rather than serving as a cheap probe. Use `/health` or `/ready` for liveness.
+
 **Request Body:**
 
-The request body must be a `RecipeCriteria` resource:
+The request body is a strict envelope. Unknown fields are rejected, so a typo fails loudly instead of being silently ignored:
 
 ```yaml
-kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: my-criteria
-spec:
+criteria:
   service: eks
   accelerator: gb200
   os: ubuntu
   intent: training
   platform: kubeflow
   nodes: 8
+profile: gpuStack=operator-managed  # optional
 ```
+
+`profile` is optional; omit it to take the composition's declared default. If you also pass `profile=` as a query parameter, the two must agree.
+
+The Kubernetes-style `RecipeCriteria` resource body that this endpoint accepted before v0.21 is no longer supported and returns `400`.
 
 **Examples:**
 
@@ -190,11 +190,7 @@ spec:
 # POST with YAML body
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/x-yaml" \
-  -d 'kind: RecipeCriteria
-apiVersion: aicr.run/v1alpha2
-metadata:
-  name: training-config
-spec:
+  -d 'criteria:
   service: eks
   accelerator: h100
   intent: training'
@@ -203,10 +199,7 @@ spec:
 curl -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/json" \
   -d '{
-    "kind": "RecipeCriteria",
-    "apiVersion": "aicr.run/v1alpha2",
-    "metadata": {"name": "training-config"},
-    "spec": {
+    "criteria": {
       "service": "eks",
       "accelerator": "h100",
       "intent": "training"
@@ -215,13 +208,13 @@ curl -X POST "http://localhost:8080/v1/recipe" \
 
 # POST with criteria file
 curl -X POST "http://localhost:8080/v1/recipe" \
-  -H "Content-Type: application/yaml" \
+  -H "Content-Type: application/x-yaml" \
   -d @criteria.yaml
 
 # Pretty print response
 curl -s -X POST "http://localhost:8080/v1/recipe" \
   -H "Content-Type: application/json" \
-  -d '{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100"}}' \
+  -d '{"criteria":{"service":"eks","accelerator":"h100"}}' \
   | jq '.'
 ```
 
@@ -370,7 +363,7 @@ curl -s "http://localhost:8080/v1/query?service=eks&accelerator=h100&selector=co
 
 ### POST /v1/query
 
-Alternative to `GET /v1/query` that accepts the criteria and selector in the request body. The body is a `QueryRequest` with a `criteria` object (same fields as the `RecipeCriteria` spec) and a `selector` string.
+Alternative to `GET /v1/query` that accepts the criteria and selector in the request body. The body is a strict envelope with a `criteria` object (the same dimensions accepted as query parameters on `GET /v1/query`), a required `selector` string, and an optional `profile`. Unknown fields are rejected.
 
 **Content Types:**
 - `application/json` - JSON format
@@ -401,49 +394,59 @@ The response format matches `GET /v1/query`: scalar values are returned as plain
 
 **Error Responses:**
 
-Same as `GET /v1/query` — see the [GET /v1/query error responses](#get-v1query) section above. The no-criteria and uncovered-dimension 400 cases apply. Note: unlike `GET /v1/query`, omitting `selector` from the POST body returns the entire hydrated recipe rather than a 400 (use `/v2/query` if you need the selector to be required).
+Same as `GET /v1/query` — see the [GET /v1/query error responses](#get-v1query) section above. The no-criteria and uncovered-dimension 400 cases apply. `selector` must be present on both GET and POST; omitting it is a 400. Passing it explicitly empty (`selector=` on GET, `"selector": ""` in a POST envelope) is the documented way to ask for the entire hydrated recipe.
 
 ---
 
-### Configured v2 endpoints
+### Profile and Slurm-accounting endpoints
 
-`v2` in the route and `apiVersion` in a recipe document are independent
-version axes. The route segment versions the transient HTTP contract;
-`aicr.run/v1alpha2` and `aicr.run/v1alpha3` identify persisted recipe schemas.
-Therefore, `/v2/recipe` can return either artifact version and `/v2/bundle`
-accepts both, plus versionless legacy artifacts. Selecting a profile or resolving
-a Slurm accounting mode—not the route number—determines whether the artifact
-uses `v1alpha3`.
+The `v1` in the route and the `apiVersion` in a recipe document are
+independent version axes. The route segment versions the HTTP contract;
+`aicr.run/v1` and `aicr.run/v1beta2` are the recipe schemas emitted from v0.22.
+`/v1/bundle` also still accepts the superseded `aicr.run/v1alpha2` and
+`aicr.run/v1alpha3`, retired in v1.0.0:
+`aicr.run/v1` for a default recipe and `aicr.run/v1beta2` for a
+profile/configuration recipe, plus versionless legacy artifacts. Selecting a
+profile or resolving a Slurm accounting mode determines which schema track
+applies.
 
-`/v2/recipe`, `/v2/query`, and `/v2/bundle` expose the configured HTTP contract
-for profiles and Slurm accounting. The AKS and GKE families are the embedded
-profile adopters (`gpuStack`), so **`/v1/recipe` and `/v1/query` requests with
-`service=aks` or `service=gke` now reject and must move to `/v2`**;
-`/v1/bundle` rejects only profile-bearing recipe bodies, so legacy unprofiled
-AKS/GKE recipes still bundle there (see the cut-over note below). `/v1`
-remains unchanged for families without a profile.
+There is a single route family. `/v1/recipe`, `/v1/query`, and `/v1/bundle`
+serve every composition — profiled and unprofiled alike — with one contract.
+The AKS and GKE families are the embedded profile adopters (`gpuStack`) and
+need no special routing.
 
-**GET `/v2/recipe`.** Accepts the `/v1/recipe` criteria parameters plus
-optional `profile=name=value` and `slurmAccountingMode`. Profile omission
+**GET `/v1/recipe`.** Accepts the `/v1/recipe` criteria parameters plus
+optional `profile=name=value`, `slurmAccountingMode`, and
+`gkeTcpxoInterfaces`. Profile omission
 applies the resolved declaration's required default. Slurm accounting accepts
 `disabled`, `customer-managed`, or `aicr-provided`; omission defaults a Slurm
 recipe to `disabled`. The setting is recorded at
 `configuration.slurm.accounting.mode` in an `aicr.run/v1alpha3` RecipeResult.
-The v2 route rejects unknown query parameters and conflicting repeated values.
+`gkeTcpxoInterfaces` carries the ordered `eth1=<network>,...,eth8=<network>`
+GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime; it is
+required when the resolved recipe ships that runtime (h100 GKE kubeflow
+training) and is recorded at `configuration.gke.tcpxoInterfaces`.
+The route rejects unknown query parameters and conflicting repeated values.
 
 ```shell
 # AKS, non-default value (omit profile= for the azure-managed default):
-curl "http://localhost:8080/v2/recipe?service=aks&accelerator=h100&os=ubuntu&intent=training&profile=gpuStack=operator-managed"
+curl "http://localhost:8080/v1/recipe?service=aks&accelerator=h100&os=ubuntu&intent=training&profile=gpuStack=operator-managed"
 
 # Slurm with AICR-provided accounting
-curl "http://localhost:8080/v2/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=aicr-provided"
+curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=aicr-provided"
+
+# GKE h100 kubeflow training (required TCPXO mapping):
+curl "http://localhost:8080/v1/recipe?service=gke&accelerator=h100&os=cos&intent=training&platform=kubeflow&gkeTcpxoInterfaces=eth1=gpu-nic-0,eth2=gpu-nic-1,eth3=gpu-nic-2,eth4=gpu-nic-3,eth5=gpu-nic-4,eth6=gpu-nic-5,eth7=gpu-nic-6,eth8=gpu-nic-7"
 ```
 
-**POST `/v2/recipe`.** Accepts a strict JSON or YAML envelope. `criteria` is
+**POST `/v1/recipe`.** Accepts a strict JSON or YAML envelope. `criteria` is
 the plain criteria object, not a `RecipeCriteria` resource. Profile selection
 may be supplied in the envelope, as the `profile` query parameter, or in both
 places when the values agree. `slurmAccountingMode` is supplied as the same
-query parameter used by GET. Conflicting selections are rejected:
+query parameter used by GET, as is `gkeTcpxoInterfaces` (required for the GKE
+h100 kubeflow training family — e.g.
+`gkeTcpxoInterfaces=eth1=gpu-nic-0,...,eth8=gpu-nic-7`). Conflicting selections
+are rejected:
 
 ```yaml
 criteria:
@@ -459,11 +462,11 @@ INVALID_REQUEST`. POST envelopes require `Content-Type: application/json` or
 `Content-Type: application/x-yaml`; missing, aliased, or unsupported media
 types are rejected.
 
-**GET and POST `/v2/query`.** GET accepts the v2 recipe parameters, including
-`slurmAccountingMode`, plus
+**GET and POST `/v1/query`.** GET accepts the recipe parameters, including
+`slurmAccountingMode` and `gkeTcpxoInterfaces`, plus
 `selector`. POST accepts the same strict envelope with a required selector.
 POST profile selection follows the same query/envelope agreement rule as
-`/v2/recipe`:
+`/v1/recipe`:
 
 ```yaml
 criteria:
@@ -473,12 +476,12 @@ profile: gpuStack=azure-managed
 selector: metadata.selectedProfile
 ```
 
-**POST `/v2/bundle`.** Uses the same query parameters and ZIP response as
+**POST `/v1/bundle`.** Uses the same query parameters and ZIP response as
 `POST /v1/bundle`. It carries no profile-selection field because its body is
 an already-selected `RecipeResult`. It accepts legacy
-`aicr.run/v1alpha2` recipes, including older artifacts that omit
-`apiVersion`, and strictly decodes profiled or accounting-configured
-`aicr.run/v1alpha3` recipes. The
+`aicr.run/v1alpha2` and `aicr.run/v1` default recipes, including older
+artifacts that omit `apiVersion`, and strictly decodes profiled or
+accounting-configured `aicr.run/v1alpha3` and `aicr.run/v1beta2` recipes. The
 request requires `Content-Type: application/json` or `Content-Type:
 application/x-yaml`; missing, aliased, or unsupported media types are
 rejected.
@@ -490,46 +493,38 @@ rejected.
 # the commands are sequential (no pipeline), so pipefail is not needed.
 set -eu
 curl -fsS -o recipe.json \
-  "http://localhost:8080/v2/recipe?service=aks&accelerator=h100&os=ubuntu&intent=training&profile=gpuStack=operator-managed"
-curl -fsS -X POST "http://localhost:8080/v2/bundle" \
+  "http://localhost:8080/v1/recipe?service=aks&accelerator=h100&os=ubuntu&intent=training&profile=gpuStack=operator-managed"
+curl -fsS -X POST "http://localhost:8080/v1/bundle" \
   -H "Content-Type: application/json" -d @recipe.json -o bundles.zip
 ```
 
 Profile-bearing responses record `metadata.selectedProfile`; accounting-aware
 responses record `configuration.slurm.accounting`. Both use recipe apiVersion
-`aicr.run/v1alpha3`. Their owned paths are immutable across AICR's supported
+`aicr.run/v1beta2` (the superseded `aicr.run/v1alpha3` is still read). Their owned paths are immutable across AICR's supported
 override surfaces: divergent static values, intersecting dynamic paths,
 owned-component removal, and argocd-helm install-time values fail closed before
 output.
 
-The `/v1` routes remain the legacy contract. Explicit profile and
-`slurmAccountingMode` input is rejected; Slurm recipes remain implicitly
-disabled and use the `aicr.run/v1alpha2` response shape. `/v1/recipe` and
-`/v1/query` reject a composition after it adopts a profile even when the request
-omits selection, and `/v1/bundle` rejects a profile-bearing body. Migrate a
-converted workflow to v2 as one cut-over.
+A recipe resolved without an explicit profile or `slurmAccountingMode` uses
+the default-track response shape. That track is `aicr.run/v1` from v0.22, and
+the schema also still admits the superseded `aicr.run/v1alpha2` so a client
+generated from this spec reads artifacts captured earlier. Profile and
+Slurm-accounting selection are available on every endpoint; no composition
+needs special routing.
 
-**AKS/GKE cut-over:** the AKS and GKE families are the embedded adopters, so
-`/v1/recipe` and `/v1/query` requests with `service=aks` or `service=gke` now
-reject. Move GET clients to `GET /v2/recipe` / `GET /v2/query` (identical
-query parameters, plus optional `profile=gpuStack=azure-managed` or
-`profile=gpuStack=operator-managed` on AKS, and `profile=gpuStack=gke-default`
-or `profile=gpuStack=driver-installer` on GKE); move POST
-clients to `POST /v2/recipe` / `POST /v2/query`, converting the body to the
-strict envelope described above (a plain `criteria` object with an explicit
-`Content-Type`, not the v1 `RecipeCriteria` resource). Then POST the
-resulting `aicr.run/v1alpha3` recipes to `/v2/bundle`. Other families are
-unaffected on `/v1` until they adopt a profile.
+The AKS and GKE families are the embedded profile adopters (`gpuStack`). Their
+compositions resolve like any other: omit `profile=` to take the declared
+default, or select one explicitly.
 
 ```shell
-# GKE migration: /v2/recipe (omit profile= for the gke-default default,
-# or select gpuStack=driver-installer explicitly), then POST to /v2/bundle.
+# GKE: omit profile= for the gke-default default, or select
+# gpuStack=bundle-installer explicitly, then POST to /v1/bundle.
 # -f stops on an HTTP error so a 4xx/5xx recipe body is never staged and
 # an error response is never written to bundles.zip.
 set -euo pipefail
 curl -fsS -o recipe.json \
-  "http://localhost:8080/v2/recipe?service=gke&accelerator=h100&os=cos&intent=training&profile=gpuStack=driver-installer"
-curl -fsS -X POST "http://localhost:8080/v2/bundle" \
+  "http://localhost:8080/v1/recipe?service=gke&accelerator=h100&os=cos&intent=training&profile=gpuStack=bundle-installer"
+curl -fsS -X POST "http://localhost:8080/v1/bundle" \
   -H "Content-Type: application/json" -d @recipe.json -o bundles.zip
 ```
 
@@ -545,11 +540,12 @@ Generate deployment bundles from a recipe.
 |-----------|------|---------|-------------|
 | `bundlers` | string | (all) | Comma-delimited list of recipe component names to bundle (e.g. `gpu-operator,network-operator`). Whitespace around names is trimmed. Components not listed are skipped as if disabled (their dependency edges are treated as satisfied externally). A name the recipe does not declare, or one that is disabled (by the recipe or a `set` `enabled=false` override), is rejected with HTTP 400. |
 | `set` | string[] | | Value overrides (format: `bundler:path.to.field=value`). Repeat for multiple. The reserved prefix `deployer:` carries Argo CD Application options for `deployer=argocd` and `deployer=argocd-helm` (`namePrefix`, `destinationServer`, `project`, `cascadeDelete`), e.g. `set=deployer:namePrefix=tenant-a-`. Unknown `deployer:` keys — or the prefix with any other deployer — are rejected with HTTP 400. An override whose component is absent from the generated bundle is rejected with HTTP 400 (`INVALID_REQUEST`, "cannot take effect") rather than silently discarded; the scalar `enabled=false` spelling is exempt on a declared component. See [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected) and the CLI reference's [Argo CD Deployer Options](cli-reference.md#argo-cd-deployer-options) for full semantics. |
-| `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm`, `deployer=argocd-helm`, `deployer=flux`, and `deployer=helmfile`. A declaration whose component is absent from the generated bundle is rejected with HTTP 400 (`INVALID_REQUEST`, "cannot take effect"); no path is exempt. Certain gate-verified paths on **present** components are also rejected — driver-ownership paths, GPU allocation-policy keys, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). |
+| `dynamic` | string[] | | Declare value paths as install-time parameters (format: `component:path.to.field`). Repeat for multiple. Supported with `deployer=helm`, `deployer=argocd-helm`, `deployer=flux`, and `deployer=helmfile`. A declaration whose component is absent from the generated bundle is rejected with HTTP 400 (`INVALID_REQUEST`, "cannot take effect"); no path is exempt. Certain gate- or contract-owned paths on **present** components are also rejected — driver-ownership paths, GPU allocation-policy keys, the DRA eviction paths `kubeletPlugin.nodeSelector` and `driver.manager.env` when both contract components are enabled **and** `dra-eviction-node-label` is supplied, and, where the corresponding NVSentinel gate applies on the recipe's platform and configuration, the NVSentinel remedy/consumer/runtime-class paths; see [NVSentinel on provider-installed-driver platforms](component-catalog.md#nvsentinel-on-provider-installed-driver-platforms). See [Overrides that cannot take effect are rejected](bundling.md#overrides-that-cannot-take-effect-are-rejected). |
 | `system-node-selector` | string[] | | Node selectors for system components (format: `key=value`). Repeat for multiple. |
 | `system-node-toleration` | string[] | | Tolerations for system components (format: `key=value:effect`). Repeat for multiple. |
 | `accelerated-node-selector` | string[] | | Node selectors for GPU nodes (format: `key=value`). Repeat for multiple. |
 | `accelerated-node-toleration` | string[] | | Tolerations for GPU nodes (format: `key=value:effect`). Repeat for multiple. |
+| `dra-eviction-node-label` | string | _(none)_ | Opt in to DRA kubelet-plugin eviction coordination with GPU Operator driver upgrades (format: `key=value`). Unset means AICR injects nothing and the plugin needs no extra node label. When set, and both components are enabled, nodes used for DRA GPU allocation must carry the same label. |
 | `nodes` | int | 0 | Estimated number of GPU nodes (0 = unset). Written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
 | `vendor-charts` | bool | false | Pull upstream Helm chart bytes into the bundle at bundle time so the artifact is fully self-contained and air-gap deployable. Each vendored chart is recorded in `provenance.yaml` with name, version, source URL, and SHA256. Trades the upstream CVE-yank fail-loud signal for offline deployability — see the CLI reference's "Vendoring Charts for Air-Gap" section for the full tradeoff. Requires the `helm` binary on the API server's `$PATH`. **The server-side vendor path is opt-in and off by default** — the operator must set `AICR_ALLOW_VENDOR_CHARTS=true`, otherwise `vendor-charts=true` returns `400 vendor-charts is not enabled on this server`. Even when enabled, repository hosts that resolve to loopback, link-local, private, or cloud-metadata IPs are rejected with `400 INVALID_REQUEST`, and vendored artifacts are capped at 64 MiB. **Private HTTP(S) repository credentials:** the aicrd pre-check sends `HELM_REPOSITORY_USERNAME`/`HELM_REPOSITORY_PASSWORD` (as HTTP Basic auth) ONLY when `AICR_HELM_REPOSITORY_HOST` is set to that repository's exact host, the request scheme is `https`, and the request host matches (case-insensitive). All three conditions must hold — an operator setting only the username/password env vars will get no credentials attached, preventing a caller-supplied `Repository` URL from harvesting the operator's helm credentials. (Note: the upstream `helm pull --repo` subprocess does not itself read these env vars — private HTTP repos require a prior `helm repo add --username --password` in the aicrd image or an SDK-based puller.) OCI credentials flow through the standard docker config (`~/.docker/config.json` or `$DOCKER_CONFIG`), exactly like `helm pull oci://...`. If prerequisites are missing the request fails with a structured error code (`SERVICE_UNAVAILABLE` / HTTP 503 for missing helm). The index pre-check surfaces upstream HTTP status by class: `404` → `NOT_FOUND` / HTTP 404, `401`/`403` → `UNAUTHORIZED` / HTTP 401, `408`/`429` → `SERVICE_UNAVAILABLE` / HTTP 503 (retryable), other `4xx` → `INVALID_REQUEST` / HTTP 400, `5xx` → `SERVICE_UNAVAILABLE` / HTTP 503. |
 | `serial` | bool | false | Sequence components strictly one at a time in deployment order, disabling the parallel rollout of independent components. Affects `deployer=argocd`, `argocd-helm`, `flux`, and `helmfile` (`helm` is already serial): argocd falls back to a linear sync-wave per folder, flux chains each `HelmRelease` `dependsOn` to the previous component, and helmfile chains every release via `needs:` into one linear apply order. An escape hatch for reproducing the pre-parallelism ordering or bisecting a rollout. |
@@ -561,11 +557,12 @@ Generate deployment bundles from a recipe.
 **Request Body:**
 
 The request body is the recipe (`RecipeResult`) directly. No wrapper object is
-needed. Current artifacts carry `apiVersion: aicr.run/v1alpha2` or
-`aicr.run/v1alpha3` and `kind: RecipeResult`. The v1alpha3 form identifies
+needed. This release emits `apiVersion: aicr.run/v1` or
+`aicr.run/v1beta2` and `kind: RecipeResult`; its bundle readers additionally
+accept the superseded `aicr.run/v1alpha2` and `aicr.run/v1alpha3`, respectively. The profile track identifies
 recipes carrying `metadata.selectedProfile`, typed
 `configuration.slurm.accounting`, or both; profile-bearing artifacts must use
-`/v2/bundle`. New clients should preserve the version emitted by recipe
+`/v1/bundle`. New clients should preserve the version emitted by recipe
 resolution.
 
 For backward compatibility, the endpoint also accepts:
@@ -584,25 +581,33 @@ rewritten — a request that omits `apiVersion` still produces an artifact with
 an empty `apiVersion`, which every reader accepts as the legacy shape.
 
 Any other `kind` is rejected with a 400, so the endpoint never emits an artifact
-it would refuse to read back. This matches the `/v2/bundle` decode path, and the
+it would refuse to read back. This matches the `/v1/bundle` decode path, and the
 CLI file loader for the same values — `aicr bundle -r` accepts a
 `RecipeMetadata` file as an *overlay* to hydrate, but as a hydrated
 `RecipeResult` artifact it too accepts only `RecipeResult` or an absent kind.
 `apiVersion` is validated separately, as described next.
 
-`apiVersion` has no equivalent legacy window on purpose. An artifact
-group/version bump is a hard break with no transition period, so a recipe
-stamped with a prior group/version should be regenerated rather than sent.
-
-This one is enforced. The shared artifact gate rejects any `apiVersion` outside
-`aicr.run/v1alpha2` and `aicr.run/v1alpha3` with a 400, on this endpoint as well
-as on the CLI file-load path, so a prior group/version fails rather than being
-silently accepted. An absent or empty `apiVersion` is still admitted as the
-legacy shape.
+The shared artifact gate rejects any `apiVersion` outside
+`aicr.run/v1alpha2`, `aicr.run/v1`, `aicr.run/v1alpha3`, and
+`aicr.run/v1beta2` with a 400, on this endpoint as well as on the CLI file-load
+path. An absent or empty `apiVersion` is still admitted as the legacy shape on
+`RecipeResult` inputs through v0.22, and v1.0.0 stops admitting it along with the
+alpha values. The tolerance is scoped to `RecipeResult`, which predates the
+field: a `RecipeMetadata` overlay is a catalog document however it arrives, so
+`aicr bundle -r` and `aicr validate -r` reject a headerless one exactly as a
+`--data` catalog scan does. The reader and emitter clocks are separate: v0.21
+and v0.22 both read the alpha values, the target values, and the empty header,
+while generated recipes carried alpha headers through v0.21 and carry the target
+values from v0.22 onward. On the CLI file-load path, reading an alpha or
+headerless artifact logs a deprecation warning naming the file; these endpoints
+take the artifact as a request body, so there is no file to name and no
+equivalent signal. See
+[Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
+for the release-by-release table.
 
 #### Components
 
-These are the recipe **components** in [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml) — the names the `bundlers` query parameter accepts (a request may only name components the recipe declares). The registry is the authoritative source — see the [component catalog](component-catalog.md) for the full, current list with detailed descriptions. The table below is illustrative of commonly used components:
+These are the recipe **components** in [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/registry.yaml) — the names the `bundlers` query parameter accepts (a request may only name components the recipe declares). The registry is the authoritative source — see the [component catalog](component-catalog.md) for detailed descriptions, pinned versions, and per-component caveats.
 
 | Component | Description |
 |-----------|-------------|
@@ -611,19 +616,25 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `aws-ebs-csi-driver` | Amazon EBS CSI driver (EKS) |
 | `aws-efa` | AWS Elastic Fabric Adapter device plugin (EKS) |
 | `cert-manager` | TLS certificate management |
+| `cert-manager-ocp` | cert-manager variant for OpenShift (OCP) |
+| `cert-manager-ocp-olm` | cert-manager for OpenShift via Operator Lifecycle Manager (OLM) |
 | `dynamo-platform` | NVIDIA Dynamo inference serving platform |
 | `gatekeeper` | OPA Gatekeeper policy controller |
-| `gke-nccl-tcpxo` | NCCL TCPxO network plugin for optimized collective communication (GKE) |
+| `gke-nccl-tcpxo` | NCCL TCPXO network plugin for optimized collective communication (GKE) |
 | `gpu-operator` | NVIDIA GPU Operator — driver and runtime lifecycle |
 | `gpu-operator-ocp` | GPU Operator variant for OpenShift (OCP) |
 | `gpu-operator-ocp-olm` | GPU Operator for OpenShift via Operator Lifecycle Manager (OLM) |
 | `grove` | Dynamo pod lifecycle management |
+| `k8s-aibom` | Optional runtime AI workload inventory — namespace-scoped CycloneDX ML-BOM resources |
 | `k8s-ephemeral-storage-metrics` | Ephemeral storage usage metrics |
 | `k8s-nim-operator` | NVIDIA NIM Operator for inference microservice deployments |
+| `k8s-nim-operator-ocp` | NIM Operator variant for OpenShift (OCP) |
 | `kai-scheduler` | DRA-aware gang scheduler with topology-aware placement |
 | `kube-prometheus-stack` | Prometheus, Grafana, Alertmanager monitoring stack |
 | `kubeflow-trainer` | Kubeflow Training Operator for distributed training |
 | `kueue` | Kubernetes-native job queuing for batch and AI workloads |
+| `mariadb-operator` | Official MariaDB Operator; installed only for AICR-provided Slurm accounting |
+| `mariadb-operator-crds` | Official MariaDB Operator CRDs; installed only for AICR-provided Slurm accounting |
 | `network-operator` | NVIDIA Network Operator — RDMA, SR-IOV, host networking |
 | `network-operator-ocp` | Network Operator variant for OpenShift (OCP) |
 | `network-operator-ocp-olm` | Network Operator for OpenShift via Operator Lifecycle Manager (OLM) |
@@ -633,14 +644,15 @@ These are the recipe **components** in [`recipes/registry.yaml`](https://github.
 | `nodewright-customizations` | Environment-specific node tuning profiles |
 | `nodewright-operator` | OS-level node tuning and kernel configuration |
 | `nvidia-dra-driver-gpu` | Dynamic Resource Allocation driver for GPUs |
-| `nvsentinel` | GPU health monitoring and automated remediation |
+| `nvidia-dra-driver-gpu-ocp` | DRA GPU driver variant for OpenShift (OCP) |
+| `nvsentinel` | GPU health monitoring; remediation components off by default |
 | `prometheus-adapter` | Custom metrics for HPA scaling |
+| `prometheus-adapter-ocp` | Prometheus Adapter variant for OpenShift (OCP) |
 | `prometheus-operator-crds` | CRDs for the prometheus-operator (`Alertmanager`, `Prometheus`, `ServiceMonitor`, etc.) |
 | `slinky-slurm` | Slinky-managed Slurm cluster instance (Controller, LoginSet, NodeSet, RestApi); reconciled by `slinky-slurm-operator` |
 | `slinky-slurm-operator` | SchedMD Slinky Slurm operator and admission webhook |
 | `slinky-slurm-operator-crds` | CRDs for the SchedMD Slinky Slurm operator (`slinky.slurm.net`) |
-| `mariadb-operator-crds` | Official MariaDB Operator CRDs; installed only for AICR-provided Slurm accounting |
-| `mariadb-operator` | Official MariaDB Operator; installed only for AICR-provided Slurm accounting |
+| `slinky-topograph` | Generates Slurm `topology.conf` from cloud topology APIs for topology-aware Slinky placement |
 | `slurm-accounting-mariadb` | Installation-managed MariaDB instance and Secret generation contract for Slurm accounting; installed only for AICR-provided Slurm accounting |
 
 **Examples:**
@@ -700,6 +712,12 @@ curl -X POST "http://localhost:8080/v1/bundle?system-node-selector=nodeGroup=sys
   -d @recipe.json \
   -o bundles.zip
 
+# Override the shared DRA eviction label when bundling DRA with GPU Operator
+curl -X POST "http://localhost:8080/v1/bundle?dra-eviction-node-label=example.com%2Fdra-ready%3Denabled" \
+  -H "Content-Type: application/json" \
+  -d @recipe.json \
+  -o bundles.zip
+
 # Generate bundles from a saved (fully-hydrated) recipe
 curl -X POST "http://localhost:8080/v1/bundle" \
   -H "Content-Type: application/json" \
@@ -713,7 +731,7 @@ curl -X POST "http://localhost:8080/v1/bundle" \
     "apiVersion": "aicr.run/v1alpha2",
     "kind": "RecipeResult",
     "componentRefs": [
-      {"name": "gpu-operator", "type": "Helm", "chart": "gpu-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "v26.3.3", "namespace": "gpu-operator", "valuesFile": "components/gpu-operator/values.yaml"},
+      {"name": "gpu-operator", "type": "Helm", "chart": "gpu-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "v26.7.0", "namespace": "gpu-operator", "valuesFile": "components/gpu-operator/values.yaml"},
       {"name": "network-operator", "type": "Helm", "chart": "network-operator", "source": "https://helm.ngc.nvidia.com/nvidia", "version": "26.1.1", "namespace": "nvidia-network-operator", "valuesFile": "components/network-operator/values.yaml"}
     ],
     "deploymentOrder": ["gpu-operator", "network-operator"]
@@ -869,9 +887,10 @@ curl "http://localhost:8080/ready"
 
 ---
 
-### GET /metrics
+### GET and HEAD /metrics
 
-Prometheus metrics endpoint.
+Prometheus metrics endpoint. `HEAD` returns the same headers with no body;
+every other method is rejected with `405` and an `Allow: GET, HEAD` header.
 
 ```shell
 curl "http://localhost:8080/metrics"
@@ -966,7 +985,8 @@ ls -la
 ### Handling Rate Limits
 
 ```shell
-# Check rate limit headers
+# Check rate limit headers. HEAD resolves the recipe exactly as GET does and
+# returns the same headers without the body -- it is not a cheap probe.
 curl -I "http://localhost:8080/v1/recipe?accelerator=h100"
 
 # Response headers:
@@ -981,7 +1001,9 @@ When rate limited (HTTP 429), use the `Retry-After` header:
 # Retry with backoff
 response=$(curl -s -w "%{http_code}" "http://localhost:8080/v1/recipe?accelerator=h100")
 if [ "${response: -3}" = "429" ]; then
-  retry_after=$(curl -sI "http://localhost:8080/v1/recipe" | grep -i "Retry-After" | awk '{print $2}')
+  # HTTP headers end in CRLF, so strip the carriage return before sleep reads
+  # the value.
+  retry_after=$(curl -sI "http://localhost:8080/v1/recipe?accelerator=h100" | grep -i "Retry-After" | awk '{print $2}' | tr -d '\r')
   echo "Rate limited. Retrying after ${retry_after}s..."
   sleep "$retry_after"
 fi
@@ -1013,9 +1035,7 @@ Allowlists are configured via environment variables when starting the server:
 - If an environment variable is **not set**, all values for that criteria are allowed
 - If an environment variable is **set**, only the specified values are permitted
 - The `any` value is always allowed regardless of allowlist configuration
-- Allowlists apply to the recipe, query, and bundle endpoints on both routes —
-  `/v1/recipe`, `/v1/query`, `/v1/bundle`, `/v2/recipe`, `/v2/query`, and
-  `/v2/bundle`
+- Allowlists apply to `/v1/recipe`, `/v1/query`, and `/v1/bundle`
 
 ### Example Configuration
 
@@ -1168,9 +1188,7 @@ main();
 #!/bin/bash
 # Generate recipes for multiple environments
 
-# /v2/recipe accepts every family (profiled and unprofiled); the aks and
-# gke entries below would be rejected on /v1 because those families carry
-# the gpuStack profile (see the AKS/GKE cut-over note).
+# /v1/recipe accepts every family, profiled and unprofiled alike.
 environments=(
   "os=ubuntu&accelerator=h100&service=eks"
   "os=cos&accelerator=h100&service=gke"
@@ -1180,7 +1198,7 @@ environments=(
 for env in "${environments[@]}"; do
   echo "Fetching recipe for: $env"
 
-  curl -s "http://localhost:8080/v2/recipe?${env}" \
+  curl -s "http://localhost:8080/v1/recipe?${env}" \
     | jq -r '.componentRefs[] | "\(.name): \(.version)"'
 
   echo ""
@@ -1215,7 +1233,7 @@ openapi-generator-cli generate -i openapi.yaml -g typescript-fetch -o ./ts-clien
 
 **"Invalid accelerator type" error:**
 ```shell
-# Use valid values: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, any
+# Use valid values: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200, any
 curl "http://localhost:8080/v1/recipe?accelerator=h100"
 ```
 

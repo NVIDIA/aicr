@@ -20,13 +20,13 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/urfave/cli/v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	aicr "github.com/NVIDIA/aicr/pkg/client/v1"
-	appcfg "github.com/NVIDIA/aicr/pkg/config"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/mirror"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -134,18 +134,13 @@ func mirrorListFlags() []cli.Flag {
 
 // flagMatchesName returns true if a CLI flag has the given name among its names.
 func flagMatchesName(f cli.Flag, name string) bool {
-	for _, n := range f.Names() {
-		if n == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(f.Names(), name)
 }
 
 //nolint:gocyclo // linear option resolution
 func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 	if validErr := validateSingleValueFlags(cmd, "recipe", "service", "accelerator",
-		"intent", "os", "platform", flagProfile, "snapshot", "config", "format", "output"); validErr != nil {
+		"intent", "os", "platform", flagProfile, flagGKETCPXOInterfaces, "snapshot", "config", "format", "output"); validErr != nil {
 		return validErr
 	}
 
@@ -157,7 +152,7 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 				format, strings.Join(mirror.SupportedFormats(), ", ")))
 	}
 
-	cfg, err := loadCmdConfig(ctx, cmd)
+	cfg, err := loadFacadeConfig(ctx, cmd)
 	if err != nil {
 		return err
 	}
@@ -187,25 +182,24 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 		}
 	}
 
-	// Discover images and charts.
-	kubeVersion := mirror.KubeVersionFromConstraints(rec.Constraints)
-	lister := mirror.NewLister(
-		mirror.WithVersion(version),
-		mirror.WithValueOverrides(valueOverrides),
-		mirror.WithKubeVersion(kubeVersion),
-	)
-
+	// Discovery runs through the facade (#2025); this command stays a thin
+	// adapter that renders what it returns.
 	slog.Info("discovering images and charts", "components", len(rec.ComponentRefs))
 
-	result, err := lister.Discover(ctx, rec)
+	inventory, err := client.MirrorInventory(ctx, aicr.WrapResolved(rec),
+		aicr.WithMirrorValueOverrides(facadeValueOverrides(valueOverrides)))
 	if err != nil {
 		return err
 	}
 
 	slog.Info("discovery complete",
-		"images", len(result.Images),
-		"charts", len(result.Charts),
-		"components", len(result.Components))
+		"images", len(inventory.Images),
+		"charts", len(inventory.Charts),
+		"components", len(inventory.Components))
+
+	// Rendering stays here on purpose: Hauler and Zarf are third-party schemas,
+	// and the SDK does not freeze them as contract.
+	result := mirrorListFromInventory(inventory)
 
 	// Resolve output writer.
 	w, cleanup, resolveErr := resolveOutputWriter(cmd)
@@ -234,12 +228,25 @@ func runMirrorListCmd(ctx context.Context, cmd *cli.Command) (err error) {
 //     Client and parses criteria against its per-provider registry. The
 //     caller seeds that registry via client.LoadCatalog before this call so
 //     a `--data` overlay's non-OSS criteria values validate.
-func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *appcfg.AICRConfig, client *aicr.Client) (*recipe.RecipeResult, error) {
+func resolveRecipeForMirror(ctx context.Context, cmd *cli.Command, cfg *aicr.Config, client *aicr.Client) (*recipe.RecipeResult, error) {
 	recipePath := cmd.String("recipe")
 	if recipePath != "" {
-		if cmd.IsSet(flagProfile) || aicr.WrapConfig(cfg).RecipeProfile() != "" {
+		if cmd.IsSet(flagProfile) || cfg.RecipeProfile() != "" {
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				"--profile/spec.recipe.profile selects during criteria resolution and cannot be combined with --recipe")
+		}
+		if cmd.IsSet(flagGKETCPXOInterfaces) {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"--gke-tcpxo-interfaces applies during criteria resolution and cannot be combined with --recipe; the recipe file already records the mapping")
+		}
+		// The config-file mapping is equally a criteria-resolution input; the
+		// recipe file on disk already records its mapping. Mirror the profile
+		// guard's flag-or-config check.
+		if _, set, cfgErr := cfg.RecipeGKETCPXOInterfaces(); cfgErr != nil {
+			return nil, cfgErr
+		} else if set {
+			return nil, errors.New(errors.ErrCodeInvalidRequest,
+				"spec.recipe.configuration.gke.tcpxoInterfaces applies during criteria resolution and cannot be combined with --recipe; the recipe file already records the mapping")
 		}
 		slog.Info("loading recipe from file", "path", recipePath)
 
@@ -285,10 +292,64 @@ func resolveOutputWriter(cmd *cli.Command) (io.Writer, func() error, error) {
 
 // isValidMirrorFormat checks if the given format is in the supported list.
 func isValidMirrorFormat(f mirror.Format) bool {
-	for _, valid := range mirror.SupportedFormats() {
-		if string(f) == valid {
-			return true
-		}
+	return slices.Contains(mirror.SupportedFormats(), string(f))
+}
+
+// mirrorListFromInventory projects the facade inventory back onto the
+// renderer's input shape.
+//
+// The projection lives here rather than in the facade because the JSON and YAML
+// tags on pkg/mirror.MirrorList define this command's published output. Moving
+// them into pkg/client/v1 would make the CLI's serialization an SDK contract,
+// which is the opposite of the split #2025 chose.
+func mirrorListFromInventory(inventory *aicr.MirrorInventory) *mirror.MirrorList {
+	if inventory == nil {
+		return nil
 	}
-	return false
+
+	list := &mirror.MirrorList{
+		Images: inventory.Images,
+		Metadata: mirror.MirrorListMetadata{
+			RecipeVersion: inventory.RecipeVersion,
+			Criteria:      inventory.Criteria,
+		},
+	}
+	for _, chart := range inventory.Charts {
+		list.Charts = append(list.Charts, mirror.ChartRef{
+			Name:       chart.Name,
+			Repository: chart.Repository,
+			Chart:      chart.Chart,
+			Version:    chart.Version,
+			Namespace:  chart.Namespace,
+		})
+	}
+	for _, component := range inventory.Components {
+		list.Components = append(list.Components, mirror.ComponentImages{
+			Component: component.Component,
+			Type:      component.Type,
+			Images:    component.Images,
+			Warnings:  component.Warnings,
+		})
+	}
+	return list
+}
+
+// facadeValueOverrides projects parsed --set entries onto the facade shape.
+//
+// The facade deliberately does not accept pkg/bundler/config.ComponentPath, so
+// the conversion happens here rather than putting an internal type in the
+// frozen SDK surface.
+func facadeValueOverrides(overrides []config.ComponentPath) []aicr.MirrorValueOverride {
+	if overrides == nil {
+		return nil
+	}
+	out := make([]aicr.MirrorValueOverride, 0, len(overrides))
+	for _, override := range overrides {
+		out = append(out, aicr.MirrorValueOverride{
+			Component: override.Component,
+			Path:      override.Path,
+			Value:     override.Value,
+		})
+	}
+	return out
 }

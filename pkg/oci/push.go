@@ -23,6 +23,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"math/rand/v2"
 	"net"
 	"net/http"
@@ -468,9 +469,7 @@ func stageGenericOCIManifest(
 
 	packOpts := oras.PackManifestOptions{Layers: []ociv1.Descriptor{archiveDescriptor}}
 	packOpts.ManifestAnnotations = make(map[string]string, len(opts.Annotations)+1)
-	for key, value := range opts.Annotations {
-		packOpts.ManifestAnnotations[key] = value
-	}
+	maps.Copy(packOpts.ManifestAnnotations, opts.Annotations)
 	packOpts.ManifestAnnotations[ociv1.AnnotationCreated] = reproducibleTimestamp
 	manifest, err := oras.PackManifest(ctx, store, oras.PackManifestVersion1_1, artifactType, packOpts)
 	if err != nil {
@@ -717,10 +716,7 @@ func pushFrozenDescriptor(
 		return nil, apperrors.New(apperrors.ErrCodeInternal, "OCI publication target is nil")
 	}
 	defer target.CloseIdleConnections()
-	attempts := deps.maxAttempts
-	if attempts < 1 {
-		attempts = 1
-	}
+	attempts := max(deps.maxAttempts, 1)
 	backoff := deps.initialBackoff
 	copyOptions := oras.DefaultCopyGraphOptions
 	copyOptions.Concurrency = defaults.OCIPushConcurrency
@@ -815,8 +811,7 @@ func classifyRegistryPushFailure(err error, exhausted bool) error {
 	if err == nil {
 		return nil
 	}
-	var response *errcode.ErrorResponse
-	if stderrors.As(err, &response) {
+	if response, ok := stderrors.AsType[*errcode.ErrorResponse](err); ok {
 		var code apperrors.ErrorCode
 		switch response.StatusCode {
 		case http.StatusUnauthorized, http.StatusForbidden:
@@ -843,8 +838,7 @@ func classifyRegistryPushFailure(err error, exhausted bool) error {
 		return apperrors.Wrap(
 			apperrors.ErrCodeUnavailable, "OCI registry push failed after retries", err)
 	}
-	var structured *apperrors.StructuredError
-	if stderrors.As(err, &structured) {
+	if _, ok := stderrors.AsType[*apperrors.StructuredError](err); ok {
 		return err
 	}
 	return apperrors.Wrap(apperrors.ErrCodeInternal, "OCI registry push failed", err)
@@ -1154,9 +1148,7 @@ func packReferrerWithDependencies(
 		Subject: &subject,
 	}
 	packOpts.ManifestAnnotations = make(map[string]string, len(opts.Annotations)+1)
-	for k, v := range opts.Annotations {
-		packOpts.ManifestAnnotations[k] = v
-	}
+	maps.Copy(packOpts.ManifestAnnotations, opts.Annotations)
 	packOpts.ManifestAnnotations[ociv1.AnnotationCreated] = reproducibleTimestamp
 
 	manifestDesc, manifestErr := oras.PackManifest(
@@ -1363,8 +1355,7 @@ func isTransientPushError(err error) bool {
 
 	// HTTP responses surfaced through oras-go's errcode.ErrorResponse.
 	// Retry only on 5xx and 429; 4xx are caller errors.
-	var respErr *errcode.ErrorResponse
-	if stderrors.As(err, &respErr) {
+	if respErr, ok := stderrors.AsType[*errcode.ErrorResponse](err); ok {
 		switch {
 		case respErr.StatusCode >= 500 && respErr.StatusCode <= 599:
 			return true

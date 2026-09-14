@@ -26,6 +26,10 @@
 # are touched. Cluster-scoped resources outside the AICR component domains are
 # left alone.
 #
+# Not narrow, by design: the snapshot-agent sweep in phase 2 is label-based and
+# matches every run, including one in flight. See the HAZARD note there before
+# running this against a cluster someone else is using.
+#
 # On shared / bring-up clusters a registry component may be deliberately owned
 # out-of-band (installed by the platform team, excluded from the AICR recipe).
 # Destroying it is data loss AICR does not own, so `--exclude-ns` and
@@ -138,8 +142,19 @@ AICR_NAMESPACES=(
 # Namespaces created at runtime by AICR conformance checks (not registry
 # components). These are torn down by the check itself, but an interrupted run
 # leaves them behind, so cleanup deletes them as a backstop. See #1672.
+#
+# The CNCF evidence collector (pkg/evidence/cncf/scripts/collect-evidence.sh)
+# creates the unsuffixed name, so it stays listed here as an exact match.
 AICR_CHECK_NAMESPACES=(
     gang-scheduling-test
+)
+
+# Namespace prefixes created at runtime. The gang-scheduling conformance check
+# derives a per-run namespace (`gang-scheduling-test-<suffix>`) so concurrent
+# validate runs do not delete each other's resources, so its namespace cannot
+# be listed as an exact name. See #2395.
+AICR_CHECK_NS_PREFIXES=(
+    gang-scheduling-test-
 )
 
 # CRD API-group suffixes owned by AICR components. Matched as substrings
@@ -160,6 +175,7 @@ AICR_CRD_PATTERNS=(
     agentgateway.dev
     apps.nvidia.com
     kueue.x-k8s.io
+    jobset.x-k8s.io
     kubeflow.org
     trainer.kubeflow.org
     slinky.slurm.net
@@ -307,8 +323,40 @@ is_excluded_crd() {
     return 1
 }
 
-# All namespaces cleanup owns: registry components plus check-created backstops.
+# Expand check-created namespace prefixes against the live cluster. Only
+# namespaces that actually exist are added, so the delete loops below stay
+# exact-name operations.
+#
+# Best-effort by design, but a failed list must not masquerade as "nothing
+# matched": capture the list command's status separately so a transient API
+# error is reported instead of silently skipping those namespaces.
+expand_check_namespaces() {
+    local prefix ns all_ns rc=0
+    # `|| rc=$?` is load-bearing: under `set -e` a bare failing assignment
+    # exits this subshell before the status can be inspected, so the caller
+    # would see an empty list and report success. Warnings go to stderr
+    # because this function's stdout is consumed as namespace names.
+    all_ns="$(kubectl get ns -o name --request-timeout=30s 2>&1)" || rc=$?
+    if (( rc != 0 )); then
+        log_warning "Could not list namespaces (rc=${rc}); check-created namespaces matching ${AICR_CHECK_NS_PREFIXES[*]} were NOT swept. Re-run cleanup once the API server is reachable." >&2
+        log_warning "  kubectl: ${all_ns}" >&2
+        return 0
+    fi
+    for prefix in "${AICR_CHECK_NS_PREFIXES[@]}"; do
+        while IFS= read -r ns; do
+            [[ -n "$ns" ]] && printf '%s\n' "$ns"
+        done < <(printf '%s\n' "${all_ns}" \
+            | sed 's|^namespace/||' \
+            | grep -E "^${prefix}" || true)
+    done
+}
+
+# All namespaces cleanup owns: registry components, check-created backstops,
+# and any per-run check namespaces discovered on the cluster.
 ALL_NAMESPACES=("${AICR_NAMESPACES[@]}" "${AICR_CHECK_NAMESPACES[@]}")
+while IFS= read -r _ns; do
+    [[ -n "$_ns" ]] && ALL_NAMESPACES+=("$_ns")
+done < <(expand_check_namespaces)
 
 # Phase 1: Uninstall Helm releases in AICR namespaces.
 msg "Phase 1: Uninstalling Helm releases in AICR namespaces..."
@@ -333,8 +381,16 @@ fi
 # runID suffix; we delete by label selector to catch all runs. Legacy resources
 # from the older job pattern lived in gpu-operator under the name "aicr".
 msg "Phase 2: Removing AICR validator artifacts..."
-kc delete clusterrolebinding -l app.kubernetes.io/managed-by=aicr --ignore-not-found
-kc delete clusterrole        -l app.kubernetes.io/managed-by=aicr --ignore-not-found
+# The component!=agent-rbac term spares the cluster RBAC an operator applied
+# from the manifests `aicr snapshot --add-roles-to-service-account` wrote for
+# an operator-supplied ServiceAccount. Those objects belong to no run — they
+# carry no run-ID label and no run's cleanup deletes them — and restoring them
+# needs the admin who applied them, so a teardown tool must not sweep them away
+# with the per-run leftovers it exists to reclaim. Revoke them deliberately
+# with `kubectl delete -f snapshot-rbac-<run-id>/` when the ServiceAccount is
+# retired.
+kc delete clusterrolebinding -l 'app.kubernetes.io/managed-by=aicr,app.kubernetes.io/component!=agent-rbac' --ignore-not-found
+kc delete clusterrole        -l 'app.kubernetes.io/managed-by=aicr,app.kubernetes.io/component!=agent-rbac' --ignore-not-found
 kc delete clusterrolebinding -l app.kubernetes.io/name=aicr-validator --ignore-not-found
 kc delete clusterrole        -l app.kubernetes.io/name=aicr-validator --ignore-not-found
 # Fall back to name-based deletion for any without the expected labels.
@@ -347,11 +403,50 @@ if ! $DRY_RUN; then
         | xargs -r kubectl delete --ignore-not-found || true
 fi
 kc delete ns aicr-validation --ignore-not-found --wait=false
-# Legacy on-cluster agent leftovers from the older deployment pattern.
+# On-cluster snapshot-agent leftovers, current and legacy. Both sweeps are
+# needed and neither subsumes the other:
+#
+#   - Current (ADR-020) runs name their Job/SA/Role/RoleBinding
+#     "aicr-<run-id>", so no fixed-name delete matches them; they are found by
+#     the label set every one of them carries.
+#   - Pre-ADR-020 runs used the fixed name "aicr" and carried none of those
+#     labels — the Job had only app.kubernetes.io/name, and the SA, Role and
+#     RoleBinding had no labels at all — so the label selector above misses
+#     them entirely. The name-based deletes below are the only thing that
+#     collects them.
+#
+# The two cannot collide: a run-scoped name is always "aicr-<run-id>", never
+# the bare "aicr".
+#
+# HAZARD -- this sweep is not run-scoped, and deliberately so. EVERY agent run
+# carries this exact label set, so running `tools/cleanup` while a snapshot is
+# in flight deletes that run's Job and revokes its ServiceAccount, Role and
+# RoleBinding; the run fails partway through. That is the intended contract for
+# a manual teardown tool: it reclaims the namespace regardless of which run
+# left an object behind, including runs whose IDs this invocation never saw.
+# Contrast tests/e2e/run.sh, which records the run IDs it launched and sweeps
+# only those: an unattended suite shares its cluster and cannot make this
+# choice. Do not run this tool against a cluster with an active
+# `aicr snapshot` or `aicr validate`.
+kc -n gpu-operator delete job -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
+kc -n gpu-operator delete sa -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
+kc -n gpu-operator delete role -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
+kc -n gpu-operator delete rolebinding -l app.kubernetes.io/name=aicr,app.kubernetes.io/component=snapshot-agent --ignore-not-found
 kc -n gpu-operator delete job aicr --ignore-not-found
 kc -n gpu-operator delete sa aicr --ignore-not-found
 kc -n gpu-operator delete role aicr --ignore-not-found
 kc -n gpu-operator delete rolebinding aicr --ignore-not-found
+# The pre-ADR-020 cluster-scoped pair, for the same reason: it was named
+# literally "aicr-node-reader" and carried no labels, so every selector above
+# misses it and the name-grep fallback ('/aicr-validator-|/aicr$') does not
+# match it either. Nothing else in the tree deletes it now that run-owned
+# names are "aicr-node-reader-<run-id>" — a later run no longer reclaims the
+# bare name — so without this it is a permanent orphan. That matters because a
+# leftover from `--discover-network` carries mutating grants (nodes: patch,
+# pods/exec: create, CRD and namespace create/delete). The exact-name delete
+# cannot touch a live run, whose name always carries a run-ID suffix.
+kc delete clusterrole aicr-node-reader --ignore-not-found
+kc delete clusterrolebinding aicr-node-reader --ignore-not-found
 
 # Phase 3: Component CRDs.
 # Helm does NOT remove CRDs on uninstall — they must be deleted manually or a

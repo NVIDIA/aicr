@@ -182,7 +182,7 @@ func TestWriteFlagEntryNormalizesUsage(t *testing.T) {
 
 	// Recipe --snapshot has a multi-line Usage; assert the bullet line for
 	// it contains no embedded newlines or tabs and stays on one line.
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		if !strings.Contains(line, "`--snapshot`") {
 			continue
 		}

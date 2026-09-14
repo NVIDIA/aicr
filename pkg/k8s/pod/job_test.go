@@ -365,8 +365,7 @@ func TestWaitForJobCompletion_ResyncListCatchesFailed(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected job-failed error from resync-List-observed terminal state")
 	}
-	var sErr *aicrerrors.StructuredError
-	if !stderrors.As(err, &sErr) {
+	if _, ok := stderrors.AsType[*aicrerrors.StructuredError](err); !ok {
 		t.Fatalf("expected *errors.StructuredError, got %T", err)
 	}
 }

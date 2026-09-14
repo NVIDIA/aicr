@@ -21,6 +21,8 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	evattest "github.com/NVIDIA/aicr/pkg/evidence/attestation"
 	recipecat "github.com/NVIDIA/aicr/pkg/recipe/catalog"
+
+	"github.com/sigstore/sigstore-go/pkg/root"
 )
 
 // The signing entry points below deliberately impose NO facade-level timeout,
@@ -174,11 +176,17 @@ type CatalogSignResult struct {
 // the failure is immediate and explains itself rather than surfacing later as
 // an unverifiable artifact.
 //
-// This is a guard, not a decision procedure, and the residual gap is worth
-// stating: SigningConfigPath passes through because the release path requires
-// it, and a signing config can itself name a private Fulcio or Rekor. Every
-// rejected setting above exists ONLY to depart from the public-good defaults,
-// which is what makes rejecting them unambiguous; a signing config does not.
+// SigningConfigPath is checked rather than rejected. It passes through because
+// the release path requires it — naming the public-good Rekor v2 target is its
+// normal use — but a signing config can itself name a private Fulcio or Rekor,
+// which would otherwise make the four rejections above bypassable by moving the
+// same endpoints into a file. Every Fulcio, Rekor, OIDC-provider, and
+// timestamp-authority URL in it must therefore be HTTPS under the sigstore.dev
+// domain, matched on a label boundary so a lookalike host is rejected.
+//
+// The config that passes that check is the config signed with: the parsed value
+// is handed to the signing path rather than re-read from the path, so the file
+// cannot change between the check and the use.
 //
 // If private catalog signing is ever needed, both halves have to move
 // together — widening this without widening VerifyCatalog is what this guard
@@ -193,7 +201,8 @@ func (c *Client) SignCatalog(ctx context.Context, opts CatalogSignOptions) (*Cat
 	if ctx == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "context is required (got nil)")
 	}
-	if err := rejectUnverifiableCatalogSigning(opts.OIDCResolve); err != nil {
+	validatedSigningConfig, err := rejectUnverifiableCatalogSigning(opts.OIDCResolve)
+	if err != nil {
 		return nil, err
 	}
 
@@ -210,6 +219,8 @@ func (c *Client) SignCatalog(ctx context.Context, opts CatalogSignOptions) (*Cat
 
 	resolve := opts.OIDCResolve
 	resolve.Attest = true
+	// Sign with the config that was validated, not a fresh read of the path.
+	resolve.SigningConfig = validatedSigningConfig
 
 	// Lazy resolution: Fulcio binds the certificate to a fresh nonce at
 	// token-issue time, so a token resolved ahead of the first Attest call
@@ -242,28 +253,51 @@ func (c *Client) SignCatalog(ctx context.Context, opts CatalogSignOptions) (*Cat
 // SignCatalog's godoc: every signing mode it accepts must be one VerifyCatalog
 // can check. Kept separate from SignCatalog so the invariant is testable
 // without an OIDC token, which the signing path itself requires.
-func rejectUnverifiableCatalogSigning(resolve OIDCResolveOptions) error {
+func rejectUnverifiableCatalogSigning(resolve OIDCResolveOptions) (*root.SigningConfig, error) {
 	// settingKey names the offending field in the error's structured context so
 	// a caller can branch on which setting to drop.
 	const settingKey = "setting"
 
 	switch {
 	case resolve.SigningKey != "":
-		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
 			"key-based catalog signing is not supported: VerifyCatalog verifies keyless GitHub OIDC certificates only, so a key-signed catalog could not be verified through the facade",
 			map[string]any{settingKey: "OIDCResolve.SigningKey"})
 	case resolve.FulcioURL != "":
-		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
 			"catalog signing against a private Fulcio is not supported: VerifyCatalog verifies against the public-good Sigstore root, which a private CA's certificate does not chain to",
 			map[string]any{settingKey: "OIDCResolve.FulcioURL"})
 	case resolve.RekorURL != "":
-		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
 			"catalog signing against an explicit Rekor URL is not supported: VerifyCatalog verifies transparency-log entries against the public-good root, and a private log's entries do not verify there. Use the Rekor v2 default, or SigningConfigPath",
 			map[string]any{settingKey: "OIDCResolve.RekorURL"})
 	case resolve.DisableTLogUpload:
-		return errors.NewWithContext(errors.ErrCodeInvalidRequest,
+		return nil, errors.NewWithContext(errors.ErrCodeInvalidRequest,
 			"catalog signing without a transparency-log entry is not supported: VerifyCatalog requires one",
 			map[string]any{settingKey: "OIDCResolve.DisableTLogUpload"})
 	}
-	return nil
+
+	// SigningConfigPath is not rejected outright -- it is the normal way to name
+	// the public-good Rekor v2 target, and the release hook depends on it -- but
+	// a signing config can itself name a private Fulcio or Rekor. Without this,
+	// the four rejections above were bypassable by putting the same endpoints in
+	// a file, and the catalog signed successfully while remaining unverifiable
+	// by its documented counterpart.
+	//
+	// The parsed config is RETURNED, not discarded. Validating here and letting
+	// the signing path re-read the same path would check one read and sign with
+	// another; the caller sets ResolveOptions.SigningConfig so the bytes that
+	// passed this check are the bytes signed with.
+	if resolve.SigningConfigPath == "" {
+		return nil, nil //nolint:nilnil // no config named: nothing to validate, nothing to pass on
+	}
+
+	sc, err := bundleattest.LoadSigningConfigForValidation(resolve.SigningConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := bundleattest.ValidateSigningConfigIsPublicGood(sc); err != nil {
+		return nil, err
+	}
+	return sc, nil
 }

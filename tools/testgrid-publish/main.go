@@ -49,6 +49,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -263,9 +264,7 @@ func run(ctx context.Context, cfg runConfig) error {
 	}
 
 	finishedMeta := make(map[string]string, len(started.Metadata))
-	for k, v := range started.Metadata {
-		finishedMeta[k] = v
-	}
+	maps.Copy(finishedMeta, started.Metadata)
 	finished := finishedJSON{
 		Timestamp: pred.AttestedAt.Unix(),
 		Passed:    allPassed,
@@ -309,8 +308,8 @@ func resultString(passed bool) string {
 // extractSigner reads signer identity and issuer from the bundle's
 // attestation.intoto.jsonl if present; returns empty strings otherwise.
 func extractSigner(bundleDir string) (identity, issuer string) {
-	pointer, err := readPointerFromAttestation(bundleDir)
-	if err != nil || pointer == nil || len(pointer.Attestations) == 0 {
+	pointer, err := readPointerFromAttestation(bundleDir)               //nolint:staticcheck // SA4023: stub always errors today; see readPointerFromAttestation
+	if err != nil || pointer == nil || len(pointer.Attestations) == 0 { //nolint:staticcheck // SA4023: guard is the contract for the real implementation (#1267)
 		return "", ""
 	}
 	att := pointer.Attestations[0]
@@ -350,6 +349,6 @@ func printDryRun(bucket, prefix string, started startedJSON, finished finishedJS
 // attestation.AttestationFilename. Tracking issue: NVIDIA/aicr#1267.
 // When implemented, parse failures must NOT be swallowed the same way —
 // only a genuinely absent attestation file should fall back to empty strings.
-func readPointerFromAttestation(_ string) (*attestation.Pointer, error) {
+func readPointerFromAttestation(_ string) (*attestation.Pointer, error) { //nolint:staticcheck // SA4023: unconditional error is the stub's documented behavior until #1267 lands
 	return nil, errors.New(errors.ErrCodeInternal, "signer extraction not yet implemented")
 }

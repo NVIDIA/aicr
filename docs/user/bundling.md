@@ -32,6 +32,106 @@ aicr bundle --recipe recipe.yaml --deployer argocd \
   --output ./bundles
 ```
 
+## Bundle layout
+
+This is the canonical description of what a bundle contains. The trees below
+are frozen at v1 and gated by `TestBundleLayoutMatchesManifest`, so a path
+shown here will not disappear or be renamed without a deliberate, reviewed
+change. Automation may read these paths.
+
+Every deployer writes `checksums.txt` and `README.md` at the bundle root. Four
+of the five group components into ordered `NNN-<component>` directories; Flux
+is the exception and uses a plain `<component>` directory with shared
+`sources/`.
+
+```text
+helm/                          argocd/                     flux/
+  001-cert-manager/              001-cert-manager/            cert-manager/
+    values.yaml                    application.yaml             helmrelease.yaml
+    cluster-values.yaml            values.yaml                nfd/
+    install.sh                   002-nfd/                     helmrelease.yaml
+    upstream.env                   application.yaml           sources/
+  002-nfd/                         values.yaml                  helmrepo-<host>.yaml
+    ...                          app-of-apps.yaml             gitrepo-<host>.yaml
+  deploy.sh                      checksums.txt              kustomization.yaml
+  recipe.yaml                    README.md                  checksums.txt
+  checksums.txt                                             README.md
+  README.md
+```
+
+`helmfile` shares Helm's per-component files but not its root: it writes
+`helmfile.yaml` instead of `deploy.sh`, and does not emit `recipe.yaml`. A
+recipe with dependencies also produces one `level-N.yaml` per dependency depth,
+which is derived from the recipe rather than fixed by the layout.
+
+```text
+helmfile/
+  001-cert-manager/            same four files as helm
+  002-nfd/
+  helmfile.yaml
+  level-N.yaml                 one per dependency depth; absent when flat
+  checksums.txt
+  README.md
+```
+
+`argocd-helm` renders a Helm chart at the root — `Chart.yaml`, `values.yaml`,
+`values.schema.json` — with one template per component.
+
+Two kinds of name appear in these trees, and only one is a promise:
+
+- **Fixed names are contract.** `deploy.sh`, `app-of-apps.yaml`,
+  `kustomization.yaml`, `checksums.txt`, `values.yaml`, `helmrelease.yaml`,
+  and the `NNN-<component>` convention itself.
+- **Derived names are not.** Flux writes one `helmrepo-<host>.yaml` per chart
+  repository and helmfile one `level-N.yaml` per dependency depth, so both sets
+  change with the recipe. Discover them by listing the directory rather than
+  hardcoding a name.
+
+### Generated chart versions
+
+Not every chart in a bundle comes from upstream. AICR generates one for each
+Kustomize-derived component, each manifest-only component, each injected
+`-pre` / `-post` / `-readiness` release, and — under `--vendor-charts` — as a
+wrapper around every vendored upstream chart. A generated `Chart.yaml` has to
+answer two different questions, so it answers them in separate fields:
+
+| Field | Carries | Why |
+|-------|---------|-----|
+| `version` | the AICR version that produced the bundle | The chart's content is AICR's own, so AICR's version identifies the artifact. This is the `aicr` binary that ran `bundle`, which is not necessarily the one that generated the recipe. |
+| `appVersion` | the payload version | The upstream chart pin for a Helm component, the git ref for a Kustomize one. Free-form, so a ref like `release-1.4` need not look like SemVer. |
+| `aicr.run/component-version` annotation | the payload version | The same value as `appVersion`, under a stable key to read from a live release. |
+| `aicr.run/generated-by` annotation | the AICR version | The same value as `version`. |
+
+To read the payload version back out of a cluster, the rule is: **use
+`aicr.run/component-version` when it is present, otherwise use the release's
+own chart version.** A component installed straight from its upstream chart
+carries neither annotation, and its release version already *is* the payload
+version. The annotation's presence is exactly the signal that the chart
+version describes the wrapper instead of what it wraps.
+
+So for the `gpu-operator-post` release generated alongside gpu-operator, a
+`helm list` reports chart `gpu-operator-post-1.4.0` — the AICR version — while
+its app version and `aicr.run/component-version` both read `v25.3.0`, the
+gpu-operator pin those manifests accompany.
+
+A component with no upstream pin — a manifest-only component, and the injected
+releases belonging to one — ships only AICR-authored content, so `appVersion`
+and the annotation report the AICR version too.
+
+A build that is not release-stamped (`aicr --version` reports `dev`) reports
+`0.0.0-dev`. Helm validates `version:` as SemVer 2 and refuses to load a chart
+whose version is not, so `dev` cannot be written through verbatim.
+
+The root chart `argocd-helm` renders is not one of these generated wrappers and
+carries neither annotation. Its `version:` tracks the recipe's
+`metadata.version` — the AICR build that generated the *recipe*, not the one
+that ran `bundle` — so on a two-step workflow where the two binaries differ, it
+will not match the wrappers alongside it. Only the `0.0.0-dev` substitution
+above is shared.
+
+Verify a bundle you received with `aicr verify` — see
+[Artifact verification](artifact-verification.md).
+
 ## Override values
 
 Use `--set` for scalar overrides, scoped per component as
@@ -178,6 +278,175 @@ aicr bundle --recipe recipe.yaml \
   --accelerated-node-toleration nvidia.com/gpu=present:NoSchedule \
   --output ./bundles
 ```
+
+## Prepare DRA nodes when opting in to eviction coordination
+
+DRA eviction coordination is **opt-in**. By default a bundle containing both
+`gpu-operator` and `nvidia-dra-driver-gpu` adds no eviction node label, and the
+DRA kubelet plugin runs on every accelerated node with no extra labeling. The
+trade-off is that the plugin is not descheduled ahead of a GPU driver container
+restart; `aicr bundle` warns about this where GPU Operator manages the driver,
+and [DRA Driver Upgrade Eviction](cli-reference.md#dra-driver-upgrade-eviction)
+describes what can go wrong.
+
+Generate with `--dra-eviction-node-label key=value` to opt in. The rest of this
+section applies only then. The same applies to the corresponding `-ocp`
+components.
+
+### Choosing whether to opt in
+
+The label is how GPU Operator's Driver Manager finds the plugin: it deschedules
+the plugin by rewriting the label's value and restores it afterwards, so the
+plugin's `nodeSelector` has to match the label for the mechanism to work at all.
+That is what makes it a placement requirement, and why an unlabeled node ends up
+with no plugin rather than with an uncoordinated one.
+
+| | Not opted in (default) | Opted in |
+|---|---|---|
+| Node labeling | none needed | every GPU node, in the node pool definition |
+| Plugin placement | every accelerated node | only nodes carrying the label |
+| Driver restart | plugin is not descheduled first | plugin is descheduled and restored |
+| If a node is missed | n/a | that node silently runs without DRA |
+
+Opt in when GPU Operator manages the driver (`driver.enabled=true`) and you can
+guarantee the label is set at provisioning time for every GPU node, including
+ones added later by autoscaling or node replacement. Otherwise the default is
+the safer choice: a plugin that always runs, with a documented risk at driver
+restarts, beats a plugin that silently does not run on some nodes.
+
+There is nothing to opt in to where the driver is provider-installed
+(`driver.enabled=false` — AKS `azure-managed`, GKE COS, OKE). GPU Operator
+deploys no driver pod and therefore no Driver Manager, so no restart can occur
+under the plugin and no warning is emitted.
+
+Also note the mechanism is best-effort under `k8s-driver-manager` v0.12: the
+configured label is paused in the same batch as other GPU operands and no wait
+covers the standalone DRA kubelet plugin, so ordering against DRA claim holders
+and completion of plugin teardown are not guaranteed. See
+[NVIDIA/k8s-driver-manager#250](https://github.com/NVIDIA/k8s-driver-manager/issues/250).
+
+> **Opt-in requirement:** label every GPU node that must run the DRA kubelet
+> plugin *before* applying the bundle. Applying it first can reduce the
+> DaemonSet to zero eligible nodes, interrupting ComputeDomain/IMEX and any
+> whole-GPU resources advertised through DRA.
+
+### Set the label at node-pool provisioning time
+
+Put the label in the **node pool definition** — an EKS managed nodegroup
+`labels` entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the equivalent for
+your provisioner — alongside the `nodeGroup=gpu-worker` label you already set
+there.
+
+A one-off `kubectl label node` is a repair, not a configuration. It does not
+survive node replacement or recycling, cluster autoscaling adding GPU nodes, or
+a nodegroup scaled from zero. Any GPU node added afterwards arrives unlabeled
+and silently runs without the DRA kubelet plugin, leaving the cluster
+**partially DRA-enabled**. This is harder to detect than uniform failure,
+because it is intermittent and node-dependent.
+
+Use `kubectl label` only to repair nodes that already exist, and fix the node
+pool definition in the same change so replacements inherit it. Substitute the
+same `key=value` pair you passed to `--dra-eviction-node-label` — the examples
+below use the documented default:
+
+```bash
+kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true
+kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true
+```
+
+### The failure mode is silent
+
+An unlabeled GPU node produces no error anywhere. `helm install`/`helm
+upgrade` reports success and the bundle's `deploy.sh` exits 0. What you get
+instead is:
+
+- no DRA kubelet plugin on any unlabeled node, and no `ResourceSlices` from
+  it — so no ComputeDomain/IMEX capability there
+- the `nvidia-dra-driver-gpu-kubelet-plugin` DaemonSet at `DESIRED=0` **if no
+  GPU node carries the label at all**
+
+Partial coverage is the shape node replacement and autoscaling produce: labeled nodes work normally while the rest silently lack
+DRA. A split cluster is harder to notice than uniform failure, because the
+DaemonSet looks healthy and only some workloads misbehave.
+
+Because the absence is not self-announcing, confirm the selector matches the
+nodes you expect **before** applying the bundle, and check the DaemonSet
+afterwards.
+
+### This applies to existing clusters, not just fresh installs
+
+The requirement is easy to read as a fresh-install prerequisite, but the
+upgrade path is especially easy to miss. A cluster whose bundle was generated
+before this selector existed has a working kubelet-plugin DaemonSet selecting
+on `nodeGroup=gpu-worker` alone. Regenerating the bundle and running `helm
+upgrade` adds the second selector, and working functionality **disappears** —
+still with no error. Revisit the node labels whenever you regenerate a bundle
+for an existing deployment, not only when building a new cluster.
+
+`aicr bundle` emits a non-blocking warning describing this requirement whenever
+both components are enabled and an eviction label is configured. The
+complementary opt-out warning fires only where GPU Operator manages the driver
+(`driver.enabled=true`). See
+[Storage Class](cli-reference.md#storage-class), where that warning is
+described alongside the other cluster-state dependency reported the same way.
+
+### Upgrading from a build that applied the label implicitly
+
+For a window on unreleased `main`, the eviction label was applied
+automatically rather than requested. Bundles generated in that window — via the
+CLI, the REST API, config, or a Go caller — received the
+`nvidia.com/dra-kubelet-plugin=true` selector and the matching Driver Manager
+environment entry without asking for them. No tagged release contains that
+behavior, so only clusters built from `main` in that interval are affected.
+
+At this head the same inputs produce the opposite result: omitting
+`--dra-eviction-node-label` removes both the selector and the Driver Manager
+entry. Regenerating and upgrading such a cluster therefore *drops* eviction
+coordination silently — the reverse of the direction described above, and the
+case the preceding subsection does not cover.
+
+Decide deliberately, and only two answers are defensible:
+
+- **Keep coordination.** Confirm the nodes still carry the label
+  (`kubectl get nodes -l nvidia.com/dra-kubelet-plugin=true`), confirm the count
+  matches the GPU nodes you expect, then pass
+  `--dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true` explicitly on
+  every subsequent generation. Verify node labels *before* upgrading: passing
+  the flag against unlabeled nodes takes the DaemonSet to `DESIRED=0`.
+- **Accept the opt-out.** Regenerate without the flag and accept the documented
+  risks in [DRA Driver Upgrade
+  Eviction](cli-reference.md#dra-driver-upgrade-eviction). The node labels
+  become inert and can be removed at leisure.
+
+The opt-out warning `aicr bundle` prints bounds the blast radius at generation
+time, but it is not upgrade guidance: it fires on every unlabeled generation and
+cannot know the cluster previously had coordination.
+
+### Custom label conventions and post-install checks
+
+The flag both opts in and selects the convention: generate the bundle with
+`--dra-eviction-node-label key=value` and apply that exact pair to the nodes.
+AICR gives the full pair to the DRA node selector, but GPU Operator's Driver
+Manager receives only the label key because its eviction contract matches and
+temporarily removes the label by key.
+
+After installation and after every GPU driver upgrade, monitor the kubelet
+plugin DaemonSet until all desired pods are ready. This also catches a Driver
+Manager rollout that did not restore the eviction label:
+
+```bash
+kubectl -n nvidia-dra-driver get daemonset \
+  nvidia-dra-driver-gpu-kubelet-plugin
+```
+
+The integration is not rendered when either component is absent. A dynamic
+declaration intersecting `kubeletPlugin.nodeSelector` or `driver.manager.env`
+is rejected because moving either path to install-time configuration would let
+the two halves drift independently. See
+[DRA Driver Upgrade Eviction](cli-reference.md#dra-driver-upgrade-eviction) for
+configuration details and NVIDIA's
+[GPU Operator DRA installation guide](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/26.3/dra-intro-install.html)
+for the upstream contract.
 
 ## Produce an offline (vendored) bundle
 

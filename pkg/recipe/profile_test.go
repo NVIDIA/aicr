@@ -26,6 +26,7 @@ import (
 	"time"
 
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/header"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	"gopkg.in/yaml.v3"
 )
@@ -586,7 +587,7 @@ func TestBuildRecipeResultWithProfile(t *testing.T) {
 
 	t.Run("selection without declaration fails", func(t *testing.T) {
 		legacy := testProfileStore(nil)
-		legacy.Overlays["aks"].APIVersion = RecipeAPIVersion
+		legacy.Overlays["aks"].APIVersion = RecipeMetadataAPIVersion
 		result, err := legacy.BuildRecipeResultWithProfile(ctx, criteria, "gpuStack=operator-managed")
 		if err == nil || result != nil {
 			t.Fatalf("BuildRecipeResultWithProfile() = (%#v, %v), want error", result, err)
@@ -595,12 +596,12 @@ func TestBuildRecipeResultWithProfile(t *testing.T) {
 
 	t.Run("composition without declaration stays legacy", func(t *testing.T) {
 		legacy := testProfileStore(nil)
-		legacy.Overlays["aks"].APIVersion = RecipeAPIVersion
+		legacy.Overlays["aks"].APIVersion = RecipeMetadataAPIVersion
 		result, err := legacy.BuildRecipeResult(ctx, criteria)
 		if err != nil {
 			t.Fatalf("BuildRecipeResult() error = %v", err)
 		}
-		if result.APIVersion != RecipeAPIVersion || result.Metadata.SelectedProfile != nil {
+		if result.APIVersion != RecipeResultAPIVersion || result.Metadata.SelectedProfile != nil {
 			t.Fatalf("legacy result apiVersion=%q selectedProfile=%#v",
 				result.APIVersion, result.Metadata.SelectedProfile)
 		}
@@ -625,7 +626,7 @@ func TestProfileResolutionGuards(t *testing.T) {
 
 	t.Run("typed declaration requires profile api version", func(t *testing.T) {
 		overlay := newOverlay("service", &Criteria{Service: CriteriaServiceAKS}, testProfileDeclaration())
-		overlay.APIVersion = RecipeAPIVersion
+		overlay.APIVersion = RecipeMetadataAPIVersion
 		store := &MetadataStore{
 			Base:     base,
 			Overlays: map[string]*RecipeMetadata{"service": overlay},
@@ -825,11 +826,19 @@ func TestProfileArtifactContract(t *testing.T) {
 		result  *RecipeResult
 		wantErr string
 	}{
-		{name: "legacy", result: &RecipeResult{APIVersion: RecipeAPIVersion}},
+		{name: "legacy", result: &RecipeResult{APIVersion: RecipeResultAPIVersion}},
+		{name: "Release N target default", result: &RecipeResult{APIVersion: header.GroupVersionV1}},
 		{
 			name: "profile",
 			result: &RecipeResult{
 				APIVersion: RecipeProfileAPIVersion,
+				Metadata:   RecipeResultMetadata{SelectedProfile: selected},
+			},
+		},
+		{
+			name: "Release N target profile",
+			result: &RecipeResult{
+				APIVersion: header.GroupVersionV1Beta2,
 				Metadata:   RecipeResultMetadata{SelectedProfile: selected},
 			},
 		},
@@ -908,7 +917,7 @@ func TestProfileArtifactContract(t *testing.T) {
 		{
 			name: "legacy with selection",
 			result: &RecipeResult{
-				APIVersion: RecipeAPIVersion,
+				APIVersion: RecipeResultAPIVersion,
 				Metadata:   RecipeResultMetadata{SelectedProfile: selected},
 			},
 			wantErr: "cannot carry",
@@ -1083,7 +1092,11 @@ func TestProfileArtifactContract(t *testing.T) {
 }
 
 func TestDecodeRecipeResult_ProfileStrictness(t *testing.T) {
-	valid := []byte(`apiVersion: aicr.run/v1alpha3
+	// Built from the constant, not a literal. The "legacy version" case below
+	// mutates this fixture with strings.Replace(RecipeProfileAPIVersion, ...),
+	// which silently became a no-op at the N+1 emitter switch when the constant
+	// moved off the hardcoded aicr.run/v1alpha3 and stopped matching.
+	valid := []byte(`apiVersion: ` + RecipeProfileAPIVersion + `
 kind: RecipeResult
 metadata:
   selectedProfile:
@@ -1175,7 +1188,7 @@ componentRefs: []
 		},
 		{
 			name:    "legacy version with selected profile",
-			data:    []byte(strings.Replace(string(valid), RecipeProfileAPIVersion, RecipeAPIVersion, 1)),
+			data:    []byte(strings.Replace(string(valid), RecipeProfileAPIVersion, RecipeResultAPIVersion, 1)),
 			wantErr: "cannot carry",
 		},
 	}
@@ -1349,10 +1362,12 @@ spec:
 		content []byte
 		wantErr string
 	}{
-		{name: "legacy without profile", content: overlay(RecipeAPIVersion, "")},
-		{name: "empty version without profile", content: overlay("", "")},
-		{name: "unknown version without profile", content: overlay("aicr.run/v99", "")},
+		{name: "legacy without profile", content: overlay(RecipeMetadataAPIVersion, "")},
+		{name: "target authoring without profile", content: overlay(header.GroupVersionV1Beta1, "")},
+		{name: "empty version without profile", content: overlay("", ""), wantErr: `apiVersion ""`},
+		{name: "unknown version without profile", content: overlay("aicr.run/v99", ""), wantErr: `apiVersion "aicr.run/v99"`},
 		{name: "profile version with declaration", content: overlay(RecipeProfileAPIVersion, validProfile)},
+		{name: "target profile version with declaration", content: overlay(header.GroupVersionV1Beta2, validProfile)},
 		{
 			name:    "profile version without declaration",
 			content: overlay(RecipeProfileAPIVersion, ""),
@@ -1364,7 +1379,7 @@ spec:
 				string(overlay(RecipeProfileAPIVersion, validProfile)),
 				"kind: RecipeMetadata", "kind: RecipeMetdata", 1,
 			)),
-			wantErr: `requires kind "RecipeMetadata", got "RecipeMetdata"`,
+			wantErr: `has kind "RecipeMetdata", expected "RecipeMetadata"`,
 		},
 		{
 			name: "profile version requires metadata name",
@@ -1376,7 +1391,7 @@ spec:
 		},
 		{
 			name:    "legacy version with declaration",
-			content: overlay(RecipeAPIVersion, validProfile),
+			content: overlay(RecipeMetadataAPIVersion, validProfile),
 			wantErr: "expected \"aicr.run/v1alpha3\"",
 		},
 		{
@@ -1790,11 +1805,13 @@ func TestValidateProfileValuesRejectsInvalidBaseline(t *testing.T) {
 	}
 }
 
-// TestApplyEffectiveProfileConstraints covers the two constraint outcomes of a
-// selection: a name already present in the composed recipe is rejected rather
-// than silently shadowing it, and a fresh name is appended in sorted order.
+// TestApplyEffectiveProfileConstraints covers the constraint outcomes of a
+// selection: a fresh name is appended in sorted order, a name the composition
+// already carries is intersected when both sides are version ranges (issue
+// #2512), and anything else — a widening range, an empty intersection, or a
+// predicate with no ordering — leaves the recipe's own constraint intact.
 func TestApplyEffectiveProfileConstraints(t *testing.T) {
-	newDecl := func(constraintName string) *effectiveProfileDeclaration {
+	newDecl := func(constraintName, constraintValue string) *effectiveProfileDeclaration {
 		return &effectiveProfileDeclaration{
 			Source: "test-overlay",
 			Declaration: &ProfileDeclaration{
@@ -1805,22 +1822,97 @@ func TestApplyEffectiveProfileConstraints(t *testing.T) {
 							Name:      "gpu-operator",
 							Overrides: map[string]any{"driver": map[string]any{"enabled": false}},
 						}},
-						Constraints: []Constraint{{Name: constraintName, Value: ">= 1.32"}},
+						Constraints: []Constraint{{
+							Name:        constraintName,
+							Value:       constraintValue,
+							Remediation: "create the pool on a newer cluster",
+						}},
 					},
 				},
 			},
 		}
 	}
-	newSpec := func() *RecipeMetadataSpec {
+	newSpec := func(recipeConstraint Constraint) *RecipeMetadataSpec {
 		return &RecipeMetadataSpec{
 			ComponentRefs: []ComponentRef{{Name: "gpu-operator", Type: ComponentTypeHelm}},
-			Constraints:   []Constraint{{Name: "K8s.server.version", Value: ">= 1.30"}},
+			Constraints:   []Constraint{recipeConstraint},
 		}
 	}
+	k8sFloor := func(value string) Constraint {
+		return Constraint{Name: "K8s.server.version", Value: value}
+	}
 
-	t.Run("collision with the composed recipe is rejected", func(t *testing.T) {
-		spec := newSpec()
-		_, err := applyEffectiveProfile(spec, newDecl("K8s.server.version"), "", nil)
+	t.Run("stricter version floor tightens the composed recipe", func(t *testing.T) {
+		spec := newSpec(k8sFloor(">= 1.30"))
+		if _, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.35"), "", nil); err != nil {
+			t.Fatalf("applyEffectiveProfile() error = %v", err)
+		}
+		if len(spec.Constraints) != 1 {
+			t.Fatalf("composed constraints = %v, want one entry per name", spec.Constraints)
+		}
+		if spec.Constraints[0].Value != ">= 1.35" {
+			t.Fatalf("constraint value = %q, want %q", spec.Constraints[0].Value, ">= 1.35")
+		}
+		if spec.Constraints[0].Remediation != "create the pool on a newer cluster" {
+			t.Fatalf("remediation = %q, want the profile's own guidance", spec.Constraints[0].Remediation)
+		}
+	})
+
+	t.Run("tightening preserves the composed ceiling", func(t *testing.T) {
+		spec := newSpec(k8sFloor(">= 1.34.1 < 1.36.0"))
+		if _, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.35"), "", nil); err != nil {
+			t.Fatalf("applyEffectiveProfile() error = %v", err)
+		}
+		if got, want := spec.Constraints[0].Value, ">= 1.35 < 1.36.0"; got != want {
+			t.Fatalf("constraint value = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("weaker version floor leaves the composed recipe alone", func(t *testing.T) {
+		spec := newSpec(k8sFloor(">= 1.34"))
+		if _, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.30"), "", nil); err != nil {
+			t.Fatalf("applyEffectiveProfile() error = %v", err)
+		}
+		if got, want := spec.Constraints[0].Value, ">= 1.34"; got != want {
+			t.Fatalf("constraint value = %q, want the recipe's own floor %q", got, want)
+		}
+		if spec.Constraints[0].Remediation != "" {
+			t.Fatalf("remediation = %q, want the recipe's own left intact", spec.Constraints[0].Remediation)
+		}
+	})
+
+	t.Run("empty intersection is rejected", func(t *testing.T) {
+		spec := newSpec(k8sFloor("<= 1.30"))
+		_, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.35"), "", nil)
+		if err == nil || !strings.Contains(err.Error(), "no version can satisfy") {
+			t.Fatalf("applyEffectiveProfile() error = %v, want an unsatisfiable-range rejection", err)
+		}
+		if !stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+			t.Fatalf("applyEffectiveProfile() error = %v, want ErrCodeInvalidRequest", err)
+		}
+		if len(spec.Constraints) != 1 || spec.Constraints[0].Value != "<= 1.30" {
+			t.Fatalf("composed constraints = %v, want the recipe's own left intact", spec.Constraints)
+		}
+	})
+
+	t.Run("bounds at different precisions are rejected as unorderable", func(t *testing.T) {
+		spec := newSpec(k8sFloor(">= 1.34"))
+		_, err := applyEffectiveProfile(spec, newDecl("K8s.server.version", ">= 1.34.1"), "", nil)
+		if err == nil || !strings.Contains(err.Error(), "different precisions cannot be ordered") {
+			t.Fatalf("applyEffectiveProfile() error = %v, want a precision-mismatch rejection", err)
+		}
+		if strings.Contains(err.Error(), "not both version ranges") {
+			t.Fatalf("applyEffectiveProfile() error = %v, must not claim these are not version ranges", err)
+		}
+		if len(spec.Constraints) != 1 || spec.Constraints[0].Value != ">= 1.34" {
+			t.Fatalf("composed constraints = %v, want the recipe's own left intact", spec.Constraints)
+		}
+	})
+
+	t.Run("collision with no ordering is rejected", func(t *testing.T) {
+		spec := newSpec(Constraint{Name: "NodeTopology.gpu-nodes.label", Value: "gke-no-default-nvidia-gpu-device-plugin=true"})
+		_, err := applyEffectiveProfile(spec,
+			newDecl("NodeTopology.gpu-nodes.label", "!gke-no-default-nvidia-gpu-device-plugin"), "", nil)
 		if err == nil || !strings.Contains(err.Error(), "collides with the composed recipe") {
 			t.Fatalf("applyEffectiveProfile() error = %v, want collision", err)
 		}
@@ -1833,8 +1925,8 @@ func TestApplyEffectiveProfileConstraints(t *testing.T) {
 	})
 
 	t.Run("distinct constraint is merged", func(t *testing.T) {
-		spec := newSpec()
-		selected, err := applyEffectiveProfile(spec, newDecl("Driver.gpu.mode"), "", nil)
+		spec := newSpec(k8sFloor(">= 1.30"))
+		selected, err := applyEffectiveProfile(spec, newDecl("Driver.gpu.mode", ">= 1.32"), "", nil)
 		if err != nil {
 			t.Fatalf("applyEffectiveProfile() error = %v", err)
 		}

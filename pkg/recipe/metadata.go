@@ -36,13 +36,27 @@ const RecipeMetadataKind = "RecipeMetadata"
 // RecipeResultKind is the kind value for RecipeResult resources.
 const RecipeResultKind = "RecipeResult"
 
-// RecipeAPIVersion is the API version for recipe metadata and result resources.
-// It aliases the canonical header.GroupVersion (single source of truth).
-const RecipeAPIVersion = header.GroupVersion
+// RecipeResultAPIVersion is the API version stamped on a default resolved
+// RecipeResult. RecipeResult is on the ADR-022 stable artifact track, so this
+// aliases header.StableGroupVersion; the track's target is
+// header.GroupVersionV1.
+const RecipeResultAPIVersion = header.StableGroupVersion
+
+// RecipeMetadataAPIVersion is the API version expected on an authored catalog
+// RecipeMetadata or RecipeMixin. Those are on the ADR-022 authoring track, so
+// this aliases header.AuthoringGroupVersion; the track's target is
+// header.GroupVersionV1Beta1.
+//
+// This is deliberately a separate constant from RecipeResultAPIVersion. The two
+// carried the same aicr.run/v1alpha2 through the reader-first release, which is
+// what made a shared constant look adequate; ADR-022 sends the kinds to
+// different targets, and since the v0.22 emitter switch they differ.
+const RecipeMetadataAPIVersion = header.AuthoringGroupVersion
 
 // ConfiguredRecipeResultAPIVersion is the strict RecipeResult schema used
-// when typed desired-state configuration is present.
-const ConfiguredRecipeResultAPIVersion = header.RecipeResultGroupVersion
+// when typed desired-state configuration is present. It is on the ADR-022
+// profile-bearing track; the track's target is header.GroupVersionV1Beta2.
+const ConfiguredRecipeResultAPIVersion = header.ProfileGroupVersion
 
 // GPUDriverState values recorded in RecipeResult.Metadata.GPUDriverState
 // by snapshot-driven resolution (see pkg/client/v1 gpu_driver_state.go).
@@ -577,9 +591,8 @@ func (r *RecipeResult) backfillComponentTypes() error {
 // silently emits an artifact it would not read back. (The file loader also
 // accepts RecipeMetadata, but as an overlay to hydrate rather than as a
 // RecipeResult; that input shape has no analog on this boundary.) Only Kind is
-// normalized: APIVersion is validated, never rewritten, because an artifact
-// group/version bump is a hard break with no transition window — see
-// docs/design/011-artifact-apiversion-policy.md. See issue #1953.
+// normalized: APIVersion is validated against the kind/schema-scoped read
+// window and never rewritten. See ADR-022 and issue #1953.
 func (r *RecipeResult) NormalizeKind() error {
 	if r == nil {
 		return nil
@@ -692,6 +705,9 @@ func (r *RecipeResult) ValidateCoherence() error {
 	if err := r.validateAccountingConfiguration(); err != nil {
 		return err
 	}
+	if err := r.validateGKEConfiguration(); err != nil {
+		return err
+	}
 	var problems []string
 	for i := range r.ComponentRefs {
 		if !r.ComponentRefs[i].IsEnabled() {
@@ -778,7 +794,7 @@ type RecipeMetadataHeader struct {
 	// Kind is always "RecipeMetadata".
 	Kind string `json:"kind" yaml:"kind"`
 
-	// APIVersion is the API version (e.g., "aicr.run/v1alpha2").
+	// APIVersion is the API version (e.g., "aicr.run/v1beta1").
 	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 
 	// Metadata contains the name and other metadata.
@@ -1185,6 +1201,11 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 		// Omitting one does not alias it, it drops it: the copy keeps the
 		// component overrides a selection applied while losing the record
 		// explaining them, and Client.AdoptRecipe always deep-copies.
+		if r.Configuration.GKE != nil {
+			out.Configuration.GKE = &GKEConfiguration{
+				TCPXOInterfaces: slices.Clone(r.Configuration.GKE.TCPXOInterfaces),
+			}
+		}
 		if r.Configuration.RuntimeInventory != nil {
 			runtimeInventory := *r.Configuration.RuntimeInventory
 			out.Configuration.RuntimeInventory = &runtimeInventory
@@ -1271,18 +1292,29 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 		return s.Constraints[i].Name < s.Constraints[j].Name
 	})
 
-	// Merge componentRefs - overlay fields take precedence, but inherit missing from base
-	componentMap := make(map[string]ComponentRef)
+	// Merge componentRefs - overlay fields take precedence, but inherit missing from base.
+	// Cloned on entry: s.ComponentRefs can itself alias a cached source (e.g.
+	// initBaseMergedSpec copies s.Base.Spec.ComponentRefs by struct, which
+	// doesn't deep-copy the Overrides map) -- mergeComponentRef's deepMergeMap
+	// below writes into a matching base entry's Overrides in place, so without
+	// this clone a later overlay/mixin contribution would corrupt that cache.
+	componentMap := make(map[string]ComponentRef, len(s.ComponentRefs))
 	for _, c := range s.ComponentRefs {
-		componentMap[c.Name] = c
+		componentMap[c.Name] = cloneComponentRef(c)
 	}
 	for _, overlay := range other.ComponentRefs {
 		if base, exists := componentMap[overlay.Name]; exists {
 			// Merge overlay into base - overlay takes precedence for non-empty fields
 			componentMap[overlay.Name] = mergeComponentRef(base, overlay)
 		} else {
-			// New component from overlay
-			componentMap[overlay.Name] = overlay
+			// New component from overlay. Clone it: overlay's map/slice
+			// fields (e.g. Overrides) would otherwise alias the source --
+			// for a mixin's ComponentRefs, that source is the process-wide
+			// cached *RecipeMixin (store.Mixins), so a later merge into
+			// this entry (e.g. a second mixin targeting the same
+			// now-existing component) would mutate the cached mixin
+			// definition itself.
+			componentMap[overlay.Name] = cloneComponentRef(overlay)
 		}
 	}
 	s.ComponentRefs = make([]ComponentRef, 0, len(componentMap))

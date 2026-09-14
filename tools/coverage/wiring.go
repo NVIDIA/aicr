@@ -213,7 +213,7 @@ func scanLanePhases(repoRoot, cloud string) (map[string]bool, error) {
 			// scalar, so a full-line `# ...` or a trailing `... # runner ref`
 			// inside one survives into step.Run and would otherwise read as an
 			// executed phase.
-			for _, line := range strings.Split(step.Run, "\n") {
+			for line := range strings.SplitSeq(step.Run, "\n") {
 				code := stripShellComment(line)
 				if strings.TrimSpace(code) == "" {
 					continue

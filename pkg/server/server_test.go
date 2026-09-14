@@ -23,6 +23,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/NVIDIA/aicr/pkg/deprecation"
 )
 
 func TestNew(t *testing.T) {
@@ -615,4 +617,24 @@ func TestResponseWriter(t *testing.T) {
 			t.Errorf("default status = %d, want %d", rw.Status(), http.StatusOK)
 		}
 	})
+}
+
+func TestWithDeprecatedRoutes(t *testing.T) {
+	routes := map[string]deprecation.Notice{
+		"/v1/recipe": {
+			Subject:     "/v1/recipe",
+			Replacement: "/v1/recipe",
+			RemovedIn:   "v0.25",
+		},
+	}
+
+	s := New(WithDeprecatedRoutes(routes))
+
+	got, ok := s.config.DeprecatedRoutes["/v1/recipe"]
+	if !ok {
+		t.Fatal("expected /v1/recipe to be registered as deprecated")
+	}
+	if got.RemovedIn != "v0.25" {
+		t.Errorf("expected RemovedIn v0.25, got %s", got.RemovedIn)
+	}
 }

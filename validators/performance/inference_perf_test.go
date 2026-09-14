@@ -31,6 +31,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/validator/labels"
 	validatorv1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/internal/allocmode"
@@ -375,21 +376,21 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 	// status.components entries (each entry is a field->count map, e.g.
 	// {"replicas": 8, "readyReplicas": 8}).
 	dgd := func(state string, spec map[string]int64, status map[string]map[string]int64) *unstructured.Unstructured {
-		specComponents := make([]interface{}, 0, len(spec))
+		specComponents := make([]any, 0, len(spec))
 		for name, r := range spec {
-			specComponents = append(specComponents, map[string]interface{}{keyName: name, "replicas": r})
+			specComponents = append(specComponents, map[string]any{keyName: name, "replicas": r})
 		}
-		statusComponents := map[string]interface{}{}
+		statusComponents := map[string]any{}
 		for name, fields := range status {
-			m := map[string]interface{}{}
+			m := map[string]any{}
 			for k, v := range fields {
 				m[k] = v
 			}
 			statusComponents[name] = m
 		}
-		return &unstructured.Unstructured{Object: map[string]interface{}{
-			"spec":   map[string]interface{}{"components": specComponents},
-			"status": map[string]interface{}{"state": state, "components": statusComponents},
+		return &unstructured.Unstructured{Object: map[string]any{
+			"spec":   map[string]any{"components": specComponents},
+			"status": map[string]any{"state": state, "components": statusComponents},
 		}}
 	}
 	tests := []struct {
@@ -400,7 +401,7 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 		{name: "nil object", input: nil, want: false},
 		{
 			name:  "no status",
-			input: &unstructured.Unstructured{Object: map[string]interface{}{"spec": map[string]interface{}{}}},
+			input: &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{}}},
 			want:  false,
 		},
 		{
@@ -445,14 +446,14 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 		{
 			// spec replicas omitted → defaults to 1; one ready replica satisfies it.
 			name: "spec replicas omitted defaults to 1",
-			input: &unstructured.Unstructured{Object: map[string]interface{}{
-				"spec": map[string]interface{}{"components": []interface{}{
-					map[string]interface{}{keyName: "VllmDecodeWorker"}, // no replicas field
+			input: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{"components": []any{
+					map[string]any{keyName: "VllmDecodeWorker"}, // no replicas field
 				}},
-				"status": map[string]interface{}{
+				"status": map[string]any{
 					"state": "successful",
-					"components": map[string]interface{}{
-						"VllmDecodeWorker": map[string]interface{}{"replicas": int64(1), "readyReplicas": int64(1)},
+					"components": map[string]any{
+						"VllmDecodeWorker": map[string]any{"replicas": int64(1), "readyReplicas": int64(1)},
 					},
 				},
 			}},
@@ -461,14 +462,14 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 		{
 			// Present-but-wrong-typed spec replicas must fail closed, not default to 1.
 			name: "spec replicas wrong type fails closed",
-			input: &unstructured.Unstructured{Object: map[string]interface{}{
-				"spec": map[string]interface{}{"components": []interface{}{
-					map[string]interface{}{keyName: "VllmDecodeWorker", "replicas": "eight"},
+			input: &unstructured.Unstructured{Object: map[string]any{
+				"spec": map[string]any{"components": []any{
+					map[string]any{keyName: "VllmDecodeWorker", "replicas": "eight"},
 				}},
-				"status": map[string]interface{}{
+				"status": map[string]any{
 					"state": "successful",
-					"components": map[string]interface{}{
-						"VllmDecodeWorker": map[string]interface{}{"replicas": int64(8), "readyReplicas": int64(8)},
+					"components": map[string]any{
+						"VllmDecodeWorker": map[string]any{"replicas": int64(8), "readyReplicas": int64(8)},
 					},
 				},
 			}},
@@ -487,28 +488,28 @@ func TestIsDynamoDeploymentReady(t *testing.T) {
 func TestApplyInferenceWorkerScheduling(t *testing.T) {
 	// Minimal DynamoGraphDeployment skeleton matching testdata/inference/dynamo-deployment.yaml structure.
 	newObj := func() *unstructured.Unstructured {
-		return &unstructured.Unstructured{Object: map[string]interface{}{
+		return &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "nvidia.com/v1beta1",
 			"kind":       "DynamoGraphDeployment",
-			"spec": map[string]interface{}{
-				"components": []interface{}{
-					map[string]interface{}{
+			"spec": map[string]any{
+				"components": []any{
+					map[string]any{
 						keyName:    "Frontend",
 						"type":     "frontend",
 						"replicas": int64(1),
-						"podTemplate": map[string]interface{}{
-							"spec": map[string]interface{}{
-								"containers": []interface{}{map[string]interface{}{keyName: mainContainerName}},
+						"podTemplate": map[string]any{
+							"spec": map[string]any{
+								"containers": []any{map[string]any{keyName: mainContainerName}},
 							},
 						},
 					},
-					map[string]interface{}{
+					map[string]any{
 						keyName:    "VllmDecodeWorker",
 						"type":     "worker",
 						"replicas": int64(4),
-						"podTemplate": map[string]interface{}{
-							"spec": map[string]interface{}{
-								"containers": []interface{}{map[string]interface{}{keyName: mainContainerName}},
+						"podTemplate": map[string]any{
+							"spec": map[string]any{
+								"containers": []any{map[string]any{keyName: mainContainerName}},
 							},
 						},
 					},
@@ -587,7 +588,7 @@ func TestApplyInferenceWorkerScheduling(t *testing.T) {
 			if len(tols) != 1 {
 				t.Fatalf("worker tolerations count = %d, want 1", len(tols))
 			}
-			tol := tols[0].(map[string]interface{})
+			tol := tols[0].(map[string]any)
 			if tol["key"] != "dedicated" || tol["value"] != "worker-workload" || tol["effect"] != "NoSchedule" {
 				t.Errorf("worker toleration = %v, unexpected fields", tol)
 			}
@@ -600,7 +601,7 @@ func TestApplyInferenceWorkerScheduling(t *testing.T) {
 				if !claimsFound || len(claims) != 1 {
 					t.Fatalf("worker resourceClaims = %v (found=%t), want exactly one DRA claim binding", claims, claimsFound)
 				}
-				binding := claims[0].(map[string]interface{})
+				binding := claims[0].(map[string]any)
 				if binding["resourceClaimTemplateName"] != inferenceClaimTemplateName {
 					t.Errorf("claim binding template = %v, want %s", binding["resourceClaimTemplateName"], inferenceClaimTemplateName)
 				}
@@ -651,11 +652,11 @@ func TestApplyInferenceWorkerScheduling(t *testing.T) {
 
 // mainContainerResourceClaims returns the main container's resources.claims
 // entries (nil when absent).
-func mainContainerResourceClaims(t *testing.T, podSpec map[string]interface{}) []interface{} {
+func mainContainerResourceClaims(t *testing.T, podSpec map[string]any) []any {
 	t.Helper()
 	containers, _, _ := unstructured.NestedSlice(podSpec, "containers")
 	for _, raw := range containers {
-		container, ok := raw.(map[string]interface{})
+		container, ok := raw.(map[string]any)
 		if !ok || container[keyName] != mainContainerName {
 			continue
 		}
@@ -666,8 +667,8 @@ func mainContainerResourceClaims(t *testing.T, podSpec map[string]interface{}) [
 }
 
 func TestApplyInferenceWorkerScheduling_MissingServices(t *testing.T) {
-	obj := &unstructured.Unstructured{Object: map[string]interface{}{
-		"spec": map[string]interface{}{},
+	obj := &unstructured.Unstructured{Object: map[string]any{
+		"spec": map[string]any{},
 	}}
 	err := applyInferenceWorkerScheduling(obj, &inferenceWorkloadConfig{})
 	if err == nil {
@@ -676,9 +677,9 @@ func TestApplyInferenceWorkerScheduling_MissingServices(t *testing.T) {
 }
 
 func TestEnsureMainContainerGPULimit_AppendsMainWhenMissing(t *testing.T) {
-	podSpec := map[string]interface{}{
-		"containers": []interface{}{
-			map[string]interface{}{keyName: "sidecar-frontend"},
+	podSpec := map[string]any{
+		"containers": []any{
+			map[string]any{keyName: "sidecar-frontend"},
 		},
 	}
 	ensureMainContainerGPULimit(podSpec, 1)
@@ -690,14 +691,14 @@ func TestEnsureMainContainerGPULimit_AppendsMainWhenMissing(t *testing.T) {
 	if len(containers) != 2 {
 		t.Fatalf("containers count = %d, want 2: %v", len(containers), containers)
 	}
-	sidecar := containers[0].(map[string]interface{})
+	sidecar := containers[0].(map[string]any)
 	if sidecar[keyName] != "sidecar-frontend" {
 		t.Fatalf("first container = %v, want original sidecar preserved", sidecar)
 	}
 	if _, found, _ := unstructured.NestedString(sidecar, "resources", "limits", gpuResourceName); found {
 		t.Fatal("sidecar unexpectedly received a GPU limit")
 	}
-	main := containers[1].(map[string]interface{})
+	main := containers[1].(map[string]any)
 	if main[keyName] != mainContainerName {
 		t.Fatalf("appended container name = %v, want %s", main[keyName], mainContainerName)
 	}
@@ -714,12 +715,12 @@ func TestEnsureMainContainerGPULimit_AppendsMainWhenMissing(t *testing.T) {
 // limit is merged into an existing resources block (e.g. a template-supplied
 // memory limit) rather than replacing it.
 func TestEnsureMainContainerGPULimit_PreservesExistingResources(t *testing.T) {
-	podSpec := map[string]interface{}{
-		"containers": []interface{}{
-			map[string]interface{}{
+	podSpec := map[string]any{
+		"containers": []any{
+			map[string]any{
 				keyName: mainContainerName,
-				"resources": map[string]interface{}{
-					"limits": map[string]interface{}{"memory": "2Gi"},
+				"resources": map[string]any{
+					"limits": map[string]any{"memory": "2Gi"},
 				},
 			},
 		},
@@ -730,7 +731,7 @@ func TestEnsureMainContainerGPULimit_PreservesExistingResources(t *testing.T) {
 	if err != nil || len(containers) != 1 {
 		t.Fatalf("read containers: err=%v count=%d", err, len(containers))
 	}
-	main := containers[0].(map[string]interface{})
+	main := containers[0].(map[string]any)
 	mem, found, err := unstructured.NestedString(main, "resources", "limits", "memory")
 	if err != nil || !found || mem != "2Gi" {
 		t.Errorf("existing memory limit lost: %q found=%v err=%v", mem, found, err)
@@ -741,14 +742,14 @@ func TestEnsureMainContainerGPULimit_PreservesExistingResources(t *testing.T) {
 	}
 }
 
-func componentPodSpec(t *testing.T, obj *unstructured.Unstructured, name string) map[string]interface{} {
+func componentPodSpec(t *testing.T, obj *unstructured.Unstructured, name string) map[string]any {
 	t.Helper()
 	components, _, err := unstructured.NestedSlice(obj.Object, "spec", "components")
 	if err != nil {
 		t.Fatalf("read spec.components: %v", err)
 	}
 	for _, raw := range components {
-		component, ok := raw.(map[string]interface{})
+		component, ok := raw.(map[string]any)
 		if !ok || component[keyName] != name {
 			continue
 		}
@@ -765,14 +766,14 @@ func componentPodSpec(t *testing.T, obj *unstructured.Unstructured, name string)
 // mainContainerGPULimit returns the main container's
 // resources.limits["nvidia.com/gpu"] value, or nil when the limit (or the
 // main container's resources block) is absent.
-func mainContainerGPULimit(t *testing.T, podSpec map[string]interface{}) interface{} {
+func mainContainerGPULimit(t *testing.T, podSpec map[string]any) any {
 	t.Helper()
 	containers, _, err := unstructured.NestedSlice(podSpec, "containers")
 	if err != nil {
 		t.Fatalf("read containers: %v", err)
 	}
 	for _, raw := range containers {
-		container, ok := raw.(map[string]interface{})
+		container, ok := raw.(map[string]any)
 		if !ok || container[keyName] != mainContainerName {
 			continue
 		}
@@ -816,10 +817,10 @@ func TestParseDynamoTemplate_ScalarModelStaysString(t *testing.T) {
 				t.Fatalf("parseYAMLTemplate() error: %v", err)
 			}
 			envs := componentContainerEnv(t, obj, "Frontend", mainContainerName)
-			var got interface{}
+			var got any
 			var found bool
 			for _, e := range envs {
-				m, ok := e.(map[string]interface{})
+				m, ok := e.(map[string]any)
 				if ok && m["name"] == "SERVED_MODEL_NAME" {
 					got, found = m["value"], true
 					break
@@ -857,7 +858,7 @@ func TestParseDynamoTemplate_RouterModeSubstituted(t *testing.T) {
 	}
 	envs := componentContainerEnv(t, obj, "Frontend", mainContainerName)
 	for _, e := range envs {
-		m, ok := e.(map[string]interface{})
+		m, ok := e.(map[string]any)
 		if ok && m["name"] == "DYN_ROUTER_MODE" {
 			if got := m["value"]; got != "kv" {
 				t.Errorf("DYN_ROUTER_MODE = %v, want %q", got, "kv")
@@ -904,7 +905,7 @@ func TestParseDynamoTemplate_WorkerDriverLibPathAppend(t *testing.T) {
 				t.Fatalf("read VllmDecodeWorker containers: %v", err)
 			}
 			for _, raw := range containers {
-				container, ok := raw.(map[string]interface{})
+				container, ok := raw.(map[string]any)
 				if !ok || container[keyName] != mainContainerName {
 					continue
 				}
@@ -929,7 +930,7 @@ func TestParseDynamoTemplate_WorkerDriverLibPathAppend(t *testing.T) {
 	}
 }
 
-func componentContainerEnv(t *testing.T, obj *unstructured.Unstructured, componentName, containerName string) []interface{} {
+func componentContainerEnv(t *testing.T, obj *unstructured.Unstructured, componentName, containerName string) []any {
 	t.Helper()
 	podSpec := componentPodSpec(t, obj, componentName)
 	containers, _, err := unstructured.NestedSlice(podSpec, "containers")
@@ -937,7 +938,7 @@ func componentContainerEnv(t *testing.T, obj *unstructured.Unstructured, compone
 		t.Fatalf("read %s containers: %v", componentName, err)
 	}
 	for _, raw := range containers {
-		container, ok := raw.(map[string]interface{})
+		container, ok := raw.(map[string]any)
 		if !ok || container[keyName] != containerName {
 			continue
 		}
@@ -1555,6 +1556,41 @@ func TestResolveModel(t *testing.T) {
 	}
 }
 
+// TestResolveModelCacheStorageClass verifies the model-cache StorageClass
+// resolution precedence recipe > env > default (""): a per-accelerator
+// `inference-model-cache-storage-class` constraint wins over the catalog env
+// knob, the env knob wins over the compiled default, and a blank/absent
+// recipe value falls through. It also verifies the returned fromRecipe flag,
+// which checkStorageClassNodeCompatibility needs to target the right
+// remediation knob in its incompatibility error.
+func TestResolveModelCacheStorageClass(t *testing.T) {
+	scC := func(v string) recipe.Constraint {
+		return recipe.Constraint{Name: perfConstraintModelCacheStorageClass, Value: v}
+	}
+	tests := []struct {
+		name       string
+		ctx        *validators.Context
+		envVal     string
+		want       string
+		wantRecipe bool
+	}{
+		{"recipe wins over env", ctxWithPerfConstraints(scC("hyperdisk-balanced")), "standard-rwo", "hyperdisk-balanced", true},
+		{"recipe trimmed", ctxWithPerfConstraints(scC("  hyperdisk-balanced  ")), "", "hyperdisk-balanced", true},
+		{"no recipe → env", ctxWithPerfConstraints(), "gp3", "gp3", false},
+		{"blank recipe → env", ctxWithPerfConstraints(scC("   ")), "gp3", "gp3", false},
+		{"no recipe, no env → cluster default", ctxWithPerfConstraints(), "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envModelCacheStorageClass, tt.envVal)
+			got, gotRecipe := resolveModelCacheStorageClass(tt.ctx)
+			if got != tt.want || gotRecipe != tt.wantRecipe {
+				t.Errorf("resolveModelCacheStorageClass() = (%q, %v), want (%q, %v)", got, gotRecipe, tt.want, tt.wantRecipe)
+			}
+		})
+	}
+}
+
 // TestValidateModelID accepts well-formed Hugging Face model IDs and rejects
 // values with YAML/shell metacharacters that could break the Dynamo deploy YAML.
 func TestValidateModelID(t *testing.T) {
@@ -1838,6 +1874,170 @@ func TestEnsureHFTokenSecret(t *testing.T) {
 		}
 		if _, err := client.CoreV1().Secrets(ns).Get(context.Background(), hfTokenSecretName, metav1.GetOptions{}); err == nil {
 			t.Error("stale HF token secret should be deleted when HF_TOKEN is unset")
+		}
+	})
+}
+
+// TestEnsureNamespace covers namespace adoption: a fresh namespace is
+// created and labeled, an existing one is reused only if it carries our
+// ownership labels, and a create-race winner (AlreadyExists) is read back
+// and held to the same ownership check, including waiting out a winner
+// that's already terminating.
+func TestEnsureNamespace(t *testing.T) {
+	const ns = "aicr-inference-perf-deadbeef"
+	const component = labels.ValueInferencePerf
+
+	t.Run("creates a fresh namespace", func(t *testing.T) {
+		client := fake.NewClientset()
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Labels[labels.ManagedBy] != labels.ValueValidator || got.Labels[labels.Component] != component {
+			t.Errorf("created namespace labels = %v, want ManagedBy/Component set", got.Labels)
+		}
+		if !created {
+			t.Error("expected created=true for a brand new namespace")
+		}
+	})
+
+	t.Run("reuses an existing namespace it owns", func(t *testing.T) {
+		owned := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{
+			labels.ManagedBy: labels.ValueValidator, labels.Component: component,
+		}}}
+		client := fake.NewClientset(owned)
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Name != ns {
+			t.Errorf("got namespace %q, want %q", got.Name, ns)
+		}
+		if created {
+			t.Error("expected created=false for a reused namespace")
+		}
+	})
+
+	t.Run("refuses to adopt an existing namespace it doesn't own", func(t *testing.T) {
+		foreign := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+		client := fake.NewClientset(foreign)
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		if _, _, err := ensureNamespace(ctx, ns, component); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+			t.Errorf("got %v, want ErrCodeConflict", err)
+		}
+	})
+
+	t.Run("refuses to adopt an unowned create-race winner", func(t *testing.T) {
+		client := fake.NewClientset()
+		client.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			createAction, ok := action.(k8stesting.CreateAction)
+			obj, objOK := createAction.GetObject().(*v1.Namespace)
+			if !ok || !objOK || obj.Name != ns {
+				return false, nil, nil
+			}
+			// A concurrent, unrelated caller won the race to create ns first.
+			winner := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}
+			if err := client.Tracker().Add(winner); err != nil {
+				return true, nil, err
+			}
+			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
+		})
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		if _, _, err := ensureNamespace(ctx, ns, component); !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+			t.Errorf("got %v, want ErrCodeConflict", err)
+		}
+	})
+
+	t.Run("adopts an owned create-race winner without claiming to have created it", func(t *testing.T) {
+		client := fake.NewClientset()
+		client.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			createAction, ok := action.(k8stesting.CreateAction)
+			obj, objOK := createAction.GetObject().(*v1.Namespace)
+			if !ok || !objOK || obj.Name != ns {
+				return false, nil, nil
+			}
+			// A concurrent caller using the same labels won the race.
+			winner := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, Labels: map[string]string{
+				labels.ManagedBy: labels.ValueValidator, labels.Component: component,
+			}}}
+			if err := client.Tracker().Add(winner); err != nil {
+				return true, nil, err
+			}
+			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
+		})
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got.Name != ns {
+			t.Errorf("got namespace %q, want %q", got.Name, ns)
+		}
+		if created {
+			t.Error("expected created=false: a concurrent caller's Create won the race, not ours")
+		}
+	})
+
+	t.Run("waits for a terminating create-race winner then creates its own", func(t *testing.T) {
+		client := fake.NewClientset()
+		var seeded bool
+		client.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			createAction, ok := action.(k8stesting.CreateAction)
+			obj, objOK := createAction.GetObject().(*v1.Namespace)
+			if !ok || !objOK || obj.Name != ns || seeded {
+				return false, nil, nil // seeded: the winner is gone, let the retry Create through.
+			}
+			seeded = true
+			now := metav1.Now()
+			winner := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
+				Name: ns, DeletionTimestamp: &now, Finalizers: []string{"kubernetes"},
+			}}
+			if err := client.Tracker().Add(winner); err != nil {
+				return true, nil, err
+			}
+			return true, nil, apierrors.NewAlreadyExists(v1.Resource("namespaces"), ns)
+		})
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			_ = client.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
+		}()
+
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("expected the retry to succeed once the winner finished terminating, got: %v", err)
+		}
+		if got.DeletionTimestamp != nil {
+			t.Error("returned namespace is still terminating")
+		}
+		if !created {
+			t.Error("expected created=true: our own Create landed after the prior winner finished terminating")
+		}
+	})
+
+	t.Run("waits for a pre-existing terminating namespace then creates its own", func(t *testing.T) {
+		now := metav1.Now()
+		terminating := &v1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name: ns, DeletionTimestamp: &now, Finalizers: []string{"kubernetes"},
+		}}
+		client := fake.NewClientset(terminating)
+		go func() {
+			time.Sleep(50 * time.Millisecond)
+			_ = client.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
+		}()
+
+		ctx := &validators.Context{Ctx: context.Background(), Clientset: client}
+		got, created, err := ensureNamespace(ctx, ns, component)
+		if err != nil {
+			t.Fatalf("expected creation to succeed once the terminating namespace finished deleting, got: %v", err)
+		}
+		if got.Labels[labels.ManagedBy] != labels.ValueValidator || got.Labels[labels.Component] != component {
+			t.Errorf("created namespace labels = %v, want ManagedBy/Component set", got.Labels)
+		}
+		if !created {
+			t.Error("expected created=true: our own Create landed after the pre-existing namespace finished terminating")
 		}
 	})
 }
@@ -3153,14 +3353,14 @@ func TestApplyWorkerClaimTemplate_VersionDispatch(t *testing.T) {
 			if !found || len(requests) != 1 {
 				t.Fatalf("spec.spec.devices.requests = %v (found=%t), want exactly one request", requests, found)
 			}
-			req := requests[0].(map[string]interface{})
+			req := requests[0].(map[string]any)
 			_, hasExactly := req["exactly"]
 			if hasExactly != tt.wantExactly {
 				t.Errorf("request has exactly wrapper = %t, want %t (version %s)", hasExactly, tt.wantExactly, effective)
 			}
 			fields := req
 			if tt.wantExactly {
-				fields = req["exactly"].(map[string]interface{})
+				fields = req["exactly"].(map[string]any)
 			}
 			if fields["deviceClassName"] != "gpu.nvidia.com" {
 				t.Errorf("deviceClassName = %v, want gpu.nvidia.com", fields["deviceClassName"])

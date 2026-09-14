@@ -32,6 +32,9 @@ spec:
     rdma:
       enabled: {{ $v.driver.rdma.enabled }}
       useHostMofed: {{ $v.driver.rdma.useHostMofed }}
+{{- with $v.driver.manager }}
+    manager: {{ . | toYaml | nindent 6 }}
+{{- end }}
   cdi:
     enabled: {{ $v.cdi.enabled }}
     default: {{ $v.cdi.default }}

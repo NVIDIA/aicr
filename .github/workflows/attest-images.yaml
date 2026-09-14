@@ -12,8 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Reusable workflow that generates SLSA build-provenance + SBOM attestations
-# for the released container images.
+# Reusable workflow that generates SLSA build-provenance, CycloneDX SBOM and
+# OpenVEX attestations for the released container images. Provenance lands on
+# the multi-platform index digest; the SBOM and the VEX land on each platform
+# manifest digest (see .github/actions/sbom-and-attest for the subject policy).
 #
 # Running attestation generation from a *reusable* workflow is what makes the
 # provenance SLSA Build Level 3: the attestation's builder identity becomes this

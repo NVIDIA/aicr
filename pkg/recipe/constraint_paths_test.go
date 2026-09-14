@@ -281,7 +281,7 @@ func TestPrepareAndValidate_RejectsBadConstraintPath(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			rec := &RecipeResult{Kind: RecipeResultKind, APIVersion: RecipeAPIVersion}
+			rec := &RecipeResult{Kind: RecipeResultKind, APIVersion: RecipeResultAPIVersion}
 			tt.mutate(rec)
 
 			// The exported entry point carries no source, so no file prefix.

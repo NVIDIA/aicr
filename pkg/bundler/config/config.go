@@ -16,10 +16,12 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
 	"sort"
 	"strings"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
 	corev1 "k8s.io/api/core/v1"
@@ -139,6 +141,56 @@ func ValidateHTTPSURL(label, raw string) error {
 	return nil
 }
 
+// NodeLabel is a single Kubernetes node label used as an exact-match node
+// selector. The GPU Operator DRA eviction contract needs both parts for the
+// DRA kubelet plugin selector, but passes only Key to the Driver Manager.
+type NodeLabel struct {
+	Key   string
+	Value string
+}
+
+// String returns the label in key=value form.
+func (l NodeLabel) String() string {
+	return l.Key + "=" + l.Value
+}
+
+// Validate reports whether the label has a Kubernetes-qualified key and a
+// valid label value.
+func (l NodeLabel) Validate() error {
+	if errs := validation.IsQualifiedName(l.Key); len(errs) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid node label key %q: %s", l.Key, strings.Join(errs, "; ")))
+	}
+	if errs := validation.IsValidLabelValue(l.Value); len(errs) > 0 {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid node label value %q: %s", l.Value, strings.Join(errs, "; ")))
+	}
+	return nil
+}
+
+// ParseNodeLabel parses and validates a single node label in key=value form.
+func ParseNodeLabel(raw string) (NodeLabel, error) {
+	parts := strings.SplitN(raw, "=", 2)
+	if len(parts) != 2 {
+		return NodeLabel{}, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("invalid node label %q: expected key=value", raw))
+	}
+	label := NodeLabel{Key: parts[0], Value: parts[1]}
+	if err := label.Validate(); err != nil {
+		return NodeLabel{}, err
+	}
+	return label, nil
+}
+
+// DefaultDRAEvictionNodeLabel returns the node label NVIDIA documents for
+// coordinating DRA kubelet-plugin eviction with GPU Operator driver upgrades.
+func DefaultDRAEvictionNodeLabel() NodeLabel {
+	return NodeLabel{
+		Key:   defaults.DRAEvictionNodeLabelKey,
+		Value: defaults.DRAEvictionNodeLabelValue,
+	}
+}
+
 // Config provides immutable configuration options for bundlers.
 // All fields are read-only after creation to prevent accidental modifications.
 // Use Clone() to create a modified copy or Merge() to combine configurations.
@@ -221,6 +273,11 @@ type Config struct {
 	// sharedStorageClass is the Kubernetes StorageClass name to inject into
 	// shared filesystem PVCs at bundle time.
 	sharedStorageClass string
+
+	// draEvictionNodeLabel is the shared label used to place the DRA kubelet
+	// plugin and tell GPU Operator's Driver Manager which pods to evict during
+	// driver upgrades. It is injected only when both components are enabled.
+	draEvictionNodeLabel NodeLabel
 
 	// vendorCharts pulls upstream Helm chart bytes into the bundle at bundle
 	// time so the resulting artifact is self-contained and air-gap
@@ -326,9 +383,7 @@ func (c *Config) ValueOverrides() map[string]map[string]string {
 	overrides := make(map[string]map[string]string, len(c.valueOverrides))
 	for bundler, paths := range c.valueOverrides {
 		overrides[bundler] = make(map[string]string, len(paths))
-		for path, value := range paths {
-			overrides[bundler][path] = value
-		}
+		maps.Copy(overrides[bundler], paths)
 	}
 	return overrides
 }
@@ -357,9 +412,7 @@ func (c *Config) SystemNodeSelector() map[string]string {
 		return nil
 	}
 	result := make(map[string]string, len(c.systemNodeSelector))
-	for k, v := range c.systemNodeSelector {
-		result[k] = v
-	}
+	maps.Copy(result, c.systemNodeSelector)
 	return result
 }
 
@@ -379,9 +432,7 @@ func (c *Config) AcceleratedNodeSelector() map[string]string {
 		return nil
 	}
 	result := make(map[string]string, len(c.acceleratedNodeSelector))
-	for k, v := range c.acceleratedNodeSelector {
-		result[k] = v
-	}
+	maps.Copy(result, c.acceleratedNodeSelector)
 	return result
 }
 
@@ -426,9 +477,7 @@ func (c *Config) WorkloadSelector() map[string]string {
 		return nil
 	}
 	result := make(map[string]string, len(c.workloadSelector))
-	for k, v := range c.workloadSelector {
-		result[k] = v
-	}
+	maps.Copy(result, c.workloadSelector)
 	return result
 }
 
@@ -482,6 +531,16 @@ func (c *Config) StorageClass() string {
 // shared filesystem PVCs at bundle time, or empty string if unset.
 func (c *Config) SharedStorageClass() string {
 	return c.sharedStorageClass
+}
+
+// DRAEvictionNodeLabel returns the label shared by the DRA kubelet plugin
+// selector and GPU Operator Driver Manager eviction configuration.
+//
+// The zero NodeLabel means the eviction contract was not requested: AICR then
+// injects neither half and the DRA kubelet plugin carries no AICR-introduced
+// placement requirement. Configuring a label opts in (see issue #2469).
+func (c *Config) DRAEvictionNodeLabel() NodeLabel {
+	return c.draEvictionNodeLabel
 }
 
 // VendorCharts reports whether upstream Helm chart bytes should be pulled
@@ -549,7 +608,12 @@ func (c *Config) Bundlers() []string {
 
 // Validate checks if the Config has valid settings.
 func (c *Config) Validate() error {
-	return nil
+	// The zero label means the DRA eviction contract was not requested, which
+	// is the default (issue #2469). Only a configured label is validated.
+	if c.draEvictionNodeLabel == (NodeLabel{}) {
+		return nil
+	}
+	return c.draEvictionNodeLabel.Validate()
 }
 
 type Option func(*Config)
@@ -593,9 +657,7 @@ func WithValueOverrides(overrides map[string]map[string]string) Option {
 			if c.valueOverrides[bundler] == nil {
 				c.valueOverrides[bundler] = make(map[string]string)
 			}
-			for path, value := range paths {
-				c.valueOverrides[bundler][path] = value
-			}
+			maps.Copy(c.valueOverrides[bundler], paths)
 		}
 	}
 }
@@ -607,9 +669,7 @@ func WithSystemNodeSelector(selector map[string]string) Option {
 			return
 		}
 		c.systemNodeSelector = make(map[string]string, len(selector))
-		for k, v := range selector {
-			c.systemNodeSelector[k] = v
-		}
+		maps.Copy(c.systemNodeSelector, selector)
 	}
 }
 
@@ -631,9 +691,7 @@ func WithAcceleratedNodeSelector(selector map[string]string) Option {
 			return
 		}
 		c.acceleratedNodeSelector = make(map[string]string, len(selector))
-		for k, v := range selector {
-			c.acceleratedNodeSelector[k] = v
-		}
+		maps.Copy(c.acceleratedNodeSelector, selector)
 	}
 }
 
@@ -688,9 +746,7 @@ func WithWorkloadSelector(selector map[string]string) Option {
 			return
 		}
 		c.workloadSelector = make(map[string]string, len(selector))
-		for k, v := range selector {
-			c.workloadSelector[k] = v
-		}
+		maps.Copy(c.workloadSelector, selector)
 	}
 }
 
@@ -757,6 +813,17 @@ func WithStorageClass(storageClass string) Option {
 func WithSharedStorageClass(storageClass string) Option {
 	return func(c *Config) {
 		c.sharedStorageClass = storageClass
+	}
+}
+
+// WithDRAEvictionNodeLabel sets the node label used to coordinate DRA
+// kubelet-plugin eviction with GPU Operator driver upgrades.
+func WithDRAEvictionNodeLabel(label NodeLabel) Option {
+	return func(c *Config) {
+		if label == (NodeLabel{}) {
+			return
+		}
+		c.draEvictionNodeLabel = label
 	}
 }
 

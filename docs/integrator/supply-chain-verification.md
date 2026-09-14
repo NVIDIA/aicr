@@ -75,16 +75,30 @@ has a fixed subject:
 | Metadata | Predicate type | Subject | Retrieved with |
 |----------|----------------|---------|----------------|
 | SLSA build provenance | `https://slsa.dev/provenance/v1` | multi-platform index digest | `gh attestation verify` |
-| SPDX SBOM | `https://spdx.dev/Document` | per-platform manifest digest | `cosign verify-attestation --type spdxjson` |
-| OpenVEX | `https://openvex.dev/ns` | multi-platform index digest | `cosign verify-attestation --type openvex` |
+| CycloneDX SBOM | `https://cyclonedx.org/bom` | per-platform manifest digest | `cosign verify-attestation --type cyclonedx` |
+| OpenVEX | `https://openvex.dev/ns` | per-platform manifest digest | `cosign verify-attestation --type openvex` |
 | Third-party source (`aiperf-bench` only) | `application/vnd.nvidia.aicr.source.v1+tar` | multi-platform index digest | `oras pull` — see [Third-Party Source Code](#third-party-source-code) |
 
 The subjects differ because the claims differ. Provenance describes the build
-that produced the whole release image, and the VEX document is a single,
-platform-independent triage record keyed by product PURL, so both belong on the
-index. An SBOM describes exactly one root filesystem, so each platform's SBOM is
-attached to that platform's own manifest digest; querying the index digest for
-an SBOM returns nothing.
+that produced the whole release image, so it belongs on the index. The SBOM and
+the VEX each describe exactly one root filesystem, so both are attached to that
+platform's own manifest digest; querying the index digest for either returns
+nothing. That also matches where they are looked for: a consumer that resolved
+`linux/amd64` enumerates referrers on the child manifest, and evidence on the
+index is invisible from there.
+
+The two per-platform documents are deliberately in different formats. A
+referrer descriptor carries only `digest`, `mediaType`, `size`, `artifactType`,
+and `annotations`, with no name, so two CycloneDX predicates on one manifest
+would be indistinguishable in a listing without fetching every payload.
+Publishing the VEX as OpenVEX gives the two documents distinct predicate types,
+so the listing is self-describing.
+
+Read the two documents for what they each claim. The SBOM is an inventory of
+what is in the image. The VEX is a record of the CVEs AICR has triaged and
+dismissed, so an **empty VEX means "no exceptions asserted", not "no
+vulnerabilities"**, and most images ship an empty one. See
+[Using the published VEX document](#using-the-published-vex-document).
 
 Resolve the digests first. `crane digest` without `--platform` returns the index
 digest; with `--platform` it returns that platform's child manifest digest.
@@ -127,26 +141,35 @@ gh attestation verify "oci://${IMAGE}@${DIGEST}" \
   --source-ref "refs/tags/${TAG}" \
   --bundle-from-oci
 
-# 2. SPDX SBOM for one platform (per-platform manifest digest)
-sbom_amd64=$(cosign verify-attestation --type spdxjson \
+# Both documents below are per-platform, so name the files per-platform too.
+# Re-running these for linux/arm64 with a fixed name would overwrite the amd64
+# evidence, or leave arm64 evidence under a name that claims to be amd64.
+PLATFORM=linux-amd64
+DIGEST_PLATFORM="${DIGEST_AMD64}"
+
+# 2. CycloneDX SBOM for one platform (per-platform manifest digest)
+sbom=$(cosign verify-attestation --type cyclonedx \
   --certificate-oidc-issuer "${AICR_ISSUER}" \
   --certificate-identity "${AICR_SIGNER}" \
-  "${IMAGE}@${DIGEST_AMD64}" \
+  "${IMAGE}@${DIGEST_PLATFORM}" \
   | jq -r '.payload' | base64 -d | jq '.predicate') \
-  && printf '%s\n' "${sbom_amd64}" > sbom-linux-amd64.spdx.json
+  && printf '%s\n' "${sbom}" > "sbom-${PLATFORM}.cdx.json"
 
-# 3. OpenVEX vulnerability triage (index digest)
+# 3. OpenVEX vulnerability triage (same per-platform manifest digest)
 openvex=$(cosign verify-attestation --type openvex \
   --certificate-oidc-issuer "${AICR_ISSUER}" \
   --certificate-identity "${AICR_SIGNER}" \
-  "${IMAGE}@${DIGEST}" \
+  "${IMAGE}@${DIGEST_PLATFORM}" \
   | jq -r '.payload' | base64 -d | jq '.predicate') \
-  && printf '%s\n' "${openvex}" > aicr-openvex.json
+  && printf '%s\n' "${openvex}" > "aicr-openvex-${PLATFORM}.json"
 ```
 
 Each of the seven released images (`aicr`, `aicrd`, `aicr-gate`, and the four
 `aicr-validators/*` images) carries the same three kinds; substitute the image
-name in `IMAGE` and re-resolve the digests.
+name in `IMAGE` and re-resolve the digests. Commands 2 and 3 retrieve the
+`linux/amd64` evidence; repeat them with `PLATFORM=linux-arm64` and
+`DIGEST_PLATFORM="${DIGEST_ARM64}"` for the other platform, which carries its
+own SBOM and its own digest-bound VEX under its own filenames.
 
 **Why `--bundle-from-oci`.** `gh attestation verify` fetches bundles from
 GitHub's attestations API unless told otherwise, so the default form would
@@ -174,7 +197,7 @@ component reaches the image.
 
 | Image | Third-party components | Where the source is |
 |-------|------------------------|---------------------|
-| `aicr`, `aicrd`, `aicr-gate`, `aicr-validators/{conformance,deployment,performance}` | Go modules compiled into the binary | The GitHub release source archive for the matching tag. Builds run with `-mod=vendor`, so `vendor/` in that archive is exactly the source that ships. |
+| `aicr`, `aicrd`, `aicr-gate`, `aicr-validators/{conformance,deployment,performance}` | Go modules compiled into the binary | The public Go module proxy, at the exact versions pinned in the `go.mod`/`go.sum` of the GitHub release source archive for the matching tag. Modules are immutable and `sum.golang.org` is append-only, so those coordinates stay fetchable and each one's content is verifiable against the `go.sum` entry. |
 | `aicr-validators/aiperf-bench` | Python packages installed from wheels | An OCI referrer on the image, retrieved with the commands below. |
 | all | base image contents | Provided by NVIDIA with `nvcr.io/nvidia/distroless/*` under that image's own approval. |
 
@@ -232,7 +255,8 @@ NVIDIA package and its source is at [ai-dynamo/aiperf](https://github.com/ai-dyn
 archive's `README.txt` records this too.
 
 Only `aiperf-bench` carries this referrer. The other six images need none: their
-dependencies are vendored, so the release source archive already contains them.
+dependencies are Go modules, named exactly by the `go.sum` in the release source
+archive and fetchable from the public module proxy at those coordinates.
 
 **Scope of the correspondence.** The archive is resolved from the same
 `requirements.txt` the image installs, so both derive from one input. Two gaps
@@ -265,16 +289,49 @@ with the reachability evidence behind the call. Feeding it to your scanner
 suppresses exactly the findings AICR's own release scan suppresses, so a
 downstream gate does not re-flag CVEs that have already been triaged.
 
+Every statement in the published document names one product,
+`pkg:oci/<image>@sha256:<platform-manifest-digest>`, so the claim binds to the
+exact manifest it was made about. The committed
+[`.openvex.json`](https://github.com/NVIDIA/aicr/blob/main/.openvex.json) is the
+reviewed source of truth and carries bare `pkg:oci/<image>` products; what the
+release publishes is a digest-bound projection of it, generated at publication
+time because the digest does not exist before the image is built. Statuses,
+justifications, impact statements and subcomponents are published as curated:
+nothing is translated or dropped.
+
+Exactly one VEX document exists per platform manifest. A retriage replaces the
+current document rather than adding a revision, so a referrers listing never
+requires a consumer to decide which of several VEX documents is current.
+
+Every released image carries a VEX document, including the ones with nothing to
+say. Where AICR has triaged no CVE for an image, its document verifies normally
+and its `statements` array is empty. Most released images are in that state at
+any given time. Which ones is a property of the release you are verifying, not
+of this page: read the document you retrieved rather than relying on a count
+here, and treat
+[`.openvex.json`](https://github.com/NVIDIA/aicr/blob/main/.openvex.json) at the
+release tag as the reviewed record of what was claimed.
+
+**An empty VEX means "no exceptions asserted", not "no vulnerabilities".** It is
+a statement about what AICR has said, not about what a scanner would find. Do
+not read one as a clean bill of health, and do not read the absence of a
+statement about a particular CVE as a claim that the image is unaffected by it:
+absence means AICR has not spoken to that CVE, nothing more. The VEX is a filter
+you apply to a scan, never a substitute for running one. What an empty document
+does buy you is that it is distinguishable from a *missing* attestation, which
+would mean the evidence never reached the registry.
+
 ```shell
-# Grype: apply the VEX document to a scan of the same image
-grype "${IMAGE}@${DIGEST}" --vex aicr-openvex.json --only-fixed --fail-on high
+# Grype: apply the VEX document to a scan of the same platform manifest
+grype "${IMAGE}@${DIGEST_AMD64}" --vex aicr-openvex.json --only-fixed --fail-on high
 
 # Trivy: same document, same effect
-trivy image --vex aicr-openvex.json "${IMAGE}@${DIGEST}"
+trivy image --vex aicr-openvex.json "${IMAGE}@${DIGEST_AMD64}"
 ```
 
 Statements apply only to products whose PURL matches, so passing the document to
-a scan of an unrelated image is a no-op rather than a blanket suppression. Treat
+a scan of an unrelated image (or of the other platform) is a no-op rather than
+a blanket suppression. Treat
 the document as evidence, not as an instruction: read the `impact_statement` for
 any CVE your policy cares about and decide whether AICR's reasoning holds for
 your deployment before adopting the suppression.
@@ -324,7 +381,7 @@ gh attestation verify oci://${IMAGE_DIGEST} --repo NVIDIA/aicr --signer-workflow
 #
 # Attestations:
 #   • Build provenance (SLSA v1.0)
-# (the SPDX SBOM is a separate Cosign attestation — see Verifying the SBOM)
+# (the CycloneDX SBOM is a separate Cosign attestation — see Verifying the SBOM)
 ```
 
 **Method 2: Extract and inspect provenance**
@@ -400,9 +457,33 @@ rekor-cli get --uuid <entry-uuid>
 
 ## Verifying the SBOM
 
-AICR provides **SBOMs in SPDX v2.3 JSON format**: binary SBOMs as separate GoReleaser
-artifacts (generated alongside CLI binaries) and container image SBOMs attached
-as Cosign attestations (generated by Syft/Anchore).
+AICR provides SBOMs in two places and two formats. Binary SBOMs ship as
+separate GoReleaser artifacts alongside the CLI binaries, in **SPDX v2.3 JSON**.
+Container image SBOMs are attached as Cosign attestations, in **CycloneDX 1.6
+JSON**, one per platform manifest. Both are generated by Syft/Anchore.
+
+**Migrating from the SPDX container SBOM attestation.** The container image
+SBOM has had three shapes, and an already-released image keeps whichever one it
+was published with. Verifying across a boundary means matching both the
+predicate type and the subject to the release:
+
+| Releases | Predicate type | Subject | Retrieved from |
+|----------|----------------|---------|----------------|
+| Through v0.18.x | `--type spdxjson` | multi-platform **index** digest | legacy `.att` tag, not the referrers path |
+| v0.19.0 through the release before this change | `--type spdxjson` | **per-platform** manifest digest | OCI referrer ([#1957](https://github.com/NVIDIA/aicr/issues/1957)) |
+| This change onward | `--type cyclonedx` | **per-platform** manifest digest | OCI referrer |
+
+So the current change alters the predicate type only; the subject moved one
+release earlier, in v0.19.0. Querying a v0.18.x image on a platform digest, or a
+v0.19.0+ image on the index digest, reports valid evidence as missing.
+
+To migrate a current verification, change `--type spdxjson` to
+`--type cyclonedx` in any `cosign verify-attestation` call or admission policy,
+and move field queries from the SPDX shape (`.packages[]`, `.versionInfo`,
+`.licenseDeclared`, `.creationInfo.created`) to the CycloneDX shape
+(`.components[]`, `.version`, `.licenses[]`, `.metadata.timestamp`); see
+[SBOM format](#sbom-format) for both. The binary SBOM assets are unaffected and
+stay SPDX.
 
 ### Binary SBOM (CLI)
 
@@ -448,7 +529,7 @@ single retrieval path. Image metadata lives in the registry for the same reason.
 
 ### Container image SBOM
 
-Container image SBOMs are attached **per platform**: each platform's SPDX
+Container image SBOMs are attached **per platform**: each platform's CycloneDX
 document is an attestation on that platform's manifest digest, not on the
 multi-platform index digest. Resolve the platform digest with
 `crane digest --platform` (see [Unified Metadata Retrieval](#unified-metadata-retrieval))
@@ -465,23 +546,23 @@ export DIGEST_API_AMD64=$(crane digest --platform linux/amd64 "${IMAGE_API}@${DI
 
 # Method 1: Using Cosign (extracts attestation) - uses the per-platform digest
 sbom=$(cosign verify-attestation \
-  --type spdxjson \
+  --type cyclonedx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
   ${IMAGE_API}@${DIGEST_API_AMD64} | \
   jq -r '.payload' | base64 -d | jq '.predicate') \
   && printf '%s\n' "${sbom}" > sbom.json
 
-# Method 2: GitHub CLI (build provenance only; the SPDX SBOM needs Method 1's Cosign flow).
+# Method 2: GitHub CLI (build provenance only; the CycloneDX SBOM needs Method 1's Cosign flow).
 # Without --bundle-from-oci this reads GitHub's attestations API, not the registry referrer.
 gh attestation verify oci://${IMAGE_API_DIGEST} --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}" --format json
 ```
 
 ### SBOM format
 
-Both binary and container SBOMs are SPDX v2.3 JSON. A representative
-package entry (the full document lists every Go module and its transitive
-dependencies, licenses, and package URLs):
+Binary SBOMs are SPDX v2.3 JSON. A representative package entry (the full
+document lists every Go module and its transitive dependencies, licenses, and
+package URLs):
 
 ```json
 {
@@ -506,21 +587,56 @@ dependencies, licenses, and package URLs):
 }
 ```
 
+Container image SBOMs are CycloneDX 1.6 JSON. The same information lives under
+different keys, so queries written against one format do not run against the
+other:
+
+```json
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "metadata": {
+    "tools": {"components": [{"name": "syft", "version": "1.45.1", "type": "application"}]},
+    "component": {"type": "container", "name": "ghcr.io/nvidia/aicr"}
+  },
+  "components": [
+    {
+      "type": "library",
+      "name": "github.com/NVIDIA/aicr",
+      "version": "v0.8.12",
+      "purl": "pkg:golang/github.com/NVIDIA/aicr@v0.8.12",
+      "licenses": [{"license": {"id": "Apache-2.0"}}]
+    }
+  ]
+}
+```
+
+The document carries no `vulnerabilities` key. Scan results are deliberately not
+published: anyone holding the image can derive them, and they go stale the
+moment a vulnerability database updates, whereas the image does not change. The
+one thing that cannot be derived, the triage judgment about whether a finding is
+reachable, is published as the OpenVEX document instead.
+
 ### SBOM use cases
+
+Against a container image SBOM (CycloneDX):
 
 ```shell
 # Vulnerability scanning — feed the SBOM to Grype, Anchore, or Snyk
 grype sbom:./sbom.json
 
 # License compliance — list declared licenses
-jq -r '.packages[] | select(.licenseDeclared != "NOASSERTION") | "\(.name) \(.versionInfo) \(.licenseDeclared)"' sbom.json
+jq -r '.components[] | select(.licenses != null) | "\(.name) \(.version) \(.licenses[0].license.id // .licenses[0].license.name)"' sbom.json
 
 # Dependency tracking — search for a specific component
-jq '.packages[] | select(.name | contains("vulnerable-lib"))' sbom.json
+jq '.components[] | select(.name | contains("vulnerable-lib"))' sbom.json
 
 # Audit trail — the SBOM timestamp proves when components were included
-jq '.creationInfo.created' sbom.json
+jq '.metadata.timestamp' sbom.json
 ```
+
+Against a binary SBOM (SPDX), the same queries read `.packages[]`,
+`.licenseDeclared`, `.versionInfo`, and `.creationInfo.created`.
 
 ## Verifying Image and Bundle Attestations
 
@@ -554,24 +670,24 @@ set -o pipefail
 # resolved from the pinned index rather than from the mutable tag.
 export DIGEST_AMD64=$(crane digest --platform linux/amd64 "${IMAGE}@${DIGEST}")
 cosign verify-attestation \
-  --type spdxjson \
+  --type cyclonedx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
   ${IMAGE}@${DIGEST_AMD64}
 
 # Extract and view the SBOM predicate
 cosign verify-attestation \
-  --type spdxjson \
+  --type cyclonedx \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
   ${IMAGE}@${DIGEST_AMD64} | jq -r '.payload' | base64 -d | jq '.predicate'
 
-# Verify the OpenVEX attestation on the index digest
+# Verify the OpenVEX attestation on the same per-platform manifest digest
 openvex=$(cosign verify-attestation \
   --type openvex \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
   --certificate-identity-regexp '^https://github\.com/NVIDIA/aicr/\.github/workflows/attest-images\.yaml@refs/tags/.+$' \
-  ${IMAGE_DIGEST} | jq -r '.payload' | base64 -d | jq '.predicate') \
+  ${IMAGE}@${DIGEST_AMD64} | jq -r '.payload' | base64 -d | jq '.predicate') \
   && printf '%s\n' "${openvex}" > aicr-openvex.json
 ```
 
@@ -663,6 +779,69 @@ Pin every policy to AICR's release identity:
 > index digest. Until that gap is understood, enforce AICR images with the
 > Sigstore Policy Controller policy below. Tracking:
 > [#1537](https://github.com/NVIDIA/aicr/issues/1537).
+
+### Kyverno and per-platform evidence
+
+The caveat above concerns AICR's **GitHub Artifact Attestation** on the index
+digest. The results below are a separate measurement: `cosign attest` output on
+**platform manifests**, read with `type: SigstoreBundle`. Different producer,
+different subject, and both results hold.
+
+Measured on kind with Kubernetes v1.34.0, Kyverno v1.19.0 and cosign v3.0.6.
+
+A deployment manifest names a tag, not a digest. Kyverno's `mutateDigest` is on
+by default and resolves that tag to the **index** digest, which is where
+provenance lives and where the SBOM and the VEX do not. Four policies against
+one image:
+
+| Policy | Subject it evaluates | Result |
+|--------|----------------------|--------|
+| provenance only | index digest | admitted |
+| SBOM only | index digest | denied |
+| SBOM + VEX + provenance | platform manifest | denied |
+| provenance only | platform manifest | denied |
+
+No single rule spans both digests. So for a normal tag-naming workload, SLSA
+provenance is enforceable at admission and the CycloneDX SBOM and the OpenVEX
+document are not. This follows from where the evidence is attached, not from how
+the policy is written, so a better policy will not recover it.
+
+The completeness property does work. Listing several `attestations[]` entries
+requires all of them, in both `ClusterPolicy` and `ImageValidatingPolicy`:
+deleting the VEX referrer and re-running a SBOM + VEX policy denies in both
+engines. It is only the cross-digest span that fails.
+
+Three ways to live with this, none of them free:
+
+* **Attach every predicate type to whichever digest you gate on.** This makes
+  one rule sufficient, at the cost of honesty in the SBOM: a single index-level
+  SBOM cannot describe two different root filesystems.
+* **Split the gate.** Enforce provenance at admission, and the SBOM and VEX at
+  build or promotion time where the platform digest is already known. This keeps
+  every document truthful but moves part of the check off the admission path.
+* **Pin platform digests in pod specs.** One rule then covers everything, and
+  you give up multi-arch scheduling.
+
+### Kyverno attestation payload limits
+
+Kyverno loads the whole attestation payload into the policy evaluation context
+*before* any condition runs, bounded by `maxContextSize` in Kyverno's ConfigMap.
+The default is 2 MiB and exists as a denial-of-service control:
+
+```text
+context size limit exceeded: 5216263 bytes exceeds limit of 2097152 bytes
+```
+
+This is not about condition complexity. A condition reading only `bomFormat`
+fails exactly as a condition walking 9,003 components does, because neither has
+run yet. Measured with a synthetically padded SBOM: 1.2 MB admitted, 5.5 MB
+denied, and the same 5.5 MB admitted after setting `maxContextSize: 32Mi`.
+
+AICR's own image SBOMs are well under the default, but real application-image
+SBOMs pass 2 MiB routinely, and the error names neither the predicate nor the
+condition that triggered it. Treat raising `maxContextSize` as a prerequisite
+for deploying SBOM-reading policies rather than as tuning to reach for after a
+failure.
 
 ### Sigstore Policy Controller
 
@@ -1053,7 +1232,7 @@ git checkout --detach d4f7bef460dc8d1ef7ea0334a6935c0038de88e4
 # never from `git tag --list`: an attacker-pushed or never-signed tag present in
 # the repository would be pre-suppressed. The workflow example below shows the
 # query; run it once ahead of the monitor.
-GOFLAGS="-mod=vendor" go run ./tools/rekor-monitor \
+go run ./tools/rekor-monitor \
   --file checkpoint_v2.txt \
   --cert-subject '^https://github\.com/myorg/myrepo/\.github/workflows/release\.yaml@refs/tags/.*$' \
   --cert-issuer '^https://token\.actions\.githubusercontent\.com$' \
@@ -1215,7 +1394,7 @@ jobs:
           # Without --known-tags-file every legitimate release alerts, and the
           # tool holds the cursor on a match, so the first real release after
           # baseline would suspend the scan until triaged.
-          GOFLAGS="-mod=vendor" go run ./tools/rekor-monitor \
+          go run ./tools/rekor-monitor \
             --file checkpoint_v2.txt \
             --restore-zip checkpoint.zip \
             --cert-subject "${CERT_SUBJECT}" \
@@ -1427,6 +1606,8 @@ covers.
 - [SLSA Framework](https://slsa.dev/)
 - [GitHub Actions SLSA Generation](https://github.com/slsa-framework/slsa-github-generator)
 - [SPDX Specification](https://spdx.dev/)
+- [CycloneDX Specification](https://cyclonedx.org/specification/overview/)
+- [OpenVEX Specification](https://github.com/openvex/spec)
 - [Sigstore Cosign](https://docs.sigstore.dev/cosign/signing/overview/)
 - [Sigstore Policy Controller](https://docs.sigstore.dev/policy-controller/overview/)
 - [Kyverno Image Verification](https://kyverno.io/docs/policy-types/cluster-policy/verify-images/overview/)

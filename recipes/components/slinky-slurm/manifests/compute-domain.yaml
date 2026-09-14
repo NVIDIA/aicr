@@ -29,6 +29,21 @@ metadata:
   name: slinky-slurm-imex
   namespace: {{ .Release.Namespace }}
 spec:
+  # Pinned explicitly rather than relying on the CRD default. GPU Operator
+  # v26.7.0 ships its own copy of resource.nvidia.com_computedomains.yaml in
+  # crds/, and that copy is a stale snapshot: it lists numNodes as REQUIRED
+  # and carries no `default: 0`, where the DRA driver chart's copy makes it
+  # optional with a default. Helm installs crds/ only when the CRD is absent
+  # and never upgrades it, and gpu-operator is ordered before
+  # nvidia-dra-driver-gpu, so on a fresh cluster the operator's stricter copy
+  # wins and a CR omitting numNodes is rejected with "spec.numNodes: Required
+  # value". Setting it here is valid under both copies.
+  #
+  # 0 is the correct value, not merely a placeholder: with
+  # IMEXDaemonsWithDNSNames=true (the DRA driver default) each IMEX daemon
+  # starts immediately instead of waiting for a quorum. Matches
+  # buildComputeDomain() in validators/performance/nccl_all_reduce_bw_constraint.go.
+  numNodes: 0
   channel:
     allocationMode: All
     resourceClaimTemplate:

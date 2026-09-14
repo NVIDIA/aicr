@@ -68,7 +68,7 @@ runs:
         # config is missing. The `-s` check treats an exit-0-but-empty-file result
         # as a failure so a truncated write is retried, not silently exported.
         for n in 1 2 3; do
-          GOFLAGS=-mod=vendor go run ./cmd/aicr trust update --emit-signing-config "${SC}" && [ -s "${SC}" ] && break
+          go run ./cmd/aicr trust update --emit-signing-config "${SC}" && [ -s "${SC}" ] && break
           if [ "$n" -lt 3 ]; then
             echo "trust update attempt $n failed; retrying" >&2
             sleep $((n * 5))

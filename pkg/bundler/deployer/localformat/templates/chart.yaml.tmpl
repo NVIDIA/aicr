@@ -16,5 +16,8 @@ apiVersion: v2
 name: {{ .Name }}
 description: Generated wrapper chart for {{ .Parent }} local content.
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: {{ q .AICRVersion }}
+appVersion: {{ q .ComponentVersion }}
+annotations:
+  aicr.run/component-version: {{ q .ComponentVersion }}
+  aicr.run/generated-by: {{ q .AICRVersion }}

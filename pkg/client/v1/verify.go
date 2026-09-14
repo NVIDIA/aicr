@@ -16,6 +16,7 @@ package aicr
 
 import (
 	"context"
+	"time"
 
 	bundleverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -127,6 +128,20 @@ type BundleVerifyOptions struct {
 	// Insecure relative to the default: with no transparency log there is
 	// no trusted timestamp proving when the signature was made.
 	IgnoreTLog bool
+
+	// Timeout overrides the facade's operation cap for this call.
+	//
+	// Nil -- the zero value -- keeps defaults.VerifyOperationTimeout, so a
+	// caller who never considered this gets today's behavior. A pointer to 0
+	// imposes NO facade cap and runs under the caller's context unchanged. A
+	// positive value sets an explicit cap.
+	//
+	// The pointer exists to make 0 mean "uncapped" rather than "default",
+	// matching WithValidationTimeout(0). A plain duration cannot distinguish
+	// unset from zero, so it would have had to spell uncapped some other way --
+	// and a caller who learned 0-means-uncapped from ValidateState would then
+	// get the opposite here, silently capped when they asked for unbounded.
+	Timeout *time.Duration
 }
 
 // BundleVerifyReport is the per-check outcome of bundle verification.
@@ -203,7 +218,7 @@ func (c *Client) VerifyBundle(ctx context.Context, bundleDir string, opts Bundle
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, defaults.VerifyOperationTimeout)
+	ctx, cancel := applyVerifyCap(ctx, opts.Timeout)
 	defer cancel()
 
 	report, err := bundleverifier.Verify(ctx, bundleDir, &bundleverifier.VerifyOptions{
@@ -272,6 +287,20 @@ type EvidenceVerifyOptions struct {
 	// rewritten by the registry, so "verify this artifact at this tag" is
 	// not content-addressable.
 	AllowUnpinnedTag bool
+
+	// Timeout overrides the facade's operation cap for this call.
+	//
+	// Nil -- the zero value -- keeps defaults.VerifyOperationTimeout, so a
+	// caller who never considered this gets today's behavior. A pointer to 0
+	// imposes NO facade cap and runs under the caller's context unchanged. A
+	// positive value sets an explicit cap.
+	//
+	// The pointer exists to make 0 mean "uncapped" rather than "default",
+	// matching WithValidationTimeout(0). A plain duration cannot distinguish
+	// unset from zero, so it would have had to spell uncapped some other way --
+	// and a caller who learned 0-means-uncapped from ValidateState would then
+	// get the opposite here, silently capped when they asked for unbounded.
+	Timeout *time.Duration
 }
 
 // EvidenceVerification is the outcome of recipe-evidence bundle verification:
@@ -298,13 +327,18 @@ type EvidenceVerification = evverifier.VerifyResult
 // Unlike bundle verification this can reach the network: a pointer or OCI
 // input pulls the artifact from its registry.
 //
-// That makes one interaction worth knowing. The call is capped by
-// defaults.VerifyOperationTimeout, which is an unconditional ceiling rather
-// than a deadline-less fallback, so a slow registry can trip it even when the
+// That makes one interaction worth knowing. By default the call is capped by
+// defaults.VerifyOperationTimeout, so a slow registry can trip it even when the
 // caller's own context allowed longer. A cap breach returns an ERROR, not
 // EvidenceExitIncomplete — so a gate that distinguishes "could not check this"
 // from "checked it and it failed" must treat a context-deadline error as the
 // former, alongside the Incomplete verdict.
+//
+// Set EvidenceVerifyOptions.Timeout to a pointer to 0 to remove the facade cap
+// and let the caller's context govern, which is the fix for a registry that is
+// simply slow rather than broken. The caller's own deadline still applies; the
+// option can only relax the facade's ceiling, never extend the context it was
+// given.
 //
 // The Client's recipe catalog is not consulted, so any open Client will do —
 // including one a hot-path caller keeps around and reuses.
@@ -323,7 +357,7 @@ func (c *Client) VerifyEvidence(ctx context.Context, opts EvidenceVerifyOptions)
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, defaults.VerifyOperationTimeout)
+	ctx, cancel := applyVerifyCap(ctx, opts.Timeout)
 	defer cancel()
 
 	result, err := evverifier.Verify(ctx, evverifier.VerifyOptions{
@@ -348,6 +382,20 @@ type CatalogVerifyOptions struct {
 	// allowed) and must not use top-level alternation. Empty uses
 	// TrustedIdentityPattern.
 	CertificateIdentityRegexp string
+
+	// Timeout overrides the facade's operation cap for this call.
+	//
+	// Nil -- the zero value -- keeps defaults.VerifyOperationTimeout, so a
+	// caller who never considered this gets today's behavior. A pointer to 0
+	// imposes NO facade cap and runs under the caller's context unchanged. A
+	// positive value sets an explicit cap.
+	//
+	// The pointer exists to make 0 mean "uncapped" rather than "default",
+	// matching WithValidationTimeout(0). A plain duration cannot distinguish
+	// unset from zero, so it would have had to spell uncapped some other way --
+	// and a caller who learned 0-means-uncapped from ValidateState would then
+	// get the opposite here, silently capped when they asked for unbounded.
+	Timeout *time.Duration
 }
 
 // CatalogVerification is what VerifyCatalog returns on success.
@@ -402,7 +450,7 @@ func (c *Client) VerifyCatalog(ctx context.Context, bundlePath string, opts Cata
 	c.mu.RUnlock()
 	defer c.inflight.Done()
 
-	ctx, cancel := context.WithTimeout(ctx, defaults.VerifyOperationTimeout)
+	ctx, cancel := applyVerifyCap(ctx, opts.Timeout)
 	defer cancel()
 
 	result, err := recipecat.Verify(ctx, bundlePath, dp, recipecat.VerifyOptions{
@@ -429,6 +477,20 @@ type RecipeDigestOptions struct {
 	// overlay inputs: an already-hydrated recipe carries its own
 	// metadata.selectedProfile, and combining the two is rejected.
 	Profile string
+
+	// Timeout overrides the facade's operation cap for this call.
+	//
+	// Nil -- the zero value -- keeps defaults.VerifyOperationTimeout, so a
+	// caller who never considered this gets today's behavior. A pointer to 0
+	// imposes NO facade cap and runs under the caller's context unchanged. A
+	// positive value sets an explicit cap.
+	//
+	// The pointer exists to make 0 mean "uncapped" rather than "default",
+	// matching WithValidationTimeout(0). A plain duration cannot distinguish
+	// unset from zero, so it would have had to spell uncapped some other way --
+	// and a caller who learned 0-means-uncapped from ValidateState would then
+	// get the opposite here, silently capped when they asked for unbounded.
+	Timeout *time.Duration
 }
 
 // RecipeDigest returns the canonical digest of a resolved recipe — the
@@ -464,7 +526,7 @@ func (c *Client) RecipeDigest(ctx context.Context, opts RecipeDigestOptions) (st
 	c.mu.RUnlock()
 	defer c.inflight.Done()
 
-	ctx, cancel := context.WithTimeout(ctx, defaults.VerifyOperationTimeout)
+	ctx, cancel := applyVerifyCap(ctx, opts.Timeout)
 	defer cancel()
 
 	digest, err := evattest.ComputeRecipeDigestWithProfile(
@@ -586,4 +648,26 @@ func (c *Client) assertOpen() error {
 		return errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized (or already closed)")
 	}
 	return nil
+}
+
+// applyVerifyCap wraps ctx with the facade's verify cap unless the caller
+// overrode it.
+//
+// Nil keeps the default cap. A pointer to zero (or negative) imposes no cap and
+// returns the caller's context unchanged, which is what lets a verification
+// behind a slow registry run to completion instead of being cut off at five
+// minutes and reported as an error.
+//
+// That distinction matters beyond convenience for VerifyEvidence: a cap breach
+// surfaces as an error, but "could not check" has a dedicated verdict
+// (EvidenceExitIncomplete) that CI gates branch on. Cutting a slow pull short
+// delivered that outcome through the wrong channel.
+func applyVerifyCap(ctx context.Context, timeout *time.Duration) (context.Context, context.CancelFunc) {
+	if timeout == nil {
+		return context.WithTimeout(ctx, defaults.VerifyOperationTimeout)
+	}
+	if *timeout <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, *timeout)
 }

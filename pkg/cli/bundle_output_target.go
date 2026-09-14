@@ -609,7 +609,7 @@ func (t *bundleOutputTarget) ensureOutputParent(ctx context.Context) error {
 			"failed to create retained bundle output parent", err)
 	}
 	current := ""
-	for _, component := range strings.Split(parent, string(filepath.Separator)) {
+	for component := range strings.SplitSeq(parent, string(filepath.Separator)) {
 		if err := cliFilesystemContextError(ctx, "bundle output parent creation canceled"); err != nil {
 			return err
 		}
@@ -715,7 +715,7 @@ func absolutePathPrefixes(absPath string) ([]string, error) {
 		return prefixes, nil
 	}
 	current := root
-	for _, component := range strings.Split(remainder, string(filepath.Separator)) {
+	for component := range strings.SplitSeq(remainder, string(filepath.Separator)) {
 		if component == "" || component == "." || component == ".." {
 			return nil, errors.New(errors.ErrCodeInvalidRequest, "path contains an unsafe component")
 		}
@@ -805,8 +805,8 @@ func (t *bundleOutputTarget) validateRelativePath(ctx context.Context) (fs.FileI
 	}
 	current := ""
 	var currentInfo fs.FileInfo
-	components := strings.Split(t.relativePath, string(filepath.Separator))
-	for _, component := range components {
+	components := strings.SplitSeq(t.relativePath, string(filepath.Separator))
+	for component := range components {
 		if err := cliFilesystemContextError(ctx, "bundle output validation canceled"); err != nil {
 			return nil, err
 		}

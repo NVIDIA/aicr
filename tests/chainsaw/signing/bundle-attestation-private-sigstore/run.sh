@@ -203,7 +203,7 @@ resolve_binary() {
   log_warning "requires an NVIDIA-CI-attested binary, so the bundle step will fail."
   log_warning "Provide AICR_BIN (e.g. the build-attested.yaml artifact) + AICR_IDENTITY_REGEXP."
   cd "${ROOT}"
-  GOFLAGS=-mod=vendor goreleaser build --clean --single-target --snapshot --timeout 10m
+  goreleaser build --clean --single-target --snapshot --timeout 10m
   local os arch
   os="$(uname -s | tr '[:upper:]' '[:lower:]')"
   arch="$(uname -m)"

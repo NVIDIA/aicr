@@ -128,7 +128,7 @@ func loadKnownTags(path string) (map[string]bool, error) {
 	if int64(len(data)) > maxKnownTagsFileBytes {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "known-tags file exceeds size limit")
 	}
-	for _, line := range strings.Split(string(data), "\n") {
+	for line := range strings.SplitSeq(string(data), "\n") {
 		if tag := strings.TrimSpace(line); tag != "" {
 			known[tag] = true
 		}
@@ -256,10 +256,7 @@ func observe(ctx context.Context, mon monitorChecks, store checkpointStore, know
 		if cerr := ctx.Err(); cerr != nil {
 			return errors.Wrap(errors.ErrCodeTimeout, "identity scan canceled", cerr)
 		}
-		chunkEnd := reached + scanChunkSize
-		if chunkEnd > runEnd {
-			chunkEnd = runEnd
-		}
+		chunkEnd := min(reached+scanChunkSize, runEnd)
 		found, failed, scanErr := mon.scanIdentity(ctx, reached, chunkEnd)
 		if scanErr != nil {
 			// If the pass deadline expired inside this chunk but earlier chunks
@@ -434,15 +431,13 @@ func (e *catchUpStalledError) Error() string {
 // proof.RootMismatchError, which stays reachable through the wrap chain via
 // Unwrap.
 func classify(err error) classification {
-	var mismatch proof.RootMismatchError
-	if stderrors.As(err, &mismatch) {
+	if _, ok := stderrors.AsType[proof.RootMismatchError](err); ok {
 		return classTamper
 	}
 	if stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
 		return classIdentity
 	}
-	var stalled *catchUpStalledError
-	if stderrors.As(err, &stalled) {
+	if _, ok := stderrors.AsType[*catchUpStalledError](err); ok {
 		return classDegraded
 	}
 	return classOperational

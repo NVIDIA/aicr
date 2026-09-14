@@ -75,8 +75,7 @@ func ExitCodeFromError(err error) int {
 		return ExitSuccess
 	}
 
-	var structErr *StructuredError
-	if errors.As(err, &structErr) {
+	if structErr, ok := errors.AsType[*StructuredError](err); ok {
 		return exitCodeFromErrorCode(structErr.Code)
 	}
 

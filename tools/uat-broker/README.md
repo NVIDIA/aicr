@@ -10,7 +10,7 @@ package is a thin CLI over it.
 ## Build
 
 ```sh
-GOFLAGS=-mod=vendor go build -o ./bin/uat-broker ./tools/uat-broker
+go build -o ./bin/uat-broker ./tools/uat-broker
 ```
 
 ## Subcommands

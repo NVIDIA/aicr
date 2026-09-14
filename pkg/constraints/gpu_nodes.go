@@ -24,7 +24,9 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/collector/topology"
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/fingerprint"
 	"github.com/NVIDIA/aicr/pkg/measurement"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
 )
 
@@ -49,12 +51,22 @@ import (
 // accept it as a virtual path (issue #1783) without importing this package.
 const GPUNodesLabelConstraintName = measurement.PathGPUNodesLabel
 
-// gpuNodeUniverseLabel defines the authoritative GPU-node universe: nodes
-// carrying GKE's native accelerator label. It is present on GKE GPU nodes
-// from pool creation — before the GPU Operator or NFD run — which is
-// exactly the pre-deployment cluster this constraint form validates.
-// (NFD's nvidia.com/gpu.* labels do not exist on such a cluster.)
-const gpuNodeUniverseLabel = "cloud.google.com/gke-accelerator"
+// gpuNodeUniverseLabels defines the pre-Operator, pre-NFD GPU-node universe
+// per service. A label listed here must be present on GPU nodes from pool
+// creation, before the GPU Operator or NFD run — the property that makes this
+// constraint form usable at pre-deployment. NFD's nvidia.com/gpu.* labels do
+// not exist on such a cluster, so they cannot serve as the universe.
+//
+// Only GKE is populated today. Other services (AKS, EKS, OKE, LKE, …) have no
+// current consumer of NodeTopology.gpu-nodes.label — AKS routes through the
+// --aks-gpu-pools snapshot projection, OKE's disablement path is not yet
+// settled (NKX-9804), and EKS has no consumer — so their entries are added by
+// the profile PR that first needs one. Missing entries fail closed at
+// evaluation with a service-named diagnostic (issue #2359), never a silent
+// vacuous pass.
+var gpuNodeUniverseLabels = map[recipe.CriteriaServiceType]string{
+	recipe.CriteriaServiceGKE: "cloud.google.com/gke-accelerator",
+}
 
 // maxReportedNodes caps the node names named in a failure message.
 const maxReportedNodes = 5
@@ -92,7 +104,23 @@ func evaluateGPUNodesLabel(value string, snap *snapshotter.Snapshot) EvalResult 
 			"snapshot carries no NodeTopology label readings — re-capture with a current aicr build and verify the snapshot agent can list nodes")}
 	}
 
-	universeEntries, err := decodeLabelEntries(labels, gpuNodeUniverseLabel)
+	// The universe label is service-specific: the property that makes it usable
+	// pre-deployment (present at pool creation, before the GPU Operator or NFD
+	// run) is a per-provider fact. Resolve service from the same source the
+	// recipe layer uses — k8s.node.provider via fingerprint — and fail closed
+	// with a service-named diagnostic when the mapping is missing, rather than
+	// masquerading as an empty snapshot (issue #2359).
+	//
+	// Ordering is load-bearing: the resolution runs AFTER findLabelSubtype so
+	// snapshots that carry no label subtype at all keep their existing
+	// ErrCodeNotFound diagnostic (nil snapshot, no NodeTopology, no label
+	// subtype) — the ordering pkg/recipe's fail-closed handling relies on.
+	universeLabel, err := gpuNodeUniverseLabelFor(snap)
+	if err != nil {
+		return EvalResult{Error: err}
+	}
+
+	universeEntries, err := decodeLabelEntries(labels, universeLabel)
 	if err != nil {
 		return EvalResult{Error: err}
 	}
@@ -107,7 +135,7 @@ func evaluateGPUNodesLabel(value string, snap *snapshotter.Snapshot) EvalResult 
 		// vacuously (#1755 acceptance requirement 2).
 		return EvalResult{Error: errors.NewWithContext(errors.ErrCodeNotFound,
 			fmt.Sprintf("GPU-node universe is empty: snapshot has no %q label readings — "+
-				"the constraint cannot be evaluated on a cluster without identifiable GPU nodes", gpuNodeUniverseLabel),
+				"the constraint cannot be evaluated on a cluster without identifiable GPU nodes", universeLabel),
 			map[string]any{ctxConstraint: GPUNodesLabelConstraintName})}
 	}
 
@@ -120,6 +148,43 @@ func evaluateGPUNodesLabel(value string, snap *snapshotter.Snapshot) EvalResult 
 		return evaluateNoGPUNodeHasKey(key, universe, targetEntries)
 	}
 	return evaluateEveryGPUNodeHasValue(key, want, universe, targetEntries)
+}
+
+// gpuNodeUniverseLabelFor resolves the GPU-node universe label for the
+// snapshot's service. The service comes from fingerprint.FromMeasurements
+// (sourced from k8s.node.provider), so the constraint form and the recipe
+// layer see the same service identity.
+//
+// Two fail-closed shapes, both distinct from the "empty universe" diagnostic
+// the caller emits when the label is defined but no node carries it:
+//
+//   - Service unknown from the snapshot: the snapshot lacks a resolvable
+//     k8s.node.provider. The constraint form needs a known service to pick
+//     its universe label, so this is fatal for evaluation. Points the
+//     operator at the provider capture, not at the constraint.
+//   - Service known but no mapping declared: this constraint form is not
+//     supported on that service today. Names the service and points at the
+//     table so a future profile adding an entry has a single site to edit.
+func gpuNodeUniverseLabelFor(snap *snapshotter.Snapshot) (string, error) {
+	fp := fingerprint.FromMeasurements(snap.Measurements)
+	service := recipe.CriteriaServiceType(fp.Service.Value)
+	if service == "" {
+		return "", errors.NewWithContext(errors.ErrCodeNotFound,
+			"snapshot has no resolvable k8s.node.provider — the NodeTopology.gpu-nodes.label "+
+				"constraint form needs a known service to select its pre-deployment GPU-node "+
+				"universe label; re-capture the snapshot with a current aicr build",
+			map[string]any{ctxConstraint: GPUNodesLabelConstraintName})
+	}
+	label, ok := gpuNodeUniverseLabels[service]
+	if !ok {
+		return "", errors.NewWithContext(errors.ErrCodeNotFound,
+			fmt.Sprintf("no pre-deployment GPU-node universe label is declared for service %q — "+
+				"the NodeTopology.gpu-nodes.label constraint form is not supported on this service; "+
+				"add an entry to gpuNodeUniverseLabels in pkg/constraints/gpu_nodes.go (issue #2359)",
+				service),
+			map[string]any{ctxConstraint: GPUNodesLabelConstraintName, "service": string(service)})
+	}
+	return label, nil
 }
 
 // ValidateGPUNodesLabelValue checks a node-set constraint value against the

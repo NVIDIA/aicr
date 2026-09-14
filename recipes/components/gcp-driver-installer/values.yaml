@@ -1,0 +1,46 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# gcp-driver-installer — Google's cos-gpu-installer DaemonSet as an
+# AICR-managed component (issue #1716, ADR-015 bundle-installer).
+#
+# Values-gated: the component sits unconditionally in the GKE COS chain and
+# renders NOTHING unless installer.enabled is true. The gpuStack profile owns
+# this gate — bundle-installer flips it on; gke-default pins it off. Do not set it directly: it is a profile-owned (locked) path.
+installer:
+  enabled: false
+
+# NVIDIA driver version the installer requests from the node's COS release.
+# MUST be COS-qualified: cos-gpu-installer validates the requested version
+# against the COS build's curated per-GPU-type list
+# (gs://cos-tools/<build>/lakitu/gpu_driver_versions.bin) and rejects versions
+# absent from it — an unqualified pin crash-loops the DaemonSet. 580.173.02
+# is qualified for H100/A100/B200/GB200 on COS 125 (19216.x) and COS 129
+# (19506.x); COS 121 carries neither this pin nor any R580 build newer than
+# 580.105.08.
+#
+# Rollout note: the installer's lsmod fast path exits 0 when any nvidia module
+# is already loaded — a version bump takes effect only on replaced or rebooted
+# nodes, never on live ones.
+driverVersion: "580.173.02"
+
+# Override for the partition-gpus init container image (multi-instance GPU
+# partitioning support). The default pinned in the manifest is amd64-only;
+# arm64 accelerators (Grace/GB200) must override this with a multi-arch
+# digest or the init container fails with "exec format error".
+# partitionGpuImage: ""
+
+# Tolerations injected by the bundler's accelerated-node scheduling path
+# (--accelerated-node-toleration); consumed by the DaemonSet pod spec.
+# acceleratedTolerations: []

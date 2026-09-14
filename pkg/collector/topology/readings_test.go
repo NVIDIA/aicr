@@ -551,7 +551,7 @@ func TestItemsAreDeterministic(t *testing.T) {
 	}
 
 	var first string
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		labelSt, taintSt := collectSubtypes(t, 0, nodes...)
 		got := fmt.Sprintf("%v|%v", labelSt.Items, taintSt.Items)
 		if i == 0 {

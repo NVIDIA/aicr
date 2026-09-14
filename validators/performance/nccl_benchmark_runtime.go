@@ -134,7 +134,7 @@ func customRuntimeNodeSelector(content string) (map[string]string, error) {
 		return nil, nil //nolint:nilnil // no replicatedJobs → nothing to size against
 	}
 	for _, raw := range jobs {
-		jobMap, ok := raw.(map[string]interface{})
+		jobMap, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}

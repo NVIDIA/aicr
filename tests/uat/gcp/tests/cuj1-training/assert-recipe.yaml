@@ -18,7 +18,7 @@
 # --os cos --platform kubeflow` produces a valid recipe with correct criteria,
 # kubeflow-specific components, and standard GPU stack components.
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 metadata:
   selectedProfile:
     name: gpuStack
@@ -36,6 +36,7 @@ constraints:
     value: '!gke-no-default-nvidia-gpu-device-plugin'
 componentRefs: ## alphabetically sorted
   - name: cert-manager
+  - name: gcp-driver-installer
   - name: gke-nccl-tcpxo
   - name: gpu-operator
   - name: k8s-ephemeral-storage-metrics
@@ -51,6 +52,7 @@ componentRefs: ## alphabetically sorted
   - name: prometheus-operator-crds
 deploymentOrder:
   - cert-manager
+  - gcp-driver-installer
   - nfd
   - nodewright-operator
   - nodewright-customizations
@@ -64,3 +66,7 @@ deploymentOrder:
   - nvidia-dra-driver-gpu
   - nvsentinel
   - prometheus-adapter
+# The recorded TCPXO interface mapping is asserted in chainsaw-test.yaml's
+# assert step, which compares the recipe against this run's generated value
+# (the names are derived from the run's deployment ID, so no static list
+# belongs here).

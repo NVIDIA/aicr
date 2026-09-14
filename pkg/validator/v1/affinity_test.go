@@ -212,12 +212,12 @@ func TestAffinityTypeFieldCountInvariant(t *testing.T) {
 		t    reflect.Type
 		want int
 	}{
-		{"Affinity", reflect.TypeOf(corev1.Affinity{}), 3},
-		{"NodeAffinity", reflect.TypeOf(corev1.NodeAffinity{}), 2},
-		{"NodeSelectorTerm", reflect.TypeOf(corev1.NodeSelectorTerm{}), 2},
-		{"PodAffinity", reflect.TypeOf(corev1.PodAffinity{}), 2},
-		{"PodAntiAffinity", reflect.TypeOf(corev1.PodAntiAffinity{}), 2},
-		{"PodAffinityTerm", reflect.TypeOf(corev1.PodAffinityTerm{}), 6},
+		{"Affinity", reflect.TypeFor[corev1.Affinity](), 3},
+		{"NodeAffinity", reflect.TypeFor[corev1.NodeAffinity](), 2},
+		{"NodeSelectorTerm", reflect.TypeFor[corev1.NodeSelectorTerm](), 2},
+		{"PodAffinity", reflect.TypeFor[corev1.PodAffinity](), 2},
+		{"PodAntiAffinity", reflect.TypeFor[corev1.PodAntiAffinity](), 2},
+		{"PodAffinityTerm", reflect.TypeFor[corev1.PodAffinityTerm](), 6},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

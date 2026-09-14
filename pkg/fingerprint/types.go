@@ -84,7 +84,7 @@ type Fingerprint struct {
 	// never read it — and exists so the snapshot records the real hardware
 	// even for SKUs outside the Accelerator enum. Sourced from the PCI
 	// device ID via the GPU "hardware" subtype.
-	GPUModel Dimension `json:"gpuModel,omitempty" yaml:"gpuModel,omitempty"`
+	GPUModel Dimension `json:"gpuModel" yaml:"gpuModel,omitempty"`
 
 	// OS is the worker node operating system, with the raw
 	// VERSION_ID retained for audit. Sourced from
@@ -99,7 +99,7 @@ type Fingerprint struct {
 	// the topology.kubernetes.io/region node label aggregated by the
 	// topology collector. Omitted when the cluster has no consistent
 	// region label or spans multiple regions.
-	Region Dimension `json:"region,omitempty" yaml:"region,omitempty"`
+	Region Dimension `json:"region" yaml:"region,omitempty"`
 
 	// NodeCount is the total number of cluster nodes including
 	// control-plane and worker nodes. Sourced from

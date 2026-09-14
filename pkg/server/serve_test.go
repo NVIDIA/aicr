@@ -79,10 +79,7 @@ func TestRouteConfiguration(t *testing.T) {
 
 	routes := newRoutes(h, bh)
 
-	for _, path := range []string{
-		"/v1/recipe", "/v1/query", "/v1/bundle",
-		"/v2/recipe", "/v2/query", "/v2/bundle",
-	} {
+	for _, path := range []string{"/v1/recipe", "/v1/query", "/v1/bundle"} {
 		if handler, exists := routes[path]; !exists {
 			t.Errorf("expected %s route to exist", path)
 		} else if handler == nil {
@@ -90,9 +87,10 @@ func TestRouteConfiguration(t *testing.T) {
 		}
 	}
 
-	// Verify no extra routes
-	if len(routes) != 6 {
-		t.Errorf("expected exactly 6 routes, got %d", len(routes))
+	// Verify no extra routes. Three, not six: #2112 collapsed the /v2 family
+	// into /v1 rather than shipping two frozen path families at GA.
+	if len(routes) != 3 {
+		t.Errorf("expected exactly 3 routes, got %d", len(routes))
 	}
 }
 
@@ -159,28 +157,19 @@ func TestRecipeEndpointPOST(t *testing.T) {
 	}{
 		{
 			name:        "valid JSON body",
-			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100"}}`,
+			body:        `{"criteria":{"service":"eks","accelerator":"h100"}}`,
 			contentType: "application/json",
 			wantStatus:  http.StatusOK,
 		},
 		{
-			name: "valid YAML body",
-			// eks, not gke: GKE compositions declare the gpuStack profile
-			// and are rejected on /v1 by design (profile cut-over).
-			body:        "kind: RecipeCriteria\napiVersion: aicr.run/v1alpha2\nspec:\n  service: eks\n  accelerator: h100\n  os: ubuntu\n  intent: training",
+			name:        "valid YAML body",
+			body:        "criteria:\n  service: eks\n  accelerator: h100\n  os: ubuntu\n  intent: training",
 			contentType: "application/x-yaml",
 			wantStatus:  http.StatusOK,
 		},
 		{
-			name:             "gke composition rejects on v1 (profile cut-over)",
-			body:             "kind: RecipeCriteria\napiVersion: aicr.run/v1alpha2\nspec:\n  service: gke\n  accelerator: a100\n  os: cos",
-			contentType:      "application/x-yaml",
-			wantStatus:       http.StatusBadRequest,
-			wantBodyContains: "Profiled recipes are available only on /v2/recipe",
-		},
-		{
 			name:        "valid JSON body with platform",
-			body:        `{"kind":"RecipeCriteria","apiVersion":"aicr.run/v1alpha2","spec":{"service":"eks","accelerator":"h100","os":"ubuntu","intent":"training","platform":"kubeflow"}}`,
+			body:        `{"criteria":{"service":"eks","accelerator":"h100","os":"ubuntu","intent":"training","platform":"kubeflow"}}`,
 			contentType: "application/json",
 			wantStatus:  http.StatusOK,
 		},
@@ -384,7 +373,7 @@ func TestRecipeEndpointConcurrency(t *testing.T) {
 	const numRequests = 10
 	done := make(chan bool, numRequests)
 
-	for i := 0; i < numRequests; i++ {
+	for range numRequests {
 		go func() {
 			req := httptest.NewRequest(http.MethodGet, "/v1/recipe?os=ubuntu", nil)
 			w := httptest.NewRecorder()
@@ -395,7 +384,7 @@ func TestRecipeEndpointConcurrency(t *testing.T) {
 
 	// Wait for all requests to complete with timeout
 	timeout := time.After(5 * time.Second)
-	for i := 0; i < numRequests; i++ {
+	for range numRequests {
 		select {
 		case <-done:
 			// Request completed

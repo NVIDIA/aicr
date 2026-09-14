@@ -265,8 +265,8 @@ func compatibleMetaSchema(got string) bool {
 // stripping any ".<minor>[...]" suffix. A value with no minor suffix is returned
 // unchanged.
 func schemaMajor(v string) string {
-	if i := strings.IndexByte(v, '.'); i >= 0 {
-		return v[:i]
+	if before, _, ok := strings.Cut(v, "."); ok {
+		return before
 	}
 	return v
 }

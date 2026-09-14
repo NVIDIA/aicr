@@ -412,7 +412,7 @@
     <div class="label">07 · Where it fits</div>
     <h2>One trust model, three subjects</h2>
     <div class="grid2">
-      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + signed SPDX SBOM on every published image (CLI binaries ship a separate, unsigned SBOM asset), signed by NVIDIA CI. <code class="inl">demos/provenance.md</code></p></div>
+      <div class="mini"><h4>Images &amp; binaries</h4><p>SLSA provenance + signed CycloneDX SBOM and OpenVEX on every published image (CLI binaries ship a separate, unsigned SPDX SBOM asset), signed by NVIDIA CI. <code class="inl">demos/provenance.md</code></p></div>
       <div class="mini"><h4>Deployment bundles</h4><p><code class="inl">aicr bundle --attest</code> signs the generated bundle with build provenance + trust levels. <em>You are here.</em></p></div>
       <div class="mini"><h4>Recipe evidence</h4><p>A signer-bound validation result for a recipe (proves who signed it, not cluster physicality), OCI-distributed with an in-tree pointer. <code class="inl">demos/evidence.md</code></p></div>
       <div class="mini"><h4>Same primitives</h4><p>Sigstore keyless + Fulcio + Rekor + in-toto across the board — different subjects, one verification model.</p></div>

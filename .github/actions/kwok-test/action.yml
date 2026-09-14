@@ -123,7 +123,7 @@ runs:
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
       with:
         go-version: ${{ inputs.go_version }}
-        cache: false  # vendor/ provides deps; disable to save disk on constrained runners
+        cache: false  # Avoid restoring large Go caches on constrained runners
 
     - name: Cache KWOK tools
       uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
@@ -163,11 +163,73 @@ runs:
 
     - name: Build aicr binary
       shell: bash
-      env:
-        GOFLAGS: -mod=vendor
       run: |
         make build
         ls -la dist/
+
+    # ── Image cache: load the public images this lane needs from the tarball
+    # the prime-images job saved, instead of pulling them here (#2483).
+    #
+    # preload_image checks the host Docker cache before every pull attempt, so
+    # an image loaded here means the lane never contacts the registry at all —
+    # which is the point: 127 concurrent jobs pulling the same image is what
+    # trips the per-IP throttle.
+    #
+    # BEST EFFORT, unlike the prime job that fills the cache. Every step below
+    # tolerates a miss (fail-on-cache-miss defaults to false, and the load step
+    # swallows a non-zero), because the fallback is intact: preload_image pulls,
+    # and the kubelet pulls behind that. A fork PR whose cache scope differs, or
+    # a first run after a pin bump, must degrade to today's behavior rather than
+    # fail. The gate lives in prime-images, not here.
+    #
+    # Placed after setup-build-tools because resolving the pins needs yq.
+    - name: Resolve image pins and cache keys
+      id: images
+      shell: bash
+      run: |
+        set -euo pipefail
+        bash kwok/scripts/lib/image-cache.sh settings .settings.yaml | tee -a "$GITHUB_OUTPUT"
+
+    - name: Restore registry image
+      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      with:
+        path: /tmp/kwok-image-cache/registry
+        key: ${{ steps.images.outputs.registry_key }}
+
+    # Gitea is installed only for the *-git deployers (see install-infra.sh), so
+    # the other lanes skip a ~250MB restore they would never use.
+    - name: Restore Gitea image
+      if: endsWith(inputs.deployer, '-git')
+      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      with:
+        path: /tmp/kwok-image-cache/gitea
+        key: ${{ steps.images.outputs.gitea_key }}
+
+    - name: Load cached images
+      shell: bash
+      env:
+        REGISTRY_IMAGE: ${{ steps.images.outputs.registry_image }}
+        GITEA_IMAGE: ${{ steps.images.outputs.gitea_image }}
+        DEPLOYER: ${{ inputs.deployer }}
+      run: |
+        set -uo pipefail
+
+        # A miss is not fatal — preload_image still pulls — but it does mean
+        # this lane is back to contending for the registry, which is the whole
+        # point of #2483. Annotate it: a key that drifts from the prime job's
+        # would otherwise leave every lane pulling again, green, with the fix
+        # silently inert and nothing to notice it by.
+        load_image() { # <dir> <image>
+          if bash kwok/scripts/lib/image-cache.sh load "$1" "$2"; then
+            return 0
+          fi
+          echo "::warning::Image cache miss for $2 — this lane will pull it from the registry"
+        }
+
+        load_image /tmp/kwok-image-cache/registry "${REGISTRY_IMAGE}"
+        if [[ "${DEPLOYER}" == *-git ]]; then
+          load_image /tmp/kwok-image-cache/gitea "${GITEA_IMAGE}"
+        fi
 
     - name: Run KWOK recipe test
       id: validate

@@ -135,6 +135,7 @@ func TestExtractPackagePins_RealManifests(t *testing.T) {
 	cases := map[string][]string{
 		"components/nodewright-customizations/manifests/tuning.yaml":         {"nvidia-setup", "nvidia-tuned"},
 		"components/nodewright-customizations/manifests/tuning-generic.yaml": {"nvidia-tuned"},
+		"components/nodewright-customizations/manifests/tuning-rke2.yaml":    {"nvidia-tuned"},
 		"components/nodewright-customizations/manifests/tuning-gke.yaml":     {"nvidia-tuning-gke"},
 		"components/nodewright-customizations/manifests/bcm-setup.yaml":      {"nvidia-setup"},
 		"components/nodewright-customizations/manifests/no-op.yaml":          {"shellscript"},

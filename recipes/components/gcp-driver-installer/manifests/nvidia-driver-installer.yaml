@@ -1,0 +1,205 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVIDIA GPU Driver Installer for GKE Container-Optimized OS (COS).
+#
+# Installs the NVIDIA driver on COS GPU nodes where GKE does not manage the
+# driver. This is required when the node pool is provisioned with
+# gpu-driver-version=disabled (which prevents GKE from setting the
+# cloud.google.com/gke-gpu-driver-version label and installing the driver).
+# The GPU Operator is configured with driver.enabled=false, so the driver must
+# come from this DaemonSet instead.
+#
+# The gke-no-default-nvidia-gpu-device-plugin=true label (also required by this
+# DaemonSet's node affinity) disables GKE's built-in device plugin, allowing
+# the GPU Operator to manage it instead. It does NOT affect driver installation.
+#
+# Source: https://github.com/GoogleCloudPlatform/container-engine-accelerators/
+#         blob/a1b8720c5e36832e533a2a4f372a74397176014b/nvidia-driver-installer/
+#         cos/daemonset-preloaded-latest.yaml
+# Note: partition-gpus digest intentionally pinned to this revision (pre-H200
+#       replacement in commit 69d631a); diverges from current master by design.
+# Copyright 2022 Google Inc. All rights reserved.
+#
+# .Values.gcp-driver-installer.driverVersion — the driver version to install.
+# Pinned in the component values; never "latest" (see values.yaml for the
+# COS curated-list qualification requirement).
+#
+# Driver version rollout note: the lsmod fast path exits 0 when any nvidia
+# module is already loaded, regardless of version. A driverVersion bump does NOT
+# upgrade live nodes — it only takes effect on replaced or rebooted nodes where
+# the old modules are unloaded before the installer pod runs.
+#
+# .Values.gcp-driver-installer.partitionGpuImage — override for the partition-gpus
+# init container image. Defaults to the digest pinned below (amd64-only, see the
+# "diverges from current master by design" note). arm64 accelerators (e.g. GB200)
+# must override this to a multi-arch digest — the pinned default has no arm64
+# manifest and fails with "exec format error" on Grace/ARM64 nodes (found via
+# live GB200 GKE validation).
+{{- $vals := index .Values "gcp-driver-installer" }}
+# Values-gated (ADR-015): renders nothing unless the gpuStack
+# bundle-installer profile value flips installer.enabled true.
+# Default-off fails closed: rendering the installer is a profile
+# decision, never a chart default.
+{{- $installer := index $vals "installer" }}
+{{- $gate := "" }}
+{{- if $installer }}{{- $gate = toString (index $installer "enabled") }}{{- end }}
+{{- if eq $gate "true" }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvidia-driver-installer
+  namespace: kube-system
+  labels:
+    k8s-app: nvidia-driver-installer
+    app.kubernetes.io/managed-by: aicr
+    # Helm 4 server-side apply rewrites managed-by to "Helm" at install;
+    # part-of survives, so it is the label the health check asserts to
+    # distinguish this object from a hand-applied installer DaemonSet.
+    app.kubernetes.io/part-of: aicr
+spec:
+  selector:
+    matchLabels:
+      k8s-app: nvidia-driver-installer
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        name: nvidia-driver-installer
+        k8s-app: nvidia-driver-installer
+    spec:
+      priorityClassName: system-node-critical
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: cloud.google.com/gke-accelerator
+                operator: Exists
+              - key: cloud.google.com/gke-gpu-driver-version
+                operator: DoesNotExist
+              - key: gke-no-default-nvidia-gpu-device-plugin
+                operator: In
+                values:
+                - "true"
+              - key: cloud.google.com/gke-confidential-nodes-instance-type
+                operator: DoesNotExist
+      tolerations:
+        {{- if $vals.acceleratedTolerations }}
+        {{- toYaml $vals.acceleratedTolerations | nindent 8 }}
+        {{- else }}
+        # Tolerate-all default, matching ParseTolerations()/DefaultTolerations()
+        # (operator Exists, no key). Only reached if no acceleratedTolerations
+        # are injected from scheduling defaults/flags — the driver must land on
+        # GPU pools GKE auto-taints in mixed clusters.
+        - operator: Exists
+        {{- end }}
+      hostNetwork: true
+      hostPID: true
+      volumes:
+      - name: dev
+        hostPath:
+          path: /dev
+      - name: vulkan-icd-mount
+        hostPath:
+          path: /home/kubernetes/bin/nvidia/vulkan/icd.d
+      - name: nvidia-install-dir-host
+        hostPath:
+          path: /home/kubernetes/bin/nvidia
+      - name: root-mount
+        hostPath:
+          path: /
+      - name: cos-tools
+        hostPath:
+          path: /var/lib/cos-tools
+      - name: nvidia-config
+        hostPath:
+          path: /etc/nvidia
+      initContainers:
+      - image: "cos-nvidia-installer:fixed"
+        imagePullPolicy: Never
+        name: nvidia-driver-installer
+        resources:
+          requests:
+            cpu: 150m
+        securityContext:
+          privileged: true
+        env:
+        - name: NVIDIA_INSTALL_DIR_HOST
+          value: /home/kubernetes/bin/nvidia
+        - name: NVIDIA_INSTALL_DIR_CONTAINER
+          value: /usr/local/nvidia
+        - name: VULKAN_ICD_DIR_HOST
+          value: /home/kubernetes/bin/nvidia/vulkan/icd.d
+        - name: VULKAN_ICD_DIR_CONTAINER
+          value: /etc/vulkan/icd.d
+        - name: ROOT_MOUNT_DIR
+          value: /root
+        - name: COS_TOOLS_DIR_HOST
+          value: /var/lib/cos-tools
+        - name: COS_TOOLS_DIR_CONTAINER
+          value: /build/cos-tools
+        volumeMounts:
+        - name: nvidia-install-dir-host
+          mountPath: /usr/local/nvidia
+        - name: vulkan-icd-mount
+          mountPath: /etc/vulkan/icd.d
+        - name: dev
+          mountPath: /dev
+        - name: root-mount
+          mountPath: /root
+        - name: cos-tools
+          mountPath: /build/cos-tools
+        command:
+        - bash
+        - -c
+        - |
+          echo "Checking for existing GPU driver modules"
+          if lsmod | grep nvidia; then
+            echo "GPU driver is already installed, the installed version may or may not be the driver version being tried to install, skipping installation"
+            exit 0
+          else
+            echo "No GPU driver module detected, installing now"
+            /cos-gpu-installer install --version={{ index $vals "driverVersion" }} || exit 1
+            chmod 755 /root/home/kubernetes/bin/nvidia
+          fi
+{{- if index $vals "partitionGpuImage" }}
+      - image: "{{ index $vals "partitionGpuImage" }}"
+{{- else }}
+        # Literal default (not an inline template default) so the BOM extractor
+        # records the digest. amd64-only — arm64 must set partitionGpuImage.
+      - image: "gcr.io/gke-release/nvidia-partition-gpu@sha256:e226275da6c45816959fe43cde907ee9a85c6a2aa8a429418a4cadef8ecdb86a"
+{{- end }}
+        name: partition-gpus
+        env:
+          - name: LD_LIBRARY_PATH
+            value: /usr/local/nvidia/lib64
+        resources:
+          requests:
+            cpu: 150m
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: nvidia-install-dir-host
+          mountPath: /usr/local/nvidia
+        - name: dev
+          mountPath: /dev
+        - name: nvidia-config
+          mountPath: /etc/nvidia
+      containers:
+      - image: "gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830"
+        name: pause
+{{- end }}

@@ -1071,7 +1071,7 @@ func TestGenerate_Reproducible(t *testing.T) {
 	// Generate twice in different directories
 	var fileContents [2]map[string]string
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		outputDir := t.TempDir()
 
 		_, err := g.Generate(ctx, outputDir)
@@ -2339,6 +2339,252 @@ func TestGenerate_ChildNameLimits(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tt.errSubstr) {
 				t.Errorf("error %q does not mention %q", err.Error(), tt.errSubstr)
+			}
+		})
+	}
+}
+
+// TestBuildApplicationData_ApplyOutOfSyncOnly is the regression-proofing
+// test for the SCOPING of ApplicationData.ApplyOutOfSyncOnly, not just its
+// presence: it exercises all four folder kinds for the same parent
+// component so a test that only checked the readiness case could not pass
+// if the predicate degenerated to unconditionally true. Paired with the
+// Job-level Replace=true,Force=true annotation in
+// pkg/bundler/gatemanifest/manifest.go, ApplyOutOfSyncOnly (set only for
+// the readiness Application) stops ArgoCD from delete-and-recreating the
+// readiness-gate Job on every no-op resync. See #2367.
+func TestBuildApplicationData_ApplyOutOfSyncOnly(t *testing.T) {
+	comp := recipe.ComponentRef{
+		Name:    "gpu-operator",
+		Source:  "https://helm.ngc.nvidia.com/nvidia",
+		Chart:   "gpu-operator",
+		Version: "v25.3.3",
+	}
+
+	tests := []struct {
+		name   string
+		folder localformat.Folder
+		want   bool
+	}{
+		{
+			name:   "primary folder",
+			folder: localformat.Folder{Name: "gpu-operator", Dir: "001-gpu-operator", Kind: localformat.KindUpstreamHelm, Parent: "gpu-operator"},
+			want:   false,
+		},
+		{
+			name:   "-pre folder",
+			folder: localformat.Folder{Name: "gpu-operator-pre", Dir: "001-gpu-operator-pre", Kind: localformat.KindLocalHelm, Parent: "gpu-operator"},
+			want:   false,
+		},
+		{
+			name:   "-post folder",
+			folder: localformat.Folder{Name: "gpu-operator-post", Dir: "003-gpu-operator-post", Kind: localformat.KindLocalHelm, Parent: "gpu-operator"},
+			want:   false,
+		},
+		{
+			name:   "-readiness folder",
+			folder: localformat.Folder{Name: "gpu-operator-readiness", Dir: "004-gpu-operator-readiness", Kind: localformat.KindLocalHelm, Parent: "gpu-operator"},
+			want:   true,
+		},
+		{
+			// Adversarial: a primary folder whose NAME merely contains
+			// "-readiness" (not the synthetic suffix pattern relative to
+			// its own Parent) must not be scoped in. f.Parent+"-readiness"
+			// = "foo-readiness-readiness" != "foo-readiness", so the
+			// predicate correctly evaluates false.
+			name:   "primary folder whose name happens to contain -readiness",
+			folder: localformat.Folder{Name: "foo-readiness", Dir: "005-foo-readiness", Kind: localformat.KindUpstreamHelm, Parent: "foo-readiness"},
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			data, err := buildApplicationData(comp, tt.folder, 0, "https://github.com/example/repo.git", "main", nil, false)
+			if err != nil {
+				t.Fatalf("buildApplicationData() error = %v", err)
+			}
+			if data.ApplyOutOfSyncOnly != tt.want {
+				t.Errorf("ApplyOutOfSyncOnly = %v, want %v (folder=%+v)", data.ApplyOutOfSyncOnly, tt.want, tt.folder)
+			}
+		})
+	}
+}
+
+// TestGenerate_ApplyOutOfSyncOnlySyncOptions asserts the rendered
+// application.yaml for a -readiness folder carries the exact
+// "- ApplyOutOfSyncOnly=true" syncOptions entry, and that a non-readiness
+// folder's rendered application.yaml does not mention ApplyOutOfSyncOnly
+// anywhere. See #2367.
+func TestGenerate_ApplyOutOfSyncOnlySyncOptions(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"gpu-operator"}
+
+	g := &Generator{
+		RecipeResult:    recipeResult,
+		ComponentValues: map[string]map[string]any{"gpu-operator": {}},
+		Version:         "v0.0.0-test",
+		RepoURL:         "https://github.com/example/aicr-bundles.git",
+		TargetRevision:  "main",
+		ComponentReadiness: map[string]map[string][]byte{
+			"gpu-operator": {
+				"readiness.yaml": []byte("apiVersion: batch/v1\nkind: Job\nmetadata:\n" +
+					"  name: gpu-operator-readiness-gate\n  namespace: {{ .Release.Namespace }}\n"),
+			},
+		},
+	}
+
+	if _, err := g.Generate(ctx, outputDir); err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	primary, err := os.ReadFile(filepath.Join(outputDir, "001-gpu-operator", "application.yaml"))
+	if err != nil {
+		t.Fatalf("read primary application.yaml: %v", err)
+	}
+	if strings.Contains(string(primary), "ApplyOutOfSyncOnly") {
+		t.Errorf("primary Application must not mention ApplyOutOfSyncOnly:\n%s", primary)
+	}
+
+	readiness, err := os.ReadFile(filepath.Join(outputDir, "002-gpu-operator-readiness", "application.yaml"))
+	if err != nil {
+		t.Fatalf("read readiness application.yaml: %v", err)
+	}
+	if !strings.Contains(string(readiness), "- ApplyOutOfSyncOnly=true") {
+		t.Errorf("readiness Application must contain \"- ApplyOutOfSyncOnly=true\":\n%s", readiness)
+	}
+}
+
+// TestGenerate_IgnoreComputeDomainCRDDiff asserts the gpu-operator
+// Application carries the computedomains ignoreDifferences stopgap only
+// when the bundle also ships a standalone DRA driver component. See
+// NVIDIA/aicr#2546.
+func TestGenerate_IgnoreComputeDomainCRDDiff(t *testing.T) {
+	computeDomainJSONPointers := []string{
+		"/spec/versions/0/schema/openAPIV3Schema/properties/spec/required",
+		"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/default",
+		"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/minimum",
+		"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/numNodes/description",
+	}
+
+	tests := []struct {
+		name           string
+		draDriverName  string // "" = no DRA driver component in the bundle
+		gpuOperatorPin string // "" = v26.7.0, the first version shipping the contested CRD
+		wantIgnore     bool
+	}{
+		{name: "gpu-operator alone", draDriverName: "", wantIgnore: false},
+		{name: "gpu-operator with nvidia-dra-driver-gpu", draDriverName: "nvidia-dra-driver-gpu", wantIgnore: true},
+		{name: "gpu-operator with nvidia-dra-driver-gpu-ocp", draDriverName: "nvidia-dra-driver-gpu-ocp", wantIgnore: true},
+		// Version gate: below v26.7.0 gpu-operator's chart ships no
+		// computedomains CRD, so there is nothing to arbitrate and the
+		// Application-wide RespectIgnoreDifferences must not be emitted.
+		{name: "gpu-operator v26.3.3 with DRA driver", draDriverName: "nvidia-dra-driver-gpu", gpuOperatorPin: "v26.3.3", wantIgnore: false},
+		{name: "gpu-operator v27.0.0 with DRA driver", draDriverName: "nvidia-dra-driver-gpu", gpuOperatorPin: "v27.0.0", wantIgnore: true},
+		// A non-semver pin cannot be ordered against the threshold; the
+		// guard fails open so a custom chart still gets the mitigation.
+		{name: "gpu-operator unparseable pin with DRA driver", draDriverName: "nvidia-dra-driver-gpu", gpuOperatorPin: "custom-build", wantIgnore: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gpuOperatorPin := tt.gpuOperatorPin
+			if gpuOperatorPin == "" {
+				gpuOperatorPin = "v26.7.0"
+			}
+			componentRefs := []recipe.ComponentRef{
+				{
+					Name:      "gpu-operator",
+					Namespace: "gpu-operator",
+					Chart:     "gpu-operator",
+					Version:   gpuOperatorPin,
+					Type:      recipe.ComponentTypeHelm,
+					Source:    "https://helm.ngc.nvidia.com/nvidia",
+				},
+			}
+			deploymentOrder := []string{"gpu-operator"}
+			componentValues := map[string]map[string]any{"gpu-operator": {}}
+			if tt.draDriverName != "" {
+				componentRefs = append(componentRefs, recipe.ComponentRef{
+					Name:      tt.draDriverName,
+					Namespace: "nvidia-dra-driver",
+					Chart:     "dra-driver-nvidia-gpu",
+					Version:   "0.5.0",
+					Type:      recipe.ComponentTypeHelm,
+					Source:    "oci://registry.k8s.io/dra-driver-nvidia/charts",
+				})
+				deploymentOrder = append(deploymentOrder, tt.draDriverName)
+				componentValues[tt.draDriverName] = map[string]any{}
+			}
+
+			recipeResult := &recipe.RecipeResult{}
+			recipeResult.Metadata.Version = testVersion
+			recipeResult.ComponentRefs = componentRefs
+			recipeResult.DeploymentOrder = deploymentOrder
+
+			g := &Generator{
+				RecipeResult:    recipeResult,
+				ComponentValues: componentValues,
+				Version:         "v0.0.0-test",
+				RepoURL:         "https://github.com/example/aicr-bundles.git",
+				TargetRevision:  "main",
+			}
+
+			ctx := context.Background()
+			outputDir := t.TempDir()
+			if _, err := g.Generate(ctx, outputDir); err != nil {
+				t.Fatalf("Generate() error = %v", err)
+			}
+
+			app, err := os.ReadFile(filepath.Join(outputDir, "001-gpu-operator", "application.yaml"))
+			if err != nil {
+				t.Fatalf("read gpu-operator application.yaml: %v", err)
+			}
+			got := string(app)
+
+			if !tt.wantIgnore {
+				if strings.Contains(got, "RespectIgnoreDifferences") || strings.Contains(got, "ignoreDifferences") {
+					t.Errorf("gpu-operator Application without a DRA driver component must not mention ignoreDifferences:\n%s", got)
+				}
+				return
+			}
+
+			if !strings.Contains(got, "- RespectIgnoreDifferences=true") {
+				t.Errorf("gpu-operator Application must contain \"- RespectIgnoreDifferences=true\":\n%s", got)
+			}
+			if !strings.Contains(got, "name: computedomains.resource.nvidia.com") {
+				t.Errorf("gpu-operator Application must ignoreDifferences on computedomains.resource.nvidia.com:\n%s", got)
+			}
+			for _, pointer := range computeDomainJSONPointers {
+				if !strings.Contains(got, pointer) {
+					t.Errorf("gpu-operator Application must ignore jsonPointer %q:\n%s", pointer, got)
+				}
+			}
+
+			// F6: the ignoreDifferences stopgap must be scoped to gpu-operator's own
+			// Application only — the DRA driver's Application must not carry it, or
+			// the DRA driver's schema would no longer be authoritative. See #2546.
+			draApp, err := os.ReadFile(filepath.Join(outputDir, "002-"+tt.draDriverName, "application.yaml"))
+			if err != nil {
+				t.Fatalf("read %s application.yaml: %v", tt.draDriverName, err)
+			}
+			gotDRA := string(draApp)
+			if strings.Contains(gotDRA, "RespectIgnoreDifferences") || strings.Contains(gotDRA, "ignoreDifferences") {
+				t.Errorf("%s Application must not mention ignoreDifferences:\n%s", tt.draDriverName, gotDRA)
 			}
 		})
 	}

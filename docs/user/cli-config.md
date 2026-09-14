@@ -32,7 +32,7 @@ The schema's source of truth is
 
 ```yaml
 kind: AICRConfig               # required, exactly this value
-apiVersion: aicr.run/v1alpha2  # required, exactly this value
+apiVersion: aicr.run/v1beta1   # required; v1alpha2 still accepted, see below
 metadata:
   name: gke-h100-training      # optional, identifying only
 spec:
@@ -46,6 +46,22 @@ spec:
 Each `spec.*` section is optional and each command reads only its own section,
 so a file may carry just one section or any combination. A document with none
 of the five sections is rejected.
+
+Reading is per-command; **validation is not**. Every section present in the file
+is checked when the file loads, whichever command loaded it — so a malformed
+`spec.bundle` fails `aicr snapshot --config` too, naming the spec path that is
+wrong. Keep that in mind for a single document spanning several sections: an
+error can name a section the running command never reads.
+
+`AICRConfig` is an authored file, so its `apiVersion` is yours to set. From
+v0.22 the documented value is `aicr.run/v1beta1`; the loader still accepts the
+superseded `aicr.run/v1alpha2` and warns, naming your config file, while empty
+and unknown values are rejected. v1.0.0 stops accepting `aicr.run/v1alpha2`
+entirely, so edit your config before upgrading to it. The full release-by-release table
+is in
+[Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility);
+the policy behind it is
+[ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md).
 
 ## Loading, Precedence, and Secrets
 
@@ -75,7 +91,7 @@ by attestation and evidence push is deliberately absent — supply it via the
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: eks-h100-training
 spec:
@@ -88,8 +104,11 @@ spec:
       namespace: aicr-validation
       image: ""                      # default: ghcr.io/nvidia/aicr:latest
       imagePullSecrets: []
-      jobName: aicr
-      serviceAccountName: aicr
+      # jobName is an optional PREFIX, not a name — the run ID is always
+      # appended. serviceAccountName is exact-if-exists: an existing
+      # ServiceAccount of exactly that name is used verbatim and the run
+      # then creates and deletes NO RBAC; otherwise it is a prefix too.
+      # Omit both to take the run-scoped defaults.
       nodeSelector:
         nodeGroup: gpu-worker
       tolerations:
@@ -118,6 +137,10 @@ spec:
     #   slurm:                       # only valid when the resolved recipe platform is slurm
     #     accounting:
     #       mode: disabled           # disabled | customer-managed | aicr-provided
+    #   gke:                         # only valid for the h100 gke-cos kubeflow training leaf
+    #     tcpxoInterfaces:           # required when that leaf ships torch-distributed-tcpxo;
+    #       - {interfaceName: eth1, network: <cluster>-gpu-nic-0}  # ordered eth1..eth8 (8 entries);
+    #                                                          # names from the cluster provisioner
     # input:
     #   snapshot: snapshot.yaml      # derive criteria from a snapshot instead
     output:
@@ -146,6 +169,7 @@ spec:
         nodeGroup: gpu-worker
       acceleratedNodeTolerations:
         - nvidia.com/gpu=present:NoSchedule
+      draEvictionNodeLabel: nvidia.com/dra-kubelet-plugin=true
       workloadGate: ""
       workloadSelector: {}
       nodes: 2
@@ -170,8 +194,10 @@ spec:
       namespace: aicr-validation
       image: ""
       imagePullSecrets: []
-      jobName: aicr
-      serviceAccountName: aicr
+      # Optional; omitted here so the defaults apply (both aicr-validate).
+      # jobName is always a prefix with the run ID appended;
+      # serviceAccountName is exact-if-exists — an existing ServiceAccount
+      # of exactly that name is used verbatim and the run creates no RBAC.
       nodeSelector:
         nodeGroup: gpu-worker
       tolerations:
@@ -219,6 +245,8 @@ produced from the live cluster.
 | `output.format` | string | `yaml` \| `json` \| `table` |
 | `output.template` | string | Optional Go template path |
 | `agent.*` | object | In-cluster capture Job pod: `namespace`, `image`, `imagePullSecrets`, `jobName`, `serviceAccountName`, `nodeSelector`, `tolerations`, `requireGpu`, `runtimeClassName` (mutually exclusive with `requireGpu`), `os`, `requests`, `limits`. Mirrors `spec.validate.agent` so one file pins matching placement for both |
+| `agent.jobName` | string | Optional **prefix**, never an exact name — the run ID is always appended (`<prefix>-<run-id>`). Omit it unless you need a custom prefix (default: `aicr`) |
+| `agent.serviceAccountName` | string | Optional and **exact-if-exists**, so unlike `jobName` it is not always a prefix. When a ServiceAccount of exactly this name already exists in `agent.namespace`, the pod runs as it verbatim, the run creates and deletes **no** ServiceAccount, Role, RoleBinding, ClusterRole, or ClusterRoleBinding, and per-run permission isolation is waived — concurrent runs share that identity's persistent grants. When it does not exist, the value is a prefix, the run ID is appended (`<prefix>-<run-id>`), and the run owns a full run-scoped RBAC set it deletes at cleanup. Omitting the field is not the same as writing `aicr` into it: an omitted name is never probed, so the run always takes the run-scoped `aicr-<run-id>`. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) |
 | `execution.timeout` | duration string | e.g. `5m` |
 | `execution.noCleanup` | bool | Keep the capture Job after completion |
 | `execution.privileged` | bool (tri-state) | Set `false` for PSS-restricted namespaces |
@@ -255,7 +283,7 @@ Inputs to `aicr bundle`.
 | `deployment.set` / `.dynamic` | []string | Value overrides, `key:path=value` |
 | `deployment.vendorCharts` | bool | Vendor charts into the bundle |
 | `deployment.appName` | string | Argo CD parent `Application` name override (multi-bundle installs sharing a namespace) |
-| `scheduling.*` | object | `systemNodeSelector`/`Tolerations`, `acceleratedNodeSelector`/`Tolerations`, `workloadGate`, `workloadSelector`, `nodes`, `storageClass`, `sharedStorageClass`. Selectors are YAML maps; tolerations use the CLI's `key=value:effect` strings |
+| `scheduling.*` | object | `systemNodeSelector`/`Tolerations`, `acceleratedNodeSelector`/`Tolerations`, `draEvictionNodeLabel`, `workloadGate`, `workloadSelector`, `nodes`, `storageClass`, `sharedStorageClass`. Selectors are YAML maps; tolerations use the CLI's `key=value:effect` strings. `draEvictionNodeLabel` accepts one `key=value` label and has no default: setting it opts in to DRA eviction coordination, which AICR applies only when DRA and GPU Operator are both enabled. |
 | `attestation.enabled` | bool | Enable bundle attestation (signing); keyless OIDC by default, KMS-backed when `signingKey` is set |
 | `attestation.certificateIdentityRegexp` | string | Expected signer identity |
 | `attestation.oidcDeviceFlow` | bool | Device-code flow for headless signing |
@@ -278,7 +306,9 @@ Inputs to `aicr validate`.
 | Field | Type | Notes |
 |-------|------|-------|
 | `input.recipe` / `.snapshot` | string | Recipe + snapshot to validate |
-| `agent.*` | object | In-cluster validation Job pod; same fields and nil-vs-empty semantics as `spec.snapshot.agent` (minus `runtimeClassName`/`os`/`requests`/`limits`) |
+| `agent.*` | object | The **live snapshot-capture** Job pod `aicr validate` deploys when `input.snapshot` is empty; same fields and nil-vs-empty semantics as `spec.snapshot.agent` (minus `runtimeClassName`/`os`/`requests`/`limits`). Neither `jobName` nor `serviceAccountName` names the validator Jobs, whose RBAC is always run-scoped |
+| `agent.jobName` | string | Optional **prefix**, never an exact name — the run ID is always appended (`<prefix>-<run-id>`). Omit it to take the default (`aicr-validate`) |
+| `agent.serviceAccountName` | string | Optional and **exact-if-exists**, with the same two branches as `spec.snapshot.agent.serviceAccountName`: an existing ServiceAccount of exactly this name in `agent.namespace` is used verbatim, the run creates and deletes **no** RBAC, and per-run permission isolation is waived — concurrent runs share that identity's persistent grants; when it does not exist the value is a prefix with the run ID appended (`<prefix>-<run-id>`) and the run owns a full run-scoped RBAC set. Omitting the field is not the same as writing `aicr-validate` into it: an omitted name is never probed, so the run always takes the run-scoped `aicr-validate-<run-id>`. See [Using an existing ServiceAccount](agent-deployment.md#using-an-existing-serviceaccount-irsa-and-workload-identity) |
 | `execution.phases` | []string | e.g. `[deployment, conformance, performance]` |
 | `execution.failOnError` | bool (tri-state) | Absent = CLI default (`true`); explicit `false` opts out |
 | `execution.failFast` | bool (tri-state) | Stop after the first failed phase |

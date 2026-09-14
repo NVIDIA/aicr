@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"path/filepath"
 	"strings"
 
@@ -141,9 +142,7 @@ func (c *Collector) parseMultiLineKeyValue(path string, lines []string, params m
 		}
 	}
 
-	for k, v := range tmp {
-		params[k] = v
-	}
+	maps.Copy(params, tmp)
 
 	return true
 }

@@ -16,51 +16,37 @@ package agent
 
 import (
 	"context"
+	"maps"
 	"strconv"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrerrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/k8s"
 	"github.com/NVIDIA/aicr/pkg/recipe/oskind"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/watch"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
 )
 
-// ensureJob deletes any existing Job and creates a fresh one.
+// ensureJob creates the run-scoped agent Job.
 func (d *Deployer) ensureJob(ctx context.Context) error {
-	// Delete existing Job if present
-	propagationPolicy := metav1.DeletePropagationForeground
-	err := d.clientset.BatchV1().Jobs(d.config.Namespace).Delete(
-		ctx,
-		d.config.JobName,
-		metav1.DeleteOptions{
-			PropagationPolicy: &propagationPolicy,
-		},
-	)
-	if err != nil && !errors.IsNotFound(err) {
-		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to delete existing Job", err)
-	}
-
-	// Wait for Job to be fully deleted
-	jobExisted := err == nil // Job existed and was deleted
-	if jobExisted {
-		if waitErr := d.waitForJobDeletion(ctx); waitErr != nil {
-			return aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "timeout waiting for Job deletion", waitErr)
-		}
-	}
-
-	// Create fresh Job
 	job := d.buildJob()
-	_, err = d.clientset.BatchV1().Jobs(d.config.Namespace).
+	// Record the intent before the Create so a committed create whose
+	// response is lost still enters Cleanup's delete list (see recordIntent).
+	d.recordIntent(kindJob, job.Name)
+	created, err := d.clientset.BatchV1().Jobs(d.config.Namespace).
 		Create(ctx, job, metav1.CreateOptions{})
+	if errors.IsAlreadyExists(err) {
+		d.discardIntent(kindJob, job.Name)
+		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "Job already exists under run-scoped name (duplicate RunID?)", err)
+	}
 	if err != nil {
 		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to create Job", err)
 	}
+	d.recordCreated(kindJob, created.Name, created.UID)
 
 	return nil
 }
@@ -78,11 +64,9 @@ func (d *Deployer) buildJob() *batchv1.Job {
 
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      d.config.JobName,
+			Name:      d.jobName(),
 			Namespace: d.config.Namespace,
-			Labels: map[string]string{
-				labelAppName: appName,
-			},
+			Labels:    d.objectLabels(),
 		},
 		Spec: batchv1.JobSpec{
 			Completions:             ptr.To(int32(1)),
@@ -93,9 +77,10 @@ func (d *Deployer) buildJob() *batchv1.Job {
 			ActiveDeadlineSeconds:   ptr.To(int64(defaults.AgentJobActiveDeadline.Seconds())),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						labelAppName: appName,
-					},
+					// Job metadata.labels do NOT propagate to the Pods a Job
+					// creates — the pod template needs its own copy so
+					// label-selector pod lookups (findPodName et al.) work.
+					Labels: d.objectLabels(),
 				},
 				Spec: podSpec,
 			},
@@ -108,7 +93,7 @@ func (d *Deployer) buildJob() *batchv1.Job {
 // When Privileged=false: PSS-compliant restricted pod, only K8s collector works.
 func (d *Deployer) buildPodSpec(args []string) corev1.PodSpec {
 	spec := corev1.PodSpec{
-		ServiceAccountName: d.config.ServiceAccountName,
+		ServiceAccountName: d.podServiceAccountName(),
 		RestartPolicy:      corev1.RestartPolicyNever,
 		NodeSelector:       d.config.NodeSelector,
 		Tolerations:        d.config.Tolerations,
@@ -347,73 +332,21 @@ func (d *Deployer) buildEnvVars() []corev1.EnvVar {
 	return envVars
 }
 
-// deleteJob deletes the Job.
-func (d *Deployer) deleteJob(ctx context.Context) error {
+// deleteJob deletes the Job, pinning the delete to uid so a same-named Job
+// belonging to a different run is never collected. If the Job is already
+// gone, or uid no longer matches (already replaced, not ours), this is a
+// no-op (idempotent).
+func (d *Deployer) deleteJob(ctx context.Context, name string, uid types.UID) error {
 	propagationPolicy := metav1.DeletePropagationForeground
 	err := d.clientset.BatchV1().Jobs(d.config.Namespace).Delete(
 		ctx,
-		d.config.JobName,
+		name,
 		metav1.DeleteOptions{
 			PropagationPolicy: &propagationPolicy,
+			Preconditions:     uidPreconditions(uid),
 		},
 	)
-	return k8s.IgnoreNotFound(err)
-}
-
-// waitForJobDeletion waits for the Job to be fully deleted using the watch API.
-// Returns nil when the Job is observed deleted (Get returns NotFound, or a
-// watch.Deleted event is received). Returns ErrCodeTimeout if the cleanup
-// deadline elapses before deletion is observed.
-func (d *Deployer) waitForJobDeletion(ctx context.Context) error {
-	timeoutCtx, cancel := context.WithTimeout(ctx, defaults.K8sCleanupTimeout)
-	defer cancel()
-
-	// Fast path: already deleted. Note: IgnoreNotFound(nil) returns nil,
-	// so check NotFound explicitly — otherwise a successful Get (Job still
-	// exists) would incorrectly short-circuit as "deleted".
-	current, err := d.clientset.BatchV1().Jobs(d.config.Namespace).
-		Get(timeoutCtx, d.config.JobName, metav1.GetOptions{})
-	if errors.IsNotFound(err) {
-		return nil
-	}
-	if err != nil {
-		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to get Job", err)
-	}
-
-	watcher, err := d.clientset.BatchV1().Jobs(d.config.Namespace).Watch(timeoutCtx, metav1.ListOptions{
-		FieldSelector:   "metadata.name=" + d.config.JobName,
-		ResourceVersion: current.ResourceVersion,
-	})
-	if err != nil {
-		return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "failed to watch Job", err)
-	}
-	defer watcher.Stop()
-
-	for {
-		select {
-		case <-timeoutCtx.Done():
-			return aicrerrors.Wrap(aicrerrors.ErrCodeTimeout, "Job deletion wait timeout", timeoutCtx.Err())
-		case event, ok := <-watcher.ResultChan():
-			if !ok {
-				// Channel closed; verify with a Get to handle missed events.
-				// Use explicit NotFound check (IgnoreNotFound(nil) returns nil
-				// and would falsely report success when the Job still exists).
-				_, getErr := d.clientset.BatchV1().Jobs(d.config.Namespace).
-					Get(timeoutCtx, d.config.JobName, metav1.GetOptions{})
-				if errors.IsNotFound(getErr) {
-					return nil
-				}
-				if getErr != nil {
-					return aicrerrors.Wrap(aicrerrors.ErrCodeInternal, "Job watch channel closed", getErr)
-				}
-				return aicrerrors.Wrap(aicrerrors.ErrCodeUnavailable,
-					"Job watch channel closed before deletion observed", nil)
-			}
-			if event.Type == watch.Deleted {
-				return nil
-			}
-		}
-	}
+	return ignoreNotFoundOrConflict(err)
 }
 
 // mustParseQuantity parses a resource quantity or panics.
@@ -429,12 +362,8 @@ func mustParseQuantity(s string) resource.Quantity {
 // overrides without forcing the caller to specify every resource.
 func mergeResourceList(defaults, override corev1.ResourceList) corev1.ResourceList {
 	merged := make(corev1.ResourceList, len(defaults))
-	for k, v := range defaults {
-		merged[k] = v
-	}
-	for k, v := range override {
-		merged[k] = v
-	}
+	maps.Copy(merged, defaults)
+	maps.Copy(merged, override)
 	return merged
 }
 

@@ -26,8 +26,24 @@
 
 name: Merge Gate
 
+# The push trigger covers what on-push.yaml does not. on-push.yaml already runs
+# the full qualification on every main push, so this workflow skips its `tests`
+# job there (see below) and contributes only its own checks: actionlint,
+# verify-licenses, verify-renovate, docs-mdx, malware-scan, CodeQL and the
+# freshness gates.
+#
+# That matters because main's ruleset is bypassable and bypassing is routine
+# here -- a direct push reports "Bypassed rule violations ... 2 of 2 required
+# status checks are expected", meaning none of these ran before the commit
+# landed. Without this trigger they would not run after it either.
+#
+# Push runs force every check-paths output true, because a merged commit has no
+# base to diff against.
 on:
   pull_request:
+    branches:
+      - main
+  push:
     branches:
       - main
   workflow_dispatch: {}
@@ -35,9 +51,17 @@ on:
 permissions:
   contents: read
 
+# Push runs key on the SHA, not the ref, and never cancel. Superseding a PR's
+# older run is the point of cancel-in-progress; superseding a merged commit's
+# run is how a broken commit goes unverified. On 2026-09-10 two merges landed 36
+# seconds apart and the first commit's On Push Qualification run was cancelled
+# while queued, so the commit that actually broke main was never tested and the
+# failure surfaced against the next commit instead. Sharing one ref-keyed group
+# across merges reproduces that; a SHA-keyed group gives every merged commit its
+# own run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
 
@@ -48,24 +72,37 @@ jobs:
   check-paths:
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    # Every output is forced true on push so a main run skips path filtering
+    # and exercises the whole gate. Path filtering exists to keep PR feedback
+    # cheap by diffing against the base; a push to main has no such base, and a
+    # watchdog that only re-checks the paths the merge happened to touch would
+    # miss exactly the case it is here for — a merge that is individually clean
+    # but breaks a derived artifact somewhere else in the tree.
     outputs:
-      code: ${{ steps.code.outputs.code }}
-      actions: ${{ steps.changes.outputs.actions }}
-      deps: ${{ steps.changes.outputs.deps }}
-      renovate: ${{ steps.changes.outputs.renovate }}
-      bom: ${{ steps.changes.outputs.bom }}
-      tuning: ${{ steps.changes.outputs.tuning }}
-      notices: ${{ steps.changes.outputs.notices }}
-      coverage: ${{ steps.changes.outputs.coverage }}
-      docs: ${{ steps.changes.outputs.docs }}
+      code: ${{ github.event_name == 'push' && 'true' || steps.code.outputs.code }}
+      actions: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.actions }}
+      deps: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.deps }}
+      renovate: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.renovate }}
+      bom: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.bom }}
+      tuning: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.tuning }}
+      notices: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.notices }}
+      coverage: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.coverage }}
+      docs: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.docs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
 
       # Detect targeted path categories (default: any match = true)
+      #
+      # Skipped on push: the outputs above already force every category true
+      # there, and running the filter anyway is not merely redundant. On a push
+      # event it diffs against github.event.before, which is all-zeros for the
+      # first push on a new branch and after history rewrites; the step then
+      # errors, failing check-paths and taking the whole gate down with it.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         id: changes
+        if: github.event_name != 'push'
         with:
           filters: |
             actions:
@@ -73,13 +110,14 @@ jobs:
               - '.github/actions/**'
             deps:
               # Inputs to the verify-licenses gate, which runs `make
-              # license-check` over the vendored dependency graph. Watch the
-              # dependency manifests and the vendor tree, plus every input that
+              # license-check` over the resolved dependency graph. Watch the
+              # dependency manifests, plus every input that
               # defines the check itself, so a change to the gate cannot skip
               # its own gate: the Makefile recipe is the check's contract, the
               # install-go-licenses action supplies the binary it runs (that
-              # action clears GOFLAGS, without which -trimpath strips GOROOT and
-              # the check passes while inspecting zero packages), and this
+              # action pins GOFLAGS to -mod=readonly, without which an inherited
+              # -trimpath strips GOROOT and the check passes while inspecting
+              # zero packages), and this
               # workflow defines the job. The entry replaced here named
               # '.github/workflows/verify-licenses.yaml', which was deleted in
               # 3c9f6ec5 when the job moved into this workflow, so the filter
@@ -96,7 +134,6 @@ jobs:
               # touching only .go-version.
               - 'go.mod'
               - 'go.sum'
-              - 'vendor/**'
               - 'Makefile'
               - '.go-version'
               - '.settings.yaml'
@@ -137,16 +174,21 @@ jobs:
               - 'pkg/tuning/**'
               - 'tools/tuning/**'
             notices:
-              # Inputs to the committed THIRD_PARTY_NOTICES.md freshness check.
-              # The file is the union of every vendored dependency's license
+              # Inputs to the THIRD_PARTY_NOTICES.md generator health check.
+              # The file itself is NOT committed — it is generated by
+              # `make release` and uploaded as a release asset — so there is no
+              # committed copy to watch or to verify a hand edit against. What
+              # this gate protects is the generator's ability to run at all:
+              # `make release` depends on it, so a break discovered at tag time
+              # would block a release.
+              # The file is the union of every redistributed dependency's license
               # across the released OS/arch matrix, so any dependency-graph
-              # change can alter it. Watch the dependency manifests, the vendor
-              # tree, and the generator itself (plus the committed file, so a
-              # hand edit is re-verified). .goreleaser.yaml is included because
+              # change can alter it. Watch the dependency manifests and the
+              # generator itself. .goreleaser.yaml is included because
               # the generator asserts its PLATFORMS matrix matches the release
               # targets defined there — a new goos/goarch must re-run this check.
-              # Makefile is included because the `notices`/`notices-check`
-              # recipes are the generation/check contract — a change to them
+              # Makefile is included because the `notices` recipe is the
+              # generation contract — a change to it
               # must not be able to skip its own gate. .settings.yaml is included
               # because the generator's output depends on its pins: a
               # linting.go_licenses bump can change license classification/URL
@@ -154,8 +196,8 @@ jobs:
               # ignore set. This is a standalone job — the full `tests` suite
               # does NOT regenerate the file.
               # The Python half of the notices file covers the aiperf-bench
-              # image, whose dependency closure is an installed venv rather
-              # than a vendored tree. It cannot be regenerated here (that needs
+              # image, whose dependency closure is an installed venv and not
+              # part of the Go module graph. It cannot be regenerated here (needs
               # docker + PyPI), so the committed fragment is watched directly,
               # alongside the requirements.txt whose sha256 the generator
               # asserts the fragment still records — editing requirements
@@ -166,12 +208,20 @@ jobs:
               - '.goreleaser.yaml'
               - 'go.mod'
               - 'go.sum'
-              - 'vendor/**'
               - 'tools/generate-notices'
+              - 'tools/check-fence-balance'
               - 'tools/generate-python-licenses'
               - 'validators/performance/requirements.txt'
               - 'validators/performance/licenses/**'
-              - 'THIRD_PARTY_NOTICES.md'
+              # The actions that supply this job's toolchain. install-go-licenses
+              # matters most: it exists to pin GOFLAGS, and a build that
+              # inherits -trimpath yields a go-licenses with no GOROOT. The
+              # `deps` filter watches both too, but that gates verify-licenses,
+              # which under -trimpath PASSES while inspecting zero packages —
+              # `make notices` is the one that fails closed, so it is the better
+              # canary and must not skip when its own toolchain changes.
+              - '.github/actions/install-go-licenses/**'
+              - '.github/actions/load-versions/**'
             coverage:
               # Inputs to the committed CUJ/CLI coverage-matrix freshness check.
               # The matrix is derived, so a change to ANY of its signal sources
@@ -241,6 +291,7 @@ jobs:
       # '.settings.yaml', etc. still count as code.
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d  # v4.0.3
         id: code
+        if: github.event_name != 'push'
         with:
           predicate-quantifier: 'every'
           filters: |
@@ -254,9 +305,15 @@ jobs:
   # Qualification (Test, Lint, CLI E2E, E2E, Security Scan)
   # ---------------------------------------------------------------------------
 
+  # Not run on push: on-push.yaml already calls this same reusable workflow on
+  # every main push (`cancel-in-progress: false`, so it completes), and running
+  # it here too would qualify each merge twice for nothing. The push trigger on
+  # this workflow exists for the checks on-push does NOT run -- actionlint,
+  # verify-licenses, verify-renovate, docs-mdx, the freshness gates -- which is
+  # what a bypassed direct push to main would otherwise skip entirely.
   tests:
     needs: [check-paths]
-    if: needs.check-paths.outputs.code == 'true'
+    if: needs.check-paths.outputs.code == 'true' && github.event_name != 'push'
     uses: ./.github/workflows/qualification.yaml
     permissions:
       actions: read
@@ -268,11 +325,11 @@ jobs:
 
   tests-skip:
     needs: [check-paths]
-    if: needs.check-paths.outputs.code != 'true'
+    if: needs.check-paths.outputs.code != 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
-      - run: echo "Docs/non-code change — qualification tests not required"
+      - run: echo "Qualification not required here (docs-only change, or a push run that on-push.yaml already qualifies)"
 
   # ---------------------------------------------------------------------------
   # CodeQL (analyze)
@@ -297,13 +354,11 @@ jobs:
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
-      - uses: github/codeql-action/init@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd  # v4.37.7
+      - uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63  # v4.38.0
         with:
           languages: go
       - run: go build ./...
-        env:
-          GOFLAGS: -mod=vendor
-      - uses: github/codeql-action/analyze@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd  # v4.37.7
+      - uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63  # v4.38.0
 
   analyze-skip:
     needs: [check-paths]
@@ -418,13 +473,10 @@ jobs:
           cache: true
           cache-dependency-path: |
             go.sum
-            vendor/modules.txt
       - uses: ./.github/actions/install-go-licenses
         with:
           version: ${{ steps.versions.outputs.go_licenses }}
       - name: Report licenses
-        env:
-          GOFLAGS: -mod=vendor
         run: |
           echo "=== Dependency Licenses ==="
           go-licenses report ./... 2>/dev/null | sort -t',' -k3 | column -t -s','
@@ -432,8 +484,6 @@ jobs:
           echo "=== License Summary ==="
           go-licenses report ./... 2>/dev/null | cut -d',' -f3 | sort | uniq -c | sort -rn
       - name: Check licenses
-        env:
-          GOFLAGS: -mod=vendor
         run: make license-check
 
   verify-licenses-skip:
@@ -530,8 +580,6 @@ jobs:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
       - name: Verify committed BOM versions and variants match the recipes
-        env:
-          GOFLAGS: -mod=vendor
         # `go test -run <name>` exits 0 with "no tests to run" if a test is
         # renamed or removed, which would let this gate silently no-op. Assert
         # each named test actually executed by requiring its PASS line — a
@@ -581,8 +629,6 @@ jobs:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
       - name: Verify committed tuning-status table is up to date
-        env:
-          GOFLAGS: -mod=vendor
         # `make tuning-check` regenerates the table into a temp dir and splices
         # it into the doc, then fails if the working tree differs — so a stale
         # committed table (or missing splice markers) fails closed here.
@@ -597,12 +643,18 @@ jobs:
       - run: echo "No tuning-status inputs changed — freshness check not required"
 
   # ---------------------------------------------------------------------------
-  # Third-party notices freshness — ensures the committed THIRD_PARTY_NOTICES.md
-  # matches the vendored dependency graph across every released OS/arch target,
-  # on PRs touching its inputs (go.mod/go.sum/vendor + the generator).
+  # Third-party notices generator health — ensures THIRD_PARTY_NOTICES.md can
+  # still be generated across every released OS/arch target, on PRs touching its
+  # inputs (go.mod/go.sum + the generator). The file is not committed; it is
+  # produced by `make release` and uploaded as a release asset. Because the
+  # release depends on this generator, a break that first surfaced at tag time
+  # would block a release, so it is exercised here on the PR that causes it.
+  # The generator fails closed — an empty `go list -deps ./cmd/...`, an
+  # uncovered linked module, a stale Python fragment, or an unbalanced code
+  # fence all abort it — so "it ran" is a meaningful assertion, not a smoke test.
   # ---------------------------------------------------------------------------
 
-  notices-freshness:
+  notices-generator:
     needs: [check-paths]
     if: needs.check-paths.outputs.notices == 'true'
     runs-on: ubuntu-latest
@@ -619,25 +671,25 @@ jobs:
           cache: true
           cache-dependency-path: |
             go.sum
-            vendor/modules.txt
       - uses: ./.github/actions/install-go-licenses
         with:
           version: ${{ steps.versions.outputs.go_licenses }}
-      - name: Verify committed THIRD_PARTY_NOTICES.md is up to date
-        env:
-          GOFLAGS: -mod=vendor
-        # `make notices-check` regenerates the notices file (union across the
-        # release OS/arch matrix, so it is host-independent) and fails if the
-        # working tree differs — a stale committed file fails closed here.
-        run: make notices-check
+      - name: Verify THIRD_PARTY_NOTICES.md can be generated
+        # Regenerates the notices file (union across the release OS/arch matrix,
+        # so it is host-independent) and discards it. The output is not compared
+        # against anything: there is no committed copy, and the release builds
+        # its own. What is asserted is that the generator completes — every
+        # failure mode it guards is fatal, so a non-zero exit here is the same
+        # signal `make release` would get at tag time.
+        run: make notices
 
-  notices-freshness-skip:
+  notices-generator-skip:
     needs: [check-paths]
     if: needs.check-paths.outputs.notices != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
-      - run: echo "No dependency/generator changes — notices freshness check not required"
+      - run: echo "No dependency/generator changes — notices generator check not required"
 
   # ---------------------------------------------------------------------------
   # Coverage-matrix freshness — ensures the committed docs/user/coverage-matrix.md
@@ -663,8 +715,6 @@ jobs:
           go-version: ${{ steps.versions.outputs.go }}
           cache: true
       - name: Verify committed coverage matrix is up to date
-        env:
-          GOFLAGS: -mod=vendor
         # `make coverage-check` regenerates the matrix in place and fails if the
         # working tree differs. The generator itself fails closed on an
         # unresolvable UAT wiring or version axis, so a moved registry or renamed
@@ -706,8 +756,8 @@ jobs:
       - bom-freshness-skip
       - tuning-freshness
       - tuning-freshness-skip
-      - notices-freshness
-      - notices-freshness-skip
+      - notices-generator
+      - notices-generator-skip
       - coverage-freshness
       - coverage-freshness-skip
     runs-on: ubuntu-latest

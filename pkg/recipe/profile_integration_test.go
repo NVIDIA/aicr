@@ -258,8 +258,8 @@ func TestUnprofiledCriteriaStayLegacy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildFromCriteria() error = %v", err)
 	}
-	if result.APIVersion != RecipeAPIVersion {
-		t.Fatalf("apiVersion = %q, want %q", result.APIVersion, RecipeAPIVersion)
+	if result.APIVersion != RecipeResultAPIVersion {
+		t.Fatalf("apiVersion = %q, want %q", result.APIVersion, RecipeResultAPIVersion)
 	}
 	if result.Metadata.SelectedProfile != nil {
 		t.Fatalf("selectedProfile = %#v, want nil for an unprofiled composition",

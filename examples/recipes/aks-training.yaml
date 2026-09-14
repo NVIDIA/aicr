@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeResult
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 metadata:
   version: dev
   appliedOverlays:
@@ -52,7 +52,7 @@ componentRefs:
     chart: gpu-operator
     type: Helm
     source: https://helm.ngc.nvidia.com/nvidia
-    version: v26.3.3
+    version: v26.7.0
     valuesFile: components/gpu-operator/values-aks-training.yaml
     dependencyRefs:
       - nfd
@@ -77,7 +77,7 @@ componentRefs:
     chart: kai-scheduler
     type: Helm
     source: oci://ghcr.io/kai-scheduler/kai-scheduler
-    version: v0.14.1
+    version: v0.16.9
     valuesFile: components/kai-scheduler/values.yaml
     dependencyRefs:
       - gpu-operator
@@ -151,7 +151,7 @@ componentRefs:
     chart: dra-driver-nvidia-gpu
     type: Helm
     source: oci://registry.k8s.io/dra-driver-nvidia/charts
-    version: 0.4.1
+    version: 0.5.0
     valuesFile: components/nvidia-dra-driver-gpu/values.yaml
     overrides:
       controller:

@@ -14,14 +14,19 @@
 
 package config
 
-import "github.com/NVIDIA/aicr/pkg/header"
+import (
+	"github.com/NVIDIA/aicr/pkg/header"
+	"github.com/NVIDIA/aicr/pkg/recipe"
+)
 
 // Kind is the kind value for AICRConfig documents.
 const Kind = "AICRConfig"
 
-// APIVersion is the apiVersion for AICRConfig documents. It aliases the
-// canonical header.GroupVersion (single source of truth).
-const APIVersion = header.GroupVersion
+// APIVersion is the apiVersion for AICRConfig documents. AICRConfig is on the
+// ADR-022 authoring and configuration track, so this aliases
+// header.AuthoringGroupVersion; the track's target is
+// header.GroupVersionV1Beta1.
+const APIVersion = header.AuthoringGroupVersion
 
 // AICRConfig is the top-level schema for the --config file accepted by
 // the aicr CLI's snapshot, recipe, bundle, validate, and verify commands.
@@ -131,6 +136,18 @@ type RecipeConfigurationSpec struct {
 	// RuntimeInventory selects whether the runtime AI inventory component
 	// (k8s-aibom) is installed. Mirrors the --runtime-inventory flag.
 	RuntimeInventory *RuntimeInventorySpec `yaml:"runtimeInventory,omitempty" json:"runtimeInventory,omitempty"`
+
+	// GKE contains GKE-specific desired-state inputs.
+	GKE *GKEConfigurationSpec `yaml:"gke,omitempty" json:"gke,omitempty"`
+}
+
+// GKEConfigurationSpec contains GKE-specific desired-state inputs.
+type GKEConfigurationSpec struct {
+	// TCPXOInterfaces is the ordered eth1..eth8 → VPC network mapping
+	// rendered into the torch-distributed-tcpxo ClusterTrainingRuntime.
+	// Required when the resolved recipe ships that runtime. Mirrors the
+	// --gke-tcpxo-interfaces flag's value in structured form.
+	TCPXOInterfaces []recipe.NetworkInterfaceMapping `yaml:"tcpxoInterfaces,omitempty" json:"tcpxoInterfaces,omitempty"`
 }
 
 // RuntimeInventorySpec contains the runtime AI inventory selection.
@@ -221,6 +238,7 @@ type SchedulingSpec struct {
 	SystemNodeTolerations      []string          `yaml:"systemNodeTolerations,omitempty" json:"systemNodeTolerations,omitempty"`
 	AcceleratedNodeSelector    map[string]string `yaml:"acceleratedNodeSelector,omitempty" json:"acceleratedNodeSelector,omitempty"`
 	AcceleratedNodeTolerations []string          `yaml:"acceleratedNodeTolerations,omitempty" json:"acceleratedNodeTolerations,omitempty"`
+	DRAEvictionNodeLabel       string            `yaml:"draEvictionNodeLabel,omitempty" json:"draEvictionNodeLabel,omitempty"`
 	WorkloadGate               string            `yaml:"workloadGate,omitempty" json:"workloadGate,omitempty"`
 	WorkloadSelector           map[string]string `yaml:"workloadSelector,omitempty" json:"workloadSelector,omitempty"`
 	Nodes                      int               `yaml:"nodes,omitempty" json:"nodes,omitempty"`

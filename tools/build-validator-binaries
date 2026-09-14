@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+set -euo pipefail
+
+phases="${VALIDATOR_PHASES:-deployment performance conformance}"
+arches="${VALIDATOR_ARCHES:-$(go env GOARCH)}"
+
+# Accept comma-separated workflow inputs as well as shell-friendly lists.
+phases="${phases//,/ }"
+arches="${arches//,/ }"
+read -r -a phase_list <<< "${phases}"
+read -r -a arch_list <<< "${arches}"
+
+for arch in "${arch_list[@]}"; do
+  case "${arch}" in
+    amd64|arm64) ;;
+    *)
+      echo "unsupported validator architecture: ${arch}" >&2
+      exit 1
+      ;;
+  esac
+
+  mkdir -p "dist/validator/${arch}"
+  for phase in "${phase_list[@]}"; do
+    if ! [[ "${phase}" =~ ^[a-z][a-z0-9_-]*$ ]] || [[ ! -d "validators/${phase}" ]]; then
+      echo "invalid validator phase: ${phase}" >&2
+      exit 1
+    fi
+    echo "Building validator binary: ${phase} (linux/${arch})"
+    CGO_ENABLED=0 GOOS=linux GOARCH="${arch}" GOFLAGS="-mod=readonly" \
+      go build -trimpath -o "dist/validator/${arch}/${phase}" "./validators/${phase}"
+  done
+done

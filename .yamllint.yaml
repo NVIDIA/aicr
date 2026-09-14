@@ -18,12 +18,18 @@ yaml-files:
   - '*.yml'
 
 ignore: |
-  # Build and vendor directories
-  vendor/
+  # Build directories
   dist/
   bundle/
   bundles/
   node_modules/
+
+  # Scratch tree for `make notices`: upstream license files copied out of the
+  # Go module cache. Gitignored, third-party, and not ours to lint. It only
+  # started matching after #2374 removed vendor/ — `go mod vendor` prunes
+  # non-Go files, so the vendored copies carried no upstream .github/ workflows;
+  # the module cache keeps the full tree.
+  .licenses-cache/
 
   # Generated snapshot output files (machine-generated, not hand-written)
   snapshot.yaml

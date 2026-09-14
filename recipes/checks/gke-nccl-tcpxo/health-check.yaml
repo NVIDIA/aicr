@@ -31,6 +31,10 @@
 # `numberUnavailable` is `omitempty` and disappears from the status
 # when zero — making the equality compare null on a healthy DaemonSet
 # (see recipes/checks/nfd/health-check.yaml for the same rationale).
+# updatedNumberScheduled/observedGeneration additionally guard against a
+# stale rollout: a node still running the previous revision's pod also
+# reports numberReady, so that alone can't distinguish it from a fully
+# current rollout.
 apiVersion: chainsaw.kyverno.io/v1alpha1
 kind: Test
 metadata:
@@ -48,9 +52,10 @@ spec:
               metadata:
                 name: nccl-tcpxo-installer
                 namespace: kube-system
-              status:
-                (desiredNumberScheduled > `0`): true
-                (numberReady == desiredNumberScheduled): true
+              ((status.desiredNumberScheduled || `0`) > `0`): true
+              ((status.numberReady || `0`) == status.desiredNumberScheduled): true
+              ((status.updatedNumberScheduled || `0`) == status.desiredNumberScheduled): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
     - name: validate-device-injector-daemonset
       try:
         - assert:
@@ -60,6 +65,7 @@ spec:
               metadata:
                 name: device-injector
                 namespace: kube-system
-              status:
-                (desiredNumberScheduled > `0`): true
-                (numberReady == desiredNumberScheduled): true
+              ((status.desiredNumberScheduled || `0`) > `0`): true
+              ((status.numberReady || `0`) == status.desiredNumberScheduled): true
+              ((status.updatedNumberScheduled || `0`) == status.desiredNumberScheduled): true
+              ((status.observedGeneration || `0`) == metadata.generation): true

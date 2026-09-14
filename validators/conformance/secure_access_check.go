@@ -300,9 +300,20 @@ func createDefinitelyRejected(err error) bool {
 // whose unauthorized sibling container must not see any accelerator, plus a
 // standalone no-allocation probe pod that must not see any GPU device. Neither
 // mechanism usable is an environment failure.
+//
+// Skipped when slinky-slurm is in the recipe.
 func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
+	}
+
+	// Each Slinky NodeSet pod reserves the whole node's GPUs through its own
+	// Kubernetes pod spec, and Slurm allocates per job internally (GRES and
+	// cgroups). A Kubernetes-scheduled test pod here would hang Pending with
+	// no spare capacity, or pass using capacity elsewhere without exercising
+	// Slurm's own isolation.
+	if recipeHasComponent(ctx, "slinky-slurm") {
+		return validators.Skip("Slurm-managed GPU allocation (slinky-slurm in recipe) is not mediated by the Kubernetes scheduler. slinky-slurm-health and slinky-slurm-imex-channel validate Slurm's own GPU access path instead")
 	}
 
 	// Bound ALL work to the check-local budget so one bounded namespace
@@ -1609,7 +1620,7 @@ func buildNoAllocationProbePod(run *gpuTestRun, gpuNodeName string) *corev1.Pod 
 // no `exactly` wrapper — deviceClassName/allocationMode/count are direct
 // fields on the request (see k8s.io/api/resource/v1beta1.DeviceRequest).
 func buildResourceClaim(run *gpuTestRun, version string) *unstructured.Unstructured {
-	request := map[string]interface{}{
+	request := map[string]any{
 		keyName: gpuClaimName,
 	}
 	if version == versionV1beta1 {
@@ -1617,23 +1628,23 @@ func buildResourceClaim(run *gpuTestRun, version string) *unstructured.Unstructu
 		request["allocationMode"] = allocationModeExactCount
 		request["count"] = int64(1)
 	} else {
-		request["exactly"] = map[string]interface{}{
+		request["exactly"] = map[string]any{
 			"deviceClassName": draDriverGPU,
 			"allocationMode":  allocationModeExactCount,
 			"count":           int64(1),
 		}
 	}
 	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
+		Object: map[string]any{
 			keyAPIVersion: apiGroupResourceK8sIO + "/" + version,
 			keyKind:       "ResourceClaim",
-			keyMetadata: map[string]interface{}{
+			keyMetadata: map[string]any{
 				keyName:      run.claimName,
 				keyNamespace: run.namespace,
 			},
-			keySpec: map[string]interface{}{
-				"devices": map[string]interface{}{
-					"requests": []interface{}{request},
+			keySpec: map[string]any{
+				"devices": map[string]any{
+					"requests": []any{request},
 				},
 			},
 		},

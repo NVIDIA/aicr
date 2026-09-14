@@ -97,6 +97,10 @@ func validateSpecConstraintPaths(spec *RecipeMetadataSpec, source string) error 
 			if err := validateConstraintPaths(spec.Profile.Values[name].Constraints, source, location); err != nil {
 				return err
 			}
+			location = fmt.Sprintf("%s.%s.readinessConstraints", locProfileConstraints, name)
+			if err := validateConstraintPaths(spec.Profile.Values[name].ReadinessConstraints, source, location); err != nil {
+				return err
+			}
 		}
 	}
 

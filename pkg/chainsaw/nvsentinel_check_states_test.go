@@ -54,12 +54,23 @@ func TestNVSentinelHealthCheckClusterStates(t *testing.T) {
 		"metadata": map[string]any{"name": "labeler", "namespace": "nvsentinel"},
 		"status":   map[string]any{"availableReplicas": int64(1)},
 	}
-	ds := func(name string, desired, ready int64) map[string]any {
+	// dsGen builds a DaemonSet with explicit updatedNumberScheduled/
+	// generation/observedGeneration, for the stale-rollout cases below. ds
+	// defaults those to a fully-current rollout (updated == desired,
+	// observedGeneration == generation) so the existing ready/desired-only
+	// cases are unaffected by the new checks.
+	dsGen := func(name string, desired, ready, updated, generation, observedGeneration int64) map[string]any {
 		return map[string]any{
 			"apiVersion": "apps/v1", "kind": "DaemonSet",
-			"metadata": map[string]any{"name": name, "namespace": "nvsentinel"},
-			"status":   map[string]any{"desiredNumberScheduled": desired, "numberReady": ready},
+			"metadata": map[string]any{"name": name, "namespace": "nvsentinel", "generation": generation},
+			"status": map[string]any{
+				"desiredNumberScheduled": desired, "numberReady": ready,
+				"updatedNumberScheduled": updated, "observedGeneration": observedGeneration,
+			},
 		}
+	}
+	ds := func(name string, desired, ready int64) map[string]any {
+		return dsGen(name, desired, ready, desired, 1, 1)
 	}
 
 	healthySyslog := ds("syslog-health-monitor-regular", 2, 2)
@@ -118,6 +129,42 @@ func TestNVSentinelHealthCheckClusterStates(t *testing.T) {
 			name:         "syslog partial rollout → fail naming it",
 			collector:    ds("metadata-collector", 2, 2),
 			syslog:       ds("syslog-health-monitor-regular", 2, 1),
+			wantPass:     false,
+			wantContains: "syslog-health-monitor-regular",
+		},
+		{
+			// Stale rollout: every pod reports Ready (numberReady ==
+			// desiredNumberScheduled), but one node is still running the
+			// previous revision (updatedNumberScheduled < desired) — the
+			// gap the numberReady-only check above cannot see.
+			name:         "metadata-collector stale rollout (ready but not updated) → fail naming it",
+			collector:    dsGen("metadata-collector", 2, 2, 1, 2, 2),
+			syslog:       healthySyslog,
+			wantPass:     false,
+			wantContains: "metadata-collector",
+		},
+		{
+			// observedGeneration lagging metadata.generation: the
+			// controller hasn't yet processed the latest spec change, so
+			// numberReady/updatedNumberScheduled can still show the OLD
+			// revision's already-complete rollout.
+			name:         "metadata-collector observedGeneration stale → fail naming it",
+			collector:    dsGen("metadata-collector", 2, 2, 2, 2, 1),
+			syslog:       healthySyslog,
+			wantPass:     false,
+			wantContains: "metadata-collector",
+		},
+		{
+			name:         "syslog stale rollout (ready but not updated) → fail naming it",
+			collector:    ds("metadata-collector", 2, 2),
+			syslog:       dsGen("syslog-health-monitor-regular", 2, 2, 1, 2, 2),
+			wantPass:     false,
+			wantContains: "syslog-health-monitor-regular",
+		},
+		{
+			name:         "syslog observedGeneration stale → fail naming it",
+			collector:    ds("metadata-collector", 2, 2),
+			syslog:       dsGen("syslog-health-monitor-regular", 2, 2, 2, 2, 1),
 			wantPass:     false,
 			wantContains: "syslog-health-monitor-regular",
 		},

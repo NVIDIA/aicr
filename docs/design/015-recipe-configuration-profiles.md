@@ -4,7 +4,8 @@
 
 **Accepted** — 2026-07-21 (proposed 2026-07-14). Amended
 2026-07-27 to stage the service-agnostic mechanism through an AKS-first,
-GKE-second rollout.
+GKE-second rollout; amended 2026-09-08 (#2512) to intersect, rather than
+reject, a profile constraint that tightens a composed version range.
 
 Originated from an internal GKE device-plugin ownership discussion
 (2026-07-14) and
@@ -213,10 +214,9 @@ target state, gated by this rule.
 
 ```yaml
 # recipes/overlays/gke-cos.yaml — device-plugin ownership
-# Shown with the post-DD5 value set. DD5's durable marker, not yet
-# identified, will additionally land as symmetric constraints on
-# operator and operator-selfdriver at that event — the constraints
-# drawn here are therefore not yet the declarable post-DD5 state.
+# Shown with the post-DD5 value set as drawn. Amended 2026-08-24:
+# operator-selfdriver shipped as bundle-installer, REPLACING operator
+# (shipped driver-installer) — see the Deferred Decision 5 resolution.
 spec:
   profile:
     name: gpuStack
@@ -247,7 +247,9 @@ spec:
         componentRefs:
           - name: gcp-driver-installer
             overrides:
-              install: false      # every value assigns every union path
+              # every value assigns every union path; nested gate — see the
+              # amendment on operator-selfdriver below.
+              installer: {enabled: false}
           - name: gpu-operator
             overrides:
               devicePlugin: {enabled: true}
@@ -262,7 +264,7 @@ spec:
         componentRefs:
           - name: gcp-driver-installer
             overrides:
-              install: false
+              installer: {enabled: false}
           - name: gpu-operator
             overrides:
               devicePlugin: {enabled: false}
@@ -277,7 +279,14 @@ spec:
         componentRefs:
           - name: gcp-driver-installer
             overrides:
-              install: true       # the chart-level gate
+              # Amended 2026-08-22: the gate is the nested installer.enabled,
+              # not the top-level `install` originally drawn here — top-level
+              # `install`/`enabled` are component-PRESENCE gates (IsEnabled),
+              # so a false default would make the component "not enabled in
+              # the surviving composition" and deadlock resolution for every
+              # value; root `overrides.enabled` is separately rejected in
+              # fragments. A nested key is an ordinary owned value path.
+              installer: {enabled: true}
           - name: gpu-operator
             overrides:
               devicePlugin: {enabled: true}
@@ -297,9 +306,10 @@ step 2 describes. Selection:
 # gke-default (declared default; drawn above as csp-managed) — no flag needed
 aicr recipe --service gke --os cos --accelerator h100 --intent inference
 
-# explicit alternative configuration (shipped name; drawn above as operator)
+# explicit alternative configuration (shipped name; drawn above as
+# operator-selfdriver)
 aicr recipe --service gke --os cos --accelerator h100 --intent inference \
-  --profile gpuStack=driver-installer
+  --profile gpuStack=bundle-installer
 ```
 
 A profile fragment may reference only components **enabled in the
@@ -479,7 +489,27 @@ to the surviving composition:
    collides with a chain or mixin constraint rejects at resolution —
    constraints don't compose, the same rule `mergeMixins` already
    enforces. Values of one declaration may reuse a constraint name
-   across values (only one is ever selected). Then evaluate
+   across values (only one is ever selected).
+
+   *Amended 2026-09-08
+   ([#2512](https://github.com/NVIDIA/aicr/issues/2512)): version ranges
+   intersect.* The blanket rejection left a value gated on a feature with
+   its own Kubernetes floor — DRA on GKE requires `>= 1.35` — with nowhere
+   to state it. The chain already carries `K8s.server.version`, and raising
+   it there raises it for every value of the declaration, where a later
+   overlay can restate and lower it again. Where the composed expression
+   and the profile's are **both version ranges** — one clause of `>=`, `>`,
+   `<=`, `<` terms — resolution now replaces the composed entry with the
+   intersection of the two, and the profile may only narrow it. Three cases
+   keep failing closed: a candidate that adds no restriction is dropped
+   rather than applied; an intersection no version can satisfy is rejected;
+   and a pair with no ordering to intersect — an exact match, `!=`, a
+   node-set label predicate, or an expression carrying `||` alternatives —
+   is rejected as a collision, as are two same-direction bounds written at
+   different precisions, which `pkg/version` compares at the lower of the
+   two so that neither can be called stricter. `mergeMixins` is unchanged.
+
+   Then evaluate
    **profile-contributed constraints** fail-closed: under a
    provided snapshot, a failing profile constraint fails recipe generation
    with the constraint diagnostics — it does not exclude anything or fall
@@ -511,7 +541,7 @@ to the surviving composition:
                                 # digest, so ordering must be byte-stable
         # Post-DD5 state shown; the initial recording is
         # gpu-operator: [devicePlugin.enabled, enabled] only.
-        gcp-driver-installer: [enabled, install]
+        gcp-driver-installer: [enabled, installer.enabled]
         gpu-operator: [devicePlugin.enabled, enabled]
   ```
 
@@ -1344,7 +1374,8 @@ recurrence — the shape the Problem section expects.
     declaration or drop it — external `--data` overlays inheriting the
     converted base need the same review by their owners. The same
     review covers constraint names a value reuses (the mixin collision
-    rule rejects those loudly at resolution).
+    rule rejects those loudly at resolution, except where step 5's
+    amendment intersects two version ranges).
   - **Declaration survival (step 2)**: a snapshot that excludes every
     declaring chain now fails generation instead of silently emitting
     the base configuration.
@@ -1453,9 +1484,13 @@ recurrence — the shape the Problem section expects.
    distinguishing signal is identified (Deferred Decision 5). The other
    two values do not wait on it. The dormant component and the third value
    land **together**, in one event: declaring the value later is an
-   ownership-surface expansion (`install` joins the union and the
-   installer's synthetic `enabled` joins `ownedPaths`), which is a
-   family-wide re-qualification and evidence re-signing event.
+   ownership-surface expansion (`installer.enabled` joins the union, so
+   every existing value gains an assignment for it — the sketch above
+   draws that end state), which is a family-wide re-qualification and
+   evidence re-signing event.
+
+   *Amended 2026-08-24 (#1716):* shipped as `bundle-installer`, replacing
+   `driver-installer` (breaking; same pool shape — see Deferred Decision 5).
 
    Any dcgm-exporter GPU-ID-mapping adjustment for `csp-managed` is an
    external GKE behavior not verifiable from this repository. It is
@@ -1495,8 +1530,8 @@ work that resolves it.
    GKE's managed driver install, so the standalone gate's prerequisite
    needed the profile's per-value pairing), and the GKE `gpuStack`
    profile now consumes the form per selected value (#1761 rollout
-   PR 3): positive for `driver-installer`, negated for the
-   `gke-default` default.
+   PR 3): positive for `driver-installer` (since replaced by
+   `bundle-installer`), negated for the `gke-default` default.
 3. **AKS node-pool-mode signal — resolved by the 2026-07-27 amendment.**
    The provider-facing AgentPool `gpuProfile.driver` property is the
    durable ownership marker. AKS adoption projects it into a snapshot
@@ -1522,3 +1557,57 @@ work that resolves it.
    absence, so the two values stay mutually distinguishable.
    **Proposed: identify a durable signal during the value's adoption;
    the `operator` and `csp-managed` values do not wait on it.**
+
+   *Amended 2026-08-24: mechanism only.* `ProfileValue` gains
+   `readinessConstraints` — same catalog-load validation as `constraints`
+   with per-phase name deduplication (the same measurement path may carry
+   a generation-time pre-condition and a readiness-time post-deployment
+   state), routed into `spec.validation.readiness.constraints` at
+   resolution and **never evaluated at generation time**. The
+   `aicr validate` readiness pre-flight evaluates them with the same
+   fail-closed exit as every other readiness gate.
+
+   The mechanism exists for values whose distinguishers are
+   deployment-created — where no generation-time reading can hold. Two
+   rules govern its use:
+
+   - **The self-falsifying pre-condition trap.** Generation-time
+     constraints are re-evaluated by the validate pre-flight, so a
+     pre-condition that the value's own success erases (e.g. "no NVIDIA
+     driver loaded" on a value whose operator installs the driver) must
+     never be declared as a generation constraint — it fails every
+     post-deployment validate on a correctly working cluster. Such state
+     belongs in `readinessConstraints`, asserted in its post-deployment
+     form.
+   - **Self-rendered readings do not qualify.** A reading the selected
+     bundle itself renders (e.g. deployed ClusterPolicy fields) is
+     satisfied by construction under every value — it is a useful
+     rendered-policy **drift check**, but it cannot serve as a value's
+     distinguishing constraint. Qualification requires cluster state
+     independent of the bundle's own output (provider properties, node
+     labels set at provisioning, externally-owned objects).
+
+     Deployment-created markers sit between the two: state the value's
+     own workload writes at runtime (the loaded driver a self-falsified
+     pre-condition asserts in post-form, a label its DaemonSet applies
+     after a successful install) is a legal readiness constraint as an
+     **outcome check** — unlike a rendered `.spec` readback it can
+     fail, and it observes state some deployment actually produced. It
+     does not establish *which* deployment produced it: the readiness
+     gate compares only the snapshot value, with no deployment
+     identity, owner, or timestamp binding, so an unversioned marker
+     left by an earlier deployment satisfies a later check. A
+     workload-written marker is therefore valid only when its producer
+     owns the marker's full lifecycle — clearing or versioning it when
+     the outcome no longer holds. And an outcome check verifies
+     *execution*, not *selection*: every value's own success satisfies
+     its own markers, so it cannot establish that the cluster's
+     pre-existing mode matches the selected value. A value's
+     **qualifying** constraint must rest on the bundle-independent
+     state above, whichever list it is declared in.
+
+   This PR resolves no GKE signal: the GKE family's DD5 question was
+   settled separately by value replacement (see the adoption-step
+   amendment), and its shipped values are generation-time
+   distinguishable. The mechanism's consumers are families whose values
+   are distinct cluster shapes with deployment-created distinguishers.

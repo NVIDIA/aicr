@@ -85,14 +85,15 @@ func myCmdAction(ctx context.Context, cmd *cli.Command) error {
         return err
     }
 
-    // 2. Optional: load --config file. (nil, nil) when --config not set.
-    cfg, err := loadCmdConfig(ctx, cmd)
+    // 2. Optional: load --config file as the facade type. (nil, nil) when
+    //    --config not set.
+    cfg, err := loadFacadeConfig(ctx, cmd)
     if err != nil {
         return err
     }
 
     // 3. Build a per-command Client. Owns its own DataProvider; must Close.
-    client, err := recipeClientFromCmd(cmd, cfg)
+    client, err := recipeClientFromCmd(ctx, cmd, cfg)
     if err != nil {
         return err
     }
@@ -145,11 +146,13 @@ packages (`pkg/recipe`, `pkg/bundler`, `pkg/snapshotter`,
 | `CollectSnapshot(ctx, *AgentConfig)` | `snapshot`, `validate` (Job-mode capture only; local `AICR_AGENT_MODE` collection deploys no Job and stays on `snapshotter.NodeSnapshotter`) |
 | `ValidateState(ctx, ...)` | `validate` |
 
-Construction in CLI happens via `recipeClientFromCmd(cmd, cfg)` in
-`root.go` — it reads `--data` (or `cfg.Recipe().DataDir()`), picks
-`FilesystemSource` vs `EmbeddedSource`, and threads `version` through
-to `Metadata.Version`. Callers **must** `defer client.Close()`; the
-client owns goroutines that drain on Close.
+Construction in CLI happens via `recipeClientFromCmd(ctx, cmd, cfg)` in
+`root.go` — it reads `--data` (or `cfg.RecipeSource()`, i.e.
+`spec.recipe.data`), picks `FilesystemSource` vs `EmbeddedSource`, and
+threads `version` through to `Metadata.Version`. `cfg` is the facade
+`*aicr.Config` returned by `loadFacadeConfig`; `recipeClientFromCmd` never
+holds the raw `*config.AICRConfig`. Callers **must** `defer
+client.Close()`; the client owns goroutines that drain on Close.
 
 Adding business logic in the handler — recipe resolution loops, bundle
 rendering, validator orchestration, OCI pushes — is a boundary
@@ -207,14 +210,19 @@ Flag names, category labels (`catInput`, `catOutput`, `catScheduling`,
 flags any literal repeated ≥ 3 times across the package — extract it
 there.
 
-## `--config` and `loadCmdConfig`
+## `--config` and `loadFacadeConfig`
 
 Commands that accept a config file declare `configFlag()` and call
-`loadCmdConfig(ctx, cmd)`. The loader returns `(*config.AICRConfig,
-nil)` when `--config` is set, `(nil, nil)` when it is not. Errors from
-`config.Load` are returned unchanged so their `pkg/errors` codes
-(`ErrCodeNotFound`, `ErrCodeInvalidRequest`, `ErrCodeUnavailable`)
-survive to the exit-code mapper.
+`loadFacadeConfig(ctx, cmd)`. The loader returns `(*aicr.Config, nil)`
+when `--config` is set, `(nil, nil)` when it is not — every derivation
+on a nil `*aicr.Config` is nil-safe, so callers need no branch. Errors
+from `aicr.LoadConfig` are returned unchanged so their `pkg/errors`
+codes (`ErrCodeNotFound`, `ErrCodeInvalidRequest`, `ErrCodeUnavailable`)
+survive to the exit-code mapper. A command derives options through the
+facade's `Config` methods (`ValidateSettings()`, `BundleOptions()`, …);
+reach for `cfg.Unwrap()` only when a spec field has no facade
+derivation yet, which the `pkg/client/v1` docstrings call out per
+method.
 
 Precedence is **CLI flag > config file > flag default**, implemented
 by three helpers in `root.go`:
@@ -368,6 +376,49 @@ Rules:
   these have many small permutations and the existing tests
   (`config_helpers_test.go`, `bundle_resolve_helpers_test.go`) are
   the template.
+
+## The CLI Surface Baseline
+
+The CLI is one of the four surfaces frozen at v1
+([ROADMAP §1](https://github.com/NVIDIA/aicr/blob/main/ROADMAP.md#1-defensible-api-stability)).
+`pkg/cli/testdata/cli-surface.golden`
+is its committed inventory — every command, flag, alias, type, default,
+`required`/`hidden` state, and environment variable — and `TestCLISurface`
+(`pkg/cli/surface_test.go`) fails when the live tree stops matching it. It runs
+under `make test`, so it is already inside the merge gate; no separate workflow
+is involved.
+
+**If you added a command or flag,** the addition is compatible. Regenerate and
+commit the result in the same PR:
+
+```bash
+go test ./pkg/cli/ -run TestCLISurface -update
+```
+
+Scope the `-update` flag to `./pkg/cli/` — it is registered only by this test,
+so `go test ./... -update` fails in every other package.
+
+**If you removed or renamed a command, flag, or alias, or changed a default,**
+the test reports it as `BREAKING` rather than telling you to regenerate. That is
+a breaking change to a frozen surface and it owes the notice period in
+[`RELEASE.md`](https://github.com/NVIDIA/aicr/blob/main/RELEASE.md#deprecation-policy): ship the deprecation
+with a warning first, remove it only after the window, and add an entry to
+[`docs/user/deprecations.md`](../user/deprecations.md). Regenerate the golden
+only once the removal is actually due.
+
+**Framework-injected surface is covered separately.** `renderSurface` walks
+`RootCommand()`, which is the tree *before* urfave performs setup, so the
+`completion` command, its four shell subcommands, `--help`, and root
+`--version` never reach the golden. Rendering post-setup is not an option:
+urfave's setup functions are unexported, so reaching them means calling `Run`,
+which mutates parsed state on the instance (see the comment at
+`pkg/cli/root.go:64`) and would bake that state into a committed baseline.
+`pkg/cli/injected_surface_test.go` asserts that surface behaviorally instead —
+that the commands actually run, not that a golden line exists.
+
+Usage strings are deliberately not pinned. They are prose, they change for good
+reasons, and including them would make the gate fail on every wording fix — the
+fastest way to train everyone to run `-update` without reading the diff.
 
 ## Anti-Patterns
 

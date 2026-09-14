@@ -100,6 +100,15 @@
 #                                         reachable. Same caveat as
 #                                         KWOK_REGISTRY_HOST_PORT: must match
 #                                         the Kind extraPortMappings hostPort.
+#   KWOK_CLUSTER             (optional, default "aicr-kwok-test") - Kind cluster
+#                                         name used only to side-load the
+#                                         registry and Gitea images before
+#                                         their Deployments are applied. Ignored
+#                                         when KUBECTL_CONTEXT is set, since the
+#                                         cluster is then read from the context
+#                                         ("kind-<cluster>"). Preloading is best
+#                                         effort: a wrong or missing value falls
+#                                         back to the kubelet pulling the image.
 #   KWOK_GITEA_USER          (optional, default "aicr") - Gitea admin user the
 #                                         flux-git / argocd-git lanes push as.
 #   KWOK_GITEA_PASSWORD      (optional, default "aicr-kwok-ci") - Password for
@@ -114,6 +123,7 @@
 #   21  registry not reachable on host port within 60s
 #   30  Argo CD Helm install failed
 #   31  `applications.argoproj.io` CRD not Established in 120s
+#   32  argocd-cm diff-customization patch failed
 #   40  Repository secret apply failed
 #   60  Flux install manifest apply failed
 #   61  Flux controller (source/kustomize/helm) not Ready in 180s
@@ -140,6 +150,12 @@ log_info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 log_debug() { echo -e "${BLUE}[DEBUG]${NC} $*"; }
+
+# preload_image() — side-loads the registry / Gitea images into the Kind node
+# before their Deployments are applied. Sourced after the log_* helpers it
+# calls. Resolved SCRIPT_DIR-relative so a deployed copy is never picked up.
+# shellcheck source=lib/preload-image.sh
+source "${SCRIPT_DIR}/lib/preload-image.sh"
 
 # Configuration
 REGISTRY_NAMESPACE="aicr-registry"
@@ -260,6 +276,10 @@ install_registry() {
     local image="$1"
 
     log_info "Installing in-cluster OCI registry (${image}) in namespace ${REGISTRY_NAMESPACE}..."
+
+    # Before the Deployment exists, so the 120s rollout budget below is spent
+    # waiting on the container starting rather than on an upstream pull.
+    preload_image "${image}"
 
     # Namespace — apply, not create, so re-runs upsert cleanly.
     kc apply -f - <<EOF
@@ -387,10 +407,17 @@ install_argocd() {
     # "true" in the `argocd-cmd-params-cm` ConfigMap — `configs.params` is a
     # stringly-typed map and the chart's `tpl` step drops bool-typed values,
     # which would leave the API server without `--insecure`.
+    #
+    # controller.diff.server.side=true offloads the merge to the live API
+    # server. Chart 9.5.x predates Kubernetes 1.37 and doesn't declare
+    # CSIDriver.spec.preventPodSchedulingIfMissing, so without it every lane
+    # fails comparison on aws-ebs-csi-driver. This doesn't clear the field on
+    # every lane by itself, so an ignoreDifferences patch is also required.
     if ! hc upgrade --install "${ARGOCD_RELEASE}" "${ARGOCD_REPO_NAME}/argo-cd" \
             --namespace "${ARGOCD_NAMESPACE}" --create-namespace \
             --version "${chart_version}" \
             --set-string 'configs.params.server\.insecure=true' \
+            --set-string 'configs.params.controller\.diff\.server\.side=true' \
             --wait --timeout "${ARGOCD_HELM_TIMEOUT}"; then
         log_error "Argo CD Helm install failed"
         dump_argocd_diagnostics
@@ -405,7 +432,33 @@ install_argocd() {
         exit 31
     fi
 
+    configure_argocd_diff_customizations
+
     log_info "Argo CD ready"
+}
+
+# configure_argocd_diff_customizations patches argocd-cm so Argo CD ignores
+# CSIDriver.spec.preventPodSchedulingIfMissing during comparisons.
+#
+# Kind's pre-release node image reports this field before the pinned Argo CD
+# chart's bundled schema declares it, so structured-merge-diff rejects it as
+# undeclared and the affected Application's sync.status wedges at Unknown
+# forever. The chainsaw sync gate treats that as a timeout unrelated to the
+# recipe under test. Enabling server-side diff for the controller doesn't
+# clear the field on every lane by itself, so this patch is still required.
+# Drop it once the chart's schema declares the field. Applied system-level so
+# it covers every Application this instance manages, not just the one under
+# test.
+configure_argocd_diff_customizations() {
+    log_info "Patching argocd-cm: ignore CSIDriver.spec.preventPodSchedulingIfMissing (Argo CD schema-lag workaround)..."
+    # jqPathExpressions strips the field before comparison runs, unlike
+    # managedFieldsManagers. This empirically clears the error on chart 9.5.x.
+    if ! kc patch configmap argocd-cm -n "${ARGOCD_NAMESPACE}" --type merge -p \
+            '{"data":{"resource.customizations.ignoreDifferences.storage.k8s.io_CSIDriver":"jqPathExpressions:\n- .spec.preventPodSchedulingIfMissing\n"}}'; then
+        log_error "Failed to patch argocd-cm with CSIDriver diff customization"
+        dump_argocd_diagnostics
+        exit 32
+    fi
 }
 
 # -------------------------------------------------------------------
@@ -578,6 +631,10 @@ install_gitea() {
     local image="$1"
 
     log_info "Installing in-cluster Gitea (${image}) in namespace ${REGISTRY_NAMESPACE}..."
+
+    # Same exposure as the registry: a public pull inside a fixed rollout
+    # budget. See preload_image.
+    preload_image "${image}"
 
     # Namespace may not exist yet if install order ever changes; apply is
     # idempotent either way.

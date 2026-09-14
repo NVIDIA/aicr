@@ -19,6 +19,8 @@ package main
 // imported across packages) — keep the two copies in sync.
 
 import (
+	"maps"
+
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -56,21 +58,21 @@ func testDeviceClass(name string) *unstructured.Unstructured {
 // testDeviceClassAt builds a DeviceClass at an explicit apiVersion
 // (e.g. resource.k8s.io/v1beta2 for beta-only cluster tests).
 func testDeviceClassAt(apiVersion, name string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{Object: map[string]interface{}{
+	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": apiVersion,
 		"kind":       "DeviceClass",
-		"metadata":   map[string]interface{}{"name": name},
+		"metadata":   map[string]any{"name": name},
 	}}
 }
 
 // testDeviceClassWithExtendedResource builds a DeviceClass carrying a
 // KEP-5004 spec.extendedResourceName mapping.
 func testDeviceClassWithExtendedResource(name, extendedResourceName string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{Object: map[string]interface{}{
+	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": draAPIGroupVersion,
 		"kind":       "DeviceClass",
-		"metadata":   map[string]interface{}{"name": name},
-		"spec":       map[string]interface{}{"extendedResourceName": extendedResourceName},
+		"metadata":   map[string]any{"name": name},
+		"spec":       map[string]any{"extendedResourceName": extendedResourceName},
 	}}
 }
 
@@ -79,43 +81,41 @@ func testDeviceClassWithExtendedResource(name, extendedResourceName string) *uns
 // perDeviceNodeSelection).
 //
 //nolint:unparam // signature kept in sync with the allocmode copy
-func testResourceSlice(name, driver, pool string, gen, count int64, topo map[string]interface{}, devices []interface{}) *unstructured.Unstructured {
+func testResourceSlice(name, driver, pool string, gen, count int64, topo map[string]any, devices []any) *unstructured.Unstructured {
 	return testResourceSliceAt(draAPIGroupVersion, name, driver, pool, gen, count, topo, devices)
 }
 
 // testResourceSliceAt builds a ResourceSlice at an explicit apiVersion
 // (e.g. resource.k8s.io/v1beta2 for beta-only cluster tests). The validated
 // spec fields are structurally identical across v1beta1/v1beta2/v1.
-func testResourceSliceAt(apiVersion, name, driver, pool string, gen, count int64, topo map[string]interface{}, devices []interface{}) *unstructured.Unstructured {
-	spec := map[string]interface{}{
+func testResourceSliceAt(apiVersion, name, driver, pool string, gen, count int64, topo map[string]any, devices []any) *unstructured.Unstructured {
+	spec := map[string]any{
 		"driver": driver,
-		"pool": map[string]interface{}{
+		"pool": map[string]any{
 			"name":               pool,
 			"generation":         gen,
 			"resourceSliceCount": count,
 		},
 		"devices": devices,
 	}
-	for k, v := range topo {
-		spec[k] = v
-	}
-	return &unstructured.Unstructured{Object: map[string]interface{}{
+	maps.Copy(spec, topo)
+	return &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": apiVersion,
 		"kind":       "ResourceSlice",
-		"metadata":   map[string]interface{}{"name": name},
+		"metadata":   map[string]any{"name": name},
 		"spec":       spec,
 	}}
 }
 
-func plainDevice(name string) map[string]interface{} {
-	return map[string]interface{}{"name": name}
+func plainDevice(name string) map[string]any {
+	return map[string]any{"name": name}
 }
 
-func taintedDevice(name, effect string) map[string]interface{} {
-	return map[string]interface{}{
+func taintedDevice(name, effect string) map[string]any {
+	return map[string]any{
 		"name": name,
-		"taints": []interface{}{
-			map[string]interface{}{"key": "nvidia.com/gpu", "effect": effect},
+		"taints": []any{
+			map[string]any{"key": "nvidia.com/gpu", "effect": effect},
 		},
 	}
 }
@@ -123,8 +123,8 @@ func taintedDevice(name, effect string) map[string]interface{} {
 // basicWrappedDevice builds a schema-accurate resource.k8s.io/v1beta1 device:
 // the Device type there is a `{name, basic}` union, so every detail field
 // (taints, per-device nodeName/nodeSelector/allNodes) nests under `basic`.
-func basicWrappedDevice(name string, fields map[string]interface{}) map[string]interface{} {
-	return map[string]interface{}{"name": name, "basic": fields}
+func basicWrappedDevice(name string, fields map[string]any) map[string]any {
+	return map[string]any{"name": name, "basic": fields}
 }
 
 type nodeOpt func(*corev1.Node)

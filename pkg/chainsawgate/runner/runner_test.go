@@ -51,7 +51,7 @@ func (f *stubFetcher) seen() []string {
 	return append([]string(nil), f.namespaces...)
 }
 
-func (f *stubFetcher) Fetch(_ context.Context, _, _, namespace, _ string) (map[string]interface{}, error) {
+func (f *stubFetcher) Fetch(_ context.Context, _, _, namespace, _ string) (map[string]any, error) {
 	f.record(namespace)
 	if f.obj != nil {
 		return f.obj, nil
@@ -59,10 +59,10 @@ func (f *stubFetcher) Fetch(_ context.Context, _, _, namespace, _ string) (map[s
 	return nil, errors.New(errors.ErrCodeNotFound, "stub: not found")
 }
 
-func (f *stubFetcher) List(_ context.Context, _, _, namespace string, _ map[string]string) ([]map[string]interface{}, error) {
+func (f *stubFetcher) List(_ context.Context, _, _, namespace string, _ map[string]string) ([]map[string]any, error) {
 	f.record(namespace)
 	if f.obj != nil {
-		return []map[string]interface{}{f.obj}, nil
+		return []map[string]any{f.obj}, nil
 	}
 	return nil, nil
 }
@@ -374,11 +374,11 @@ spec:
 // then surfaces it.
 type unavailableFetcher struct{}
 
-func (unavailableFetcher) Fetch(context.Context, string, string, string, string) (map[string]interface{}, error) {
+func (unavailableFetcher) Fetch(context.Context, string, string, string, string) (map[string]any, error) {
 	return nil, errors.New(errors.ErrCodeUnavailable, "failed to resolve REST mapping: discovery outage")
 }
 
-func (unavailableFetcher) List(context.Context, string, string, string, map[string]string) ([]map[string]interface{}, error) {
+func (unavailableFetcher) List(context.Context, string, string, string, map[string]string) ([]map[string]any, error) {
 	return nil, errors.New(errors.ErrCodeUnavailable, "failed to resolve REST mapping: discovery outage")
 }
 

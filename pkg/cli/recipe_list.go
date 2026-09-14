@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"text/tabwriter"
 
@@ -187,12 +188,7 @@ Include overlays from an external data directory:
 
 // hasAnyCriteriaFlag reports whether the user provided at least one filter flag.
 func hasAnyCriteriaFlag(cmd *cli.Command) bool {
-	for _, name := range []string{flagService, flagAccelerator, flagIntent, flagOS, flagPlatform} {
-		if cmd.IsSet(name) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc([]string{flagService, flagAccelerator, flagIntent, flagOS, flagPlatform}, cmd.IsSet)
 }
 
 // buildCatalogFilter constructs a Criteria filter from the CLI flags.

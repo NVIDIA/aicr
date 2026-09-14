@@ -24,6 +24,8 @@ This section is for integrators who:
 | [GKE TCPXO Networking](gke-tcpxo-networking.md) | GPUDirect TCPXO prerequisites for GKE training overlays |
 | [AKS GPU Setup](aks-gpu-setup.md) | AKS prerequisites: Kubernetes 1.34+ (DRA GA), GPU driver setup, DRA configuration |
 | [GKE GPU Setup](gke-gpu-setup.md) | GKE device-plugin ownership: the `gpuStack` profile, node-pool setup for both values, verification, and troubleshooting |
+| [OKE GPU Setup](oke-gpu-setup.md) | OKE GPU stack ownership: the `gpuStack` profile (two values), the device-plugin add-on / disable label, and bring-your-own-image pools |
+| [RKE2 VR200 Setup](rke2-vr200-setup.md) | Bare-metal RKE2 setup for the VR200 (Vera Rubin) NVL72 Preview coordinates: cluster prerequisites (K8s window, StorageClass, LoadBalancer, host `nvidia-imex` mask), Skyhook reboot behavior, and known gaps |
 | [Talos Integration](talos-integration.md) | Running AICR on Talos Linux |
 | [OpenShift Deployment](openshift.md) | OpenShift/OCP-specific Helm and OLM integration and two-phase operator deployment |
 | [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |
@@ -40,7 +42,7 @@ See [Kubernetes Deployment](kubernetes-deployment.md) for full manifests. After 
 
 ```shell
 # Generate recipe via API
-curl "http://aicrd.aicr.svc/v2/recipe?service=eks&accelerator=h100"
+curl "http://aicrd.aicr.svc/v1/recipe?service=eks&accelerator=h100"
 ```
 
 ### CI/CD Integration

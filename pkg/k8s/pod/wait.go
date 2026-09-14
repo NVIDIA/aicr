@@ -169,7 +169,7 @@ func checkPodPhase(p *corev1.Pod) (bool, error) {
 		slog.Info("pod successfully completed", "name", p.Name)
 		return true, nil
 	case corev1.PodFailed:
-		return true, errors.NewWithContext(errors.ErrCodeInternal, "pod failed", map[string]interface{}{
+		return true, errors.NewWithContext(errors.ErrCodeInternal, "pod failed", map[string]any{
 			keyNamespace: p.Namespace,
 			keyName:      p.Name,
 			keyReason:    p.Status.Reason,
@@ -354,7 +354,7 @@ func checkPodReady(p *corev1.Pod) (bool, error) {
 		}
 	}
 	if p.Status.Phase == corev1.PodFailed {
-		return true, errors.NewWithContext(errors.ErrCodeInternal, "pod failed", map[string]interface{}{
+		return true, errors.NewWithContext(errors.ErrCodeInternal, "pod failed", map[string]any{
 			keyNamespace: p.Namespace,
 			keyName:      p.Name,
 			keyReason:    p.Status.Reason,

@@ -146,8 +146,7 @@ func TestPartialDiscovery_ProducesBareNoKindMatch(t *testing.T) {
 	if !meta.IsNoMatchError(err) {
 		t.Fatalf("err = %v, want a NoKindMatchError", err)
 	}
-	var groupErr *discovery.ErrGroupDiscoveryFailed
-	if stderrors.As(err, &groupErr) {
+	if _, ok := stderrors.AsType[*discovery.ErrGroupDiscoveryFailed](err); ok {
 		t.Fatalf("client-go now propagates ErrGroupDiscoveryFailed through the mapper (%v); "+
 			"the ServerGroupsAndResources probe in resolveMapping may be redundant", err)
 	}
@@ -401,11 +400,9 @@ func TestClusterFetcher_CooldownDeniedNoMatchIsUnavailable(t *testing.T) {
 		var wg sync.WaitGroup
 		errs := make([]error, defaults.ChainsawMaxParallel)
 		for i := range errs {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				_, errs[i] = f.Fetch(context.Background(), "v1", "Pod", "ns", "p1")
-			}()
+			})
 		}
 		wg.Wait()
 

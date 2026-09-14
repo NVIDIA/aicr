@@ -224,6 +224,43 @@ func Example_resolveFromSnapshot() {
 	}
 }
 
+// ExampleClient_DiffSnapshots compares two previously captured snapshots in
+// memory. Loading local files needs no cluster access; cm:// sources use the
+// kubeconfig argument passed to LoadSnapshot.
+func ExampleClient_DiffSnapshots() {
+	ctx := context.Background()
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	baseline, err := client.LoadSnapshot(ctx, "before.yaml", "")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	target, err := client.LoadSnapshot(ctx, "after.yaml", "")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	result, err := client.DiffSnapshots(ctx, baseline, target, aicr.SnapshotDiffOptions{
+		BaselineSource: "before.yaml",
+		TargetSource:   "after.yaml",
+	})
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	if result.HasDrift() {
+		fmt.Printf("detected %d change(s)\n", result.Summary.Total)
+	}
+}
+
 // Example_bundleAndVerify is the integrator path end to end: resolve a recipe,
 // render its deployment bundle, then check what was written.
 //
@@ -328,6 +365,102 @@ func Example_bundleAndVerify() {
 	// Output: unverified
 }
 
+// Example_workflow runs the full Snapshot -> Recipe -> Bundle workflow this
+// guide documents: load a snapshot, derive criteria from it, layer the
+// caller's own intent on top, resolve a recipe, render a bundle, and verify
+// what was written.
+//
+// It runs hermetically against the embedded catalog and a checked-in
+// snapshot fixture (testdata/snapshot.yaml), with no cluster and no network
+// — which is why it can assert its output.
+//
+// Two legs of the real workflow are cluster-dependent and are therefore NOT
+// part of this runnable body: capturing the snapshot in the first place
+// (Client.CollectSnapshot, see ExampleClient_CollectSnapshot) and validating
+// the resolved recipe against observed state (Client.ValidateState, see
+// ExampleClient_ValidateState). Both need a reachable cluster and are only
+// mentioned here.
+func Example_workflow() {
+	ctx := context.Background()
+
+	client, err := aicr.NewClient(
+		aicr.WithRecipeSource(aicr.EmbeddedSource()),
+		aicr.WithVersion("v0.19.0"),
+	)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	// A snapshot already captured elsewhere (see CollectSnapshot above) and
+	// delivered to this pipeline stage as a file.
+	snap, err := client.LoadSnapshot(ctx, "testdata/snapshot.yaml", "")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	// Every dimension the snapshot could not determine stays "any"; nothing
+	// is guessed.
+	criteria, err := client.CriteriaFromSnapshot(snap)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	// Intent is a recipe-author choice the cluster cannot reveal, so the
+	// caller states it explicitly on top of what was derived.
+	criteria.Intent = "training"
+
+	result, err := client.ResolveRecipeFromCriteria(ctx, criteria)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	outputDir, err := os.MkdirTemp("", "aicr-workflow-")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = os.RemoveAll(outputDir) }()
+
+	artifact, err := client.MakeBundle(ctx, result, aicr.BundleOptions{
+		OutputDir: outputDir,
+	})
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	if artifact.HasErrors() {
+		log.Printf("bundle completed with %d errors", len(artifact.Errors))
+		return
+	}
+
+	verification, err := client.VerifyBundle(ctx, outputDir, aicr.BundleVerifyOptions{
+		// Empty means "max": verify against the highest level achievable.
+		MinTrustLevel: "",
+	})
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	if verification.PolicyFailure != "" {
+		log.Printf("policy: %s", verification.PolicyFailure)
+		return
+	}
+	if len(verification.Report.Errors) > 0 {
+		log.Printf("verification: %s", verification.Report.Errors[0])
+		return
+	}
+
+	fmt.Println(result.Name)
+	fmt.Println(verification.Report.TrustLevel)
+	// Output:
+	// criteria(service=eks, accelerator=h100, intent=training)
+	// unverified
+}
+
 // ExampleClient_LoadRecipe reads a recipe emitted earlier by `aicr recipe -o`,
 // instead of resolving a new one. The result is interchangeable with a
 // resolved one: bundle it, or validate it against a snapshot.
@@ -355,13 +488,10 @@ func ExampleClient_LoadRecipe() {
 // snapshotter Job, for callers that do not already have a snapshot file.
 // Requires a reachable cluster and RBAC to create the Job.
 //
-// # Image, JobName, and ServiceAccountName are required here
-//
-// DeployAndCollect validates only Namespace; the rest are copied straight into
-// the Job and RBAC objects. The CLI supplies defaults from its own flags,
-// which the facade does not share — so leaving these empty produces an empty
-// ServiceAccount name and an empty container image, and the API server rejects
-// the ServiceAccount before the Job is ever created. Set all three.
+// Namespace is the only field that must be set. Image, JobName, and
+// ServiceAccountName are defaulted when empty — the image to the tag matching
+// the Client's WithVersion. This example pins the image anyway, which is what an
+// air-gapped or version-skew-sensitive deployment wants.
 func ExampleClient_CollectSnapshot() {
 	ctx := context.Background()
 
@@ -650,4 +780,88 @@ func Example_criteriaDimensions() {
 	// intent
 	// os
 	// platform
+}
+
+// ExampleClient_CriteriaFromSnapshot derives recipe criteria from a captured
+// snapshot without reaching past the facade.
+//
+// This step previously required pkg/fingerprint, so the documented workflow
+// could not be completed with pkg/client/v1 alone.
+func ExampleClient_CriteriaFromSnapshot() {
+	ctx := context.Background()
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	snap, err := client.LoadSnapshot(ctx, "snapshot.yaml", "")
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	// Every dimension the snapshot could not determine stays "any"; nothing is
+	// guessed. Layer your own stated values on top before resolving.
+	criteria, err := client.CriteriaFromSnapshot(snap)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	criteria.Intent = "training"
+
+	result, err := client.ResolveRecipeFromCriteria(ctx, criteria)
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	fmt.Printf("resolved %d components\n", len(result.Components))
+}
+
+// ExampleClient_MirrorInventory lists every image and chart a recipe needs, for
+// staging into an air-gapped registry.
+//
+// Rendering is the caller's job: the facade returns data, and formats such as
+// Hauler or Zarf stay in the CLI so the SDK does not freeze third-party schemas
+// as contract.
+func ExampleClient_MirrorInventory() {
+	ctx := context.Background()
+
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+	defer func() { _ = client.Close() }()
+
+	result, err := client.ResolveRecipeFromCriteria(ctx, &aicr.Criteria{
+		Service:     "eks",
+		Accelerator: "h100",
+		Intent:      "training",
+	})
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	// Pass the same overrides you will bundle with. Disabling a sub-component
+	// removes its images, so mirroring without them stages the wrong set.
+	disabled := "false"
+	inventory, err := client.MirrorInventory(ctx, result,
+		aicr.WithMirrorValueOverrides([]aicr.MirrorValueOverride{
+			{Component: "gpuoperator", Path: "driver.enabled", Value: &disabled},
+		}))
+	if err != nil {
+		log.Print(err)
+		return
+	}
+
+	for _, image := range inventory.Images {
+		fmt.Println(image)
+	}
+	for _, chart := range inventory.Charts {
+		fmt.Printf("%s %s from %s\n", chart.Chart, chart.Version, chart.Repository)
+	}
 }

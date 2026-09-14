@@ -16,7 +16,6 @@ package recipe
 
 import (
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 )
@@ -78,20 +77,32 @@ func TestNVSentinelConfigurationMatrix(t *testing.T) {
 			wantAssume: ptr(true),
 		},
 		{
-			name:       "GKE-COS driver-installer: Google's DaemonSet supplies a driver pod",
+			name:       "GKE-COS bundle-installer: the bundle-carried installer supplies a driver pod",
 			criteria:   gkeCriteria(),
-			profile:    "gpuStack=driver-installer",
+			profile:    "gpuStack=bundle-installer",
 			wantAssume: ptr(false),
 		},
 		{
-			name: "OKE: node image installs the driver (overlay-level, no profile)",
+			name: "OKE oci-managed: image driver + OKE's plugin, no driver pod",
 			criteria: &Criteria{
 				Service:     CriteriaServiceOKE,
 				Accelerator: CriteriaAcceleratorA100,
 				OS:          CriteriaOSOracleLinux,
 				Intent:      CriteriaIntentTraining,
 			},
+			profile:    "gpuStack=oci-managed",
 			wantAssume: ptr(true),
+		},
+		{
+			name: "OKE operator-managed: the operator's driver pod is the evidence",
+			criteria: &Criteria{
+				Service:     CriteriaServiceOKE,
+				Accelerator: CriteriaAcceleratorA100,
+				OS:          CriteriaOSOracleLinux,
+				Intent:      CriteriaIntentTraining,
+			},
+			profile:    "gpuStack=operator-managed",
+			wantAssume: ptr(false),
 		},
 		{
 			name: "Kind: nvkind host-installs the driver (overlay-level, no profile)",
@@ -359,20 +370,12 @@ func TestNVSentinelPresenceLockedOnProfiledFamilies(t *testing.T) {
 	}
 }
 
-// TestOKENVSentinelValueIsNotProfileOwned documents an asymmetry the docs
-// must not paper over.
-//
-// OKE has no gpuStack profile, so its assumeDriverInstalled value lives on
-// the overlay's componentRefs and is NOT covered by ADR-015's generated
-// install-time profile lock — unlike the equivalent AKS and GKE-COS values.
-// The NVSentinel driver-label bundle gate still rejects bundle-time and
-// declared-dynamic changes that would recreate #2175, so the normal paths
-// are protected; a manual post-generation edit to the rendered Helm values
-// is outside that guarantee.
-//
-// Stating the asymmetry here keeps "profile-owned" from being read as a
-// uniform property of every platform that sets the value.
-func TestOKENVSentinelValueIsNotProfileOwned(t *testing.T) {
+// TestOKENVSentinelValueIsProfileOwned pins the OKE family's conversion to
+// the gpuStack profile: assumeDriverInstalled moved from the overlay's
+// componentRefs into the profile values, so OKE now receives the same
+// generated install-time profile lock as AKS and GKE-COS — the asymmetry the
+// previous version of this test documented is gone.
+func TestOKENVSentinelValueIsProfileOwned(t *testing.T) {
 	t.Parallel()
 
 	result, err := NewBuilder().BuildFromCriteriaWithProfile(t.Context(), &Criteria{
@@ -385,28 +388,27 @@ func TestOKENVSentinelValueIsNotProfileOwned(t *testing.T) {
 		t.Fatalf("BuildFromCriteriaWithProfile() error = %v", err)
 	}
 
-	// The value is present ...
+	// The value is present under the declared default ...
 	values, err := result.GetValuesForComponentWithContext(t.Context(), nvsentinelComponent)
 	if err != nil {
 		t.Fatalf("GetValuesForComponentWithContext(nvsentinel): %v", err)
 	}
 	if assume, ok := nestedBool(values, "labeler", "assumeDriverInstalled"); !ok || !assume {
-		t.Fatalf("OKE labeler.assumeDriverInstalled = %v (set: %v), want true", assume, ok)
+		t.Fatalf("OKE labeler.assumeDriverInstalled = %v (set: %v), want true under oci-managed", assume, ok)
 	}
 
-	// ... and deliberately unprofiled.
-	if result.Metadata.SelectedProfile != nil {
-		t.Fatalf("OKE resolved with a profile (%#v); if a gpuStack profile is ever added to OKE, "+
-			"move the value into it and update the docs that describe this asymmetry",
-			result.Metadata.SelectedProfile)
+	// ... and profile-owned.
+	selected := result.Metadata.SelectedProfile
+	if selected == nil || selected.Name != "gpuStack" || selected.Value != "oci-managed" {
+		t.Fatalf("selectedProfile = %#v, want gpuStack=oci-managed", selected)
 	}
-	if len(result.EffectiveLockSet()) != 0 {
-		lockedComponents := make([]string, 0, len(result.EffectiveLockSet()))
-		for component := range result.EffectiveLockSet() {
-			lockedComponents = append(lockedComponents, component)
-		}
-		sort.Strings(lockedComponents)
-		t.Fatalf("OKE has a non-empty profile lock set %v, want none", lockedComponents)
+	owned := selected.OwnedPaths[nvsentinelComponent]
+	wantOwned := []string{"enabled", "labeler.assumeDriverInstalled"}
+	if len(owned) != len(wantOwned) || owned[0] != wantOwned[0] || owned[1] != wantOwned[1] {
+		t.Fatalf("ownedPaths[nvsentinel] = %v, want %v", owned, wantOwned)
+	}
+	if len(result.EffectiveLockSet()) == 0 {
+		t.Fatal("OKE profile lock set is empty, want the gpuStack-owned paths")
 	}
 }
 

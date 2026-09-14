@@ -37,15 +37,50 @@ import (
 type coverageDimension struct {
 	name  string
 	value func(*Criteria) string
+
+	// strict marks a dimension the caller must state when omitting it would
+	// resolve to a weaker recipe than the catalog can produce. See
+	// strictDimensionGaps for the rule and why os is the only one.
+	strict bool
 }
 
 // coverageDimensions is ordered; all coverage reporting uses this order.
 var coverageDimensions = []coverageDimension{
-	{"service", func(c *Criteria) string { return string(c.Service) }},
-	{"accelerator", func(c *Criteria) string { return string(c.Accelerator) }},
-	{"intent", func(c *Criteria) string { return string(c.Intent) }},
-	{"os", func(c *Criteria) string { return string(c.OS) }},
-	{"platform", func(c *Criteria) string { return string(c.Platform) }},
+	{name: string(FieldService), value: func(c *Criteria) string { return string(c.Service) }},
+	{name: string(FieldAccelerator), value: func(c *Criteria) string { return string(c.Accelerator) }},
+	{name: string(FieldIntent), value: func(c *Criteria) string { return string(c.Intent) }},
+	// os is the only strict dimension, and the reason is the driver.
+	//
+	// Every other dimension degrades to a smaller but coherent recipe when
+	// omitted: no --platform yields no Slurm/Kubeflow layer, no --intent
+	// yields untuned GPU Operator values, no --accelerator yields generic
+	// GPU config. Each answer is complete, just less specific.
+	//
+	// os is different because it decides whether the GPU driver can be
+	// installed at all. On Ubuntu the GPU Operator installs the driver, so
+	// an OS-agnostic recipe is a real answer; that is why recipes/overlays
+	// carries eks.yaml with no os. On COS the operator installs no driver
+	// (Google supplies it) and the device-plugin owner differs, which is why
+	// every gke overlay is os-gated and no OS-agnostic gke recipe exists to
+	// hand back. Resolving one anyway would emit a recipe whose driver story
+	// is wrong rather than merely generic.
+	//
+	// The driver argument is a property of installing NVIDIA drivers on Linux
+	// rather than of this catalog's shape, so it carries to external --data
+	// catalogs. Note what that does and does not claim: it says os is the
+	// right dimension to demand, NOT that every catalog shape is served well
+	// by demanding it. A split-coverage external catalog (service overlay,
+	// os-agnostic accelerator overlay, one os-gated tuned leaf) is rejected
+	// here asking for an os, because no single overlay carries the stated
+	// combination. That is deliberate and the escape hatch is explicit:
+	// declare an os-agnostic overlay carrying the combination, which is the
+	// same assertion eks.yaml makes.
+	//
+	// The assumption that would break the driver argument itself is a cluster
+	// whose node pools run different operating systems. AICR has no model for
+	// that; it is expressed as separate recipes.
+	{name: string(FieldOS), value: func(c *Criteria) string { return string(c.OS) }, strict: true},
+	{name: string(FieldPlatform), value: func(c *Criteria) string { return string(c.Platform) }},
 }
 
 // CoverageDimensionNames returns the criteria dimension names subject to the
@@ -225,6 +260,14 @@ func isSubsetTuple(sub, super map[string]string) bool {
 func (s *MetadataStore) verifyCriteriaCoverage(criteria *Criteria, appliedOverlays []string, excluded []ExcludedOverlay, warnings []ConstraintWarning) error {
 	uncovered := s.uncoveredDimensions(criteria, appliedOverlays)
 	if len(uncovered) == 0 {
+		// Completeness holds: every stated dimension is carried by something.
+		// That is necessary but not sufficient — it is satisfied when service
+		// and accelerator are honored by two SEPARATE overlays while no single
+		// overlay covers the combination. Joint sufficiency catches that, and
+		// absorbs the retired requireOSIfNeeded guard (issue #1782).
+		if gaps := s.strictDimensionGaps(criteria, appliedOverlays); len(gaps) > 0 {
+			return strictGapError(criteria, gaps, excluded, warnings)
+		}
 		return nil
 	}
 
@@ -275,6 +318,24 @@ func (s *MetadataStore) excludedOverlayProvides(dimName, want string, excluded [
 		}
 	}
 	return false
+}
+
+// setCriteriaDimension writes one named dimension's value. Write-side twin of
+// criteriaDimensionValue; strictDimensionGaps uses it to probe what the
+// applied set would look like had the caller stated a dimension.
+func setCriteriaDimension(c *Criteria, name, value string) {
+	switch name {
+	case string(FieldService):
+		c.Service = CriteriaServiceType(value)
+	case string(FieldAccelerator):
+		c.Accelerator = CriteriaAcceleratorType(value)
+	case string(FieldIntent):
+		c.Intent = CriteriaIntentType(value)
+	case string(FieldOS):
+		c.OS = CriteriaOSType(value)
+	case string(FieldPlatform):
+		c.Platform = CriteriaPlatformType(value)
+	}
 }
 
 // criteriaDimensionValue reads one named dimension's value.
@@ -343,4 +404,201 @@ func sameDimensionSingletons(tuples []map[string]string) (string, []string, bool
 // gracefully (exclusion); every other code fails the build (design 5.2).
 func isNotFoundEvalError(err error) bool {
 	return stderrors.Is(err, aicrerrors.New(aicrerrors.ErrCodeNotFound, ""))
+}
+
+// strictGap names a strict dimension the caller must state, with the values
+// that would reach the overlays currently being skipped.
+type strictGap struct {
+	dimension   string
+	validValues []string
+}
+
+// jointlyCarriesAllStated reports whether some applied overlay carries every
+// dimension the query states, with matching values.
+//
+// This is the escape hatch that keeps the generic tier valid. When one
+// overlay already honors the whole stated combination, nothing was silently
+// dropped and no further criteria are demanded — `--service eks` resolves
+// through eks.yaml and is never asked for an os. Per-dimension coverage
+// cannot express this: it is satisfied when service and accelerator are
+// honored by two SEPARATE overlays, which is a pile of ingredients rather
+// than the recipe for the combination (issue #1782).
+func (s *MetadataStore) jointlyCarriesAllStated(criteria *Criteria, applied []string) bool {
+	for _, name := range applied {
+		meta, ok := s.GetRecipeByName(name)
+		if !ok || meta.Spec.Criteria == nil {
+			continue
+		}
+		carriesAll := true
+		for _, dim := range coverageDimensions {
+			want := dim.value(criteria)
+			if !isSpecifiedCriteriaValue(want) {
+				continue
+			}
+			if dim.value(meta.Spec.Criteria) != want {
+				carriesAll = false
+				break
+			}
+		}
+		if carriesAll {
+			return true
+		}
+	}
+	return false
+}
+
+// strictDimensionGaps returns the strict dimensions the caller must state,
+// or nil when resolution may proceed.
+//
+// The rule, replacing the retired requireOSIfNeeded guard:
+//
+//	Resolution fails when NO applied overlay jointly carries every stated
+//	dimension AND stating a strict dimension would reach an overlay that is
+//	currently being skipped.
+//
+// Both halves are required. The first is jointlyCarriesAllStated above. The
+// second is what detects the loss: if naming an os would pull in an overlay
+// that is not applied, that overlay's content is being dropped by omission
+// rather than by choice.
+//
+// The demand is for PRESENCE, not for a particular value. validValues is
+// advisory, matching the retired guard's "specify an OS (valid: cos)"
+// wording; supplying a value outside it is legal and falls through to the
+// ordinary completeness path above.
+//
+// requireOSIfNeeded hardcoded three separate scopes: it only ran when
+// service was stated, it only compared service+accelerator regardless of
+// what the caller actually asked for, and it only ever demanded os. Only the
+// third survives here, and only for the reason recorded on coverageDimensions.
+// The subset now comes from the query.
+func (s *MetadataStore) strictDimensionGaps(criteria *Criteria, applied []string) []strictGap {
+	if s.jointlyCarriesAllStated(criteria, applied) {
+		return nil
+	}
+
+	appliedSet := make(map[string]struct{}, len(applied))
+	for _, name := range applied {
+		appliedSet[name] = struct{}{}
+	}
+
+	gaps := make([]strictGap, 0, len(coverageDimensions))
+	for _, dim := range coverageDimensions {
+		if !dim.strict || isSpecifiedCriteriaValue(dim.value(criteria)) {
+			continue // elective, or the caller already stated it
+		}
+		reachable := map[string]struct{}{}
+		for _, value := range s.dimensionValues(dim) {
+			probe := *criteria
+			setCriteriaDimension(&probe, dim.name, value)
+			// One overlay outside the applied set is enough to establish that
+			// this value reaches something currently being skipped; the rest
+			// of the matches and their chains cannot change the answer.
+			if s.reachesUnappliedOverlay(&probe, appliedSet) {
+				reachable[value] = struct{}{}
+			}
+		}
+		if len(reachable) == 0 {
+			continue
+		}
+		values := make([]string, 0, len(reachable))
+		for v := range reachable {
+			values = append(values, v)
+		}
+		sort.Strings(values)
+		gaps = append(gaps, strictGap{dimension: dim.name, validValues: values})
+	}
+	if len(gaps) == 0 {
+		return nil
+	}
+	return gaps
+}
+
+// reachesUnappliedOverlay reports whether resolving probe would pull in any
+// overlay that is not already applied.
+func (s *MetadataStore) reachesUnappliedOverlay(probe *Criteria, applied map[string]struct{}) bool {
+	for _, match := range s.FindMatchingOverlays(probe) {
+		for _, name := range s.inheritanceChainNames(match) {
+			if _, already := applied[name]; !already {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// dimensionValues returns every value the catalog declares for a dimension,
+// sorted. Iteration order of s.Overlays is randomized, so the sort is what
+// makes strictDimensionGaps deterministic.
+func (s *MetadataStore) dimensionValues(dim coverageDimension) []string {
+	seen := map[string]struct{}{}
+	for _, overlay := range s.Overlays {
+		if overlay.Spec.Criteria == nil {
+			continue
+		}
+		if v := dim.value(overlay.Spec.Criteria); isSpecifiedCriteriaValue(v) {
+			seen[v] = struct{}{}
+		}
+	}
+	values := make([]string, 0, len(seen))
+	for v := range seen {
+		values = append(values, v)
+	}
+	sort.Strings(values)
+	return values
+}
+
+// inheritanceChainNames returns the overlay and every ancestor it inherits
+// from, matching the appliedOverlays semantics used by coverage.
+func (s *MetadataStore) inheritanceChainNames(overlay *RecipeMetadata) []string {
+	names := []string{}
+	for cur := overlay; cur != nil; {
+		names = append(names, cur.Metadata.Name)
+		if cur.Spec.Base == "" {
+			break
+		}
+		next, ok := s.GetRecipeByName(cur.Spec.Base)
+		if !ok {
+			break
+		}
+		cur = next
+	}
+	return names
+}
+
+// strictGapError renders the strict-dimension failure. The message mirrors
+// the retired guard so operator-facing wording does not regress, and the
+// context uses its own key rather than `uncovered`: pkg/client/v1 relaxation
+// CLEARS uncovered dimensions and retries, which here would discard the check
+// and return the partial recipe that issue #1542 fixed.
+//
+// excluded/warnings are attached exactly as the completeness path attaches
+// them. reachesUnappliedOverlay probes through the UNFILTERED overlay set, so
+// on the evaluator path an overlay that would cover the combination but was
+// removed by a failing constraint still counts as reachable. Without this
+// context the caller is told to state an os, supplies it, and only then meets
+// the real constraint failure. The demand itself is still correct — the
+// combination genuinely is not covered — so this is a diagnosis aid, not a
+// gate: the error stands either way.
+func strictGapError(criteria *Criteria, gaps []strictGap, excluded []ExcludedOverlay, warnings []ConstraintWarning) error {
+	clauses := make([]string, 0, len(gaps))
+	entries := make([]map[string]any, 0, len(gaps))
+	for _, gap := range gaps {
+		clauses = append(clauses, fmt.Sprintf("%s (valid: %s)",
+			gap.dimension, strings.Join(gap.validValues, ", ")))
+		entries = append(entries, map[string]any{
+			"dimension":   gap.dimension,
+			"validValues": gap.validValues,
+		})
+	}
+	ctx := map[string]any{"strictDimensions": entries}
+	if len(excluded) > 0 {
+		ctx["excludedOverlays"] = excluded
+	}
+	if len(warnings) > 0 {
+		ctx["constraintWarnings"] = warnings
+	}
+	return aicrerrors.NewWithContext(aicrerrors.ErrCodeInvalidRequest,
+		fmt.Sprintf("%s has no recipe covering that combination; specify %s",
+			criteria.String(), strings.Join(clauses, ", ")),
+		ctx)
 }

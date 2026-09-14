@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -35,6 +36,13 @@ import (
 	"k8s.io/client-go/dynamic"
 	"sigs.k8s.io/yaml"
 )
+
+// readFailedBecauseContextEnded reports whether an I/O error came from the
+// polling context itself ending. Such an error is the wait's terminal signal,
+// not evidence that preceding object reads were persistently failing.
+func readFailedBecauseContextEnded(ctx context.Context, err error) bool {
+	return ctx.Err() != nil && stderrors.Is(err, ctx.Err())
+}
 
 // getDynamicClient returns the dynamic client from context, or creates one from RESTConfig.
 func getDynamicClient(ctx *validators.Context) (dynamic.Interface, error) {
@@ -97,7 +105,7 @@ func getConditionObservation(obj *unstructured.Unstructured, condType string) (*
 	}
 
 	for _, c := range conditions {
-		cond, ok := c.(map[string]interface{})
+		cond, ok := c.(map[string]any)
 		if !ok {
 			continue
 		}
@@ -175,16 +183,38 @@ func waitForDeploymentAvailable(ctx *validators.Context, namespace, name string,
 	defer cancel()
 
 	var last *appsv1.Deployment
+	var lastReadErr error
 	err := wait.PollUntilContextCancel(pollCtx, defaults.PodPollInterval, true,
 		func(c context.Context) (bool, error) {
 			deploy, getErr := ctx.Clientset.AppsV1().Deployments(namespace).Get(c, name, metav1.GetOptions{})
 			if getErr != nil {
 				if k8serrors.IsNotFound(getErr) {
+					// A NotFound is a successful read: the API answered. Clear
+					// any earlier transient error so a recovered throttle does
+					// not mislabel a genuinely-missing deployment at expiry.
+					lastReadErr = nil
 					return false, nil // not created yet — keep waiting within the bound
 				}
-				return false, errors.Wrap(errors.ErrCodeInternal,
-					fmt.Sprintf("failed to get deployment %s/%s", namespace, name), getErr)
+				// A read that could not land is not a verdict. Client-go's own
+				// rate limiter fails reads under load, and aborting here failed
+				// callers on a healthy cluster (#2406). Retry within the bound;
+				// genuine errors (RBAC, malformed) still abort immediately.
+				if isK8sTimeoutErr(getErr) {
+					// A Get interrupted by this wait's own cancellation is not a
+					// transient read failure. Do not let the final in-flight read
+					// overwrite the diagnostic from the preceding poll history.
+					if readFailedBecauseContextEnded(c, getErr) {
+						return false, nil
+					}
+					lastReadErr = getErr
+					slog.Debug("transient read while waiting for deployment; retrying",
+						"namespace", namespace, "deployment", name, "error", getErr)
+					return false, nil
+				}
+				return false, classifyK8sReadError(getErr,
+					fmt.Sprintf("deployment %s/%s", namespace, name))
 			}
+			lastReadErr = nil
 			last = deploy
 			return deploy.Status.AvailableReplicas >= 1, nil
 		},
@@ -214,6 +244,13 @@ func waitForDeploymentAvailable(ctx *validators.Context, namespace, name string,
 	// available in time. Surface the NotFound-shaped not-available message the
 	// caller wraps. A non-deadline error is a genuine API failure — propagate it.
 	if pollCtx.Err() != nil {
+		// A sustained throttle would otherwise be indistinguishable from "never
+		// became ready" — keep the last read error so the operator sees why.
+		if lastReadErr != nil {
+			return last, errors.Wrap(errors.ErrCodeTimeout,
+				fmt.Sprintf("deployment %s/%s unreadable for %s (reads kept failing)",
+					namespace, name, timeout), lastReadErr)
+		}
 		if last == nil {
 			return nil, errors.New(errors.ErrCodeNotFound,
 				fmt.Sprintf("deployment %s/%s not found after %s", namespace, name, timeout))

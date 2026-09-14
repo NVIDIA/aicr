@@ -17,7 +17,7 @@
 //
 // This package is the binary's home, not a reusable framework. cmd/aicrd/main.go
 // calls Serve() and exits. The package owns the HTTP entry point, the
-// middleware chain, the v1 and v2 recipe/query/bundle handlers, and the
+// middleware chain, the recipe/query/bundle handlers, and the
 // health/readiness probes.
 //
 // # Architecture
@@ -44,29 +44,27 @@
 //   - bodyLimitMiddleware — defaults.ServerMaxBodyBytes (8 MiB) via
 //     http.MaxBytesReader; handlers install tighter caps where appropriate
 //     (MaxRecipePOSTBytes for recipe/query routes and MaxBundlePOSTBytes for
-//     bundle routes, in both v1 and v2).
+//     bundle routes).
 //
 // Graceful shutdown is wired via signal.NotifyContext on SIGINT/SIGTERM.
 //
 // # Endpoints
 //
-// POST/GET /v1/recipe — resolve a Recipe from criteria. Query parameters or a
-// JSON/YAML RecipeCriteria body select service, accelerator, intent, os,
-// platform, and version.
+// POST/GET /v1/recipe — resolve a Recipe from criteria. GET takes the criteria
+// as query parameters. POST takes a strict envelope ({criteria, profile}) and
+// requires Content-Type: application/json or application/x-yaml; unknown
+// fields and unsupported media types are rejected. slurmAccountingMode is a
+// query parameter on both methods, not an envelope field.
 //
 // POST/GET /v1/query — resolve a hydrated value from a recipe by JSON-path
 // selector. GET takes criteria + selector via query string; POST takes a
-// QueryRequest body ({criteria, selector}).
+// strict envelope ({criteria, profile, selector}). selector must be present on
+// both methods; pass it explicitly empty to get the entire hydrated recipe.
 //
 // POST /v1/bundle — generate a deployment bundle (zip) from a hydrated
 // RecipeResult body. Query parameters control deployer, value overrides
 // (set=), dynamic declarations (dynamic=), node selectors/tolerations, and
 // workload gating.
-//
-// The corresponding /v2/recipe, /v2/query, and /v2/bundle routes add strict,
-// profile-aware request and artifact contracts. The v1 routes preserve their
-// legacy input behavior and reject explicit profile selection or profiled
-// artifacts.
 //
 // GET /health — liveness probe; always 200.
 // GET /ready — readiness probe; 200 when ready, 503 otherwise.

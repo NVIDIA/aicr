@@ -351,7 +351,7 @@ func TestGetKubeClient_CallsOnce(t *testing.T) {
 	const numGoroutines = 10
 	results := make(chan bool, numGoroutines)
 
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		go func() {
 			client, _, _ := GetKubeClient()
 			// Record whether client is non-nil (success) or nil (failure)
@@ -362,7 +362,7 @@ func TestGetKubeClient_CallsOnce(t *testing.T) {
 	// Collect results
 	successCount := 0
 	failCount := 0
-	for i := 0; i < numGoroutines; i++ {
+	for range numGoroutines {
 		if <-results {
 			successCount++
 		} else {

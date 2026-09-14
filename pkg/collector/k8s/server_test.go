@@ -42,7 +42,7 @@ func TestKubernetesCollector_Collect(t *testing.T) {
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
 	// Should have 6 subtypes: server, image, policy, node, Slinky, and MariaDB.
-	assert.Len(t, m.Subtypes, 6)
+	assert.Len(t, m.Subtypes, 7)
 
 	// Find the server subtype
 	var serverSubtype *measurement.Subtype
@@ -209,9 +209,10 @@ func TestKubernetesCollector_ErrorRecovery_NilClient(t *testing.T) {
 	assert.NotNil(t, m)
 	assert.Equal(t, measurement.TypeK8s, m.Type)
 	// All standard subtypes should be present; custom-resource detection is unknown.
-	assert.Len(t, m.Subtypes, 6)
+	assert.Len(t, m.Subtypes, 7)
 	foundSlinky := false
 	foundMariaDB := false
+	foundOKELegacy := false
 	for _, subtype := range m.Subtypes {
 		if subtype.Name == SubtypeSlinkySlurm {
 			assert.Equal(t, slinkyStateUnknown, subtype.Data[slinkyKeyCollectionState].Any())
@@ -221,9 +222,14 @@ func TestKubernetesCollector_ErrorRecovery_NilClient(t *testing.T) {
 			assert.Equal(t, mariaDBStateUnknown, subtype.Data[mariaDBKeyCollectionState].Any())
 			foundMariaDB = true
 		}
+		if subtype.Name == SubtypeOKELegacyPlugin {
+			assert.Equal(t, okeLegacyPluginUnknown, subtype.Data[okeLegacyKeyPlugin].Any())
+			foundOKELegacy = true
+		}
 	}
 	assert.True(t, foundSlinky, "expected slinky-slurm subtype")
 	assert.True(t, foundMariaDB, "expected mariadb-operator subtype")
+	assert.True(t, foundOKELegacy, "expected oke-legacy-plugin subtype")
 }
 
 // Helper function defined in image_test.go

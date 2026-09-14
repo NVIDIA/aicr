@@ -14,27 +14,7 @@
 
 package localformat
 
-import (
-	"strings"
-	"testing"
-)
-
-func TestRenderWrapperChartYAML(t *testing.T) {
-	got, err := renderWrapperChartYAML("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.0")
-	if err != nil {
-		t.Fatalf("render: %v", err)
-	}
-	for _, want := range []string{
-		"name: gpu-operator",
-		"- name: gpu-operator",
-		"version: v25.3.0",
-		`repository: ""`,
-	} {
-		if !strings.Contains(string(got), want) {
-			t.Errorf("Chart.yaml missing %q\n--- got:\n%s", want, got)
-		}
-	}
-}
+import "testing"
 
 func TestNestUnderSubchart(t *testing.T) {
 	tests := []struct {

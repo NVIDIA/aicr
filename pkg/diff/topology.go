@@ -15,6 +15,8 @@
 package diff
 
 import (
+	"context"
+
 	"github.com/NVIDIA/aicr/pkg/collector/topology"
 	"github.com/NVIDIA/aicr/pkg/measurement"
 )
@@ -45,22 +47,38 @@ const (
 // The cost is that a mixed-vintage comparison sees only what the folded
 // encoding could express, which is the accuracy the older snapshot was
 // captured with. Once both sides carry items the comparison is exact.
-func alignTopologyEncoding(base, target *measurement.Measurement) (*measurement.Measurement, *measurement.Measurement) {
+func alignTopologyEncoding(
+	ctx context.Context,
+	base, target *measurement.Measurement,
+) (*measurement.Measurement, *measurement.Measurement, error) {
+
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
 	if base == nil || target == nil {
-		return base, target
+		return base, target, nil
 	}
 	if base.Type != measurement.TypeNodeTopology || target.Type != measurement.TypeNodeTopology {
-		return base, target
+		return base, target, nil
 	}
 
-	baseIdx := indexSubtypes(base.Subtypes)
-	targetIdx := indexSubtypes(target.Subtypes)
+	baseIdx, indexErr := indexSubtypes(ctx, base.Subtypes)
+	if indexErr != nil {
+		return nil, nil, indexErr
+	}
+	targetIdx, indexErr := indexSubtypes(ctx, target.Subtypes)
+	if indexErr != nil {
+		return nil, nil, indexErr
+	}
 
 	plan := map[string]subtypePlan{}
 	for subtype, countKey := range map[string]string{
 		topologyLabelSubtype: topologyLabelCountKey,
 		topologyTaintSubtype: topologyTaintCountKey,
 	} {
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
 		b, t := baseIdx[subtype], targetIdx[subtype]
 		if b == nil || t == nil {
 			continue
@@ -78,8 +96,14 @@ func alignTopologyEncoding(base, target *measurement.Measurement) (*measurement.
 			// Exclude collision-ambiguous keys: Go map iteration decides the
 			// winner, so an unchanged cluster can write different values on each
 			// side across an upgrade/rollback.
-			_, ambiguous, err := topology.HydrateItems(itemSide(b, t))
-			if err != nil {
+			if err := ctx.Err(); err != nil {
+				return nil, nil, err
+			}
+			_, ambiguous, hydrateErr := topology.HydrateItems(itemSide(b, t))
+			if contextErr := ctx.Err(); contextErr != nil {
+				return nil, nil, contextErr
+			}
+			if hydrateErr != nil {
 				plan[subtype] = subtypePlan{dropItems: true, countKey: countKey}
 				continue
 			}
@@ -89,10 +113,18 @@ func alignTopologyEncoding(base, target *measurement.Measurement) (*measurement.
 		// the count here would mask a corrupted one rather than report it.
 	}
 	if len(plan) == 0 {
-		return base, target
+		return base, target, nil
 	}
 
-	return alignMeasurement(base, plan), alignMeasurement(target, plan)
+	alignedBase, alignErr := alignMeasurement(ctx, base, plan)
+	if alignErr != nil {
+		return nil, nil, alignErr
+	}
+	alignedTarget, alignErr := alignMeasurement(ctx, target, plan)
+	if alignErr != nil {
+		return nil, nil, alignErr
+	}
+	return alignedBase, alignedTarget, nil
 }
 
 // subtypePlan is how one subtype is reduced before comparison.
@@ -113,23 +145,40 @@ func itemSide(a, b *measurement.Subtype) *measurement.Subtype {
 }
 
 // alignMeasurement copies m with the topology subtypes reduced as directed.
-func alignMeasurement(m *measurement.Measurement, plan map[string]subtypePlan) *measurement.Measurement {
+func alignMeasurement(
+	ctx context.Context,
+	m *measurement.Measurement,
+	plan map[string]subtypePlan,
+) (*measurement.Measurement, error) {
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	out := *m
 	out.Subtypes = make([]measurement.Subtype, len(m.Subtypes))
 	copy(out.Subtypes, m.Subtypes)
 
 	folded := map[string]int{}
 	for i := range out.Subtypes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		st := &out.Subtypes[i]
 		p, ok := plan[st.Name]
 		if !ok {
 			continue
 		}
 		if p.hydrate {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			if items, _, err := topology.HydrateItems(st); err == nil {
 				st.Items = items
 			} else {
 				p.dropData = false // keep data when hydration fails
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, err
 			}
 		}
 		if p.dropData {
@@ -144,6 +193,9 @@ func alignMeasurement(m *measurement.Measurement, plan map[string]subtypePlan) *
 		if len(p.skipKeys) > 0 && st.Data != nil {
 			data := make(map[string]measurement.Reading, len(st.Data))
 			for k, v := range st.Data {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				if !p.skipKeys[k] {
 					data[k] = v
 				}
@@ -152,24 +204,33 @@ func alignMeasurement(m *measurement.Measurement, plan map[string]subtypePlan) *
 		}
 	}
 	if len(folded) == 0 {
-		return &out
+		return &out, nil
 	}
 
 	for i := range out.Subtypes {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		st := &out.Subtypes[i]
 		if st.Name != topologySummarySubtype || st.Data == nil {
 			continue
 		}
 		data := make(map[string]measurement.Reading, len(st.Data))
 		for k, v := range st.Data {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			data[k] = v
 		}
 		for key, count := range folded {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			if _, ok := data[key]; ok {
 				data[key] = measurement.Int(count)
 			}
 		}
 		st.Data = data
 	}
-	return &out
+	return &out, nil
 }

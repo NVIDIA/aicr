@@ -215,7 +215,7 @@ spec:
                 # alongside the worker. Uses NRI device injection (devices.gke.io
                 # annotation) for GPU device access instead of privileged mode.
                 - name: tcpxo-daemon
-                  image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.20
+                  image: us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21
                   imagePullPolicy: Always
                   restartPolicy: Always
                   command: ["/bin/sh", "-c"]

@@ -75,10 +75,10 @@ pointers) predate profiles and carry no such field: converting one to
 profiled evidence selects the value from the **target cluster** — the
 profile the refreshed evidence is meant to attest — not from anything in
 the legacy pointer. This hydrated-recipe path is the only way to regenerate
-`driver-installer` evidence (on GKE, validating the raw overlay selects
+`bundle-installer` evidence (on GKE, validating the raw overlay selects
 the `gke-default` default, whose
 `!gke-no-default-nvidia-gpu-device-plugin` constraint fails against a
-driver-installer cluster's labeled pools).
+bundle-installer cluster's labeled pools).
 State `--intent` (and `--platform` when the leaf pins one — omit it
 otherwise) explicitly: the snapshot fingerprint supplies service,
 accelerator, and OS, but intent and platform are author-selected and
@@ -226,6 +226,12 @@ aicr validate -r recipes/overlays/<slug>.yaml -s snapshot.yaml --emit-attestatio
 #   aicr recipe -s snapshot.yaml --intent <intent> [--platform <platform>] \
 #     --profile gpuStack=<value> -o recipe.yaml
 #   aicr validate -r recipe.yaml -s snapshot.yaml --emit-attestation ./out
+# The h100 GKE kubeflow training leaf ships torch-distributed-tcpxo, which
+# requires the ordered GPU-NIC interface mapping — overlay-direct validate/
+# bundle/evidence-digest fails closed on it (auto-hydration supplies none).
+# Hydrate first and add --gke-tcpxo-interfaces eth1=<net>,...,eth8=<net>:
+#   aicr recipe -s snapshot.yaml --intent training --platform kubeflow \
+#     --profile gpuStack=<value> --gke-tcpxo-interfaces eth1=<net>,...,eth8=<net> -o recipe.yaml
 
 # Off VPN, where Sigstore is reachable: sign, push, and write the pointer.
 aicr evidence publish ./out --push ghcr.io/<your-fork-owner>/aicr-evidence

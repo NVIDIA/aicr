@@ -259,9 +259,13 @@ func TestToInternalAgentConfig_ProjectsAKSGPUPoolsPath(t *testing.T) {
 	got := toInternalAgentConfig(&AgentConfig{
 		Namespace:       "gpu-operator",
 		AKSGPUPoolsPath: "/tmp/pools.json",
+		OKEAddonsPath:   "/tmp/addons.json",
 	})
 	if got.AKSGPUPoolsPath != "/tmp/pools.json" {
 		t.Fatalf("AKSGPUPoolsPath = %q, want /tmp/pools.json", got.AKSGPUPoolsPath)
+	}
+	if got.OKEAddonsPath != "/tmp/addons.json" {
+		t.Fatalf("OKEAddonsPath = %q, want /tmp/addons.json", got.OKEAddonsPath)
 	}
 	if got.Namespace != "gpu-operator" {
 		t.Fatalf("Namespace = %q, want gpu-operator", got.Namespace)
@@ -292,13 +296,12 @@ func TestToInternalAgentConfig_ProjectsAKSGPUPoolsPath(t *testing.T) {
 // rather than being skipped, so extending the mirror always forces a
 // deliberate update here.
 func TestAgentConfigMirrorsInternal(t *testing.T) {
-	facadeType := reflect.TypeOf(AgentConfig{})
-	internalType := reflect.TypeOf(snapshotter.AgentConfig{})
+	facadeType := reflect.TypeFor[AgentConfig]()
+	internalType := reflect.TypeFor[snapshotter.AgentConfig]()
 
 	fieldTypes := func(t reflect.Type) map[string]reflect.Type {
 		out := make(map[string]reflect.Type, t.NumField())
-		for i := range t.NumField() {
-			f := t.Field(i)
+		for f := range t.Fields() {
 			out[f.Name] = f.Type
 		}
 		return out
@@ -358,7 +361,7 @@ func nonZeroFieldValue(t *testing.T, name string, typ reflect.Type, seed int) re
 
 	// resource.Quantity has unexported state, so it cannot be built by
 	// generic reflection — parse a real quantity instead.
-	if typ == reflect.TypeOf(resource.Quantity{}) {
+	if typ == reflect.TypeFor[resource.Quantity]() {
 		return reflect.ValueOf(resource.MustParse(fmt.Sprintf("%d", seed+1)))
 	}
 

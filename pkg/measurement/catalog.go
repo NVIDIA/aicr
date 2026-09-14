@@ -128,6 +128,19 @@ var catalog = map[Type]typeSpec{
 			// cluster with no GPU pools; that is a runtime NotFound, not an
 			// unaddressable path.
 			"aks-gpu-pools": {scalar: closedKeys("gpu-pool-count", "gpu-pools", "gpu-driver")},
+			// oke-addons is the OKE control-plane add-on projection supplied via
+			// `aicr snapshot --oke-addons` / `aicr validate --oke-addons` —
+			// pkg/collector/k8s/okeaddons.go. nvidia-gpu-plugin normalizes the
+			// NvidiaGpuPlugin add-on state (installed/absent; any other
+			// lifecycle state projects a fail-closed marker).
+			"oke-addons": {scalar: closedKeys("addon-count", "nvidia-gpu-plugin")},
+			// oke-legacy-plugin is in-cluster conflict evidence for OKE's legacy
+			// addon-manager-shipped device plugin (invisible to list-addons) —
+			// pkg/collector/k8s/okelegacyplugin.go. nvidia-gpu-device-plugin is
+			// the collapsed constraint reading (none/active/unknown; only "none"
+			// qualifies operator-managed); daemonset carries the uncollapsed
+			// detail (absent/unlabeled/disabled/active/unknown).
+			"oke-legacy-plugin": {scalar: closedKeys("nvidia-gpu-device-plugin", "daemonset")},
 			// Keys are container image names (pkg/collector/k8s/image.go).
 			"image": {scalar: openKeys()},
 			// Keys are discovered cluster policies (pkg/collector/k8s/policy.go).

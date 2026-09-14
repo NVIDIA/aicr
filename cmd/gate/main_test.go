@@ -128,11 +128,11 @@ func TestLoop_StabilityWindowAfterEvalLatency(t *testing.T) {
 // evaluation itself.
 type nopFetcher struct{}
 
-func (nopFetcher) Fetch(context.Context, string, string, string, string) (map[string]interface{}, error) {
+func (nopFetcher) Fetch(context.Context, string, string, string, string) (map[string]any, error) {
 	return nil, errors.New(errors.ErrCodeNotFound, "nop fetcher")
 }
 
-func (nopFetcher) List(context.Context, string, string, string, map[string]string) ([]map[string]interface{}, error) {
+func (nopFetcher) List(context.Context, string, string, string, map[string]string) ([]map[string]any, error) {
 	return nil, nil
 }
 

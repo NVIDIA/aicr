@@ -257,7 +257,7 @@ func TestRegistry_Count(t *testing.T) {
 	}
 
 	// Add bundlers and verify count
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		reg.Register(types.BundleType(fmt.Sprintf("bundler-%d", i)), &mockBundler{})
 		if reg.Count() != i+1 {
 			t.Errorf("Expected count %d, got %d", i+1, reg.Count())
@@ -299,7 +299,7 @@ func TestRegistry_ThreadSafety(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Concurrent registrations
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -314,7 +314,7 @@ func TestRegistry_ThreadSafety(t *testing.T) {
 	}
 
 	// Concurrent reads
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
@@ -328,7 +328,7 @@ func TestRegistry_ThreadSafety(t *testing.T) {
 	wg.Wait()
 
 	// Concurrent list/getall operations
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
@@ -342,7 +342,7 @@ func TestRegistry_ThreadSafety(t *testing.T) {
 	wg.Wait()
 
 	// Concurrent unregistrations
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()

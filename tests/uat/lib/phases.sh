@@ -63,6 +63,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/collect-debug.sh"
 # Train-job knobs (overridable for local reproduction or future inference variant).
 TRAINJOB_NAMESPACE="${TRAINJOB_NAMESPACE:-kubeflow}"
 TRAINJOB_NAME="${TRAINJOB_NAME:-pytorch-mnist}"
+# The runtime the training smoke references. Cloud lanes that ship a
+# fabric-wired sibling set TRAINJOB_RUNTIME to it (tests/uat/gcp/run sets
+# torch-distributed-tcpxo, exercising the recipe-shipped runtime end to end).
+TRAINJOB_RUNTIME="${TRAINJOB_RUNTIME:-torch-distributed}"
+# GPUs the smoke requests per node. Lanes on a full-node fabric runtime set 8;
+# the default keeps the single-GPU smoke used elsewhere.
+TRAINJOB_GPUS_PER_NODE="${TRAINJOB_GPUS_PER_NODE:-1}"
 TRAINJOB_IMAGE="${TRAINJOB_IMAGE:-kubeflow/pytorch-dist-mnist:v1-9e12c68}"
 TRAINJOB_TIMEOUT_SECONDS="${TRAINJOB_TIMEOUT_SECONDS:-1200}" # 20 min
 # TrainJob node count. Defaults to 2 to span the cloud lanes' 2-GPU pools (and
@@ -162,10 +169,12 @@ SERVE_NAMESPACE="${SERVE_NAMESPACE:-dynamo-workload}"
 SERVE_NAME="${SERVE_NAME:-vllm-agg}"
 SERVE_QUEUE="${SERVE_QUEUE:-dynamo}"
 SERVE_MODEL="${SERVE_MODEL:-Qwen/Qwen3-0.6B}"
-SERVE_RUNTIME_IMAGE="${SERVE_RUNTIME_IMAGE:-nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.2.1}"
-# GPU worker placement. The demo pins nodeGroup=gpu-worker; both UAT clusters
-# label their GPU pool the same way (tests/uat/*/cluster-config.yaml), so the
-# default lands the decode worker on the GPU node on either cloud.
+SERVE_RUNTIME_IMAGE="${SERVE_RUNTIME_IMAGE:-nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.4.2}"
+# GPU pool placement, applied to BOTH graph components (#1644 — it keeps the
+# Frontend off the small CPU nodes, where its ~12GB image pull blew the
+# readiness budget). The demo pins nodeGroup=gpu-worker; every UAT cluster
+# labels its GPU pool the same way (tests/uat/*/cluster-config.yaml), so the
+# default lands the graph on the GPU pool on any of the clouds.
 SERVE_GPU_NODE_SELECTOR_KEY="${SERVE_GPU_NODE_SELECTOR_KEY:-nodeGroup}"
 SERVE_GPU_NODE_SELECTOR_VALUE="${SERVE_GPU_NODE_SELECTOR_VALUE:-gpu-worker}"
 SERVE_FRONTEND_PORT="${SERVE_FRONTEND_PORT:-8000}"
@@ -1244,11 +1253,11 @@ spec:
       - --epochs=1
     resourcesPerNode:
       requests:
-        nvidia.com/gpu: 1
+        nvidia.com/gpu: ${TRAINJOB_GPUS_PER_NODE}
       limits:
-        nvidia.com/gpu: 1
+        nvidia.com/gpu: ${TRAINJOB_GPUS_PER_NODE}
   runtimeRef:
-    name: torch-distributed
+    name: ${TRAINJOB_RUNTIME}
     apiGroup: trainer.kubeflow.org
     kind: ClusterTrainingRuntime
 EOF
@@ -1305,30 +1314,27 @@ serve_debug() {
     kubectl describe pods -n "${SERVE_NAMESPACE}" 2>&1 || true
     echo "--- events ---"
     kubectl get events -n "${SERVE_NAMESPACE}" --sort-by=.lastTimestamp 2>&1 || true
-    echo "--- logs (all pods, all containers, last 200 lines) ---"
+    echo "--- logs (all pods, all containers, last 200 lines; --previous for crash loops) ---"
     for p in $(kubectl get pods -n "${SERVE_NAMESPACE}" -o name 2>/dev/null); do
       echo "=== ${p} ==="
       kubectl logs -n "${SERVE_NAMESPACE}" "${p#pod/}" --all-containers --tail=200 2>&1 || true
+      # CrashLoopBackOff replaces the current container before this dump
+      # runs, so the dying process's stdout is on --previous. Missing
+      # previous (first start, or already GC'd) is a no-op.
+      echo "=== ${p} (previous) ==="
+      kubectl logs -n "${SERVE_NAMESPACE}" "${p#pod/}" --all-containers --previous --tail=200 2>&1 || true
     done
   } | tee serve-logs/"${SERVE_NAME}".log
 }
 
-phase_serve() {
-  # Deploy the served inference graph (Dynamo) — the intent=inference CUJ, the
-  # DC3 counterpart of phase_train. Mirrors the DynamoGraphDeployment in
-  # demos/cuj2-inference.md (demos/workloads/inference/vllm-agg.yaml): the KAI
-  # queue and a two-component (Frontend + decode Worker) graph serving an
-  # OpenAI-compatible endpoint. The worker requests its GPU as a scalar
-  # nvidia.com/gpu limit — the device-plugin production default (#1327).
-  #
-  # Tolerations are a portable SUPERSET of the taints across all UAT clusters
-  # (AWS and GKE GPU pools use different `dedicated` values, the AKS pool carries
-  # only nvidia.com/gpu; the DRA/gpu-operator adds nvidia.com/gpu). Tolerating a
-  # taint a node does not carry is a no-op, so one list schedules correctly on
-  # any of the clouds. The Frontend deliberately omits
-  # the nvidia.com/gpu toleration so it stays OFF the scarce GPU nodes.
-  echo "::group::Deploy DynamoGraphDeployment (${SERVE_NAME} in ${SERVE_NAMESPACE})"
-  kubectl apply -f - <<EOF
+# serve_render_manifest prints the serve manifests — KAI Queue, Namespace, and
+# the DynamoGraphDeployment — to STDOUT and touches no cluster. It is split out
+# from phase_serve so the scheduling contract documented there is assertable
+# off-cluster: #1644 was a MISSING field (the Frontend had no nodeSelector), and
+# only a test that reads the rendered manifest can catch an absent field. See
+# TestServeGraphGPUPlacement in tests/uat/serve_manifest_test.go.
+serve_render_manifest() {
+  cat <<EOF
 apiVersion: scheduling.run.ai/v2
 kind: Queue
 metadata:
@@ -1358,18 +1364,22 @@ spec:
       replicas: 1
       podTemplate:
         spec:
+          nodeSelector:
+            ${SERVE_GPU_NODE_SELECTOR_KEY}: ${SERVE_GPU_NODE_SELECTOR_VALUE}
           tolerations:
             - {key: dedicated, operator: Equal, value: worker-workload, effect: NoSchedule}
             - {key: dedicated, operator: Equal, value: worker-workload, effect: NoExecute}
             - {key: dedicated, operator: Equal, value: gpu-workload, effect: NoSchedule}
             - {key: dedicated, operator: Equal, value: system-workload, effect: NoSchedule}
             - {key: dedicated, operator: Equal, value: system-workload, effect: NoExecute}
+            - {key: nvidia.com/gpu, operator: Exists, effect: NoSchedule}
           containers:
             - name: main
               image: ${SERVE_RUNTIME_IMAGE}
               env:
                 - {name: SERVED_MODEL_NAME, value: ${SERVE_MODEL}}
                 - {name: DYN_ROUTER_MODE, value: kv}
+                - {name: DYN_EVENT_PLANE, value: zmq}
     - name: VllmDecodeWorker
       type: worker
       replicas: 1
@@ -1387,7 +1397,26 @@ spec:
             - name: main
               image: ${SERVE_RUNTIME_IMAGE}
               workingDir: /workspace/examples/backends/vllm
-              command: ["python3", "-m", "dynamo.vllm"]
+              # A bare `python3 -m dynamo.vllm` here crash-looped on GKE before
+              # binding its health port (run 32732018329), while inference-perf
+              # served the same runtime on the SAME cluster minutes earlier
+              # using this wrapper. GKE mounts the node driver at
+              # /usr/local/nvidia without putting it on LD_LIBRARY_PATH, so
+              # vLLM cannot dlopen libcuda.so.1 ("Failed to infer device type",
+              # observed live in gke-default qualification — see the same
+              # wrapper in validators/performance/testdata/inference).
+              # Shell APPEND with \${VAR:+} so we do not clobber
+              # the image's nixl/ucx/cuda entries or create a leading empty
+              # ld.so entry. Harmless no-op when the path is absent (EKS/AKS
+              # GPU Operator toolkit). \$ so the unquoted heredoc does not
+              # expand LD_LIBRARY_PATH at render time.
+              command:
+                - /bin/bash
+                - -c
+                - export LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:+\${LD_LIBRARY_PATH}:}/usr/local/nvidia/lib64"; exec python3 -m dynamo.vllm "\$@"
+                - dynamo.vllm
+              env:
+                - {name: DYN_EVENT_PLANE, value: zmq}
               args:
                 - --model
                 - ${SERVE_MODEL}
@@ -1397,6 +1426,52 @@ spec:
                 limits:
                   nvidia.com/gpu: 1
 EOF
+}
+
+phase_serve() {
+  # Deploy the served inference graph (Dynamo) — the intent=inference CUJ, the
+  # DC3 counterpart of phase_train. Graph topology mirrors the
+  # DynamoGraphDeployment in demos/cuj2-inference.md
+  # (demos/workloads/inference/vllm-agg.yaml): the KAI queue and a
+  # two-component (Frontend + decode Worker) graph serving an OpenAI-compatible
+  # endpoint. Two intentional divergences from the demo: Frontend placement
+  # (the demo pins nodeGroup=cpu-worker; this graph selects the GPU pool for
+  # both components — pool-selection note below, #1644), and the worker
+  # command (the demo uses python3 -m dynamo.vllm; this graph wraps it with
+  # the GKE driver-lib append used by inference-perf, or vLLM cannot see
+  # libcuda.so.1 on gke-default). The worker requests its GPU as a scalar
+  # nvidia.com/gpu limit — the device-plugin production default (#1327).
+  #
+  # Tolerations are a portable SUPERSET of the taints across all UAT clusters
+  # (AWS and GKE GPU pools use different `dedicated` values, the AKS pool carries
+  # only nvidia.com/gpu; the DRA/gpu-operator adds nvidia.com/gpu). Tolerating a
+  # taint a node does not carry is a no-op, so one list schedules correctly on
+  # any of the clouds.
+  #
+  # Both components select the GPU pool (#1644). Left unselected, the Frontend
+  # landed on a CPU-pool node (e2-standard-4 / n2-standard-8) and wedged in
+  # ContainerCreating on the ~12GB vllm-runtime image, exceeding
+  # SERVE_READY_TIMEOUT_SECONDS: on 4-8 vCPUs with modest egress, both the
+  # download and the CPU-bound layer decompression are slow. The GPU pool's
+  # a3-megagpu-8g class pulls the same image in a fraction of the budget, which
+  # is what this selector buys. It therefore also needs the nvidia.com/gpu
+  # toleration (the AKS pool carries only that taint). Sharing the pool consumes
+  # no device: the Frontend declares no nvidia.com/gpu limit, so the device
+  # plugin never allocates one to it. This matches how the inference-perf
+  # validator places every component on the GPU cohort
+  # (validators/performance/inference_perf_constraint.go). The worker command
+  # is the same GKE driver-lib append as that validator's Dynamo templates;
+  # without it, vLLM crash-loops on gke-default (run 32732018329).
+  #
+  # This selects the POOL, not a node: the pool holds two GPU nodes and nothing
+  # constrains the two components to the same one, so they may be split. That is
+  # deliberate rather than an oversight — a split yields two pulls running in
+  # PARALLEL on two high-bandwidth nodes, so readiness waits out roughly one
+  # pull either way. Do not read the co-location as load-bearing; it is not, and
+  # there is no shared cache to inherit (the operator creates both components at
+  # once, so kubelet merely dedupes co-located pulls into one).
+  echo "::group::Deploy DynamoGraphDeployment (${SERVE_NAME} in ${SERVE_NAMESPACE})"
+  serve_render_manifest | kubectl apply -f -
   echo "::endgroup::"
 
   echo "::group::Wait for DynamoGraphDeployment readiness (timeout ${SERVE_READY_TIMEOUT_SECONDS}s)"

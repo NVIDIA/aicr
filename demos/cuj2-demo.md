@@ -210,17 +210,20 @@ publication revalidate a private snapshot and publish only that inventory.
 │                                                                 │
 │  Discovery: Kubernetes-native (no etcd)                         │
 │  Requests:  Dynamo request plane (default TCP)                  │
-│  Events:    NATS event plane for worker KV-cache events         │
+│  Events:    ZMQ-based KV-cache event plane (direct, no NATS)    │
 │                                                                 │
-│  CRDs (6):                                                      │
+│  CRDs (9):                                                      │
 │  ├── DynamoGraphDeployment         (inference serving graph)    │
 │  ├── DynamoComponentDeployment     (per-component pod mgmt)     │
 │  ├── DynamoGraphDeploymentRequest  (deployment lifecycle)       │
 │  ├── DynamoModel                   (model metadata)             │
 │  ├── DynamoWorkerMetadata          (worker state tracking)      │
-│  └── DynamoGraphDeploymentScalingAdapter  (autoscaling config)  │
+│  ├── DynamoGraphDeploymentScalingAdapter  (autoscaling config)  │
+│  ├── DynamoCheckpoint              (checkpoint/warm-restore)    │
+│  ├── PodSnapshot                   (checkpoint pod snapshot)    │
+│  └── PodSnapshotContent            (checkpoint snapshot data)   │
 │                                                                 │
-│  Webhooks: 4 validating (schema + business rule enforcement)    │
+│  Webhooks: 5 validating (schema + business rule enforcement)    │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               │ reconciles
@@ -249,8 +252,8 @@ publication revalidate a private snapshot and publish only that inventory.
 │    1. Client → /v1/chat/completions → Frontend :8000            │
 │    2. Frontend → Dynamo request plane (TCP) → VllmDecodeWorker  │
 │    3. VllmDecodeWorker runs Qwen3-0.6B on H100                  │
-│    4. Worker relays local vLLM ZMQ KV events to NATS            │
-│    5. KV router consumes NATS events; response returns over TCP │
+│    4. Worker publishes ZMQ KV events directly to KV router      │
+│    5. KV router consumes ZMQ events; response returns over TCP  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 ### ChatBot

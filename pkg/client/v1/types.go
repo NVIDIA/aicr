@@ -122,25 +122,50 @@ func (s *Snapshot) Unwrap() *snapshotter.Snapshot {
 // this type — so an unplumbed field is a test failure rather than a silent
 // zero value.
 type AgentConfig struct {
-	Kubeconfig         string
-	Namespace          string
-	Image              string
-	ImagePullSecrets   []string
-	JobName            string
+	Kubeconfig       string
+	Namespace        string
+	Image            string
+	ImagePullSecrets []string
+	JobName          string
+
+	// ServiceAccountName selects the ServiceAccount the agent pod runs
+	// as. It is EXACT-IF-EXISTS, so it carries two meanings:
+	//
+	//   - A ServiceAccount of exactly this name already exists in
+	//     Namespace: it is used verbatim, and the run creates NO
+	//     ServiceAccount, Role, RoleBinding, ClusterRole or
+	//     ClusterRoleBinding — and deletes none at cleanup. This is how a
+	//     ServiceAccount carrying IRSA (eks.amazonaws.com/role-arn) or
+	//     GKE Workload Identity (iam.gke.io/gcp-service-account)
+	//     annotations stays usable: both providers pin trust to the
+	//     ServiceAccount NAME, which a run-scoped name can never satisfy.
+	//     Generate the RBAC that grants it the agent's permissions with
+	//     snapshotter.WriteAgentRoleManifests (CLI:
+	//     `aicr snapshot --add-roles-to-service-account`), which writes
+	//     manifests and applies nothing, then apply them yourself.
+	//   - Otherwise: a name prefix. The run creates "<prefix>-<RunID>"
+	//     and the full run-scoped RBAC set, and deletes them at cleanup.
+	//
+	// Empty falls back to NameBase and is never probed for existence.
+	//
+	// Using an existing ServiceAccount waives per-run permission
+	// isolation: concurrent runs sharing it share its grants, and grants
+	// provisioned for DiscoverNetwork persist beyond any one run.
 	ServiceAccountName string
-	NodeSelector       map[string]string
-	Tolerations        []corev1.Toleration
-	Timeout            time.Duration
-	Cleanup            bool
-	Debug              bool
-	Privileged         bool
-	RequireGPU         bool
-	RuntimeClassName   string
-	TemplatePath       string
-	MaxNodesPerEntry   int
-	OS                 string
-	Requests           corev1.ResourceList
-	Limits             corev1.ResourceList
+
+	NodeSelector     map[string]string
+	Tolerations      []corev1.Toleration
+	Timeout          time.Duration
+	Cleanup          bool
+	Debug            bool
+	Privileged       bool
+	RequireGPU       bool
+	RuntimeClassName string
+	TemplatePath     string
+	MaxNodesPerEntry int
+	OS               string
+	Requests         corev1.ResourceList
+	Limits           corev1.ResourceList
 
 	// Output selects where the agent Job stages its result. A cm://namespace/name
 	// URI makes that ConfigMap the delivery vehicle — the Job writes there and
@@ -175,6 +200,36 @@ type AgentConfig struct {
 	// Required for AKS profile-qualified resolution from a collected
 	// snapshot; empty disables the projection.
 	AKSGPUPoolsPath string
+
+	// RunID scopes every resource this deployment creates (Job, RBAC, and
+	// the internal staging ConfigMap when Output does not name one) to a
+	// single run, so concurrent snapshot-agent runs never collide on a
+	// shared resource name. Empty lets CollectSnapshot's underlying
+	// deployment generate one; SDK and CLI callers normally leave it
+	// unset. Set it explicitly to correlate this run with an external
+	// identifier — `aicr validate` does this to give its live-capture
+	// snapshot agent and its validator Jobs the same RunID.
+	RunID string
+
+	// NameBase prefixes generated Job/ServiceAccount/RBAC names. The
+	// fallback is per name, not all-or-nothing: the Job uses JobName when
+	// set and NameBase otherwise, while the ServiceAccount, Role and
+	// RoleBinding use ServiceAccountName when set and NameBase otherwise.
+	// Setting only one of the two therefore leaves NameBase governing the
+	// other. Defaults to "aicr" when also empty.
+	//
+	// JobName is likewise an optional prefix, not a required name —
+	// RunID is appended to whichever prefix applies, so the deployed Job
+	// name is always run-scoped. ServiceAccountName is a prefix only
+	// when no ServiceAccount of that exact name exists; see its own
+	// documentation above.
+	NameBase string
+
+	// OKEAddonsPath points at an operator-supplied
+	// `oci ce cluster list-addons --cluster-id <cluster-ocid> --all --output json` dump. Same
+	// contract as AKSGPUPoolsPath: projected controller-side and merged
+	// into the snapshot as the oke-addons subtype.
+	OKEAddonsPath string
 }
 
 // Criteria is the facade-owned, semver-stable shape of a recipe-resolution
@@ -318,6 +373,13 @@ type RecipeRequest struct {
 	// fields above instead.
 	PinnedName string
 
+	// GKETCPXOInterfaces is the ordered eth1..eth8 → VPC network mapping
+	// rendered into the torch-distributed-tcpxo ClusterTrainingRuntime, in
+	// the string form "eth1=<network>,...,eth8=<network>". Required — with
+	// no default — when the resolved recipe ships that runtime (h100 GKE
+	// kubeflow training); rejected for recipes that do not.
+	GKETCPXOInterfaces string
+
 	// PinnedVersion reserves space for future pinned-recipe support.
 	// Currently rejected with ErrCodeUnavailable.
 	PinnedVersion string
@@ -330,11 +392,10 @@ type recipeResolveConfig struct {
 	profile              string
 	accountingMode       *recipe.AccountingMode
 	runtimeInventoryMode *recipe.RuntimeInventoryMode
+	tcpxoInterfaces      *[]recipe.NetworkInterfaceMapping
 
-	// relaxDerived records that WithSnapshotCriteriaRelaxation was passed.
-	// Kept separate from stated because an empty stated set is meaningful
-	// (every dimension derived, all relaxable) and must not read as "option
-	// absent".
+	// relaxDerived records opt-in to snapshot-criteria relaxation.
+	// An empty stated set means every dimension was derived, not option absent.
 	relaxDerived bool
 	stated       statedDimensionSet
 
@@ -393,6 +454,27 @@ func WithRuntimeInventoryMode(mode string) RecipeResolveOption {
 			return
 		}
 		cfg.runtimeInventoryMode = &parsed
+	}
+}
+
+// WithGKETCPXOInterfaces supplies the ordered eth1..eth8 → VPC network
+// mapping for a criteria- or snapshot-based resolve call, in the string form
+// "eth1=<network>,...,eth8=<network>". The value is recorded in the emitted
+// recipe (configuration.gke.tcpxoInterfaces) and rendered into the
+// torch-distributed-tcpxo ClusterTrainingRuntime's
+// networking.gke.io/interfaces annotation.
+//
+// Required — with no default — when the resolved recipe ships that runtime;
+// rejected when it does not. An empty or malformed value is rejected when
+// the resolve call runs.
+func WithGKETCPXOInterfaces(value string) RecipeResolveOption {
+	return func(cfg *recipeResolveConfig) {
+		parsed, err := recipe.ParseGKETCPXOInterfaces(value)
+		if err != nil {
+			cfg.recordOptErr(err)
+			return
+		}
+		cfg.tcpxoInterfaces = &parsed
 	}
 }
 
@@ -467,7 +549,7 @@ type RecipeResult struct {
 }
 
 // SelectedProfile is the stable facade projection of a recipe profile.
-// It is populated only for aicr.run/v1alpha3 results; an unprofiled
+// It is populated only for aicr.run/v1beta2 (or legacy aicr.run/v1alpha3) results; an unprofiled
 // composition leaves it nil.
 type SelectedProfile struct {
 	// Name is the declaration this selection came from, e.g. "gpuStack".
