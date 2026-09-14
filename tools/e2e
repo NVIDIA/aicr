@@ -106,11 +106,13 @@ SELECTOR='ci!=true'
 REGISTRY_IMAGE="$(sed -n "s/^  registry_image: '\(.*\)'$/\1/p" "${ROOT}/.settings.yaml")"
 # Every probe is time-bounded: a stalled daemon or a hanging pull must turn
 # into "prerequisite unavailable, skip", never a hung make e2e. `timeout` is
-# coreutils (present on CI runners; brew coreutils on macOS); without it the
-# probe runs unbounded, as before.
+# coreutils (`timeout` on CI runners, `gtimeout` from brew coreutils on macOS);
+# without either the probe runs unbounded, as before.
 bounded() { # <seconds> <command...>
   if command -v timeout >/dev/null 2>&1; then
     timeout "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$@"   # Homebrew coreutils on macOS installs the g-prefixed name
   else
     shift
     "$@"
