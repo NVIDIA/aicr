@@ -906,6 +906,19 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 			fmt.Sprintf("NCCL benchmark execution lock for namespace %q was taken over by another execution; refusing to proceed", gpuConfig.Namespace))
 	}
 
+	// On GKE H100 the log-marker transport check is a documented no-op
+	// (NCCL_DEBUG=WARN keeps the results table retrievable, so the INFO
+	// banner never appears — see verifyTransportFromLogs). Watch the worker
+	// pods for the TCPXO wiring instead. The watch starts BEFORE resources are
+	// created so no worker pod can predate it, and its assertion runs only
+	// after the goroutine is stopped and joined. A recipe-supplied runtime
+	// owns its fabric end to end and is out of scope here.
+	var tcpxoWatch *tcpxoWorkerWatcher
+	if customRuntime == "" && gkeTCPXOPreflightApplies(variant, accelerator, service) {
+		tcpxoWatch = startGKETCPXOWorkerWatch(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
+		defer tcpxoWatch.Stop() // covers the error returns below
+	}
+
 	// Apply runtime and trainjob resources. Propagate an inner code rather than
 	// forcing ErrCodeInternal — a recipe-supplied runtime that fails to render is
 	// an ErrCodeInvalidRequest (recipe-authoring error), not an internal fault.
@@ -922,6 +935,15 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	logs, err = waitForLauncherPodAndGetLogs(ctx, podHelper, holderID)
 	if err != nil {
 		return "", aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to get launcher logs", err)
+	}
+
+	if tcpxoWatch != nil {
+		// Join before asserting: the records are complete only once the
+		// watch goroutine has stopped consuming events.
+		tcpxoWatch.Stop()
+		if assertErr := tcpxoWatch.Assert(gpuConfig.WorkerCount); assertErr != nil {
+			return "", assertErr
+		}
 	}
 
 	return logs, nil
