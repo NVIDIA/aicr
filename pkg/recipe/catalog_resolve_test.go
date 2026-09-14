@@ -162,4 +162,3 @@ func TestResolveLeaves_TCPXOFingerprintLeafRetriesWithIntrospection(t *testing.T
 		t.Fatal("h100-gke-cos-training-kubeflow not in catalog")
 	}
 }
-

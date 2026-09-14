@@ -219,7 +219,6 @@ func GKETCPXOIntrospectionInterfaces() []NetworkInterfaceMapping {
 	return mapping
 }
 
-
 // GKETCPXOOwnership declares the mapping's non-profile ownership domain.
 func GKETCPXOOwnership() OwnershipDomain {
 	return OwnershipDomain{

@@ -33,9 +33,9 @@ import (
 // job-completion-index — the fixture must match the real JobSet labels.
 func workerLabels(index int) map[string]string {
 	return map[string]string{
-		"jobset.sigs.k8s.io/jobset-name":        "nccl-all-reduce-tj",
-		"jobset.sigs.k8s.io/replicatedjob-name": "node",
-		"jobset.sigs.k8s.io/job-index":          "0",
+		"jobset.sigs.k8s.io/jobset-name":           "nccl-all-reduce-tj",
+		"jobset.sigs.k8s.io/replicatedjob-name":    "node",
+		"jobset.sigs.k8s.io/job-index":             "0",
 		"batch.kubernetes.io/job-completion-index": strconv.Itoa(index),
 	}
 }
