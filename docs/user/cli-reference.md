@@ -262,7 +262,7 @@ aicr snapshot --config aicr-config.yaml -o /tmp/snapshot.yaml
 
 The `--template` flag enables custom output formatting using Go templates with [Sprig functions](https://masterminds.github.io/sprig/). Templates receive the full Snapshot struct:
 
-```yaml
+```text
 # Available template data structure:
 .Kind           # Resource kind ("Snapshot")
 .APIVersion     # API version string
