@@ -20,7 +20,6 @@ import (
 	"path"
 	"reflect"
 	stdsort "sort"
-	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -65,7 +64,7 @@ func TestRealUpgradeRecordsWellFormed(t *testing.T) {
 
 	orphans, walkErr := orphanUpgradeRecords(t.Context(), provider, comps)
 	if walkErr != nil {
-		t.Fatalf("enumerating %s: %v", upgradesDir, walkErr)
+		t.Fatalf("enumerating %s: %v", componentsDir, walkErr)
 	}
 	if len(orphans) > 0 {
 		t.Errorf("upgrade record(s) %v are not referenced by any registry entry's upgrades.file, so nothing reads or validates them",
@@ -73,14 +72,15 @@ func TestRealUpgradeRecordsWellFormed(t *testing.T) {
 	}
 }
 
-// orphanUpgradeRecords returns the record files under upgradesDir that no
-// component references.
+// orphanUpgradeRecords returns the components/<name>/upgrades.yaml files that
+// no component's upgrades.file references.
 //
 // Validating what the registry points at is only as wide as the registry: a
-// record whose upgrades.file path, //go:embed pattern, or filename is wrong is
-// never read, and every rule in pkg/upgrade then passes vacuously over the
-// empty component list that leaves. That is the cheap half of the embed
-// interlock the first-record PR has to satisfy.
+// record whose upgrades.file path or filename is wrong is never read, and
+// every rule in pkg/upgrade then passes vacuously over the empty component
+// list that leaves. This walk is what catches that: a
+// components/<name>/upgrades.yaml with a typo'd or missing registry
+// reference.
 func orphanUpgradeRecords(ctx context.Context, provider DataProvider, comps []upgrade.Component) ([]string, error) {
 	referenced := make(map[string]bool, len(comps))
 	for _, c := range comps {
@@ -88,16 +88,21 @@ func orphanUpgradeRecords(ctx context.Context, provider DataProvider, comps []up
 	}
 
 	var orphans []string
-	err := provider.WalkDir(ctx, upgradesDir, func(p string, d fs.DirEntry, err error) error {
+	err := provider.WalkDir(ctx, componentsDir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			// The directory is absent until the first record lands, and an
-			// absent directory is not an orphan.
-			if path.Clean(p) == upgradesDir {
+			// componentsDir is absent only in a synthetic test tree; the
+			// real data root always has one, and an absent directory is
+			// not an orphan.
+			if path.Clean(p) == componentsDir {
 				return fs.SkipAll
 			}
 			return err
 		}
-		if d.IsDir() || !strings.HasSuffix(p, ".yaml") {
+		// A record is exactly components/<name>/upgrades.yaml — one
+		// path segment below componentsDir — so a same-named file
+		// nested deeper (e.g. under a component's manifests/) is not
+		// mistaken for one.
+		if d.IsDir() || d.Name() != upgradesFileName || path.Dir(path.Dir(p)) != componentsDir {
 			return nil
 		}
 		if !referenced[path.Clean(p)] {
@@ -113,9 +118,9 @@ func orphanUpgradeRecords(ctx context.Context, provider DataProvider, comps []up
 }
 
 // mapFSProvider is the DataProvider subset orphanUpgradeRecords uses, over an
-// in-memory tree. The embedded provider cannot stand in: //go:embed rejects a
-// pattern matching nothing, so recipes/ carries no upgrades/*.yaml yet and the
-// real tree cannot produce an orphan to detect.
+// in-memory tree. The embedded provider cannot stand in: no component has
+// authored a components/<name>/upgrades.yaml yet, so the real tree cannot
+// produce an orphan to detect.
 type mapFSProvider struct {
 	DataProvider
 	fsys fs.FS
@@ -141,27 +146,40 @@ func TestOrphanUpgradeRecords(t *testing.T) {
 			files: map[string]*fstest.MapFile{"registry.yaml": record},
 		},
 		{
-			name:  "every record referenced",
-			files: map[string]*fstest.MapFile{"upgrades/a.yaml": record, "upgrades/b.yaml": record},
+			name: "every record referenced",
+			files: map[string]*fstest.MapFile{
+				"components/a/upgrades.yaml": record,
+				"components/b/upgrades.yaml": record,
+			},
 			comps: []upgrade.Component{
-				{Name: "a", File: "upgrades/a.yaml"},
-				{Name: "b", File: "upgrades/b.yaml"},
+				{Name: "a", File: "components/a/upgrades.yaml"},
+				{Name: "b", File: "components/b/upgrades.yaml"},
 			},
 		},
 		{
-			name:  "a record no registry entry points at",
-			files: map[string]*fstest.MapFile{"upgrades/a.yaml": record, "upgrades/stale.yaml": record},
-			comps: []upgrade.Component{{Name: "a", File: "upgrades/a.yaml"}},
-			want:  []string{"upgrades/stale.yaml"},
+			name: "a record no registry entry points at",
+			files: map[string]*fstest.MapFile{
+				"components/a/upgrades.yaml":     record,
+				"components/stale/upgrades.yaml": record,
+			},
+			comps: []upgrade.Component{{Name: "a", File: "components/a/upgrades.yaml"}},
+			want:  []string{"components/stale/upgrades.yaml"},
 		},
 		{
-			name:  "every record orphaned, which is what a wrong embed pattern looks like",
-			files: map[string]*fstest.MapFile{"upgrades/a.yaml": record, "upgrades/b.yaml": record},
-			want:  []string{"upgrades/a.yaml", "upgrades/b.yaml"},
+			name: "every record orphaned, which is what an unwired upgrades.file looks like",
+			files: map[string]*fstest.MapFile{
+				"components/a/upgrades.yaml": record,
+				"components/b/upgrades.yaml": record,
+			},
+			want: []string{"components/a/upgrades.yaml", "components/b/upgrades.yaml"},
 		},
 		{
-			name:  "non-yaml files are not records",
-			files: map[string]*fstest.MapFile{"upgrades/README.md": record},
+			name:  "non-upgrades files are not records",
+			files: map[string]*fstest.MapFile{"components/a/values.yaml": record, "components/a/README.md": record},
+		},
+		{
+			name:  "a same-named file below the component directory is not a record",
+			files: map[string]*fstest.MapFile{"components/a/manifests/migrations/upgrades.yaml": record},
 		},
 	}
 	for _, tt := range tests {
@@ -180,8 +198,14 @@ func TestOrphanUpgradeRecords(t *testing.T) {
 	}
 }
 
-// upgradesDir is where ADR-021 puts records, relative to the recipes data root.
-const upgradesDir = "upgrades"
+// componentsDir holds every component's data, relative to the recipes data
+// root. ADR-021 upgrade records live one level below it, at
+// componentsDir/<name>/upgradesFileName.
+const componentsDir = "components"
+
+// upgradesFileName is the ADR-021 record's filename within a component's
+// directory.
+const upgradesFileName = "upgrades.yaml"
 
 func pinnedVersionFor(c *ComponentConfig) string {
 	if c.Helm.DefaultVersion != "" {
