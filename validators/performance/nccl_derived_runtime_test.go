@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -422,8 +423,11 @@ func TestResolveBenchmarkRuntimeSource(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolve: %v", err)
 		}
-		if plan.source != runtimeSourceDelivered || plan.carrier == "" || plan.provenance == nil || !plan.derived() {
+		if plan.source != runtimeSourceDelivered || plan.carrier == "" || !plan.derived() {
 			t.Fatalf("plan=%+v", plan)
+		}
+		if plan.provenance != nil {
+			t.Error("resolution must not record provenance: nothing has been applied yet")
 		}
 		if err := validatorv1.ValidateBenchmarkRuntime(plan.carrier); err != nil {
 			t.Errorf("derived carrier must pass the shape gate: %v", err)
@@ -592,13 +596,14 @@ func TestFinalizeRuntimeProvenanceDescribesAppliedObject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := applyNCCLWorkerScheduling(obj, map[string]string{"pool": "gpu"}, nil); err != nil {
+	if err = applyNCCLWorkerScheduling(obj, map[string]string{"pool": "gpu"}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := finalizeRuntimeProvenance(plan, obj); err != nil {
+	prov, err := finalizeRuntimeProvenance(plan, obj)
+	if err != nil {
 		t.Fatal(err)
 	}
-	prov := plan.provenance
+	plan.provenance = prov
 	if len(prov.shippedDigest) != 64 || len(prov.derivedDigest) != 64 || prov.shippedDigest == prov.derivedDigest {
 		t.Errorf("digests = %q / %q", prov.shippedDigest, prov.derivedDigest)
 	}
@@ -687,4 +692,42 @@ func TestRuntimeProvenanceCarrierIsEmitted(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("carrier = %+v, want %+v", got, want)
 	}
+}
+
+// TestProvenanceRecordedOnlyAfterRuntimeApplied pins the review finding: a run
+// that fails before or at the TrainingRuntime create must publish no record
+// claiming an object was applied; a successful create records it.
+func TestProvenanceRecordedOnlyAfterRuntimeApplied(t *testing.T) {
+	const ns = "aicr-validation"
+	config := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 8, TotalGPUCount: 16, Namespace: ns}
+	apply := func(t *testing.T, client *dynamicfake.FakeDynamicClient) (*benchmarkRuntimePlan, error) {
+		t.Helper()
+		plan := deliveredPlan(t)
+		ctx := &validators.Context{Ctx: t.Context(), DynamicClient: client, Namespace: ns}
+		err := applyNCCLResources(ctx, client, config, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
+			variantDefault, fabricEFA, plan.carrier, plan)
+		return plan, err
+	}
+	t.Run("create rejected -> no provenance", func(t *testing.T) {
+		client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), ncclGVRListKinds)
+		client.PrependReactor("create", "trainingruntimes", func(k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, stderrors.New("admission webhook denied")
+		})
+		plan, err := apply(t, client)
+		if err == nil {
+			t.Fatal("control: the rejected create must fail apply")
+		}
+		if plan.provenance != nil {
+			t.Errorf("provenance recorded for a runtime that was never applied: %+v", plan.provenance)
+		}
+	})
+	t.Run("create succeeds -> provenance recorded", func(t *testing.T) {
+		plan, err := apply(t, dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), ncclGVRListKinds))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if plan.provenance == nil || len(plan.provenance.inheritedPaths) == 0 {
+			t.Fatalf("provenance must describe the applied object: %+v", plan.provenance)
+		}
+	})
 }

@@ -319,19 +319,23 @@ lines** — stdout lines with a reserved prefix that a specific parser recognize
 and pulls out. Plain (non-prefixed) stdout is unaffected and flows into the CTRF
 `stdout` array as before.
 
-Two sentinels exist today, with deliberately different lifecycles:
+Three sentinels exist today, with deliberately different lifecycles:
 
 | Prefix | Emitted by | Parsed by | Payload | Kept in CTRF `stdout`? | Survives minimal redaction? |
 |--------|-----------|-----------|---------|------------------------|-----------------------------|
 | `RESULT:` + one space | any check (`fmt.Printf`) | `extractResultSummaries` (`pkg/validator/validator.go`) | free-form human text (throughput, bandwidth, TTFT…) | **yes** — line stays; trailing text is *also* echoed to the live CLI at INFO | **no** — dies with `stdout` under the default policy |
 | `##AICR-EXTRA##` + one space | `validators.EmitExtra` | `parseExtraSentinels` (`pkg/validator/job/result.go`) | one JSON object → `TestResult.Extra` (counts / enum codes) | **no** — stripped as transport, not evidence | **yes** — allowlisted keys are published (see below) |
+| `##AICR-PROVENANCE##` + one space | `validators.EmitRuntimeProvenance` | `parseExtraSentinels` (same pass) | one JSON object → `TestResult.RuntimeProvenance` (template digests + key paths) | **no** — stripped as transport | **yes** — bounded by `redact.boundRuntimeProvenance` (see "NCCL benchmark runtime provenance") |
 
-Both are parsed with `strings.CutPrefix` and both parsers are pure, unit-tested
+All are parsed with `strings.CutPrefix` and the parsers are pure, unit-tested
 functions. They are separate channels on purpose: `RESULT:` surfaces live
 metrics to a human watching a run, so it carries unbounded free-form text and is
 correctly redacted with the rest of `stdout`; `##AICR-EXTRA##` carries structured
 data that must *outlive* redaction, so it is low-cardinality, allowlisted, and
-stripped from the human evidence. Do not route structured outcome data through
+stripped from the human evidence; `##AICR-PROVENANCE##` carries the one
+structured record that is neither a count nor a code — content digests plus
+template key paths — under its own bounding rule rather than the `Extra`
+allowlist. Do not route structured outcome data through
 `RESULT:` (it would not survive publication) or human prose through
 `##AICR-EXTRA##` (it would be dropped by the allowlist or leak identifiers).
 
@@ -369,9 +373,10 @@ only channel that crosses the pod boundary besides the exit code and termination
 log. `EmitRuntimeProvenance` uses the same transport under
 `ctrf.ProvenanceLinePrefix` (`##AICR-PROVENANCE##` + space) for the derived
 runtime's `RuntimeProvenance` record. The orchestrator (`pkg/validator/job.ExtractResult`) parses each sentinel
-line, keeps the **last valid non-empty** payload as `TestResult.Extra`, and
-strips every sentinel line from the stored `stdout` (transport, not human
-evidence). A malformed line is non-fatal: it is logged and skipped without
+line, keeps the **last valid non-empty** payload of each kind — the `Extra` map
+as `TestResult.Extra`, the provenance record (both digests present) as
+`TestResult.RuntimeProvenance` — and strips every sentinel line from the stored
+`stdout` (transport, not human evidence). A malformed line is non-fatal: it is logged and skipped without
 discarding an earlier valid payload — a garbled line never flips a pass to an
 error, nor clears a coverage line that preceded it. Keep the human `fmt.Printf`
 lines too; they still feed `--full` and live `aicr validate` output.
@@ -454,21 +459,30 @@ that fails on a missing runtime or a mapping drift still records that it was a
 shipped and applied worker templates, the paths at which they differ
 (benchmark overrides plus stamped scheduling), and the inventory of shipped
 paths inherited unchanged — is computed against the object as applied and
-published — whether or not the run then succeeds, since it describes the
-runtime that was applied — twice: as a human-readable listing on stdout
+recorded only once the `TrainingRuntime` create succeeded, so a run that fails
+before or at application publishes no record; after that point it is published
+whether or not the measurement succeeds, twice: as a human-readable listing on stdout
 (`--full` only), and as the bounded `TestResult.RuntimeProvenance` carrier (`##AICR-PROVENANCE## `
 sentinel → `pkg/validator/job`), which **survives minimal redaction**. The
 redaction policy for that carrier (`redact.boundRuntimeProvenance`, rule
 `ctrf.tests.runtimeProvenance.bound`): both digests must be lowercase sha256
 hex or the record is dropped; paths are template *keys* only and must match
-the dotted key grammar; keys under operator-authored maps
+the dotted key grammar; every named-list selector (`containers[node]`,
+`volumes[x]`, `volumeMounts[x]`, `env[x]`) collapses to `[*]` unless it names
+a fabric env variable (`NCCL_*`, `CUDA_*`, `UCX_*`, `LD_LIBRARY_PATH`), which
+is kept because it is the evidence; keys under operator-authored maps
 (`metadata.labels`, `metadata.annotations`, `spec.nodeSelector`) collapse to
-the parent unless they sit under a vendor API domain (`gke.io`,
-`cloud.google.com`, `kubernetes.io`, `k8s.io`, `nvidia.com`, `kubeflow.org`),
-so `metadata.annotations.networking.gke.io/interfaces` is kept while an
-operator's `spec.nodeSelector.my-org/pool` becomes `spec.nodeSelector`; lists
-are deduplicated, sorted and capped at 1024 entries. No value — network name,
-node name, env value — ever appears. The deployment check `gke-gpu-nic-networks` runs the same recipe →
+the parent unless the key's domain is in the **exact** vendor set
+(`networking.gke.io`, `devices.gke.io`, `cloud.google.com`, `kubernetes.io`,
+`node.kubernetes.io`, `nvidia.com`, `trainer.kubeflow.org` — a subdomain is
+not ownership), so `metadata.annotations.networking.gke.io/interfaces` and
+`spec.containers[*].env[NCCL_FASTRAK_IFNAME].value` are kept while an
+operator's `spec.nodeSelector.my-org/pool` becomes `spec.nodeSelector` and
+`spec.volumes[customer-cache].secret.secretName` becomes
+`spec.volumes[*].secret.secretName`; lists are deduplicated, sorted and capped
+at 1024 entries. The live runtime is operator-modifiable, so any name it
+carries is treated as operator text unless one of these closed rules keeps it.
+No value — network name, node name, env value — ever appears. The deployment check `gke-gpu-nic-networks` runs the same recipe →
 deployed → cluster arms, gated on the same predicate, so a base
 `h100-gke-cos-training` recipe (TCPXO, no runtime) keeps its census-only
 behaviour.

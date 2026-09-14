@@ -480,8 +480,9 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// bounded carrier that survives minimal evidence) whether or not the run
 	// succeeded: the record describes the runtime that was applied, and a
 	// failed measurement of a delivered artifact is exactly the case where
-	// knowing which templates were compared matters. No-op unless a derived
-	// runtime reached apply.
+	// knowing which templates were compared matters. plan.provenance is set
+	// only after the TrainingRuntime create succeeded, so a run that failed
+	// before or at application publishes no record.
 	emitRuntimeProvenance(plan)
 	if err != nil {
 		return "", false, err
@@ -1376,14 +1377,20 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	if err = applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", err)
 	}
-	// Provenance describes the object as applied — scheduling included.
+	// Provenance describes the object as applied — scheduling included — and is
+	// recorded on the plan only once the create succeeded, so a rejected or
+	// never-attempted application publishes nothing.
+	var prov *derivedRuntimeProvenance
 	if plan.derived() {
-		if err = finalizeRuntimeProvenance(plan, runtimeObj); err != nil {
+		if prov, err = finalizeRuntimeProvenance(plan, runtimeObj); err != nil {
 			return err
 		}
 	}
 	if err = createUnstructured(ctx.Ctx, dynamicClient, trainingRuntimeGVR, config.Namespace, runtimeObj); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply training runtime", err)
+	}
+	if prov != nil {
+		plan.provenance = prov
 	}
 	slog.Info("Applied TrainingRuntime", "service", service)
 

@@ -662,13 +662,13 @@ func TestCTRFBoundsRuntimeProvenance(t *testing.T) {
 	}{
 		{"absent stays absent", nil, nil},
 		{
-			name: "well-formed record survives with keys sorted and deduplicated",
+			name: "well-formed record survives with selectors collapsed, keys sorted and deduplicated",
 			in: &ctrf.RuntimeProvenance{ShippedDigest: sha('a'), DerivedDigest: sha('b'),
 				OverriddenPaths: []string{"spec.containers[node].image", "spec.containers[node].args", "spec.containers[node].args"},
 				InheritedPaths:  []string{"spec.containers[node].env[NCCL_SOCKET_IFNAME].value"}},
 			want: &ctrf.RuntimeProvenance{ShippedDigest: sha('a'), DerivedDigest: sha('b'),
-				OverriddenPaths: []string{"spec.containers[node].args", "spec.containers[node].image"},
-				InheritedPaths:  []string{"spec.containers[node].env[NCCL_SOCKET_IFNAME].value"}},
+				OverriddenPaths: []string{"spec.containers[*].args", "spec.containers[*].image"},
+				InheritedPaths:  []string{"spec.containers[*].env[NCCL_SOCKET_IFNAME].value"}},
 		},
 		{
 			name: "malformed digest drops the whole record",
@@ -676,27 +676,41 @@ func TestCTRFBoundsRuntimeProvenance(t *testing.T) {
 			want: nil,
 		},
 		{
-			name: "vendor-domain keys kept, operator keys collapsed, free text dropped",
+			name: "exact vendor keys kept, operator keys and list names collapsed, free text dropped",
 			in: &ctrf.RuntimeProvenance{ShippedDigest: sha('a'), DerivedDigest: sha('b'),
 				InheritedPaths: []string{
 					"metadata.annotations.networking.gke.io/interfaces",
 					"metadata.annotations.devices.gke.io/container.tcpxo-daemon",
+					"metadata.annotations.evil.gke.io/customer-x", // subdomain is not ownership
 					"metadata.labels.team-payments-prod",
 					"spec.nodeSelector.cloud.google.com/gke-accelerator",
 					"spec.nodeSelector.my-org/private-pool-10.0.0.5",
 					"spec.nodeSelector.pool",
 					"spec.volumes[nvtcpxo-libraries].hostPath.path",
+					"spec.volumes[customer-secret-cache].secret.secretName",
+					"spec.containers[node].env[PROJECT_X_TOKEN].value",
+					"spec.containers[node].env[NCCL_FASTRAK_IFNAME].value",
+					"spec.containers[node].env[LD_LIBRARY_PATH].value",
+					"spec.containers[node].volumeMounts[customer-secret-cache].mountPath",
+					"spec.initContainers[tcpxo-daemon].image",
 					"free text with spaces",
 					"spec.containers[node].env[X].value=10.0.0.5",
 				}},
 			want: &ctrf.RuntimeProvenance{ShippedDigest: sha('a'), DerivedDigest: sha('b'),
 				InheritedPaths: []string{
+					"metadata.annotations",
 					"metadata.annotations.devices.gke.io/container.tcpxo-daemon",
 					"metadata.annotations.networking.gke.io/interfaces",
 					"metadata.labels",
+					"spec.containers[*].env[*].value",
+					"spec.containers[*].env[LD_LIBRARY_PATH].value",
+					"spec.containers[*].env[NCCL_FASTRAK_IFNAME].value",
+					"spec.containers[*].volumeMounts[*].mountPath",
+					"spec.initContainers[*].image",
 					"spec.nodeSelector",
 					"spec.nodeSelector.cloud.google.com/gke-accelerator",
-					"spec.volumes[nvtcpxo-libraries].hostPath.path",
+					"spec.volumes[*].hostPath.path",
+					"spec.volumes[*].secret.secretName",
 				}},
 		},
 	}
@@ -718,7 +732,7 @@ func TestCTRFRuntimeProvenancePathBounds(t *testing.T) {
 	sha := func(c byte) string { return string(bytes.Repeat([]byte{c}, 64)) }
 	many := make([]string, 0, 1100)
 	for i := range 1100 {
-		many = append(many, "spec.containers[node].env[V"+strconv.Itoa(i)+"].value")
+		many = append(many, "spec.containers[node].env[NCCL_V"+strconv.Itoa(i)+"].value")
 	}
 	out, _ := redact.CTRF(reportWithProvenance(&ctrf.RuntimeProvenance{
 		ShippedDigest: sha('a'), DerivedDigest: sha('b'),

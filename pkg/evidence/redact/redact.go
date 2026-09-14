@@ -246,7 +246,17 @@ var ctrfSHA256Value = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // ctrfProvenancePath bounds a RuntimeProvenance path: the dotted template-key
 // grammar (map keys, [name]-addressed list elements, label/annotation keys with
 // their "/" and "-"), and nothing that could carry free text or an address.
-var ctrfProvenancePath = regexp.MustCompile(`^[A-Za-z0-9._/\-\[\]]{1,256}$`)
+var ctrfProvenancePath = regexp.MustCompile(`^[A-Za-z0-9._/*\-\[\]]{1,256}$`)
+
+// ctrfListSelector matches a named-list selector segment ("[name]") in a path.
+var ctrfListSelector = regexp.MustCompile(`\[([^\[\]]*)\]`)
+
+// ctrfFabricEnvName is the closed grammar of env names a selector may keep:
+// the NCCL/CUDA/UCX tuning namespace and the loader path — the variables the
+// inherited inventory exists to prove were carried. Every other list element
+// name (containers, volumes, mounts, other env) is operator- or vendor-chosen
+// text and collapses to "[*]".
+var ctrfFabricEnvName = regexp.MustCompile(`^((NCCL|CUDA|UCX)_[A-Z0-9_]+|LD_LIBRARY_PATH)$`)
 
 // ctrfProvenanceMaxPaths caps each path list; a derived PodTemplateSpec has a
 // few hundred leaves, so a longer list is not a template inventory.
@@ -259,18 +269,32 @@ const ctrfProvenanceMaxPaths = 1024
 // is collapsed to the parent unless it sits under a vendor API domain.
 var ctrfOperatorKeyedMaps = []string{"metadata.annotations.", "metadata.labels.", "spec.nodeSelector."}
 
-// ctrfVendorKeyDomains are the API domains whose label/annotation keys are
-// vendor-defined surface, not operator text, and stay in minimal evidence
-// (e.g. networking.gke.io/interfaces — the fabric wiring this carrier exists to
-// prove was inherited).
-var ctrfVendorKeyDomains = []string{"kubernetes.io", "k8s.io", "gke.io", "cloud.google.com", "nvidia.com", "kubeflow.org"}
+// ctrfVendorKeyDomains is the EXACT set of key domains whose label/annotation/
+// nodeSelector keys are vendor-defined API surface, not operator text, and stay
+// in minimal evidence (e.g. networking.gke.io/interfaces — the fabric wiring
+// this carrier exists to prove was inherited). Exact match, not suffix: an
+// operator can name a key under any subdomain, so "ends with gke.io" is not an
+// ownership check.
+var ctrfVendorKeyDomains = map[string]struct{}{
+	"networking.gke.io":    {},
+	"devices.gke.io":       {},
+	"cloud.google.com":     {},
+	"kubernetes.io":        {},
+	"node.kubernetes.io":   {},
+	"nvidia.com":           {},
+	"trainer.kubeflow.org": {},
+}
 
 // boundRuntimeProvenance applies the minimal-evidence policy to a derived
 // runtime's provenance record: both digests must be lowercase sha256 hex or
 // the whole record is dropped (fail-closed — a record that cannot bind is not
-// evidence); each path must match the template-key grammar; keys under
-// operator-keyed maps collapse to the parent unless vendor-domained; lists are
-// deduplicated, sorted and capped. Returns a fresh record; never mutates in.
+// evidence); each path must match the template-key grammar; named-list
+// selectors collapse to "[*]" unless they name a fabric env variable; keys
+// under operator-keyed maps collapse to the parent unless the key's domain is
+// in the exact vendor set; lists are deduplicated, sorted and capped. The live
+// runtime is operator-modifiable, so any name it carries is treated as
+// operator text unless a closed rule says otherwise. Returns a fresh record;
+// never mutates in.
 func boundRuntimeProvenance(in *ctrf.RuntimeProvenance) *ctrf.RuntimeProvenance {
 	if in == nil || !ctrfSHA256Value.MatchString(in.ShippedDigest) || !ctrfSHA256Value.MatchString(in.DerivedDigest) {
 		return nil
@@ -293,7 +317,7 @@ func boundProvenancePaths(in []string) []string {
 		if !ctrfProvenancePath.MatchString(p) {
 			continue
 		}
-		p = collapseOperatorKey(p)
+		p = collapseOperatorKey(collapseListSelectors(p))
 		if _, dup := seen[p]; dup {
 			continue
 		}
@@ -322,15 +346,28 @@ func collapseOperatorKey(p string) string {
 		}
 		domain, _, hasDomain := strings.Cut(key, "/")
 		if hasDomain {
-			for _, d := range ctrfVendorKeyDomains {
-				if domain == d || strings.HasSuffix(domain, "."+d) {
-					return p
-				}
+			if _, vendor := ctrfVendorKeyDomains[domain]; vendor {
+				return p
 			}
 		}
 		return strings.TrimSuffix(prefix, ".")
 	}
 	return p
+}
+
+// collapseListSelectors rewrites every "[name]" selector in p to "[*]" except
+// an env selector naming a fabric variable (ctrfFabricEnvName), which is kept
+// because it is the evidence. Container, volume, mount and arbitrary env names
+// are whatever the live runtime carries and are not published.
+func collapseListSelectors(p string) string {
+	return ctrfListSelector.ReplaceAllStringFunc(p, func(sel string) string {
+		name := sel[1 : len(sel)-1]
+		start := strings.Index(p, sel)
+		if start >= 0 && strings.HasSuffix(p[:start], "env") && ctrfFabricEnvName.MatchString(name) {
+			return sel
+		}
+		return "[*]"
+	})
 }
 
 // ctrfAppliedRules is the static, sorted description of the CTRF scrub.

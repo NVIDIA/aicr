@@ -185,7 +185,10 @@ func resolveBenchmarkRuntimeSource(ctx *validators.Context, customRuntime string
 	}
 	slog.Info("Derived NCCL benchmark runtime from the shipped ClusterTrainingRuntime",
 		"shipped", gkenet.TCPXORuntimeName, "shippedDigest", prov.shippedDigest, "overriddenPaths", len(prov.overridePaths))
-	return &benchmarkRuntimePlan{carrier: string(raw), source: runtimeSourceDelivered, shipped: shipped, provenance: prov}, nil
+	// provenance stays nil here on purpose: the record that is published
+	// describes the object that was APPLIED, and nothing has been yet. The
+	// derivation-time record above is logging only.
+	return &benchmarkRuntimePlan{carrier: string(raw), source: runtimeSourceDelivered, shipped: shipped}, nil
 }
 
 // verifyDeliveredTCPXORuntime is the shared three-way verifier: the recipe's
@@ -490,19 +493,23 @@ func isFabricExport(v string) bool {
 	return strings.HasPrefix(v, "NCCL_") || strings.HasPrefix(v, "CUDA_") || strings.HasPrefix(v, "LD_LIBRARY_PATH=")
 }
 
-// finalizeRuntimeProvenance recomputes the provenance record against the
+// finalizeRuntimeProvenance computes the provenance record against the
 // runtime object that is about to be applied — after scheduling was stamped —
-// so the digests and path lists describe what actually ran. The derivation-time
+// so the digests and path lists describe what actually ran. It RETURNS the
+// record rather than storing it: the caller assigns plan.provenance only once
+// the create succeeded, so a run that fails before or at application (namespace
+// or lock failure, a declared-but-incomplete Trainer, an admission rejection)
+// publishes no record claiming an object was applied. The derivation-time
 // guard already proved the derived template stays inside the owned paths; this
 // only records.
-func finalizeRuntimeProvenance(plan *benchmarkRuntimePlan, applied *unstructured.Unstructured) error {
+func finalizeRuntimeProvenance(plan *benchmarkRuntimePlan, applied *unstructured.Unstructured) (*derivedRuntimeProvenance, error) {
 	shippedTmpl, err := gkenet.NodeTemplateOf(plan.shipped)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	appliedTmpl, err := gkenet.NodeTemplateOf(applied)
 	if err != nil {
-		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "applied benchmark runtime has no node template", err)
+		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "applied benchmark runtime has no node template", err)
 	}
 	diff := diffTemplatePaths(shippedTmpl, appliedTmpl)
 	var inherited []string
@@ -512,13 +519,12 @@ func finalizeRuntimeProvenance(plan *benchmarkRuntimePlan, applied *unstructured
 		}
 	}
 	sort.Strings(inherited)
-	plan.provenance = &derivedRuntimeProvenance{
+	return &derivedRuntimeProvenance{
 		shippedDigest:  digestOf(shippedTmpl),
 		derivedDigest:  digestOf(appliedTmpl),
 		overridePaths:  diff,
 		inheritedPaths: inherited,
-	}
-	return nil
+	}, nil
 }
 
 // emitRuntimeSource publishes the provenance class the moment it is decided —
