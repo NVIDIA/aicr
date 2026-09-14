@@ -1,0 +1,29 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# ...
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: gb200-eks-amazonlinux-inference
+
+spec:
+  # Inherits from gb200-eks-inference recipe (GB200 + EKS + inference settings).
+  # This overlay adds AL2023-specific OS constraints.
+  base: gb200-eks-inference
+
+  criteria:
+    service: eks
+    accelerator: gb200
+    os: amazonlinux
+    intent: inference
+
+  mixins:
+    - os-amazonlinux
+
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+
+  componentRefs: []

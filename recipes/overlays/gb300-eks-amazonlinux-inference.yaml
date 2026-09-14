@@ -1,0 +1,26 @@
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha2
+metadata:
+  name: gb300-eks-amazonlinux-inference
+
+spec:
+  # Inherits from gb300-eks-inference (GB300 + EKS + inference).
+  base: gb300-eks-inference
+
+  criteria:
+    service: eks
+    accelerator: gb300
+    os: amazonlinux
+    intent: inference
+
+  mixins:
+    - os-amazonlinux
+
+  constraints:
+    # Keep in sync with gb300-eks-ubuntu-inference: GA DRA API needs 1.34
+    - name: K8s.server.version
+      value: ">= 1.34"
+
+  componentRefs: []
+
+  # Validation inherited from gb300-eks-inference (not OS-specific)

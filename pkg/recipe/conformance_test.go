@@ -621,6 +621,141 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			},
 			wantDRAConstraint: true,
 		},
+		{
+			// h100 + EKS + AL2023 inference: covers the default EKS GPU managed
+			// node group AMI family (AL2023_x86_64_NVIDIA). Pinned so OS
+			// constraint coverage cannot silently regress (issue #2514).
+			// inference-gateway/pod-autoscaling/cluster-autoscaling are not
+			// declared in the h100-eks-inference base chain; only the 5 core
+			// platform checks are inherited here.
+			name: "h100-eks-amazonlinux-inference",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorH100
+				c.OS = CriteriaOSAmazonLinux
+				c.Intent = CriteriaIntentInference
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"agentgateway-crds",
+				"agentgateway",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+			},
+			wantDRAConstraint: false,
+		},
+		{
+			// gb200 + EKS + AL2023 inference: same AMI family rationale as
+			// h100-eks-amazonlinux-inference (issue #2514).
+			// inference-gateway/pod-autoscaling/cluster-autoscaling are not
+			// declared in the gb200-eks-inference base chain.
+			name: "gb200-eks-amazonlinux-inference",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorGB200
+				c.OS = CriteriaOSAmazonLinux
+				c.Intent = CriteriaIntentInference
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"agentgateway-crds",
+				"agentgateway",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+			},
+			wantDRAConstraint: false,
+		},
+		{
+			// gb300 + EKS + AL2023 inference: K8s floor is 1.34 (GA DRA API),
+			// matching gb300-eks-ubuntu-inference (issue #2514).
+			// inference-gateway/pod-autoscaling/cluster-autoscaling are not
+			// declared in the gb300-eks-inference base chain.
+			name: "gb300-eks-amazonlinux-inference",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorGB300
+				c.OS = CriteriaOSAmazonLinux
+				c.Intent = CriteriaIntentInference
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"agentgateway-crds",
+				"agentgateway",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+			},
+			wantDRAConstraint: false,
+		},
+		{
+			// rtx-pro-6000 + EKS + AL2023 inference: same AMI family rationale
+			// as h100-eks-amazonlinux-inference (issue #2514).
+			name: "rtx-pro-6000-eks-amazonlinux-inference",
+			criteria: func() *Criteria {
+				c := NewCriteria()
+				c.Service = CriteriaServiceEKS
+				c.Accelerator = CriteriaAcceleratorRTXPro6000
+				c.OS = CriteriaOSAmazonLinux
+				c.Intent = CriteriaIntentInference
+				return c
+			},
+			requiredComponents: []string{
+				"cert-manager",
+				"gpu-operator",
+				"kube-prometheus-stack",
+				"prometheus-adapter",
+				"nvidia-dra-driver-gpu",
+				"kai-scheduler",
+				"agentgateway-crds",
+				"agentgateway",
+			},
+			requiredChecks: []string{
+				"platform-health",
+				"gpu-operator-health",
+				"dra-support",
+				"accelerator-metrics",
+				"ai-service-metrics",
+				"inference-gateway",
+				"pod-autoscaling",
+				"cluster-autoscaling",
+			},
+			wantDRAConstraint: false,
+		},
 	}
 
 	for _, tt := range tests {
