@@ -120,6 +120,7 @@ paths:
         - $ref: "#/components/parameters/Nodes"
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/GKETCPXOInterfaces"
       responses:
         '200':
           description: Headers for the response GET would return
@@ -184,6 +185,7 @@ paths:
         - $ref: "#/components/parameters/Nodes"
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/GKETCPXOInterfaces"
       responses:
         "200":
           description: Resolved legacy, profile-bearing, or accounting-configured recipe
@@ -262,6 +264,7 @@ paths:
         - $ref: "#/components/parameters/RequestId"
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/GKETCPXOInterfaces"
       requestBody:
         required: true
         content:
@@ -369,6 +372,7 @@ paths:
         - $ref: "#/components/parameters/Nodes"
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/GKETCPXOInterfaces"
         - $ref: "#/components/parameters/Selector"
       responses:
         '200':
@@ -437,6 +441,7 @@ paths:
         - $ref: "#/components/parameters/Nodes"
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/GKETCPXOInterfaces"
         - $ref: "#/components/parameters/Selector"
       responses:
         "200":
@@ -525,6 +530,7 @@ paths:
         - $ref: "#/components/parameters/RequestId"
         - $ref: "#/components/parameters/ProfileSelection"
         - $ref: "#/components/parameters/SlurmAccountingMode"
+        - $ref: "#/components/parameters/GKETCPXOInterfaces"
       requestBody:
         required: true
         content:
@@ -986,6 +992,17 @@ components:
         type: string
         enum: [disabled, customer-managed, aicr-provided]
         default: disabled
+    GKETCPXOInterfaces:
+      name: gkeTcpxoInterfaces
+      in: query
+      required: false
+      description: >-
+        Ordered eth1..eth8 to GPU-NIC Network mapping for the
+        torch-distributed-tcpxo runtime, as eth1=<network>,...,eth8=<network>.
+        Required when the resolved recipe ships that runtime (service=gke,
+        accelerator=h100, platform=kubeflow).
+      schema:
+        type: string
     Selector:
       name: selector
       in: query
@@ -1430,6 +1447,8 @@ components:
                 mode:
                   type: string
                   enum: [enabled, disabled]
+            gke:
+              $ref: "#/components/schemas/GKERecipeConfiguration"
         componentRefs:
           type: array
           items:
@@ -1619,6 +1638,35 @@ components:
               enum: [RecipeResult]
               example: RecipeResult
 
+    GKERecipeConfiguration:
+      type: object
+      description: GKE-specific typed desired state
+      required: [tcpxoInterfaces]
+      additionalProperties: false
+      properties:
+        tcpxoInterfaces:
+          type: array
+          description: >-
+            Ordered eth1..eth8 to GPU-NIC Network mapping rendered into the
+            torch-distributed-tcpxo ClusterTrainingRuntime. Exactly eight
+            entries; interface names cover eth1..eth8 once; networks are
+            unique.
+          minItems: 8
+          maxItems: 8
+          items:
+            type: object
+            required: [interfaceName, network]
+            additionalProperties: false
+            properties:
+              interfaceName:
+                type: string
+                pattern: "^eth[1-8]$"
+              network:
+                type: string
+                description: Device-type GKE Network name (41 chars max)
+                maxLength: 41
+                pattern: "^[a-z]([-a-z0-9]*[a-z0-9])?$"
+
     ConfiguredRecipeConfiguration:
       allOf:
         - $ref: "#/components/schemas/RecipeResponseBase/properties/configuration"
@@ -1650,6 +1698,8 @@ components:
                 mode:
                   type: string
                   enum: [enabled, disabled]
+            gke:
+              $ref: "#/components/schemas/GKERecipeConfiguration"
 
     ProfileRecipeResponse:
       allOf:
@@ -1800,8 +1850,9 @@ components:
         - $ref: "#/components/schemas/RecipeResponse"
         - type: object
           description: >
-            Closed accounting-configured RecipeResult shape without a selected
-            profile. aicr.run/v1beta2 is emitted; the superseded
+            Closed typed-configuration RecipeResult shape without a selected
+            profile (Slurm accounting, runtime inventory, or GKE TCPXO
+            interfaces). aicr.run/v1beta2 is emitted; the superseded
             aicr.run/v1alpha3 is still accepted until v1.0.0.
           required: [metadata, configuration, componentRefs]
           additionalProperties: false
@@ -1853,7 +1904,6 @@ components:
               allOf:
                 - $ref: "#/components/schemas/ConfiguredRecipeConfiguration"
                 - type: object
-                  required: [slurm]
             componentRefs:
               type: array
               minItems: 1
@@ -1983,7 +2033,8 @@ components:
         Version-partitioned RecipeResult accepted by POST /v1/bundle.
         Default input with apiVersion aicr.run/v1alpha2, aicr.run/v1, or no
         apiVersion remains additive; v1alpha3/v1beta2 input is closed and requires either
-        metadata.selectedProfile or configuration.slurm.accounting. The
+        metadata.selectedProfile or a typed configuration section
+        (configuration.slurm, configuration.runtimeInventory, or configuration.gke). The
         branches are disjoint on apiVersion:
         the default branch admits only absent/empty/v1alpha2/v1 and prohibits
         selectedProfile, while both configured branches require the profile track.

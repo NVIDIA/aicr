@@ -139,6 +139,9 @@ func (r *RecipeSpec) validate() error {
 	if _, _, err := r.ResolveAccountingMode(); err != nil {
 		return err
 	}
+	if _, _, err := r.ResolveGKETCPXOInterfaces(); err != nil {
+		return err
+	}
 	if r.Output != nil && r.Output.Format != "" {
 		if serializer.Format(r.Output.Format).IsUnknown() {
 			return errors.New(errors.ErrCodeInvalidRequest,

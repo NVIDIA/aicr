@@ -501,6 +501,7 @@ Generate recipes using direct system parameters:
 | `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS/OKE or `gpuStack=bundle-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE, `gpuStack=oci-managed` on OKE) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
+| `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
@@ -640,6 +641,7 @@ target-cluster conflict detection.
 | `--profile` | | string | Profile selection in exact `name=value` form; omit to use the declaration's default |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
+| `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (used when `--snapshot` or `--output` is a ConfigMap URI; overrides KUBECONFIG env) |
@@ -3288,7 +3290,10 @@ aicr evidence digest -r recipes/overlays/h100-aks-ubuntu-training.yaml \
 # CI drift gate: compare the digest pinned in a signed evidence bundle
 # against the recipe currently on the PR branch. For a profiled pointer,
 # replay its recorded selection — recomputing without it hydrates the
-# declaration default and false-stales every non-default value.
+# declaration default and false-stales every non-default value. For the
+# h100 GKE kubeflow training leaf (ships torch-distributed-tcpxo), replay
+# the recorded configuration.gke.tcpxoInterfaces too — overlay-direct
+# digest fails closed without it; hydrate the recipe first, then digest it.
 ptr=recipes/evidence/<slug>/<src>/<digest>.yaml
 prof=$(yq -r '.profile // ""' "$ptr")
 signed=$(aicr evidence verify "$ptr" --format json \
