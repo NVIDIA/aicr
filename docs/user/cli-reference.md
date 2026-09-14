@@ -1639,8 +1639,8 @@ The `--accelerated-node-selector` and `--accelerated-node-toleration` flags cont
 
 | Flag | GPU DaemonSets | NFD Workers |
 |------|---------------|-------------|
-| `--accelerated-node-selector` | Applied (restricts to GPU nodes) | **Not applied** (NFD runs on all nodes) |
-| `--accelerated-node-toleration` | Applied | Applied |
+| `--accelerated-node-selector` | Applied (restricts to GPU nodes) — **except gpu-operator operands**, which self-place via the operator's GPU detection | **Not applied** (NFD runs on all nodes) |
+| `--accelerated-node-toleration` | Applied (including gpu-operator operands, via `daemonsets.tolerations`) | Applied |
 | `--system-node-selector` | Not applied | Not applied |
 | `--system-node-toleration` | Not applied | Not applied |
 
@@ -1664,7 +1664,7 @@ aicr bundle --recipe recipe.yaml \
 > **Cluster node requirements:** This example assumes the cluster has nodes labeled `nodeGroup=system-worker` with taints `dedicated=system-workload:NoSchedule,NoExecute` for system infrastructure, and GPU nodes labeled `nodeGroup=gpu-worker` with taints `dedicated=worker-workload:NoSchedule,NoExecute`.
 
 This results in:
-- **GPU DaemonSets** (driver, device-plugin, toolkit, dcgm): `nodeSelector=nodeGroup=gpu-worker` + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
+- **gpu-operator operand DaemonSets** (driver, device-plugin, toolkit, dcgm): **no `nodeSelector` is applied** — the gpu-operator chart and its ClusterPolicy CRD have no `daemonsets.nodeSelector` field, so the selector cannot constrain them; the operator places these operands on GPU nodes itself via its GFD/NFD-driven `nvidia.com/gpu.deploy.*` labels. They **do** receive the tolerations for `dedicated=worker-workload` (both `NoSchedule` and `NoExecute`) through the real `daemonsets.tolerations` value.
 - **NFD workers**: no nodeSelector (runs on all nodes) + tolerations for `dedicated=worker-workload` with both `NoSchedule` and `NoExecute`
 - **System components** (gpu-operator controller, NFD gc/master, dynamo grove, agentgateway proxy): `nodeSelector=nodeGroup=system-worker` + tolerations for `dedicated=system-workload` with both `NoSchedule` and `NoExecute`
 

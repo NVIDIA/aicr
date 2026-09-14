@@ -177,8 +177,7 @@ nodeScheduling:
       - operator.tolerations
   accelerated:
     nodeSelectorPaths:
-      - daemonsets.nodeSelector
-      - node-feature-discovery.worker.nodeSelector
+      - kubeletPlugin.nodeSelector
     tolerationPaths:
       - daemonsets.tolerations
 ```
