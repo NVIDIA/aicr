@@ -42,7 +42,7 @@ func tr(mut func(*Transition)) Transition {
 // rec wraps transitions into a record and a matching Component.
 func rec(pin string, trs ...Transition) (Set, []Component) {
 	u := &ComponentUpgrades{Component: "c", Transitions: trs}
-	return Set{"c": u}, []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: pin}}
+	return Set{"c": u}, []Component{{Name: "c", File: "components/c/upgrades.yaml", PinnedVersion: pin}}
 }
 
 // mentions reports whether err names any of the given message fragments.
@@ -210,7 +210,7 @@ func TestValidateIsSelfSufficientWithoutLoad(t *testing.T) {
 // one. That must report a violation naming the component, not panic.
 func TestValidateReportsANilRecordRatherThanPanicking(t *testing.T) {
 	set := Set{"c": nil}
-	comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "v1.0.0"}}
+	comps := []Component{{Name: "c", File: "components/c/upgrades.yaml", PinnedVersion: "v1.0.0"}}
 
 	err := set.Validate(comps)
 	if err == nil {
@@ -230,7 +230,7 @@ func TestValidateReplacesIsSelfSufficientWithoutLoad(t *testing.T) {
 		Component: "c",
 		Replaces:  &Replaces{Component: "old", Verdict: VerdictUnknown, Summary: "superseded"},
 	}}
-	comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "v1.0.0"}}
+	comps := []Component{{Name: "c", File: "components/c/upgrades.yaml", PinnedVersion: "v1.0.0"}}
 	err := set.Validate(comps)
 	if err == nil {
 		t.Fatal("Validate = nil, want a violation for a non-authorable replaces verdict")
@@ -251,7 +251,7 @@ func TestValidateReportsAMissingReplacesSummaryOnce(t *testing.T) {
 			StepsByDeployer: []StepGroup{{Steps: []Step{{ID: "swap", Description: "swap it"}}}},
 		},
 	}}
-	comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "v1.0.0"}}
+	comps := []Component{{Name: "c", File: "components/c/upgrades.yaml", PinnedVersion: "v1.0.0"}}
 	err := set.Validate(comps)
 	if err == nil {
 		t.Fatal("Validate = nil, want a missing-summary violation")
@@ -294,9 +294,9 @@ func TestValidateOrdersComponentsDeterministically(t *testing.T) {
 	}
 	set := Set{"a": bad("a"), "b": bad("b"), "c": bad("c")}
 	comps := []Component{
-		{Name: "a", File: "upgrades/a.yaml", PinnedVersion: "v0.18.0"},
-		{Name: "b", File: "upgrades/b.yaml", PinnedVersion: "v0.18.0"},
-		{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "v0.18.0"},
+		{Name: "a", File: "components/a/upgrades.yaml", PinnedVersion: "v0.18.0"},
+		{Name: "b", File: "components/b/upgrades.yaml", PinnedVersion: "v0.18.0"},
+		{Name: "c", File: "components/c/upgrades.yaml", PinnedVersion: "v0.18.0"},
 	}
 	for i := range 50 {
 		err := set.Validate(comps)
@@ -456,7 +456,7 @@ func TestValidatePinCeilingSkipsReplacesOnlyRecord(t *testing.T) {
 		},
 	}
 	set := Set{"c": u}
-	comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "main"}}
+	comps := []Component{{Name: "c", File: "components/c/upgrades.yaml", PinnedVersion: "main"}}
 	if err := set.Validate(comps); err != nil {
 		t.Errorf("Validate error = %v, want nil for a replaces-only record", err)
 	}
@@ -683,7 +683,7 @@ func TestValidateCoverage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			set := Set{"c": &ComponentUpgrades{Component: "c", Transitions: froms(tt.to, tt.from...)}}
-			comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: tt.pin}}
+			comps := []Component{{Name: "c", File: "components/c/upgrades.yaml", PinnedVersion: tt.pin}}
 			err := set.Validate(comps)
 			hasHole := err != nil && strings.Contains(err.Error(), "no record describes")
 			if hasHole != tt.wantErr {
@@ -765,7 +765,7 @@ func TestValidateReplaces(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			set := Set{"c": &ComponentUpgrades{Component: "c", Replaces: tt.replaces}}
-			comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "v1.0.0"}}
+			comps := []Component{{Name: "c", File: "components/c/upgrades.yaml", PinnedVersion: "v1.0.0"}}
 			err := set.Validate(comps)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("Validate error = %v, wantErr %v", err, tt.wantErr)
@@ -851,7 +851,7 @@ func TestValidateDistinctBoundaries(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			set := Set{"c": &ComponentUpgrades{Component: "c", Transitions: tt.trs}}
-			comps := []Component{{Name: "c", File: "upgrades/c.yaml", PinnedVersion: "v0.20.0"}}
+			comps := []Component{{Name: "c", File: "components/c/upgrades.yaml", PinnedVersion: "v0.20.0"}}
 			err := set.Validate(comps)
 			got := err != nil && strings.Contains(err.Error(), "same boundary")
 			if got != tt.wantErr {
