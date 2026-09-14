@@ -65,10 +65,11 @@ const (
 // wiring was measured rather than re-injected.
 //
 // Paths are template KEYS (dotted, named-list elements addressed as [name]),
-// never values: no network name, node name, or env value appears. Keys under
-// operator-authored maps (labels, annotations, nodeSelector) can still carry
-// operator-chosen text, so pkg/evidence/redact collapses those to the parent
-// key in minimal evidence unless the key sits under a vendor API domain. This
+// never values: no network name, node name, or env value appears. Names the
+// operator authors — list element names, and keys of user-keyed maps such as
+// labels, annotations, nodeSelector and resource limits — are collapsed by
+// pkg/evidence/redact in minimal evidence unless they are on its exact
+// allowlists (the shipped runtime's fabric env names and vendor keys). This
 // is an AICR extension alongside the CTRF `extra` object; it is absent for
 // every result that did not derive a runtime.
 type RuntimeProvenance struct {

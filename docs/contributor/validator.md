@@ -472,18 +472,24 @@ the dotted key grammar; every named-list selector (`containers[node]`,
 `env` selector naming a variable in the **exact** fabric set
 (`redact.ctrfFabricEnvNames`: the GPUDirect-TCPXO NCCL configuration the
 shipped runtime declares, plus `CUDA_VISIBLE_DEVICES` and `LD_LIBRARY_PATH`),
-which is kept because it is the evidence; keys under operator-authored maps
-(`metadata.labels`, `metadata.annotations`, `spec.nodeSelector`) collapse to
-the parent unless the **whole key** is in the exact vendor set
+which is kept because it is the evidence; a key under any **user-keyed map**
+of the PodTemplateSpec API, wherever it sits (`redact.ctrfFreeKeyMaps`:
+`labels`, `annotations`, `nodeSelector`, resource `limits`/`requests`,
+`overhead`, `matchLabels`, CSI `volumeAttributes`, flexVolume `options`)
+collapses to the map unless the **whole key** is in the exact vendor set
 (`redact.ctrfVendorKeys`: `networking.gke.io/interfaces`,
 `networking.gke.io/default-interface`, `devices.gke.io/container.tcpxo-daemon`,
 `cloud.google.com/gke-accelerator`, `trainer.kubeflow.org/trainjob-ancestor-step`,
-`nvidia.com/gpu.present`, `node.kubernetes.io/instance-type`). There is no
-prefix or domain rule anywhere in the policy: `NCCL_CUSTOMER_ACME_PROD` and
-`networking.gke.io/customer-prod` are operator text and collapse like any
-other name. So `metadata.annotations.networking.gke.io/interfaces` and
-`spec.containers[*].env[NCCL_FASTRAK_IFNAME].value` are kept while an
-operator's `spec.nodeSelector.my-org/pool` becomes `spec.nodeSelector` and
+`nvidia.com/gpu`, `nvidia.com/gpu.present`, `node.kubernetes.io/instance-type`).
+There is no prefix or domain rule anywhere in the policy: `NCCL_CUSTOMER_ACME_PROD`,
+`networking.gke.io/customer-prod` and a sidecar's
+`resources.limits.acme.internal/project-prod` are operator text and collapse
+like any other name. So `metadata.annotations.networking.gke.io/interfaces`,
+`spec.containers[*].env[NCCL_FASTRAK_IFNAME].value` and
+`spec.containers[*].resources.limits.nvidia.com/gpu` are kept while an
+operator's `spec.nodeSelector.my-org/pool` becomes `spec.nodeSelector`,
+`spec.initContainers[setup].resources.limits.acme.internal/x` becomes
+`spec.initContainers[*].resources.limits`, and
 `spec.volumes[customer-cache].secret.secretName` becomes
 `spec.volumes[*].secret.secretName`; lists are deduplicated, sorted and capped
 at 1024 entries. Adding a variable or key to the shipped runtime that the

@@ -295,12 +295,20 @@ var ctrfFabricEnvNames = map[string]struct{}{
 // few hundred leaves, so a longer list is not a template inventory.
 const ctrfProvenanceMaxPaths = 1024
 
-// ctrfOperatorKeyedMaps are the PodTemplateSpec maps whose KEYS an operator
-// authors (label/annotation/nodeSelector keys). Every other key in a template
-// path is a Kubernetes or Kubeflow API field name or a name from the shipped
-// manifest, but a key under one of these can be an operator's own label, so it
-// is collapsed to the parent unless it sits under a vendor API domain.
-var ctrfOperatorKeyedMaps = []string{"metadata.annotations.", "metadata.labels.", "spec.nodeSelector."}
+// ctrfFreeKeyMaps are the PodTemplateSpec field names whose value is a map
+// with USER-DEFINED keys (map[string]string / map[string]Quantity in the
+// core/v1 API): labels, annotations, nodeSelector, resource limits/requests
+// and overhead (extended-resource names such as acme.internal/x), label
+// selectors' matchLabels, CSI volumeAttributes and flexVolume options. Every
+// other segment of a template path is a Kubernetes API field name. A key under
+// one of these maps is operator text wherever the map sits in the template —
+// a sidecar's resources as much as the pod's labels — so it is collapsed to
+// the map unless the whole key is in ctrfVendorKeys. The maps are leaves in
+// the API (their values are scalars), so the key is always the final segment.
+var ctrfFreeKeyMaps = []string{
+	"annotations", "labels", "nodeSelector", "limits", "requests", "overhead",
+	"matchLabels", "volumeAttributes", "options",
+}
 
 // ctrfVendorKeys is the EXACT set of full label/annotation/nodeSelector keys
 // that are vendor-defined API surface, not operator text, and stay in minimal
@@ -316,6 +324,7 @@ var ctrfVendorKeys = map[string]struct{}{
 	"devices.gke.io/container.tcpxo-daemon":       {},
 	"cloud.google.com/gke-accelerator":            {},
 	"trainer.kubeflow.org/trainjob-ancestor-step": {},
+	"nvidia.com/gpu":                              {}, // the worker's GPU request — the count the measurement ran on
 	"nvidia.com/gpu.present":                      {},
 	"node.kubernetes.io/instance-type":            {},
 }
@@ -370,21 +379,32 @@ func boundProvenancePaths(in []string) []string {
 	return out
 }
 
-// collapseOperatorKey returns p unchanged unless it addresses a key under an
-// operator-keyed map, in which case the whole key must be in ctrfVendorKeys;
-// otherwise the path collapses to the map itself.
+// collapseOperatorKey returns p unchanged unless it addresses a key under a
+// free-key map (ctrfFreeKeyMaps) anywhere in the template, in which case the
+// whole key must be in ctrfVendorKeys; otherwise the path collapses to the map
+// itself. Keys may contain "." (annotation domains), so the map is located by
+// field-name segment, not by splitting the key.
 func collapseOperatorKey(p string) string {
-	for _, prefix := range ctrfOperatorKeyedMaps {
-		key, ok := strings.CutPrefix(p, prefix)
-		if !ok {
-			continue
+	best := -1
+	for _, field := range ctrfFreeKeyMaps {
+		for _, marker := range []string{"." + field + ".", field + "."} {
+			idx := strings.Index(p, marker)
+			if idx < 0 || (marker[0] != '.' && idx != 0) {
+				continue
+			}
+			end := idx + len(marker) // first byte of the key
+			if best < 0 || end < best {
+				best = end
+			}
 		}
-		if _, vendor := ctrfVendorKeys[key]; vendor {
-			return p
-		}
-		return strings.TrimSuffix(prefix, ".")
 	}
-	return p
+	if best < 0 {
+		return p
+	}
+	if _, vendor := ctrfVendorKeys[p[best:]]; vendor {
+		return p
+	}
+	return p[:best-1]
 }
 
 // collapseListSelectors rewrites every "[name]" selector in p to "[*]" except
