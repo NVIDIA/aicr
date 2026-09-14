@@ -261,16 +261,12 @@ check_tools_row() {
     fi
 }
 
-cat >"${STUB_DIR}/go.mod" <<EOF
-module github.com/NVIDIA/aicr
-
-go 1.26
-
-require (
-	github.com/google/go-licenses/v2 ${GO_LICENSES_PINNED_VERSION}
-	golang.org/x/exp ${APIDIFF_PINNED_VERSION}
-)
-EOF
+# printf rather than a cat heredoc: PATH is hermetic from here on and cat is
+# deliberately absent from the utility allowlist above, so only builtins work.
+printf 'module github.com/NVIDIA/aicr\n\ngo 1.26\n\nrequire (\n\t%s %s\n\t%s %s\n)\n' \
+    github.com/google/go-licenses/v2 "${GO_LICENSES_PINNED_VERSION}" \
+    golang.org/x/exp "${APIDIFF_PINNED_VERSION}" \
+    >"${STUB_DIR}/go.mod"
 
 check_helper "extracts-exact-module-version" correct 0 \
     "${APIDIFF_PINNED_VERSION}"
