@@ -82,6 +82,38 @@ source "${SCRIPT_DIR}/lib/cleanup.sh"
 # shellcheck source=lib/profile-select.sh
 source "${SCRIPT_DIR}/lib/profile-select.sh"
 
+# CTRF emitter shared with the UAT phase library (#1806). Every (recipe,
+# deployer) cell of the KWOK matrix is recorded as one CTRF test in
+# KWOK_RESULTS_FILE so the six-deployer lane has structured, per-deployer
+# results rather than only log lines and an exit code. The kwok-test action
+# uploads the file on every outcome.
+# shellcheck source=tools/ctrf
+source "${SCRIPT_DIR}/../../tools/ctrf"
+KWOK_RESULTS_FILE="${KWOK_RESULTS_FILE:-/tmp/kwok-debug-artifacts/kwok-results.json}"
+
+# Set by run_recipe_test when a recipe is skipped (no KWOK profile in implicit
+# batch mode) so the CTRF record says skipped rather than passed.
+LAST_RECIPE_SKIPPED=false
+
+# kwok_setup_finalize is the EXIT trap armed by main around cluster/context/
+# infra setup. On a non-zero exit it records the failing stage as one
+# kwok/setup/<deployer> CTRF entry with status "other" and writes the report;
+# the original exit status is preserved either way. Disarmed by main once the
+# recipe loop starts.
+KWOK_SETUP_STAGE=""
+KWOK_SETUP_START=""
+kwok_setup_finalize() {
+    local rc=$?
+    trap - EXIT
+    if (( rc != 0 )); then
+        ctrf_add "kwok/setup/${DEPLOYER}" other "$(ctrf_elapsed_ms "${KWOK_SETUP_START}")" \
+            "KWOK ${KWOK_SETUP_STAGE} setup failed (rc=${rc})" || true
+        ctrf_write "${KWOK_RESULTS_FILE}" || true
+        log_error "CTRF setup record written to ${KWOK_RESULTS_FILE}"
+    fi
+    exit "${rc}"
+}
+
 CLUSTER_NAME="${KWOK_CLUSTER:-aicr-kwok-test}"
 CONTEXT="kind-${CLUSTER_NAME}"
 
@@ -243,6 +275,7 @@ cleanup_between_tests() {
 
 run_recipe_test() {
     local recipe="$1"
+    LAST_RECIPE_SKIPPED=false
     echo ""
     log_info "========================================"
     log_info "Testing recipe: ${recipe} (deployer=${DEPLOYER})"
@@ -281,6 +314,7 @@ run_recipe_test() {
                     return 1
                 fi
                 log_warn "SKIP ${recipe}: no KWOK profile for service=${svc} accelerator=${accel} (add one under kwok/profiles/${svc}/ — see #1997)"
+                LAST_RECIPE_SKIPPED=true
                 return 0
             fi
             if (( select_rc != 0 )); then
@@ -402,6 +436,30 @@ main() {
     fi
 
     log_info "Found $(echo "${recipes}" | wc -w | tr -d ' ') recipe(s) to test (deployer=${DEPLOYER})"
+    # jq is what tools/ctrf serializes with; fail fast here rather than 127 out
+    # of the recipe loop with no results file.
+    if ! command -v jq >/dev/null 2>&1; then
+        log_error "jq is required to write ${KWOK_RESULTS_FILE}; install it and re-run"
+        return 1
+    fi
+    rm -f "${KWOK_RESULTS_FILE}"   # never leave a previous run's results behind
+    # The CTRF report starts before cluster/infra setup so a setup failure still
+    # leaves a report: one kwok/setup/<deployer> entry with status "other"
+    # (CTRF's "neither passed nor failed" bucket) and no per-recipe cells.
+    #
+    # Setup keeps its fail-fast semantics exactly as before: ensure_cluster's
+    # commands abort the script under set -e and ensure_kwok_context_loose
+    # exits 1 on a foreign context. Capturing either in an `|| rc=$?` list
+    # would silence errexit INSIDE the function and let it return 0 after an
+    # internal failure, so the record is written by an EXIT trap instead,
+    # which fires on every one of those exit paths and preserves the exit
+    # status. It is cleared once setup completes and the recipe loop owns
+    # the report.
+    ctrf_init "kwok-validate-scheduling"
+    KWOK_SETUP_STAGE="cluster"
+    KWOK_SETUP_START="$(ctrf_now_ms)"
+    trap 'kwok_setup_finalize' EXIT
+
     ensure_cluster
 
     # Safety: refuse to start the cleanup sweep unless the kubectl
@@ -412,10 +470,12 @@ main() {
     # sweep at a real cluster. Loose check only: kwok nodes don't
     # exist yet on the initial run (apply-nodes.sh runs per recipe
     # inside run_recipe_test).
+    KWOK_SETUP_STAGE="context"
     ensure_kwok_context_loose
 
     # Clean up any stale resources from previous runs
     cleanup_between_tests
+    KWOK_SETUP_STAGE="infra"
 
     # Install shared in-cluster registry + the controller(s) the selected
     # deployer needs (Argo CD for argocd-*, Flux for flux-*, plus Gitea for
@@ -438,9 +498,11 @@ main() {
         if (( infra_rc != 0 )); then
             log_error "install-infra.sh failed (exit code ${infra_rc}); cannot run ${DEPLOYER} deployer lane"
             log_error "See kwok/scripts/install-infra.sh header for exit-code taxonomy"
-            return 1
+            KWOK_SETUP_STAGE="infra (install-infra.sh rc=${infra_rc}; see its header for the exit-code taxonomy)"
+            return 1   # the EXIT trap writes the kwok/setup record
         fi
     fi
+    trap - EXIT   # setup complete; the recipe loop owns the report from here
 
     # 3-strike rule for Argo CD sync timeouts (ADR-008 §"Error Handling and
     # Failure Modes"). Tracks CONSECUTIVE EXIT_ARGOCD_SYNC_TIMEOUT failures.
@@ -452,13 +514,27 @@ main() {
     local consecutive_sync_timeouts=0
 
     for recipe in ${recipes}; do
-        local rc=0
+        local rc=0 recipe_start
+        recipe_start="$(ctrf_now_ms)"
         run_recipe_test "${recipe}" || rc=$?
         if (( rc == 0 )); then
             passed+=("${recipe}")
             consecutive_sync_timeouts=0
+            if [[ "${LAST_RECIPE_SKIPPED}" == true ]]; then
+                ctrf_add "kwok/${recipe}/${DEPLOYER}" skipped "$(ctrf_elapsed_ms "${recipe_start}")" \
+                    "no KWOK profile for this recipe (implicit batch mode)"
+            else
+                ctrf_add "kwok/${recipe}/${DEPLOYER}" passed "$(ctrf_elapsed_ms "${recipe_start}")"
+            fi
         else
             failed+=("${recipe}")
+            if (( rc == EXIT_ARGOCD_SYNC_TIMEOUT )); then
+                ctrf_add "kwok/${recipe}/${DEPLOYER}" failed "$(ctrf_elapsed_ms "${recipe_start}")" \
+                    "GitOps sync deadline exceeded (rc=${rc})"
+            else
+                ctrf_add "kwok/${recipe}/${DEPLOYER}" failed "$(ctrf_elapsed_ms "${recipe_start}")" \
+                    "recipe test failed (rc=${rc}); see the log for the failing stage"
+            fi
             # 3-strike rule is GitOps-only: helm path never returns 50, so
             # the gate is currently implicit. Make it explicit by checking
             # DEPLOYER too — keeps the contract auditable from this site
@@ -475,6 +551,8 @@ main() {
                     log_error "Failed recipes so far:"
                     for r in "${failed[@]:-}"; do [[ -n "$r" ]] && log_error "  - ${r}"; done
                     log_error "========================================"
+                    ctrf_write "${KWOK_RESULTS_FILE}"
+                    log_info "CTRF results written to ${KWOK_RESULTS_FILE}"
                     cleanup_between_tests
                     return "$EXIT_ARGOCD_SYNC_TIMEOUT"
                 fi
@@ -492,6 +570,8 @@ main() {
     log_info "========================================"
     for r in "${passed[@]:-}"; do [[ -n "$r" ]] && echo -e "  ${GREEN}✓${NC} $r"; done
     for r in "${failed[@]:-}"; do [[ -n "$r" ]] && echo -e "  ${RED}✗${NC} $r"; done
+    ctrf_write "${KWOK_RESULTS_FILE}"
+    log_info "CTRF results written to ${KWOK_RESULTS_FILE}"
 
     cleanup_between_tests
 

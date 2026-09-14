@@ -427,6 +427,20 @@ Start with the repo-server log (Argo CD) or source-controller log
 logs show reconciliation decisions and prune behavior;
 helm-controller logs surface per-`HelmRelease` install outcomes.
 
+Independently of the outcome, every `kwok-test` job also uploads
+`kwok-results-<recipe>-<deployer>-<run_id>-<attempt>` containing `kwok-results.json`,
+a [CTRF](https://ctrf.io) report written by `run-all-recipes.sh` (via the
+shared `tools/ctrf` emitter) with one test per `(recipe, deployer)` cell:
+`kwok/<recipe>/<deployer>` with status `passed`, `failed` (the message
+distinguishes a GitOps sync timeout from a generic failure), or `skipped`
+(no KWOK profile in implicit batch mode). The file is also written on the
+3-strike bail, so a truncated matrix still reports the cells it ran, and when
+cluster or `install-infra.sh` setup fails before any cell runs it holds a
+single `kwok/setup/<deployer>` entry with status `other` and the setup
+failure in its message.
+Locally the same file lands at `/tmp/kwok-debug-artifacts/kwok-results.json`
+(override with `KWOK_RESULTS_FILE`).
+
 ### Adding a New Deployer Value
 
 The deployer set is finite and matches what `pkg/bundler` emits. To

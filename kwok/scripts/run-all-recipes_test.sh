@@ -246,6 +246,79 @@ KWOK_DIR="${_ORIG_KWOK_DIR}"
 # shellcheck disable=SC2034
 OVERLAYS_DIR="${_ORIG_OVERLAYS_DIR}"
 
+# ── Setup-failure CTRF record (#1806) ──────────────────────────────────
+# The real main() is exercised end to end with stubbed kind/kubectl/helm on
+# PATH so cluster and context setup fail the way they do in CI. Both paths
+# must leave kwok-results.json with one kwok/setup/<deployer> entry of status
+# "other" naming the failing stage, and must preserve the original exit code.
+# The first case is the errexit trap: `ensure_cluster || rc=$?` would have let
+# an internal `kind create cluster` failure return 0.
+if command -v jq >/dev/null 2>&1; then
+    STUB_BIN="${FIXTURE_ROOT}/stub-bin"
+    mkdir -p "${STUB_BIN}"
+    cat > "${STUB_BIN}/kind" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+    get) exit 0 ;;                       # no clusters -> create path
+    create) echo "stub: kind create failed" >&2; exit 42 ;;
+    *) exit 0 ;;
+esac
+STUB
+    cat > "${STUB_BIN}/kubectl" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "config" && "$2" == "current-context" ]]; then echo "${STUB_CONTEXT:-kind-aicr-kwok-test}"; fi
+exit 0
+STUB
+    cat > "${STUB_BIN}/helm" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    chmod +x "${STUB_BIN}"/*
+
+    SETUP_RESULTS="${FIXTURE_ROOT}/setup-results.json"
+    : > "${LOG_FILE}"
+    rc=0
+    PATH="${STUB_BIN}:${PATH}" KWOK_RESULTS_FILE="${SETUP_RESULTS}" KWOK_CLUSTER=aicr-kwok-test \
+        bash "${SCRIPT_UNDER_TEST}" --deployer helm gb200-eks-training >"${LOG_FILE}" 2>&1 || rc=$?
+    check "setup-cluster-failure-preserves-exit-code" eq 42 "${rc}"
+    ran=$((ran + 1))
+    if jq -e '.results.summary.other == 1 and .results.summary.tests == 1
+              and .results.tests[0].name == "kwok/setup/helm"
+              and .results.tests[0].status == "other"
+              and (.results.tests[0].message | test("cluster setup failed \\(rc=42\\)"))' \
+              "${SETUP_RESULTS}" >/dev/null 2>&1; then
+        echo "PASS: setup-cluster-failure-writes-other-record"
+    else
+        echo "FAIL: setup-cluster-failure-writes-other-record"; cat "${SETUP_RESULTS}" 2>/dev/null; fails=$((fails + 1))
+    fi
+
+    # Context guard: the cluster exists, but kubectl points somewhere else.
+    cat > "${STUB_BIN}/kind" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+    get) echo "aicr-kwok-test" ;;
+    *) exit 0 ;;
+esac
+STUB
+    chmod +x "${STUB_BIN}/kind"
+    : > "${LOG_FILE}"
+    rc=0
+    PATH="${STUB_BIN}:${PATH}" STUB_CONTEXT=kind-production KWOK_RESULTS_FILE="${SETUP_RESULTS}" KWOK_CLUSTER=aicr-kwok-test \
+        bash "${SCRIPT_UNDER_TEST}" --deployer helm gb200-eks-training >"${LOG_FILE}" 2>&1 || rc=$?
+    check "setup-context-guard-preserves-exit-code" eq 1 "${rc}"
+    check_log "setup-context-guard-refuses-foreign-context" "is not a known KWOK Kind cluster" "${LOG_FILE}"
+    ran=$((ran + 1))
+    if jq -e '.results.summary.tests == 1 and .results.tests[0].status == "other"
+              and (.results.tests[0].message | test("context setup failed \\(rc=1\\)"))' \
+              "${SETUP_RESULTS}" >/dev/null 2>&1; then
+        echo "PASS: setup-context-failure-writes-other-record"
+    else
+        echo "FAIL: setup-context-failure-writes-other-record"; cat "${SETUP_RESULTS}" 2>/dev/null; fails=$((fails + 1))
+    fi
+else
+    echo "SKIP: jq not on PATH; setup-failure CTRF cases not run"
+fi
+
 # ── Summary ────────────────────────────────────────────────────────────
 # ${ran} is incremented inside check / check_log so the summary count is
 # derived, not a hardcoded literal — a future contributor adding or

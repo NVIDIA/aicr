@@ -59,6 +59,11 @@
 # from phase_conformance. Lives alongside this file in tests/uat/lib/.
 # shellcheck source=./collect-debug.sh
 source "$(dirname "${BASH_SOURCE[0]}")/collect-debug.sh"
+# CTRF emitter shared with the KWOK batch driver (#1806): phase_prep wraps the
+# live-cluster `aicr snapshot` outcome into snapshot-result.json so the step has
+# a machine-readable record alongside the CTRF `aicr validate` already writes.
+# shellcheck source=tools/ctrf
+source "$(dirname "${BASH_SOURCE[0]}")/../../../tools/ctrf"
 
 # Train-job knobs (overridable for local reproduction or future inference variant).
 TRAINJOB_NAMESPACE="${TRAINJOB_NAMESPACE:-kubeflow}"
@@ -360,8 +365,23 @@ phase_prep() {
   # generic "pod did not become ready" timeout the aicr CLI prints.
   local snapshot_ns
   snapshot_ns="$(yq '.spec.snapshot.agent.namespace // "aicr-validation"' "${config}")"
+  # Record the snapshot outcome as CTRF (snapshot-result.json) on both paths.
+  # The failure branch writes BEFORE the debug dump and exit 1 so the record
+  # exists whenever the workflow's upload step runs; the workflows upload it
+  # with if: always() and include it in the failure-debug bundle.
+  local snapshot_start snapshot_rc=0
+  ctrf_init "aicr-uat"
+  snapshot_start="$(ctrf_now_ms)"
   echo "::group::Snapshot live cluster"
-  if ! "${AICR_BIN}" snapshot --config "${config}"; then
+  "${AICR_BIN}" snapshot --config "${config}" || snapshot_rc=$?
+  if (( snapshot_rc == 0 )) && [[ ! -f snapshot.yaml ]]; then
+    echo "aicr snapshot exited 0 but wrote no snapshot.yaml" >&2
+    snapshot_rc=1
+  fi
+  if (( snapshot_rc != 0 )); then
+    ctrf_add snapshot failed "$(ctrf_elapsed_ms "${snapshot_start}")" \
+      "aicr snapshot --config ${config} failed (rc=${snapshot_rc})"
+    ctrf_write snapshot-result.json
     echo "::endgroup::"
     echo "::group::Snapshot failure debug"
     echo "--- nodes ---"
@@ -380,7 +400,8 @@ phase_prep() {
     echo "::endgroup::"
     exit 1
   fi
-  test -f snapshot.yaml
+  ctrf_add snapshot passed "$(ctrf_elapsed_ms "${snapshot_start}")"
+  ctrf_write snapshot-result.json
   echo "::endgroup::"
 
   echo "::group::Generate recipe"

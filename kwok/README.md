@@ -166,6 +166,13 @@ the runner:
 Clusters created before a port mapping existed must be recreated
 (`kind delete cluster --name aicr-kwok-test`) to pick it up.
 
+Every lane run records one [CTRF](https://ctrf.io) test per `(recipe,
+deployer)` cell in `/tmp/kwok-debug-artifacts/kwok-results.json` (a setup
+failure before any cell runs is recorded as one `kwok/setup/<deployer>`
+entry with status `other`)
+(`KWOK_RESULTS_FILE` overrides the path); CI uploads it as
+`kwok-results-<recipe>-<deployer>-<run_id>-<attempt>` on every outcome.
+
 Lane details, sync gates, exit codes, and tuning variables are
 documented in
 [docs/contributor/tests.md](../docs/contributor/tests.md) ("KWOK
