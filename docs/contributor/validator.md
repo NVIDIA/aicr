@@ -378,7 +378,7 @@ lines too; they still feed `--full` and live `aicr validate` output.
 codes only (`"2"`, `"no-schedulable-gpu-nodes"`) — never node names, IPs, or hostnames.
 `pkg/evidence/redact`'s `ctrfExtraAllowlist` enforces this at the **publication
 boundary** (not just at emission, which raw prefixed stdout could bypass) with a
-fail-closed **key _and_ value** check: only the listed keys (`nodesValidated`, `nodesTotal`, `skipReason`, `runtimeSource`, `shippedRuntimeDigest`, `derivedRuntimeDigest`) survive, and each surviving value must pass its key's
+fail-closed **key _and_ value** check: only the listed keys (`nodesValidated`, `nodesTotal`, `skipReason`, `runtimeSource`, `shippedRuntimeDigest`, `derivedRuntimeDigest`) survive, and only when the value matches the key's shape: a bare decimal count for `nodesValidated`/`nodesTotal`, a closed-set code for `skipReason` and for `runtimeSource` (`delivered-artifact` | `recipe-supplied-runtime` | `cluster-capability`), and a lowercase 64-character sha256 hex digest for the two `*RuntimeDigest` keys survive, and each surviving value must pass its key's
 validator — a non-negative decimal count for the `nodes*` keys, and for
 `skipReason` a **closed set** of known codes (`ctrfSkipReasons`, currently
 `no-gpu-nodes`, `no-schedulable-gpu-nodes`, `nodes-busy`). A closed set rather

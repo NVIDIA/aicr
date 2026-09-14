@@ -350,6 +350,17 @@ func TestResolveBenchmarkRuntimeSource(t *testing.T) {
 			t.Fatalf("want deployed-vs-cluster NotFound, got %v", err)
 		}
 	})
+	t.Run("delivered derivation ignores the validator's own fabric env", func(t *testing.T) {
+		// AICR_NCCL_FABRIC describes the embedded fixture's fabric; a delivered
+		// runtime carries its own wiring, so a RoCE override must not redirect
+		// the skeleton lookup to a template tree that does not exist for GKE.
+		objs := append([]runtime.Object{shippedTCPXORuntime(m)}, nets...)
+		plan, err := resolveBenchmarkRuntimeSource(newCtx(tcpxoRefs(m), objs...), "",
+			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault, fabricRoCE)
+		if err != nil || plan.source != runtimeSourceDelivered {
+			t.Fatalf("fabric env must not affect a delivered derivation: plan=%+v err=%v", plan, err)
+		}
+	})
 	t.Run("delivered, deployed, consistent -> derived carrier", func(t *testing.T) {
 		objs := append([]runtime.Object{shippedTCPXORuntime(m)}, nets...)
 		plan, err := resolve(newCtx(tcpxoRefs(m), objs...), "")

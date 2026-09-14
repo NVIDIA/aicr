@@ -118,15 +118,14 @@ func TestFabricRuntimeDelivered(t *testing.T) {
 }
 
 // TestFabricRuntimeDeliveredReadsWhatGenerationRecords guards the two exported
-// identifiers against drift: the predicate must find the override exactly where
-// recipe generation puts it.
+// identifiers against drift: the predicate must find the override under the
+// same component name and override key that recipe generation uses.
 func TestFabricRuntimeDeliveredReadsWhatGenerationRecords(t *testing.T) {
 	want := mapping(eightNets("gen")...)
 	r := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: recipe.KubeflowTrainerComponentName}}}
-	for _, opt := range []recipe.BuildOption{recipe.WithGKETCPXOInterfaces(want)} {
-		_ = opt // BuildOption is applied by the builder; emulate its recording below
-	}
-	// Mirror what the builder records so the test does not need a full catalog.
+	// Hand-build the record in the shape recipe generation writes (a list of
+	// {interfaceName, network} maps under the exported override key), so the
+	// reader is tested against that shape without needing a full catalog.
 	raw := make([]any, 0, len(want))
 	for _, e := range want {
 		raw = append(raw, map[string]any{"interfaceName": e.InterfaceName, "network": e.Network})

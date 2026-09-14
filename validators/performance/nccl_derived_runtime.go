@@ -126,7 +126,17 @@ func resolveBenchmarkRuntimeSource(ctx *validators.Context, customRuntime string
 	if err != nil {
 		return nil, err
 	}
-	skeletonPath := templatePath(accelerator, service, variant, fabric, "runtime.yaml")
+	// The skeleton is the platform's own MPI benchmark template. The fabric
+	// argument selects between per-fabric template trees (the RoCE tree lives
+	// under testdata/roce/); a DELIVERED runtime already carries its fabric
+	// wiring from the shipped object, so the only thing the skeleton must match
+	// is the platform — never the AICR_NCCL_FABRIC environment, which describes
+	// the validator's own fixture and has no bearing on what the recipe ships.
+	// Pinning the platform default here keeps an operator-set fabric override
+	// from redirecting a delivered derivation to a template tree that does not
+	// exist for this platform.
+	_ = fabric
+	skeletonPath := templatePath(accelerator, service, variant, fabricEFA, "runtime.yaml")
 	skeleton, err := parseYAMLTemplate(skeletonPath, nil)
 	if err != nil {
 		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to load benchmark runtime skeleton "+skeletonPath, err)
@@ -190,12 +200,21 @@ func verifyDeliveredTCPXORuntime(ctx *validators.Context, recorded []recipe.Netw
 //
 // Paths are dotted, with the worker container addressed by name rather than
 // index so a reordering in the shipped spec cannot silently move the boundary.
-var benchmarkOwnedNodePaths = []string{
-	"spec.containers[node].image",
-	"spec.containers[node].command",
-	"spec.containers[node].args",
-	"spec.containers[node].resources",
-	"spec.containers[node].terminationMessagePolicy",
+var benchmarkOwnedNodePaths = ownedWorkerPaths(benchmarkOwnedWorkerFields)
+
+// benchmarkOwnedWorkerFields is the single list of worker-container fields the
+// derivation re-applies from the skeleton. Both the override loop and the
+// guard allowlist are derived from it, so a field cannot be added to one and
+// forgotten in the other — which would let a differing skeleton value pass the
+// guard while the derived template silently kept the shipped value.
+var benchmarkOwnedWorkerFields = []string{"image", "command", "args", "resources", "terminationMessagePolicy"}
+
+func ownedWorkerPaths(fields []string) []string {
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		out = append(out, "spec.containers["+benchmarkWorkerContainer+"]."+f)
+	}
+	return out
 }
 
 // deriveBenchmarkRuntime builds the benchmark TrainingRuntime from the
@@ -230,7 +249,7 @@ func deriveBenchmarkRuntime(skeleton, shipped *unstructured.Unstructured) (*unst
 		return nil, nil, aicrErrors.New(aicrErrors.ErrCodeInternal,
 			"both the skeleton and the shipped runtime must define a worker container named \"node\"")
 	}
-	for _, field := range []string{"image", "command", "args", "resources", "terminationMessagePolicy"} {
+	for _, field := range benchmarkOwnedWorkerFields {
 		if v, ok := skelWorker[field]; ok {
 			derWorker[field] = serializer.DeepCopyAny(v)
 		} else {

@@ -298,8 +298,10 @@ cluster**: the recipe's recorded `configuration.gke.tcpxoInterfaces` must equal
 the mapping on the deployed `ClusterTrainingRuntime` exactly and in order, and
 every network that mapping selects must exist on the cluster. It then derives
 the benchmark runtime from the deployed one — copying the worker pod template
-wholesale and overriding only the benchmark's own image, entrypoint, and
-resources — and labels the result `runtimeSource: delivered-artifact`. A
+wholesale (metadata and spec), re-applying only the benchmark's own worker
+`image`, `command`, `args`, `resources`, and `terminationMessagePolicy`, and
+merging volumes and mounts additively — and labels the result
+`runtimeSource: delivered-artifact`. A
 mismatch in either comparison fails the run rather than being recorded; a
 divergent deployed artifact is a finding, never something validation repairs.
 
