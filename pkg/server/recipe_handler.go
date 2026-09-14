@@ -43,6 +43,10 @@ var recipeCacheTTL = defaults.RecipeCacheTTL
 
 const slurmAccountingModeQueryParameter = "slurmAccountingMode"
 
+// gkeTCPXOInterfacesQueryParameter carries the ordered eth1..eth8 → VPC
+// network mapping for recipes that ship the torch-distributed-tcpxo runtime.
+const gkeTCPXOInterfacesQueryParameter = "gkeTcpxoInterfaces"
+
 var criteriaQueryParameters = map[string]struct{}{
 	keyService:                        {},
 	"accelerator":                     {},
@@ -53,6 +57,7 @@ var criteriaQueryParameters = map[string]struct{}{
 	keyNodes:                          {},
 	keyProfile:                        {},
 	slurmAccountingModeQueryParameter: {},
+	gkeTCPXOInterfacesQueryParameter:  {},
 }
 
 // recipeHandler backs /v1/recipe and /v1/query with an aicr.Client.
@@ -491,6 +496,7 @@ func resolvePOSTProfileSelection(
 	if err := validateStrictQueryParameters(r, map[string]struct{}{
 		keyProfile:                        {},
 		slurmAccountingModeQueryParameter: {},
+		gkeTCPXOInterfacesQueryParameter:  {},
 	}); err != nil {
 		return "", err
 	}
@@ -640,15 +646,27 @@ func recipeResolveOptions(r *http.Request, profile string) ([]aicr.RecipeResolve
 		opts = append(opts, aicr.WithProfile(profile))
 	}
 	values, present := r.URL.Query()[slurmAccountingModeQueryParameter]
-	if !present {
-		return opts, nil
+	if present {
+		if len(values) != 1 || values[0] == "" {
+			return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+				"slurmAccountingMode must be provided exactly once with a non-empty value")
+		}
+		if _, err := recipe.ParseAccountingMode(values[0]); err != nil {
+			return nil, err
+		}
+		opts = append(opts, aicr.WithAccountingMode(values[0]))
 	}
-	if len(values) != 1 || values[0] == "" {
-		return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-			"slurmAccountingMode must be provided exactly once with a non-empty value")
+
+	tcpxoValues, tcpxoPresent := r.URL.Query()[gkeTCPXOInterfacesQueryParameter]
+	if tcpxoPresent {
+		if len(tcpxoValues) != 1 || tcpxoValues[0] == "" {
+			return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+				"gkeTcpxoInterfaces must be provided exactly once with a non-empty value")
+		}
+		if _, err := recipe.ParseGKETCPXOInterfaces(tcpxoValues[0]); err != nil {
+			return nil, err
+		}
+		opts = append(opts, aicr.WithGKETCPXOInterfaces(tcpxoValues[0]))
 	}
-	if _, err := recipe.ParseAccountingMode(values[0]); err != nil {
-		return nil, err
-	}
-	return append(opts, aicr.WithAccountingMode(values[0])), nil
+	return opts, nil
 }
