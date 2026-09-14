@@ -65,6 +65,34 @@ source "$(dirname "${BASH_SOURCE[0]}")/collect-debug.sh"
 # shellcheck source=tools/ctrf
 source "$(dirname "${BASH_SOURCE[0]}")/../../../tools/ctrf"
 
+# Snapshot CTRF helpers for phase_prep (#1806). uat_snapshot_record never
+# fails the phase: a report-write problem (unwritable cwd, full disk, jq
+# error) is logged as a workflow warning and the snapshot outcome stands.
+# uat_snapshot_on_signal is armed only while `aicr snapshot` runs: a TERM/INT
+# stops the agent, records the step as "other" (interrupted), and re-raises
+# the signal so the runner sees the same termination it would have without
+# the trap.
+UAT_SNAPSHOT_START=""
+UAT_SNAPSHOT_PID=""
+uat_snapshot_record() {
+  local status="$1" message="${2:-}"
+  ctrf_add snapshot "${status}" "$(ctrf_elapsed_ms "${UAT_SNAPSHOT_START}")" "${message}" || true
+  if ! ctrf_write snapshot-result.json; then
+    echo "::warning::failed to write snapshot-result.json; the snapshot outcome is unaffected" >&2
+  fi
+}
+uat_snapshot_on_signal() {
+  local sig="$1" num="$2"
+  trap - TERM INT
+  if [[ -n "${UAT_SNAPSHOT_PID}" ]]; then
+    kill -"${sig}" "${UAT_SNAPSHOT_PID}" 2>/dev/null || true
+  fi
+  uat_snapshot_record other "aicr snapshot interrupted by SIG${sig}"
+  # BASHPID, not $$: in a subshell $$ is still the top-level shell.
+  kill -"${sig}" "${BASHPID:-$$}"
+  exit $(( 128 + num ))
+}
+
 # Train-job knobs (overridable for local reproduction or future inference variant).
 TRAINJOB_NAMESPACE="${TRAINJOB_NAMESPACE:-kubeflow}"
 TRAINJOB_NAME="${TRAINJOB_NAME:-pytorch-mnist}"
@@ -365,23 +393,29 @@ phase_prep() {
   # generic "pod did not become ready" timeout the aicr CLI prints.
   local snapshot_ns
   snapshot_ns="$(yq '.spec.snapshot.agent.namespace // "aicr-validation"' "${config}")"
-  # Record the snapshot outcome as CTRF (snapshot-result.json) on both paths.
-  # The failure branch writes BEFORE the debug dump and exit 1 so the record
-  # exists whenever the workflow's upload step runs; the workflows upload it
-  # with if: always() and include it in the failure-debug bundle.
-  local snapshot_start snapshot_rc=0
+  # Record the snapshot outcome as CTRF (snapshot-result.json) on every path:
+  # pass, fail (written BEFORE the debug dump and exit 1), and TERM/INT while
+  # the agent runs (status "other"). The workflows upload the file with
+  # if: always() and include it in the failure-debug bundle. The agent runs
+  # as a background job under `wait` so a signal is handled at once instead
+  # of after the agent gives up on its own.
+  local snapshot_rc=0
   ctrf_init "aicr-uat"
-  snapshot_start="$(ctrf_now_ms)"
+  UAT_SNAPSHOT_START="$(ctrf_now_ms)"
   echo "::group::Snapshot live cluster"
-  "${AICR_BIN}" snapshot --config "${config}" || snapshot_rc=$?
+  trap 'uat_snapshot_on_signal TERM 15' TERM
+  trap 'uat_snapshot_on_signal INT 2' INT
+  "${AICR_BIN}" snapshot --config "${config}" &
+  UAT_SNAPSHOT_PID=$!
+  wait "${UAT_SNAPSHOT_PID}" || snapshot_rc=$?
+  UAT_SNAPSHOT_PID=""
+  trap - TERM INT
   if (( snapshot_rc == 0 )) && [[ ! -f snapshot.yaml ]]; then
     echo "aicr snapshot exited 0 but wrote no snapshot.yaml" >&2
     snapshot_rc=1
   fi
   if (( snapshot_rc != 0 )); then
-    ctrf_add snapshot failed "$(ctrf_elapsed_ms "${snapshot_start}")" \
-      "aicr snapshot --config ${config} failed (rc=${snapshot_rc})"
-    ctrf_write snapshot-result.json
+    uat_snapshot_record failed "aicr snapshot --config ${config} failed (rc=${snapshot_rc})"
     echo "::endgroup::"
     echo "::group::Snapshot failure debug"
     echo "--- nodes ---"
@@ -400,8 +434,7 @@ phase_prep() {
     echo "::endgroup::"
     exit 1
   fi
-  ctrf_add snapshot passed "$(ctrf_elapsed_ms "${snapshot_start}")"
-  ctrf_write snapshot-result.json
+  uat_snapshot_record passed
   echo "::endgroup::"
 
   echo "::group::Generate recipe"

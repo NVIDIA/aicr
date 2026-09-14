@@ -437,7 +437,10 @@ distinguishes a GitOps sync timeout from a generic failure), or `skipped`
 3-strike bail, so a truncated matrix still reports the cells it ran, and when
 cluster or `install-infra.sh` setup fails before any cell runs it holds a
 single `kwok/setup/<deployer>` entry with status `other` and the setup
-failure in its message.
+failure in its message. The report is flushed after every cell, and a TERM
+or INT while a cell runs records that cell as `other` ("interrupted") before
+the runner exits with the usual 128+signal status, so an interrupted matrix
+still reports what it completed.
 Locally the same file lands at `/tmp/kwok-debug-artifacts/kwok-results.json`
 (override with `KWOK_RESULTS_FILE`).
 

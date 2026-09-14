@@ -95,24 +95,68 @@ KWOK_RESULTS_FILE="${KWOK_RESULTS_FILE:-/tmp/kwok-debug-artifacts/kwok-results.j
 # batch mode) so the CTRF record says skipped rather than passed.
 LAST_RECIPE_SKIPPED=false
 
-# kwok_setup_finalize is the EXIT trap armed by main around cluster/context/
-# infra setup. On a non-zero exit it records the failing stage as one
-# kwok/setup/<deployer> CTRF entry with status "other" and writes the report;
-# the original exit status is preserved either way. Disarmed by main once the
-# recipe loop starts.
+# kwok_ctrf_finalize is the EXIT trap armed by main from CTRF init to the end
+# of the run, so a report exists on every exit path: a set -e abort or exit 1
+# during setup, a `return` from main, and TERM/INT (routed here through
+# kwok_on_signal). On a non-zero exit with the report not yet final it records
+# whichever unit was in flight as one CTRF entry with status "other" (setup ->
+# kwok/setup/<deployer>; a recipe -> its cell, message "interrupted") and
+# writes the report. Report-write failures are logged and never change the
+# exit status. The original exit status is preserved either way.
 KWOK_SETUP_STAGE=""
 KWOK_SETUP_START=""
-kwok_setup_finalize() {
+KWOK_ACTIVE_RECIPE=""
+KWOK_ACTIVE_START=""
+KWOK_REPORT_FINAL=false
+KWOK_SIGNAL=""
+kwok_ctrf_finalize() {
     local rc=$?
     trap - EXIT
-    if (( rc != 0 )); then
-        ctrf_add "kwok/setup/${DEPLOYER}" other "$(ctrf_elapsed_ms "${KWOK_SETUP_START}")" \
-            "KWOK ${KWOK_SETUP_STAGE} setup failed (rc=${rc})" || true
-        ctrf_write "${KWOK_RESULTS_FILE}" || true
-        log_error "CTRF setup record written to ${KWOK_RESULTS_FILE}"
+    if [[ "${KWOK_REPORT_FINAL}" != true ]]; then
+        if (( rc != 0 )); then
+            local why="rc=${rc}"
+            [[ -n "${KWOK_SIGNAL}" ]] && why="interrupted by SIG${KWOK_SIGNAL} (rc=${rc})"
+            if [[ -n "${KWOK_ACTIVE_RECIPE}" ]]; then
+                ctrf_add "kwok/${KWOK_ACTIVE_RECIPE}/${DEPLOYER}" other \
+                    "$(ctrf_elapsed_ms "${KWOK_ACTIVE_START}")" "recipe test ${why}" || true
+            elif [[ -n "${KWOK_SETUP_STAGE}" ]]; then
+                ctrf_add "kwok/setup/${DEPLOYER}" other "$(ctrf_elapsed_ms "${KWOK_SETUP_START}")" \
+                    "KWOK ${KWOK_SETUP_STAGE} setup failed (${why})" || true
+            fi
+        fi
+        kwok_ctrf_flush
     fi
     exit "${rc}"
 }
+
+# kwok_ctrf_flush writes the accumulated report. A failed write (unwritable
+# path, full disk, jq error) is a telemetry problem: it is logged and the
+# caller's status is left alone, so it can never skip cleanup or replace the
+# outcome of the run.
+kwok_ctrf_flush() {
+    if ctrf_write "${KWOK_RESULTS_FILE}"; then
+        log_info "CTRF results written to ${KWOK_RESULTS_FILE}"
+    else
+        log_error "failed to write CTRF results to ${KWOK_RESULTS_FILE}; continuing"
+    fi
+}
+
+# kwok_on_signal turns TERM/INT into an exit so kwok_ctrf_finalize runs (a
+# fatal signal would otherwise skip the EXIT trap). It stops the recipe
+# subprocess first so `wait` returns and the finalizer is not deferred until
+# the child ends on its own. Exit status is 128 + signal, as the shell would
+# have reported.
+KWOK_CHILD_PID=""
+kwok_on_signal() {
+    local sig="$1" num="$2"
+    trap - TERM INT
+    KWOK_SIGNAL="${sig}"
+    if [[ -n "${KWOK_CHILD_PID}" ]]; then
+        kill -"${sig}" "${KWOK_CHILD_PID}" 2>/dev/null || true
+    fi
+    exit $(( 128 + num ))
+}
+
 
 CLUSTER_NAME="${KWOK_CLUSTER:-aicr-kwok-test}"
 CONTEXT="kind-${CLUSTER_NAME}"
@@ -333,8 +377,14 @@ run_recipe_test() {
     # Run validation. Preserve validate-scheduling.sh's exit code so callers
     # can distinguish EXIT_ARGOCD_SYNC_TIMEOUT (50) from generic failures (1)
     # for the 3-strike rule.
+    # Background + wait (rather than a foreground child) so a TERM/INT to this
+    # script is handled at once by kwok_on_signal instead of being deferred
+    # until validate-scheduling.sh finishes on its own.
     local rc=0
-    bash "${SCRIPT_DIR}/validate-scheduling.sh" --deployer "${DEPLOYER}" "${recipe}" || rc=$?
+    bash "${SCRIPT_DIR}/validate-scheduling.sh" --deployer "${DEPLOYER}" "${recipe}" &
+    KWOK_CHILD_PID=$!
+    wait "${KWOK_CHILD_PID}" || rc=$?
+    KWOK_CHILD_PID=""
     return "$rc"
 }
 
@@ -442,7 +492,9 @@ main() {
         log_error "jq is required to write ${KWOK_RESULTS_FILE}; install it and re-run"
         return 1
     fi
-    rm -f "${KWOK_RESULTS_FILE}"   # never leave a previous run's results behind
+    # Never leave a previous run's results behind. Non-fatal: an unwritable
+    # report path is a telemetry problem and must not decide the run.
+    rm -f "${KWOK_RESULTS_FILE}" 2>/dev/null || true
     # The CTRF report starts before cluster/infra setup so a setup failure still
     # leaves a report: one kwok/setup/<deployer> entry with status "other"
     # (CTRF's "neither passed nor failed" bucket) and no per-recipe cells.
@@ -458,7 +510,9 @@ main() {
     ctrf_init "kwok-validate-scheduling"
     KWOK_SETUP_STAGE="cluster"
     KWOK_SETUP_START="$(ctrf_now_ms)"
-    trap 'kwok_setup_finalize' EXIT
+    trap 'kwok_ctrf_finalize' EXIT
+    trap 'kwok_on_signal TERM 15' TERM
+    trap 'kwok_on_signal INT 2' INT
 
     ensure_cluster
 
@@ -502,7 +556,7 @@ main() {
             return 1   # the EXIT trap writes the kwok/setup record
         fi
     fi
-    trap - EXIT   # setup complete; the recipe loop owns the report from here
+    KWOK_SETUP_STAGE=""   # setup complete; from here the active recipe is what an interruption records
 
     # 3-strike rule for Argo CD sync timeouts (ADR-008 §"Error Handling and
     # Failure Modes"). Tracks CONSECUTIVE EXIT_ARGOCD_SYNC_TIMEOUT failures.
@@ -516,7 +570,10 @@ main() {
     for recipe in ${recipes}; do
         local rc=0 recipe_start
         recipe_start="$(ctrf_now_ms)"
+        KWOK_ACTIVE_RECIPE="${recipe}"
+        KWOK_ACTIVE_START="${recipe_start}"
         run_recipe_test "${recipe}" || rc=$?
+        KWOK_ACTIVE_RECIPE=""
         if (( rc == 0 )); then
             passed+=("${recipe}")
             consecutive_sync_timeouts=0
@@ -551,8 +608,8 @@ main() {
                     log_error "Failed recipes so far:"
                     for r in "${failed[@]:-}"; do [[ -n "$r" ]] && log_error "  - ${r}"; done
                     log_error "========================================"
-                    ctrf_write "${KWOK_RESULTS_FILE}"
-                    log_info "CTRF results written to ${KWOK_RESULTS_FILE}"
+                    KWOK_REPORT_FINAL=true
+                    kwok_ctrf_flush
                     cleanup_between_tests
                     return "$EXIT_ARGOCD_SYNC_TIMEOUT"
                 fi
@@ -562,6 +619,9 @@ main() {
                 consecutive_sync_timeouts=0
             fi
         fi
+        # Flush after every cell so completed cells survive a hard kill that
+        # bypasses the traps (SIGKILL, runner teardown).
+        kwok_ctrf_flush
     done
 
     echo ""
@@ -570,8 +630,8 @@ main() {
     log_info "========================================"
     for r in "${passed[@]:-}"; do [[ -n "$r" ]] && echo -e "  ${GREEN}✓${NC} $r"; done
     for r in "${failed[@]:-}"; do [[ -n "$r" ]] && echo -e "  ${RED}✗${NC} $r"; done
-    ctrf_write "${KWOK_RESULTS_FILE}"
-    log_info "CTRF results written to ${KWOK_RESULTS_FILE}"
+    KWOK_REPORT_FINAL=true
+    kwok_ctrf_flush
 
     cleanup_between_tests
 
