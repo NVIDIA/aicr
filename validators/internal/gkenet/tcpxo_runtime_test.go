@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
@@ -266,5 +267,51 @@ func TestReadDeployedTCPXORuntimeNotFound(t *testing.T) {
 	got, err := ReadDeployedTCPXORuntime(t.Context(), dyn)
 	if err != nil || got.GetName() != TCPXORuntimeName {
 		t.Fatalf("expected deployed runtime, got %v err=%v", got, err)
+	}
+}
+
+// TestReadDeployedTCPXORuntimeAPIError pins the non-NotFound branch: an
+// apiserver fault must surface as ErrCodeInternal, never be mistaken for the
+// runtime being absent (which would file a transient error as a deployment
+// defect).
+func TestReadDeployedTCPXORuntimeAPIError(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+		ClusterTrainingRuntimeGVR: "ClusterTrainingRuntimeList",
+	})
+	dyn.PrependReactor("get", "clustertrainingruntimes", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, stderrors.New("apiserver: connection reset")
+	})
+	_, err := ReadDeployedTCPXORuntime(t.Context(), dyn)
+	if err == nil || !stderrors.Is(err, errors.New(errors.ErrCodeInternal, "")) {
+		t.Fatalf("apiserver fault must be ErrCodeInternal, got %v", err)
+	}
+	if stderrors.Is(err, errors.New(errors.ErrCodeNotFound, "")) {
+		t.Fatal("apiserver fault must not be classified as NotFound")
+	}
+}
+
+func TestNodeTemplateOfMalformedShapes(t *testing.T) {
+	tests := []struct {
+		name    string
+		obj     *unstructured.Unstructured
+		wantErr string
+	}{
+		{"no replicatedJobs", &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": TCPXORuntimeName},
+			"spec":     map[string]any{"template": map[string]any{"spec": map[string]any{}}}}},
+			"has no spec.template.spec.replicatedJobs"},
+		{"non-map entry is skipped, node job lacks pod template", &unstructured.Unstructured{Object: map[string]any{
+			"metadata": map[string]any{"name": TCPXORuntimeName},
+			"spec": map[string]any{"template": map[string]any{"spec": map[string]any{
+				"replicatedJobs": []any{"not-a-map", map[string]any{"name": TCPXONodeJob, "template": map[string]any{"spec": map[string]any{}}}}}}}}},
+			"has no template.spec.template"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NodeTemplateOf(tt.obj)
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("err = %v, want substring %q", err, tt.wantErr)
+			}
+		})
 	}
 }
