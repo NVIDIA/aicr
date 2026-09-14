@@ -1470,7 +1470,7 @@ func TestMixinOSTalos_AppliesPrivilegedNamespacesAndPreManifests(t *testing.T) {
 		},
 	}
 
-	if _, err := store.mergeMixins(&spec); err != nil {
+	if _, err := store.mergeMixins(t.Context(), &spec); err != nil {
 		t.Fatalf("mergeMixins: %v", err)
 	}
 
@@ -1580,13 +1580,16 @@ func TestMixinComponentRefSafeForMerge(t *testing.T) {
 			wantOffending: "valuesFile",
 		},
 		{
-			name: "overrides set -> conflict",
+			// mixinComponentRefSafeForMerge alone no longer flags Overrides:
+			// it is validated separately by mixinOverridesSafeForMerge
+			// (registry allowlist + collision check), see
+			// TestMixinOverridesSafeForMerge.
+			name: "overrides set alone -> safe at this layer",
 			ref: ComponentRef{
 				Name:      "gpu-operator",
 				Overrides: map[string]any{"driver": map[string]any{"enabled": false}},
 			},
-			wantSafe:      false,
-			wantOffending: "overrides",
+			wantSafe: true,
 		},
 		{
 			name: "dependencyRefs set -> conflict",
@@ -2332,6 +2335,7 @@ func TestEvaluateMixinConstraintsReturnsErrorWhenConstraintCannotBeMappedToCandi
 	}
 
 	result, err := store.evaluateMixinConstraints(
+		t.Context(),
 		&RecipeMetadataSpec{
 			Constraints: []Constraint{
 				{Name: "OS.kernel", Value: ">= 6.8"},
@@ -2386,6 +2390,7 @@ func TestEvaluateMixinConstraintsRejectsIncompleteConstraint(t *testing.T) {
 			}
 
 			_, err := store.evaluateMixinConstraints(
+				t.Context(),
 				&RecipeMetadataSpec{Constraints: []Constraint{tt.constraint}},
 				func(_ Constraint) ConstraintEvalResult {
 					return ConstraintEvalResult{

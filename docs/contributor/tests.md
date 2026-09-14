@@ -211,7 +211,10 @@ Discover them and run locally against a Kind cluster:
 
 ```bash
 make check-health COMPONENT=gpu-operator       # single component
-make check-health-all                           # all components
+make check-health-all                           # registry-linked components
+# opt-in-only checks (e.g. nvsentinel-observability) aren't in that
+# sweep -- run them directly:
+make check-health COMPONENT=nvsentinel-observability
 make validate-local RECIPE=recipe.yaml          # full pipeline
 ```
 
@@ -423,6 +426,23 @@ Start with the repo-server log (Argo CD) or source-controller log
 (Flux) for OCI-pull failures. Application-controller / kustomize-controller
 logs show reconciliation decisions and prune behavior;
 helm-controller logs surface per-`HelmRelease` install outcomes.
+
+Independently of the outcome, every `kwok-test` job also uploads
+`kwok-results-<recipe>-<deployer>-<run_id>-<attempt>` containing `kwok-results.json`,
+a [CTRF](https://ctrf.io) report written by `run-all-recipes.sh` (via the
+shared `tools/ctrf` emitter) with one test per `(recipe, deployer)` cell:
+`kwok/<recipe>/<deployer>` with status `passed`, `failed` (the message
+distinguishes a GitOps sync timeout from a generic failure), or `skipped`
+(no KWOK profile in implicit batch mode). The file is also written on the
+3-strike bail, so a truncated matrix still reports the cells it ran, and when
+cluster or `install-infra.sh` setup fails before any cell runs it holds a
+single `kwok/setup/<deployer>` entry with status `other` and the setup
+failure in its message. The report is flushed after every cell, and a TERM
+or INT while a cell runs records that cell as `other` ("interrupted") before
+the runner exits with the usual 128+signal status, so an interrupted matrix
+still reports what it completed.
+Locally the same file lands at `/tmp/kwok-debug-artifacts/kwok-results.json`
+(override with `KWOK_RESULTS_FILE`).
 
 ### Adding a New Deployer Value
 
