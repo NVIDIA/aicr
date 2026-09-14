@@ -24,9 +24,9 @@ This is a **different axis** from the per-recipe **Coverage** column in the reci
 | `bundle` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
 | `diff` | chainsaw | simulated / none | per-PR | covered | — |
 | `evidence digest` | — | — | — | not-yet-covered | — |
-| `evidence publish` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
+| `evidence publish` | chainsaw, demo | simulated / none | per-PR | covered | — |
 | `evidence sign` | — | — | — | not-yet-covered | — |
-| `evidence verify` | uat, demo | GPU (H100, real) | nightly | covered | — |
+| `evidence verify` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
 | `mirror list` | — | — | — | not-yet-covered | — |
 | `query` | chainsaw, demo | simulated / none | per-PR | covered | — |
 | `recipe` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
