@@ -455,3 +455,58 @@ func TestRecipeHandlers_AllowHeaderNamesHead(t *testing.T) {
 		})
 	}
 }
+
+// TestHandleRecipes_GKETCPXOInterfaces covers the query-parameter surface for
+// the required TCPXO mapping: accepted and recorded when supplied on the
+// fingerprint family, fail-closed when omitted there, rejected when repeated.
+func TestHandleRecipes_GKETCPXOInterfaces(t *testing.T) {
+	h := newTestHandler(t, nil)
+
+	const fingerprint = "/v1/recipe?service=gke&accelerator=h100&os=cos&intent=training&platform=kubeflow"
+	mapping := "eth1=gpu-nic-0,eth2=gpu-nic-1,eth3=gpu-nic-2,eth4=gpu-nic-3," +
+		"eth5=gpu-nic-4,eth6=gpu-nic-5,eth7=gpu-nic-6,eth8=gpu-nic-7"
+
+	t.Run("accepted and recorded", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, fingerprint+"&gkeTcpxoInterfaces="+mapping, nil)
+		w := httptest.NewRecorder()
+		h.HandleRecipes(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body: %s", w.Code, w.Body.String())
+		}
+		var got recipe.RecipeResult
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatalf("decode recipe result: %v", err)
+		}
+		if _, present := got.GKETCPXOInterfaces(); !present {
+			t.Fatal("response records no configuration.gke.tcpxoInterfaces")
+		}
+	})
+
+	t.Run("omitted fails closed", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, fingerprint, nil)
+		w := httptest.NewRecorder()
+		h.HandleRecipes(w, req)
+		if w.Code == http.StatusOK {
+			t.Fatalf("status = 200 without the mapping, want an error; body: %s", w.Body.String())
+		}
+	})
+
+	t.Run("repeated parameter rejected", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet,
+			fingerprint+"&gkeTcpxoInterfaces="+mapping+"&gkeTcpxoInterfaces="+mapping, nil)
+		w := httptest.NewRecorder()
+		h.HandleRecipes(w, req)
+		if w.Code == http.StatusOK {
+			t.Fatal("status = 200 with a repeated parameter, want 400")
+		}
+	})
+
+	t.Run("malformed mapping rejected", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, fingerprint+"&gkeTcpxoInterfaces=eth1=only-one", nil)
+		w := httptest.NewRecorder()
+		h.HandleRecipes(w, req)
+		if w.Code == http.StatusOK {
+			t.Fatal("status = 200 with a one-entry mapping, want 400")
+		}
+	})
+}

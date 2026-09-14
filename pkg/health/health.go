@@ -202,6 +202,11 @@ func Compute(ctx context.Context, opts Options) (*Report, error) {
 		Filter:   opts.Filter,
 
 		RetainNonLeaf: opts.RetainNonLeaf,
+		// No BuildOptionsForCriteria hook: the embedded TCPXO leaf fails closed
+		// without its required mapping and ResolveLeaves retries it with the fixed
+		// introspection value (content-driven). Forcing the mapping by criteria
+		// here would wrongly fire on --data catalogs whose gke/h100/kubeflow leaf
+		// omits the runtime.
 	})
 	if err != nil {
 		return nil, errors.PropagateOrWrap(err,
