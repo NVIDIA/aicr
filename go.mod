@@ -23,7 +23,7 @@ require (
 	github.com/sigstore/sigstore-go v1.3.0
 	github.com/sigstore/sigstore/pkg/signature/kms/aws v1.10.10
 	github.com/sigstore/sigstore/pkg/signature/kms/azure v1.10.9
-	github.com/sigstore/sigstore/pkg/signature/kms/gcp v1.10.9
+	github.com/sigstore/sigstore/pkg/signature/kms/gcp v1.10.10
 	github.com/sigstore/sigstore/pkg/signature/kms/hashivault v1.10.9
 	github.com/stretchr/testify v1.12.1
 	github.com/theupdateframework/go-tuf/v2 v2.4.2
@@ -33,7 +33,7 @@ require (
 	golang.org/x/mod v0.41.0
 	golang.org/x/sync v0.23.0
 	golang.org/x/sys v0.48.0
-	golang.org/x/term v0.45.0
+	golang.org/x/term v0.46.0
 	golang.org/x/time v0.16.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
