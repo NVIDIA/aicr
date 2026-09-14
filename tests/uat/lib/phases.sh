@@ -85,7 +85,7 @@ uat_snapshot_on_signal() {
   local sig="$1" num="$2"
   trap - TERM INT
   if [[ -n "${UAT_SNAPSHOT_PID}" ]]; then
-    kill -"${sig}" "${UAT_SNAPSHOT_PID}" 2>/dev/null || true
+    kill -"${sig}" -- "-${UAT_SNAPSHOT_PID}" 2>/dev/null || kill -"${sig}" "${UAT_SNAPSHOT_PID}" 2>/dev/null || true
   fi
   uat_snapshot_record other "aicr snapshot interrupted by SIG${sig}"
   # BASHPID, not $$: in a subshell $$ is still the top-level shell.
@@ -405,8 +405,12 @@ phase_prep() {
   echo "::group::Snapshot live cluster"
   trap 'uat_snapshot_on_signal TERM 15' TERM
   trap 'uat_snapshot_on_signal INT 2' INT
+  # set -m for the launch only: the agent gets its own process group so an
+  # interruption can stop its whole tree, not just the wrapper.
+  set -m
   "${AICR_BIN}" snapshot --config "${config}" &
   UAT_SNAPSHOT_PID=$!
+  set +m
   wait "${UAT_SNAPSHOT_PID}" || snapshot_rc=$?
   UAT_SNAPSHOT_PID=""
   trap - TERM INT

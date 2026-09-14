@@ -52,7 +52,7 @@ case "$1" in
             pass) : > snapshot.yaml; exit 0 ;;
             fail) echo "stub: agent pod never became ready" >&2; exit 3 ;;
             nofile) exit 0 ;;
-            hang) touch "${AICR_STUB_STARTED:?}"; sleep 300 ;;
+            hang) touch "${AICR_STUB_STARTED:?}"; sleep 2149 ;;   # unusual duration so the test can find this exact process
         esac ;;
     recipe) exit 7 ;;
     *) exit 0 ;;
@@ -119,10 +119,12 @@ else
     kill -TERM "${phase_pid:-${prep_pid}}"
     rc=0; wait "${prep_pid}" || rc=$?
     [[ "${rc}" == 143 ]] && pass "interrupted snapshot terminates with 143" || fail "interrupted snapshot: want rc 143, got ${rc}"
+    sleep 1
+    if pgrep -f "sleep 2149" >/dev/null 2>&1; then fail "interrupted snapshot left the agent's child process running"; else pass "interrupted snapshot stops the agent's process tree"; fi
     record_ok "${d}" '.results.summary.other == 1 and (.results.tests[0].message | test("interrupted by SIGTERM"))' \
         && pass "interrupted snapshot records other" || fail "interrupted snapshot record wrong: $(cat "${d}/snapshot-result.json" 2>/dev/null)"
 fi
-pkill -f "${STUB_BIN}/aicr snapshot" 2>/dev/null || true
+pkill -f "sleep 2149" 2>/dev/null || true   # belt and braces if the assertion above failed
 
 # --- unwritable report ---------------------------------------------------
 d="${WORK}/unwritable"; mkdir -p "${d}/snapshot-result.json"   # a directory blocks the write

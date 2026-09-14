@@ -152,7 +152,9 @@ kwok_on_signal() {
     trap - TERM INT
     KWOK_SIGNAL="${sig}"
     if [[ -n "${KWOK_CHILD_PID}" ]]; then
-        kill -"${sig}" "${KWOK_CHILD_PID}" 2>/dev/null || true
+        # The child was started in its own process group (set -m); signal the
+        # group so its descendants stop too, falling back to the pid alone.
+        kill -"${sig}" -- "-${KWOK_CHILD_PID}" 2>/dev/null || kill -"${sig}" "${KWOK_CHILD_PID}" 2>/dev/null || true
     fi
     exit $(( 128 + num ))
 }
@@ -380,9 +382,15 @@ run_recipe_test() {
     # Background + wait (rather than a foreground child) so a TERM/INT to this
     # script is handled at once by kwok_on_signal instead of being deferred
     # until validate-scheduling.sh finishes on its own.
+    # `set -m` for the launch only: with job control on, the background job
+    # gets its own process group, so kwok_on_signal can signal the whole tree
+    # (validate-scheduling.sh and everything it spawned) as -<pid>, not just
+    # the wrapper shell.
     local rc=0
+    set -m
     bash "${SCRIPT_DIR}/validate-scheduling.sh" --deployer "${DEPLOYER}" "${recipe}" &
     KWOK_CHILD_PID=$!
+    set +m
     wait "${KWOK_CHILD_PID}" || rc=$?
     KWOK_CHILD_PID=""
     return "$rc"

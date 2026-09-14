@@ -338,7 +338,7 @@ if command -v jq >/dev/null 2>&1; then
     cat > "${KWOK_COPY}/scripts/validate-scheduling.sh" <<'STUB'
 #!/usr/bin/env bash
 touch "${KWOK_STUB_STARTED:?}"
-sleep 300
+sleep 2147   # unusual duration so the test can find this exact process
 STUB
     chmod +x "${KWOK_COPY}/scripts/apply-nodes.sh" "${KWOK_COPY}/scripts/validate-scheduling.sh"
     cat > "${STUB_BIN}/kind" <<'STUB'
@@ -364,6 +364,13 @@ STUB
         kill -TERM "${runner_pid}"
         rc=0; wait "${runner_pid}" || rc=$?
         check "interrupted-cell-exits-143" eq 143 "${rc}"
+        sleep 1
+        ran=$((ran + 1))
+        if pgrep -f "sleep 2147" >/dev/null 2>&1; then
+            echo "FAIL: interrupted-cell-stops-child-process-tree (stub's sleep survived the signal)"; fails=$((fails + 1))
+        else
+            echo "PASS: interrupted-cell-stops-child-process-tree"
+        fi
         ran=$((ran + 1))
         if jq -e '.results.summary.tests == 1 and .results.summary.other == 1
                   and .results.tests[0].name == "kwok/gb200-eks-training/helm"
@@ -373,7 +380,7 @@ STUB
             echo "FAIL: interrupted-cell-writes-other-record"; cat "${INT_RESULTS}" 2>/dev/null; fails=$((fails + 1))
         fi
     fi
-    pkill -f "${KWOK_COPY}/scripts/validate-scheduling.sh" 2>/dev/null || true
+    pkill -f "sleep 2147" 2>/dev/null || true   # belt and braces if the assertion above failed
 
     # Unwritable report path: /dev/null is a file, so mkdir -p of the parent
     # fails inside ctrf_write. The kind-create failure (exit 42) must still be
