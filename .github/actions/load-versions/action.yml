@@ -198,13 +198,19 @@ runs:
 
         # Linting
         echo "golangci_lint=$(yq eval '.linting.golangci_lint' .settings.yaml)" >> $GITHUB_OUTPUT
-        echo "apidiff=$(go_mod_required_version golang.org/x/exp go.mod)" >> $GITHUB_OUTPUT
+        # Assigned first so `set -e` sees the lookup's exit status: inside an
+        # `echo` argument a failure is invisible, and an empty apidiff output
+        # makes the go-test action skip the SDK API compatibility check rather
+        # than fail.
+        apidiff_version="$(go_mod_required_version golang.org/x/exp go.mod)"
+        echo "apidiff=${apidiff_version}" >> $GITHUB_OUTPUT
         echo "oasdiff=$(yq eval '.linting.oasdiff' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "oasdiff_sha256_linux_amd64=$(yq eval '.linting.oasdiff_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "yamllint=$(yq eval '.linting.yamllint' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "addlicense=$(yq eval '.linting.addlicense' .settings.yaml)" >> $GITHUB_OUTPUT
         echo "addlicense_sha256_linux_amd64=$(yq eval '.linting.addlicense_sha256_linux_amd64' .settings.yaml)" >> $GITHUB_OUTPUT
-        echo "go_licenses=$(go_mod_required_version github.com/google/go-licenses/v2 go.mod)" >> $GITHUB_OUTPUT
+        go_licenses_version="$(go_mod_required_version github.com/google/go-licenses/v2 go.mod)"
+        echo "go_licenses=${go_licenses_version}" >> $GITHUB_OUTPUT
 
         # Security tools
         echo "grype=$(yq eval '.security_tools.grype' .settings.yaml)" >> $GITHUB_OUTPUT

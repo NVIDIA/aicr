@@ -223,6 +223,30 @@ check_helper() {
     fi
 }
 
+# go_mod_required_version underpins every reader of the module-built tool pins,
+# so the shapes it must refuse matter as much as the one it must find: `exclude`
+# and `replace` lines carry a version the build never uses.
+check_gomod_version() {
+    local name="$1"
+    local fixture="$2"
+    local want_rc="$3"
+    local want_output="$4"
+    local path="${STUB_DIR}/gomod-${name}.mod"
+    local output
+    local rc
+
+    # %b so the \t in the fixtures becomes a real tab, which is how the go
+    # tooling indents require blocks.
+    printf '%b' "${fixture}" >"${path}"
+    output=$(go_mod_required_version golang.org/x/exp "${path}")
+    rc=$?
+    if [[ "${rc}" == "${want_rc}" && "${output}" == "${want_output}" ]]; then
+        pass "${name}"
+    else
+        fail "${name}" "want rc=${want_rc} output='${want_output}', got rc=${rc} output='${output}'"
+    fi
+}
+
 check_tools_row() {
     local name="$1"
     local tool_name="$2"
@@ -273,6 +297,58 @@ check_helper "extracts-exact-module-version" correct 0 \
 check_helper "extracts-mismatched-module-version" mismatch 0 \
     "${APIDIFF_MISMATCH_VERSION}"
 check_helper "rejects-unreadable-build-metadata" unreadable 1 ""
+
+check_gomod_version "reads-block-require" \
+    'module m
+
+go 1.26
+
+require (
+	golang.org/x/exp v1.1.1 // indirect
+)
+' 0 v1.1.1
+check_gomod_version "reads-single-line-require" \
+    'module m
+
+go 1.26
+
+require golang.org/x/exp v1.2.2
+' 0 v1.2.2
+check_gomod_version "ignores-exclude-block" \
+    'module m
+
+go 1.26
+
+exclude (
+	golang.org/x/exp v9.9.9
+)
+
+require (
+	golang.org/x/exp v1.3.3 // indirect
+)
+' 0 v1.3.3
+check_gomod_version "ignores-replace-left-hand-side" \
+    'module m
+
+go 1.26
+
+replace (
+	golang.org/x/exp v9.9.9 => ./fork
+)
+
+require (
+	golang.org/x/exp v1.4.4 // indirect
+)
+' 0 v1.4.4
+check_gomod_version "fails-when-module-is-absent" \
+    'module m
+
+go 1.26
+
+require (
+	golang.org/x/tools v1.5.5 // indirect
+)
+' 1 ""
 
 check_tools_row "accepts-exact-apidiff" apidiff correct 0 \
     "${APIDIFF_PINNED_VERSION}|${APIDIFF_PINNED_VERSION}|✓"
