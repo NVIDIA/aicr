@@ -147,16 +147,29 @@ Created once per run via Server-Side Apply, cleaned up at end.
 
 Four timeout layers protect against hangs. The first three are ordered so the
 check's own budget is the tightest — the ordering that closes issue #2473 (see
-below). Clocks 1 and 3 start at different moments, so that ordering is not
-unconditional: clock 1 begins when the validator container's first instruction
-runs, while clock 3 begins at the Job's start time. Container startup —
-scheduling plus image pull — therefore eats into the headroom, and a startup
+below). The three clocks do not all start at the same moment, and two of those
+offsets have put clock 3 ahead of an inner clock; only the first is still live.
+
+Container startup is the live one. Clock 1 begins when the validator
+container's first instruction runs, while clock 3 begins at the Job's start
+time, so scheduling plus image pull eats into the headroom, and a startup
 slower than `defaults.ValidatorJobDeadlineHeadroom` lets clock 3 fire first.
 Kubernetes then marks the Job `Failed/DeadlineExceeded` and deletes the still-active
 pod, which is the pre-#2473 behaviour: the phase still fails closed, but the
-check's own diagnosis is lost. The headroom is sized as
-`defaults.K8sPodReadyTimeout` plus margin to cover ordinary startup; it is a
-budget, not a guarantee.
+check's own diagnosis is lost. No offset applied to clock 2 removes this path,
+because the check's context cannot start before its container does. The
+headroom is sized as `defaults.K8sPodReadyTimeout` plus margin to cover
+ordinary startup; it is a budget, not a guarantee.
+
+A slow create/apply response delays clock 2's start alone. Past
+`defaults.ValidatorWaitBuffer` of delay the rebased wait would go negative and
+`defaults.ValidatorMinCompletionWait` floors it, and a floor measured from that
+late a start used to run past clock 3 — the same lost-verdict outcome, reached
+by the other route. `v1.OrchestratorWaitFor` now bounds every result, floor
+included, at `defaults.ValidatorPreDeadlineMargin` short of clock 3 computed
+from the same start time, so a late response costs the wait its length rather
+than its ordering. Once clock 3 has already fired, the wait is only there to
+read the terminal Job the controller left behind.
 
 1. **Check budget** (catalog `timeout`, published as `AICR_CHECK_TIMEOUT`): the
    validator's own parent context. A well-behaved check cancels and exits on
@@ -173,8 +186,10 @@ budget, not a guarantee.
    been running for however long the apply response took: a response slower than
    that lets clock 3 fire first and delete the still-active pod. `v1.OrchestratorWaitFor`
    carries the derivation; it caps the result at the un-rebased budget (apiserver
-   clock skew can place the start time in the CLI's future) and floors it at
-   `defaults.ValidatorMinCompletionWait`.
+   clock skew can place the start time in the CLI's future), floors it at
+   `defaults.ValidatorMinCompletionWait`, and holds every result
+   `defaults.ValidatorPreDeadlineMargin` short of clock 3 below, measured from
+   that same start time.
 
 3. **Job `activeDeadlineSeconds`** (catalog timeout + `defaults.ValidatorJobDeadlineHeadroom`,
    3m30s): K8s sends SIGTERM, then SIGKILL after `terminationGracePeriodSeconds` (30s),
