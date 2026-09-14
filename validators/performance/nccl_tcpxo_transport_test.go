@@ -27,14 +27,16 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-// workerLabels are the JobSet labels the watcher selects on, plus the job
-// index the per-slot accounting keys on. The test pods must carry them or the
-// watcher never sees them — as with the real JobSet.
+// workerLabels are the JobSet labels the watcher selects on, plus the
+// completion index the per-slot accounting keys on. The node job is one replica
+// with parallelism=numNodes, so job-index is always "0" and workers differ by
+// job-completion-index — the fixture must match the real JobSet labels.
 func workerLabels(index int) map[string]string {
 	return map[string]string{
 		"jobset.sigs.k8s.io/jobset-name":        "nccl-all-reduce-tj",
 		"jobset.sigs.k8s.io/replicatedjob-name": "node",
-		"jobset.sigs.k8s.io/job-index":          strconv.Itoa(index),
+		"jobset.sigs.k8s.io/job-index":          "0",
+		"batch.kubernetes.io/job-completion-index": strconv.Itoa(index),
 	}
 }
 

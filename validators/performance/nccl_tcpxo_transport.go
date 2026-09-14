@@ -48,6 +48,11 @@ const (
 	// gkeTCXOExpectedEntries is eth0 (default) plus eth1..eth8 (GPU NICs) on
 	// the a3-megagpu-8g shape this assertion covers.
 	gkeTCXOExpectedEntries = 9
+
+	// gkeTCXOWorkerIndexLabel distinguishes the benchmark's worker pods. The
+	// node job runs as a single replica with parallelism=numNodes, so
+	// jobset job-index is always "0"; the completion index carries 0..N-1.
+	gkeTCXOWorkerIndexLabel = "batch.kubernetes.io/job-completion-index"
 )
 
 // tcpxoWorkerRecord accumulates what the watcher has seen of one worker pod.
@@ -245,7 +250,11 @@ func (w *tcpxoWorkerWatcher) record(pod *v1.Pod) {
 	if tcpxoDaemonStarted(pod) {
 		rec.daemonStarted = true
 	}
-	if idx := pod.Labels["jobset.sigs.k8s.io/job-index"]; idx != "" {
+	// Key the per-worker slot on the job-completion-index, NOT the JobSet
+	// job-index: Trainer v2.2.0 runs the node job as one replica with
+	// parallelism=numNodes, so every worker carries job-index=0 and only the
+	// completion index distinguishes worker 0..N-1.
+	if idx := pod.Labels[gkeTCXOWorkerIndexLabel]; idx != "" {
 		rec.jobIndex = idx
 	}
 }
@@ -260,7 +269,7 @@ func (w *tcpxoWorkerWatcher) record(pod *v1.Pod) {
 // list position.
 func validateTCPXOWorkerWiring(pod *v1.Pod) error {
 	if !podHasTCXODaemon(pod) {
-		return fmt.Errorf("pod %q has no %s sidecar", pod.Name, gkeTCXODaemonContainer)
+		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf("pod %q has no %s sidecar", pod.Name, gkeTCXODaemonContainer))
 	}
 	return checkTCXOAnnotations(pod)
 }
@@ -302,52 +311,52 @@ type gkeTCXOInterfaceEntry struct {
 // with distinct networks — the a3-megagpu-8g contract the runtime records.
 func checkTCXOAnnotations(pod *v1.Pod) error {
 	if pod.Annotations[gkeTCXODefaultAnnotation] != "eth0" {
-		return fmt.Errorf("pod %q: %s annotation is %q, want eth0",
-			pod.Name, gkeTCXODefaultAnnotation, pod.Annotations[gkeTCXODefaultAnnotation])
+		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf("pod %q: %s annotation is %q, want eth0",
+			pod.Name, gkeTCXODefaultAnnotation, pod.Annotations[gkeTCXODefaultAnnotation]))
 	}
 	raw := pod.Annotations[gkeTCXOInterfacesAnnotation]
 	if raw == "" {
-		return fmt.Errorf("pod %q: missing %s annotation", pod.Name, gkeTCXOInterfacesAnnotation)
+		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf("pod %q: missing %s annotation", pod.Name, gkeTCXOInterfacesAnnotation))
 	}
 	var entries []gkeTCXOInterfaceEntry
 	if err := json.Unmarshal([]byte(raw), &entries); err != nil {
-		return fmt.Errorf("pod %q: %s annotation is not valid JSON: %w",
-			pod.Name, gkeTCXOInterfacesAnnotation, err)
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, fmt.Sprintf("pod %q: %s annotation is not valid JSON",
+			pod.Name, gkeTCXOInterfacesAnnotation), err)
 	}
 	if len(entries) != gkeTCXOExpectedEntries {
-		return fmt.Errorf("pod %q: %s annotation has %d entries, want %d (eth0 default + eth1..eth8 GPU NICs)",
-			pod.Name, gkeTCXOInterfacesAnnotation, len(entries), gkeTCXOExpectedEntries)
+		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf("pod %q: %s annotation has %d entries, want %d (eth0 default + eth1..eth8 GPU NICs)",
+			pod.Name, gkeTCXOInterfacesAnnotation, len(entries), gkeTCXOExpectedEntries))
 	}
 	if entries[0].InterfaceName != "eth0" || entries[0].Network != gkeTCXODefaultNetwork {
-		return fmt.Errorf("pod %q: %s first entry = %s→%s, want eth0→default",
-			pod.Name, gkeTCXOInterfacesAnnotation, entries[0].InterfaceName, entries[0].Network)
+		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf("pod %q: %s first entry = %s→%s, want eth0→default",
+			pod.Name, gkeTCXOInterfacesAnnotation, entries[0].InterfaceName, entries[0].Network))
 	}
 	seenInterfaces := make(map[string]struct{}, gkeTCXOExpectedEntries-1)
 	seenNetworks := make(map[string]struct{}, gkeTCXOExpectedEntries-1)
 	for _, entry := range entries[1:] {
 		if !recipe.IsGKETCPXOInterfaceName(entry.InterfaceName) {
-			return fmt.Errorf("pod %q: %s entry has interface %q, want eth1..eth8 — "+
+			return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf("pod %q: %s entry has interface %q, want eth1..eth8 — "+
 				"a wrong interface name lands traffic on the wrong NIC",
-				pod.Name, gkeTCXOInterfacesAnnotation, entry.InterfaceName)
+				pod.Name, gkeTCXOInterfacesAnnotation, entry.InterfaceName))
 		}
 		if _, dup := seenInterfaces[entry.InterfaceName]; dup {
-			return fmt.Errorf("pod %q: %s repeats interface %q",
-				pod.Name, gkeTCXOInterfacesAnnotation, entry.InterfaceName)
+			return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf("pod %q: %s repeats interface %q",
+				pod.Name, gkeTCXOInterfacesAnnotation, entry.InterfaceName))
 		}
 		seenInterfaces[entry.InterfaceName] = struct{}{}
 		if entry.Network == gkeTCXODefaultNetwork {
-			return fmt.Errorf("pod %q: %s maps secondary interface %q to reserved network %q — eth0 already uses it; a secondary must name a distinct GPU NIC network",
-				pod.Name, gkeTCXOInterfacesAnnotation, entry.InterfaceName, entry.Network)
+			return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf("pod %q: %s maps secondary interface %q to reserved network %q — eth0 already uses it; a secondary must name a distinct GPU NIC network",
+				pod.Name, gkeTCXOInterfacesAnnotation, entry.InterfaceName, entry.Network))
 		}
 		if _, dup := seenNetworks[entry.Network]; dup {
-			return fmt.Errorf("pod %q: %s maps two interfaces to network %q",
-				pod.Name, gkeTCXOInterfacesAnnotation, entry.Network)
+			return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf("pod %q: %s maps two interfaces to network %q",
+				pod.Name, gkeTCXOInterfacesAnnotation, entry.Network))
 		}
 		seenNetworks[entry.Network] = struct{}{}
 	}
 	if len(seenInterfaces) != gkeTCXOExpectedEntries-1 {
-		return fmt.Errorf("pod %q: %s covers %d secondary interfaces, want eth1..eth8",
-			pod.Name, gkeTCXOInterfacesAnnotation, len(seenInterfaces))
+		return aicrErrors.New(aicrErrors.ErrCodeInternal, fmt.Sprintf("pod %q: %s covers %d secondary interfaces, want eth1..eth8",
+			pod.Name, gkeTCXOInterfacesAnnotation, len(seenInterfaces)))
 	}
 	return nil
 }
