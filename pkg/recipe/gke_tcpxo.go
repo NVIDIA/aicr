@@ -49,6 +49,11 @@ const (
 	// GKETCPXOInterfacesOverrideKey is the ComponentRef.Overrides key under which
 	// recipe generation records the normalized eth1..eth8 -> network mapping.
 	GKETCPXOInterfacesOverrideKey = gkeTCPXOInterfacesValueKey
+	// GKETCPXORuntimeManifest is the manifestFiles entry whose presence on the
+	// kubeflow-trainer componentRef means the recipe SHIPS the TCPXO runtime
+	// (see ShipsGKETCPXORuntime). Validators combine it with the override above
+	// to decide delivery: a mapping without the manifest describes nothing.
+	GKETCPXORuntimeManifest = gkeTCPXORuntimeManifest
 )
 
 // Device-type Network names are limited by GKE's UNIX socket path length.

@@ -378,10 +378,13 @@ lines too; they still feed `--full` and live `aicr validate` output.
 codes only (`"2"`, `"no-schedulable-gpu-nodes"`) — never node names, IPs, or hostnames.
 `pkg/evidence/redact`'s `ctrfExtraAllowlist` enforces this at the **publication
 boundary** (not just at emission, which raw prefixed stdout could bypass) with a
-fail-closed **key _and_ value** check: only the listed keys (`nodesValidated`, `nodesTotal`, `skipReason`, `runtimeSource`, `shippedRuntimeDigest`, `derivedRuntimeDigest`) survive, and only when the value matches the key's shape: a bare decimal count for `nodesValidated`/`nodesTotal`, a closed-set code for `skipReason` and for `runtimeSource` (`delivered-artifact` | `recipe-supplied-runtime` | `cluster-capability`), and a lowercase 64-character sha256 hex digest for the two `*RuntimeDigest` keys survive, and each surviving value must pass its key's
+fail-closed **key _and_ value** check: only the listed keys (`nodesValidated`,
+`nodesTotal`, `skipReason`, `runtimeSource`) survive, and each surviving value must pass its key's
 validator — a non-negative decimal count for the `nodes*` keys, and for
 `skipReason` a **closed set** of known codes (`ctrfSkipReasons`, currently
-`no-gpu-nodes`, `no-schedulable-gpu-nodes`, `nodes-busy`). A closed set rather
+`no-gpu-nodes`, `no-schedulable-gpu-nodes`, `nodes-busy`), and for
+`runtimeSource` the closed set `delivered-artifact` | `recipe-supplied-runtime`
+| `cluster-capability` (`ctrfRuntimeSources`). A closed set rather
 than a shape regex is deliberate: a kebab-case regex would still pass an
 arbitrary low-cardinality identifier like `customer-prod-cluster`. A value that
 is ill-shaped or unlisted (an IP under `nodesTotal`, a hostname or unminted code
@@ -406,8 +409,10 @@ bandwidth floor; provenance is a separate, closed-set label (#2297):
 
 The class is decided from the **recipe**, never from what happens to be
 installed: a leaf is `delivered-artifact` only when its enabled
-`kubeflow-trainer` componentRef records a `tcpxoInterfaces` override
-(`validators/internal/gkenet.FabricRuntimeDelivered`). Today that is
+`kubeflow-trainer` componentRef both lists the `torch-distributed-tcpxo`
+runtime manifest and records a `tcpxoInterfaces` override
+(`validators/internal/gkenet.FabricRuntimeDelivered` — a mapping without the
+artifact describes nothing). Today that is
 `h100-gke-cos-training-kubeflow` alone — the other kubeflow leaves declare the
 Trainer but ship no fabric runtime, and are `cluster-capability`. A
 recipe-supplied runtime combined with a delivered one is rejected; the benchmark
@@ -426,13 +431,26 @@ else, and a baseline precondition fails it if the shipped worker sets its own
 `command`/`args` or lacks the NCCL fabric env — the two ways a fabric change
 could hide under an overridden path.
 
-Evidence carrier: `shippedRuntimeDigest` / `derivedRuntimeDigest` (sha256 of the
-normalized worker templates) ride `Extra` and survive minimal redaction; the
-per-path override diff is printed to stdout and therefore ships only in `--full`
-bundles, since templates can name cluster-specific networks. The deployment
-check `gke-gpu-nic-networks` runs the same recipe → deployed → cluster arms,
-gated on the same predicate, so a base `h100-gke-cos-training` recipe (TCPXO,
-no runtime) keeps its census-only behaviour.
+The measurement runs under the **shipped** environment. The derived worker's
+bootstrap exports the container's own `NCCL_*`/`CUDA_*`/`LD_LIBRARY_PATH` to
+the ssh sessions mpirun opens instead of re-sourcing the host
+`nccl-env-profile.sh` the capability fixture uses, and the launcher's
+`-x NCCL_*`/`-x CUDA_*`/`-x LD_LIBRARY_PATH=` tuning exports are stripped
+(`NCCL_DEBUG` is kept — log volume, not wiring). The object that is applied is
+derived at apply time from the skeleton rendered with the run's real template
+data, so placeholder types survive (`containers[].args` stay strings, which
+Trainer's structural CRD requires; `numProcPerNode` stays an integer).
+
+Evidence carrier: `runtimeSource` rides `Extra` and survives minimal redaction.
+The audit record — sha256 of the normalized shipped and applied worker
+templates, the paths at which they differ (benchmark overrides plus stamped
+scheduling), and the inventory of shipped paths inherited unchanged — is
+computed against the object as applied and printed to stdout, so it ships only
+in `--full` bundles, since template paths can name cluster-specific mounts and
+env. The deployment check `gke-gpu-nic-networks` runs the same recipe →
+deployed → cluster arms, gated on the same predicate, so a base
+`h100-gke-cos-training` recipe (TCPXO, no runtime) keeps its census-only
+behaviour.
 
 **Mounted data:** `/data/snapshot/snapshot.yaml`, `/data/validation/validation.yaml`
 (override via `AICR_SNAPSHOT_PATH`, `AICR_VALIDATION_PATH`).

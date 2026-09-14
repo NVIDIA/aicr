@@ -309,7 +309,8 @@ func deliveredContext(client *dynamicfake.FakeDynamicClient, recorded []recipe.N
 	return &validators.Context{Ctx: context.Background(), DynamicClient: client,
 		ValidationInput: &v1.ValidationInput{ComponentRefs: []recipe.ComponentRef{
 			{Name: tcpxoComponent},
-			{Name: recipe.KubeflowTrainerComponentName, Overrides: map[string]any{recipe.GKETCPXOInterfacesOverrideKey: raw}},
+			{Name: recipe.KubeflowTrainerComponentName, ManifestFiles: []string{recipe.GKETCPXORuntimeManifest},
+				Overrides: map[string]any{recipe.GKETCPXOInterfacesOverrideKey: raw}},
 		}}}
 }
 

@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -71,20 +72,28 @@ var ClusterTrainingRuntimeGVR = schema.GroupVersionResource{
 // FabricRuntimeDelivered reports whether the recipe ships a fabric-wired runtime,
 // and returns the eth1..eth8 -> network mapping it recorded for it.
 //
-// It is answered from the recipe alone — the enabled kubeflow-trainer
-// componentRef carrying a tcpxoInterfaces override — never from finding a live
-// runtime, because a stray runtime must not change who owns the evidence
-// (#2297). Declaring kubeflow-trainer is NOT sufficient: the platform-kubeflow
-// mixin ships only torch-distributed, so every kubeflow leaf except
-// h100-gke-cos-training-kubeflow returns (nil, false, nil) here. A recorded
-// override that fails to normalize is an error, not "not delivered": the recipe
-// claims a runtime it cannot describe, and silently downgrading that to the
-// capability-fixture path would hide exactly the divergence this exists to catch.
+// It is answered from the recipe alone and needs BOTH halves #2297 names: the
+// enabled kubeflow-trainer componentRef must declare the TCPXO runtime manifest
+// (the same test recipe.ShipsGKETCPXORuntime applies — a mapping without the
+// artifact describes nothing) AND carry the typed tcpxoInterfaces override. It
+// is never answered from finding a live runtime, because a stray runtime must
+// not change who owns the evidence. Declaring kubeflow-trainer is NOT
+// sufficient: the platform-kubeflow mixin ships only torch-distributed, so
+// every kubeflow leaf except h100-gke-cos-training-kubeflow returns
+// (nil, false, nil). A recorded override that fails to normalize is an error,
+// not "not delivered": the recipe claims a runtime it cannot describe, and
+// silently downgrading that to the capability-fixture path would hide exactly
+// the divergence this exists to catch.
 func FabricRuntimeDelivered(refs []recipe.ComponentRef) ([]recipe.NetworkInterfaceMapping, bool, error) {
 	for i := range refs {
 		ref := &refs[i]
 		if ref.Name != recipe.KubeflowTrainerComponentName || !ref.IsEnabled() {
 			continue
+		}
+		if !slices.Contains(ref.ManifestFiles, recipe.GKETCPXORuntimeManifest) {
+			// Overrides without the runtime manifest (an external --data recipe
+			// that copied the mapping but not the artifact) do not ship anything.
+			return nil, false, nil
 		}
 		raw, ok := ref.Overrides[recipe.GKETCPXOInterfacesOverrideKey]
 		if !ok {

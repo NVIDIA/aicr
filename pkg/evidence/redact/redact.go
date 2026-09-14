@@ -73,7 +73,11 @@ const (
 	// v2 added the per-test CTRF Extra allowlist (ctrfExtraAllowlist):
 	// allowlisted structured keys whose values match the key's canonical shape
 	// (count / enum code) now survive minimal redaction.
-	PolicyVersion = "v2"
+	// v3 (#2297): the per-test Extra allowlist admits the NCCL runtime-
+	// provenance key runtimeSource (closed set). Nothing previously published
+	// changed shape; verifiers on v2 will see a key they do not expect, which
+	// is exactly why the version moves.
+	PolicyVersion = "v3"
 )
 
 // headerMetadataAllowlist is the fail-closed set of snapshot header metadata
@@ -214,16 +218,6 @@ var ctrfRuntimeSources = map[string]struct{}{
 
 func isRuntimeSource(v string) bool { _, ok := ctrfRuntimeSources[v]; return ok }
 
-// ctrfSHA256Value matches a bare lowercase sha256 hex digest and nothing else.
-// A content identity is the one non-enumerated value shape this allowlist
-// admits: it is fixed-length, cannot encode an identifier, and is what lets the
-// minimal bundle bind a provenance claim to the exact templates that were
-// compared without shipping the templates themselves (they can carry
-// cluster-identifying names and are --full-only evidence).
-var ctrfSHA256Value = regexp.MustCompile(`^[0-9a-f]{64}$`)
-
-func isSHA256Digest(v string) bool { return ctrfSHA256Value.MatchString(v) }
-
 // ctrfExtraAllowlist is the fail-closed set of TestResult.Extra keys safe to
 // publish in a minimal (default) evidence bundle, each paired with the
 // validator its value must pass. Every key carries only low-cardinality counts
@@ -237,10 +231,9 @@ var ctrfExtraAllowlist = map[string]ctrfExtraValidator{
 	"nodesTotal":     isCountValue, // count of candidate nodes (validated + skipped/cordoned)
 	"skipReason":     isSkipReason, // closed-set code for why a check skipped
 	// NCCL benchmark runtime provenance (#2297): which artifact the bandwidth
-	// number describes, plus content identities of the two templates compared.
-	"runtimeSource":        isRuntimeSource, // closed-set code: delivered-artifact | recipe-supplied-runtime | cluster-capability
-	"shippedRuntimeDigest": isSHA256Digest,  // sha256 of the normalized deployed ClusterTrainingRuntime node template
-	"derivedRuntimeDigest": isSHA256Digest,  // sha256 of the normalized benchmark runtime node template derived from it
+	// number describes. The template digests and path diff that back the claim
+	// are stdout (--full) evidence, not Extra — see validators/performance.
+	"runtimeSource": isRuntimeSource, // closed-set code: delivered-artifact | recipe-supplied-runtime | cluster-capability
 }
 
 // ctrfAppliedRules is the static, sorted description of the CTRF scrub.

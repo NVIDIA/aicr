@@ -411,6 +411,9 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 		return "", false, err
 	}
 	customRuntime = plan.carrier
+	// Record the class now, before any cluster mutation, so a run that fails
+	// later still says which artifact it set out to measure.
+	emitRuntimeSource(plan)
 
 	sizingSelector := ctx.NodeSelector
 	if customRuntime != "" && len(sizingSelector) == 0 {
@@ -475,11 +478,11 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Run the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.
 	// Each platform has a per-platform TrainingRuntime with all platform-specific
 	// configuration (image, mpirun args, resources, sidecars). The TrainJob is shared.
-	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime, plan.source)
+	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime, plan)
 	if err != nil {
 		return "", false, err
 	}
-	// The run completed: record which artifact the bandwidth below describes.
+	// The run completed: print the derived-runtime audit record (--full only).
 	emitRuntimeProvenance(plan)
 
 	// Parse bandwidth from logs (shared across all service types).
@@ -832,7 +835,7 @@ func pruneStaleNCCLNamespaces(ctx context.Context, clientset kubernetes.Interfac
 // pod to complete, and returns the benchmark logs.
 func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType,
-	customRuntime string, source ncclRuntimeSource) (logs string, err error) {
+	customRuntime string, plan *benchmarkRuntimePlan) (logs string, err error) {
 
 	dynamicClient := ctx.DynamicClient
 
@@ -929,7 +932,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// after the goroutine is stopped and joined. A recipe-supplied runtime
 	// owns its fabric end to end and is out of scope here.
 	var tcpxoWatch *tcpxoWorkerWatcher
-	if source.runsGKETCPXOChecks() && gkeTCPXOPreflightApplies(variant, accelerator, service) {
+	if plan.source.runsGKETCPXOChecks() && gkeTCPXOPreflightApplies(variant, accelerator, service) {
 		tcpxoWatch = startGKETCPXOWorkerWatch(ctx.Ctx, ctx.Clientset, gpuConfig.Namespace)
 		defer tcpxoWatch.Stop() // covers the error returns below
 	}
@@ -937,7 +940,7 @@ func runNCCLTrainJob(ctx *validators.Context, gpuConfig *gpuConfiguration,
 	// Apply runtime and trainjob resources. Propagate an inner code rather than
 	// forcing ErrCodeInternal — a recipe-supplied runtime that fails to render is
 	// an ErrCodeInvalidRequest (recipe-authoring error), not an internal fault.
-	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service, variant, fabric, customRuntime); applyErr != nil {
+	if applyErr := applyNCCLResources(ctx, dynamicClient, gpuConfig, accelerator, service, variant, fabric, customRuntime, plan); applyErr != nil {
 		return "", aicrErrors.PropagateOrWrap(applyErr, aicrErrors.ErrCodeInternal, "failed to apply NCCL resources")
 	}
 
@@ -1261,7 +1264,7 @@ func uniformGPUCountPerNode(nodes []v1.Node) (int, error) {
 // YAML files with template substitution using the dynamic client.
 // Runtime: testdata/{accelerator}/{service}/runtime[-{variant}].yaml (per-platform+variant)
 // TrainJob: testdata/trainjob.yaml (shared, just runtimeRef + numNodes)
-func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface, config *gpuConfiguration, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType, customRuntime string) error {
+func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface, config *gpuConfiguration, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType, customRuntime string, plan *benchmarkRuntimePlan) error {
 	slog.Info("Applying NCCL test resources...", "accelerator", accelerator, "service", service, "variant", string(variant), "fabric", string(fabric), "customRuntime", customRuntime != "")
 
 	templateData := map[string]string{
@@ -1364,12 +1367,18 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		slog.Info("Applied RoCE ResourceClaimTemplate", "name", ncclRoceClaimName, "count", templateData["ROCE_DEVICE_COUNT"])
 	}
 
-	runtimeObj, err := buildNCCLRuntimeObject(customRuntime, accelerator, service, variant, fabric, config.Namespace, templateData)
+	runtimeObj, err := buildNCCLRuntimeObject(customRuntime, accelerator, service, variant, fabric, config.Namespace, templateData, plan)
 	if err != nil {
 		return err
 	}
 	if err = applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", err)
+	}
+	// Provenance describes the object as applied — scheduling included.
+	if plan.derived() {
+		if err = finalizeRuntimeProvenance(plan, runtimeObj); err != nil {
+			return err
+		}
 	}
 	if err = createUnstructured(ctx.Ctx, dynamicClient, trainingRuntimeGVR, config.Namespace, runtimeObj); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply training runtime", err)
@@ -1692,15 +1701,36 @@ func effectiveWorkerScheduling(ctx *validators.Context, service recipe.CriteriaS
 }
 
 // buildNCCLRuntimeObject selects and renders the TrainingRuntime the NCCL
-// TrainJob will reference. A recipe-supplied nccl-benchmark-runtime is rendered
-// from its inline template with its identity forced to what the shared TrainJob's
-// runtimeRef expects and confined to the validator namespace (the value was
-// shape-checked as a Kubeflow TrainingRuntime at resolve time). Otherwise the
-// baked-in per-platform testdata template is read from disk.
+// TrainJob will reference. A derived runtime (#2297) is built here, at apply
+// time, from the skeleton rendered with the real templateData and the shipped
+// ClusterTrainingRuntime the plan carries — never from the plan's carrier
+// string, whose placeholders would lose their types on re-parse. A
+// recipe-supplied nccl-benchmark-runtime is rendered from its inline template
+// with its identity forced to what the shared TrainJob's runtimeRef expects and
+// confined to the validator namespace (the value was shape-checked as a
+// Kubeflow TrainingRuntime at resolve time). Otherwise the baked-in
+// per-platform testdata template is read from disk.
 func buildNCCLRuntimeObject(customRuntime string, accelerator recipe.CriteriaAcceleratorType,
 	service recipe.CriteriaServiceType, variant ncclVariant, fabric ncclFabricType,
-	namespace string, templateData map[string]string) (*unstructured.Unstructured, error) {
+	namespace string, templateData map[string]string, plan *benchmarkRuntimePlan) (*unstructured.Unstructured, error) {
 
+	if plan.derived() {
+		// Same skeleton, same fabric pin as resolveBenchmarkRuntimeSource: the
+		// delivered runtime carries its own wiring, so only the platform matters.
+		skeletonPath := templatePath(accelerator, service, variant, fabricEFA, "runtime.yaml")
+		skeleton, err := parseYAMLTemplate(skeletonPath, templateData)
+		if err != nil {
+			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to render benchmark runtime skeleton "+skeletonPath, err)
+		}
+		obj, _, err := deriveBenchmarkRuntime(skeleton, plan.shipped)
+		if err != nil {
+			return nil, err
+		}
+		obj.SetName(ncclTrainingRuntimeName)
+		obj.SetNamespace(namespace)
+		slog.Info("Derived NCCL TrainingRuntime from the shipped runtime", "name", ncclTrainingRuntimeName, "namespace", namespace, "shipped", gkenet.TCPXORuntimeName)
+		return obj, nil
+	}
 	if customRuntime != "" {
 		obj, err := renderYAMLTemplate(customRuntime, templateData)
 		if err != nil {

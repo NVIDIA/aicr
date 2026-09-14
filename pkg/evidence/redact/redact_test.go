@@ -498,28 +498,14 @@ func TestCTRFAllowlistsExtra(t *testing.T) {
 			want: nil,
 		},
 		{
-			// Content identities bind the provenance claim to the exact templates
-			// compared; a digest is the one non-enumerated shape admitted because
-			// it is fixed-length and cannot smuggle an identifier.
-			name: "sha256 template digests survive",
+			// Digests and paths that back a delivered-artifact claim are stdout
+			// (--full) evidence; under Extra they are unlisted keys and drop.
+			name: "runtime digests are not an Extra carrier",
 			in: map[string]string{
 				"runtimeSource":        "delivered-artifact",
 				"shippedRuntimeDigest": "cab912550bf2999744b2c685f40cd96ec010bf7e615da59847ce55090cae4bae",
-				"derivedRuntimeDigest": "4e3e8f09d0000000000000000000000000000000000000000000000000000000",
 			},
-			want: map[string]string{
-				"runtimeSource":        "delivered-artifact",
-				"shippedRuntimeDigest": "cab912550bf2999744b2c685f40cd96ec010bf7e615da59847ce55090cae4bae",
-				"derivedRuntimeDigest": "4e3e8f09d0000000000000000000000000000000000000000000000000000000",
-			},
-		},
-		{
-			name: "malformed digest is dropped under an allowed key",
-			in: map[string]string{
-				"shippedRuntimeDigest": "CAB912550BF2999744B2C685F40CD96EC010BF7E615DA59847CE55090CAE4BAE",
-				"derivedRuntimeDigest": "cab9125",
-			},
-			want: nil,
+			want: map[string]string{"runtimeSource": "delivered-artifact"},
 		},
 	}
 	for _, tt := range tests {

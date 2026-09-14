@@ -16,6 +16,7 @@ package main
 
 import (
 	stderrors "errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -275,7 +276,8 @@ func tcpxoRefs(m []recipe.NetworkInterfaceMapping) []recipe.ComponentRef {
 		raw = append(raw, map[string]any{"interfaceName": e.InterfaceName, "network": e.Network})
 	}
 	return []recipe.ComponentRef{{Name: recipe.KubeflowTrainerComponentName,
-		Overrides: map[string]any{recipe.GKETCPXOInterfacesOverrideKey: raw}}}
+		ManifestFiles: []string{recipe.GKETCPXORuntimeManifest},
+		Overrides:     map[string]any{recipe.GKETCPXOInterfacesOverrideKey: raw}}}
 }
 
 func gkeNetwork(name string) *unstructured.Unstructured {
@@ -367,7 +369,7 @@ func TestResolveBenchmarkRuntimeSource(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolve: %v", err)
 		}
-		if plan.source != runtimeSourceDelivered || plan.carrier == "" || plan.provenance == nil {
+		if plan.source != runtimeSourceDelivered || plan.carrier == "" || plan.provenance == nil || !plan.derived() {
 			t.Fatalf("plan=%+v", plan)
 		}
 		if err := validatorv1.ValidateBenchmarkRuntime(plan.carrier); err != nil {
@@ -383,19 +385,185 @@ func TestResolveBenchmarkRuntimeSource(t *testing.T) {
 }
 
 func TestRuntimeProvenanceExtra(t *testing.T) {
-	got := runtimeProvenanceExtra(&benchmarkRuntimePlan{source: runtimeSourceCapability})
-	if got[extraKeyRuntimeSource] != "cluster-capability" || len(got) != 1 {
-		t.Fatalf("capability extra = %v", got)
+	// Only the closed-set class is published; digests and paths are stdout-only
+	// (--full) evidence and must never ride the Extra carrier.
+	for _, src := range []ncclRuntimeSource{runtimeSourceCapability, runtimeSourceRecipeSupplied, runtimeSourceDelivered} {
+		got := runtimeProvenanceExtra(&benchmarkRuntimePlan{source: src,
+			provenance: &derivedRuntimeProvenance{shippedDigest: strings.Repeat("a", 64), derivedDigest: strings.Repeat("b", 64)}})
+		if len(got) != 1 || got[extraKeyRuntimeSource] != string(src) {
+			t.Fatalf("extra for %s = %v, want only runtimeSource", src, got)
+		}
 	}
-	got = runtimeProvenanceExtra(&benchmarkRuntimePlan{
-		source: runtimeSourceDelivered,
-		provenance: &derivedRuntimeProvenance{
-			shippedDigest: strings.Repeat("a", 64), derivedDigest: strings.Repeat("b", 64)},
-	})
-	if got[extraKeyRuntimeSource] != "delivered-artifact" ||
-		got[extraKeyShippedRuntimeDigest] != strings.Repeat("a", 64) ||
-		got[extraKeyDerivedRuntimeDigest] != strings.Repeat("b", 64) {
+}
 
-		t.Fatalf("delivered extra = %v", got)
+// deliveredPlan resolves a consistent delivered plan against a fake cluster.
+func deliveredPlan(t *testing.T) *benchmarkRuntimePlan {
+	t.Helper()
+	m := shippedMapping()
+	objs := make([]runtime.Object, 0, 1+len(m))
+	objs = append(objs, shippedTCPXORuntime(m))
+	for _, e := range m {
+		objs = append(objs, gkeNetwork(e.Network))
 	}
+	ctx := &validators.Context{Ctx: t.Context(),
+		DynamicClient: fakeDyn(objs...),
+		ValidationInput: validatorv1.ToValidationInput(&recipe.RecipeResult{
+			Criteria:      &recipe.Criteria{Service: recipe.CriteriaServiceGKE, Accelerator: recipe.CriteriaAcceleratorH100},
+			ComponentRefs: tcpxoRefs(m)})}
+	plan, err := resolveBenchmarkRuntimeSource(ctx, "", recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE, variantDefault, fabricEFA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return plan
+}
+
+var derivedTemplateData = map[string]string{"NAMESPACE": "ns", "WORKER_COUNT": "2", "GPU_COUNT": "16", "GPU_COUNT_PER_NODE": "8",
+	"TEST_TYPE": "all_reduce", "MIN_MESSAGE_SIZE": "1K", "MAX_MESSAGE_SIZE": "16G"}
+
+// containerArgs returns the args of a job's "node" container as strings,
+// failing on any non-string element (Kubeflow Trainer's structural CRD rejects
+// those). Both skeleton jobs name their container "node".
+func containerArgs(t *testing.T, obj *unstructured.Unstructured, job string) []string {
+	const container = benchmarkWorkerContainer
+	t.Helper()
+	jobs, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "replicatedJobs")
+	for _, raw := range jobs {
+		j := raw.(map[string]any)
+		if j["name"] != job {
+			continue
+		}
+		cs, _, _ := unstructured.NestedSlice(j, "template", "spec", "template", "spec", "containers")
+		for _, c := range cs {
+			cm := c.(map[string]any)
+			if cm["name"] != container {
+				continue
+			}
+			raw, _ := cm["args"].([]any)
+			out := make([]string, 0, len(raw))
+			for i, a := range raw {
+				str, ok := a.(string)
+				if !ok {
+					t.Fatalf("%s/%s args[%d] = %T (%v), want string", job, container, i, a, a)
+				}
+				out = append(out, str)
+			}
+			return out
+		}
+	}
+	t.Fatalf("no %s/%s container", job, container)
+	return nil
+}
+
+// TestDerivedRuntimeBuiltAtApplyTimeKeepsTypes is the regression the review
+// found: deriving from a serialized carrier with placeholders inside turned a
+// quoted "${GPU_COUNT}" into an integer after substitution. The applied object
+// is now derived from the skeleton rendered with the real templateData, so
+// every args element is a string while numProcPerNode stays a number.
+func TestDerivedRuntimeBuiltAtApplyTimeKeepsTypes(t *testing.T) {
+	plan := deliveredPlan(t)
+	obj, err := buildNCCLRuntimeObject(plan.carrier, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
+		variantDefault, fabricRoCE, "aicr-validation", derivedTemplateData, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if obj.GetName() != ncclTrainingRuntimeName || obj.GetNamespace() != "aicr-validation" {
+		t.Errorf("identity = %s/%s", obj.GetNamespace(), obj.GetName())
+	}
+	launcher := containerArgs(t, obj, benchmarkLauncherJob)
+	if !slices.Contains(launcher, "16") || !slices.Contains(launcher, "/usr/local/bin/all_reduce_mpi") {
+		t.Errorf("launcher args not rendered: %v", launcher)
+	}
+	if v, _, _ := unstructured.NestedFieldNoCopy(obj.Object, "spec", "mlPolicy", "mpi", "numProcPerNode"); v != int64(8) {
+		t.Errorf("numProcPerNode = %T %v, want int64 8", v, v)
+	}
+	tmpl, err := gkenet.NodeTemplateOf(obj)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ann, _, _ := unstructured.NestedString(tmpl, "metadata", "annotations", gkenet.InterfacesAnnotation)
+	if ann != interfacesAnnotation(shippedMapping()) {
+		t.Errorf("shipped interfaces annotation not carried: %q", ann)
+	}
+}
+
+// TestDerivedRuntimeMeasuresShippedEnv pins the second review finding: the
+// fixture's worker bootstrap re-sourced the host nccl-env-profile.sh over the
+// shipped env and the launcher pushed fixture NCCL/CUDA tuning via mpirun -x,
+// so the number would have described the fixture's env under the shipped
+// container. A derived runtime exports only what the shipped worker declares
+// and keeps just the benchmark-owned exports on the launcher.
+func TestDerivedRuntimeMeasuresShippedEnv(t *testing.T) {
+	plan := deliveredPlan(t)
+	obj, err := buildNCCLRuntimeObject(plan.carrier, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
+		variantDefault, fabricEFA, "ns", derivedTemplateData, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker := containerArgs(t, obj, gkenet.TCPXONodeJob)
+	if len(worker) != 1 || strings.Contains(worker[0], "nccl-env-profile.sh") || !strings.Contains(worker[0], "^LD_LIBRARY_PATH=") {
+		t.Errorf("worker bootstrap must export the shipped env, not source the host profile: %q", worker)
+	}
+	launcher := containerArgs(t, obj, benchmarkLauncherJob)
+	for i, a := range launcher {
+		if a != "-x" {
+			continue
+		}
+		v := launcher[i+1]
+		switch {
+		case strings.HasPrefix(v, "NCCL_DEBUG="), strings.HasPrefix(v, "UCX_"):
+		default:
+			t.Errorf("launcher still exports fixture tuning: -x %s", v)
+		}
+	}
+	if !slices.Contains(launcher, "NCCL_DEBUG=WARN") {
+		t.Errorf("NCCL_DEBUG export must be kept: %v", launcher)
+	}
+	// The capability fixture is untouched: its launcher still carries its tuning.
+	fixture, err := buildNCCLRuntimeObject("", recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
+		variantDefault, fabricEFA, "ns", derivedTemplateData, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(containerArgs(t, fixture, benchmarkLauncherJob), "CUDA_DEVICE_MAX_CONNECTIONS=1") {
+		t.Error("control: the embedded fixture must keep its own tuning exports")
+	}
+}
+
+// TestFinalizeRuntimeProvenanceDescribesAppliedObject checks the audit record
+// is computed against the applied runtime — scheduling included — and that the
+// inherited inventory is the shipped leaves the diff did not touch.
+func TestFinalizeRuntimeProvenanceDescribesAppliedObject(t *testing.T) {
+	plan := deliveredPlan(t)
+	obj, err := buildNCCLRuntimeObject(plan.carrier, recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceGKE,
+		variantDefault, fabricEFA, "ns", derivedTemplateData, plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applyNCCLWorkerScheduling(obj, map[string]string{"pool": "gpu"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := finalizeRuntimeProvenance(plan, obj); err != nil {
+		t.Fatal(err)
+	}
+	prov := plan.provenance
+	if len(prov.shippedDigest) != 64 || len(prov.derivedDigest) != 64 || prov.shippedDigest == prov.derivedDigest {
+		t.Errorf("digests = %q / %q", prov.shippedDigest, prov.derivedDigest)
+	}
+	for _, want := range []string{"spec.nodeSelector.pool", "spec.containers[node].args", "spec.containers[node].image"} {
+		if !slices.Contains(prov.overridePaths, want) {
+			t.Errorf("override paths missing %s: %v", want, prov.overridePaths)
+		}
+	}
+	for _, want := range []string{"spec.containers[node].env[NCCL_FASTRAK_IFNAME].value", "metadata.annotations." + gkenet.InterfacesAnnotation} {
+		if !slices.Contains(prov.inheritedPaths, want) {
+			t.Errorf("inherited paths missing %s: %v", want, prov.inheritedPaths)
+		}
+	}
+	for _, p := range prov.inheritedPaths {
+		if overlapsAny(p, prov.overridePaths) {
+			t.Errorf("inherited path %s overlaps an override", p)
+		}
+	}
+	emitRuntimeProvenance(plan)                                                   // prints the record; must not panic
+	emitRuntimeProvenance(&benchmarkRuntimePlan{source: runtimeSourceCapability}) // no record: no-op
 }

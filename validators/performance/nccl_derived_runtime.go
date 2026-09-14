@@ -53,9 +53,7 @@ const (
 	// delivered wiring.
 	runtimeSourceDelivered ncclRuntimeSource = "delivered-artifact"
 
-	extraKeyRuntimeSource        = "runtimeSource"
-	extraKeyShippedRuntimeDigest = "shippedRuntimeDigest"
-	extraKeyDerivedRuntimeDigest = "derivedRuntimeDigest"
+	extraKeyRuntimeSource = "runtimeSource"
 )
 
 // runsGKETCPXOChecks reports whether the GKE preflight and the per-worker
@@ -66,23 +64,41 @@ func (s ncclRuntimeSource) runsGKETCPXOChecks() bool { return s != runtimeSource
 
 // benchmarkRuntimePlan is the outcome of resolveBenchmarkRuntimeSource: the
 // carrier fed to the existing custom-runtime plumbing (empty for the embedded
-// fixture), the provenance class, and — for a derived runtime — the content
-// identities and override diff that make the claim auditable.
+// fixture), the provenance class, and — for a derived runtime — the shipped
+// object the final runtime is derived from at apply time, plus the provenance
+// record that makes the claim auditable.
+//
+// For a delivered artifact the carrier is a gating/sizing stand-in only: it
+// lets every customRuntime != "" branch (fabric injection, scheduling defaults,
+// the node-selector sizing lookup) treat the derived runtime like a
+// recipe-supplied one. The object that is actually applied is re-derived in
+// buildNCCLRuntimeObject from the skeleton rendered with real templateData, so
+// placeholder types survive (a quoted "${GPU_COUNT}" stays a string, a bare
+// ${GPU_COUNT_PER_NODE} stays a number) instead of round-tripping through a
+// serialized carrier that re-parses "16" as an integer.
 type benchmarkRuntimePlan struct {
 	carrier    string
 	source     ncclRuntimeSource
+	shipped    *unstructured.Unstructured // deployed ClusterTrainingRuntime; nil unless delivered
 	provenance *derivedRuntimeProvenance
 }
 
-// derivedRuntimeProvenance is the bounded evidence carrier for a derived
-// runtime. Digests are published in minimal evidence (redact allowlist); the
-// override diff is printed to stdout, which minimal evidence strips, so a
-// --full bundle carries it while the default never ships template contents
-// that can name cluster-specific networks.
+// derived reports whether the plan re-derives the applied runtime from a
+// shipped object. Nil-safe so test callers that exercise the baked-in path can
+// pass no plan.
+func (p *benchmarkRuntimePlan) derived() bool { return p != nil && p.shipped != nil }
+
+// derivedRuntimeProvenance is the audit record for a derived runtime, computed
+// against the object that was actually applied (after scheduling was stamped)
+// so it describes what ran, not an intermediate. It is printed to stdout only:
+// minimal evidence strips stdout, so a --full bundle carries it while the
+// default never ships template paths that can name cluster-specific mounts or
+// env — the minimal bundle carries just the runtimeSource class.
 type derivedRuntimeProvenance struct {
-	shippedDigest string
-	derivedDigest string
-	overridePaths []string // benchmark-owned paths at which derived != shipped
+	shippedDigest  string
+	derivedDigest  string
+	overridePaths  []string // paths at which applied != shipped (owned overrides + scheduling)
+	inheritedPaths []string // shipped leaf paths carried into the applied runtime unchanged
 }
 
 // resolveBenchmarkRuntimeSource decides which of the three runtime sources this
@@ -145,20 +161,21 @@ func resolveBenchmarkRuntimeSource(ctx *validators.Context, customRuntime string
 	if err != nil {
 		return nil, err
 	}
+	// The carrier is the gating stand-in described on benchmarkRuntimePlan; it
+	// still holds skeleton placeholders and is never applied. It rides the same
+	// shape gate as a recipe-supplied runtime so every downstream branch that
+	// already knows to leave a self-wired runtime's fabric alone
+	// (customRuntime != "") applies to the derived one.
 	raw, err := yaml.Marshal(derived.Object)
 	if err != nil {
 		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to serialize derived benchmark runtime", err)
 	}
-	// The derived runtime rides the same carrier and the same shape gate as a
-	// recipe-supplied one, so every downstream branch that already knows to
-	// leave a self-wired runtime's fabric alone (customRuntime != "") applies.
 	if err := v1.ValidateBenchmarkRuntime(string(raw)); err != nil {
 		return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "derived benchmark runtime failed the shape gate", err)
 	}
 	slog.Info("Derived NCCL benchmark runtime from the shipped ClusterTrainingRuntime",
-		"shipped", gkenet.TCPXORuntimeName, "shippedDigest", prov.shippedDigest, "derivedDigest", prov.derivedDigest,
-		"overriddenPaths", len(prov.overridePaths))
-	return &benchmarkRuntimePlan{carrier: string(raw), source: runtimeSourceDelivered, provenance: prov}, nil
+		"shipped", gkenet.TCPXORuntimeName, "shippedDigest", prov.shippedDigest, "overriddenPaths", len(prov.overridePaths))
+	return &benchmarkRuntimePlan{carrier: string(raw), source: runtimeSourceDelivered, shipped: shipped, provenance: prov}, nil
 }
 
 // verifyDeliveredTCPXORuntime is the shared three-way verifier: the recipe's
@@ -256,11 +273,20 @@ func deriveBenchmarkRuntime(skeleton, shipped *unstructured.Unstructured) (*unst
 			delete(derWorker, field)
 		}
 	}
+	// The measurement must run under the env the shipped worker declares, so
+	// the fixture's bootstrap — which re-sources the host nccl-env-profile.sh
+	// over it — is replaced by one that only exports what the container already
+	// has, and the launcher's NCCL/CUDA tuning exports (which mpirun -x would
+	// push over the shipped values on every rank) are dropped.
+	derWorker["args"] = []any{deliveredWorkerBootstrap}
 	mergeNamedList(derWorker, skelWorker, "volumeMounts")
 	mergeNamedListAt(derivedTmpl, skelTmpl, []string{"spec", "volumes"})
 
 	out := skeleton.DeepCopy()
 	if err := setNodeTemplate(out, derivedTmpl); err != nil {
+		return nil, nil, err
+	}
+	if err := stripLauncherNCCLTuning(out); err != nil {
 		return nil, nil, err
 	}
 
@@ -287,9 +313,9 @@ func deriveBenchmarkRuntime(skeleton, shipped *unstructured.Unstructured) (*unst
 // checkShippedWorkerBaseline pins the semantic preconditions the derivation
 // relies on for every path it overrides. Overridden paths are invisible to the
 // diff — command/args/image/resources differ on every run by construction — so
-// a fabric-sensitive change hiding inside one of them (the fixture once
-// activated TCPXO by sourcing nccl-env-profile.sh from the worker command) can
-// only be caught by checking the source still looks the way the override
+// a fabric-sensitive change hiding inside one of them (the fixture activates
+// TCPXO by sourcing nccl-env-profile.sh from the worker command; a shipped
+// runtime doing the same would lose that under the override) can only be caught by checking the source still looks the way the override
 // assumes. Each precondition names the assumption so a future shipped-runtime
 // change fails here with a reason, not silently under the override.
 func checkShippedWorkerBaseline(tmpl map[string]any) error {
@@ -331,42 +357,171 @@ func checkShippedWorkerBaseline(tmpl map[string]any) error {
 	return nil
 }
 
-// emitRuntimeProvenance publishes the provenance class (always) and, for a
-// derived runtime, the two content identities and the override diff. The class
-// and digests ride EmitExtra and survive minimal redaction; the diff is stdout,
-// which minimal evidence strips — see derivedRuntimeProvenance.
-func emitRuntimeProvenance(plan *benchmarkRuntimePlan) {
-	extra := runtimeProvenanceExtra(plan)
-	if plan.provenance != nil {
-		fmt.Printf("Benchmark runtime derived from %s (shipped %s -> derived %s); benchmark-owned overrides at:\n",
-			gkenet.TCPXORuntimeName, plan.provenance.shippedDigest[:12], plan.provenance.derivedDigest[:12])
-		for _, p := range plan.provenance.overridePaths {
-			fmt.Printf("  %s\n", p)
+// deliveredWorkerBootstrap is the worker entrypoint for a DERIVED runtime. It
+// is the fixture's sshd bootstrap minus the one line that made the fixture
+// self-wiring: sourcing the host nccl-env-profile.sh, which would overwrite
+// the NCCL env the shipped worker declares and turn the measurement back into
+// a fixture measurement. The shipped env (NCCL_*, CUDA_*, LD_LIBRARY_PATH) is
+// exported to the ssh sessions mpirun opens so each rank runs under exactly
+// what the recipe ships; checkShippedWorkerBaseline guarantees the grep is
+// non-empty.
+const deliveredWorkerBootstrap = `set -x &&
+apt-get update &&
+apt-get install -y --no-install-recommends openssh-server &&
+mkdir -p /var/run/sshd &&
+chmod 0755 /var/run/sshd &&
+mkdir -p /root/.ssh &&
+chmod 700 /root/.ssh &&
+cp /tmp/mpi-keys/* /root/.ssh/ &&
+chmod 600 /root/.ssh/id_rsa &&
+chmod 644 /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys &&
+env | grep -E '^NCCL_|^CUDA_|^LD_LIBRARY_PATH=' > /root/.ssh/environment &&
+echo "PermitUserEnvironment yes" >> /etc/ssh/sshd_config &&
+/usr/sbin/sshd -De
+`
+
+// launcherOwnedExportPrefixes are the mpirun -x exports the benchmark keeps on
+// a derived runtime: mpirun's own control-plane pinning and NCCL_DEBUG, which
+// is log verbosity the fixture owns (#1712), not fabric configuration.
+var launcherOwnedExportPrefixes = []string{"UCX_", "NCCL_DEBUG="}
+
+// stripLauncherNCCLTuning removes every `-x NCCL_*`, `-x CUDA_*` and
+// `-x LD_LIBRARY_PATH=` pair from the launcher's mpirun args. mpirun -x pushes
+// the value into every rank's environment ahead of what the worker's ssh
+// session exported, so a fixture tuning value left here would silently win over
+// the shipped one and the number would no longer describe the delivered
+// artifact. NCCL_DEBUG is kept: it is output volume, not wiring.
+func stripLauncherNCCLTuning(rt *unstructured.Unstructured) error {
+	jobs, found, err := unstructured.NestedSlice(rt.Object, "spec", "template", "spec", "replicatedJobs")
+	if err != nil || !found {
+		return aicrErrors.New(aicrErrors.ErrCodeInternal, "benchmark skeleton has no replicatedJobs")
+	}
+	for i, raw := range jobs {
+		job, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, _, _ := unstructured.NestedString(job, "name"); name != benchmarkLauncherJob {
+			continue
+		}
+		tmpl, _, _ := unstructured.NestedMap(job, "template", "spec", "template")
+		launcher := workerContainer(tmpl)
+		if launcher == nil {
+			return aicrErrors.New(aicrErrors.ErrCodeInternal, "benchmark skeleton launcher has no container named \"node\"")
+		}
+		args, _ := launcher["args"].([]any)
+		kept := make([]any, 0, len(args))
+		for j := 0; j < len(args); j++ {
+			if args[j] == "-x" && j+1 < len(args) {
+				if v, ok := args[j+1].(string); ok && isFabricExport(v) {
+					j++
+					continue
+				}
+			}
+			kept = append(kept, args[j])
+		}
+		launcher["args"] = kept
+		if err := unstructured.SetNestedMap(job, tmpl, "template", "spec", "template"); err != nil {
+			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to set derived launcher template", err)
+		}
+		jobs[i] = job
+		return unstructured.SetNestedSlice(rt.Object, jobs, "spec", "template", "spec", "replicatedJobs")
+	}
+	return aicrErrors.New(aicrErrors.ErrCodeInternal, "benchmark skeleton declares no \"launcher\" replicatedJob")
+}
+
+// isFabricExport reports whether an mpirun -x value is fabric configuration a
+// derived runtime must take from the shipped worker instead.
+func isFabricExport(v string) bool {
+	for _, keep := range launcherOwnedExportPrefixes {
+		if strings.HasPrefix(v, keep) {
+			return false
 		}
 	}
+	return strings.HasPrefix(v, "NCCL_") || strings.HasPrefix(v, "CUDA_") || strings.HasPrefix(v, "LD_LIBRARY_PATH=")
+}
+
+// finalizeRuntimeProvenance recomputes the provenance record against the
+// runtime object that is about to be applied — after scheduling was stamped —
+// so the digests and path lists describe what actually ran. The derivation-time
+// guard already proved the derived template stays inside the owned paths; this
+// only records.
+func finalizeRuntimeProvenance(plan *benchmarkRuntimePlan, applied *unstructured.Unstructured) error {
+	shippedTmpl, err := gkenet.NodeTemplateOf(plan.shipped)
+	if err != nil {
+		return err
+	}
+	appliedTmpl, err := gkenet.NodeTemplateOf(applied)
+	if err != nil {
+		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "applied benchmark runtime has no node template", err)
+	}
+	diff := diffTemplatePaths(shippedTmpl, appliedTmpl)
+	var inherited []string
+	for _, p := range leafPaths("", shippedTmpl) {
+		if !overlapsAny(p, diff) {
+			inherited = append(inherited, p)
+		}
+	}
+	sort.Strings(inherited)
+	plan.provenance = &derivedRuntimeProvenance{
+		shippedDigest:  digestOf(shippedTmpl),
+		derivedDigest:  digestOf(appliedTmpl),
+		overridePaths:  diff,
+		inheritedPaths: inherited,
+	}
+	return nil
+}
+
+// emitRuntimeSource publishes the provenance class the moment it is decided,
+// before any cluster mutation, so a run that fails later still records which
+// artifact it set out to measure. The class rides EmitExtra and survives
+// minimal redaction (redact allowlist key runtimeSource).
+func emitRuntimeSource(plan *benchmarkRuntimePlan) {
 	fmt.Printf("Benchmark runtime source: %s\n", plan.source)
-	if err := validators.EmitExtra(extra); err != nil {
-		slog.Warn("failed to emit runtime provenance extra", "error", err)
+	if err := validators.EmitExtra(runtimeProvenanceExtra(plan)); err != nil {
+		slog.Warn("failed to emit runtime source extra", "error", err)
+	}
+}
+
+// emitRuntimeProvenance prints the derived-runtime audit record after the run:
+// both content identities, the paths at which the applied runtime differs from
+// the shipped one, and the inventory of shipped paths it inherited unchanged.
+// Stdout only — minimal evidence strips it, --full carries it (see
+// derivedRuntimeProvenance). No-op for the other two sources.
+func emitRuntimeProvenance(plan *benchmarkRuntimePlan) {
+	prov := plan.provenance
+	if prov == nil {
+		return
+	}
+	fmt.Printf("Benchmark runtime derived from %s: shipped node template sha256 %s, applied sha256 %s\n",
+		gkenet.TCPXORuntimeName, prov.shippedDigest, prov.derivedDigest)
+	fmt.Printf("Overridden by the benchmark (%d paths):\n", len(prov.overridePaths))
+	for _, p := range prov.overridePaths {
+		fmt.Printf("  %s\n", p)
+	}
+	fmt.Printf("Inherited from the shipped runtime unchanged (%d paths):\n", len(prov.inheritedPaths))
+	for _, p := range prov.inheritedPaths {
+		fmt.Printf("  %s\n", p)
 	}
 }
 
 // runtimeProvenanceExtra is the allowlisted Extra payload for a plan: the
-// provenance class always, plus both content identities for a derived runtime.
-// Pure so it can be unit-tested without capturing the stdout sentinel.
+// provenance class only. Digests and paths are deliberately NOT here — they
+// are stdout evidence for --full bundles. Pure so it can be unit-tested
+// without capturing the stdout sentinel.
 func runtimeProvenanceExtra(plan *benchmarkRuntimePlan) map[string]string {
-	extra := map[string]string{extraKeyRuntimeSource: string(plan.source)}
-	if plan.provenance != nil {
-		extra[extraKeyShippedRuntimeDigest] = plan.provenance.shippedDigest
-		extra[extraKeyDerivedRuntimeDigest] = plan.provenance.derivedDigest
-	}
-	return extra
+	return map[string]string{extraKeyRuntimeSource: string(plan.source)}
 }
 
 // --- template plumbing -------------------------------------------------------
 
 // benchmarkWorkerContainer is the worker container name both the shipped
 // runtime and the MPI skeleton use; the derivation keys its overrides on it.
+// The skeleton's launcher job uses the same container name.
 const benchmarkWorkerContainer = "node"
+
+// benchmarkLauncherJob is the skeleton's mpirun replicatedJob.
+const benchmarkLauncherJob = "launcher"
 
 // workerContainer returns the worker container map of a PodTemplateSpec map,
 // or nil when absent. The returned map aliases tmpl so callers can override in
@@ -535,6 +690,33 @@ func byName(l []any) map[string]any {
 		out[m["name"].(string)] = m
 	}
 	return out
+}
+
+// leafPaths enumerates the dotted leaf paths of a template using the same
+// addressing as diffTemplatePaths (maps by key, named lists by [name]), so the
+// two can be set-compared to inventory what a derived runtime inherited.
+func leafPaths(prefix string, v any) []string {
+	switch t := v.(type) {
+	case map[string]any:
+		out := make([]string, 0, len(t))
+		for k, cv := range t {
+			p := k
+			if prefix != "" {
+				p = prefix + "." + k
+			}
+			out = append(out, leafPaths(p, cv)...)
+		}
+		return out
+	case []any:
+		if allNamed(t) {
+			var out []string
+			for n, cv := range byName(t) {
+				out = append(out, leafPaths(prefix+"["+n+"]", cv)...)
+			}
+			return out
+		}
+	}
+	return []string{prefix}
 }
 
 // overlapsAny applies the profile lock's overlap rule (argocdhelm: a path

@@ -87,18 +87,26 @@ func TestFabricRuntimeDelivered(t *testing.T) {
 		wantErr       bool
 	}{
 		{"not declared", []recipe.ComponentRef{{Name: "gpu-operator"}}, false, false},
-		{"declared without override", []recipe.ComponentRef{{Name: recipe.KubeflowTrainerComponentName}}, false, false},
-		{"declared with override", []recipe.ComponentRef{{
+		{"declared without override", []recipe.ComponentRef{{
+			Name: recipe.KubeflowTrainerComponentName, ManifestFiles: []string{recipe.GKETCPXORuntimeManifest}}}, false, false},
+		{"declared with manifest and override", []recipe.ComponentRef{{
+			Name:          recipe.KubeflowTrainerComponentName,
+			ManifestFiles: []string{recipe.GKETCPXORuntimeManifest},
+			Overrides:     map[string]any{recipe.GKETCPXOInterfacesOverrideKey: rawGood},
+		}}, true, false},
+		{"override without the runtime manifest is not delivered", []recipe.ComponentRef{{
 			Name:      recipe.KubeflowTrainerComponentName,
 			Overrides: map[string]any{recipe.GKETCPXOInterfacesOverrideKey: rawGood},
-		}}, true, false},
+		}}, false, false},
 		{"declared but disabled", []recipe.ComponentRef{{
-			Name:      recipe.KubeflowTrainerComponentName,
-			Overrides: map[string]any{"enabled": false, recipe.GKETCPXOInterfacesOverrideKey: rawGood},
+			Name:          recipe.KubeflowTrainerComponentName,
+			ManifestFiles: []string{recipe.GKETCPXORuntimeManifest},
+			Overrides:     map[string]any{"enabled": false, recipe.GKETCPXOInterfacesOverrideKey: rawGood},
 		}}, false, false},
 		{"malformed override fails closed", []recipe.ComponentRef{{
-			Name:      recipe.KubeflowTrainerComponentName,
-			Overrides: map[string]any{recipe.GKETCPXOInterfacesOverrideKey: "eth1=x"},
+			Name:          recipe.KubeflowTrainerComponentName,
+			ManifestFiles: []string{recipe.GKETCPXORuntimeManifest},
+			Overrides:     map[string]any{recipe.GKETCPXOInterfacesOverrideKey: "eth1=x"},
 		}}, false, true},
 	}
 	for _, tt := range tests {
@@ -122,7 +130,8 @@ func TestFabricRuntimeDelivered(t *testing.T) {
 // same component name and override key that recipe generation uses.
 func TestFabricRuntimeDeliveredReadsWhatGenerationRecords(t *testing.T) {
 	want := mapping(eightNets("gen")...)
-	r := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: recipe.KubeflowTrainerComponentName}}}
+	r := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{
+		Name: recipe.KubeflowTrainerComponentName, ManifestFiles: []string{recipe.GKETCPXORuntimeManifest}}}}
 	// Hand-build the record in the shape recipe generation writes (a list of
 	// {interfaceName, network} maps under the exported override key), so the
 	// reader is tested against that shape without needing a full catalog.

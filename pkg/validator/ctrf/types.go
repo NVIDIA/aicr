@@ -157,12 +157,11 @@ type TestResult struct {
 	// free-form log text stripped by default). It mirrors the CTRF spec's
 	// `extra` object.
 	//
-	// CONTRACT: values MUST take one of three low-cardinality shapes — a bare
-	// decimal count ("1", "2"), a closed-set enum code ("no-gpu-nodes",
-	// "delivered-artifact"), or a lowercase 64-hex sha256 content identity (the
-	// #2297 runtime-provenance digests). NEVER node names, IPs,
-	// hostnames, or any operator-identifying free text; those belong in Stdout,
-	// which is redacted by default. The redact package enforces this at the
+	// CONTRACT: values MUST take one of two low-cardinality shapes — a bare
+	// decimal count ("1", "2") or a closed-set enum code ("no-gpu-nodes",
+	// "delivered-artifact"). NEVER node names, IPs, hostnames, digests of
+	// cluster-specific content, or any operator-identifying free text; those
+	// belong in Stdout, which is redacted by default. The redact package enforces this at the
 	// publication boundary with a fail-closed key AND value allowlist: only
 	// listed keys survive, and only values matching the key's canonical shape
 	// (decimal count / kebab-case enum code) — so an identifier smuggled under
