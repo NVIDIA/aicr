@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
@@ -152,7 +153,9 @@ func LoadFromFileWithProviderProfile(
 		if profileErr := ensureDirectOverlayProfileApplied(ctx, path, &overlay, rec, dp, selection); profileErr != nil {
 			return nil, profileErr
 		}
-		warnUnappliedDirectOverlayMixins(path, &overlay, rec)
+		if mixinErr := ensureDirectOverlayMixinsApplied(ctx, path, &overlay, rec, dp); mixinErr != nil {
+			return nil, mixinErr
+		}
 
 		slog.Info("overlay hydrated successfully",
 			"appliedOverlays", rec.Metadata.AppliedOverlays)
@@ -261,30 +264,87 @@ func deprecatedInputTarget(kind, apiVersion string) string {
 	return header.GroupVersionV1
 }
 
-// warnUnappliedDirectOverlayMixins reports a directly-passed overlay whose
+// ensureDirectOverlayMixinsApplied rejects a directly-passed overlay whose
 // spec.mixins did not reach the hydrated recipe. Hydration rebuilds from
-// spec.criteria alone and never reads spec.mixins, so an overlay file outside
-// the resolved catalog contributes none of them: the bundle still succeeds and
-// still accepts --set against the mixin's paths, but ships none of its values.
+// spec.criteria alone and never reads spec.mixins, so a mixin composes only
+// when the overlay itself is in the active catalog.
 //
-// Presence in AppliedOverlays is the discriminator. A name that resolved from
-// the catalog composed through the normal mixin path, so only an absent name
-// indicates the silent drop.
-func warnUnappliedDirectOverlayMixins(path string, overlay *RecipeMetadata, rec *RecipeResult) {
-	if len(overlay.Spec.Mixins) == 0 {
-		return
+// This fails closed rather than warning, matching
+// ensureDirectOverlayProfileApplied below: once the discarded content is known,
+// returning success ships an artifact missing values the caller asked for, and
+// SDK and HTTP callers cannot act on a log line.
+func ensureDirectOverlayMixinsApplied(
+	ctx context.Context,
+	path string,
+	overlay *RecipeMetadata,
+	rec *RecipeResult,
+	dp DataProvider,
+) error {
+
+	if overlay == nil || len(overlay.Spec.Mixins) == 0 {
+		return nil
 	}
-	for _, applied := range rec.Metadata.AppliedOverlays {
-		if applied == overlay.Metadata.Name {
-			return
+	missing, err := unappliedDirectOverlayMixins(ctx, path, overlay, rec, dp)
+	if err != nil {
+		return err
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return errors.New(errors.ErrCodeInvalidRequest,
+		fmt.Sprintf("mixins %v declared by directly loaded overlay %q were not applied; only "+
+			"spec.criteria is read from a directly loaded file, so a mixin composes only when its "+
+			"overlay is in the active catalog — register the overlay under an external "+
+			"--data <dir>/overlays/ directory before loading it directly", missing, path))
+}
+
+// unappliedDirectOverlayMixins returns the mixins the direct overlay declares
+// that no applied catalog overlay contributed.
+//
+// A shared metadata.name is not evidence that the file's mixins composed: a
+// copy of a catalog overlay keeps the name and criteria, so the catalog twin
+// resolves under that name while the copy's edited mixin list is ignored.
+// Comparing against the mixins the applied chain actually declares is what
+// separates a real drop from a mixin some other chain member already supplies.
+func unappliedDirectOverlayMixins(
+	ctx context.Context,
+	path string,
+	overlay *RecipeMetadata,
+	rec *RecipeResult,
+	dp DataProvider,
+) ([]string, error) {
+
+	if rec == nil {
+		return slices.Clone(overlay.Spec.Mixins), nil
+	}
+	store, err := LoadMetadataStoreFor(ctx, dp)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			fmt.Sprintf("failed to verify mixins declared by directly loaded overlay %q", path))
+	}
+	composed := make(map[string]bool)
+	collect := func(declared []string) {
+		for _, mixin := range declared {
+			composed[mixin] = true
 		}
 	}
-	slog.Warn("overlay declares mixins that were not applied; hydration rebuilds from spec.criteria "+
-		"and does not read spec.mixins from a file outside the resolved catalog. "+
-		"Register the overlay under an external --data <dir>/overlays/ directory so its mixins compose",
-		"file", path,
-		"overlay", overlay.Metadata.Name,
-		"mixins", overlay.Spec.Mixins)
+	// mergeOverlayChains skips the root base when recording AppliedOverlays,
+	// so its declaration is folded in separately.
+	if store.Base != nil {
+		collect(store.Base.Spec.Mixins)
+	}
+	for _, name := range rec.Metadata.AppliedOverlays {
+		if applied, ok := store.Overlays[name]; ok && applied != nil {
+			collect(applied.Spec.Mixins)
+		}
+	}
+	var missing []string
+	for _, mixin := range overlay.Spec.Mixins {
+		if !composed[mixin] {
+			missing = append(missing, mixin)
+		}
+	}
+	return missing, nil
 }
 
 func ensureDirectOverlayProfileApplied(

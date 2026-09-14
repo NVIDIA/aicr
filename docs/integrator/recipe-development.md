@@ -114,7 +114,13 @@ spec:
 
 Mixins use `kind: RecipeMixin` and carry only `constraints` and `componentRefs`. They live in `recipes/mixins/` and are applied after inheritance chain merging. See [Data Architecture](../contributor/recipe.md#mixin-composition) for details.
 
-**A mixin only composes when its overlay is part of the resolved catalog.** Passing a leaf overlay file directly — `aicr bundle -r <file>`, `aicr validate -r <file>` — hydrates it by re-resolving `spec.criteria` against the catalog; it does not read `spec.mixins` from that file. An overlay that is neither embedded in `recipes/overlays/` nor registered under an external `--data <dir>/overlays/` therefore contributes no mixin content, and the bundle still succeeds. AICR logs a warning naming the file and the dropped mixins when this happens; register the overlay via `--data` so its mixins apply.
+**A mixin only composes when its overlay is part of the resolved catalog.** Passing a leaf overlay file directly — `aicr bundle -r <file>`, `aicr validate -r <file>` — hydrates it by re-resolving `spec.criteria` against the catalog. Only `spec.criteria` is read from the file; `spec.mixins` is not.
+
+An overlay that is neither embedded in `recipes/overlays/` nor registered under an external `--data <dir>/overlays/` therefore contributes no mixin content, and the bundle still succeeds. Register it via `--data` so its own declaration composes.
+
+This bites hardest when you copy an embedded overlay and add a mixin to your copy. The copy keeps the original `metadata.name` and `spec.criteria`, so the catalog's overlay of that name still resolves and the result looks correct — while the mixin you added is absent.
+
+AICR rejects this case rather than proceeding, naming the file and the mixins that were dropped. A mixin that some other applied overlay in the chain already contributes is not reported, since its content did reach the recipe.
 
 Some platforms declare their full component stack inline per leaf overlay rather than via a platform mixin. This is the case for `--platform slurm` and `--platform dynamo`, where each leaf carries hardware-specific tuning (GPU GRES strings, accelerator resource limits) that the mixin merge path cannot represent cleanly. Other shapes like `--platform kubeflow` and `--intent inference` still use the `platform-kubeflow` / `platform-inference` mixins shown above, since their leaf-specific tuning is minimal.
 
