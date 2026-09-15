@@ -54,6 +54,7 @@ components:
     helm:
       defaultRepository: https://kubernetes-sigs.github.io/node-feature-discovery/charts
       defaultChart: node-feature-discovery
+      # renovate: datasource=helm depName=node-feature-discovery registryUrl=https://kubernetes-sigs.github.io/node-feature-discovery/charts
       defaultVersion: "0.19.0"
       defaultNamespace: node-feature-discovery
     nodeScheduling:
@@ -104,6 +105,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/gpu-operator
+      # renovate: datasource=helm depName=gpu-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
       defaultVersion: v26.7.0
       defaultNamespace: gpu-operator
     nodeScheduling:
@@ -168,6 +170,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: nvidia/network-operator
+      # renovate: datasource=helm depName=network-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
       defaultVersion: "26.4.1"
       defaultNamespace: nvidia-network-operator
     nodeScheduling:
@@ -261,6 +264,7 @@ components:
     helm:
       defaultRepository: https://aws.github.io/eks-charts
       defaultChart: aws-efa-k8s-device-plugin
+      # renovate: datasource=helm depName=aws-efa-k8s-device-plugin registryUrl=https://aws.github.io/eks-charts
       defaultVersion: v0.5.29
       defaultNamespace: kube-system
     nodeScheduling:
@@ -279,6 +283,7 @@ components:
     helm:
       defaultRepository: https://charts.jetstack.io
       defaultChart: jetstack/cert-manager
+      # renovate: datasource=helm depName=cert-manager registryUrl=https://charts.jetstack.io
       defaultVersion: v1.20.2
       defaultNamespace: cert-manager
     nodeScheduling:
@@ -307,6 +312,7 @@ components:
       # v0.18.0 renames Skyhook to NodeWright and writes status only on the new
       # kind; do not bump past v0.17.x until the upgrade guidance (design 021)
       # lands. See #2595.
+      # renovate: datasource=docker depName=ghcr.io/nvidia/nodewright/charts/nodewright
       defaultVersion: v0.17.1
       defaultNamespace: skyhook
     nodeScheduling:
@@ -387,6 +393,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: nvsentinel
+      # renovate: datasource=docker depName=ghcr.io/nvidia/nvsentinel
       defaultVersion: v1.20.0
       defaultNamespace: nvsentinel
     nodeScheduling:
@@ -468,6 +475,7 @@ components:
     helm:
       defaultRepository: oci://registry.k8s.io/dra-driver-nvidia/charts
       defaultChart: dra-driver-nvidia-gpu
+      # renovate: datasource=docker depName=registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu
       defaultVersion: "0.5.0"
       defaultNamespace: nvidia-dra-driver
     nodeScheduling:
@@ -501,6 +509,7 @@ components:
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/prometheus-operator-crds
+      # renovate: datasource=helm depName=prometheus-operator-crds registryUrl=https://prometheus-community.github.io/helm-charts
       defaultVersion: 28.0.1
       defaultNamespace: monitoring
 
@@ -519,6 +528,7 @@ components:
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/kube-prometheus-stack
+      # renovate: datasource=helm depName=kube-prometheus-stack registryUrl=https://prometheus-community.github.io/helm-charts
       defaultVersion: 84.4.0
       defaultNamespace: monitoring
     nodeScheduling:
@@ -565,6 +575,7 @@ components:
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/prometheus-adapter
+      # renovate: datasource=helm depName=prometheus-adapter registryUrl=https://prometheus-community.github.io/helm-charts
       defaultVersion: 5.3.0
       defaultNamespace: monitoring
     nodeScheduling:
@@ -584,6 +595,7 @@ components:
     helm:
       defaultRepository: https://kubernetes-sigs.github.io/aws-ebs-csi-driver
       defaultChart: aws-ebs-csi-driver/aws-ebs-csi-driver
+      # renovate: datasource=helm depName=aws-ebs-csi-driver registryUrl=https://kubernetes-sigs.github.io/aws-ebs-csi-driver
       defaultVersion: 2.59.0
       defaultNamespace: kube-system
     nodeScheduling:
@@ -608,6 +620,7 @@ components:
     helm:
       defaultRepository: https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
       defaultChart: k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics
+      # renovate: datasource=helm depName=k8s-ephemeral-storage-metrics registryUrl=https://jmcgrath207.github.io/k8s-ephemeral-storage-metrics/chart
       defaultVersion: "1.19.2"
       defaultNamespace: monitoring
     nodeScheduling:
@@ -634,6 +647,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/googlecloudplatform/charts
       defaultChart: k8s-aibom
+      # renovate: datasource=docker depName=ghcr.io/googlecloudplatform/charts/k8s-aibom
       defaultVersion: "1.3.0"
       defaultNamespace: k8s-aibom-system
     nodeScheduling:
@@ -660,6 +674,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/kai-scheduler/kai-scheduler
       defaultChart: kai-scheduler
+      # renovate: datasource=docker depName=ghcr.io/kai-scheduler/kai-scheduler/kai-scheduler
       defaultVersion: v0.16.9
       defaultNamespace: kai-scheduler
     nodeScheduling:
@@ -683,6 +698,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/ai-dynamo/grove
       defaultChart: grove-charts
+      # renovate: datasource=docker depName=ghcr.io/ai-dynamo/grove/grove-charts
       defaultVersion: "v0.1.0-alpha.12"
       defaultNamespace: dynamo-system
     nodeScheduling:
@@ -702,6 +718,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultChart: dynamo-platform
+      # renovate: datasource=helm depName=dynamo-platform registryUrl=https://helm.ngc.nvidia.com/nvidia/ai-dynamo
       defaultVersion: "1.4.2"
       defaultNamespace: dynamo-system
     nodeScheduling:
@@ -731,6 +748,7 @@ components:
     helm:
       defaultRepository: oci://cr.agentgateway.dev/charts
       defaultChart: agentgateway-crds
+      # renovate: datasource=docker depName=cr.agentgateway.dev/charts/agentgateway-crds
       defaultVersion: v1.5.0
       defaultNamespace: agentgateway-system
 
@@ -745,6 +763,7 @@ components:
       defaultChart: agentgateway
       # Keep in lockstep with agentgateway-crds above; see the version floor
       # note there before changing this pin.
+      # renovate: datasource=docker depName=cr.agentgateway.dev/charts/agentgateway
       defaultVersion: v1.5.0
       defaultNamespace: agentgateway-system
     nodeScheduling:
@@ -764,6 +783,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: k8s-nim-operator
+      # renovate: datasource=helm depName=k8s-nim-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
       defaultVersion: "3.1.0"
       defaultNamespace: nvidia-nim
     nodeScheduling:
@@ -796,6 +816,7 @@ components:
     helm:
       defaultRepository: oci://registry.k8s.io/kueue/charts
       defaultChart: kueue
+      # renovate: datasource=docker depName=registry.k8s.io/kueue/charts/kueue
       defaultVersion: "0.19.3"
       defaultNamespace: kueue-system
     nodeScheduling:
@@ -832,6 +853,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/kubeflow/charts
       defaultChart: kubeflow-trainer
+      # renovate: datasource=docker depName=ghcr.io/kubeflow/charts/kubeflow-trainer
       defaultVersion: 2.2.0
       defaultNamespace: kubeflow
     nodeScheduling:
@@ -924,6 +946,7 @@ components:
       # anonymous; Helm OCI chart pulls may require GHCR credentials.
       defaultRepository: oci://ghcr.io/nvidia
       defaultChart: cluster-readiness-engine
+      # renovate: datasource=docker depName=ghcr.io/nvidia/cluster-readiness-engine
       defaultVersion: v0.2.0
       defaultNamespace: nvcre
     nodeScheduling:
@@ -957,6 +980,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/slinkyproject/charts
       defaultChart: slurm-operator-crds
+      # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm-operator-crds
       defaultVersion: "1.2.0"
       defaultNamespace: slinky
 
@@ -969,6 +993,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-operator-crds
+      # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-operator-crds
       defaultVersion: "26.6.0"
       defaultNamespace: mariadb-system
 
@@ -981,6 +1006,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-operator
+      # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-operator
       defaultVersion: "26.6.0"
       defaultNamespace: mariadb-system
     nodeScheduling:
@@ -1010,6 +1036,7 @@ components:
     helm:
       defaultRepository: oci://ghcr.io/mariadb-operator/charts
       defaultChart: mariadb-cluster
+      # renovate: datasource=docker depName=ghcr.io/mariadb-operator/charts/mariadb-cluster
       defaultVersion: "26.6.0"
       defaultNamespace: slurm
     storageClassPaths:
@@ -1048,6 +1075,7 @@ components:
       # `crds.enabled: false` still match the chart defaults. The values
       # file mirrors the chart defaults explicitly for documentation, but
       # an upstream default flip would otherwise pass through unnoticed.
+      # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm-operator
       defaultVersion: "1.2.0"
       defaultNamespace: slinky
     nodeScheduling:
@@ -1076,6 +1104,7 @@ components:
       # component values define the `slinky` map keys, and the cross-check in
       # pkg/recipe TestComponentRegistry_SlinkySlurm_NodeSchedulingPaths
       # enforces their alignment with the scheduling paths below.
+      # renovate: datasource=docker depName=ghcr.io/slinkyproject/charts/slurm
       defaultVersion: "1.2.0"
       defaultNamespace: slurm
     sharedStorageClassPaths:
@@ -1121,6 +1150,7 @@ components:
     helm:
       defaultRepository: https://nvidia.github.io/topograph
       defaultChart: topograph/topograph
+      # renovate: datasource=helm depName=topograph registryUrl=https://nvidia.github.io/topograph
       defaultVersion: "1.0.0"
       defaultNamespace: topograph
     nodeScheduling:
@@ -1151,6 +1181,7 @@ components:
     helm:
       defaultRepository: https://open-policy-agent.github.io/gatekeeper/charts
       defaultChart: gatekeeper/gatekeeper
+      # renovate: datasource=helm depName=gatekeeper registryUrl=https://open-policy-agent.github.io/gatekeeper/charts
       defaultVersion: 3.22.2
       defaultNamespace: gatekeeper-system
     nodeScheduling:
@@ -1284,6 +1315,7 @@ components:
     helm:
       defaultRepository: https://prometheus-community.github.io/helm-charts
       defaultChart: prometheus-community/prometheus-adapter
+      # renovate: datasource=helm depName=prometheus-adapter registryUrl=https://prometheus-community.github.io/helm-charts
       defaultVersion: 5.3.0
       defaultNamespace: monitoring
     nodeScheduling:
@@ -1306,6 +1338,7 @@ components:
     helm:
       defaultRepository: oci://registry.k8s.io/dra-driver-nvidia/charts
       defaultChart: dra-driver-nvidia-gpu
+      # renovate: datasource=docker depName=registry.k8s.io/dra-driver-nvidia/charts/dra-driver-nvidia-gpu
       defaultVersion: "0.5.0"
       defaultNamespace: nvidia-dra-driver
     nodeScheduling:
@@ -1333,6 +1366,7 @@ components:
     helm:
       defaultRepository: https://helm.ngc.nvidia.com/nvidia
       defaultChart: k8s-nim-operator
+      # renovate: datasource=helm depName=k8s-nim-operator registryUrl=https://helm.ngc.nvidia.com/nvidia
       defaultVersion: "3.1.0"
       defaultNamespace: nvidia-nim
     nodeScheduling:
