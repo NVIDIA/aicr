@@ -276,6 +276,26 @@ Both policies fire when a **DaemonSet-owned Pod** in a watched namespace has bee
 
 **What these policies do not catch.** The predicate requires a Pod that is scheduled (`spec.nodeName` set) and has a `status.startTime`, because a health event has to be attached to a node. A DaemonSet Pod the scheduler never placed -- Pending because no node can satisfy its requests -- has neither, so it never fires, at any elapsed time. Nor does a Pod whose *phase* is `Running` while a container is wedged in a state other than `CrashLoopBackOff` (`ImagePullBackOff` on a restart, `CreateContainerConfigError`, a permanently failing readiness probe), or a k8s ≥1.29 native sidecar crash-looping at phase `Running`: `initContainerStatuses` is not inspected. An init container that crash-loops *before* the Pod reaches `Running` is caught, via the phase clause.
 
+**Each policy matches only its own operator's operands.** Namespace plus "owned by a DaemonSet" would not be enough: an unrelated DaemonSet an administrator happens to run in `gpu-operator` or `nvidia-network-operator` would, once unhealthy past the grace period, raise a *fatal* event and node condition blaming the operator. Each predicate therefore also requires the label that operator stamps on the DaemonSet pods it owns. The two are not the same label, and neither is a documented API -- both were read off live deployments at the versions this repo pins:
+
+| Operator | Required label | Coverage |
+|---|---|---|
+| `gpu-operator` (v26.7.0) | `app.kubernetes.io/managed-by: gpu-operator` | Confirmed on a live H100 cluster: all nine operand DaemonSets (driver, toolkit, device-plugin, DCGM, DCGM exporter, validator, GFD, MIG manager, MPS control), and the running Pods inherit it. The bundled node-feature-discovery subchart does not carry it and is out of scope. |
+| `network-operator` (26.4.1) | `ds-owner: NicClusterPolicy` | Verified on Kind only. The label is applied per-operand, not uniformly, so coverage depends on which `NicClusterPolicy` a recipe ships -- see below. |
+
+**Network Operator coverage is partial, and it varies by recipe.** The `ds-owner` label is stamped per operand rather than by a shared helper, so which components a policy watches depends on what that recipe's `NicClusterPolicy` enables:
+
+| `recipes/components/network-operator/manifests/` | Operands enabled | Watched |
+|---|---|---|
+| `nic-cluster-policy-generic-gb300.yaml` | ofedDriver, rdmaSharedDevicePlugin | both |
+| `nic-cluster-policy-oke-gb200.yaml` | rdmaSharedDevicePlugin | yes |
+| `nic-cluster-policy-aks.yaml` | ofedDriver, rdmaSharedDevicePlugin, docaTelemetryService | first two; `docaTelemetryService` unverified |
+| `nic-cluster-policy-oke-l40s.yaml` | nvIpam, secondaryNetwork, sriovDevicePlugin | **none confirmed** -- `nv-ipam-node` demonstrably omits the label, the other two are unverified |
+
+The RDMA driver and shared device plugin — the components whose failure actually means a node can no longer run RDMA workloads — are covered everywhere they are deployed. The uncovered cases fail by staying silent rather than by raising a wrong event, which is the safe direction, but on OKE L40S the network policy should not be relied on until those operands are checked against a cluster with RDMA NICs.
+
+Because neither label is contractual, an operator release that renames one would turn that policy into a silent no-op — and nothing inside this repo can detect that, since the labels come from the operators' own controllers rather than from any chart AICR renders. Each assumption is therefore bound to the version it was verified against: `TestObjectMonitorOperandIdentityPinnedToVerifiedVersion` fails the moment `gpu-operator` or `network-operator` is bumped in `recipes/registry.yaml`, forcing whoever bumps it to re-read the labels off the new release first. That converts a silent no-op into a required revalidation step; it is not a live check.
+
 **The grace period debounces Pod age, not unhealthiness.** `status.startTime` is when the Pod started, so for a Pod that has been up for weeks -- the case this mixin exists for -- the 30-minute floor is already satisfied and a brief container restart fires immediately. The floor suppresses events during a rollout; it does not require a fault to persist for 30 minutes.
 
 **Event handling is the chart's default, `processingStrategy: EXECUTE_REMEDIATION`.** The mixin does not set it, so events flow through NVSentinel's normal path (a node condition today; cordon/drain once remediation exists). The subchart also offers `STORE_ONLY`, which records events without acting on them; it is not on `nvsentinel`'s `mixinSafeOverridePaths` allowlist, so set it on your own leaf's `componentRefs` if you want it.

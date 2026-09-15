@@ -391,9 +391,18 @@ assert_no_health_event() {
 
 # apply_daemonset creates a DaemonSet in gpu-operator running $2. An
 # unresolvable image yields a permanently unhealthy pod; a real one yields a
-# healthy rollout.
+# healthy rollout. $3 selects
+# whether its pods carry the GPU Operator operand identity the policy requires
+# ("operand", the default) or not ("unrelated"). Without that label a real
+# cluster's unrelated workloads must not raise a GPU Operator health event, and
+# an "operand" fixture is what makes the positive cases represent a real operand
+# rather than any pod that happens to live in the namespace.
 apply_daemonset() {
-  local name="$1" image="$2"
+  local name="$1" image="$2" identity="${3:-operand}" identity_label=""
+  if [[ "${identity}" == "operand" ]]; then
+    identity_label="
+        app.kubernetes.io/managed-by: gpu-operator"
+  fi
   kubectl --context "${KUBE_CONTEXT}" apply -f - >/dev/null <<EOF
 apiVersion: apps/v1
 kind: DaemonSet
@@ -407,7 +416,7 @@ spec:
   template:
     metadata:
       labels:
-        app: ${name}
+        app: ${name}${identity_label}
     spec:
       containers:
         - name: main
@@ -509,6 +518,47 @@ test_inside_grace_period_stays_quiet() {
   kubectl --context "${KUBE_CONTEXT}" -n gpu-operator delete daemonset gpu-operator-fresh-e2e --wait=false >/dev/null
 }
 
+# The policy's blast-radius guard, and the only case here that exercises the
+# operand-identity clause at runtime. This DaemonSet is identical to the
+# positive case -- same namespace, same DaemonSet ownership, same unresolvable
+# image, same backdated startTime -- and differs ONLY in carrying no
+# app.kubernetes.io/managed-by label. Without that clause in the predicate it
+# raises a fatal "GPU Operator DaemonSet pod is not healthy" for a workload the
+# GPU Operator has nothing to do with.
+test_unrelated_daemonset_stays_quiet() {
+  msg "TEST: unhealthy NON-operand DaemonSet past the grace period produces neither event nor condition"
+  local since
+  since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  apply_daemonset gpu-operator-unrelated-e2e "${UNHEALTHY_IMAGE}" unrelated
+  local scheduled pod node
+  scheduled=$(await_scheduled_pod gpu-operator-unrelated-e2e) ||
+    err "unrelated DaemonSet never produced a scheduled pod"
+  read -r pod node <<<"${scheduled}"
+  detail "pod=${pod} node=${node}"
+
+  # Backdated exactly like the positive case, so the grace period cannot be
+  # what keeps this quiet -- the identity clause has to be.
+  backdate_pod_start_time "${pod}"
+  patch_start_time_loop "${pod}" "${PATCH_LOOP_SECONDS}" &
+  PATCHER_PID=$!
+
+  require_monitor_ready
+  if wait_for_node_condition "${GPU_POLICY_CONDITION}" "True" "${CONDITION_WAIT_SECONDS}" "${node}"; then
+    fail "nvsentinel-object-monitor/unrelated-daemonset-no-condition" \
+      "${GPU_POLICY_CONDITION} went True for a DaemonSet with no GPU Operator identity"
+  else
+    pass "nvsentinel-object-monitor/unrelated-daemonset-no-condition"
+  fi
+  assert_no_health_event "${pod}" "${since}" "unrelated-daemonset-no-event"
+
+  kill "${PATCHER_PID}" 2>/dev/null || true
+  wait "${PATCHER_PID}" 2>/dev/null || true
+  PATCHER_PID=""
+
+  require_monitor_ready
+  kubectl --context "${KUBE_CONTEXT}" -n gpu-operator delete daemonset gpu-operator-unrelated-e2e --wait=false >/dev/null
+}
+
 # #2612 asks specifically for a healthy rollout inside the grace period to
 # produce no event. It is a weaker assertion than the one above -- a healthy
 # pod already fails the predicate's health clause, so this would stay green
@@ -567,6 +617,7 @@ install_nvsentinel
 # would let a stale True from it fail whichever negative test came next.
 test_inside_grace_period_stays_quiet
 test_healthy_rollout_stays_quiet
+test_unrelated_daemonset_stays_quiet
 test_unhealthy_pod_fires
 
 msg "=========================================="

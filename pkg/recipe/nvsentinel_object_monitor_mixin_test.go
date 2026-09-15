@@ -303,3 +303,114 @@ func TestObjectMonitorImagePinnedEverywhere(t *testing.T) {
 		}
 	}
 }
+
+// objectMonitorOperandIdentities records, per operator, the label its operand
+// DaemonSet pods carry and the component version that label was READ OFF A
+// LIVE DEPLOYMENT at.
+//
+// Neither label is a documented API. Both were obtained by installing the
+// operator at the version below, driving it to create its operands, and reading
+// the labels off the result. They are not the same label between the two
+// operators, which is exactly why neither can be assumed.
+//
+// The two were verified to different depths, and that difference matters:
+//
+//	gpu-operator     confirmed on a live EKS H100 cluster. All 9 operand
+//	                 DaemonSets carry it, INCLUDING nvidia-driver-daemonset,
+//	                 nvidia-container-toolkit-daemonset and nvidia-dcgm, and
+//	                 the running Pods inherit it (the predicate matches Pods,
+//	                 not DaemonSets). The two pods in that namespace which do
+//	                 NOT carry it are correctly outside the policy anyway: the
+//	                 operator's own Deployment (ReplicaSet-owned) and
+//	                 nvidia-cuda-validator (a ClusterPolicy-owned Pod, not a
+//	                 DaemonSet).
+//	network-operator verified only on Kind, against a hand-written
+//	                 NicClusterPolicy, on the mofed driver and rdma-shared-dp
+//	                 operands. No AICR cluster with network-operator was
+//	                 available to confirm it, and AICR ships its own
+//	                 NicClusterPolicy manifests which may enable other
+//	                 operands. Treat this one as the weaker of the two.
+var objectMonitorOperandIdentities = []struct {
+	component    string
+	verifiedAt   string
+	label        string
+	policy       string
+	notCoveredBy string
+}{
+	{
+		component:    "gpu-operator",
+		verifiedAt:   "v26.7.0",
+		label:        "app.kubernetes.io/managed-by",
+		policy:       "gpu-operator-pods-health",
+		notCoveredBy: "the bundled node-feature-discovery subchart, which is a Helm dependency rather than a ClusterPolicy operand",
+	},
+	{
+		component:    "network-operator",
+		verifiedAt:   "26.4.1",
+		label:        "ds-owner",
+		policy:       "network-operator-pod-health",
+		notCoveredBy: "nv-ipam-node, which omits the label upstream",
+	},
+}
+
+// TestObjectMonitorOperandIdentityPinnedToVerifiedVersion is the drift guard
+// the render test cannot be.
+//
+// The render test renders the NVSENTINEL chart and confirms the policy asks for
+// a given label — it compares the mixin against itself, so it stays green if
+// GPU Operator or Network Operator renames the label it stamps on its operands.
+// Nothing inside this repo can observe that rename: the labels come from the
+// operators' own controllers, not from any chart AICR renders.
+//
+// So the assumption is bound to the version it was verified against instead.
+// Bumping gpu-operator or network-operator in recipes/registry.yaml fails this
+// test, which forces someone to re-read the labels off the new version before
+// the bump can land. That is a weaker guarantee than a live check and it is the
+// honest one: it converts a silent no-op into a required revalidation step.
+func TestObjectMonitorOperandIdentityPinnedToVerifiedVersion(t *testing.T) {
+	_, store := objectMonitorStore(t)
+
+	registry, err := GetComponentRegistryFor(store.provider)
+	if err != nil {
+		t.Fatalf("GetComponentRegistryFor: %v", err)
+	}
+	ref, ok := findComponentRefByName(store.Mixins[objectMonitorMixin].Spec.ComponentRefs, "nvsentinel")
+	if !ok {
+		t.Fatal("mixin has no nvsentinel componentRef")
+	}
+	policies := objectMonitorPolicies(t, ref)
+
+	for _, identity := range objectMonitorOperandIdentities {
+		t.Run(identity.component, func(t *testing.T) {
+			comp := registry.Get(identity.component)
+			if comp == nil {
+				t.Fatalf("%s not found in registry", identity.component)
+			}
+			if comp.Helm.DefaultVersion != identity.verifiedAt {
+				t.Errorf(
+					"%s is pinned at %q but its operand identity label %q was only verified against %q.\n"+
+						"Re-verify before shipping this bump: install %s %s, let it create its operands, and read\n"+
+						"  kubectl get ds -n %s -o jsonpath='{range .items[*]}{.metadata.name}{\"\\t\"}{.spec.template.metadata.labels}{\"\\n\"}{end}'\n"+
+						"If the label still holds, update verifiedAt here. If it changed, update the predicate in\n"+
+						"recipes/mixins/%s.yaml too -- otherwise policy %q silently matches nothing.",
+					identity.component, comp.Helm.DefaultVersion, identity.label, identity.verifiedAt,
+					identity.component, comp.Helm.DefaultVersion, comp.Helm.DefaultNamespace,
+					objectMonitorMixin, identity.policy)
+			}
+
+			// The mixin must still actually require the label. Without this the
+			// version pin above would keep passing after someone deleted the
+			// clause, which is the over-match this guard exists to prevent.
+			policy := policyByName(policies, identity.policy)
+			if policy == nil {
+				t.Fatalf("policy %q not found in mixin", identity.policy)
+			}
+			predicate, _ := policy["predicate"].(map[string]any)
+			expr, _ := predicate["expression"].(string)
+			if !strings.Contains(expr, "'"+identity.label+"'") {
+				t.Errorf("policy %q does not require the %s operand identity %q; it would match any DaemonSet pod in the namespace (not covered either way: %s)",
+					identity.policy, identity.component, identity.label, identity.notCoveredBy)
+			}
+		})
+	}
+}

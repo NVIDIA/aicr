@@ -117,10 +117,21 @@ func TestNVSentinelObjectMonitor_PolicyPredicates_MatchNVSentinelSemantics(t *te
 		if containerStatuses != nil {
 			status["containerStatuses"] = containerStatuses
 		}
+		// Operand identity, keyed off the namespace the case is exercising.
+		// Read off live deployments at the pinned versions -- the two operators
+		// do not use the same label (see the mixin header).
+		labels := map[string]any{}
+		switch namespace {
+		case "gpu-operator", "privileged-gpu-operator":
+			labels["app.kubernetes.io/managed-by"] = "gpu-operator"
+		case "nvidia-network-operator", "privileged-network-operator":
+			labels["ds-owner"] = "NicClusterPolicy"
+		}
 		pod := map[string]any{
 			"metadata": map[string]any{
 				"namespace":       namespace,
 				"ownerReferences": daemonSetOwner,
+				"labels":          labels,
 			},
 			"spec": map[string]any{
 				"nodeName": "node-1",
@@ -150,6 +161,26 @@ func TestNVSentinelObjectMonitor_PolicyPredicates_MatchNVSentinelSemantics(t *te
 			map[string]any{"kind": "ReplicaSet", "name": "gpu-operator-5d9f"},
 		}
 	}
+	// An unrelated DaemonSet an admin happens to run in the operator's
+	// namespace: right namespace, right owner kind, no operator identity.
+	withoutLabels := func(pod map[string]any) {
+		delete(pod["metadata"].(map[string]any), "labels")
+	}
+	withUnrelatedLabels := func(pod map[string]any) {
+		pod["metadata"].(map[string]any)["labels"] = map[string]any{
+			"app": "some-log-shipper",
+		}
+	}
+	// The other operator's identity, to prove the two policies do not accept
+	// each other's operands.
+	withCrossOperatorIdentity := func(pod map[string]any) {
+		labels, _ := pod["metadata"].(map[string]any)["labels"].(map[string]any)
+		if _, isGPU := labels["app.kubernetes.io/managed-by"]; isGPU {
+			pod["metadata"].(map[string]any)["labels"] = map[string]any{"ds-owner": "NicClusterPolicy"}
+			return
+		}
+		pod["metadata"].(map[string]any)["labels"] = map[string]any{"app.kubernetes.io/managed-by": "gpu-operator"}
+	}
 
 	crashLoopContainerStatuses := []any{
 		map[string]any{
@@ -168,6 +199,39 @@ func TestNVSentinelObjectMonitor_PolicyPredicates_MatchNVSentinelSemantics(t *te
 		pod    map[string]any
 		want   bool
 	}{
+		{
+			// The finding this identity guard exists for: an unrelated
+			// DaemonSet an admin runs in the operator's namespace must not
+			// raise a fatal "GPU Operator DaemonSet pod is not healthy".
+			name:   "gpu-operator: unrelated unhealthy DaemonSet in the same namespace stays quiet",
+			policy: "gpu-operator-pods-health",
+			pod:    newPod("gpu-operator", now.Add(-31*time.Minute), "Running", crashLoopContainerStatuses, withUnrelatedLabels),
+			want:   false,
+		},
+		{
+			name:   "gpu-operator: unhealthy DaemonSet pod with no labels at all stays quiet",
+			policy: "gpu-operator-pods-health",
+			pod:    newPod("gpu-operator", now.Add(-31*time.Minute), "Running", crashLoopContainerStatuses, withoutLabels),
+			want:   false,
+		},
+		{
+			name:   "gpu-operator: a network-operator operand does not satisfy the GPU policy",
+			policy: "gpu-operator-pods-health",
+			pod:    newPod("gpu-operator", now.Add(-31*time.Minute), "Running", crashLoopContainerStatuses, withCrossOperatorIdentity),
+			want:   false,
+		},
+		{
+			name:   "network-operator: unrelated unhealthy DaemonSet in the same namespace stays quiet",
+			policy: "network-operator-pod-health",
+			pod:    newPod("nvidia-network-operator", now.Add(-31*time.Minute), "Running", crashLoopContainerStatuses, withUnrelatedLabels),
+			want:   false,
+		},
+		{
+			name:   "network-operator: a gpu-operator operand does not satisfy the network policy",
+			policy: "network-operator-pod-health",
+			pod:    newPod("nvidia-network-operator", now.Add(-31*time.Minute), "Running", crashLoopContainerStatuses, withCrossOperatorIdentity),
+			want:   false,
+		},
 		{
 			name:   "gpu-operator: CrashLoopBackOff past the 30m grace period fires",
 			policy: "gpu-operator-pods-health",

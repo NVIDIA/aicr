@@ -29,6 +29,34 @@
 # Consequently `resource.namespace` is NOT set (it takes a single namespace),
 # so the informer watches Pods cluster-wide, as upstream's own policies do.
 #
+# OPERATOR IDENTITY IS REQUIRED, AND IT DIFFERS BETWEEN THE TWO. Namespace plus
+# "owned by some DaemonSet" is not enough: any unrelated DaemonSet an admin runs
+# in these namespaces would, once unhealthy for 30m, raise a fatal event blaming
+# the operator. Each policy therefore also requires a label that only that
+# operator's own operands carry. They are not the same label, and neither was
+# guessable -- both were read off live deployments at the versions this repo
+# pins:
+#
+#   gpu-operator v26.7.0      app.kubernetes.io/managed-by = gpu-operator
+#                             Confirmed on a live EKS H100 cluster: all 9 operand
+#                             DaemonSets including driver, toolkit and dcgm, and
+#                             the running Pods inherit it. The bundled NFD
+#                             subchart does not carry it and is out of scope.
+#   network-operator 26.4.1   ds-owner = NicClusterPolicy
+#                             Kind-only, and the label is per-operand rather than
+#                             universal: mofed + rdma-shared-dp carry it,
+#                             nv-ipam-node does not. So coverage depends on which
+#                             NicClusterPolicy a recipe ships -- the oke-l40s one
+#                             enables none of the verified operands. Under-match,
+#                             the safe direction, but weaker than the GPU side.
+#                             See docs/user/component-catalog.md for the table.
+#
+# A bump that changes either label makes the policy match nothing, and nothing
+# here can observe that -- the labels come from the operators' controllers, not
+# from a chart AICR renders. So each label is bound to the version it was read
+# at: TestObjectMonitorOperandIdentityPinnedToVerifiedVersion fails when either
+# component is bumped in recipes/registry.yaml, forcing revalidation first.
+#
 # isFatal: true is deliberate, not inherited. With no quarantine component
 # enabled in this repo it only produces a node condition today; once
 # remediation lands (#1014) these policies would drive a real cordon/drain,
@@ -65,6 +93,9 @@ spec:
                    resource.metadata.namespace == 'privileged-gpu-operator') &&
                   has(resource.metadata.ownerReferences) &&
                   resource.metadata.ownerReferences.exists(r, r.kind == 'DaemonSet') &&
+                  has(resource.metadata.labels) &&
+                  'app.kubernetes.io/managed-by' in resource.metadata.labels &&
+                  resource.metadata.labels['app.kubernetes.io/managed-by'] == 'gpu-operator' &&
                   has(resource.spec.nodeName) && resource.spec.nodeName != "" &&
                   has(resource.status.startTime) &&
                   now - timestamp(resource.status.startTime) > duration('30m') &&
@@ -100,6 +131,9 @@ spec:
                    resource.metadata.namespace == 'privileged-network-operator') &&
                   has(resource.metadata.ownerReferences) &&
                   resource.metadata.ownerReferences.exists(r, r.kind == 'DaemonSet') &&
+                  has(resource.metadata.labels) &&
+                  'ds-owner' in resource.metadata.labels &&
+                  resource.metadata.labels['ds-owner'] == 'NicClusterPolicy' &&
                   has(resource.spec.nodeName) && resource.spec.nodeName != "" &&
                   has(resource.status.startTime) &&
                   now - timestamp(resource.status.startTime) > duration('30m') &&

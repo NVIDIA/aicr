@@ -56,6 +56,25 @@ func objectMonitorWatchedNamespaces(t *testing.T, store *recipe.MetadataStore, c
 	return namespaces
 }
 
+// objectMonitorOperandIdentity is the label each operator stamps on the
+// DaemonSet pods it owns, and the two are not the same.
+//
+// What this pins is narrow and worth stating: that the rendered policy still
+// ASKS for the label. It cannot tell whether the operator still SETS it --
+// this renders the nvsentinel chart, and the labels come from the GPU/Network
+// Operator controllers. Bumping either operator is caught by
+// pkg/recipe's TestObjectMonitorOperandIdentityPinnedToVerifiedVersion instead,
+// which binds each label to the version it was read at.
+//
+// Quoted as they appear in the CEL expression, not bare: Helm stamps
+// `app.kubernetes.io/managed-by: Helm` onto every object it renders (29 times
+// in this chart), and renderedPolicyBlock's last block runs to end-of-document,
+// so a bare-key search would match those instead of the predicate.
+var objectMonitorOperandIdentity = map[string]string{
+	"gpu-operator":     "'app.kubernetes.io/managed-by'",
+	"network-operator": "'ds-owner'",
+}
+
 // renderedPolicyBlock returns the chart-rendered TOML for one named policy:
 // everything from its `[[policies]]` header up to the next one. Assertions
 // scoped to a single policy need this -- the rendered document contains both,
@@ -197,6 +216,18 @@ func TestNVSentinelObjectMonitorChartRender(t *testing.T) {
 			if strings.Contains(block, "'"+other+"'") {
 				t.Errorf("rendered policy %q matches %q, which belongs to the other operator's policy", policy, other)
 			}
+		}
+		// The operand-identity label. Without it the predicate matches any
+		// DaemonSet pod in the namespace, so an unrelated workload raises a
+		// fatal event blaming the operator. Asserted against the rendered
+		// output because an NVSentinel chart bump that mangles the expression
+		// would otherwise leave the policy quietly over-broad.
+		identity := objectMonitorOperandIdentity[component]
+		if !strings.Contains(block, identity) {
+			t.Errorf("rendered policy %q does not require the %s operand identity %q; it would match any DaemonSet pod in the namespace", policy, component, identity)
+		}
+		if otherIdentity := objectMonitorOperandIdentity[otherComponent(component)]; strings.Contains(block, otherIdentity) {
+			t.Errorf("rendered policy %q requires %q, which is the other operator's identity", policy, otherIdentity)
 		}
 	}
 
