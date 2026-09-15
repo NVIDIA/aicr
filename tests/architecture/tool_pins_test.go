@@ -15,6 +15,7 @@
 package architecture
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -184,4 +185,70 @@ func settingsString(t *testing.T, tree map[string]any, path []string) (string, b
 			strings.Join(path, "."), cur)
 	}
 	return s, true
+}
+
+// TestNoFileReadsTheRemovedToolPins walks the worktree for readers of the
+// .settings.yaml keys this repo no longer defines.
+//
+// The keys are gone and TestToolPinsLiveOnlyInGoMod keeps them gone, but a
+// reader left behind does not fail loudly: `yq` exits 0 and prints "null" for
+// a missing key, so the caller gets the four-character string "null" as a
+// version. #2741 shipped exactly that -- tools/setup-tools still read both
+// keys, so `make tools-setup` compared every installed tool against "null",
+// never matched, and rebuilt apidiff on every run while reporting success.
+//
+// A repo-wide scan rather than a list of known callers: the readers missed
+// were tools/setup-tools and tools/generate-notices, both extensionless
+// scripts that a *.sh glob does not match.
+func TestNoFileReadsTheRemovedToolPins(t *testing.T) {
+	root := repoRoot(t)
+
+	// Assembled at run time so this file does not match its own scan.
+	needles := []string{
+		"linting" + "." + "apidiff",
+		"linting" + "." + "go_licenses",
+	}
+	skipDirs := map[string]bool{
+		".git": true, "node_modules": true, "vendor": true, "dist": true, "bin": true,
+	}
+
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if skipDirs[d.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if path == filepath.Join(root, "tests", "architecture", "tool_pins_test.go") {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil || info.Size() > 1<<20 {
+			return nil //nolint:nilerr // unreadable or oversized files are not pin readers
+		}
+		data, err := os.ReadFile(path) //nolint:gosec // repo-relative walk
+		if err != nil {
+			return nil //nolint:nilerr // binaries and transient files are not pin readers
+		}
+		for _, needle := range needles {
+			if !strings.Contains(string(data), needle) {
+				continue
+			}
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				rel = path
+			}
+			t.Errorf("%s still references .settings.yaml %s, which no longer exists.\n"+
+				"yq prints \"null\" for a missing key and exits 0, so this reader gets the "+
+				"string \"null\" as a version rather than an error. Read the go.mod require "+
+				"line instead -- go_mod_required_version in tools/common does it.", rel, needle)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
 }

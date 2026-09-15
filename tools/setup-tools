@@ -250,6 +250,18 @@ EXAMPLES:
 EOF
 }
 
+# Whether a module-built tool's installed version already matches its go.mod
+# pin. An unreadable binary reports an empty current version and must rebuild
+# rather than be treated as a match. A function so setup-tools_test.sh can
+# exercise the retain/replace decision, which is otherwise top-level code that
+# only runs during a real install.
+module_tool_up_to_date() {
+    local current="$1"
+    local required="$2"
+
+    [[ -n "${current}" && -n "${required}" && "${current}" == "${required}" ]]
+}
+
 # Test hook: lets setup-tools_test.sh source this file to reach the function
 # definitions above (command_exists, prompt_continue, install_helm, ...) and
 # call them directly with mocked commands, without running the argument
@@ -366,7 +378,14 @@ cd "${REPO_ROOT}"
 
 GO_VERSION=$(yq '.languages.go' .settings.yaml)
 GOLANGCI_LINT_VERSION=$(yq '.linting.golangci_lint' .settings.yaml)
-APIDIFF_VERSION=$(yq '.linting.apidiff' .settings.yaml)
+# apidiff and go-licenses are built from this module (#2667), so go.mod's
+# require line is their only pin -- .settings.yaml does not carry one. Fail
+# closed: yq would have returned the string "null" for the removed key, which
+# never equals an installed version and so rebuilds on every run.
+if ! APIDIFF_VERSION=$(go_mod_required_version golang.org/x/exp go.mod); then
+    log_error "No golang.org/x/exp require line in go.mod; cannot resolve the apidiff version."
+    exit 1
+fi
 OASDIFF_VERSION=$(yq '.linting.oasdiff' .settings.yaml)
 YAMLLINT_VERSION=$(yq '.linting.yamllint' .settings.yaml)
 ADDLICENSE_VERSION=$(yq '.linting.addlicense' .settings.yaml)
@@ -377,7 +396,10 @@ ADDLICENSE_VERSION=$(yq '.linting.addlicense' .settings.yaml)
 # Using it here also makes a local run a second check on the pin CI depends on,
 # which nothing outside CI otherwise exercises.
 ADDLICENSE_SHA256_LINUX_AMD64=$(yq '.linting.addlicense_sha256_linux_amd64' .settings.yaml)
-GO_LICENSES_VERSION=$(yq '.linting.go_licenses' .settings.yaml)
+if ! GO_LICENSES_VERSION=$(go_mod_required_version github.com/google/go-licenses/v2 go.mod); then
+    log_error "No github.com/google/go-licenses/v2 require line in go.mod; cannot resolve the go-licenses version."
+    exit 1
+fi
 GRYPE_VERSION=$(yq '.security_tools.grype' .settings.yaml)
 COSIGN_VERSION=$(yq '.security_tools.cosign' .settings.yaml)
 SYFT_VERSION=$(yq '.security_tools.syft' .settings.yaml)
@@ -1135,7 +1157,7 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
         APIDIFF_CURRENT_VERSION=$(go_binary_module_version "${APIDIFF_PATH}" golang.org/x/exp || true)
     fi
 
-    if [[ "${UPGRADE}" != "true" && "${APIDIFF_CURRENT_VERSION}" == "${APIDIFF_VERSION}" ]]; then
+    if [[ "${UPGRADE}" != "true" ]] && module_tool_up_to_date "${APIDIFF_CURRENT_VERSION}" "${APIDIFF_VERSION}"; then
         log_success "apidiff ${APIDIFF_VERSION} already installed"
     else
         if command_exists apidiff && [[ "${UPGRADE}" != "true" ]]; then
@@ -1266,13 +1288,26 @@ if [[ "${SKIP_TOOLS}" == "false" ]] && command_exists go; then
     fi
 
     # go-licenses
+    GO_LICENSES_CURRENT_VERSION=""
     if command_exists go-licenses && [[ "${UPGRADE}" != "true" ]]; then
-        log_success "go-licenses already installed"
+        GO_LICENSES_PATH=$(command -v go-licenses)
+        GO_LICENSES_CURRENT_VERSION=$(go_binary_module_version "${GO_LICENSES_PATH}" github.com/google/go-licenses/v2 || true)
+    fi
+
+    if [[ "${UPGRADE}" != "true" ]] && module_tool_up_to_date "${GO_LICENSES_CURRENT_VERSION}" "${GO_LICENSES_VERSION}"; then
+        log_success "go-licenses ${GO_LICENSES_VERSION} already installed"
     else
+        if command_exists go-licenses && [[ "${UPGRADE}" != "true" ]]; then
+            if [[ -n "${GO_LICENSES_CURRENT_VERSION}" ]]; then
+                log_warning "go-licenses version mismatch at ${GO_LICENSES_PATH} (installed: ${GO_LICENSES_CURRENT_VERSION}, required: ${GO_LICENSES_VERSION}); reinstalling pinned version"
+            else
+                log_warning "Unable to verify go-licenses module version at ${GO_LICENSES_PATH}; reinstalling pinned version ${GO_LICENSES_VERSION}"
+            fi
+        fi
         log_info "Installing go-licenses ${GO_LICENSES_VERSION}..."
         if prompt_continue; then
             build_module_tool go-licenses github.com/google/go-licenses/v2
-            log_success "go-licenses installed"
+            log_success "go-licenses ${GO_LICENSES_VERSION} installed"
         fi
     fi
 
