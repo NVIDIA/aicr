@@ -1,0 +1,125 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Opt-in mixin: turns on NVSentinel's Kubernetes Object Monitor with the two
+# policies from NVSentinel's docs/monitoring-critical-operators.md that watch
+# GPU Operator and Network Operator DaemonSet pods. Off by default in every
+# shipped recipe. See docs/user/component-catalog.md#kubernetes-object-monitor.
+#
+# NAMESPACES DIFFER FROM UPSTREAM. Each policy matches two, because this
+# repo deploys these components to two different namespaces depending on the
+# OS mixin: `gpu-operator`/`network-operator` normally (the latter as
+# `nvidia-network-operator`, not upstream's hardcoded `network-operator`),
+# and `privileged-`-prefixed variants under os-talos. A policy naming only
+# one would silently never fire on the other -- the failure this mixin
+# exists to avoid. The namespace tests read both the registry and os-talos
+# so a rename in either fails them rather than going quiet.
+#
+# Consequently `resource.namespace` is NOT set (it takes a single namespace),
+# so the informer watches Pods cluster-wide, as upstream's own policies do.
+#
+# isFatal: true is deliberate, not inherited. With no quarantine component
+# enabled in this repo it only produces a node condition today; once
+# remediation lands (#1014) these policies would drive a real cordon/drain,
+# correct for a node that can no longer run GPU or RDMA workloads.
+# quarantineOverrides/drainOverrides are left unset so that behavior follows
+# whatever mode the recipe's remediation config picks.
+#
+# The chart ships a third default policy, node-not-ready. Setting `policies`
+# replaces the list wholesale (Helm does not merge lists), so it is dropped
+# here on purpose: a general node-readiness signal outside this mixin's scope.
+
+kind: RecipeMixin
+apiVersion: aicr.run/v1beta1
+metadata:
+  name: nvsentinel-object-monitor
+spec:
+  componentRefs:
+    - name: nvsentinel
+      overrides:
+        global:
+          kubernetesObjectMonitor:
+            enabled: true
+        kubernetes-object-monitor:
+          policies:
+            - name: gpu-operator-pods-health
+              enabled: true
+              resource:
+                group: ""
+                version: v1
+                kind: Pod
+              predicate:
+                expression: |
+                  (resource.metadata.namespace == 'gpu-operator' ||
+                   resource.metadata.namespace == 'privileged-gpu-operator') &&
+                  has(resource.metadata.ownerReferences) &&
+                  resource.metadata.ownerReferences.exists(r, r.kind == 'DaemonSet') &&
+                  has(resource.spec.nodeName) && resource.spec.nodeName != "" &&
+                  has(resource.status.startTime) &&
+                  now - timestamp(resource.status.startTime) > duration('30m') &&
+                  (
+                    (resource.status.phase != 'Running' && resource.status.phase != 'Succeeded') ||
+                    (
+                      has(resource.status.containerStatuses) &&
+                      resource.status.containerStatuses.exists(cs,
+                        has(cs.state.waiting) &&
+                        has(cs.state.waiting.reason) &&
+                        cs.state.waiting.reason == 'CrashLoopBackOff'
+                      )
+                    )
+                  )
+              nodeAssociation:
+                expression: resource.spec.nodeName
+              healthEvent:
+                componentClass: Software
+                isFatal: true
+                message: "GPU Operator DaemonSet pod is not healthy"
+                recommendedAction: CONTACT_SUPPORT
+                errorCode:
+                  - GPU_OPERATOR_POD_UNHEALTHY
+            - name: network-operator-pod-health
+              enabled: true
+              resource:
+                group: ""
+                version: v1
+                kind: Pod
+              predicate:
+                expression: |
+                  (resource.metadata.namespace == 'nvidia-network-operator' ||
+                   resource.metadata.namespace == 'privileged-network-operator') &&
+                  has(resource.metadata.ownerReferences) &&
+                  resource.metadata.ownerReferences.exists(r, r.kind == 'DaemonSet') &&
+                  has(resource.spec.nodeName) && resource.spec.nodeName != "" &&
+                  has(resource.status.startTime) &&
+                  now - timestamp(resource.status.startTime) > duration('30m') &&
+                  (
+                    (resource.status.phase != 'Running' && resource.status.phase != 'Succeeded') ||
+                    (
+                      has(resource.status.containerStatuses) &&
+                      resource.status.containerStatuses.exists(cs,
+                        has(cs.state.waiting) &&
+                        has(cs.state.waiting.reason) &&
+                        cs.state.waiting.reason == 'CrashLoopBackOff'
+                      )
+                    )
+                  )
+              nodeAssociation:
+                expression: resource.spec.nodeName
+              healthEvent:
+                componentClass: Software
+                isFatal: true
+                message: "Network Operator DaemonSet pod is not healthy"
+                recommendedAction: CONTACT_SUPPORT
+                errorCode:
+                  - NETWORK_OPERATOR_POD_UNHEALTHY

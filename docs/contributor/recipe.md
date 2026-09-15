@@ -337,7 +337,8 @@ spec:
 ```
 
 Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
-`platform-inference`, `platform-kubeflow`, `nvsentinel-observability`.
+`platform-inference`, `platform-kubeflow`, `nvsentinel-observability`,
+`nvsentinel-object-monitor`.
 
 **Mixin rules:**
 
