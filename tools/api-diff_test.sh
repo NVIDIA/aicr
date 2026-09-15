@@ -130,6 +130,7 @@ ALIASES
             echo 'GenericAlias|github.com/NVIDIA/aicr/pkg/bundler/result|Result'
         fi
         echo 'OIDCResolveOptions|github.com/NVIDIA/aicr/pkg/bundler/attestation|ResolveOptions'
+        echo 'UpgradeReport|github.com/NVIDIA/aicr/pkg/upgrade|Report'
         exit 0
     fi
     if [[ "${ALIAS_CLOSURE_SCENARIO:-correct}" == "failure" ]]; then
