@@ -556,22 +556,32 @@ func waitForPreflightPodPhase(ctx context.Context, clientset kubernetes.Interfac
 	}
 }
 
-// gb200NetPreflightApplies reports whether the preflight check should run for
-// the given (variant, accelerator, service) tuple. Keeps the call site at the
-// top of validateNcclAllReduceBw uncluttered.
+// graceBlackwellNetPreflightApplies reports whether the preflight check
+// should run for the given (variant, accelerator, service) tuple. Keeps the
+// call site at the top of validateNcclAllReduceBw uncluttered.
 //
-// EKS and OKE are the two GB200 NET fabrics that traverse a PCIe-attached NIC
+// EKS and OKE are the GB200 NET fabrics that traverse a PCIe-attached NIC
 // (EFA and ConnectX IB respectively), so both need the dma-buf prerequisite —
 // the module flag before R595, and on R595+ a topology property this preflight
-// cannot check, where it fails rather than assume.
+// cannot check, where it fails rather than assume. GB300 EKS shares the same
+// Grace PCI topology and EFA dma-buf requirement — see the
+// kernel-module-params ConfigMap in recipes/overlays/gb300-eks-training.yaml.
 // On OKE the flag reaches the driver only under gpuStack=operator-managed
 // (the leaf's kernel-module-params ConfigMap needs a driver DaemonSet to
 // consume it — see recipes/overlays/gb200-oke-training.yaml); under the
 // default oci-managed profile the driver ships in the node image, so this
 // preflight is the fail-closed gate that catches an image driver missing the
 // flag before NCCL silently degrades to Socket (#2356 review).
-func gb200NetPreflightApplies(variant ncclVariant, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType) bool {
-	return variant == variantNET &&
-		accelerator == recipe.CriteriaAcceleratorGB200 &&
-		(service == recipe.CriteriaServiceEKS || service == recipe.CriteriaServiceOKE)
+func graceBlackwellNetPreflightApplies(variant ncclVariant, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType) bool {
+	if variant != variantNET {
+		return false
+	}
+	switch accelerator {
+	case recipe.CriteriaAcceleratorGB200:
+		return service == recipe.CriteriaServiceEKS || service == recipe.CriteriaServiceOKE
+	case recipe.CriteriaAcceleratorGB300:
+		return service == recipe.CriteriaServiceEKS
+	default:
+		return false
+	}
 }
