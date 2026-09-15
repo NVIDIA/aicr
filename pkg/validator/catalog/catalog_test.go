@@ -1162,6 +1162,39 @@ func TestEmbeddedCatalog_NCCLAllReduceBWNetEntryExists(t *testing.T) {
 	t.Fatalf("no embedded catalog entry named %q (AICR_NCCL_FABRIC forwarding would silently no-op)", v1.NCCLAllReduceBWNetCheckName)
 }
 
+// TestEmbeddedCatalog_NCCLEntriesExist locks the embedded catalog entry names
+// for all three NCCL all-reduce checks (default, NET, NVLS) to the
+// v1.NCCLAllReduceBW*CheckName constants that scope AICR_NCCL_RUNTIME_IMAGE
+// forwarding (see buildEnv in pkg/validator/v1). Without this, renaming any of
+// the three catalog entries would silently disable image-override forwarding
+// to that variant — the in-Job validator would never see the env and stay on
+// the compiled-in default — with no other test failing. See NVIDIA/aicr#1751.
+func TestEmbeddedCatalog_NCCLEntriesExist(t *testing.T) {
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	want := map[string]bool{
+		v1.NCCLAllReduceBWCheckName:     false,
+		v1.NCCLAllReduceBWNetCheckName:  false,
+		v1.NCCLAllReduceBWNvlsCheckName: false,
+	}
+	for _, v := range cat.Validators {
+		if _, ok := want[v.Name]; !ok {
+			continue
+		}
+		if v.Phase != "performance" {
+			t.Errorf("%q phase = %q, want performance", v.Name, v.Phase)
+		}
+		want[v.Name] = true
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("no embedded catalog entry named %q (AICR_NCCL_RUNTIME_IMAGE forwarding would silently no-op)", name)
+		}
+	}
+}
+
 func TestCatalogEmbedding(t *testing.T) {
 	// Simulate embedding in a CR spec
 	type ValidatorCatalogSpec struct {

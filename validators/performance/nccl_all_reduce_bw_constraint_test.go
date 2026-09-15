@@ -291,7 +291,7 @@ func TestRunNCCLTrainJob_TrainerInstallFailureCleansUpNamespace(t *testing.T) {
 	}
 	gpuConfig := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8}
 
-	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "")
+	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "", "")
 	if err == nil {
 		t.Fatal("expected an error from the failed Trainer install probe, got nil")
 	}
@@ -350,7 +350,7 @@ func TestRunNCCLTrainJob_AbortsIfExecutionLockLostBeforeApply(t *testing.T) {
 	}
 	gpuConfig := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8}
 
-	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "")
+	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "", "")
 	if err == nil {
 		t.Fatal("expected a conflict error when the execution lock was taken over before apply, got nil")
 	}
@@ -386,7 +386,7 @@ func TestRunNCCLTrainJob_RollsBackNamespaceOnLeaseAdmissionFailure(t *testing.T)
 	}
 	gpuConfig := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8}
 
-	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "")
+	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "", "")
 	if err == nil {
 		t.Fatal("expected an error from the failed Lease claim, got nil")
 	}
@@ -421,7 +421,7 @@ func TestRunNCCLTrainJob_KeepsReusedNamespaceOnLeaseAdmissionFailure(t *testing.
 	}
 	gpuConfig := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8}
 
-	if _, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, ""); err == nil {
+	if _, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "", ""); err == nil {
 		t.Fatal("expected an error from the failed Lease claim, got nil")
 	}
 	if _, getErr := clientset.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{}); getErr != nil {
@@ -454,7 +454,7 @@ func TestRunNCCLTrainJob_KeepsNamespaceOnConcurrentClaimConflict(t *testing.T) {
 	}
 	gpuConfig := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8}
 
-	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "")
+	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "", "")
 	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeConflict, "")) {
 		t.Fatalf("expected ErrCodeConflict, got %v", err)
 	}
@@ -1517,7 +1517,7 @@ func TestRunNCCLTrainJob_RefusesLiveForeignNamespace(t *testing.T) {
 	}
 	gpuConfig := &gpuConfiguration{WorkerCount: 2, GPUCountPerNode: 4, TotalGPUCount: 8}
 
-	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "")
+	_, err := runNCCLTrainJob(vctx, gpuConfig, "", "", variantDefault, fabricEFA, "", "")
 	if err == nil {
 		t.Fatal("expected a conflict error for a live foreign namespace, got nil")
 	}
