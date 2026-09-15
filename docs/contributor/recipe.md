@@ -81,7 +81,7 @@ apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: <component-id>
-    ...
+    # Additional component fields omitted.
 ```
 
 `ComponentConfig` fields (see `pkg/recipe/components.go`):
