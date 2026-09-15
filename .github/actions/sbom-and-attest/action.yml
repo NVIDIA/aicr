@@ -32,8 +32,27 @@ description: 'Generates CycloneDX SBOM, OpenVEX and build provenance attestation
 #                 projection exists only at release time; the committed
 #                 document stays the reviewed source of truth and is not
 #                 modified.
-#   Provenance -> the INDEX digest, via actions/attest-build-provenance. It
-#                 describes the build that produced the whole release image.
+#   Provenance -> the INDEX digest *and* each PER-PLATFORM manifest digest, via
+#                 actions/attest-build-provenance. Three attestations, one per
+#                 subject, each generated with the in-toto subject naming the
+#                 manifest it is published under. Re-publishing one document
+#                 under extra OCI subjects while its in-toto subject still named
+#                 the index would be worse than not doing it at all (#2728).
+#
+# The three provenance predicates are identical apart from that subject. Their
+# buildType is https://actions.github.io/buildtypes/workflow/v1, whose every
+# field is a function of (repository, ref, commit, workflow run): it has no
+# field for a target platform, and this action runs after the builds holding
+# nothing but an image name and a digest. The per-platform copies therefore add
+# no build information the index document lacks. They exist so a consumer that
+# resolved linux/amd64 finds a complete evidence set there -- provenance, SBOM
+# and VEX -- instead of having to walk back up to the index for one of the three.
+#
+# The index copy is not thereby redundant. Admission control resolves a tag to
+# the index (measured on Kyverno v1.19.0 `mutateDigest`) and no single rule can
+# span an index and a child manifest, so the index attestation is the only one a
+# policy can reach; it is also the one .github/scripts/release-images.sh
+# preflight re-verifies before promoting the release aliases.
 #
 # The two per-platform documents are deliberately in different formats.
 # `cosign attest --type cyclonedx` stamps predicate type
@@ -62,13 +81,13 @@ inputs:
     description: 'Full image name (without tag or digest)'
     required: true
   image_digest:
-    description: 'Multi-platform index digest (sha256:...); subject for provenance'
+    description: 'Multi-platform index digest (sha256:...); subject for the index provenance'
     required: true
   amd64_digest:
-    description: 'linux/amd64 manifest digest (sha256:...); subject for the amd64 SBOM and VEX'
+    description: 'linux/amd64 manifest digest (sha256:...); subject for the amd64 SBOM, VEX and provenance'
     required: true
   arm64_digest:
-    description: 'linux/arm64 manifest digest (sha256:...); subject for the arm64 SBOM and VEX'
+    description: 'linux/arm64 manifest digest (sha256:...); subject for the arm64 SBOM, VEX and provenance'
     required: true
 
 runs:
@@ -346,9 +365,29 @@ runs:
           --type openvex \
           "${IMAGE_NAME}@${PLATFORM_DIGEST}"
 
-    - name: Attest build provenance
+    # One invocation per subject. `subject-digest` takes a single digest, and
+    # each invocation both mints a statement whose in-toto subject is that
+    # digest and pushes it to that digest's referrers -- which is exactly the
+    # coupling this needs, since a statement is only honest where the two agree.
+    # The index goes first so the policy-reachable attestation exists even if a
+    # later call is the one that exhausts a Sigstore retry.
+    - name: Attest index build provenance
       uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f  # v3.2.0
       with:
         subject-name: ${{ steps.validate.outputs.image_name }}
         subject-digest: ${{ steps.validate.outputs.image_digest }}
+        push-to-registry: true
+
+    - name: Attest amd64 build provenance
+      uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f  # v3.2.0
+      with:
+        subject-name: ${{ steps.validate.outputs.image_name }}
+        subject-digest: ${{ steps.validate.outputs.amd64_digest }}
+        push-to-registry: true
+
+    - name: Attest arm64 build provenance
+      uses: actions/attest-build-provenance@96278af6caaf10aea03fd8d33a09a777ca52d62f  # v3.2.0
+      with:
+        subject-name: ${{ steps.validate.outputs.image_name }}
+        subject-digest: ${{ steps.validate.outputs.arm64_digest }}
         push-to-registry: true
