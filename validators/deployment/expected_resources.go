@@ -202,9 +202,10 @@ func pollUntilStable(ctx *validators.Context, label string, probe func() error, 
 // budgetExhausted, mark every piece of unevaluated work, print the accumulated
 // failures, and fail closed (issue #2473). Unevaluated work is reported in
 // three parts, all via markUndispatched: chainsaw asserts already queued when
-// the loop broke, the health checks carried by enabledRefs entries the loop
-// never reached, and the GPU readiness probes the enabled component set
-// selects. Anything less understates how much of the cluster went unchecked.
+// the loop broke, the health checks and expected resources carried by
+// enabledRefs entries the loop never reached, and the GPU readiness probes the
+// enabled component set selects. Anything less understates how much of the
+// cluster went unchecked.
 //
 // Once budgetExhausted is set the GPU probes are skipped rather than run.
 // Their poll loops observe ctx.Ctx, but the work ahead of the first poll is not
@@ -250,9 +251,9 @@ func checkExpectedResources(ctx *validators.Context) error {
 	var budgetExhausted string
 
 	// unreachedRefs are the enabledRefs the loop below never examined because
-	// the budget went first. Their health checks were never queued, so
-	// markUndispatched has to name them separately from chainsawAsserts or they
-	// vanish from the report entirely.
+	// the budget went first. Neither their health checks nor their expected
+	// resources were ever evaluated, so markUndispatched has to name them
+	// separately from chainsawAsserts or they vanish from the report entirely.
 	var unreachedRefs []recipe.ComponentRef
 
 	failures = append(failures, verifyNamespacesActive(ctx, enabledRefs)...)
@@ -425,11 +426,17 @@ func enabledComponentRefs(refs []recipe.ComponentRef) []recipe.ComponentRef {
 
 // markUndispatched appends a not-evaluated line for every piece of work the
 // exhausted run left undone: each assert queued but never handed to chainsaw,
-// each health check on a component the iteration never reached, and each GPU
-// readiness probe skipped rather than run. Reporting them explicitly is what
-// stops a truncated run from reading as a mostly-healthy cluster: the operator
-// sees which components carry no verdict rather than inferring their absence
-// means "fine".
+// each health check and expected resource on a component the iteration never
+// reached, and each GPU readiness probe skipped rather than run. Reporting them
+// explicitly is what stops a truncated run from reading as a mostly-healthy
+// cluster: the operator sees which components carry no verdict rather than
+// inferring their absence means "fine".
+//
+// The two kinds of work an unreached ref carries are reported independently.
+// A component can declare expectedResources without a registry health check —
+// the loop would have verified them via helper.VerifyResource all the same — so
+// gating the expectedResources lines on HealthCheckAsserts would drop part of
+// the recipe's deployment contract from a report that otherwise reads complete.
 //
 // unreached and asserts are disjoint — a ref only reaches asserts by being
 // examined, which is what unreached excludes — so no component is named twice.
@@ -449,11 +456,15 @@ func markUndispatched(
 			"[chainsaw] %s: not evaluated — budget exhausted during %s", a.Name, stage))
 	}
 	for _, ref := range unreached {
-		if ref.HealthCheckAsserts == "" {
-			continue
+		if ref.HealthCheckAsserts != "" {
+			failures = append(failures, fmt.Sprintf(
+				"[chainsaw] %s: not evaluated — budget exhausted during %s", ref.Name, stage))
 		}
-		failures = append(failures, fmt.Sprintf(
-			"[chainsaw] %s: not evaluated — budget exhausted during %s", ref.Name, stage))
+		for _, er := range ref.ExpectedResources {
+			failures = append(failures, fmt.Sprintf(
+				"[expectedResources] %s %s/%s (%s): not evaluated — budget exhausted during %s",
+				er.Kind, er.Namespace, er.Name, ref.Name, stage))
+		}
 	}
 	for _, p := range gpuProbes {
 		failures = append(failures, fmt.Sprintf(

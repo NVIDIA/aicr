@@ -1951,6 +1951,79 @@ func TestCheckExpectedResourcesReportsUnreachedWorkOnExhaustedBudget(t *testing.
 	}
 }
 
+// TestCheckExpectedResourcesReportsUnreachedExpectedResources covers the
+// component shape the unreached-work report used to drop entirely: one that
+// declares expectedResources and carries no registry health check. Gating the
+// not-evaluated lines on HealthCheckAsserts let a budget that expired between
+// components omit part of the recipe's deployment contract from a report that
+// otherwise read complete.
+//
+// Unlike the sibling test above, the budget here expires *during* the run
+// rather than before it, which is what puts a later component on the unreached
+// path while an earlier one was fully evaluated. The reactor makes that
+// deterministic: the fake clientset dispatches it synchronously inside
+// first-component's own helper.VerifyResource, so the loop's next guard is
+// guaranteed to see a dead context with later-component still unexamined.
+//
+// Expected tally, all deterministic:
+//   - 2 namespace failures (verifyNamespacesActive runs before the loop and
+//     neither namespace exists in the empty fake clientset)
+//   - 1 expectedResources failure for first-component's Deployment, which the
+//     loop did reach
+//   - 2 not-evaluated lines for later-component's two expected resources
+//
+// Before the fix the count was 3.
+func TestCheckExpectedResourcesReportsUnreachedExpectedResources(t *testing.T) {
+	t.Parallel()
+
+	refs := []recipe.ComponentRef{
+		{
+			Name:      "first-component",
+			Namespace: "first-ns",
+			ExpectedResources: []recipe.ExpectedResource{
+				{Kind: "Deployment", Namespace: "first-ns", Name: "first-dep"},
+			},
+		},
+		{
+			Name:      "later-component",
+			Namespace: "later-ns",
+			ExpectedResources: []recipe.ExpectedResource{
+				{Kind: "Deployment", Namespace: "later-ns", Name: "later-dep"},
+				{Kind: "DaemonSet", Namespace: "later-ns", Name: "later-ds"},
+			},
+		},
+	}
+
+	ctx := newDeploymentTestContext(t, nil, nil, refs)
+	budget, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ctx.Ctx = budget
+
+	fake, ok := ctx.Clientset.(*k8sfake.Clientset)
+	if !ok {
+		t.Fatalf("Clientset is %T, want *k8sfake.Clientset", ctx.Clientset)
+	}
+	// Spend the budget inside first-component's own verification. Returning
+	// handled=false falls through to the object tracker, so the Deployment
+	// still reports its normal NotFound.
+	fake.PrependReactor("get", "deployments", func(clienttesting.Action) (bool, runtime.Object, error) {
+		cancel()
+		return false, nil, nil
+	})
+
+	err := checkExpectedResources(ctx)
+	if err == nil {
+		t.Fatal("checkExpectedResources returned nil on an exhausted budget; it must fail closed")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("error = %v, want ErrCodeTimeout", err)
+	}
+	if !strings.Contains(err.Error(), "5 issue(s) collected") {
+		t.Errorf("error = %q, want 5 issue(s) collected (2 namespaces + 1 verified resource + 2 unreached resources)",
+			err.Error())
+	}
+}
+
 // TestEnabledGPUReadinessProbesSelection pins which enabled components select
 // which probe, since markUndispatched reports the skipped set from this list
 // without running any of it — a selection drift would silently shrink the
@@ -2018,8 +2091,14 @@ func TestEnabledGPUReadinessProbesSelection(t *testing.T) {
 // TestMarkUndispatched proves every piece of work an exhausted run left undone
 // is reported as not evaluated rather than silently dropped — otherwise an
 // operator reads a short failure list and concludes the rest of the cluster is
-// fine. All three categories must appear: asserts queued but never dispatched,
-// components the iteration never reached, and GPU probes that were skipped.
+// fine. All four categories must appear: asserts queued but never dispatched,
+// health checks and expectedResources on components the iteration never
+// reached, and GPU probes that were skipped.
+//
+// The unreached-with-both and unreached-with-resources refs pin that the two
+// kinds of work are reported independently: a component declaring
+// expectedResources and no registry health check still has a deployment
+// contract the run never verified.
 //
 // Unit-tested against the helper rather than through checkExpectedResources:
 // reaching that path in an integration test needs a context that is live while
@@ -2033,21 +2112,41 @@ func TestMarkUndispatched(t *testing.T) {
 		[]chainsaw.ComponentAssert{{Name: "gpu-operator"}, {Name: "network-operator"}},
 		[]recipe.ComponentRef{
 			{Name: "unreached-with-check", HealthCheckAsserts: "apiVersion: v1"},
-			// No HealthCheckAsserts: there was no verdict to lose, so it must
-			// NOT produce a line or the report inflates the unchecked count.
-			{Name: "unreached-without-check"},
+			{
+				Name:               "unreached-with-both",
+				HealthCheckAsserts: "apiVersion: v1",
+				ExpectedResources: []recipe.ExpectedResource{
+					{Kind: "Deployment", Namespace: "both-ns", Name: "both-dep"},
+				},
+			},
+			{
+				Name: "unreached-with-resources",
+				ExpectedResources: []recipe.ExpectedResource{
+					{Kind: "Deployment", Namespace: "res-ns", Name: "res-dep"},
+					{Kind: "DaemonSet", Namespace: "res-ns", Name: "res-ds"},
+				},
+			},
+			// Neither health check nor expectedResources: there was no verdict
+			// to lose, so it must NOT produce a line or the report inflates the
+			// unchecked count.
+			{Name: "unreached-without-work"},
 		},
 		[]gpuReadinessProbe{{component: "dra-driver", signal: "DRA kubelet plugin readiness"}},
 		"chainsaw dispatch",
 	)
 
-	if len(got) != 5 {
-		t.Fatalf("got %d failures (%q), want 5 (1 pre-existing + 2 queued + 1 unreached + 1 GPU probe)", len(got), got)
+	if len(got) != 9 {
+		t.Fatalf("got %d failures (%q), want 9 (1 pre-existing + 2 queued + 2 unreached health checks + 3 unreached resources + 1 GPU probe)",
+			len(got), got)
 	}
 	for _, want := range []string{
 		"[chainsaw] gpu-operator: not evaluated — budget exhausted during chainsaw dispatch",
 		"[chainsaw] network-operator: not evaluated — budget exhausted during chainsaw dispatch",
 		"[chainsaw] unreached-with-check: not evaluated — budget exhausted during chainsaw dispatch",
+		"[chainsaw] unreached-with-both: not evaluated — budget exhausted during chainsaw dispatch",
+		"[expectedResources] Deployment both-ns/both-dep (unreached-with-both): not evaluated — budget exhausted during chainsaw dispatch",
+		"[expectedResources] Deployment res-ns/res-dep (unreached-with-resources): not evaluated — budget exhausted during chainsaw dispatch",
+		"[expectedResources] DaemonSet res-ns/res-ds (unreached-with-resources): not evaluated — budget exhausted during chainsaw dispatch",
 		"[gpuReadiness] dra-driver (DRA kubelet plugin readiness): not evaluated — budget exhausted during chainsaw dispatch",
 	} {
 		if !slices.Contains(got, want) {
@@ -2055,8 +2154,8 @@ func TestMarkUndispatched(t *testing.T) {
 		}
 	}
 	for _, f := range got {
-		if strings.Contains(f, "unreached-without-check") {
-			t.Errorf("failures %q names a component that carries no health check", got)
+		if strings.Contains(f, "unreached-without-work") {
+			t.Errorf("failures %q names a component that carries no unevaluated work", got)
 		}
 	}
 }
