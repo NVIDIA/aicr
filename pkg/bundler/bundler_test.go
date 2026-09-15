@@ -479,6 +479,95 @@ func TestMake_ClosedWorldAllDeployers(t *testing.T) {
 	}
 }
 
+// TestMake_EveryDeployerEmitsRecipe covers #2753: the recipe write used to be
+// gated on the helm deployer, so four of the five bundle formats carried no
+// recipe and could not be fed back to anything that re-resolves one.
+//
+// The byte-identity assertion is the part that would not survive a plausible
+// "fix": writing the recipe from each deployer in turn re-marshals it per
+// deployer, and yaml.v3 walks Go map order, so two bundles built from one
+// recipe would disagree. That breaks the digest the attestation is taken over
+// rather than anything visible in a file listing.
+func TestMake_EveryDeployerEmitsRecipe(t *testing.T) {
+	tests := []struct {
+		name     string
+		deployer config.DeployerType
+		repoURL  string
+	}{
+		{name: "helm", deployer: config.DeployerHelm},
+		{name: "argocd", deployer: config.DeployerArgoCD, repoURL: "https://github.com/example/bundles.git"},
+		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
+		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
+		{name: "helmfile", deployer: config.DeployerHelmfile},
+	}
+
+	emitted := make(map[string][]byte, len(tests))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(
+				config.WithDeployer(tt.deployer),
+				config.WithRepoURL(tt.repoURL),
+				config.WithIncludeChecksums(true),
+			)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			dir := t.TempDir()
+			output, err := b.Make(context.Background(), closedWorldRecipeResult(), dir)
+			if err != nil {
+				t.Fatalf("Make() error = %v", err)
+			}
+
+			data, err := os.ReadFile(filepath.Join(dir, recipeFileName))
+			if err != nil {
+				t.Fatalf("read %s: %v", recipeFileName, err)
+			}
+			emitted[tt.name] = data
+
+			var reloaded recipe.RecipeResult
+			if unmarshalErr := yaml.Unmarshal(data, &reloaded); unmarshalErr != nil {
+				t.Errorf("emitted %s does not parse as a RecipeResult: %v", recipeFileName, unmarshalErr)
+			}
+			if len(reloaded.ComponentRefs) == 0 {
+				t.Errorf("emitted %s carries no componentRefs", recipeFileName)
+			}
+
+			// A recipe outside checksums.txt is outside the attestation
+			// subject, so presence on disk alone is not the guarantee.
+			opts := checksum.InventoryOptions{AllowedMetadataPaths: attestation.BundleMetadataPaths()}
+			_, inventory, _, err := checksum.ReadAndVerifyBundle(context.Background(), dir, opts)
+			if err != nil {
+				t.Fatalf("ReadAndVerifyBundle() error = %v", err)
+			}
+			if !slices.Contains(inventory.RelativeFiles(), recipeFileName) {
+				t.Errorf("%s missing from checksum inventory %v", recipeFileName, inventory.RelativeFiles())
+			}
+			var reported bool
+			for _, res := range output.Results {
+				if slices.Contains(res.Files, filepath.Join(dir, recipeFileName)) {
+					reported = true
+					break
+				}
+			}
+			if !reported {
+				t.Errorf("%s missing from the reported result files", recipeFileName)
+			}
+		})
+	}
+
+	if len(emitted) != len(tests) {
+		t.Fatalf("collected %d recipes, want %d", len(emitted), len(tests))
+	}
+	want := emitted["helm"]
+	for name, got := range emitted {
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s emitted a different %s than helm; the recipe is re-marshaled "+
+				"per deployer instead of sharing one serializer path", name, recipeFileName)
+		}
+	}
+}
+
 func TestMake_HelmBundlePassesVerifierChecksums(t *testing.T) {
 	b, err := New(WithConfig(config.NewConfig(
 		config.WithDeployer(config.DeployerHelm),
