@@ -357,6 +357,12 @@ const (
 	// CLISnapshotTimeout is the default timeout for snapshot operations.
 	CLISnapshotTimeout = 5 * time.Minute
 
+	// CLIUpgradeCheckTimeout bounds one `aicr upgrade-check` run. The command
+	// performs two recipe operations, each already bounded by
+	// RecipeOperationTimeout, plus the registry's upgrade-record reads, so the
+	// ceiling is derived from the operation it repeats rather than picked.
+	CLIUpgradeCheckTimeout = 3 * RecipeOperationTimeout
+
 	// OIDCAuthTimeout is the maximum time to wait for a user to complete
 	// any interactive OIDC authentication flow — browser callback or
 	// device-code (RFC 8628). Prevents indefinite blocking if the flow is

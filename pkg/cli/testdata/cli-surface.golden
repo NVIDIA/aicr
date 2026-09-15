@@ -25,6 +25,7 @@ command aicr skill  aliases= hidden=false
 command aicr snapshot  aliases= hidden=false
 command aicr trust  aliases= hidden=false
 command aicr trust update  aliases= hidden=false
+command aicr upgrade-check  aliases= hidden=false
 command aicr validate  aliases= hidden=false
 command aicr verify  aliases= hidden=false
 flag    aicr  --debug  type=bool default=false required=false hidden=false env=AICR_DEBUG
@@ -195,6 +196,13 @@ flag    aicr snapshot  --template  type=string default= required=false hidden=fa
 flag    aicr snapshot  --timeout  type=duration default=5m0s required=false hidden=false env=
 flag    aicr snapshot  --toleration  type=string default= required=false hidden=false env=
 flag    aicr trust update  --emit-signing-config  type=string default= required=false hidden=false env=
+flag    aicr upgrade-check  --deployer,-d  type=string default= required=false hidden=false env=
+flag    aicr upgrade-check  --fail-on-error  type=bool default=true required=false hidden=false env=
+flag    aicr upgrade-check  --format,-t  type=string default="table" required=false hidden=false env=
+flag    aicr upgrade-check  --from,-f  type=string default= required=false hidden=false env=
+flag    aicr upgrade-check  --kubeconfig,-k  type=string default= required=false hidden=false env=
+flag    aicr upgrade-check  --output,-o  type=string default= required=false hidden=false env=
+flag    aicr upgrade-check  --to  type=string default= required=false hidden=false env=
 flag    aicr validate  --aks-gpu-pools  type=string default= required=false hidden=false env=AICR_AKS_GPU_POOLS_PATH
 flag    aicr validate  --bom  type=string default= required=false hidden=false env=
 flag    aicr validate  --cncf-submission  type=bool default=false required=false hidden=false env=

@@ -20,7 +20,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **aws-efa** | Device plugin for AWS Elastic Fabric Adapter. Enables low-latency networking on EKS clusters with EFA-capable instances. EKS-specific. | [AWS EFA K8s Device Plugin](https://github.com/aws/eks-charts) |
 | **cert-manager** | Automates TLS certificate management. Required by several operators for webhook and API server certificates. | [cert-manager](https://github.com/cert-manager/cert-manager) |
 | **gatekeeper** | Admission controller for Kubernetes. Enforces policies and governance across the cluster using OPA (Open Policy Agent) ConstraintTemplates and Constraints. | [Open Policy Agent Gatekeeper](https://github.com/open-policy-agent/gatekeeper) |
-| **nodewright-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. | [Nodewright](https://github.com/nvidia/nodewright) |
+| **nodewright-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. Pinned to `v0.17.x` on purpose: `v0.18.0` renamed the `Skyhook` API to `NodeWright` and writes status only on the new kind, which the readiness gate does not yet read — see [Upgrade Notes](#nodewright-operator-staying-on-v017x) below. | [Nodewright](https://github.com/nvidia/nodewright) |
 | **nodewright-customizations** | Environment-specific node tuning profiles applied via Nodewright. Extends the operator with kernel params, hugepages, and other host-level configurations. | — |
 | **nvsentinel** | GPU health monitoring. Detects GPU errors and publishes health events; the components that cordon, drain, reboot or terminate a node are off by default — see [NVSentinel Deployment Posture](#nvsentinel-deployment-posture). On platforms where the provider installs the driver but no driver pod is observable by NVSentinel, the recipes set `labeler.assumeDriverInstalled` for you — see [NVSentinel on provider-installed-driver platforms](#nvsentinel-on-provider-installed-driver-platforms). | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
 | **nvidia-dra-driver-gpu** | Dynamic Resource Allocation (DRA) driver. Advertises devices via the Kubernetes `resource.k8s.io` API (`v1` on 1.34+, `v1beta1`/`v1beta2` on 1.32/1.33) — ComputeDomain/IMEX channels for MNNVL platforms, and optionally whole GPUs. Stock recipes disable whole-GPU DRA advertisement (`resources.gpus.enabled: false`) — the device plugin is the production default whole-GPU advertiser, and DRA whole-GPU allocation is an experimental recipe-level opt-in ([#1327](https://github.com/NVIDIA/aicr/issues/1327)). Whole-GPU DRA and the GPU Operator device plugin (`nvidia.com/gpu`) are mutually exclusive per node: recipe-backed validation rejects a configuration that enables both (at policy-resolution time — skipping validation bypasses the check), because the two allocators keep independent ledgers and concurrent advertisement can double-allocate the same physical GPUs (see the guidance in `recipes/components/nvidia-dra-driver-gpu/values.yaml`). See [AKS GPU Setup](../integrator/aks-gpu-setup.md#dynamic-resource-allocation-dra) for details. CLI alias: `dradriver`. | [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu) |
@@ -1259,3 +1259,43 @@ the path is resolved inside the controller's own filesystem.
 `MultiKueueKubeConfigPathValidation` is alpha and off by default in 0.19 and
 upstream expects to turn it on later, so prefer `locationType: Secret` or
 `ClusterProfile` rather than taking that dependency.
+
+### `nodewright-operator`: staying on `v0.17.x`
+
+AICR pins `nodewright-operator` at `v0.17.1` and deliberately does **not** track
+upstream's latest. Upstream `v0.18.0` renamed the `skyhook.nvidia.com/v1alpha1
+Skyhook` API to `nodewright.nvidia.com/v1alpha1 NodeWright`, migrates each
+existing `Skyhook` into a `NodeWright`, and writes completion status **only** on
+the new kind. Its attempt to mirror status back to the legacy object fails in a
+reconcile conflict loop, so `Skyhook.status` stays empty on a cluster where node
+tuning has genuinely finished.
+
+That matters because AICR's deployment-phase readiness gate and the
+`nodewright-customizations` health check both poll the legacy `Skyhook` CR. On a
+`v0.18.0` or newer operator they wait on a status that never populates and time
+out, failing the deployment phase while tuning has completed. This was observed
+live on a bare-metal GB300 cluster, where `NodeWright` reported `complete` with
+`completeNodes 2/2` while `Skyhook.status` was `{}`. AICR briefly pinned
+`v0.18.0` and rolled back; no released AICR version ever shipped it.
+
+`v0.19.0` carries no fix for the status mirror, so the same applies there.
+
+**Do not bump this pin ahead of the readiness path.** Moving to `v0.19.x`
+requires, at minimum:
+
+1. The deployment validator and the `nodewright-customizations` health check
+   read `NodeWright`, with a `Skyhook` fallback for older operators. The
+   fallback is needed regardless of the pin, since `Skyhook` is deprecated and
+   the API server already warns that it will be removed.
+2. The `Skyhook` CRs AICR ships under `nodewright-customizations` move to
+   `NodeWright`.
+3. The runtime-required taint key tracks the operator's default, which `v0.18.0`
+   changed from `skyhook.nvidia.com` to `nodewright.nvidia.com`.
+4. Deployment-phase validation passes on a live cluster carrying
+   `nodewright-customizations`.
+
+Tracked in [#2593](https://github.com/NVIDIA/aicr/issues/2593) and
+[#2594](https://github.com/NVIDIA/aicr/issues/2594). Once the pin moves, this
+entry becomes a transition record at
+`recipes/components/nodewright-operator/upgrades.yaml` and `aicr upgrade-check`
+reports it directly.
