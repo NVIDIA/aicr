@@ -29,7 +29,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/serializer"
-	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
 
 // upgradeCheckCmd creates the "upgrade-check" CLI command.
@@ -186,7 +185,7 @@ func writeUpgradeReport(
 	cmd *cli.Command,
 	outFormat serializer.Format,
 	kubeconfig string,
-	report *upgrade.Report,
+	report *aicr.UpgradeReport,
 ) (err error) {
 
 	output := cmd.String(flagOutput)
@@ -209,7 +208,7 @@ func writeUpgradeReport(
 			}()
 			w = f
 		}
-		return upgrade.WriteTable(w, report)
+		return aicr.WriteUpgradeReportTable(w, report)
 	}
 
 	ser, err := serializer.NewFileWriterOrStdoutWithKubeconfig(outFormat, output, kubeconfig)
