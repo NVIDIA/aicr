@@ -720,7 +720,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 				"accelerator-metrics",
 				"ai-service-metrics",
 			},
-			wantDRAConstraint: false,
+			wantDRAConstraint: true, // K8s >= 1.34 floor required for GA DRA API (matches gb300-eks-ubuntu-inference)
 		},
 		{
 			// rtx-pro-6000 + EKS + AL2023 inference: same AMI family rationale
