@@ -72,8 +72,24 @@ if [[ -z "${TIMEOUT_BIN}" ]]; then
   exit 1
 fi
 
+# -k: a process that ignores TERM still gets KILLed a few seconds later, so the
+# bound holds against a wedged client rather than merely asking it to stop.
 run_bounded() {
-  "${TIMEOUT_BIN}" "${CRD_STEP_TIMEOUT}" "$@"
+  "${TIMEOUT_BIN}" -k 5 "${CRD_STEP_TIMEOUT}" "$@" </dev/null
+}
+
+# Capture through a file, never `$(cmd)`.
+#
+# Command substitution blocks until the write end of the pipe closes, which is
+# not the same thing as the command exiting: if the bound kills helm or kubectl
+# but a grandchild (a credential helper, a retry worker) still holds stdout,
+# `$(...)` waits on that grandchild and the bound buys nothing. A file has no
+# such reader, so the step returns when the bounded process does.
+BOUNDED_OUT="$(mktemp)"
+trap 'rm -f "${BOUNDED_OUT}"' EXIT
+capture_bounded() {
+  : >"${BOUNDED_OUT}"
+  run_bounded "$@" >"${BOUNDED_OUT}" 2>&1
 }
 
 # Does a release already exist? An existing release means an upgrade, and helm
@@ -96,13 +112,15 @@ run_bounded() {
 # status by default but Helm 3 does not, and `--all` (which Helm 3 uses for
 # that) was removed in Helm 4. These three exist in both and are exactly the
 # set an upgrade would act on, so one spelling works against either binary.
-if ! existing="$(run_bounded helm list --namespace "${NAMESPACE}" \
+if ! capture_bounded helm list --namespace "${NAMESPACE}" \
   --filter "${RELEASE_FILTER}" --short --deployed --failed --pending \
-  ${KUBECONFIG_FLAG:-} 2>&1)"; then
+  ${KUBECONFIG_FLAG:-}; then
+  existing="$(cat "${BOUNDED_OUT}")"
   echo "ERROR: cannot determine whether release ${RELEASE} exists; refusing to" >&2
   echo "       skip the CRD step and risk leaving the previous schema in place: ${existing}" >&2
   exit 1
 fi
+existing="$(cat "${BOUNDED_OUT}")"
 RELEASE_EXISTS=true
 if [[ -z "${existing//[[:space:]]/}" ]]; then
   RELEASE_EXISTS=false
@@ -119,8 +137,11 @@ source ./upstream.env
 # writes "Pulled:" and "Digest:" lines to stdout, and those two parse as a
 # valid YAML mapping, so kubectl rejects the stream with
 # "error validating data: [apiVersion not set, kind not set]".
-crds="$(run_bounded helm show crds "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" \
-  | sed -n '/^---$/,$p')"
+if ! capture_bounded helm show crds "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}"; then
+  echo "ERROR: cannot read ${RELEASE} CRDs from its pinned chart: $(cat "${BOUNDED_OUT}")" >&2
+  exit 1
+fi
+crds="$(sed -n '/^---$/,$p' "${BOUNDED_OUT}")"
 
 # An ownsCRDs component whose chart ships no CRDs is a no-op, not a failure:
 # `kubectl apply` on an empty stream exits non-zero with "no objects passed to
@@ -144,12 +165,16 @@ fi
 # rather than an error. A failure here is indeterminate and fails closed, for
 # the same reason the release lookup does.
 if [[ "${RELEASE_EXISTS}" == "false" ]]; then
-  if ! retained="$(printf '%s\n' "${crds}" \
-    | run_bounded kubectl get -f - --ignore-not-found -o name ${KUBECONFIG_FLAG:-} 2>&1)"; then
+  CRD_MANIFEST="$(mktemp)"
+  printf '%s\n' "${crds}" >"${CRD_MANIFEST}"
+  if ! capture_bounded kubectl get -f "${CRD_MANIFEST}" --ignore-not-found -o name ${KUBECONFIG_FLAG:-}; then
     echo "ERROR: cannot determine whether ${RELEASE} CRDs are already present; refusing" >&2
-    echo "       to skip and risk pairing a new controller with a retained schema: ${retained}" >&2
+    echo "       to skip and risk pairing a new controller with a retained schema: $(cat "${BOUNDED_OUT}")" >&2
+    rm -f "${CRD_MANIFEST}"
     exit 1
   fi
+  retained="$(cat "${BOUNDED_OUT}")"
+  rm -f "${CRD_MANIFEST}"
   if [[ -z "${retained//[[:space:]]/}" ]]; then
     echo "${RELEASE}: no release and no existing CRDs; helm install creates them."
     exit 0
@@ -160,5 +185,9 @@ fi
 # --server-side is required because these CRDs exceed the 262144-byte
 # annotation cap client-side apply depends on. --force-conflicts is required
 # because Helm created them on install and owns their fields.
-printf '%s\n' "${crds}" \
-  | run_bounded kubectl apply --server-side --force-conflicts ${KUBECONFIG_FLAG:-} -f -
+APPLY_MANIFEST="$(mktemp)"
+printf '%s\n' "${crds}" >"${APPLY_MANIFEST}"
+run_bounded kubectl apply --server-side --force-conflicts ${KUBECONFIG_FLAG:-} -f "${APPLY_MANIFEST}"
+apply_rc=$?
+rm -f "${APPLY_MANIFEST}"
+exit "${apply_rc}"
