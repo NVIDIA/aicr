@@ -368,6 +368,12 @@ mirror-e2e: build ## Tests mirror list output with Hauler and Zarf against local
 	echo "Running mirror list e2e tests..."; \
 	tools/mirror-e2e
 
+.PHONY: nvsentinel-object-monitor-e2e
+nvsentinel-object-monitor-e2e: ## Live Kind test: nvsentinel-object-monitor mixin emits a health event + node condition (#2612)
+	@set -e; \
+	echo "Running nvsentinel-object-monitor mixin e2e test..."; \
+	tests/e2e/nvsentinel-object-monitor/run.sh
+
 .PHONY: scan
 scan: ## Scans for vulnerabilities with grype
 	@set -e; \
