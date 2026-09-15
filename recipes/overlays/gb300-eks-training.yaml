@@ -90,20 +90,21 @@ spec:
           kernelModuleConfig:
             name: nvidia-kernel-module-params
 
-    # GB300 node tuning is deferred: nodewright ships no gb300 profile, and the
-    # gb200 profile's baseline has not been validated against GB300's Grace
-    # ARM64 64KB-page kernel (enabling it there would also require
-    # kernelAllowNewer: true). Until a GB300 profile exists, wire the documented
-    # no-op placeholder — it establishes the Skyhook CR (autoTaint, tolerations,
-    # node selectors from the --accelerated-node-* flags) while applying no
-    # tuning packages.
-    #
-    # To turn training tuning on later, swap the manifest for tuning.yaml and
-    # set the profile overrides (service/accelerator/intent).
+    # GB300 node tuning runs nvidia-tuned alone (tuning-gb300.yaml), not the
+    # shared tuning.yaml: nvidia-setup ships no gb300 config and fails on
+    # accelerator=gb300, so GB300 takes its kernel and EFA from the platform
+    # image. nvidia-tuned 0.10.0 added the gb300 intent profiles; multiNodeTraining
+    # is a shim onto nvidia-gb300-performance, which is the tuning that actually
+    # applies. See the manifest header for the 64k-page kernel requirement its
+    # hugepage sizing carries.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:
-        - components/nodewright-customizations/manifests/no-op.yaml
+        - components/nodewright-customizations/manifests/tuning-gb300.yaml
+      overrides:
+        service: eks
+        accelerator: gb300
+        intent: multiNodeTraining
       dependencyRefs:
         - nodewright-operator
 

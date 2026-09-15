@@ -82,13 +82,17 @@ spec:
           kernelModuleConfig:
             name: nvidia-kernel-module-params
 
-    # GB300 node tuning is deferred — the documented no-op placeholder, kept in
-    # sync with gb300-eks-training.yaml; see that file for the rationale and
-    # what enabling real tuning later requires.
+    # GB300 node tuning, kept in sync with gb300-eks-training.yaml; see that file
+    # for the rationale. intent=inference is a shim onto nvidia-gb300-performance
+    # in nvidia-tuned 0.10.0, so it applies the same tuning as the training leaf.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:
-        - components/nodewright-customizations/manifests/no-op.yaml
+        - components/nodewright-customizations/manifests/tuning-gb300.yaml
+      overrides:
+        service: eks
+        accelerator: gb300
+        intent: inference
       dependencyRefs:
         - nodewright-operator
 

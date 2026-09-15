@@ -1029,8 +1029,12 @@ echo "gpu_driver_version = \"${DRIVER_VERSION}\""
 # H100: real tuning packages (kernel setup, nvidia-tuned, full setup)
 aicr query --service eks --accelerator h100 --intent training \
   --selector components.nodewright-customizations.values
-# GB200: same value structure, but manifest renders a no-op (ARM64 packages pending)
+# GB200: same manifest and value structure; the accelerator/intent overrides
+# select the gb200 profile instead
 aicr query --service eks --accelerator gb200 --intent training \
+  --selector components.nodewright-customizations.values
+# GB300: tuned-only manifest (nvidia-setup ships no gb300 config)
+aicr query --service eks --accelerator gb300 --intent training \
   --selector components.nodewright-customizations.values
 
 # Watch constraints tighten as you add specificity

@@ -75,26 +75,26 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 
 | Service | Accelerator  | Profile | Setup              | Tuning                  |
 |---------|--------------|---------|--------------------|-------------------------|
-| aks     | a100         | h100    | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
-| aks     | h100         | -       | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
+| aks     | a100         | h100    | nvidia-setup 0.7.0 | nvidia-tuned 0.10.0     |
+| aks     | h100         | -       | nvidia-setup 0.7.0 | nvidia-tuned 0.10.0     |
 | bcm     | *            | h100    | nvidia-setup 0.3.0 | -                       |
 | bcm     | h100         | -       | nvidia-setup 0.3.0 | -                       |
-| eks     | a100         | h100    | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
-| eks     | gb200        | -       | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
-| eks     | gb300        | -       | -                  | -                       |
-| eks     | h100         | -       | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
-| eks     | h200         | h100    | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
+| eks     | a100         | h100    | nvidia-setup 0.7.0 | nvidia-tuned 0.10.0     |
+| eks     | gb200        | -       | nvidia-setup 0.7.0 | nvidia-tuned 0.10.0     |
+| eks     | gb300        | -       | -                  | nvidia-tuned 0.10.0     |
+| eks     | h100         | -       | nvidia-setup 0.7.0 | nvidia-tuned 0.10.0     |
+| eks     | h200         | h100    | nvidia-setup 0.7.0 | nvidia-tuned 0.10.0     |
 | eks     | rtx-pro-6000 | generic | -                  | nvidia-tuned 0.3.2      |
-| generic | gb300        | -       | -                  | -                       |
+| generic | gb300        | -       | -                  | nvidia-tuned 0.10.0     |
 | gke     | a100         | h100    | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | b200         | -       | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | h100         | -       | -                  | nvidia-tuning-gke 0.1.2 |
-| rke2    | vr200        | -       | -                  | nvidia-tuned 0.9.0      |
+| rke2    | vr200        | -       | -                  | nvidia-tuned 0.10.0     |
 
 {/* END AICR-TUNING */}
 
 Note: the generated table lists the packages *pinned in the manifests* and
-cannot see per-recipe value gates. The `aks` rows show `nvidia-tuned 0.3.2`,
+cannot see per-recipe value gates. The `aks` rows show `nvidia-tuned 0.10.0`,
 but AKS recipes disable it by default via `nodewright-customizations`
 `tuningEnabled: false` under the Azure-managed driver profile; see
 [AKS GPU setup](../aks-gpu-setup.md#infiniband-rdma-host-setup-nodewright)
@@ -103,10 +103,10 @@ for the rationale and re-enable path.
 The `tuningEnabled` gate (default `true`; only an explicit `false` disables)
 applies uniformly across the tuning manifests: on the shared `tuning.yaml` it
 omits the `nvidia-tuned` package while `nvidia-setup` keeps running, and on the
-single-package manifests (`tuning-gke.yaml`, `tuning-generic.yaml`) it
-suppresses the whole tuning Skyhook CR, since the tuning package is that CR's
-only content. No recipe sets it outside AKS today, so default renderings are
-unchanged elsewhere.
+single-package manifests (`tuning-gke.yaml`, `tuning-generic.yaml`,
+`tuning-rke2.yaml`, `tuning-gb300.yaml`) it suppresses the whole tuning Skyhook
+CR, since the tuning package is that CR's only content. No recipe sets it
+outside AKS today, so default renderings are unchanged elsewhere.
 
 The tuning Skyhook CR is a normal release-managed resource (no Helm hooks), so
 flipping `tuningEnabled` from `true` to `false` retracts it on all deployers —
@@ -130,9 +130,10 @@ Helm/Argo clusters are unaffected (they never created it as a hook).
 Known limitation: the `nodewright-customizations` deployment health check
 asserts the `tuning` Skyhook CR reaches `status.status: complete` and cannot
 see value gates. When the whole CR is suppressed — `tuningEnabled: false` on a
-`tuning-gke.yaml`/`tuning-generic.yaml` recipe, or `enabled: false` anywhere —
-`aicr validate --phase deployment` fails that check on the deliberately
-untuned cluster; skip it in that configuration. (AKS is unaffected by
+`tuning-gke.yaml`/`tuning-generic.yaml`/`tuning-rke2.yaml`/`tuning-gb300.yaml`
+recipe, or `enabled: false` anywhere — `aicr validate --phase deployment`
+fails that check on the deliberately untuned cluster; skip it in that
+configuration. (AKS is unaffected by
 `tuningEnabled: false`: its `tuning` CR still renders with the `nvidia-setup`
 packages.) A value-aware health check that tolerates the intentionally-absent
 CR is tracked in [#1844](https://github.com/NVIDIA/aicr/issues/1844).

@@ -43,14 +43,14 @@ func TestCompute_Structure(t *testing.T) {
 		{"bcm", "h100", "-", "nvidia-setup", ""},
 		{"eks", "a100", "h100", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "gb200", "-", "nvidia-setup", "nvidia-tuned"},
-		// GB300 wires the no-op placeholder: no setup or tuning package until a
-		// nodewright gb300 profile exists.
-		{"eks", "gb300", "-", "", ""},
+		// GB300 runs nvidia-tuned alone: nvidia-setup ships no gb300 config, so
+		// the kernel and EFA come from the platform image instead.
+		{"eks", "gb300", "-", "", "nvidia-tuned"},
 		{"eks", "h100", "-", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "h200", "h100", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "rtx-pro-6000", "generic", "", "nvidia-tuned"},
-		// Generic bare-metal GB300 wires the no-op placeholder, same as EKS.
-		{"generic", "gb300", "-", "", ""},
+		// Generic bare-metal GB300 runs the same tuned-only manifest as EKS.
+		{"generic", "gb300", "-", "", "nvidia-tuned"},
 		{"gke", "a100", "h100", "", "nvidia-tuning-gke"},
 		{"gke", "b200", "-", "", "nvidia-tuning-gke"},
 		{"gke", "h100", "-", "", "nvidia-tuning-gke"},
