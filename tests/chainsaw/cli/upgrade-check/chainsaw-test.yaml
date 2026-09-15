@@ -142,7 +142,18 @@ spec:
                 || { echo "FAIL: helm block not labelled" >&2; exit 1; }
               echo "${argo_steps}" | grep -q 'deployer: argocd' \
                 || { echo "FAIL: argocd block not labelled" >&2; exit 1; }
-              if [ "${helm_steps}" = "${argo_steps}" ]; then
+
+              # Compare the bodies with the "STEPS (deployer: X)" headers
+              # dropped. Those headers always differ, so comparing the blocks
+              # whole would pass even if both deployers were handed identical
+              # instructions, which is the failure this step exists to catch.
+              helm_body="$(printf '%s\n' "${helm_steps}" | sed '1d')"
+              argo_body="$(printf '%s\n' "${argo_steps}" | sed '1d')"
+              if [ -z "${helm_body}" ] || [ -z "${argo_body}" ]; then
+                echo "FAIL: a step body was empty; the blocks did not render" >&2
+                exit 1
+              fi
+              if [ "${helm_body}" = "${argo_body}" ]; then
                 echo "FAIL: helm and argocd rendered identical steps" >&2
                 exit 1
               fi

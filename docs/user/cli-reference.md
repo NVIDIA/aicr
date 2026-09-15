@@ -1503,7 +1503,7 @@ aicr diff --baseline ./golden.yaml --target cm://default/aicr-snapshot
 
 ### aicr upgrade-check
 
-Compare two recipes or bundles component by component and report, for each version that changed, whether moving between them is safe to apply. Verdicts come from the [transition records](../contributor/upgrade-records.md) the running `aicr` release ships. No cluster is contacted, which makes this the CI and GitOps path.
+Compare two recipes or bundles component by component and report, for each version that changed, whether moving between them is safe to apply. Verdicts come from the [transition records](../contributor/upgrade-records.md) the running `aicr` release ships. No cluster state is inspected, which makes this the CI and GitOps path: the comparison reads two artifacts and nothing else. A `cm://` path is an artifact location like a file path, so reading or writing one does contact that cluster's API for the ConfigMap itself.
 
 **Synopsis:**
 ```shell
