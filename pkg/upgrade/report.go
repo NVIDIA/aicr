@@ -126,7 +126,7 @@ func (r *Report) FailsRun() bool {
 // ADR-021 Decision 5 would infer the deployer from a `--to` bundle, but no
 // bundle artifact records which deployer built it: the bundler writes
 // provenance.yaml only under --vendor-charts, and it describes vendored charts
-// rather than the deployer. Until a bundle carries that fact (NVIDIA/aicr#2753),
+// rather than the deployer. Until a bundle carries that fact (NVIDIA/aicr#2767),
 // every caller has to supply it, and the alternative of rendering every
 // deployer's path is the failure deployer-scoping exists to prevent.
 func RequiresDeployer(results []ComponentResult) bool {

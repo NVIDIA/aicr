@@ -45,8 +45,7 @@ location like a file path, so reading or writing one does contact that
 cluster's API to fetch or store the ConfigMap.
 
 Either side may be a recipe file or a bundle directory; a bundle is read
-through the recipe.yaml at its root, which today only helm bundles carry
-(NVIDIA/aicr#2753). Omitting --to re-resolves the --from artifact's own
+through the recipe.yaml at its root. Omitting --to re-resolves the --from artifact's own
 criteria against this binary's registry, which answers "am I behind, and does
 catching up hurt?" rather than "is this move safe?".
 
