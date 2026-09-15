@@ -760,7 +760,7 @@ It deliberately proves nothing about real component upgrades. It proves the mech
 2. A downgrade with no explicit reverse record reports `unknown`, never `safe`.
 3. All routes to `blocked` report it and name a stopping point: a record that describes the move and blocks it, an authored `blocked` record crossed from a starting point it does not describe, two or more boundaries crossed, and a single boundary crossed from outside every recorded starting point. Only the first attaches a record and renders its deployer-scoped steps; the rest attach none, so crossed records' steps are never composed or handed to an operator the author did not write them for.
 4. `--from cluster` against a KWOK-installed bundle reports the same versions the artifact path reports for the same artifacts.
-5. Recipe-to-recipe with no `--deployer` and no bundle to infer from exits non-zero asking for the flag, rather than defaulting or rendering every deployer's steps.
+5. A comparison with no `--deployer` exits non-zero asking for the flag whenever any result carries steps, rather than defaulting or rendering every deployer's steps. This holds for bundle inputs too: nothing records which deployer built a bundle ([#2767](https://github.com/NVIDIA/aicr/issues/2767)), so there is nothing to infer from.
 6. Wrapper charts expose the payload version in `aicr.run/component-version`, and a `dev` build still produces a Helm-valid `Chart.yaml`.
 7. A malformed or reverse-matching record in `recipes/components/*/upgrades.yaml` fails `make lint` rather than being silently skipped.
 8. A `safe` record with no `verifiedBy` fails the well-formedness check, so a blanket `safe` cannot satisfy the coverage gate.
