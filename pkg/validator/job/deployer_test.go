@@ -150,8 +150,9 @@ func TestDeployJobTimeouts(t *testing.T) {
 	ns := createUniqueNamespace(t)
 	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: testEntry()}))
 
-	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != 120 {
-		t.Errorf("ActiveDeadlineSeconds = %v, want 120", job.Spec.ActiveDeadlineSeconds)
+	wantDeadline := int64(v1.JobDeadlineFor(2 * time.Minute).Seconds()) // 120 + 210 = 330
+	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != wantDeadline {
+		t.Errorf("ActiveDeadlineSeconds = %v, want %d", job.Spec.ActiveDeadlineSeconds, wantDeadline)
 	}
 	if job.Spec.BackoffLimit == nil || *job.Spec.BackoffLimit != 0 {
 		t.Errorf("BackoffLimit = %v, want 0", job.Spec.BackoffLimit)
@@ -175,7 +176,7 @@ func TestDeployJobDefaultTimeout(t *testing.T) {
 	entry.Timeout = 0
 	job := deployAndGet(t, NewDeployer(Config{Clientset: testClientset, Factory: testFactory(t, ns), Namespace: ns, RunID: "run1", Entry: entry}))
 
-	expected := int64(defaults.ValidatorDefaultTimeout.Seconds())
+	expected := int64(v1.JobDeadlineFor(defaults.ValidatorDefaultTimeout).Seconds())
 	if job.Spec.ActiveDeadlineSeconds == nil || *job.Spec.ActiveDeadlineSeconds != expected {
 		t.Errorf("ActiveDeadlineSeconds = %v, want %d (default)", job.Spec.ActiveDeadlineSeconds, expected)
 	}
@@ -263,7 +264,8 @@ func TestDeployJobEnvVars(t *testing.T) {
 
 	// AICR_CHECK_TIMEOUT propagates the entry's catalog-level timeout to
 	// validators.checkTimeoutFromEnv so the inner parent context matches
-	// the Job's ActiveDeadlineSeconds. Value is time.Duration.String().
+	// CheckTimeout, not the Job's larger ActiveDeadlineSeconds (which adds
+	// defaults.ValidatorJobDeadlineHeadroom). Value is time.Duration.String().
 	timeoutEnv, ok := envMap["AICR_CHECK_TIMEOUT"]
 	if !ok {
 		t.Error("AICR_CHECK_TIMEOUT must be injected")
@@ -1069,5 +1071,111 @@ func TestScanMissingPodAffinityDeps_StopsOnCancellation(t *testing.T) {
 	got := scanMissingPodAffinityDeps(ctx, cs, pa)
 	if len(got) != 0 {
 		t.Errorf("expected no warnings after pre-canceled ctx, got %d: %v", len(got), got)
+	}
+}
+
+// TestDeployJobAnchorsWaitToObservedJobStart is the deployer half of the
+// clock-origin regression for issue #2473. The Job's activeDeadlineSeconds is
+// measured by Kubernetes from the Job's start time, so the orchestrator's own
+// wait has to be measured from there too — not from the moment the apply
+// response happened to land. The reactor returns a Job whose creationTimestamp
+// is already 90s old, standing in for an apply response delayed past
+// defaults.JobEnvelopeMargin, which is exactly the case where an unrebased wait
+// outlived the Job deadline and let the Job controller delete the pod holding
+// the verdict.
+//
+// No wall-clock sleeping: the delay is expressed entirely in the timestamp the
+// fake apiserver reports.
+func TestDeployJobAnchorsWaitToObservedJobStart(t *testing.T) {
+	t.Parallel()
+
+	const applyDelay = 90 * time.Second // 30s past defaults.JobEnvelopeMargin
+	entry := testEntry()
+	created := metav1.NewTime(time.Now().Add(-applyDelay).Truncate(time.Second))
+
+	//nolint:staticcheck // SA1019: fake.NewSimpleClientset is sufficient for tests
+	cs := fake.NewSimpleClientset()
+	cs.PrependReactor("patch", "jobs", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "aicr-gpu-operator-health-abcdef",
+				Namespace:         "aicr-validation",
+				CreationTimestamp: created,
+			},
+		}, nil
+	})
+
+	d := NewDeployer(Config{
+		Clientset: cs,
+		Factory:   informers.NewSharedInformerFactory(cs, 0),
+		Namespace: "aicr-validation",
+		RunID:     "run-1",
+		Entry:     entry,
+	})
+	if err := d.DeployJob(context.Background()); err != nil {
+		t.Fatalf("DeployJob() failed: %v", err)
+	}
+
+	if !d.jobStart.Equal(created.Time) {
+		t.Fatalf("jobStart = %v, want the apply response's creationTimestamp %v", d.jobStart, created.Time)
+	}
+
+	// The wait WaitForCompletion would derive from that origin. Entry timeout
+	// is 2m, so the unrebased budget is 2m+2m30s = 4m30s and the Job deadline
+	// is 2m+3m30s = 5m30s. Rebased onto a 90s-old start the wait is ~3m, and
+	// the whole wait fits inside the Job deadline measured from the same
+	// origin; unrebased it would have ended 90s past that deadline.
+	now := time.Now()
+	wait := v1.OrchestratorWaitFor(d.jobStart, now, entry.Timeout)
+	budget := entry.Timeout + defaults.ValidatorWaitBuffer
+	if wait >= budget {
+		t.Errorf("derived wait = %v, want less than the unrebased budget %v", wait, budget)
+	}
+	if end, deadline := now.Add(wait), d.jobStart.Add(v1.JobDeadlineFor(entry.Timeout)); !end.Before(deadline) {
+		t.Errorf("orchestrator wait ends at %v, want strictly before the Job deadline at %v", end, deadline)
+	}
+}
+
+// TestObservedJobStartPrefersStatusStartTime pins the fallback order:
+// status.startTime is what the Job controller measures activeDeadlineSeconds
+// against, and creationTimestamp stands in only until the controller stamps it.
+func TestObservedJobStartPrefersStatusStartTime(t *testing.T) {
+	t.Parallel()
+
+	created := metav1.NewTime(time.Now().Add(-2 * time.Minute).Truncate(time.Second))
+	started := metav1.NewTime(created.Add(15 * time.Second))
+
+	tests := []struct {
+		name string
+		job  *batchv1.Job
+		want time.Time
+	}{
+		{
+			name: "nil Job yields the zero time",
+			job:  nil,
+			want: time.Time{},
+		},
+		{
+			name: "creationTimestamp is the fallback before the controller reconciles",
+			job:  &batchv1.Job{ObjectMeta: metav1.ObjectMeta{CreationTimestamp: created}},
+			want: created.Time,
+		},
+		{
+			name: "status.startTime wins once set",
+			job: &batchv1.Job{
+				ObjectMeta: metav1.ObjectMeta{CreationTimestamp: created},
+				Status:     batchv1.JobStatus{StartTime: &started},
+			},
+			want: started.Time,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := observedJobStart(tt.job); !got.Equal(tt.want) {
+				t.Errorf("observedJobStart() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
