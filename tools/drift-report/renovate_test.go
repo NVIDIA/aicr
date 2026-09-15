@@ -201,6 +201,37 @@ func TestParseRenovateReportUnsupportedUpdateTypes(t *testing.T) {
 			"patch",
 			"",
 		},
+		{
+			"skipReason with only unrecognized update",
+			`{
+  "repositories": {
+    "NVIDIA/aicr": {
+      "packageFiles": {
+        "custom.regex": [
+          {
+            "packageFile": "recipes/registry.yaml",
+            "deps": [
+              {
+                "depName": "deprecated-chart",
+                "depType": "registry-chart",
+                "datasource": "helm",
+                "currentValue": "v1.5.0",
+                "skipReason": "package-renamed",
+                "updates": [
+                  {"newValue": "v1.6.0", "updateType": "replace"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}`,
+			"",
+			"",
+			"package-renamed: unsupported update type: replace",
+		},
 	}
 
 	for _, tt := range tests {

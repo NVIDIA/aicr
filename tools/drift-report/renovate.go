@@ -88,7 +88,6 @@ func ParseRenovateReport(data []byte) (map[string]Lookup, error) {
 					for _, w := range dep.Warnings {
 						msgs = append(msgs, w.Message)
 					}
-					l.Problem = strings.Join(msgs, ": ")
 					best := 0
 					hasRecognizedUpdate := false
 					var unsupportedType string
@@ -109,12 +108,13 @@ func ParseRenovateReport(data []byte) (map[string]Lookup, error) {
 							best, l.Latest, l.UpdateType = r, u.NewValue, u.UpdateType
 						}
 					}
-					// If no recognized updates exist, surface the unsupported type as a problem.
+					// If no recognized updates exist, add the unsupported type to diagnostics.
 					if !hasRecognizedUpdate && unsupportedType != "" {
-						l.Problem = "unsupported update type: " + unsupportedType
+						msgs = append(msgs, "unsupported update type: "+unsupportedType)
 						l.Latest = ""
 						l.UpdateType = ""
 					}
+					l.Problem = strings.Join(msgs, ": ")
 					out[dep.DepName] = l
 				}
 			}
