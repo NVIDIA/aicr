@@ -56,9 +56,8 @@ type UpgradeCheckRequest struct {
 //
 // The recipe and bundle input forms share this one code path: a bundle is read
 // through the recipe.yaml it embeds, never by fingerprinting deployer-specific
-// layout files. Only helm bundles embed one today, so the bundle form reaches
-// no further than that until NVIDIA/aicr#2753 lands; the other four deployers
-// fail with an explicit error rather than being misread.
+// layout files. A directory without one is neither a recipe nor a bundle and is
+// rejected rather than misread.
 //
 // Records are loaded and validated before matching. Both fail closed, because
 // "a record exists and I could not read it" is not "no record exists", and a

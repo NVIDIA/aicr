@@ -97,7 +97,7 @@ Treat an `unknown` downgrade as genuinely unassessed rather than as a quiet pass
 ## What this does not cover
 
 - **It does not read your cluster's state.** The comparison is between two artifacts; nothing is inspected, deployed or modified. (A `cm://` path is an artifact location like a file path, so reading or writing one does contact that cluster's API for the ConfigMap itself.) If your cluster has drifted from the recipe you think you deployed, the check compares the artifacts you gave it, not reality. Reading installed Helm release inventory is tracked in [#2531](https://github.com/NVIDIA/aicr/issues/2531).
-- **Bundle input works only for `helm` bundles today.** Other deployers' bundles carry no embedded `recipe.yaml` ([#2753](https://github.com/NVIDIA/aicr/issues/2753)). Recipe files work everywhere.
+- **You still name the deployer.** Nothing records which deployer built a bundle ([#2767](https://github.com/NVIDIA/aicr/issues/2767)), so `--deployer` is required whenever a component carries steps, even when reading one.
 - **Coverage starts near zero.** Records are being written component by component, so most transitions still report `unknown`. Absence of a record is absence of assessment.
 - **Records are human assertions.** A `safe` verdict names what verified it, but it is somebody's reading of the migration notes plus a test lane, not a proof.
 

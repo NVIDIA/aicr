@@ -211,9 +211,10 @@ spec:
 
     - name: rejects-bad-input
       description: >-
-        Missing --from, an unknown deployer, and a bundle with no recipe.yaml
-        each fail closed rather than reporting an empty result. The last case
-        pins today's behavior for non-helm bundles (NVIDIA/aicr#2753).
+        Missing --from, an unknown deployer, and a directory that is not a
+        bundle each fail closed rather than reporting an empty result. Also
+        pins that a non-helm bundle now reads fine, since every deployer
+        embeds recipe.yaml as of #2759.
       try:
         - script:
             content: |
@@ -240,11 +241,11 @@ spec:
                 "${AICR_BIN}" upgrade-check --from "${WORK}/missing.yaml" \
                   --to "${WORK}/new.yaml" --deployer helm
 
-              # An argocd bundle carries no recipe.yaml today, so it is neither
-              # a recipe nor a readable bundle. The setup call's exit code is
-              # captured: a failed bundle would leave the directory absent, and
-              # expect_fail would then pass on "no such path" while never
-              # exercising the case this step exists for.
+              # A bundle is read through its recipe.yaml; every deployer writes
+              # one as of #2759. A directory without one is neither a recipe nor
+              # a bundle. The setup call's exit code is captured: a failed
+              # bundle would leave the directory absent, and expect_fail would
+              # then pass on "no such path" while never exercising this case.
               rc=0
               "${AICR_BIN}" bundle -r "${WORK}/new.yaml" --deployer argocd \
                 --repo https://example.com/x.git -o "${WORK}/b-argocd" >/dev/null 2>&1 || rc=$?
@@ -252,14 +253,20 @@ spec:
                 echo "FAIL: setup bundle for the argocd case exited ${rc}" >&2
                 exit 1
               fi
-              if [ ! -d "${WORK}/b-argocd" ]; then
-                echo "FAIL: argocd bundle directory was not created" >&2
+              if [ ! -f "${WORK}/b-argocd/recipe.yaml" ]; then
+                echo "FAIL: argocd bundle has no recipe.yaml; #2759 regressed" >&2
                 exit 1
               fi
-              if [ -f "${WORK}/b-argocd/recipe.yaml" ]; then
-                echo "FAIL: argocd bundles now embed recipe.yaml; this case no longer pins #2753" >&2
+              # An argocd bundle IS readable now, so it must succeed.
+              rc=0
+              "${AICR_BIN}" upgrade-check --from "${WORK}/b-argocd" \
+                --to "${WORK}/new.yaml" --deployer argocd --fail-on-error=false >/dev/null 2>&1 || rc=$?
+              if [ "${rc}" -ne 0 ]; then
+                echo "FAIL: reading an argocd bundle exited ${rc}; every deployer embeds recipe.yaml" >&2
                 exit 1
               fi
-              expect_fail "argocd bundle without recipe.yaml" \
-                "${AICR_BIN}" upgrade-check --from "${WORK}/b-argocd" \
-                  --to "${WORK}/new.yaml" --deployer argocd
+              # A directory with no recipe.yaml is still rejected.
+              mkdir -p "${WORK}/not-a-bundle"
+              expect_fail "directory with no recipe.yaml" \
+                "${AICR_BIN}" upgrade-check --from "${WORK}/not-a-bundle" \
+                  --to "${WORK}/new.yaml" --deployer helm

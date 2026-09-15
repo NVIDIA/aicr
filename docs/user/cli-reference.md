@@ -1557,7 +1557,7 @@ Every row states its reason in the detail block under the table, and `--format j
 
 **Why `--deployer` is required rather than defaulted:**
 
-Steps are deployer-scoped, and no bundle records which deployer built it ([#2753](https://github.com/NVIDIA/aicr/issues/2753)). Showing an Argo CD operator an imperative "delete the legacy CRDs" step is the exact failure deployer-scoping exists to prevent, so the command asks rather than guessing, and never renders every deployer's path. It is only required when some component actually carries steps.
+Steps are deployer-scoped, and no bundle records which deployer built it ([#2767](https://github.com/NVIDIA/aicr/issues/2767)). Showing an Argo CD operator an imperative "delete the legacy CRDs" step is the exact failure deployer-scoping exists to prevent, so the command asks rather than guessing, and never renders every deployer's path. It is only required when some component actually carries steps.
 
 **Example:**
 
@@ -1612,7 +1612,7 @@ aicr upgrade-check --from old.yaml --to new.yaml \
 
 **Limitations:**
 
-- **Bundle input works only for `helm` bundles today.** A bundle is read through the `recipe.yaml` at its root, and only the `helm` deployer writes one ([#2753](https://github.com/NVIDIA/aicr/issues/2753)). Other bundles fail with an explicit error rather than being misread. Recipe files work for every deployer.
+- **A bundle is read through the `recipe.yaml` at its root.** Every deployer writes one as of [#2759](https://github.com/NVIDIA/aicr/pull/2759); a directory without it is neither a recipe nor a bundle and is rejected rather than misread.
 - **Coverage starts near zero.** Every transition without an authored record reports `unknown`. See the [authoring guide](../contributor/upgrade-records.md).
 - **No cluster comparison yet.** `--from cluster`, which reads installed Helm release inventory, is tracked in [#2531](https://github.com/NVIDIA/aicr/issues/2531).
 
