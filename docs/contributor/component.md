@@ -176,8 +176,9 @@ nodeScheduling:
     tolerationPaths:
       - operator.tolerations
   accelerated:
-    nodeSelectorPaths:
-      - kubeletPlugin.nodeSelector
+    # No nodeSelectorPaths for gpu-operator: its operand DaemonSets have no
+    # chart/CRD nodeSelector field — the operator self-places via its GFD/NFD
+    # deploy labels. Only tolerations are routable here (#2474).
     tolerationPaths:
       - daemonsets.tolerations
 ```

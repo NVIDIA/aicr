@@ -28,10 +28,11 @@ operator:
     nodeGroup: system-pool
   upgradeCRD: true
 
-# ── Scheduling: GPU daemonsets ───────────────────────────────────────
+# ── Scheduling: GPU daemonsets ────────────────────────────────────
+# daemonsets.nodeSelector is gone (#2474): the gpu-operator chart/CRD have no
+# such field, so AICR no longer injects it. Operands self-place on GPU nodes.
+# Only the (real) daemonsets.tolerations are asserted here.
 daemonsets:
-  nodeSelector:
-    nodeGroup: gpu-worker
   tolerations:
     - key: nvidia.com/gpu
       value: present
