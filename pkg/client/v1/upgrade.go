@@ -17,6 +17,7 @@ package aicr
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,7 +74,29 @@ type UpgradeCheckRequest struct {
 //     artifact carrying no criteria, or a manual or blocked result needs a
 //     Deployer that was not supplied.
 //   - Loader, resolver and record errors propagate with their own codes.
-func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*upgrade.Report, error) {
+//
+// UpgradeReport is the report UpgradeCheck returns. It is a transparent alias
+// of upgrade.Report rather than a restatement of it: the report is already a
+// projection built for consumers, so copying it here would add a second shape
+// to keep in step with the first for no gain.
+type UpgradeReport = upgrade.Report
+
+// WriteUpgradeReportTable writes a human-readable upgrade-check table.
+//
+// Re-exported so pkg/cli renders the report without importing pkg/upgrade,
+// mirroring WriteSnapshotDiffTable. The rendering itself stays beside the
+// report shape and its goldens.
+func WriteUpgradeReportTable(w io.Writer, report *UpgradeReport) error {
+	if w == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "upgrade report table writer is required (got nil)")
+	}
+	if report == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "upgrade report is required (got nil)")
+	}
+	return upgrade.WriteTable(w, report)
+}
+
+func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*UpgradeReport, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
 	}

@@ -25,6 +25,10 @@ spec:
     Work directory honors TMPDIR (falling back to /tmp) so the suite also
     runs where /tmp is not writable, such as a sandboxed local shell.
 
+    Uses `set -eu`, not `set -euo pipefail`: chainsaw runs scripts under
+    /usr/bin/sh, which is dash on the CI runners, and pipefail is a bashism
+    dash rejects outright with "Illegal option -o pipefail".
+
     Every step captures the exit code and asserts it exactly. `|| true` would
     defeat the purpose here: the exit code IS the feature, so a step that
     swallows it would pass while the gate was broken.
@@ -46,7 +50,7 @@ spec:
       try:
         - script:
             content: |
-              set -euo pipefail
+              set -eu
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
               rm -rf "${WORK}" && mkdir -p "${WORK}"
@@ -74,7 +78,7 @@ spec:
       try:
         - script:
             content: |
-              set -uo pipefail
+              set -u
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
 
@@ -100,7 +104,7 @@ spec:
       try:
         - script:
             content: |
-              set -uo pipefail
+              set -u
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
 
@@ -122,7 +126,7 @@ spec:
       try:
         - script:
             content: |
-              set -uo pipefail
+              set -u
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
 
@@ -150,7 +154,7 @@ spec:
       try:
         - script:
             content: |
-              set -uo pipefail
+              set -u
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
 
@@ -169,7 +173,7 @@ spec:
       try:
         - script:
             content: |
-              set -uo pipefail
+              set -u
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
 
@@ -188,7 +192,7 @@ spec:
       try:
         - script:
             content: |
-              set -uo pipefail
+              set -u
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
 
@@ -213,7 +217,7 @@ spec:
       try:
         - script:
             content: |
-              set -uo pipefail
+              set -u
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
 
