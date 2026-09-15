@@ -1,0 +1,261 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-upgrade-check
+spec:
+  description: |
+    Exercises `aicr upgrade-check` against the real binary and the embedded
+    registry. No cluster needed.
+
+    Work directory honors TMPDIR (falling back to /tmp) so the suite also
+    runs where /tmp is not writable, such as a sandboxed local shell.
+
+    Every step captures the exit code and asserts it exactly. `|| true` would
+    defeat the purpose here: the exit code IS the feature, so a step that
+    swallows it would pass while the gate was broken.
+
+    Deliberately asserts NO verdict for any real component. ADR-021's testing
+    strategy reserves that to KWOK and UAT, because pinning a real component's
+    verdict means every registry pin bump churns this suite, and the pressure
+    to keep it green becomes pressure to weaken the records. What is asserted
+    here is the mechanism: rows appear, steps are deployer-scoped, and the
+    exit-code contract holds.
+  timeouts:
+    exec: 120s
+  steps:
+    - name: setup
+      description: >-
+        Generate a recipe carrying a component that has a transition record,
+        plus a copy with that component moved back to an older version so a
+        transition exists to report.
+      try:
+        - script:
+            content: |
+              set -euo pipefail
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+
+              # dynamo is the platform whose recipes carry grove, the first
+              # component with an authored record.
+              "${AICR_BIN}" recipe --service eks --accelerator h100 \
+                --intent inference --os ubuntu --platform dynamo \
+                -o "${WORK}/new.yaml"
+
+              # Rewrite grove's pin in place rather than hardcoding a version,
+              # so a later pin bump does not silently turn this into a
+              # no-change comparison. The record matches any source below its
+              # `to` floor, so the older value stays valid as the pin moves.
+              line="$(awk '/^  - chart: grove-charts/{f=1} f&&/^    version:/{print NR; exit}' "${WORK}/new.yaml")"
+              if [ -z "${line}" ]; then
+                echo "FAIL: no grove version line found; the dynamo recipe no longer carries grove" >&2
+                exit 1
+              fi
+              sed "${line}s/version: .*/version: v0.1.0-alpha.8/" \
+                "${WORK}/new.yaml" > "${WORK}/old.yaml"
+
+    - name: reports-a-row-and-fails-the-run
+      description: A changed component with a record reports a row and exits non-zero.
+      try:
+        - script:
+            content: |
+              set -uo pipefail
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
+
+              rc=0
+              out="$("${AICR_BIN}" upgrade-check --from "${WORK}/old.yaml" \
+                --to "${WORK}/new.yaml" --deployer helm 2>/dev/null)" || rc=$?
+              if [ "${rc}" -ne 2 ]; then
+                echo "FAIL: expected exit 2 for a component needing attention, got ${rc}" >&2
+                echo "${out}" >&2
+                exit 1
+              fi
+              echo "${out}" | grep -q '^COMPONENT ' \
+                || { echo "FAIL: no table header in output" >&2; exit 1; }
+              echo "${out}" | grep -q 'grove' \
+                || { echo "FAIL: grove row missing" >&2; exit 1; }
+              echo "${out}" | grep -q 'STEPS (deployer: helm)' \
+                || { echo "FAIL: steps not scoped to the named deployer" >&2; exit 1; }
+
+    - name: fail-on-error-false-still-reports
+      description: >-
+        --fail-on-error=false exits 0 while printing the identical report. The
+        exit code is orthogonal to the report.
+      try:
+        - script:
+            content: |
+              set -uo pipefail
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
+
+              rc=0
+              out="$("${AICR_BIN}" upgrade-check --from "${WORK}/old.yaml" \
+                --to "${WORK}/new.yaml" --deployer helm \
+                --fail-on-error=false 2>/dev/null)" || rc=$?
+              if [ "${rc}" -ne 0 ]; then
+                echo "FAIL: expected exit 0 with --fail-on-error=false, got ${rc}" >&2
+                exit 1
+              fi
+              echo "${out}" | grep -q 'grove' \
+                || { echo "FAIL: report suppressed; it must print either way" >&2; exit 1; }
+
+    - name: steps-are-deployer-scoped
+      description: >-
+        A different --deployer selects a different step group. Rendering every
+        deployer's path is the failure deployer-scoping exists to prevent.
+      try:
+        - script:
+            content: |
+              set -uo pipefail
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
+
+              run() {
+                "${AICR_BIN}" upgrade-check --from "${WORK}/old.yaml" \
+                  --to "${WORK}/new.yaml" --deployer "$1" \
+                  --fail-on-error=false 2>/dev/null
+              }
+              helm_steps="$(run helm | sed -n '/STEPS/,$p')"
+              argo_steps="$(run argocd | sed -n '/STEPS/,$p')"
+
+              echo "${helm_steps}" | grep -q 'deployer: helm' \
+                || { echo "FAIL: helm block not labelled" >&2; exit 1; }
+              echo "${argo_steps}" | grep -q 'deployer: argocd' \
+                || { echo "FAIL: argocd block not labelled" >&2; exit 1; }
+              if [ "${helm_steps}" = "${argo_steps}" ]; then
+                echo "FAIL: helm and argocd rendered identical steps" >&2
+                exit 1
+              fi
+
+    - name: missing-deployer-asks-for-it
+      description: >-
+        Steps are needed but no --deployer was given: exit non-zero naming the
+        flag, rather than defaulting or rendering every deployer's path.
+      try:
+        - script:
+            content: |
+              set -uo pipefail
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
+
+              rc=0
+              err="$("${AICR_BIN}" upgrade-check --from "${WORK}/old.yaml" \
+                --to "${WORK}/new.yaml" 2>&1 >/dev/null)" || rc=$?
+              if [ "${rc}" -ne 2 ]; then
+                echo "FAIL: expected exit 2 without --deployer, got ${rc}" >&2
+                exit 1
+              fi
+              echo "${err}" | grep -q -- '--deployer' \
+                || { echo "FAIL: error does not name the flag: ${err}" >&2; exit 1; }
+
+    - name: no-change-is-not-a-finding
+      description: Identical artifacts report no rows and exit 0.
+      try:
+        - script:
+            content: |
+              set -uo pipefail
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
+
+              rc=0
+              out="$("${AICR_BIN}" upgrade-check --from "${WORK}/new.yaml" \
+                --to "${WORK}/new.yaml" --deployer helm 2>/dev/null)" || rc=$?
+              if [ "${rc}" -ne 0 ]; then
+                echo "FAIL: expected exit 0 for identical artifacts, got ${rc}" >&2
+                exit 1
+              fi
+              echo "${out}" | grep -q 'NO COMPONENT CHANGES' \
+                || { echo "FAIL: unexpected output: ${out}" >&2; exit 1; }
+
+    - name: json-is-machine-readable
+      description: JSON output parses and carries the summary a pipeline branches on.
+      try:
+        - script:
+            content: |
+              set -uo pipefail
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
+
+              rc=0
+              "${AICR_BIN}" upgrade-check --from "${WORK}/old.yaml" \
+                --to "${WORK}/new.yaml" --deployer helm --format json \
+                --output "${WORK}/report.json" --fail-on-error=false || rc=$?
+              if [ "${rc}" -ne 0 ]; then
+                echo "FAIL: expected exit 0, got ${rc}" >&2
+                exit 1
+              fi
+              jq -e '.summary.failing >= 1' "${WORK}/report.json" >/dev/null \
+                || { echo "FAIL: summary.failing absent or zero" >&2; exit 1; }
+              jq -e '.components[0].verdict | type == "string"' "${WORK}/report.json" >/dev/null \
+                || { echo "FAIL: component verdict missing from JSON" >&2; exit 1; }
+
+    - name: rejects-bad-input
+      description: >-
+        Missing --from, an unknown deployer, and a bundle with no recipe.yaml
+        each fail closed rather than reporting an empty result. The last case
+        pins today's behavior for non-helm bundles (NVIDIA/aicr#2753).
+      try:
+        - script:
+            content: |
+              set -uo pipefail
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="${TMPDIR:-/tmp}/chainsaw-upgrade-check"
+
+              expect_fail() {
+                local what="$1"; shift
+                local rc=0
+                "$@" >/dev/null 2>&1 || rc=$?
+                if [ "${rc}" -eq 0 ]; then
+                  echo "FAIL: ${what} exited 0; it must fail closed" >&2
+                  exit 1
+                fi
+              }
+
+              expect_fail "missing --from" \
+                "${AICR_BIN}" upgrade-check --to "${WORK}/new.yaml" --deployer helm
+              expect_fail "unknown deployer" \
+                "${AICR_BIN}" upgrade-check --from "${WORK}/old.yaml" \
+                  --to "${WORK}/new.yaml" --deployer nope
+              expect_fail "nonexistent artifact" \
+                "${AICR_BIN}" upgrade-check --from "${WORK}/missing.yaml" \
+                  --to "${WORK}/new.yaml" --deployer helm
+
+              # An argocd bundle carries no recipe.yaml today, so it is neither
+              # a recipe nor a readable bundle. The setup call's exit code is
+              # captured: a failed bundle would leave the directory absent, and
+              # expect_fail would then pass on "no such path" while never
+              # exercising the case this step exists for.
+              rc=0
+              "${AICR_BIN}" bundle -r "${WORK}/new.yaml" --deployer argocd \
+                --repo https://example.com/x.git -o "${WORK}/b-argocd" >/dev/null 2>&1 || rc=$?
+              if [ "${rc}" -ne 0 ]; then
+                echo "FAIL: setup bundle for the argocd case exited ${rc}" >&2
+                exit 1
+              fi
+              if [ ! -d "${WORK}/b-argocd" ]; then
+                echo "FAIL: argocd bundle directory was not created" >&2
+                exit 1
+              fi
+              if [ -f "${WORK}/b-argocd/recipe.yaml" ]; then
+                echo "FAIL: argocd bundles now embed recipe.yaml; this case no longer pins #2753" >&2
+                exit 1
+              fi
+              expect_fail "argocd bundle without recipe.yaml" \
+                "${AICR_BIN}" upgrade-check --from "${WORK}/b-argocd" \
+                  --to "${WORK}/new.yaml" --deployer argocd

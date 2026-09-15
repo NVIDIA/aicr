@@ -519,18 +519,18 @@ func TestMake_EveryDeployerEmitsRecipe(t *testing.T) {
 				t.Fatalf("Make() error = %v", err)
 			}
 
-			data, err := os.ReadFile(filepath.Join(dir, recipeFileName))
+			data, err := os.ReadFile(filepath.Join(dir, RecipeFileName))
 			if err != nil {
-				t.Fatalf("read %s: %v", recipeFileName, err)
+				t.Fatalf("read %s: %v", RecipeFileName, err)
 			}
 			emitted[tt.name] = data
 
 			var reloaded recipe.RecipeResult
 			if unmarshalErr := yaml.Unmarshal(data, &reloaded); unmarshalErr != nil {
-				t.Errorf("emitted %s does not parse as a RecipeResult: %v", recipeFileName, unmarshalErr)
+				t.Errorf("emitted %s does not parse as a RecipeResult: %v", RecipeFileName, unmarshalErr)
 			}
 			if len(reloaded.ComponentRefs) == 0 {
-				t.Errorf("emitted %s carries no componentRefs", recipeFileName)
+				t.Errorf("emitted %s carries no componentRefs", RecipeFileName)
 			}
 
 			// A recipe outside checksums.txt is outside the attestation
@@ -540,18 +540,18 @@ func TestMake_EveryDeployerEmitsRecipe(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ReadAndVerifyBundle() error = %v", err)
 			}
-			if !slices.Contains(inventory.RelativeFiles(), recipeFileName) {
-				t.Errorf("%s missing from checksum inventory %v", recipeFileName, inventory.RelativeFiles())
+			if !slices.Contains(inventory.RelativeFiles(), RecipeFileName) {
+				t.Errorf("%s missing from checksum inventory %v", RecipeFileName, inventory.RelativeFiles())
 			}
 			var reported bool
 			for _, res := range output.Results {
-				if slices.Contains(res.Files, filepath.Join(dir, recipeFileName)) {
+				if slices.Contains(res.Files, filepath.Join(dir, RecipeFileName)) {
 					reported = true
 					break
 				}
 			}
 			if !reported {
-				t.Errorf("%s missing from the reported result files", recipeFileName)
+				t.Errorf("%s missing from the reported result files", RecipeFileName)
 			}
 		})
 	}
@@ -563,7 +563,7 @@ func TestMake_EveryDeployerEmitsRecipe(t *testing.T) {
 	for name, got := range emitted {
 		if !bytes.Equal(got, want) {
 			t.Errorf("%s emitted a different %s than helm; the recipe is re-marshaled "+
-				"per deployer instead of sharing one serializer path", name, recipeFileName)
+				"per deployer instead of sharing one serializer path", name, RecipeFileName)
 		}
 	}
 }
@@ -1042,13 +1042,13 @@ func TestMake_RecipeCoveredByChecksums(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", checksum.ChecksumFileName, err)
 	}
-	if !strings.Contains(string(checksums), "  "+recipeFileName+"\n") {
-		t.Fatalf("%s does not cover %s:\n%s", checksum.ChecksumFileName, recipeFileName, checksums)
+	if !strings.Contains(string(checksums), "  "+RecipeFileName+"\n") {
+		t.Fatalf("%s does not cover %s:\n%s", checksum.ChecksumFileName, RecipeFileName, checksums)
 	}
 
-	recipePath := filepath.Join(bundleDir, recipeFileName)
+	recipePath := filepath.Join(bundleDir, RecipeFileName)
 	if err = os.WriteFile(recipePath, []byte("tampered: true\n"), 0600); err != nil {
-		t.Fatalf("tamper %s: %v", recipeFileName, err)
+		t.Fatalf("tamper %s: %v", RecipeFileName, err)
 	}
 
 	verifyResult, err := bundleverifier.Verify(context.Background(), bundleDir, nil)
@@ -1056,10 +1056,10 @@ func TestMake_RecipeCoveredByChecksums(t *testing.T) {
 		t.Fatalf("Verify() error = %v", err)
 	}
 	if verifyResult.ChecksumsPassed {
-		t.Fatalf("Verify() passed after %s was tampered with", recipeFileName)
+		t.Fatalf("Verify() passed after %s was tampered with", RecipeFileName)
 	}
-	if !strings.Contains(strings.Join(verifyResult.Errors, "\n"), recipeFileName) {
-		t.Errorf("Verify() errors do not identify %s: %v", recipeFileName, verifyResult.Errors)
+	if !strings.Contains(strings.Join(verifyResult.Errors, "\n"), RecipeFileName) {
+		t.Errorf("Verify() errors do not identify %s: %v", RecipeFileName, verifyResult.Errors)
 	}
 }
 

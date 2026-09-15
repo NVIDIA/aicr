@@ -77,12 +77,15 @@ const (
 	// digestAlgoSHA256 is the algorithm key used in attestation digest maps.
 	digestAlgoSHA256 = "sha256"
 
-	// recipeFileName is the resolved recipe written into every bundle.
-	recipeFileName = "recipe.yaml"
-
 	accountingDatabaseUsername = "slurm"
 	componentInstallKey        = "install"
 )
+
+// RecipeFileName is the resolved recipe written at the root of every bundle.
+// Exported because reading it back is how a consumer recognizes a directory as
+// a bundle and recovers the recipe it was built from, and a second copy of the
+// literal would drift silently.
+const RecipeFileName = "recipe.yaml"
 
 // errCtxKeyComponent is the structured-error context key carrying the
 // component name in bundle value-override failures.
@@ -1004,7 +1007,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	if writeErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
 	}
-	output.Files = append(output.Files, filepath.Join(dir, recipeFileName))
+	output.Files = append(output.Files, filepath.Join(dir, RecipeFileName))
 	output.TotalSize += recipeSize
 
 	if b.Config.IncludeChecksums() {
@@ -2790,7 +2793,7 @@ func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir 
 		return 0, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to serialize recipe")
 	}
 
-	recipePath, joinErr := deployer.SafeJoin(dir, recipeFileName)
+	recipePath, joinErr := deployer.SafeJoin(dir, RecipeFileName)
 	if joinErr != nil {
 		return 0, errors.Wrap(errors.ErrCodeInternal, "unsafe recipe file path", joinErr)
 	}

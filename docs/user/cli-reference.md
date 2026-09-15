@@ -1501,6 +1501,123 @@ aicr diff --baseline ./golden.yaml --target cm://default/aicr-snapshot
 
 ---
 
+### aicr upgrade-check
+
+Compare two recipes or bundles component by component and report, for each version that changed, whether moving between them is safe to apply. Verdicts come from the [transition records](../contributor/upgrade-records.md) the running `aicr` release ships. No cluster is contacted, which makes this the CI and GitOps path.
+
+**Synopsis:**
+```shell
+aicr upgrade-check --from <recipe|bundle> [--to <recipe|bundle>] [--deployer <name>] [flags]
+```
+
+**Flags:**
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--from` | `-f` | string | | Source artifact: recipe file, bundle directory, or ConfigMap URI. **Required.** |
+| `--to` | | string | re-resolve | Target artifact. When omitted, `--from`'s own criteria are re-resolved against this binary's registry. |
+| `--deployer` | `-d` | string | | Deployer the reported steps are scoped to: `argocd`, `argocd-helm`, `flux`, `helm`, `helmfile`. **Required whenever any component needs steps.** |
+| `--fail-on-error` | | bool | **true** | Exit non-zero when any component needs attention. |
+| `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`, JSON/YAML only), or stdout. |
+| `--format` | `-t` | string | **table** | Output format: `json`, `yaml`, or `table`. |
+| `--kubeconfig` | `-k` | string | | Kubeconfig used for `cm://` artifact reads and a `cm://` `--output`. Overrides `KUBECONFIG` and `~/.kube/config`. No cluster is contacted unless an argument is a ConfigMap URI. |
+
+Note the two defaults that differ from sibling commands. `--format` defaults to `table` rather than `yaml`, because the report's payload is a list of operator steps that folded YAML scalars make unreadable. `--fail-on-error` defaults to **true**, the opposite of `aicr diff --fail-on-drift`: you chose to run this check, so its exit code is what makes running it worth something in a pipeline.
+
+**The two questions it answers:**
+
+`--from X --to Y` asks *"is this specific move safe?"* and presumes you already know your target.
+
+Omitting `--to` asks *"am I behind, and does catching up hurt?"*, which is usually the real question: what an operator holds is an old artifact, not a chosen destination. The `--from` artifact's embedded criteria are re-resolved against the running binary's pins to synthesize the target.
+
+**Verdicts:**
+
+| Verdict | Meaning | Fails a strict run |
+|---------|---------|--------------------|
+| `safe` | Upgrade in place. Nothing to do. | no |
+| `manual` | Operator steps are required first. | yes |
+| `blocked` | Do not make this jump in one step. The report names the boundary it stops at. | yes |
+| `unknown` | No record covers this transition. A gap in the **data**, closed by authoring a record. | only across a breaking boundary |
+| `unversioned` | One side's version is not comparable. A gap in the **inputs**, closed by pinning something comparable. | yes |
+
+A **breaking boundary** is a major bump, or a minor bump while the major version is `0`. Semver offers no stability guarantee below 1.0, so `0.18 → 0.19` may break exactly as `1.x → 2.x` may.
+
+Components whose version is identical on both sides produce no row. Added components are reported with nothing to do; removed components are reported and **stay installed**, because AICR does not uninstall them.
+
+**The three routes to `blocked`.** A record is *crossed* when your source version sits below the boundary its `to` names and your target reaches it. That is a property of the jump alone, so a record still counts even when the jump flies straight over it:
+
+| Route | When | `reason` | Renders steps |
+|---|---|---|---|
+| A record describes this move and blocks it | One record is crossed and its `from` covers your source | `recorded` | yes |
+| You would skip a boundary | Two or more records are crossed, or a crossed `blocked` record was written for a different starting point | `multiple-boundaries`, `record-blocks` | no |
+| Nothing describes your starting version | One record is crossed, but its `from` does not cover your source, usually because you are below the lowest recorded starting point | `undefined-origin` | no |
+
+The first renders its record's steps, deployer-scoped, exactly as a `manual` row does: the author marked the move `blocked` and then wrote what to do instead. The other two render none, because the record that carries them describes a different move than the one you asked about. All three name a stopping point.
+
+Every row states its reason in the detail block under the table, and `--format json` carries the same thing as `reason` (a stable code: `recorded`, `record-blocks`, `multiple-boundaries`, `undefined-origin`, `no-record`, `no-boundary-crossed`, `downgrade`, `not-comparable`) plus `explanation`, the sentence naming your versions.
+
+**Why `--deployer` is required rather than defaulted:**
+
+Steps are deployer-scoped, and no bundle records which deployer built it ([#2753](https://github.com/NVIDIA/aicr/issues/2753)). Showing an Argo CD operator an imperative "delete the legacy CRDs" step is the exact failure deployer-scoping exists to prevent, so the command asks rather than guessing, and never renders every deployer's path. It is only required when some component actually carries steps.
+
+**Example:**
+
+```console
+$ aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer helm
+UPGRADE CHECK
+  from      old-recipe.yaml
+  to        new-recipe.yaml
+  deployer  helm
+
+COMPONENT  FROM            TO               VERDICT  NOTES
+---------  ----            --               -------  -----
+grove      v0.1.0-alpha.8  v0.1.0-alpha.12  manual   3 steps
+
+grove v0.1.0-alpha.8 -> v0.1.0-alpha.12  (manual)
+  alpha.12 drops the clustertopologies.grove.io CRD (kind ClusterTopology) in
+  favor of clustertopologybindings.grove.io, which reuses the shortname ct.
+
+  PRECONDITION
+    No ClusterTopology objects exist in the cluster.
+
+  STEPS (deployer: helm)
+    1. delete-legacy-crd
+       kubectl delete crd clustertopologies.grove.io
+    ...
+
+1 component change, 1 needs attention
+```
+
+**More examples:**
+
+```shell
+# Two recipes, for a pipeline that already knows its deployer
+aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer argocd
+
+# Am I behind, and does catching up hurt?
+aicr upgrade-check --from ./bundles-v0.16.0 --deployer helm
+
+# JSON for a pipeline, reporting without gating
+aicr upgrade-check --from old.yaml --to new.yaml \
+  --format json --output report.json --fail-on-error=false
+```
+
+**Exit Codes:**
+
+| Code | Description |
+|------|-------------|
+| `0` | No component needs attention, or `--fail-on-error=false` |
+| `2` | Invalid input (missing `--from`, unknown deployer, a bundle with no `recipe.yaml`, a missing `--deployer` where steps are needed) **or** a component needs attention (mapped from `ErrCodeConflict`) |
+
+> **Note on CI gating:** as with `aicr diff`, a bad invocation and a failing check both exit `2`. To tell them apart without parsing stderr, write the report with `--format json --output report.json` and branch on the file's presence plus its `summary.failing` count.
+
+**Limitations:**
+
+- **Bundle input works only for `helm` bundles today.** A bundle is read through the `recipe.yaml` at its root, and only the `helm` deployer writes one ([#2753](https://github.com/NVIDIA/aicr/issues/2753)). Other bundles fail with an explicit error rather than being misread. Recipe files work for every deployer.
+- **Coverage starts near zero.** Every transition without an authored record reports `unknown`. See the [authoring guide](../contributor/upgrade-records.md).
+- **No cluster comparison yet.** `--from cluster`, which reads installed Helm release inventory, is tracked in [#2531](https://github.com/NVIDIA/aicr/issues/2531).
+
+---
+
 ### aicr bundle
 
 Generate deployment-ready bundles from recipes containing Helm values, manifests, scripts, and documentation.

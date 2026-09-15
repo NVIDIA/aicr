@@ -46,6 +46,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/oci"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/snapshotter"
+	"github.com/NVIDIA/aicr/pkg/upgrade"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
 )
 
@@ -197,6 +198,22 @@ func TestStability_SnapshotDiff(t *testing.T) {
 	_ = []aicr.SnapshotChangeSeverity{
 		aicr.SnapshotChangeSeverityInfo,
 	}
+}
+
+// TestStability_UpgradeCheck pins the ADR-021 upgrade-check entry point. The
+// report type itself is pkg/upgrade's, not a facade projection: it carries no
+// internal handle a caller could misuse, and duplicating it here would give the
+// CLI and an SDK consumer two shapes that can drift.
+func TestStability_UpgradeCheck(t *testing.T) {
+	t.Parallel()
+
+	requireSignature[func(*aicr.Client, context.Context, aicr.UpgradeCheckRequest) (*upgrade.Report, error)]((*aicr.Client).UpgradeCheck)
+
+	var req aicr.UpgradeCheckRequest
+	_ = req.From
+	_ = req.To
+	_ = req.Deployer
+	_ = req.Kubeconfig
 }
 
 func requireSignature[T any](_ T) {}
