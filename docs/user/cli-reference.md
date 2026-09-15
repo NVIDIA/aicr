@@ -2226,10 +2226,9 @@ Use `--dynamic` for values that genuinely vary per cluster — cluster names, su
 
 > **Attestation scope:** Dynamic values are supplied at install time and are
 > **not covered by `--attest`**. Attestation binds the generated closed-world
-> inventory, including `recipe.yaml` when present, not operator-provided
-> overrides. If you need to constrain dynamic values at deploy time, use
-> admission control or Argo sync hooks — see
-> [Attestation Scope](#attestation-scope).
+> inventory, including `recipe.yaml`, not operator-provided overrides. If you
+> need to constrain dynamic values at deploy time, use admission control or
+> Argo sync hooks — see [Attestation Scope](#attestation-scope).
 
 ```shell
 --dynamic component:path.to.field
@@ -2653,7 +2652,7 @@ When `--attest` is passed, the bundle command performs five steps:
 1. **Verifies the binary attestation file exists** — The running `aicr` binary must have a valid SLSA provenance file (`aicr-attestation.sigstore.json`) alongside it, included by the install script from a release archive. If missing, the command fails immediately with guidance on how to install correctly.
 2. **Acquires a signing credential** — in the default keyless mode this is an OIDC token (see [OIDC Token Sources](#oidc-token-sources) below); with `--signing-key` this step instead resolves the KMS key and no OIDC token is acquired (see [KMS-Backed Signing](#kms-backed-signing)).
 3. **Verifies the binary's own attestation** — Cryptographically verifies the SLSA provenance binds to the running binary and was signed by NVIDIA CI. This ensures only NVIDIA-built binaries can produce attested bundles.
-4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the generated closed-world inventory, including `recipe.yaml` when present, and the binary that produced it.
+4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the generated closed-world inventory, including `recipe.yaml`, and the binary that produced it.
 5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
 
 Attestation is opt-in; bundles are unsigned by default. By default, signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log) and records the entry in **Rekor v2** (the signing config is fetched from Sigstore's TUF repository, so shard rotation is handled automatically; a cold cache is fetched on demand). Verifying such bundles with `aicr verify` needs only the `aicr` binary; verifying them with `cosign verify-blob-attestation` needs Cosign v3.0.1+. For CI/CD environments without OIDC, pass `--signing-key` to sign with a KMS key instead; see [KMS-Backed Signing](#kms-backed-signing) below. For verification, see [`aicr verify`](#aicr-verify).
@@ -2811,9 +2810,9 @@ The `hashivault://<transit-key-name>` scheme signs through HashiCorp Vault's Tra
 ##### Attestation Scope
 
 Attestation binds a closed-world bundle inventory. `checksums.txt` contains one
-SHA256 entry for every regular payload file — including `recipe.yaml` when
-present, defaults, dynamic-value stubs, and external `--data` files copied into
-the bundle. Verification derives the required directories and rejects every
+SHA256 entry for every regular payload file — including `recipe.yaml`,
+defaults, dynamic-value stubs, and external `--data` files copied into the
+bundle. Verification derives the required directories and rejects every
 additional file or directory, symlink, and other non-regular object. Only
 `checksums.txt`, `attestation/bundle-attestation.sigstore.json`, and
 `attestation/aicr-attestation.sigstore.json` may exist outside the manifest;
