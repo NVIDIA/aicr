@@ -169,6 +169,12 @@ type gpuTestRun struct {
 	podName        string
 	claimName      string
 	noAllocPodName string
+	// IMEX channel subtest names (dra-support): the per-run ComputeDomain,
+	// the ResourceClaimTemplate the DRA driver generates from it, and the
+	// probe pod that consumes one channel from that template.
+	computeDomainName string
+	claimTemplateName string
+	imexPodName       string
 
 	nsObserved     bool
 	nsUID          types.UID
@@ -217,6 +223,10 @@ func newGPUTestRun() (*gpuTestRun, error) {
 		podName:        gpuTestPodPrefix + token,
 		claimName:      gpuClaimPrefix + token,
 		noAllocPodName: noAllocProbePrefix + token,
+
+		computeDomainName: imexComputeDomainPrefix + token,
+		claimTemplateName: imexClaimTemplatePrefix + token,
+		imexPodName:       imexTestPodPrefix + token,
 	}, nil
 }
 
@@ -617,29 +627,13 @@ func buildDevicePluginTestPod(run *gpuTestRun, tolerations []corev1.Toleration, 
 	if tolerations == nil {
 		tolerations = []corev1.Toleration{{Operator: corev1.TolerationOpExists}}
 	}
-	terms := make([]corev1.NodeSelectorTerm, 0, len(nodeNames))
-	for _, nodeName := range nodeNames {
-		terms = append(terms, corev1.NodeSelectorTerm{
-			MatchFields: []corev1.NodeSelectorRequirement{{
-				Key:      metav1.ObjectNameField,
-				Operator: corev1.NodeSelectorOpIn,
-				Values:   []string{nodeName},
-			}},
-		})
-	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      run.podName,
 			Namespace: run.namespace,
 		},
 		Spec: corev1.PodSpec{
-			Affinity: &corev1.Affinity{
-				NodeAffinity: &corev1.NodeAffinity{
-					RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
-						NodeSelectorTerms: terms,
-					},
-				},
-			},
+			Affinity:      nodeNameAffinity(nodeNames),
 			RestartPolicy: corev1.RestartPolicyNever,
 			Tolerations:   tolerations,
 			Containers: []corev1.Container{
@@ -1505,6 +1499,32 @@ func buildDRATestPod(run *gpuTestRun, tolerations []corev1.Toleration) *corev1.P
 					},
 				},
 				unauthorizedSiblingContainer(),
+			},
+		},
+	}
+}
+
+// nodeNameAffinity returns a REQUIRED node affinity restricting a pod to the
+// given node OBJECT names, matched via metadata.name (matchFields) rather
+// than the kubernetes.io/hostname label, which is not guaranteed to equal
+// (or even exist for) the node name. matchFields In accepts exactly one
+// value per requirement, so the node set is expressed as OR-ed single-node
+// terms. Shared by the device-plugin GPU probe and the IMEX channel probe.
+func nodeNameAffinity(nodeNames []string) *corev1.Affinity {
+	terms := make([]corev1.NodeSelectorTerm, 0, len(nodeNames))
+	for _, nodeName := range nodeNames {
+		terms = append(terms, corev1.NodeSelectorTerm{
+			MatchFields: []corev1.NodeSelectorRequirement{{
+				Key:      metav1.ObjectNameField,
+				Operator: corev1.NodeSelectorOpIn,
+				Values:   []string{nodeName},
+			}},
+		})
+	}
+	return &corev1.Affinity{
+		NodeAffinity: &corev1.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: &corev1.NodeSelector{
+				NodeSelectorTerms: terms,
 			},
 		},
 	}
