@@ -33,6 +33,9 @@ operator:
 # such field, so AICR no longer injects it. Operands self-place on GPU nodes.
 # Only the (real) daemonsets.tolerations are asserted here.
 daemonsets:
+  # regression guard: the route must stay gone (chainsaw asserts are subset-match,
+  # so without this the assert would still pass if the dead route were re-added)
+  (nodeSelector == null): true
   tolerations:
     - key: nvidia.com/gpu
       value: present

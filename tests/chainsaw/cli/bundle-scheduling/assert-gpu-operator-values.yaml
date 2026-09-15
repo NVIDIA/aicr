@@ -37,6 +37,7 @@ operator:
 # AICR no longer injects daemonsets.nodeSelector (no such chart/CRD field, #2474).
 # Only the real daemonsets.tolerations are asserted.
 daemonsets:
+  (nodeSelector == null): true  # regression guard: the dead route must not return
   tolerations:
     - effect: NoSchedule
       key: nvidia.com/gpu
