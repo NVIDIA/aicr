@@ -497,11 +497,26 @@ func TestCapCRECertificationNodes(t *testing.T) {
 		{ObjectMeta: metav1.ObjectMeta{Name: "a"}},
 		{ObjectMeta: metav1.ObjectMeta{Name: "m"}},
 	}
-	got := capCRECertificationNodes(nodes)
-	if len(got) != creMaxNodesPerCertification {
-		t.Fatalf("len = %d, want %d", len(got), creMaxNodesPerCertification)
+	tests := []struct {
+		name     string
+		maxNodes int
+		want     []string
+	}{
+		{"caps to the qualified footprint", 2, []string{"a", "m"}},
+		{"cap above the pool keeps every node", 5, []string{"a", "m", "z"}},
+		{"missing cap clamps to one rather than the whole pool", 0, []string{"a"}},
 	}
-	if got[0].Name != "a" || got[1].Name != "m" {
-		t.Fatalf("capped names = %q %q, want a m", got[0].Name, got[1].Name)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := capCRECertificationNodes(nodes, tt.maxNodes)
+			if len(got) != len(tt.want) {
+				t.Fatalf("len = %d, want %d", len(got), len(tt.want))
+			}
+			for i := range tt.want {
+				if got[i].Name != tt.want[i] {
+					t.Errorf("node[%d] = %q, want %q", i, got[i].Name, tt.want[i])
+				}
+			}
+		})
 	}
 }
