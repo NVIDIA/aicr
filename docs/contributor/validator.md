@@ -860,8 +860,13 @@ silently fall back.
 Full list (defaults, semantics) is in the `validators/performance`
 package godoc. NCCL variants exposed today: `nccl-all-reduce-bw`,
 `nccl-all-reduce-bw-net`, `nccl-all-reduce-bw-nvls`. Opt-in public CRE
-checks for EKS H100: `nccl-cre-all-reduce-bw` (`Certification` `communication/nccl-all-reduce`) and
-`cre-training-goodput` (`Certification` `training/nemotron5-8b`). Both create the
+checks: `nccl-cre-all-reduce-bw` and `cre-training-goodput`. Neither branches on
+service or accelerator — `creQualifiedEntries` in
+`validators/performance/cre_qualification.go` records which combinations are
+qualified and the catalog entry and node cap each was measured with, so a new
+combination is an entry there plus a measured threshold rather than a new code
+path. On `eks` x `h100` the entries are `communication/nccl-all-reduce` and
+`training/nemotron5-8b`. Both create the
 CR on an explicitly named set of nodes, wait with a timeout, and tear it down on
 success or failure — deleting the CR and then confirming the `TrainJob`s and
 workload pods it started are gone, since CRE's controller drops its finalizer

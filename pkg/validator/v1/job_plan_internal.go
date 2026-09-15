@@ -61,14 +61,15 @@ const (
 
 	// CRENCCLAllReduceBWCheckName is the catalog name of the CRE-driven NCCL
 	// all-reduce check (Certification). Overlays opt in by listing this check and
-	// a same-named performance constraint. It is limited to EKS H100 while CRE
-	// integration is validated, and no embedded overlay enables it.
+	// a same-named performance constraint. No embedded overlay enables it, and
+	// the combinations it is qualified on are recorded in creQualifiedEntries in
+	// validators/performance rather than gated here.
 	CRENCCLAllReduceBWCheckName = "nccl-cre-all-reduce-bw"
 
 	// CRETrainingGoodputCheckName is the catalog name of the CRE-driven
-	// NeMo training check (Certification training/nemotron5-8b). It is
-	// limited to EKS H100 while CRE integration is validated, and no
-	// embedded overlay enables it.
+	// training goodput check (Certification). It opts in and records its
+	// qualified combinations the same way, and the catalog entry it drives
+	// varies per combination.
 	CRETrainingGoodputCheckName = "cre-training-goodput"
 
 	// ncclFabricEnv selects the NET fabric (efa default | roce). Forwarded to
