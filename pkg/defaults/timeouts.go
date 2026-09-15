@@ -1351,7 +1351,14 @@ const (
 	// that, so reads and the write are bounded alike. Matches
 	// MirrorHelmTemplateTimeout, the other per-chart helm invocation.
 	// Operators can override per-run with AICR_CRD_STEP_TIMEOUT.
-	BundleCRDStepTimeout = 90 * time.Second
+	//
+	// 30s rather than the 90s a lone helm invocation would justify, because
+	// deploy.sh multiplies it: a component that keeps failing is retried six
+	// times with backoff, so three bounded calls at 90s each can consume ~31
+	// minutes and exceed the CI job budget before the retry loop ever reports
+	// anything. A CRD read or apply that needs more than 30s is already
+	// pathological, and the override exists for the exception.
+	BundleCRDStepTimeout = 30 * time.Second
 )
 
 // Mirror discovery timeouts and defaults.

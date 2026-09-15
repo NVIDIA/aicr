@@ -55,7 +55,7 @@ fi
 # one platform least likely to be exercised in CI. Failing closed with an
 # actionable message is the safer trade: the operator can install coreutils, or
 # apply the CRDs by hand with the command in the component catalog.
-CRD_STEP_TIMEOUT="${AICR_CRD_STEP_TIMEOUT:-90}"
+CRD_STEP_TIMEOUT="${AICR_CRD_STEP_TIMEOUT:-30}"
 TIMEOUT_BIN=""
 for candidate in timeout gtimeout; do
   if command -v "${candidate}" >/dev/null 2>&1; then
@@ -87,9 +87,18 @@ run_bounded() {
 # such reader, so the step returns when the bounded process does.
 BOUNDED_OUT="$(mktemp)"
 trap 'rm -f "${BOUNDED_OUT}"' EXIT
+# Progress is announced before each bounded call and timed after it. deploy.sh
+# captures this and prints it only when a component fails, so it costs nothing
+# on a good run and names the slow call on a bad one. Without it a stalled step
+# is indistinguishable from a stalled `helm upgrade` further down.
 capture_bounded() {
   : >"${BOUNDED_OUT}"
-  run_bounded "$@" >"${BOUNDED_OUT}" 2>&1
+  echo "${RELEASE}: crd-step: running $1 $2 (bound ${CRD_STEP_TIMEOUT}s)"
+  local started=${SECONDS}
+  local rc=0
+  run_bounded "$@" >"${BOUNDED_OUT}" 2>&1 || rc=$?
+  echo "${RELEASE}: crd-step: $1 $2 exited ${rc} after $((SECONDS - started))s"
+  return ${rc}
 }
 
 # Does a release already exist? An existing release means an upgrade, and helm
