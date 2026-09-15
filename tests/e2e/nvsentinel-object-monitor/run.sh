@@ -561,9 +561,13 @@ build_binary
 compose_bundle
 ensure_cluster
 install_nvsentinel
-test_unhealthy_pod_fires
+# Negative tests first, condition-producing test last. test_unhealthy_pod_fires
+# deletes its DaemonSet with --wait=false and no longer waits for the condition
+# to clear (recovery is unasserted -- see that function), so running it earlier
+# would let a stale True from it fail whichever negative test came next.
 test_inside_grace_period_stays_quiet
 test_healthy_rollout_stays_quiet
+test_unhealthy_pod_fires
 
 msg "=========================================="
 msg "Results: ${PASSED_TESTS}/${TOTAL_TESTS} passed"
