@@ -134,7 +134,11 @@ func RequiresDeployer(results []ComponentResult) bool {
 		if r.Verdict == VerdictManual {
 			return true
 		}
-		if r.Verdict == VerdictBlocked && r.Transition != nil {
+		// A replacement carries its guidance on Replaces rather than
+		// Transition, and checkReplaces admits a blocked one with required
+		// step groups, so keying on Transition alone would let a blocked
+		// replacement through with no deployer and then render nothing.
+		if r.Verdict == VerdictBlocked && (r.Transition != nil || r.Replaces != nil) {
 			return true
 		}
 	}

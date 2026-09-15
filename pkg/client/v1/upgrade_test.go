@@ -285,3 +285,46 @@ func TestUpgradeCheckSynthesizesTargetFromCriteria(t *testing.T) {
 		t.Error("FailsRun() = true for a report with no changes")
 	}
 }
+
+// TestUpgradeCheckRejectsUnrecognizedDeployer pins the SDK-side gate. pkg/cli
+// validates the flag too, but the facade is the shared surface: an unrecognized
+// name matches no explicit step group and would silently collect the remainder
+// group, which was authored for the deployers nobody named.
+func TestUpgradeCheckRejectsUnrecognizedDeployer(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	from := syntheticRecipe(t, filepath.Join(dir, "from.yaml"), map[string]string{"synthetic-alpha": "1.2.0"})
+	to := syntheticRecipe(t, filepath.Join(dir, "to.yaml"), map[string]string{"synthetic-alpha": "1.3.0"})
+
+	for _, name := range []string{"helm3", "argo", "kustomize", "localformat"} {
+		t.Run("rejected/"+name, func(t *testing.T) {
+			t.Parallel()
+			_, err := upgradeCheckClient(t).UpgradeCheck(t.Context(), aicr.UpgradeCheckRequest{
+				From: from, To: to, Deployer: name,
+			})
+			if err == nil {
+				t.Fatalf("UpgradeCheck(Deployer=%q) error = nil, want rejection", name)
+			}
+		})
+	}
+
+	// ParseDeployerType folds case and trims, so these are the same deployer
+	// spelled differently rather than unknown values. Accepting them and
+	// canonicalizing is the contract; the report must not echo the raw input,
+	// since stepsFor matches canonical names only.
+	for _, name := range []string{"Helm", " helm", "HELM"} {
+		t.Run("canonicalized/"+name, func(t *testing.T) {
+			t.Parallel()
+			report, err := upgradeCheckClient(t).UpgradeCheck(t.Context(), aicr.UpgradeCheckRequest{
+				From: from, To: to, Deployer: name,
+			})
+			if err != nil {
+				t.Fatalf("UpgradeCheck(Deployer=%q) error = %v, want acceptance", name, err)
+			}
+			if report.Deployer != "helm" {
+				t.Errorf("report.Deployer = %q, want %q", report.Deployer, "helm")
+			}
+		})
+	}
+}

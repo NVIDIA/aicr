@@ -86,6 +86,13 @@ func TestRequiresDeployer(t *testing.T) {
 		{"a replacement is manual too", []ComponentResult{
 			{Change: ChangeReplaced, Verdict: VerdictManual},
 		}, true},
+		// checkReplaces admits a blocked replacement and requires its step
+		// groups, and a replacement carries its guidance on Replaces rather
+		// than Transition, so keying on Transition alone let this through with
+		// no deployer and then rendered nothing.
+		{"a blocked replacement carries steps on Replaces", []ComponentResult{
+			{Change: ChangeReplaced, Verdict: VerdictBlocked, Replaces: &Replaces{Verdict: VerdictBlocked}},
+		}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

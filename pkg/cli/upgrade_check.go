@@ -39,7 +39,10 @@ func upgradeCheckCmd() *cli.Command {
 		Usage:    "Report whether moving between two recipes or bundles is safe to apply",
 		Description: `Compare two artifacts component by component and report a verdict for
 each version that changed, from the transition records this aicr release
-ships. No cluster is contacted.
+ships. No cluster state is read: the comparison is between two artifacts, and
+nothing is inspected, deployed or modified. A cm:// path is an artifact
+location like a file path, so reading or writing one does contact that
+cluster's API to fetch or store the ConfigMap.
 
 Either side may be a recipe file or a bundle directory; a bundle is read
 through the recipe.yaml at its root, which today only helm bundles carry
