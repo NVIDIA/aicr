@@ -1,0 +1,117 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Nodewright GB300 GPU customization that runs ONLY nvidia-tuned (no
+# nvidia-setup).
+#
+# The shared tuning.yaml cannot be used here: it also renders nvidia-setup,
+# which ships baked-in (service, accelerator) configs for eks-h100 / eks-gb200 /
+# aks-h100 / bcm-* only and fails on accelerator=gb300. GB300 therefore takes
+# its kernel and EFA from the platform image rather than from nvidia-setup.
+#
+# The gb300 profiles arrived in nvidia-tuned 0.10.0. `inference` and
+# `multiNodeTraining` are shims that resolve to nvidia-gb300-performance and add
+# nothing — no gb300-specific inference or training deltas have been measured
+# yet — so all three intents land on the same tuning. Before 0.10.0 the package
+# exited non-zero on those intents rather than falling back.
+#
+# nvidia-gb300-performance sizes its hugepage pools for the 64k-page ARM64
+# kernel GB300 runs (2M + 512M, no 1G: a 64k granule has no PUD level). On a
+# 4k-granule kernel the hugepagesz=512M clause is rejected at boot and the
+# hugepages= paired with it is dropped silently, so this manifest must not be
+# pointed at a GB300 node whose image ships a 4k kernel.
+#
+# service is deliberately optional. service=eks resolves to the
+# accelerator-agnostic eks service profile (a MAC address policy network
+# drop-in); upstream ships no eks gb300 override, and its gb300 service
+# overrides are oci-only. Leave service unset on bare metal — nvidia-tuned exits
+# non-zero on a service directory it does not ship, and there is no `generic`
+# service.
+#
+# Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support.
+{{- $cust := index .Values "nodewright-customizations" }}
+{{- /* tuningEnabled (default true) disables node tuning uniformly across the */}}
+{{- /* nodewright tuning manifests (cf. tuning.yaml). Here nvidia-tuned is the */}}
+{{- /* CR's only package, so the gate suppresses the whole Skyhook CR. */}}
+{{- /* Sprig-safe: only an explicit false disables (absent/true render); a */}}
+{{- /* "| default true" would swallow an explicit false under --deployer flux. */}}
+{{- if and (ne (toString (index $cust "enabled")) "false") (ne (toString (index $cust "tuningEnabled")) "false") }}
+---
+apiVersion: skyhook.nvidia.com/v1alpha1
+kind: Skyhook
+metadata:
+  annotations:
+    # No Helm hooks: this Skyhook CR is release-managed so that disabling tuning
+    # (tuningEnabled=false) actually retracts it. As a hook it would be orphaned
+    # under Flux on a true->false flip (before-hook-creation never fires once the
+    # CR leaves the render). Ordering after the Skyhook CRD is handled by the
+    # component dependency on nodewright-operator, not an intra-release hook;
+    # helm/argo already strip these hooks at bundle time.
+    aicr/skip-hook-validation: "true"
+  labels:
+    app.kubernetes.io/part-of: skyhook-operator
+    app.kubernetes.io/created-by: aicr
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+  name: tuning
+  namespace: {{ .Release.Namespace }}
+spec:
+  runtimeRequired: true
+  # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
+  {{- /* Sprig-safe: a "| default true" here would swallow an explicit false under --deployer flux. */}}
+  autoTaintNewNodes: {{ ne (toString (index $cust "autoTaintNewNodes")) "false" }}
+  # Dynamic: Supports --accelerated-node-toleration CLI flag
+  additionalTolerations:
+    {{- if $cust.acceleratedTolerations }}
+    {{- toYaml $cust.acceleratedTolerations | nindent 4 }}
+    {{- else }}
+    # Tolerate-all default, matching ParseTolerations()/DefaultTolerations()
+    # (operator Exists, no key). Only reached if no acceleratedTolerations are
+    # injected from scheduling defaults/flags.
+    - operator: Exists
+    {{- end }}
+  # Dynamic: Supports --accelerated-node-selector CLI flag
+  {{- if $cust.acceleratedNodeSelector }}
+  nodeSelectors:
+    matchLabels:
+      {{- toYaml $cust.acceleratedNodeSelector | nindent 6 }}
+  {{- end }}
+  # Dynamic: Supports --workload-selector CLI flag
+  {{- if $cust.workloadSelector }}
+  podNonInterruptLabels:
+    matchLabels:
+      {{- toYaml $cust.workloadSelector | nindent 6 }}
+  {{- end }}
+  # Tuning: nvidia-tuned gb300 profile only (no nvidia-setup).
+  packages:
+    nvidia-tuned:
+      image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
+      version: "0.10.0"
+      containerSHA: sha256:124f3bdedbb651125cec1bf20d3e2f7fcbbe10588c44f36d8e5680b38b9ef8f6
+      # nvidia-gb300-performance carries a [bootloader] section (iommu.passthrough,
+      # hugepages, numa_balancing, earlycon), which takes effect only on reboot.
+      interrupt:
+        type: reboot
+      env:
+        - name: INTERRUPT
+          value: "true"
+      configMap:
+        {{- if $cust.intent }}
+        intent: {{ $cust.intent }}
+        {{- end }}
+        accelerator: {{ $cust.accelerator }}
+        {{- if $cust.service }}
+        service: {{ $cust.service }}
+        {{- end }}
+{{- end }}
