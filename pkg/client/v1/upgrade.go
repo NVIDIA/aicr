@@ -150,11 +150,24 @@ func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*Up
 				"Set --deployer (SDK: UpgradeCheckRequest.Deployer) to one of: "+
 				strings.Join(config.GetDeployerTypes(), ", "))
 	}
+	// Validated here, not only in pkg/cli: an unrecognized name matches no
+	// explicit step group, so it would silently collect the remainder group,
+	// which was authored for the deployers nobody named. Rendering somebody
+	// else's steps is the failure deployer-scoping exists to prevent, so an
+	// unknown value is rejected rather than approximated.
+	deployer := req.Deployer
+	if deployer != "" {
+		parsed, perr := config.ParseDeployerType(deployer)
+		if perr != nil {
+			return nil, perr
+		}
+		deployer = parsed.String()
+	}
 
 	return upgrade.NewReport(results, upgrade.ReportOptions{
 		From:     req.From,
 		To:       req.To,
-		Deployer: req.Deployer,
+		Deployer: deployer,
 	}), nil
 }
 
