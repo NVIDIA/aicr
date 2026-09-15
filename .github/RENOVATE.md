@@ -22,6 +22,7 @@ Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are d
 | `validators/*/Dockerfile` | `dockerfile` |
 | `infra/**/*.tf` | `terraform` (grouped) |
 | `recipes/components/*/values.yaml` | `helm-values` (partial — see limitations) |
+| `recipes/registry.yaml` (34 chart pins) | custom regex manager (`# renovate:` annotations) — **report-only**, see [Registry drift report](#registry-drift-report) |
 | `.settings.yaml` (28 tool entries) | custom regex manager (`# renovate:` annotations) |
 | `.settings.yaml` `nvkind` SHA | dedicated git-refs digest customManager (`# renovate-digest:`) |
 | `.settings.yaml` `chainsaw_checksums` | `postUpgradeTasks` → `tools/update-chainsaw-checksums` |
@@ -77,6 +78,33 @@ make lint-renovate    # requires Docker; runs the same image the workflow uses
 ```
 
 CI re-runs `make lint-renovate` automatically via `merge-gate.yaml` whenever `.github/renovate.json5` changes.
+
+## Registry drift report
+
+The 34 chart pins in `recipes/registry.yaml` are extracted by a custom regex
+manager but never bumped by PR: `packageRules` disables the `registry-chart`
+depType, and [`registry-drift.yaml`](workflows/registry-drift.yaml) re-enables it
+weekly under `RENOVATE_DRY_RUN=full` to produce a Slack digest and a
+`drift-report.json` artifact. An AICR component bump is not a version-string
+edit — it can rename a values path `nodeScheduling` writes into, move the
+rendered image set, or need an ADR-021 upgrade record — so detection is
+automated and the decision stays human, assisted by the
+`aicr-reviewing-component-drift` skill.
+
+Unlike the `.settings.yaml` manager, these annotations carry `registryUrl`
+inline:
+
+```yaml
+      defaultChart: jetstack/cert-manager
+      # renovate: datasource=helm depName=cert-manager registryUrl=https://charts.jetstack.io
+      defaultVersion: v1.20.2
+```
+
+Sixteen HTTP charts span ten repository URLs; hoisting those into `packageRules`
+would put sixteen near-identical rules far from the pins they describe. OCI
+charts use `datasource=docker` with the full image path as `depName` and no
+`registryUrl`. `tools/drift-report`'s `TestRegistryPinsAreRenovateTracked` fails
+closed when a new component arrives without an annotation.
 
 ## Known limitations
 

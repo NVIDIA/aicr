@@ -118,6 +118,29 @@
         "# renovate-digest: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) packageName=(?<packageName>\\S+) branch=(?<currentValue>\\S+)(?:\\s+depType=(?<depType>\\S+))?\\s*\\n\\s*\\S+:\\s*['\"](?<currentDigest>[a-f0-9]{40})['\"]",
       ],
     },
+    {
+      // recipes/registry.yaml pins ~34 upstream Helm charts. They are NOT
+      // bumped by PR: an AICR component bump can rename a values path that
+      // nodeScheduling writes into, move the rendered image set (BOM), or
+      // require an ADR-021 upgrade record, none of which a one-line bot PR
+      // checks. The pins are extracted here and reported weekly by
+      // .github/workflows/registry-drift.yaml; the packageRule below keeps the
+      // weekday PR run from acting on them.
+      //
+      // The annotation carries registryUrl inline, unlike the .settings.yaml
+      // manager (see .github/RENOVATE.md): 16 HTTP charts span 10 repository
+      // URLs, so packageRules would be 16 near-identical entries far from the
+      // pin they describe. tools/drift-report's TestRegistryPinsAreRenovateTracked
+      // keeps the annotation and the neighbouring fields in sync, and
+      // TestRenovateRegexMatchesEveryAnnotation compiles this exact matchString
+      // against registry.yaml.
+      customType: "regex",
+      managerFilePatterns: ["/^recipes/registry\\.yaml$/"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: registryUrl=(?<registryUrl>\\S+))?\\s+defaultVersion: [\"']?(?<currentValue>[^\"'\\s]+)[\"']?",
+      ],
+      depTypeTemplate: "registry-chart",
+    },
   ],
 
   // Kubernetes manager: scan AICR's component manifests for Pod-spec
@@ -450,6 +473,17 @@
       matchFileNames: ["validators/performance/aiperf-bench.Dockerfile"],
       matchDepNames: ["python"],
       allowedVersions: "<3.14",
+    },
+
+    // ---- Registry chart pins are extracted, never PR'd ----
+    {
+      // Report-only. The weekly registry-drift workflow force-enables this
+      // depType under RENOVATE_DRY_RUN=full; this run must never open a PR for
+      // a chart pin. Two independent guards (that dry-run, and this flag) keep
+      // "no PRs" from depending on either one alone.
+      description: "Registry chart pins are reported weekly, never PR'd — see .github/workflows/registry-drift.yaml",
+      matchDepTypes: ["registry-chart"],
+      enabled: false,
     },
   ],
 
