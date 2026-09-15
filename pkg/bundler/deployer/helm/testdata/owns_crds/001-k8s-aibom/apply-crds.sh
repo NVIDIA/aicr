@@ -86,7 +86,8 @@ run_bounded() {
 # `$(...)` waits on that grandchild and the bound buys nothing. A file has no
 # such reader, so the step returns when the bounded process does.
 BOUNDED_OUT="$(mktemp)"
-trap 'rm -f "${BOUNDED_OUT}"' EXIT
+CRD_MANIFEST="$(mktemp)"
+trap 'rm -f "${BOUNDED_OUT}" "${CRD_MANIFEST}"' EXIT
 # Progress is announced before each bounded call and timed after it. deploy.sh
 # captures this and prints it only when a component fails, so it costs nothing
 # on a good run and names the slow call on a bad one. Without it a stalled step
@@ -150,12 +151,17 @@ if ! capture_bounded helm show crds "${CHART}" ${REPO:+--repo "${REPO}"} --versi
   echo "ERROR: cannot read ${RELEASE} CRDs from its pinned chart: $(cat "${BOUNDED_OUT}")" >&2
   exit 1
 fi
-crds="$(sed -n '/^---$/,$p' "${BOUNDED_OUT}")"
+sed -n '/^---$/,$p' "${BOUNDED_OUT}" >"${CRD_MANIFEST}"
 
 # An ownsCRDs component whose chart ships no CRDs is a no-op, not a failure:
 # `kubectl apply` on an empty stream exits non-zero with "no objects passed to
 # apply", which would abort the deploy over nothing.
-if [[ -z "${crds//[[:space:]]/}" ]]; then
+#
+# grep, not a `${var//...}` substitution. The payload is a chart's full CRD set,
+# megabytes of OpenAPI schema for a component like nvsentinel, and bash global
+# substring replacement on a string that size takes minutes. It also never
+# enters a shell variable for the same reason.
+if ! grep -q '[^[:space:]]' "${CRD_MANIFEST}"; then
   echo "${RELEASE}: chart ships no CRDs; nothing to apply."
   exit 0
 fi
@@ -174,17 +180,12 @@ fi
 # rather than an error. A failure here is indeterminate and fails closed, for
 # the same reason the release lookup does.
 if [[ "${RELEASE_EXISTS}" == "false" ]]; then
-  CRD_MANIFEST="$(mktemp)"
-  printf '%s\n' "${crds}" >"${CRD_MANIFEST}"
   if ! capture_bounded kubectl get -f "${CRD_MANIFEST}" --ignore-not-found -o name ${KUBECONFIG_FLAG:-}; then
     echo "ERROR: cannot determine whether ${RELEASE} CRDs are already present; refusing" >&2
     echo "       to skip and risk pairing a new controller with a retained schema: $(cat "${BOUNDED_OUT}")" >&2
-    rm -f "${CRD_MANIFEST}"
     exit 1
   fi
-  retained="$(cat "${BOUNDED_OUT}")"
-  rm -f "${CRD_MANIFEST}"
-  if [[ -z "${retained//[[:space:]]/}" ]]; then
+  if ! grep -q '[^[:space:]]' "${BOUNDED_OUT}"; then
     echo "${RELEASE}: no release and no existing CRDs; helm install creates them."
     exit 0
   fi
@@ -194,9 +195,4 @@ fi
 # --server-side is required because these CRDs exceed the 262144-byte
 # annotation cap client-side apply depends on. --force-conflicts is required
 # because Helm created them on install and owns their fields.
-APPLY_MANIFEST="$(mktemp)"
-printf '%s\n' "${crds}" >"${APPLY_MANIFEST}"
-run_bounded kubectl apply --server-side --force-conflicts ${KUBECONFIG_FLAG:-} -f "${APPLY_MANIFEST}"
-apply_rc=$?
-rm -f "${APPLY_MANIFEST}"
-exit "${apply_rc}"
+run_bounded kubectl apply --server-side --force-conflicts ${KUBECONFIG_FLAG:-} -f "${CRD_MANIFEST}"
