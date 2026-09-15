@@ -102,3 +102,125 @@ func TestParseRenovateReportRejectsGarbage(t *testing.T) {
 		t.Fatal("want error on truncated JSON, got nil")
 	}
 }
+
+func TestParseRenovateReportUnsupportedUpdateTypes(t *testing.T) {
+	tests := []struct {
+		name                           string
+		report                         string
+		wantLatest, wantType, wantProb string
+	}{
+		{
+			"only rollback update",
+			`{
+  "repositories": {
+    "NVIDIA/aicr": {
+      "packageFiles": {
+        "custom.regex": [
+          {
+            "packageFile": "recipes/registry.yaml",
+            "deps": [
+              {
+                "depName": "ahead-chart",
+                "depType": "registry-chart",
+                "datasource": "helm",
+                "currentValue": "v2.0.0",
+                "updates": [
+                  {"newValue": "v1.19.0", "updateType": "rollback"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}`,
+			"",
+			"",
+			"unsupported update type: rollback",
+		},
+		{
+			"mixed rollback and minor update",
+			`{
+  "repositories": {
+    "NVIDIA/aicr": {
+      "packageFiles": {
+        "custom.regex": [
+          {
+            "packageFile": "recipes/registry.yaml",
+            "deps": [
+              {
+                "depName": "mixed-chart",
+                "depType": "registry-chart",
+                "datasource": "helm",
+                "currentValue": "v1.20.0",
+                "updates": [
+                  {"newValue": "v1.19.0", "updateType": "rollback"},
+                  {"newValue": "v1.23.0", "updateType": "minor"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}`,
+			"v1.23.0",
+			"minor",
+			"",
+		},
+		{
+			"same-rank tie between two patches",
+			`{
+  "repositories": {
+    "NVIDIA/aicr": {
+      "packageFiles": {
+        "custom.regex": [
+          {
+            "packageFile": "recipes/registry.yaml",
+            "deps": [
+              {
+                "depName": "tied-chart",
+                "depType": "registry-chart",
+                "datasource": "helm",
+                "currentValue": "v1.20.0",
+                "updates": [
+                  {"newValue": "v1.20.1", "updateType": "patch"},
+                  {"newValue": "v1.20.2", "updateType": "patch"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}`,
+			"v1.20.2",
+			"patch",
+			"",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseRenovateReport([]byte(tt.report))
+			if err != nil {
+				t.Fatalf("ParseRenovateReport: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("got %d deps, want 1", len(got))
+			}
+			var l Lookup
+			for _, dep := range got {
+				l = dep
+				break
+			}
+			if l.Latest != tt.wantLatest || l.UpdateType != tt.wantType || l.Problem != tt.wantProb {
+				t.Errorf("got (%q,%q,%q), want (%q,%q,%q)",
+					l.Latest, l.UpdateType, l.Problem, tt.wantLatest, tt.wantType, tt.wantProb)
+			}
+		})
+	}
+}

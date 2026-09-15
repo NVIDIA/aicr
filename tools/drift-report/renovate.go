@@ -60,6 +60,9 @@ type rawReport struct {
 
 // updateRank orders update types by distance traveled, so a dep offering both
 // a patch and a minor reports the minor. Renovate emits one entry per type.
+// Unknown types (rollback, replace, lockFileMaintenance, bump, pinDigest) are
+// not selectable — a rollback is not forward drift and must never be reported
+// as Latest.
 var updateRank = map[string]int{"digest": 1, "pin": 2, "patch": 3, "minor": 4, "major": 5}
 
 // ParseRenovateReport extracts the registry-chart deps from a Renovate report
@@ -87,13 +90,30 @@ func ParseRenovateReport(data []byte) (map[string]Lookup, error) {
 					}
 					l.Problem = strings.Join(msgs, ": ")
 					best := 0
+					hasRecognizedUpdate := false
+					var unsupportedType string
 					for _, u := range dep.Updates {
 						if u.NewValue == "" {
 							continue
 						}
-						if r := updateRank[u.UpdateType]; r >= best {
+						r, ok := updateRank[u.UpdateType]
+						if !ok {
+							// Unrecognized type; remember it but don't select it.
+							if unsupportedType == "" {
+								unsupportedType = u.UpdateType
+							}
+							continue
+						}
+						hasRecognizedUpdate = true
+						if r >= best {
 							best, l.Latest, l.UpdateType = r, u.NewValue, u.UpdateType
 						}
+					}
+					// If no recognized updates exist, surface the unsupported type as a problem.
+					if !hasRecognizedUpdate && unsupportedType != "" {
+						l.Problem = "unsupported update type: " + unsupportedType
+						l.Latest = ""
+						l.UpdateType = ""
 					}
 					out[dep.DepName] = l
 				}
