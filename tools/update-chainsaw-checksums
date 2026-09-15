@@ -60,7 +60,17 @@ extract_sha() {
     echo "ERROR: no checksum entry matching ${pattern} in ${CHECKSUMS_URL}" >&2
     exit 1
   fi
-  echo "${line%% *}"
+  local sha="${line%% *}"
+  # Same check as update-oras-checksums. The value is interpolated into the
+  # awk regex in verify_block, where a metacharacter would change what the
+  # verification matches rather than being compared literally, and it is
+  # written into .settings.yaml for tools/setup-tools to pin against at
+  # install time. Both want a digest, so reject anything that is not one here.
+  if [[ ! "${sha}" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "ERROR: extracted value is not a sha256: '${sha}'" >&2
+    exit 1
+  fi
+  echo "${sha}"
 }
 
 LINUX_AMD64=$(extract_sha linux amd64)
@@ -73,44 +83,72 @@ echo "  linux_arm64:  ${LINUX_ARM64}"
 echo "  darwin_amd64: ${DARWIN_AMD64}"
 echo "  darwin_arm64: ${DARWIN_ARM64}"
 
-# Rewrite the four checksum lines in-place via a surgical sed edit.
-# mikefarah/yq drops blank lines between top-level mappings, which would
-# reformat the entire file on every Renovate PR — see the failure-modes note
-# in .github/RENOVATE.md. Targeted sed preserves blank lines and comments.
-# Each line is anchored to its arch key, indentation, and SHA256 hex value.
-sed_inplace() {
-  if sed --version >/dev/null 2>&1; then
-    sed -E -i "$@"          # GNU sed (Linux / Renovate runner)
-  else
-    sed -E -i '' "$@"       # BSD sed (macOS)
-  fi
-}
+# Rewrite the four checksum lines in-place inside the chainsaw_checksums:
+# block via awk, matching update-helmfile-checksums and
+# update-helm-diff-checksums.
+#
+# This previously used a sed anchored on the arch key alone, with no block
+# scoping. Four blocks in .settings.yaml -- helm_diff_checksums,
+# helmfile_checksums, chainsaw_checksums, mkcert_checksums -- carry the same
+# sub-keys at the same indent, so a single `replace_sha linux_amd64` rewrote
+# all four, and the post-check passed because it only asserted the new value
+# existed *somewhere*. A chainsaw bump would have silently written chainsaw's
+# digests into the other three (#2658).
+#
+# mikefarah/yq would also work but drops blank lines between top-level
+# mappings and would reformat the whole file on every Renovate PR -- see the
+# failure-modes note in .github/RENOVATE.md.
+# The replacement file must live on the same filesystem as ${SETTINGS_FILE} so
+# the final mv is an atomic rename. ${TMPDIR} is frequently a separate
+# filesystem, where mv degrades to copy-then-delete and a failure mid-copy
+# would leave .settings.yaml truncated. Same reasoning as
+# update-helm-diff-checksums.
+NEW_FILE="$(mktemp "${SETTINGS_FILE}.new.XXXXXX")"
+trap 'rm -rf "${TMPDIR}" "${NEW_FILE}"' EXIT
+# mktemp creates 0600; seed from the target so the rename preserves its mode.
+cp -p "${SETTINGS_FILE}" "${NEW_FILE}"
 
-replace_sha() {
+awk -v amd64="${LINUX_AMD64}" -v arm64="${LINUX_ARM64}" \
+    -v damd64="${DARWIN_AMD64}" -v darm64="${DARWIN_ARM64}" '
+    BEGIN { in_block = 0 }
+    # Enter chainsaw_checksums block.
+    /^  chainsaw_checksums:[[:space:]]*$/ { in_block = 1; print; next }
+    # Leave the block on any other 2-space key, and on any column-0 line. The
+    # second rule is what makes this safe when chainsaw_checksums is the last
+    # key of its section: without it in_block stays set to EOF and the next
+    # 4-space digest line anywhere in the file -- in another section entirely --
+    # gets rewritten, which is the cross-block clobber this script exists to
+    # stop.
+    in_block && /^[^ ]/ { in_block = 0 }
+    in_block && /^  [a-zA-Z_]/ && !/^    / { in_block = 0 }
+    in_block && /^    linux_amd64:[[:space:]]*'\''[0-9a-f]{64}'\''/  { print "    linux_amd64: \x27" amd64 "\x27"; next }
+    in_block && /^    linux_arm64:[[:space:]]*'\''[0-9a-f]{64}'\''/  { print "    linux_arm64: \x27" arm64 "\x27"; next }
+    in_block && /^    darwin_amd64:[[:space:]]*'\''[0-9a-f]{64}'\''/ { print "    darwin_amd64: \x27" damd64 "\x27"; next }
+    in_block && /^    darwin_arm64:[[:space:]]*'\''[0-9a-f]{64}'\''/ { print "    darwin_arm64: \x27" darm64 "\x27"; next }
+    { print }
+  ' "${SETTINGS_FILE}" > "${NEW_FILE}"
+
+# Verify the new value landed inside chainsaw_checksums specifically. The old
+# post-check asked only whether the value existed anywhere in the file, which
+# is what let the cross-block clobber pass silently.
+verify_block() {
   local key="$1" sha="$2"
-
-  # Pre-check: the key must exist with the expected shape, otherwise the
-  # sed below silently no-ops and we ship stale checksums.
-  if ! grep -Eq "^[[:space:]]+${key}:[[:space:]]*'[0-9a-f]{64}'[[:space:]]*\$" "${SETTINGS_FILE}"; then
-    echo "ERROR: replace_sha: key '${key}' not found (or wrong shape) in ${SETTINGS_FILE}" >&2
-    exit 1
-  fi
-
-  sed_inplace \
-    -e "s|^([[:space:]]+${key}:[[:space:]]*)'[0-9a-f]{64}'\$|\1'${sha}'|" \
-    "${SETTINGS_FILE}"
-
-  # Post-check: confirm the new value is now in place. Catches sed
-  # alternative-engine quirks and unanticipated input shapes.
-  if ! grep -Eq "^[[:space:]]+${key}:[[:space:]]*'${sha}'[[:space:]]*\$" "${SETTINGS_FILE}"; then
-    echo "ERROR: replace_sha: ${key} did not update to '${sha}' in ${SETTINGS_FILE}" >&2
+  if ! awk -v key="$key" -v sha="$sha" '
+        /^  chainsaw_checksums:[[:space:]]*$/ { in_block = 1; next }
+        in_block && /^[^ ]/ { in_block = 0 }
+        in_block && /^  [a-zA-Z_]/ && !/^    / { in_block = 0 }
+        in_block && $0 ~ "^    " key ":[[:space:]]*'\''" sha "'\''$" { found = 1 }
+        END { exit !found }
+      ' "${NEW_FILE}"; then
+    echo "ERROR: verify_block: ${key} did not update to '${sha}' under chainsaw_checksums" >&2
     exit 1
   fi
 }
+verify_block linux_amd64  "${LINUX_AMD64}"
+verify_block linux_arm64  "${LINUX_ARM64}"
+verify_block darwin_amd64 "${DARWIN_AMD64}"
+verify_block darwin_arm64 "${DARWIN_ARM64}"
 
-replace_sha linux_amd64  "${LINUX_AMD64}"
-replace_sha linux_arm64  "${LINUX_ARM64}"
-replace_sha darwin_amd64 "${DARWIN_AMD64}"
-replace_sha darwin_arm64 "${DARWIN_ARM64}"
+mv "${NEW_FILE}" "${SETTINGS_FILE}"
 
 echo "Updated ${SETTINGS_FILE} for chainsaw ${VERSION_WITH_V}"

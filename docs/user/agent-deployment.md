@@ -54,7 +54,7 @@ metadata:
     app.kubernetes.io/version: <aicr-version>
 data:
   snapshot.yaml: |  # Complete snapshot YAML
-    apiVersion: aicr.run/v1alpha2
+    apiVersion: aicr.run/v1
     kind: Snapshot
     measurements: [...]
   format: yaml

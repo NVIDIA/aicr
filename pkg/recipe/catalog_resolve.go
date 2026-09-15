@@ -40,14 +40,35 @@ type ResolveLeavesOptions struct {
 	// Filter narrows enumeration to leaves matching every set criteria dimension.
 	// Nil enumerates all leaf combos.
 	Filter *Criteria
+	// RetainNonLeaf opts a non-leaf catalog entry back into the enumeration.
+	// Nil (the default) keeps the leaf-only behavior.
+	//
+	// It exists so a coordinate that carries published validation evidence is
+	// not silently dropped the moment a platform sibling is added beneath it
+	// — adding e.g. a `-kubeflow` leaf turns the plain training overlay into a
+	// non-leaf, and without this the evidence-backed coordinate would vanish
+	// from every leaf-only consumer (NVIDIA/aicr#2564). The predicate is
+	// supplied by the caller rather than read here so pkg/recipe stays free of
+	// a dependency on the evidence/presence manifest.
+	RetainNonLeaf func(entry CatalogEntry) bool
+	// BuildOptionsForCriteria supplies per-leaf generation-time selections,
+	// applied to each leaf's initial build. The h100 GKE kubeflow leaf fails
+	// closed without the TCPXO interface mapping; when the hook does not supply
+	// one, that leaf is retried once with the fixed introspection value. Nil
+	// means every leaf gets the default build plus that one retry.
+	BuildOptionsForCriteria func(*Criteria) []BuildOption
 }
 
-// alwaysSatisfiedEvaluator reports every constraint satisfied, so the
-// constraint-aware resolution path runs offline: no overlay is excluded and no
-// snapshot measurement is consulted. This exercises the merge/compose machinery
-// (populating merged Constraints and Metadata) without cluster or snapshot state.
 func alwaysSatisfiedEvaluator(Constraint) ConstraintEvalResult {
 	return ConstraintEvalResult{Passed: true}
+}
+
+// buildOptionsForCriteria nil-safely resolves the per-leaf build options.
+func buildOptionsForCriteria(fn func(*Criteria) []BuildOption, c *Criteria) []BuildOption {
+	if fn == nil {
+		return nil
+	}
+	return fn(c)
 }
 
 // ResolveLeaves enumerates every leaf overlay in the catalog and resolves each
@@ -81,10 +102,21 @@ func ResolveLeaves(ctx context.Context, opts ResolveLeavesOptions) ([]ResolvedLe
 			return nil, errors.Wrap(errors.ErrCodeTimeout,
 				"catalog resolution canceled before completing the catalog", cerr)
 		}
-		if !entry.IsLeaf {
+		if !entry.IsLeaf && (opts.RetainNonLeaf == nil || !opts.RetainNonLeaf(entry)) {
 			continue
 		}
-		result, buildErr := builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, alwaysSatisfiedEvaluator)
+		result, buildErr := builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, alwaysSatisfiedEvaluator,
+			buildOptionsForCriteria(opts.BuildOptionsForCriteria, entry.Criteria)...)
+		if IsMissingGKETCPXOInterfaces(buildErr) {
+			// The one catalog family with a required typed input: retry with
+			// the fixed introspection mapping so enumeration tooling covers
+			// this leaf without a cluster to name real networks for. A leaf
+			// that does not ship the runtime never reaches this branch — its
+			// plain build succeeded — so external catalogs that shadow the
+			// family without the runtime are unaffected.
+			result, buildErr = builder.BuildFromCriteriaWithEvaluator(ctx, entry.Criteria, alwaysSatisfiedEvaluator,
+				WithGKETCPXOInterfaces(GKETCPXOIntrospectionInterfaces()))
+		}
 		leaves = append(leaves, ResolvedLeaf{Entry: entry, Result: result, Err: buildErr})
 	}
 

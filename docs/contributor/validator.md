@@ -75,7 +75,8 @@ per-value constraints, which are verified at snapshot-based generation
 (criteria-only generation has no snapshot evaluator and defers entirely
 to the pre-flight) AND re-evaluated by the same readiness pre-flight.)
 
-**Supported operators** (`pkg/constraints/constraint.go`):
+**Supported operators** (`pkg/constraints/expr/expr.go`, re-exported
+from `pkg/constraints`):
 
 | Operator | Use | Notes |
 |----------|-----|-------|
@@ -116,7 +117,7 @@ encodings, unknown service, service with no declared universe label).
 
 **Adding a new operator:**
 
-1. Add an `Operator` constant in `pkg/constraints/constraint.go`.
+1. Add an `Operator` constant in `pkg/constraints/expr/expr.go`.
 2. Insert it in the operator slice in `ParseConstraintExpression` —
    **longest prefix first** (e.g. `~=` before `~`).
 3. Add a `case` arm in `(*ParsedConstraint).Evaluate`. Return an
@@ -169,6 +170,12 @@ applies only when the policy is `unspecified` (standalone runs without recipe
 context). A configured policy forces the mechanism at
 secure-accelerator-access, dra-support's behavioral subtest, and
 inference-perf's worker wiring and node discovery.
+
+`secure-accelerator-access` also routes on the resolved recipe before any
+probe: when `slinky-slurm` resolves, it skips with the reason recorded. The
+Slinky NodeSet reserves every GPU on a node for its `slurmd` pod and Slurm
+GRES/cgroups isolate access, so the check's Kubernetes per-pod probe could
+either never schedule or attest the wrong access path (#2724).
 
 `PhaseAll` (the string `"all"`) is the CLI / recipe wildcard;
 `ParsePhaseSelection` collapses it to nil-meaning-everything. It is
@@ -803,7 +810,10 @@ validation:
 
 Resolution precedence is **recipe constraint > catalog env knob > compiled
 default** (`Qwen/Qwen3-8B` at 256/GPU). A non-positive / non-integer
-`inference-concurrency-per-gpu` fails closed with `ErrCodeInvalidRequest`.
+`inference-concurrency-per-gpu` fails closed with `ErrCodeInvalidRequest`. The
+model-weights cache's StorageClass resolves with the same precedence via the
+`inference-model-cache-storage-class` constraint (see the
+`AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` row below).
 
 | Variable | Default | Effect |
 |----------|---------|--------|
@@ -813,7 +823,8 @@ default** (`Qwen/Qwen3-8B` at 256/GPU). A non-positive / non-integer
 | `AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT` | `10m` | Wait for the `DynamoGraphDeployment` to become ready (image pull + model load + worker health). Large models load slower — raise this **and** the catalog entry's `timeout` in tandem, or the parent deadline caps it. |
 | `AICR_INFERENCE_PERF_HEALTH_TIMEOUT` | `5m` | Wait for the endpoint to serve a real chat-completion *after* the workload reports Ready. Concurrent first-load from one RWO cache PVC can push first-serve past 5m; raise it (bounded by the catalog `timeout`). |
 | `AICR_INFERENCE_PERF_MODEL_CACHE_SIZE` | `100Gi` (on) | The PVC-backed model-weights cache is **on by default**. Set a different K8s quantity to resize, or a disable sentinel (`off`/`0`/`none`/`disabled`) to turn it off and download from HF directly. |
-| `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` | cluster default | StorageClass for the cache PVC. On a cluster with **no default SC and no value here**, the check **fails fast** with guidance rather than leaving the PVC `Pending` until timeout. AICR-deployed EKS gets a default `gp3` SC from `aws-ebs-csi-driver`; GKE has `standard-rwo`. |
+| `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` | cluster default | StorageClass for the cache PVC. On a cluster with **no default SC and no value here**, the check **fails fast** with guidance rather than leaving the PVC `Pending` until timeout. AICR-deployed EKS gets a default `gp3` SC from `aws-ebs-csi-driver`, and GKE Standard typically ships with `standard-rwo`, but neither default is guaranteed to attach for every node machine family. Prefer the per-accelerator `inference-model-cache-storage-class` recipe constraint over this global knob. |
+| `AICR_INFERENCE_PERF_MODEL_CACHE_EXTRA_COMPATIBLE_TYPES` | unset | Comma-separated `parameters.type` values to add to the compiled machine-family/StorageClass compatibility allowlist (`storageCompatibilityRules` in `validators/performance/model_cache.go`), for example a new Hyperdisk type a cloud provider ships before AICR's allowlist is updated to include it. Without a matching entry here, the selected StorageClass (the `inference-model-cache-storage-class` constraint, `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`, or the cluster default when neither is set) fails closed with `ErrCodeInvalidRequest` if its type isn't allowlisted for the node's machine family, rather than binding a PVC that fails to attach at Job-run time. |
 | `AICR_INFERENCE_PERF_MODEL_CACHE_POPULATE_TIMEOUT` | `13m` | Wait for the one-time model-cache populate Job (cold image pull + first-ever Hugging Face download into the PVC). Separate from — and larger than — `AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT` because the populate Job pays a cold pull *and* a multi-GB download; provide the optional HF-token secret to remove anonymous-download throttling. Raise it (and the catalog `timeout`) for very large models. **Migration:** the cache-populate wait no longer honors `AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT` (which now bounds only the DynamoGraphDeployment readiness wait) — set this knob instead to widen the populate budget. |
 
 For gated models, or to lift Hugging Face rate limits on large downloads,
@@ -1061,7 +1072,10 @@ Kind cluster after `aicr bundle` + `helm install`) via the
 The same assertion file now powers TWO surfaces:
 
 1. **`make check-health` / `make check-health-all`** — local Kind-cluster
-   sanity invoked manually by chart authors.
+   sanity invoked manually by chart authors. `check-health-all` sweeps
+   only registry-linked components (`registry.yaml`'s
+   `healthCheck.assertFile` entries); an opt-in-only check like
+   `nvsentinel-observability` runs via `check-health COMPONENT=<name>`.
 2. **`aicr validate --phase deployment`** — registry-declared content is
    loaded into `ComponentRef.HealthCheckAsserts` during recipe
    resolution (PR #1219) and executed by the deployment validator's
@@ -1235,7 +1249,7 @@ into the validator image):
 
 ```bash
 make check-health COMPONENT=gpu-operator   # one component
-make check-health-all                      # everything in recipes/checks/
+make check-health-all                      # every registry-linked component
 make validate-local RECIPE=recipe.yaml     # full pipeline in Kind
 ```
 

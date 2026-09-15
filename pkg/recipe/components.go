@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -84,6 +85,9 @@ type ComponentConfig struct {
 
 	// HealthCheck defines custom health check configuration for this component.
 	HealthCheck HealthCheckConfig `yaml:"healthCheck,omitempty"`
+
+	// Upgrades references this component's transition records (ADR-021).
+	Upgrades UpgradesConfig `yaml:"upgrades,omitempty"`
 
 	// ManifestFiles lists manifest files (relative to the recipes data
 	// root, e.g. "components/kueue/manifests/cluster-queue.yaml") bundled
@@ -183,6 +187,20 @@ type ComponentConfig struct {
 	// ClusterTrainingRuntime CR of the CRD shipped in the chart's
 	// crds/).
 	ManifestsUseChartCRDs bool `yaml:"manifestsUseChartCRDs,omitempty"`
+
+	// MixinSafeOverridePaths declares the exact dotted value paths (e.g.
+	// "global.tracing.enabled") a RecipeMixin may set on THIS component
+	// via ComponentRef.Overrides. Declared by the component owner, not the
+	// mixin author: a mixin cannot self-grant access to a component it
+	// doesn't own. Paths match exactly, never as a prefix -- list each
+	// leaf path, not an ancestor of it. Empty (the default) means the
+	// component has not opted in.
+	//
+	// Enforcement (allowlist matching, collision rules, and how an
+	// unopted-in component is treated): mixinOverridesSafeForMerge in
+	// metadata_store.go. Rationale: ADR-005's "Silent constraint override"
+	// mitigation, docs/design/005-overlay-refactoring.md.
+	MixinSafeOverridePaths []string `yaml:"mixinSafeOverridePaths,omitempty"`
 }
 
 // HealthCheckConfig defines custom health check settings for a component.
@@ -191,6 +209,14 @@ type HealthCheckConfig struct {
 	// When set, the expected-resources check uses Chainsaw CLI to evaluate assertions
 	// instead of the default auto-discovery + typed replica checks.
 	AssertFile string `yaml:"assertFile,omitempty"`
+}
+
+// UpgradesConfig references a component's ComponentUpgrades document.
+type UpgradesConfig struct {
+	// File is the path to a ComponentUpgrades YAML file, relative to the
+	// data directory (e.g. "components/nodewright-operator/upgrades.yaml").
+	// Empty means the component has no transition records.
+	File string `yaml:"file,omitempty"`
 }
 
 // HelmConfig contains default Helm chart settings for a component.
@@ -477,6 +503,9 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 			return nil, errors.New(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("registry component %q is Kustomize but declares manifestFiles; a component may declare either Kustomize (tag/path) or raw manifest files, not both — manifestFiles defaults apply only to Helm components", comp.Name))
 		}
+		if err := validateMixinSafeOverridePaths(comp); err != nil {
+			return nil, err
+		}
 	}
 
 	// Build index for fast lookup
@@ -487,6 +516,44 @@ func loadComponentRegistryFor(provider DataProvider) (*ComponentRegistry, error)
 	}
 
 	return &registry, nil
+}
+
+// validateMixinSafeOverridePaths rejects a malformed mixinSafeOverridePaths
+// declaration at registry load time rather than letting it silently
+// misbehave the first time a mixin actually collides with it: an empty or
+// dot-malformed entry can never match a real leaf path flattened by
+// overrideLeafPaths (so it would be dead, misleading configuration); a
+// literal duplicate is always redundant; and one entry that is an ancestor
+// or descendant of another (e.g. declaring both "global.tracing" and
+// "global.tracing.enabled") is ambiguous: overrideLeafPaths matches exact
+// paths, so the ancestor entry grants access only to a mixin override that
+// stops exactly there (a scalar or list at that key -- an empty map never
+// reaches allowlist matching, rejectEmptyMapValues errors on it first) --
+// not to the whole subtree a reader would reasonably assume from seeing
+// both entries together. Rejecting the pair forces one unambiguous
+// declaration.
+func validateMixinSafeOverridePaths(comp *ComponentConfig) error {
+	seen := make(map[string]bool, len(comp.MixinSafeOverridePaths))
+	for _, p := range comp.MixinSafeOverridePaths {
+		if p == "" || strings.HasPrefix(p, ".") || strings.HasSuffix(p, ".") || strings.Contains(p, "..") {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("registry component %q declares mixinSafeOverridePaths entry %q, which is not a well-formed dotted path", comp.Name, p))
+		}
+		if seen[p] {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("registry component %q declares mixinSafeOverridePaths entry %q more than once", comp.Name, p))
+		}
+		seen[p] = true
+	}
+	for i, a := range comp.MixinSafeOverridePaths {
+		for _, b := range comp.MixinSafeOverridePaths[i+1:] {
+			if a != b && pathsIntersect(a, b) {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("registry component %q declares mixinSafeOverridePaths entries %q and %q, one an ancestor of the other -- list only exact leaf paths; declaring both is ambiguous about whether the ancestor grants the whole subtree or just an exact-match override at that key", comp.Name, a, b))
+			}
+		}
+	}
+	return nil
 }
 
 func validateComponentRegistryHeader(registry *ComponentRegistry, source string) error {
@@ -501,8 +568,12 @@ func validateComponentRegistryHeader(registry *ComponentRegistry, source string)
 	if !header.IsSupportedAuthoringAPIVersion(registry.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("%s has apiVersion %q, expected %q or %q for %s; update the registry header for this aicr release",
-				source, registry.APIVersion, ComponentRegistryAPIVersion, header.GroupVersionV1Beta1, ComponentRegistryKind))
+				source, registry.APIVersion, header.GroupVersion, header.GroupVersionV1Beta1, ComponentRegistryKind))
 	}
+	// source is a label ("registry.yaml", "external registry.yaml") rather than
+	// a path, so this names the document a user can act on without pretending
+	// to a precision the caller does not have.
+	header.WarnDeprecatedAPIVersion(source, registry.APIVersion, header.GroupVersionV1Beta1)
 	return nil
 }
 
@@ -644,6 +715,15 @@ func (r *ComponentRegistry) Validate() []error {
 
 		if hasHelm && hasKustomize {
 			errs = append(errs, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf("component[%d] (%s): cannot have both helm and kustomize configuration", i, comp.Name)))
+		}
+	}
+
+	// Same mixinSafeOverridePaths rules loadComponentRegistryFor enforces at
+	// load time, so a registry constructed directly through the exported API
+	// is held to the identical contract rather than only the file-loaded path.
+	for i := range r.Components {
+		if err := validateMixinSafeOverridePaths(&r.Components[i]); err != nil {
+			errs = append(errs, err)
 		}
 	}
 

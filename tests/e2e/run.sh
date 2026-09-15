@@ -1155,6 +1155,10 @@ test_validate_deployment_checks() {
   msg "=========================================="
 
   # Test: Validate with passing constraint
+  # The RecipeResult fixtures below deliberately keep the superseded
+  # aicr.run/v1alpha2 header: ADR-022 Release N+1 (#2416) requires the readers to
+  # keep accepting it until v1.0.0 (#2417), and these are the only end-to-end
+  # exercise of that path. Do not sweep them to the target value.
   local recipe_file="${validate_dir}/recipe-with-constraints.yaml"
   cat > "$recipe_file" <<RECIPE
 kind: RecipeResult

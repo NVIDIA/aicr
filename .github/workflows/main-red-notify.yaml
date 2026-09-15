@@ -1,0 +1,92 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Pages a human when main goes red.
+#
+# Detection was never the gap. On 2026-09-10 a Renovate digest bump left main
+# broken, On Push Qualification failed on it at 10:40:59Z exactly as designed,
+# and nothing surfaced that for four hours -- it was eventually diagnosed from
+# an unrelated PR's gate. A failing run on main produced no signal anyone acted
+# on, so this closes the response half rather than adding more checking.
+#
+# Deliberately noisy in one direction only: main should be green, so a message
+# here is rare and always worth reading. If both watched workflows fail on the
+# same commit you get two messages, which is the useful outcome -- they cover
+# different checks and knowing which one broke is the first triage step.
+#
+# COUPLING: the `workflows:` list matches by workflow NAME, not filename.
+# Renaming "On Push Qualification" or "Merge Gate" silently stops these alerts
+# with no error anywhere.
+
+name: Notify on Main Red
+
+on:
+  workflow_run:
+    workflows:
+      - "On Push Qualification"
+      - "Merge Gate"
+    types:
+      - completed
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+
+  notify:
+    name: Post to Slack
+    # `event == 'push'` is load-bearing, not redundant with the branch filter:
+    # Merge Gate also runs on pull_request, and without this every failing PR
+    # would page the channel and train people to ignore it.
+    if: >-
+      github.event.workflow_run.conclusion == 'failure'
+      && github.event.workflow_run.event == 'push'
+      && github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+
+      - name: Post to Slack
+        env:
+          SLACK_SERVICE: ${{ secrets.SLACK_SERVICE }}
+          WORKFLOW: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          ACTOR: ${{ github.event.workflow_run.actor.login }}
+          COMMIT_MSG: ${{ github.event.workflow_run.head_commit.message }}
+        run: |
+          set -euo pipefail
+
+          # Commit messages and logins are contributor-controlled, so the
+          # payload is assembled with jq rather than string interpolation:
+          # an apostrophe or a newline would otherwise produce invalid JSON,
+          # and a crafted one could forge message structure.
+          SUBJECT="$(printf '%s' "${COMMIT_MSG}" | head -1)"
+          SHORT="${SHA:0:9}"
+
+          PAYLOAD="$(jq -n \
+            --arg wf "${WORKFLOW}" \
+            --arg short "${SHORT}" \
+            --arg actor "${ACTOR}" \
+            --arg subject "${SUBJECT}" \
+            --arg url "${RUN_URL}" \
+            '{text: ("AICR main is RED — " + $wf + " failed on " + $short
+                     + " (" + $actor + ")\n" + $subject + "\n" + $url)}')"
+
+          curl -sSf -X POST \
+            -H 'Content-type: application/json' \
+            --data "${PAYLOAD}" \
+            "https://hooks.slack.com/services/${SLACK_SERVICE}"

@@ -472,18 +472,22 @@ relay KV events.
 **Model-weights cache and `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`.** The benchmark downloads
 the model **once** into a PVC and serves all workers from it (on by default;
 avoids per-IP Hugging Face throttling). The cache PVC needs a StorageClass: it
-uses the cluster's **default** StorageClass unless you set
-`AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`. On a cluster with **no default
-StorageClass** (common on EKS — e.g. only a non-default `gp2`) and no value set,
-the check **fails fast** in seconds with guidance rather than hanging; set
+uses the cluster's **default** StorageClass unless you set one, with
+precedence **recipe constraint > catalog env > cluster default**. Set it
+per accelerator via the `inference-model-cache-storage-class` performance
+constraint, or globally via
 `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS=<name>` (e.g. `gp2`/`gp3` on EKS,
-`standard-rwo` on GKE) on the `inference-perf` catalog entry's `env` (or via a
-catalog overlay in the `aicr validate --data <dir>` directory), or disable the cache with
-`AICR_INFERENCE_PERF_MODEL_CACHE_SIZE=off`. Like the other
-`AICR_INFERENCE_PERF_*` knobs, this is a **catalog/`--data`** setting — it is
-**not** read from the shell environment of the process running `aicr validate`
-(only `HF_TOKEN` is). AICR-deployed EKS clusters get a default `gp3` StorageClass
-from the `aws-ebs-csi-driver` component, so the cache works there with no knob.
+`standard-rwo` on GKE, though not every StorageClass attaches to every node
+machine family) on the `inference-perf` catalog entry's `env` (or via a
+catalog overlay in the `aicr validate --data <dir>` directory). On a cluster
+with **no default StorageClass** (common on EKS, since some clusters ship
+only a non-default `gp2`) and neither set, the check **fails fast** in
+seconds with guidance rather than hanging. Disable the cache instead with
+`AICR_INFERENCE_PERF_MODEL_CACHE_SIZE=off`. Unlike the recipe constraint, the
+catalog env knob is **not** read from the shell environment of the process
+running `aicr validate` (only `HF_TOKEN` is). AICR-deployed EKS clusters get a
+default `gp3` StorageClass from the `aws-ebs-csi-driver` component, so the
+cache works there with no knob.
 
 **Debugging a failed run with `AICR_INFERENCE_PERF_NO_CLEANUP`.** By default the
 validator deletes the per-run namespace (DGD, workers, frontend, AIPerf Job) on

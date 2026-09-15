@@ -73,6 +73,7 @@ func LoadFromFileWithKubeconfig(ctx context.Context, path, kubeconfig string) (*
 				"recapture the snapshot with a matching aicr version",
 				snap.APIVersion, header.GroupVersion, header.GroupVersionV1))
 	}
+	header.WarnDeprecatedAPIVersion(path, snap.APIVersion, header.GroupVersionV1)
 
 	usable := 0
 	for _, m := range snap.Measurements {

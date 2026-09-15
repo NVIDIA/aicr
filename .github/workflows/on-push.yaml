@@ -37,8 +37,20 @@ env:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Never cancel main pushes — every merge must complete to produce its
-  # immutable sha-<commit> image tag.
+  # Serialize main pushes so a run that starts is never interrupted mid-build
+  # and its sha-<commit> image tag is published whole.
+  #
+  # This does NOT mean every merge gets a run. One ref-keyed group holds at most
+  # one queued run, so when merges land faster than a run takes, a pending one is
+  # cancelled by the next arrival and that commit is never qualified or tagged.
+  # Observed 2026-09-10: c6d8a5533 and 5b0e3727b merged 36 seconds apart, the
+  # first was cancelled while queued, and ghcr.io/nvidia/aicr-validators/*
+  # carries no sha-c6d8a5533... tag. Do not assume a merged commit has an image.
+  #
+  # Keeping it this way is deliberate. Keying the group by github.sha would give
+  # every commit its own run, but concurrent runs also push the mutable
+  # edge-<arch> tags, so a slower older run could clobber a newer commit's edge.
+  # Losing an intermediate sha- tag is the cheaper failure.
   cancel-in-progress: false
 
 jobs:
