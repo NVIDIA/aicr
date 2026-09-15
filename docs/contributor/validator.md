@@ -164,7 +164,12 @@ On MNNVL clusters `dra-support` also runs a behavioral IMEX channel subtest
 `compute-domain.nvidia.com` ResourceSlice: no clique-labeled node means the
 subtest is not applicable (non-MNNVL nodes such as H100 still publish
 compute-domain slices, so slice presence alone cannot gate it); clique-labeled
-nodes with no usable compute-domain slice fail the check. When applicable the
+nodes with no usable compute-domain slice fail the check. The driver serves one
+ComputeDomain channel claim per node, so candidate nodes whose channel is
+already held by an allocated claim (a standing ComputeDomain such as Slinky
+Slurm's, or a running MNNVL workload) are excluded; when every candidate is
+occupied the subtest records not applicable and names the holding claims
+rather than leaving a probe Pending until the deadline. When applicable the
 check creates a per-run ComputeDomain (`numNodes: 0`, `Single` allocation),
 waits for the driver-generated ResourceClaimTemplate, and runs a busybox probe
 pinned to the candidate nodes that consumes one channel from it. The verdict is
