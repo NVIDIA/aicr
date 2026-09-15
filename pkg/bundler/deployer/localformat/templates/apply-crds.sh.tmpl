@@ -76,11 +76,13 @@ run_bounded() {
   "${TIMEOUT_BIN}" "${CRD_STEP_TIMEOUT}" "$@"
 }
 
-# Upgrades only. Helm installs a chart's crds/ directory itself on first
-# install, which is the whole reason this script exists for upgrades and
-# nowhere else. Running it on a fresh cluster would add a registry round-trip
-# and a failure mode to the install path in order to apply CRDs helm is about
-# to create a moment later.
+# Does a release already exist? An existing release means an upgrade, and helm
+# never touches crds/ on upgrade, so the CRDs are this script's to apply.
+#
+# An absent release does NOT by itself mean a fresh cluster; see the retained-
+# CRD check further down. Helm skips a CRD that already exists on install, and
+# never deletes one on uninstall, so "no release" and "no CRDs" are different
+# questions and only the second one licenses skipping.
 #
 # "Absent" and "cannot tell" are deliberately distinguished. An auth failure,
 # an unreachable apiserver, or a broken helm must not read as a fresh install:
@@ -101,9 +103,9 @@ if ! existing="$(run_bounded helm list --namespace "${NAMESPACE}" \
   echo "       skip the CRD step and risk leaving the previous schema in place: ${existing}" >&2
   exit 1
 fi
+RELEASE_EXISTS=true
 if [[ -z "${existing//[[:space:]]/}" ]]; then
-  echo "${RELEASE}: no existing release; helm install creates the chart's CRDs."
-  exit 0
+  RELEASE_EXISTS=false
 fi
 
 {{ if .FromUpstreamEnv }}
@@ -135,6 +137,33 @@ crds="$(run_bounded helm show crds ./ | sed -n '/^---$/,$p')"
 if [[ -z "${crds//[[:space:]]/}" ]]; then
   echo "${RELEASE}: chart ships no CRDs; nothing to apply."
   exit 0
+fi
+
+# With no release, skip only once the cluster confirms none of this chart's
+# CRDs are already present.
+#
+# Uninstall is why. Helm retains a chart's CRDs when the release is removed and
+# skips any CRD that already exists on install, so uninstall followed by
+# reinstall pairs a new controller with the retained old schema, and helm will
+# not correct it. Treating "no release" as "fresh cluster" would skip exactly
+# that case, which is the defect this script exists to prevent.
+#
+# `kubectl get -f -` asks about precisely the objects in the manifest, so this
+# needs no name extraction; --ignore-not-found makes absence an empty result
+# rather than an error. A failure here is indeterminate and fails closed, for
+# the same reason the release lookup does.
+if [[ "${RELEASE_EXISTS}" == "false" ]]; then
+  if ! retained="$(printf '%s\n' "${crds}" \
+    | run_bounded kubectl get -f - --ignore-not-found -o name ${KUBECONFIG_FLAG:-} 2>&1)"; then
+    echo "ERROR: cannot determine whether ${RELEASE} CRDs are already present; refusing" >&2
+    echo "       to skip and risk pairing a new controller with a retained schema: ${retained}" >&2
+    exit 1
+  fi
+  if [[ -z "${retained//[[:space:]]/}" ]]; then
+    echo "${RELEASE}: no release and no existing CRDs; helm install creates them."
+    exit 0
+  fi
+  echo "${RELEASE}: no release but CRDs remain from a previous install; updating them."
 fi
 
 # --server-side is required because these CRDs exceed the 262144-byte

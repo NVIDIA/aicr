@@ -213,12 +213,13 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 	// a bare "exit 0", which the chart-ships-no-CRDs branch also satisfies, so
 	// it would have passed with the release gate's skip removed entirely.
 	blocks := map[string]string{
-		"release gate queries helm":        `if ! existing="$(run_bounded helm list --namespace "${NAMESPACE}" \`,
-		"indeterminate state aborts":       "  exit 1\nfi\nif [[ -z \"${existing//[[:space:]]/}\" ]]; then",
-		"absent release skips":             "  exit 0\nfi",
-		"bound uses a real timeout binary": `  "${TIMEOUT_BIN}" "${CRD_STEP_TIMEOUT}" "$@"`,
-		"missing timeout fails closed":     "cannot be bounded",
-		"the apply is bounded too":         "| run_bounded kubectl apply --server-side",
+		"release gate queries helm":               `if ! existing="$(run_bounded helm list --namespace "${NAMESPACE}" \`,
+		"indeterminate state aborts":              "  exit 1\nfi\nRELEASE_EXISTS=true",
+		"absent release checks for retained CRDs": `    | run_bounded kubectl get -f - --ignore-not-found -o name ${KUBECONFIG_FLAG:-} 2>&1)"; then`,
+		"only absent release AND no CRDs skips":   `    echo "${RELEASE}: no release and no existing CRDs; helm install creates them."`,
+		"bound uses a real timeout binary":        `  "${TIMEOUT_BIN}" "${CRD_STEP_TIMEOUT}" "$@"`,
+		"missing timeout fails closed":            "cannot be bounded",
+		"the apply is bounded too":                "| run_bounded kubectl apply --server-side",
 	}
 	for name, block := range blocks {
 		if !strings.Contains(got, block) {
@@ -308,8 +309,11 @@ func TestApplyCRDsScript_RejectsInjectedRecipeValues(t *testing.T) {
 		t.Fatalf("script did not run to the release gate (exit %v); the injection "+
 			"assertion below would prove nothing\n%s", runErr, out)
 	}
-	if !strings.Contains(string(out), "no existing release") {
-		t.Fatalf("script did not reach the release gate; output:\n%s", out)
+	// The name must appear in output verbatim, unexpanded. That both proves the
+	// script ran far enough to echo it and is the property under test.
+	if !strings.Contains(string(out), c.Name) {
+		t.Fatalf("script never echoed the release name, so it did not run far enough "+
+			"for the injection assertion to mean anything; output:\n%s", out)
 	}
 
 	canaryPath := filepath.Join(outDir, res.Folders[0].Dir, canary)
@@ -560,4 +564,87 @@ func TestApplyCRDsScript_BoundsStalledApply(t *testing.T) {
 		t.Errorf("apply was not bounded: took %s\n%s", elapsed, out)
 	}
 	t.Logf("bounded apply returned after %s (exit %v); script output:\n%s", elapsed, err, out)
+}
+
+// TestApplyCRDsScript_AppliesRetainedCRDsAfterUninstall pins the case that
+// makes "no release" insufficient grounds for skipping.
+//
+// Helm retains a chart's CRDs when a release is uninstalled, and skips any CRD
+// that already exists on install. So uninstall followed by reinstall leaves a
+// new controller running against the retained old schema, and helm will never
+// correct it. An earlier version of this script read "no release" as "fresh
+// cluster" and skipped exactly that case, which is the defect it exists to
+// prevent.
+func TestApplyCRDsScript_AppliesRetainedCRDsAfterUninstall(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	scriptPath := writeApplyCRDs(t, ownsCRDsComponent(true))
+	applied := filepath.Join(t.TempDir(), "applied")
+
+	// No release (uninstalled), but `kubectl get` finds the CRD still present,
+	// which is precisely the retained-CRD state.
+	path := stubPATH(t, map[string]string{
+		"helm": "#!/usr/bin/env bash\n" +
+			"case \"$1\" in\n" +
+			"  list) : ;;\n" + // no release
+			"  show) printf -- '---\\napiVersion: apiextensions.k8s.io/v1\\nkind: CustomResourceDefinition\\nmetadata:\\n  name: things.example.com\\n' ;;\n" +
+			"esac\nexit 0\n",
+		"kubectl": "#!/usr/bin/env bash\n" +
+			"for a in \"$@\"; do\n" +
+			"  if [[ \"$a\" == get ]]; then echo customresourcedefinition.apiextensions.k8s.io/things.example.com; exit 0; fi\n" +
+			"  if [[ \"$a\" == apply ]]; then touch " + applied + "; cat >/dev/null; exit 0; fi\n" +
+			"done\nexit 0\n",
+		"timeout": "#!/usr/bin/env bash\nshift\nexec \"$@\"\n",
+	})
+
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+path)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("script failed: %v\n%s", err, out)
+	}
+	if _, statErr := os.Stat(applied); statErr != nil {
+		t.Fatalf("CRDs retained from a previous install were not re-applied (%v); a "+
+			"reinstall would pair the new controller with the old schema\n%s", statErr, out)
+	}
+}
+
+// TestApplyCRDsScript_SkipsOnGenuinelyFreshCluster is the counterpart: no
+// release and no CRDs in the cluster is the one state where helm install does
+// create them, so the step is correctly skipped and costs no apply.
+func TestApplyCRDsScript_SkipsOnGenuinelyFreshCluster(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	scriptPath := writeApplyCRDs(t, ownsCRDsComponent(true))
+	applied := filepath.Join(t.TempDir(), "applied")
+
+	path := stubPATH(t, map[string]string{
+		"helm": "#!/usr/bin/env bash\n" +
+			"case \"$1\" in\n" +
+			"  list) : ;;\n" +
+			"  show) printf -- '---\\napiVersion: apiextensions.k8s.io/v1\\nkind: CustomResourceDefinition\\nmetadata:\\n  name: things.example.com\\n' ;;\n" +
+			"esac\nexit 0\n",
+		// get finds nothing; apply would be a bug.
+		"kubectl": "#!/usr/bin/env bash\n" +
+			"for a in \"$@\"; do\n" +
+			"  if [[ \"$a\" == apply ]]; then touch " + applied + "; cat >/dev/null; exit 0; fi\n" +
+			"done\nexit 0\n",
+		"timeout": "#!/usr/bin/env bash\nshift\nexec \"$@\"\n",
+	})
+
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+path)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("script failed on a fresh cluster: %v\n%s", err, out)
+	}
+	if _, statErr := os.Stat(applied); !os.IsNotExist(statErr) {
+		t.Errorf("applied CRDs on a genuinely fresh cluster (stat %v); helm install "+
+			"creates them, so this is a needless cluster write\n%s", statErr, out)
+	}
+	if !strings.Contains(string(out), "no release and no existing CRDs") {
+		t.Errorf("expected the fresh-cluster skip message\n%s", out)
+	}
 }
