@@ -1162,6 +1162,38 @@ func TestEmbeddedCatalog_NCCLAllReduceBWNetEntryExists(t *testing.T) {
 	t.Fatalf("no embedded catalog entry named %q (AICR_NCCL_FABRIC forwarding would silently no-op)", v1.NCCLAllReduceBWNetCheckName)
 }
 
+func TestEmbeddedCatalog_CRENCCLAllReduceBWEntryExists(t *testing.T) {
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	for _, v := range cat.Validators {
+		if v.Name == v1.CRENCCLAllReduceBWCheckName {
+			if v.Phase != "performance" {
+				t.Errorf("%q phase = %q, want performance", v1.CRENCCLAllReduceBWCheckName, v.Phase)
+			}
+			return
+		}
+	}
+	t.Fatalf("no embedded catalog entry named %q", v1.CRENCCLAllReduceBWCheckName)
+}
+
+func TestEmbeddedCatalog_CRETrainingGoodputEntryExists(t *testing.T) {
+	cat, err := LoadWithDataProvider(context.Background(), nil, "v0.0.0-next", "")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	for _, v := range cat.Validators {
+		if v.Name == v1.CRETrainingGoodputCheckName {
+			if v.Phase != "performance" {
+				t.Errorf("%q phase = %q, want performance", v1.CRETrainingGoodputCheckName, v.Phase)
+			}
+			return
+		}
+	}
+	t.Fatalf("no embedded catalog entry named %q", v1.CRETrainingGoodputCheckName)
+}
+
 func TestCatalogEmbedding(t *testing.T) {
 	// Simulate embedding in a CR spec
 	type ValidatorCatalogSpec struct {
