@@ -172,7 +172,6 @@ nodeScheduling:
   system:
     nodeSelectorPaths:
       - operator.nodeSelector
-      - node-feature-discovery.master.nodeSelector
     tolerationPaths:
       - operator.tolerations
   accelerated:
