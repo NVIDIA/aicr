@@ -436,8 +436,8 @@ shipped `node` PodTemplateSpec is copied **wholesale — metadata and spec** —
 and only the paths in `benchmarkOwnedNodePaths` (worker `image`, `command`,
 `args`, `resources`, `terminationMessagePolicy`) are re-applied from the MPI
 skeleton (the skeleton's worker sets no `terminationMessagePolicy`, so that
-override clears a shipped value), with volumes and mounts
-skeleton, with volumes and mounts merged additively. An override-path guard
+override clears a shipped value), with volumes and mounts merged additively.
+An override-path guard
 fails the run if the derived template differs from the shipped one anywhere
 else, and a baseline precondition covers every overridden path — the shipped
 worker must set no `command`/`args` (an entrypoint would hide fabric
