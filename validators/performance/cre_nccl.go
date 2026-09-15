@@ -47,8 +47,9 @@ func validateCRENcclAllReduceBw(
 	}
 	service := ctx.ValidationInput.Criteria.Service
 	accelerator := ctx.ValidationInput.Criteria.Accelerator
-	if service != recipe.CriteriaServiceEKS || accelerator != recipe.CriteriaAcceleratorH100 {
-		return fmt.Sprintf("skipped - CRE NCCL currently supports only eks × h100, got %s × %s", service, accelerator), true, nil
+	entry, qualified := lookupCREQualification(checkNameCRENCCLAllReduceBW, service, accelerator)
+	if !qualified {
+		return fmt.Sprintf("skipped - %s is not qualified on %s × %s", checkNameCRENCCLAllReduceBW, service, accelerator), true, nil
 	}
 
 	threshold, err := parseThreshold(constraint.Value)
@@ -73,7 +74,7 @@ func validateCRENcclAllReduceBw(
 	if err != nil {
 		return "", false, err
 	}
-	obj := buildCRENCCLCertification(ctx.Namespace, objName, gpuConfig)
+	obj := buildCRECertification(ctx.Namespace, objName, gpuConfig, entry)
 
 	if deleteErr := deleteCRECertification(ctx.Ctx, dyn, ctx.Namespace, objName); deleteErr != nil {
 		return "", false, deleteErr
@@ -100,7 +101,7 @@ func validateCRENcclAllReduceBw(
 		return "", false, aicrErrors.New(aicrErrors.ErrCodeInternal, "CRE Certification failed")
 	}
 
-	workflowName, err := certificationWorkflowName(run, creNCCLDomain, creNCCLVariant)
+	workflowName, err := certificationWorkflowName(run, entry.Domain, entry.Variant)
 	if err != nil {
 		return "", false, err
 	}

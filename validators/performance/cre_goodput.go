@@ -23,7 +23,6 @@ import (
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
-	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -39,11 +38,14 @@ func checkCRETrainingGoodput(ctx *validators.Context) (err error) {
 	if ctx.ValidationInput == nil {
 		return validators.Skip("no validation input")
 	}
-	if ctx.ValidationInput.Criteria.Service != recipe.CriteriaServiceEKS ||
-		ctx.ValidationInput.Criteria.Accelerator != recipe.CriteriaAcceleratorH100 {
-
+	entry, qualified := lookupCREQualification(
+		checkNameCRETrainingGoodput,
+		ctx.ValidationInput.Criteria.Service,
+		ctx.ValidationInput.Criteria.Accelerator,
+	)
+	if !qualified {
 		return validators.Skip(fmt.Sprintf(
-			"%s currently supports only eks × h100, got %s × %s",
+			"%s is not qualified on %s × %s",
 			checkNameCRETrainingGoodput,
 			ctx.ValidationInput.Criteria.Service,
 			ctx.ValidationInput.Criteria.Accelerator,
@@ -76,7 +78,7 @@ func checkCRETrainingGoodput(ctx *validators.Context) (err error) {
 	if err != nil {
 		return err
 	}
-	obj := buildCRETrainingCertification(ctx.Namespace, objName, gpuConfig)
+	obj := buildCRECertification(ctx.Namespace, objName, gpuConfig, entry)
 	if deleteErr := deleteCRECertification(ctx.Ctx, ctx.DynamicClient, ctx.Namespace, objName); deleteErr != nil {
 		return deleteErr
 	}
@@ -104,7 +106,7 @@ func checkCRETrainingGoodput(ctx *validators.Context) (err error) {
 			fmt.Sprintf("CRE training Certification failed: %s", summary))
 	}
 
-	workflowName, err := certificationWorkflowName(run, creTrainingDomain, creTrainingVariant)
+	workflowName, err := certificationWorkflowName(run, entry.Domain, entry.Variant)
 	if err != nil {
 		return err
 	}

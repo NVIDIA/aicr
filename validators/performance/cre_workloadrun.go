@@ -43,11 +43,6 @@ const (
 	creNCCLVariant     = "nccl-all-reduce"
 	creTrainingDomain  = "training"
 	creTrainingVariant = "nemotron5-8b"
-	// creMaxNodesPerCertification caps both spec.nodesPerJob and
-	// spec.target.nodeNames. Omitting nodesPerJob makes CRE use every
-	// matching node; setting it without capping nodeNames still fans out
-	// one job group per pair across the whole GPU pool.
-	creMaxNodesPerCertification = 2
 	// creGonePollInterval is how often deleteCREResource re-Gets a CR that is
 	// still terminating (finalizers). Bounded by DiagnosticTimeout on the
 	// parent context.
@@ -90,26 +85,18 @@ func uniqueCREResourceName(prefix string) (string, error) {
 	return fmt.Sprintf("%s-%x", prefix, nonce), nil
 }
 
-func buildCRENCCLCertification(namespace, name string, gpuConfig *gpuConfiguration) *unstructured.Unstructured {
-	return buildCRECertification(namespace, name, gpuConfig, creNCCLDomain, creNCCLVariant)
-}
-
-func buildCRETrainingCertification(namespace, name string, gpuConfig *gpuConfiguration) *unstructured.Unstructured {
-	return buildCRECertification(namespace, name, gpuConfig, creTrainingDomain, creTrainingVariant)
-}
-
 func buildCRECertification(
 	namespace, name string,
 	gpuConfig *gpuConfiguration,
-	domain, variant string,
+	entry creCatalogEntry,
 ) *unstructured.Unstructured {
 
-	nodes := capCRECertificationNodes(gpuConfig.Nodes)
+	nodes := capCRECertificationNodes(gpuConfig.Nodes, entry.MaxNodes)
 	spec := map[string]any{
 		"categories": []any{
 			map[string]any{
-				"domain":  domain,
-				"variant": variant,
+				"domain":  entry.Domain,
+				"variant": entry.Variant,
 			},
 		},
 		"gpusPerNode":   int64(gpuConfig.GPUCountPerNode),
@@ -131,14 +118,24 @@ func buildCRECertification(
 	}
 }
 
-func capCRECertificationNodes(nodes []corev1.Node) []corev1.Node {
+// capCRECertificationNodes trims the target node list to the footprint the
+// combination was qualified at. The cap has to reach both spec.nodesPerJob and
+// spec.target.nodeNames: omitting nodesPerJob makes CRE use every matching
+// node, and setting it without capping nodeNames still fans out one job group
+// per pair across the whole GPU pool.
+func capCRECertificationNodes(nodes []corev1.Node, maxNodes int) []corev1.Node {
 	if len(nodes) == 0 {
 		return nil
 	}
 	out := append([]corev1.Node(nil), nodes...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	if len(out) > creMaxNodesPerCertification {
-		out = out[:creMaxNodesPerCertification]
+	// Clamp rather than treat a missing cap as unlimited: a single node fails
+	// an all-reduce loudly, where an uncapped run quietly consumes the pool.
+	if maxNodes < 1 {
+		maxNodes = 1
+	}
+	if len(out) > maxNodes {
+		out = out[:maxNodes]
 	}
 	return out
 }
