@@ -654,9 +654,7 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			},
 			requiredComponents:         []string{"gpu-operator", "kubeflow-trainer"},
 			requiredManifestComponents: []string{"kubeflow-trainer"},
-			// robust-controller is inherited from h200-eks-training rather than
-			// declared on the leaf; assert it resolves all the same.
-			requiredChecks: []string{"platform-health", "robust-controller", "secure-accelerator-access"},
+			requiredChecks:             []string{"platform-health", "robust-controller", "secure-accelerator-access"},
 		},
 		{
 			name: "rtx-pro-6000-lke-ubuntu-training-kubeflow",
@@ -705,11 +703,6 @@ func TestConformanceRecipeInvariants(t *testing.T) {
 			wantDRAConstraint:          true,
 		},
 		{
-			// Grace-Blackwell training-kubeflow leaves: robust-controller and
-			// secure-accelerator-access are declared on these leaves (#2563),
-			// not on the shared training base, so the Slurm siblings do not
-			// inherit them. robust-controller only does real work when
-			// kubeflow-trainer is present, so pin the kubeflow leaf.
 			name: "gb200-eks-ubuntu-training-kubeflow",
 			criteria: func() *Criteria {
 				c := NewCriteria()

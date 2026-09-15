@@ -1043,19 +1043,9 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"gang-scheduling",
 		"pod-autoscaling",
 		"cluster-autoscaling",
-		"robust-controller",
 		"secure-accelerator-access",
 		"slinky-slurm-health",
 	}
-	// The gb200/gb300 EKS Slurm leaves differ from the h100 list above in two
-	// INDEPENDENT ways; do not collapse them into one explanation:
-	//   + slinky-slurm-imex-channel — added by the leaf, genuinely IMEX-specific.
-	//   - robust-controller, secure-accelerator-access — the GB families declare
-	//     these on their training-kubeflow leaves (#2563), not on the shared
-	//     training base, so the Slurm siblings do not inherit them.
-	//     secure-accelerator-access launches a pod requesting nvidia.com/gpu,
-	//     which a Slinky NodeSet that reserves every GPU cannot honor, and
-	//     robust-controller has no AI operator to exercise on a Slurm leaf.
 	gbEKSSlurmConformanceChecks := []string{
 		"platform-health",
 		"gpu-operator-health",
@@ -1065,6 +1055,7 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"gang-scheduling",
 		"pod-autoscaling",
 		"cluster-autoscaling",
+		"secure-accelerator-access",
 		"slinky-slurm-health",
 		"slinky-slurm-imex-channel",
 	}

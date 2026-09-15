@@ -42,4 +42,7 @@ spec:
 
   componentRefs: []
 
-  # Validation is inherited from gb300-eks-training (not OS-specific)
+  validation:
+    conformance:
+      checks:
+        - secure-accelerator-access

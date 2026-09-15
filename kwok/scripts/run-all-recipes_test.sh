@@ -246,6 +246,164 @@ KWOK_DIR="${_ORIG_KWOK_DIR}"
 # shellcheck disable=SC2034
 OVERLAYS_DIR="${_ORIG_OVERLAYS_DIR}"
 
+# ── Setup-failure CTRF record (#1806) ──────────────────────────────────
+# The real main() is exercised end to end with stubbed kind/kubectl/helm on
+# PATH so cluster and context setup fail the way they do in CI. Both paths
+# must leave kwok-results.json with one kwok/setup/<deployer> entry of status
+# "other" naming the failing stage, and must preserve the original exit code.
+# The first case is the errexit trap: `ensure_cluster || rc=$?` would have let
+# an internal `kind create cluster` failure return 0.
+if command -v jq >/dev/null 2>&1; then
+    STUB_BIN="${FIXTURE_ROOT}/stub-bin"
+    mkdir -p "${STUB_BIN}"
+    cat > "${STUB_BIN}/kind" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+    get) exit 0 ;;                       # no clusters -> create path
+    create) echo "stub: kind create failed" >&2; exit 42 ;;
+    *) exit 0 ;;
+esac
+STUB
+    cat > "${STUB_BIN}/kubectl" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == "config" && "$2" == "current-context" ]]; then echo "${STUB_CONTEXT:-kind-aicr-kwok-test}"; fi
+exit 0
+STUB
+    cat > "${STUB_BIN}/helm" <<'STUB'
+#!/usr/bin/env bash
+exit 0
+STUB
+    chmod +x "${STUB_BIN}"/*
+
+    SETUP_RESULTS="${FIXTURE_ROOT}/setup-results.json"
+    : > "${LOG_FILE}"
+    rc=0
+    PATH="${STUB_BIN}:${PATH}" KWOK_RESULTS_FILE="${SETUP_RESULTS}" KWOK_CLUSTER=aicr-kwok-test \
+        bash "${SCRIPT_UNDER_TEST}" --deployer helm gb200-eks-training >"${LOG_FILE}" 2>&1 || rc=$?
+    check "setup-cluster-failure-preserves-exit-code" eq 42 "${rc}"
+    ran=$((ran + 1))
+    if jq -e '.results.summary.other == 1 and .results.summary.tests == 1
+              and .results.tests[0].name == "kwok/setup/helm"
+              and .results.tests[0].status == "other"
+              and (.results.tests[0].message | test("cluster setup failed \\(rc=42\\)"))' \
+              "${SETUP_RESULTS}" >/dev/null 2>&1; then
+        echo "PASS: setup-cluster-failure-writes-other-record"
+    else
+        echo "FAIL: setup-cluster-failure-writes-other-record"; cat "${SETUP_RESULTS}" 2>/dev/null; fails=$((fails + 1))
+    fi
+
+    # Context guard: the cluster exists, but kubectl points somewhere else.
+    cat > "${STUB_BIN}/kind" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+    get) echo "aicr-kwok-test" ;;
+    *) exit 0 ;;
+esac
+STUB
+    chmod +x "${STUB_BIN}/kind"
+    : > "${LOG_FILE}"
+    rc=0
+    PATH="${STUB_BIN}:${PATH}" STUB_CONTEXT=kind-production KWOK_RESULTS_FILE="${SETUP_RESULTS}" KWOK_CLUSTER=aicr-kwok-test \
+        bash "${SCRIPT_UNDER_TEST}" --deployer helm gb200-eks-training >"${LOG_FILE}" 2>&1 || rc=$?
+    check "setup-context-guard-preserves-exit-code" eq 1 "${rc}"
+    check_log "setup-context-guard-refuses-foreign-context" "is not a known KWOK Kind cluster" "${LOG_FILE}"
+    ran=$((ran + 1))
+    if jq -e '.results.summary.tests == 1 and .results.tests[0].status == "other"
+              and (.results.tests[0].message | test("context setup failed \\(rc=1\\)"))' \
+              "${SETUP_RESULTS}" >/dev/null 2>&1; then
+        echo "PASS: setup-context-failure-writes-other-record"
+    else
+        echo "FAIL: setup-context-failure-writes-other-record"; cat "${SETUP_RESULTS}" 2>/dev/null; fails=$((fails + 1))
+    fi
+else
+    echo "SKIP: jq not on PATH; setup-failure CTRF cases not run"
+fi
+
+# ── Interrupted cell and report-write failure (#1806) ──────────────────
+# A TERM while a recipe is running must leave a valid report with the active
+# cell recorded as "other" and exit 143 like an untrapped TERM would. A report
+# path that cannot be written must not change the run's exit status.
+if command -v jq >/dev/null 2>&1; then
+    # A private copy of the kwok tree with stubbed apply-nodes.sh and a
+    # blocking validate-scheduling.sh, so the real main() reaches the recipe
+    # loop without a cluster. REPO_ROOT resolves to ${FIXTURE_ROOT}, so the
+    # overlay and tools/ctrf are copied to the same relative places.
+    KWOK_COPY="${FIXTURE_ROOT}/kwok"
+    rm -rf "${KWOK_COPY}"
+    cp -R "${SCRIPT_DIR}/.." "${KWOK_COPY}"
+    mkdir -p "${FIXTURE_ROOT}/tools" "${FIXTURE_ROOT}/recipes/overlays"
+    cp "${SCRIPT_DIR}/../../tools/ctrf" "${FIXTURE_ROOT}/tools/ctrf"
+    cp "${SCRIPT_DIR}/../../recipes/overlays/gb200-eks-training.yaml" "${FIXTURE_ROOT}/recipes/overlays/"
+    printf '#!/usr/bin/env bash\nexit 0\n' > "${KWOK_COPY}/scripts/apply-nodes.sh"
+    cat > "${KWOK_COPY}/scripts/validate-scheduling.sh" <<'STUB'
+#!/usr/bin/env bash
+touch "${KWOK_STUB_STARTED:?}"
+sleep 2147   # unusual duration so the test can find this exact process
+STUB
+    chmod +x "${KWOK_COPY}/scripts/apply-nodes.sh" "${KWOK_COPY}/scripts/validate-scheduling.sh"
+    cat > "${STUB_BIN}/kind" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+    get) echo "aicr-kwok-test" ;;
+    *) exit 0 ;;
+esac
+STUB
+    chmod +x "${STUB_BIN}/kind"
+
+    INT_RESULTS="${FIXTURE_ROOT}/interrupt-results.json"
+    STARTED="${FIXTURE_ROOT}/stub-started"
+    rm -f "${STARTED}" "${INT_RESULTS}"
+    : > "${LOG_FILE}"
+    PATH="${STUB_BIN}:${PATH}" KWOK_STUB_STARTED="${STARTED}" KWOK_RESULTS_FILE="${INT_RESULTS}" KWOK_CLUSTER=aicr-kwok-test \
+        bash "${KWOK_COPY}/scripts/run-all-recipes.sh" --deployer helm gb200-eks-training >"${LOG_FILE}" 2>&1 &
+    runner_pid=$!
+    for _ in $(seq 1 100); do [[ -f "${STARTED}" ]] && break; sleep 0.2; done
+    if [[ ! -f "${STARTED}" ]]; then
+        echo "FAIL: interrupted-cell: blocking stub never started"; fails=$((fails + 1)); kill "${runner_pid}" 2>/dev/null || true
+    else
+        kill -TERM "${runner_pid}"
+        rc=0; wait "${runner_pid}" || rc=$?
+        check "interrupted-cell-exits-143" eq 143 "${rc}"
+        sleep 1
+        ran=$((ran + 1))
+        if pgrep -f "sleep 2147" >/dev/null 2>&1; then
+            echo "FAIL: interrupted-cell-stops-child-process-tree (stub's sleep survived the signal)"; fails=$((fails + 1))
+        else
+            echo "PASS: interrupted-cell-stops-child-process-tree"
+        fi
+        ran=$((ran + 1))
+        if jq -e '.results.summary.tests == 1 and .results.summary.other == 1
+                  and .results.tests[0].name == "kwok/gb200-eks-training/helm"
+                  and (.results.tests[0].message | test("interrupted by SIGTERM"))' "${INT_RESULTS}" >/dev/null 2>&1; then
+            echo "PASS: interrupted-cell-writes-other-record"
+        else
+            echo "FAIL: interrupted-cell-writes-other-record"; cat "${INT_RESULTS}" 2>/dev/null; fails=$((fails + 1))
+        fi
+    fi
+    pkill -f "sleep 2147" 2>/dev/null || true   # belt and braces if the assertion above failed
+
+    # Unwritable report path: /dev/null is a file, so mkdir -p of the parent
+    # fails inside ctrf_write. The kind-create failure (exit 42) must still be
+    # the run's exit status, and the failure must be logged, not fatal.
+    cat > "${STUB_BIN}/kind" <<'STUB'
+#!/usr/bin/env bash
+case "$1" in
+    get) exit 0 ;;
+    create) echo "stub: kind create failed" >&2; exit 42 ;;
+    *) exit 0 ;;
+esac
+STUB
+    chmod +x "${STUB_BIN}/kind"
+    : > "${LOG_FILE}"
+    rc=0
+    PATH="${STUB_BIN}:${PATH}" KWOK_RESULTS_FILE="/dev/null/kwok-results.json" KWOK_CLUSTER=aicr-kwok-test \
+        bash "${SCRIPT_UNDER_TEST}" --deployer helm gb200-eks-training >"${LOG_FILE}" 2>&1 || rc=$?
+    check "unwritable-report-preserves-exit-code" eq 42 "${rc}"
+    check_log "unwritable-report-is-logged-not-fatal" "failed to write CTRF results" "${LOG_FILE}"
+else
+    echo "SKIP: jq not on PATH; interruption and write-failure cases not run"
+fi
+
 # ── Summary ────────────────────────────────────────────────────────────
 # ${ran} is incremented inside check / check_log so the summary count is
 # derived, not a hardcoded literal — a future contributor adding or
