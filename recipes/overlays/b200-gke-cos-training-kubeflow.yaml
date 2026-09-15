@@ -45,3 +45,8 @@ spec:
         - cert-manager
         - kube-prometheus-stack
         - gpu-operator
+
+  validation:
+    conformance:
+      checks:
+        - robust-controller

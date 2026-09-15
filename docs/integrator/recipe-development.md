@@ -114,6 +114,16 @@ spec:
 
 Mixins use `kind: RecipeMixin` and carry only `constraints` and `componentRefs`. They live in `recipes/mixins/` and are applied after inheritance chain merging. See [Data Architecture](../contributor/recipe.md#mixin-composition) for details.
 
+**A mixin only composes when its overlay is part of the resolved catalog.** Passing a leaf overlay file directly — `aicr bundle -r <file>`, `aicr validate -r <file>` — hydrates it by re-resolving `spec.criteria` against the catalog. Only `spec.criteria` is read from the file; `spec.mixins` is not.
+
+An overlay that is neither embedded in `recipes/overlays/` nor supplied in the `overlays/` directory of an external data tree therefore contributes no mixin content during criteria-only hydration. AICR rejects the direct load rather than proceeding, naming the file and the mixins that were dropped. Place the overlay at `<dir>/overlays/` and pass `--data <dir>` so its own declaration composes.
+
+If the overlay references a mixin you wrote yourself, place that too, at `<dir>/mixins/<name>.yaml`. The catalog scan only registers `kind: RecipeMixin` documents found under `mixins/`, so a custom mixin left anywhere else fails with `mixin ... not found in recipes/mixins/` even once the overlay resolves. Mixins that ship with AICR need not be copied — referencing them by name is enough.
+
+The case to watch for is copying an embedded overlay and adding a mixin to your copy. The copy keeps the original `metadata.name` and `spec.criteria`, so the catalog's overlay of that name still resolves — which is why matching on name alone would not notice that the mixin you added never composed.
+
+A mixin that some other applied overlay in the chain already contributes is not reported, since its content did reach the recipe.
+
 Some platforms declare their full component stack inline per leaf overlay rather than via a platform mixin. This is the case for `--platform slurm` and `--platform dynamo`, where each leaf carries hardware-specific tuning (GPU GRES strings, accelerator resource limits) that the mixin merge path cannot represent cleanly. Other shapes like `--platform kubeflow` and `--intent inference` still use the `platform-kubeflow` / `platform-inference` mixins shown above, since their leaf-specific tuning is minimal.
 
 For example, `--platform slurm` leaves inline three `componentRefs`:
