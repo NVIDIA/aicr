@@ -163,7 +163,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Map ComponentData to localformat.Component and write per-component folders.
 	// localformat owns: folder naming, values.yaml/cluster-values.yaml split,
 	// Chart.yaml, templates/*, install.sh. The helm deployer just orchestrates.
-	lfComponents := toLocalformatComponents(components, g.ComponentValues, g.DynamicValues)
+	// Which components may have their CRDs applied ahead of `helm upgrade`.
+	// Helm never updates a chart's crds/ directory on upgrade, so without
+	// this the bundle pairs a bumped chart with its day-one CRD schema.
+	crdOwners, err := deployer.ResolveCRDOwners(ctx, g.RecipeResult.DataProvider(), g.RecipeResult.ComponentRefs)
+	if err != nil {
+		return nil, err
+	}
+
+	lfComponents := toLocalformatComponents(components, g.ComponentValues, g.DynamicValues, crdOwners)
 	writeResult, err := localformat.Write(ctx, localformat.Options{
 		OutputDir:              outputDir,
 		Components:             lfComponents,
@@ -299,12 +307,13 @@ func (g *Generator) buildComponentDataList() ([]ComponentData, error) {
 }
 
 // toLocalformatComponents maps the orchestration ComponentData list to the
-// per-component inputs consumed by localformat.Write. Values and DynamicPaths
-// are looked up by component name from the generator's maps.
+// per-component inputs consumed by localformat.Write. Values, DynamicPaths,
+// and OwnsCRDs are looked up by component name from the caller's maps.
 func toLocalformatComponents(
 	components []ComponentData,
 	values map[string]map[string]any,
 	dynamic map[string][]string,
+	crdOwners map[string]bool,
 ) []localformat.Component {
 
 	out := make([]localformat.Component, 0, len(components))
@@ -320,6 +329,7 @@ func toLocalformatComponents(
 			Path:         c.Path,
 			Values:       values[c.Name],
 			DynamicPaths: dynamic[c.Name],
+			OwnsCRDs:     crdOwners[c.Name],
 		})
 	}
 	return out

@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Apply k8s-aibom's CRDs from its pinned chart, ahead of `helm upgrade`.
+#
+# Helm installs a chart's crds/ directory on first install and never touches it
+# again, so a chart bump whose CRDs changed would otherwise leave the previous
+# schema in place: the API server then silently prunes the new controller's
+# writes to fields the old schema does not know.
+#
+# AICR emits this script only for components the registry marks ownsCRDs whose
+# ref still points at the registry-pinned chart. That flag records an audit of
+# one specific chart: that the component solely owns every CRD it ships, and
+# ships none using spec.conversion.strategy: Webhook. It says nothing about a
+# chart an overriding ref points at.
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
+
+# Bound once as literals. Recipe values are validated as path components
+# (separators rejected), not as shell words, so they are never interpolated
+# bare into a command or into a double-quoted string, where $(...) would
+# re-expand. Every later use is a plain parameter expansion, which does not.
+RELEASE='k8s-aibom'
+NAMESPACE='k8s-aibom-system'
+RELEASE_FILTER='^k8s-aibom$'
+
+if ! command -v kubectl >/dev/null 2>&1; then
+  echo "ERROR: kubectl is required to apply ${RELEASE} CRDs before upgrade." >&2
+  exit 1
+fi
+
+# Every helm and kubectl call below runs through run_bounded. This script runs
+# inside the deploy path, where a command that never returns hangs the whole
+# rollout rather than failing it: deploy.sh retries a component that exits
+# non-zero but has no way to interrupt one that is still running. A wedged
+# registry and a wedged apiserver both produce that, so the reads and the write
+# are bounded alike.
+#
+# No unbounded fallback. Stock macOS ships no timeout(1), and running
+# unbounded there would reintroduce exactly the hang this guards against on the
+# one platform least likely to be exercised in CI. Failing closed with an
+# actionable message is the safer trade: the operator can install coreutils, or
+# apply the CRDs by hand with the command in the component catalog.
+CRD_STEP_TIMEOUT="${AICR_CRD_STEP_TIMEOUT:-30}"
+TIMEOUT_BIN=""
+for candidate in timeout gtimeout; do
+  if command -v "${candidate}" >/dev/null 2>&1; then
+    TIMEOUT_BIN="${candidate}"
+    break
+  fi
+done
+if [[ -z "${TIMEOUT_BIN}" ]]; then
+  echo "ERROR: neither timeout(1) nor gtimeout(1) is available, so the ${RELEASE} CRD" >&2
+  echo "       step cannot be bounded and will not run unbounded inside a deploy." >&2
+  echo "       Install GNU coreutils (macOS: brew install coreutils), or apply this" >&2
+  echo "       chart's CRDs manually before upgrading; see the upgrade section of" >&2
+  echo "       docs/user/component-catalog.md." >&2
+  exit 1
+fi
+
+# -k: a process that ignores TERM still gets KILLed a few seconds later, so the
+# bound holds against a wedged client rather than merely asking it to stop.
+run_bounded() {
+  "${TIMEOUT_BIN}" -k 5 "${CRD_STEP_TIMEOUT}" "$@" </dev/null
+}
+
+# Capture through a file, never `$(cmd)`.
+#
+# Command substitution blocks until the write end of the pipe closes, which is
+# not the same thing as the command exiting: if the bound kills helm or kubectl
+# but a grandchild (a credential helper, a retry worker) still holds stdout,
+# `$(...)` waits on that grandchild and the bound buys nothing. A file has no
+# such reader, so the step returns when the bounded process does.
+BOUNDED_OUT="$(mktemp)"
+CRD_MANIFEST="$(mktemp)"
+trap 'rm -f "${BOUNDED_OUT}" "${CRD_MANIFEST}"' EXIT
+# Progress is announced before each bounded call and timed after it. deploy.sh
+# captures this and prints it only when a component fails, so it costs nothing
+# on a good run and names the slow call on a bad one. Without it a stalled step
+# is indistinguishable from a stalled `helm upgrade` further down.
+capture_bounded() {
+  : >"${BOUNDED_OUT}"
+  echo "${RELEASE}: crd-step: running $1 $2 (bound ${CRD_STEP_TIMEOUT}s)"
+  local started=${SECONDS}
+  local rc=0
+  run_bounded "$@" >"${BOUNDED_OUT}" 2>&1 || rc=$?
+  echo "${RELEASE}: crd-step: $1 $2 exited ${rc} after $((SECONDS - started))s"
+  return ${rc}
+}
+
+# Does a release already exist? An existing release means an upgrade, and helm
+# never touches crds/ on upgrade, so the CRDs are this script's to apply.
+#
+# An absent release does NOT by itself mean a fresh cluster; see the retained-
+# CRD check further down. Helm skips a CRD that already exists on install, and
+# never deletes one on uninstall, so "no release" and "no CRDs" are different
+# questions and only the second one licenses skipping.
+#
+# "Absent" and "cannot tell" are deliberately distinguished. An auth failure,
+# an unreachable apiserver, or a broken helm must not read as a fresh install:
+# the `helm upgrade` that follows can still succeed, and would then leave the
+# previous CRDs in place. That is precisely the stranded-schema defect this
+# script exists to prevent, so an indeterminate answer fails closed. `helm
+# list` exits 0 whenever the query itself succeeded, whether or not it matched,
+# which is what makes the two cases separable.
+#
+# The status flags are named rather than left to the default: Helm 4 lists every
+# status by default but Helm 3 does not, and `--all` (which Helm 3 uses for
+# that) was removed in Helm 4. These three exist in both and are exactly the
+# set an upgrade would act on, so one spelling works against either binary.
+if ! capture_bounded helm list --namespace "${NAMESPACE}" \
+  --filter "${RELEASE_FILTER}" --short --deployed --failed --pending \
+  ${KUBECONFIG_FLAG:-}; then
+  existing="$(cat "${BOUNDED_OUT}")"
+  echo "ERROR: cannot determine whether release ${RELEASE} exists; refusing to" >&2
+  echo "       skip the CRD step and risk leaving the previous schema in place: ${existing}" >&2
+  exit 1
+fi
+existing="$(cat "${BOUNDED_OUT}")"
+RELEASE_EXISTS=true
+if [[ -z "${existing//[[:space:]]/}" ]]; then
+  RELEASE_EXISTS=false
+fi
+
+
+# The wrapper chart resolves the vendored upstream chart from
+# charts/<chart>-<version>.tgz, and `helm show crds` recurses into chart
+# dependencies, so this reports the vendored chart's CRDs.
+#
+# sed drops any helm progress output ahead of the first document; see the
+# upstream-chart variant of this script for the failure it prevents.
+if ! capture_bounded helm show crds ./; then
+  echo "ERROR: cannot read ${RELEASE} CRDs from its vendored chart: $(cat "${BOUNDED_OUT}")" >&2
+  exit 1
+fi
+sed -n '/^---$/,$p' "${BOUNDED_OUT}" >"${CRD_MANIFEST}"
+
+# An ownsCRDs component whose chart ships no CRDs is a no-op, not a failure:
+# `kubectl apply` on an empty stream exits non-zero with "no objects passed to
+# apply", which would abort the deploy over nothing.
+#
+# grep, not a `${var//...}` substitution. The payload is a chart's full CRD set,
+# megabytes of OpenAPI schema for a component like nvsentinel, and bash global
+# substring replacement on a string that size takes minutes. It also never
+# enters a shell variable for the same reason.
+if ! grep -q '[^[:space:]]' "${CRD_MANIFEST}"; then
+  echo "${RELEASE}: chart ships no CRDs; nothing to apply."
+  exit 0
+fi
+
+# With no release, skip only once the cluster confirms none of this chart's
+# CRDs are already present.
+#
+# Uninstall is why. Helm retains a chart's CRDs when the release is removed and
+# skips any CRD that already exists on install, so uninstall followed by
+# reinstall pairs a new controller with the retained old schema, and helm will
+# not correct it. Treating "no release" as "fresh cluster" would skip exactly
+# that case, which is the defect this script exists to prevent.
+#
+# `kubectl get -f -` asks about precisely the objects in the manifest, so this
+# needs no name extraction; --ignore-not-found makes absence an empty result
+# rather than an error. A failure here is indeterminate and fails closed, for
+# the same reason the release lookup does.
+if [[ "${RELEASE_EXISTS}" == "false" ]]; then
+  if ! capture_bounded kubectl get -f "${CRD_MANIFEST}" --ignore-not-found -o name ${KUBECONFIG_FLAG:-}; then
+    echo "ERROR: cannot determine whether ${RELEASE} CRDs are already present; refusing" >&2
+    echo "       to skip and risk pairing a new controller with a retained schema: $(cat "${BOUNDED_OUT}")" >&2
+    exit 1
+  fi
+  if ! grep -q '[^[:space:]]' "${BOUNDED_OUT}"; then
+    echo "${RELEASE}: no release and no existing CRDs; helm install creates them."
+    exit 0
+  fi
+  echo "${RELEASE}: no release but CRDs remain from a previous install; updating them."
+fi
+
+# --server-side is required because these CRDs exceed the 262144-byte
+# annotation cap client-side apply depends on. --force-conflicts is required
+# because Helm created them on install and owns their fields.
+run_bounded kubectl apply --server-side --force-conflicts ${KUBECONFIG_FLAG:-} -f "${CRD_MANIFEST}"

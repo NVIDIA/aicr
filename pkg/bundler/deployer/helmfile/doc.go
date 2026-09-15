@@ -51,10 +51,18 @@
 // # Non-goals (per issue #632)
 //
 //   - No deploy.sh emitted alongside helmfile.yaml.
-//   - No prepare:/presync:/postsync:/postuninstall: hooks emitted.
 //   - No replication of helm-deployer pre-flight — `helmfile destroy`
 //     is the simple graceful-uninstall primitive.
 //
 // Cluster pre-flight, finalizer scrubbing, and scorched-earth cleanup are
 // operator-owned concerns; see #632 for the rationale.
+//
+// The one hook this deployer does emit is a presync applying a component's
+// CRDs, for components the registry marks ownsCRDs (#2525). #632 also listed
+// hooks as a non-goal, on the same operator-owned reasoning as the entries
+// above. This one is not that: Helm never updates a chart's crds/ directory
+// on upgrade, so without it the bundle pairs a bumped chart with its day-one
+// CRD schema. That is a correctness gap in what the bundle itself generates,
+// which no operator convention closes. The helm deployer gets the same step inside
+// install.sh, which helmfile does not use.
 package helmfile
