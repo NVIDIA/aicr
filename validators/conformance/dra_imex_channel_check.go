@@ -17,7 +17,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -169,10 +171,40 @@ func validateIMEXChannelAllocation(ctx *validators.Context, dynClient dynamic.In
 			"MNNVL node(s) [%s] carry the %s label but none advertises a usable %s ResourceSlice device — the ComputeDomain DRA driver is not serving the fabric nodes",
 			strings.Join(cliqueNodes, ","), labelNVIDIAGPUClique, draDriverComputeDomain))
 	}
+	// One ComputeDomain channel claim per node: the driver advertises a
+	// single channel device per node, so a node whose channel is already
+	// allocated (a standing ComputeDomain such as the Slinky Slurm
+	// slinky-slurm-imex claim, or a running MNNVL workload) cannot satisfy
+	// the probe's Single claim — the pod would sit Pending until the deadline
+	// and turn a healthy cluster into a spurious failure. Exclude occupied
+	// nodes; when none is free the subtest is not applicable RIGHT NOW and
+	// says which claims hold the channels.
+	occupied, err := occupiedComputeDomainNodes(ctx.Ctx, dynClient, version, sv.poolNodes[draDriverComputeDomain])
+	if err != nil {
+		return err
+	}
+	free := make([]string, 0, len(candidates))
+	occupiedLines := make([]string, 0, len(occupied))
+	for _, node := range candidates {
+		if holders, busy := occupied[node]; busy {
+			occupiedLines = append(occupiedLines, fmt.Sprintf("%s held by %s", node, strings.Join(holders, ",")))
+			continue
+		}
+		free = append(free, node)
+	}
 	recordRawTextArtifact(ctx, "IMEX candidate nodes",
-		fmt.Sprintf("kubectl get nodes -l %s", labelNVIDIAGPUClique),
-		fmt.Sprintf("Clique-labeled nodes:         %s\nWith usable compute-domain:   %s",
-			strings.Join(cliqueNodes, ","), strings.Join(candidates, ",")))
+		fmt.Sprintf("kubectl get nodes -l %s; kubectl get resourceclaims -A", labelNVIDIAGPUClique),
+		fmt.Sprintf("Clique-labeled nodes:         %s\nWith usable compute-domain:   %s\nChannel already allocated:    %s\nProbe candidates:             %s",
+			strings.Join(cliqueNodes, ","), strings.Join(candidates, ","),
+			valueOrNone(strings.Join(occupiedLines, "; ")), valueOrNone(strings.Join(free, ","))))
+	if len(free) == 0 {
+		recordRawTextArtifact(ctx, artifactIMEXSubtest, "",
+			fmt.Sprintf("skipped (not applicable): every MNNVL candidate node already holds a %s channel claim (%s) — the driver serves one ComputeDomain channel claim per node, so a probe claim could not be allocated while those workloads run; "+
+				"ComputeDomain DRA validated via driver health and validated ResourceSlices",
+				draDriverComputeDomain, strings.Join(occupiedLines, "; ")))
+		return nil
+	}
+	candidates = free
 
 	run, runErr := newGPUTestRun()
 	if runErr != nil {
@@ -208,22 +240,24 @@ func validateIMEXChannelAllocation(ctx *validators.Context, dynClient dynamic.In
 
 	pod, err := waitForTerminalPod(ctx.Ctx, ctx.Clientset, run.namespace, run.imexPodName, "IMEX channel test pod")
 	if err != nil {
+		// The wait returns no pod for stuck (ImagePullBackOff, Unschedulable)
+		// and deadline paths — exactly the runs whose diagnostics matter most
+		// (claim never allocated → pod Pending until the deadline). Re-read
+		// the pod best-effort so its status, logs, and claim evidence still
+		// ship; the wait error stays the verdict.
+		if last, getErr := ctx.Clientset.CoreV1().Pods(run.namespace).Get(ctx.Ctx, run.imexPodName, metav1.GetOptions{}); getErr == nil {
+			recordIMEXPodEvidence(ctx, dynClient, version, last)
+		} else {
+			recordRawTextArtifact(ctx, "IMEX pod status",
+				fmt.Sprintf("kubectl get pod %s -n %s -o wide", run.imexPodName, run.namespace),
+				fmt.Sprintf("unavailable after wait failure: %v", getErr))
+		}
 		return err
 	}
 
 	// Evidence BEFORE the verdict: status, logs, and the generated claim's
 	// (best-effort) post-terminal state ship even when the run fails.
-	podLines := []string{
-		fmt.Sprintf("Name:      %s/%s", pod.Namespace, pod.Name),
-		fmt.Sprintf("Phase:     %s", pod.Status.Phase),
-		fmt.Sprintf("Node:      %s", valueOrUnknown(pod.Spec.NodeName)),
-		fmt.Sprintf("Claims:    %d", len(pod.Spec.ResourceClaims)),
-		fmt.Sprintf("Generated: %s", valueOrUnknown(imexGeneratedClaimName(pod))),
-	}
-	recordRawTextArtifact(ctx, "IMEX pod status",
-		fmt.Sprintf("kubectl get pod %s -n %s -o wide", run.imexPodName, run.namespace), strings.Join(podLines, "\n"))
-	recordGPUPodContainerLogs(ctx, pod, "IMEX pod logs")
-	recordIMEXGeneratedClaim(ctx, dynClient, version, pod)
+	recordIMEXPodEvidence(ctx, dynClient, version, pod)
 
 	if pod.Status.Phase != corev1.PodSucceeded {
 		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
@@ -281,78 +315,210 @@ func buildIMEXComputeDomain(run *gpuTestRun) *unstructured.Unstructured {
 	}}
 }
 
-// waitForIMEXClaimTemplate waits, bounded by imexClaimTemplateTimeout,
-// until the DRA driver has reconciled the ComputeDomain into the
-// ResourceClaimTemplate named in its spec. Watch API (repo rule: watch, don't
-// poll), with Get fast paths before and after establishing the watch — the
-// driver may reconcile between the two calls and the watch would not replay
-// that Added event — and a re-Get when the watch channel closes without the
-// deadline firing (apiserver hiccup, LB drop), per the repo anti-pattern list.
+// waitForIMEXClaimTemplate waits, bounded by imexClaimTemplateTimeout (and
+// the caller's work budget), until the DRA driver has reconciled the
+// ComputeDomain into the ResourceClaimTemplate named in its spec. Watch API
+// (repo rule: watch, don't poll), with Get fast paths before and after
+// establishing the watch — the driver may reconcile between the two calls
+// and the watch would not replay that Added event.
+//
+// Hiccup handling mirrors waitForTerminalPod: a transient Get or Watch
+// failure (retryableWatchSetupErr: throttling, 5xx, apiserver timeouts,
+// transport drops) and a watch channel that closes without the deadline
+// firing both get a bounded 250ms→5s backoff and a restart, never an
+// immediate failure; permanent errors (authorization, validation) surface at
+// once. The deadline message names the budget that actually fired.
 func waitForIMEXClaimTemplate(ctx context.Context, dynClient dynamic.Interface, version string, run *gpuTestRun) error {
 	waitCtx, cancel := context.WithTimeout(ctx, imexClaimTemplateTimeout)
 	defer cancel()
 
 	rctClient := dynClient.Resource(draGVRAt(version, "resourceclaimtemplates")).Namespace(run.namespace)
 	timeoutErr := func(cause error) error {
-		return errors.Wrap(errors.ErrCodeTimeout, fmt.Sprintf(
-			"DRA driver did not reconcile ComputeDomain %s into ResourceClaimTemplate %s within %s",
-			run.computeDomainName, run.claimTemplateName, imexClaimTemplateTimeout), cause)
-	}
-	// present reports whether the template exists; a non-NotFound read error
-	// is returned as-is (classified).
-	present := func() (bool, error) {
-		_, err := rctClient.Get(waitCtx, run.claimTemplateName, metav1.GetOptions{})
-		switch {
-		case err == nil:
-			return true, nil
-		case k8serrors.IsNotFound(err):
-			return false, nil
-		case waitCtx.Err() != nil:
-			return false, timeoutErr(err)
-		default:
-			return false, classifyK8sReadError(err, fmt.Sprintf("IMEX ResourceClaimTemplate %s", run.claimTemplateName))
+		window := fmt.Sprintf("within %s", imexClaimTemplateTimeout)
+		if ctx.Err() != nil {
+			window = "before the check's work budget ran out (less than the " + imexClaimTemplateTimeout.String() + " reconcile window remained)"
 		}
+		return errors.Wrap(errors.ErrCodeTimeout, fmt.Sprintf(
+			"DRA driver did not reconcile ComputeDomain %s into ResourceClaimTemplate %s %s",
+			run.computeDomainName, run.claimTemplateName, window), cause)
+	}
+	const (
+		backoffBase = 250 * time.Millisecond
+		backoffCap  = 5 * time.Second
+	)
+	backoff := backoffBase
+	// pause sleeps the current backoff (context-aware) and doubles it.
+	pause := func(cause error) error {
+		select {
+		case <-waitCtx.Done():
+			return timeoutErr(cause)
+		case <-time.After(backoff):
+		}
+		if backoff *= 2; backoff > backoffCap {
+			backoff = backoffCap
+		}
+		return nil
 	}
 
 	for {
-		if ok, err := present(); err != nil || ok {
-			return err
+		// present: nil,true when the template exists; a transient read error
+		// is retried after backoff; a permanent one is classified and fatal.
+		_, getErr := rctClient.Get(waitCtx, run.claimTemplateName, metav1.GetOptions{})
+		switch {
+		case getErr == nil:
+			return nil
+		case k8serrors.IsNotFound(getErr):
+			// Not reconciled yet — establish the watch below.
+		case waitCtx.Err() != nil:
+			return timeoutErr(getErr)
+		case retryableWatchSetupErr(getErr):
+			slog.Warn("IMEX ResourceClaimTemplate read failed; backing off before retry",
+				"template", run.claimTemplateName, "error", getErr)
+			if err := pause(getErr); err != nil {
+				return err
+			}
+			continue
+		default:
+			return classifyK8sReadError(getErr, fmt.Sprintf("IMEX ResourceClaimTemplate %s", run.claimTemplateName))
 		}
-		watcher, err := rctClient.Watch(waitCtx, metav1.ListOptions{
+
+		watcher, watchErr := rctClient.Watch(waitCtx, metav1.ListOptions{
 			FieldSelector: "metadata.name=" + run.claimTemplateName,
 		})
-		if err != nil {
+		if watchErr != nil {
 			if waitCtx.Err() != nil {
-				return timeoutErr(err)
+				return timeoutErr(watchErr)
 			}
-			return errors.Wrap(errors.ErrCodeInternal, "failed to watch IMEX ResourceClaimTemplate", err)
+			if !retryableWatchSetupErr(watchErr) {
+				return errors.Wrap(errors.ErrCodeInternal, "failed to watch IMEX ResourceClaimTemplate", watchErr)
+			}
+			slog.Warn("IMEX ResourceClaimTemplate watch setup failed; backing off before re-get and re-watch",
+				"template", run.claimTemplateName, "error", watchErr)
+			if err := pause(watchErr); err != nil {
+				return err
+			}
+			continue
 		}
-		// Re-check after the watch is established (see doc comment).
-		if ok, err := present(); err != nil || ok {
+		// Re-check after the watch is established (see doc comment). A
+		// transient error here simply falls through to the watch, whose
+		// restart loop re-Gets anyway.
+		if _, err := rctClient.Get(waitCtx, run.claimTemplateName, metav1.GetOptions{}); err == nil {
 			watcher.Stop()
+			return nil
+		}
+
+		appeared, received := consumeTemplateWatch(waitCtx, watcher)
+		if appeared {
+			return nil
+		}
+		if waitCtx.Err() != nil {
+			return timeoutErr(waitCtx.Err())
+		}
+		// Closed without cancellation (apiserver hiccup, LB drop): back off
+		// (reset when the session delivered events), then re-Get + re-watch
+		// rather than failing a healthy run.
+		if received {
+			backoff = backoffBase
+		}
+		if err := pause(nil); err != nil {
 			return err
 		}
-		closed := false
-		for !closed {
-			select {
-			case <-waitCtx.Done():
-				watcher.Stop()
-				return timeoutErr(waitCtx.Err())
-			case event, ok := <-watcher.ResultChan():
-				if !ok {
-					// Closed without cancellation: loop back to re-Get and
-					// re-watch rather than failing a healthy run.
-					closed = true
-					continue
-				}
-				if event.Type == watch.Added || event.Type == watch.Modified {
-					watcher.Stop()
-					return nil
-				}
+	}
+}
+
+// consumeTemplateWatch drains an established ResourceClaimTemplate watch
+// until the template appears (appeared=true), the context ends, or the
+// channel closes (appeared=false — the caller's restart loop takes over).
+// received reports whether at least one event arrived (backoff-reset signal).
+func consumeTemplateWatch(ctx context.Context, watcher watch.Interface) (appeared, received bool) {
+	defer watcher.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return false, received
+		case event, ok := <-watcher.ResultChan():
+			if !ok {
+				return false, received
+			}
+			received = true
+			if event.Type == watch.Added || event.Type == watch.Modified {
+				return true, received
 			}
 		}
-		watcher.Stop()
 	}
+}
+
+// occupiedComputeDomainNodes returns, per node, the ResourceClaims currently
+// holding that node's compute-domain.nvidia.com channel device, as
+// "namespace/name" strings. Allocation results carry the POOL, which is
+// resolved to a node through poolNodes (slice-derived); results whose pool
+// is unknown are attributed to the pool name itself as a conservative
+// fallback (the common case is pool == node name). Claims without an
+// allocation are not occupants.
+func occupiedComputeDomainNodes(ctx context.Context, dynClient dynamic.Interface, version string, poolNodes map[string]string) (map[string][]string, error) {
+	claims, err := dynClient.Resource(draGVRAt(version, "resourceclaims")).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, classifyK8sReadError(err, "ResourceClaims for IMEX channel occupancy")
+	}
+	occupied := make(map[string][]string)
+	for _, claim := range claims.Items {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, errors.Wrap(errors.ErrCodeTimeout, "ResourceClaim occupancy scan canceled", ctxErr)
+		}
+		results, found, _ := unstructured.NestedSlice(claim.Object, "status", "allocation", "devices", "results")
+		if !found {
+			continue
+		}
+		holder := claim.GetNamespace() + "/" + claim.GetName()
+		for _, r := range results {
+			res, ok := r.(map[string]any)
+			if !ok {
+				continue
+			}
+			driver, _, _ := unstructured.NestedString(res, "driver")
+			if driver != draDriverComputeDomain {
+				continue
+			}
+			pool, _, _ := unstructured.NestedString(res, "pool")
+			node, known := poolNodes[pool]
+			if !known {
+				node = pool
+			}
+			if node == "" {
+				continue
+			}
+			occupied[node] = append(occupied[node], holder)
+		}
+	}
+	return occupied, nil
+}
+
+// recordIMEXPodEvidence records the probe pod's status, container logs, and
+// the generated claim's best-effort state — always BEFORE any verdict.
+func recordIMEXPodEvidence(ctx *validators.Context, dynClient dynamic.Interface, version string, pod *corev1.Pod) {
+	podLines := []string{
+		fmt.Sprintf("Name:      %s/%s", pod.Namespace, pod.Name),
+		fmt.Sprintf("Phase:     %s", pod.Status.Phase),
+		fmt.Sprintf("Node:      %s", valueOrUnknown(pod.Spec.NodeName)),
+		fmt.Sprintf("Waiting:   %s", podWaitingStatus(pod)),
+		fmt.Sprintf("Claims:    %d", len(pod.Spec.ResourceClaims)),
+		fmt.Sprintf("Generated: %s", valueOrUnknown(imexGeneratedClaimName(pod))),
+	}
+	if reason := podStuckReason(pod); reason != "" {
+		podLines = append(podLines, "Stuck:     "+reason)
+	}
+	recordRawTextArtifact(ctx, "IMEX pod status",
+		fmt.Sprintf("kubectl get pod %s -n %s -o wide", pod.Name, pod.Namespace), strings.Join(podLines, "\n"))
+	recordGPUPodContainerLogs(ctx, pod, "IMEX pod logs")
+	recordIMEXGeneratedClaim(ctx, dynClient, version, pod)
+}
+
+// valueOrNone renders an empty string as "none" for evidence lines.
+func valueOrNone(v string) string {
+	if v == "" {
+		return valueNone
+	}
+	return v
 }
 
 // buildIMEXTestPod returns the probe pod: one busybox container that

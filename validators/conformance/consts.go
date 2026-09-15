@@ -94,6 +94,7 @@ const (
 	containerNameSleep          = "sleep"
 	gpuClaimName                = "gpu"
 	statusUnknown               = "unknown"
+	valueNone                   = "none"
 	deploymentClusterAutoscaler = "cluster-autoscaler"
 	namespaceDynamoSystem       = "dynamo-system"
 )
@@ -121,6 +122,14 @@ const (
 //
 //	dra-support:               3m30s work + 30s cleanup + 60s margin =  5m catalog timeout
 //	secure-accelerator-access: 8m30s work + 30s cleanup + 60s margin = 10m catalog timeout
+//
+// dra-support can run TWO namespace-creating behavioral subtests in sequence
+// (the MNNVL IMEX channel probe, then the full-GPU DRA probe). The reserve
+// covers only the LAST subtest's cleanup; the IMEX subtest's own bounded
+// cleanup is charged against the work budget, and both probes share that
+// budget. In the supported ComputeDomain-only configuration only one of the
+// two applies on any given cluster; a cluster that enables full-GPU DRA on an
+// MNNVL fabric runs both and shares the 3m30s between them (#1649).
 //
 // This containment is deliberately LOCAL to the checks that create cluster
 // resources needing reconciliation — not a validator-wide lifecycle change.

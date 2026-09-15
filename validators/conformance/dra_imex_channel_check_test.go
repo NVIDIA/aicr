@@ -25,9 +25,12 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -542,5 +545,268 @@ func TestIMEXCandidateNodes(t *testing.T) {
 				t.Errorf("cliqueNodes = %v, want %v", clique, tt.wantClique)
 			}
 		})
+	}
+}
+
+// allocatedComputeDomainClaim builds a ResourceClaim whose allocation holds
+// the compute-domain.nvidia.com channel device of the given pool — the shape
+// a standing ComputeDomain (e.g. Slinky Slurm's slinky-slurm-imex-channels
+// template) or a running MNNVL workload leaves on a node.
+func allocatedComputeDomainClaim(version, namespace, name, pool string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": apiGroupResourceK8sIO + "/" + version,
+		"kind":       "ResourceClaim",
+		"metadata":   map[string]any{"name": name, "namespace": namespace},
+		"status": map[string]any{
+			"allocation": map[string]any{
+				"devices": map[string]any{
+					"results": []any{map[string]any{
+						"request": "channel", "driver": draDriverComputeDomain, "pool": pool, "device": "channel-0",
+					}},
+				},
+			},
+			"reservedFor": []any{map[string]any{"resource": "pods", "name": "slurmd-0", "uid": "u1"}},
+		},
+	}}
+}
+
+// TestCheckDRASupport_IMEXSkipsNodesWithAllocatedChannel: a node whose
+// compute-domain channel is already held by another claim is excluded from
+// the probe's affinity; when every candidate is occupied the subtest is
+// recorded not applicable, names the holders, and creates nothing.
+func TestCheckDRASupport_IMEXSkipsNodesWithAllocatedChannel(t *testing.T) {
+	t.Run("one of two candidates occupied → probe pinned to the free node", func(t *testing.T) {
+		ctx, client, _, createdCDs := imexTestContext(t, "v1",
+			[]runtime.Object{testNode("node1", withCliqueLabel()), testNode("node2", withCliqueLabel())},
+			computeDomainSlice("v1", "node1"), computeDomainSlice("v1", "node2"),
+			allocatedComputeDomainClaim("v1", "slurm", "slinky-slurm-imex-channels-abc", "node1"))
+		createdPods := markPodsSucceededOnCreate(client)
+
+		var err error
+		out := captureStdout(t, func() { err = CheckDRASupport(ctx) })
+		if err != nil {
+			t.Fatalf("CheckDRASupport() error = %v, want pass", err)
+		}
+		if len(*createdCDs) != 1 {
+			t.Fatalf("ComputeDomains created = %d, want 1", len(*createdCDs))
+		}
+		pod := findPodByPrefix(*createdPods, imexTestPodPrefix)
+		if pod == nil {
+			t.Fatal("IMEX probe pod was not created")
+		}
+		if got := affinityNodeNames(t, pod); !slices.Equal(got, []string{"node2"}) {
+			t.Errorf("affinity nodes = %v, want [node2] (node1's channel is held)", got)
+		}
+		if !strings.Contains(out, "Channel already allocated:    node1 held by slurm/slinky-slurm-imex-channels-abc") {
+			t.Errorf("occupancy evidence missing:\n%s", out)
+		}
+	})
+	t.Run("every candidate occupied → not applicable, nothing created", func(t *testing.T) {
+		ctx, client, _, createdCDs := imexTestContext(t, "v1",
+			[]runtime.Object{testNode("node1", withCliqueLabel())},
+			computeDomainSlice("v1", "node1"),
+			allocatedComputeDomainClaim("v1", "slurm", "slinky-slurm-imex-channels-abc", "node1"))
+		createdPods := markPodsSucceededOnCreate(client)
+
+		var err error
+		out := captureStdout(t, func() { err = CheckDRASupport(ctx) })
+		if err != nil {
+			t.Fatalf("CheckDRASupport() error = %v, want pass", err)
+		}
+		if len(*createdCDs) != 0 || len(*createdPods) != 0 {
+			t.Errorf("created ComputeDomains=%d pods=%d, want none", len(*createdCDs), len(*createdPods))
+		}
+		if !strings.Contains(out, "skipped (not applicable): every MNNVL candidate node already holds a "+draDriverComputeDomain+" channel claim (node1 held by slurm/slinky-slurm-imex-channels-abc)") {
+			t.Errorf("evidence missing the occupied not-applicable record:\n%s", out)
+		}
+	})
+	t.Run("unallocated claim is not an occupant", func(t *testing.T) {
+		pending := allocatedComputeDomainClaim("v1", "slurm", "pending-claim", "node1")
+		unstructured.RemoveNestedField(pending.Object, "status", "allocation")
+		ctx, client, _, createdCDs := imexTestContext(t, "v1",
+			[]runtime.Object{testNode("node1", withCliqueLabel())},
+			computeDomainSlice("v1", "node1"), pending)
+		markPodsSucceededOnCreate(client)
+		if err := CheckDRASupport(ctx); err != nil {
+			t.Fatalf("CheckDRASupport() error = %v, want pass", err)
+		}
+		if len(*createdCDs) != 1 {
+			t.Errorf("ComputeDomains created = %d, want 1 (pending claim must not block the probe)", len(*createdCDs))
+		}
+	})
+}
+
+// closeOnceWatch is a watch.Interface whose result channel is already closed
+// — the apiserver/LB "accepts the watch and drops it" hiccup.
+type closeOnceWatch struct{ ch chan watch.Event }
+
+func (w *closeOnceWatch) Stop()                          {}
+func (w *closeOnceWatch) ResultChan() <-chan watch.Event { return w.ch }
+
+func newClosedWatch() *closeOnceWatch {
+	w := &closeOnceWatch{ch: make(chan watch.Event)}
+	close(w.ch)
+	return w
+}
+
+// TestWaitForIMEXClaimTemplate_HiccupPaths pins the restart loop: a watch
+// channel that closes without cancellation, a transient Watch setup error,
+// and a transient Get error are all retried (with backoff) until the template
+// appears, while a permanent Get error fails immediately.
+func TestWaitForIMEXClaimTemplate_HiccupPaths(t *testing.T) {
+	saved := imexClaimTemplateTimeout
+	imexClaimTemplateTimeout = 5 * time.Second
+	t.Cleanup(func() { imexClaimTemplateTimeout = saved })
+	rctGR := schema.GroupResource{Group: apiGroupResourceK8sIO, Resource: "resourceclaimtemplates"}
+	rct := func(run *gpuTestRun) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": draAPIGroupVersion, "kind": "ResourceClaimTemplate",
+			"metadata": map[string]any{"name": run.claimTemplateName, "namespace": run.namespace},
+		}}
+	}
+
+	tests := []struct {
+		name       string
+		install    func(dyn *dynamicfake.FakeDynamicClient, run *gpuTestRun)
+		wantErr    bool
+		wantTarget error
+		minCalls   int
+	}{
+		{
+			name: "watch closes immediately twice, template appears on the third pass",
+			install: func(dyn *dynamicfake.FakeDynamicClient, run *gpuTestRun) {
+				closes := 0
+				dyn.PrependWatchReactor("resourceclaimtemplates", func(k8stesting.Action) (bool, watch.Interface, error) {
+					closes++
+					if closes == 2 {
+						// Reconciled during the second closure window.
+						_ = dyn.Tracker().Create(draGVRAt("v1", "resourceclaimtemplates"), rct(run), run.namespace)
+					}
+					return true, newClosedWatch(), nil
+				})
+			},
+			minCalls: 2,
+		},
+		{
+			name: "transient watch setup error is retried",
+			install: func(dyn *dynamicfake.FakeDynamicClient, run *gpuTestRun) {
+				calls := 0
+				dyn.PrependWatchReactor("resourceclaimtemplates", func(k8stesting.Action) (bool, watch.Interface, error) {
+					calls++
+					if calls == 1 {
+						return true, nil, k8serrors.NewTooManyRequests("throttled", 1)
+					}
+					_ = dyn.Tracker().Create(draGVRAt("v1", "resourceclaimtemplates"), rct(run), run.namespace)
+					return true, newClosedWatch(), nil
+				})
+			},
+			minCalls: 2,
+		},
+		{
+			name: "transient get error is retried",
+			install: func(dyn *dynamicfake.FakeDynamicClient, run *gpuTestRun) {
+				gets := 0
+				dyn.PrependReactor("get", "resourceclaimtemplates", func(k8stesting.Action) (bool, runtime.Object, error) {
+					gets++
+					if gets == 1 {
+						return true, nil, k8serrors.NewServiceUnavailable("apiserver restarting")
+					}
+					if gets == 2 {
+						_ = dyn.Tracker().Create(draGVRAt("v1", "resourceclaimtemplates"), rct(run), run.namespace)
+					}
+					return false, nil, nil
+				})
+			},
+			minCalls: 2,
+		},
+		{
+			name: "permanent get error fails immediately",
+			install: func(dyn *dynamicfake.FakeDynamicClient, _ *gpuTestRun) {
+				dyn.PrependReactor("get", "resourceclaimtemplates", func(k8stesting.Action) (bool, runtime.Object, error) {
+					return true, nil, k8serrors.NewForbidden(rctGR, "x", stderrors.New("rbac"))
+				})
+			},
+			wantErr:    true,
+			wantTarget: errors.New(errors.ErrCodeInternal, ""),
+		},
+		{
+			name: "permanent watch setup error fails immediately",
+			install: func(dyn *dynamicfake.FakeDynamicClient, _ *gpuTestRun) {
+				dyn.PrependWatchReactor("resourceclaimtemplates", func(k8stesting.Action) (bool, watch.Interface, error) {
+					return true, nil, k8serrors.NewForbidden(rctGR, "x", stderrors.New("rbac"))
+				})
+			},
+			wantErr:    true,
+			wantTarget: errors.New(errors.ErrCodeInternal, ""),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			run, err := newGPUTestRun()
+			if err != nil {
+				t.Fatal(err)
+			}
+			dyn := newDRAFakeDynamicClient()
+			tt.install(dyn, run)
+			start := time.Now()
+			err = waitForIMEXClaimTemplate(context.Background(), dyn, "v1", run)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				if !stderrors.Is(err, tt.wantTarget) {
+					t.Errorf("error = %v, want code of %v", err, tt.wantTarget)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("waitForIMEXClaimTemplate() error = %v, want nil after retry", err)
+			}
+			// At least one 250ms backoff must have elapsed for every retried
+			// pass — the loop must not hot-spin.
+			if elapsed := time.Since(start); elapsed < 250*time.Millisecond*time.Duration(tt.minCalls-1) {
+				t.Errorf("elapsed %s, want >= %s of backoff", elapsed, 250*time.Millisecond*time.Duration(tt.minCalls-1))
+			}
+		})
+	}
+}
+
+// TestCheckDRASupport_IMEXStuckPodStillRecordsEvidence: a probe pod that
+// never reaches a terminal phase (ImagePullBackOff) fails the check through
+// the wait error, and its status and logs are still recorded.
+func TestCheckDRASupport_IMEXStuckPodStillRecordsEvidence(t *testing.T) {
+	ctx, client, _, _ := imexTestContext(t, "v1",
+		[]runtime.Object{testNode("node1", withCliqueLabel())},
+		computeDomainSlice("v1", "node1"))
+	client.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		pod, ok := action.(k8stesting.CreateAction).GetObject().(*corev1.Pod)
+		if !ok {
+			return false, nil, nil
+		}
+		pod.Status.Phase = corev1.PodPending
+		pod.Status.ContainerStatuses = []corev1.ContainerStatus{{
+			Name: containerNameIMEXTest, Image: pod.Spec.Containers[0].Image,
+			State: corev1.ContainerState{Waiting: &corev1.ContainerStateWaiting{Reason: "ImagePullBackOff", Message: "pull denied"}},
+		}}
+		return false, nil, nil
+	})
+
+	var err error
+	out := captureStdout(t, func() { err = CheckDRASupport(ctx) })
+	if err == nil {
+		t.Fatal("expected the stuck probe to fail the check")
+	}
+	if !strings.Contains(err.Error(), "ImagePullBackOff") {
+		t.Errorf("error = %v, want the stuck reason", err)
+	}
+	for _, want := range []string{
+		"--- IMEX pod status ---",
+		"Stuck:     ImagePullBackOff",
+		"--- IMEX pod logs (" + containerNameIMEXTest + ") ---",
+		"--- Generated ResourceClaim status ---",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("evidence missing %q despite the stuck pod:\n%s", want, out)
+		}
 	}
 }

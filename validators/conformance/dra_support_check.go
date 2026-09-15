@@ -300,6 +300,7 @@ func validateNVIDIAResourceSlices(ctx *validators.Context, dynClient dynamic.Int
 	eligible := eligibleReadySchedulableNodes(nodeList)
 	result := &sliceValidation{
 		usableByDriver: make(map[string]map[string]struct{}),
+		poolNodes:      make(map[string]map[string]string),
 		eligible:       eligible,
 	}
 
@@ -316,6 +317,16 @@ func validateNVIDIAResourceSlices(ctx *validators.Context, dynClient dynamic.Int
 		poolName, _, _ := unstructured.NestedString(item.Object, "spec", "pool", "name")
 		if strings.HasSuffix(driver, nvidiaDriverSuffix) {
 			nvidiaDrivers[driver] = struct{}{}
+			// Pool → node attribution for node-local slices. The K8s API
+			// does not require pool names to equal node names, so claim
+			// occupancy (allocation results carry the POOL) must resolve
+			// through this map, never through name equality.
+			if nodeName != "" && poolName != "" {
+				if result.poolNodes[driver] == nil {
+					result.poolNodes[driver] = make(map[string]string)
+				}
+				result.poolNodes[driver][poolName] = nodeName
+			}
 		}
 		fmt.Fprintf(&sliceSummary, "%-48s node=%s driver=%s pool=%s\n",
 			item.GetName(), nodeName, driver, poolName)
@@ -360,6 +371,9 @@ type sliceValidation struct {
 	// usableByDriver maps driver name (e.g. compute-domain.nvidia.com) to
 	// the set of node names with at least one usable device from it.
 	usableByDriver map[string]map[string]struct{}
+	// poolNodes maps driver name → ResourceSlice pool name → the node
+	// (spec.nodeName) publishing that pool, for node-local slices.
+	poolNodes map[string]map[string]string
 	// eligible is the Ready, schedulable node set (name → node).
 	eligible map[string]*corev1.Node
 }
