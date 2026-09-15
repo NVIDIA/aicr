@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"reflect"
 	"slices"
-	"strconv"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/evidence/redact"
@@ -703,6 +702,9 @@ func TestCTRFBoundsRuntimeProvenance(t *testing.T) {
 					"spec.initContainers[tcpxo-daemon].image",
 					"free text with spaces",
 					"spec.containers[node].env[X].value=10.0.0.5",
+					"spec.customer-prod-cluster",             // non-schema structural segment
+					"spec.containers[node].acmeTenant.value", // camelCase but not a field
+					"acme.internal/x",                        // no schema root at all
 				}},
 			want: &ctrf.RuntimeProvenance{ShippedDigest: sha('a'), DerivedDigest: sha('b'),
 				InheritedPaths: []string{
@@ -744,9 +746,20 @@ func TestCTRFBoundsRuntimeProvenance(t *testing.T) {
 
 func TestCTRFRuntimeProvenancePathBounds(t *testing.T) {
 	sha := func(c byte) string { return string(bytes.Repeat([]byte{c}, 64)) }
-	many := make([]string, 0, 1100)
-	for i := range 1100 {
-		many = append(many, "spec.field"+strconv.Itoa(i))
+	// Distinct, schema-valid structural paths: pairs of real field names.
+	fields := []string{"affinity", "containers", "dnsConfig", "hostAliases", "initContainers", "os", "overhead",
+		"resourceClaims", "schedulingGates", "securityContext", "tolerations", "topologySpreadConstraints", "volumes",
+		"ephemeralContainers", "readinessGates", "imagePullSecrets", "hostname", "subdomain", "nodeName", "priority",
+		"runtimeClassName", "serviceAccountName", "schedulerName", "restartPolicy", "hostNetwork", "hostPID", "hostIPC",
+		"shareProcessNamespace", "enableServiceLinks", "preemptionPolicy", "setHostnameAsFQDN", "hostUsers", "resources", "name"}
+	many := make([]string, 0, len(fields)*len(fields))
+	for _, a := range fields {
+		for _, b := range fields {
+			many = append(many, "spec."+a+"."+b)
+		}
+	}
+	if len(many) <= 1024 {
+		t.Fatalf("control: need more than 1024 distinct paths, have %d", len(many))
 	}
 	out, _ := redact.CTRF(reportWithProvenance(&ctrf.RuntimeProvenance{
 		ShippedDigest: sha('a'), DerivedDigest: sha('b'),

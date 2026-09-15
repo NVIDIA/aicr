@@ -114,7 +114,7 @@ type derivedRuntimeProvenance struct {
 // The delivered predicate is recipe-derived (gkenet.FabricRuntimeDelivered) and
 // never inferred from a live object, so a stray runtime cannot change who owns
 // the evidence.
-func resolveBenchmarkRuntimeSource(ctx *validators.Context, customRuntime string,
+func resolveBenchmarkRuntimeSource(ctx *validators.Context, customRuntime string, profiled bool,
 	accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType, variant ncclVariant,
 	fabric ncclFabricType) (*benchmarkRuntimePlan, error) {
 
@@ -139,6 +139,15 @@ func resolveBenchmarkRuntimeSource(ctx *validators.Context, customRuntime string
 	if !delivered {
 		emitRuntimeSource(runtimeSourceCapability)
 		return &benchmarkRuntimePlan{source: runtimeSourceCapability}, nil
+	}
+	// A benchmark profile retargets the skeleton, the preflights and the
+	// watcher to another platform; a delivered runtime is wired for the one
+	// the recipe ships on. Combining them mirrors the supplied-runtime case —
+	// two owners of the benchmark's platform — and is rejected the same way.
+	if profiled {
+		return nil, aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s cannot be combined with a recipe that ships %s: the shipped runtime fixes the benchmark's platform; drop the profile to measure the delivered artifact",
+				perfConstraintNCCLBenchmarkProfile, gkenet.TCPXORuntimeName))
 	}
 	// The class is recipe-determined and is settled here, BEFORE the live
 	// verification below: a missing runtime, a mapping drift, or an absent
@@ -374,26 +383,38 @@ func checkShippedWorkerBaseline(tmpl map[string]any) error {
 	// A fabric device or an extended resource added under the shipped
 	// resources later would be dropped silently under the override — fail here
 	// instead, naming the key.
-	if res, ok := worker["resources"].(map[string]any); ok {
-		for section, raw := range res {
-			if section != "limits" && section != "requests" {
+	// The check is two-sided: extra keys would be dropped, and a MISSING GPU
+	// request would be silently repaired by the skeleton's — a deployed runtime
+	// whose GPU request was removed must fail, not be measured as delivered.
+	// The quantity itself is checked against the discovered node GPU count at
+	// apply time (checkShippedWorkerGPUCount), where that count is known.
+	res, _ := worker["resources"].(map[string]any)
+	for section, raw := range res {
+		if section != resourcesLimits && section != resourcesRequests {
+			return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("shipped %s worker resources carry %q, which the benchmark override would drop", gkenet.TCPXORuntimeName, section))
+		}
+		m, _ := raw.(map[string]any)
+		for name := range m {
+			if name != shippedWorkerGPUResource {
 				return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
-					fmt.Sprintf("shipped %s worker resources carry %q, which the benchmark override would drop", gkenet.TCPXORuntimeName, section))
-			}
-			m, _ := raw.(map[string]any)
-			for name := range m {
-				if name != shippedWorkerGPUResource {
-					return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
-						fmt.Sprintf("shipped %s worker resources.%s carry %q beyond %s, which the benchmark override would drop", gkenet.TCPXORuntimeName, section, name, shippedWorkerGPUResource))
-				}
+					fmt.Sprintf("shipped %s worker resources.%s carry %q beyond %s, which the benchmark override would drop", gkenet.TCPXORuntimeName, section, name, shippedWorkerGPUResource))
 			}
 		}
 	}
-	// terminationMessagePolicy: the benchmark sets its own to recover results
-	// from pod status; a shipped value would be a diagnostics choice for the
+	for _, section := range []string{resourcesLimits, resourcesRequests} {
+		m, _ := res[section].(map[string]any)
+		if _, ok := m[shippedWorkerGPUResource]; !ok {
+			return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("shipped %s worker resources.%s do not request %s; the benchmark would substitute its own GPU request for a runtime that no longer schedules on GPUs", gkenet.TCPXORuntimeName, section, shippedWorkerGPUResource))
+		}
+	}
+	// terminationMessagePolicy: the skeleton's worker sets none (only its
+	// launcher does), so the owned-field override CLEARS whatever the shipped
+	// worker carries. A shipped value would be a diagnostics choice for the
 	// training workload with no bearing on the measurement, but one exists only
 	// if the shipped runtime changed shape, which must be seen rather than
-	// absorbed.
+	// silently cleared.
 	if _, ok := worker["terminationMessagePolicy"]; ok {
 		return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("shipped %s worker sets terminationMessagePolicy, which the benchmark overrides; confirm the derivation still measures what the recipe ships and update the baseline deliberately", gkenet.TCPXORuntimeName))
@@ -408,6 +429,35 @@ func checkShippedWorkerBaseline(tmpl map[string]any) error {
 // shippedWorkerGPUResource is the only resource the shipped worker may request
 // for the derivation's resources override to be lossless.
 const shippedWorkerGPUResource = "nvidia.com/gpu"
+
+// The two resource sections the shipped worker may carry.
+const (
+	resourcesLimits   = "limits"
+	resourcesRequests = "requests"
+)
+
+// checkShippedWorkerGPUCount completes the resources baseline where the node
+// GPU count is known: the shipped worker's nvidia.com/gpu request (limits and
+// requests, already proven present) must equal the per-node count the
+// benchmark is about to substitute. A deployed runtime asking for a different
+// count would not schedule the way the derived one does, so measuring it as
+// delivered-artifact would misattribute the number.
+func checkShippedWorkerGPUCount(shipped *unstructured.Unstructured, gpusPerNode string) error {
+	tmpl, err := gkenet.NodeTemplateOf(shipped)
+	if err != nil {
+		return err
+	}
+	worker := workerContainer(tmpl)
+	for _, section := range []string{resourcesLimits, resourcesRequests} {
+		got, _, _ := unstructured.NestedFieldNoCopy(worker, "resources", section, shippedWorkerGPUResource)
+		if fmt.Sprint(got) != gpusPerNode {
+			return aicrErrors.New(aicrErrors.ErrCodeInvalidRequest,
+				fmt.Sprintf("shipped %s worker resources.%s request %s=%v but the target nodes carry %s GPUs each; the deployed runtime does not schedule the way the benchmark would, so it is not measured as the delivered artifact",
+					gkenet.TCPXORuntimeName, section, shippedWorkerGPUResource, got, gpusPerNode))
+		}
+	}
+	return nil
+}
 
 // deliveredWorkerBootstrap is the worker entrypoint for a DERIVED runtime. It
 // is the fixture's sshd bootstrap minus the one line that made the fixture

@@ -98,7 +98,14 @@ func FabricRuntimeDelivered(refs []recipe.ComponentRef) ([]recipe.NetworkInterfa
 		}
 		raw, ok := ref.Overrides[recipe.GKETCPXOInterfacesOverrideKey]
 		if !ok {
-			return nil, false, nil
+			// The runtime manifest is listed but no mapping is recorded: the
+			// recipe claims a fabric runtime it cannot describe. Generation never
+			// produces this shape (#2296 requires the value), so it is a hand
+			// edit; fail closed like the malformed case rather than downgrade to
+			// the capability fixture.
+			return nil, false, errors.New(errors.ErrCodeInvalidRequest,
+				"recipe ships "+TCPXORuntimeName+" on "+recipe.KubeflowTrainerComponentName+
+					" but records no "+recipe.GKETCPXOInterfacesOverrideKey+" override; regenerate the recipe with the network mapping")
 		}
 		mapping, err := recipe.NormalizeGKETCPXOInterfaces(raw)
 		if err != nil {

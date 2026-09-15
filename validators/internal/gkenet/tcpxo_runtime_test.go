@@ -88,8 +88,9 @@ func TestFabricRuntimeDelivered(t *testing.T) {
 		wantErr       bool
 	}{
 		{"not declared", []recipe.ComponentRef{{Name: "gpu-operator"}}, false, false},
-		{"declared without override", []recipe.ComponentRef{{
-			Name: recipe.KubeflowTrainerComponentName, ManifestFiles: []string{recipe.GKETCPXORuntimeManifest}}}, false, false},
+		{"manifest without override fails closed", []recipe.ComponentRef{{
+			Name: recipe.KubeflowTrainerComponentName, ManifestFiles: []string{recipe.GKETCPXORuntimeManifest}}}, false, true},
+		{"declared without manifest or override", []recipe.ComponentRef{{Name: recipe.KubeflowTrainerComponentName}}, false, false},
 		{"declared with manifest and override", []recipe.ComponentRef{{
 			Name:          recipe.KubeflowTrainerComponentName,
 			ManifestFiles: []string{recipe.GKETCPXORuntimeManifest},

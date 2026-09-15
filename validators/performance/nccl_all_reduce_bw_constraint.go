@@ -406,7 +406,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// derivation before anything is applied; the derived runtime then rides the
 	// same carrier as a recipe-supplied one, so every downstream branch that
 	// leaves a self-wired runtime's fabric alone (customRuntime != "") applies.
-	plan, err := resolveBenchmarkRuntimeSource(ctx, customRuntime, target.accelerator, target.service, variant, fabric)
+	plan, err := resolveBenchmarkRuntimeSource(ctx, customRuntime, profile != nil, target.accelerator, target.service, variant, fabric)
 	if err != nil {
 		return "", false, err
 	}
@@ -1377,19 +1377,22 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	if err = applyNCCLWorkerScheduling(runtimeObj, effectiveNodeSelector, effectiveTolerations); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL worker scheduling", err)
 	}
-	// Provenance describes the object as applied — scheduling included — and is
-	// recorded on the plan only once the create succeeded, so a rejected or
-	// never-attempted application publishes nothing.
-	var prov *derivedRuntimeProvenance
-	if plan.derived() {
-		if prov, err = finalizeRuntimeProvenance(plan, runtimeObj); err != nil {
-			return err
-		}
-	}
 	if err = createUnstructured(ctx.Ctx, dynamicClient, trainingRuntimeGVR, config.Namespace, runtimeObj); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply training runtime", err)
 	}
-	if prov != nil {
+	// Provenance describes the object as STORED — read back after the create so
+	// admission defaulting or mutation is part of the digest — and is recorded
+	// on the plan only once the create succeeded, so a rejected or
+	// never-attempted application publishes nothing.
+	if plan.derived() {
+		stored, getErr := dynamicClient.Resource(trainingRuntimeGVR).Namespace(config.Namespace).Get(ctx.Ctx, ncclTrainingRuntimeName, metav1.GetOptions{})
+		if getErr != nil {
+			return aicrErrors.Wrap(gkenet.ReadErrorCode(getErr), "failed to read back the applied training runtime for provenance", getErr)
+		}
+		prov, provErr := finalizeRuntimeProvenance(plan, stored)
+		if provErr != nil {
+			return provErr
+		}
 		plan.provenance = prov
 	}
 	slog.Info("Applied TrainingRuntime", "service", service)
@@ -1730,6 +1733,9 @@ func buildNCCLRuntimeObject(customRuntime string, accelerator recipe.CriteriaAcc
 		skeleton, err := parseYAMLTemplate(skeletonPath, templateData)
 		if err != nil {
 			return nil, aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to render benchmark runtime skeleton "+skeletonPath, err)
+		}
+		if err = checkShippedWorkerGPUCount(plan.shipped, templateData["GPU_COUNT_PER_NODE"]); err != nil {
+			return nil, err
 		}
 		obj, _, err := deriveBenchmarkRuntime(skeleton, plan.shipped)
 		if err != nil {

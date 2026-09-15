@@ -419,11 +419,14 @@ installed: a leaf is `delivered-artifact` only when its enabled
 `kubeflow-trainer` componentRef both lists the `torch-distributed-tcpxo`
 runtime manifest and records a `tcpxoInterfaces` override
 (`validators/internal/gkenet.FabricRuntimeDelivered` — a mapping without the
-artifact describes nothing). Today that is
+artifact describes nothing, and a listed manifest without a recorded mapping,
+which generation never produces, fails closed rather than downgrading to the
+fixture). Today that is
 `h100-gke-cos-training-kubeflow` alone — the other kubeflow leaves declare the
 Trainer but ship no fabric runtime, and are `cluster-capability`. A
-recipe-supplied runtime combined with a delivered one is rejected; the benchmark
-cannot have two owners.
+recipe-supplied runtime or an `nccl-benchmark-profile` combined with a
+delivered one is rejected; the benchmark cannot have two owners of its runtime
+or of its platform.
 
 For a delivered artifact the performance validator, **before any cluster
 mutation**, verifies recipe → deployed → cluster (the recipe's recorded mapping
@@ -432,13 +435,18 @@ must exist, as a set comparison), then derives the benchmark runtime: the
 shipped `node` PodTemplateSpec is copied **wholesale — metadata and spec** —
 and only the paths in `benchmarkOwnedNodePaths` (worker `image`, `command`,
 `args`, `resources`, `terminationMessagePolicy`) are re-applied from the MPI
+skeleton (the skeleton's worker sets no `terminationMessagePolicy`, so that
+override clears a shipped value), with volumes and mounts
 skeleton, with volumes and mounts merged additively. An override-path guard
 fails the run if the derived template differs from the shipped one anywhere
 else, and a baseline precondition covers every overridden path — the shipped
 worker must set no `command`/`args` (an entrypoint would hide fabric
-activation), must declare the NCCL fabric env, must request only
-`nvidia.com/gpu` under `resources`, and must set no
-`terminationMessagePolicy`; `image` is the one override with no precondition,
+activation), must declare the NCCL fabric env, must request `nvidia.com/gpu`
+— and only that — under both `resources.limits` and `resources.requests`,
+with a quantity equal to the target nodes' per-node GPU count (checked at
+apply time, where that count is known, so a deployed runtime whose GPU request
+was removed or changed is failed rather than silently repaired by the
+skeleton's), and must set no `terminationMessagePolicy`; `image` is the one override with no precondition,
 since the benchmark binary lives only in the fixture image and the fabric
 plugin is mounted from the host.
 
@@ -458,7 +466,8 @@ that fails on a missing runtime or a mapping drift still records that it was a
 `delivered-artifact` measurement. The audit record — sha256 of the normalized
 shipped and applied worker templates, the paths at which they differ
 (benchmark overrides plus stamped scheduling), and the inventory of shipped
-paths inherited unchanged — is computed against the object as applied and
+paths inherited unchanged — is computed against the object as **stored** (read
+back after the create, so admission defaulting is part of the digest) and
 recorded only once the `TrainingRuntime` create succeeded, so a run that fails
 before or at application publishes no record; after that point it is published
 whether or not the measurement succeeds, twice: as a human-readable listing on stdout
@@ -467,7 +476,12 @@ sentinel → `pkg/validator/job`), which **survives minimal redaction**. The
 redaction policy for that carrier (`redact.boundRuntimeProvenance`, rule
 `ctrf.tests.runtimeProvenance.bound`): both digests must be lowercase sha256
 hex or the record is dropped; paths are template *keys* only and must match
-the dotted key grammar; every named-list selector (`containers[node]`,
+the dotted key grammar; every **structural** segment must be a JSON field name
+reachable from core/v1 `PodTemplateSpec` (`redact.ctrfPodTemplateFields`, an
+exact set generated from `k8s.io/api` and pinned by
+`TestPodTemplateFieldsMatchAPI`) or the path is dropped, so the carrier can
+only describe the Kubernetes schema whether a non-schema key survived CRD
+pruning or the sentinel line were forged; every named-list selector (`containers[node]`,
 `volumes[x]`, `volumeMounts[x]`, `env[x]`) collapses to `[*]` unless it is an
 `env` selector naming a variable in the **exact** fabric set
 (`redact.ctrfFabricEnvNames`: the GPUDirect-TCPXO NCCL configuration the
