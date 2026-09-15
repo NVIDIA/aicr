@@ -154,6 +154,11 @@ spec:
         - nccl-all-reduce-bw-net
         - nccl-all-reduce-bw-nvls
       constraints:
+        # gb300/eks is a native matrix entry (supportedNCCLCombinations) —
+        # no nccl-benchmark-profile override needed. Its templates
+        # (testdata/gb300/eks/runtime-{net,nvls}.yaml) are unchanged copies
+        # of the gb200/eks ones: GB300 on EKS runs the same EFA scale-out
+        # fabric and the same NVL72 MNNVL/IMEX topology.
         - name: nccl-all-reduce-bw-net
           value: ">= 40"
         - name: nccl-all-reduce-bw-nvls

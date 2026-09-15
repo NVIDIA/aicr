@@ -576,12 +576,6 @@ func graceBlackwellNetPreflightApplies(variant ncclVariant, accelerator recipe.C
 	if variant != variantNET {
 		return false
 	}
-	switch accelerator {
-	case recipe.CriteriaAcceleratorGB200:
-		return service == recipe.CriteriaServiceEKS || service == recipe.CriteriaServiceOKE
-	case recipe.CriteriaAcceleratorGB300:
-		return service == recipe.CriteriaServiceEKS
-	default:
-		return false
-	}
+	return (accelerator == recipe.CriteriaAcceleratorGB200 && (service == recipe.CriteriaServiceEKS || service == recipe.CriteriaServiceOKE)) ||
+		(accelerator == recipe.CriteriaAcceleratorGB300 && service == recipe.CriteriaServiceEKS)
 }
