@@ -741,6 +741,7 @@ else
             "${internal_fixture}/pkg/bundler/verifier" \
             "${internal_fixture}/pkg/evidence/verifier" \
             "${internal_fixture}/pkg/recipe" \
+            "${internal_fixture}/pkg/upgrade" \
             "${internal_fixture}/internal/sdkcontract"
         cp "${API_DIFF}" "${internal_fixture}/tools/api-diff"
         cp "${SCRIPT_DIR}/common" "${internal_fixture}/tools/common"
@@ -766,6 +767,7 @@ import (
 	bundlerverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	evidenceverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
 
 type BundleConfig = config.Config
@@ -775,6 +777,12 @@ type BundleArtifact = result.Output
 type CriteriaRegistry = recipe.CriteriaRegistry
 type BundleVerifyReport = bundlerverifier.VerifyResult
 type EvidenceVerification = evidenceverifier.VerifyResult
+type UpgradeReport = upgrade.Report
+EOF
+        cat >"${internal_fixture}/pkg/upgrade/upgrade.go" <<'EOF'
+package upgrade
+
+type Report struct{}
 EOF
         cat >"${internal_fixture}/pkg/bundler/verifier/verifier.go" <<'EOF'
 package verifier
@@ -874,7 +882,8 @@ else
             "${deleted_target_fixture}/pkg/bundler/verifier" \
             "${deleted_target_fixture}/pkg/evidence/verifier" \
             "${deleted_target_fixture}/pkg/legacyconfig" \
-            "${deleted_target_fixture}/pkg/recipe"
+            "${deleted_target_fixture}/pkg/recipe" \
+            "${deleted_target_fixture}/pkg/upgrade"
         cp "${API_DIFF}" "${deleted_target_fixture}/tools/api-diff"
         cp "${SCRIPT_DIR}/common" "${deleted_target_fixture}/tools/common"
         cp "${SCRIPT_DIR}/api-diff-closure/main.go" \
@@ -900,6 +909,7 @@ import (
 	evidenceverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/legacyconfig"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
 
 type BundleConfig = legacyconfig.Config
@@ -909,6 +919,12 @@ type BundleArtifact = result.Output
 type CriteriaRegistry = recipe.CriteriaRegistry
 type BundleVerifyReport = bundlerverifier.VerifyResult
 type EvidenceVerification = evidenceverifier.VerifyResult
+type UpgradeReport = upgrade.Report
+EOF
+        cat >"${deleted_target_fixture}/pkg/upgrade/upgrade.go" <<'EOF'
+package upgrade
+
+type Report struct{}
 EOF
         cat >"${deleted_target_fixture}/pkg/bundler/verifier/verifier.go" <<'EOF'
 package verifier
@@ -967,6 +983,7 @@ import (
 	bundlerverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	evidenceverifier "github.com/NVIDIA/aicr/pkg/evidence/verifier"
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/pkg/upgrade"
 )
 
 type BundleConfig = config.Config
@@ -976,6 +993,7 @@ type BundleArtifact = result.Output
 type CriteriaRegistry = recipe.CriteriaRegistry
 type BundleVerifyReport = bundlerverifier.VerifyResult
 type EvidenceVerification = evidenceverifier.VerifyResult
+type UpgradeReport = upgrade.Report
 EOF
         rm "${deleted_target_fixture}/pkg/legacyconfig/config.go"
     ); then
