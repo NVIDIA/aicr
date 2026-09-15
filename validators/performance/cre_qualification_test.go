@@ -15,9 +15,11 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/recipe"
+	"github.com/NVIDIA/aicr/validators"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -86,6 +88,48 @@ func TestCREQualifiedEntriesCoverBothChecks(t *testing.T) {
 			t.Errorf("%s has no qualified combinations", checkName)
 		}
 	}
+}
+
+// A recipe can declare a CRE constraint on a combination the check was never
+// measured on. Both checks must skip there rather than run the benchmark and
+// judge it against a threshold calibrated for other hardware.
+func TestCREChecksSkipUnqualifiedCombination(t *testing.T) {
+	t.Run("nccl", func(t *testing.T) {
+		ctx := ctxWithCriteriaAndPerfConstraints(
+			recipe.CriteriaServiceEKS,
+			recipe.CriteriaAcceleratorGB200,
+			recipe.Constraint{Name: checkNameCRENCCLAllReduceBW, Value: ">= 300"},
+		)
+		constraint, found := findPerformanceConstraint(ctx, checkNameCRENCCLAllReduceBW)
+		if !found {
+			t.Fatal("constraint not found in the test context")
+		}
+		actual, passed, err := validateCRENcclAllReduceBw(ctx, constraint)
+		if err != nil {
+			t.Fatalf("unexpected error = %v", err)
+		}
+		if !passed {
+			t.Error("passed = false, want true: an unqualified combination skips, it does not fail")
+		}
+		if !strings.Contains(actual, "not qualified") {
+			t.Errorf("actual = %q, want a not-qualified skip message", actual)
+		}
+	})
+
+	t.Run("goodput", func(t *testing.T) {
+		ctx := ctxWithCriteriaAndPerfConstraints(
+			recipe.CriteriaServiceEKS,
+			recipe.CriteriaAcceleratorGB200,
+			recipe.Constraint{Name: checkNameCRETrainingGoodput, Value: ">= 0.5"},
+		)
+		err := checkCRETrainingGoodput(ctx)
+		if !validators.IsSkip(err) {
+			t.Fatalf("error = %v, want Skip on an unqualified combination", err)
+		}
+		if !strings.Contains(err.Error(), "not qualified") {
+			t.Errorf("error = %q, want a not-qualified skip message", err)
+		}
+	})
 }
 
 func TestLookupCREQualificationUnqualified(t *testing.T) {
