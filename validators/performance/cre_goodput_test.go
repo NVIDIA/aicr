@@ -99,15 +99,15 @@ func TestCRETerminalConditionSummary(t *testing.T) {
 			want: "Failed",
 		},
 		{
-			name: "nil reason and message",
+			name: "no True condition",
 			obj: &unstructured.Unstructured{Object: map[string]any{
 				"status": map[string]any{
 					"conditions": []any{
-						map[string]any{"type": "Failed", "status": "True", "reason": nil, "message": nil},
+						map[string]any{"type": "Failed", "status": "False"},
 					},
 				},
 			}},
-			want: "Failed",
+			want: "Failed with empty condition reason/message",
 		},
 	}
 	for _, tt := range tests {
