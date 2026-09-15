@@ -3007,9 +3007,7 @@ criteria(service=aks, accelerator=, intent=training, os=ubuntu, platform=slurm):
         platform:
             - accelerator=h100
 criteria(service=aks, accelerator=a100, intent=, os=, platform=):
-    outcome: error
-    strictDimensions:
-        - os
+    outcome: success
 criteria(service=aks, accelerator=a100, intent=, os=, platform=kubeflow):
     outcome: error
     uncovered:
@@ -3040,9 +3038,7 @@ criteria(service=aks, accelerator=a100, intent=training, os=ubuntu, platform=):
 criteria(service=aks, accelerator=a100, intent=training, os=ubuntu, platform=kubeflow):
     outcome: success
 criteria(service=aks, accelerator=h100, intent=, os=, platform=):
-    outcome: error
-    strictDimensions:
-        - os
+    outcome: success
 criteria(service=aks, accelerator=h100, intent=, os=, platform=dynamo):
     outcome: error
     uncovered:
@@ -3384,9 +3380,7 @@ criteria(service=eks, accelerator=, intent=training, os=ubuntu, platform=slurm):
             - accelerator=gb300
             - accelerator=h100
 criteria(service=eks, accelerator=a100, intent=, os=, platform=):
-    outcome: error
-    strictDimensions:
-        - os
+    outcome: success
 criteria(service=eks, accelerator=a100, intent=, os=, platform=kubeflow):
     outcome: error
     uncovered:
@@ -3417,9 +3411,7 @@ criteria(service=eks, accelerator=a100, intent=training, os=ubuntu, platform=):
 criteria(service=eks, accelerator=a100, intent=training, os=ubuntu, platform=kubeflow):
     outcome: success
 criteria(service=eks, accelerator=gb200, intent=, os=, platform=):
-    outcome: error
-    strictDimensions:
-        - os
+    outcome: success
 criteria(service=eks, accelerator=gb200, intent=, os=, platform=dynamo):
     outcome: error
     uncovered:
@@ -3500,9 +3492,7 @@ criteria(service=eks, accelerator=gb200, intent=training, os=ubuntu, platform=ku
 criteria(service=eks, accelerator=gb200, intent=training, os=ubuntu, platform=slurm):
     outcome: success
 criteria(service=eks, accelerator=gb300, intent=, os=, platform=):
-    outcome: error
-    strictDimensions:
-        - os
+    outcome: success
 criteria(service=eks, accelerator=gb300, intent=, os=, platform=dynamo):
     outcome: error
     uncovered:
@@ -3583,9 +3573,7 @@ criteria(service=eks, accelerator=gb300, intent=training, os=ubuntu, platform=ku
 criteria(service=eks, accelerator=gb300, intent=training, os=ubuntu, platform=slurm):
     outcome: success
 criteria(service=eks, accelerator=h100, intent=, os=, platform=):
-    outcome: error
-    strictDimensions:
-        - os
+    outcome: success
 criteria(service=eks, accelerator=h100, intent=, os=, platform=dynamo):
     outcome: error
     uncovered:
@@ -3689,9 +3677,7 @@ criteria(service=eks, accelerator=h100, intent=training, os=ubuntu, platform=kub
 criteria(service=eks, accelerator=h100, intent=training, os=ubuntu, platform=slurm):
     outcome: success
 criteria(service=eks, accelerator=h200, intent=, os=, platform=):
-    outcome: error
-    strictDimensions:
-        - os
+    outcome: success
 criteria(service=eks, accelerator=h200, intent=, os=, platform=kubeflow):
     outcome: error
     uncovered:
@@ -3706,9 +3692,7 @@ criteria(service=eks, accelerator=h200, intent=training, os=, platform=):
 criteria(service=eks, accelerator=h200, intent=training, os=, platform=kubeflow):
     outcome: success
 criteria(service=eks, accelerator=rtx-pro-6000, intent=, os=, platform=):
-    outcome: error
-    strictDimensions:
-        - os
+    outcome: success
 criteria(service=eks, accelerator=rtx-pro-6000, intent=, os=, platform=dynamo):
     outcome: error
     uncovered:
