@@ -213,13 +213,13 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 	// a bare "exit 0", which the chart-ships-no-CRDs branch also satisfies, so
 	// it would have passed with the release gate's skip removed entirely.
 	blocks := map[string]string{
-		"release gate queries helm":               `if ! existing="$(run_bounded helm list --namespace "${NAMESPACE}" \`,
-		"indeterminate state aborts":              "  exit 1\nfi\nRELEASE_EXISTS=true",
-		"absent release checks for retained CRDs": `    | run_bounded kubectl get -f - --ignore-not-found -o name ${KUBECONFIG_FLAG:-} 2>&1)"; then`,
+		"release gate queries helm":               `if ! capture_bounded helm list --namespace "${NAMESPACE}" \`,
+		"indeterminate state aborts":              "  exit 1\nfi\nexisting=",
+		"absent release checks for retained CRDs": `  if ! capture_bounded kubectl get -f "${CRD_MANIFEST}" --ignore-not-found -o name ${KUBECONFIG_FLAG:-}; then`,
 		"only absent release AND no CRDs skips":   `    echo "${RELEASE}: no release and no existing CRDs; helm install creates them."`,
-		"bound uses a real timeout binary":        `  "${TIMEOUT_BIN}" "${CRD_STEP_TIMEOUT}" "$@"`,
+		"bound kills a wedged client":             `  "${TIMEOUT_BIN}" -k 5 "${CRD_STEP_TIMEOUT}" "$@" </dev/null`,
 		"missing timeout fails closed":            "cannot be bounded",
-		"the apply is bounded too":                "| run_bounded kubectl apply --server-side",
+		"the apply is bounded too":                `run_bounded kubectl apply --server-side --force-conflicts ${KUBECONFIG_FLAG:-} -f "${APPLY_MANIFEST}"`,
 	}
 	for name, block := range blocks {
 		if !strings.Contains(got, block) {
@@ -230,7 +230,7 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 
 	// Every helm and kubectl call must go through the wrapper. The apply is the
 	// one originally left out, so absence is checked as well as presence.
-	for _, banned := range []string{"$(helm show crds", "$(helm list", "| kubectl apply"} {
+	for _, banned := range []string{"$(helm show crds", "$(helm list", "$(run_bounded", "| kubectl apply"} {
 		if strings.Contains(got, banned) {
 			t.Errorf("apply-crds.sh runs %q outside run_bounded; an unbounded call hangs "+
 				"the rollout instead of failing it\n%s", banned, got)
@@ -294,7 +294,7 @@ func TestApplyCRDsScript_RejectsInjectedRecipeValues(t *testing.T) {
 	// The script fails closed when no timeout(1) exists, which stock macOS does
 	// not ship. A pass-through keeps this test about quoting, not the bound.
 	if werr := os.WriteFile(filepath.Join(stub, "timeout"),
-		[]byte("#!/usr/bin/env bash\nshift\nexec \"$@\"\n"), 0o755); werr != nil {
+		[]byte("#!/usr/bin/env bash\n[[ \"$1\" == -k ]] && shift 2\nshift\nexec \"$@\"\n"), 0o755); werr != nil {
 		t.Fatalf("write timeout stub: %v", werr)
 	}
 
@@ -525,6 +525,7 @@ func TestApplyCRDsScript_BoundsStalledApply(t *testing.T) {
 		// apply is routed through run_bounded at all, which is platform
 		// independent; HelmFlagsExist covers the real binaries.
 		"timeout": "#!/usr/bin/env bash\n" +
+			"[[ \"$1\" == -k ]] && shift 2\n" +
 			"dur=\"$1\"; shift\n" +
 			"\"$@\" & pid=$!\n" +
 			"( sleep \"$dur\"; kill -9 \"$pid\" 2>/dev/null ) & guard=$!\n" +
@@ -595,7 +596,7 @@ func TestApplyCRDsScript_AppliesRetainedCRDsAfterUninstall(t *testing.T) {
 			"  if [[ \"$a\" == get ]]; then echo customresourcedefinition.apiextensions.k8s.io/things.example.com; exit 0; fi\n" +
 			"  if [[ \"$a\" == apply ]]; then touch " + applied + "; cat >/dev/null; exit 0; fi\n" +
 			"done\nexit 0\n",
-		"timeout": "#!/usr/bin/env bash\nshift\nexec \"$@\"\n",
+		"timeout": "#!/usr/bin/env bash\n[[ \"$1\" == -k ]] && shift 2\nshift\nexec \"$@\"\n",
 	})
 
 	cmd := exec.Command("bash", scriptPath)
@@ -631,7 +632,7 @@ func TestApplyCRDsScript_SkipsOnGenuinelyFreshCluster(t *testing.T) {
 			"for a in \"$@\"; do\n" +
 			"  if [[ \"$a\" == apply ]]; then touch " + applied + "; cat >/dev/null; exit 0; fi\n" +
 			"done\nexit 0\n",
-		"timeout": "#!/usr/bin/env bash\nshift\nexec \"$@\"\n",
+		"timeout": "#!/usr/bin/env bash\n[[ \"$1\" == -k ]] && shift 2\nshift\nexec \"$@\"\n",
 	})
 
 	cmd := exec.Command("bash", scriptPath)
