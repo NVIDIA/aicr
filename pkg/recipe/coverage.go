@@ -457,9 +457,12 @@ func (s *MetadataStore) jointlyCarriesAllStated(criteria *Criteria, applied []st
 //	currently being skipped.
 //
 // Both halves are required. The first is jointlyCarriesAllStated above. The
-// second is what detects the loss: if naming an os would pull in an overlay
-// that is not applied, that overlay's content is being dropped by omission
-// rather than by choice.
+// second is what detects the loss: if naming a strict value would pull in an
+// overlay that jointly carries the full stated combination and that overlay
+// is not applied, that overlay's content is being dropped by omission
+// rather than by choice. A generic carrier that merely matches (e.g.
+// eks-ubuntu matching a service+accelerator probe via its wildcard
+// accelerator) does not count: it is not the recipe for that combination.
 //
 // The demand is for PRESENCE, not for a particular value. validValues is
 // advisory, matching the retired guard's "specify an OS (valid: cos)"
@@ -514,9 +517,22 @@ func (s *MetadataStore) strictDimensionGaps(criteria *Criteria, applied []string
 }
 
 // reachesUnappliedOverlay reports whether resolving probe would pull in any
-// overlay that is not already applied.
+// overlay that is not already applied AND that jointly carries every
+// dimension the probe states.
+//
+// The joint-carry requirement is what keeps generic service+os carriers
+// (e.g. eks-ubuntu, aks-ubuntu for issue #2513) from forcing an os demand
+// onto queries that omit it: such a carrier matches the probe (its
+// unspecified dimensions are wildcards) but is not the recipe for that
+// combination, so its omission is not a loss. An accelerator-qualified os
+// carrier (e.g. the svc-accel-ubuntu shape in
+// TestBuildRecipeResult_JointSufficiency) does jointly carry the probe and
+// still demands the dimension. See #2730.
 func (s *MetadataStore) reachesUnappliedOverlay(probe *Criteria, applied map[string]struct{}) bool {
 	for _, match := range s.FindMatchingOverlays(probe) {
+		if !overlayJointlyCarries(match, probe) {
+			continue
+		}
 		for _, name := range s.inheritanceChainNames(match) {
 			if _, already := applied[name]; !already {
 				return true
@@ -524,6 +540,25 @@ func (s *MetadataStore) reachesUnappliedOverlay(probe *Criteria, applied map[str
 		}
 	}
 	return false
+}
+
+// overlayJointlyCarries reports whether a single overlay's criteria carries
+// every dimension the probe states, with matching values. A generic
+// (any/empty) overlay value does not carry a stated value.
+func overlayJointlyCarries(overlay *RecipeMetadata, probe *Criteria) bool {
+	if overlay == nil || overlay.Spec.Criteria == nil {
+		return false
+	}
+	for _, dim := range coverageDimensions {
+		want := dim.value(probe)
+		if !isSpecifiedCriteriaValue(want) {
+			continue
+		}
+		if dim.value(overlay.Spec.Criteria) != want {
+			return false
+		}
+	}
+	return true
 }
 
 // dimensionValues returns every value the catalog declares for a dimension,
