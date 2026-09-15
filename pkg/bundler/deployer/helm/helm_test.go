@@ -288,6 +288,179 @@ func TestGenerate_DeployScriptExecutable(t *testing.T) {
 	}
 }
 
+// TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged pins the
+// fix for #2135's review follow-up: live cluster state alone (absent
+// DaemonSet + no labeled node) cannot tell "driver is host-managed" apart
+// from "driver is operator-managed but the migration gate hasn't converged
+// yet" — the latter must block the DRA kubelet-plugin restart rather than
+// running it unguarded, or it reproduces the invalid-CDI/ContainerCreating
+// failure (#973). DriverOperatorManaged is derived at bundle time from
+// gpu-operator's/gpu-operator-ocp's effective driver.enabled and threaded
+// into the rendered script, so this only needs to check the generated
+// text — no live cluster required.
+func TestGenerate_DeployScript_DRARestartGatedOnDriverOperatorManaged(t *testing.T) {
+	recipeResult := func() *recipe.RecipeResult {
+		return &recipe.RecipeResult{
+			Kind:       "RecipeResult",
+			APIVersion: "aicr.run/v1alpha2",
+			Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+			Criteria: &recipe.Criteria{
+				Service:     "eks",
+				Accelerator: "h100",
+				Intent:      "training",
+			},
+			ComponentRefs: []recipe.ComponentRef{
+				{
+					Name:      "gpu-operator",
+					Namespace: "gpu-operator",
+					Chart:     "gpu-operator",
+					Version:   "v25.3.3",
+					Source:    "https://helm.ngc.nvidia.com/nvidia",
+				},
+				{
+					Name:      "nvidia-dra-driver-gpu",
+					Namespace: "nvidia-dra-driver",
+					Chart:     "nvidia-dra-driver-gpu",
+					Version:   "0.4.1",
+					Source:    "https://helm.ngc.nvidia.com/nvidia",
+				},
+			},
+			DeploymentOrder: []string{"gpu-operator", "nvidia-dra-driver-gpu"},
+		}
+	}
+
+	tests := []struct {
+		name            string
+		recipeResultOCP bool // when true, uses OCP component names throughout instead of canonical
+		componentValues map[string]map[string]any
+		wantContains    []string
+		wantNotContains []string
+	}{
+		{
+			name: "operator-managed driver blocks restart until gate is observable",
+			componentValues: map[string]map[string]any{
+				"gpu-operator": {
+					"driver": map[string]any{"enabled": true},
+				},
+				"nvidia-dra-driver-gpu": {},
+			},
+			wantContains: []string{
+				`SKIP_RESTART="false"`,
+				`blocking the DRA plugin restart until the driver rollout is detectable`,
+				`SKIP_RESTART=true`,
+				`if [[ -n "${DRA_DS}" && "${SKIP_RESTART}" != "true" ]]; then`,
+				`no nodes labeled nvidia.com/gpu.deploy.driver=true yet; skipping migration wait and DRA restart`,
+				`blocking the DRA plugin restart until the migration completes`,
+			},
+			wantNotContains: []string{
+				`nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"`,
+			},
+		},
+		{
+			name: "host-managed driver still skips the wait without blocking restart",
+			componentValues: map[string]map[string]any{
+				"gpu-operator": {
+					"driver": map[string]any{"enabled": false},
+				},
+				"nvidia-dra-driver-gpu": {},
+			},
+			wantContains: []string{
+				`nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"`,
+				`blocking the DRA plugin restart until the migration completes`,
+			},
+			wantNotContains: []string{
+				`blocking the DRA plugin restart until the driver rollout is detectable`,
+			},
+		},
+		{
+			name:            "OCP DRA component renders its own guard and is gated by gpu-operator-ocp's driver.enabled",
+			recipeResultOCP: true,
+			componentValues: map[string]map[string]any{
+				"gpu-operator-ocp": {
+					"driver": map[string]any{"enabled": true},
+				},
+				"nvidia-dra-driver-gpu-ocp": {},
+			},
+			wantContains: []string{
+				`if [[ "${name}" == "nvidia-dra-driver-gpu-ocp" ]]; then`,
+				`SKIP_RESTART="false"`,
+				`blocking the DRA plugin restart until the driver rollout is detectable`,
+				`SKIP_RESTART=true`,
+				`blocking the DRA plugin restart until the migration completes`,
+			},
+			wantNotContains: []string{
+				`if [[ "${name}" == "nvidia-dra-driver-gpu" ]]; then`,
+				`nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			outputDir := t.TempDir()
+
+			rr := recipeResult()
+			if tt.recipeResultOCP {
+				rr = &recipe.RecipeResult{
+					Kind:       "RecipeResult",
+					APIVersion: "aicr.run/v1alpha2",
+					Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+					Criteria: &recipe.Criteria{
+						Service:     "ocp",
+						Accelerator: "h100",
+						Intent:      "training",
+					},
+					ComponentRefs: []recipe.ComponentRef{
+						{
+							Name:      "gpu-operator-ocp",
+							Namespace: "gpu-operator",
+							Chart:     "gpu-operator",
+							Version:   "",
+							Source:    "",
+						},
+						{
+							Name:      "nvidia-dra-driver-gpu-ocp",
+							Namespace: "nvidia-dra-driver",
+							Chart:     "nvidia-dra-driver-gpu",
+							Version:   "0.4.1",
+							Source:    "https://helm.ngc.nvidia.com/nvidia",
+						},
+					},
+					DeploymentOrder: []string{"gpu-operator-ocp", "nvidia-dra-driver-gpu-ocp"},
+				}
+			}
+
+			g := &Generator{
+				RecipeResult:    rr,
+				ComponentValues: tt.componentValues,
+				Version:         "v1.0.0",
+			}
+
+			if _, err := g.Generate(ctx, outputDir); err != nil {
+				t.Fatalf("Generate failed: %v", err)
+			}
+
+			content, err := os.ReadFile(filepath.Join(outputDir, "deploy.sh"))
+			if err != nil {
+				t.Fatalf("failed to read deploy.sh: %v", err)
+			}
+			script := string(content)
+
+			for _, want := range tt.wantContains {
+				if !strings.Contains(script, want) {
+					t.Errorf("deploy.sh missing %q", want)
+				}
+			}
+			for _, notWant := range tt.wantNotContains {
+				if strings.Contains(script, notWant) {
+					t.Errorf("deploy.sh unexpectedly contains %q", notWant)
+				}
+			}
+		})
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Property tests (helpers and data-shape preservation)
 // ---------------------------------------------------------------------------
