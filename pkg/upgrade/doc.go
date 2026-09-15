@@ -50,6 +50,64 @@
 //	8  no two transitions share a to floor for the same from     checkDistinctBoundaries
 //	9  hooks name a phase and a local manifests/migrations file  checkHooks
 //
+// # Matching
+//
+// Match answers "does this jump need attention?" over two component-to-version
+// tables, and is pure: no filesystem, no cluster, no registry.
+//
+// A record is *crossed* when the source sits below the floor its `to` names and
+// the target reaches it. Crossing is a property of the jump alone; `from` is
+// not consulted, because a record whose `from` excludes the source still
+// describes a boundary the jump flies over, and skipping it there is how a
+// recorded block goes unreported. `from` answers the separate question of
+// whether that record's guidance was authored for this starting point.
+//
+// Verdict selection runs in this order:
+//
+//	1  nothing crossed                              unknown
+//	2  one crossed, from covers the source          that record's verdict
+//	3  another crossed record authored blocked      blocked, stop at its to
+//	4  two or more crossed                          blocked, stop at the lowest
+//	5  one crossed, from does not cover the source  blocked, stop at its to
+//
+// Rule 2 is the only one that attaches a Transition, and it attaches one for
+// every verdict including blocked: that record describes this exact move, so
+// its blocked verdict means "not in one step" and its steps say what to do
+// instead. Rules 3, 4 and 5 leave Transition nil, so no renderer can print one
+// record's steps for a jump that record does not describe. Rule 5 is the
+// outside-every-recorded-origin case, usually below the lowest `from` floor:
+// nothing describes an upgrade from where the operator is, and an opt-in check
+// errs toward safety there. Every blocked result names a StoppedAt, and every
+// result carries a Reason code and an Explanation sentence saying which rule it
+// was and what to do about it.
+//
+// Match takes an already validated Set and does not re-run Validate. Validate
+// is therefore not optional: a record that violates a well-formedness rule
+// still applies and still lends its verdict. A safe record missing its
+// verifiedBy (rule 4) is the case that matters, because it reports safe and
+// passes a strict run, which is exactly the false confidence a wrong safe
+// buys. Only two malformed shapes are inert here, and only because they leave
+// nothing to compare against: ranges that do not parse, and a to naming no
+// floor. Callers that did not build the Set through Load plus Validate own
+// that gap.
+//
+// # Reporting
+//
+// NewReport projects match results into the shape a reader and a CI consumer
+// both see: one row per changed component, each semver distance already
+// rendered as a phrase, and every step list narrowed to the one deployer named.
+// It is a projection rather than an alias because a result points into the Set,
+// and a report has to outlive it. WriteTable renders that report; a blocked row
+// computed from several records, or from none naming the operator's starting
+// point, renders no steps, so its detail block is the Explanation alone.
+//
+// The deployer cannot be inferred. ADR-021 Decision 5 would take it from a `to`
+// bundle, but no bundle artifact records which deployer built it, so
+// RequiresDeployer reports when a caller has to supply one. It is true for a
+// manual row, and for a blocked row that carries a record; the step-less
+// blocked rows do not make it true, because a deployer would name a scope
+// nothing renders.
+//
 // # Read-only contract
 //
 // A Set and everything reachable from it must not be mutated. Consumers share

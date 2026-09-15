@@ -1,0 +1,154 @@
+{
+  "from": "./bundles-v0.16.0",
+  "to": "./bundles-v0.17.0",
+  "deployer": "argocd",
+  "components": [
+    {
+      "component": "alpha-operator",
+      "change": "version",
+      "from": "1.2.0",
+      "to": "1.2.3",
+      "verdict": "safe",
+      "notes": "3 patches, verified, safe across 1 minor",
+      "reason": "recorded",
+      "explanation": "recorded safe: the record covering 1.2.1 describes the move from 1.2.0 to 1.2.3, verified by \"uat: synthetic lane\"",
+      "jump": "3 patches",
+      "covers": "1 minor",
+      "breaking": false,
+      "downgrade": false,
+      "summary": "Patch releases only. No schema or API changes.",
+      "failsRun": false
+    },
+    {
+      "component": "beta-operator",
+      "change": "version",
+      "from": "0.17.2",
+      "to": "0.18.1",
+      "verdict": "manual",
+      "notes": "1 minor, 1 step, manual across 3 minors",
+      "reason": "recorded",
+      "explanation": "recorded manual: the record covering 0.18.0 describes the move from 0.17.2 to 0.18.1. Follow the steps below, then apply",
+      "jump": "1 minor",
+      "covers": "3 minors",
+      "breaking": true,
+      "downgrade": false,
+      "summary": "The legacy API group is renamed. A mirror controller copies existing objects.",
+      "precondition": "No object is mid-rollout and no node is mid-package.",
+      "steps": [
+        {
+          "id": "rename-crs",
+          "description": "In a single commit, remove the legacy manifests and add their replacements.",
+          "reason": "one commit lets the controller prune and adopt in a single sync."
+        }
+      ],
+      "failsRun": true
+    },
+    {
+      "component": "delta-operator",
+      "change": "version",
+      "from": "0.18.0",
+      "to": "0.19.0",
+      "verdict": "unknown",
+      "notes": "1 minor, no record, breaking boundary",
+      "reason": "no-record",
+      "explanation": "no transition record exists for this component, so this move is unassessed",
+      "jump": "1 minor",
+      "breaking": true,
+      "downgrade": false,
+      "failsRun": true
+    },
+    {
+      "component": "epsilon-operator",
+      "change": "version",
+      "from": "main",
+      "to": "release-1",
+      "verdict": "unversioned",
+      "notes": "versions are not comparable",
+      "reason": "not-comparable",
+      "explanation": "version \"main\" is not comparable to \"release-1\"; pin a semver version on both sides",
+      "breaking": false,
+      "downgrade": false,
+      "failsRun": true
+    },
+    {
+      "component": "eta-operator",
+      "change": "removed",
+      "from": "2.4.1",
+      "notes": "stays installed; AICR does not uninstall it",
+      "breaking": false,
+      "downgrade": false,
+      "failsRun": false
+    },
+    {
+      "component": "gamma-operator",
+      "change": "version",
+      "from": "1.0.0",
+      "to": "3.0.0",
+      "verdict": "blocked",
+      "notes": "2 majors, stops at \u003e=2.0.0 \u003c3.0.0",
+      "reason": "multiple-boundaries",
+      "explanation": "crosses 2 recorded boundaries (2.0.0, 3.0.0); no single record describes the whole jump. Upgrade to 2.0.0 first, then re-run this check",
+      "jump": "2 majors",
+      "breaking": true,
+      "downgrade": false,
+      "stoppedAt": "\u003e=2.0.0 \u003c3.0.0",
+      "failsRun": true
+    },
+    {
+      "component": "kappa-operator",
+      "change": "version",
+      "from": "3.2.0",
+      "to": "4.0.0",
+      "verdict": "blocked",
+      "notes": "1 major, stops at \u003e=4.0.0 \u003c=4.0.0, 2 steps",
+      "reason": "recorded",
+      "explanation": "recorded blocked: the record covering 4.0.0 describes the move from 3.2.0 to 4.0.0 and blocks it in one step. Follow the steps below to get there safely",
+      "jump": "1 major",
+      "covers": "1 major",
+      "breaking": true,
+      "downgrade": false,
+      "stoppedAt": "\u003e=4.0.0 \u003c=4.0.0",
+      "summary": "4.0.0 drops in-place conversion; the store has to be exported and reloaded.",
+      "precondition": "No writer is connected to the store.",
+      "steps": [
+        {
+          "id": "export-store",
+          "description": "Export the store with the 3.x tooling before touching the release.",
+          "reason": "4.0.0 cannot read the 3.x on-disk format, and the converter was removed."
+        },
+        {
+          "id": "land-on-3-9-first",
+          "description": "Upgrade to 3.9.x, reload the export there, then move to 4.0.0."
+        }
+      ],
+      "failsRun": true
+    },
+    {
+      "component": "theta-operator",
+      "change": "version",
+      "from": "0.13.0",
+      "to": "0.11.0",
+      "verdict": "unknown",
+      "notes": "downgrade, no reverse record, breaking boundary",
+      "reason": "downgrade",
+      "explanation": "downgrade from 0.13.0 to 0.11.0; records are directional and no reverse record exists",
+      "jump": "2 minors",
+      "breaking": true,
+      "downgrade": true,
+      "failsRun": true
+    },
+    {
+      "component": "zeta-operator",
+      "change": "added",
+      "to": "0.4.0",
+      "notes": "new component, nothing to do",
+      "breaking": false,
+      "downgrade": false,
+      "failsRun": false
+    }
+  ],
+  "summary": {
+    "components": 9,
+    "failing": 6
+  }
+}
