@@ -113,8 +113,10 @@ components:
         tolerationPaths:
           - operator.tolerations
       accelerated:
-        nodeSelectorPaths:
-          - daemonsets.nodeSelector
+        # No nodeSelectorPaths: the gpu-operator chart and ClusterPolicy CRD have no
+        # daemonsets.nodeSelector — operands are placed by the operator's own
+        # GFD/NFD-driven deploy labels. Routing --accelerated-node-selector here was
+        # silently ignored (#2474).
         tolerationPaths:
           - daemonsets.tolerations
     validations:

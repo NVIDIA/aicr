@@ -172,13 +172,12 @@ nodeScheduling:
   system:
     nodeSelectorPaths:
       - operator.nodeSelector
-      - node-feature-discovery.master.nodeSelector
     tolerationPaths:
       - operator.tolerations
   accelerated:
-    nodeSelectorPaths:
-      - daemonsets.nodeSelector
-      - node-feature-discovery.worker.nodeSelector
+    # No nodeSelectorPaths for gpu-operator: its operand DaemonSets have no
+    # chart/CRD nodeSelector field — the operator self-places via its GFD/NFD
+    # deploy labels. Only tolerations are routable here (#2474).
     tolerationPaths:
       - daemonsets.tolerations
 ```

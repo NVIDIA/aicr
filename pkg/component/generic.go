@@ -49,7 +49,7 @@ type ComponentConfig struct {
 	SystemTolerationPaths []string
 
 	// AcceleratedNodeSelectorPaths are Helm value paths for GPU node selectors.
-	// Example: ["daemonsets.nodeSelector"]
+	// Example: ["kubeletPlugin.nodeSelector"] (nvidia-dra-driver-gpu)
 	AcceleratedNodeSelectorPaths []string
 
 	// AcceleratedTolerationPaths are Helm value paths for GPU node tolerations.
