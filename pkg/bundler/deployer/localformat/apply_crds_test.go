@@ -219,7 +219,7 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 		"only absent release AND no CRDs skips":   `    echo "${RELEASE}: no release and no existing CRDs; helm install creates them."`,
 		"bound kills a wedged client":             `  "${TIMEOUT_BIN}" -k 5 "${CRD_STEP_TIMEOUT}" "$@" </dev/null`,
 		"missing timeout fails closed":            "cannot be bounded",
-		"the apply is bounded too":                `run_bounded kubectl apply --server-side --force-conflicts ${KUBECONFIG_FLAG:-} -f "${APPLY_MANIFEST}"`,
+		"the apply is bounded too":                `run_bounded kubectl apply --server-side --force-conflicts ${KUBECONFIG_FLAG:-} -f "${CRD_MANIFEST}"`,
 	}
 	for name, block := range blocks {
 		if !strings.Contains(got, block) {
@@ -230,7 +230,13 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 
 	// Every helm and kubectl call must go through the wrapper. The apply is the
 	// one originally left out, so absence is checked as well as presence.
-	for _, banned := range []string{"$(helm show crds", "$(helm list", "$(run_bounded", "| kubectl apply"} {
+	// The CRD payload is megabytes of OpenAPI schema. A bash global substitution
+	// over a string that size costs minutes, which is how an 8-minute stall got
+	// into the deploy path once already, so it must stay in a file.
+	for _, banned := range []string{
+		"$(helm show crds", "$(helm list", "$(run_bounded", "| kubectl apply",
+		"${crds//", "${retained//",
+	} {
 		if strings.Contains(got, banned) {
 			t.Errorf("apply-crds.sh runs %q outside run_bounded; an unbounded call hangs "+
 				"the rollout instead of failing it\n%s", banned, got)
