@@ -74,12 +74,12 @@ linting:
   # addlicense_1.1.1_..., v1.2.0 publishes addlicense_v1.2.0_... -- so a bump
   # that changes the naming shows up as a refresher failure, not a silent skip.
   addlicense_sha256_linux_amd64: '6924296771234b1ba6c969e109b4459cff75e15b259676b61df874a92734b242'
-  # MDX toolchain for tools/check-docs-mdx-parse (the parser-level docs gate) is
-  # owned by tools/mdx/package.json + package-lock.json, not listed here. The
-  # lockfile freezes the full transitive tree, which a version string cannot;
-  # this gate decides which docs merge, so its verdict must be reproducible.
-  # Renovate updates it natively via the npm manager. Same single-source-of-truth
-  # split as the Go toolchain living in .go-version.
+  # The shared MDX and fenced-YAML documentation parser toolchain is owned by
+  # tools/mdx/package.json + package-lock.json, not listed here. The lockfile
+  # freezes the full transitive tree, which a version string cannot; these gates
+  # decide which docs merge, so their verdicts must be reproducible. Renovate
+  # updates it natively via the npm manager. Same single-source-of-truth split as
+  # the Go toolchain living in .go-version.
 
 # Security Tools
 security_tools:

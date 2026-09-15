@@ -47,7 +47,44 @@ const (
 	// is the shared contract between the in-pod producer and the orchestrator
 	// consumer, and both packages import ctrf.
 	ExtraLinePrefix = "##AICR-EXTRA## "
+
+	// ProvenanceLinePrefix marks a single stdout line as the transport for a
+	// check's RuntimeProvenance record (one JSON object). Same producer/consumer
+	// contract as ExtraLinePrefix; the last valid line wins and every prefixed
+	// line is stripped from Stdout.
+	ProvenanceLinePrefix = "##AICR-PROVENANCE## "
 )
+
+// RuntimeProvenance is the bounded, digest-bound evidence carrier for a
+// benchmark runtime DERIVED from an artifact the recipe ships (#2297). It binds
+// the result to the exact templates compared without shipping them: content
+// identities of the normalized shipped and applied worker PodTemplateSpecs,
+// the paths at which they differ, and the inventory of shipped paths carried
+// into the applied runtime unchanged — an inherited field is equal on both
+// sides and therefore invisible to a diff, so the inventory is what proves the
+// wiring was measured rather than re-injected.
+//
+// Paths are template KEYS (dotted, named-list elements addressed as [name]),
+// never values: no network name, node name, or env value appears. Names the
+// operator authors — list element names, and keys of user-keyed maps such as
+// labels, annotations, nodeSelector and resource limits — are collapsed by
+// pkg/evidence/redact in minimal evidence unless they are on its exact
+// allowlists (the shipped runtime's fabric env names and vendor keys). This
+// is an AICR extension alongside the CTRF `extra` object; it is absent for
+// every result that did not derive a runtime.
+type RuntimeProvenance struct {
+	// ShippedDigest is sha256 (lowercase hex) of the normalized worker template
+	// read from the deployed artifact.
+	ShippedDigest string `json:"shippedDigest"`
+	// DerivedDigest is sha256 (lowercase hex) of the normalized worker template
+	// as applied for the measurement — scheduling stamped.
+	DerivedDigest string `json:"derivedDigest"`
+	// OverriddenPaths are the paths at which the applied template differs from
+	// the shipped one (benchmark-owned overrides plus stamped scheduling).
+	OverriddenPaths []string `json:"overriddenPaths,omitempty"`
+	// InheritedPaths are the shipped template's leaf paths carried unchanged.
+	InheritedPaths []string `json:"inheritedPaths,omitempty"`
+}
 
 // IsFailingStatus reports whether a check or phase status must block progress
 // — i.e., fail a readiness gate or trip cross-phase fail-fast.
@@ -157,15 +194,23 @@ type TestResult struct {
 	// free-form log text stripped by default). It mirrors the CTRF spec's
 	// `extra` object.
 	//
-	// CONTRACT: values MUST be low-cardinality counts or enum codes only —
-	// e.g. "1", "2", "no-schedulable-gpu-nodes", "no-gpu-nodes". NEVER node names, IPs,
-	// hostnames, or any operator-identifying free text; those belong in Stdout,
-	// which is redacted by default. The redact package enforces this at the
+	// CONTRACT: values MUST take one of two low-cardinality shapes — a bare
+	// decimal count ("1", "2") or a closed-set enum code ("no-gpu-nodes",
+	// "delivered-artifact"). NEVER node names, IPs, hostnames, digests of
+	// cluster-specific content, or any operator-identifying free text; those
+	// belong in Stdout, which is redacted by default. The redact package enforces this at the
 	// publication boundary with a fail-closed key AND value allowlist: only
 	// listed keys survive, and only values matching the key's canonical shape
-	// (decimal count / kebab-case enum code) — so an identifier smuggled under
-	// an allowed key is dropped, not published (see pkg/evidence/redact).
+	// (decimal count / member of that key's closed enum set — a kebab-case
+	// regex would still admit an arbitrary identifier) — so an identifier
+	// smuggled under an allowed key is dropped, not published (see
+	// pkg/evidence/redact).
 	Extra map[string]string `json:"extra,omitempty"`
+
+	// RuntimeProvenance binds a derived-runtime measurement to the templates it
+	// compared (see RuntimeProvenance). It survives minimal redaction after the
+	// shape and key-collapsing rules in pkg/evidence/redact; nil otherwise.
+	RuntimeProvenance *RuntimeProvenance `json:"runtimeProvenance,omitempty"`
 }
 
 // Environment describes the execution environment and build context.

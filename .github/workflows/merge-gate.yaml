@@ -251,26 +251,25 @@ jobs:
               - 'Makefile'
               - '.github/workflows/merge-gate.yaml'
             docs:
-              # Inputs to the parser-level MDX gate. Only the Fern-published
-              # trees matter — a change anywhere under them can introduce a
-              # construct that parses as CommonMark but aborts
-              # `fern generate --docs`.
+              # Inputs to the documentation parser gates. MDX parsing follows
+              # the Fern-published page list, while YAML fence parsing covers
+              # every Markdown file under docs/.
               #
-              # docs/index.yml is Fern's navigation manifest AND the source the
-              # checkers derive their file list from, so it is both an input and
-              # a trigger: adding a page there must run the gate over it.
+              # docs/index.yml is Fern's navigation manifest and supplies the
+              # MDX checker's file list, so it is both an input and a trigger:
+              # adding a page there must run the gate over it.
               # docs/README.md is the published landing page — the earlier
               # per-subdirectory globs missed it entirely.
               #
-              # Everything the gate is MADE of is listed too, so a change to the
-              # gate cannot skip its own verification: the two checkers, the page
-              # enumerator, the locked parser toolchain, this workflow, and the
-              # Makefile — whose `check-docs-mdx-parse` target is what the job
-              # actually invokes, matching why the `renovate` and `notices`
-              # filters watch it.
+              # Everything the gates are MADE of is listed too, so a change to
+              # either gate cannot skip its own verification: the checkers, the
+              # page enumerator, the locked parser toolchain, this workflow, and
+              # the Makefile targets the job invokes, matching why the `renovate`
+              # and `notices` filters watch it.
               - 'docs/**'
               - 'tools/check-docs-mdx'
               - 'tools/check-docs-mdx-parse'
+              - 'tools/check-docs-yaml*'
               - 'tools/docs-published-files'
               - 'tools/mdx/**'
               - 'Makefile'
@@ -519,7 +518,8 @@ jobs:
       - run: echo "No Renovate config changes — validation not required"
 
   # ---------------------------------------------------------------------------
-  # MDX docs gate — parses every Fern-published doc with the real MDX parser.
+  # Docs parser gates — parse every Fern-published doc as MDX and every YAML
+  # fence under docs/ as YAML.
   #
   # `fern check` (Fern Docs CI) does not parse MDX, and the job that does
   # (`fern generate --docs --preview`) runs in a workflow_run companion whose
@@ -550,6 +550,8 @@ jobs:
         run: make check-docs-mdx
       - name: Validate docs with the real MDX parser
         run: make check-docs-mdx-parse
+      - name: Validate YAML examples in documentation
+        run: make check-docs-yaml
 
   docs-mdx-skip:
     needs: [check-paths]
@@ -557,7 +559,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 1
     steps:
-      - run: echo "No published-docs changes — MDX parse gate not required"
+      - run: echo "No documentation changes — docs parser gates not required"
 
   # ---------------------------------------------------------------------------
   # BOM version freshness — ensures the committed container-images.md matches
