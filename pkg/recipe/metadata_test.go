@@ -2343,6 +2343,10 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"h100-gke-cos-training-kubeflow", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
 		{"h100-gke-cos-training-slurm", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
 		{"h100-gke-cos-inference-dynamo", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
+		// GB200 GKE COS platform variants (GKE uses COS, no Ubuntu variant)
+		{"gb200-gke-cos-training-kubeflow", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
+		{"gb200-gke-cos-training-slurm", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
+		{"gb200-gke-cos-inference-dynamo", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		// GB200 EKS Ubuntu variants
 		{"gb200-eks-ubuntu-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
 		{"gb200-eks-ubuntu-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},
@@ -2591,44 +2595,61 @@ func TestGB200GKEIncludesRDMA(t *testing.T) {
 	if builder == nil {
 		t.Fatal("NewBuilder() returned nil")
 	}
+	leaves := []struct {
+		label    string
+		intent   CriteriaIntentType
+		platform CriteriaPlatformType // empty for the unspecialized base leaf
+		// wantPerf is explicit per leaf. The Slurm leaf does not declare
+		// nccl-all-reduce-bw-nvls even though its intent is training, so
+		// this cannot be derived from intent alone.
+		wantPerf bool
+	}{
+		{"training", CriteriaIntentTraining, "", true},
+		{"inference", CriteriaIntentInference, "", false},
+		{"training-kubeflow", CriteriaIntentTraining, CriteriaPlatformKubeflow, true},
+		{"training-slurm", CriteriaIntentTraining, CriteriaPlatformSlurm, false},
+		{"inference-dynamo", CriteriaIntentInference, CriteriaPlatformDynamo, false},
+	}
+
 	ctx := context.Background()
-	for _, intent := range []CriteriaIntentType{CriteriaIntentTraining, CriteriaIntentInference} {
+	for _, leaf := range leaves {
 		cr := NewCriteria()
 		cr.Service = CriteriaServiceGKE
 		cr.Accelerator = CriteriaAcceleratorGB200
 		cr.OS = CriteriaOSCOS
-		cr.Intent = intent
+		cr.Intent = leaf.intent
+		cr.Platform = leaf.platform
 		result, err := builder.BuildFromCriteria(ctx, cr)
 		if err != nil {
-			t.Fatalf("BuildFromCriteria(gke/gb200/cos/%s): %v", intent, err)
+			t.Fatalf("BuildFromCriteria(gke/gb200/cos/%s): %v", leaf.label, err)
 		}
 		if result.GetComponentRef("gke-gb200-rdma") == nil {
-			t.Errorf("gke-gb200-rdma missing from resolved gke/gb200/cos/%s recipe", intent)
+			t.Errorf("gke-gb200-rdma missing from resolved gke/gb200/cos/%s recipe", leaf.label)
 		}
 		gpuOp := result.GetComponentRef("gpu-operator")
 		if gpuOp == nil {
-			t.Fatalf("gpu-operator missing from resolved gke/gb200/cos/%s recipe", intent)
+			t.Fatalf("gpu-operator missing from resolved gke/gb200/cos/%s recipe", leaf.label)
 		}
 		km, ok := gpuOp.Overrides["driver"].(map[string]any)
 		if !ok {
-			t.Errorf("gpu-operator.driver override missing for gke/gb200/cos/%s", intent)
+			t.Errorf("gpu-operator.driver override missing for gke/gb200/cos/%s", leaf.label)
 			continue
 		}
 		cfg, ok := km["kernelModuleConfig"].(map[string]any)
 		if !ok || cfg["name"] != "nvidia-kernel-module-params" {
-			t.Errorf("kernelModuleConfig.name = %v, want nvidia-kernel-module-params for gke/gb200/cos/%s", km["kernelModuleConfig"], intent)
+			t.Errorf("kernelModuleConfig.name = %v, want nvidia-kernel-module-params for gke/gb200/cos/%s", km["kernelModuleConfig"], leaf.label)
 		}
 		checkPresent := performanceCheckPresent(result.Validation, "nccl-all-reduce-bw-nvls")
 		floor, floorFound := findPerformanceConstraint(result.Validation, "nccl-all-reduce-bw-nvls")
-		if intent == CriteriaIntentTraining {
+		if leaf.wantPerf {
 			if !checkPresent {
-				t.Errorf("performance check nccl-all-reduce-bw-nvls missing for gke/gb200/cos/training")
+				t.Errorf("performance check nccl-all-reduce-bw-nvls missing for gke/gb200/cos/%s", leaf.label)
 			}
 			if !floorFound || floor != ">= 250" {
-				t.Errorf("nccl-all-reduce-bw-nvls = %q found=%v, want >= 250 for gke/gb200/cos/training", floor, floorFound)
+				t.Errorf("nccl-all-reduce-bw-nvls = %q found=%v, want >= 250 for gke/gb200/cos/%s", floor, floorFound, leaf.label)
 			}
 		} else if checkPresent || floorFound {
-			t.Errorf("inference must not declare NCCL performance; check=%v floor=%q", checkPresent, floor)
+			t.Errorf("gke/gb200/cos/%s must not declare NCCL performance; check=%v floor=%q", leaf.label, checkPresent, floor)
 		}
 	}
 }
