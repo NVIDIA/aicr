@@ -175,14 +175,18 @@ operator-facing [Upgrade Notes](../user/component-catalog.md#upgrade-notes)
 entry if one exists. A reader who needs the full story should get a link, not a
 wall of transcribed text that drifts out of date.
 
+Good, because it names the breakage and its mechanism:
+
 ```yaml
-# Good: names the breakage and its mechanism.
 summary: >-
   alpha.12 drops the clustertopologies.grove.io CRD in favor of
   clustertopologybindings.grove.io, which reuses the shortname ct, so applying
   the new CRD before deleting the old one blocks it from reaching Established.
+```
 
-# Bad: a release note. None of this tells the operator what to do.
+Bad, because it is a release note. None of it tells the operator what to do:
+
+```yaml
 summary: >-
   alpha.12 adds scheduling improvements, updates dependencies, fixes a
   goroutine leak in the reconciler, and drops an unused CRD.

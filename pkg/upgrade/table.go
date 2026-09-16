@@ -66,13 +66,13 @@ func WriteTable(w io.Writer, r *Report) error {
 	ew := &errWriter{w: w}
 	ew.println("UPGRADE CHECK")
 	if r.From != "" {
-		ew.printf("  from      %s\n", r.From)
+		ew.printf("  from      %s\n", safe(r.From))
 	}
 	if r.To != "" {
-		ew.printf("  to        %s\n", r.To)
+		ew.printf("  to        %s\n", safe(r.To))
 	}
 	if r.Deployer != "" {
-		ew.printf("  deployer  %s\n", r.Deployer)
+		ew.printf("  deployer  %s\n", safe(r.Deployer))
 	}
 	ew.println("")
 
@@ -107,8 +107,10 @@ func writeRows(w io.Writer, rows []ReportComponent) error {
 	ew.println("COMPONENT\tFROM\tTO\tVERDICT\tNOTES")
 	ew.println("---------\t----\t--\t-------\t-----")
 	for _, c := range rows {
+		// Component and Notes go through safe() too: every field in this row
+		// is artifact-derived, and one unescaped cell is enough to forge a row.
 		ew.printf("%s\t%s\t%s\t%s\t%s\n",
-			c.Component, cell(c.From), cell(c.To), cell(string(c.Verdict)), c.Notes)
+			safe(c.Component), cell(c.From), cell(c.To), cell(string(c.Verdict)), safe(c.Notes))
 	}
 	if ew.err != nil {
 		return wrapTableErr(ew.err)
@@ -152,7 +154,7 @@ func writeDetail(ew *errWriter, c *ReportComponent, deployer string) error {
 	}
 
 	ew.println("")
-	ew.printf("  STEPS (deployer: %s)\n", deployer)
+	ew.printf("  STEPS (deployer: %s)\n", safe(deployer))
 	if len(c.Steps) == 0 {
 		writeParagraph(ew, "    ", fmt.Sprintf(
 			"This record declares no steps for deployer %q. Its verdict says operator action is "+
@@ -160,7 +162,7 @@ func writeDetail(ew *errWriter, c *ReportComponent, deployer string) error {
 		return wrapTableErr(ew.err)
 	}
 	for i, s := range c.Steps {
-		ew.printf("    %d. %s\n", i+1, s.ID)
+		ew.printf("    %d. %s\n", i+1, safe(s.ID))
 		writeParagraph(ew, "       ", s.Description)
 		if s.Reason != "" {
 			writeParagraph(ew, "       ", "Why: "+s.Reason)
@@ -173,15 +175,17 @@ func writeDetail(ew *errWriter, c *ReportComponent, deployer string) error {
 // replacement joins two components rather than two versions of one.
 func heading(c *ReportComponent) string {
 	if c.Change == ChangeReplaced {
-		return fmt.Sprintf("%s replaces %s", c.Component, c.From)
+		return fmt.Sprintf("%s replaces %s", safe(c.Component), safe(c.From))
 	}
-	return fmt.Sprintf("%s %s -> %s", c.Component, c.From, c.To)
+	return fmt.Sprintf("%s %s -> %s", safe(c.Component), safe(c.From), safe(c.To))
 }
 
 // writeParagraph emits record prose at a fixed indent, wrapped to a width a
 // standard terminal shows without folding.
 func writeParagraph(ew *errWriter, indent, text string) {
-	for _, line := range wrapText(text, reportWrapWidth-len(indent)) {
+	// Every caller passes record prose: summary, precondition, explanation, a
+	// step description or its reason. Escaping at this one point covers them all.
+	for _, line := range wrapText(safe(text), reportWrapWidth-len(indent)) {
 		ew.println(indent + line)
 	}
 }
@@ -213,11 +217,48 @@ func wrapText(text string, width int) []string {
 	return append(lines, line)
 }
 
+// safe renders artifact-derived text for a terminal. Component names, versions
+// and artifact paths all come from a recipe or bundle the operator did not
+// necessarily write, and the table is the surface they read a verdict off, so a
+// crafted value carrying newlines or an ANSI sequence could forge a row or
+// recolor one. Control characters are shown rather than executed.
+//
+// Only the table does this. JSON output stays faithful because encoding/json
+// already escapes these bytes, and a consumer parsing it is not a terminal.
+func safe(s string) string {
+	if strings.IndexFunc(s, isControl) < 0 {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 8)
+	for _, r := range s {
+		switch {
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case isControl(r):
+			fmt.Fprintf(&b, `\x%02x`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// isControl reports whether r is a C0 or C1 control character, or DEL. ESC
+// (0x1b) is the one that matters most: it opens every ANSI sequence.
+func isControl(r rune) bool {
+	return r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f)
+}
+
 func cell(s string) string {
 	if s == "" {
 		return "-"
 	}
-	return s
+	return safe(s)
 }
 
 func wrapTableErr(err error) error {

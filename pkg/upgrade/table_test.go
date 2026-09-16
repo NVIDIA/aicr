@@ -21,6 +21,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -315,4 +316,106 @@ type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) {
 	return 0, stderrors.New("synthetic write failure")
+}
+
+// TestWriteTableEscapesArtifactControlCharacters pins that no artifact-derived
+// field can emit a control byte into the table.
+//
+// Component names, versions and artifact paths come from a recipe or bundle the
+// operator did not necessarily write, and the table is the surface they read a
+// verdict off. Before this escaping, a crafted component name carrying a newline
+// and an ANSI color sequence rendered as an extra row reading "safe", which is
+// exactly the false confidence the verdicts exist to prevent.
+func TestWriteTableEscapesArtifactControlCharacters(t *testing.T) {
+	t.Parallel()
+
+	forged := "grove\n\x1b[32mgpu-operator  v1.0.0  v2.0.0  safe      forged\x1b[0m"
+	results := []ComponentResult{{
+		Component:   forged,
+		Change:      ChangeVersion,
+		From:        "1.0.0\tspoof",
+		To:          "2.0.0\r",
+		Verdict:     VerdictUnknown,
+		Reason:      ReasonNoRecord,
+		Explanation: "prose\x1b[31m with \x07 bell",
+	}}
+	report := NewReport(results, ReportOptions{
+		From: "from\nFORGED HEADER", To: "to\x1b[1m", Deployer: "helm",
+	})
+
+	var sb strings.Builder
+	if err := WriteTable(&sb, report); err != nil {
+		t.Fatalf("WriteTable() error = %v", err)
+	}
+	got := sb.String()
+
+	for _, bad := range []struct{ name, seq string }{
+		{"ESC", "\x1b"},
+		{"carriage return", "\r"},
+		{"bell", "\x07"},
+	} {
+		if strings.Contains(got, bad.seq) {
+			t.Errorf("%s survived into table output:\n%s", bad.name, got)
+		}
+	}
+	// The injected newline must not start a line of its own.
+	if strings.Contains(got, "\nFORGED HEADER") {
+		t.Errorf("an injected newline forged a header line:\n%s", got)
+	}
+	for _, want := range []string{`\n`, `\t`, `\r`, `\x1b`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("control character not rendered visibly as %q:\n%s", want, got)
+		}
+	}
+	// The real verdict still reads correctly beside the inert text.
+	if !strings.Contains(got, "unknown") {
+		t.Errorf("the true verdict is missing:\n%s", got)
+	}
+}
+
+// TestWriteTableEscapesDetailBlock covers the prose path the row test cannot:
+// writeDetail renders only for manual and blocked verdicts.
+func TestWriteTableEscapesDetailBlock(t *testing.T) {
+	t.Parallel()
+
+	results := []ComponentResult{{
+		Component: "comp", Change: ChangeVersion, From: "1.0.0", To: "2.0.0",
+		Verdict: VerdictManual, Reason: ReasonRecorded,
+		Explanation: "why\x07 bell",
+		Transition: &Transition{
+			Verdict:      VerdictManual,
+			Summary:      "summary\x1b[31m red",
+			Precondition: "pre\r\nline",
+			StepsByDeployer: []StepGroup{{
+				Steps: []Step{{
+					ID:          "step\x1b[1m",
+					Description: "do\nthis",
+					Reason:      "because\x00nul",
+				}},
+			}},
+		},
+	}}
+	report := NewReport(results, ReportOptions{From: "f", To: "t", Deployer: "helm"})
+
+	var sb strings.Builder
+	if err := WriteTable(&sb, report); err != nil {
+		t.Fatalf("WriteTable() error = %v", err)
+	}
+	got := sb.String()
+
+	for _, bad := range []struct{ name, seq string }{
+		{"ESC", "\x1b"},
+		{"carriage return", "\r"},
+		{"bell", "\x07"},
+		{"NUL", "\x00"},
+	} {
+		if strings.Contains(got, bad.seq) {
+			t.Errorf("%s survived into the detail block:\n%s", bad.name, got)
+		}
+	}
+	for _, want := range []string{`\x07`, `\x1b`, `\x00`, `\r`, `\n`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("control character not rendered visibly as %q:\n%s", want, got)
+		}
+	}
 }
