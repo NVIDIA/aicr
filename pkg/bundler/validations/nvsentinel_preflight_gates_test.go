@@ -27,10 +27,27 @@ func preflightOn(gangGroup string) map[string]any {
 	return preflightOnWithAddr(gangGroup, "nvidia-dcgm.gpu-operator.svc:5555")
 }
 
+// preflightOnWithoutDCGMCheck turns preflight on with an explicit
+// initContainers list that omits preflight-dcgm-diag. Unlike an absent list --
+// which Helm fills with the chart's own default, DCGM check included -- this is
+// the only way to genuinely opt out of the DCGM check.
+func preflightOnWithoutDCGMCheck() map[string]any {
+	return map[string]any{
+		"global": map[string]any{"preflight": map[string]any{"enabled": true}},
+		"preflight": map[string]any{
+			"initContainers": []any{
+				map[string]any{"name": "preflight-nccl-loopback"},
+			},
+		},
+	}
+}
+
 // preflightOnWithAddr is preflightOn with an explicit DCGM_HOSTENGINE_ADDR, so
 // the DCGM gate can be exercised against a retargeted or malformed address the
 // way a leaf override or --set-json would produce one. addr == "" omits the
-// initContainers list entirely (no DCGM check configured).
+// initContainers list entirely, which leaves the chart's own default list in
+// force -- so the DCGM check still runs, against the chart-default endpoint.
+// preflightOnWithoutDCGMCheck is the genuine opt-out.
 func preflightOnWithAddr(gangGroup, addr string) map[string]any {
 	preflight := map[string]any{}
 	if gangGroup != "" {
@@ -116,6 +133,40 @@ func TestCheckNVSentinelPreflightGangSchedulerRequired(t *testing.T) {
 		{
 			name:         "preflight on, gang coordination off -> skipped",
 			recipeResult: result(sentinel(preflightOn(""))),
+		},
+		{
+			// The chart ships gangCoordination.enabled: true, so omitting the key
+			// leaves coordination ON. Reading absence as off would skip the
+			// kai-scheduler requirement for values that still build a KAI
+			// discoverer -- the controller then crash-loops on the missing
+			// PodGroup GVR while failurePolicy: Ignore admits pods unchecked.
+			name: "KAI GVR with gangCoordination unset -> chart default on, kai absent -> blocked",
+			recipeResult: result(sentinel(map[string]any{
+				"global": map[string]any{"preflight": map[string]any{"enabled": true}},
+				"preflight": map[string]any{
+					"gangDiscovery": map[string]any{
+						"podGroupGVR": map[string]any{
+							"group": "scheduling.run.ai", "version": "v2alpha2", "resource": "podgroups",
+						},
+					},
+				},
+			})),
+			wantBlocked: true,
+		},
+		{
+			// Only an explicit false disables it.
+			name: "KAI GVR with gangCoordination explicitly false -> skipped",
+			recipeResult: result(sentinel(map[string]any{
+				"global": map[string]any{"preflight": map[string]any{"enabled": true}},
+				"preflight": map[string]any{
+					"gangCoordination": map[string]any{"enabled": false},
+					"gangDiscovery": map[string]any{
+						"podGroupGVR": map[string]any{
+							"group": "scheduling.run.ai", "version": "v2alpha2", "resource": "podgroups",
+						},
+					},
+				},
+			})),
 		},
 		{
 			name:         "preflight on with a non-KAI scheduler GVR -> skipped",
@@ -398,10 +449,58 @@ func TestCheckNVSentinelPreflightDCGMReachable(t *testing.T) {
 			),
 		},
 		{
-			name: "no DCGM init container configured -> skipped",
+			// Helm replaces lists wholesale, so an unset preflight.initContainers
+			// ships the chart's own list -- DCGM check included, pointed at
+			// nvidia-dcgm.gpu-operator.svc:5555. Skipping here would pass a
+			// bundle whose opted-in GPU pods strand on a hostengine that the
+			// disabled dcgm never starts.
+			name: "initContainers unset -> chart default DCGM check validated, dcgm disabled -> blocked",
 			recipeResult: result(
 				sentinel(preflightOnWithAddr("", "")),
 				gpuOperatorWith("gpu-operator", dcgmEnabled(false)),
+			),
+			wantBlocked: true,
+		},
+		{
+			name: "initContainers unset, dcgm enabled -> chart default reaches it",
+			recipeResult: result(
+				sentinel(preflightOnWithAddr("", "")),
+				gpuOperatorWith("gpu-operator", dcgmEnabled(true)),
+			),
+		},
+		{
+			// The only genuine opt-out: an explicit list without the check.
+			name: "explicit initContainers without the DCGM check -> skipped",
+			recipeResult: result(
+				sentinel(preflightOnWithoutDCGMCheck()),
+				gpuOperatorWith("gpu-operator", dcgmEnabled(false)),
+			),
+		},
+		{
+			// The right Service on a port it does not serve: every later check
+			// passes, so without this the bundle ships and every opted-in GPU
+			// pod fails to reach DCGM.
+			name: "GPU Operator DCGM Service on the wrong port -> blocked",
+			recipeResult: result(
+				sentinel(preflightOnWithAddr("", "nvidia-dcgm.gpu-operator.svc:5556")),
+				gpuOperatorWith("gpu-operator", dcgmEnabled(true)),
+			),
+			wantBlocked: true,
+		},
+		{
+			name: "GPU Operator DCGM Service on the right port -> allowed",
+			recipeResult: result(
+				sentinel(preflightOnWithAddr("", "nvidia-dcgm.gpu-operator.svc:5555")),
+				gpuOperatorWith("gpu-operator", dcgmEnabled(true)),
+			),
+		},
+		{
+			// An omitted port leaves the default to the DCGM client, which this
+			// gate cannot determine -- so it is not rejected.
+			name: "GPU Operator DCGM Service with no port -> allowed",
+			recipeResult: result(
+				sentinel(preflightOnWithAddr("", "nvidia-dcgm.gpu-operator.svc")),
+				gpuOperatorWith("gpu-operator", dcgmEnabled(true)),
 			),
 		},
 		{
@@ -433,9 +532,11 @@ func TestCheckNVSentinelPreflightDCGMReachable(t *testing.T) {
 		{
 			// No DCGM check is configured, so there is no gpu-operator
 			// dependency to protect -- guarding its paths here would reject a
-			// legitimate recipe for a value this gate never reads.
+			// legitimate recipe for a value this gate never reads. An explicit
+			// list is required: an absent one means the chart default runs, and
+			// that does depend on gpu-operator.
 			name:         "no DCGM check configured, --dynamic on gpu-operator dcgm.enabled -> skipped",
-			recipeResult: result(sentinel(preflightOnWithAddr("", "")), gpuOperatorWith("gpu-operator", dcgmEnabled(true))),
+			recipeResult: result(sentinel(preflightOnWithoutDCGMCheck()), gpuOperatorWith("gpu-operator", dcgmEnabled(true))),
 			bundlerConfig: config.NewConfig(config.WithDynamicValues(map[string][]string{
 				"gpuoperator": {"dcgm.enabled"},
 			})),

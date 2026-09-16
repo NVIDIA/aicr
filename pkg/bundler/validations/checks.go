@@ -2279,12 +2279,13 @@ func nvsentinelPreflightGangTarget(values map[string]any) (target preflightGangT
 	if !ok {
 		return gangTargetNone, "", ""
 	}
-	coordination, ok := preflight["gangCoordination"].(map[string]any)
-	if !ok {
-		return gangTargetNone, "", ""
-	}
-	if raw, present := coordination["enabled"]; !present || !helmTruthy(raw) {
-		return gangTargetNone, "", ""
+	// The chart ships gangCoordination.enabled: true, so only an explicit false
+	// turns coordination off. Treating an absent key as off would skip the
+	// kai-scheduler requirement for values that still build a KAI discoverer.
+	if coordination, isMap := preflight["gangCoordination"].(map[string]any); isMap {
+		if raw, present := coordination["enabled"]; present && !helmTruthy(raw) {
+			return gangTargetNone, "", ""
+		}
 	}
 	discovery, ok := preflight["gangDiscovery"].(map[string]any)
 	if !ok {
@@ -2316,6 +2317,13 @@ const preflightEnabledPath = "global.preflight.enabled"
 // decides which hostengine the check talks to.
 const preflightDCGMDiagContainer = "preflight-dcgm-diag"
 
+// chartDefaultDCGMHostengineAddr is the DCGM_HOSTENGINE_ADDR the preflight
+// subchart ships on preflight-dcgm-diag. Helm replaces lists wholesale, so an
+// unset preflight.initContainers means the chart's own list runs -- the check
+// is injected and points here. Treating that as "no check configured" would
+// skip validation for exactly the configurations this gate exists to reject.
+const chartDefaultDCGMHostengineAddr = "nvidia-dcgm.gpu-operator.svc:5555"
+
 // preflightConfiguredDCGMAddr returns the DCGM_HOSTENGINE_ADDR configured on
 // the preflight-dcgm-diag init container in the resolved values.
 //
@@ -2326,11 +2334,11 @@ const preflightDCGMDiagContainer = "preflight-dcgm-diag"
 func preflightConfiguredDCGMAddr(values map[string]any) (addr string, found bool, problem string) {
 	preflight, ok := values["preflight"].(map[string]any)
 	if !ok {
-		return "", false, ""
+		return chartDefaultDCGMHostengineAddr, true, ""
 	}
 	raw, present := preflight["initContainers"]
 	if !present {
-		return "", false, ""
+		return chartDefaultDCGMHostengineAddr, true, ""
 	}
 	list, ok := raw.([]any)
 	if !ok {
@@ -2381,24 +2389,30 @@ func preflightConfiguredDCGMAddr(values map[string]any) (addr string, found bool
 // else's hostengine and nothing about gpu-operator constrains it.
 const gpuOperatorDCGMService = "nvidia-dcgm"
 
+// gpuOperatorDCGMPort is the port the GPU Operator's nvidia-dcgm Service
+// listens on. It comes from that operator's own Service spec, not from
+// anything AICR sets, so a different port on that Service name reaches nothing.
+const gpuOperatorDCGMPort = "5555"
+
 // clusterLocalServiceRef splits a cluster-local Service address
-// (service.namespace.svc[.cluster.local][:port]) into its Service and
-// namespace. ok=false means the address is not of that form -- an external host
+// (service.namespace.svc[.cluster.local][:port]) into its Service, namespace
+// and port. ok=false means the address is not of that form -- an external host
 // or IP, which this gate cannot reason about and deliberately leaves alone.
 //
-// Both halves are returned because the namespace alone is not enough to
-// identify the GPU Operator's hostengine: custom-hostengine.gpu-operator.svc
-// sits in that namespace without being its Service.
-func clusterLocalServiceRef(addr string) (service, namespace string, ok bool) {
+// All three parts are returned because none alone identifies the GPU Operator's
+// hostengine: custom-hostengine.gpu-operator.svc sits in that namespace without
+// being its Service, and nvidia-dcgm.gpu-operator.svc:5556 names the right
+// Service on a port it does not serve. port is "" when the address omits one.
+func clusterLocalServiceRef(addr string) (service, namespace, port string, ok bool) {
 	host := addr
 	if idx := strings.LastIndex(host, ":"); idx != -1 {
-		host = host[:idx]
+		host, port = host[:idx], host[idx+1:]
 	}
 	parts := strings.Split(host, ".")
 	if len(parts) < 3 || parts[2] != "svc" {
-		return "", "", false
+		return "", "", "", false
 	}
-	return parts[0], parts[1], true
+	return parts[0], parts[1], port, true
 }
 
 // CheckNVSentinelPreflightDCGMReachable rejects a bundle whose preflight DCGM
@@ -2501,7 +2515,7 @@ func CheckNVSentinelPreflightDCGMReachable(ctx context.Context, componentName st
 
 	// Only a cluster-local Service address can be checked from here. An
 	// external host or IP is a deliberate choice this gate cannot verify.
-	service, namespace, isClusterLocal := clusterLocalServiceRef(dcgmAddr)
+	service, namespace, port, isClusterLocal := clusterLocalServiceRef(dcgmAddr)
 	if !isClusterLocal {
 		return nil, nil
 	}
@@ -2510,6 +2524,14 @@ func CheckNVSentinelPreflightDCGMReachable(ctx context.Context, componentName st
 	// or runs dcgm.enabled says nothing about whether it resolves.
 	if service != gpuOperatorDCGMService {
 		return nil, nil
+	}
+	// A wrong port on the right Service reaches nothing, and every check below
+	// would otherwise pass. Only an explicitly stated port is rejected: an
+	// address that omits one leaves the default to the DCGM client, which is
+	// not something this gate can determine.
+	if port != "" && port != gpuOperatorDCGMPort {
+		return fail(fmt.Sprintf("it names port %q but the GPU Operator's %s Service listens on %s",
+			port, gpuOperatorDCGMService, gpuOperatorDCGMPort))
 	}
 
 	gpuOperator := unionView.GetComponentRef("gpu-operator")
