@@ -408,3 +408,51 @@ func TestVerifyCriteriaCoverage(t *testing.T) {
 		}
 	})
 }
+
+func TestStrictGapGenericOSCarrier(t *testing.T) {
+	tests := []struct {
+		name         string
+		overlays     []*RecipeMetadata
+		criteria     *Criteria
+		applied      []string
+		wantErr      bool
+		wantContains string
+	}{
+		{
+			name: "generic service+os carrier does not force os onto service+accelerator",
+			overlays: []*RecipeMetadata{
+				covOverlay("eks", &Criteria{Service: CriteriaServiceEKS}, ""),
+				covOverlay("h100-any", &Criteria{Accelerator: CriteriaAcceleratorH100}, ""),
+				covOverlay("eks-ubuntu", &Criteria{Service: CriteriaServiceEKS, OS: CriteriaOSUbuntu}, ""),
+			},
+			criteria: &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100},
+			applied:  []string{baseRecipeName, "eks", "h100-any"},
+			wantErr:  false,
+		},
+		{
+			name: "accelerator-qualified os carrier still demands os",
+			overlays: []*RecipeMetadata{
+				covOverlay("eks", &Criteria{Service: CriteriaServiceEKS}, ""),
+				covOverlay("h100-any", &Criteria{Accelerator: CriteriaAcceleratorH100}, ""),
+				covOverlay("eks-h100-ubuntu", &Criteria{Service: CriteriaServiceEKS,
+					Accelerator: CriteriaAcceleratorH100, OS: CriteriaOSUbuntu}, ""),
+			},
+			criteria:     &Criteria{Service: CriteriaServiceEKS, Accelerator: CriteriaAcceleratorH100},
+			applied:      []string{baseRecipeName, "eks", "h100-any"},
+			wantErr:      true,
+			wantContains: "specify os",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := covStore(t, tt.overlays...)
+			err := store.verifyCriteriaCoverage(tt.criteria, tt.applied, nil, nil)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), tt.wantContains) {
+				t.Errorf("message %q missing %q", err.Error(), tt.wantContains)
+			}
+		})
+	}
+}
