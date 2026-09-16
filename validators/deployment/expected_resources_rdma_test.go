@@ -204,13 +204,15 @@ func TestVerifyRDMAFabricReady_Poll(t *testing.T) {
 }
 
 // TestVerifyRDMAFabricReady_EagerDisclosureFloor locks the every-terminal-outcome
-// coverage contract against the mid-poll SIGKILL race: the catalog timeout feeds
-// both the Job's activeDeadlineSeconds and this poll's budget with no margin, so
-// a never-ready poll can be killed at the deadline before the terminal emit runs.
-// The eager floor must have already emitted the structured coverage — including
-// the cordoned node that narrowed the cohort — on the first observation, with
-// validated=0 (nothing is certified mid-poll). parseExtraSentinels keeps the last
-// valid sentinel, so on a clean exit the terminal emit overwrites the floor.
+// coverage contract for the case where the process is killed before reaching
+// the terminal emit: the eager floor must have already emitted the structured
+// coverage — including the cordoned node that narrowed the cohort — on the
+// first observation, with validated=0 (nothing is certified mid-poll). This
+// guards the narrower gap left once defaults.ValidatorJobDeadlineHeadroom gave
+// the Job's activeDeadlineSeconds margin over this poll's catalog-timeout-bound
+// budget (a probe call blocking past its own cancellation, not a deadline
+// race). parseExtraSentinels keeps the last valid sentinel, so on a clean exit
+// the terminal emit overwrites the floor.
 func TestVerifyRDMAFabricReady_EagerDisclosureFloor(t *testing.T) {
 	t.Parallel()
 
