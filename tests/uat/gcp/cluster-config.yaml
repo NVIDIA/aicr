@@ -87,21 +87,22 @@ compute:
             dedicated: system-workload
 
       workers:
-        - name: cpu-worker
-          machineType: n2-standard-8
-          diskType: pd-ssd
-          diskSizeGb: 200
-          zones:
-            - us-central1-c
-          autoscaling:
-            enabled: true
-            minNodes: 1
-            maxNodes: 1
-          nodeConfig:
-            labels:
-              nodeGroup: cpu-worker
-              dedicated: user-workload
-
+        # No general-purpose CPU pool. Nothing in the GCP UAT lane selects one:
+        # system components go to nodeGroup=system-worker and every accelerated
+        # workload to nodeGroup=gpu-worker, while the validator's orchestrator
+        # Jobs only *prefer* non-GPU nodes, so the untainted system pool serves
+        # them. A pool pinned to the GPU zone to satisfy nothing cost a run:
+        # `minNodes: 1` in us-central1-c hit ZONE_RESOURCE_POOL_EXHAUSTED for 35m
+        # and failed Bringup *after* the H100s were reserved, so the teardown
+        # discarded them (#2764). Re-adding one is not a matter of unpinning:
+        # GKE applies node counts PER ZONE, so a zone-less pool on this regional
+        # cluster provisions one node in each of us-central1-b/c/f. A
+        # stockout-tolerant pool needs region-wide counts, and those need an
+        # actuator change first: v0.5.17 passes `totalMinNodes`/`totalMaxNodes`
+        # through, but emits `min_node_count`/`max_node_count` unconditionally
+        # (defaulting to 1 and 3), and the provider rejects per-zone and total
+        # limits together. The gpu-worker pin below must stay regardless — the
+        # reservation is zonal.
         - name: gpu-worker
           machineType: a3-megagpu-8g
           diskType: pd-ssd

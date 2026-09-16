@@ -228,7 +228,7 @@ kos:
     # aicr CLI/agent is pure Go and discovers the GPU SKU driver-free via
     # NFD/PCI, so it no longer needs nvidia-smi or the CUDA base image (and its
     # CVE surface).
-    base_image: nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
+    base_image: nvcr.io/nvidia/distroless/static:v4.1.3@sha256:ec947edce045116008a8aeab38c5da643fbf110990b133bad200dbf5e4b6e296
     # Pinned because ko has no user default of its own — left unset, the image
     # runs as whatever the base declares, which here is nvs (UID 1000). A
     # username cannot satisfy a runAsNonRoot admission check, which has no way
@@ -251,11 +251,12 @@ kos:
     repositories:
       - ghcr.io/nvidia/aicrd
     # NVIDIA's static distroless base and pinned user, same rationale as aicr
-    # above. This base also declares WorkingDir=/app without shipping an /app
-    # directory, which ko copies through verbatim and offers no option to
-    # override; runtimes that refuse to create a missing working directory
-    # (Cloud Run, Knative) cannot start the image. Tracked in #2652.
-    base_image: nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
+    # above. The base declares WorkingDir=/app and ko copies it through verbatim
+    # with no option to override, so this pin must stay at v4.1.3 or later: that
+    # is the first tag shipping an /app directory. On anything older, runtimes
+    # that refuse to create a missing working directory (Cloud Run, Knative)
+    # cannot start the image (#2652).
+    base_image: nvcr.io/nvidia/distroless/static:v4.1.3@sha256:ec947edce045116008a8aeab38c5da643fbf110990b133bad200dbf5e4b6e296
     user: "65532"
     platforms:
       - linux/amd64

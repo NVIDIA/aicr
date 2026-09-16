@@ -12,18 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Weekly live-render check for the nvsentinel-observability mixin.
+# Weekly live-render checks for the opt-in nvsentinel mixins.
 #
-# TestNVSentinelObservabilityChartRender (pkg/bundler/validations) renders
-# the real, live-pulled nvsentinel chart with the mixin's actual values and
-# asserts the audit-logging mount shape. It is gated on testing.Short() --
-# `make test`/`make qualify`/every other CI job run with -short, so this is
-# the only place that test executes. There is no PR-blocking trigger here
-# on purpose: this component is opt-in and off by default, so a transient
-# upstream chart hiccup here should never block an unrelated PR's merge.
-# Modeled on bom-refresh.yaml's scheduled-only pattern.
+# Both tests (pkg/bundler/validations) render the real, live-pulled nvsentinel
+# chart with a mixin's actual values: the observability one asserts the
+# audit-logging mount shape, the object-monitor one asserts both policies
+# reach the generated config with every namespace the catalog deploys the
+# watched components into. Both are gated on testing.Short() -- `make
+# test`/`make qualify`/every other CI job run with -short, so this is the only
+# place they execute. There is no PR-blocking trigger here on purpose: these
+# components are opt-in and off by default, so a transient upstream chart
+# hiccup should never block an unrelated PR's merge. Modeled on
+# bom-refresh.yaml's scheduled-only pattern.
 
-name: NVSentinel Observability Render Check
+name: NVSentinel Mixin Render Checks
 
 on:
   schedule:
@@ -36,7 +38,7 @@ permissions:
 
 jobs:
   render-check:
-    name: Render nvsentinel-observability mixin against the live chart
+    name: Render the opt-in nvsentinel mixins against the live chart
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -62,3 +64,9 @@ jobs:
 
       - name: Render nvsentinel-observability mixin
         run: go test ./pkg/bundler/validations/... -run '^TestNVSentinelObservabilityChartRender$' -v -count=1
+
+      # Runs even when the step above fails: the mixins are independent, and
+      # an upstream break in one should not hide the other's status.
+      - name: Render nvsentinel-object-monitor mixin
+        if: ${{ !cancelled() }}
+        run: go test ./pkg/bundler/validations/... -run '^TestNVSentinelObjectMonitorChartRender$' -v -count=1
