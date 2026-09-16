@@ -111,6 +111,127 @@ func TestParseRenovateReportRejectsGarbage(t *testing.T) {
 	}
 }
 
+func TestParseRenovateReportIncompleteUpdates(t *testing.T) {
+	tests := []struct {
+		name                           string
+		report                         string
+		wantLatest, wantType, wantProb string
+	}{
+		{
+			"sole update missing newValue",
+			`{
+  "repositories": {
+    "NVIDIA/aicr": {
+      "packageFiles": {
+        "custom.regex": [
+          {
+            "packageFile": "recipes/registry.yaml",
+            "deps": [
+              {
+                "depName": "no-newvalue-chart",
+                "depType": "registry-chart",
+                "datasource": "helm",
+                "currentValue": "v1.20.0",
+                "updates": [
+                  {"newValue": "", "updateType": "minor"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}`,
+			"",
+			"",
+			"update missing newValue",
+		},
+		{
+			"sole update missing updateType",
+			`{
+  "repositories": {
+    "NVIDIA/aicr": {
+      "packageFiles": {
+        "custom.regex": [
+          {
+            "packageFile": "recipes/registry.yaml",
+            "deps": [
+              {
+                "depName": "no-updatetype-chart",
+                "depType": "registry-chart",
+                "datasource": "helm",
+                "currentValue": "v1.20.0",
+                "updates": [
+                  {"newValue": "v1.23.0", "updateType": ""}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}`,
+			"",
+			"",
+			"update missing updateType",
+		},
+		{
+			"malformed entry alongside a valid recognized update",
+			`{
+  "repositories": {
+    "NVIDIA/aicr": {
+      "packageFiles": {
+        "custom.regex": [
+          {
+            "packageFile": "recipes/registry.yaml",
+            "deps": [
+              {
+                "depName": "mixed-malformed-chart",
+                "depType": "registry-chart",
+                "datasource": "helm",
+                "currentValue": "v1.20.0",
+                "updates": [
+                  {"newValue": "", "updateType": "minor"},
+                  {"newValue": "v1.23.0", "updateType": "minor"}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}`,
+			"v1.23.0",
+			"minor",
+			"",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ParseRenovateReport([]byte(tt.report))
+			if err != nil {
+				t.Fatalf("ParseRenovateReport: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("got %d deps, want 1", len(got))
+			}
+			var l Lookup
+			for _, dep := range got {
+				l = dep
+				break
+			}
+			if l.Latest != tt.wantLatest || l.UpdateType != tt.wantType || l.Problem != tt.wantProb {
+				t.Errorf("got (%q,%q,%q), want (%q,%q,%q)",
+					l.Latest, l.UpdateType, l.Problem, tt.wantLatest, tt.wantType, tt.wantProb)
+			}
+		})
+	}
+}
+
 func TestParseRenovateReportUnsupportedUpdateTypes(t *testing.T) {
 	tests := []struct {
 		name                           string

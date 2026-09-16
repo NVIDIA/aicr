@@ -106,8 +106,17 @@ func ParseRenovateReport(data []byte) (map[string]Lookup, error) {
 					best := 0
 					hasRecognizedUpdate := false
 					var unsupportedType string
+					var malformed []string
 					for _, u := range updates {
 						if u.NewValue == "" {
+							// Missing newValue: the update can never be selected, and
+							// it must not be silently dropped either — an unresolved
+							// pin is reported as unknown, never as current.
+							malformed = append(malformed, "update missing newValue")
+							continue
+						}
+						if u.UpdateType == "" {
+							malformed = append(malformed, "update missing updateType")
 							continue
 						}
 						r, ok := updateRank[u.UpdateType]
@@ -123,9 +132,14 @@ func ParseRenovateReport(data []byte) (map[string]Lookup, error) {
 							best, l.Latest, l.UpdateType = r, u.NewValue, u.UpdateType
 						}
 					}
-					// If no recognized updates exist, add the unsupported type to diagnostics.
-					if !hasRecognizedUpdate && unsupportedType != "" {
-						msgs = append(msgs, "unsupported update type: "+unsupportedType)
+					// If no recognized updates exist, surface the unsupported type and
+					// any malformed entries as diagnostics instead of leaving the pin
+					// looking current.
+					if !hasRecognizedUpdate {
+						if unsupportedType != "" {
+							msgs = append(msgs, "unsupported update type: "+unsupportedType)
+						}
+						msgs = append(msgs, malformed...)
 						l.Latest = ""
 						l.UpdateType = ""
 					}
