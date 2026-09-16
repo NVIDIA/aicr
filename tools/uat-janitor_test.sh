@@ -76,6 +76,36 @@ esac
 STUB
 chmod +x "${STUB_DIR}/gh"
 
+# --- Stub `gcloud` on PATH ----------------------------------------------------
+# Only the two calls discover_gcp_state makes are stubbed. `storage ls` echoes
+# GCLOUD_LS_FIXTURE (a captured `gcloud storage ls -l` listing); `storage cat`
+# serves ${GCLOUD_CAT_DIR}/<deployment-id>.json and FAILS when that file is
+# absent, which is how a lost/unreadable state object is exercised. Any other
+# invocation is a path this harness does not drive, so it errors loudly rather
+# than returning a plausible empty answer.
+cat >"${STUB_DIR}/gcloud" <<'STUB'
+#!/usr/bin/env bash
+sub="${1:-} ${2:-}"
+shift 2 2>/dev/null || true
+case "${sub}" in
+  "storage ls")
+    [ -n "${GCLOUD_LS_FIXTURE:-}" ] || { echo "gcloud: no listing" >&2; exit 1; }
+    cat "${GCLOUD_LS_FIXTURE}"
+    ;;
+  "storage cat")
+    url="${!#}"
+    id="${url%/default.tfstate}"; id="${id##*/}"
+    f="${GCLOUD_CAT_DIR:-/nonexistent}/${id}.json"
+    [ -f "${f}" ] || { echo "gcloud: object not found: ${url}" >&2; exit 1; }
+    cat "${f}"
+    ;;
+  *)
+    echo "gcloud: unexpected invocation: ${sub} $*" >&2; exit 1
+    ;;
+esac
+STUB
+chmod +x "${STUB_DIR}/gcloud"
+
 # The janitor uses GNU `date -u -d`; on a BSD-date host (macOS dev box) forward
 # to gdate so the age assertions run everywhere CI does.
 if ! date -u -d "2026-01-01T00:00:00Z" +%s >/dev/null 2>&1; then
@@ -177,20 +207,28 @@ GH_STUB="ok:completed:$(ago 99)"
 #                                        <slug>-<slot> form (gh1-0) AND the legacy
 #                                        hyphenated <reservation> form (gcp-h100)
 #                                        during the migration window.
-# (GCP nightly is aicr-uat-<run_id> like the others — the GKE actuator now bounds
-# the node-SA account_id, so the earlier aicr-<run_id> short form was dropped.)
+#   aicr-<run_id>                        TRANSITIONAL, the pre-rename GCP short
+#                                        form. Nothing generates it now; it is
+#                                        admitted only until the six pre-rename
+#                                        deployments still holding service
+#                                        accounts are reaped, so this assertion is
+#                                        expected to be deleted with the schema.
 check "accepts nightly"                  "REAP" "$(classify aicr-uat-31021150393)"
 check "accepts daytime (reservation)"    "REAP" "$(classify aicr-uat-day-gcp-h100-31021150393)"
 check "accepts daytime (adr-017 slug)"   "REAP" "$(classify aicr-uat-day-gh1-0-31021150393)"
 check "accepts daytime multi-digit slot" "REAP" "$(classify aicr-uat-day-gh1-12-31021150393)"
+check "accepts legacy GCP short form"    "REAP" "$(classify aicr-31021150393)"
 # Still anchored: the aicr-uat-day- prefix and a trailing numeric run_id are
 # required, so these are rejected — empty middle, no run id, wrong/absent prefix,
-# or a non-numeric nightly tail. Persistent infra (aicr-testgrid-*) and the
-# dropped GCP short form (aicr-<run_id>) match neither schema.
+# or a non-numeric nightly tail. The transitional aicr-<run_id> schema widens the
+# gate the least it can: everything after `aicr-` must be digits, so persistent
+# infra (aicr-testgrid*, aicr-demo1, aicr-day-gcp-h100) stays out of scope even
+# though it shares the prefix.
 for n in aicr-uat-unrelated-7 aicr-uat- aicr-testgrid-vpc aicr-uat-day--7 \
          aicr-testgrid aicr-testgrid-7 aicr-prod-7 aicr- aicr \
          some-aicr-uat-123 aicr-uat-123-vpc aicr-uat-day-h100- \
-         aicr-31021150393 ; do
+         aicr-demo1 aicr-day-gcp-h100 aicr-testgrid-staging \
+         some-aicr-123 aicr-123-vpc ; do
     check "rejects '${n}'" "SKIP:not-allowlisted" "$(classify "$n")"
 done
 check "rejects missing run id" "SKIP:not-allowlisted" "$(classify aicr-uat-manual)"
@@ -265,6 +303,70 @@ check "defers daytime reap while a lifecycle run is active" "SKIP:lifecycle-acti
 check "nightly ignores lifecycle liveness"                  "REAP"                          "$(classify aicr-uat-7)"
 LIFECYCLE_STUB=idle
 check "reaps daytime when no lifecycle run active"          "REAP"                          "$(classify aicr-uat-day-gcp-h100-7)"
+
+echo "has_managed_state:"
+# The orphan class this gate exists for is a deployment whose every NAMED resource
+# is gone but whose service accounts and IAM bindings survive, so "still holds a
+# managed resource" is what nominates it. Every ambiguous answer must be "no":
+# nominating nothing leaves the orphan for a later cycle, which is the safe
+# direction, whereas a false yes hands an id to the destroy path.
+STATE_DIR="${STUB_DIR}/states"
+mkdir -p "${STATE_DIR}"
+export GCLOUD_CAT_DIR="${STATE_DIR}"
+printf '{"resources":[{"mode":"managed","type":"google_service_account"}]}\n' >"${STATE_DIR}/dep-managed.json"
+printf '{"resources":[{"mode":"data","type":"google_project"},{"mode":"data","type":"http"}]}\n' >"${STATE_DIR}/dep-dataonly.json"
+printf '{"resources":[]}\n' >"${STATE_DIR}/dep-emptied.json"
+printf 'not json at all\n' >"${STATE_DIR}/dep-garbage.json"
+BASE="gs://cluster-state-eidosx/deployments/us-central1"
+has_managed_state "${BASE}/dep-managed/default.tfstate"
+check "yes on a surviving managed resource" "0" "$?"
+has_managed_state "${BASE}/dep-dataonly/default.tfstate"
+check "no on a data-only state" "1" "$?"
+has_managed_state "${BASE}/dep-emptied/default.tfstate"
+check "no on an emptied state" "1" "$?"
+has_managed_state "${BASE}/dep-garbage/default.tfstate"
+check "no on unparsable state JSON" "1" "$?"
+has_managed_state "${BASE}/dep-absent/default.tfstate"
+check "no on an unreadable object" "1" "$?"
+
+echo "discover_gcp_state:"
+if ! command -v yq >/dev/null 2>&1; then
+    echo "  SKIP: no yq (the .deployment.location lookup needs it)"
+else
+    CFG="${STUB_DIR}/cluster-config.yaml"
+    LS_FIXTURE="${STUB_DIR}/listing.txt"
+    export JANITOR_CONFIG="${CFG}" GCP_PROJECT_ID=eidosx GCLOUD_LS_FIXTURE="${LS_FIXTURE}"
+    printf 'deployment:\n  id: aicr-uat\n  location: us-central1\n' >"${CFG}"
+    # Sizes and the trailing summary mirror a real `gcloud storage ls -l`: an
+    # emptied state is a few hundred bytes, one still holding resources is tens
+    # of KB. Only dep-managed satisfies BOTH stages — dep-emptied is filtered on
+    # size, dep-dataonly owns no cloud resource, and dep-absent cannot be read.
+    cat >"${LS_FIXTURE}" <<EOF
+    159556  2026-08-24T02:19:31Z  ${BASE}/dep-managed/default.tfstate
+       181  2026-09-14T03:11:02Z  ${BASE}/dep-emptied/default.tfstate
+     26486  2026-07-02T11:45:00Z  ${BASE}/dep-dataonly/default.tfstate
+     73522  2026-07-05T09:00:00Z  ${BASE}/dep-absent/default.tfstate
+TOTAL: 4 objects, 259745 bytes.
+EOF
+    check "nominates only states holding managed resources" "dep-managed" "$(discover_gcp_state 2>/dev/null)"
+
+    # The summary row, a non-numeric size, and a neighbouring object whose name
+    # merely STARTS with default.tfstate must all fall out of the listing parse.
+    cat >"${LS_FIXTURE}" <<EOF
+TOTAL: 1 objects, 100 bytes.
+garbage row carrying no size at all
+       abc  2026-01-01T00:00:00Z  ${BASE}/dep-managed/default.tfstate
+    159556  2026-08-24T02:19:31Z  ${BASE}/dep-managed/default.tfstate.backup
+EOF
+    check "ignores summary, malformed, and non-tfstate rows" "" "$(discover_gcp_state 2>/dev/null)"
+
+    # Both inputs the discovery depends on must nominate NOTHING when unavailable,
+    # rather than falling back to a bucket path built from an empty location.
+    printf 'deployment:\n  id: aicr-uat\n' >"${CFG}"
+    check "nominates nothing when location is absent" "" "$(discover_gcp_state 2>/dev/null)"
+    printf 'deployment:\n  id: aicr-uat\n  location: us-central1\n' >"${CFG}"
+    check "nominates nothing when the listing fails" "" "$(GCLOUD_LS_FIXTURE='' discover_gcp_state 2>/dev/null)"
+fi
 
 if [[ "${FAILED}" -eq 0 ]]; then
     echo "PASS: uat-janitor decision logic"

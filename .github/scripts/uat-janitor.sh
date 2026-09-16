@@ -15,7 +15,8 @@
 #
 # UAT orphan janitor — the backstop for the in-run teardown (uat-{gcp,aws,azure}
 # .yaml "Destroy Cluster"). A UAT run can leave its cluster + full resource group
-# (GPU node, VPC network group, router/NAT, resource group, TF state) behind when
+# (GPU node, VPC network group, router/NAT, resource group, node-pool service
+# accounts and their project IAM bindings, TF state) behind when
 # teardown never runs: a runner hard-killed mid-cancel, a daytime-up held cluster
 # whose evening daytime-down never fired, a manual skip_delete run abandoned, or a
 # Bringup "failure" that stranded a healthy cluster. Those orphans accumulate until
@@ -30,7 +31,7 @@
 # VPC, the GCP default-route quirk, the Azure resource group) correctly.
 #
 # Safety model (this deletes cloud infrastructure — read before editing):
-#   * ALLOWLIST — a candidate must match one of the two deployment-id schemas,
+#   * ALLOWLIST — a candidate must match one of the three deployment-id schemas,
 #     anchored end to end:
 #       ^aicr-uat-[0-9]+$                 nightly, all clouds
 #       ^aicr-uat-day-[a-z0-9-]+-[0-9]+$  daytime, all clouds. The middle segment
@@ -44,13 +45,32 @@
 #                                         shape once no legacy-held clusters remain.
 #                                         Still anchored: the aicr-uat-day- prefix
 #                                         and a trailing numeric run_id are required.
-#     (GCP nightly stays aicr-uat-<run_id> too: the GKE actuator now bounds the
-#     derived node-SA account_id — mchmarny/cluster#36, image >= v0.5.17.)
+#       ^aicr-[0-9]+$                     TRANSITIONAL, GCP only. The short form
+#                                         uat-gcp.yaml used before it moved to
+#                                         aicr-uat-<run_id> (the GKE actuator now
+#                                         bounds the derived node-SA account_id,
+#                                         mchmarny/cluster#36, image >= v0.5.17,
+#                                         so the id no longer has to be short).
+#                                         No workflow generates it any more; it is
+#                                         admitted solely so the six pre-rename
+#                                         deployments still holding service
+#                                         accounts and project IAM bindings can be
+#                                         destroyed through Terraform, which
+#                                         unwinds those bindings correctly. DELETE
+#                                         this schema once they are reaped — the
+#                                         state-bucket discovery reporting no
+#                                         aicr-<run_id> candidates is the signal.
 #     A prefix test would admit aicr-uat-unrelated-7, which no workflow produces;
-#     the anchors reject it. Persistent infra (aicr-testgrid-*, anything else)
-#     matches neither schema and is never in scope. Per-cloud discovery is
+#     the anchors reject it. Persistent infra matches none of the three and is
+#     never in scope: the transitional schema requires everything after `aicr-` to
+#     be digits, which aicr-testgrid*, aicr-demo1, and aicr-day-gcp-h100 all fail.
+#     Per-cloud discovery is
 #     deliberately coarser — it only nominates CANDIDATES; classify() is the
 #     authoritative gate, and run_id_of/is_daytime remain defense in depth.
+#     Nominating from Terraform state (GCP) does not weaken any of this: the
+#     state prefix IS the literal deployment id, so it arrives at the same gate
+#     as a cluster name. It is what makes the SA-only orphan class reachable at
+#     all, since a derived node-SA name no longer carries the run id.
 #   * RUN-ID REQUIRED — a name with no trailing numeric run_id is skipped. We
 #     never guess.
 #   * NOT-ACTIVE — the owning run must be `completed` (or purged/404). This is an
@@ -205,12 +225,13 @@ uat_lifecycle_active() {
 # both liveness and age so the decision is identical across clouds.
 classify() {
   local id="$1" run_id json status upd age min
-  # Exactly the two supported deployment-id schemas (see the ALLOWLIST bullet in
+  # Exactly the three supported deployment-id schemas (see the ALLOWLIST bullet in
   # the header) — fully anchored, so merely starting with `aicr-` is not enough and
   # a shape we do not generate (aicr-uat-unrelated-7, aicr-testgrid-vpc) can never
   # reach the actuator. discover_* is deliberately coarser; THIS is the gate.
   if [[ ! "$id" =~ ^aicr-uat-[0-9]+$ ]] &&
-     [[ ! "$id" =~ ^aicr-uat-day-[a-z0-9-]+-[0-9]+$ ]]; then
+     [[ ! "$id" =~ ^aicr-uat-day-[a-z0-9-]+-[0-9]+$ ]] &&
+     [[ ! "$id" =~ ^aicr-[0-9]+$ ]]; then
     echo "SKIP:not-allowlisted"; return
   fi
   run_id="$(run_id_of "$id")" || { echo "SKIP:no-run-id"; return; }
@@ -423,7 +444,10 @@ reap() {
 # ALLOWLIST), deduped by the caller. Discovery is intentionally broad (clusters
 # AND their networks /
 # resource groups) so a cluster that was already deleted but left its network
-# group / resource group behind is still caught.
+# group / resource group behind is still caught. GCP goes one further and
+# nominates from Terraform state as well, which catches a deployment whose every
+# NAMED resource is already gone but whose service accounts and IAM bindings are
+# not (see discover_gcp_state).
 
 # All GCP deployment ids (nightly aicr-uat-<run_id> and daytime aicr-uat-day-*)
 # share the aicr-uat- prefix, same as AWS/Azure.
@@ -447,6 +471,80 @@ run_discovery() {
   printf '%s' "$out"
 }
 
+# A fully-destroyed GCS state object is 181-329 bytes ("resources": []); one that
+# still holds resources is >=26KB. The gap is three orders of magnitude, so this
+# only has to separate "plausibly non-empty" from "certainly empty" — the
+# authoritative check is has_managed_state below.
+STATE_EMPTY_MAX_BYTES=2048
+
+# Does <state-url> still hold a MANAGED resource? Data-only states are not
+# orphans: a destroyed deployment keeps its `google_project` / `http` lookups in
+# state, and a data source owns no cloud resource to reap.
+#
+# Every ambiguous answer is "no" — an unreadable object, a truncated fetch, or
+# unparsable JSON leaves the deployment un-nominated for this cycle, which is the
+# harmless direction. Normalized to 0/1 like the other predicates here; the
+# underlying failures surface as jq's "no valid result" (4) and gcloud's own
+# codes, neither of which a caller should branch on.
+has_managed_state() {
+  if gcloud storage cat "$1" 2>/dev/null |
+    jq -e 'any(.resources[]?; .mode == "managed")' >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+# Deployments whose Terraform state still holds a managed resource.
+#
+# The cluster and network discoveries below can only see resources that still
+# EXIST, so a deployment whose cluster and VPC went away out of band — a manual
+# quota sweep, a destroy that died before reaching IAM — but whose node-pool
+# service accounts and their project role bindings survived is invisible to both,
+# and leaks permanently (#2775). Measured in eidosx on 2026-09-16, with zero UAT
+# clusters and zero UAT VPCs alive: 7 such deployments held 14 service accounts
+# carrying 80 project role bindings between them, one of them roles/compute.admin.
+#
+# State is also the only place the LITERAL deployment id survives. Once an id
+# exceeds the 30-char account_id cap the actuator derives node-SA names as
+# substr(id,0,8)+substr(sha256(id),0,8) (mchmarny/cluster main.tf), which carries
+# no run id — so an orphaned SA cannot be classified from its own name, and
+# discovering by SA would mean reimplementing that hash here and re-deriving it
+# whenever the actuator changes. Nominating the state prefix instead keeps
+# classify()'s run-liveness and age gates applicable unchanged, and the ordinary
+# actuator destroy then clears the service accounts, their bindings, and the
+# state together.
+#
+# Two stages, because these prefixes are never pruned (429 of them by Sep 2026)
+# and fetching every state hourly would not scale: one `ls -l` returns every
+# size, and the size filter narrows to the few that can still hold anything. That
+# filter can only ever SHRINK the candidate set, so a miss just leaves an orphan
+# for a later cycle — the safe direction — and nothing is nominated on size
+# alone.
+discover_gcp_state() {
+  local loc size url id
+  loc="$(yq -r '.deployment.location' "$JANITOR_CONFIG" 2>/dev/null)" || loc=""
+  case "$loc" in
+    '' | null)
+      echo "::warning::${CLOUD} discovery 'tfstate' skipped: no .deployment.location in ${JANITOR_CONFIG}; state-only orphans are NOT reconciled this run" >&2
+      return 0
+      ;;
+  esac
+
+  while read -r size url; do
+    [ "$size" -gt "$STATE_EMPTY_MAX_BYTES" ] 2>/dev/null || continue
+    id="${url%/default.tfstate}"
+    id="${id##*/}"
+    [ -n "$id" ] || continue
+    has_managed_state "$url" && echo "$id"
+  done < <(
+    run_discovery "GCP tfstate" gcloud storage ls -l \
+      "gs://cluster-state-${GCP_PROJECT_ID}/deployments/${loc}/**/default.tfstate" |
+      # Keep only `<bytes> <date> <url>` rows, dropping the trailing
+      # `TOTAL: N objects, M bytes` summary and any malformed line.
+      awk 'NF>=3 && $1 ~ /^[0-9]+$/ && $NF ~ /\/default\.tfstate$/ {print $1, $NF}'
+  )
+}
+
 discover_gcp() {
   run_discovery "GKE clusters" gcloud container clusters list \
     --project "$GCP_PROJECT_ID" --format="value(name)" | grep -E "^${NAME_PREFIX}" || true
@@ -454,6 +552,7 @@ discover_gcp() {
   # The ^ anchor means a foreign name merely ending in -vpc cannot be captured.
   run_discovery "GCP networks" gcloud compute networks list \
     --project "$GCP_PROJECT_ID" --format="value(name)" | sed -nE "s/^(${NAME_PREFIX}.*)-vpc$/\1/p" || true
+  discover_gcp_state
 }
 
 discover_aws() {
