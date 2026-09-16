@@ -84,8 +84,8 @@ spec:
     # (AKS manages its own Ubuntu kernel) and ensure_kernel exits early.
     nvidia-setup-kernel:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
-      version: "0.7.0"
-      containerSHA: sha256:fc8eba030a9b91b4adc65cb10e65e5bdcb66207a7fa33e9290ceca713ec51487
+      version: "0.8.0"
+      containerSHA: sha256:1551abdd54476f6bddce863d383903a0a76f8a91bb4daa53c4f3c9490b980dae
       configMap:
         {{- if $cust.service }}
         service: {{ $cust.service }}
@@ -138,14 +138,14 @@ spec:
         service: {{ $cust.service }}
         {{- end }}
       dependsOn:
-        nvidia-setup-kernel: "0.7.0"
+        nvidia-setup-kernel: "0.8.0"
     {{- end }}
 
     # Full setup after kernel is in place
     nvidia-setup-full:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-setup
-      version: "0.7.0"
-      containerSHA: sha256:fc8eba030a9b91b4adc65cb10e65e5bdcb66207a7fa33e9290ceca713ec51487
+      version: "0.8.0"
+      containerSHA: sha256:1551abdd54476f6bddce863d383903a0a76f8a91bb4daa53c4f3c9490b980dae
       interrupt:
         type: reboot
       {{- /* Until nodewright >= v0.18 resources that get reduced to whole numbers should be expressed */}}
@@ -177,6 +177,6 @@ spec:
         {{- if ne (toString (index $cust "tuningEnabled")) "false" }}
         nvidia-tuned: "0.10.0"
         {{- else }}
-        nvidia-setup-kernel: "0.7.0"
+        nvidia-setup-kernel: "0.8.0"
         {{- end }}
 {{- end }}

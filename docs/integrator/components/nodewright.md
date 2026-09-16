@@ -75,15 +75,15 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 
 | Service | Accelerator  | Profile | Setup              | Tuning                  |
 |---------|--------------|---------|--------------------|-------------------------|
-| aks     | a100         | h100    | nvidia-setup 0.7.0 | nvidia-tuned 0.10.0     |
-| aks     | h100         | -       | nvidia-setup 0.7.0 | nvidia-tuned 0.10.0     |
+| aks     | a100         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
+| aks     | h100         | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
 | bcm     | *            | h100    | nvidia-setup 0.3.0 | -                       |
 | bcm     | h100         | -       | nvidia-setup 0.3.0 | -                       |
-| eks     | a100         | h100    | nvidia-setup 0.7.0 | nvidia-tuned 0.10.0     |
-| eks     | gb200        | -       | nvidia-setup 0.7.0 | nvidia-tuned 0.10.0     |
+| eks     | a100         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
+| eks     | gb200        | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
 | eks     | gb300        | -       | -                  | nvidia-tuned 0.10.0     |
-| eks     | h100         | -       | nvidia-setup 0.7.0 | nvidia-tuned 0.10.0     |
-| eks     | h200         | h100    | nvidia-setup 0.7.0 | nvidia-tuned 0.10.0     |
+| eks     | h100         | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
+| eks     | h200         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
 | eks     | rtx-pro-6000 | generic | -                  | nvidia-tuned 0.3.2      |
 | generic | gb300        | -       | -                  | nvidia-tuned 0.10.0     |
 | gke     | a100         | h100    | -                  | nvidia-tuning-gke 0.1.2 |
