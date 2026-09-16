@@ -137,6 +137,48 @@ func TestBuildReportDivergentDuplicateDepNameIsUnresolved(t *testing.T) {
 	}
 }
 
+func TestBuildReportEmptyCurrentIsUnresolved(t *testing.T) {
+	// ParseRenovateReport can produce this exact shape: dep.Updates is a
+	// present-but-empty array (Renovate ran the lookup) while
+	// dep.CurrentValue is absent, so Lookup.Current, .Latest, and .Problem
+	// are all "". Nothing here trips the currentValue-mismatch case (Current
+	// is empty, not disagreeing) or sets a Problem, so an empty Current must
+	// be caught on its own — otherwise it falls straight into "Latest == ''
+	// means current" and a pin Renovate never actually resolved is reported
+	// as up to date.
+	lookups := map[string]Lookup{
+		"ghcr.io/nvidia/nvsentinel": {Current: "", Latest: ""},
+		"prometheus-adapter":        {Current: "5.3.0"},
+		"cert-manager":              {Current: "v1.20.2"},
+	}
+	got, err := BuildReport(testPins(), lookups, Meta{})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	for _, c := range got.Current {
+		if c == "nvsentinel" {
+			t.Fatal("nvsentinel counted as current despite an empty currentValue; Renovate never resolved it")
+		}
+	}
+	var found bool
+	for _, u := range got.Unresolved {
+		for _, c := range u.Components {
+			if c == "nvsentinel" {
+				found = true
+				if !strings.Contains(u.Reason, "no currentValue") {
+					t.Errorf("reason = %q, want it to name the missing currentValue", u.Reason)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("nvsentinel not found in unresolved")
+	}
+	if got.Summary.Unresolved != 1 || len(got.Unresolved) != 1 {
+		t.Fatalf("unresolved rows = %d, want 1", got.Summary.Unresolved)
+	}
+}
+
 func TestBuildReportTotalOutageAllUnresolved(t *testing.T) {
 	// The realistic outage shape: every registry-chart dep resolves (Renovate
 	// ran) but every resolution carries a Problem (each lookup itself failed).

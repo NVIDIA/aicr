@@ -108,7 +108,17 @@ func BuildReport(pins []Pin, lookups map[string]Lookup, meta Meta) (Report, erro
 		case l.Problem != "":
 			resolved++
 			appendUnresolved(unresolved, key, p, l.Problem)
-		case l.Current != "" && l.Current != p.Version:
+		case l.Current == "":
+			// dep.Updates present but dep.CurrentValue absent (e.g. an
+			// empty `updates` array) parses to Current, Latest, and Problem
+			// all "". Nothing else below distinguishes that from "current"
+			// — catch it here, before the mismatch and update branches, so
+			// a pin Renovate never actually resolved is never folded into
+			// Current.
+			resolved++
+			appendUnresolved(unresolved, key, p, fmt.Sprintf(
+				"Renovate reported no currentValue for depName %q; the lookup did not resolve this pin", p.DepName))
+		case l.Current != p.Version:
 			// A depName shared by two pins (the OpenShift twins) but reported by
 			// Renovate at a currentValue that disagrees with this pin: the map in
 			// ParseRenovateReport kept a different dep entry than the one this pin
