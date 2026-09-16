@@ -233,6 +233,21 @@ the boundary, write `from: "<3.0.0"` and say so. If you are not, a bounded floor
 is the honest shape, and everyone beneath it correctly gets told to move up
 first rather than handed a claim nobody verified.
 
+### Where your `to` ceiling ends is a real decision too
+
+`to`'s floor is the boundary a jump crosses; its ceiling is how far your verdict
+reaches. A record does not vouch past that ceiling. An operator whose target
+lands above it is told `blocked` with reason `beyond-record-ceiling`: stop at
+the ceiling you assessed and re-run, or get the record widened. They get no
+verdict and no steps, for the same reason as the floor case, and the report
+names your ceiling as the place to stop.
+
+That is not a limitation to route around. It is the match-time form of the rule
+that already stops you writing a ceiling above the current pin: you cannot have
+read the migration notes for a release nobody has cut. A ceiling is your claim
+about how far forward you actually looked, so put it where you looked, and widen
+it deliberately later rather than reaching for headroom now.
+
 ## Checking your work
 
 ```bash

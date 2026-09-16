@@ -66,6 +66,7 @@
 //
 //	1  nothing crossed                              unknown
 //	2  one crossed, from covers the source          that record's verdict
+//	2a   ... but the target is past its to ceiling  blocked, stop at that ceiling
 //	3  another crossed record authored blocked      blocked, stop at its to
 //	4  two or more crossed                          blocked, stop at the lowest
 //	5  one crossed, from does not cover the source  blocked, stop at its to
@@ -73,13 +74,17 @@
 // Rule 2 is the only one that attaches a Transition, and it attaches one for
 // every verdict including blocked: that record describes this exact move, so
 // its blocked verdict means "not in one step" and its steps say what to do
-// instead. Rules 3, 4 and 5 leave Transition nil, so no renderer can print one
-// record's steps for a jump that record does not describe. Rule 5 is the
+// instead. Rules 2a, 3, 4 and 5 leave Transition nil, so no renderer can print
+// one record's steps for a jump that record does not describe. Rule 2a is the
+// forward-reach case: the record was authored for this starting point but stops
+// assessing before the target, and lending its verdict there would vouch for
+// releases its author cannot have read the migration notes for, which is the
+// same reach checkPinCeiling rejects at authoring time. Rule 5 is the
 // outside-every-recorded-origin case, usually below the lowest `from` floor:
 // nothing describes an upgrade from where the operator is, and an opt-in check
-// errs toward safety there. Every blocked result names a StoppedAt, and every
-// result carries a Reason code and an Explanation sentence saying which rule it
-// was and what to do about it.
+// errs toward safety there. Every blocked version transition names a StoppedAt,
+// and every result carries a Reason code and an Explanation sentence saying
+// which rule it was and what to do about it.
 //
 // Match takes an already validated Set and does not re-run Validate. Validate
 // is therefore not optional: a record that violates a well-formedness rule

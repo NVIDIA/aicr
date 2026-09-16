@@ -158,9 +158,12 @@ func TestUpgradeCheckCmd_WritesToOutputFile(t *testing.T) {
 	to := syntheticRecipeFile(t, filepath.Join(dir, "to.yaml"), map[string]string{"synthetic-alpha": "1.2.3"})
 	outPath := filepath.Join(dir, "report.json")
 
+	// The bump is unrecorded, so it reports unknown and the run exits
+	// non-zero. The file is still written: the exit code is orthogonal to the
+	// report, which is what this asserts.
 	if _, err := runUpgradeCheck(t,
-		"--from", from, "--to", to, "--format", "json", "--output", outPath); err != nil {
-		t.Fatalf("upgrade-check to a file: %v", err)
+		"--from", from, "--to", to, "--format", "json", "--output", outPath); err == nil {
+		t.Fatal("expected a non-zero outcome for an unrecorded jump")
 	}
 	data, err := os.ReadFile(outPath) //nolint:gosec // test-local temp path
 	if err != nil {

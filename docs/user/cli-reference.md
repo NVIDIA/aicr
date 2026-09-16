@@ -1536,24 +1536,41 @@ Omitting `--to` asks *"am I behind, and does catching up hurt?"*, which is usual
 | `safe` | Upgrade in place. Nothing to do. | no |
 | `manual` | Operator steps are required first. | yes |
 | `blocked` | Do not make this jump in one step. The report names the boundary it stops at. | yes |
-| `unknown` | No record covers this transition. A gap in the **data**, closed by authoring a record. | only across a breaking boundary |
+| `unknown` | No record covers this transition. A gap in the **data**. | yes |
 | `unversioned` | One side's version is not comparable. A gap in the **inputs**, closed by pinning something comparable. | yes |
 
-A **breaking boundary** is a major bump, or a minor bump while the major version is `0`. Semver offers no stability guarantee below 1.0, so `0.18 → 0.19` may break exactly as `1.x → 2.x` may.
+Anything other than `safe` exits non-zero. `unknown` is included deliberately: a transition nobody assessed is not a transition anyone approved, and the distance moved does not change that.
+
+The report still reports a **breaking boundary** (a major bump, a minor bump while the major version is `0`, or a changed prerelease identifier over an otherwise unchanged `major.minor.patch`) in the NOTES cell and the JSON `breaking` field, because the size of a move tells you how hard to look. It no longer affects the exit code.
+
+**Three kinds of `unknown`.** They differ in what would close the gap, so they carry different `reason` codes and different report text:
+
+| `reason` | Situation | Closed by |
+|---|---|---|
+| `no-record` | No record exists for this component | Somebody authoring the first record |
+| `no-boundary-crossed` | A record exists but says nothing about this range | Widening it, or confirming no boundary belongs there |
+| `downgrade` | You are rolling back | Nothing. Records describe forward moves only, so this can never become known |
+
+`blocked` and `unknown` say opposite things. `blocked` means AICR has something to tell you and a version to stop at: read it and act on it. `unknown` means AICR has nothing for you: read the component's own upstream release notes and decide. Neither is a pass.
+
+**Rollout note: expect red today.** Exactly one registry component ships a transition record so far, so most components that change version report `unknown` and the check exits non-zero on most comparisons. That is a coverage problem being worked ([#2535](https://github.com/NVIDIA/aicr/issues/2535) makes records mandatory per pin bump), not a tool limitation, and it shrinks as records are authored. Use `--fail-on-error=false` if you want the report without the gate in the meantime.
 
 Components whose version is identical on both sides produce no row. Added components are reported with nothing to do; removed components are reported and **stay installed**, because AICR does not uninstall them.
 
-**The three routes to `blocked`.** A record is *crossed* when your source version sits below the boundary its `to` names and your target reaches it. That is a property of the jump alone, so a record still counts even when the jump flies straight over it:
+**The four routes to `blocked`.** A record is *crossed* when your source version sits below the boundary its `to` names and your target reaches it. That is a property of the jump alone, so a record still counts even when the jump flies straight over it:
 
 | Route | When | `reason` | Renders steps |
 |---|---|---|---|
 | A record describes this move and blocks it | One record is crossed and its `from` covers your source | `recorded` | yes |
 | You would skip a boundary | Two or more records are crossed, or a crossed `blocked` record was written for a different starting point | `multiple-boundaries`, `record-blocks` | no |
 | Nothing describes your starting version | One record is crossed, but its `from` does not cover your source, usually because you are below the lowest recorded starting point | `undefined-origin` | no |
+| Your target is past what the record assessed | One record is crossed and its `from` covers your source, but your target sits above the ceiling that record's `to` names | `beyond-record-ceiling` | no |
 
-The first renders its record's steps, deployer-scoped, exactly as a `manual` row does: the author marked the move `blocked` and then wrote what to do instead. The other two render none, because the record that carries them describes a different move than the one you asked about. All three name a stopping point.
+The first renders its record's steps, deployer-scoped, exactly as a `manual` row does: the author marked the move `blocked` and then wrote what to do instead. The other three render none, because the record that carries them describes a different move than the one you asked about. All four name a stopping point.
 
-Every row states its reason in the detail block under the table, and `--format json` carries the same thing as `reason` (a stable code: `recorded`, `record-blocks`, `multiple-boundaries`, `undefined-origin`, `no-record`, `no-boundary-crossed`, `downgrade`, `not-comparable`) plus `explanation`, the sentence naming your versions.
+The fourth exists because a record vouches only as far as its own `to` ceiling. An author cannot have read the migration notes for a release nobody had cut, so a record claiming `>=0.18.0 <0.19.0` says nothing about `0.25.0`, and letting it lend its verdict there would report eight minors as safe on the strength of a two-minor claim. Stop at the assessed ceiling and re-run, or have the record widened.
+
+Every row states its reason in the detail block under the table, and `--format json` carries the same thing as `reason` (a stable code: `recorded`, `record-blocks`, `multiple-boundaries`, `undefined-origin`, `beyond-record-ceiling`, `no-record`, `no-boundary-crossed`, `downgrade`, `not-comparable`) plus `explanation`, the sentence naming your versions.
 
 **Why `--deployer` is required rather than defaulted:**
 

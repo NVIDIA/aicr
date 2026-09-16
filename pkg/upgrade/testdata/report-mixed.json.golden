@@ -51,7 +51,7 @@
       "verdict": "unknown",
       "notes": "1 minor, no record, breaking boundary",
       "reason": "no-record",
-      "explanation": "no transition record exists for this component, so this move is unassessed",
+      "explanation": "no transition record exists for this component, so nothing assesses the move from 0.18.0 to 0.19.0. This is not a pass: read the component's own upstream release notes and decide, then consider authoring the first record so the next operator does not repeat the work",
       "jump": "1 minor",
       "breaking": true,
       "downgrade": false,
@@ -124,14 +124,43 @@
       "failsRun": true
     },
     {
+      "component": "lambda-operator",
+      "change": "version",
+      "from": "1.1.0",
+      "to": "1.2.0",
+      "verdict": "unknown",
+      "notes": "1 minor, record exists, no boundary here",
+      "reason": "no-boundary-crossed",
+      "explanation": "a record exists for this component but says nothing about the range between 1.1.0 and 1.2.0, so no author flagged this move. This is not a pass: read the component's own upstream release notes and decide whether this range needs a boundary, then widen the record if it does",
+      "jump": "1 minor",
+      "breaking": false,
+      "downgrade": false,
+      "failsRun": true
+    },
+    {
+      "component": "mu-operator",
+      "change": "version",
+      "from": "1.17.0",
+      "to": "1.25.0",
+      "verdict": "blocked",
+      "notes": "8 minors, stops at \u003e=1.18.0 \u003c1.19.0",
+      "reason": "beyond-record-ceiling",
+      "explanation": "transition records for this component assess only as far as the last version below 1.19.0, and 1.25.0 lands past that, so nothing assesses this move or anything above the last version below 1.19.0. Upgrade no further than the last version below 1.19.0 and re-run this check, or widen a record's `to` range to cover 1.25.0",
+      "jump": "8 minors",
+      "breaking": false,
+      "downgrade": false,
+      "stoppedAt": "\u003e=1.18.0 \u003c1.19.0",
+      "failsRun": true
+    },
+    {
       "component": "theta-operator",
       "change": "version",
       "from": "0.13.0",
       "to": "0.11.0",
       "verdict": "unknown",
-      "notes": "downgrade, no reverse record, breaking boundary",
+      "notes": "downgrade, unassessable",
       "reason": "downgrade",
-      "explanation": "downgrade from 0.13.0 to 0.11.0; records are directional and no reverse record exists",
+      "explanation": "downgrade from 0.13.0 to 0.11.0. Transition records describe forward moves only, so none describes this one and none ever can: this is unassessable rather than merely unassessed, and there is no intermediate version to land on. Review the component's own downgrade guidance before proceeding",
       "jump": "2 minors",
       "breaking": true,
       "downgrade": true,
@@ -148,7 +177,7 @@
     }
   ],
   "summary": {
-    "components": 9,
-    "failing": 6
+    "components": 11,
+    "failing": 8
   }
 }

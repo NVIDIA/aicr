@@ -75,10 +75,11 @@ type ReportComponent struct {
 	Downgrade bool `json:"downgrade" yaml:"downgrade"`
 
 	// StoppedAt is the interval a blocked row must not enter in one step. Set
-	// on every blocked row. Such a row carries a Summary, Precondition and
-	// Steps only when one record describes the whole jump: rendering one
-	// record's instructions for a jump it does not describe is the thing the
-	// verdict exists to prevent.
+	// on every blocked version row, and empty on a blocked replaced row, which
+	// joins two pieces of software rather than two versions of one. Such a row
+	// carries a Summary, Precondition and Steps only when one record describes
+	// the whole jump: rendering one record's instructions for a jump it does
+	// not describe is the thing the verdict exists to prevent.
 	StoppedAt string `json:"stoppedAt,omitempty" yaml:"stoppedAt,omitempty"`
 
 	Summary      string `json:"summary,omitempty" yaml:"summary,omitempty"`
@@ -253,6 +254,12 @@ func notes(r ComponentResult, c ReportComponent) string {
 		return "stays installed; AICR does not uninstall it"
 	case ChangeReplaced:
 		parts := []string{"replaces " + r.ReplacedComponent}
+		if r.Verdict == VerdictBlocked {
+			// The version rows signal a block with "stops at <range>", which a
+			// replacement has no boundary to fill in, so it would otherwise
+			// read as an ordinary migration.
+			parts = append(parts, "not in one step")
+		}
 		if len(c.Steps) > 0 {
 			parts = append(parts, plural(len(c.Steps), "step", "steps"))
 		}
@@ -282,14 +289,21 @@ func notes(r ComponentResult, c ReportComponent) string {
 			parts = append(parts, plural(len(c.Steps), "step", "steps"))
 		}
 	case VerdictUnknown:
-		if r.Downgrade {
-			parts = append(parts, "no reverse record")
-		} else {
+		// The three gaps behind unknown get three cells because they close
+		// differently: somebody authoring the first record, widening one that
+		// exists, or nothing at all.
+		switch {
+		case r.Downgrade:
+			parts = append(parts, "unassessable")
+		case r.Reason == ReasonNoBoundaryCrossed:
+			parts = append(parts, "record exists, no boundary here")
+		default:
 			parts = append(parts, "no record")
 		}
-		if r.Breaking {
-			// Named only here, where it is the reason an unrecorded jump
-			// stops the run rather than passing.
+		if r.Breaking && !r.Downgrade {
+			// Descriptive: it sizes the gap for a reader deciding how hard to
+			// look, having stopped deciding the exit code. Suppressed on a
+			// downgrade, where "unassessable" is the whole story.
 			parts = append(parts, "breaking boundary")
 		}
 	case VerdictUnversioned:

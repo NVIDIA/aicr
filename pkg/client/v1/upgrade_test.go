@@ -163,8 +163,14 @@ func TestUpgradeCheckNoDeployerNeeded(t *testing.T) {
 	if report.Deployer != "" {
 		t.Errorf("Deployer = %q, want empty", report.Deployer)
 	}
-	if report.FailsRun() {
-		t.Error("an unrecorded patch bump stopped the run, want it to pass")
+	// Needing no deployer is independent of the exit code: an unrecorded bump
+	// is unknown, and unknown fails however small the move, but nothing about
+	// it carries steps for a deployer to scope.
+	if !report.FailsRun() {
+		t.Error("an unrecorded patch bump passed the run, want unknown to fail")
+	}
+	if got := report.Components[0].Reason; got != upgrade.ReasonNoRecord {
+		t.Errorf("reason = %q, want %q", got, upgrade.ReasonNoRecord)
 	}
 }
 
@@ -324,6 +330,82 @@ func TestUpgradeCheckRejectsUnrecognizedDeployer(t *testing.T) {
 			}
 			if report.Deployer != "helm" {
 				t.Errorf("report.Deployer = %q, want %q", report.Deployer, "helm")
+			}
+		})
+	}
+}
+
+// syntheticKustomizeRecipe writes a hydrated RecipeResult whose components pin
+// a Kustomize tag rather than a Helm chart version.
+func syntheticKustomizeRecipe(t *testing.T, path string, components map[string]string) string {
+	t.Helper()
+	doc := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: test\ncomponentRefs:\n"
+	for _, name := range sortedKeys(components) {
+		doc += fmt.Sprintf(
+			"  - name: %s\n    type: Kustomize\n    source: https://github.invalid/synthetic\n"+
+				"    path: deploy\n    tag: %s\n",
+			name, components[name])
+	}
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatalf("setup: write %s: %v", path, err)
+	}
+	return path
+}
+
+// A Kustomize component pins its version in `tag`. Reading `version` alone
+// compares "" to "" on both sides, which the matcher skips as unchanged, so the
+// row disappears instead of being reported.
+func TestUpgradeCheckReportsKustomizeTagChanges(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	client := upgradeCheckClient(t)
+
+	tests := []struct {
+		name     string
+		from, to map[string]string
+		wantRows int
+		wantFrom string
+		wantTo   string
+	}{
+		{
+			name:     "a moved tag is one row",
+			from:     map[string]string{"synthetic-kustomize": "v1.0.0"},
+			to:       map[string]string{"synthetic-kustomize": "v2.0.0"},
+			wantRows: 1,
+			wantFrom: "v1.0.0",
+			wantTo:   "v2.0.0",
+		},
+		{
+			name:     "an unchanged tag is still no row",
+			from:     map[string]string{"synthetic-kustomize": "v1.0.0"},
+			to:       map[string]string{"synthetic-kustomize": "v1.0.0"},
+			wantRows: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			fromPath := syntheticKustomizeRecipe(t, filepath.Join(dir, tt.name+"-from.yaml"), tt.from)
+			toPath := syntheticKustomizeRecipe(t, filepath.Join(dir, tt.name+"-to.yaml"), tt.to)
+
+			report, err := client.UpgradeCheck(context.Background(), aicr.UpgradeCheckRequest{
+				From: fromPath, To: toPath,
+			})
+			if err != nil {
+				t.Fatalf("UpgradeCheck: %v", err)
+			}
+			if len(report.Components) != tt.wantRows {
+				t.Fatalf("report has %d rows, want %d: %+v", len(report.Components), tt.wantRows, report.Components)
+			}
+			if tt.wantRows == 0 {
+				return
+			}
+			row := report.Components[0]
+			if row.From != tt.wantFrom || row.To != tt.wantTo {
+				t.Errorf("row = %s -> %s, want %s -> %s", row.From, row.To, tt.wantFrom, tt.wantTo)
+			}
+			if row.Change != upgrade.ChangeVersion {
+				t.Errorf("change = %q, want %q", row.Change, upgrade.ChangeVersion)
 			}
 		})
 	}

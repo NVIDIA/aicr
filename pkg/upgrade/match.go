@@ -57,20 +57,29 @@ type Span struct {
 // Verdict is: on a ChangeAdded or ChangeRemoved row, where nothing was
 // assessed because no transition was made.
 //
-// ReasonNoRecord and ReasonNoBoundaryCrossed are deliberately distinct even
-// though both produce unknown: the first is closed by authoring a record at
-// all, the second by widening one that already exists.
+// The three reasons that produce unknown stay distinct because they differ in
+// what would close the gap, which is the same test that keeps unknown separate
+// from unversioned: ReasonNoRecord needs somebody to author the first record,
+// ReasonNoBoundaryCrossed needs an existing one widened (or confirmation that
+// no boundary belongs there), and ReasonDowngrade needs nothing because nothing
+// can close it. Rule 7 rejects every reverse record, so a downgrade is
+// unassessable rather than merely unassessed.
+//
+// ReasonBeyondRecordCeiling is not one of them. A record exists, what it covers
+// is known, and the target is known to sit past that, which is a fact about
+// assessed ground being exceeded rather than an absence of information.
 type Reason string
 
 const (
-	ReasonRecorded           Reason = "recorded"
-	ReasonRecordBlocks       Reason = "record-blocks"
-	ReasonMultipleBoundaries Reason = "multiple-boundaries"
-	ReasonUndefinedOrigin    Reason = "undefined-origin"
-	ReasonNoRecord           Reason = "no-record"
-	ReasonNoBoundaryCrossed  Reason = "no-boundary-crossed"
-	ReasonDowngrade          Reason = "downgrade"
-	ReasonNotComparable      Reason = "not-comparable"
+	ReasonRecorded            Reason = "recorded"
+	ReasonRecordBlocks        Reason = "record-blocks"
+	ReasonMultipleBoundaries  Reason = "multiple-boundaries"
+	ReasonUndefinedOrigin     Reason = "undefined-origin"
+	ReasonNoRecord            Reason = "no-record"
+	ReasonNoBoundaryCrossed   Reason = "no-boundary-crossed"
+	ReasonBeyondRecordCeiling Reason = "beyond-record-ceiling"
+	ReasonDowngrade           Reason = "downgrade"
+	ReasonNotComparable       Reason = "not-comparable"
 )
 
 // ComponentResult is one row of an upgrade check.
@@ -111,7 +120,9 @@ type ComponentResult struct {
 	Replaces *Replaces
 
 	// StoppedAt is the `to` range a blocked jump stops at: the interval it must
-	// not enter in one step. Set on every blocked result, empty otherwise.
+	// not enter in one step. Set on every blocked version transition, and empty
+	// on every other result including a blocked ChangeReplaced row, where two
+	// pieces of software share no version line for a boundary to sit on.
 	StoppedAt string
 
 	// Span is how far the matched record's claim reaches, from the source
@@ -121,11 +132,9 @@ type ComponentResult struct {
 	// the highest version actually covered is not knowable from the range
 	// alone.
 	//
-	// Span is usually wider than Jump, but not always: a target past the
-	// record's ceiling still crosses its floor and so still matches, leaving
-	// the claim narrower than the move it is being asked to cover. A second
-	// record normally forces blocked there, so the shape survives only where
-	// one record is the whole story.
+	// Span is never narrower than Jump where it is set at all: a target past
+	// the record's ceiling no longer takes that record's verdict, so a claim
+	// cannot end up narrower than the move it is covering.
 	Span Span
 
 	// Jump is the distance between the two versions actually compared. Zero
@@ -133,8 +142,13 @@ type ComponentResult struct {
 	Jump Span
 
 	// Breaking reports a boundary semver makes no stability promise across: a
-	// major bump, or a minor bump while the major version is 0. False when
+	// major bump, a minor bump while the major version is 0, or a changed
+	// prerelease identifier over an otherwise equal release triple. False when
 	// either side is unversioned, where there is no boundary to classify.
+	//
+	// Descriptive only. It used to decide whether an unknown result stopped a
+	// strict run; ADR-021 Decision 6 dropped that calibration, because an
+	// unassessed transition is unassessed at any distance.
 	Breaking bool
 
 	// Downgrade reports that the target orders below the source.
@@ -154,24 +168,12 @@ func (r ComponentResult) FailsRun() bool {
 	if r.Change == ChangeAdded || r.Change == ChangeRemoved {
 		return false
 	}
-	switch r.Verdict {
-	case VerdictSafe:
-		return false
-	case VerdictUnknown:
-		return r.Breaking
-	case VerdictManual, VerdictBlocked:
-		return true
-	case VerdictUnversioned:
-		// Unconditional: the semver calibration has nothing to calibrate on,
-		// because there is no boundary to classify. This is a blind spot
-		// rather than an unassessed transition, and pinning a comparable ref
-		// resolves it.
-		return true
-	default:
-		// A Set can be built without going through Load, so a verdict outside
-		// the vocabulary is reachable here; an unrecognized one must not pass.
-		return true
-	}
+	// Only safe passes. A transition nobody assessed is not a transition anyone
+	// approved, so unknown fails however far the versions moved; Breaking once
+	// calibrated that and no longer does. A verdict outside the vocabulary is
+	// reachable because a Set can be built without going through Load, and it
+	// fails for the same reason an unrecognized one must not pass.
+	return r.Verdict != VerdictSafe
 }
 
 // Match compares two component-to-version tables against the set's records and
@@ -184,11 +186,13 @@ func (r ComponentResult) FailsRun() bool {
 // A record is crossed when the source sits below the floor its `to` names and
 // the target reaches it. Verdict selection then runs in this order: nothing
 // crossed is unknown; one crossed record whose `from` covers the source lends
-// its verdict, blocked included, because it describes this exact move; any
-// other crossed record authored blocked blocks the jump; two or more crossed
-// records block it; one crossed record whose `from` does not cover the source
-// blocks it, because nothing describes an upgrade from where the operator is.
-// Every result carries a Reason and an Explanation saying which of those it was.
+// its verdict, blocked included, because it describes this exact move, unless
+// the target lands past the ceiling that record's `to` names, which blocks the
+// jump at that ceiling; any other crossed record authored blocked blocks the
+// jump; two or more crossed records block it; one crossed record whose `from`
+// does not cover the source blocks it, because nothing describes an upgrade
+// from where the operator is. Every result carries a Reason and an Explanation
+// saying which of those it was.
 //
 // set must already have passed Validate; Match does not re-run it. A malformed
 // record cannot panic here either: a transition whose ranges do not parse, or
@@ -315,16 +319,25 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 
 	crossed := crossings(u, src, tgt)
 	if len(crossed) == 0 {
-		r.Verdict = VerdictUnknown
-		r.Reason, r.Explanation = unmatchedReason(u, r)
-		return r
+		return unmatched(u, r, tgt)
 	}
-	// One record, authored for this starting point, describing this exact
-	// move: its verdict stands whatever it is. A blocked verdict here is that
-	// record saying "not in one step", and its own steps say what to do
-	// instead, so the result carries it and a renderer can show them.
+	// One record, authored for this starting point and reaching the target:
+	// its verdict stands whatever it is. A blocked verdict here is that record
+	// saying "not in one step", and its own steps say what to do instead, so
+	// the result carries it and a renderer can show them.
 	if len(crossed) == 1 && fromCovers(crossed[0].tr, src) {
 		only := crossed[0]
+		if ceiling, past := beyondCeiling(only.tr, tgt); past {
+			// The record describes this starting point but stops assessing
+			// before the target, so lending its verdict would reach forward
+			// over ground nobody read the migration notes for. Rule 2 forbids
+			// the same reach at authoring time; this is it at match time.
+			r.Verdict = VerdictBlocked
+			r.Reason = ReasonBeyondRecordCeiling
+			r.StoppedAt = only.tr.To
+			r.Explanation = beyondCeilingExplanation(ceiling, r.To)
+			return r
+		}
 		r.Verdict = only.tr.Verdict
 		r.Transition = only.tr
 		r.Span = claimSpan(src, only.tr)
@@ -344,7 +357,7 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		r.StoppedAt = blocking.tr.To
 		r.Explanation = fmt.Sprintf(
 			"blocked by the record covering %s: do not move from %s into %s in one step. "+
-				"Upgrade to an intermediate version below %s first, then re-run this check",
+				"Upgrade to %s first, then re-run this check",
 			blocking.floor.ver, r.From, blocking.tr.To, blocking.floor.ver)
 		return r
 	}
@@ -435,6 +448,37 @@ func crosses(t *Transition, src, tgt *semver.Version) (bound, bool) {
 	return toRange.lower, true
 }
 
+// beyondCeiling reports whether the target lands past the ceiling a
+// transition's `to` names, and returns that ceiling.
+//
+// A `to` with no ceiling reaches forward without limit, so nothing is past it,
+// and an unparseable one never became a crossing in the first place. A target
+// exactly at an inclusive ceiling is covered; at an exclusive one it is not.
+func beyondCeiling(t *Transition, tgt *semver.Version) (bound, bool) {
+	b, err := parseBounds(t.To)
+	if err != nil || b.upper.unbounded || b.upper.ver == nil {
+		return bound{}, false
+	}
+	return b.upper, pastBound(b.upper, tgt)
+}
+
+// pastBound reports whether v sits above a bounded ceiling. A version exactly
+// at an inclusive ceiling is covered by it; at an exclusive one it is not.
+func pastBound(ceiling bound, v *semver.Version) bool {
+	cmp := v.Compare(ceiling.ver)
+	return cmp > 0 || (cmp == 0 && !ceiling.inclusive)
+}
+
+// ceilingPhrase names the highest version a ceiling actually covers, as a place
+// an operator can be told to stop. The bare number will not do: "<0.19.0" and
+// "<=0.19.0" end at different versions, and only one of them is 0.19.0 itself.
+func ceilingPhrase(b bound) string {
+	if b.inclusive {
+		return b.ver.String()
+	}
+	return "the last version below " + b.ver.String()
+}
+
 // fromCovers reports whether a transition's guidance was authored for this
 // starting point.
 func fromCovers(t *Transition, src *semver.Version) bool {
@@ -464,20 +508,93 @@ func floorNames(crossed []crossing) []string {
 	return names
 }
 
-// unmatchedReason distinguishes the three ways a jump can cross nothing.
-// Direction comes first: a downgrade needs a reverse record, and saying "no
-// record" there would point the reader at the wrong gap.
-func unmatchedReason(u *ComponentUpgrades, r ComponentResult) (Reason, string) {
+// unmatched classifies a jump that crosses no recorded boundary.
+//
+// Direction comes first: a downgrade needs a reverse record rule 7 forbids, so
+// reporting a coverage gap there would point the reader at a remedy that cannot
+// exist. Otherwise coverage decides, and the highest `to` ceiling is the top of
+// it. That ceiling stands for everything anyone assessed only because rules 2
+// and 3 hold together: rule 3 leaves the `from` domains no hole below the pin,
+// and rule 2 keeps every `to` ceiling at or under it, so a target above the
+// highest ceiling is past the data rather than inside a quiet stretch of it.
+func unmatched(u *ComponentUpgrades, r ComponentResult, tgt *semver.Version) ComponentResult {
 	switch {
 	case r.Downgrade:
-		return ReasonDowngrade, fmt.Sprintf(
-			"downgrade from %s to %s; records are directional and no reverse record exists", r.From, r.To)
+		r.Verdict = VerdictUnknown
+		r.Reason = ReasonDowngrade
+		r.Explanation = fmt.Sprintf(
+			"downgrade from %s to %s. Transition records describe forward moves only, so none "+
+				"describes this one and none ever can: this is unassessable rather than merely "+
+				"unassessed, and there is no intermediate version to land on. Review the "+
+				"component's own downgrade guidance before proceeding",
+			r.From, r.To)
 	case u == nil || len(u.Transitions) == 0:
-		return ReasonNoRecord, "no transition record exists for this component, so this move is unassessed"
+		r.Verdict = VerdictUnknown
+		r.Reason = ReasonNoRecord
+		r.Explanation = fmt.Sprintf(
+			"no transition record exists for this component, so nothing assesses the move from "+
+				"%s to %s. This is not a pass: read the component's own upstream release notes "+
+				"and decide, then consider authoring the first record so the next operator does "+
+				"not repeat the work",
+			r.From, r.To)
 	default:
-		return ReasonNoBoundaryCrossed, fmt.Sprintf(
-			"a record exists for this component, but no recorded boundary falls between %s and %s", r.From, r.To)
+		if top, ceiling, ok := highestCeiling(u); ok && pastBound(ceiling, tgt) {
+			r.Verdict = VerdictBlocked
+			r.Reason = ReasonBeyondRecordCeiling
+			r.StoppedAt = top.To
+			r.Explanation = beyondCeilingExplanation(ceiling, r.To)
+			return r
+		}
+		r.Verdict = VerdictUnknown
+		r.Reason = ReasonNoBoundaryCrossed
+		r.Explanation = fmt.Sprintf(
+			"a record exists for this component but says nothing about the range between %s and "+
+				"%s, so no author flagged this move. This is not a pass: read the component's own "+
+				"upstream release notes and decide whether this range needs a boundary, then "+
+				"widen the record if it does",
+			r.From, r.To)
 	}
+	return r
+}
+
+// beyondCeilingExplanation states what both routes to ReasonBeyondRecordCeiling
+// have in common: assessment stops at a version the target is above.
+func beyondCeilingExplanation(ceiling bound, target string) string {
+	landing := ceilingPhrase(ceiling)
+	return fmt.Sprintf(
+		"transition records for this component assess only as far as %s, and %s lands past that, "+
+			"so nothing assesses this move or anything above %s. Upgrade no further than %s and "+
+			"re-run this check, or widen a record's `to` range to cover %s",
+		landing, target, landing, landing, target)
+}
+
+// highestCeiling returns the transition whose `to` reaches furthest forward and
+// the ceiling it names. ok is false when no ceiling bounds the coverage, either
+// because a record reaches forward without limit or because none parsed.
+func highestCeiling(u *ComponentUpgrades) (*Transition, bound, bool) {
+	if u == nil {
+		return nil, bound{}, false
+	}
+	var (
+		top     *Transition
+		highest bound
+	)
+	for i := range u.Transitions {
+		b, err := parseBounds(u.Transitions[i].To)
+		if err != nil {
+			continue
+		}
+		if b.upper.unbounded || b.upper.ver == nil {
+			return nil, bound{}, false
+		}
+		if top == nil || upperAfter(b.upper, highest) {
+			top, highest = &u.Transitions[i], b.upper
+		}
+	}
+	if top == nil {
+		return nil, bound{}, false
+	}
+	return top, highest, true
 }
 
 func recordedExplanation(r ComponentResult, c crossing) string {
@@ -568,9 +685,22 @@ func levelDiff(a, b uint64) int {
 // 1.0 there is no promise at all, so a minor bump counts there: treating 0.x
 // minors as non-breaking would pass an unassessed 0.17.2 to 0.18.1, which is
 // ADR-021's own worked example and an entire API-group rename.
+//
+// A changed prerelease identifier over an otherwise equal release triple counts
+// for the same reason one level further down: semver excludes prereleases from
+// every guarantee it makes about the release they precede, so they promise
+// strictly less than a 0.x minor does. The pin that shipped a CRD migration
+// moved only there, and without this an unassessed alpha-to-alpha bump crosses
+// no boundary and passes a strict run.
 func breaking(a, b *semver.Version) bool {
-	if a.Major() != b.Major() {
+	switch {
+	case a.Major() != b.Major():
 		return true
+	case a.Major() == 0 && a.Minor() != b.Minor():
+		return true
+	case a.Minor() == b.Minor() && a.Patch() == b.Patch():
+		return a.Prerelease() != b.Prerelease()
+	default:
+		return false
 	}
-	return a.Major() == 0 && a.Minor() != b.Minor()
 }

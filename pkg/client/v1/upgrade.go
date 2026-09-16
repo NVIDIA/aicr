@@ -51,6 +51,27 @@ type UpgradeCheckRequest struct {
 	Kubeconfig string
 }
 
+// UpgradeReport is the report UpgradeCheck returns. It is a transparent alias
+// of upgrade.Report rather than a restatement of it: the report is already a
+// projection built for consumers, so copying it here would add a second shape
+// to keep in step with the first for no gain.
+type UpgradeReport = upgrade.Report
+
+// WriteUpgradeReportTable writes a human-readable upgrade-check table.
+//
+// Re-exported so pkg/cli renders the report without importing pkg/upgrade,
+// mirroring WriteSnapshotDiffTable. The rendering itself stays beside the
+// report shape and its goldens.
+func WriteUpgradeReportTable(w io.Writer, report *UpgradeReport) error {
+	if w == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "upgrade report table writer is required (got nil)")
+	}
+	if report == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, "upgrade report is required (got nil)")
+	}
+	return upgrade.WriteTable(w, report)
+}
+
 // UpgradeCheck compares two artifacts against the ADR-021 transition records
 // this binary's registry references, and returns the report.
 //
@@ -73,28 +94,6 @@ type UpgradeCheckRequest struct {
 //     artifact carrying no criteria, or a manual or blocked result needs a
 //     Deployer that was not supplied.
 //   - Loader, resolver and record errors propagate with their own codes.
-//
-// UpgradeReport is the report UpgradeCheck returns. It is a transparent alias
-// of upgrade.Report rather than a restatement of it: the report is already a
-// projection built for consumers, so copying it here would add a second shape
-// to keep in step with the first for no gain.
-type UpgradeReport = upgrade.Report
-
-// WriteUpgradeReportTable writes a human-readable upgrade-check table.
-//
-// Re-exported so pkg/cli renders the report without importing pkg/upgrade,
-// mirroring WriteSnapshotDiffTable. The rendering itself stays beside the
-// report shape and its goldens.
-func WriteUpgradeReportTable(w io.Writer, report *UpgradeReport) error {
-	if w == nil {
-		return errors.New(errors.ErrCodeInvalidRequest, "upgrade report table writer is required (got nil)")
-	}
-	if report == nil {
-		return errors.New(errors.ErrCodeInvalidRequest, "upgrade report is required (got nil)")
-	}
-	return upgrade.WriteTable(w, report)
-}
-
 func (c *Client) UpgradeCheck(ctx context.Context, req UpgradeCheckRequest) (*UpgradeReport, error) {
 	if c == nil {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "aicr client not initialized")
@@ -232,13 +231,23 @@ func artifactRecipePath(ref string) (string, error) {
 // table the matcher compares. Unversioned components are carried rather than
 // dropped: the matcher classifies them as unversioned, which is a reportable
 // blind spot, while dropping them would read as a component removal.
+//
+// A Kustomize component pins Tag where a Helm one pins Version, and records
+// apply to both (pinnedVersionFor checks a record's ceiling against whichever
+// the registry declares). Reading Version alone would compare "" to "" for
+// every Kustomize component, and the matcher skips equal pins, so a tag move
+// would vanish from the report rather than be carried as unversioned.
 func componentVersions(r *RecipeResult) map[string]string {
 	if r == nil {
 		return nil
 	}
 	table := make(map[string]string, len(r.Components))
 	for _, c := range r.Components {
-		table[c.Name] = c.Version
+		version := c.Version
+		if version == "" {
+			version = c.Tag
+		}
+		table[c.Name] = version
 	}
 	return table
 }

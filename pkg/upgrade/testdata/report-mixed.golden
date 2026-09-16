@@ -12,7 +12,9 @@ epsilon-operator  main    release-1  unversioned  versions are not comparable
 eta-operator      2.4.1   -          -            stays installed; AICR does not uninstall it
 gamma-operator    1.0.0   3.0.0      blocked      2 majors, stops at >=2.0.0 <3.0.0
 kappa-operator    3.2.0   4.0.0      blocked      1 major, stops at >=4.0.0 <=4.0.0, 2 steps
-theta-operator    0.13.0  0.11.0     unknown      downgrade, no reverse record, breaking boundary
+lambda-operator   1.1.0   1.2.0      unknown      1 minor, record exists, no boundary here
+mu-operator       1.17.0  1.25.0     blocked      8 minors, stops at >=1.18.0 <1.19.0
+theta-operator    0.13.0  0.11.0     unknown      downgrade, unassessable
 zeta-operator     -       0.4.0      -            new component, nothing to do
 
 beta-operator 0.17.2 -> 0.18.1  (manual)
@@ -52,4 +54,11 @@ kappa-operator 3.2.0 -> 4.0.0  (blocked)
     2. land-on-3-9-first
        Upgrade to 3.9.x, reload the export there, then move to 4.0.0.
 
-9 component changes, 6 need attention
+mu-operator 1.17.0 -> 1.25.0  (blocked)
+  transition records for this component assess only as far as the last version
+  below 1.19.0, and 1.25.0 lands past that, so nothing assesses this move or
+  anything above the last version below 1.19.0. Upgrade no further than the
+  last version below 1.19.0 and re-run this check, or widen a record's `to`
+  range to cover 1.25.0
+
+11 component changes, 8 need attention

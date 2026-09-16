@@ -16,6 +16,7 @@ package upgrade
 
 import (
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -390,18 +391,6 @@ func TestMatchSpan(t *testing.T) {
 			wantJump: Span{Minors: 1},
 		},
 		{
-			// A target past the ceiling still crosses the floor, so the record
-			// still applies and the claim ends up narrower than the move. Only
-			// reachable while one record is the whole story; a second forces
-			// blocked.
-			name:     "a target overshooting the ceiling leaves the claim narrower than the jump",
-			to:       ">=0.18.0 <0.20.0",
-			from:     "0.17.2",
-			target:   "0.25.0",
-			wantSpan: Span{Minors: 3},
-			wantJump: Span{Minors: 8},
-		},
-		{
 			name:     "a patch-only record",
 			to:       ">=0.17.3 <=0.17.5",
 			from:     "0.17.2",
@@ -454,6 +443,11 @@ func TestMatchBreakingBoundary(t *testing.T) {
 		{"a minor downgrade below 1.0 is breaking", "0.18.1", "0.17.2", true, true},
 		{"a major downgrade is breaking", "2.0.0", "1.9.0", true, true},
 		{"crossing 1.0 is breaking", "0.19.0", "1.0.0", true, false},
+		{"prerelease to prerelease on one triple is breaking", "0.1.0-alpha.8", "0.1.0-alpha.12", true, false},
+		{"prerelease to its release is breaking", "1.0.0-rc.1", "1.0.0", true, false},
+		{"release to a prerelease of itself is breaking", "1.0.0", "1.0.0-rc.1", true, true},
+		{"a prerelease across a patch bump is not breaking", "1.0.0-rc.1", "1.0.1-rc.1", false, false},
+		{"equal prereleases across a patch bump are not breaking", "1.2.0-rc.1", "1.2.5-rc.1", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -468,8 +462,10 @@ func TestMatchBreakingBoundary(t *testing.T) {
 			if r.Breaking != tt.wantBreaking {
 				t.Errorf("breaking = %v, want %v", r.Breaking, tt.wantBreaking)
 			}
-			if r.FailsRun() != tt.wantBreaking {
-				t.Errorf("FailsRun() = %v, want %v", r.FailsRun(), tt.wantBreaking)
+			// Independent of wantBreaking: every row here is unknown, and
+			// unknown never passes.
+			if !r.FailsRun() {
+				t.Error("FailsRun() = false, want true: unknown never passes")
 			}
 			if r.Downgrade != tt.wantDowngrade {
 				t.Errorf("downgrade = %v, want %v", r.Downgrade, tt.wantDowngrade)
@@ -493,13 +489,25 @@ func TestComponentResultFailsRun(t *testing.T) {
 			true,
 		},
 		{
+			// Breaking is descriptive now: an unassessed transition is
+			// unassessed at any distance, so both shapes fail.
 			"unknown within a non-breaking boundary",
 			ComponentResult{Change: ChangeVersion, Verdict: VerdictUnknown},
-			false,
+			true,
 		},
 		{
 			"unknown across a breaking boundary",
 			ComponentResult{Change: ChangeVersion, Verdict: VerdictUnknown, Breaking: true},
+			true,
+		},
+		{
+			// 1.9.0 -> 1.8.0's shape: same major, non-zero, so Breaking is
+			// false. It used to exit 0, which is a silently passing rollback.
+			"a non-breaking downgrade still fails",
+			ComponentResult{
+				Change: ChangeVersion, Verdict: VerdictUnknown,
+				Reason: ReasonDowngrade, Downgrade: true,
+			},
 			true,
 		},
 		{"added", ComponentResult{Change: ChangeAdded}, false},
@@ -797,7 +805,7 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			from: "1.5.0",
 			to:   "3.0.0",
 			want: "blocked by the record covering 3.0.0: do not move from 1.5.0 into >=3.0.0 <=3.0.0 " +
-				"in one step. Upgrade to an intermediate version below 3.0.0 first, then re-run this check",
+				"in one step. Upgrade to 3.0.0 first, then re-run this check",
 		},
 		{
 			name: "multiple-boundaries",
@@ -828,25 +836,53 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 				"so nothing covers this move. Author a record for this starting point, then re-run this check",
 		},
 		{
+			name: "beyond-record-ceiling",
+			set:  oneComponent(trans("<0.18.0", ">=0.18.0 <0.20.0", VerdictSafe, "S")),
+			from: "0.17.2",
+			to:   "0.25.0",
+			want: "transition records for this component assess only as far as the last version below " +
+				"0.20.0, and 0.25.0 lands past that, so nothing assesses this move or anything above " +
+				"the last version below 0.20.0. Upgrade no further than the last version below 0.20.0 " +
+				"and re-run this check, or widen a record's `to` range to cover 0.25.0",
+		},
+		{
+			name: "beyond-record-ceiling names an inclusive ceiling as the version itself",
+			set:  oneComponent(trans("<0.18.0", ">=0.18.0 <=0.20.0", VerdictSafe, "S")),
+			from: "0.17.2",
+			to:   "0.25.0",
+			want: "transition records for this component assess only as far as 0.20.0, and 0.25.0 lands " +
+				"past that, so nothing assesses this move or anything above 0.20.0. Upgrade no further " +
+				"than 0.20.0 and re-run this check, or widen a record's `to` range to cover 0.25.0",
+		},
+		{
 			name: "no-record",
 			set:  Set{},
 			from: "1.0.0",
 			to:   "1.0.1",
-			want: "no transition record exists for this component, so this move is unassessed",
+			want: "no transition record exists for this component, so nothing assesses the move from " +
+				"1.0.0 to 1.0.1. This is not a pass: read the component's own upstream release notes " +
+				"and decide, then consider authoring the first record so the next operator does not " +
+				"repeat the work",
 		},
 		{
 			name: "no-boundary-crossed",
 			set:  oneComponent(trans("<2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "S")),
 			from: "1.0.0",
 			to:   "1.0.1",
-			want: "a record exists for this component, but no recorded boundary falls between 1.0.0 and 1.0.1",
+			want: "a record exists for this component but says nothing about the range between 1.0.0 " +
+				"and 1.0.1, so no author flagged this move. This is not a pass: read the component's " +
+				"own upstream release notes and decide whether this range needs a boundary, then " +
+				"widen the record if it does",
 		},
 		{
 			name: "downgrade",
 			set:  oneComponent(trans("<2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "S")),
 			from: "2.0.0",
 			to:   "1.5.0",
-			want: "downgrade from 2.0.0 to 1.5.0; records are directional and no reverse record exists",
+			want: "downgrade from 2.0.0 to 1.5.0. Transition records describe forward moves only, so " +
+				"none describes this one and none ever can: this is unassessable rather than merely " +
+				"unassessed, and there is no intermediate version to land on. Review the component's " +
+				"own downgrade guidance before proceeding",
 		},
 		{
 			name: "not-comparable",
@@ -891,6 +927,164 @@ func TestMatchExplanationsAreConcrete(t *testing.T) {
 			}
 			if got[0].Explanation != tt.want {
 				t.Errorf("explanation =\n  %q\nwant\n  %q", got[0].Explanation, tt.want)
+			}
+		})
+	}
+}
+
+// A prerelease-only bump is the shape that shipped a CRD migration: it clears
+// every major/minor rule, so without the prerelease arm an unassessed one
+// crosses no boundary and passes a strict run.
+func TestMatchPrereleaseBumpFailsAnUnassessedRun(t *testing.T) {
+	tests := []struct {
+		name        string
+		set         Set
+		from, to    string
+		wantVerdict Verdict
+		wantReason  Reason
+	}{
+		{
+			name: "no record at all", set: Set{},
+			from: "0.1.0-alpha.8", to: "0.1.0-alpha.12",
+			wantVerdict: VerdictUnknown, wantReason: ReasonNoRecord,
+		},
+		{
+			// The pin moved past the only record's ceiling, so the next bump
+			// crosses no boundary. Assessment plainly ended at alpha.12.
+			name: "a record exists but the pin moved past its ceiling",
+			set:  oneComponent(trans("<0.1.0-alpha.12", "0.1.0-alpha.12", VerdictManual, "M")),
+			from: "0.1.0-alpha.12", to: "0.1.0-alpha.20",
+			wantVerdict: VerdictBlocked, wantReason: ReasonBeyondRecordCeiling,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Match(tt.set, map[string]string{"c": tt.from}, map[string]string{"c": tt.to})
+			if len(got) != 1 {
+				t.Fatalf("Match() returned %d rows, want 1: %+v", len(got), got)
+			}
+			if got[0].Verdict != tt.wantVerdict {
+				t.Errorf("verdict = %q, want %q", got[0].Verdict, tt.wantVerdict)
+			}
+			if got[0].Reason != tt.wantReason {
+				t.Errorf("reason = %q, want %q", got[0].Reason, tt.wantReason)
+			}
+			if !got[0].Breaking {
+				t.Error("breaking = false, want true: a differing prerelease is a boundary")
+			}
+			if !got[0].FailsRun() {
+				t.Error("FailsRun() = false, want true: an unassessed prerelease bump must not pass")
+			}
+		})
+	}
+}
+
+// A recorded verdict is unaffected by the prerelease arm: Breaking is consulted
+// only where the verdict is unknown.
+func TestMatchPrereleaseBreakingDoesNotDisturbARecordedSafe(t *testing.T) {
+	set := oneComponent(Transition{
+		From: "<0.1.0-alpha.12", To: ">=0.1.0-alpha.12 <=0.1.0-alpha.12",
+		Verdict: VerdictSafe, VerifiedBy: "uat: synthetic lane", Summary: "S",
+	})
+	got := Match(set, map[string]string{"c": "0.1.0-alpha.8"}, map[string]string{"c": "0.1.0-alpha.12"})
+	if len(got) != 1 {
+		t.Fatalf("Match() returned %d rows, want 1: %+v", len(got), got)
+	}
+	if got[0].Verdict != VerdictSafe {
+		t.Fatalf("verdict = %q, want %q", got[0].Verdict, VerdictSafe)
+	}
+	if !got[0].Breaking {
+		t.Error("breaking = false, want true: the boundary is still classified")
+	}
+	if got[0].FailsRun() {
+		t.Error("FailsRun() = true, want false: a recorded safe does not consult Breaking")
+	}
+}
+
+// crosses only fires when the source sits below the blocking floor, so advice
+// to stop *below* that floor always already held. The floor itself is the
+// actionable landing point.
+func TestMatchRecordBlocksNamesTheFloorToLandOn(t *testing.T) {
+	set := oneComponent(
+		trans("<2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "S"),
+		trans(">=2.5.0 <3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B"),
+	)
+	explanations := make(map[string]string, 2)
+	for _, src := range []string{"1.5.0", "2.4.9"} {
+		got := Match(set, map[string]string{"c": src}, map[string]string{"c": "3.0.0"})
+		if len(got) != 1 {
+			t.Fatalf("Match(%s) returned %d rows, want 1: %+v", src, len(got), got)
+		}
+		if got[0].Reason != ReasonRecordBlocks {
+			t.Fatalf("reason = %q, want %q", got[0].Reason, ReasonRecordBlocks)
+		}
+		if !strings.Contains(got[0].Explanation, "Upgrade to 3.0.0 first") {
+			t.Errorf("explanation does not name the floor to land on: %q", got[0].Explanation)
+		}
+		if strings.Contains(got[0].Explanation, "below 3.0.0") {
+			t.Errorf("explanation still advises stopping below the floor, which always already held: %q",
+				got[0].Explanation)
+		}
+		explanations[src] = got[0].Explanation
+	}
+	if explanations["1.5.0"] == explanations["2.4.9"] {
+		t.Errorf("two different sources produced byte-identical advice: %q", explanations["1.5.0"])
+	}
+}
+
+// A record vouches only as far as its own `to` ceiling. Reaching past it is the
+// same forward reach checkPinCeiling rejects at authoring time.
+func TestMatchTargetPastTheRecordCeiling(t *testing.T) {
+	tests := []struct {
+		name        string
+		to          string
+		target      string
+		wantVerdict Verdict
+		wantReason  Reason
+	}{
+		{"past an exclusive ceiling", ">=1.18.0 <1.19.0", "1.25.0", VerdictBlocked, ReasonBeyondRecordCeiling},
+		{"exactly at an exclusive ceiling", ">=1.18.0 <1.19.0", "1.19.0", VerdictBlocked, ReasonBeyondRecordCeiling},
+		{"exactly at an inclusive ceiling", ">=1.18.0 <=1.19.0", "1.19.0", VerdictSafe, ReasonRecorded},
+		{"inside the range", ">=1.18.0 <1.19.0", "1.18.5", VerdictSafe, ReasonRecorded},
+		{"a ceiling-less to reaches everywhere", ">=1.18.0", "1.25.0", VerdictSafe, ReasonRecorded},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			set := oneComponent(Transition{
+				From: "<1.18.0", To: tt.to, Verdict: VerdictSafe,
+				VerifiedBy: "uat: synthetic lane", Summary: "S",
+			})
+			got := Match(set, map[string]string{"c": "1.17.0"}, map[string]string{"c": tt.target})
+			if len(got) != 1 {
+				t.Fatalf("Match() returned %d rows, want 1: %+v", len(got), got)
+			}
+			r := got[0]
+			if r.Verdict != tt.wantVerdict {
+				t.Errorf("verdict = %q, want %q", r.Verdict, tt.wantVerdict)
+			}
+			if r.Reason != tt.wantReason {
+				t.Errorf("reason = %q, want %q", r.Reason, tt.wantReason)
+			}
+			if tt.wantReason != ReasonBeyondRecordCeiling {
+				return
+			}
+			if !r.FailsRun() {
+				t.Error("FailsRun() = false, want true")
+			}
+			// The 1.x minors keep Breaking false throughout, so a passing
+			// FailsRun above is the blocked verdict rather than the semver
+			// calibration standing in for it.
+			if r.Breaking {
+				t.Error("breaking = true, want false")
+			}
+			if r.Transition != nil {
+				t.Error("Transition is set; a record that does not cover the jump must render no steps")
+			}
+			if r.StoppedAt != tt.to {
+				t.Errorf("StoppedAt = %q, want %q", r.StoppedAt, tt.to)
+			}
+			if (r.Span != Span{}) {
+				t.Errorf("span = %+v, want zero: no record's claim covers this move", r.Span)
 			}
 		})
 	}

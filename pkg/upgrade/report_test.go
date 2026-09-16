@@ -162,6 +162,22 @@ func TestNewReportNotes(t *testing.T) {
 			want: "replaces a, 2 steps",
 		},
 		{
+			// The verdict column reads "blocked", but a replacement has no
+			// boundary for the version rows' "stops at" phrase to name, so
+			// without this the notes read as an ordinary migration.
+			name: "a blocked replacement signals the block",
+			result: ComponentResult{
+				Component: "b", Change: ChangeReplaced, ReplacedComponent: "a", To: "1.0.0",
+				Verdict: VerdictBlocked,
+				Replaces: &Replaces{
+					Component:       "a",
+					Verdict:         VerdictBlocked,
+					StepsByDeployer: []StepGroup{{Steps: []Step{{ID: "one"}, {ID: "two"}}}},
+				},
+			},
+			want: "replaces a, not in one step, 2 steps",
+		},
+		{
 			name: "safe names its evidence",
 			result: ComponentResult{
 				Component: "a", Change: ChangeVersion, From: "1.2.0", To: "1.2.3",
@@ -221,12 +237,33 @@ func TestNewReportNotes(t *testing.T) {
 			want: "1 minor, no record",
 		},
 		{
-			name: "a downgrade has no forward record to read backwards",
+			name: "unknown with no record at all says to author one",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "1.18.0", To: "1.19.0",
+				Verdict: VerdictUnknown, Reason: ReasonNoRecord, Jump: Span{Minors: 1},
+			},
+			want: "1 minor, no record",
+		},
+		{
+			// Kept apart from "no record": telling a reader to author a record
+			// for a component that has one points at the wrong gap.
+			name: "unknown with a record that no boundary falls inside says so",
+			result: ComponentResult{
+				Component: "a", Change: ChangeVersion, From: "1.18.0", To: "1.19.0",
+				Verdict: VerdictUnknown, Reason: ReasonNoBoundaryCrossed, Jump: Span{Minors: 1},
+			},
+			want: "1 minor, record exists, no boundary here",
+		},
+		{
+			// No reverse record can ever exist, so the cell says the gap
+			// cannot be closed rather than that it has not been.
+			name: "a downgrade is unassessable, not merely unassessed",
 			result: ComponentResult{
 				Component: "a", Change: ChangeVersion, From: "0.13.0", To: "0.11.0",
-				Verdict: VerdictUnknown, Downgrade: true, Jump: Span{Minors: 2}, Breaking: true,
+				Verdict: VerdictUnknown, Reason: ReasonDowngrade,
+				Downgrade: true, Jump: Span{Minors: 2}, Breaking: true,
 			},
-			want: "downgrade, no reverse record, breaking boundary",
+			want: "downgrade, unassessable",
 		},
 		{
 			name: "unversioned is a gap in the inputs",

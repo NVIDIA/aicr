@@ -93,7 +93,7 @@ Twelve decisions. The first four define the artifact and where it ships; the nex
 | 3 | [Ownership classes](#decision-3-ownership-classes-and-what-aicr-can-see) | Upstream, AICR-authored, and user-authored content are versioned and migrated differently. |
 | 4 | [Adjacent migration release](#decision-4-migration-content-ships-as-an-adjacent-generated-release) | Migration content ships as a `-premigrate` release beside the component, never injected into a chart. |
 | 5 | [One matcher, three axes](#decision-5-one-matcher-three-independent-axes) | Where `from` comes from, whether a cluster scan runs, and which deployer to render are independent. |
-| 6 | [Non-zero exit by default](#decision-6-non-zero-exit-by-default-semver-calibrated) | An opt-in check, but one that exits non-zero so CI can use it. 0.x minors count as breaking. |
+| 6 | [Non-zero exit by default](#decision-6-non-zero-exit-by-default-on-anything-but-safe) | An opt-in check that exits non-zero on anything but `safe`, `unknown` included. |
 | 7 | [Wrappers carry two versions](#decision-7-generated-wrappers-carry-two-versions) | Generated charts stamp the AICR version and the payload version separately. |
 | 8 | [Close the `ownsCRDs` gap](#decision-8-close-the-ownscrds-deployer-gap) | CRDs must actually upgrade before a `safe` verdict can mean anything. |
 | 9 | [UAT covers upgrade](#decision-9-uat-covers-upgrade-and-rollback) | `safe` is tested; `manual` rests on process; hardware-specific residual falls to evidence. |
@@ -349,11 +349,27 @@ One matcher runs over a `component -> version` table per side. Three separate in
 
 **`--to` is optional when `--from` is a bundle or recipe.** Omitting it re-resolves that artifact's own embedded criteria against the running binary's registry, synthesizing the target from AICR's current pins. This exists because it answers a different question from the one the two-argument form answers. `--from X --to Y` asks "is this specific move safe?" and presumes the operator already worked out where they are going. What an operator actually holds is an old bundle and the question **"am I behind, and does catching up hurt?"** The single-argument form asks that directly, and it is cheap because a bundle already embeds `recipe.yaml`, which embeds the criteria it was resolved from. Because a bundle embeds a deterministic `recipe.yaml`, the recipe and bundle forms share one code path.
 
-**This premise was false when written, and is now true.** Only `helm` bundles embedded `recipe.yaml`: `pkg/bundler/bundler.go` gated the write on the deployer, and that was its only write site, so `argocd`, `argocd-helm`, `flux` and `helmfile` bundles carried no recipe at all. Found while implementing [#2528](https://github.com/NVIDIA/aicr/issues/2528), tracked as [#2753](https://github.com/NVIDIA/aicr/issues/2753), and fixed by [#2759](https://github.com/NVIDIA/aicr/pull/2759): every bundle now writes it, so the shared code path this decision describes reaches every deployer as intended.
+That shared code path was aspirational when written and is now real: only `helm` bundles embedded `recipe.yaml`, because `pkg/bundler/bundler.go` gated its only write site on the deployer, leaving `argocd`, `argocd-helm`, `flux` and `helmfile` bundles with no recipe at all. Found while implementing [#2528](https://github.com/NVIDIA/aicr/issues/2528), tracked as [#2753](https://github.com/NVIDIA/aicr/issues/2753), fixed by [#2759](https://github.com/NVIDIA/aicr/pull/2759).
 
 **"No cluster access" is about cluster state, not artifact I/O.** The comparison reads two artifacts and inspects nothing else, which is what makes it the CI and GitOps path. A `cm://` path is an artifact *location* like a file path, accepted for the same reason `aicr diff` and `aicr validate` accept one, and reading or writing one does contact that cluster's API for the ConfigMap itself. That is artifact I/O, not the live-state inspection this decision scopes out: reading installed release inventory is the separate `--from cluster` axis below.
 
 **Whether a cluster scan runs.** The at-risk scan for unmanaged resources ([Decision 3](#decision-3-ownership-classes-and-what-aicr-can-see)) needs a cluster no matter where the `from` table came from, so it is its own axis rather than a property of `--from`. It is implied by `--from cluster` and available alongside artifact comparison via `--scan-cluster`. Comparing two bundles while scanning a live cluster for unmanaged `Skyhook` objects is a legitimate combination, and the two-mode framing had no name for it.
+
+**A record's verdict reaches only as far as its own `to` ceiling** (narrowed in [#2760](https://github.com/NVIDIA/aicr/pull/2760), which previously tested only `to`'s lower bound and never compared the target against the ceiling, so a record claiming `to: ">=0.18.0 <0.19.0" verdict: safe` lent `safe` to `0.17.0 -> 0.25.0`). `to`'s floor is the boundary a jump crosses; its ceiling is how far the verdict carries. This is the same principle [Rule 2](#decision-2-transition-records) enforces at authoring time, where a `to` may not reach past the current pin because an author cannot have read the migration notes for a version nobody has released. A record vouching past its own ceiling is that identical forward reach, moved to match time.
+
+**`blocked` means AICR can name where to stop.** That is what unifies its four routes, and what separates it from `unknown`: `blocked` hands the operator information to act on, while `unknown` says AICR has none and the investigation is theirs. Neither is a pass. [Decision 6](#decision-6-non-zero-exit-by-default-on-anything-but-safe) carries the gradient of `unknown` and the failure rule that follows from it.
+
+| Route | When | `reason` | Steps |
+|---|---|---|---|
+| A record describes the move and blocks it | One record crossed, its `from` covers the source, the target is within its ceiling | `recorded` | yes |
+| An authored block is flown past | A crossed `blocked` record was written for a different starting point | `record-blocks` | no |
+| Several boundaries at once | Two or more records crossed | `multiple-boundaries` | no |
+| Nothing describes the starting point | One record crossed, its `from` excludes the source | `undefined-origin` | no |
+| The target is past what anyone assessed | The target sits above the highest `to` ceiling the component's records name | `beyond-record-ceiling` | no |
+
+Only the first attaches a record and renders its deployer-scoped steps, because only there did an author write instructions for the move actually being made. The rest attach none: composing one record's steps for a jump it does not describe is the failure the verdict exists to prevent.
+
+The last route is `blocked` rather than `unknown` because nothing is unknown about it. The record exists, what it covers is known, and the target is known to sit outside it, which makes it structurally the `multiple-boundaries` case with the unassessed remainder above the ceiling instead of between two records. It is reachable whether or not a boundary is crossed, which is what catches the common authoring miss: a pin bumped past the last record's ceiling, leaving the next upgrade crossing nothing and describing nothing.
 
 **The report states the span a verdict covers.** A record's `to` is a range, so `safe` may cover one patch or eleven minors, and the range expression buries that. The check renders it explicitly ("safe across 11 minors"), which makes [Decision 12](#decision-12-the-matrix-describes-aicrs-pins-not-upstreams-releases)'s point that jump size scales the claim operational rather than advisory: a reviewer sees the width without decoding a semver constraint.
 
@@ -439,19 +455,37 @@ Shelling out to `helm list -A -o json` is **not** sufficient. It returns chart a
 
 Vendoring the SDK is a substantial change on its own and may land as its own PR ahead of this work; sequencing is an [open question](#open-questions).
 
-### Decision 6: Non-zero exit by default, semver-calibrated
+### Decision 6: Non-zero exit by default, on anything but `safe`
+
+**Rewritten in [#2760](https://github.com/NVIDIA/aicr/pull/2760).** This decision previously calibrated the exit code on semver, passing `unknown` within a non-breaking boundary. That calibration is gone. The text below is the current design, not an amendment to the old one.
 
 **This is a check you choose to run, not a gate you must pass through.** Nothing in `aicr recipe` or `aicr bundle` invokes it, and it cannot be: `bundle` has a recipe and produces a bundle, with no source version, so it cannot compute a transition at all. Running `upgrade-check` is opt-in, which is what review on #2343 correctly observed about its place next to `recipe`, `bundle`, and `query`.
 
-Given that, the exit code exists to make running it *worth* something. A pipeline should be able to consume the result without parsing output, so the command exits non-zero on a transition that needs attention. Informing and erroring are not alternatives here: the matrix and any steps print in full either way, and the exit code is orthogonal to the report.
+Being opt-in is what makes strictness cheap. A strict default costs nothing to anyone who has not called the submode, and it buys correctness for everyone who has. The original text drew the opposite conclusion from the same premise: because it is opt-in, calibrate it so it is *usable*. The correct reading is: because it is opt-in, calibrate it so it is *trustworthy*, since the operator already chose to ask the question.
 
-The check exits non-zero by default. It fails on `manual`, on `blocked`, on `unversioned`, and on `unknown` across a **breaking boundary**. It passes `safe`, and passes `unknown` within a non-breaking boundary.
+**The check cannot stop anyone, which is the second half of the same point.** It reports and sets an exit code; nothing about it blocks a deployment. An operator who dislikes the verdict can ignore it, pass `--fail-on-error=false`, or not run the command at all. So a conservative verdict costs at most somebody's irritation, while a permissive one costs an outage they were explicitly told was fine. The asymmetry is not close, and the agency stays with the operator at every point, which leaves the tool's job to be accurate rather than agreeable.
 
-A breaking boundary is a major bump, **or a minor bump while the major version is 0**. Semver gives no stability guarantee below 1.0, so `0.18 -> 0.19` may break exactly as `1.x -> 2.x` may. Treating 0.x minors as non-breaking would have passed an unassessed `0.17.2 -> 0.18.1`, which is this ADR's own worked example and an entire API-group rename.
+**The rule.** The check exits non-zero on any verdict other than `safe`. Added and removed components never fail, having made no transition at all. That is the whole rule; there is no per-verdict calibration to reason about.
 
-`unversioned` fails unconditionally because the semver calibration below has nothing to calibrate on: there is no boundary to classify. It is a blind spot rather than an unassessed transition, and the remedy is in the operator's hands, since pinning a comparable ref resolves it. `--fail-on-error=false` covers anyone who accepts the blind spot deliberately.
+**Why `unknown` fails.** `unknown` must never be treated as equivalent to `safe`. A transition nobody assessed is not a transition anyone approved, and how far the versions moved does not change that. The old semver calibration said an unassessed patch bump was close enough to approved; it was not, and the boundary it drew was an inference about risk standing in for a statement about knowledge. `Breaking` is still computed, still carried in JSON, and still shown in the NOTES cell, because the size of a move is true information for a reader deciding how hard to look. It simply no longer decides anything.
 
-The calibration uses the signal semver already carries. Without it, a matrix that starts at zero coverage would fail on every component, and strict mode would sit disabled forever. With it, an unassessed 1.x to 2.x still stops you on day one.
+**`unknown` is not one thing, and the report says which.** Three situations produce it, and they are kept distinct by the same test that keeps `unknown` separate from `unversioned`: what would close the gap.
+
+| Level | Situation | `reason` | Closed by |
+|---|---|---|---|
+| Missing | No record exists for the component | `no-record` | Somebody authoring the first record |
+| Silent | A record exists but says nothing about this range | `no-boundary-crossed` | Widening it, or confirming no boundary belongs there |
+| Unassessable | A downgrade | `downgrade` | Nothing. [Rule 7](#decision-2-transition-records) rejects every reverse record, so it can never become known |
+
+A downgrade stays `unknown` rather than becoming `blocked` because `blocked` names an intermediate version to land on and a rollback has none: you cannot partially roll back. It is unassessable rather than merely unassessed, and human review is the only remedy.
+
+**`blocked` and `unknown` say opposite things.** `blocked` means we have something to tell you: read it and act on it, and there is a version we can name to stop at. `unknown` means we have nothing for you: go investigate the transition yourself and decide. Both need human judgement; the difference is whether AICR is handing over information or admitting it has none. Neither is a pass, and no `unknown` message may read as permission to proceed.
+
+**`unversioned` fails for a third reason.** There is no boundary to classify at all, so it is a blind spot in the *inputs* rather than a gap in the data, and the remedy is in the operator's hands: pinning a comparable ref resolves it.
+
+**Most runs are red today, and that is the honest signal.** Exactly one registry component ships a record, so nearly every component whose version changes reports `unknown` and the check exits non-zero. The original text treated that as a reason to calibrate: "a matrix that starts at zero coverage would fail on every component, and strict mode would sit disabled forever." That reads near-zero coverage as a permanent constraint to design around. It is a starting condition to design *out of*, and the strict exit is part of what forces that. Anyone who accepts the gap deliberately has `--fail-on-error=false`, which prints the full report without the gate.
+
+**This decision and [Decision 10](#decision-10-a-coverage-gate-keeps-records-current) justify each other, and neither is sound alone.** The strict exit is only reasonable because coverage is being made mandatory: the coverage gate ([#2535](https://github.com/NVIDIA/aicr/issues/2535)) drives `unknown` toward the exception rather than the rule, which is what turns this into something a pipeline can rely on. And the coverage gate is only enforceable because the strict exit creates the pressure to author records: a gate nobody feels is a gate nobody clears. Read either one on its own and it looks like a bad trade.
 
 `--fail-on-error` controls this, defaulting to true, mirroring `aicr validate` (`pkg/cli/validate.go:416`, `Value: true`). A plain boolean rather than an override with a special name: there is nothing to escape from, since the caller already chose to run the check. `aicr diff --fail-on-drift` is the same flag shape with the opposite default, so both conventions in the repo are flag-driven and this adds no new one.
 
@@ -756,9 +790,9 @@ It deliberately proves nothing about real component upgrades. It proves the mech
 
 ## Acceptance Criteria
 
-1. `aicr upgrade-check --from <recipe> --to <recipe> --deployer <name>` reports a verdict for every component whose version changed, and exits non-zero when any verdict is `manual`, `blocked`, or `unversioned`, or `unknown` across a breaking boundary (a major bump, or a minor bump while major is 0).
-2. A downgrade with no explicit reverse record reports `unknown`, never `safe`.
-3. All routes to `blocked` report it and name a stopping point: a record that describes the move and blocks it, an authored `blocked` record crossed from a starting point it does not describe, two or more boundaries crossed, and a single boundary crossed from outside every recorded starting point. Only the first attaches a record and renders its deployer-scoped steps; the rest attach none, so crossed records' steps are never composed or handed to an operator the author did not write them for.
+1. `aicr upgrade-check --from <recipe> --to <recipe> --deployer <name>` reports a verdict for every component whose version changed, and exits non-zero on any verdict other than `safe`. Components that only appear on one side made no transition and never fail. The three situations reporting `unknown` carry distinct `reason` codes and distinct report text, because they close differently: `no-record` (author the first record), `no-boundary-crossed` (widen an existing one), and `downgrade` (nothing can close it).
+2. A downgrade reports `unknown` with reason `downgrade`, never `safe`, and always fails the run. It is not `blocked`, because `blocked` names an intermediate version to land on and a rollback has none.
+3. All routes to `blocked` report it and name a stopping point: a record that describes the move and blocks it, an authored `blocked` record crossed from a starting point it does not describe, two or more boundaries crossed, a single boundary crossed from outside every recorded starting point, and a target landing past the highest `to` ceiling any of the component's records names. Only the first attaches a record and renders its deployer-scoped steps; the rest attach none, so crossed records' steps are never composed or handed to an operator the author did not write them for.
 4. `--from cluster` against a KWOK-installed bundle reports the same versions the artifact path reports for the same artifacts.
 5. A comparison with no `--deployer` exits non-zero asking for the flag whenever any result carries steps, rather than defaulting or rendering every deployer's steps. This holds for bundle inputs too: nothing records which deployer built a bundle ([#2767](https://github.com/NVIDIA/aicr/issues/2767)), so there is nothing to infer from.
 6. Wrapper charts expose the payload version in `aicr.run/component-version`, and a `dev` build still produces a Helm-valid `Chart.yaml`.

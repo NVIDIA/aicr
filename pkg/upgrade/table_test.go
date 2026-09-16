@@ -105,6 +105,25 @@ func syntheticSet() Set {
 				}}},
 			}},
 		},
+		// A record exists, but the jump falls entirely below its boundary. The
+		// NOTES cell has to say that rather than "no record", which would send
+		// a reader off to author one that is already written.
+		"lambda-operator": {
+			Component: "lambda-operator",
+			Transitions: []Transition{{
+				From: "<5.0.0", To: ">=5.0.0 <=5.0.0", Verdict: VerdictSafe,
+				VerifiedBy: "uat: synthetic lane",
+			}},
+		},
+		// One record covers the source, but the target lands above the ceiling
+		// its `to` names, so the record's claim does not reach the move.
+		"mu-operator": {
+			Component: "mu-operator",
+			Transitions: []Transition{{
+				From: "<1.18.0", To: ">=1.18.0 <1.19.0", Verdict: VerdictSafe,
+				VerifiedBy: "uat: synthetic lane",
+			}},
+		},
 		// Two blocks across one jump: the report names where to stop instead
 		// of composing both records' steps.
 		"gamma-operator": {
@@ -144,6 +163,8 @@ func syntheticTables() (from, to map[string]string) {
 		"theta-operator":   "0.13.0",
 		"iota-operator":    "1.1.0",
 		"kappa-operator":   "3.2.0",
+		"lambda-operator":  "1.1.0",
+		"mu-operator":      "1.17.0",
 	}
 	to = map[string]string{
 		"alpha-operator":   "1.2.3",
@@ -155,15 +176,20 @@ func syntheticTables() (from, to map[string]string) {
 		"theta-operator":   "0.11.0",
 		"iota-operator":    "1.1.0",
 		"kappa-operator":   "4.0.0",
+		"lambda-operator":  "1.2.0",
+		"mu-operator":      "1.25.0",
 	}
 	return from, to
 }
 
 // mixedReport covers every verdict and every change kind in one render: safe,
-// manual, both shapes of blocked (gamma-operator, where two records are crossed
-// and neither describes the jump, and kappa-operator, where one record does),
-// unknown, unversioned, added, removed, and a component that did not move at
-// all (iota-operator, which produces no row).
+// manual, three shapes of blocked (gamma-operator, where two records are
+// crossed and neither describes the jump, kappa-operator, where one record
+// does, and mu-operator, where the one record that covers the source stops
+// assessing below the target), both shapes of unknown (delta-operator with no
+// record at all, lambda-operator with one no boundary falls inside),
+// unversioned, added, removed, and a component that did not move at all
+// (iota-operator, which produces no row).
 func mixedReport(t *testing.T) *Report {
 	t.Helper()
 	from, to := syntheticTables()

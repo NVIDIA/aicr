@@ -52,10 +52,10 @@ catching up hurt?" rather than "is this move safe?".
 Operator steps are deployer-scoped, and no bundle records which deployer
 built it, so --deployer is required whenever any component needs steps.
 
-Exits non-zero when any component needs attention: a manual or blocked
-verdict, versions that are not comparable, or no record across a breaking
-boundary (a major bump, or a minor bump while the major version is 0). The
-report prints in full either way; pass --fail-on-error=false to report
+Exits non-zero on any verdict other than safe, unknown included: a
+transition nobody assessed is not a transition anyone approved. Records are
+still being authored, so most comparisons report unknown today and fail.
+The report prints in full either way; pass --fail-on-error=false to report
 without failing.
 
 Examples:
@@ -98,8 +98,8 @@ func upgradeCheckCmdFlags() []cli.Flag {
 		&cli.BoolFlag{
 			Name:  "fail-on-error",
 			Value: true,
-			Usage: "Exit with non-zero status if any component needs attention (manual, blocked, " +
-				"unversioned, or unknown across a breaking boundary)",
+			Usage: "Exit with non-zero status if any component needs attention (any verdict " +
+				"other than safe)",
 		},
 		outputFlag(),
 		// Table, unlike every other command's yaml: the report's payload is
