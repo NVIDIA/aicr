@@ -167,10 +167,21 @@ jobs:
           # with `return {...config, ...config.force}`, so `force.packageRules`
           # shallow-replaces the merged array instead of appending to it — a
           # renovate.json5-level rule would be silently dropped for this run.
+          #
+          # The fourth rule pins grove-charts to its `-alpha.N` line. Under
+          # SemVer 2 precedence a prerelease's dot-separated identifiers
+          # compare pairwise, and an alphanumeric identifier always outranks
+          # a numeric one — so for grove's published tags, `alpha.12-rc2`
+          # (identifier `12-rc2` is alphanumeric) sorts above `alpha.13`
+          # (identifier `13` is numeric), and the general semver rule above
+          # picks the RC over the newer alpha release. This regex versioning
+          # matches only the `-alpha.N` line, excluding grove's `-rcN` and
+          # SHA-suffixed tags so the RC never wins the comparison.
           RENOVATE_FORCE: >-
             {"packageRules":[{"matchPackageNames":["*"],"enabled":false},
             {"matchDepTypes":["registry-chart"],"enabled":true},
-            {"matchDepTypes":["registry-chart"],"matchDatasources":["docker"],"versioning":"semver"}]}
+            {"matchDepTypes":["registry-chart"],"matchDatasources":["docker"],"versioning":"semver"},
+            {"matchDepNames":["ghcr.io/ai-dynamo/grove/grove-charts"],"versioning":"regex:^v(?<major>[0-9]+)[.](?<minor>[0-9]+)[.](?<patch>[0-9]+)-alpha[.](?<build>[0-9]+)$"}]}
           RENOVATE_REPORT_TYPE: file
           # renovatebot/github-action mounts only /tmp:/tmp into the Renovate
           # container (see docker-volumes in the run log); the workspace path
