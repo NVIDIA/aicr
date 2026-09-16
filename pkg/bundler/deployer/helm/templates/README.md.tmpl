@@ -102,10 +102,13 @@ bash install.sh
 > Those folders need `kubectl` and `timeout` (GNU coreutils) on `$PATH` in
 > addition to `helm`; the script refuses to run rather than run unbounded
 > inside a deploy, so on macOS install coreutils or apply the CRDs by hand.
-> Every helm and kubectl call it makes is bounded, 90s by default and
-> overridable with `AICR_CRD_STEP_TIMEOUT`. The step is skipped when
-> `DRY_RUN_FLAG` is set, and on a release that does not exist yet, since
-> `helm install` creates the chart's CRDs itself. Only components audited as
+> Every helm and kubectl call it makes is bounded, 30s by default and
+> overridable with `AICR_CRD_STEP_TIMEOUT`. The bound is per call and
+> `deploy.sh` retries a failing component, so the budget it consumes is a
+> multiple of that. The step is skipped when `DRY_RUN_FLAG` is set, and when
+> neither the release nor any of the chart's CRDs exist yet, since only then
+> does `helm install` create them. A release that was uninstalled leaves its
+> CRDs behind, so a reinstall still applies them. Only components audited as
 > the sole owner of every CRD they ship get the script; for the rest, replacing
 > CRDs is unsafe because another component's release ships the same CRD with a
 > different schema.

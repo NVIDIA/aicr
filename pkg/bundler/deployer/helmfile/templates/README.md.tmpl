@@ -41,11 +41,13 @@ runs it before the upgrade. helmfile upgrades through Helm, which installs a
 chart's `crds/` directory on first install and never touches it again, so
 without the hook a chart bump whose CRDs changed would run the new controller
 against the old schema. The script applies the pinned chart's CRDs with
-`kubectl apply --server-side --force-conflicts`, and skips a release that does
-not exist yet, since `helm install` creates the chart's CRDs itself. Every helm
-and kubectl call it makes is bounded, 90s by default and overridable with
-`AICR_CRD_STEP_TIMEOUT`; it requires `timeout` (GNU coreutils) and refuses to
-run rather than run unbounded inside a deploy. Only components audited as the
+`kubectl apply --server-side --force-conflicts`. It skips only when neither the
+release nor any of the chart's CRDs exist yet, since only then does `helm
+install` create them; a release that was uninstalled leaves its CRDs behind, so
+a reinstall still applies them. Every helm and kubectl call it makes is bounded,
+30s by default and overridable with `AICR_CRD_STEP_TIMEOUT`, per call rather
+than for the step as a whole. It requires `timeout` (GNU coreutils) and refuses
+to run rather than run unbounded inside a deploy. Only components audited as the
 sole owner of every CRD they ship get it; for the rest, replacing CRDs is
 unsafe because another component's release ships the same CRD with a different
 schema.
