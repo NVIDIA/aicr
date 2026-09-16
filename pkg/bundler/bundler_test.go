@@ -2335,6 +2335,39 @@ func TestMake_TypedEnabledToggleRejectedBelowCLI(t *testing.T) {
 	}
 }
 
+// TestMake_TypedA4xStorageClassCreateRejected verifies the bundler rejects a
+// dynamo-platform:a4xStorageClass.create override supplied via
+// --set-json/--set-file. A typed override would write the value into Helm
+// chart values but would not affect whether the fixed a4x-compatible
+// StorageClass manifest is included in the bundle.
+func TestMake_TypedA4xStorageClassCreateRejected(t *testing.T) {
+	cfg := config.NewConfig(
+		config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+			{Component: "dynamo-platform", Path: "a4xStorageClass.create", Value: false},
+		}),
+	)
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	recipeResult := &recipe.RecipeResult{
+		APIVersion: "aicr.run/v1alpha2",
+		Kind:       "Recipe",
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "dynamo-platform", Version: "v0.1.0", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
+		},
+	}
+
+	_, makeErr := bundler.Make(context.Background(), recipeResult, t.TempDir())
+	if makeErr == nil {
+		t.Fatal("expected error: typed a4xStorageClass.create override must be rejected")
+	}
+	if !strings.Contains(makeErr.Error(), "a4xStorageClass.create") || !strings.Contains(makeErr.Error(), "--set") {
+		t.Errorf("error %q must name the a4xStorageClass.create toggle and point to --set", makeErr.Error())
+	}
+}
+
 // TestApplyNodeSchedulingOverrides_EstimatedNodeCount verifies that when Config has
 // EstimatedNodeCount() > 0 and the component has nodeCountPaths, the value is written
 // to the values map via ApplyMapOverrides (and thus appears as an int for Helm).

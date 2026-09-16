@@ -1210,6 +1210,18 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 						"(e.g. --set %s:%s=false), not --set-json/--set-file",
 						ref.Name, config.ComponentEnabledKey, ref.Name, config.ComponentEnabledKey))
 			}
+			// a4xStorageClass.create is a bundling-only toggle, not a
+			// real chart value. Reject it here too, rather than letting
+			// it silently write a stray value into Helm values.
+			if ref.Name == dynamoPlatformComponentName {
+				if _, hasA4x := typedOverrides[dynamoA4xStorageClassCreateOverridePath]; hasA4x {
+					return nil, errors.New(errors.ErrCodeInvalidRequest,
+						fmt.Sprintf("component %q: %q is a bundling toggle and must be set with --set "+
+							"(e.g. --set %s:%s=false), not --set-json/--set-file",
+							ref.Name, dynamoA4xStorageClassCreateOverridePath,
+							ref.Name, dynamoA4xStorageClassCreateOverridePath))
+				}
+			}
 			if applyErr := component.ApplyTypedOverrides(values, typedOverrides); applyErr != nil {
 				return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
 					"failed to apply --set-json/--set-file value overrides",
