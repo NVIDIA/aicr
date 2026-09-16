@@ -25,6 +25,9 @@
 # nodeScheduling writes into, move the rendered image set (BOM), require an
 # ADR-021 upgrade record, or raise the chart's kubeVersion past a recipe
 # constraint. A one-line bot PR that goes green asserts none of that was checked.
+#
+# A draft PR touching the drift surface also runs this report against its own
+# branch (Slack posting stays off) — see the pull_request trigger below.
 
 name: Registry Drift Report
 
@@ -39,11 +42,23 @@ on:
         description: "Post the digest to Slack (off by default so manual runs can be validated silently)"
         default: false
         type: boolean
+  # A draft PR touching the drift surface runs the same report against its own
+  # branch. This is how Renovate's real report shape gets verified before merge:
+  # workflow_dispatch cannot target a branch until the workflow is on the default
+  # branch, so without this the first real run would be a post-merge surprise.
+  pull_request:
+    paths:
+      - ".github/workflows/registry-drift.yaml"
+      - ".github/renovate.json5"
+      - "recipes/registry.yaml"
+      - "tools/drift-report/**"
 
-# Serialize: a manual run and the cron must not interleave two Renovate runs
-# over the same repository. No cancel-in-progress — a second run waits.
 concurrency:
-  group: ${{ github.workflow }}
+  # PR runs are keyed per branch; schedule and workflow_dispatch share one group
+  # (head_ref is empty for both), preserving the original serialization between
+  # a manual run and the cron. cancel-in-progress stays off: a superseded run is
+  # cheap to let finish, and nothing here is safe to interrupt mid-upload.
+  group: ${{ github.workflow }}-${{ github.head_ref || 'scheduled' }}
 
 permissions:
   contents: read
@@ -71,6 +86,22 @@ jobs:
         with:
           go-version: ${{ steps.versions.outputs.go }}
           cache: false
+
+      # Renovate clones the repo itself and extracts from the default branch by
+      # default. On a PR that means reading registry.yaml and renovate.json5
+      # from main — without this PR's annotations or custom manager — so the run
+      # would find zero registry-chart deps and fail closed. Both variables are
+      # needed: the first moves the package files, the second moves the config.
+      - name: Point Renovate at the PR branch
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          {
+            printf 'RENOVATE_BASE_BRANCHES=["%s"]\n' "${HEAD_REF}"
+            echo "RENOVATE_USE_BASE_BRANCH_CONFIG=merge"
+          } >> "${GITHUB_ENV}"
 
       # Same action and digest-pinned image as renovate.yaml; keep them in
       # lockstep with RENOVATE_VALIDATOR_IMAGE in the Makefile.

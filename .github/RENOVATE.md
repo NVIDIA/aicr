@@ -106,6 +106,12 @@ charts use `datasource=docker` with the full image path as `depName` and no
 `registryUrl`. `tools/drift-report`'s `TestRegistryPinsAreRenovateTracked` fails
 closed when a new component arrives without an annotation.
 
+A PR touching `recipes/registry.yaml`, `.github/renovate.json5`,
+`tools/drift-report/**`, or the workflow itself also runs the report against the
+PR branch and uploads the `drift-report` artifact, so a change to the
+annotations or the parser is verified against real upstream lookups before
+merge, without posting to Slack.
+
 ## Known limitations
 
 - **AWS EFA device-plugin image** (`recipes/components/aws-efa/values.yaml`) is published only to AWS's authenticated public ECR (`602401143452.dkr.ecr.us-west-2.amazonaws.com/...`); no `public.ecr.aws` mirror. The image is in `ignoreDeps`; bumps must be coordinated manually with EKS add-on releases.
