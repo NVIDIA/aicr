@@ -47,6 +47,16 @@ that runs `all_reduce_perf` across GPU nodes and measures aggregate bus
 bandwidth. Three check variants are available; the recipe picks the one (or
 ones) that match the target fabric:
 
+**What the bandwidth number describes.** Each `nccl-all-reduce-bw*` result
+carries a `runtimeSource` label: `delivered-artifact` means the benchmark
+runtime was derived from the `ClusterTrainingRuntime` the recipe ships, so the
+number attests to the delivered wiring; `recipe-supplied-runtime` means the
+recipe supplied the runtime itself; `cluster-capability` means the validator's
+own fixture was measured — proof the fabric can reach the floor, not proof of
+what the recipe ships. Only `h100-gke-cos-training-kubeflow` produces
+`delivered-artifact` today. The label is decided from the recipe, not from what
+is installed on the cluster.
+
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |

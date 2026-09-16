@@ -24,7 +24,7 @@ executable bits or `./script.sh` invocation.
 - `helm_version` (required): Helm version from `load-versions`
 - `setup_envtest_version` (required): setup-envtest version from `load-versions`
 - `setup_envtest_sha256` (**required**): pinned linux/amd64 SHA256 for the setup-envtest release binary, from `load-versions`. controller-runtime publishes no `checksums.txt` beside it, so this pin is the only integrity check on the download
-- `apidiff_version` (optional): apidiff version from `load-versions`; when set, builds apidiff and runs `make api-diff` (default: empty, which skips both steps). The input gates whether the check runs; the version actually built comes from `go.mod`, which `TestToolPinsMatchGoMod` holds equal to `.settings.yaml`
+- `apidiff_version` (optional): apidiff version from `load-versions`, which reads it from the `go.mod` require line; when set, builds apidiff and runs `make api-diff` (default: empty, which skips both steps). The input gates whether the check runs; the version built comes from that same `go.mod` entry
 - `oasdiff_version` (**required**): oasdiff version from `load-versions`; installs oasdiff before `make test` and runs `make openapi-diff` after. Not optional, because `make test` runs `tools/openapi-diff_test.sh`, which fails in CI when oasdiff is absent rather than skipping — the REST contract gate cannot be silently unverified
 - `oasdiff_sha256` (**required**): pinned linux/amd64 SHA256 for the oasdiff release archive, from `load-versions`. The install fails closed when it is missing or malformed rather than falling back to the release's own `checksums.txt`
 - `privileged_ci` (optional): whether the checked-out ref is trusted (default: `"true"`). Only trusted runs save the Go cache; restore is unconditional. `ok-to-test` passes `false` because it runs an untrusted PR head inside the default branch's cache scope
@@ -86,7 +86,7 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 **Purpose**: Build the pinned `go-licenses` from this module with `GOFLAGS` pinned
 **When to use**: Any job running `make license-check`, `make notices`, or `make release`
 **Inputs**:
-- `version` (required): go-licenses version from `load-versions` (`.settings.yaml` `linting.go_licenses`). Validated for presence only — the version built comes from `go.mod`, which `TestToolPinsMatchGoMod` holds equal to this pin
+- `version` (required): go-licenses version from `load-versions`, which reads it from the `go.mod` require line. Validated for presence only — the version built comes from that same entry
 
 `go-licenses` publishes no binary release, so it cannot come from
 `setup-build-tools` (which installs from binary releases). It is instead a `tool`
@@ -243,15 +243,19 @@ attestations for an image whose digests are already known
 **When to use**: When you already have the digests (e.g., from build output)
 **Inputs**:
 - `image_name` (required): One of the seven fixed AICR release image names
-- `image_digest` (required): Multi-platform index digest; subject for the provenance attestation
-- `amd64_digest` (required): `linux/amd64` manifest digest; subject for the amd64 SBOM and VEX
-- `arm64_digest` (required): `linux/arm64` manifest digest; subject for the arm64 SBOM and VEX
+- `image_digest` (required): Multi-platform index digest; subject for the index provenance attestation
+- `amd64_digest` (required): `linux/amd64` manifest digest; subject for the amd64 SBOM, VEX and provenance
+- `arm64_digest` (required): `linux/arm64` manifest digest; subject for the arm64 SBOM, VEX and provenance
 
 Cosign is pinned from `.settings.yaml` via `load-versions`, and every
 `cosign attest` call sets `--new-bundle-format=true` explicitly so the
 attestations land through the OCI referrers path by our decision rather than by
-an installer default. The SBOM and the VEX share a per-platform subject and are
-deliberately in different formats so a referrers listing can tell them apart;
+an installer default. Provenance is attested once per subject — the index and
+each platform manifest — through `actions/attest-build-provenance`, so every
+call mints the in-toto subject it publishes under rather than re-pushing one
+document to subjects its own statement does not name. The SBOM and the VEX share
+a per-platform subject and are deliberately in different formats so a referrers
+listing can tell them apart;
 `tools/openvex-bind` rewrites `.openvex.json` product identifiers to the
 platform manifest digest before the VEX is signed, and replaces the
 document-level `tooling` field with an identifier of itself so committed prose

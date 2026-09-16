@@ -31,7 +31,7 @@ inputs:
     description: 'Helm version pinned in .settings.yaml (testing_tools.helm, via load-versions) — required by the argocd-helm live-render tests, which fail (not skip) in CI when helm is missing'
     required: true
   apidiff_version:
-    description: 'Optional apidiff version pinned in .settings.yaml (linting.apidiff, via load-versions); leave empty to skip the SDK API compatibility check'
+    description: 'Optional apidiff version from the go.mod require line (via load-versions); leave empty to skip the SDK API compatibility check'
     required: false
     default: ''
   oasdiff_version:

@@ -112,7 +112,7 @@ cat recipe.yaml
 The recipe includes OpenShift-specific component references with two-phase OLM deployment. Each operator appears as a pair — an OLM component with `manifestFiles` and a CR component with `dependencyRefs` back to the OLM component. For example, the GPU Operator entry looks like:
 
 ```yaml
-...
+# Earlier recipe fields omitted.
 spec:
   componentRefs:
     - name: gpu-operator-ocp-olm
@@ -131,7 +131,7 @@ spec:
         - components/gpu-operator-ocp/manifests/clusterpolicy.yaml
       dependencyRefs:
         - gpu-operator-ocp-olm  # waits for OLM phase to complete
-...
+# Remaining recipe fields omitted.
 ```
 
 The `dependencyRefs` create a deployment ordering chain across all operators. Each CR component depends on its OLM counterpart, and operators that require prerequisites (e.g., GPU Operator depends on NFD labels) declare cross-operator dependencies.

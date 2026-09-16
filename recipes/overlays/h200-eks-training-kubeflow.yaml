@@ -40,5 +40,7 @@ spec:
 
   componentRefs: []
 
-  # robust-controller is already declared by h200-eks-training and is inherited
-  # here; with kubeflow-trainer resolved it routes to checkRobustKubeflowTrainer.
+  validation:
+    conformance:
+      checks:
+        - robust-controller

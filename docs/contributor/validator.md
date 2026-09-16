@@ -319,19 +319,23 @@ lines** — stdout lines with a reserved prefix that a specific parser recognize
 and pulls out. Plain (non-prefixed) stdout is unaffected and flows into the CTRF
 `stdout` array as before.
 
-Two sentinels exist today, with deliberately different lifecycles:
+Three sentinels exist today, with deliberately different lifecycles:
 
 | Prefix | Emitted by | Parsed by | Payload | Kept in CTRF `stdout`? | Survives minimal redaction? |
 |--------|-----------|-----------|---------|------------------------|-----------------------------|
 | `RESULT:` + one space | any check (`fmt.Printf`) | `extractResultSummaries` (`pkg/validator/validator.go`) | free-form human text (throughput, bandwidth, TTFT…) | **yes** — line stays; trailing text is *also* echoed to the live CLI at INFO | **no** — dies with `stdout` under the default policy |
 | `##AICR-EXTRA##` + one space | `validators.EmitExtra` | `parseExtraSentinels` (`pkg/validator/job/result.go`) | one JSON object → `TestResult.Extra` (counts / enum codes) | **no** — stripped as transport, not evidence | **yes** — allowlisted keys are published (see below) |
+| `##AICR-PROVENANCE##` + one space | `validators.EmitRuntimeProvenance` | `parseExtraSentinels` (same pass) | one JSON object → `TestResult.RuntimeProvenance` (template digests + key paths) | **no** — stripped as transport | **yes** — bounded by `redact.boundRuntimeProvenance` (see "NCCL benchmark runtime provenance") |
 
-Both are parsed with `strings.CutPrefix` and both parsers are pure, unit-tested
+All are parsed with `strings.CutPrefix` and the parsers are pure, unit-tested
 functions. They are separate channels on purpose: `RESULT:` surfaces live
 metrics to a human watching a run, so it carries unbounded free-form text and is
 correctly redacted with the rest of `stdout`; `##AICR-EXTRA##` carries structured
 data that must *outlive* redaction, so it is low-cardinality, allowlisted, and
-stripped from the human evidence. Do not route structured outcome data through
+stripped from the human evidence; `##AICR-PROVENANCE##` carries the one
+structured record that is neither a count nor a code — content digests plus
+template key paths — under its own bounding rule rather than the `Extra`
+allowlist. Do not route structured outcome data through
 `RESULT:` (it would not survive publication) or human prose through
 `##AICR-EXTRA##` (it would be dropped by the allowlist or leak identifiers).
 
@@ -366,10 +370,13 @@ emit(map[string]string{"skipReason": "no-gpu-nodes"})
 **Transport.** `EmitExtra` marshals the map to one JSON line prefixed with
 `ctrf.ExtraLinePrefix` (`##AICR-EXTRA##` followed by one space) on stdout — the
 only channel that crosses the pod boundary besides the exit code and termination
-log. The orchestrator (`pkg/validator/job.ExtractResult`) parses each sentinel
-line, keeps the **last valid non-empty** payload as `TestResult.Extra`, and
-strips every sentinel line from the stored `stdout` (transport, not human
-evidence). A malformed line is non-fatal: it is logged and skipped without
+log. `EmitRuntimeProvenance` uses the same transport under
+`ctrf.ProvenanceLinePrefix` (`##AICR-PROVENANCE##` + space) for the derived
+runtime's `RuntimeProvenance` record. The orchestrator (`pkg/validator/job.ExtractResult`) parses each sentinel
+line, keeps the **last valid non-empty** payload of each kind — the `Extra` map
+as `TestResult.Extra`, the provenance record (both digests present) as
+`TestResult.RuntimeProvenance` — and strips every sentinel line from the stored
+`stdout` (transport, not human evidence). A malformed line is non-fatal: it is logged and skipped without
 discarding an earlier valid payload — a garbled line never flips a pass to an
 error, nor clears a coverage line that preceded it. Keep the human `fmt.Printf`
 lines too; they still feed `--full` and live `aicr validate` output.
@@ -379,10 +386,12 @@ codes only (`"2"`, `"no-schedulable-gpu-nodes"`) — never node names, IPs, or h
 `pkg/evidence/redact`'s `ctrfExtraAllowlist` enforces this at the **publication
 boundary** (not just at emission, which raw prefixed stdout could bypass) with a
 fail-closed **key _and_ value** check: only the listed keys (`nodesValidated`,
-`nodesTotal`, `skipReason`) survive, and each surviving value must pass its key's
+`nodesTotal`, `skipReason`, `runtimeSource`) survive, and each surviving value must pass its key's
 validator — a non-negative decimal count for the `nodes*` keys, and for
 `skipReason` a **closed set** of known codes (`ctrfSkipReasons`, currently
-`no-gpu-nodes`, `no-schedulable-gpu-nodes`, `nodes-busy`). A closed set rather
+`no-gpu-nodes`, `no-schedulable-gpu-nodes`, `nodes-busy`), and for
+`runtimeSource` the closed set `delivered-artifact` | `recipe-supplied-runtime`
+| `cluster-capability` (`ctrfRuntimeSources`). A closed set rather
 than a shape regex is deliberate: a kebab-case regex would still pass an
 arbitrary low-cardinality identifier like `customer-prod-cluster`. A value that
 is ill-shaped or unlisted (an IP under `nodesTotal`, a hostname or unminted code
@@ -392,6 +401,117 @@ dropped too, and if nothing survives the map ships as absent (no empty
 code means adding it to that allowlist (and bumping `redact.PolicyVersion`) in
 the same change; there is no CTRF schema in `api/`, so the `pkg/validator/ctrf`
 godoc and this page are the contract.
+
+### NCCL benchmark runtime provenance
+
+`nccl-all-reduce-bw*` results carry a `runtimeSource` code saying **which
+artifact the bandwidth number describes**. Pass/fail still comes from the
+bandwidth floor; provenance is a separate, closed-set label (#2297):
+
+| `runtimeSource` | Meaning |
+|---|---|
+| `delivered-artifact` | The benchmark runtime was **derived from the `ClusterTrainingRuntime` the recipe ships** (`torch-distributed-tcpxo`, read from the live API). The number attests to the delivered wiring. |
+| `recipe-supplied-runtime` | The recipe supplied the runtime itself via `nccl-benchmark-runtime(-ref)` (#1792) and owns its wiring. |
+| `cluster-capability` | The validator's embedded fixture: proves the fabric can reach the floor, says nothing about what the recipe ships. |
+
+The class is decided from the **recipe**, never from what happens to be
+installed: a leaf is `delivered-artifact` only when its enabled
+`kubeflow-trainer` componentRef both lists the `torch-distributed-tcpxo`
+runtime manifest and records a `tcpxoInterfaces` override
+(`validators/internal/gkenet.FabricRuntimeDelivered` — a mapping without the
+artifact describes nothing, and a listed manifest without a recorded mapping,
+which generation never produces, fails closed rather than downgrading to the
+fixture). Today that is
+`h100-gke-cos-training-kubeflow` alone — the other kubeflow leaves declare the
+Trainer but ship no fabric runtime, and are `cluster-capability`. A
+recipe-supplied runtime or an `nccl-benchmark-profile` combined with a
+delivered one is rejected; the benchmark cannot have two owners of its runtime
+or of its platform.
+
+For a delivered artifact the performance validator, **before any cluster
+mutation**, verifies recipe → deployed → cluster (the recipe's recorded mapping
+must equal the deployed runtime's exactly and in order; every selected network
+must exist, as a set comparison), then derives the benchmark runtime: the
+shipped `node` PodTemplateSpec is copied **wholesale — metadata and spec** —
+and only the paths in `benchmarkOwnedNodePaths` (worker `image`, `command`,
+`args`, `resources`, `terminationMessagePolicy`) are re-applied from the MPI
+skeleton (the skeleton's worker sets no `terminationMessagePolicy`, so that
+override clears a shipped value), with volumes and mounts merged additively.
+An override-path guard
+fails the run if the derived template differs from the shipped one anywhere
+else, and a baseline precondition covers every overridden path — the shipped
+worker must set no `command`/`args` (an entrypoint would hide fabric
+activation), must declare the NCCL fabric env, must request `nvidia.com/gpu`
+— and only that — under both `resources.limits` and `resources.requests`,
+with a quantity equal to the target nodes' per-node GPU count (checked at
+apply time, where that count is known, so a deployed runtime whose GPU request
+was removed or changed is failed rather than silently repaired by the
+skeleton's), and must set no `terminationMessagePolicy`; `image` is the one override with no precondition,
+since the benchmark binary lives only in the fixture image and the fabric
+plugin is mounted from the host.
+
+The measurement runs under the **shipped** environment. The derived worker's
+bootstrap exports the container's own `NCCL_*`/`CUDA_*`/`LD_LIBRARY_PATH` to
+the ssh sessions mpirun opens instead of re-sourcing the host
+`nccl-env-profile.sh` the capability fixture uses, and the launcher's
+`-x NCCL_*`/`-x CUDA_*`/`-x LD_LIBRARY_PATH=` tuning exports are stripped
+(`NCCL_DEBUG` is kept — log volume, not wiring). The object that is applied is
+derived at apply time from the skeleton rendered with the run's real template
+data, so placeholder types survive (`containers[].args` stay strings, which
+Trainer's structural CRD requires; `numProcPerNode` stays an integer).
+
+**Evidence carrier.** `runtimeSource` rides `Extra` and is emitted the moment
+the class is decided — before the delivered path's live verification — so a run
+that fails on a missing runtime or a mapping drift still records that it was a
+`delivered-artifact` measurement. The audit record — sha256 of the normalized
+shipped and applied worker templates, the paths at which they differ
+(benchmark overrides plus stamped scheduling), and the inventory of shipped
+paths inherited unchanged — is computed against the object as **stored** (read
+back after the create, so admission defaulting is part of the digest) and
+recorded only once the `TrainingRuntime` create succeeded, so a run that fails
+before or at application publishes no record; after that point it is published
+whether or not the measurement succeeds, twice: as a human-readable listing on stdout
+(`--full` only), and as the bounded `TestResult.RuntimeProvenance` carrier (`##AICR-PROVENANCE## `
+sentinel → `pkg/validator/job`), which **survives minimal redaction**. The
+redaction policy for that carrier (`redact.boundRuntimeProvenance`, rule
+`ctrf.tests.runtimeProvenance.bound`): both digests must be lowercase sha256
+hex or the record is dropped; paths are template *keys* only and must match
+the dotted key grammar; every **structural** segment must be a JSON field name
+reachable from core/v1 `PodTemplateSpec` (`redact.ctrfPodTemplateFields`, an
+exact set generated from `k8s.io/api` and pinned by
+`TestPodTemplateFieldsMatchAPI`) or the path is dropped, so the carrier can
+only describe the Kubernetes schema whether a non-schema key survived CRD
+pruning or the sentinel line were forged; every named-list selector (`containers[node]`,
+`volumes[x]`, `volumeMounts[x]`, `env[x]`) collapses to `[*]` unless it is an
+`env` selector naming a variable in the **exact** fabric set
+(`redact.ctrfFabricEnvNames`: the GPUDirect-TCPXO NCCL configuration the
+shipped runtime declares, plus `CUDA_VISIBLE_DEVICES` and `LD_LIBRARY_PATH`),
+which is kept because it is the evidence; a key under any **user-keyed map**
+of the PodTemplateSpec API, wherever it sits (`redact.ctrfFreeKeyMaps`:
+`labels`, `annotations`, `nodeSelector`, resource `limits`/`requests`,
+`overhead`, `matchLabels`, CSI `volumeAttributes`, flexVolume `options`)
+collapses to the map unless the **whole key** is in the exact vendor set
+(`redact.ctrfVendorKeys`: `networking.gke.io/interfaces`,
+`networking.gke.io/default-interface`, `devices.gke.io/container.tcpxo-daemon`,
+`cloud.google.com/gke-accelerator`, `trainer.kubeflow.org/trainjob-ancestor-step`,
+`nvidia.com/gpu`, `nvidia.com/gpu.present`, `node.kubernetes.io/instance-type`).
+There is no prefix or domain rule anywhere in the policy: `NCCL_CUSTOMER_ACME_PROD`,
+`networking.gke.io/customer-prod` and a sidecar's
+`resources.limits.acme.internal/project-prod` are operator text and collapse
+like any other name. So `metadata.annotations.networking.gke.io/interfaces`,
+`spec.containers[*].env[NCCL_FASTRAK_IFNAME].value` and
+`spec.containers[*].resources.limits.nvidia.com/gpu` are kept while an
+operator's `spec.nodeSelector.my-org/pool` becomes `spec.nodeSelector`,
+`spec.initContainers[setup].resources.limits.acme.internal/x` becomes
+`spec.initContainers[*].resources.limits`, and
+`spec.volumes[customer-cache].secret.secretName` becomes
+`spec.volumes[*].secret.secretName`; lists are deduplicated, sorted and capped
+at 1024 entries. Adding a variable or key to the shipped runtime that the
+inventory should name means adding it to the corresponding set in the same
+change. No value — network name, node name, env value — ever appears. The deployment check `gke-gpu-nic-networks` runs the same recipe →
+deployed → cluster arms, gated on the same predicate, so a base
+`h100-gke-cos-training` recipe (TCPXO, no runtime) keeps its census-only
+behaviour.
 
 **Mounted data:** `/data/snapshot/snapshot.yaml`, `/data/validation/validation.yaml`
 (override via `AICR_SNAPSHOT_PATH`, `AICR_VALIDATION_PATH`).
@@ -670,8 +790,8 @@ reports `0` validated and never reads as ready.
 Unlike `check-nvidia-smi`, the RDMA gate never *skips* — it either
 certifies the cohort or fails closed — so it mints no `skipReason`
 enum. Its coverage rides the existing `nodesValidated`/`nodesTotal`
-allowlist keys unchanged (see below), so the redaction
-`PolicyVersion` stays `v2`.
+allowlist keys unchanged (see below), so that change did not move the
+redaction `PolicyVersion`.
 
 Cluster-aggregate checks that assert on an operator's aggregate status
 (`gpu-operator-health`) remain unaffected — DaemonSet operands ignore

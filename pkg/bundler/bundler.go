@@ -77,7 +77,7 @@ const (
 	// digestAlgoSHA256 is the algorithm key used in attestation digest maps.
 	digestAlgoSHA256 = "sha256"
 
-	// recipeFileName is the resolved recipe copied into Helm bundles.
+	// recipeFileName is the resolved recipe written into every bundle.
 	recipeFileName = "recipe.yaml"
 
 	accountingDatabaseUsername = "slurm"
@@ -224,10 +224,12 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 // By default, generates a Helm per-component bundle. If deployer is set to "argocd",
 // generates Argo CD Application manifests.
 //
+// Every deployer writes recipe.yaml at the bundle root: the resolved recipe the
+// bundle was generated from.
+//
 // For Helm per-component output:
 //   - README.md: Root deployment guide with ordered steps
 //   - deploy.sh: Automation script (0755)
-//   - recipe.yaml: Copy of the input recipe
 //   - <component>/values.yaml: Helm values per component
 //   - <component>/README.md: Component install/upgrade/uninstall
 //   - <component>/manifests/: Optional manifest files
@@ -998,15 +1000,12 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate bundle", err)
 	}
-	// Write recipe file (helm-only, preserves original behavior)
-	if b.Config.Deployer() == config.DeployerHelm {
-		recipeSize, writeErr := b.writeRecipeFile(recipeResult, dir)
-		if writeErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
-		}
-		output.Files = append(output.Files, filepath.Join(dir, recipeFileName))
-		output.TotalSize += recipeSize
+	recipeSize, writeErr := b.writeRecipeFile(recipeResult, dir)
+	if writeErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
 	}
+	output.Files = append(output.Files, filepath.Join(dir, recipeFileName))
+	output.TotalSize += recipeSize
 
 	if b.Config.IncludeChecksums() {
 		if checksumErr := checksum.WriteChecksums(ctx, dir, output); checksumErr != nil {

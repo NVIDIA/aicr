@@ -39,7 +39,7 @@ description: 'Build the pinned go-licenses from this module with GOFLAGS pinned 
 # consequence worth knowing: the binary is built with THIS repo's versions of
 # its dependencies, not upstream's. golang.org/x/tools in particular is the
 # go/packages library go-licenses uses to walk the graph and locate GOROOT, so a
-# bump here can change this tool's behavior with linting.go_licenses untouched.
+# bump here can change this tool's behavior with the go-licenses pin untouched.
 # It fails loudly (compile or gate error) rather than silently.
 #
 # tools/generate-notices_test.sh asserts the build shape below, and rejects any
@@ -48,9 +48,9 @@ description: 'Build the pinned go-licenses from this module with GOFLAGS pinned 
 inputs:
   version:
     description: >-
-      go-licenses version pinned in .settings.yaml (linting.go_licenses, via load-versions).
-      Validated for presence only — the version built comes from go.mod, which
-      TestToolPinsMatchGoMod holds equal to this pin.
+      go-licenses version from the go.mod require line (via load-versions).
+      Validated for presence only — the version built comes from that same
+      entry, which is the tool's only pin.
     required: true
 
 runs:
@@ -63,7 +63,7 @@ runs:
       run: |
         set -euo pipefail
         if [[ -z "${GO_LICENSES_VERSION}" ]]; then
-          echo "::error::version is required (expected .settings.yaml linting.go_licenses via load-versions)"
+          echo "::error::version is required (expected the go.mod go-licenses require line via load-versions)"
           exit 1
         fi
 
@@ -77,8 +77,8 @@ runs:
     #
     # go-licenses publishes no release binaries, so unlike addlicense and
     # setup-envtest there is no pinned-artifact option; the module route is what
-    # removes the sumdb dependency. The version still comes from go.mod, which
-    # TestToolPinsMatchGoMod holds equal to .settings.yaml.
+    # removes the sumdb dependency. The version comes from the go.mod require
+    # line, which is the only place it is pinned.
     #
     # GOFLAGS is pinned rather than inherited for the GOROOT reason in the file
     # header above -- the previous `go install` form cleared it for the same

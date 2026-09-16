@@ -107,7 +107,7 @@ onboarding process when they return to active participation.
 Amendments follow the supermajority rule above: a pull request plus approval from
 a two-thirds supermajority of non-emeritus maintainers.
 
-## Maintainers
+## Current Maintainers
 
 The current maintainers (the `@nvidia/aicr-maintainer` team), sorted by GitHub
 handle. The GitHub team is the authoritative source; this table is a convenience
@@ -116,7 +116,8 @@ snapshot.
 | GitHub | Name | Headshot |
 |---|---|---|
 | [@ArangoGutierrez](https://github.com/ArangoGutierrez) | Carlos Arango Gutierrez | <img src="https://avatars.githubusercontent.com/u/15933089?s=48&v=4" width="48" height="48" alt="ArangoGutierrez"/> |
-| [@cullenmcdermott](https://github.com/cullenmcdermott) | Cullen McDermott | <img src="https://avatars.githubusercontent.com/u/9535761?s=48&v=4" width="48" height="48" alt="cullenmcdermott"/> |
+| [@atif1996](https://github.com/atif1996) | Atif Mahmood | <img src="https://avatars.githubusercontent.com/u/10677309?s=48&v=4" width="48" height="48" alt="atif1996"/> |
+| [@ayuskauskas](https://github.com/ayuskauskas) | Alex Yuskauskas | <img src="https://avatars.githubusercontent.com/u/176436259?s=48&v=4" width="48" height="48" alt="ayuskauskas"/> |
 | [@dims](https://github.com/dims) | Davanum Srinivas | <img src="https://avatars.githubusercontent.com/u/23304?s=48&v=4" width="48" height="48" alt="dims"/> |
 | [@lalitadithya](https://github.com/lalitadithya) | Lalit Adithya V | <img src="https://avatars.githubusercontent.com/u/13063810?s=48&v=4" width="48" height="48" alt="lalitadithya"/> |
 | [@lockwobr](https://github.com/lockwobr) | Brian Lockwood | <img src="https://avatars.githubusercontent.com/u/1550334?s=48&v=4" width="48" height="48" alt="lockwobr"/> |

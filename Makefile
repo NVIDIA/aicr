@@ -108,7 +108,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse bom-pinning-check check-depproxy-kit check-upgrade-records ## Lints the entire project (Go, YAML, license headers, chart-version pins, and vendored action digests)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml bom-pinning-check check-depproxy-kit check-upgrade-records ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, and vendored action digests)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-depproxy-kit
@@ -166,6 +166,10 @@ check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, b
 .PHONY: check-docs-mdx-parse
 check-docs-mdx-parse: ## Validates docs/ with the real MDX parser (requires Node; CI-blocking)
 	@./tools/check-docs-mdx-parse
+
+.PHONY: check-docs-yaml
+check-docs-yaml: ## Validates YAML-labelled code blocks throughout docs/ (requires Node; CI-blocking)
+	@./tools/check-docs-yaml
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet
@@ -275,6 +279,15 @@ license-check: ## Check license is approved
         --ignore=github.com/cyberphone/json-canonicalization \
         --ignore=$$STDLIB_IGNORE
 
+# Ordered ahead of test-shell because a stale tool pin makes tools/api-diff exit
+# 17, which surfaces as nine unrelated-looking `want rc=16 got rc=17` shell
+# failures (#2741). This test names the stale file directly and runs in under a
+# second. Scoped to the one test: the rest of tests/architecture takes ~25s and
+# runs with the full suite below.
+.PHONY: test-tool-pins
+test-tool-pins: ## Checks go.mod is the only pin for tools built from this module
+	@GOFLAGS="-mod=readonly" go test -count=1 -run '^TestToolPinsLiveOnlyInGoMod$$' ./tests/architecture/
+
 .PHONY: test-shell
 test-shell: ## Runs shell unit tests (tools/*_test.sh, tests/uat/lib/*_test.sh; hermetic, no cluster)
 	@set -e; for t in tools/*_test.sh tests/uat/lib/*_test.sh; do [ -e "$$t" ] || continue; echo "Running $$t..."; bash "$$t"; done
@@ -302,7 +315,7 @@ test-shell: ## Runs shell unit tests (tools/*_test.sh, tests/uat/lib/*_test.sh; 
 # the same everywhere depends on.
 # ---------------------------------------------------------------------------
 .PHONY: test
-test: test-shell ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
+test: test-tool-pins test-shell ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
 	echo "Running tests with race detector..."; \
 	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path 2>/dev/null || echo "") \
