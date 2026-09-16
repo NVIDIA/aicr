@@ -51,10 +51,13 @@ slurm components. See recipes/registry.yaml for the current authoritative list.
 
 # Output Formats
 
+Every deployer writes recipe.yaml at the bundle root: the resolved recipe the
+bundle was generated from. A bundle and a recipe are therefore interchangeable
+inputs to anything that reads one.
+
 Helm (default):
   - README.md: Root deployment guide with ordered steps
   - deploy.sh: Automation script (0755)
-  - recipe.yaml: Copy of the input recipe
   - NNN-<component>/install.sh: Per-folder install script
   - NNN-<component>/values.yaml: Static Helm values
   - NNN-<component>/cluster-values.yaml: Per-cluster dynamic values

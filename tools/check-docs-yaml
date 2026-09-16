@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Parse every fenced `yaml` or `yml` example in Markdown documentation. This is
+# syntax-only validation: useful configuration fragments do not need to be
+# complete Kubernetes resources.
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PARSER="${REPO_ROOT}/tools/mdx/check-docs-yaml.mjs"
+
+# shellcheck source=tools/mdx/bootstrap.sh
+source "${REPO_ROOT}/tools/mdx/bootstrap.sh"
+ensure_docs_node_toolchain "docs YAML fence gate"
+
+cd "${REPO_ROOT}"
+
+SEARCH_DIRS=("docs")
+if [[ $# -gt 0 ]]; then
+  SEARCH_DIRS=("$@")
+fi
+
+for dir in "${SEARCH_DIRS[@]}"; do
+  if [[ ! -d "${dir}" ]]; then
+    echo "ERROR: docs scan root is not a directory: ${dir}" >&2
+    exit 2
+  fi
+done
+
+FILE_LIST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aicr-check-docs-yaml.XXXXXX")" || {
+  echo "ERROR: failed to create temporary directory for docs file discovery" >&2
+  exit 1
+}
+DISCOVERED_FILES="${FILE_LIST_DIR}/discovered"
+SORTED_FILES="${FILE_LIST_DIR}/sorted"
+
+cleanup_file_list() {
+  local exit_status=$?
+
+  trap - EXIT
+  rm -f -- "${DISCOVERED_FILES}" "${SORTED_FILES}" 2>/dev/null || true
+  rmdir -- "${FILE_LIST_DIR}" 2>/dev/null || true
+  exit "${exit_status}"
+}
+trap cleanup_file_list EXIT
+
+for dir in "${SEARCH_DIRS[@]}"; do
+  if ! find "${dir}" -type f \( -name '*.md' -o -name '*.mdx' \) -print >>"${DISCOVERED_FILES}"; then
+    echo "ERROR: failed to enumerate Markdown files under: ${dir}" >&2
+    exit 1
+  fi
+done
+
+if ! LC_ALL=C sort -u "${DISCOVERED_FILES}" >"${SORTED_FILES}"; then
+  echo "ERROR: failed to sort Markdown file list" >&2
+  exit 1
+fi
+
+FILES=()
+while IFS= read -r file; do
+  [[ -z "${file}" ]] && continue
+  FILES+=("${file}")
+done <"${SORTED_FILES}"
+
+if [[ ${#FILES[@]} -eq 0 ]]; then
+  echo "ERROR: no Markdown files found (scan roots: ${SEARCH_DIRS[*]})" >&2
+  exit 1
+fi
+
+node "${PARSER}" "${FILES[@]}"

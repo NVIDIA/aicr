@@ -105,7 +105,7 @@ case "${1:-}" in
         printf 'linting\nsecurity_tools\ntesting_tools\n'
         ;;
     '.linting | keys | .[]')
-        printf 'apidiff\naddlicense\ngo_licenses\n'
+        printf 'addlicense\n'
         ;;
     '.security_tools | keys | .[]')
         echo oras
@@ -113,14 +113,8 @@ case "${1:-}" in
     '.testing_tools | keys | .[]')
         echo helm
         ;;
-    '.linting.apidiff')
-        echo "${APIDIFF_PINNED_VERSION}"
-        ;;
     '.linting.addlicense')
         echo "${ADDLICENSE_PINNED_VERSION}"
-        ;;
-    '.linting.go_licenses')
-        echo "${GO_LICENSES_PINNED_VERSION}"
         ;;
     '.security_tools.oras')
         echo "${ORAS_PINNED_VERSION}"
@@ -229,6 +223,30 @@ check_helper() {
     fi
 }
 
+# go_mod_required_version underpins every reader of the module-built tool pins,
+# so the shapes it must refuse matter as much as the one it must find: `exclude`
+# and `replace` lines carry a version the build never uses.
+check_gomod_version() {
+    local name="$1"
+    local fixture="$2"
+    local want_rc="$3"
+    local want_output="$4"
+    local path="${STUB_DIR}/gomod-${name}.mod"
+    local output
+    local rc
+
+    # %b so the \t in the fixtures becomes a real tab, which is how the go
+    # tooling indents require blocks.
+    printf '%b' "${fixture}" >"${path}"
+    output=$(go_mod_required_version golang.org/x/exp "${path}")
+    rc=$?
+    if [[ "${rc}" == "${want_rc}" && "${output}" == "${want_output}" ]]; then
+        pass "${name}"
+    else
+        fail "${name}" "want rc=${want_rc} output='${want_output}', got rc=${rc} output='${output}'"
+    fi
+}
+
 check_tools_row() {
     local name="$1"
     local tool_name="$2"
@@ -245,6 +263,7 @@ check_tools_row() {
         mv "${executable}" "${unavailable}"
     fi
     output=$(TOOL_TARGET="${tool_name}" TOOL_MODE="${mode}" \
+        CHECK_TOOLS_GO_MOD_FILE="${STUB_DIR}/go.mod" \
         bash "${CHECK_TOOLS}" 2>&1)
     rc=$?
     if [[ "${mode}" == "missing" ]]; then
@@ -266,11 +285,79 @@ check_tools_row() {
     fi
 }
 
+# printf rather than a cat heredoc: PATH is hermetic from here on and cat is
+# deliberately absent from the utility allowlist above, so only builtins work.
+printf 'module github.com/NVIDIA/aicr\n\ngo 1.26\n\nrequire (\n\t%s %s\n\t%s %s\n)\n' \
+    github.com/google/go-licenses/v2 "${GO_LICENSES_PINNED_VERSION}" \
+    golang.org/x/exp "${APIDIFF_PINNED_VERSION}" \
+    >"${STUB_DIR}/go.mod"
+
 check_helper "extracts-exact-module-version" correct 0 \
     "${APIDIFF_PINNED_VERSION}"
 check_helper "extracts-mismatched-module-version" mismatch 0 \
     "${APIDIFF_MISMATCH_VERSION}"
 check_helper "rejects-unreadable-build-metadata" unreadable 1 ""
+
+check_gomod_version "reads-block-require" \
+    'module m
+
+go 1.26
+
+require (
+	golang.org/x/exp v1.1.1 // indirect
+)
+' 0 v1.1.1
+check_gomod_version "reads-single-line-require" \
+    'module m
+
+go 1.26
+
+require golang.org/x/exp v1.2.2
+' 0 v1.2.2
+check_gomod_version "ignores-exclude-block" \
+    'module m
+
+go 1.26
+
+exclude (
+	golang.org/x/exp v9.9.9
+)
+
+require (
+	golang.org/x/exp v1.3.3 // indirect
+)
+' 0 v1.3.3
+check_gomod_version "ignores-replace-left-hand-side" \
+    'module m
+
+go 1.26
+
+replace (
+	golang.org/x/exp v9.9.9 => ./fork
+)
+
+require (
+	golang.org/x/exp v1.4.4 // indirect
+)
+' 0 v1.4.4
+check_gomod_version "reads-require-without-space-before-paren" \
+    'module m
+
+go 1.26
+
+require(
+\tgolang.org/x/exp v1.6.6 // indirect
+)
+' 0 v1.6.6
+check_gomod_version "fails-when-module-is-absent" \
+    'module m
+
+go 1.26
+
+require (
+	golang.org/x/tools v1.5.5 // indirect
+)
+' 1 ""
 
 check_tools_row "accepts-exact-apidiff" apidiff correct 0 \
     "${APIDIFF_PINNED_VERSION}|${APIDIFF_PINNED_VERSION}|✓"

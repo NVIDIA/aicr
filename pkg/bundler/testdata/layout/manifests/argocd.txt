@@ -5,3 +5,4 @@
 README.md
 app-of-apps.yaml
 checksums.txt
+recipe.yaml

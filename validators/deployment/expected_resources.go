@@ -1178,8 +1178,8 @@ func verifyRDMAFabricReadyEmit(ctx *validators.Context, fabricResource string, e
 	// ctrfExtraAllowlist (see pkg/evidence/redact): their semantics fit exactly —
 	// validated = schedulable RDMA nodes with uniform allocatable fabric, total =
 	// all RDMA-candidate nodes incl cordoned. No new key or skipReason enum is
-	// minted (the RDMA gate never "skips" — it fails closed), so the redaction
-	// PolicyVersion stays v2.
+	// minted (the RDMA gate never "skips" — it fails closed), so this gate did
+	// not move the redaction PolicyVersion.
 	emitCoverage(validated, coverage.total())
 
 	if err == nil {

@@ -29,6 +29,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=tools/common
 . "${DIR}/common"
 VERSIONS_FILE="${REPO_ROOT}/.settings.yaml"
+GO_MOD_FILE="${CHECK_TOOLS_GO_MOD_FILE:-${REPO_ROOT}/go.mod}"
 
 # Check if yq is available
 if ! command -v yq &>/dev/null; then
@@ -284,6 +285,21 @@ for category in $categories; do
         # Check the tool
         check_tool "$tool" "$expected"
     done
+done
+
+# apidiff and go-licenses are built from this module (#2667), so go.mod holds
+# their only pin and the loop above -- which is driven by .settings.yaml keys --
+# never sees them. Check them from the require lines instead, keeping the stale
+# -binary-on-PATH warning that the settings-driven check used to provide.
+for module_tool in "apidiff:golang.org/x/exp" "go_licenses:github.com/google/go-licenses/v2"; do
+    tool_key="${module_tool%%:*}"
+    tool_module="${module_tool#*:}"
+    if expected=$(go_mod_required_version "${tool_module}" "${GO_MOD_FILE}"); then
+        check_tool "${tool_key}" "${expected}"
+    else
+        log_error "No ${tool_module} require line in go.mod; restore it with 'go get -tool'."
+        CHECK_FAILED=1
+    fi
 done
 
 # Docker is intentionally not pinned in .settings.yaml: developers use Docker

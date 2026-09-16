@@ -500,7 +500,9 @@ half of the pipeline and skips deploy-side assertions.
 
 - `test-coverage` — `go test -race ./...` plus the 83% coverage floor.
 - `lint` — golangci-lint with `.golangci.yaml`, yamllint, and the docs checks
-  (filenames, MDX patterns, MDX parse — see [Docs MDX Gate](#docs-mdx-gate)).
+  (filenames, MDX patterns, MDX parse, YAML fences — see
+  [Docs MDX Gate](#docs-mdx-gate) and
+  [Docs YAML Fence Gate](#docs-yaml-fence-gate)).
 - `e2e` — the end-to-end pipeline runner.
 - `scan` — Grype vulnerability scan.
 - `license-check` — license header / dependency-license sweep.
@@ -593,6 +595,25 @@ job that does — `fern generate --docs --preview` — runs as a `workflow_run`
 companion whose status never lands on the PR head SHA, so it cannot be a
 required check. `make check-docs-mdx-parse` exists to close that gap without a
 token or a dependency on Fern's service at merge time.
+
+## Docs YAML Fence Gate
+
+`make check-docs-yaml` checks every Markdown and MDX file under `docs/**`. Any
+fenced code block labelled `yaml` or `yml` must parse as YAML. This is a syntax
+check only: partial fragments are allowed and do not need to be complete
+Kubernetes resources.
+
+Inside a YAML fence, `...` is an explicit document-end marker. Content after it
+must start a new document with `---`; use `# ...` to show omitted content.
+Aliases must refer to an earlier anchor in the same YAML document. Empty
+fragments are valid, but malformed or incomplete YAML directives are rejected.
+Fences inside HTML or MDX comments are ignored.
+
+There is no `no-parse` bypass: `yaml no-parse` remains checked, and
+comma-suffixed labels such as `yaml,no-parse` are rejected. Relabel Helm or
+Go-template examples as `gotemplate`, and intentionally invalid examples as
+`text`. The checker needs Node 20+; without Node it warns and skips locally, but
+hard-fails in CI so the docs-only merge gate cannot pass without running it.
 
 ## Common Gotchas
 

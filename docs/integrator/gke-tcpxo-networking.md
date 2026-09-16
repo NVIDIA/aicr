@@ -296,6 +296,29 @@ aicr validate --recipe recipes/overlays/h100-gke-cos-training.yaml \
   --phase performance
 ```
 
+That base recipe ships TCPXO but no runtime, so it measures the validator's
+own fixture and labels the result `runtimeSource: cluster-capability`.
+
+On a recipe that ships the `torch-distributed-tcpxo` runtime
+(`h100-gke-cos-training-kubeflow`), the performance validator does not measure
+a fixture of its own. Before creating anything it verifies **recipe → deployed →
+cluster**: the recipe's recorded `configuration.gke.tcpxoInterfaces` must equal
+the mapping on the deployed `ClusterTrainingRuntime` exactly and in order, and
+every network that mapping selects must exist on the cluster. It then derives
+the benchmark runtime from the deployed one — copying the worker pod template
+wholesale (metadata and spec), re-applying only the benchmark's own worker
+`image`, `command`, `args`, `resources`, and `terminationMessagePolicy`, and
+merging volumes and mounts additively, so the workers run under the shipped
+NCCL environment rather than the fixture's — and labels the result
+`runtimeSource: delivered-artifact`. A mismatch in either comparison fails the
+run rather than being recorded; a divergent deployed artifact is a finding,
+never something validation repairs.
+
+```shell
+aicr validate --recipe recipes/overlays/h100-gke-cos-training-kubeflow.yaml \
+  --phase performance
+```
+
 The validator runs the all-reduce sweep over the validator-fixed `1K`–`16G`
 message-size range and asserts the busBW floor. It deploys the
 `TrainingRuntime` (`validators/performance/testdata/h100/gke/runtime.yaml`)
