@@ -53,6 +53,7 @@ on:
       - '.github/workflows/nvsentinel-preflight-e2e.yaml'
       - '.github/actions/setup-build-tools/**'
       - '.github/actions/prep-kind-runner/**'
+      - '.github/actions/load-versions/**'
       - '.settings.yaml'
   pull_request:
     branches: [main]
