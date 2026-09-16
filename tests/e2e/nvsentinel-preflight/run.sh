@@ -286,6 +286,33 @@ await_webhook_ca_injected() {
   err "cert-manager never injected a caBundle into the preflight webhook -- with failurePolicy Ignore the webhook would be skipped and every assertion below would be vacuous"
 }
 
+# await_webhook_serving blocks until the webhook actually mutates a pod.
+#
+# A completed rollout and a populated caBundle are both necessary and neither is
+# sufficient: the apiserver caches the webhook configuration, so there is a
+# window after the CA lands where it still dials with the old one. failurePolicy
+# is Ignore, so that window admits every pod unmutated and silently -- the
+# positive test below then fails, and the negative tests pass for the wrong
+# reason. Creating a real pod is the only signal that the whole admission path
+# works, so probe until it does.
+await_webhook_serving() {
+  local elapsed=0 probe="preflight-webhook-probe" injected
+  while [[ "${elapsed}" -lt 120 ]]; do
+    kubectl --context "${KUBE_CONTEXT}" -n "${NS_OPTED_IN}" delete pod "${probe}" \
+      --ignore-not-found >/dev/null 2>&1
+    create_pod "${NS_OPTED_IN}" "${probe}" gpu
+    if injected=$(injected_init_containers "${NS_OPTED_IN}" "${probe}") && [[ -n "${injected}" ]]; then
+      kubectl --context "${KUBE_CONTEXT}" -n "${NS_OPTED_IN}" delete pod "${probe}" \
+        --ignore-not-found >/dev/null 2>&1
+      msg "webhook is serving (probe got: ${injected})"
+      return 0
+    fi
+    sleep 3
+    elapsed=$((elapsed + 3))
+  done
+  err "the preflight webhook never mutated a probe pod in 120s -- with failurePolicy Ignore every assertion below would be vacuous"
+}
+
 # ── Assertion helpers ──
 
 # create_pod creates a Pending pod named $2 in namespace $1. $3 selects whether
@@ -475,6 +502,8 @@ install_stack
 kubectl --context "${KUBE_CONTEXT}" create namespace "${NS_OPTED_IN}" >/dev/null
 kubectl --context "${KUBE_CONTEXT}" label namespace "${NS_OPTED_IN}" "${PREFLIGHT_NS_LABEL}" >/dev/null
 kubectl --context "${KUBE_CONTEXT}" create namespace "${NS_NOT_OPTED_IN}" >/dev/null
+
+await_webhook_serving
 
 # The positive test runs first and aborts the run on failure: it is the only one
 # that proves the webhook is reachable at all, so a negative test that ran
