@@ -207,3 +207,49 @@ if ! printf '%s\n' "${output}" | grep -q 'is pinned in .settings.yaml'; then
     exit 1
 fi
 echo "Post-install version mismatch fails install_helm and reports the pin-mismatch error"
+
+# --- module-built tool pins (apidiff, go-licenses) --------------------------
+# #2741 removed these tools' .settings.yaml keys in favour of the go.mod
+# require line, but setup-tools kept reading the keys. yq exits 0 and prints
+# "null" for a missing key, so the required version became the string "null":
+# it never equalled an installed version, so apidiff rebuilt on every run
+# while reporting success. These cover the retain/replace decision that
+# regression turned into "always replace".
+#
+# Sourced in a subshell for the reason install_helm is: setup-tools defines
+# these at top level and the source-only hook returns before the installers.
+check_module_tool_pins() {
+    (
+        export SETUP_TOOLS_SOURCE_ONLY="true"
+        # shellcheck source=tools/setup-tools
+        source "${SETUP_TOOLS}"
+
+        module_tool_up_to_date "v1.2.3" "v1.2.3" ||
+            { echo "an exactly-matching installed version was not retained"; exit 1; }
+        ! module_tool_up_to_date "v1.2.3" "v1.2.4" ||
+            { echo "a stale installed version was retained instead of replaced"; exit 1; }
+        ! module_tool_up_to_date "" "v1.2.3" ||
+            { echo "an unreadable installed version was treated as up to date"; exit 1; }
+
+        # The regression itself: yq printed "null" for the removed key, and an
+        # unresolved pin must never look like a match.
+        ! module_tool_up_to_date "v1.2.3" "null" ||
+            { echo "the literal 'null' from a missing settings key was treated as a pin"; exit 1; }
+        ! module_tool_up_to_date "" "" ||
+            { echo "an unresolved required version was treated as up to date"; exit 1; }
+
+        # Both pins must resolve from go.mod, not from the removed keys.
+        for module in golang.org/x/exp github.com/google/go-licenses/v2; do
+            resolved=$(go_mod_required_version "${module}" "${REPO_ROOT}/go.mod") ||
+                { echo "could not resolve ${module} from go.mod"; exit 1; }
+            [[ -n "${resolved}" && "${resolved}" != "null" ]] ||
+                { echo "${module} resolved to '${resolved}' rather than a version"; exit 1; }
+        done
+    )
+}
+
+if ! reason=$(check_module_tool_pins); then
+    echo "FAIL: ${reason}" >&2
+    exit 1
+fi
+echo "Module-built tool pins: exact retained, stale/unreadable/unresolved replaced, both resolve from go.mod"

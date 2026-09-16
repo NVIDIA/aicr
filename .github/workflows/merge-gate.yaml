@@ -126,11 +126,11 @@ jobs:
               # The toolchain pins are watched too, because the job resolves
               # them through load-versions before running the check: .go-version
               # supplies the Go toolchain (which determines the `go list std`
-              # ignore set) and .settings.yaml supplies linting.go_licenses (the
+              # ignore set) and go.mod supplies the go-licenses require line (the
               # go-licenses build that classifies packages). Both reach the gate
               # only via that action, so all three paths must be watched or a
               # version bump silently skips the gate it changes — #814 bumped
-              # go-licenses touching only .settings.yaml, and #1204 bumped Go
+              # go-licenses touching only the pin, and #1204 bumped Go
               # touching only .go-version.
               - 'go.mod'
               - 'go.sum'
@@ -189,9 +189,9 @@ jobs:
               # targets defined there — a new goos/goarch must re-run this check.
               # Makefile is included because the `notices` recipe is the
               # generation contract — a change to it
-              # must not be able to skip its own gate. .settings.yaml is included
-              # because the generator's output depends on its pins: a
-              # linting.go_licenses bump can change license classification/URL
+              # must not be able to skip its own gate. go.mod and .settings.yaml
+              # are included because the generator's output depends on their
+              # pins: a go-licenses bump can change license classification/URL
               # derivation, and a languages.go bump changes the `go list std`
               # ignore set. This is a standalone job — the full `tests` suite
               # does NOT regenerate the file.
