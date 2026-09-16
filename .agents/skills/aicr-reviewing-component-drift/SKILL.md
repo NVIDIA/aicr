@@ -44,13 +44,30 @@ In order of preference:
 
 1. An explicit run: `gh run download <id> -R NVIDIA/aicr -n drift-report`
 2. The latest run:
-   `gh run list -R NVIDIA/aicr --workflow=registry-drift.yaml --status=success --limit 1 --json databaseId`
+   `gh run list -R NVIDIA/aicr --workflow=registry-drift.yaml --status=success --event schedule --limit 1 --json databaseId`
    then `gh run download <id> -R NVIDIA/aicr -n drift-report`
+
+   The default is deliberately the weekly scheduled run on the default
+   branch — `registry-drift.yaml` also runs on `workflow_dispatch` and, for a
+   same-repo PR touching the drift surface, on `pull_request`; every
+   successful path uploads the same `drift-report` artifact name, so an
+   unfiltered "latest successful run" could just as easily be a PR-validation
+   run and put the review against unmerged changes. `--event schedule`
+   excludes both. Reviewing a manual or PR-validation report is still
+   supported — pass `--run <id>` explicitly (option 1) rather than relying on
+   the default.
 3. A local `drift-report.json` path the user provides
 4. A pasted Slack digest — parse the component names only, then re-derive
    current and latest from `recipes/registry.yaml` and the upstream registry
    (`helm show chart` for HTTP repos, `crane ls` for `oci://`). This is the
-   fallback for an expired artifact, not the contract.
+   fallback for an expired artifact, not the contract, and it is unfiltered:
+   it does not apply Renovate's `minimumReleaseAge` (3 days,
+   `.github/renovate.json5`) or `internalChecksFilter: "strict"`, so it can
+   surface a release younger than the cooldown or one Renovate's strict
+   filter would reject. Use it only to identify which components to look at
+   when the artifact has expired — never to justify a bump on its own; the
+   artifact remains the authoritative source for whether a version is
+   actually eligible.
 
 Confirm `schemaVersion` is `1`. A higher number means this skill is stale —
 read `tools/drift-report/report.go` before trusting the field names.
