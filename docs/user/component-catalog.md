@@ -246,6 +246,68 @@ If your leaf needs a different value for something the mixin already sets (a dif
 
 **Tracing** (`global.tracing.enabled`) emits OpenTelemetry traces to an OTLP collector at `global.tracing.endpoint`. At the pinned chart version, under AICR's current base configuration, the exporter env (`OTEL_EXPORTER_OTLP_ENDPOINT`/`_INSECURE`) renders on the `platform-connectors` DaemonSet only — so enabling tracing does not instrument the other workloads AICR deploys today (including `labeler`, which does receive audit logging). The chart instruments additional workloads (event-exporter, fault-remediation, node-drainer) when those optional subcharts are enabled, which AICR's base values do not do. `TestNVSentinelObservabilityChartRender` asserts that env so a chart bump that drops it is caught. The chart has no `required` guard on that value — `global.tracing.enabled: true` with no endpoint renders and deploys without error, and the exporter fails silently at runtime. AICR closes that gap at bundle time: `CheckNVSentinelTracingEndpointRequired` fails the bundle unless an endpoint is supplied, e.g. `--set nv-sentinel:global.tracing.endpoint=<host:port>`. `insecure` defaults to `false` (the endpoint is expected to use TLS); override with `--set nv-sentinel:global.tracing.insecure=true` for a non-TLS collector.
 
+### Kubernetes Object Monitor
+
+`kubernetesObjectMonitor` is off by default (see the table above). It evaluates CEL predicates against live Kubernetes objects on a resync loop and, when a predicate turns true, emits a health event that the platform connector turns into a node condition today — cordon/drain only follow once remediation exists (see "Enabling Remediation" below). It is the runtime complement to `aicr validate`'s install-time DaemonSet checks: `aicr validate` catches a broken rollout once, at install; the Object Monitor keeps watching afterward, so a driver pod that starts crashlooping weeks later still produces a signal.
+
+**Opt in via the `nvsentinel-object-monitor` mixin** (`recipes/mixins/nvsentinel-object-monitor.yaml`) on your own leaf overlay:
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-object-monitor
+```
+
+**This overlay must be part of the resolved catalog** -- either an embedded overlay in `recipes/overlays/` (a real PR to this repo) or a file under an external `--data <dir>/overlays/` directory (`aicr recipe --data <dir> ...`, `aicr bundle --data <dir> ...`). An external `--data` directory must also carry a `registry.yaml` at its root even when it adds nothing but an overlay; see [the minimal stub](../integrator/data-extension.md#registryyaml-is-required). Passing your leaf overlay file directly to `aicr bundle -r <file>` or `aicr validate -r <file>` does **not** work for this (`aicr recipe` has no equivalent flag): AICR auto-hydrates a directly-passed overlay by re-resolving its `spec.criteria` against the catalog, not by reading `spec.mixins` or any other field from that file. Confirm the mixin actually applied by checking the generated recipe's `nvsentinel` componentRef for `global.kubernetesObjectMonitor.enabled` before bundling.
+
+`nvsentinel` is always in a recipe's inheritance chain (`recipes/overlays/base.yaml`), so this mixin composes onto an already-chained component -- something AICR's mixin-merge guard (`pkg/recipe/metadata_store.go`, ADR-005's "Silent constraint override" mitigation) otherwise hard-errors on. It is allowed through a narrower gate, not a blanket relaxation: `nvsentinel`'s own registry entry (`recipes/registry.yaml`) explicitly allowlists the exact leaf paths (`mixinSafeOverridePaths`) a mixin may set on it -- `global.kubernetesObjectMonitor.enabled` and `kubernetes-object-monitor.policies` -- and `mixinOverridesSafeForMerge` rejects, at compose time, both a path outside that allowlist and a path that collides with one your own leaf (or another mixin) already set.
+
+**Has no effect if `nvsentinel` is disabled by the chain.** `recipes/overlays/ocp.yaml`, for example, sets `nvsentinel`'s `overrides.enabled: false` (no OLM variant exists yet). Composing this mixin on top still succeeds -- a `slog.Warn` names the mixin and the disabled component, but the recipe/bundle call returns success either way -- and produces values nothing ever reads. Set `overrides.enabled: true` on `nvsentinel` in your own leaf before adding this mixin, and confirm nothing later in your chain disables it again.
+
+The mixin carries two policies adopted from NVSentinel's own `docs/monitoring-critical-operators.md`, with two deliberate deviations. First, the namespaces: upstream hardcodes `network-operator`, but this registry deploys that component into `nvidia-network-operator`, and the `os-talos` mixin relocates both operators again into `privileged-`-prefixed namespaces. Each policy therefore matches **both** namespaces its component can land in -- a policy naming only one watches a namespace nothing runs in, and never fires. Second, and following from that, `resource.namespace` is left unset (it accepts a single namespace), so the informer watches Pods cluster-wide exactly as upstream's own policies do.
+
+Both policies fire when a **DaemonSet-owned Pod** in a watched namespace has been scheduled to a node, has been running past a **30-minute grace period**, and is unhealthy -- phase other than `Running`/`Succeeded`, or a container in `CrashLoopBackOff`:
+
+| Policy | Namespaces watched | `errorCode` |
+|---|---|---|
+| `gpu-operator-pods-health` | `gpu-operator`, `privileged-gpu-operator` | `GPU_OPERATOR_POD_UNHEALTHY` |
+| `network-operator-pod-health` | `nvidia-network-operator`, `privileged-network-operator` | `NETWORK_OPERATOR_POD_UNHEALTHY` |
+
+**What these policies do not catch.** The predicate requires a Pod that is scheduled (`spec.nodeName` set) and has a `status.startTime`, because a health event has to be attached to a node. A DaemonSet Pod the scheduler never placed -- Pending because no node can satisfy its requests -- has neither, so it never fires, at any elapsed time. Nor does a Pod whose *phase* is `Running` while a container is wedged in a state other than `CrashLoopBackOff` (`ImagePullBackOff` on a restart, `CreateContainerConfigError`, a permanently failing readiness probe), or a k8s ≥1.29 native sidecar crash-looping at phase `Running`: `initContainerStatuses` is not inspected. An init container that crash-loops *before* the Pod reaches `Running` is caught, via the phase clause.
+
+**Each policy matches only its own operator's operands.** Namespace plus "owned by a DaemonSet" would not be enough: an unrelated DaemonSet an administrator happens to run in `gpu-operator` or `nvidia-network-operator` would, once unhealthy past the grace period, raise a *fatal* event and node condition blaming the operator. Each predicate therefore also requires the label that operator stamps on the DaemonSet pods it owns. The two are not the same label, and neither is a documented API -- both were read off live deployments at the versions this repo pins:
+
+| Operator | Required label | Coverage |
+|---|---|---|
+| `gpu-operator` (v26.7.0) | `app.kubernetes.io/managed-by: gpu-operator` | Confirmed on a live H100 cluster: all nine operand DaemonSets (driver, toolkit, device-plugin, DCGM, DCGM exporter, validator, GFD, MIG manager, MPS control), and the running Pods inherit it. The bundled node-feature-discovery subchart does not carry it and is out of scope. |
+| `network-operator` (26.4.1) | `ds-owner: NicClusterPolicy` | Verified on Kind only. The label is applied per-operand, not uniformly, so coverage depends on which `NicClusterPolicy` a recipe ships -- see below. |
+
+**Network Operator coverage is partial, and it varies by recipe.** The `ds-owner` label is stamped per operand rather than by a shared helper, so which components a policy watches depends on what that recipe's `NicClusterPolicy` enables:
+
+| `recipes/components/network-operator/manifests/` | Operands enabled | Watched |
+|---|---|---|
+| `nic-cluster-policy-generic-gb300.yaml` | ofedDriver, rdmaSharedDevicePlugin | both |
+| `nic-cluster-policy-oke-gb200.yaml` | rdmaSharedDevicePlugin | yes |
+| `nic-cluster-policy-aks.yaml` | ofedDriver, rdmaSharedDevicePlugin, docaTelemetryService | first two; `docaTelemetryService` unverified |
+| `nic-cluster-policy-oke-l40s.yaml` | nvIpam, secondaryNetwork, sriovDevicePlugin | **none confirmed** -- `nv-ipam-node` demonstrably omits the label, the other two are unverified |
+
+The RDMA driver and shared device plugin — the components whose failure actually means a node can no longer run RDMA workloads — are covered everywhere they are deployed. The uncovered cases fail by staying silent rather than by raising a wrong event, which is the safe direction, but on OKE L40S the network policy should not be relied on until those operands are checked against a cluster with RDMA NICs.
+
+Because neither label is contractual, an operator release that renames one would turn that policy into a silent no-op — and nothing inside this repo can detect that, since the labels come from the operators' own controllers rather than from any chart AICR renders. Each assumption is therefore bound to the version it was verified against: `TestObjectMonitorOperandIdentityPinnedToVerifiedVersion` fails the moment `gpu-operator` or `network-operator` is bumped in `recipes/registry.yaml`, forcing whoever bumps it to re-read the labels off the new release first. That converts a silent no-op into a required revalidation step; it is not a live check.
+
+**The grace period debounces Pod age, not unhealthiness.** `status.startTime` is when the Pod started, so for a Pod that has been up for weeks -- the case this mixin exists for -- the 30-minute floor is already satisfied and a brief container restart fires immediately. The floor suppresses events during a rollout; it does not require a fault to persist for 30 minutes.
+
+**Event handling is the chart's default, `processingStrategy: EXECUTE_REMEDIATION`.** The mixin does not set it, so events flow through NVSentinel's normal path (a node condition today; cordon/drain once remediation exists). The subchart also offers `STORE_ONLY`, which records events without acting on them; it is not on `nvsentinel`'s `mixinSafeOverridePaths` allowlist, so set it on your own leaf's `componentRefs` if you want it.
+
+**RBAC worth naming:** the subchart's ClusterRole grants `nodes: get/list/watch/patch/update` unconditionally, independent of which policies you configure. That is not read-only -- it is how the node condition gets written.
+
+**Watch load is the chart's defaults, inherited deliberately.** Because each policy must match two namespaces, `resource.namespace` cannot be set, so the monitor keeps a cluster-wide Pod informer -- the same shape as upstream's own policies. The mixin leaves `resyncPeriod` (5m) and `maxConcurrentReconciles` (1) at the subchart defaults; on the clusters AICR targets that is a single informer over Pods, not a per-policy one. Neither is on `nvsentinel`'s `mixinSafeOverridePaths`, so tuning them means setting them on your own leaf's `componentRefs` rather than through a mixin. [#2430](https://github.com/NVIDIA/aicr/issues/2430) owns requalifying those defaults against real cluster sizes.
+
+Both policies set `isFatal: true` and leave `quarantineOverrides`/`drainOverrides` unset -- deliberately, not by omission. Today, with no quarantine component enabled anywhere in this repo's recipes, `isFatal: true` produces only a node condition; there is nothing to cordon or drain yet. Once remediation is enabled through #1014, the same policies drive an actual cordon/drain when an operator DaemonSet pod stays unhealthy past the grace period -- which is the correct behavior for a fault that means the node can no longer safely run GPU or RDMA workloads, not an accident of inheriting upstream's default.
+
+**`node-not-ready` is deliberately dropped, not inherited.** The `kubernetes-object-monitor` subchart ships a third policy by default, `node-not-ready` (watches `Node` for `Ready=False`); setting `kubernetes-object-monitor.policies` replaces that default list wholesale (Helm values do not merge lists), so this mixin does not carry it forward. It is a general node-readiness signal unrelated to this mixin's scope (operator DaemonSet pod health) and would enable a new class of node-cordon behavior nobody asked for here. Adopt it explicitly, with its own deliberate `isFatal`/quarantine decision, via your own leaf overlay's `componentRefs` if you want it.
+
 ### Enabling Remediation
 
 **AICR does not support enabling remediation today, and this page does not carry a recipe for it.** [#1014](https://github.com/NVIDIA/aicr/issues/1014) tracks adding a qualified opt-in path.

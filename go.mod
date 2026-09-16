@@ -9,6 +9,7 @@ require (
 	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/distribution/reference v0.6.0
 	github.com/go-logr/logr v1.4.4
+	github.com/google/cel-go v0.31.0
 	github.com/google/gnostic-models v0.7.1
 	github.com/google/uuid v1.6.0
 	github.com/in-toto/attestation v1.2.0
@@ -135,7 +136,6 @@ require (
 	github.com/godbus/dbus/v5 v5.2.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
-	github.com/google/cel-go v0.31.0 // indirect
 	github.com/google/certificate-transparency-go v1.3.3 // indirect
 	github.com/google/go-containerregistry v0.22.1 // indirect
 	github.com/google/go-licenses/v2 v2.0.1 // indirect
