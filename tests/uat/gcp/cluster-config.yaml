@@ -96,11 +96,13 @@ compute:
         # and failed Bringup *after* the H100s were reserved, so the teardown
         # discarded them (#2764). Re-adding one is not a matter of unpinning:
         # GKE applies node counts PER ZONE, so a zone-less pool on this regional
-        # cluster provisions one node in each of us-central1-b/c/f. The shape
-        # that would actually be stockout-tolerant is zone-less with
-        # `totalMinNodes`/`totalMaxNodes` and `locationPolicy: ANY` (which
-        # requires an initial count of 0). The gpu-worker pin below must stay
-        # regardless — the reservation is zonal.
+        # cluster provisions one node in each of us-central1-b/c/f. A
+        # stockout-tolerant pool needs region-wide counts, and those need an
+        # actuator change first: v0.5.17 passes `totalMinNodes`/`totalMaxNodes`
+        # through, but emits `min_node_count`/`max_node_count` unconditionally
+        # (defaulting to 1 and 3), and the provider rejects per-zone and total
+        # limits together. The gpu-worker pin below must stay regardless — the
+        # reservation is zonal.
         - name: gpu-worker
           machineType: a3-megagpu-8g
           diskType: pd-ssd
