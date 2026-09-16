@@ -983,6 +983,33 @@ frontend discovery panic fixed in #1193 -- setting `DYN_EVENT_PLANE=zmq`
 on the old workload is defense in depth, not a substitute for bumping its
 image to match the operator.
 
+### `dynamo-platform`: reusing an existing StorageClass for the GB200 model-weights cache
+
+On GB200 (`a4x-highgpu-4g`) GKE leaves, `dynamo-platform` bundles a fixed
+`a4x-compatible` StorageClass
+(`recipes/components/dynamo-platform/manifests/a4x-storage-class.yaml`) so
+the `inference-perf` model-weights cache PVC has somewhere Hyperdisk-backed
+to bind, since those nodes can't attach Persistent Disk at all. See
+[GKE GB200 networking](../integrator/gke-gb200-networking.md#storage-prerequisites).
+
+Redirecting the cache PVC to a different, already-existing StorageClass,
+via the recipe's `inference-model-cache-storage-class` constraint or the
+`AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` catalog env (see
+[Validation](validation.md)), doesn't stop AICR from also rendering
+`a4x-compatible`. If a StorageClass with that name already exists on the
+cluster under someone else's ownership, adopting it into this release's
+Helm lifecycle either fails the install or takes over an object this bundle
+doesn't need. Opt out of rendering it at bundle time with:
+
+```bash
+aicr bundle --recipe recipes/overlays/gb200-gke-cos-inference-dynamo.yaml \
+  --set dynamo-platform:a4xStorageClass.create=false \
+  --output ./bundle
+```
+
+`a4xStorageClass.create` is a bundling-time toggle read by AICR itself, not
+an `ai-dynamo` chart value. It never reaches the rendered Helm values.
+
 ### `gpu-operator` and `nvidia-dra-driver-gpu`: ComputeDomain CRD ownership on Argo CD
 
 `gpu-operator` and `nvidia-dra-driver-gpu` (and `nvidia-dra-driver-gpu-ocp`) both

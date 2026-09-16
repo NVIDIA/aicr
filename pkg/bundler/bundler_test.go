@@ -3922,6 +3922,114 @@ func TestCollectComponentManifests_MissingPath(t *testing.T) {
 	})
 }
 
+func TestDynamoA4xStorageClassEnabled(t *testing.T) {
+	tests := []struct {
+		name      string
+		overrides map[string]string
+		want      bool
+		wantErr   bool
+	}{
+		{name: "unset defaults to enabled", overrides: nil, want: true},
+		{name: "explicit true", overrides: map[string]string{dynamoA4xStorageClassCreateOverridePath: "true"}, want: true},
+		{name: "explicit false", overrides: map[string]string{dynamoA4xStorageClassCreateOverridePath: "false"}, want: false},
+		{name: "non-boolean value fails closed", overrides: map[string]string{dynamoA4xStorageClassCreateOverridePath: "maybe"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := dynamoA4xStorageClassEnabled(tt.overrides)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err == nil && got != tt.want {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCollectComponentManifests_DynamoA4xStorageClassOptOut(t *testing.T) {
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:          dynamoPlatformComponentName,
+				ManifestFiles: []string{dynamoA4xStorageClassManifestPath},
+			},
+		},
+	}
+
+	t.Run("default renders the StorageClass manifest", func(t *testing.T) {
+		bundler, err := New()
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		contents, err := bundler.collectComponentManifests(context.Background(), recipeResult)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := contents[dynamoPlatformComponentName][dynamoA4xStorageClassManifestPath]; !ok {
+			t.Errorf("expected %q rendered by default, got %v", dynamoA4xStorageClassManifestPath, contents)
+		}
+	})
+
+	t.Run("create=false omits the StorageClass manifest", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithValueOverrides(map[string]map[string]string{
+			dynamoPlatformComponentName: {dynamoA4xStorageClassCreateOverridePath: "false"},
+		}))
+		bundler, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		contents, err := bundler.collectComponentManifests(context.Background(), recipeResult)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := contents[dynamoPlatformComponentName][dynamoA4xStorageClassManifestPath]; ok {
+			t.Errorf("expected %q to be omitted, got %v", dynamoA4xStorageClassManifestPath, contents)
+		}
+	})
+
+	t.Run("non-boolean override fails closed", func(t *testing.T) {
+		cfg := config.NewConfig(config.WithValueOverrides(map[string]map[string]string{
+			dynamoPlatformComponentName: {dynamoA4xStorageClassCreateOverridePath: "maybe"},
+		}))
+		bundler, err := New(WithConfig(cfg))
+		if err != nil {
+			t.Fatalf("New() error = %v", err)
+		}
+		if _, err := bundler.collectComponentManifests(context.Background(), recipeResult); err == nil {
+			t.Fatal("expected error for non-boolean override")
+		} else if !strings.Contains(err.Error(), dynamoA4xStorageClassCreateOverridePath) {
+			t.Errorf("error should mention %q: %v", dynamoA4xStorageClassCreateOverridePath, err)
+		}
+	})
+}
+
+// TestExtractComponentValues_DynamoA4xStorageClassCreateNotLeakedToHelmValues
+// verifies that the bundling-time a4xStorageClass.create toggle never
+// reaches the ai-dynamo chart's rendered Helm values.
+func TestExtractComponentValues_DynamoA4xStorageClassCreateNotLeakedToHelmValues(t *testing.T) {
+	cfg := config.NewConfig(config.WithValueOverrides(map[string]map[string]string{
+		dynamoPlatformComponentName: {dynamoA4xStorageClassCreateOverridePath: "false"},
+	}))
+	bundler, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	recipeResult := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: dynamoPlatformComponentName, Version: "1.0.0", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia/ai-dynamo"},
+		},
+	}
+
+	values, err := bundler.extractComponentValues(context.Background(), recipeResult)
+	if err != nil {
+		t.Fatalf("extractComponentValues() error = %v", err)
+	}
+	if _, ok := values[dynamoPlatformComponentName][strings.SplitN(dynamoA4xStorageClassCreateOverridePath, ".", 2)[0]]; ok {
+		t.Errorf("a4xStorageClass leaked into Helm values: %v", values[dynamoPlatformComponentName])
+	}
+}
+
 // TestMake_Reproducible verifies that bundle generation is deterministic.
 // Running Make() twice with the same input should produce identical output.
 func TestMake_Reproducible(t *testing.T) {

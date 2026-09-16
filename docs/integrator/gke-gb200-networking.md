@@ -217,6 +217,11 @@ on the `inference-perf` catalog entry's `env`. AICR's compatibility check
 accepts `hyperdisk-balanced`, `hyperdisk-ml`, or `hyperdisk-extreme` (see
 [Validation](../user/validation.md)).
 
+When overriding to a StorageClass this bundle doesn't own, for example one
+that already exists on the cluster under the name AICR would otherwise
+create, also pass `--set dynamo-platform:a4xStorageClass.create=false` at
+bundle time, so AICR doesn't render the `a4x-compatible` manifest at all.
+
 ## Running the NCCL Benchmark
 
 The GB200 GKE training recipe (`gb200-gke-cos-training`) selects the

@@ -1131,6 +1131,21 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 				}
 				setOverrides = filtered
 			}
+			// dynamo-platform:a4xStorageClass.create is an AICR bundling
+			// toggle (see collectComponentManifestsByPhase), not a real
+			// ai-dynamo chart value. Strip it before it reaches Helm.
+			if ref.Name == dynamoPlatformComponentName {
+				if _, has := setOverrides[dynamoA4xStorageClassCreateOverridePath]; has {
+					filtered := make(map[string]string, len(setOverrides)-1)
+					for k, v := range setOverrides {
+						if k == dynamoA4xStorageClassCreateOverridePath {
+							continue
+						}
+						filtered[k] = v
+					}
+					setOverrides = filtered
+				}
+			}
 			if applyErr := component.ApplyMapOverrides(values, setOverrides); applyErr != nil {
 				// User-supplied --set overrides must produce the values the
 				// user asked for; silently dropping them ships a bundle
@@ -2865,6 +2880,37 @@ const (
 	phasePreManifests
 )
 
+// dynamoPlatformComponentName, dynamoA4xStorageClassManifestPath, and
+// dynamoA4xStorageClassCreateOverridePath identify the dynamo-platform
+// component, its fixed a4x-compatible StorageClass manifest, and the
+// bundling-time key that opts out of rendering it. See
+// dynamoA4xStorageClassEnabled.
+const (
+	dynamoPlatformComponentName             = "dynamo-platform"
+	dynamoA4xStorageClassManifestPath       = "components/dynamo-platform/manifests/a4x-storage-class.yaml"
+	dynamoA4xStorageClassCreateOverridePath = "a4xStorageClass.create"
+)
+
+// dynamoA4xStorageClassEnabled reports whether the dynamo-platform bundle
+// should include the fixed a4x-compatible StorageClass manifest. It
+// defaults to true. Opt out with
+// --set dynamo-platform:a4xStorageClass.create=false when redirecting
+// inference-model-cache-storage-class to a StorageClass this release
+// doesn't own.
+func dynamoA4xStorageClassEnabled(overrides map[string]string) (bool, error) {
+	raw, ok := overrides[dynamoA4xStorageClassCreateOverridePath]
+	if !ok {
+		return true, nil
+	}
+	enabled, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"component %q: %s must be a boolean, got %q",
+			dynamoPlatformComponentName, dynamoA4xStorageClassCreateOverridePath, raw))
+	}
+	return enabled, nil
+}
+
 // collectComponentManifestsByPhase gathers manifest file contents from
 // all components for the requested phase, keyed by component name then
 // manifest path. The body is shared between phases via the manifestPhase
@@ -2897,6 +2943,21 @@ func (b *DefaultBundler) collectComponentManifestsByPhase(
 		}
 		if len(paths) == 0 {
 			continue
+		}
+
+		if phase == phasePostManifests && ref.Name == dynamoPlatformComponentName {
+			createA4xStorageClass, err := dynamoA4xStorageClassEnabled(b.getValueOverridesForComponent(ref.Name, provider))
+			if err != nil {
+				return nil, err
+			}
+			if !createA4xStorageClass {
+				paths = slices.DeleteFunc(slices.Clone(paths), func(p string) bool {
+					return p == dynamoA4xStorageClassManifestPath
+				})
+				if len(paths) == 0 {
+					continue
+				}
+			}
 		}
 
 		componentManifests := make(map[string][]byte, len(paths))

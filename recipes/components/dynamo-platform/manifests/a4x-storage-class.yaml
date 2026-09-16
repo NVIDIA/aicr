@@ -22,6 +22,12 @@
 #
 # The inference-model-cache-storage-class performance constraint points the
 # inference-perf model-weights cache PVC at this StorageClass by name.
+#
+# An operator reusing an existing, already-Hyperdisk-backed StorageClass
+# instead (via inference-model-cache-storage-class) can skip this manifest
+# with --set dynamo-platform:a4xStorageClass.create=false, so this release
+# doesn't create or take ownership of a cluster-scoped object it doesn't
+# need.
 apiVersion: storage.k8s.io/v1
 kind: StorageClass
 metadata:
