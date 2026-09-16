@@ -86,6 +86,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          # actions/checkout defaults to the synthetic merge commit on
+          # pull_request events. The "Point Renovate at the PR branch" step
+          # below sends Renovate to extract from github.head_ref (the PR head
+          # branch) directly, so LoadPins here must read registry.yaml from
+          # that same head commit — otherwise LoadPins, Renovate, and the
+          # report's recorded commit (below) could each describe a different
+          # revision.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Load versions
@@ -169,7 +177,9 @@ jobs:
           SERVER: ${{ github.server_url }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
-          SHA: ${{ github.sha }}
+          # Same revision as the Checkout step's ref above, so the report's
+          # recorded commit matches what LoadPins actually read.
+          SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: |
           set -euo pipefail
           GOFLAGS="-mod=readonly" go run ./tools/drift-report \
