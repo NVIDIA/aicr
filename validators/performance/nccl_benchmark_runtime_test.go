@@ -442,7 +442,7 @@ spec:
 	// job. No --node-selector override, so the runtime's own selector must win.
 	if err := applyNCCLResources(ctx, fakeClient, config,
 		recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
-		runtimeWithSelector, ""); err != nil {
+		runtimeWithSelector, "", nil); err != nil {
 		t.Fatalf("applyNCCLResources (custom runtime) failed: %v", err)
 	}
 
@@ -503,7 +503,7 @@ spec:
 
 		if err := applyNCCLResources(ctx, fakeClient, config,
 			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
-			"", "example.com/qualify/nccl:cuda13"); err != nil {
+			"", "example.com/qualify/nccl:cuda13", nil); err != nil {
 			t.Fatalf("applyNCCLResources (embedded, override) failed: %v", err)
 		}
 
@@ -528,7 +528,7 @@ spec:
 		// it if called this way — the recipe-supplied runtime owns its image.
 		if err := applyNCCLResources(ctx, fakeClient, config,
 			recipe.CriteriaAcceleratorH100, recipe.CriteriaServiceEKS, variantDefault, fabricEFA,
-			runtimeWithSelector, "example.com/should-be-ignored:v1"); err != nil {
+			runtimeWithSelector, "example.com/should-be-ignored:v1", nil); err != nil {
 			t.Fatalf("applyNCCLResources (custom runtime) failed: %v", err)
 		}
 
