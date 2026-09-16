@@ -143,19 +143,26 @@ jobs:
             {"packageRules":[{"matchPackageNames":["*"],"enabled":false},
             {"matchDepTypes":["registry-chart"],"enabled":true}]}
           RENOVATE_REPORT_TYPE: file
-          RENOVATE_REPORT_PATH: ${{ github.workspace }}/drift-report-raw.json
+          # renovatebot/github-action mounts only /tmp:/tmp into the Renovate
+          # container (see docker-volumes in the run log); the workspace path
+          # is not shared, so a report written there vanishes with the
+          # container on exit and the host sees nothing.
+          RENOVATE_REPORT_PATH: /tmp/drift-report-raw.json
           LOG_LEVEL: info
 
       - name: Verify the Renovate report was written
         run: |
           set -euo pipefail
-          if [[ ! -s drift-report-raw.json ]]; then
-            echo "::error::Renovate wrote no report at drift-report-raw.json." >&2
-            echo "The container may not share the workspace path. Fallback: set" >&2
-            echo "RENOVATE_REPORT_TYPE=logging and parse the run log, or invoke the" >&2
-            echo "pinned image with an explicit docker run mount." >&2
+          if [[ ! -s /tmp/drift-report-raw.json ]]; then
+            echo "::error::Renovate wrote no report at /tmp/drift-report-raw.json." >&2
+            echo "Check the Run Renovate step's own log for a failure before it" >&2
+            echo "wrote the report, and confirm the action's docker-volumes input" >&2
+            echo "still mounts /tmp into the container." >&2
             exit 1
           fi
+
+      - name: Copy the report into the workspace
+        run: cp /tmp/drift-report-raw.json ./drift-report-raw.json
 
       - name: Build the drift report
         env:
@@ -167,7 +174,7 @@ jobs:
           set -euo pipefail
           GOFLAGS="-mod=readonly" go run ./tools/drift-report \
             -repo-root "${PWD}" \
-            -renovate-report drift-report-raw.json \
+            -renovate-report /tmp/drift-report-raw.json \
             -out drift-report.json \
             -slack-out slack-payload.json \
             -run-url "${SERVER}/${REPO}/actions/runs/${RUN_ID}" \
