@@ -37,7 +37,7 @@
 #   matrix below in sync with the goos/goarch blocks in .goreleaser.yaml.
 #
 # Requirements:
-#   - go-licenses (version pinned in .settings.yaml linting.go_licenses)
+#   - go-licenses (version pinned by the go.mod require line)
 #   - go (version pinned in .settings.yaml languages.go)
 #   - yq (mikefarah) — verifies the PLATFORMS matrix matches .goreleaser.yaml
 

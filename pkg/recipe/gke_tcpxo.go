@@ -38,6 +38,24 @@ const (
 	gkeTCPXODefaultNetwork = "default"
 )
 
+// Exported names for the two identifiers validators need in order to read the
+// recorded TCPXO mapping back out of a ValidationInput without hardcoding the
+// strings a second time (validators/internal/gkenet). They alias the unexported
+// constants above so the recipe package and the validators cannot drift.
+const (
+	// KubeflowTrainerComponentName is the componentRef that carries the
+	// torch-distributed-tcpxo runtime and the recorded tcpxoInterfaces override.
+	KubeflowTrainerComponentName = kubeflowTrainerComponentName
+	// GKETCPXOInterfacesOverrideKey is the ComponentRef.Overrides key under which
+	// recipe generation records the normalized eth1..eth8 -> network mapping.
+	GKETCPXOInterfacesOverrideKey = gkeTCPXOInterfacesValueKey
+	// GKETCPXORuntimeManifest is the manifestFiles entry whose presence on the
+	// kubeflow-trainer componentRef means the recipe SHIPS the TCPXO runtime
+	// (see ShipsGKETCPXORuntime). Validators combine it with the override above
+	// to decide delivery: a mapping without the manifest describes nothing.
+	GKETCPXORuntimeManifest = gkeTCPXORuntimeManifest
+)
+
 // Device-type Network names are limited by GKE's UNIX socket path length.
 // https://docs.cloud.google.com/kubernetes-engine/docs/how-to/setup-multinetwork-support-for-pods
 const gkeNetworkObjectNameMaxLen = 41
