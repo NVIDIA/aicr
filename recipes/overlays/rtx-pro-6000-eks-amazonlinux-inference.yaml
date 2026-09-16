@@ -1,0 +1,78 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1alpha3
+metadata:
+  name: rtx-pro-6000-eks-amazonlinux-inference
+
+spec:
+  # Inherits from rtx-pro-6000-eks-inference (RTX PRO 6000 + EKS + inference).
+  # This overlay adds AL2023-specific OS constraints and the preinstalled-driver
+  # profile required by the NVIDIA AL2023 AMI family (AL2023_x86_64_NVIDIA).
+  base: rtx-pro-6000-eks-inference
+
+  criteria:
+    service: eks
+    accelerator: rtx-pro-6000
+    os: amazonlinux
+    intent: inference
+
+  mixins:
+    - os-amazonlinux
+
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+
+  # See h100-eks-amazonlinux-inference.yaml for the full profile rationale.
+  profile:
+    name: gpuStack
+    description: >-
+      Who installs the GPU driver and container toolkit on EKS AL2023 GPU
+      nodes. "ami-preinstalled" (the default) is the NVIDIA AL2023 AMI
+      family (AL2023_x86_64_NVIDIA): the AMI pre-installs driver and toolkit
+      at the host root; the GPU Operator installs neither.
+      "operator-managed" is a BYO driverless AMI: the GPU Operator installs
+      driver and toolkit, and the DRA driver reads the operator install path.
+    default: ami-preinstalled
+    values:
+      ami-preinstalled:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver: {enabled: false}
+              toolkit: {enabled: false}
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: /
+          - name: nvsentinel
+            overrides:
+              labeler: {assumeDriverInstalled: true}
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver: {enabled: true}
+              toolkit: {enabled: true}
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: /run/nvidia/driver
+          - name: nvsentinel
+            overrides:
+              labeler: {assumeDriverInstalled: false}
+
+  componentRefs:
+    - name: nvsentinel
+      type: Helm
