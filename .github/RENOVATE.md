@@ -113,6 +113,11 @@ annotations or the parser is verified against real upstream lookups before
 merge, without posting to Slack; fork PRs skip this check because Renovate
 cannot resolve a fork's head branch against the base repository.
 
+The global `minimumReleaseAge: "3 days"` and `internalChecksFilter: "strict"`
+settings above apply to this run too, so a chart's reported "latest" is really
+its latest release at least 3 days old — the same cooldown that protects
+auto-merged bumps elsewhere in this file.
+
 ## Known limitations
 
 - **AWS EFA device-plugin image** (`recipes/components/aws-efa/values.yaml`) is published only to AWS's authenticated public ECR (`602401143452.dkr.ecr.us-west-2.amazonaws.com/...`); no `public.ecr.aws` mirror. The image is in `ignoreDeps`; bumps must be coordinated manually with EKS add-on releases.

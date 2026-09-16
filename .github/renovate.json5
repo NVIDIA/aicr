@@ -477,10 +477,14 @@
 
     // ---- Registry chart pins are extracted, never PR'd ----
     {
-      // Report-only. The weekly registry-drift workflow force-enables this
-      // depType under RENOVATE_DRY_RUN=full; this run must never open a PR for
-      // a chart pin. Two independent guards (that dry-run, and this flag) keep
-      // "no PRs" from depending on either one alone.
+      // Report-only. Each run relies on exactly one config-level guard here:
+      // the weekday PR run is kept off registry-chart deps by this
+      // `enabled: false`, while the weekly registry-drift workflow
+      // force-enables the depType (RENOVATE_FORCE) and relies instead on
+      // RENOVATE_DRY_RUN=full, which makes this flag a no-op for that run.
+      // The genuinely independent second guard is `permissions:
+      // contents: read` on registry-drift.yaml — Renovate has no write
+      // access to push a branch there regardless of either flag.
       description: "Registry chart pins are reported weekly, never PR'd — see .github/workflows/registry-drift.yaml",
       matchDepTypes: ["registry-chart"],
       enabled: false,

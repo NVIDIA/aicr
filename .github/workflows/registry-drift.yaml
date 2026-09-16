@@ -26,7 +26,7 @@
 # ADR-021 upgrade record, or raise the chart's kubeVersion past a recipe
 # constraint. A one-line bot PR that goes green asserts none of that was checked.
 #
-# A draft PR touching the drift surface also runs this report against its own
+# A PR touching the drift surface also runs this report against its own
 # branch (Slack posting stays off) — see the pull_request trigger below.
 
 name: Registry Drift Report
@@ -42,7 +42,7 @@ on:
         description: "Post the digest to Slack (off by default so manual runs can be validated silently)"
         default: false
         type: boolean
-  # A draft PR touching the drift surface runs the same report against its own
+  # A PR touching the drift surface runs the same report against its own
   # branch. This is how Renovate's real report shape gets verified before merge:
   # workflow_dispatch cannot target a branch until the workflow is on the default
   # branch, so without this the first real run would be a post-merge surprise.
@@ -56,9 +56,13 @@ on:
 concurrency:
   # PR runs are keyed per branch; schedule and workflow_dispatch share one group
   # (head_ref is empty for both), preserving the original serialization between
-  # a manual run and the cron. cancel-in-progress stays off: a superseded run is
-  # cheap to let finish, and nothing here is safe to interrupt mid-upload.
+  # a manual run and the cron. cancel-in-progress is scoped to pull_request:
+  # each push on a PR branch queues another 20-minute, 34-lookup run, so a
+  # superseded one is cancelled rather than left to finish behind the latest.
+  # Scheduled and manual runs are never cancelled — nothing there is safe to
+  # interrupt mid-upload.
   group: ${{ github.workflow }}-${{ github.head_ref || 'scheduled' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -178,7 +182,11 @@ jobs:
 
       - name: Post to Slack
         env:
-          SLACK_SERVICE: ${{ secrets.SLACK_SERVICE }}
+          # Nothing is posted on a pull_request run (POST_SLACK below is
+          # always false there), so keep the secret out of that step's
+          # environment entirely — defense in depth against a PR-controlled
+          # script reading it.
+          SLACK_SERVICE: ${{ github.event_name != 'pull_request' && secrets.SLACK_SERVICE || '' }}
           # Scheduled runs always post; manual runs post only when asked. The
           # digest is echoed to the log either way — the vuln-scan-images shape.
           POST_SLACK: ${{ github.event_name == 'schedule' || inputs.post_slack }}
