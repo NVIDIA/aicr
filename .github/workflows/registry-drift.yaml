@@ -124,9 +124,14 @@ jobs:
           RENOVATE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RENOVATE_REPOSITORIES: '["${{ github.repository }}"]'
           RENOVATE_ONBOARDING: "false"
-          # Guard 1 of 2: Renovate cannot create a branch or PR in this mode.
-          # Guard 2 is `enabled: false` on the registry-chart depType in
-          # .github/renovate.json5, which keeps the weekday PR run off them.
+          # Guard 1: Renovate cannot create a branch or PR in this mode.
+          # Guard 2, independent of this flag: `permissions: contents: read`
+          # above and on this job — Renovate has no write access to push a
+          # branch or open a PR here regardless of RENOVATE_DRY_RUN. The
+          # `enabled: false` on the registry-chart depType in
+          # .github/renovate.json5 is a no-op for this run (RENOVATE_FORCE
+          # re-enables it below); that flag is what keeps the weekday
+          # Renovate PR job off these pins, not this workflow.
           RENOVATE_DRY_RUN: full
           # Extract only the custom managers; go.mod, Dockerfiles, and Terraform
           # are irrelevant here and cost lookup time.

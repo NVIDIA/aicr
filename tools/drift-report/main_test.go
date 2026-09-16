@@ -23,6 +23,10 @@ import (
 
 // runFixtureReport resolves one real registry-chart pin (nvsentinel) as
 // current, so BuildReport sees resolved > 0 and does not fail closed.
+// currentValue below must track the live nvsentinel pin in
+// recipes/registry.yaml; a drifted fixture pin routes this dep to the
+// mismatch branch, and the symptom is an off-by-one in Summary.Unresolved
+// far from this line.
 const runFixtureReport = `{
   "repositories": {
     "NVIDIA/aicr": {
