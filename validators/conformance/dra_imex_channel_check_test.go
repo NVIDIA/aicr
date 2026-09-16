@@ -552,9 +552,13 @@ func TestIMEXCandidateNodes(t *testing.T) {
 // the compute-domain.nvidia.com channel device of the given pool — the shape
 // a standing ComputeDomain (e.g. Slinky Slurm's slinky-slurm-imex-channels
 // template) or a running MNNVL workload leaves on a node.
-func allocatedComputeDomainClaim(version, namespace, name, pool string) *unstructured.Unstructured {
+// The claim lives in the "slurm" namespace, the shape of the Slinky Slurm leaves.
+//
+//nolint:unparam // fixture keeps the claim name and pool explicit at every call site
+func allocatedComputeDomainClaim(name, pool string) *unstructured.Unstructured {
+	const namespace = "slurm"
 	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": apiGroupResourceK8sIO + "/" + version,
+		"apiVersion": draAPIGroupVersion,
 		"kind":       "ResourceClaim",
 		"metadata":   map[string]any{"name": name, "namespace": namespace},
 		"status": map[string]any{
@@ -579,7 +583,7 @@ func TestCheckDRASupport_IMEXSkipsNodesWithAllocatedChannel(t *testing.T) {
 		ctx, client, _, createdCDs := imexTestContext(t, "v1",
 			[]runtime.Object{testNode("node1", withCliqueLabel()), testNode("node2", withCliqueLabel())},
 			computeDomainSlice("v1", "node1"), computeDomainSlice("v1", "node2"),
-			allocatedComputeDomainClaim("v1", "slurm", "slinky-slurm-imex-channels-abc", "node1"))
+			allocatedComputeDomainClaim("slinky-slurm-imex-channels-abc", "node1"))
 		createdPods := markPodsSucceededOnCreate(client)
 
 		var err error
@@ -601,27 +605,37 @@ func TestCheckDRASupport_IMEXSkipsNodesWithAllocatedChannel(t *testing.T) {
 			t.Errorf("occupancy evidence missing:\n%s", out)
 		}
 	})
-	t.Run("every candidate occupied → not applicable, nothing created", func(t *testing.T) {
+	t.Run("every candidate occupied, holder pod Running on the node → verified from the holder, nothing created", func(t *testing.T) {
+		holderPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "slurmd-0", Namespace: "slurm"},
+			Spec:       corev1.PodSpec{NodeName: "node1"},
+			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+		}
 		ctx, client, _, createdCDs := imexTestContext(t, "v1",
-			[]runtime.Object{testNode("node1", withCliqueLabel())},
+			[]runtime.Object{testNode("node1", withCliqueLabel()), holderPod},
 			computeDomainSlice("v1", "node1"),
-			allocatedComputeDomainClaim("v1", "slurm", "slinky-slurm-imex-channels-abc", "node1"))
+			allocatedComputeDomainClaim("slinky-slurm-imex-channels-abc", "node1"))
 		createdPods := markPodsSucceededOnCreate(client)
 
 		var err error
 		out := captureStdout(t, func() { err = CheckDRASupport(ctx) })
 		if err != nil {
-			t.Fatalf("CheckDRASupport() error = %v, want pass", err)
+			t.Fatalf("CheckDRASupport() error = %v, want pass via verified holder", err)
 		}
 		if len(*createdCDs) != 0 || len(*createdPods) != 0 {
-			t.Errorf("created ComputeDomains=%d pods=%d, want none", len(*createdCDs), len(*createdPods))
+			t.Errorf("created ComputeDomains=%d pods=%d, want none (no free node for a probe)", len(*createdCDs), len(*createdPods))
 		}
-		if !strings.Contains(out, "skipped (not applicable): every MNNVL candidate node already holds a "+draDriverComputeDomain+" channel claim (node1 held by slurm/slinky-slurm-imex-channels-abc)") {
-			t.Errorf("evidence missing the occupied not-applicable record:\n%s", out)
+		if !strings.Contains(out, "reserved for pod slurm/slurmd-0 Running on this node — channel allocated and prepared (VERIFIED)") ||
+			!strings.Contains(out, "verified holders: 1") {
+
+			t.Errorf("evidence missing the verified-holder record:\n%s", out)
+		}
+		if strings.Contains(out, "skipped (not applicable): every MNNVL candidate") {
+			t.Error("all-occupied candidates must never be recorded as not applicable")
 		}
 	})
 	t.Run("unallocated claim is not an occupant", func(t *testing.T) {
-		pending := allocatedComputeDomainClaim("v1", "slurm", "pending-claim", "node1")
+		pending := allocatedComputeDomainClaim("pending-claim", "node1")
 		unstructured.RemoveNestedField(pending.Object, "status", "allocation")
 		ctx, client, _, createdCDs := imexTestContext(t, "v1",
 			[]runtime.Object{testNode("node1", withCliqueLabel())},
@@ -634,6 +648,86 @@ func TestCheckDRASupport_IMEXSkipsNodesWithAllocatedChannel(t *testing.T) {
 			t.Errorf("ComputeDomains created = %d, want 1 (pending claim must not block the probe)", len(*createdCDs))
 		}
 	})
+}
+
+// TestCheckDRASupport_IMEXAllOccupiedNeverPassesUnverified is the regression
+// for the false-success path: when every MNNVL candidate node's channel is
+// held and no holding claim can be verified (allocated + reserved + its pod
+// Running on that node), the check FAILS as inconclusive — it must not pass
+// on structural validation alone, and it must not record the subtest as not
+// applicable.
+func TestCheckDRASupport_IMEXAllOccupiedNeverPassesUnverified(t *testing.T) {
+	runningOn := func(node string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "slurmd-0", Namespace: "slurm"},
+			Spec:       corev1.PodSpec{NodeName: node},
+			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+		}
+	}
+	tests := []struct {
+		name       string
+		extraObjs  []runtime.Object // pods present in the fake clientset
+		claimEdit  func(*unstructured.Unstructured)
+		wantReason string
+	}{
+		{
+			name:       "holder pod does not exist",
+			wantReason: "which no longer exists",
+		},
+		{
+			name: "holder pod is Pending",
+			extraObjs: []runtime.Object{&corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "slurmd-0", Namespace: "slurm"},
+				Spec:       corev1.PodSpec{NodeName: "node1"},
+				Status:     corev1.PodStatus{Phase: corev1.PodPending},
+			}},
+			wantReason: "phase=Pending (want Running)",
+		},
+		{
+			name:       "holder pod runs on a different node",
+			extraObjs:  []runtime.Object{runningOn("node9")},
+			wantReason: "on node node9, not this node",
+		},
+		{
+			name: "claim allocated but reserved for no pod",
+			claimEdit: func(c *unstructured.Unstructured) {
+				unstructured.RemoveNestedField(c.Object, "status", "reservedFor")
+			},
+			wantReason: "reserved for no pod",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			claim := allocatedComputeDomainClaim("slinky-slurm-imex-channels-abc", "node1")
+			if tt.claimEdit != nil {
+				tt.claimEdit(claim)
+			}
+			nodes := append([]runtime.Object{testNode("node1", withCliqueLabel())}, tt.extraObjs...)
+			ctx, client, _, createdCDs := imexTestContext(t, "v1", nodes, computeDomainSlice("v1", "node1"), claim)
+			createdPods := markPodsSucceededOnCreate(client)
+
+			var err error
+			out := captureStdout(t, func() { err = CheckDRASupport(ctx) })
+			if err == nil {
+				t.Fatal("all-occupied candidates with no verifiable holder must FAIL, got pass")
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeUnavailable, "")) {
+				t.Errorf("error = %v, want ErrCodeUnavailable", err)
+			}
+			if !strings.Contains(err.Error(), "IMEX channel subtest inconclusive") {
+				t.Errorf("error = %v, want the inconclusive message", err)
+			}
+			if !strings.Contains(out, tt.wantReason) || !strings.Contains(out, "verified holders: 0") {
+				t.Errorf("evidence missing %q / zero verified holders:\n%s", tt.wantReason, out)
+			}
+			if strings.Contains(out, "not applicable") {
+				t.Error("all-occupied candidates must never be recorded as not applicable")
+			}
+			if len(*createdCDs) != 0 || len(*createdPods) != 0 {
+				t.Errorf("created ComputeDomains=%d pods=%d, want none", len(*createdCDs), len(*createdPods))
+			}
+		})
+	}
 }
 
 // closeOnceWatch is a watch.Interface whose result channel is already closed

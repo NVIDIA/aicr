@@ -167,9 +167,13 @@ compute-domain slices, so slice presence alone cannot gate it); clique-labeled
 nodes with no usable compute-domain slice fail the check. The driver serves one
 ComputeDomain channel claim per node, so candidate nodes whose channel is
 already held by an allocated claim (a standing ComputeDomain such as Slinky
-Slurm's, or a running MNNVL workload) are excluded; when every candidate is
-occupied the subtest records not applicable and names the holding claims
-rather than leaving a probe Pending until the deadline. When applicable the
+Slurm's, or a running MNNVL workload) are excluded from the probe. When every
+candidate is occupied the check does not record not applicable (that would
+certify DRA without behavioral evidence on a ComputeDomain-only cluster);
+it instead verifies allocation and preparation from the holding claims: a
+claim that is allocated, reserved by a pod, and whose pod is Running on that
+node proves the driver allocated the channel and the kubelet prepared it. If
+no holder verifies, the check fails as inconclusive. When applicable the
 check creates a per-run ComputeDomain (`numNodes: 0`, `Single` allocation),
 waits for the driver-generated ResourceClaimTemplate, and runs a busybox probe
 pinned to the candidate nodes that consumes one channel from it. The verdict is

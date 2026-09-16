@@ -187,7 +187,7 @@ func validateIMEXChannelAllocation(ctx *validators.Context, dynClient dynamic.In
 	occupiedLines := make([]string, 0, len(occupied))
 	for _, node := range candidates {
 		if holders, busy := occupied[node]; busy {
-			occupiedLines = append(occupiedLines, fmt.Sprintf("%s held by %s", node, strings.Join(holders, ",")))
+			occupiedLines = append(occupiedLines, fmt.Sprintf("%s held by %s", node, strings.Join(holderNames(holders), ",")))
 			continue
 		}
 		free = append(free, node)
@@ -198,11 +198,16 @@ func validateIMEXChannelAllocation(ctx *validators.Context, dynClient dynamic.In
 			strings.Join(cliqueNodes, ","), strings.Join(candidates, ","),
 			valueOrNone(strings.Join(occupiedLines, "; ")), valueOrNone(strings.Join(free, ","))))
 	if len(free) == 0 {
-		recordRawTextArtifact(ctx, artifactIMEXSubtest, "",
-			fmt.Sprintf("skipped (not applicable): every MNNVL candidate node already holds a %s channel claim (%s) — the driver serves one ComputeDomain channel claim per node, so a probe claim could not be allocated while those workloads run; "+
-				"ComputeDomain DRA validated via driver health and validated ResourceSlices",
-				draDriverComputeDomain, strings.Join(occupiedLines, "; ")))
-		return nil
+		// Applicable but no node can take a probe claim. This is NOT a
+		// not-applicable pass: on a ComputeDomain-only cluster the full-GPU
+		// subtest is N/A too, so passing here would certify DRA without any
+		// behavioral evidence — the exact gap #1649 closes. Instead, prove
+		// allocation AND preparation from the claims that hold the channels:
+		// a claim that is allocated, reserved by a pod, and whose pod is
+		// Running on that node proves the driver allocated the channel and
+		// the kubelet prepared it (the kubelet does not start a pod whose
+		// claim is not prepared). Nothing verifiable → inconclusive FAILURE.
+		return verifyOccupiedChannelAllocation(ctx, candidates, occupied)
 	}
 	candidates = free
 
@@ -448,19 +453,38 @@ func consumeTemplateWatch(ctx context.Context, watcher watch.Interface) (appeare
 	}
 }
 
+// channelHolder is a ResourceClaim that holds a node's compute-domain
+// channel device, with the pods it is reserved for.
+type channelHolder struct {
+	namespace string
+	name      string
+	// reservedPods are the pod names in status.reservedFor (resource
+	// "pods"); the pods live in the claim's namespace.
+	reservedPods []string
+}
+
+func (h channelHolder) String() string { return h.namespace + "/" + h.name }
+
+func holderNames(holders []channelHolder) []string {
+	names := make([]string, 0, len(holders))
+	for _, h := range holders {
+		names = append(names, h.String())
+	}
+	return names
+}
+
 // occupiedComputeDomainNodes returns, per node, the ResourceClaims currently
-// holding that node's compute-domain.nvidia.com channel device, as
-// "namespace/name" strings. Allocation results carry the POOL, which is
-// resolved to a node through poolNodes (slice-derived); results whose pool
-// is unknown are attributed to the pool name itself as a conservative
-// fallback (the common case is pool == node name). Claims without an
-// allocation are not occupants.
-func occupiedComputeDomainNodes(ctx context.Context, dynClient dynamic.Interface, version string, poolNodes map[string]string) (map[string][]string, error) {
+// holding that node's compute-domain.nvidia.com channel device. Allocation
+// results carry the POOL, which is resolved to a node through poolNodes
+// (slice-derived); results whose pool is unknown are attributed to the pool
+// name itself as a conservative fallback (the common case is pool == node
+// name). Claims without an allocation are not occupants.
+func occupiedComputeDomainNodes(ctx context.Context, dynClient dynamic.Interface, version string, poolNodes map[string]string) (map[string][]channelHolder, error) {
 	claims, err := dynClient.Resource(draGVRAt(version, "resourceclaims")).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, classifyK8sReadError(err, "ResourceClaims for IMEX channel occupancy")
 	}
-	occupied := make(map[string][]string)
+	occupied := make(map[string][]channelHolder)
 	for _, claim := range claims.Items {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, errors.Wrap(errors.ErrCodeTimeout, "ResourceClaim occupancy scan canceled", ctxErr)
@@ -469,7 +493,20 @@ func occupiedComputeDomainNodes(ctx context.Context, dynClient dynamic.Interface
 		if !found {
 			continue
 		}
-		holder := claim.GetNamespace() + "/" + claim.GetName()
+		holder := channelHolder{namespace: claim.GetNamespace(), name: claim.GetName()}
+		reserved, _, _ := unstructured.NestedSlice(claim.Object, "status", "reservedFor")
+		for _, r := range reserved {
+			ref, ok := r.(map[string]any)
+			if !ok {
+				continue
+			}
+			resource, _, _ := unstructured.NestedString(ref, "resource")
+			name, _, _ := unstructured.NestedString(ref, "name")
+			if resource == "pods" && name != "" {
+				holder.reservedPods = append(holder.reservedPods, name)
+			}
+		}
+		seenNodes := make(map[string]struct{})
 		for _, r := range results {
 			res, ok := r.(map[string]any)
 			if !ok {
@@ -487,10 +524,66 @@ func occupiedComputeDomainNodes(ctx context.Context, dynClient dynamic.Interface
 			if node == "" {
 				continue
 			}
+			if _, dup := seenNodes[node]; dup {
+				continue
+			}
+			seenNodes[node] = struct{}{}
 			occupied[node] = append(occupied[node], holder)
 		}
 	}
 	return occupied, nil
+}
+
+// verifyOccupiedChannelAllocation is the all-candidates-occupied verdict.
+// It passes only when at least one holding claim on a candidate node is
+// allocated, reserved by a pod, and that pod is Running on the same node —
+// behavioral proof that the driver allocated the channel and the kubelet
+// prepared it for a consumer. Every holder is inspected and recorded; when
+// none verifies, the subtest FAILS as inconclusive rather than passing
+// without behavioral evidence.
+func verifyOccupiedChannelAllocation(ctx *validators.Context, candidates []string, occupied map[string][]channelHolder) error {
+	var lines []string
+	verified := 0
+	for _, node := range candidates {
+		for _, h := range occupied[node] {
+			if len(h.reservedPods) == 0 {
+				lines = append(lines, fmt.Sprintf("%s: claim %s allocated but reserved for no pod — not verifiable", node, h))
+				continue
+			}
+			for _, podName := range h.reservedPods {
+				pod, err := ctx.Clientset.CoreV1().Pods(h.namespace).Get(ctx.Ctx, podName, metav1.GetOptions{})
+				switch {
+				case k8serrors.IsNotFound(err):
+					lines = append(lines, fmt.Sprintf("%s: claim %s reserved for pod %s/%s which no longer exists — not verifiable", node, h, h.namespace, podName))
+					continue
+				case err != nil:
+					return classifyK8sReadError(err, fmt.Sprintf("pod %s/%s holding IMEX channel claim %s", h.namespace, podName, h))
+				}
+				switch {
+				case pod.Spec.NodeName != node:
+					lines = append(lines, fmt.Sprintf("%s: claim %s reserved for pod %s/%s on node %s, not this node — not verifiable",
+						node, h, h.namespace, podName, valueOrUnknown(pod.Spec.NodeName)))
+				case pod.Status.Phase != corev1.PodRunning:
+					lines = append(lines, fmt.Sprintf("%s: claim %s reserved for pod %s/%s phase=%s (want Running) — channel not proven prepared",
+						node, h, h.namespace, podName, pod.Status.Phase))
+				default:
+					verified++
+					lines = append(lines, fmt.Sprintf("%s: claim %s allocated, reserved for pod %s/%s Running on this node — channel allocated and prepared (VERIFIED)",
+						node, h, h.namespace, podName))
+				}
+			}
+		}
+	}
+	// Evidence before the verdict.
+	recordRawTextArtifact(ctx, artifactIMEXSubtest, "kubectl get resourceclaims -A -o yaml; kubectl get pods -A -o wide",
+		fmt.Sprintf("every MNNVL candidate node already holds a %s channel claim; verifying allocation and preparation from the holding claims instead of a probe (the driver serves one ComputeDomain channel claim per node):\n%s\nverified holders: %d",
+			draDriverComputeDomain, strings.Join(lines, "\n"), verified))
+	if verified == 0 {
+		return errors.New(errors.ErrCodeUnavailable, fmt.Sprintf(
+			"IMEX channel subtest inconclusive: every MNNVL candidate node [%s] holds a %s channel claim, so no probe claim can be allocated, and no holding claim could be verified as allocated, reserved, and consumed by a Running pod on its node — DRA channel allocation was not behaviorally exercised",
+			strings.Join(candidates, ","), draDriverComputeDomain))
+	}
+	return nil
 }
 
 // recordIMEXPodEvidence records the probe pod's status, container logs, and
