@@ -51,6 +51,9 @@ func SlackPayload(r Report) ([]byte, error) {
 	if r.RunURL != "" {
 		fmt.Fprintf(&b, "\n<%s|report artifact>", r.RunURL)
 	}
+	if r.Summary.Behind > 0 || r.Summary.Unresolved > 0 {
+		fmt.Fprint(&b, "\nReview with /aicr-reviewing-component-drift (Codex: $aicr-reviewing-component-drift)")
+	}
 
 	payload, err := json.Marshal(struct {
 		Text string `json:"text"`

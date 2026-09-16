@@ -57,10 +57,19 @@ func TestSlackPayloadDrift(t *testing.T) {
 		"unresolved",
 		"dynamo-platform",
 		"https://example/run/1",
+		"Review with /aicr-reviewing-component-drift (Codex: $aicr-reviewing-component-drift)",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("message missing %q:\n%s", want, text)
 		}
+	}
+
+	raw, err := SlackPayload(r)
+	if err != nil {
+		t.Fatalf("SlackPayload: %v", err)
+	}
+	if !strings.Contains(string(raw), `Review with /aicr-reviewing-component-drift (Codex: $aicr-reviewing-component-drift)`) {
+		t.Errorf("$ form did not survive JSON encoding literally:\n%s", raw)
 	}
 }
 
@@ -73,5 +82,37 @@ func TestSlackPayloadCleanWeek(t *testing.T) {
 	text := payloadText(t, r)
 	if !strings.Contains(text, "all 34 pins current") {
 		t.Errorf("clean-week heartbeat missing:\n%s", text)
+	}
+	if strings.Contains(text, "aicr-reviewing-component-drift") {
+		t.Errorf("clean-week heartbeat must not include a call to action:\n%s", text)
+	}
+}
+
+func TestSlackPayloadDriftWithoutRunURL(t *testing.T) {
+	r := Report{
+		SchemaVersion: schemaVersion,
+		GeneratedAt:   "2026-09-21T07:00:11Z",
+		Summary:       Summary{Tracked: 34, Behind: 2},
+		Drift: []Row{
+			{Components: []string{"nvsentinel"}, Chart: "nvsentinel", Current: "v1.20.0", Latest: "v1.23.0", UpdateType: "minor"},
+		},
+	}
+	text := payloadText(t, r)
+	if !strings.Contains(text, "Review with /aicr-reviewing-component-drift (Codex: $aicr-reviewing-component-drift)") {
+		t.Errorf("call to action must not depend on RunURL:\n%s", text)
+	}
+}
+
+func TestSlackPayloadUnresolvedOnly(t *testing.T) {
+	r := Report{
+		SchemaVersion: schemaVersion,
+		GeneratedAt:   "2026-09-21T07:00:11Z",
+		RunURL:        "https://example/run/1",
+		Summary:       Summary{Tracked: 34, Unresolved: 1},
+		Unresolved:    []Unresolved{{Components: []string{"dynamo-platform"}, Chart: "dynamo-platform", Reason: "lookup failed"}},
+	}
+	text := payloadText(t, r)
+	if !strings.Contains(text, "Review with /aicr-reviewing-component-drift (Codex: $aicr-reviewing-component-drift)") {
+		t.Errorf("unresolved-only report missing call to action:\n%s", text)
 	}
 }
