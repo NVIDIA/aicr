@@ -144,12 +144,33 @@ jobs:
           # Extract only the custom managers; go.mod, Dockerfiles, and Terraform
           # are irrelevant here and cost lookup time.
           RENOVATE_ENABLED_MANAGERS: '["custom.regex"]'
-          # Catch-all disable, then a targeted enable: later packageRules win, so
-          # this leaves exactly the registry-chart deps active — the .settings.yaml
-          # and .go-version customManagers stay off.
+          # Catch-all disable, then a targeted enable, then a versioning fix:
+          # later packageRules win, so this leaves exactly the registry-chart
+          # deps active — the .settings.yaml and .go-version customManagers
+          # stay off.
+          #
+          # The third rule forces `semver` versioning on registry-chart OCI
+          # pins (datasource=docker). Docker's default `docker` versioning
+          # treats everything after a tag's first hyphen as a compatibility
+          # suffix, not a semver prerelease, so `v0.1.0-alpha.12` resolves as
+          # `v0.1.0` and a published `v0.1.0-alpha.13` never surfaces as an
+          # update — a false negative confirmed against grove-charts in a run
+          # of this workflow. Helm requires chart versions to be SemVer 2, so
+          # a hyphen in an OCI chart tag is always a prerelease and never an
+          # OS/arch variant (the case `docker` versioning exists to handle),
+          # which is what makes `semver` safe here. Scoped to the docker
+          # datasource only: the HTTP charts already extract under
+          # datasource=helm, whose versioning resolves prereleases correctly.
+          #
+          # This has to live in RENOVATE_FORCE, not as a repository-level
+          # packageRule in renovate.json5: Renovate's mergeChildConfig ends
+          # with `return {...config, ...config.force}`, so `force.packageRules`
+          # shallow-replaces the merged array instead of appending to it — a
+          # renovate.json5-level rule would be silently dropped for this run.
           RENOVATE_FORCE: >-
             {"packageRules":[{"matchPackageNames":["*"],"enabled":false},
-            {"matchDepTypes":["registry-chart"],"enabled":true}]}
+            {"matchDepTypes":["registry-chart"],"enabled":true},
+            {"matchDepTypes":["registry-chart"],"matchDatasources":["docker"],"versioning":"semver"}]}
           RENOVATE_REPORT_TYPE: file
           # renovatebot/github-action mounts only /tmp:/tmp into the Renovate
           # container (see docker-volumes in the run log); the workspace path
