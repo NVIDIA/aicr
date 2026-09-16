@@ -459,6 +459,34 @@ the exact artifact:
   an identity or predicate mismatch is a signing-path problem, and the remediation
   is different.
 
+## Registry Chart Drift Report
+
+`Registry Drift Report` (`.github/workflows/registry-drift.yaml`) runs weekly
+(Mondays 07:00 UTC) and answers a question the weekday Renovate PR run
+deliberately does not: which of the 34 chart pins in `recipes/registry.yaml`
+have moved upstream? Renovate's custom manager extracts every pin, but a
+`packageRules` guard disables the `registry-chart` depType for the weekday
+run, because an AICR component bump is never a version-string edit — it can
+rename a values path `nodeScheduling` writes into, move the rendered image
+set, or need an ADR-021 upgrade record, none of which a one-line bot PR
+checks. This workflow force-re-enables that depType under
+`RENOVATE_DRY_RUN=full`, so Renovate can report drift without ever pushing a
+branch or opening a PR.
+
+Each run posts a digest to Slack and the job summary, and uploads a
+`drift-report` artifact (`drift-report.json` plus the raw Renovate report)
+retained for 90 days — long enough to review weeks after the Monday post. A
+manual `workflow_dispatch` run has Slack posting off by default so it can be
+validated silently, and a same-repo PR touching the drift surface also runs
+the report against its own branch, always without posting.
+
+On receiving the Monday digest, review it with the
+[`aicr-reviewing-component-drift`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-reviewing-component-drift/SKILL.md)
+skill: it turns "what moved" into a ranked take/hold/defer recommendation per
+component, gathering values-path, lockstep-family, BOM, CRD/upgrade-record,
+and Kubernetes-compatibility evidence. The skill only recommends — the
+registry edit, `make bom-docs`, and the PR are separate, human-initiated work.
+
 ## Reviewing Recipe Contributions
 
 A recipe PR touches `recipes/overlays/`, `recipes/mixins/`,
