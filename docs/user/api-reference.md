@@ -122,7 +122,7 @@ Generate an optimized configuration recipe based on environment parameters.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `any`. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; aliases: `self-managed`, `self`, `vanilla`); `any` is the wildcard and does not select `generic` recipes. `generic` is never inferred from a snapshot (the fingerprint reports the detected provisioner, such as `metal3` or `rke2`), so `generic` recipes require `service=generic` explicitly, also when a snapshot is supplied |
+| `service` | string | any | K8s service: `eks`, `gke`, `aks`, `oke`, `ocp`, `kind`, `lke`, `bcm`, `metal3`, `rke2`, `generic`, `k0s`, `any`. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; aliases: `self-managed`, `self`, `vanilla`); `any` is the wildcard and does not select `generic` recipes. `generic` is never inferred from a snapshot (the fingerprint reports the detected provisioner, such as `metal3` or `rke2`), so `generic` recipes require `service=generic` explicitly, also when a snapshot is supplied |
 | `accelerator` | string | any | GPU type: `h100`, `h200`, `gb200`, `gb300`, `b200`, `a100`, `l40`, `l40s`, `rtx-pro-6000`, `vr200`, `any` |
 | `gpu` | string | any | Alias for `accelerator` |
 | `intent` | string | any | Workload: `training`, `inference`, `any` |
@@ -402,8 +402,9 @@ Same as `GET /v1/query` — see the [GET /v1/query error responses](#get-v1query
 
 The `v1` in the route and the `apiVersion` in a recipe document are
 independent version axes. The route segment versions the HTTP contract;
-`aicr.run/v1alpha2` and `aicr.run/v1alpha3` are the recipe schemas emitted by
-this reader-first release. `/v1/bundle` also accepts their ADR-022 targets:
+`aicr.run/v1` and `aicr.run/v1beta2` are the recipe schemas emitted from v0.22.
+`/v1/bundle` also still accepts the superseded `aicr.run/v1alpha2` and
+`aicr.run/v1alpha3`, retired in v1.0.0:
 `aicr.run/v1` for a default recipe and `aicr.run/v1beta2` for a
 profile/configuration recipe, plus versionless legacy artifacts. Selecting a
 profile or resolving a Slurm accounting mode determines which schema track
@@ -415,11 +416,16 @@ The AKS and GKE families are the embedded profile adopters (`gpuStack`) and
 need no special routing.
 
 **GET `/v1/recipe`.** Accepts the `/v1/recipe` criteria parameters plus
-optional `profile=name=value` and `slurmAccountingMode`. Profile omission
+optional `profile=name=value`, `slurmAccountingMode`, and
+`gkeTcpxoInterfaces`. Profile omission
 applies the resolved declaration's required default. Slurm accounting accepts
 `disabled`, `customer-managed`, or `aicr-provided`; omission defaults a Slurm
 recipe to `disabled`. The setting is recorded at
 `configuration.slurm.accounting.mode` in an `aicr.run/v1alpha3` RecipeResult.
+`gkeTcpxoInterfaces` carries the ordered `eth1=<network>,...,eth8=<network>`
+GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime; it is
+required when the resolved recipe ships that runtime (h100 GKE kubeflow
+training) and is recorded at `configuration.gke.tcpxoInterfaces`.
 The route rejects unknown query parameters and conflicting repeated values.
 
 ```shell
@@ -428,13 +434,19 @@ curl "http://localhost:8080/v1/recipe?service=aks&accelerator=h100&os=ubuntu&int
 
 # Slurm with AICR-provided accounting
 curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100&intent=training&os=ubuntu&platform=slurm&slurmAccountingMode=aicr-provided"
+
+# GKE h100 kubeflow training (required TCPXO mapping):
+curl "http://localhost:8080/v1/recipe?service=gke&accelerator=h100&os=cos&intent=training&platform=kubeflow&gkeTcpxoInterfaces=eth1=gpu-nic-0,eth2=gpu-nic-1,eth3=gpu-nic-2,eth4=gpu-nic-3,eth5=gpu-nic-4,eth6=gpu-nic-5,eth7=gpu-nic-6,eth8=gpu-nic-7"
 ```
 
 **POST `/v1/recipe`.** Accepts a strict JSON or YAML envelope. `criteria` is
 the plain criteria object, not a `RecipeCriteria` resource. Profile selection
 may be supplied in the envelope, as the `profile` query parameter, or in both
 places when the values agree. `slurmAccountingMode` is supplied as the same
-query parameter used by GET. Conflicting selections are rejected:
+query parameter used by GET, as is `gkeTcpxoInterfaces` (required for the GKE
+h100 kubeflow training family — e.g.
+`gkeTcpxoInterfaces=eth1=gpu-nic-0,...,eth8=gpu-nic-7`). Conflicting selections
+are rejected:
 
 ```yaml
 criteria:
@@ -451,7 +463,7 @@ INVALID_REQUEST`. POST envelopes require `Content-Type: application/json` or
 types are rejected.
 
 **GET and POST `/v1/query`.** GET accepts the recipe parameters, including
-`slurmAccountingMode`, plus
+`slurmAccountingMode` and `gkeTcpxoInterfaces`, plus
 `selector`. POST accepts the same strict envelope with a required selector.
 POST profile selection follows the same query/envelope agreement rule as
 `/v1/recipe`:
@@ -488,15 +500,15 @@ curl -fsS -X POST "http://localhost:8080/v1/bundle" \
 
 Profile-bearing responses record `metadata.selectedProfile`; accounting-aware
 responses record `configuration.slurm.accounting`. Both use recipe apiVersion
-`aicr.run/v1alpha3`. Their owned paths are immutable across AICR's supported
+`aicr.run/v1beta2` (the superseded `aicr.run/v1alpha3` is still read). Their owned paths are immutable across AICR's supported
 override surfaces: divergent static values, intersecting dynamic paths,
 owned-component removal, and argocd-helm install-time values fail closed before
 output.
 
 A recipe resolved without an explicit profile or `slurmAccountingMode` uses
-the default-track response shape. That track is `aicr.run/v1alpha2` today, and
-the schema also admits its ADR-022 target `aicr.run/v1` so a client generated
-from this spec tolerates the value a release before AICR emits it. Profile and
+the default-track response shape. That track is `aicr.run/v1` from v0.22, and
+the schema also still admits the superseded `aicr.run/v1alpha2` so a client
+generated from this spec reads artifacts captured earlier. Profile and
 Slurm-accounting selection are available on every endpoint; no composition
 needs special routing.
 
@@ -545,9 +557,9 @@ Generate deployment bundles from a recipe.
 **Request Body:**
 
 The request body is the recipe (`RecipeResult`) directly. No wrapper object is
-needed. This release emits `apiVersion: aicr.run/v1alpha2` or
-`aicr.run/v1alpha3` and `kind: RecipeResult`; its bundle readers additionally
-accept `aicr.run/v1` and `aicr.run/v1beta2`, respectively. The profile track identifies
+needed. This release emits `apiVersion: aicr.run/v1` or
+`aicr.run/v1beta2` and `kind: RecipeResult`; its bundle readers additionally
+accept the superseded `aicr.run/v1alpha2` and `aicr.run/v1alpha3`, respectively. The profile track identifies
 recipes carrying `metadata.selectedProfile`, typed
 `configuration.slurm.accounting`, or both; profile-bearing artifacts must use
 `/v1/bundle`. New clients should preserve the version emitted by recipe
@@ -579,14 +591,17 @@ The shared artifact gate rejects any `apiVersion` outside
 `aicr.run/v1alpha2`, `aicr.run/v1`, `aicr.run/v1alpha3`, and
 `aicr.run/v1beta2` with a 400, on this endpoint as well as on the CLI file-load
 path. An absent or empty `apiVersion` is still admitted as the legacy shape on
-`RecipeResult` inputs through v0.22, and v0.23 stops admitting it along with the
+`RecipeResult` inputs through v0.22, and v1.0.0 stops admitting it along with the
 alpha values. The tolerance is scoped to `RecipeResult`, which predates the
 field: a `RecipeMetadata` overlay is a catalog document however it arrives, so
 `aicr bundle -r` and `aicr validate -r` reject a headerless one exactly as a
 `--data` catalog scan does. The reader and emitter clocks are separate: v0.21
 and v0.22 both read the alpha values, the target values, and the empty header,
-while generated recipes keep their alpha headers until v0.22 switches the
-emitters. See
+while generated recipes carried alpha headers through v0.21 and carry the target
+values from v0.22 onward. On the CLI file-load path, reading an alpha or
+headerless artifact logs a deprecation warning naming the file; these endpoints
+take the artifact as a request body, so there is no file to name and no
+equivalent signal. See
 [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
 for the release-by-release table.
 

@@ -263,14 +263,20 @@ func readManifest(t *testing.T, deployer string) []string {
 
 // requiredRootPaths are the root entries a manifest must contain, per deployer.
 //
-// These are structural: every bundle carries checksums.txt and README.md, and
-// each deployer has its own entry point that integrator automation invokes.
+// These are structural: every bundle carries checksums.txt, README.md and
+// recipe.yaml, and each deployer has its own entry point that integrator
+// automation invokes.
+//
+// recipe.yaml is listed for all five because it was helm-only until #2753, and
+// the additive direction of TestBundleLayoutMatchesManifest cannot catch its
+// loss on the other four -- a regression there would read as a manifest that
+// had not been refreshed.
 var requiredRootPaths = map[string][]string{
 	"helm":        {"checksums.txt", "README.md", "deploy.sh", "recipe.yaml"},
-	"argocd":      {"checksums.txt", "README.md", "app-of-apps.yaml"},
-	"argocd-helm": {"checksums.txt", "README.md", "Chart.yaml", "values.yaml"},
-	"flux":        {"checksums.txt", "README.md", "kustomization.yaml"},
-	"helmfile":    {"checksums.txt", "README.md", "helmfile.yaml"},
+	"argocd":      {"checksums.txt", "README.md", "app-of-apps.yaml", "recipe.yaml"},
+	"argocd-helm": {"checksums.txt", "README.md", "Chart.yaml", "values.yaml", "recipe.yaml"},
+	"flux":        {"checksums.txt", "README.md", "kustomization.yaml", "recipe.yaml"},
+	"helmfile":    {"checksums.txt", "README.md", "helmfile.yaml", "recipe.yaml"},
 }
 
 // TestBundleLayoutManifestsAreComplete rejects a truncated manifest.

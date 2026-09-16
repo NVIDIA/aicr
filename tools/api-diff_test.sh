@@ -265,7 +265,9 @@ STUB
 chmod +x "${STUB_DIR}/go" "${STUB_DIR}/git" "${STUB_DIR}/apidiff"
 export STUB_DIR
 export PATH="${STUB_DIR}:${PATH}"
-PINNED_APIDIFF_VERSION="$(yq eval -r '.linting.apidiff' "${SCRIPT_DIR}/../.settings.yaml")"
+# Parsed here rather than via tools/common so the harness does not read the pin
+# through the same helper the gate under test uses.
+PINNED_APIDIFF_VERSION="$(awk '$1 == "golang.org/x/exp" && $2 ~ /^v/ { print $2; exit }' "${SCRIPT_DIR}/../go.mod")"
 export PINNED_APIDIFF_VERSION
 
 EMPTY_EXCEPTIONS="${STUB_DIR}/empty.yaml"
@@ -743,14 +745,12 @@ else
         cp "${SCRIPT_DIR}/common" "${internal_fixture}/tools/common"
         cp "${SCRIPT_DIR}/api-diff-closure/main.go" "${internal_fixture}/tools/api-diff-closure/main.go"
 
-        cat >"${internal_fixture}/go.mod" <<'EOF'
+        cat >"${internal_fixture}/go.mod" <<EOF
 module github.com/NVIDIA/aicr
 
 go 1.26
-EOF
-        cat >"${internal_fixture}/.settings.yaml" <<EOF
-linting:
-  apidiff: '${PINNED_APIDIFF_VERSION}'
+
+require golang.org/x/exp ${PINNED_APIDIFF_VERSION}
 EOF
         cat >"${internal_fixture}/pkg/client/v1/api-diff-exceptions.yaml" <<'EOF'
 acknowledgements: []
@@ -879,14 +879,12 @@ else
         cp "${SCRIPT_DIR}/api-diff-closure/main.go" \
             "${deleted_target_fixture}/tools/api-diff-closure/main.go"
 
-        cat >"${deleted_target_fixture}/go.mod" <<'EOF'
+        cat >"${deleted_target_fixture}/go.mod" <<EOF
 module github.com/NVIDIA/aicr
 
 go 1.26
-EOF
-        cat >"${deleted_target_fixture}/.settings.yaml" <<EOF
-linting:
-  apidiff: '${PINNED_APIDIFF_VERSION}'
+
+require golang.org/x/exp ${PINNED_APIDIFF_VERSION}
 EOF
         cat >"${deleted_target_fixture}/pkg/client/v1/api-diff-exceptions.yaml" <<'EOF'
 acknowledgements: []

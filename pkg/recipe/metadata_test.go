@@ -2258,6 +2258,19 @@ func TestComponentRefMergeWithPath(t *testing.T) {
 	})
 }
 
+// tcpxoRequiredBuildOpts supplies the generation-time TCPXO interface mapping
+// when (and only when) the criteria select the h100 GKE kubeflow family — the
+// one recipe that ships torch-distributed-tcpxo and therefore fails closed
+// without the recorded mapping.
+func tcpxoRequiredBuildOpts(cr *Criteria) []BuildOption {
+	if cr.Service == CriteriaServiceGKE && cr.Accelerator == CriteriaAcceleratorH100 &&
+		cr.Platform == CriteriaPlatformKubeflow {
+
+		return []BuildOption{WithGKETCPXOInterfaces(tcpxoTestMapping())}
+	}
+	return nil
+}
+
 // TestNFDTopologyUpdater_OverlayCoverage verifies that every GPU overlay
 // rooted at a real-cluster platform base resolves to
 // componentRefs[nfd].overrides.topologyUpdater.enable=true, and that the
@@ -2390,7 +2403,7 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 				cr.Platform = tt.c.platform
 			}
 
-			result, err := builder.BuildFromCriteria(ctx, cr)
+			result, err := builder.BuildFromCriteria(ctx, cr, tcpxoRequiredBuildOpts(cr)...)
 			if err != nil {
 				t.Fatalf("BuildFromCriteria(%+v): %v", tt.c, err)
 				return
@@ -2481,6 +2494,38 @@ func TestDeepMergeMap_NoSliceAliasing(t *testing.T) {
 	}
 	if got := src["env"].([]any)[0]; got != srcOriginalEnv {
 		t.Errorf("src env corrupted via dst alias: got %v want %v", got, srcOriginalEnv)
+	}
+}
+
+// TestRecipeMetadataSpecMerge_DoesNotCorruptSourceOverrides covers Merge's
+// initial componentMap population: s.ComponentRefs can itself alias a cached
+// source (e.g. initBaseMergedSpec copies s.Base.Spec.ComponentRefs by
+// struct, which doesn't deep-copy the Overrides map). Without cloning on
+// entry, a second layer's Overrides for the same component would be
+// deep-merged straight into that aliased map, corrupting the cached source
+// for every later build that reuses it.
+func TestRecipeMetadataSpecMerge_DoesNotCorruptSourceOverrides(t *testing.T) {
+	source := RecipeMetadataSpec{
+		ComponentRefs: []ComponentRef{
+			{Name: "x", Overrides: map[string]any{"a": 1}},
+		},
+	}
+
+	// Mirrors initBaseMergedSpec's copy pattern: a struct-level copy that
+	// leaves the Overrides map aliased to source.
+	merged := RecipeMetadataSpec{
+		ComponentRefs: make([]ComponentRef, len(source.ComponentRefs)),
+	}
+	copy(merged.ComponentRefs, source.ComponentRefs)
+
+	merged.Merge(&RecipeMetadataSpec{
+		ComponentRefs: []ComponentRef{
+			{Name: "x", Overrides: map[string]any{"b": 2}},
+		},
+	})
+
+	if _, leaked := source.ComponentRefs[0].Overrides["b"]; leaked {
+		t.Fatalf("source was mutated by the merge: %#v", source.ComponentRefs[0].Overrides)
 	}
 }
 

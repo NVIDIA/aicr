@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
@@ -94,6 +95,11 @@ func LoadFromFileWithProviderProfile(
 	if versionErr := validateRecipeInputAPIVersion(rec.Kind, inputAPIVersion); versionErr != nil {
 		return nil, versionErr
 	}
+	// Warned here rather than inside validateRecipeInputAPIVersion because the
+	// helper takes only kind and apiVersion, and a warning that cannot name the
+	// file is not the warning RELEASE.md promises.
+	header.WarnDeprecatedAPIVersion(path, inputAPIVersion,
+		deprecatedInputTarget(rec.Kind, inputAPIVersion))
 
 	// Users often pass overlay files directly; auto-hydrate so they don't need
 	// a separate "aicr recipe" step before consuming the recipe.
@@ -138,12 +144,17 @@ func LoadFromFileWithProviderProfile(
 			opts = append(opts, WithDataProvider(dp))
 		}
 		builder := NewBuilder(opts...)
-		rec, err = builder.BuildFromCriteriaWithProfile(ctx, overlay.Spec.Criteria, profile)
+		criteria := *overlay.Spec.Criteria
+		criteria.FillUnsetWithAny()
+		rec, err = builder.BuildFromCriteriaWithProfile(ctx, &criteria, profile)
 		if err != nil {
 			return nil, err
 		}
 		if profileErr := ensureDirectOverlayProfileApplied(ctx, path, &overlay, rec, dp, selection); profileErr != nil {
 			return nil, profileErr
+		}
+		if mixinErr := ensureDirectOverlayMixinsApplied(ctx, path, &overlay, rec, dp); mixinErr != nil {
+			return nil, mixinErr
 		}
 
 		slog.Info("overlay hydrated successfully",
@@ -222,8 +233,8 @@ func validateRecipeInputAPIVersion(kind, apiVersion string) error {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("recipe metadata file has apiVersion %q, which this aicr build does not support (expected %q, %q, %q, or %q); "+
 				"update the catalog header for this aicr release",
-				apiVersion, RecipeMetadataAPIVersion, header.GroupVersionV1Beta1,
-				RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
+				apiVersion, header.GroupVersion, header.GroupVersionV1Beta1,
+				header.RecipeResultGroupVersion, header.GroupVersionV1Beta2))
 	}
 
 	if apiVersion == "" {
@@ -236,8 +247,100 @@ func validateRecipeInputAPIVersion(kind, apiVersion string) error {
 	return errors.New(errors.ErrCodeInvalidRequest,
 		fmt.Sprintf("recipe file has apiVersion %q, which this aicr build does not support (expected %q, %q, %q, or %q); "+
 			"regenerate the recipe with a matching aicr version",
-			apiVersion, RecipeResultAPIVersion, header.GroupVersionV1,
-			RecipeProfileAPIVersion, header.GroupVersionV1Beta2))
+			apiVersion, header.GroupVersion, header.GroupVersionV1,
+			header.RecipeResultGroupVersion, header.GroupVersionV1Beta2))
+}
+
+// deprecatedInputTarget is the §2 value a recipe input should carry, given its
+// wire kind and whatever it carries today. An alpha profile document keeps the
+// profile track (v1beta2); everything else follows its kind.
+func deprecatedInputTarget(kind, apiVersion string) string {
+	if apiVersion == header.RecipeResultGroupVersion {
+		return header.GroupVersionV1Beta2
+	}
+	if kind == RecipeMetadataKind {
+		return header.GroupVersionV1Beta1
+	}
+	return header.GroupVersionV1
+}
+
+// ensureDirectOverlayMixinsApplied rejects a directly-passed overlay whose
+// spec.mixins did not reach the hydrated recipe. Hydration rebuilds from
+// spec.criteria alone and never reads spec.mixins, so a mixin composes only
+// when the overlay itself is in the active catalog.
+//
+// This fails closed rather than warning, matching
+// ensureDirectOverlayProfileApplied below: once the discarded content is known,
+// returning success ships an artifact missing values the caller asked for, and
+// SDK and HTTP callers cannot act on a log line.
+func ensureDirectOverlayMixinsApplied(
+	ctx context.Context,
+	path string,
+	overlay *RecipeMetadata,
+	rec *RecipeResult,
+	dp DataProvider,
+) error {
+
+	if overlay == nil || len(overlay.Spec.Mixins) == 0 {
+		return nil
+	}
+	missing, err := unappliedDirectOverlayMixins(ctx, path, overlay, rec, dp)
+	if err != nil {
+		return err
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return errors.New(errors.ErrCodeInvalidRequest,
+		fmt.Sprintf("mixins %v declared by directly loaded overlay %q were not applied; only "+
+			"spec.criteria is read from a directly loaded file, so a mixin composes only when its "+
+			"overlay is in the active catalog — place the overlay at <dir>/overlays/ and pass "+
+			"--data <dir> before loading it directly", missing, path))
+}
+
+// unappliedDirectOverlayMixins returns the mixins the direct overlay declares
+// that no applied catalog overlay contributed.
+//
+// A shared metadata.name is not evidence that the file's mixins composed: a
+// copy of a catalog overlay keeps the name and criteria, so the catalog twin
+// resolves under that name while the copy's edited mixin list is ignored.
+// Comparing against the mixins the applied chain actually declares is what
+// separates a real drop from a mixin some other chain member already supplies.
+func unappliedDirectOverlayMixins(
+	ctx context.Context,
+	path string,
+	overlay *RecipeMetadata,
+	rec *RecipeResult,
+	dp DataProvider,
+) ([]string, error) {
+
+	if rec == nil {
+		return slices.Clone(overlay.Spec.Mixins), nil
+	}
+	store, err := LoadMetadataStoreFor(ctx, dp)
+	if err != nil {
+		return nil, errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			fmt.Sprintf("failed to verify mixins declared by directly loaded overlay %q", path))
+	}
+	// The root base is deliberately not consulted: initBaseMergedSpec seeds the
+	// merged spec with its constraints, componentRefs and validation but not
+	// its mixins, so a mixin declared there never composes and must not count
+	// as applied.
+	composed := make(map[string]bool)
+	for _, name := range rec.Metadata.AppliedOverlays {
+		if applied, ok := store.Overlays[name]; ok && applied != nil {
+			for _, mixin := range applied.Spec.Mixins {
+				composed[mixin] = true
+			}
+		}
+	}
+	var missing []string
+	for _, mixin := range overlay.Spec.Mixins {
+		if !composed[mixin] {
+			missing = append(missing, mixin)
+		}
+	}
+	return missing, nil
 }
 
 func ensureDirectOverlayProfileApplied(

@@ -57,8 +57,8 @@ const (
 // single DNS name. They are still allowlist units — a reviewer approves "this
 // build may install apt/brew packages" — but they are not literal hostnames.
 const (
-	hostGoProxy  = "proxy.golang.org" // default GOPROXY for `go install`
-	hostGoSum    = "sum.golang.org"   // checksum db `go install` also contacts
+	hostGoProxy  = "proxy.golang.org" // default GOPROXY for `go build` and `go install`
+	hostGoSum    = "sum.golang.org"   // checksum db, contacted by `go install` but not by an in-module `go build`
 	hostPyPI     = "pypi.org"         // pip
 	hostApt      = "apt"              // symbolic: distro apt mirror set
 	hostHomebrew = "homebrew"         // symbolic: Homebrew bottle infra
@@ -66,7 +66,7 @@ const (
 
 // PinType records how tightly a reference is pinned, strongest first.
 const (
-	PinDigest = "digest" // @sha256:...
+	PinDigest = "digest" // @sha256:..., or "go.sum" for a module verified by it
 	PinSHA    = "sha"    // 40-char git commit (GitHub Actions)
 	PinTag    = "tag"    // :v1.2.3 or version field
 	PinBranch = "branch" // @main / @master — mutable

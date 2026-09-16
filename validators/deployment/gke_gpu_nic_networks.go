@@ -19,6 +19,7 @@ import (
 	"log/slog"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
+	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/validators"
 	"github.com/NVIDIA/aicr/validators/internal/gkenet"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -95,6 +96,51 @@ func checkGKEGPUNICNetworks(ctx *validators.Context) error {
 			"the cluster has %d of %d", len(gpuNICs), gkenet.RequiredGPUNICNetworks)))
 	}
 
+	return verifyDeliveredRuntimeWiring(ctx, gpuNICs)
+}
+
+// verifyDeliveredRuntimeWiring is the runtime-specific arm of this check
+// (#2297): when the recipe ships the torch-distributed-tcpxo runtime with a
+// recorded GPU-NIC mapping, the DEPLOYED ClusterTrainingRuntime must carry
+// exactly that mapping, and every network it selects must exist on this
+// cluster. Both are failures, not findings — the first catches the generated
+// artifact being modified outside AICR, the second catches a recipe value that
+// is well-formed but wrong for this cluster.
+//
+// It is gated on the recipe-derived predicate, not on gke-nccl-tcpxo being
+// declared: base h100-gke-cos-training is a supported recipe that has TCPXO but
+// ships no Kubeflow runtime and records no mapping, and an unconditional
+// extension would false-fail it. The same primitives run in the performance
+// validator before it derives its benchmark, so `--phase performance` does not
+// depend on this phase having run.
+func verifyDeliveredRuntimeWiring(ctx *validators.Context, gpuNICs []string) error {
+	var refs []recipe.ComponentRef
+	if ctx.ValidationInput != nil {
+		refs = ctx.ValidationInput.ComponentRefs
+	}
+	recorded, delivered, err := gkenet.FabricRuntimeDelivered(refs)
+	if err != nil {
+		return err
+	}
+	if !delivered {
+		return nil
+	}
+	shipped, err := gkenet.ReadDeployedTCPXORuntime(ctx.Ctx, ctx.DynamicClient)
+	if err != nil {
+		return err
+	}
+	deployed, err := gkenet.DeployedTCPXOMapping(shipped)
+	if err != nil {
+		return err
+	}
+	if err := gkenet.VerifyMappingMatchesRecipe(recorded, deployed); err != nil {
+		return err
+	}
+	if err := gkenet.VerifyNetworksExist(deployed, gpuNICs); err != nil {
+		return err
+	}
+	fmt.Printf("Deployed %s carries the recipe's %d-interface GPU NIC mapping, and every selected network exists on the cluster\n",
+		gkenet.TCPXORuntimeName, len(deployed))
 	return nil
 }
 
@@ -117,5 +163,5 @@ func absentPrerequisiteMsg(detail string) string {
 			"(--enable-multi-networking) cannot be enabled after cluster creation. "+
 			"Verify with: kubectl get network.networking.gke.io "+
 			"(see docs/integrator/gke-tcpxo-networking.md)",
-		tcpxoComponent, detail, gkenet.GPUNICNameSubstring)
+		tcpxoComponent, detail, recipe.GPUNICNameSubstring)
 }

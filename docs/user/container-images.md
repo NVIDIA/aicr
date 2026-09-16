@@ -20,7 +20,7 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 ## Summary
 
 - Components: **47**
-- Unique images: **109**
+- Unique images: **111**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -51,9 +51,9 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | k8s-ephemeral-storage-metrics | helm | k8s-ephemeral-storage-metrics/k8s-ephemeral-storage-metrics | 1.19.2 | 1 |
 | k8s-nim-operator | helm | k8s-nim-operator | 3.1.0 | 1 |
 | k8s-nim-operator-ocp | helm | k8s-nim-operator | 3.1.0 | 1 |
-| kai-scheduler | helm | kai-scheduler | v0.14.1 | 11 |
+| kai-scheduler | helm | kai-scheduler | v0.16.9 | 12 |
 | kube-prometheus-stack | helm | prometheus-community/kube-prometheus-stack | 84.4.0 | 8 |
-| kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 3 |
+| kubeflow-trainer | helm | kubeflow-trainer | 2.2.0 | 4 |
 | kueue | helm | kueue | 0.19.3 | 1 |
 | mariadb-operator | helm | mariadb-operator | 26.6.0 | 1 |
 | mariadb-operator-crds | helm | mariadb-operator-crds | 26.6.0 | 0 |
@@ -150,7 +150,7 @@ _No images extracted._
 
 - `gcr.io/gke-release/nri-device-injector:1.0.25-gke.6@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
-- `ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea2648d2c0e09b`
+- `ubuntu:26.04@sha256:513c074113a871b51a8d16ab445c88779d6452d937a164fb5cc479f32668a41d`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4`
 
 ### gpu-operator
@@ -201,17 +201,18 @@ _No images extracted._
 
 ### kai-scheduler
 
-- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.14.1`
-- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.14.1`
+- `ghcr.io/kai-scheduler/kai-scheduler/admission:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/binder:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/crd-upgrader:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/nodescaleadjuster:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/numa-placement-exporter:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/operator:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgroupcontroller:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/podgrouper:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/queuecontroller:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/resourcereservation:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/scalingpod:v0.16.9`
+- `ghcr.io/kai-scheduler/kai-scheduler/scheduler:v0.16.9`
 
 ### kube-prometheus-stack
 
@@ -229,6 +230,7 @@ _No images extracted._
 - `ghcr.io/kubeflow/trainer/trainer-controller-manager:v2.2.0`
 - `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime@sha256:eee11b3b3872a8c838e35ef48f08b2d5def2080902c7f666831310ca1a0ef2be`
 - `registry.k8s.io/jobset/jobset:v0.11.0`
+- `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/tcpgpudmarxd-dev:v1.0.21@sha256:8d9e10fd589a34ab8a0aa64f7e70ad075c8f1c69bea176350f8d211367697e3d`
 
 ### kueue
 
@@ -378,6 +380,8 @@ AICR pins some images directly in this repository — in `recipes/components/<na
 Air-gapped OpenShift deployments must separately mirror the relevant Red Hat certified-operator catalog (`redhat-operators`) alongside the images this BOM does track. See the [OpenShift documentation on mirroring Operator catalogs](https://docs.openshift.com/container-platform/latest/operators/admin/olm-restricted-networks.html) and this repo's [air-gap mirroring guide](https://github.com/NVIDIA/aicr/issues/743) for the OLM-specific mirroring workflow.
 
 The trade-off is intentional. Pinning an image gives reproducibility; deferring to the upstream chart lets security patches flow without an AICR release. The split is policy, not oversight — see the [supply chain epic](https://github.com/NVIDIA/aicr/issues/739) for how each component's policy is being made explicit.
+
+**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Known case: adopting the `nvsentinel-observability` mixin (see [Audit Logging and Tracing](component-catalog.md#audit-logging-and-tracing)), which sets `global.auditLogging.enabled: true` on `nvsentinel`, conditionally adds a `fix-audit-log-permissions` init container (`docker.io/bitnamilegacy/os-shell:12-debian-12-r30`) to the `platform-connectors` DaemonSet and `labeler` Deployment. It is not counted in the `nvsentinel` row's image count above, and it is a third-party image AICR does not otherwise mirror.
 
 ### Registries spanned
 

@@ -41,7 +41,13 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 15 minutes was sized for a warm Go module cache: the same job finished in
+    # 9m59s on the v0.21.0 tag with a cache hit, and was killed at the wall on
+    # v0.21.1 with a miss, after 13.6 minutes of `go: downloading` stalls. The
+    # prefix fallback added in go-test makes a total miss far less likely, but a
+    # budget that only holds when the cache hits is the wrong shape for the one
+    # place a failure is most expensive -- a release run (#2663).
+    timeout-minutes: 30
     permissions:
       actions: read
       contents: read
@@ -65,9 +71,12 @@ jobs:
           coverage_report: ${{ inputs.coverage_report }}
           coverage_threshold: ${{ steps.versions.outputs.coverage_threshold }}
           setup_envtest_version: ${{ steps.versions.outputs.setup_envtest }}
+          setup_envtest_sha256: ${{ steps.versions.outputs.setup_envtest_sha256_linux_amd64 }}
           helm_version: ${{ steps.versions.outputs.helm }}
           apidiff_version: ${{ steps.versions.outputs.apidiff }}
           oasdiff_version: ${{ steps.versions.outputs.oasdiff }}
+          oasdiff_sha256: ${{ steps.versions.outputs.oasdiff_sha256_linux_amd64 }}
+          privileged_ci: ${{ inputs.privileged_ci }}
 
   lint:
     name: Lint
@@ -91,7 +100,9 @@ jobs:
           go_version: ${{ steps.versions.outputs.go }}
           golangci_lint_version: ${{ steps.versions.outputs.golangci_lint }}
           addlicense_version: ${{ steps.versions.outputs.addlicense }}
+          addlicense_sha256: ${{ steps.versions.outputs.addlicense_sha256_linux_amd64 }}
           lint_timeout: ${{ steps.versions.outputs.lint_timeout }}
+          privileged_ci: ${{ inputs.privileged_ci }}
 
   cli-e2e:
     name: CLI E2E
@@ -144,6 +155,7 @@ jobs:
         uses: ./.github/actions/e2e
         with:
           go_version: ${{ steps.versions.outputs.go }}
+          privileged_ci: ${{ inputs.privileged_ci }}
 
   security-scan:
     name: Security Scan

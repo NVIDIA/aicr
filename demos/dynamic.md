@@ -31,7 +31,7 @@ One `AICRConfig` is the single source of truth for the recipe criteria and the b
 ```shell
 cat > aicr-config.yaml <<'EOF'
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: dynamic-values-demo
 spec:

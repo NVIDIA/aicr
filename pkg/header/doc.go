@@ -23,7 +23,7 @@
 //
 //	type Header struct {
 //	    Kind       Kind              `json:"kind,omitempty" yaml:"kind,omitempty"`             // Resource type (Snapshot, Recipe, RecipeResult)
-//	    APIVersion string            `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"` // API version (e.g., "aicr.run/v1alpha2")
+//	    APIVersion string            `json:"apiVersion,omitempty" yaml:"apiVersion,omitempty"` // API version (e.g., "aicr.run/v1")
 //	    Metadata   map[string]string `json:"metadata,omitempty" yaml:"metadata,omitempty"`     // Free-form string metadata (timestamp, version, etc.)
 //	}
 //
@@ -57,7 +57,7 @@
 // Headers serialize consistently to JSON and YAML:
 //
 //	{
-//	  "apiVersion": "aicr.run/v1alpha2",
+//	  "apiVersion": "aicr.run/v1",
 //	  "kind": "Recipe",
 //	  "metadata": {
 //	    "timestamp": "2025-12-30T10:30:00Z",
@@ -73,10 +73,11 @@
 //
 // ADR-022 splits artifacts across three schema tracks. An emitter aliases the
 // constant for its track — StableGroupVersion, AuthoringGroupVersion, or
-// ProfileGroupVersion — never GroupVersion directly. The first two carry the
-// same string during the reader-first release and diverge at the emitter
-// switch, so aliasing by value rather than by track compiles and passes tests
-// today while emitting the wrong version later.
+// ProfileGroupVersion — never GroupVersion directly. The three carried the
+// same value through the reader-first release, so aliasing by value rather
+// than by track compiled and passed tests while emitting the wrong version
+// later. The v0.22 switch (#2416) separated them, which turns that mistake
+// into a visible wrong value instead of a latent one.
 //
 // Callers should select the gate for the artifact's schema track rather than
 // comparing literals, so the single source of truth in this package stays

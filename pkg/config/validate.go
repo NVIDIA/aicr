@@ -41,7 +41,7 @@ func (c *AICRConfig) Validate() error {
 	if !header.IsSupportedAuthoringAPIVersion(c.APIVersion) {
 		return errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("invalid apiVersion %q: expected %q or %q; update the config header to a version accepted by this aicr release",
-				c.APIVersion, APIVersion, header.GroupVersionV1Beta1))
+				c.APIVersion, header.GroupVersion, header.GroupVersionV1Beta1))
 	}
 	if c.Spec.Snapshot == nil && c.Spec.Recipe == nil && c.Spec.Bundle == nil &&
 		c.Spec.Validate == nil && c.Spec.Verify == nil {
@@ -137,6 +137,9 @@ func (r *RecipeSpec) validate() error {
 		return err
 	}
 	if _, _, err := r.ResolveAccountingMode(); err != nil {
+		return err
+	}
+	if _, _, err := r.ResolveGKETCPXOInterfaces(); err != nil {
 		return err
 	}
 	if r.Output != nil && r.Output.Format != "" {

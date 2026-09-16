@@ -3,6 +3,7 @@
 Chart.yaml
 README.md
 checksums.txt
+recipe.yaml
 static/cert-manager.yaml
 static/nfd.yaml
 templates/aicr-stack.yaml

@@ -57,8 +57,23 @@ hosts:
   - get.helm.sh                      # helm binary
   - dl.k8s.io                        # kubectl binary
   - kind.sigs.k8s.io                 # kind binary
-  - proxy.golang.org                 # `go install` module proxy (ctlptl, goreleaser, addlicense, go-licenses)
-  - sum.golang.org                   # `go install` checksum db (contacted alongside the proxy)
+  - proxy.golang.org                 # Go module proxy (`go build` of apidiff, go-licenses from the main module)
+  # Still reached, though no longer by the qualification gate. #2667 moved the
+  # gate's four tools off `go install pkg@version` -- which resolves outside the
+  # main module, so nothing it pulls is covered by go.sum and every dependency is
+  # authenticated against the checksum database on each run. Two `go install`
+  # sites survive elsewhere and both contact this host:
+  #
+  #   .github/workflows/on-push-comment.yaml  go-coverage-report, on every
+  #                                           Merge Gate completion
+  #   .github/actions/gpu-cluster-setup/install-nvkind.sh  nvkind, GPU lanes
+  #
+  # Neither is mined by this tool -- the shell pass reads only
+  # tools/setup-tools, and .github/** is scanned for `uses:` refs, not inline
+  # `run:` bodies (see uncoveredSources in sources.go). So this entry cannot be
+  # retired on the strength of a green gate; it comes out when those two sites
+  # do, verified by hand.
+  - sum.golang.org                   # Go checksum db (`go install` in on-push-comment + install-nvkind)
   - pypi.org                         # pip (awscli, yamllint)
   - apt                              # symbolic: distro apt mirror set (python3-venv)
   - homebrew                         # symbolic: Homebrew bottle infra (macOS dev path)

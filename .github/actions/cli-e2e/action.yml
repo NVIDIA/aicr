@@ -52,8 +52,35 @@ runs:
     - name: Setup Go
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
       with:
+        # Caching is done explicitly below, for the reasons in go-lint.
+        cache: false
         go-version: '${{ inputs.go_version }}'
-        cache: true
+
+    - name: Resolve Go cache paths
+      id: gocache
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        echo "buildcache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+    # Restore-only against go-test's key, like lint and e2e. This job is
+    # already skipped on the fork path (`if: inputs.privileged_ci` on the job
+    # in qualification.yaml), so the motive here is storage rather than trust:
+    # setup-go was banking a second copy of these same two directories under
+    # `setup-go-*` on every go.sum change, and this repo's cache scope is over
+    # its ceiling and evicting. That eviction falls on the single `go-` entry
+    # lint and e2e now depend on entirely, so reclaiming the duplicate protects
+    # them rather than just saving space.
+    - name: Restore Go modules and build output
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: |
+          ${{ steps.gocache.outputs.modcache }}
+          ${{ steps.gocache.outputs.buildcache }}
+        key: go-${{ runner.os }}-${{ runner.arch }}-${{ inputs.go_version }}-${{ hashFiles('go.sum') }}
+        restore-keys: |
+          go-${{ runner.os }}-${{ runner.arch }}-${{ inputs.go_version }}-
 
     - name: Install Cosign
       uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad  # v4.0.0
@@ -122,6 +149,40 @@ runs:
         else
           echo "AICR_ATTESTED=false" >> "$GITHUB_ENV"
           echo "::warning::No binary attestation found (attestation tests will skip)"
+        fi
+
+    ## Image cache for the requires=docker suite (tests/chainsaw/cli/evidence-publish).
+    ## Restore the pinned registry image (.settings.yaml testing_tools.registry_image)
+    ## from the tarball the prime-images job in kwok-recipes.yaml saves, so this
+    ## job does not pull it from ECR Public: anonymous pulls there are throttled
+    ## per runner egress IP (toomanyrequests), the same failure the KWOK matrix
+    ## hit in #2483. Best effort, like the KWOK lanes: a cache miss is logged and
+    ## the suite falls back to pulling.
+    - name: Install yq
+      uses: ./.github/actions/setup-build-tools
+      with:
+        install_yq: 'true'
+
+    - name: Resolve image pins and cache keys
+      id: images
+      shell: bash
+      run: |
+        set -euo pipefail
+        bash kwok/scripts/lib/image-cache.sh settings .settings.yaml | tee -a "$GITHUB_OUTPUT"
+
+    - name: Restore registry image
+      uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306  # v5.0.3
+      with:
+        path: /tmp/kwok-image-cache/registry
+        key: ${{ steps.images.outputs.registry_key }}
+
+    - name: Load cached registry image
+      shell: bash
+      env:
+        REGISTRY_IMAGE: ${{ steps.images.outputs.registry_image }}
+      run: |
+        if ! bash kwok/scripts/lib/image-cache.sh load /tmp/kwok-image-cache/registry "${REGISTRY_IMAGE}"; then
+          echo "::warning::Image cache miss for ${REGISTRY_IMAGE} — the evidence-publish suite will pull it from the registry"
         fi
 
     ## Forked repos: skip CI-gated tests (no OIDC for attestation). ci!=true

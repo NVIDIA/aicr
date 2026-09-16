@@ -94,8 +94,8 @@ runs:
         install_goreleaser: 'true'
         goreleaser_version: ${{ steps.validate.outputs.goreleaser_version }}
 
-    # Clearing GOFLAGS is a correctness requirement for go-licenses (see
-    # install-go-licenses/action.yml). Keep the install here centralized so the
+    # Pinning GOFLAGS is a correctness requirement for go-licenses (see
+    # install-go-licenses/action.yml). Keep the build here centralized so the
     # notices guard can cover all of .github/ without flagging a duplicate.
     - name: Install go-licenses
       uses: ./.github/actions/install-go-licenses

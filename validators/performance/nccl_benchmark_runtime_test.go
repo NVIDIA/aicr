@@ -385,7 +385,7 @@ func TestRenderYAMLTemplate(t *testing.T) {
 func TestBuildNCCLRuntimeObjectCustom(t *testing.T) {
 	obj, err := buildNCCLRuntimeObject(validBenchmarkRuntime,
 		"customaccel", "custom-svc", variantDefault, fabricEFA,
-		"aicr-validation", map[string]string{"GPU_COUNT_PER_NODE": "8"})
+		"aicr-validation", map[string]string{"GPU_COUNT_PER_NODE": "8"}, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

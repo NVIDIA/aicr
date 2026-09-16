@@ -1,0 +1,187 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-diff
+spec:
+  description: |
+    CLI-boundary coverage for `aicr diff` (#1806): snapshot-vs-snapshot drift
+    in yaml/json/table formats, the no-drift baseline, --fail-on-drift gating,
+    and the required-flag failure mode. Both snapshots are file paths, so no
+    cluster is needed.
+    Run with: AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/cli/diff
+  timeouts:
+    exec: 30s
+  steps:
+    - name: setup-snapshots
+      description: Write a baseline and a target that differ by one modified and one added reading.
+      try:
+        - script:
+            content: |
+              set -eu
+              WORK="/tmp/chainsaw-diff"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              cat > "${WORK}/baseline.yaml" << 'SNAP'
+              kind: Snapshot
+              apiVersion: aicr.run/v1
+              metadata: {}
+              measurements:
+                - type: K8s
+                  subtypes:
+                    - subtype: server
+                      data:
+                        version: v1.33.0
+                - type: OS
+                  subtypes:
+                    - subtype: release
+                      data:
+                        ID: ubuntu
+                        VERSION_ID: "24.04"
+              SNAP
+              cat > "${WORK}/target.yaml" << 'SNAP'
+              kind: Snapshot
+              apiVersion: aicr.run/v1
+              metadata: {}
+              measurements:
+                - type: K8s
+                  subtypes:
+                    - subtype: server
+                      data:
+                        version: v1.34.0
+                - type: OS
+                  subtypes:
+                    - subtype: release
+                      data:
+                        ID: ubuntu
+                        VERSION_ID: "24.04"
+                        PRETTY_NAME: "Ubuntu 24.04 LTS"
+              SNAP
+            check:
+              ($error == null): true
+
+    - name: drift-yaml-to-file
+      description: Drift is written to --output as a structured Result with one modified and one added change.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-diff"
+              "${AICR_BIN}" diff --baseline "${WORK}/baseline.yaml" --target "${WORK}/target.yaml" \
+                --format yaml --output "${WORK}/drift.yaml"
+              test -s "${WORK}/drift.yaml"
+              cat "${WORK}/drift.yaml"
+            check:
+              ($error == null): true
+              (parse_yaml($stdout).summary.total): 2
+              (parse_yaml($stdout).summary.added): 1
+              (parse_yaml($stdout).summary.modified): 1
+              (parse_yaml($stdout).summary.removed): 0
+              (length(parse_yaml($stdout).changes)): 2
+              (parse_yaml($stdout).changes[?kind == 'modified'] | [0].path): K8s.server.version
+              (parse_yaml($stdout).changes[?kind == 'modified'] | [0].baseline): v1.33.0
+              (parse_yaml($stdout).changes[?kind == 'modified'] | [0].target): v1.34.0
+              (parse_yaml($stdout).changes[?kind == 'added'] | [0].path): OS.release.PRETTY_NAME
+              (ends_with(parse_yaml($stdout).baselineSource, 'baseline.yaml')): true
+              (ends_with(parse_yaml($stdout).targetSource, 'target.yaml')): true
+
+    - name: no-drift-yaml
+      description: Diffing a snapshot against itself yields an empty change list and exit 0.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-diff"
+              "${AICR_BIN}" diff -b "${WORK}/baseline.yaml" --target "${WORK}/baseline.yaml" --format yaml
+            check:
+              ($error == null): true
+              (parse_yaml($stdout).summary.total): 0
+              (length(parse_yaml($stdout).changes)): 0
+
+    - name: drift-json-stdout
+      description: --format json writes the Result object to stdout.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-diff"
+              "${AICR_BIN}" diff -b "${WORK}/baseline.yaml" --target "${WORK}/target.yaml" --format json
+            check:
+              ($error == null): true
+              (json_parse($stdout).summary.total): 2
+              (json_parse($stdout).changes[?kind == 'modified'] | [0].path): K8s.server.version
+              (json_parse($stdout).changes[?kind == 'added'] | [0].path): OS.release.PRETTY_NAME
+
+    - name: drift-table-stdout
+      description: --format table renders a human-readable change table with the drift verdict.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-diff"
+              "${AICR_BIN}" diff -b "${WORK}/baseline.yaml" --target "${WORK}/target.yaml" --format table
+            check:
+              ($error == null): true
+              (contains($stdout, 'KIND')): true
+              (contains($stdout, 'MODIFIED')): true
+              (contains($stdout, 'ADDED')): true
+              (contains($stdout, 'K8s.server.version')): true
+              (contains($stdout, 'DRIFT DETECTED')): true
+
+    - name: fail-on-drift-exits-conflict
+      description: --fail-on-drift turns detected drift into a CONFLICT failure (exit 2) for CI gating.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-diff"
+              "${AICR_BIN}" diff -b "${WORK}/baseline.yaml" --target "${WORK}/target.yaml" \
+                --fail-on-drift --format json > /dev/null
+              echo "exit=$?"
+            check:
+              ($stdout): "exit=2\n"
+              (contains($stderr, '[CONFLICT] drift detected')): true
+              (contains($stderr, '2 change(s) found')): true
+
+    - name: fail-on-drift-passes-without-drift
+      description: --fail-on-drift stays exit 0 when the snapshots match.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-diff"
+              "${AICR_BIN}" diff -b "${WORK}/baseline.yaml" --target "${WORK}/baseline.yaml" \
+                --fail-on-drift --format json > /dev/null
+            check:
+              ($error == null): true
+
+    - name: missing-target-is-invalid-request
+      description: --target is required alongside --baseline.
+      try:
+        - script:
+            content: |
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-diff"
+              "${AICR_BIN}" diff -b "${WORK}/baseline.yaml"
+              echo "exit=$?"
+            check:
+              ($stdout): "exit=2\n"
+              (contains($stderr, '[INVALID_REQUEST] --target is required')): true
+      cleanup:
+        - script:
+            content: |
+              rm -rf /tmp/chainsaw-diff
