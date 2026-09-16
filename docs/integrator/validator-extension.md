@@ -244,7 +244,7 @@ ENTRYPOINT ["/check.sh"]
 
 - Must run as non-root (validator Jobs use `runAsNonRoot: true`)
 - Must handle the mounted data paths (`/data/snapshot/`, `/data/validation/`)
-- Should respect timeout — the Job has `activeDeadlineSeconds` set from the catalog entry
+- **Must** self-terminate within the catalog `timeout` (published as `AICR_CHECK_TIMEOUT`) rather than rely on the Job — the Job's `activeDeadlineSeconds` is set to the catalog entry plus a fixed headroom, as a backstop for a check that never exits on its own. Self-termination is what preserves the logs: a pod that exited on its own is no longer *active*, so the Job controller's `deleteActivePods` leaves it in place as `Failed` for the orchestrator to read, whereas a pod still running when the backstop fires is deleted along with its verdict
 - Should write meaningful evidence to stdout for the CTRF report
 - Must use explicit image tags (not `:latest`) for reproducibility in external catalogs
 
