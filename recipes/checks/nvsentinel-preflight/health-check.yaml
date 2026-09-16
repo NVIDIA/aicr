@@ -1,0 +1,147 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# NVSentinel Preflight Health Check
+#
+# Opt-in only: adopted via spec.mixins: [nvsentinel-preflight], not shipped on
+# any recipe by default. `make check-health-all` derives its component list
+# from recipes/registry.yaml's healthCheck.assertFile entries, and no
+# component references this file there, so this check is excluded from that
+# sweep by construction -- run it directly with
+# `make check-health COMPONENT=nvsentinel-preflight` after bundling and
+# deploying with the mixin's values (see
+# docs/user/component-catalog.md#preflight-checks).
+#
+# TestNVSentinelPreflightChartRender (pkg/bundler/validations) asserts the
+# rendered shape without needing a cluster, but it pulls the chart over the
+# network, so it is gated on testing.Short() and does NOT run as part of
+# `make test`/`make qualify`. It runs in CI weekly via the scheduled-only
+# .github/workflows/nvsentinel-preflight-render-check.yaml. The two checks are
+# complementary, not redundant: the assertions below are the ones only a live
+# cluster can make -- that the Deployment actually rolled out, that
+# cert-manager injected a CA bundle, and that the controller-manager
+# aggregated the gang-discovery rules.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: nvsentinel-preflight-health-check
+spec:
+  timeouts:
+    assert: 90s
+  steps:
+    - name: validate-preflight-rollout
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: preflight
+                namespace: nvsentinel
+              status:
+                (availableReplicas > `0`): true
+        # Stale-rollout guards, mirroring
+        # recipes/checks/nvsentinel-observability/health-check.yaml: compared
+        # against spec.replicas, not status.replicas, because during a
+        # scale-up status.replicas itself lags and a status-vs-status
+        # comparison passes vacuously.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: preflight
+                namespace: nvsentinel
+              ((status.updatedReplicas || `0`) < (spec.replicas || `1`)): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: preflight
+                namespace: nvsentinel
+              ((status.availableReplicas || `0`) < (spec.replicas || `1`)): true
+        # Old pods can still be ready while new ones are stuck, passing both
+        # guards above; mirrors kubectl rollout status's drain check.
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: preflight
+                namespace: nvsentinel
+              ((status.replicas || `0`) > (status.updatedReplicas || `0`)): true
+        - error:
+            resource:
+              apiVersion: apps/v1
+              kind: Deployment
+              metadata:
+                name: preflight
+                namespace: nvsentinel
+              ((status.observedGeneration || `0`) < metadata.generation): true
+    - name: validate-webhook-configuration
+      try:
+        # failurePolicy and the namespace gate are the two settings that
+        # decide this mixin's blast radius, and both fail silently when
+        # wrong: Fail turns a webhook outage into a cluster-wide pod-creation
+        # outage, and a missing namespaceSelector injects into every
+        # namespace. The caBundle assertion is the live-cluster-only one --
+        # cert-manager's ca-injector fills it in after the chart applies, and
+        # until it does the webhook is unreachable and (because failurePolicy
+        # is Ignore) silently checks nothing at all.
+        - assert:
+            resource:
+              apiVersion: admissionregistration.k8s.io/v1
+              kind: MutatingWebhookConfiguration
+              metadata:
+                name: preflight
+              (webhooks[?name == 'preflight.nvsentinel.nvidia.com'] | length(@) == `1`): true
+              (webhooks[?name == 'preflight.nvsentinel.nvidia.com' && failurePolicy == 'Ignore'] | length(@) == `1`): true
+              (webhooks[?name == 'preflight.nvsentinel.nvidia.com' && namespaceSelector.matchLabels."nvsentinel.nvidia.com/preflight" == 'enabled'] | length(@) == `1`): true
+              (webhooks[?name == 'preflight.nvsentinel.nvidia.com' && length(clientConfig.caBundle || '') > `0`] | length(@) == `1`): true
+    - name: validate-gang-discovery-rbac
+      try:
+        # The mixin ships no ClusterRole of its own: with
+        # gangCoordination.enabled the chart generates this one from
+        # preflight.gangDiscovery.podGroupGVR. Asserting the KAI rule here is
+        # what proves the mixin's podGroupGVR reached RBAC -- a controller
+        # that cannot read PodGroups cannot size a gang, and it fails at
+        # admission time rather than at install time.
+        - assert:
+            resource:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRole
+              metadata:
+                name: preflight-gang-discovery-builtin
+              (rules[?contains(apiGroups, 'scheduling.run.ai') && contains(resources, 'podgroups') && contains(verbs, 'get')] | length(@) > `0`): true
+        # Only `get` is pinned here, not the full get/list/watch set: the
+        # controller reads the PodGroup as an unstructured object, so `get` is
+        # the verb it actually issues, and a legitimate upstream narrowing
+        # should not fail a live-cluster health check. The render test pins the
+        # full set, where the intent is chart-drift detection rather than
+        # runtime health.
+        #
+        # Aggregation is resolved by the cluster's controller-manager, not by
+        # Helm, so this is only observable on a live cluster: the rules field
+        # of the aggregate role is empty in the rendered manifest and gets
+        # filled in afterwards. An empty rules list here means the
+        # aggregation label never matched and the controller has no PodGroup
+        # access despite the builtin role existing.
+        - assert:
+            resource:
+              apiVersion: rbac.authorization.k8s.io/v1
+              kind: ClusterRole
+              metadata:
+                name: preflight-gang-discovery
+              ((rules || `[]`)[?contains(apiGroups, 'scheduling.run.ai') && contains(resources, 'podgroups') && contains(verbs, 'get')] | length(@) > `0`): true

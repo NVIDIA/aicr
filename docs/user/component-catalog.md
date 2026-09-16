@@ -308,6 +308,108 @@ Both policies set `isFatal: true` and leave `quarantineOverrides`/`drainOverride
 
 **`node-not-ready` is deliberately dropped, not inherited.** The `kubernetes-object-monitor` subchart ships a third policy by default, `node-not-ready` (watches `Node` for `Ready=False`); setting `kubernetes-object-monitor.policies` replaces that default list wholesale (Helm values do not merge lists), so this mixin does not carry it forward. It is a general node-readiness signal unrelated to this mixin's scope (operator DaemonSet pod health) and would enable a new class of node-cordon behavior nobody asked for here. Adopt it explicitly, with its own deliberate `isFatal`/quarantine decision, via your own leaf overlay's `componentRefs` if you want it.
 
+### Preflight Checks
+
+Off by default. NVSentinel's preflight is a mutating admission webhook that appends init containers to GPU pods, so the node runs hardware checks *before* your workload's own containers start.
+
+**These checks gate.** A node that fails one leaves the pod in `Init:Error` — the workload's own containers never start — and the failure is recorded on the node: a **fatal** result becomes a NodeCondition named after the check, while an **unhealthy but non-fatal** result becomes a Kubernetes Event instead. (They are alternatives, not both.) That is the point: the job fails in seconds rather than hanging minutes into training. Nothing is cordoned, drained or rebooted; AICR deploys no remediation component.
+
+**Opt in via the `nvsentinel-preflight` mixin** (`recipes/mixins/nvsentinel-preflight.yaml`) on your own leaf overlay:
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-preflight
+```
+
+The catalog-registration rule described under [Audit Logging and Tracing](#audit-logging-and-tracing) applies here too: a leaf overlay naming this mixin that is never registered via `--data` (or committed to `recipes/overlays/`) silently composes *without* it, and the bundle still succeeds. Confirm the generated recipe's `nvsentinel` componentRef carries `global.preflight` before bundling. The "has no effect if `nvsentinel` is disabled by the chain" caveat applies equally, as does the allowlist mechanism — `nvsentinel`'s `mixinSafeOverridePaths` entry names each `preflight.*` leaf path this mixin may set, and anything outside it fails at compose time.
+
+**Two gates, not one.** Adopting the mixin only deploys the webhook. Nothing is injected until you also label the namespaces whose pods should be checked:
+
+```shell
+kubectl label namespace <ns> nvsentinel.nvidia.com/preflight=enabled
+```
+
+Within a labeled namespace, only pods that request a GPU resource (`nvidia.com/gpu`) are mutated; everything else passes through untouched.
+
+**Adopting this on a cluster that already runs NVSentinel needs one manual step.** The preflight subchart ships its `PreflightConfig` CRD under `crds/`, and Helm installs a `crds/` directory only on `helm install`, never on `helm upgrade`. A cluster that installed NVSentinel *before* adopting this mixin had the subchart — and therefore its CRD — pruned by the `global.preflight.enabled` condition, so enabling the mixin later cannot backfill it. The controller still admits and injects correctly, but its `preflightconfig` controller never starts and it logs `no matches for kind "PreflightConfig"` every 10 seconds. Apply the CRD once, from the chart:
+
+```shell
+kubectl apply -f <chart>/charts/preflight/crds/preflight.nvsentinel.nvidia.com_preflightconfigs.yaml
+```
+
+A fresh bundle install is unaffected, which is also why CI does not catch this — every bundle in CI is a first install.
+
+**What the mixin sets:**
+
+```yaml
+global:
+  preflight:
+    enabled: true
+preflight:
+  processingStrategy: EXECUTE_REMEDIATION   # chart default; the checks gate
+  webhook:
+    failurePolicy: Ignore             # chart default is Fail
+  gangCoordination:
+    enabled: true
+  gangDiscovery:
+    name: kai
+    annotationKeys: [pod-group-name]
+    podGroupGVR:
+      group: scheduling.run.ai
+      version: v2alpha2
+      resource: podgroups
+    minCountExpr: "podGroup.spec.minMember"
+  initContainers:                       # restated from the chart, see below
+    - name: preflight-dcgm-diag         #   (chart defaults)
+    - name: preflight-nccl-loopback     #   (chart defaults)
+    - name: preflight-nccl-allreduce
+      defaultEnabled: false             # the one deviation
+```
+
+The mixin also restates `preflight.initContainers` in full — all three checks, verbatim from the chart, with one addition: `defaultEnabled: false` on `preflight-nccl-allreduce`. The next section explains why.
+
+Restating means AICR now pins that list's contents (both images, both bandwidth thresholds, and `DCGM_HOSTENGINE_ADDR`), so a chart bump cannot move them silently. `TestNVSentinelPreflightInitContainersMatchChart` renders the mixin's list against the chart's own and fails on any drift beyond the intended `defaultEnabled` line. That test runs weekly, not on every PR, so a chart bump can merge before it fires.
+
+**`failurePolicy: Ignore` is deliberate.** The webhook sits in the pod-creation path, so the chart's `Fail` would turn a webhook outage into a pod-creation outage for every labeled namespace. `Ignore` trades a missed check for availability — the right default while this is new, and worth revisiting once it has field time. The cost is that a broken webhook is *silent*: pods are admitted unchecked, with no error anywhere. `recipes/checks/nvsentinel-preflight/health-check.yaml` exists to catch exactly that, including the case where cert-manager has not injected the webhook's CA bundle.
+
+**`processingStrategy: EXECUTE_REMEDIATION` is the chart default, kept deliberately.** It is what makes the init container's exit code gate the pod. The obvious-looking alternative, `STORE_ONLY`, is a trap: each check converts its own failure to exit code 0 (upstream logs `Check failed (STORE_ONLY — not blocking pod)`), *and* `platform-connectors` filters `STORE_ONLY` events out before they become a NodeCondition or a Kubernetes Event. Since AICR deploys no datastore, that combination would ship the cost of the checks with no gate and no record — the only trace of a failure would be an init-container log that disappears with the pod.
+
+**The name is misleading here: nothing is remediated.** The strategy controls whether the event is processable, not whether anything acts on it. All six NVSentinel remediation components (`faultQuarantine`, `nodeDrainer`, `faultRemediation`, `janitor`, `lifecycleManager`, `janitorProvider`) default off and AICR enables none, and `fault-quarantine` — the only consumer that would cordon or drain — is not deployed. The complete effect is: the pod is stranded, and the node gets either a NodeCondition (fatal) or a Kubernetes Event (non-fatal).
+
+**What this means operationally:** a bad GPU now blocks the pods scheduled onto it. That is the intended behaviour, but it is a real change in failure mode — budget for pods sitting in `Init:Error` rather than running slowly. `failurePolicy: Ignore` limits the blast radius of a *webhook* outage, not of a failing check.
+
+**One asymmetry worth knowing:** the strategy affects *check* failures. A check that cannot load its own configuration exits non-zero regardless.
+
+**Gang discovery points at KAI.** The chart's default (`{}`) relies on native Kubernetes gang-scheduling APIs that exist only on 1.35+/1.36+, while AICR's floor is 1.32 and managed control planes do not expose the alpha gates — so it is pointed at KAI's `PodGroup` CRs instead. `annotationKeys` is load-bearing, not decorative: upstream builds a PodGroup discoverer only when `name`, `annotationKeys` (or `labelKeys`), a full `podGroupGVR` and `minCountExpr` are all present, and anything short of that fails fast at controller startup. Because the controller validates the `PodGroup` CRD at startup and fails closed, the mixin adds `kai-scheduler` as a `dependencyRef` on `nvsentinel` so a DAG-stratified deployer applies the scheduler first. Every shipped recipe already carries `kai-scheduler`, and `TestMixinNVSentinelPreflight_ComposesOntoEveryLeaf` keeps it that way.
+
+Gang coordination also makes the chart generate the `preflight-gang-discovery-builtin` ClusterRole from `podGroupGVR` and aggregate it into the role the controller binds — which is why the mixin ships no RBAC of its own.
+
+**The multi-node check is configured but off by default.** `preflight-nccl-allreduce` needs gang context, and the webhook injects `POD_NAME` into it *only* when the pod already carries a gang annotation at creation time. A plain GPU pod would get the container without that variable, and the check exits on the missing variable — stranding a pod in `Init:Error` on perfectly healthy hardware. So the mixin ships it disabled and you request it per pod, with **both** annotations:
+
+```yaml
+metadata:
+  annotations:
+    pod-group-name: my-gang
+    nvsentinel.nvidia.com/preflight-checks: "preflight-dcgm-diag,preflight-nccl-loopback,preflight-nccl-allreduce"
+```
+
+The entry stays in the list rather than being removed, because the webhook resolves an annotation-requested name against every configured check — deleting it would turn this opt-in into a pod-creation error. **This path is exercised only at admission time in CI**: the e2e asserts the container and its `POD_NAME` are injected, but nothing in AICR has ever run the check itself.
+
+**The checks cost startup time.** Two init containers run in sequence before your workload's first container starts: a DCGM level-2 diagnostic (~2 min) and an NCCL loopback bandwidth test. Budget for this on every GPU pod in a labeled namespace, including short-lived ones — which is the main reason the namespace label exists rather than the mixin turning injection on cluster-wide.
+
+**The check images are not counted in the BOM table.** The three `preflight-*` check images and the `preflight` controller image come from `ghcr.io/nvidia/nvsentinel/` at the chart's own version; see the opt-in image note in [container images](container-images.md).
+
+**Limitations.**
+
+- **Rejected with `os-talos`, at bundle time.** That mixin relocates `gpu-operator` to `privileged-gpu-operator`, where `nvidia-dcgm.gpu-operator.svc:5555` does not resolve. The mixin pins that address and cannot vary it per composition — a second mixin setting the same allowlisted path collides at compose time. Rather than ship a DCGM check that cannot reach its hostengine, `CheckNVSentinelPreflightDCGMReachable` fails the bundle whenever preflight is enabled and gpu-operator is absent, disabled, relocated, or running with `dcgm.enabled: false`.
+- **The multi-node check is unusable on Grove-scheduled recipes.** Grove's gang model is hierarchical while preflight assumes one flat PodGroup per gang ([NVIDIA/NVSentinel#1354](https://github.com/NVIDIA/NVSentinel/issues/1354)), so gang discovery finds nothing there. Because the check is off by default this costs nothing unless you request it — and if you do request it on such a recipe, the pod is stranded rather than merely uncoordinated. The two single-node checks are unaffected. Every `*-inference-dynamo` leaf is affected and no other leaf is -- today that is `b200-gke-cos`, `gb200-eks-ubuntu`, `gb200-oke-ubuntu`, `gb300-eks-ubuntu`, `h100-aks-ubuntu`, `h100-eks-ubuntu`, `h100-gke-cos`, `h100-kind`, `rtx-pro-6000-eks-ubuntu` and `vr200-rke2-ubuntu`. `TestGroveLeavesAreExactlyTheDynamoLeaves` pins the correspondence -- a Grove leaf under another name, or a dynamo leaf that moves off Grove, fails there -- but it does not read the names above, so re-check them when a dynamo leaf is added.
+- **`kai-scheduler` must stay enabled, and the bundle now enforces it.** The mixin's dependency edge only orders the install — the bundler prunes an edge to a declared-but-disabled component as satisfied externally, so ordering alone would let a bundle look well-formed while `podgroups.scheduling.run.ai` never exists, crash-looping the controller and leaving `failurePolicy: Ignore` to admit every GPU pod unchecked. `CheckNVSentinelPreflightGangSchedulerRequired` blocks that at bundle time.
+- **The loopback bandwidth threshold is not enforced.** The chart's 150 GB/s is calibrated for NVLink, while its own values note PCIe parts need roughly 15 — so on `l40`, `l40s` and `rtx-pro-6000` a healthy GPU would fail it. Because the checks now gate, that would be a pod-creation outage on those recipes, so the mixin sets `SKIP_BANDWIDTH_CHECK: "true"`. The loopback *connectivity* test still runs and still gates; only its bandwidth assertion is skipped. Revisit if upstream gains per-accelerator thresholds. The all-reduce check keeps its 100 GB/s threshold, but it is off by default.
+- **A DCGM outage blocks GPU pods.** `preflight-dcgm-diag` treats an unreachable hostengine as a fatal result, so while DCGM is down every GPU pod in an opted-in namespace strands in `Init:Error`. `CheckNVSentinelPreflightDCGMReachable` catches the *configuration* cases at bundle time — gpu-operator absent, disabled, relocated, or running with `dcgm.enabled: false` (which the shipped Kind overlay does) — but it cannot catch a runtime outage. This is the main operational risk of adopting the mixin.
+
+
 ### Enabling Remediation
 
 **AICR does not support enabling remediation today, and this page does not carry a recipe for it.** [#1014](https://github.com/NVIDIA/aicr/issues/1014) tracks adding a qualified opt-in path.

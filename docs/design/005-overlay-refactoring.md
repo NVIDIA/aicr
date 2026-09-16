@@ -5,6 +5,7 @@
 **Accepted, implemented** — 2026-03-19
 **Revised** — 2026-04-06 (prototype findings, resequenced phases)
 **Revised** — 2026-09-10 (issue #2617): the "Component names" conflict policy below is amended, not superseded. `Overrides` is no longer an unconditional hard error for a mixin componentRef colliding with the inheritance chain -- a component may now opt in per-path via a new registry field, `ComponentConfig.MixinSafeOverridePaths` (`recipes/registry.yaml`), declared by the *target component's own owner*, not the mixin author. A mixin path outside that allowlist, or one colliding (exact match or ancestor/descendant) with a path the leaf's chain or an earlier mixin already set, still hard-errors exactly as this ADR originally specified. See `pkg/recipe/metadata_store.go`'s `mixinOverridesSafeForMerge` and `recipes/mixins/nvsentinel-observability.yaml` for the reference implementation. This narrower mechanism replaces an unconditional relaxation that was tried and reverted for being unsafe (it would have let any mixin set any value on any already-chained component) -- see `docs/contributor/recipe.md`'s "Mixin Composition" section for the current, authoritative rule.
+**Revised** — 2026-09-15 (issue #2610): the "Component names" conflict policy is amended again, in the same narrow way. `DependencyRefs` moves from the identity/sourcing set to the additive set, because `mergeComponentRef` unions and deduplicates it rather than replacing it -- a mixin can add a dependency edge but cannot drop or reorder one the chain declared, and `ValidateDependencies` still rejects an edge to an absent component and `detectCycles` still rejects cycles. `recipes/mixins/nvsentinel-preflight.yaml` is the reference case: its controller validates kai-scheduler's PodGroup CRD at startup and fails closed, so it must order itself after a component the chain already declares.
 
 The mixin-based refactor has shipped: shared OS/platform fragments now live in
 `recipes/mixins/` (e.g. `os-ubuntu.yaml`, `os-talos.yaml`,
@@ -282,9 +283,13 @@ are truly orthogonal and reused enough to justify the indirection.
      compose, so a name collision is unambiguously a conflict.
    - **Component names:** name collisions are allowed only when the mixin
      entry sets nothing beyond the additive set
-     `{Namespace, ManifestFiles, PreManifestFiles}`. Identity / sourcing
-     fields (`Chart`, `Type`, `Source`, `Version`, `Tag`, `Path`,
-     `ValuesFile`, `Patches`, `DependencyRefs`, `Cleanup`,
+     `{Namespace, ManifestFiles, PreManifestFiles, DependencyRefs}`
+     (`DependencyRefs` joined the additive set in the 2026-09-15 revision:
+     it merges as a deduplicated union, so a mixin can add a dependency
+     edge but cannot drop one the chain declared, and the resolver still
+     rejects an edge to an absent component or a cycle). Identity /
+     sourcing fields (`Chart`, `Type`, `Source`, `Version`, `Tag`,
+     `Path`, `ValuesFile`, `Patches`, `Cleanup`,
      `ExpectedResources`, `HealthCheckAsserts`) still produce an
      unconditional hard error — those are exactly the fields the original
      "Silent constraint override" risk row (see Risk Table) was
@@ -294,7 +299,8 @@ are truly orthogonal and reused enough to justify the indirection.
      mixin use. The carve-out keeps the mitigation intact while letting
      OS-conditional mixins (e.g. `os-talos`) contribute namespace and
      pre/post manifest overrides, and opted-in mixins (e.g.
-     `nvsentinel-observability`) contribute allowlisted values, to
+     `nvsentinel-observability`, `nvsentinel-preflight`) contribute
+     allowlisted values and dependency edges, to
      components already declared upstream without forcing every adopting
      leaf overlay to re-author those fields by hand.
    Implemented as loader-time validation in `mergeMixins()` plus a field-set

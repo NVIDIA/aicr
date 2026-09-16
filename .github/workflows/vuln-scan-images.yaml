@@ -310,7 +310,11 @@ jobs:
     name: Scan (${{ matrix.image }})
     runs-on: ubuntu-latest
     needs: [build-ko, docker-manifest]
-    timeout-minutes: 15
+    # 30, not 15: the two NVSentinel NCCL check images are ~9.9 GiB compressed
+    # each, so the pull and extraction alone outlast the budget the small
+    # AICR-built images need. Matrix jobs get their own runner, so the larger
+    # budget costs nothing for the images that finish in two minutes.
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: read
@@ -325,18 +329,30 @@ jobs:
           - ghcr.io/nvidia/aicr-validators/conformance
           - ghcr.io/nvidia/aicr-validators/aiperf-bench
           - ghcr.io/nvidia/aicr-gate
-          # The first image here AICR does not build. It ships only with the
-          # opt-in nvsentinel-object-monitor mixin (#2612), and the static BOM
-          # cannot see a mixin-gated subchart, so nothing else would surface a
-          # CVE in it. Because it is not built by this workflow it carries the
-          # nvsentinel chart's own version rather than SCAN_TAG -- see the
-          # override below.
+          # AICR does not build the five below. They ship only with the
+          # opt-in nvsentinel-object-monitor (#2612) and nvsentinel-preflight
+          # (#2610) mixins, and the static BOM cannot see a mixin-gated image,
+          # so nothing else would surface a CVE in them. Because they are not
+          # built by this workflow they carry the nvsentinel chart's own
+          # version rather than SCAN_TAG -- see the overrides below.
           - ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
+          - ghcr.io/nvidia/nvsentinel/preflight
+          - ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
+          - ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
+          - ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
         include:
           # Keep in lockstep with nvsentinel's defaultVersion in
-          # recipes/registry.yaml; TestObjectMonitorImagePinnedEverywhere
-          # fails if these drift apart.
+          # recipes/registry.yaml; TestObjectMonitorImagePinnedEverywhere and
+          # TestPreflightImagesPinnedEverywhere fail if these drift apart.
           - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
+            tag: v1.20.0
+          - image: ghcr.io/nvidia/nvsentinel/preflight
+            tag: v1.20.0
+          - image: ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
+            tag: v1.20.0
+          - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
+            tag: v1.20.0
+          - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
             tag: v1.20.0
     steps:
       - name: Checkout Code
@@ -346,6 +362,17 @@ jobs:
 
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
+
+      # Only for images this workflow does not build. An ubuntu-latest runner
+      # ships with roughly 21 GiB free, and grype extracts the image before
+      # scanning it, so a ~9.9 GiB compressed NCCL check image does not fit
+      # without this. matrix.tag is the marker for "upstream image".
+      - name: Free disk space for large upstream images
+        if: ${{ matrix.tag != '' }}
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          docker system prune -f
+          df -h /
 
       - name: Scan container image
         id: scan

@@ -56,6 +56,8 @@ func init() {
 	registerCheck("CheckNVSentinelDriverLabelDetectable", CheckNVSentinelDriverLabelDetectable)
 	registerCheck("CheckNVSentinelRuntimeClassCoherence", CheckNVSentinelRuntimeClassCoherence)
 	registerCheck("CheckNVSentinelTracingEndpointRequired", CheckNVSentinelTracingEndpointRequired)
+	registerCheck("CheckNVSentinelPreflightDCGMReachable", CheckNVSentinelPreflightDCGMReachable)
+	registerCheck("CheckNVSentinelPreflightGangSchedulerRequired", CheckNVSentinelPreflightGangSchedulerRequired)
 }
 
 // registerCheck is a helper to register validation functions from checks.go.
@@ -2219,6 +2221,459 @@ func CheckGKETCPXOInterfacesCoherence(ctx context.Context, componentName string,
 			"%s: the resolved tcpxoInterfaces value disagrees with "+
 				"configuration.gke.tcpxoInterfaces; the bundle would render a different wiring "+
 				"than the recipe records", componentName))}
+	}
+	return nil, nil
+}
+
+// nvsentinelPreflightEnabled reports whether the resolved values turn the
+// preflight admission webhook on.
+func nvsentinelPreflightEnabled(values map[string]any) bool {
+	global, ok := values["global"].(map[string]any)
+	if !ok {
+		return false
+	}
+	preflight, ok := global["preflight"].(map[string]any)
+	if !ok {
+		return false
+	}
+	raw, present := preflight["enabled"]
+	if !present {
+		return false
+	}
+	return helmTruthy(raw)
+}
+
+// kaiPodGroupGVR is the complete GroupVersionResource the preflight controller
+// resolves at startup for KAI gang discovery. All three parts matter: the
+// controller resolves the GVR against the API server, so scheduling.run.ai with
+// the wrong version or resource fails exactly as a missing CRD would, and a
+// group-only match would wave it through.
+var kaiPodGroupGVR = struct{ group, version, resource string }{
+	group:    "scheduling.run.ai",
+	version:  "v2alpha2",
+	resource: "podgroups",
+}
+
+// preflightGangTarget classifies what the configured gang discovery points at.
+type preflightGangTarget int
+
+const (
+	// gangTargetNone: coordination is off, or no podGroupGVR is configured.
+	gangTargetNone preflightGangTarget = iota
+	// gangTargetOtherScheduler: a non-KAI API group. Someone else's problem.
+	gangTargetOtherScheduler
+	// gangTargetKAI: exactly KAI's GVR. Requires kai-scheduler.
+	gangTargetKAI
+	// gangTargetKAIMalformed: KAI's group with the wrong version or resource.
+	// Rejected rather than skipped: the controller resolves the GVR against the
+	// API server at startup and exits when it does not exist, so this crash-loops
+	// exactly like a missing CRD -- and failurePolicy: Ignore then admits every
+	// GPU pod unchecked. Skipping it would be fail-open.
+	gangTargetKAIMalformed
+)
+
+// nvsentinelPreflightGangTarget classifies the configured gang discovery, and
+// returns the version/resource so a malformed KAI GVR can be named in the error.
+func nvsentinelPreflightGangTarget(values map[string]any) (target preflightGangTarget, version, resource string) {
+	preflight, ok := values["preflight"].(map[string]any)
+	if !ok {
+		return gangTargetNone, "", ""
+	}
+	coordination, ok := preflight["gangCoordination"].(map[string]any)
+	if !ok {
+		return gangTargetNone, "", ""
+	}
+	if raw, present := coordination["enabled"]; !present || !helmTruthy(raw) {
+		return gangTargetNone, "", ""
+	}
+	discovery, ok := preflight["gangDiscovery"].(map[string]any)
+	if !ok {
+		return gangTargetNone, "", ""
+	}
+	gvr, ok := discovery["podGroupGVR"].(map[string]any)
+	if !ok {
+		return gangTargetNone, "", ""
+	}
+	group, _ := gvr["group"].(string)
+	version, _ = gvr["version"].(string)
+	resource, _ = gvr["resource"].(string)
+	if group != kaiPodGroupGVR.group {
+		return gangTargetOtherScheduler, version, resource
+	}
+	if version == kaiPodGroupGVR.version && resource == kaiPodGroupGVR.resource {
+		return gangTargetKAI, version, resource
+	}
+	return gangTargetKAIMalformed, version, resource
+}
+
+// preflightEnabledPath is the value that decides whether the preflight webhook
+// runs at all. Both preflight gates read it, and both must guard it against a
+// --dynamic declaration even when it is statically off -- otherwise an
+// install-time edit turns preflight on with nothing validated.
+const preflightEnabledPath = "global.preflight.enabled"
+
+// preflightDCGMDiagContainer is the init container whose DCGM_HOSTENGINE_ADDR
+// decides which hostengine the check talks to.
+const preflightDCGMDiagContainer = "preflight-dcgm-diag"
+
+// preflightConfiguredDCGMAddr returns the DCGM_HOSTENGINE_ADDR configured on
+// the preflight-dcgm-diag init container in the resolved values.
+//
+// The address is read rather than assumed because the mixin restates
+// preflight.initContainers, so a leaf override or --set-json can legitimately
+// point the check at a different hostengine. found=false means the DCGM check
+// is not configured at all, which is not this gate's business.
+func preflightConfiguredDCGMAddr(values map[string]any) (addr string, found bool, problem string) {
+	preflight, ok := values["preflight"].(map[string]any)
+	if !ok {
+		return "", false, ""
+	}
+	raw, present := preflight["initContainers"]
+	if !present {
+		return "", false, ""
+	}
+	list, ok := raw.([]any)
+	if !ok {
+		return "", false, fmt.Sprintf("preflight.initContainers is %T, want a list", raw)
+	}
+	var matches []map[string]any
+	for _, entry := range list {
+		container, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, _ := container["name"].(string); name == preflightDCGMDiagContainer {
+			matches = append(matches, container)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return "", false, ""
+	case 1:
+	default:
+		// Ambiguous rather than merely odd: the webhook injects whichever the
+		// controller resolves first, so the validated address may not be the
+		// one that runs.
+		return "", false, fmt.Sprintf("preflight.initContainers declares %s %d times; which address applies is ambiguous",
+			preflightDCGMDiagContainer, len(matches))
+	}
+	env, _ := matches[0]["env"].([]any)
+	for _, e := range env {
+		entry, ok := e.(map[string]any)
+		if !ok {
+			continue
+		}
+		if name, _ := entry["name"].(string); name != "DCGM_HOSTENGINE_ADDR" {
+			continue
+		}
+		value, ok := entry["value"].(string)
+		if !ok || strings.TrimSpace(value) == "" {
+			return "", false, fmt.Sprintf("%s sets DCGM_HOSTENGINE_ADDR to %v, want a non-empty string", preflightDCGMDiagContainer, entry["value"])
+		}
+		return value, true, ""
+	}
+	return "", false, fmt.Sprintf("%s declares no DCGM_HOSTENGINE_ADDR; the check cannot reach a hostengine", preflightDCGMDiagContainer)
+}
+
+// gpuOperatorDCGMService is the Service the GPU Operator creates for the
+// standalone DCGM hostengine. Only an address naming THIS Service is the GPU
+// Operator's; a differently-named Service in the same namespace is somebody
+// else's hostengine and nothing about gpu-operator constrains it.
+const gpuOperatorDCGMService = "nvidia-dcgm"
+
+// clusterLocalServiceRef splits a cluster-local Service address
+// (service.namespace.svc[.cluster.local][:port]) into its Service and
+// namespace. ok=false means the address is not of that form -- an external host
+// or IP, which this gate cannot reason about and deliberately leaves alone.
+//
+// Both halves are returned because the namespace alone is not enough to
+// identify the GPU Operator's hostengine: custom-hostengine.gpu-operator.svc
+// sits in that namespace without being its Service.
+func clusterLocalServiceRef(addr string) (service, namespace string, ok bool) {
+	host := addr
+	if idx := strings.LastIndex(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) < 3 || parts[2] != "svc" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+// CheckNVSentinelPreflightDCGMReachable rejects a bundle whose preflight DCGM
+// check cannot reach a hostengine.
+//
+// The address is read from the preflight-dcgm-diag init container rather than
+// assumed: the mixin restates preflight.initContainers, so a leaf override or
+// --set-json can legitimately retarget it, and a bogus address must fail even
+// when gpu-operator sits where the default expects. Once the address names a
+// cluster-local Service in gpu-operator's own namespace, every part of that has
+// to hold. Three ways it does not, none of
+// them visible until a GPU pod starts in an opted-in namespace:
+//
+//   - gpu-operator is absent or disabled, so nothing serves the Service;
+//   - gpu-operator is relocated (os-talos moves it to
+//     privileged-gpu-operator), so the DNS name does not resolve;
+//   - gpu-operator runs with dcgm.enabled: false, which is what the shipped
+//     Kind overlay does — only the embedded exporter runs and the standalone
+//     hostengine Service is never created.
+//
+// Registration details are in recipes/registry.yaml.
+func CheckNVSentinelPreflightDCGMReachable(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	sentinelRef := recipeResult.GetComponentRef(componentName)
+	if sentinelRef == nil {
+		return nil, nil
+	}
+	provider := recipeResult.DataProvider()
+	sentinelKeys := componentOverrideKeys(componentName, provider)
+	if componentDisabled(sentinelRef, bundlerConfig, sentinelKeys) {
+		return nil, nil
+	}
+
+	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, sentinelKeys, "NVSentinel preflight DCGM endpoint")
+	if err != nil {
+		return nil, []error{err}
+	}
+	// The DECLARED union, so a `bundlers=` subset that omits gpu-operator is not
+	// mistaken for a recipe that never had it. The same view must carry through
+	// to the values read below: resolving against the filtered result fails
+	// outright for a component that was filtered out, which would reject a
+	// legitimate partial bundle.
+	unionView := declaredUnionView(recipeResult)
+	gpuKeys := componentOverrideKeys("gpu-operator", provider)
+
+	// EVALUATED BEFORE the static enabled check below, not after. A dynamic
+	// declaration on global.preflight.enabled lets an operator turn preflight on
+	// at install time; returning early on the static "off" would mean this gate
+	// validated nothing and the DCGM endpoint was never checked at all.
+	if !nvsentinelPreflightEnabled(values) {
+		if msgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
+			[]string{preflightEnabledPath},
+			"decides whether the preflight DCGM check runs, and this recipe has it statically off -- so the gate would validate nothing while an install-time edit switched it on",
+		); len(msgs) > 0 {
+			for _, msg := range msgs {
+				slog.Warn(msg, logKeyComponent, componentName)
+			}
+			return msgs, nil
+		}
+		return nil, nil
+	}
+
+	// NVSentinel-side guard first: these two decide whether a DCGM check runs at
+	// all and where it points, so a dynamic declaration on either invalidates
+	// everything below regardless of what the static address turns out to be.
+	// The gpu-operator paths are NOT guarded here -- see below.
+	if msgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
+		[]string{preflightEnabledPath, "preflight.initContainers"},
+		"decides whether the preflight DCGM check runs and which hostengine it targets",
+	); len(msgs) > 0 {
+		for _, msg := range msgs {
+			slog.Warn(msg, logKeyComponent, componentName)
+		}
+		return msgs, nil
+	}
+
+	// Read the address the check is actually configured with rather than
+	// assuming the chart default: the mixin restates preflight.initContainers,
+	// so a leaf override or --set-json can legitimately retarget it.
+	dcgmAddr, configured, problem := preflightConfiguredDCGMAddr(values)
+	if problem != "" {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s", componentName, problem))}
+	}
+	if !configured {
+		// No DCGM check is injected, so there is no hostengine dependency.
+		return nil, nil
+	}
+
+	fail := func(reason string) ([]string, []error) {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: preflight is enabled but its %s check cannot reach %s -- %s. "+
+				"The check would fail at pod-start time in every opted-in namespace. Either deploy gpu-operator "+
+				"with dcgm.enabled: true in the namespace that address names, retarget DCGM_HOSTENGINE_ADDR on the "+
+				"%s init container, or do not compose the nvsentinel-preflight mixin onto this recipe",
+				componentName, preflightDCGMDiagContainer, dcgmAddr, reason, preflightDCGMDiagContainer))}
+	}
+
+	// Only a cluster-local Service address can be checked from here. An
+	// external host or IP is a deliberate choice this gate cannot verify.
+	service, namespace, isClusterLocal := clusterLocalServiceRef(dcgmAddr)
+	if !isClusterLocal {
+		return nil, nil
+	}
+	// A Service this operator does not own, even inside gpu-operator's own
+	// namespace, is an independent hostengine: whether gpu-operator is enabled
+	// or runs dcgm.enabled says nothing about whether it resolves.
+	if service != gpuOperatorDCGMService {
+		return nil, nil
+	}
+
+	gpuOperator := unionView.GetComponentRef("gpu-operator")
+	if gpuOperator == nil {
+		return fail("gpu-operator is not in the recipe, so nothing serves that Service")
+	}
+	if componentDisabled(gpuOperator, bundlerConfig, gpuKeys) {
+		return fail("gpu-operator is disabled")
+	}
+	// Compared against where gpu-operator actually lands, so any relocation is
+	// caught -- os-talos's today, and any other tomorrow.
+	gpuNamespace := gpuOperator.Namespace
+	if gpuNamespace == "" {
+		gpuNamespace = "gpu-operator"
+	}
+	if namespace != gpuNamespace {
+		return fail(fmt.Sprintf("it names namespace %q but gpu-operator is deployed to %q", namespace, gpuNamespace))
+	}
+
+	// Only here is a gpu-operator dependency established: the check is
+	// configured, cluster-local, and pointed at gpu-operator's own namespace.
+	// Guarding these paths any earlier rejects a --dynamic on gpu-operator for
+	// recipes where the DCGM check is absent or targets an external hostengine,
+	// neither of which depends on gpu-operator at all.
+	if msgs := nvsentinelDynamicGuardViolations(bundlerConfig, "gpu-operator", gpuKeys,
+		[]string{"enabled", "dcgm.enabled"},
+		"decides whether the DCGM hostengine this check depends on is deployed at all",
+	); len(msgs) > 0 {
+		for _, msg := range msgs {
+			slog.Warn(msg, logKeyComponent, componentName)
+		}
+		return msgs, nil
+	}
+
+	// dcgm.enabled gates the standalone hostengine DaemonSet and its Service.
+	gpuValues, err := effectiveComponentValues(ctx, unionView, bundlerConfig, "gpu-operator", gpuKeys, "NVSentinel preflight DCGM endpoint")
+	if err != nil {
+		return nil, []error{err}
+	}
+	dcgm, ok := gpuValues["dcgm"].(map[string]any)
+	if !ok {
+		// Absent means the chart default applies, which enables it.
+		return nil, nil
+	}
+	if raw, present := dcgm["enabled"]; present && !helmTruthy(raw) {
+		return fail("gpu-operator runs with dcgm.enabled: false, so the standalone DCGM hostengine Service is never created")
+	}
+	return nil, nil
+}
+
+// CheckNVSentinelPreflightGangSchedulerRequired blocks a bundle that enables
+// preflight gang coordination against KAI PodGroups while kai-scheduler is
+// disabled or absent.
+//
+// The dependencyRefs edge the mixin adds only orders the install; it does not
+// require the scheduler to stay enabled, and the bundler prunes an edge to a
+// declared-but-disabled component as "satisfied externally". Without the
+// PodGroup CRD the preflight controller fails its startup GVR resolution and
+// crash-loops — and because the webhook is failurePolicy: Ignore, every GPU pod
+// in a labeled namespace is then admitted unchecked, silently. Registration
+// details are in recipes/registry.yaml.
+func CheckNVSentinelPreflightGangSchedulerRequired(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	sentinelRef := recipeResult.GetComponentRef(componentName)
+	if sentinelRef == nil {
+		return nil, nil
+	}
+	provider := recipeResult.DataProvider()
+	sentinelKeys := componentOverrideKeys(componentName, provider)
+	if componentDisabled(sentinelRef, bundlerConfig, sentinelKeys) {
+		return nil, nil
+	}
+
+	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, sentinelKeys, "NVSentinel preflight gang scheduler")
+	if err != nil {
+		return nil, []error{err}
+	}
+
+	// Same fail-open shape as the gate-applies check below: returning early on
+	// a static "preflight off" would skip validation entirely while a dynamic
+	// declaration on that very flag lets an operator switch it on at install
+	// time.
+	if !nvsentinelPreflightEnabled(values) {
+		if msgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
+			[]string{preflightEnabledPath},
+			"decides whether the preflight controller runs at all, and this recipe has it statically off -- so the gate would validate nothing while an install-time edit switched it on",
+		); len(msgs) > 0 {
+			for _, msg := range msgs {
+				slog.Warn(msg, logKeyComponent, componentName)
+			}
+			return msgs, nil
+		}
+		return nil, nil
+	}
+	target, gvrVersion, gvrResource := nvsentinelPreflightGangTarget(values)
+
+	// EVALUATED BEFORE the static early return below, not after. The paths that
+	// decide whether this gate applies at all are exactly the ones whose
+	// dynamic declaration would let an operator opt into the KAI path at
+	// install time, after this gate concluded it had nothing to check. Guarding
+	// them only once the static config already targets KAI is fail-open.
+	gateApplies := target == gangTargetKAI || target == gangTargetKAIMalformed
+	if !gateApplies {
+		if msgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
+			[]string{preflightEnabledPath, "preflight.gangCoordination.enabled", "preflight.gangDiscovery.podGroupGVR"},
+			"decides whether the preflight controller resolves KAI PodGroups at startup, and this recipe does not statically target them -- so the gate would validate nothing while an install-time edit switched it on",
+		); len(msgs) > 0 {
+			for _, msg := range msgs {
+				slog.Warn(msg, logKeyComponent, componentName)
+			}
+			return msgs, nil
+		}
+		return nil, nil
+	}
+
+	// A KAI group with the wrong version or resource is rejected, not skipped:
+	// the controller resolves the GVR at startup and exits when it is absent,
+	// so this crash-loops exactly like a missing CRD.
+	if target == gangTargetKAIMalformed {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: preflight gang discovery targets %s/%s resource %q, but KAI serves %s/%s resource %q; "+
+				"the preflight controller resolves this GVR at startup and exits when it does not exist, so the Deployment "+
+				"crash-loops and the webhook (failurePolicy: Ignore) then admits every GPU pod unchecked. Set "+
+				"preflight.gangDiscovery.podGroupGVR to %s/%s/%s",
+				componentName, kaiPodGroupGVR.group, gvrVersion, gvrResource,
+				kaiPodGroupGVR.group, kaiPodGroupGVR.version, kaiPodGroupGVR.resource,
+				kaiPodGroupGVR.group, kaiPodGroupGVR.version, kaiPodGroupGVR.resource))}
+	}
+
+	// The gate applies. Now guard the dependency paths too.
+	kaiKeysForGuard := componentOverrideKeys("kai-scheduler", provider)
+	dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
+		[]string{preflightEnabledPath, "preflight.gangCoordination.enabled", "preflight.gangDiscovery.podGroupGVR"},
+		"decides whether the preflight controller resolves KAI PodGroups at startup")
+	dynMsgs = append(dynMsgs, nvsentinelDynamicGuardViolations(bundlerConfig, "kai-scheduler", kaiKeysForGuard,
+		[]string{"enabled"},
+		"decides whether the PodGroup CRD the preflight controller requires exists at all")...)
+	if len(dynMsgs) > 0 {
+		for _, msg := range dynMsgs {
+			slog.Warn(msg, logKeyComponent, componentName)
+		}
+		return dynMsgs, nil
+	}
+
+	// Read the DECLARED union, not the enabled set: a `bundlers=` subset that
+	// omits kai-scheduler is a legitimate partial install of a correct recipe.
+	// What must fail is a recipe where the scheduler is disabled or was never
+	// declared at all.
+	union := declaredUnionView(recipeResult)
+	kaiRef := union.GetComponentRef("kai-scheduler")
+	if kaiRef == nil {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: preflight gang discovery targets scheduling.run.ai PodGroups but kai-scheduler is not in the recipe; "+
+				"the preflight controller resolves that GVR at startup and exits when the CRD is absent, so the Deployment crash-loops "+
+				"and the webhook (failurePolicy: Ignore) then admits every GPU pod unchecked", componentName))}
+	}
+	kaiKeys := componentOverrideKeys("kai-scheduler", provider)
+	if componentDisabled(kaiRef, bundlerConfig, kaiKeys) {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: preflight gang discovery targets scheduling.run.ai PodGroups but kai-scheduler is disabled; "+
+				"the PodGroup CRD will not exist, so the preflight controller crash-loops on startup GVR resolution and the webhook "+
+				"(failurePolicy: Ignore) admits every GPU pod unchecked. Re-enable kai-scheduler or drop the nvsentinel-preflight mixin", componentName))}
 	}
 	return nil, nil
 }

@@ -1195,7 +1195,8 @@ The same assertion file now powers TWO surfaces:
    sanity invoked manually by chart authors. `check-health-all` sweeps
    only registry-linked components (`registry.yaml`'s
    `healthCheck.assertFile` entries); an opt-in-only check like
-   `nvsentinel-observability` runs via `check-health COMPONENT=<name>`.
+   `nvsentinel-observability` or `nvsentinel-preflight` runs via
+   `check-health COMPONENT=<name>`.
 2. **`aicr validate --phase deployment`** — registry-declared content is
    loaded into `ComponentRef.HealthCheckAsserts` during recipe
    resolution (PR #1219) and executed by the deployment validator's

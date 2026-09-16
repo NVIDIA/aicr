@@ -388,6 +388,17 @@ The trade-off is intentional. Pinning an image gives reproducibility; deferring 
 
 A recipe composing either mixin **with `nvsentinel` still enabled** adds these images to what it deploys and mirrors; `aicr bundle`/`aicr mirror` on such a recipe surfaces them even though this static BOM cannot. A chain that disables `nvsentinel` (the OCP overlay, for example) can compose a mixin and ship neither.
 
+The `nvsentinel-preflight` mixin (see [Preflight Checks](component-catalog.md#preflight-checks)) is the second case. Setting `global.preflight.enabled: true` on `nvsentinel` adds four images, all from `ghcr.io/nvidia/nvsentinel/` at the chart's own version and therefore already covered by the NVIDIA mirroring path — but none of them appear in the `nvsentinel` row above:
+
+| Image | Role |
+|---|---|
+| `ghcr.io/nvidia/nvsentinel/preflight` | the admission webhook controller |
+| `ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag` | injected init container: DCGM level-2 diagnostic |
+| `ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback` | injected init container: NCCL loopback bandwidth test |
+| `ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce` | injected init container: NCCL all-reduce bandwidth test |
+
+`TestNVSentinelPreflightChartRender` pins all four against the rendered chart, so a bump that changes a repository fails there rather than silently diverging from this table.
+
 ### Registries spanned
 
 AICR pulls from a deliberately diverse set of registries:

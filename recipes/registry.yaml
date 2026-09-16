@@ -395,15 +395,26 @@ components:
           - global.systemNodeSelector
         tolerationPaths:
           - global.systemNodeTolerations
-    # Opt-in surface for the nvsentinel-observability mixin (#2617) and the
-    # nvsentinel-object-monitor mixin (#2612): the exact leaf paths a mixin
-    # may set on this already-base-chained component.
-    # global.tracing.endpoint is deliberately absent -- it must come from
-    # outside the mixin (a leaf recipe's own override, or an operator
-    # --set), never from a mixin, so
+    # Opt-in surface for the nvsentinel-observability (#2617),
+    # nvsentinel-object-monitor (#2612) and nvsentinel-preflight (#2610)
+    # mixins: the exact leaf paths a mixin may set on this
+    # already-base-chained component. global.tracing.endpoint is
+    # deliberately absent -- it must come from outside the mixin (a leaf
+    # recipe's own override, or an operator --set), never from a mixin, so
     # CheckNVSentinelTracingEndpointRequired always has a real value to
     # demand. See pkg/recipe/metadata_store.go's mixinOverridesSafeForMerge
     # for how this allowlist is enforced.
+    #
+    # preflight.initContainers is allowlisted, and the mixin restates the whole
+    # list, because the chart's default is not safe here: preflight-nccl-allreduce
+    # is injected into every GPU pod, but POD_NAME is injected only when the pod
+    # carries a gang annotation at CREATE. A non-gang pod therefore fails the
+    # check's own config load and is stuck in Init:Error on healthy hardware.
+    # defaultEnabled is the chart's only per-check switch and it lives inside the
+    # list, so owning the list is the only way to turn that check off.
+    # Restating pins chart content (images, thresholds, the DCGM address), so
+    # TestNVSentinelPreflightInitContainersMatchChart diffs the mixin's list
+    # against the chart's on every render-check run.
     mixinSafeOverridePaths:
       - global.auditLogging.enabled
       - global.auditLogging.logRequestBody
@@ -415,6 +426,17 @@ components:
       - global.tracing.insecure
       - global.kubernetesObjectMonitor.enabled
       - kubernetes-object-monitor.policies
+      - global.preflight.enabled
+      - preflight.processingStrategy
+      - preflight.webhook.failurePolicy
+      - preflight.gangCoordination.enabled
+      - preflight.gangDiscovery.name
+      - preflight.gangDiscovery.annotationKeys
+      - preflight.gangDiscovery.podGroupGVR.group
+      - preflight.gangDiscovery.podGroupGVR.version
+      - preflight.gangDiscovery.podGroupGVR.resource
+      - preflight.gangDiscovery.minCountExpr
+      - preflight.initContainers
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
@@ -460,6 +482,20 @@ components:
       # to `aicr bundle`/`aicr validate`. A no-op for every recipe that
       # doesn't set global.tracing.enabled.
       - function: CheckNVSentinelTracingEndpointRequired
+        severity: error
+      # Blocking: the preflight DCGM check reaches the hostengine at a fixed
+      # address inside preflight.initContainers, so it is only correct while
+      # gpu-operator sits in its default namespace. The os-talos mixin
+      # relocates it, and the mismatch is invisible until a GPU pod starts in
+      # a labeled namespace. A no-op unless global.preflight.enabled is set.
+      - function: CheckNVSentinelPreflightDCGMReachable
+        severity: error
+      # Blocking: the mixin's kai-scheduler dependencyRef only orders the
+      # install, and the bundler prunes an edge to a declared-but-disabled
+      # component. Without the PodGroup CRD the preflight controller
+      # crash-loops, and failurePolicy: Ignore then admits every GPU pod
+      # unchecked. A no-op unless preflight gang discovery targets KAI.
+      - function: CheckNVSentinelPreflightGangSchedulerRequired
         severity: error
 
   - name: nvidia-dra-driver-gpu
