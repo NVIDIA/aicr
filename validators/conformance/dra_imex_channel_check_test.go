@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/watch"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	k8sfake "k8s.io/client-go/kubernetes/fake"
@@ -607,7 +608,7 @@ func TestCheckDRASupport_IMEXSkipsNodesWithAllocatedChannel(t *testing.T) {
 	})
 	t.Run("every candidate occupied, holder pod Running on the node → verified from the holder, nothing created", func(t *testing.T) {
 		holderPod := &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "slurmd-0", Namespace: "slurm"},
+			ObjectMeta: metav1.ObjectMeta{Name: "slurmd-0", Namespace: "slurm", UID: "u1"}, // matches the claim's reservedFor uid
 			Spec:       corev1.PodSpec{NodeName: "node1"},
 			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
 		}
@@ -682,9 +683,9 @@ func TestCheckDRASupport_IMEXSkipsNodesWithAllocatedChannel(t *testing.T) {
 // on structural validation alone, and it must not record the subtest as not
 // applicable.
 func TestCheckDRASupport_IMEXAllOccupiedNeverPassesUnverified(t *testing.T) {
-	runningOn := func(node string) *corev1.Pod {
+	runningOn := func(node, uid string) *corev1.Pod {
 		return &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "slurmd-0", Namespace: "slurm"},
+			ObjectMeta: metav1.ObjectMeta{Name: "slurmd-0", Namespace: "slurm", UID: types.UID(uid)},
 			Spec:       corev1.PodSpec{NodeName: node},
 			Status:     corev1.PodStatus{Phase: corev1.PodRunning},
 		}
@@ -700,9 +701,24 @@ func TestCheckDRASupport_IMEXAllOccupiedNeverPassesUnverified(t *testing.T) {
 			wantReason: "which no longer exists",
 		},
 		{
+			// The reservation names uid u1; a same-name replacement pod (u2)
+			// is Running on the right node but is NOT the reserved consumer.
+			name:       "holder pod replaced under the same name (uid mismatch)",
+			extraObjs:  []runtime.Object{runningOn("node1", "u2")},
+			wantReason: "uid u1 but the current pod has uid u2",
+		},
+		{
+			name:      "claim reservation carries no uid",
+			extraObjs: []runtime.Object{runningOn("node1", "u1")},
+			claimEdit: func(c *unstructured.Unstructured) {
+				_ = unstructured.SetNestedSlice(c.Object, []any{map[string]any{"resource": "pods", "name": "slurmd-0"}}, "status", "reservedFor")
+			},
+			wantReason: "without a UID",
+		},
+		{
 			name: "holder pod is Pending",
 			extraObjs: []runtime.Object{&corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{Name: "slurmd-0", Namespace: "slurm"},
+				ObjectMeta: metav1.ObjectMeta{Name: "slurmd-0", Namespace: "slurm", UID: "u1"},
 				Spec:       corev1.PodSpec{NodeName: "node1"},
 				Status:     corev1.PodStatus{Phase: corev1.PodPending},
 			}},
@@ -710,7 +726,7 @@ func TestCheckDRASupport_IMEXAllOccupiedNeverPassesUnverified(t *testing.T) {
 		},
 		{
 			name:       "holder pod runs on a different node",
-			extraObjs:  []runtime.Object{runningOn("node9")},
+			extraObjs:  []runtime.Object{runningOn("node9", "u1")},
 			wantReason: "on node node9, not this node",
 		},
 		{

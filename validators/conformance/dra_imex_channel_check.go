@@ -464,9 +464,18 @@ func consumeTemplateWatch(ctx context.Context, watcher watch.Interface) (appeare
 type channelHolder struct {
 	namespace string
 	name      string
-	// reservedPods are the pod names in status.reservedFor (resource
-	// "pods"); the pods live in the claim's namespace.
-	reservedPods []string
+	// reservedPods are the status.reservedFor entries with resource "pods";
+	// the pods live in the claim's namespace.
+	reservedPods []reservedPod
+}
+
+// reservedPod is one status.reservedFor consumer. The UID identifies exactly
+// one pod incarnation: a same-name replacement pod (StatefulSet restart) has
+// a different UID, and the claim status may lag the swap, so verification
+// must match the UID, never the name alone.
+type reservedPod struct {
+	name string
+	uid  string
 }
 
 func (h channelHolder) String() string { return h.namespace + "/" + h.name }
@@ -511,8 +520,9 @@ func occupiedComputeDomainNodes(ctx context.Context, dynClient dynamic.Interface
 			}
 			resource, _, _ := unstructured.NestedString(ref, "resource")
 			name, _, _ := unstructured.NestedString(ref, "name")
+			uid, _, _ := unstructured.NestedString(ref, "uid")
 			if resource == "pods" && name != "" {
-				holder.reservedPods = append(holder.reservedPods, name)
+				holder.reservedPods = append(holder.reservedPods, reservedPod{name: name, uid: uid})
 			}
 		}
 		seenNodes := make(map[string]struct{})
@@ -546,10 +556,11 @@ func occupiedComputeDomainNodes(ctx context.Context, dynClient dynamic.Interface
 
 // verifyOccupiedChannelAllocation is the all-candidates-occupied verdict.
 // It passes only when at least one holding claim on a candidate node is
-// allocated, reserved by a pod, and that pod is Running on the same node —
+// allocated, reserved by a pod, and that exact pod (matched by the
+// reservation's UID, not just its name) is Running on the same node —
 // behavioral proof that the driver allocated the channel and the kubelet
-// prepared it for a consumer. Every holder is inspected and recorded; when
-// none verifies, the subtest FAILS as inconclusive rather than passing
+// prepared it for that consumer. Every holder is inspected and recorded;
+// when none verifies, the subtest FAILS as inconclusive rather than passing
 // without behavioral evidence.
 func verifyOccupiedChannelAllocation(ctx *validators.Context, candidates []string, occupied map[string][]channelHolder) error {
 	var lines []string
@@ -560,7 +571,12 @@ func verifyOccupiedChannelAllocation(ctx *validators.Context, candidates []strin
 				lines = append(lines, fmt.Sprintf("%s: claim %s allocated but reserved for no pod — not verifiable", node, h))
 				continue
 			}
-			for _, podName := range h.reservedPods {
+			for _, rp := range h.reservedPods {
+				podName := rp.name
+				if rp.uid == "" {
+					lines = append(lines, fmt.Sprintf("%s: claim %s reserved for pod %s/%s without a UID — not verifiable", node, h, h.namespace, podName))
+					continue
+				}
 				pod, err := ctx.Clientset.CoreV1().Pods(h.namespace).Get(ctx.Ctx, podName, metav1.GetOptions{})
 				switch {
 				case k8serrors.IsNotFound(err):
@@ -570,6 +586,9 @@ func verifyOccupiedChannelAllocation(ctx *validators.Context, candidates []strin
 					return classifyK8sReadError(err, fmt.Sprintf("pod %s/%s holding IMEX channel claim %s", h.namespace, podName, h))
 				}
 				switch {
+				case string(pod.UID) != rp.uid:
+					lines = append(lines, fmt.Sprintf("%s: claim %s reserved for pod %s/%s uid %s but the current pod has uid %s (replaced since the reservation) — not verifiable",
+						node, h, h.namespace, podName, rp.uid, pod.UID))
 				case pod.Spec.NodeName != node:
 					lines = append(lines, fmt.Sprintf("%s: claim %s reserved for pod %s/%s on node %s, not this node — not verifiable",
 						node, h, h.namespace, podName, valueOrUnknown(pod.Spec.NodeName)))
