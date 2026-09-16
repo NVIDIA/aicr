@@ -147,14 +147,18 @@ type FailureCause struct {
 
 // VerifyResult is what Verify returns to its caller.
 type VerifyResult struct {
-	Input        InputForm              `json:"input" yaml:"input"`
-	Pointer      *attestation.Pointer   `json:"pointer,omitempty" yaml:"pointer,omitempty"`
-	Predicate    *attestation.Predicate `json:"predicate,omitempty" yaml:"predicate,omitempty"`
-	Signer       *SignerClaims          `json:"signer,omitempty" yaml:"signer,omitempty"`
-	RecipeName   string                 `json:"recipeName,omitempty" yaml:"recipeName,omitempty"`
-	BundleDigest string                 `json:"bundleDigest,omitempty" yaml:"bundleDigest,omitempty"`
-	Steps        []StepResult           `json:"steps" yaml:"steps"`
-	Exit         int                    `json:"exit" yaml:"exit"`
+	Input     InputForm              `json:"input" yaml:"input"`
+	Pointer   *attestation.Pointer   `json:"pointer,omitempty" yaml:"pointer,omitempty"`
+	Predicate *attestation.Predicate `json:"predicate,omitempty" yaml:"predicate,omitempty"`
+	// PredicateType is the predicateType recorded alongside Predicate, one
+	// of PredicateTypeV1, V2, or V3. It determines which subject-digest
+	// canonicalization algorithm was used to bind Predicate.Recipe.Digest.
+	PredicateType string        `json:"predicateType,omitempty" yaml:"predicateType,omitempty"`
+	Signer        *SignerClaims `json:"signer,omitempty" yaml:"signer,omitempty"`
+	RecipeName    string        `json:"recipeName,omitempty" yaml:"recipeName,omitempty"`
+	BundleDigest  string        `json:"bundleDigest,omitempty" yaml:"bundleDigest,omitempty"`
+	Steps         []StepResult  `json:"steps" yaml:"steps"`
+	Exit          int           `json:"exit" yaml:"exit"`
 
 	// Pending is true when the bundle is unsigned — a "pending signature"
 	// state, not a failure. An in-flight PR that committed an unsigned

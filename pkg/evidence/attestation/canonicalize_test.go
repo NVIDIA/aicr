@@ -159,3 +159,82 @@ configuration:
 		t.Fatalf("accounting mode change did not change recipe digest: %s", disabledDigest)
 	}
 }
+
+func TestCanonicalizeRecipeYAMLV3_StripsMetadataVersion(t *testing.T) {
+	in := []byte("metadata:\n  version: 1.2.3\n  name: foo\nfoo: bar\n")
+	got, err := CanonicalizeRecipeYAMLV3(in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(string(got), "1.2.3") {
+		t.Errorf("expected metadata.version to be stripped, got %q", got)
+	}
+	if !strings.Contains(string(got), "name: foo") {
+		t.Errorf("expected other metadata fields to survive, got %q", got)
+	}
+}
+
+func TestCanonicalizeRecipeYAMLV3_NoopWithoutMetadataOrVersion(t *testing.T) {
+	for _, in := range [][]byte{
+		[]byte("foo: bar\n"),
+		[]byte("metadata:\n  name: foo\nfoo: bar\n"),
+	} {
+		v1, err := CanonicalizeRecipeYAML(in)
+		if err != nil {
+			t.Fatalf("CanonicalizeRecipeYAML(%q) error = %v", in, err)
+		}
+		v3, err := CanonicalizeRecipeYAMLV3(in)
+		if err != nil {
+			t.Fatalf("CanonicalizeRecipeYAMLV3(%q) error = %v", in, err)
+		}
+		if string(v1) != string(v3) {
+			t.Errorf("expected V3 to equal V1 when there is no metadata.version to strip: %q vs %q", v1, v3)
+		}
+	}
+}
+
+func TestSubjectDigestV3_IgnoresMetadataVersion(t *testing.T) {
+	a := []byte("metadata:\n  version: 1.0.0\nfoo: bar\n")
+	b := []byte("metadata:\n  version: 2.0.0\nfoo: bar\n")
+	da, err := SubjectDigestV3(a)
+	if err != nil {
+		t.Fatalf("SubjectDigestV3(a) error = %v", err)
+	}
+	db, err := SubjectDigestV3(b)
+	if err != nil {
+		t.Fatalf("SubjectDigestV3(b) error = %v", err)
+	}
+	if da != db {
+		t.Errorf("expected V3 digest to ignore metadata.version: %q vs %q", da, db)
+	}
+
+	// SubjectDigest (V1/V2) has no such carve-out. The same version change
+	// still changes the digest.
+	da1, _ := SubjectDigest(a)
+	db1, _ := SubjectDigest(b)
+	if da1 == db1 {
+		t.Errorf("expected V1/V2 digest to remain sensitive to metadata.version, both %q", da1)
+	}
+}
+
+func TestSubjectDigestForType_DispatchesOnPredicateType(t *testing.T) {
+	in := []byte("metadata:\n  version: 1.0.0\nfoo: bar\n")
+
+	v3, err := SubjectDigestForType(in, PredicateTypeV3)
+	if err != nil {
+		t.Fatalf("SubjectDigestForType(v3) error = %v", err)
+	}
+	if want, _ := SubjectDigestV3(in); v3 != want {
+		t.Errorf("SubjectDigestForType(v3) = %q, want %q", v3, want)
+	}
+
+	for _, pt := range []string{PredicateTypeV1, PredicateTypeV2, "unknown"} {
+		got, err := SubjectDigestForType(in, pt)
+		if err != nil {
+			t.Fatalf("SubjectDigestForType(%s) error = %v", pt, err)
+		}
+		if want, _ := SubjectDigest(in); got != want {
+			t.Errorf("SubjectDigestForType(%s) = %q, want legacy digest %q", pt, got, want)
+		}
+	}
+}

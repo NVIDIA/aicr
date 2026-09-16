@@ -114,8 +114,8 @@ func ValidateBundleProfileCoherence(b *Bundle) error {
 	case b.Profile != "" && b.Predicate.Profile == nil:
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"bundle recipe carries profile selection "+b.Profile+
-				" but the predicate has no profile block — profiled evidence requires "+
-				PredicateTypeV2+"; re-emit the bundle")
+				" but the predicate has no profile block. Profiled evidence requires "+
+				"a predicate profile block. Re-emit the bundle")
 	case b.Profile != "" && b.Predicate.Profile.Selection != b.Profile:
 		return errors.New(errors.ErrCodeInvalidRequest,
 			"bundle recipe profile selection "+b.Profile+
