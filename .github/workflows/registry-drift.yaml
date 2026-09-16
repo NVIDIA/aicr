@@ -226,8 +226,13 @@ jobs:
           if [[ "${POST_SLACK}" != "true" ]]; then
             echo "Slack post disabled for this run (POST_SLACK=${POST_SLACK}); skipping"
           elif [[ -n "${SLACK_SERVICE}" ]]; then
+            # Bound the webhook request to prevent the step from hanging until the
+            # 20-minute workflow timeout if the Slack endpoint stalls. No --retry:
+            # a retried webhook POST can deliver duplicate digests.
             curl -sSf -X POST \
               -H 'Content-type: application/json' \
+              --connect-timeout 10 \
+              --max-time 30 \
               --data @slack-payload.json \
               "https://hooks.slack.com/services/${SLACK_SERVICE}"
           else
