@@ -957,13 +957,13 @@ func TestSupportedNCCLCombinations_Variants(t *testing.T) {
 			name:    "NET EKS GB200",
 			variant: variantNET,
 			service: recipe.CriteriaServiceEKS,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		},
 		{
 			name:    "NVLS EKS GB200",
 			variant: variantNVLS,
 			service: recipe.CriteriaServiceEKS,
-			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200},
+			want:    []recipe.CriteriaAcceleratorType{recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		},
 		{
 			name:    "NVLS OKE GB200",

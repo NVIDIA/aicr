@@ -156,11 +156,12 @@ const (
 	// deleting the driver pods does NOT reload the module, because
 	// k8s-driver-manager keys on a digest of the ClusterPolicy spec rather than
 	// the ConfigMap contents (#2459).
-	nvregDocsHint = `NVreg_GrdmaPciTopoCheckOverride=1 is required on GB200 nodes; without it NCCL ` +
-		`silently falls back to the Socket transport. Deleting the nvidia-driver ` +
-		`DaemonSet pods does NOT apply it — k8s-driver-manager keys on a digest of the ` +
-		`ClusterPolicy spec, not the ConfigMap. Procedure and the node-image ` +
-		`(OKE oci-managed) variant: docs/user/validation.md, "GB200 NET preflight".`
+	nvregDocsHint = `NVreg_GrdmaPciTopoCheckOverride=1 is required on GB200 (EKS, OKE) and GB300 ` +
+		`(EKS) nodes; without it NCCL silently falls back to the Socket transport. ` +
+		`Deleting the nvidia-driver DaemonSet pods does NOT apply it — k8s-driver-manager ` +
+		`keys on a digest of the ClusterPolicy spec, not the ConfigMap. Procedure and the ` +
+		`node-image (OKE oci-managed) variant: docs/user/validation.md, "Grace Blackwell ` +
+		`NET preflight".`
 
 	// nvregOverrideRemovedHint is emitted on R595+. It states only what the code
 	// established — the override is gone — and does not assert the hardware is
@@ -223,8 +224,8 @@ func splitNVregProbeOutput(out string) (versionFile, paramsFile string, paramsOK
 // preflightGB200NetNVregFlag checks each target GPU node for the driver-side
 // prerequisite of GPUDirect RDMA over its PCIe-attached NIC. It does not prove
 // RDMA works end to end — it establishes that the one setting AICR controls is
-// in place. Called only for the NET variant on GB200/EKS and GB200/OKE; NVLS
-// traffic stays on NVLink-C2C and does not need it.
+// in place. Called only for the NET variant on GB200/EKS, GB200/OKE, and
+// GB300/EKS; NVLS traffic stays on NVLink-C2C and does not need it.
 //
 // The requirement is driver-version dependent: before R595 it is the
 // NVreg_GrdmaPciTopoCheckOverride=1 module parameter (R580 is the version AICR
@@ -556,22 +557,26 @@ func waitForPreflightPodPhase(ctx context.Context, clientset kubernetes.Interfac
 	}
 }
 
-// gb200NetPreflightApplies reports whether the preflight check should run for
-// the given (variant, accelerator, service) tuple. Keeps the call site at the
-// top of validateNcclAllReduceBw uncluttered.
+// graceBlackwellNetPreflightApplies reports whether the preflight check
+// should run for the given (variant, accelerator, service) tuple. Keeps the
+// call site at the top of validateNcclAllReduceBw uncluttered.
 //
-// EKS and OKE are the two GB200 NET fabrics that traverse a PCIe-attached NIC
+// EKS and OKE are the GB200 NET fabrics that traverse a PCIe-attached NIC
 // (EFA and ConnectX IB respectively), so both need the dma-buf prerequisite —
 // the module flag before R595, and on R595+ a topology property this preflight
-// cannot check, where it fails rather than assume.
+// cannot check, where it fails rather than assume. GB300 EKS shares the same
+// Grace PCI topology and EFA dma-buf requirement — see the
+// kernel-module-params ConfigMap in recipes/overlays/gb300-eks-training.yaml.
 // On OKE the flag reaches the driver only under gpuStack=operator-managed
 // (the leaf's kernel-module-params ConfigMap needs a driver DaemonSet to
 // consume it — see recipes/overlays/gb200-oke-training.yaml); under the
 // default oci-managed profile the driver ships in the node image, so this
 // preflight is the fail-closed gate that catches an image driver missing the
 // flag before NCCL silently degrades to Socket (#2356 review).
-func gb200NetPreflightApplies(variant ncclVariant, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType) bool {
-	return variant == variantNET &&
-		accelerator == recipe.CriteriaAcceleratorGB200 &&
-		(service == recipe.CriteriaServiceEKS || service == recipe.CriteriaServiceOKE)
+func graceBlackwellNetPreflightApplies(variant ncclVariant, accelerator recipe.CriteriaAcceleratorType, service recipe.CriteriaServiceType) bool {
+	if variant != variantNET {
+		return false
+	}
+	return (accelerator == recipe.CriteriaAcceleratorGB200 && (service == recipe.CriteriaServiceEKS || service == recipe.CriteriaServiceOKE)) ||
+		(accelerator == recipe.CriteriaAcceleratorGB300 && service == recipe.CriteriaServiceEKS)
 }
