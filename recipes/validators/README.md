@@ -15,7 +15,7 @@ validators:
     phase: deployment               # deployment | performance | conformance
     description: "Human-readable"   # Shown in CTRF report
     image: ghcr.io/.../img:latest   # OCI image reference
-    timeout: 2m                     # Job activeDeadlineSeconds
+    timeout: 2m                     # Check's own budget (AICR_CHECK_TIMEOUT); activeDeadlineSeconds adds headroom
     args: ["operator-health"]       # Container arguments
     env: []                         # Optional environment variables
     resources:                      # Optional (omit for defaults)
