@@ -60,16 +60,20 @@
 #     workflow + RENOVATE.md scope of this change rather than adding a third
 #     script file).
 #   * A GITHUB_TOKEN-authored push fires no pull_request event (GitHub's
-#     anti-recursion rule for its own token), so the PR's checks would stay
-#     bound to the pre-push head SHA — pending forever. workflow_dispatch is
-#     a documented exception to that rule. merge-gate.yaml produces this
-#     repo's sole required "gate" check (its `tests` job calls
-#     qualification.yaml, whose `tests` job is what actually runs this golden
-#     test) and already declares `workflow_dispatch: {}`, so this workflow
-#     dispatches it explicitly after pushing to re-attach checks to the new
-#     head SHA. Whether that dispatched run's path filtering behaves the same
-#     as a pull_request run is itself unverified — see the comment on the
-#     re-fire step below.
+#     anti-recursion rule for its own token), so the PR's checks stay bound
+#     to the pre-push head SHA. workflow_dispatch looks like a way around
+#     that — it is a documented exception to the anti-recursion rule, and
+#     merge-gate.yaml (this repo's sole required "gate" check; its `tests`
+#     job calls qualification.yaml, whose `tests` job is what actually runs
+#     this golden test) already declares `workflow_dispatch: {}` — but it
+#     does not work: a dispatched run's checks attach to the commit, not to
+#     the PR's statusCheckRollup, and required-status-check evaluation reads
+#     the rollup, not the commit's check-runs. Measured directly on PR #2780
+#     by dispatching merge-gate.yaml at this workflow's refreshed head: 70
+#     check-runs on the commit, 27 of them from the dispatched run, 0 of
+#     those 27 in the PR's statusCheckRollup (44 entries, none from the
+#     dispatched run). This workflow does not attempt a re-fire; see the
+#     hand-off step below instead.
 #
 # Hermetic: the golden test never fetches a chart — only the --vendor-charts
 # path does, which this test does not take (see
@@ -78,20 +82,19 @@
 # bom-refresh.yaml that recipe-health-refresh.yaml documents for its own
 # render-free generator.
 #
-# Unverifiable until a real Renovate PR exercises this path:
-#   * Whether the dispatched merge-gate.yaml run's checks actually land on
-#     and satisfy the PR's required "gate" context for the new head SHA.
-#   * Whether merge-gate.yaml's check-paths job classifies that run's changed
-#     paths correctly under workflow_dispatch (no equivalent to its `push`
-#     carve-out exists for this event — see the re-fire step).
-# If the gate does not reattach, this repo's existing /ok-to-test
-# maintainer-comment path (.github/workflows/ok-to-test.yaml) is NOT a
-# confirmed substitute: it dispatches qualification.yaml directly, producing
-# individual qualification check names, not merge-gate.yaml's "gate"
-# aggregate — it has not been shown to satisfy the "gate" required check
-# either. A PR stuck in that state needs a maintainer to investigate
-# directly, e.g. by re-running merge-gate.yaml's own workflow_dispatch
-# trigger by hand and inspecting which jobs it ran.
+# Confirmed on PR #2780: the dispatched merge-gate.yaml run's check-paths
+# job classified changed paths correctly under workflow_dispatch (16 real
+# jobs + 11 skips, against 17 real + 11 skips on the PR-triggered run for
+# the same change), so path filtering was never the problem — rollup
+# association is. There is no workflow_dispatch input or path-filter fix for
+# that; a dispatched run's checks cannot satisfy a PR's required check,
+# full stop. The existing /ok-to-test maintainer-comment path
+# (.github/workflows/ok-to-test.yaml) does not help either: it dispatches
+# qualification.yaml directly, producing individual qualification check
+# names, not merge-gate.yaml's "gate" aggregate. After this workflow commits
+# a refresh, the PR's checks stay bound to the pre-refresh head SHA until a
+# maintainer pushes any commit to the branch, or closes and reopens the PR
+# — the hand-off step below leaves a notice and job-summary line saying so.
 
 name: Render Golden Refresh
 
@@ -127,7 +130,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write   # commit the refreshed golden via createCommitOnBranch
-      actions: write    # re-fire the gate, which a GITHUB_TOKEN push cannot do
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -212,28 +214,18 @@ jobs:
 
           echo "Committed refreshed golden as ${commit_oid} on ${HEAD_REF} (GitHub-signed, Verified)."
 
-      # check-paths (merge-gate.yaml) forces every path-filter output `true`
-      # only for the `push` event; there is no equivalent carve-out for
-      # workflow_dispatch, so dorny/paths-filter runs here with no explicit
-      # `base:` input. Its documented default is to diff against the
-      # merge-base with the default branch, which should still classify this
-      # SHA's changes as `code`, but that inference has never been exercised
-      # — merge-gate.yaml's workflow_dispatch trigger has existed since #651
-      # as generic manual-trigger capability, not for this. If the inference
-      # is wrong, the re-fired "gate" could be satisfied by the cheaper
-      # `*-skip` jobs instead of the real ones — a wider blast radius than
-      # just this golden test. The first real Renovate PR this runs against
-      # must be checked for which jobs (real or skip) actually ran.
-      - name: Re-fire the gate on the new head SHA
+      # workflow_dispatch cannot re-attach checks to the PR (see the header
+      # comment: a dispatched run's checks land on the commit, never on the
+      # PR's statusCheckRollup, confirmed on PR #2780), so this workflow
+      # does not attempt one. This step just makes the hand-off explicit
+      # instead of leaving a green job that silently did not unblock the PR.
+      - name: Hand off the manual re-trigger to a maintainer
         if: steps.drift.outputs.changed == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
-          gh workflow run merge-gate.yaml -R "${REPO}" --ref "${HEAD_REF}"
-          echo "Dispatched merge-gate.yaml on ${HEAD_REF}: a GITHUB_TOKEN-authored"
-          echo "commit fires no pull_request event, so this re-attaches the 'gate'"
-          echo "check to the new head SHA (path-filter behavior under workflow_dispatch"
-          echo "is unverified — see the comment above)."
+          MSG="The golden was refreshed on this branch. A GITHUB_TOKEN push emits no"
+          MSG="${MSG} pull_request event, so the PR's checks still point at the previous"
+          MSG="${MSG} head SHA. A maintainer must trigger a PR-associated run: push any"
+          MSG="${MSG} commit to the branch, or close and reopen the PR."
+          echo "::notice::${MSG}"
+          echo "${MSG}" >> "$GITHUB_STEP_SUMMARY"
