@@ -86,9 +86,8 @@ run_bounded() {
 # `$(...)` waits on that grandchild and the bound buys nothing. A file has no
 # such reader, so the step returns when the bounded process does.
 BOUNDED_OUT="$(mktemp)"
-CRD_MANIFEST="$(mktemp)"
-SPLIT_DIR=""
-trap 'rm -f "${BOUNDED_OUT}" "${CRD_MANIFEST}"; [[ -n "${SPLIT_DIR}" ]] && rm -rf "${SPLIT_DIR}"' EXIT
+CRD_DIR="$(mktemp -d)"
+trap 'rm -f "${BOUNDED_OUT}"; rm -rf "${CRD_DIR}"' EXIT
 # Progress is announced before each bounded call and timed after it. deploy.sh
 # captures this and prints it only when a component fails, so it costs nothing
 # on a good run and names the slow call on a bad one. Without it a stalled step
@@ -101,6 +100,35 @@ capture_bounded() {
   run_bounded "$@" >"${BOUNDED_OUT}" 2>&1 || rc=$?
   echo "${RELEASE}: crd-step: $1 $2 exited ${rc} after $((SECONDS - started))s"
   return ${rc}
+}
+
+# Read CRDs out of the chart archive rather than out of `helm show crds`.
+#
+# That command's output shape is version-dependent: Helm 4 prepends "---"
+# before every CRD, Helm 3 prepends one only for `show all` and emits nothing
+# between documents. Parsing it meant a separator-based filter that silently
+# matched nothing on Helm 3, reported "chart ships no CRDs", and exited 0 with
+# the schema left stranded, which is the defect this script exists to prevent
+# appearing on the success path where nothing reports it. A chart's crds/
+# directory is the same on both, one file per document, so the archive is the
+# stable source.
+#
+# Recurses into packaged dependencies so a chart whose CRDs arrive through a
+# subchart is covered, matching what `helm show crds` reported.
+collect_crds() { # $1 = chart .tgz, $2 = destination directory
+  local work sub f
+  work="$(mktemp -d)"
+  if ! tar -xzf "$1" -C "${work}" 2>/dev/null; then
+    rm -rf "${work}"
+    return 1
+  fi
+  while IFS= read -r f; do
+    cp "${f}" "${2}/$(printf '%s' "${f#"${work}"/}" | tr '/' '_')"
+  done < <(find "${work}" -type f -path '*/crds/*' \( -name '*.yaml' -o -name '*.yml' \))
+  while IFS= read -r sub; do
+    collect_crds "${sub}" "${2}" || true
+  done < <(find "${work}" -type f -path '*/charts/*' -name '*.tgz')
+  rm -rf "${work}"
 }
 
 # Does a release already exist? An existing release means an upgrade, and helm
@@ -169,38 +197,28 @@ if [[ -z "${pulled}" ]]; then
 fi
 mv -f "${pulled}" "${PULLED_CHART}"
 
-# sed drops helm's own progress output: for an OCI chart `helm show crds`
-# writes "Pulled:" and "Digest:" lines to stdout, and those two parse as a
-# valid YAML mapping, so kubectl rejects the stream with
-# "error validating data: [apiVersion not set, kind not set]".
-if ! capture_bounded helm show crds "${PULLED_CHART}"; then
-  echo "ERROR: cannot read ${RELEASE} CRDs from its pinned chart: $(cat "${BOUNDED_OUT}")" >&2
+if ! collect_crds "${PULLED_CHART}" "${CRD_DIR}"; then
+  echo "ERROR: cannot read CRDs from the ${RELEASE} chart archive." >&2
   exit 1
 fi
-sed -n '/^---$/,$p' "${BOUNDED_OUT}" >"${CRD_MANIFEST}"
 {{- else }}
-# The wrapper chart resolves the vendored upstream chart from
-# charts/<chart>-<version>.tgz, and `helm show crds` recurses into chart
-# dependencies, so this reports the vendored chart's CRDs.
-#
-# sed drops any helm progress output ahead of the first document; see the
-# upstream-chart variant of this script for the failure it prevents.
-if ! capture_bounded helm show crds ./; then
-  echo "ERROR: cannot read ${RELEASE} CRDs from its vendored chart: $(cat "${BOUNDED_OUT}")" >&2
+# The wrapper folder carries the upstream chart as charts/<chart>-<version>.tgz,
+# already one immutable artifact shared with the release, so there is nothing to
+# pull and nothing that can drift between phases.
+vendored="$(find "${SCRIPT_DIR}/charts" -maxdepth 1 -name '*.tgz' -print -quit 2>/dev/null)"
+if [[ -z "${vendored}" ]]; then
+  echo "ERROR: ${RELEASE} is a vendored component but ships no chart archive." >&2
   exit 1
 fi
-sed -n '/^---$/,$p' "${BOUNDED_OUT}" >"${CRD_MANIFEST}"
+if ! collect_crds "${vendored}" "${CRD_DIR}"; then
+  echo "ERROR: cannot read CRDs from the vendored ${RELEASE} chart archive." >&2
+  exit 1
+fi
 {{- end }}
 
 # An ownsCRDs component whose chart ships no CRDs is a no-op, not a failure:
-# `kubectl apply` on an empty stream exits non-zero with "no objects passed to
-# apply", which would abort the deploy over nothing.
-#
-# grep, not a `${var//...}` substitution. The payload is a chart's full CRD set,
-# megabytes of OpenAPI schema for a component like nvsentinel, and bash global
-# substring replacement on a string that size takes minutes. It also never
-# enters a shell variable for the same reason.
-if ! grep -q '[^[:space:]]' "${CRD_MANIFEST}"; then
+# kubectl rejects an empty input, which would abort the deploy over nothing.
+if ! find "${CRD_DIR}" -type f -name '*.y*ml' -print -quit | grep -q .; then
   echo "${RELEASE}: chart ships no CRDs; nothing to apply."
   exit 0
 fi
@@ -219,7 +237,7 @@ fi
 # rather than an error. A failure here is indeterminate and fails closed, for
 # the same reason the release lookup does.
 if [[ "${RELEASE_EXISTS}" == "false" ]]; then
-  if ! capture_bounded kubectl get -f "${CRD_MANIFEST}" --ignore-not-found -o name ${KUBECONFIG_FLAG:-}; then
+  if ! capture_bounded kubectl get -f "${CRD_DIR}" --ignore-not-found -o name ${KUBECONFIG_FLAG:-}; then
     echo "ERROR: cannot determine whether ${RELEASE} CRDs are already present; refusing" >&2
     echo "       to skip and risk pairing a new controller with a retained schema: $(cat "${BOUNDED_OUT}")" >&2
     exit 1
@@ -245,18 +263,9 @@ fi
 # replace discards a runtime-injected caBundle. Applying different update
 # semantics per deployer for one audited flag is the thing to avoid.
 #
-# Split per document: a chart's CRD set can be partly present after a partial
-# prior install, and replace fails on an object that does not exist while
-# create fails on one that does. Trying create first and falling back to
-# replace needs no existence probe of its own.
-SPLIT_DIR="$(mktemp -d)"
-trap 'rm -f "${BOUNDED_OUT}" "${CRD_MANIFEST}"; rm -rf "${SPLIT_DIR}"' EXIT
-awk -v d="${SPLIT_DIR}" '/^---[[:space:]]*$/ { n++; next } { print >> (d "/doc-" n ".yaml") }' \
-  "${CRD_MANIFEST}"
-
-for doc in "${SPLIT_DIR}"/doc-*.yaml; do
-  [[ -e "${doc}" ]] || continue
-  grep -q '[^[:space:]]' "${doc}" || continue
+# One file per CRD document, straight from the archive, so no separator
+# parsing is involved and the loop works the same on Helm 3 and Helm 4.
+while IFS= read -r doc; do
   if capture_bounded kubectl create -f "${doc}" ${KUBECONFIG_FLAG:-}; then
     continue
   fi
@@ -264,4 +273,4 @@ for doc in "${SPLIT_DIR}"/doc-*.yaml; do
     echo "ERROR: could not create or replace a ${RELEASE} CRD: $(cat "${BOUNDED_OUT}")" >&2
     exit 1
   fi
-done
+done < <(find "${CRD_DIR}" -type f -name '*.y*ml' | sort)

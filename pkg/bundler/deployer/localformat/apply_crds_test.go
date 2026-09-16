@@ -213,15 +213,16 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 	// a bare "exit 0", which the chart-ships-no-CRDs branch also satisfies, so
 	// it would have passed with the release gate's skip removed entirely.
 	blocks := map[string]string{
-		"release gate queries helm":               `if ! capture_bounded helm list --namespace "${NAMESPACE}" \`,
-		"indeterminate state aborts":              "  exit 1\nfi\nexisting=",
-		"absent release checks for retained CRDs": `  if ! capture_bounded kubectl get -f "${CRD_MANIFEST}" --ignore-not-found -o name ${KUBECONFIG_FLAG:-}; then`,
-		"only absent release AND no CRDs skips":   `    echo "${RELEASE}: no release and no existing CRDs; helm install creates them."`,
-		"bound kills a wedged client":             `  "${TIMEOUT_BIN}" -k 5 "${CRD_STEP_TIMEOUT}" "$@" </dev/null`,
-		"missing timeout fails closed":            "cannot be bounded",
-		"create-or-replace, not apply":            `  if capture_bounded kubectl create -f "${doc}" ${KUBECONFIG_FLAG:-}; then`,
-		"replace makes the chart authoritative":   `  if ! capture_bounded kubectl replace -f "${doc}" ${KUBECONFIG_FLAG:-}; then`,
-		"both phases share one artifact":          `if ! capture_bounded helm pull "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" \`,
+		"release gate queries helm":                 `if ! capture_bounded helm list --namespace "${NAMESPACE}" \`,
+		"indeterminate state aborts":                "  exit 1\nfi\nexisting=",
+		"absent release checks for retained CRDs":   `  if ! capture_bounded kubectl get -f "${CRD_DIR}" --ignore-not-found -o name ${KUBECONFIG_FLAG:-}; then`,
+		"only absent release AND no CRDs skips":     `    echo "${RELEASE}: no release and no existing CRDs; helm install creates them."`,
+		"bound kills a wedged client":               `  "${TIMEOUT_BIN}" -k 5 "${CRD_STEP_TIMEOUT}" "$@" </dev/null`,
+		"missing timeout fails closed":              "cannot be bounded",
+		"create-or-replace, not apply":              `  if capture_bounded kubectl create -f "${doc}" ${KUBECONFIG_FLAG:-}; then`,
+		"replace makes the chart authoritative":     `  if ! capture_bounded kubectl replace -f "${doc}" ${KUBECONFIG_FLAG:-}; then`,
+		"both phases share one artifact":            `if ! capture_bounded helm pull "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" \`,
+		"CRDs come from the archive, not show crds": `if ! collect_crds "${PULLED_CHART}" "${CRD_DIR}"; then`,
 	}
 	for name, block := range blocks {
 		if !strings.Contains(got, block) {
@@ -237,7 +238,7 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 	// into the deploy path once already, so it must stay in a file.
 	for _, banned := range []string{
 		"$(helm show crds", "$(helm list", "$(run_bounded", "| kubectl apply",
-		"${crds//", "${retained//", "kubectl apply --server-side",
+		"${crds//", "${retained//", "kubectl apply --server-side", "capture_bounded helm show", "sed -n '/^---$/,$p'",
 	} {
 		if strings.Contains(got, banned) {
 			t.Errorf("apply-crds.sh runs %q outside run_bounded; an unbounded call hangs "+
@@ -460,6 +461,46 @@ func stubPATH(t *testing.T, stubs map[string]string) string {
 	return dir + string(os.PathListSeparator) + os.Getenv("PATH")
 }
 
+// chartArchiveWithCRD builds a real chart .tgz containing one CRD whose file
+// does not begin with "---", which is the shape Helm 3 produces and the shape
+// that silently applied nothing before CRDs were read from the archive.
+func chartArchiveWithCRD(t *testing.T) string {
+	t.Helper()
+	for _, bin := range []string{"tar"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not available", bin)
+		}
+	}
+	root := t.TempDir()
+	crdDir := filepath.Join(root, "k8s-aibom", "crds")
+	if err := os.MkdirAll(crdDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	crd := "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n" +
+		"metadata:\n  name: things.example.com\n"
+	if err := os.WriteFile(filepath.Join(crdDir, "thing.yaml"), []byte(crd), 0o644); err != nil {
+		t.Fatalf("write crd: %v", err)
+	}
+	tgz := filepath.Join(t.TempDir(), "chart.tgz")
+	if out, err := exec.Command("tar", "-czf", tgz, "-C", root, "k8s-aibom").CombinedOutput(); err != nil {
+		t.Fatalf("tar: %v\n%s", err, out)
+	}
+	return tgz
+}
+
+// helmStub returns a helm stub whose `list` behaves as listBody and whose
+// `pull` hands back a real chart archive.
+func helmStub(listBody, tgz string) string {
+	return "#!/usr/bin/env bash\n" +
+		"case \"$1\" in\n" +
+		"  list) " + listBody + " ;;\n" +
+		"  pull)\n" +
+		"    dest=.\n" +
+		"    while [[ $# -gt 0 ]]; do [[ \"$1\" == --destination ]] && dest=\"$2\"; shift; done\n" +
+		"    cp " + tgz + " \"${dest}/pulled.tgz\" ;;\n" +
+		"esac\nexit 0\n"
+}
+
 // writeApplyCRDs renders a bundle for c and returns the path to its
 // apply-crds.sh.
 func writeApplyCRDs(t *testing.T, c localformat.Component) string {
@@ -527,15 +568,7 @@ func TestApplyCRDsScript_BoundsStalledApply(t *testing.T) {
 	// script reaches the apply. kubectl hangs, standing in for a wedged
 	// apiserver.
 	stalledPATH := stubPATH(t, map[string]string{
-		"helm": "#!/usr/bin/env bash\n" +
-			"case \"$1\" in\n" +
-			"  list) echo k8s-aibom ;;\n" +
-			"  pull)\n" +
-			"    dest=.\n" +
-			"    while [[ $# -gt 0 ]]; do [[ \"$1\" == --destination ]] && dest=\"$2\"; shift; done\n" +
-			"    : >\"${dest}/stub-chart.tgz\" ;;\n" +
-			"  show) printf -- '---\\napiVersion: apiextensions.k8s.io/v1\\nkind: CustomResourceDefinition\\nmetadata:\\n  name: things.example.com\\n' ;;\n" +
-			"esac\nexit 0\n",
+		"helm": helmStub("echo k8s-aibom", chartArchiveWithCRD(t)),
 		// exec, so the stub process *becomes* sleep. Without it the wrapper
 		// is killed but sleep is orphaned, and the orphan holds the stdout
 		// pipe open, so the harness blocks for the full 300s even though the
@@ -607,15 +640,7 @@ func TestApplyCRDsScript_AppliesRetainedCRDsAfterUninstall(t *testing.T) {
 	// No release (uninstalled), but `kubectl get` finds the CRD still present,
 	// which is precisely the retained-CRD state.
 	path := stubPATH(t, map[string]string{
-		"helm": "#!/usr/bin/env bash\n" +
-			"case \"$1\" in\n" +
-			"  list) :  ;;\n" +
-			"  pull)\n" +
-			"    dest=.\n" +
-			"    while [[ $# -gt 0 ]]; do [[ \"$1\" == --destination ]] && dest=\"$2\"; shift; done\n" +
-			"    : >\"${dest}/stub-chart.tgz\" ;;\n" +
-			"  show) printf -- '---\\napiVersion: apiextensions.k8s.io/v1\\nkind: CustomResourceDefinition\\nmetadata:\\n  name: things.example.com\\n' ;;\n" +
-			"esac\nexit 0\n",
+		"helm": helmStub(":", chartArchiveWithCRD(t)),
 		"kubectl": "#!/usr/bin/env bash\n" +
 			"case \"$1\" in\n" +
 			"  get) echo customresourcedefinition.apiextensions.k8s.io/things.example.com ;;\n" +
@@ -647,15 +672,7 @@ func TestApplyCRDsScript_SkipsOnGenuinelyFreshCluster(t *testing.T) {
 	applied := filepath.Join(t.TempDir(), "applied")
 
 	path := stubPATH(t, map[string]string{
-		"helm": "#!/usr/bin/env bash\n" +
-			"case \"$1\" in\n" +
-			"  list) :  ;;\n" +
-			"  pull)\n" +
-			"    dest=.\n" +
-			"    while [[ $# -gt 0 ]]; do [[ \"$1\" == --destination ]] && dest=\"$2\"; shift; done\n" +
-			"    : >\"${dest}/stub-chart.tgz\" ;;\n" +
-			"  show) printf -- '---\\napiVersion: apiextensions.k8s.io/v1\\nkind: CustomResourceDefinition\\nmetadata:\\n  name: things.example.com\\n' ;;\n" +
-			"esac\nexit 0\n",
+		"helm": helmStub(":", chartArchiveWithCRD(t)),
 		// get finds nothing; any create or replace would be a bug.
 		"kubectl": "#!/usr/bin/env bash\n" +
 			"case \"$1\" in\n" +
@@ -676,5 +693,77 @@ func TestApplyCRDsScript_SkipsOnGenuinelyFreshCluster(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "no release and no existing CRDs") {
 		t.Errorf("expected the fresh-cluster skip message\n%s", out)
+	}
+}
+
+// TestApplyCRDsScript_AppliesCRDsWithoutLeadingSeparator pins that CRDs are
+// applied for a chart whose crds/ files do not begin with "---".
+//
+// This was a silent no-op. The script used to filter `helm show crds` output
+// with sed -n '/^---$/,$p', which assumed Helm 4's shape: Helm 4 prepends a
+// separator before every CRD, Helm 3 prepends one only for `show all` and
+// emits none between documents (helm v3.19.0 pkg/action/show.go). On Helm 3
+// the filter matched nothing, the emptiness guard reported "chart ships no
+// CRDs", and the deploy exited 0 with the schema stranded, which is the defect
+// this script exists to prevent showing up on the success path.
+//
+// Reading crds/ out of the chart archive removes the dependency on that output
+// entirely, so this test builds a real .tgz whose CRD file starts with
+// `apiVersion:` and asserts the CRD still reaches the cluster.
+func TestApplyCRDsScript_AppliesCRDsWithoutLeadingSeparator(t *testing.T) {
+	for _, bin := range []string{"bash", "tar"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not available", bin)
+		}
+	}
+	scriptPath := writeApplyCRDs(t, ownsCRDsComponent(true))
+	applied := filepath.Join(t.TempDir(), "applied")
+
+	// A chart archive whose only CRD file opens with apiVersion, no separator.
+	chartRoot := t.TempDir()
+	crdDir := filepath.Join(chartRoot, "k8s-aibom", "crds")
+	if err := os.MkdirAll(crdDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	crd := "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n" +
+		"metadata:\n  name: things.example.com\n"
+	if err := os.WriteFile(filepath.Join(crdDir, "thing.yaml"), []byte(crd), 0o644); err != nil {
+		t.Fatalf("write crd: %v", err)
+	}
+	tgz := filepath.Join(t.TempDir(), "chart.tgz")
+	if out, err := exec.Command("tar", "-czf", tgz, "-C", chartRoot, "k8s-aibom").CombinedOutput(); err != nil {
+		t.Fatalf("tar: %v\n%s", err, out)
+	}
+
+	path := stubPATH(t, map[string]string{
+		// Release exists, so the script goes straight to applying. pull hands
+		// back the archive built above.
+		"helm": "#!/usr/bin/env bash\n" +
+			"case \"$1\" in\n" +
+			"  list) echo k8s-aibom ;;\n" +
+			"  pull)\n" +
+			"    dest=.\n" +
+			"    while [[ $# -gt 0 ]]; do [[ \"$1\" == --destination ]] && dest=\"$2\"; shift; done\n" +
+			"    cp " + tgz + " \"${dest}/pulled.tgz\" ;;\n" +
+			"esac\nexit 0\n",
+		"kubectl": "#!/usr/bin/env bash\n" +
+			"case \"$1\" in\n" +
+			"  create|replace) touch " + applied + " ;;\n" +
+			"esac\nexit 0\n",
+		"timeout": "#!/usr/bin/env bash\n[[ \"$1\" == -k ]] && shift 2\nshift\nexec \"$@\"\n",
+	})
+
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+path)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("script failed: %v\n%s", err, out)
+	}
+	if strings.Contains(string(out), "ships no CRDs") {
+		t.Fatalf("script decided the chart ships no CRDs; the separator-shaped filter "+
+			"is back and this is a silent no-op\n%s", out)
+	}
+	if _, statErr := os.Stat(applied); statErr != nil {
+		t.Fatalf("CRD without a leading separator was never applied (%v)\n%s", statErr, out)
 	}
 }
