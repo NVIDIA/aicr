@@ -1035,7 +1035,7 @@ aicr query --service eks --accelerator h100 --intent training \
 # select the gb200 profile instead
 aicr query --service eks --accelerator gb200 --intent training \
   --selector components.nodewright-customizations.values
-# GB300: tuned-only manifest (nvidia-setup ships no gb300 config)
+# GB300 on EKS: same shared setup-and-tuning manifest as gb200
 aicr query --service eks --accelerator gb300 --intent training \
   --selector components.nodewright-customizations.values
 
