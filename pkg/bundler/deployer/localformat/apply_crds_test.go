@@ -219,7 +219,9 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 		"only absent release AND no CRDs skips":   `    echo "${RELEASE}: no release and no existing CRDs; helm install creates them."`,
 		"bound kills a wedged client":             `  "${TIMEOUT_BIN}" -k 5 "${CRD_STEP_TIMEOUT}" "$@" </dev/null`,
 		"missing timeout fails closed":            "cannot be bounded",
-		"the apply is bounded too":                `run_bounded kubectl apply --server-side --force-conflicts ${KUBECONFIG_FLAG:-} -f "${CRD_MANIFEST}"`,
+		"create-or-replace, not apply":            `  if capture_bounded kubectl create -f "${doc}" ${KUBECONFIG_FLAG:-}; then`,
+		"replace makes the chart authoritative":   `  if ! capture_bounded kubectl replace -f "${doc}" ${KUBECONFIG_FLAG:-}; then`,
+		"both phases share one artifact":          `if ! capture_bounded helm pull "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" \`,
 	}
 	for name, block := range blocks {
 		if !strings.Contains(got, block) {
@@ -235,7 +237,7 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 	// into the deploy path once already, so it must stay in a file.
 	for _, banned := range []string{
 		"$(helm show crds", "$(helm list", "$(run_bounded", "| kubectl apply",
-		"${crds//", "${retained//",
+		"${crds//", "${retained//", "kubectl apply --server-side",
 	} {
 		if strings.Contains(got, banned) {
 			t.Errorf("apply-crds.sh runs %q outside run_bounded; an unbounded call hangs "+
@@ -288,11 +290,20 @@ func TestApplyCRDsScript_RejectsInjectedRecipeValues(t *testing.T) {
 	// release, which is the earliest exit and still passes through every
 	// interpolation above it.
 	stub := t.TempDir()
-	for _, name := range []string{"helm", "kubectl"} {
-		if werr := os.WriteFile(filepath.Join(stub, name),
-			[]byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); werr != nil {
-			t.Fatalf("write %s stub: %v", name, werr)
-		}
+	if werr := os.WriteFile(filepath.Join(stub, "kubectl"),
+		[]byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); werr != nil {
+		t.Fatalf("write kubectl stub: %v", werr)
+	}
+	// helm pull must leave a tarball behind, since the script binds both
+	// phases to that one artifact and aborts if the pull produced nothing.
+	if werr := os.WriteFile(filepath.Join(stub, "helm"), []byte(
+		"#!/usr/bin/env bash\n"+
+			"if [[ \"$1\" == pull ]]; then\n"+
+			"  dest=.\n"+
+			"  while [[ $# -gt 0 ]]; do [[ \"$1\" == --destination ]] && dest=\"$2\"; shift; done\n"+
+			"  : >\"${dest}/stub-chart.tgz\"\n"+
+			"fi\nexit 0\n"), 0o755); werr != nil {
+		t.Fatalf("write helm stub: %v", werr)
 	}
 	// Prepend rather than replace: the script calls dirname and pwd, so a
 	// stub-only PATH kills it at the first line and every assertion below
@@ -519,7 +530,11 @@ func TestApplyCRDsScript_BoundsStalledApply(t *testing.T) {
 		"helm": "#!/usr/bin/env bash\n" +
 			"case \"$1\" in\n" +
 			"  list) echo k8s-aibom ;;\n" +
-			"  show) printf -- '---\\napiVersion: apiextensions.k8s.io/v1\\nkind: CustomResourceDefinition\\n' ;;\n" +
+			"  pull)\n" +
+			"    dest=.\n" +
+			"    while [[ $# -gt 0 ]]; do [[ \"$1\" == --destination ]] && dest=\"$2\"; shift; done\n" +
+			"    : >\"${dest}/stub-chart.tgz\" ;;\n" +
+			"  show) printf -- '---\\napiVersion: apiextensions.k8s.io/v1\\nkind: CustomResourceDefinition\\nmetadata:\\n  name: things.example.com\\n' ;;\n" +
 			"esac\nexit 0\n",
 		// exec, so the stub process *becomes* sleep. Without it the wrapper
 		// is killed but sleep is orphaned, and the orphan holds the stdout
@@ -594,14 +609,18 @@ func TestApplyCRDsScript_AppliesRetainedCRDsAfterUninstall(t *testing.T) {
 	path := stubPATH(t, map[string]string{
 		"helm": "#!/usr/bin/env bash\n" +
 			"case \"$1\" in\n" +
-			"  list) : ;;\n" + // no release
+			"  list) :  ;;\n" +
+			"  pull)\n" +
+			"    dest=.\n" +
+			"    while [[ $# -gt 0 ]]; do [[ \"$1\" == --destination ]] && dest=\"$2\"; shift; done\n" +
+			"    : >\"${dest}/stub-chart.tgz\" ;;\n" +
 			"  show) printf -- '---\\napiVersion: apiextensions.k8s.io/v1\\nkind: CustomResourceDefinition\\nmetadata:\\n  name: things.example.com\\n' ;;\n" +
 			"esac\nexit 0\n",
 		"kubectl": "#!/usr/bin/env bash\n" +
-			"for a in \"$@\"; do\n" +
-			"  if [[ \"$a\" == get ]]; then echo customresourcedefinition.apiextensions.k8s.io/things.example.com; exit 0; fi\n" +
-			"  if [[ \"$a\" == apply ]]; then touch " + applied + "; cat >/dev/null; exit 0; fi\n" +
-			"done\nexit 0\n",
+			"case \"$1\" in\n" +
+			"  get) echo customresourcedefinition.apiextensions.k8s.io/things.example.com ;;\n" +
+			"  create|replace) touch " + applied + " ;;\n" +
+			"esac\nexit 0\n",
 		"timeout": "#!/usr/bin/env bash\n[[ \"$1\" == -k ]] && shift 2\nshift\nexec \"$@\"\n",
 	})
 
@@ -630,14 +649,18 @@ func TestApplyCRDsScript_SkipsOnGenuinelyFreshCluster(t *testing.T) {
 	path := stubPATH(t, map[string]string{
 		"helm": "#!/usr/bin/env bash\n" +
 			"case \"$1\" in\n" +
-			"  list) : ;;\n" +
+			"  list) :  ;;\n" +
+			"  pull)\n" +
+			"    dest=.\n" +
+			"    while [[ $# -gt 0 ]]; do [[ \"$1\" == --destination ]] && dest=\"$2\"; shift; done\n" +
+			"    : >\"${dest}/stub-chart.tgz\" ;;\n" +
 			"  show) printf -- '---\\napiVersion: apiextensions.k8s.io/v1\\nkind: CustomResourceDefinition\\nmetadata:\\n  name: things.example.com\\n' ;;\n" +
 			"esac\nexit 0\n",
-		// get finds nothing; apply would be a bug.
+		// get finds nothing; any create or replace would be a bug.
 		"kubectl": "#!/usr/bin/env bash\n" +
-			"for a in \"$@\"; do\n" +
-			"  if [[ \"$a\" == apply ]]; then touch " + applied + "; cat >/dev/null; exit 0; fi\n" +
-			"done\nexit 0\n",
+			"case \"$1\" in\n" +
+			"  create|replace) touch " + applied + " ;;\n" +
+			"esac\nexit 0\n",
 		"timeout": "#!/usr/bin/env bash\n[[ \"$1\" == -k ]] && shift 2\nshift\nexec \"$@\"\n",
 	})
 

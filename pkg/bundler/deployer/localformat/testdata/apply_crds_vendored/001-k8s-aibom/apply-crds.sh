@@ -87,7 +87,8 @@ run_bounded() {
 # such reader, so the step returns when the bounded process does.
 BOUNDED_OUT="$(mktemp)"
 CRD_MANIFEST="$(mktemp)"
-trap 'rm -f "${BOUNDED_OUT}" "${CRD_MANIFEST}"' EXIT
+SPLIT_DIR=""
+trap 'rm -f "${BOUNDED_OUT}" "${CRD_MANIFEST}"; [[ -n "${SPLIT_DIR}" ]] && rm -rf "${SPLIT_DIR}"' EXIT
 # Progress is announced before each bounded call and timed after it. deploy.sh
 # captures this and prints it only when a component fails, so it costs nothing
 # on a good run and names the slow call on a bad one. Without it a stalled step
@@ -188,7 +189,37 @@ if [[ "${RELEASE_EXISTS}" == "false" ]]; then
   echo "${RELEASE}: no release but CRDs remain from a previous install; updating them."
 fi
 
-# --server-side is required because these CRDs exceed the 262144-byte
-# annotation cap client-side apply depends on. --force-conflicts is required
-# because Helm created them on install and owns their fields.
-run_bounded kubectl apply --server-side --force-conflicts ${KUBECONFIG_FLAG:-} -f "${CRD_MANIFEST}"
+# Create or replace, not apply.
+#
+# Server-side apply resolves conflicts over fields present in the manifest, but
+# deletes an omitted field only when no other manager owns it. Helm created
+# these CRDs, so a schema field or spec.versions entry that a chart bump
+# *removes* stays owned by Helm and survives an apply that exits 0. Replace
+# makes the chart authoritative for the whole object, so removals converge.
+#
+# This is the semantic ownsCRDs was audited for: Flux uses
+# spec.upgrade.crds: CreateReplace for these same components, and the audit
+# criteria (sole ownership, no spec.conversion.strategy: Webhook) exist because
+# replace discards a runtime-injected caBundle. Applying different update
+# semantics per deployer for one audited flag is the thing to avoid.
+#
+# Split per document: a chart's CRD set can be partly present after a partial
+# prior install, and replace fails on an object that does not exist while
+# create fails on one that does. Trying create first and falling back to
+# replace needs no existence probe of its own.
+SPLIT_DIR="$(mktemp -d)"
+trap 'rm -f "${BOUNDED_OUT}" "${CRD_MANIFEST}"; rm -rf "${SPLIT_DIR}"' EXIT
+awk -v d="${SPLIT_DIR}" '/^---[[:space:]]*$/ { n++; next } { print >> (d "/doc-" n ".yaml") }' \
+  "${CRD_MANIFEST}"
+
+for doc in "${SPLIT_DIR}"/doc-*.yaml; do
+  [[ -e "${doc}" ]] || continue
+  grep -q '[^[:space:]]' "${doc}" || continue
+  if capture_bounded kubectl create -f "${doc}" ${KUBECONFIG_FLAG:-}; then
+    continue
+  fi
+  if ! capture_bounded kubectl replace -f "${doc}" ${KUBECONFIG_FLAG:-}; then
+    echo "ERROR: could not create or replace a ${RELEASE} CRD: $(cat "${BOUNDED_OUT}")" >&2
+    exit 1
+  fi
+done

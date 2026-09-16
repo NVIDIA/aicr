@@ -87,7 +87,8 @@ run_bounded() {
 # such reader, so the step returns when the bounded process does.
 BOUNDED_OUT="$(mktemp)"
 CRD_MANIFEST="$(mktemp)"
-trap 'rm -f "${BOUNDED_OUT}" "${CRD_MANIFEST}"' EXIT
+SPLIT_DIR=""
+trap 'rm -f "${BOUNDED_OUT}" "${CRD_MANIFEST}"; [[ -n "${SPLIT_DIR}" ]] && rm -rf "${SPLIT_DIR}"' EXIT
 # Progress is announced before each bounded call and timed after it. deploy.sh
 # captures this and prints it only when a component fails, so it costs nothing
 # on a good run and names the slow call on a bad one. Without it a stalled step
@@ -140,14 +141,39 @@ fi
 # shellcheck source=/dev/null
 source ./upstream.env
 
-# CHART carries the full OCI URI for OCI charts and just the chart name for
-# HTTP/HTTPS charts; REPO is non-empty only for the latter.
+# Pull once, then read the CRDs out of those exact bytes.
 #
+# Repository, chart, and version are coordinates, not content. Reading CRDs
+# through them and letting the release resolve them again is two fetches, and a
+# mutable tag does not promise both got the same artifact. Force-applying
+# cluster-scoped CRDs from one artifact while the release runs a controller
+# from another is precisely what the ownsCRDs audit is supposed to make
+# impossible, so both phases are bound to one file here: install.sh installs
+# PULLED_CHART when this script leaves it behind.
+#
+# Removed first, so a tarball from an earlier run can never be mistaken for
+# this one's.
+PULLED_CHART="${SCRIPT_DIR}/.aicr-chart.tgz"
+rm -f "${PULLED_CHART}"
+if ! capture_bounded helm pull "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" \
+  --destination "${SCRIPT_DIR}"; then
+  echo "ERROR: cannot fetch the ${RELEASE} chart: $(cat "${BOUNDED_OUT}")" >&2
+  exit 1
+fi
+# helm pull names the file after the chart and version; there is exactly one
+# because the directory was cleared of tarballs above.
+pulled="$(find "${SCRIPT_DIR}" -maxdepth 1 -name '*.tgz' -print -quit)"
+if [[ -z "${pulled}" ]]; then
+  echo "ERROR: helm pull reported success but produced no chart for ${RELEASE}." >&2
+  exit 1
+fi
+mv -f "${pulled}" "${PULLED_CHART}"
+
 # sed drops helm's own progress output: for an OCI chart `helm show crds`
 # writes "Pulled:" and "Digest:" lines to stdout, and those two parse as a
 # valid YAML mapping, so kubectl rejects the stream with
 # "error validating data: [apiVersion not set, kind not set]".
-if ! capture_bounded helm show crds "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}"; then
+if ! capture_bounded helm show crds "${PULLED_CHART}"; then
   echo "ERROR: cannot read ${RELEASE} CRDs from its pinned chart: $(cat "${BOUNDED_OUT}")" >&2
   exit 1
 fi
@@ -192,7 +218,37 @@ if [[ "${RELEASE_EXISTS}" == "false" ]]; then
   echo "${RELEASE}: no release but CRDs remain from a previous install; updating them."
 fi
 
-# --server-side is required because these CRDs exceed the 262144-byte
-# annotation cap client-side apply depends on. --force-conflicts is required
-# because Helm created them on install and owns their fields.
-run_bounded kubectl apply --server-side --force-conflicts ${KUBECONFIG_FLAG:-} -f "${CRD_MANIFEST}"
+# Create or replace, not apply.
+#
+# Server-side apply resolves conflicts over fields present in the manifest, but
+# deletes an omitted field only when no other manager owns it. Helm created
+# these CRDs, so a schema field or spec.versions entry that a chart bump
+# *removes* stays owned by Helm and survives an apply that exits 0. Replace
+# makes the chart authoritative for the whole object, so removals converge.
+#
+# This is the semantic ownsCRDs was audited for: Flux uses
+# spec.upgrade.crds: CreateReplace for these same components, and the audit
+# criteria (sole ownership, no spec.conversion.strategy: Webhook) exist because
+# replace discards a runtime-injected caBundle. Applying different update
+# semantics per deployer for one audited flag is the thing to avoid.
+#
+# Split per document: a chart's CRD set can be partly present after a partial
+# prior install, and replace fails on an object that does not exist while
+# create fails on one that does. Trying create first and falling back to
+# replace needs no existence probe of its own.
+SPLIT_DIR="$(mktemp -d)"
+trap 'rm -f "${BOUNDED_OUT}" "${CRD_MANIFEST}"; rm -rf "${SPLIT_DIR}"' EXIT
+awk -v d="${SPLIT_DIR}" '/^---[[:space:]]*$/ { n++; next } { print >> (d "/doc-" n ".yaml") }' \
+  "${CRD_MANIFEST}"
+
+for doc in "${SPLIT_DIR}"/doc-*.yaml; do
+  [[ -e "${doc}" ]] || continue
+  grep -q '[^[:space:]]' "${doc}" || continue
+  if capture_bounded kubectl create -f "${doc}" ${KUBECONFIG_FLAG:-}; then
+    continue
+  fi
+  if ! capture_bounded kubectl replace -f "${doc}" ${KUBECONFIG_FLAG:-}; then
+    echo "ERROR: could not create or replace a ${RELEASE} CRD: $(cat "${BOUNDED_OUT}")" >&2
+    exit 1
+  fi
+done
