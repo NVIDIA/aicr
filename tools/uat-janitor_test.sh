@@ -91,6 +91,9 @@ case "${sub}" in
   "storage ls")
     [ -n "${GCLOUD_LS_FIXTURE:-}" ] || { echo "gcloud: no listing" >&2; exit 1; }
     cat "${GCLOUD_LS_FIXTURE}"
+    # GCLOUD_LS_TRUNCATED emits a valid listing and THEN fails, the shape a
+    # throttled or interrupted `gcloud storage ls` takes.
+    [ -z "${GCLOUD_LS_TRUNCATED:-}" ] || { echo "gcloud: 503 backend error" >&2; exit 1; }
     ;;
   "storage cat")
     url="${!#}"
@@ -366,6 +369,20 @@ EOF
     check "nominates nothing when location is absent" "" "$(discover_gcp_state 2>/dev/null)"
     printf 'deployment:\n  id: aicr-uat\n  location: us-central1\n' >"${CFG}"
     check "nominates nothing when the listing fails" "" "$(GCLOUD_LS_FIXTURE='' discover_gcp_state 2>/dev/null)"
+
+    # A listing that emits rows and THEN fails stays best-effort, matching
+    # run_discovery's documented contract for all three clouds: the partial
+    # result is still reconciled and the failure is surfaced as a ::warning::,
+    # because discarding it would look identical to an empty fleet. Safe here
+    # because a short listing can only UNDER-nominate, and each row it does
+    # yield is re-verified against the state object and then against the run.
+    cat >"${LS_FIXTURE}" <<EOF
+    159556  2026-08-24T02:19:31Z  ${BASE}/dep-managed/default.tfstate
+EOF
+    check "keeps a truncated listing's rows" "dep-managed" \
+        "$(GCLOUD_LS_TRUNCATED=1 discover_gcp_state 2>/dev/null)"
+    check "warns about the truncated listing" "1" \
+        "$(GCLOUD_LS_TRUNCATED=1 discover_gcp_state 2>&1 >/dev/null | grep -c '^::warning::.*tfstate.*failed')"
 fi
 
 if [[ "${FAILED}" -eq 0 ]]; then
