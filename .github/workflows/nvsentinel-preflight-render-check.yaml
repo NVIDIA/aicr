@@ -64,4 +64,24 @@ jobs:
           version: ${{ steps.versions.outputs.helm }}
 
       - name: Render nvsentinel-preflight mixin
-        run: go test ./pkg/bundler/validations/... -run '^TestNVSentinelPreflight' -v -count=1
+        # `go test -run` exits 0 with "no tests to run" when a test is renamed,
+        # and -short skips these everywhere else -- so this lane is their only
+        # gate and a rename would silently drop the coverage. Assert each PASS
+        # line, as the BOM freshness gate does in merge-gate.yaml.
+        run: |
+          set -uo pipefail
+          tests='TestNVSentinelPreflightChartRender
+          TestNVSentinelPreflightAbsentWithoutMixin
+          TestNVSentinelPreflightInitContainersMatchChart'
+          pattern="^($(echo $tests | tr ' ' '|'))$"
+          out=$(go test ./pkg/bundler/validations/... -run "$pattern" -v -count=1 2>&1) && rc=0 || rc=$?
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+          for t in $tests; do
+            if ! grep -q "^--- PASS: $t" <<<"$out"; then
+              echo "::error::$t did not execute (renamed or removed?); the preflight render check would silently pass. Update this job to match."
+              exit 1
+            fi
+          done

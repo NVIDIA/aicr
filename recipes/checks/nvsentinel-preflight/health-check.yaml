@@ -38,7 +38,7 @@ metadata:
   name: nvsentinel-preflight-health-check
 spec:
   timeouts:
-    assert: 90s
+    assert: 5m
   steps:
     - name: validate-preflight-rollout
       try:

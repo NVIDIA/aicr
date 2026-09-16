@@ -2332,9 +2332,15 @@ const chartDefaultDCGMHostengineAddr = "nvidia-dcgm.gpu-operator.svc:5555"
 // point the check at a different hostengine. found=false means the DCGM check
 // is not configured at all, which is not this gate's business.
 func preflightConfiguredDCGMAddr(values map[string]any) (addr string, found bool, problem string) {
-	preflight, ok := values["preflight"].(map[string]any)
-	if !ok {
+	// A missing key means Helm supplies the chart default; a malformed one means
+	// an override replaced the block with something the chart cannot render.
+	rawPreflight, present := values["preflight"]
+	if !present {
 		return chartDefaultDCGMHostengineAddr, true, ""
+	}
+	preflight, ok := rawPreflight.(map[string]any)
+	if !ok {
+		return "", false, fmt.Sprintf("preflight is %T, want a map", rawPreflight)
 	}
 	raw, present := preflight["initContainers"]
 	if !present {
@@ -2388,6 +2394,35 @@ func preflightConfiguredDCGMAddr(values map[string]any) (addr string, found bool
 // Operator's; a differently-named Service in the same namespace is somebody
 // else's hostengine and nothing about gpu-operator constrains it.
 const gpuOperatorDCGMService = "nvidia-dcgm"
+
+// preflightDCGMServingGPUOperator picks the GPU Operator variant that could
+// serve the DCGM Service, with its override keys. An enabled ref wins over a
+// declared-but-disabled one: recipes/overlays/ocp.yaml declares gpu-operator-ocp
+// enabled alongside a disabled canonical gpu-operator in the same namespace, and
+// gpuOperatorComponentNames lists the canonical name first. With none enabled the
+// first declared ref is returned rather than nil, so the caller reports the
+// disabled case rather than the absent one.
+func preflightDCGMServingGPUOperator(
+	unionView *recipe.RecipeResult,
+	bundlerConfig *config.Config,
+	provider recipe.DataProvider,
+) (name string, ref *recipe.ComponentRef, keys []string) {
+
+	for _, candidate := range gpuOperatorComponentNames {
+		declared := unionView.GetComponentRef(candidate)
+		if declared == nil {
+			continue
+		}
+		candidateKeys := componentOverrideKeys(candidate, provider)
+		if !componentDisabled(declared, bundlerConfig, candidateKeys) {
+			return candidate, declared, candidateKeys
+		}
+		if ref == nil {
+			name, ref, keys = candidate, declared, candidateKeys
+		}
+	}
+	return name, ref, keys
+}
 
 // gpuOperatorDCGMPort is the port the GPU Operator's nvidia-dcgm Service
 // listens on. It comes from that operator's own Service spec, not from
@@ -2458,7 +2493,7 @@ func CheckNVSentinelPreflightDCGMReachable(ctx context.Context, componentName st
 	// outright for a component that was filtered out, which would reject a
 	// legitimate partial bundle.
 	unionView := declaredUnionView(recipeResult)
-	gpuKeys := componentOverrideKeys("gpu-operator", provider)
+	gpuName, gpuOperator, gpuKeys := preflightDCGMServingGPUOperator(unionView, bundlerConfig, provider)
 
 	// EVALUATED BEFORE the static enabled check below, not after. A dynamic
 	// declaration on global.preflight.enabled lets an operator turn preflight on
@@ -2534,12 +2569,11 @@ func CheckNVSentinelPreflightDCGMReachable(ctx context.Context, componentName st
 			port, gpuOperatorDCGMService, gpuOperatorDCGMPort))
 	}
 
-	gpuOperator := unionView.GetComponentRef("gpu-operator")
 	if gpuOperator == nil {
-		return fail("gpu-operator is not in the recipe, so nothing serves that Service")
+		return fail("no GPU Operator component is in the recipe, so nothing serves that Service")
 	}
 	if componentDisabled(gpuOperator, bundlerConfig, gpuKeys) {
-		return fail("gpu-operator is disabled")
+		return fail(fmt.Sprintf("%s is disabled", gpuName))
 	}
 	// Compared against where gpu-operator actually lands, so any relocation is
 	// caught -- os-talos's today, and any other tomorrow.
@@ -2548,7 +2582,7 @@ func CheckNVSentinelPreflightDCGMReachable(ctx context.Context, componentName st
 		gpuNamespace = "gpu-operator"
 	}
 	if namespace != gpuNamespace {
-		return fail(fmt.Sprintf("it names namespace %q but gpu-operator is deployed to %q", namespace, gpuNamespace))
+		return fail(fmt.Sprintf("it names namespace %q but %s is deployed to %q", namespace, gpuName, gpuNamespace))
 	}
 
 	// Only here is a gpu-operator dependency established: the check is
@@ -2556,7 +2590,7 @@ func CheckNVSentinelPreflightDCGMReachable(ctx context.Context, componentName st
 	// Guarding these paths any earlier rejects a --dynamic on gpu-operator for
 	// recipes where the DCGM check is absent or targets an external hostengine,
 	// neither of which depends on gpu-operator at all.
-	if msgs := nvsentinelDynamicGuardViolations(bundlerConfig, "gpu-operator", gpuKeys,
+	if msgs := nvsentinelDynamicGuardViolations(bundlerConfig, gpuName, gpuKeys,
 		[]string{"enabled", "dcgm.enabled"},
 		"decides whether the DCGM hostengine this check depends on is deployed at all",
 	); len(msgs) > 0 {
@@ -2567,7 +2601,7 @@ func CheckNVSentinelPreflightDCGMReachable(ctx context.Context, componentName st
 	}
 
 	// dcgm.enabled gates the standalone hostengine DaemonSet and its Service.
-	gpuValues, err := effectiveComponentValues(ctx, unionView, bundlerConfig, "gpu-operator", gpuKeys, "NVSentinel preflight DCGM endpoint")
+	gpuValues, err := effectiveComponentValues(ctx, unionView, bundlerConfig, gpuName, gpuKeys, "NVSentinel preflight DCGM endpoint")
 	if err != nil {
 		return nil, []error{err}
 	}
@@ -2577,7 +2611,7 @@ func CheckNVSentinelPreflightDCGMReachable(ctx context.Context, componentName st
 		return nil, nil
 	}
 	if raw, present := dcgm["enabled"]; present && !helmTruthy(raw) {
-		return fail("gpu-operator runs with dcgm.enabled: false, so the standalone DCGM hostengine Service is never created")
+		return fail(fmt.Sprintf("%s runs with dcgm.enabled: false, so the standalone DCGM hostengine Service is never created", gpuName))
 	}
 	return nil, nil
 }

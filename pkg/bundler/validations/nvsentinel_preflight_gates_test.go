@@ -294,6 +294,11 @@ func TestCheckNVSentinelPreflightDCGMReachable(t *testing.T) {
 	gpuOperatorWith := func(namespace string, overrides map[string]any) recipe.ComponentRef {
 		return recipe.ComponentRef{Name: "gpu-operator", Namespace: namespace, Overrides: overrides}
 	}
+	// The OCP shape: recipes/overlays/ocp.yaml declares the OCP variant enabled
+	// and the canonical name disabled, both in the gpu-operator namespace.
+	gpuOperatorOCP := func(namespace string, overrides map[string]any) recipe.ComponentRef {
+		return recipe.ComponentRef{Name: "gpu-operator-ocp", Namespace: namespace, Overrides: overrides}
+	}
 	dcgmEnabled := func(enabled any) map[string]any {
 		return map[string]any{"dcgm": map[string]any{"enabled": enabled}}
 	}
@@ -467,6 +472,51 @@ func TestCheckNVSentinelPreflightDCGMReachable(t *testing.T) {
 				sentinel(preflightOnWithAddr("", "")),
 				gpuOperatorWith("gpu-operator", dcgmEnabled(true)),
 			),
+		},
+		{
+			// gpuOperatorComponentNames lists the canonical name first, so taking
+			// the first declared ref reports the disabled one and rejects a
+			// bundle whose OCP variant serves that address perfectly well.
+			name: "OCP: canonical gpu-operator disabled, gpu-operator-ocp enabled -> allowed",
+			recipeResult: result(
+				sentinel(preflightOn("")),
+				gpuOperatorWith("gpu-operator", map[string]any{"enabled": false}),
+				gpuOperatorOCP("gpu-operator", dcgmEnabled(true)),
+			),
+		},
+		{
+			// The enabled OCP variant is the one whose dcgm.enabled decides it.
+			name: "OCP: gpu-operator-ocp enabled but dcgm disabled -> blocked",
+			recipeResult: result(
+				sentinel(preflightOn("")),
+				gpuOperatorWith("gpu-operator", map[string]any{"enabled": false}),
+				gpuOperatorOCP("gpu-operator", dcgmEnabled(false)),
+			),
+			wantBlocked: true,
+		},
+		{
+			// With none enabled the disabled case is still reported, not the
+			// absent one.
+			name: "OCP: both GPU Operator variants disabled -> blocked",
+			recipeResult: result(
+				sentinel(preflightOn("")),
+				gpuOperatorWith("gpu-operator", map[string]any{"enabled": false}),
+				gpuOperatorOCP("gpu-operator", map[string]any{"enabled": false}),
+			),
+			wantBlocked: true,
+		},
+		{
+			// A malformed preflight block is not a missing one: it must error
+			// rather than silently validate the chart-default endpoint.
+			name: "preflight values replaced by a scalar -> blocked",
+			recipeResult: result(
+				sentinel(map[string]any{
+					"global":    map[string]any{"preflight": map[string]any{"enabled": true}},
+					"preflight": "not-a-map",
+				}),
+				gpuOperatorWith("gpu-operator", dcgmEnabled(true)),
+			),
+			wantBlocked: true,
 		},
 		{
 			// The only genuine opt-out: an explicit list without the check.

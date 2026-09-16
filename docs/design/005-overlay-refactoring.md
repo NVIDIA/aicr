@@ -322,7 +322,8 @@ are truly orthogonal and reused enough to justify the indirection.
   - Duplicate constraint names between a mixin and the inheritance chain
     or between mixins in the same leaf produce a hard error.
   - Duplicate component names are allowed when the mixin's entry sets only
-    fields in the additive set `{Namespace, ManifestFiles, PreManifestFiles}`,
+    fields in the additive set
+    `{Namespace, ManifestFiles, PreManifestFiles, DependencyRefs}`,
     plus `Overrides` paths that are both allowlisted by the target
     component's own registry entry (`ComponentConfig.MixinSafeOverridePaths`)
     and non-colliding — an allowlisted path is still rejected when the
