@@ -156,11 +156,12 @@ const (
 	// deleting the driver pods does NOT reload the module, because
 	// k8s-driver-manager keys on a digest of the ClusterPolicy spec rather than
 	// the ConfigMap contents (#2459).
-	nvregDocsHint = `NVreg_GrdmaPciTopoCheckOverride=1 is required on GB200 nodes; without it NCCL ` +
-		`silently falls back to the Socket transport. Deleting the nvidia-driver ` +
-		`DaemonSet pods does NOT apply it — k8s-driver-manager keys on a digest of the ` +
-		`ClusterPolicy spec, not the ConfigMap. Procedure and the node-image ` +
-		`(OKE oci-managed) variant: docs/user/validation.md, "GB200 NET preflight".`
+	nvregDocsHint = `NVreg_GrdmaPciTopoCheckOverride=1 is required on GB200 (EKS, OKE) and GB300 ` +
+		`(EKS) nodes; without it NCCL silently falls back to the Socket transport. ` +
+		`Deleting the nvidia-driver DaemonSet pods does NOT apply it — k8s-driver-manager ` +
+		`keys on a digest of the ClusterPolicy spec, not the ConfigMap. Procedure and the ` +
+		`node-image (OKE oci-managed) variant: docs/user/validation.md, "Grace Blackwell ` +
+		`NET preflight".`
 
 	// nvregOverrideRemovedHint is emitted on R595+. It states only what the code
 	// established — the override is gone — and does not assert the hardware is
@@ -223,8 +224,8 @@ func splitNVregProbeOutput(out string) (versionFile, paramsFile string, paramsOK
 // preflightGB200NetNVregFlag checks each target GPU node for the driver-side
 // prerequisite of GPUDirect RDMA over its PCIe-attached NIC. It does not prove
 // RDMA works end to end — it establishes that the one setting AICR controls is
-// in place. Called only for the NET variant on GB200/EKS and GB200/OKE; NVLS
-// traffic stays on NVLink-C2C and does not need it.
+// in place. Called only for the NET variant on GB200/EKS, GB200/OKE, and
+// GB300/EKS; NVLS traffic stays on NVLink-C2C and does not need it.
 //
 // The requirement is driver-version dependent: before R595 it is the
 // NVreg_GrdmaPciTopoCheckOverride=1 module parameter (R580 is the version AICR
