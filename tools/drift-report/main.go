@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
@@ -64,6 +65,9 @@ func run(repoRoot, renovateReport, out, slackOut string, meta Meta) error {
 	if err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "encode drift report", err)
 	}
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "mkdir out parent", err)
+	}
 	if err := os.WriteFile(out, append(data, '\n'), 0o600); err != nil {
 		return errors.Wrap(errors.ErrCodeInternal, "write drift report", err)
 	}
@@ -71,6 +75,9 @@ func run(repoRoot, renovateReport, out, slackOut string, meta Meta) error {
 		payload, err := SlackPayload(report)
 		if err != nil {
 			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(slackOut), 0o755); err != nil {
+			return errors.Wrap(errors.ErrCodeInternal, "mkdir slack-out parent", err)
 		}
 		if err := os.WriteFile(slackOut, append(payload, '\n'), 0o600); err != nil {
 			return errors.Wrap(errors.ErrCodeInternal, "write Slack payload", err)
