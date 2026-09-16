@@ -114,6 +114,36 @@ func TestRegistryPinsAreRenovateTracked(t *testing.T) {
 		t.Errorf("tracked chart pins = %d, want 34; update this count and the spec deliberately", tracked)
 	}
 
+	// report.go joins Renovate's lookups by DepName alone (lookups[p.DepName]),
+	// so two pins sharing one DepName share whichever Lookup entry
+	// ParseRenovateReport's map kept last. That is safe only when the two
+	// pins are genuine twins (e.g. the -ocp variants: same Repository, same
+	// Chart, deliberately sharing one annotation) — an HTTP chart's DepName is
+	// deliberately just the bare chart name (the repository travels
+	// separately as registryUrl), so a *different* repository can collide on
+	// the same bare name without either pin's YAML looking wrong on its own.
+	// Assert every DepName collision is a real twin, so a future colliding
+	// bare chart name fails CI here instead of silently sharing a lookup and
+	// letting one pin's Latest apply to both.
+	coords := make(map[string]Pin, len(pins))
+	for _, p := range pins {
+		if p.DepName == "" {
+			continue
+		}
+		prev, seen := coords[p.DepName]
+		if !seen {
+			coords[p.DepName] = p
+			continue
+		}
+		if prev.Repository != p.Repository || prev.Chart != p.Chart {
+			t.Errorf("depName %q is shared by %q (repository %q, chart %q) and %q (repository %q, chart %q) "+
+				"but they are not the same chart; tools/drift-report/report.go joins Renovate lookups by "+
+				"depName alone, so these two pins would silently share one Lookup and one pin's Latest "+
+				"would be applied to the other — give them distinct depName annotations",
+				p.DepName, prev.Component, prev.Repository, prev.Chart, p.Component, p.Repository, p.Chart)
+		}
+	}
+
 	var stale []string
 	for name := range untrackedComponents {
 		if !used[name] {
