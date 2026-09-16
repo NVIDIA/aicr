@@ -213,12 +213,12 @@ require (
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
-	golang.org/x/crypto v0.56.0 // indirect
-	golang.org/x/exp v0.0.0-20260824195058-e88cd73687aa // indirect
-	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/crypto v0.57.0 // indirect
+	golang.org/x/exp v0.0.0-20260908205506-85c1c2202aba // indirect
+	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/text v0.41.0 // indirect
-	golang.org/x/tools v0.49.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/tools v0.50.0 // indirect
 	google.golang.org/api v0.297.0 // indirect
 	google.golang.org/genproto v0.0.0-20260831171406-18b4a7587f8a // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20260831171406-18b4a7587f8a // indirect
@@ -239,6 +239,13 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
 )
 
+// apidiff and go-licenses are built from this module rather than installed
+// with `go install pkg@version` (#2667), so the require lines below are the
+// only pin either tool has -- .settings.yaml deliberately does not repeat it.
+// The versions govern the tools' own source, not just their dependency set:
+// go-licenses links the go/packages library it uses to walk the graph and
+// locate GOROOT, so a bump here can change what `make license-check` and
+// THIRD_PARTY_NOTICES.md produce. It fails loudly rather than quietly.
 tool (
 	github.com/google/go-licenses/v2
 	golang.org/x/exp/cmd/apidiff
