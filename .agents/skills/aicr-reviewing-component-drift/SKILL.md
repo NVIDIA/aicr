@@ -42,10 +42,19 @@ Update it in Step 5.
 
 In order of preference:
 
-1. An explicit run: `gh run download <id> -R NVIDIA/aicr -n drift-report`
+1. An explicit run, downloaded into a scratch directory rather than the
+   working tree (`gh run download` extracts in place; without `--dir` the two
+   report files land as untracked files in this checkout and collide with
+   themselves on a second run):
+   ```bash
+   dir=$(mktemp -d "${TMPDIR:-/tmp}/aicr-drift.XXXXXX")
+   gh run download <id> -R NVIDIA/aicr -n drift-report --dir "$dir"
+   ```
+   Read `drift-report.json` and `drift-report-raw.json` from `"$dir"`.
 2. The latest run:
    `gh run list -R NVIDIA/aicr --workflow=registry-drift.yaml --status=success --event schedule --limit 1 --json databaseId`
-   then `gh run download <id> -R NVIDIA/aicr -n drift-report`
+   then the same scratch-directory download as above (`mktemp -d` + `gh run
+   download <id> -R NVIDIA/aicr -n drift-report --dir "$dir"`).
 
    The default is deliberately the weekly scheduled run on the default
    branch — `registry-drift.yaml` also runs on `workflow_dispatch` and, for a
