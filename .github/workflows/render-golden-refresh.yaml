@@ -1,0 +1,166 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Auto-refresh of pkg/bundler/testdata/stock_render_golden.yaml on Renovate
+# PRs that touch recipes/components/**.
+#
+# The golden pins a digest per leaf overlay over its fully rendered
+# helm-deployer output (TestStockRenderParityGolden). Renovate's `kubernetes`
+# manager bumps digest-pinned images inside recipes/components/*/manifests/**
+# and its `helm-values` manager bumps image tags in
+# recipes/components/*/values.yaml; both classes are configured to
+# auto-merge (matchManagers: ["kubernetes"], matchUpdateTypes: ["digest",
+# "pin"], automerge: true, automergeType: "pr" in .github/renovate.json5).
+# Renovate never regenerates the golden, so such a PR goes red and its
+# auto-merge stalls until a human clones the repo and runs the regeneration
+# command by hand — which is exactly what happened on PR #2773 (a
+# ubuntu:26.04 digest bump), merged over the red gate, which then took main
+# down.
+#
+# Renovate branches only, never a human PR: the golden exists so a human sees
+# an unintended change to rendered output. Auto-refreshing it on every PR
+# that touches recipes/components/** would silently absorb exactly that
+# signal — a contributor's values edit that leaked into other leaves would be
+# papered over and merged green. A digest/tag bump's effect on the golden is
+# arithmetic, not judgment, so that narrow class is safe to automate; the
+# general case is not. The branch-prefix check is the discriminator because
+# Renovate runs self-hosted under GITHUB_TOKEN in this repo, so its PRs are
+# authored by the `github-actions` app rather than `renovate[bot]` — the
+# actor is not a reliable signal, but PR #2773's head
+# (`renovate/ubuntu-26.04`) shows the branch prefix is.
+#
+# Having only GITHUB_TOKEN (no App token, no PAT) shapes the push:
+#   * The refreshed file is pushed through the REST Contents API rather than
+#     `git push`, so the commit is GitHub-signed (Verified) — the runner has
+#     no GPG key to `-S` with, and this repo requires signed + DCO
+#     signed-off commits.
+#   * A GITHUB_TOKEN-authored push fires no pull_request event (GitHub's
+#     anti-recursion rule for its own token), so the PR's checks would stay
+#     bound to the pre-push head SHA — pending forever. workflow_dispatch is
+#     a documented exception to that rule. merge-gate.yaml produces this
+#     repo's sole required "gate" check (its `tests` job calls
+#     qualification.yaml, whose `tests` job is what actually runs this golden
+#     test) and already declares `workflow_dispatch: {}`, so this workflow
+#     dispatches it explicitly after pushing to re-attach checks to the new
+#     head SHA.
+#
+# Hermetic: the golden test never fetches a chart — only the --vendor-charts
+# path does, which this test does not take (see
+# pkg/bundler/stock_render_parity_golden_test.go) — so this workflow has no
+# Helm setup and no network step, the same deliberate divergence from
+# bom-refresh.yaml that recipe-health-refresh.yaml documents for its own
+# render-free generator.
+#
+# Unverifiable until a real Renovate PR exercises this path: whether the
+# dispatched merge-gate.yaml run's checks actually land on and satisfy the
+# PR's required "gate" context for the new head SHA. If they do not, the
+# fallback is the path this repo already uses for a stuck bot/fork PR: a
+# maintainer comments /ok-to-test.
+
+name: Render Golden Refresh
+
+on:
+  pull_request:
+    paths:
+      - "recipes/components/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    # Renovate branches only. The golden exists so a human sees an unintended
+    # change to rendered output; auto-refreshing it on a contributor's PR
+    # would absorb that signal. A digest/tag bump's effect on the golden is
+    # arithmetic, so that narrow class is safe to automate. Same-repo only: a
+    # fork PR's token is read-only and could not push anyway, but the check
+    # is explicit rather than relying on that.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.head_ref, 'renovate/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write   # push the refreshed golden through the Contents API
+      actions: write    # re-fire the gate, which a GITHUB_TOKEN push cannot do
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.head_ref }}
+          # The push goes through the Contents API below, not git — no token
+          # needs to be persisted in .git/config.
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      - name: Regenerate render golden
+        run: AICR_UPDATE_GOLDEN=1 go test ./pkg/bundler/ -run '^TestStockRenderParityGolden$' -count=1 -v
+
+      - name: Check for drift
+        id: drift
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain -- pkg/bundler/testdata/stock_render_golden.yaml)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat -- pkg/bundler/testdata/stock_render_golden.yaml
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Golden already current; nothing to refresh."
+          fi
+
+      - name: Push refreshed golden through the Contents API
+        if: steps.drift.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          FILE=pkg/bundler/testdata/stock_render_golden.yaml
+          BLOB_SHA="$(gh api "repos/${REPO}/contents/${FILE}?ref=${HEAD_REF}" -q .sha)"
+          MESSAGE="$(printf '%s\n\n%s\n%s\n\n%s' \
+            'test(bundler): refresh render golden' \
+            'Regenerated by render-golden-refresh.yaml after a Renovate dependency bump' \
+            'moved rendered output.' \
+            'Signed-off-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>')"
+          gh api -X PUT "repos/${REPO}/contents/${FILE}" \
+            -f branch="${HEAD_REF}" \
+            -f sha="${BLOB_SHA}" \
+            -f message="${MESSAGE}" \
+            -f content="$(base64 -w0 "${FILE}")"
+          echo "Pushed refreshed golden to ${HEAD_REF} via the Contents API (GitHub-signed, Verified)."
+
+      - name: Re-fire the gate on the new head SHA
+        if: steps.drift.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          gh workflow run merge-gate.yaml -R "${REPO}" --ref "${HEAD_REF}"
+          echo "Dispatched merge-gate.yaml on ${HEAD_REF}: a GITHUB_TOKEN-authored Contents API push fires no pull_request event, so this re-attaches the required 'gate' check to the new head SHA."

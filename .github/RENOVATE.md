@@ -78,6 +78,14 @@ make lint-renovate    # requires Docker; runs the same image the workflow uses
 
 CI re-runs `make lint-renovate` automatically via `merge-gate.yaml` whenever `.github/renovate.json5` changes.
 
+## Auto-merge and the render golden
+
+`pkg/bundler/testdata/stock_render_golden.yaml` pins a digest per leaf overlay over its fully rendered output. The `kubernetes` manager's digest bumps inside `recipes/components/*/manifests/**` and the `helm-values` manager's tag bumps in `recipes/components/*/values.yaml` both change rendered bytes and move this golden — and both are configured to `automerge: true`. Left alone, such a PR goes red on an unregenerated golden and stalls its own auto-merge until a human clones the repo and runs the regeneration command by hand (this happened on PR #2773 and took `main` down when the red PR was merged anyway).
+
+[`render-golden-refresh.yaml`](workflows/render-golden-refresh.yaml) closes that gap: on a PR whose branch matches `renovate/*`, it regenerates the golden and, if it drifted, pushes the refresh back onto the same PR branch and re-dispatches `merge-gate.yaml` so the required `gate` check re-attaches to the new head SHA (a `GITHUB_TOKEN`-authored push fires no `pull_request` event, so without the explicit re-dispatch the PR's checks would stay bound to the pre-push SHA).
+
+This refresh deliberately does **not** run on human PRs, even ones that touch `recipes/components/**`. The golden exists so a human sees an unintended change to rendered output; a Renovate digest/tag bump's effect on the golden is arithmetic, so that narrow class is safe to automate, but auto-refreshing on a contributor's PR would silently absorb the signal the golden exists to give. If a Renovate PR still fails after the refresh runs — or the refresh's own dispatch doesn't reattach `gate` in time — fall back to the same path used for any stuck bot/fork PR: a maintainer comments `/ok-to-test`.
+
 ## Known limitations
 
 - **AWS EFA device-plugin image** (`recipes/components/aws-efa/values.yaml`) is published only to AWS's authenticated public ECR (`602401143452.dkr.ecr.us-west-2.amazonaws.com/...`); no `public.ecr.aws` mirror. The image is in `ignoreDeps`; bumps must be coordinated manually with EKS add-on releases.
