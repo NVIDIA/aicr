@@ -105,8 +105,18 @@ Ordered by how often each is what actually bites.
    - `slinky-slurm-operator-crds`, `slinky-slurm-operator`, `slinky-slurm`
    - `mariadb-operator-crds`, `mariadb-operator`, `slurm-accounting-mariadb`
    - `agentgateway-crds`, `agentgateway`
-   - every `-ocp` twin with its base component (already collapsed into one
-     report row, but name both in the verdict)
+   - `prometheus-adapter` / `prometheus-adapter-ocp`,
+     `nvidia-dra-driver-gpu` / `nvidia-dra-driver-gpu-ocp`, and
+     `k8s-nim-operator` / `k8s-nim-operator-ocp` — these three `-ocp` twins
+     carry a `defaultRepository` identical to their base, so `BuildReport`
+     already collapses each pair into one report row; name both in the
+     verdict anyway. The other four `-ocp` components (`gpu-operator-ocp`,
+     `network-operator-ocp`, `nfd-ocp`, `cert-manager-ocp`) have
+     `defaultRepository: ""` and are manifest-only — `BuildReport` drops them
+     before `Tracked++`, so they never appear in the report at all (they
+     surface in `untrackedComponents` instead). Do not assume a base
+     component's row already accounts for one of these four; there is no
+     shared row to collapse into.
 
 3. **Image and BOM delta.** Render old against new and diff the image list.
    `make bom-docs` is the repo's renderer; a new image means new vulnerability
