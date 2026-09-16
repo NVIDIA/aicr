@@ -1055,6 +1055,7 @@ func TestSlurmLeavesAppendConformanceHealthCheck(t *testing.T) {
 		"gang-scheduling",
 		"pod-autoscaling",
 		"cluster-autoscaling",
+		"robust-controller",
 		"secure-accelerator-access",
 		"slinky-slurm-health",
 		"slinky-slurm-imex-channel",
