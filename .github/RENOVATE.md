@@ -106,11 +106,12 @@ charts use `datasource=docker` with the full image path as `depName` and no
 `registryUrl`. `tools/drift-report`'s `TestRegistryPinsAreRenovateTracked` fails
 closed when a new component arrives without an annotation.
 
-A PR touching `recipes/registry.yaml`, `.github/renovate.json5`,
+A same-repo PR touching `recipes/registry.yaml`, `.github/renovate.json5`,
 `tools/drift-report/**`, or the workflow itself also runs the report against the
 PR branch and uploads the `drift-report` artifact, so a change to the
 annotations or the parser is verified against real upstream lookups before
-merge, without posting to Slack.
+merge, without posting to Slack; fork PRs skip this check because Renovate
+cannot resolve a fork's head branch against the base repository.
 
 ## Known limitations
 

@@ -68,6 +68,13 @@ jobs:
     name: Report registry chart drift
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # A fork PR cannot be checked here: Renovate resolves RENOVATE_BASE_BRANCHES
+    # against RENOVATE_REPOSITORIES (the base repo), where a fork's head branch
+    # does not exist — the run would find zero registry-chart deps and the
+    # tool's fail-closed guard would turn that into a red X the contributor has
+    # no way to clear. Skipping is the honest signal; a maintainer's same-repo
+    # PR is what actually verifies the change.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     # No elevation: this job pushes no branch, opens no PR, writes no issue.
     permissions:
       contents: read
