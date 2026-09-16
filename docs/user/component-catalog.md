@@ -996,7 +996,7 @@ Redirecting the cache PVC to a different, already-existing StorageClass,
 via the recipe's `inference-model-cache-storage-class` constraint or the
 `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` catalog env (see
 [Validation](validation.md)), doesn't stop AICR from also rendering
-`a4x-compatible`. If a StorageClass with that name already exists on the
+`a4x-compatible`. If a StorageClass named `a4x-compatible` already exists on the
 cluster under someone else's ownership, adopting it into this release's
 Helm lifecycle either fails the install or takes over an object this bundle
 doesn't need. Opt out of rendering it at bundle time with:
