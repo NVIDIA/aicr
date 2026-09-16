@@ -83,6 +83,8 @@ community:
     source: 9d71833b5a62cb2928c1b40fffc6c20f
   - issuer: https://token.actions.githubusercontent.com
     source: 5bf9e82f0e90a11528ac85f4bcb866c8
+  - issuer: https://github.com/login/oauth
+    source: 2e85f8702c6214cafcc0ed714d928720
 
 # Partner: vetted partner organizations. None onboarded yet.
 partner: []
