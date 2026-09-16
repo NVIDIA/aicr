@@ -72,11 +72,16 @@ spec:
             - name: MOFED_ENABLED
               value: "false"
 
-    # GB300 bare-metal node tuning; see gb300-eks-training.yaml for why this runs
-    # nvidia-tuned without nvidia-setup. service is deliberately omitted: there is
-    # no `generic` service profile upstream and nvidia-tuned exits non-zero on a
-    # service directory it does not ship, so the node lands on the unlayered
-    # nvidia-gb300-multiNodeTraining profile.
+    # GB300 bare-metal node tuning: nvidia-tuned alone, unlike the EKS gb300
+    # leaves, which take the shared tuning.yaml setup chain. nvidia-setup
+    # dispatches on `<service>-<accelerator>` and ships no `generic-*` config, so
+    # it has nothing to run here and the kernel comes from the host image. See
+    # the tuning-gb300.yaml header for the 64k-page kernel that implies.
+    #
+    # service is deliberately omitted: there is no `generic` service profile
+    # upstream and nvidia-tuned exits non-zero on a service directory it does not
+    # ship, so the node lands on the unlayered nvidia-gb300-multiNodeTraining
+    # profile.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:

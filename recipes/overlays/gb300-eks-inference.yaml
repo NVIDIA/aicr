@@ -83,12 +83,13 @@ spec:
             name: nvidia-kernel-module-params
 
     # GB300 node tuning, kept in sync with gb300-eks-training.yaml; see that file
-    # for the rationale. intent=inference is a shim onto nvidia-gb300-performance
-    # in nvidia-tuned 0.10.0, so it applies the same tuning as the training leaf.
+    # for the setup-chain and 64k-kernel rationale. intent=inference is a shim
+    # onto nvidia-gb300-performance in nvidia-tuned 0.10.0, so it applies the same
+    # tuning as the training leaf.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:
-        - components/nodewright-customizations/manifests/tuning-gb300.yaml
+        - components/nodewright-customizations/manifests/tuning.yaml
       overrides:
         service: eks
         accelerator: gb300

@@ -12,13 +12,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Nodewright GB300 GPU customization that runs ONLY nvidia-tuned (no
-# nvidia-setup).
+# Nodewright GB300 GPU customization for bare metal: nvidia-tuned only, no
+# nvidia-setup.
 #
-# The shared tuning.yaml cannot be used here: it also renders nvidia-setup,
-# which ships baked-in (service, accelerator) configs for eks-h100 / eks-gb200 /
-# aks-h100 / bcm-* only and fails on accelerator=gb300. GB300 therefore takes
-# its kernel and EFA from the platform image rather than from nvidia-setup.
+# Used by gb300-generic-ubuntu-training. The EKS gb300 leaves use the shared
+# tuning.yaml instead, since nvidia-setup 0.8.0 added the eks-gb300 combination.
+# There is no equivalent for bare metal: nvidia-setup dispatches on
+# `<service>-<accelerator>` and ships no `generic-*` config at all, so
+# tuning.yaml would fail on this leaf. A bare-metal GB300 node therefore takes
+# its kernel and EFA from the host image.
+#
+# That makes the hugepage sizing a deployment-time precondition here, where on
+# EKS nvidia-setup guarantees it. nvidia-gb300-performance sizes its pools for a
+# 64k-page ARM64 kernel (2M + 512M, no 1G: a 64k granule has no PUD level). On a
+# 4k-granule kernel the hugepagesz=512M clause is rejected at boot and the
+# hugepages= paired with it is dropped silently, so do not point this manifest at
+# a GB300 node whose image ships a 4k kernel.
 #
 # The gb300 profiles arrived in nvidia-tuned 0.10.0. `inference` and
 # `multiNodeTraining` are shims that resolve to nvidia-gb300-performance and add
@@ -26,18 +35,9 @@
 # yet — so all three intents land on the same tuning. Before 0.10.0 the package
 # exited non-zero on those intents rather than falling back.
 #
-# nvidia-gb300-performance sizes its hugepage pools for the 64k-page ARM64
-# kernel GB300 runs (2M + 512M, no 1G: a 64k granule has no PUD level). On a
-# 4k-granule kernel the hugepagesz=512M clause is rejected at boot and the
-# hugepages= paired with it is dropped silently, so this manifest must not be
-# pointed at a GB300 node whose image ships a 4k kernel.
-#
-# service is deliberately optional. service=eks resolves to the
-# accelerator-agnostic eks service profile (a MAC address policy network
-# drop-in); upstream ships no eks gb300 override, and its gb300 service
-# overrides are oci-only. Leave service unset on bare metal — nvidia-tuned exits
-# non-zero on a service directory it does not ship, and there is no `generic`
-# service.
+# service is deliberately optional and unset by the bare-metal leaf: nvidia-tuned
+# exits non-zero on a service directory it does not ship, and there is no
+# `generic` service.
 #
 # Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support.
 {{- $cust := index .Values "nodewright-customizations" }}
