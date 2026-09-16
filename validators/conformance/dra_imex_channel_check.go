@@ -89,6 +89,12 @@ const (
 	// imexChannelDir is where the kubelet (via the driver's CDI spec) mounts
 	// the allocated IMEX channel character device(s).
 	imexChannelDir = "/dev/nvidia-caps-imex-channels"
+	// computeDomainChannelDevicePrefix names the channel devices in a
+	// compute-domain.nvidia.com ResourceSlice ("channel-0", ...). The same
+	// pool also publishes the daemon device ("daemon-0"), which the driver
+	// allocates to its own per-ComputeDomain daemon claim; only CHANNEL
+	// allocations make a node unavailable to the probe.
+	computeDomainChannelDevicePrefix = "channel"
 
 	// computeDomainAllocationModeSingle allocates one channel per claim.
 	computeDomainAllocationModeSingle = "Single"
@@ -474,11 +480,14 @@ func holderNames(holders []channelHolder) []string {
 }
 
 // occupiedComputeDomainNodes returns, per node, the ResourceClaims currently
-// holding that node's compute-domain.nvidia.com channel device. Allocation
-// results carry the POOL, which is resolved to a node through poolNodes
-// (slice-derived); results whose pool is unknown are attributed to the pool
-// name itself as a conservative fallback (the common case is pool == node
-// name). Claims without an allocation are not occupants.
+// holding that node's compute-domain.nvidia.com CHANNEL device. Only results
+// for a channel device count: the driver's own daemon claim allocates the
+// pool's daemon device and must not read as an occupied channel (nor as
+// proof of channel allocation). Allocation results carry the POOL, which is
+// resolved to a node through poolNodes (slice-derived); results whose pool
+// is unknown are attributed to the pool name itself as a conservative
+// fallback (the common case is pool == node name). Claims without an
+// allocation are not occupants.
 func occupiedComputeDomainNodes(ctx context.Context, dynClient dynamic.Interface, version string, poolNodes map[string]string) (map[string][]channelHolder, error) {
 	claims, err := dynClient.Resource(draGVRAt(version, "resourceclaims")).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -513,7 +522,8 @@ func occupiedComputeDomainNodes(ctx context.Context, dynClient dynamic.Interface
 				continue
 			}
 			driver, _, _ := unstructured.NestedString(res, "driver")
-			if driver != draDriverComputeDomain {
+			device, _, _ := unstructured.NestedString(res, "device")
+			if driver != draDriverComputeDomain || !strings.HasPrefix(device, computeDomainChannelDevicePrefix) {
 				continue
 			}
 			pool, _, _ := unstructured.NestedString(res, "pool")

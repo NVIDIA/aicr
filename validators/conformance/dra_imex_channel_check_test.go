@@ -634,6 +634,31 @@ func TestCheckDRASupport_IMEXSkipsNodesWithAllocatedChannel(t *testing.T) {
 			t.Error("all-occupied candidates must never be recorded as not applicable")
 		}
 	})
+	t.Run("daemon-device claim is not an occupant", func(t *testing.T) {
+		// The driver's own per-ComputeDomain daemon claim allocates the
+		// pool's daemon-0 device; the node's channel stays free.
+		daemon := allocatedComputeDomainClaim("computedomain-daemon-abc", "node1")
+		results, _, _ := unstructured.NestedSlice(daemon.Object, "status", "allocation", "devices", "results")
+		results[0].(map[string]any)["device"] = "daemon-0"
+		results[0].(map[string]any)["request"] = "daemon"
+		_ = unstructured.SetNestedSlice(daemon.Object, results, "status", "allocation", "devices", "results")
+		ctx, client, _, createdCDs := imexTestContext(t, "v1",
+			[]runtime.Object{testNode("node1", withCliqueLabel())},
+			computeDomainSlice("v1", "node1"), daemon)
+		createdPods := markPodsSucceededOnCreate(client)
+
+		var err error
+		out := captureStdout(t, func() { err = CheckDRASupport(ctx) })
+		if err != nil {
+			t.Fatalf("CheckDRASupport() error = %v, want pass", err)
+		}
+		if len(*createdCDs) != 1 || findPodByPrefix(*createdPods, imexTestPodPrefix) == nil {
+			t.Errorf("probe not run (ComputeDomains=%d): a daemon-only allocation must not occupy the channel", len(*createdCDs))
+		}
+		if !strings.Contains(out, "Channel already allocated:    none") {
+			t.Errorf("daemon claim recorded as channel occupancy:\n%s", out)
+		}
+	})
 	t.Run("unallocated claim is not an occupant", func(t *testing.T) {
 		pending := allocatedComputeDomainClaim("pending-claim", "node1")
 		unstructured.RemoveNestedField(pending.Object, "status", "allocation")
