@@ -109,8 +109,17 @@ spec:
       # NET exercises EFA (the external interconnect) and NVLS exercises MNNVL
       # across the NVL72 IMEX domain — each variant asserts its transport
       # actually carried traffic, so a silent fallback to Socket or NET does
-      # not masquerade as a pass. Thresholds are sized for a 2-node GB200 pair
-      # and will be raised once production NVL72 data is available.
+      # not masquerade as a pass.
+      #
+      # The NVLS floor is set at roughly 80% of the reported NVL72 busbw
+      # baseline (~770 GB/s, from the beacon dataset and not yet confirmed
+      # against a measured 2-node GB200 run). The 80% ratio follows
+      # vr200-rke2-ubuntu-training, which floors at 600 against its own
+      # measured 744.71 — a precedent for the ratio, not GB200 evidence.
+      # The validator applies a further 10% tolerance, so the gate fires at
+      # 540: these are conservative floors that catch a degraded fabric, not
+      # performance targets. The NET floor is unchanged pending an EFA
+      # baseline.
       checks:
         - nccl-all-reduce-bw-net
         - nccl-all-reduce-bw-nvls
@@ -118,7 +127,7 @@ spec:
         - name: nccl-all-reduce-bw-net
           value: ">= 40"
         - name: nccl-all-reduce-bw-nvls
-          value: ">= 500"
+          value: ">= 600"
     conformance:
       checks:
         - platform-health

@@ -106,7 +106,7 @@ spec:
         - name: nccl-all-reduce-bw-net
           value: ">= 40"
         - name: nccl-all-reduce-bw-nvls
-          value: ">= 500"
+          value: ">= 600"
     conformance:
       checks:
         - platform-health

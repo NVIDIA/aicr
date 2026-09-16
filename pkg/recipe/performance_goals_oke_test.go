@@ -37,7 +37,7 @@ func TestOKEPerformanceGoalsFollowTrainingInferencePattern(t *testing.T) {
 			wantChecks: []string{"nccl-all-reduce-bw-net", "nccl-all-reduce-bw-nvls"},
 			wantConstraints: map[string]string{
 				"nccl-all-reduce-bw-net":  ">= 40",
-				"nccl-all-reduce-bw-nvls": ">= 500",
+				"nccl-all-reduce-bw-nvls": ">= 600",
 			},
 		},
 		{
@@ -45,7 +45,7 @@ func TestOKEPerformanceGoalsFollowTrainingInferencePattern(t *testing.T) {
 			wantChecks: []string{"nccl-all-reduce-bw-net", "nccl-all-reduce-bw-nvls"},
 			wantConstraints: map[string]string{
 				"nccl-all-reduce-bw-net":  ">= 40",
-				"nccl-all-reduce-bw-nvls": ">= 500",
+				"nccl-all-reduce-bw-nvls": ">= 600",
 			},
 		},
 		{
@@ -53,7 +53,7 @@ func TestOKEPerformanceGoalsFollowTrainingInferencePattern(t *testing.T) {
 			wantChecks: []string{"nccl-all-reduce-bw-net", "nccl-all-reduce-bw-nvls"},
 			wantConstraints: map[string]string{
 				"nccl-all-reduce-bw-net":  ">= 40",
-				"nccl-all-reduce-bw-nvls": ">= 500",
+				"nccl-all-reduce-bw-nvls": ">= 600",
 			},
 		},
 		{

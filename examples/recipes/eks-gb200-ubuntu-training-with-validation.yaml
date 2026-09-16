@@ -81,7 +81,7 @@ validation:
       - name: nccl-all-reduce-bw-net
         value: ">= 40"
       - name: nccl-all-reduce-bw-nvls
-        value: ">= 500"
+        value: ">= 600"
 
   # Conformance phase: Validate workload-specific requirements
   # (not configured in this example - will be skipped)

@@ -89,7 +89,7 @@ expose two inter-node fabrics simultaneously and a single auto-detect test
 would only exercise one of them.
 
 GB200/OKE training recipes follow the same pattern and enable `-net` and
-`-nvls` together, with the same `>= 40` / `>= 500` GB/s floors as GB200/EKS.
+`-nvls` together, with the same `>= 40` / `>= 600` GB/s floors as GB200/EKS.
 On OKE, `-net` exercises the NVL72 rack's InfiniBand east-west fabric
 (`rdma0-3`, advertised as `nvidia.com/mlnxnics` by the recipe's
 `rdmaSharedDevicePlugin` NicClusterPolicy) over NCCL's built-in IB/verbs
@@ -109,8 +109,8 @@ aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase performance
 
 The generated recipe lists the selected variant(s) under
 `validation.performance.checks` with a platform-tuned bandwidth constraint
-(example: `>= 300 GB/s` for H100 + EFA; `>= 40 GB/s` NET and `>= 500 GB/s`
-NVLS for GB200 + EFA, each sized for a 2-node pair).
+(example: `>= 300 GB/s` for H100 + EFA; `>= 40 GB/s` NET and `>= 600 GB/s`
+NVLS for GB200 + EFA).
 
 **Node-shape assumption.** These bus-bandwidth floors are fixed absolute
 values calibrated on full, high-bandwidth nodes (8-GPU H100 NVLink/SXM with
