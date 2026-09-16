@@ -78,11 +78,24 @@ spec:
       overrides:
         labeler:
           assumeDriverInstalled: true
-        # See vr200-rke2-ubuntu-training for why metadata-collector is
-        # disabled rather than patched (NVIDIA/nvsentinel#1717).
-        global:
-          metadataCollector:
-            enabled: false
+        # See vr200-rke2-ubuntu-training for the metadata-collector NRI-mode
+        # host-mount rationale (NVIDIA/NVSentinel#1742, released in v1.22.0).
+        # Path picks Ubuntu 26.04 arm64 driver libs — same reference image
+        # as the training leaf.
+        metadata-collector:
+          runtimeClassName: ""
+          extraEnv:
+            - name: LD_LIBRARY_PATH
+              value: /usr/local/nvidia/lib
+          additionalVolumeMounts:
+            - name: nvidia-driver-libs
+              mountPath: /usr/local/nvidia/lib
+              readOnly: true
+          additionalHostVolumes:
+            - name: nvidia-driver-libs
+              hostPath:
+                path: /usr/lib/aarch64-linux-gnu
+                type: Directory
 
     # See vr200-rke2-ubuntu-training for the host-managed-driver root
     # rationale and the host nvidia-imex/ComputeDomain conflict note.
