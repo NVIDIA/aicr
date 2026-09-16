@@ -4,7 +4,7 @@
 # hardware.model). Intent is a recipe-author choice the cluster cannot
 # reveal, so the example layers it on top explicitly.
 kind: Snapshot
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 measurements:
   - type: K8s
     subtypes:

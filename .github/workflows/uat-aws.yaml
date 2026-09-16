@@ -881,6 +881,18 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+      # phase_prep records the live-cluster `aicr snapshot` outcome as CTRF
+      # (snapshot-result.json, #1806). Upload it on every outcome once prep ran,
+      # so the step has a machine-readable record on green and red runs alike.
+      - name: Upload snapshot result
+        if: always() && steps.prep.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: uat-aws-snapshot-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: snapshot-result.json
+          retention-days: 30
+          if-no-files-found: warn
+
       # Refresh the AWS session before collecting: a long tuning-race failure
       # (exactly what this bundle targets) can outlast the 1h session minted before
       # validate, which would leave every kubectl in the collector failing EKS
@@ -917,6 +929,7 @@ jobs:
           name: uat-aws-debug-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             snapshot.yaml
+            snapshot-result.json
             recipe.yaml
             dry-run.json
             report.json

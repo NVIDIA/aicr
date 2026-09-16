@@ -229,6 +229,12 @@ kos:
     # NFD/PCI, so it no longer needs nvidia-smi or the CUDA base image (and its
     # CVE surface).
     base_image: nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
+    # Pinned because ko has no user default of its own — left unset, the image
+    # runs as whatever the base declares, which here is nvs (UID 1000). A
+    # username cannot satisfy a runAsNonRoot admission check, which has no way
+    # to resolve a name to a UID. 65532 is what the pre-#1795 chainguard base
+    # supplied, so this restores that posture rather than changing it.
+    user: "65532"
     platforms:
       - linux/amd64
       - linux/arm64
@@ -244,11 +250,13 @@ kos:
     build: aicrd
     repositories:
       - ghcr.io/nvidia/aicrd
-    # NVIDIA's static distroless base, same as aicr above. ko stamps its default
-    # nonroot user (UID 65532) numerically, preserving the unprivileged security
-    # posture of the previous gcr.io/distroless/static:nonroot base (also UID
-    # 65532); the base image's own nvs (UID 1000) account is unused here.
+    # NVIDIA's static distroless base and pinned user, same rationale as aicr
+    # above. This base also declares WorkingDir=/app without shipping an /app
+    # directory, which ko copies through verbatim and offers no option to
+    # override; runtimes that refuse to create a missing working directory
+    # (Cloud Run, Knative) cannot start the image. Tracked in #2652.
     base_image: nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69
+    user: "65532"
     platforms:
       - linux/amd64
       - linux/arm64

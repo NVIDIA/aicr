@@ -300,9 +300,20 @@ func createDefinitelyRejected(err error) bool {
 // whose unauthorized sibling container must not see any accelerator, plus a
 // standalone no-allocation probe pod that must not see any GPU device. Neither
 // mechanism usable is an environment failure.
+//
+// Skipped when slinky-slurm is in the recipe.
 func CheckSecureAcceleratorAccess(ctx *validators.Context) error {
 	if ctx.Clientset == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "kubernetes client is not available")
+	}
+
+	// Each Slinky NodeSet pod reserves the whole node's GPUs through its own
+	// Kubernetes pod spec, and Slurm allocates per job internally (GRES and
+	// cgroups). A Kubernetes-scheduled test pod here would hang Pending with
+	// no spare capacity, or pass using capacity elsewhere without exercising
+	// Slurm's own isolation.
+	if recipeHasComponent(ctx, "slinky-slurm") {
+		return validators.Skip("Slurm-managed GPU allocation (slinky-slurm in recipe) is not mediated by the Kubernetes scheduler. slinky-slurm-health and slinky-slurm-imex-channel validate Slurm's own GPU access path instead")
 	}
 
 	// Bound ALL work to the check-local budget so one bounded namespace

@@ -36,11 +36,14 @@ GO_LICENSES_PINNED_VERSION="v2.0.1"
 GO_LICENSES_MISMATCH_VERSION="v1.6.0"
 ORAS_PINNED_VERSION="1.3.3"
 ORAS_MISMATCH_VERSION="1.3.4"
+HELM_PINNED_VERSION="v4.3.0"
+HELM_MISMATCH_VERSION="v4.2.4"
 DOCKER_VERSION="27.3.1"
 export APIDIFF_PINNED_VERSION APIDIFF_MISMATCH_VERSION
 export ADDLICENSE_PINNED_VERSION ADDLICENSE_MISMATCH_VERSION
 export GO_LICENSES_PINNED_VERSION GO_LICENSES_MISMATCH_VERSION
-export ORAS_PINNED_VERSION ORAS_MISMATCH_VERSION DOCKER_VERSION
+export ORAS_PINNED_VERSION ORAS_MISMATCH_VERSION
+export HELM_PINNED_VERSION HELM_MISMATCH_VERSION DOCKER_VERSION
 
 cat >"${STUB_DIR}/go" <<'STUB'
 #!/usr/bin/env bash
@@ -99,25 +102,25 @@ cat >"${STUB_DIR}/yq" <<'STUB'
 #!/usr/bin/env bash
 case "${1:-}" in
     'keys | .[]')
-        printf 'linting\nsecurity_tools\n'
+        printf 'linting\nsecurity_tools\ntesting_tools\n'
         ;;
     '.linting | keys | .[]')
-        printf 'apidiff\naddlicense\ngo_licenses\n'
+        printf 'addlicense\n'
         ;;
     '.security_tools | keys | .[]')
         echo oras
         ;;
-    '.linting.apidiff')
-        echo "${APIDIFF_PINNED_VERSION}"
+    '.testing_tools | keys | .[]')
+        echo helm
         ;;
     '.linting.addlicense')
         echo "${ADDLICENSE_PINNED_VERSION}"
         ;;
-    '.linting.go_licenses')
-        echo "${GO_LICENSES_PINNED_VERSION}"
-        ;;
     '.security_tools.oras')
         echo "${ORAS_PINNED_VERSION}"
+        ;;
+    '.testing_tools.helm')
+        echo "${HELM_PINNED_VERSION}"
         ;;
     *)
         exit 2
@@ -153,6 +156,27 @@ fi
 printf 'Version: %s+Homebrew\n' "${version}"
 STUB
 
+cat >"${STUB_DIR}/helm" <<'STUB'
+#!/usr/bin/env bash
+version="${HELM_PINNED_VERSION}"
+if [[ "${TOOL_TARGET:-}" == "helm" ]]; then
+    case "${TOOL_MODE:-correct}" in
+        correct)
+            ;;
+        mismatch)
+            version="${HELM_MISMATCH_VERSION}"
+            ;;
+        unreadable)
+            exit 1
+            ;;
+        *)
+            exit 2
+            ;;
+    esac
+fi
+printf '%s+g1234567\n' "${version}"
+STUB
+
 cat >"${STUB_DIR}/docker" <<'STUB'
 #!/usr/bin/env bash
 if [[ "${1:-}" != "version" ]]; then
@@ -166,7 +190,7 @@ STUB
 
 chmod +x "${STUB_DIR}/go" "${STUB_DIR}/yq" \
     "${STUB_DIR}/apidiff" "${STUB_DIR}/addlicense" \
-    "${STUB_DIR}/go-licenses" "${STUB_DIR}/oras" "${STUB_DIR}/docker"
+    "${STUB_DIR}/go-licenses" "${STUB_DIR}/oras" "${STUB_DIR}/helm" "${STUB_DIR}/docker"
 
 # Keep missing-tool cases hermetic: after a stub is moved aside, PATH must not
 # fall through to a copy of that tool preinstalled on the host or CI runner.
@@ -199,6 +223,30 @@ check_helper() {
     fi
 }
 
+# go_mod_required_version underpins every reader of the module-built tool pins,
+# so the shapes it must refuse matter as much as the one it must find: `exclude`
+# and `replace` lines carry a version the build never uses.
+check_gomod_version() {
+    local name="$1"
+    local fixture="$2"
+    local want_rc="$3"
+    local want_output="$4"
+    local path="${STUB_DIR}/gomod-${name}.mod"
+    local output
+    local rc
+
+    # %b so the \t in the fixtures becomes a real tab, which is how the go
+    # tooling indents require blocks.
+    printf '%b' "${fixture}" >"${path}"
+    output=$(go_mod_required_version golang.org/x/exp "${path}")
+    rc=$?
+    if [[ "${rc}" == "${want_rc}" && "${output}" == "${want_output}" ]]; then
+        pass "${name}"
+    else
+        fail "${name}" "want rc=${want_rc} output='${want_output}', got rc=${rc} output='${output}'"
+    fi
+}
+
 check_tools_row() {
     local name="$1"
     local tool_name="$2"
@@ -215,6 +263,7 @@ check_tools_row() {
         mv "${executable}" "${unavailable}"
     fi
     output=$(TOOL_TARGET="${tool_name}" TOOL_MODE="${mode}" \
+        CHECK_TOOLS_GO_MOD_FILE="${STUB_DIR}/go.mod" \
         bash "${CHECK_TOOLS}" 2>&1)
     rc=$?
     if [[ "${mode}" == "missing" ]]; then
@@ -236,11 +285,79 @@ check_tools_row() {
     fi
 }
 
+# printf rather than a cat heredoc: PATH is hermetic from here on and cat is
+# deliberately absent from the utility allowlist above, so only builtins work.
+printf 'module github.com/NVIDIA/aicr\n\ngo 1.26\n\nrequire (\n\t%s %s\n\t%s %s\n)\n' \
+    github.com/google/go-licenses/v2 "${GO_LICENSES_PINNED_VERSION}" \
+    golang.org/x/exp "${APIDIFF_PINNED_VERSION}" \
+    >"${STUB_DIR}/go.mod"
+
 check_helper "extracts-exact-module-version" correct 0 \
     "${APIDIFF_PINNED_VERSION}"
 check_helper "extracts-mismatched-module-version" mismatch 0 \
     "${APIDIFF_MISMATCH_VERSION}"
 check_helper "rejects-unreadable-build-metadata" unreadable 1 ""
+
+check_gomod_version "reads-block-require" \
+    'module m
+
+go 1.26
+
+require (
+	golang.org/x/exp v1.1.1 // indirect
+)
+' 0 v1.1.1
+check_gomod_version "reads-single-line-require" \
+    'module m
+
+go 1.26
+
+require golang.org/x/exp v1.2.2
+' 0 v1.2.2
+check_gomod_version "ignores-exclude-block" \
+    'module m
+
+go 1.26
+
+exclude (
+	golang.org/x/exp v9.9.9
+)
+
+require (
+	golang.org/x/exp v1.3.3 // indirect
+)
+' 0 v1.3.3
+check_gomod_version "ignores-replace-left-hand-side" \
+    'module m
+
+go 1.26
+
+replace (
+	golang.org/x/exp v9.9.9 => ./fork
+)
+
+require (
+	golang.org/x/exp v1.4.4 // indirect
+)
+' 0 v1.4.4
+check_gomod_version "reads-require-without-space-before-paren" \
+    'module m
+
+go 1.26
+
+require(
+\tgolang.org/x/exp v1.6.6 // indirect
+)
+' 0 v1.6.6
+check_gomod_version "fails-when-module-is-absent" \
+    'module m
+
+go 1.26
+
+require (
+	golang.org/x/tools v1.5.5 // indirect
+)
+' 1 ""
 
 check_tools_row "accepts-exact-apidiff" apidiff correct 0 \
     "${APIDIFF_PINNED_VERSION}|${APIDIFF_PINNED_VERSION}|✓"
@@ -277,6 +394,15 @@ check_tools_row "rejects-unreadable-oras" oras unreadable 1 \
     "${ORAS_PINNED_VERSION}|unknown|⚠"
 check_tools_row "rejects-missing-oras" oras missing 1 \
     "${ORAS_PINNED_VERSION}|-|✗"
+
+check_tools_row "accepts-exact-helm" helm correct 0 \
+    "${HELM_PINNED_VERSION}|${HELM_PINNED_VERSION}|✓"
+check_tools_row "rejects-mismatched-helm" helm mismatch 1 \
+    "${HELM_PINNED_VERSION}|${HELM_MISMATCH_VERSION}|⚠"
+check_tools_row "rejects-unreadable-helm" helm unreadable 1 \
+    "${HELM_PINNED_VERSION}|unknown|⚠"
+check_tools_row "rejects-missing-helm" helm missing 1 \
+    "${HELM_PINNED_VERSION}|-|✗"
 
 check_tools_row "reports-any-running-docker-version" docker correct 0 \
     "any|${DOCKER_VERSION}|✓"

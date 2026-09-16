@@ -77,7 +77,7 @@ const (
 	// digestAlgoSHA256 is the algorithm key used in attestation digest maps.
 	digestAlgoSHA256 = "sha256"
 
-	// recipeFileName is the resolved recipe copied into Helm bundles.
+	// recipeFileName is the resolved recipe written into every bundle.
 	recipeFileName = "recipe.yaml"
 
 	accountingDatabaseUsername = "slurm"
@@ -224,10 +224,12 @@ func NewWithConfig(cfg *config.Config) (*DefaultBundler, error) {
 // By default, generates a Helm per-component bundle. If deployer is set to "argocd",
 // generates Argo CD Application manifests.
 //
+// Every deployer writes recipe.yaml at the bundle root: the resolved recipe the
+// bundle was generated from.
+//
 // For Helm per-component output:
 //   - README.md: Root deployment guide with ordered steps
 //   - deploy.sh: Automation script (0755)
-//   - recipe.yaml: Copy of the input recipe
 //   - <component>/values.yaml: Helm values per component
 //   - <component>/README.md: Component install/upgrade/uninstall
 //   - <component>/manifests/: Optional manifest files
@@ -284,7 +286,7 @@ func (b *DefaultBundler) Make(ctx context.Context, recipeResult *recipe.RecipeRe
 	recipeResult = &validated
 	profileBaseline := recipeResult
 
-	if err := b.enforceAccountingOwnership(recipeResult); err != nil {
+	if err := b.enforceConfigurationOwnership(recipeResult); err != nil {
 		return nil, err
 	}
 
@@ -564,6 +566,15 @@ func accountingValuesEqual(actual, expected any) bool {
 	}
 }
 
+// enforceConfigurationOwnership checks typed ownership before filtering, so
+// removing a component cannot hide a protected path.
+func (b *DefaultBundler) enforceConfigurationOwnership(result *recipe.RecipeResult) error {
+	if err := b.enforceAccountingOwnership(result); err != nil {
+		return err
+	}
+	return b.enforceGKETCPXOOwnership(result)
+}
+
 // enforceAccountingOwnership prevents bundle-time inputs from becoming a
 // second representation of the typed ownership mode recorded in the recipe.
 // It runs before component filtering so a required component cannot disappear
@@ -577,58 +588,8 @@ func (b *DefaultBundler) enforceAccountingOwnership(result *recipe.RecipeResult)
 		return b.warnLegacyAccountingOverride(result.DataProvider())
 	}
 
-	protected := recipe.AccountingOwnership(mode).Paths
-
-	aliases := make(map[string]string)
-	registry, err := recipe.GetComponentRegistryFor(result.DataProvider())
-	if err != nil {
-		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
-			"failed to load component registry for accounting ownership validation")
-	}
-	for canonical := range protected {
-		aliases[canonical] = canonical
-		if componentConfig := registry.Get(canonical); componentConfig != nil {
-			for _, alias := range componentConfig.ValueOverrideKeys {
-				aliases[alias] = canonical
-			}
-		}
-	}
-
-	checkPath := func(componentName, valuePath, source string) error {
-		canonical, ok := aliases[componentName]
-		if !ok {
-			return nil
-		}
-		for _, ownedPath := range protected[canonical] {
-			if recipe.PathsIntersect(valuePath, ownedPath) {
-				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
-					"%s cannot override %s:%s: the path is owned by configuration.slurm.accounting.mode=%s",
-					source, componentName, valuePath, mode))
-			}
-		}
-		return nil
-	}
-
-	for componentName, paths := range b.Config.ValueOverrides() {
-		for valuePath := range paths {
-			if err := checkPath(componentName, valuePath, "--set"); err != nil {
-				return err
-			}
-		}
-	}
-	for componentName, paths := range b.Config.ValueOverridesTyped() {
-		for valuePath := range paths {
-			if err := checkPath(componentName, valuePath, "--set-json/--set-file"); err != nil {
-				return err
-			}
-		}
-	}
-	for componentName, paths := range b.Config.DynamicValues() {
-		for _, valuePath := range paths {
-			if err := checkPath(componentName, valuePath, "--dynamic"); err != nil {
-				return err
-			}
-		}
+	if err := b.enforceOwnedPaths(result, recipe.AccountingOwnership(mode)); err != nil {
+		return err
 	}
 
 	if requested := b.Config.Bundlers(); len(requested) > 0 {
@@ -655,6 +616,105 @@ func (b *DefaultBundler) enforceAccountingOwnership(result *recipe.RecipeResult)
 	}
 
 	return nil
+}
+
+// enforceOwnedPaths rejects bundle-time override channels (--set,
+// --set-json/--set-file, --dynamic) that intersect an ownership domain's
+// component paths. Alias resolution is load-bearing: each canonical
+// component expands through the registry's ValueOverrideKeys before
+// matching, so kubeflow-trainer is matched under both `kubeflowtrainer` and
+// `trainer` — a check keyed only on the canonical name would let
+// `--set trainer:...` straight through.
+func (b *DefaultBundler) enforceOwnedPaths(result *recipe.RecipeResult, domain recipe.OwnershipDomain) error {
+	protected := domain.Paths
+
+	aliases := make(map[string]string)
+	registry, err := recipe.GetComponentRegistryFor(result.DataProvider())
+	if err != nil {
+		return errors.PropagateOrWrap(err, errors.ErrCodeInternal,
+			"failed to load component registry for ownership validation")
+	}
+	for canonical := range protected {
+		aliases[canonical] = canonical
+		if componentConfig := registry.Get(canonical); componentConfig != nil {
+			for _, alias := range componentConfig.ValueOverrideKeys {
+				aliases[alias] = canonical
+			}
+		}
+	}
+
+	checkPath := func(componentName, valuePath, source string) error {
+		canonical, ok := aliases[componentName]
+		if !ok {
+			return nil
+		}
+		for _, ownedPath := range protected[canonical] {
+			if recipe.PathsIntersect(valuePath, ownedPath) {
+				return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+					"%s cannot override %s:%s: the path is owned by %s",
+					source, componentName, valuePath, domain.Name))
+			}
+		}
+		return nil
+	}
+
+	for componentName, paths := range b.Config.ValueOverrides() {
+		for valuePath := range paths {
+			if err := checkPath(componentName, valuePath, "--set"); err != nil {
+				return err
+			}
+		}
+	}
+	for componentName, paths := range b.Config.ValueOverridesTyped() {
+		for valuePath := range paths {
+			if err := checkPath(componentName, valuePath, "--set-json/--set-file"); err != nil {
+				return err
+			}
+		}
+	}
+	for componentName, paths := range b.Config.DynamicValues() {
+		for _, valuePath := range paths {
+			if err := checkPath(componentName, valuePath, "--dynamic"); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// enforceGKETCPXOOwnership applies the recipe-recorded TCPXO interface
+// mapping's ownership to bundle-time inputs. Two deliberate divergences from
+// the accounting precedent:
+//
+// The not-present branch fails closed instead of warning:
+// warnLegacyAccountingOverride warns because a legacy Slurm recipe plus a
+// bundle-time accounting.enabled override still means something; a recipe
+// that ships torch-distributed-tcpxo without the recorded mapping cannot
+// render a usable runtime at all, so there is nothing to tolerate. Do not
+// "align" this branch with the accounting warning.
+//
+// The fail-closed runs before the bundler-config nil check. The values-only
+// SDK path (BundleComponents) never reaches this function — its fail-closed
+// comes from CheckGKETCPXOInterfacesCoherence via runComponentValidations —
+// and Make rejects a nil config before this point, so the ordering is
+// defense-in-depth against future callers, not a live path. There is no
+// bundlers-filter clause — the accounting one protects required database
+// components from being filtered out, while this mapping is data on a
+// component the recipe already requires.
+func (b *DefaultBundler) enforceGKETCPXOOwnership(result *recipe.RecipeResult) error {
+	if !result.ShipsGKETCPXORuntime() {
+		return nil
+	}
+	if _, present := result.GKETCPXOInterfaces(); !present {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			"recipe ships the torch-distributed-tcpxo ClusterTrainingRuntime but records no "+
+				"configuration.gke.tcpxoInterfaces mapping; regenerate the recipe with "+
+				"--gke-tcpxo-interfaces eth1=<network>,...,eth8=<network>")
+	}
+	if b.Config == nil {
+		return nil
+	}
+	return b.enforceOwnedPaths(result, recipe.GKETCPXOOwnership())
 }
 
 func (b *DefaultBundler) warnLegacyAccountingOverride(provider recipe.DataProvider) error {
@@ -940,15 +1000,12 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 		}
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate bundle", err)
 	}
-	// Write recipe file (helm-only, preserves original behavior)
-	if b.Config.Deployer() == config.DeployerHelm {
-		recipeSize, writeErr := b.writeRecipeFile(recipeResult, dir)
-		if writeErr != nil {
-			return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
-		}
-		output.Files = append(output.Files, filepath.Join(dir, recipeFileName))
-		output.TotalSize += recipeSize
+	recipeSize, writeErr := b.writeRecipeFile(recipeResult, dir)
+	if writeErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
 	}
+	output.Files = append(output.Files, filepath.Join(dir, recipeFileName))
+	output.TotalSize += recipeSize
 
 	if b.Config.IncludeChecksums() {
 		if checksumErr := checksum.WriteChecksums(ctx, dir, output); checksumErr != nil {
@@ -1936,8 +1993,10 @@ func (b *DefaultBundler) applyNodeSchedulingOverrides(componentName string, valu
 }
 
 // validateRequiredNodeSelectors returns an error if a component's registry
-// entry sets requireNodeSelector (SchedulingPaths) but the resolved value at
-// one of its non-opted-out node-selector paths is empty or missing.
+// entry sets requireNodeSelector, or sets requireNodeSelectorIfStorageClassSet
+// with a storage class already configured (SchedulingPaths), but the
+// resolved value at one of its non-opted-out node-selector paths is empty
+// or missing.
 //
 // Must run after every override in extractComponentValues, including
 // --set-json/--set-file, which can null out a selector that
@@ -1959,14 +2018,18 @@ func (b *DefaultBundler) validateRequiredNodeSelectors(componentName string, val
 		return nil
 	}
 
-	if comp.RequireSystemNodeSelector() {
+	if comp.RequireSystemNodeSelector() ||
+		(comp.RequireSystemNodeSelectorIfStorageClassSet() && componentHasConfiguredStorageClass(comp, values)) {
+
 		if err := requireNonEmptyNodeSelectors(componentName, values,
 			filterPaths(comp.GetSystemNodeSelectorPaths(), policy.optOut),
 			"--system-node-selector"); err != nil {
 			return err
 		}
 	}
-	if comp.RequireAcceleratedNodeSelector() {
+	if comp.RequireAcceleratedNodeSelector() ||
+		(comp.RequireAcceleratedNodeSelectorIfStorageClassSet() && componentHasConfiguredStorageClass(comp, values)) {
+
 		if err := requireNonEmptyNodeSelectors(componentName, values,
 			filterPaths(comp.GetAcceleratedNodeSelectorPaths(), policy.optOut),
 			"--accelerated-node-selector"); err != nil {
@@ -1974,6 +2037,21 @@ func (b *DefaultBundler) validateRequiredNodeSelectors(componentName string, val
 		}
 	}
 	return nil
+}
+
+// componentHasConfiguredStorageClass reports whether any of comp's
+// StorageClassPaths or SharedStorageClassPaths paths resolve to a
+// configured value in values.
+func componentHasConfiguredStorageClass(comp *recipe.ComponentConfig, values map[string]any) bool {
+	paths := make([]string, 0, len(comp.GetStorageClassPaths())+len(comp.GetSharedStorageClassPaths()))
+	paths = append(paths, comp.GetStorageClassPaths()...)
+	paths = append(paths, comp.GetSharedStorageClassPaths()...)
+	for _, path := range paths {
+		if hasConfiguredStorageClass(values, path) {
+			return true
+		}
+	}
+	return false
 }
 
 // requireNonEmptyNodeSelectors returns an error naming every path in paths
@@ -2084,9 +2162,9 @@ func (b *DefaultBundler) dynamicPathSetFor(componentName string, provider recipe
 }
 
 // rejectDynamicRequiredNodeSelectorPaths returns an error if a path in
-// dynPaths is also one of componentName's requireNodeSelector paths.
-// --dynamic leaves a path out of the bundle for an operator to supply
-// later, the same unpinned state requireNodeSelector exists to reject.
+// dynPaths equals, contains, or is contained by one of componentName's
+// required node selector paths, since --dynamic would defer that path to
+// install time.
 func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName string, provider recipe.DataProvider, dynPaths map[string]struct{}) error {
 	registry, err := recipe.GetComponentRegistryFor(provider)
 	if err != nil {
@@ -2102,6 +2180,11 @@ func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName st
 
 	var conflicts []string
 	seen := make(map[string]struct{})
+	// A dynamic override on an ancestor (e.g. prometheus.prometheusSpec) or a
+	// descendant (e.g. prometheus.prometheusSpec.nodeSelector.disktype) of a
+	// required path moves the required value into install-time control the
+	// same way an exact-path override does, so intersectingPaths treats
+	// either direction as a conflict, not just an exact match.
 	addConflicts := func(paths []string) {
 		for _, p := range intersectingPaths(paths, dynPaths) {
 			if _, ok := seen[p]; ok {
@@ -2111,11 +2194,25 @@ func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName st
 			conflicts = append(conflicts, p)
 		}
 	}
-	if comp.RequireSystemNodeSelector() {
+	// Reject regardless of whether a storage class ends up configured for
+	// RequireNodeSelectorIfStorageClassSet. A --dynamic path bypasses
+	// validateRequiredNodeSelectors unconditionally by merging into
+	// policy.optOut, so this is the only gate closing that loophole if a
+	// storage class is configured now or added later without rebuilding
+	// the bundle.
+	if comp.RequireSystemNodeSelector() || comp.RequireSystemNodeSelectorIfStorageClassSet() {
 		addConflicts(comp.GetSystemNodeSelectorPaths())
 	}
-	if comp.RequireAcceleratedNodeSelector() {
+	if comp.RequireAcceleratedNodeSelector() || comp.RequireAcceleratedNodeSelectorIfStorageClassSet() {
 		addConflicts(comp.GetAcceleratedNodeSelectorPaths())
+	}
+	// A --dynamic override on the storage-class path removes its value
+	// from values before componentHasConfiguredStorageClass evaluates it,
+	// so the conditional flags could never fire once an operator defers
+	// the storage class to install time.
+	if comp.RequireSystemNodeSelectorIfStorageClassSet() || comp.RequireAcceleratedNodeSelectorIfStorageClassSet() {
+		addConflicts(comp.GetStorageClassPaths())
+		addConflicts(comp.GetSharedStorageClassPaths())
 	}
 	if len(conflicts) == 0 {
 		return nil
@@ -2126,16 +2223,20 @@ func (b *DefaultBundler) rejectDynamicRequiredNodeSelectorPaths(componentName st
 		componentName, strings.Join(conflicts, ", ")))
 }
 
-// intersectingPaths returns the paths present in both paths and set,
-// preserving paths' order. Returns nil if either is empty.
+// intersectingPaths returns the paths in paths that equal, contain, or are
+// contained by a path in set, preserving paths' order. Returns nil if
+// either is empty.
 func intersectingPaths(paths []string, set map[string]struct{}) []string {
 	if len(paths) == 0 || len(set) == 0 {
 		return nil
 	}
 	var out []string
 	for _, p := range paths {
-		if _, ok := set[p]; ok {
-			out = append(out, p)
+		for dyn := range set {
+			if valuePathsIntersect(p, dyn) {
+				out = append(out, p)
+				break
+			}
 		}
 	}
 	return out

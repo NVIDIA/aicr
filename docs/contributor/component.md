@@ -83,6 +83,7 @@ operator:
 
 - `validations:` — bundle-time misconfiguration warnings ([validator.md](validator.md#component-validations-bundle-time))
 - `healthCheck.assertFile:` — chainsaw conformance assertions ([validator.md](validator.md))
+- `upgrades.file:` — path to a `ComponentUpgrades` transition record ([recipe.md](recipe.md#transition-records))
 - `manifestFiles:` — manifest YAMLs (paths relative to the recipes data
   root) bundled with the component whenever a recipe references it and the
   componentRef declares none; shipped in the injected `-post` local chart
@@ -138,13 +139,16 @@ One-liner per field:
 | `nodeScheduling.system` | Helm value paths that receive the **control-plane** node selector / tolerations / taints |
 | `nodeScheduling.accelerated` | Helm value paths that receive the **GPU node** selector / tolerations / taints |
 | `nodeScheduling.system.requireNodeSelector`, `nodeScheduling.accelerated.requireNodeSelector` | Fail the bundle instead of silently skipping injection when the corresponding `--system-node-selector`/`--accelerated-node-selector` flag is omitted and no overlay opts the paths out (see [below](#nodeschedulingsystem-vs-accelerated)) |
+| `nodeScheduling.system.requireNodeSelectorIfStorageClassSet`, `nodeScheduling.accelerated.requireNodeSelectorIfStorageClassSet` | Conditional counterpart to `requireNodeSelector`: same enforcement, but only once a `storageClassPaths`/`sharedStorageClassPaths` path resolves to a non-empty value (see [below](#nodeschedulingsystem-vs-accelerated)) |
 | `nodeScheduling.nodeCountPaths` | Where `--nodes` is written |
 | `podScheduling.workload.workloadSelectorPaths` | Workload-pod placement |
 | `storageClassPaths` | Where `--storage-class` is written |
 | `sharedStorageClassPaths` | Where `--shared-storage-class` is written for shared filesystem PVCs |
 | `validations` | Bundle-time component check list ([validator.md](validator.md#component-validations-bundle-time)) |
 | `healthCheck.assertFile` | Chainsaw assert YAML path (relative to data dir) |
+| `upgrades.file` | Path to a `ComponentUpgrades` transition record (relative to data dir); empty means no transition records ([recipe.md](recipe.md#transition-records)) |
 | `manifestFiles` | Default manifest YAML paths bundled when the componentRef declares none (ref-declared lists take precedence). No opt-out: an empty ref-declared list is indistinguishable from absent (len == 0 → defaults filled) — to suppress the defaults, declare a replacement list. Helm components only; the loader rejects the combination with `kustomize:` |
+| `mixinSafeOverridePaths` | Exact dotted value paths (e.g. `global.tracing.enabled`) a `RecipeMixin` may set on this component via `Overrides`. Empty (the default) means the component hasn't opted into mixin overrides — a mixin introducing it fresh still has unrestricted `valuesFile`/`overrides`, but once the component is already in the chain (or has a non-empty allowlist), every mixin Overrides path is validated against this list ([recipe.md](recipe.md#mixin-composition)) |
 | `gkeCriticalPriority`, `hasSelfRefCRDs`, `manifestsUseChartCRDs` | Narrow service-specific flags (see godoc) |
 
 ## `nodeScheduling.system` vs `accelerated`
@@ -194,9 +198,31 @@ and strands it there on a later reschedule (see `slinky-slurm` and
 `slurm-accounting-mariadb` in `registry.yaml`). An overlay can still opt a
 component's paths out of the requirement with an explicit empty
 `nodeSelector: {}` override, same as it opts out of toleration injection.
-`--dynamic` is not an equivalent escape hatch: it is rejected on a required
-path outright, since deferring the value to install time is the same
-unpinned state the requirement exists to reject.
+`--dynamic` is not an equivalent escape hatch: it is rejected on a path that
+equals, contains, or is contained by a required path, since deferring any of
+those to install time is the same unpinned state the requirement exists to
+reject.
+
+**`requireNodeSelectorIfStorageClassSet`.** `requireNodeSelector`'s
+conditional counterpart, for a chart whose zone-pinning PVC only exists once
+a storage class is configured, not by default. Set
+`nodeScheduling.system.requireNodeSelectorIfStorageClassSet: true` (or the
+`accelerated` counterpart) when the component's chart defaults to ephemeral
+storage (e.g. `emptyDir`), but a non-empty value at one of its
+`storageClassPaths` or `sharedStorageClassPaths` paths can switch it to a PVC
+at bundle time; a bare bundle of such a component with no storage class
+configured stays unaffected, and `--system-node-selector`/
+`--accelerated-node-selector` is required only once that PVC is actually in
+play. The two flags are mutually exclusive on the same scheduling group, and
+`requireNodeSelectorIfStorageClassSet` requires at least one
+`storageClassPaths` or `sharedStorageClassPaths` entry to condition on;
+`ComponentRegistry.Validate` rejects a registry entry that violates either
+rule. `--dynamic` is rejected the same way as for `requireNodeSelector`,
+regardless of whether a storage class is configured yet, since one could be
+added later without rebuilding the bundle. `kube-prometheus-stack` is the
+example in `registry.yaml`. Its Prometheus StatefulSet uses `emptyDir` until
+`--storage-class` (or `--set` / an overlay override) puts a non-empty value
+at its `storageClassPaths` entry.
 
 ## `valueOverrideKeys`
 

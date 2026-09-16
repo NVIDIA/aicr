@@ -2,17 +2,17 @@
 
 IAM configuration for the GKE UAT pipeline (`.github/workflows/uat-gcp.yaml`), invoked through the shared dispatch surface (`uat-run.yaml`) for ad-hoc runs and via the nightly batch (`uat-nightly-batch.yaml`) on a cron.
 
-## Relationship to demo-api-server
+## Relationship to gcp-shared
 
-This config shares the `eidosx` GCP project with `infra/demo-api-server`, which
+This config shares the `eidosx` GCP project with `infra/gcp-shared`, which
 owns the foundational resources:
 
 | Resource | Owner | This Config |
 |----------|-------|-------------|
-| Workload Identity Pool (`github-actions-pool`) | demo-api-server | references (not managed) |
-| WIF Provider (`github-actions-provider`) | demo-api-server | references (not managed) |
-| Service Account (`github-actions`) | demo-api-server | data source + additive IAM |
-| GCP API enablement | demo-api-server | additive (idempotent) |
+| Workload Identity Pool (`github-actions-pool`) | gcp-shared | references (not managed) |
+| WIF Provider (`github-actions-provider`) | gcp-shared | references (not managed) |
+| Service Account (`github-actions`) | gcp-shared | data source + additive IAM |
+| GCP API enablement | gcp-shared | additive (idempotent) |
 
 This config adds **only** the IAM roles the service account needs for GKE
 cluster lifecycle management (create, connect, destroy):
@@ -24,7 +24,7 @@ cluster lifecycle management (create, connect, destroy):
 - `roles/resourcemanager.projectIamAdmin` -- Bind roles to node pool SAs
 
 All bindings use `google_project_iam_member` (additive), so they cannot conflict
-with `demo-api-server`'s bindings on the same service account.
+with `gcp-shared`'s bindings on the same service account.
 
 ## Evidence-dashboard read SA (GP5)
 

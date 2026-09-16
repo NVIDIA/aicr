@@ -51,7 +51,7 @@
 # stable repo (`oras repo tags` lists run history). Consumers pin immutably
 # via `@sha256:…`.
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: aks-h100-inference-uat
 

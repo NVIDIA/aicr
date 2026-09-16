@@ -27,6 +27,14 @@ inputs:
     description: 'Number of days to retain debug artifacts'
     required: false
     default: '7'
+  privileged_ci:
+    description: >-
+      Whether this run checked out trusted content. Forwarded to
+      install-e2e-tools, which gates its tool-binary cache save on it. The Go
+      cache below is restore-only and needs no gate. Restore is unconditional
+      either way.
+    required: false
+    default: 'true'
 
 runs:
   using: 'composite'
@@ -35,13 +43,47 @@ runs:
       uses: actions/setup-go@7a3fe6cf4cb3a834922a1244abfce67bcef6a0c5  # v6.2.0
       with:
         go-version: ${{ inputs.go_version }}
-        cache: true
+        # Caching is done explicitly below, for the reasons in go-lint.
+        cache: false
+
+    - name: Resolve Go cache paths
+      id: gocache
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+        echo "buildcache=$(go env GOCACHE)" >> "$GITHUB_OUTPUT"
+
+    # Restore-only, for the reasons spelled out in go-lint: this job shares
+    # go-test's key, entries are immutable, and a save here could take that key
+    # with a GOCACHE that has none of the -race test objects go-test gates its
+    # own save on. The prefix fallback keeps this near-warm without writing.
+    #
+    # Restore-only applies to THIS cache, not to the job: install-e2e-tools
+    # below saves a tool-binary cache, which is why the action still takes a
+    # privileged_ci input to forward.
+    #
+    # E2E benefits less than lint does: `make test` banks -race objects, while
+    # this job's compiles (`ko build`, and the -trimpath/CGO_ENABLED=0 host
+    # builds) use different flags, so those ActionIDs miss. GOMODCACHE still
+    # lands in full, which is the part that dominates a cold run.
+    - name: Restore Go modules and build output
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+      with:
+        path: |
+          ${{ steps.gocache.outputs.modcache }}
+          ${{ steps.gocache.outputs.buildcache }}
+        key: go-${{ runner.os }}-${{ runner.arch }}-${{ inputs.go_version }}-${{ hashFiles('go.sum') }}
+        restore-keys: |
+          go-${{ runner.os }}-${{ runner.arch }}-${{ inputs.go_version }}-
 
     - name: Prep runner for Kind
       uses: ./.github/actions/prep-kind-runner
 
     - name: Install E2E testing tools
       uses: ./.github/actions/install-e2e-tools
+      with:
+        privileged_ci: ${{ inputs.privileged_ci }}
 
     - name: Create Kind cluster and deploy aicrd
       shell: bash

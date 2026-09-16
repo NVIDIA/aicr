@@ -1033,7 +1033,7 @@ func TestParseExtraSentinels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cleaned, extra := parseExtraSentinels(tt.logs)
+			cleaned, extra, _ := parseExtraSentinels(tt.logs)
 			if cleaned != tt.wantCleaned {
 				t.Errorf("cleaned = %q, want %q", cleaned, tt.wantCleaned)
 			}
@@ -1060,7 +1060,7 @@ func TestProcessValidatorLogs(t *testing.T) {
 	}
 	b.WriteString(p + `{"nodesValidated":"1","nodesTotal":"2"}`)
 
-	extra, stdout := processValidatorLogs(b.String())
+	extra, _, stdout := processValidatorLogs(b.String())
 
 	if extra["nodesValidated"] != "1" || extra["nodesTotal"] != "2" {
 		t.Fatalf("late sentinel beyond truncation window was lost: extra=%v", extra)
@@ -1263,6 +1263,42 @@ func TestBoundTerminationMsg(t *testing.T) {
 			if trimmed := tt.maxBytes - suffixIdx; trimmed < 0 || trimmed >= utf8.UTFMax {
 				t.Errorf("trimmed %d bytes back from maxBytes=%d; want an incomplete-rune trim (0..%d)",
 					trimmed, tt.maxBytes, utf8.UTFMax-1)
+			}
+		})
+	}
+}
+
+func TestParseProvenanceSentinel(t *testing.T) {
+	const p = ctrf.ProvenanceLinePrefix
+	const x = ctrf.ExtraLinePrefix
+	good := p + `{"shippedDigest":"aa","derivedDigest":"bb","inheritedPaths":["spec.hostNetwork"]}`
+	tests := []struct {
+		name        string
+		logs        string
+		wantCleaned string
+		wantProv    bool
+		wantExtra   int
+	}{
+		{"record parsed and stripped", "work\n" + good + "\ndone", "work\ndone", true, 0},
+		{"both sentinels coexist", x + `{"runtimeSource":"delivered-artifact"}` + "\n" + good, "", true, 1},
+		{"malformed record dropped, earlier kept", good + "\n" + p + `{"shippedDigest":`, "", true, 0},
+		{"record without both digests is not a carrier", p + `{"shippedDigest":"aa"}`, "", false, 0},
+		{"no sentinel", "plain", "plain", false, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleaned, extra, prov := parseExtraSentinels(tt.logs)
+			if cleaned != tt.wantCleaned {
+				t.Errorf("cleaned = %q, want %q", cleaned, tt.wantCleaned)
+			}
+			if (prov != nil) != tt.wantProv {
+				t.Errorf("prov = %+v, want present=%v", prov, tt.wantProv)
+			}
+			if prov != nil && (prov.ShippedDigest != "aa" || prov.DerivedDigest != "bb" || len(prov.InheritedPaths) != 1) {
+				t.Errorf("prov = %+v", prov)
+			}
+			if len(extra) != tt.wantExtra {
+				t.Errorf("extra = %v", extra)
 			}
 		})
 	}

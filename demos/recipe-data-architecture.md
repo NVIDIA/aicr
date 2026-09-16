@@ -192,16 +192,24 @@ Order in `dependencyRefs`:
 
 ## API Access
 
+These call a self-hosted `aicrd`. Start one first:
+
+```shell
+docker run -p 8080:8080 ghcr.io/nvidia/aicrd:latest
+```
+
+See [API Reference](../docs/user/api-reference.md).
+
 Same recipe via API:
 
 ```shell
-curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=gb200&intent=training" | jq .
+curl -s "http://localhost:8080/v1/recipe?service=eks&accelerator=gb200&intent=training" | jq .
 ```
 
 View applied overlays:
 
 ```shell
-curl -s "https://aicr-demo.dgxc.io/v1/recipe?service=eks&accelerator=gb200&intent=training" | jq .metadata.appliedOverlays
+curl -s "http://localhost:8080/v1/recipe?service=eks&accelerator=gb200&intent=training" | jq .metadata.appliedOverlays
 ```
 
 ## Validation Tests

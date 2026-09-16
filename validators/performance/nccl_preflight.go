@@ -16,6 +16,7 @@ package main
 
 import (
 	"context"
+	stderrors "errors"
 	"slices"
 	"sync"
 
@@ -39,39 +40,41 @@ const (
 	shellBin = "/bin/sh"
 )
 
-// runPerNodeProbe fans out a boolean readiness probe across the target nodes
-// with bounded concurrency and returns the sorted list of nodes for which the
-// probe reported false (not-ready). A probe error (schedule/image-pull/log
-// failure) aborts the whole fan-out with that error rather than being counted
-// as not-ready, so a transient infrastructure fault is never misreported as a
-// node-level misconfiguration. Shared by the NVreg (GB200/EKS) and TCPXO
-// (GKE/H100) preflights, whose only real difference is the per-node probe body
-// and the operator-facing failure message.
-func runPerNodeProbe(
+// runPerNodeResultProbe fans out a per-node probe across the target nodes with
+// bounded concurrency and returns every node's result keyed by node name. A
+// probe error (schedule/image-pull/log failure) aborts the whole fan-out with
+// that error rather than being folded into a result, so a transient
+// infrastructure fault is never misreported as a node-level misconfiguration.
+//
+// Generic over the result type because the two preflights need different
+// verdict shapes: TCPXO's question is boolean (is the plugin installed?), while
+// NVreg's has several once the driver version is consulted — see nvregVerdict,
+// whose values a bool cannot carry (#2459).
+func runPerNodeResultProbe[T any](
 	ctx *validators.Context,
 	nodes []corev1.Node,
 	probeLabel string,
-	probe func(ctx context.Context, clientset kubernetes.Interface, namespace, nodeName string) (bool, error),
-) ([]string, error) {
+	probe func(ctx context.Context, clientset kubernetes.Interface, namespace, nodeName string) (T, error),
+) (map[string]T, error) {
 
-	var (
-		mu      sync.Mutex
-		missing []string
-	)
+	var mu sync.Mutex
+	results := make(map[string]T, len(nodes))
+
 	g, gctx := errgroup.WithContext(ctx.Ctx)
 	g.SetLimit(perNodeFanoutConcurrency)
 	for _, n := range nodes {
 		// Stop scheduling once the group context is canceled — a sibling probe's
 		// hard failure or a parent-context deadline — rather than queuing work
-		// that would only run against an already-canceled context. Any nodes not
-		// yet probed are irrelevant: g.Wait below returns the cancellation error,
-		// so the partial missing-list is never consumed.
+		// that would only run against an already-canceled context. Wait does NOT
+		// report that on its own: it returns whatever a goroutine returned, which
+		// is nil when none ever ran. The completeness check after Wait is what
+		// keeps a partial result map from being consumed.
 		if gctx.Err() != nil {
 			break
 		}
 		nodeName := n.Name
 		g.Go(func() error {
-			ok, err := probe(gctx, ctx.Clientset, ctx.Namespace, nodeName)
+			res, err := probe(gctx, ctx.Clientset, ctx.Namespace, nodeName)
 			if err != nil {
 				// Preserve the probe's structured code (e.g. ErrCodeTimeout from
 				// the phase wait) instead of flattening every failure to Internal;
@@ -79,16 +82,61 @@ func runPerNodeProbe(
 				return aicrErrors.PropagateOrWrap(err, aicrErrors.ErrCodeInternal,
 					probeLabel+" preflight probe failed on node "+nodeName)
 			}
-			if !ok {
-				mu.Lock()
-				missing = append(missing, nodeName)
-				mu.Unlock()
-			}
+			mu.Lock()
+			results[nodeName] = res
+			mu.Unlock()
 			return nil
 		})
 	}
 	if err := g.Wait(); err != nil {
 		return nil, err
+	}
+
+	// Every node must have produced a result. The loop above stops scheduling
+	// once the group context is canceled, and a context ALREADY canceled on
+	// entry means no goroutine ever ran — so Wait returns nil over an empty map
+	// and the caller reads "no node reported a problem" as a pass. A preflight
+	// that examines nothing must not look like success.
+	//
+	// The cause comes from ctx.Ctx, not the errgroup's derived context:
+	// errgroup.Wait cancels the latter when it returns, so gctx.Err() is always
+	// non-nil here and would attach a spurious "context canceled" to every case.
+	if len(results) != len(nodes) {
+		// A deadline and an operator cancellation are different outcomes: the
+		// first is retryable, the second is not, and flattening both to one code
+		// misleads whoever reads the verdict.
+		cause := ctx.Ctx.Err()
+		code := aicrErrors.ErrCodeCanceled
+		if stderrors.Is(cause, context.DeadlineExceeded) {
+			code = aicrErrors.ErrCodeTimeout
+		}
+		return nil, aicrErrors.WrapWithContext(code,
+			probeLabel+" preflight did not probe every target node", cause,
+			map[string]any{"probed": len(results), "nodes": len(nodes)})
+	}
+
+	return results, nil
+}
+
+// runPerNodeProbe is the boolean specialization of runPerNodeResultProbe: it
+// returns the sorted list of nodes for which the probe reported false
+// (not-ready). Used by the TCPXO preflight, whose question is genuinely binary.
+func runPerNodeProbe(
+	ctx *validators.Context,
+	nodes []corev1.Node,
+	probeLabel string,
+	probe func(ctx context.Context, clientset kubernetes.Interface, namespace, nodeName string) (bool, error),
+) ([]string, error) {
+
+	results, err := runPerNodeResultProbe(ctx, nodes, probeLabel, probe)
+	if err != nil {
+		return nil, err
+	}
+	var missing []string
+	for nodeName, ok := range results {
+		if !ok {
+			missing = append(missing, nodeName)
+		}
 	}
 	slices.Sort(missing)
 	return missing, nil

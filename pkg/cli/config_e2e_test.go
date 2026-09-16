@@ -290,11 +290,19 @@ spec:
 }
 
 // TestBundleCmd_SigningKeyFromConfig verifies the KMS --signing-key is
-// config-driven: a config-sourced spec.bundle.attestation.signingKey lands on
-// the resolved options, the CLI flag wins over the config value, and a
-// config-sourced signingKey combined with a config-sourced keyless input
-// (fulcioURL) is rejected by the mutual-exclusion guard through the resolved
-// layer (cmd.IsSet is false for both, so only resolved opts catch it). See #1566.
+// config-driven end to end: a config-sourced spec.bundle.attestation.signingKey
+// lands on the resolved options, the CLI flag wins over the config value, and a
+// config-sourced signingKey combined with a config-sourced keyless input is
+// rejected with no flag set (cmd.IsSet is false for both, so nothing at the flag
+// layer alone would see it). See #1566.
+//
+// Which layer does the rejecting differs by case, and this test deliberately
+// does not distinguish: the fulcioURL and blank-key cases now fail in
+// config.resolveSigningKey when the document loads, while oidcDeviceFlow is
+// excluded from that rule and is caught only by validateSigningKeyExclusivity on
+// the merged opts. Those two functions are covered directly by
+// TestBundleResolve_SigningKey (pkg/config) and TestValidateSigningKeyExclusivity
+// below, so a regression in either is caught there rather than here.
 func TestBundleCmd_SigningKeyFromConfig(t *testing.T) {
 	const configKey = "awskms://alias/aicr-signing"
 	const flagKey = "gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k"
@@ -358,9 +366,9 @@ spec:
 	}
 
 	// Rejection cases: a config-sourced signingKey that conflicts with a
-	// config-sourced keyless input must be caught through the resolved layer
-	// (cmd.IsSet is false for both), and a blank config signingKey must fail
-	// fast rather than reaching the KMS resolver. See #1566.
+	// config-sourced keyless input must be rejected with no flag set (cmd.IsSet
+	// is false for both), and a blank config signingKey must fail fast rather
+	// than reaching the KMS resolver. See #1566.
 	rejectTests := []struct {
 		name        string
 		attestation string
@@ -402,11 +410,12 @@ spec:
 // signingKey and oidcDeviceFlow: true BEFORE the CLI ever read
 // --oidc-device-flow, so a caller trying to correct a self-contradictory
 // config with --oidc-device-flow=false got the error anyway — the flag was
-// never given a chance to be read. Config.BundleOptions no longer checks
-// oidcDeviceFlow eagerly (see its godoc); only the merged-opts
-// validateSigningKeyExclusivity does, so the flag now wins as every other
-// per-field override does. TestBundleCmd_SigningKeyFromConfig's rejectTests
-// above still prove the config-only combination (no flag) is rejected.
+// never given a chance to be read. The rule now lives one layer down in
+// config.resolveSigningKey, which leaves oidcDeviceFlow out for that same
+// reason; only the merged-opts validateSigningKeyExclusivity checks it, so the
+// flag wins as every other per-field override does.
+// TestBundleCmd_SigningKeyFromConfig's rejectTests above still prove the
+// config-only combination (no flag) is rejected.
 func TestBundleCmd_OIDCDeviceFlowFlagOverridesConfigSigningKeyConflict(t *testing.T) {
 	const configKey = "awskms://alias/aicr-signing"
 

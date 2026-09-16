@@ -72,7 +72,15 @@ CLUSTER_DEBUG_LOG_TAIL="${CLUSTER_DEBUG_LOG_TAIL:-2000}"
 # that fail). Other namespaces still get get/describe/events, just not every log —
 # keeps the bundle focused on the GPU/tuning stack that drives deployment-phase
 # failures. Space-separated; overridable.
-CLUSTER_DEBUG_LOG_NAMESPACES="${CLUSTER_DEBUG_LOG_NAMESPACES:-skyhook gpu-operator nvidia-dra-driver nvsentinel node-feature-discovery kai-scheduler cert-manager monitoring}"
+#
+# nvidia-network-operator (MOFED/DOCA driver-build pods) and aicr-validation (the
+# NCCL launcher/worker + check Jobs) carry the crash logs behind two failure
+# modes the operator namespaces alone cannot explain: an RDMA driver that never
+# reaches .driver-ready, and a CUJ Job that crash-loops to its deadline. Both run
+# NVIDIA/AICR workloads, not third-party tenants; heed the Privacy note above
+# before adding a namespace that runs token-bearing workloads (e.g. a served
+# model), whose logs can carry app-emitted credentials into the public artifact.
+CLUSTER_DEBUG_LOG_NAMESPACES="${CLUSTER_DEBUG_LOG_NAMESPACES:-skyhook gpu-operator nvidia-dra-driver nvidia-network-operator nvsentinel node-feature-discovery kai-scheduler aicr-validation cert-manager monitoring}"
 
 # Cluster-scoped custom resources most relevant to a deployment-phase failure.
 # Skyhook is first: its status.status is the non-monotonic signal the readiness
@@ -175,7 +183,11 @@ capture_skyhook_snapshot() {
 
 # _cd_gpu_driver_state writes a per-GPU-node census of advertised GPUs and, when
 # any GPU node advertises fewer than the cohort max (a capacity shortfall — e.g.
-# an H100 node enumerating 7 of 8 GPUs), captures DRIVER-LEVEL state on each short
+# an H100 node enumerating 7 of 8 GPUs) OR a GPU-marked node advertises none at
+# all (the driver-dead 0/total case, #1860 — invisible to a plain allocatable
+# scan because the resource key is absent, so such a node is identified instead
+# by its GPU taint/label or NVIDIA PCI presence and surfaced as 0), captures
+# DRIVER-LEVEL state on each short
 # node: nvidia-smi -L, per-GPU PCI/serial, the host NVIDIA PCI census, and dmesg
 # NVRM/Xid lines. The Kubernetes API only shows the *symptom* (allocatable count);
 # this exec-based capture — via the privileged on-node nvidia-dcgm pod — is what
@@ -202,15 +214,27 @@ _cd_gpu_driver_state() {
     local ns="${CLUSTER_DEBUG_GPU_NAMESPACE}"
     census="$(_cd_bounded kubectl get nodes -o json 2>/dev/null \
       | jq -r --arg r "${res}" '.items[]
-          | select(.status.allocatable[$r] != null)
-          | "\(.metadata.name) \(.status.allocatable[$r])"' 2>/dev/null)"
+          # A GPU node advertises the resource, OR is marked as GPU hardware by
+          # taint/label while advertising none — the #1860 driver-dead case the
+          # census must still surface (as 0), not silently drop.
+          | select(
+              (.status.allocatable[$r] != null)
+              or (.status.capacity[$r] != null)
+              or (any(.spec.taints[]?; .key == $r))
+              or (.metadata.labels["feature.node.kubernetes.io/pci-10de.present"] == "true")
+            )
+          | "\(.metadata.name) \(.status.allocatable[$r] // "0")"' 2>/dev/null)"
     # NOTE: "cohort max" is computed across ALL GPU nodes, with no per-product /
     # per-pool segmentation. Correct for UAT's homogeneous single-SKU GPU pools;
     # a heterogeneous pool (e.g. a 1-GPU utility node beside 8-GPU workers) would
     # false-flag the smaller node as short. Best-effort diagnostics, so the only
     # cost of a false positive is one extra bounded exec + a marker.
     maxc="$(printf '%s\n' "${census}" | awk '{if($2+0>m)m=$2+0}END{print m+0}')"
-    short="$(printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && $2+0 < m {print $1}')"
+    # Short = below cohort max, OR advertising 0 regardless of max. The `== 0`
+    # arm is #1860: when every GPU node is driver-dead the max is also 0, so a
+    # plain `< max` test would flag nothing; a GPU node advertising 0 is always a
+    # shortfall (it is known GPU hardware, per the census select above).
+    short="$(printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && ($2+0 < m || $2+0 == 0) {print $1}')"
 
     local captured=0
     echo "::group::Collect GPU driver state"
@@ -224,8 +248,8 @@ _cd_gpu_driver_state() {
       fi
       echo
       if [[ -n "${short}" ]]; then
-        echo "----- GPU-count SHORTFALL: node(s) below cohort max ${maxc} -----"
-        printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && $2+0 < m {print "  "$1" advertises "$2"/"m}'
+        echo "----- GPU-count SHORTFALL: node(s) below cohort max ${maxc} (or advertising none) -----"
+        printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && ($2+0 < m || $2+0 == 0) {print "  "$1" advertises "$2"/"m}'
         echo
         # shellcheck disable=SC2086 # intentional word-split of the node list
         for node in ${short}; do
@@ -263,7 +287,7 @@ _cd_gpu_driver_state() {
     if [[ -n "${short}" ]]; then
       {
         echo "GPU-count shortfall @ $(date -u +%Y-%m-%dT%H:%M:%SZ); cohort max=${maxc}"
-        printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && $2+0 < m {print $1" "$2"/"m}'
+        printf '%s\n' "${census}" | awk -v m="${maxc}" 'NF>=2 && ($2+0 < m || $2+0 == 0) {print $1" "$2"/"m}'
       } > "${CLUSTER_DEBUG_DIR}/gpu-shortfall.txt" 2>/dev/null || true
     fi
     exit 0

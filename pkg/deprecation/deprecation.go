@@ -65,7 +65,7 @@ type Notice struct {
 	// leaving the user to guess.
 	Replacement string
 
-	// RemovedIn is the AICR release that removes Subject, e.g. "v0.23".
+	// RemovedIn is the AICR release that removes Subject, e.g. "v1.0.0".
 	RemovedIn string
 
 	// Deprecated is when Subject became (or becomes) deprecated. This is the

@@ -38,7 +38,7 @@ spec:
 
               # Create a registry.yaml with healthCheck.assertFile for gpu-operator
               cat > "${WORK}/data/registry.yaml" <<'EOF'
-              apiVersion: aicr.run/v1alpha2
+              apiVersion: aicr.run/v1beta1
               kind: ComponentRegistry
               components:
                 - name: gpu-operator

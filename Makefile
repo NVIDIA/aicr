@@ -108,7 +108,7 @@ generate: ## Runs go generate for code generation
 	@echo "Code generation completed"
 
 .PHONY: lint
-lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse bom-pinning-check check-depproxy-kit ## Lints the entire project (Go, YAML, license headers, chart-version pins, and vendored action digests)
+lint: lint-go lint-yaml license check-agents-sync check-docs-filenames check-docs-mdx check-docs-mdx-parse check-docs-yaml bom-pinning-check check-depproxy-kit check-upgrade-records ## Lints the entire project (Go, YAML, license headers, docs, chart-version pins, and vendored action digests)
 	@echo "Completed Go and YAML lints and ensured license headers"
 
 .PHONY: check-depproxy-kit
@@ -144,6 +144,10 @@ check-agents-sync: ## Verifies AGENTS.md is in sync with .claude/CLAUDE.md
 check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 	@./tools/check-docs-filenames
 
+.PHONY: check-upgrade-records
+check-upgrade-records: ## Verifies committed ComponentUpgrades records are well-formed (ADR-021)
+	@./tools/check-upgrade-records
+
 .PHONY: check-docs-mdx
 check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments, autolinks, bare <tags>)
 	@./tools/check-docs-mdx
@@ -162,6 +166,10 @@ check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, b
 .PHONY: check-docs-mdx-parse
 check-docs-mdx-parse: ## Validates docs/ with the real MDX parser (requires Node; CI-blocking)
 	@./tools/check-docs-mdx-parse
+
+.PHONY: check-docs-yaml
+check-docs-yaml: ## Validates YAML-labelled code blocks throughout docs/ (requires Node; CI-blocking)
+	@./tools/check-docs-yaml
 
 .PHONY: lint-go
 lint-go: ## Lints Go files with golangci-lint and go vet
@@ -271,9 +279,18 @@ license-check: ## Check license is approved
         --ignore=github.com/cyberphone/json-canonicalization \
         --ignore=$$STDLIB_IGNORE
 
+# Ordered ahead of test-shell because a stale tool pin makes tools/api-diff exit
+# 17, which surfaces as nine unrelated-looking `want rc=16 got rc=17` shell
+# failures (#2741). This test names the stale file directly and runs in under a
+# second. Scoped to the one test: the rest of tests/architecture takes ~25s and
+# runs with the full suite below.
+.PHONY: test-tool-pins
+test-tool-pins: ## Checks go.mod is the only pin for tools built from this module
+	@GOFLAGS="-mod=readonly" go test -count=1 -run '^TestToolPinsLiveOnlyInGoMod$$' ./tests/architecture/
+
 .PHONY: test-shell
-test-shell: ## Runs shell unit tests (tools/*_test.sh; hermetic, no cluster)
-	@set -e; for t in tools/*_test.sh; do [ -e "$$t" ] || continue; echo "Running $$t..."; bash "$$t"; done
+test-shell: ## Runs shell unit tests (tools/*_test.sh, tests/uat/lib/*_test.sh; hermetic, no cluster)
+	@set -e; for t in tools/*_test.sh tests/uat/lib/*_test.sh; do [ -e "$$t" ] || continue; echo "Running $$t..."; bash "$$t"; done
 
 # validators/ tests run as part of `make test` but are excluded from the
 # coverage.out this target emits: per-package coverage there runs 41-92%
@@ -298,7 +315,7 @@ test-shell: ## Runs shell unit tests (tools/*_test.sh; hermetic, no cluster)
 # the same everywhere depends on.
 # ---------------------------------------------------------------------------
 .PHONY: test
-test: test-shell ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
+test: test-tool-pins test-shell ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
 	echo "Running tests with race detector..."; \
 	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path 2>/dev/null || echo "") \
@@ -780,25 +797,44 @@ check-health: ## Runs chainsaw health check directly against Kind cluster (COMPO
 	chainsaw test --test-dir "recipes/checks/$(COMPONENT)/" --test-file health-check.yaml --no-color
 
 .PHONY: check-health-all
-check-health-all: ## Runs all chainsaw health checks against Kind cluster
+# Iterates registry.yaml's healthCheck.assertFile entries, not a raw glob of
+# recipes/checks/*/: this is the set every shipped recipe actually exercises,
+# so opt-in-only checks (e.g. nvsentinel-observability) are excluded by
+# construction -- run those directly via `make check-health COMPONENT=<name>`.
+# --test-dir/--test-file are derived from each declared path rather than
+# reconstructed from a component name, so a non-conventional assertFile
+# (e.g. checks/shared/foo.yaml) is honored as declared.
+#
+# yq's exit status is captured separately from the pipeline that follows:
+# without `set -o pipefail`, a failing yq piped straight into the loop would
+# silently yield zero components and a false "All health checks passed".
+# The empty-list check below is a second guard against the same outcome.
+check-health-all: ## Runs chainsaw health checks for every registry-linked component against Kind cluster
 	@set -e; \
 	FAILED=""; \
-	for dir in recipes/checks/*/; do \
-		COMPONENT=$$(basename "$$dir"); \
-		echo "=== $$COMPONENT ==="; \
-		if chainsaw test --test-dir "$$dir" --test-file health-check.yaml --no-color; then \
-			echo "PASS: $$COMPONENT"; \
+	ASSERT_FILES=$$(yq -r '.components[].healthCheck.assertFile' recipes/registry.yaml) || { echo "Error: yq failed to read recipes/registry.yaml"; exit 1; }; \
+	PATHS=$$(printf '%s\n' "$$ASSERT_FILES" | grep -v '^null$$' | sort -u); \
+	if [ -z "$$PATHS" ]; then \
+		echo "Error: no registry-linked health checks found in recipes/registry.yaml -- refusing to report success on zero checks"; \
+		exit 1; \
+	fi; \
+	for ASSERT in $$PATHS; do \
+		dir="recipes/$$(dirname "$$ASSERT")/"; \
+		file="$$(basename "$$ASSERT")"; \
+		echo "=== $$ASSERT ==="; \
+		if chainsaw test --test-dir "$$dir" --test-file "$$file" --no-color; then \
+			echo "PASS: $$ASSERT"; \
 		else \
-			echo "FAIL: $$COMPONENT"; \
-			FAILED="$$FAILED $$COMPONENT"; \
+			echo "FAIL: $$ASSERT"; \
+			FAILED="$$FAILED $$ASSERT"; \
 		fi; \
 		echo ""; \
 	done; \
 	if [ -n "$$FAILED" ]; then \
-		echo "Failed components:$$FAILED"; \
+		echo "Failed checks:$$FAILED"; \
 		exit 1; \
 	fi; \
-	echo "All health checks passed"
+	echo "All registry-linked health checks passed"
 
 .PHONY: validate-local
 validate-local: image-validators ## Builds validator images and runs validation in Kind (RECIPE=<path>)

@@ -45,6 +45,10 @@ type ValidatorResult struct {
 	// codes only — never node names or IPs.
 	Extra map[string]string
 
+	// RuntimeProvenance is the derived-runtime evidence carrier parsed from the
+	// container's ProvenanceLinePrefix sentinel line; nil when none was emitted.
+	RuntimeProvenance *RuntimeProvenance
+
 	// Duration is the wall-clock execution time.
 	Duration time.Duration
 
@@ -173,6 +177,13 @@ func (b *Builder) AddResult(r *ValidatorResult) {
 		// report after AddResult returns.
 		tr.Extra = make(map[string]string, len(r.Extra))
 		maps.Copy(tr.Extra, r.Extra)
+	}
+	if r.RuntimeProvenance != nil {
+		// Same defensive copy: the slices are caller-owned.
+		p := *r.RuntimeProvenance
+		p.OverriddenPaths = append([]string(nil), p.OverriddenPaths...)
+		p.InheritedPaths = append([]string(nil), p.InheritedPaths...)
+		tr.RuntimeProvenance = &p
 	}
 
 	b.tests = append(b.tests, tr)

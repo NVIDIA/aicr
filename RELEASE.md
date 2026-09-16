@@ -135,12 +135,13 @@ Two candidates existed and neither turns out to be a real exercise:
   yet, that owes no notice window — it is a pre-adoption restructure. Spending
   two releases deprecating an endpoint nobody calls would buy a worse end state
   (two frozen path families instead of one) for the sake of a dry run.
-- **The ADR-022 alpha migration runs warn-then-remove across v0.22 and v0.23**
-  and will be the first end-to-end use of the loader-warning arm — once
-  [#2416](https://github.com/NVIDIA/aicr/issues/2416) wires `deprecation.Warn`
-  into the artifact loaders, which is still outstanding. Even then, alpha owes
-  no window under the table above, so it demonstrates the mechanism working
-  rather than the policy being honored.
+- **The ADR-022 alpha migration runs warn-then-remove across v0.22 and v1.0.0**
+  and is the first end-to-end use of the loader-warning arm:
+  [#2416](https://github.com/NVIDIA/aicr/issues/2416) wired `deprecation.Warn`
+  into the snapshot, recipe, catalog and criteria loaders in v0.22, so reading
+  an alpha or headerless artifact now names the file and the release that stops
+  reading it. Alpha owes no window under the table above, so this demonstrates
+  the mechanism working rather than the policy being honored.
 
 What that leaves untested is the *obligation*, not the machinery. The
 per-surface mechanisms have unit coverage in `pkg/deprecation` and `pkg/server`.
@@ -178,9 +179,9 @@ ADR-022 §3, bound to these releases:
 |---|---|---|---|
 | v0.21 | alpha and target | alpha | [#2404](https://github.com/NVIDIA/aicr/pull/2404) |
 | v0.22 | alpha and target | target | [#2416](https://github.com/NVIDIA/aicr/issues/2416) |
-| v0.23 | target only | target | [#2417](https://github.com/NVIDIA/aicr/issues/2417) |
+| v1.0.0 | target only | target | [#2417](https://github.com/NVIDIA/aicr/issues/2417) |
 
-Cutting v0.22 or v0.23 means completing the corresponding issue in that release,
+Cutting v0.22 or v1.0.0 means completing the corresponding issue in that release,
 not after it. The consumer-facing form of this table, including the per-kind
 target values, is in
 [`docs/integrator/data-extension.md`](docs/integrator/data-extension.md#catalog-and-binary-compatibility).
@@ -263,14 +264,16 @@ run:
 
 Both inputs have to match what the release job used, or the comparison measures
 drift rather than reproducibility. The release generated from the RC tag's tree
-with the toolchain pinned in `.settings.yaml`, so pin both locally: run from a
+with the toolchain pinned at that tree, so pin both locally: run from a
 worktree at the tag rather than the ambient checkout, and confirm the local
-`go` and `go-licenses` match their pins first.
+`go` and `go-licenses` match their pins first. `go` is pinned in
+`.go-version`; `go-licenses` is built from this module, so its pin is the
+`go.mod` require line.
 
 ```bash
 git worktree add /tmp/rc-verify vX.Y.Z-rc1
 cd /tmp/rc-verify
-make tools-check   # go and go_licenses must match .settings.yaml
+make tools-check   # go must match .go-version, go-licenses its go.mod require
 gh release download vX.Y.Z-rc1 -p THIRD_PARTY_NOTICES.md -D /tmp/rc
 make notices
 diff /tmp/rc/THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.md
@@ -281,7 +284,7 @@ is host-independent, which is what the generator's fixed platform matrix and
 `LC_ALL=C` sort exist to guarantee. A missing asset means the `extra_files` glob
 found nothing. A diff means generation is not reproducible and the release
 should not be promoted until it is understood — but check `make tools-check`
-first: a `⚠` on `go` or `go_licenses` means the local toolchain, not the
+first: a `⚠` on `go` or `go-licenses` means the local toolchain, not the
 generator, explains the difference.
 
 Pre-releases exercise the full build/test/scan/attest pipeline. After those
@@ -290,7 +293,6 @@ but they do not update:
 
 - Homebrew formula (users on `brew upgrade` are unaffected)
 - Container `:latest` tags (only candidate and version aliases are written)
-- Demo deployment (Cloud Run stays on latest stable)
 - Site documentation (GitHub Pages stays on latest stable)
 
 Slack notifications fire for both pre-releases and stable releases.
@@ -333,7 +335,7 @@ For critical fixes between regular releases:
 ## Release Pipeline
 
 ```
-Tag Push --> CI --> Candidate Images --> Resolve Digests --> Scan + Attest --> Promote Aliases --> Publish --> Deploy
+Tag Push --> CI --> Candidate Images --> Resolve Digests --> Scan + Attest --> Promote Aliases --> Publish
 ```
 
 The release workflow resolves one authoritative seven-image digest map. Both
@@ -442,7 +444,7 @@ digest you verify against depends on what you are asking for:
 
 | Predicate | Attached to | Verify against |
 |-----------|-------------|----------------|
-| SLSA provenance (`slsaprovenance1`) | multi-arch index | `crane digest <image>:<tag>` |
+| SLSA provenance (`slsaprovenance1`) | multi-arch index **and** each per-platform child manifest | `crane digest <image>:<tag>`, or `crane digest --platform <os>/<arch> <image>:<tag>` |
 | SBOM (`cyclonedx`) | per-platform child manifest | `crane digest --platform <os>/<arch> <image>:<tag>` |
 | OpenVEX (`openvex`) | per-platform child manifest | `crane digest --platform <os>/<arch> <image>:<tag>` |
 
@@ -475,7 +477,9 @@ gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/performance@${PERF_I
 gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/conformance@${CONF_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 gh attestation verify "oci://ghcr.io/nvidia/aicr-validators/aiperf-bench@${AIPERF_INDEX}" --repo NVIDIA/aicr --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml --source-ref "refs/tags/${TAG}"
 
-# Cosign — only provenance is on the index. Pin the workflow *and* the exact
+# Cosign — provenance is the only predicate on the index (it is also on each
+# child manifest; the index copy is what an admission policy can reach). Pin
+# the workflow *and* the exact
 # tag ref (same binding as --source-ref above): without
 # --certificate-github-workflow-ref, the identity regexp alone would accept
 # an attestation signed for any release tag on a digest this tag was
@@ -543,12 +547,6 @@ else
   exit 1
 fi
 ```
-
-## Demo Deployment
-
-> **Note**: Demonstration only — not a production service. Self-host `aicrd` for production use. See [API Server Documentation](docs/contributor/api-server.md).
-
-The `aicrd` API server demo deploys to Google Cloud Run on successful release (region: `us-west1`, auth: Workload Identity Federation). Project-specific details are managed in CI configuration.
 
 ## Troubleshooting
 
