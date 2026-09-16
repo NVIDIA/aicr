@@ -24,7 +24,7 @@ executable bits or `./script.sh` invocation.
 - `helm_version` (required): Helm version from `load-versions`
 - `setup_envtest_version` (required): setup-envtest version from `load-versions`
 - `setup_envtest_sha256` (**required**): pinned linux/amd64 SHA256 for the setup-envtest release binary, from `load-versions`. controller-runtime publishes no `checksums.txt` beside it, so this pin is the only integrity check on the download
-- `apidiff_version` (optional): apidiff version from `load-versions`; when set, builds apidiff and runs `make api-diff` (default: empty, which skips both steps). The input gates whether the check runs; the version actually built comes from `go.mod`, which `TestToolPinsMatchGoMod` holds equal to `.settings.yaml`
+- `apidiff_version` (optional): apidiff version from `load-versions`, which reads it from the `go.mod` require line; when set, builds apidiff and runs `make api-diff` (default: empty, which skips both steps). The input gates whether the check runs; the version built comes from that same `go.mod` entry
 - `oasdiff_version` (**required**): oasdiff version from `load-versions`; installs oasdiff before `make test` and runs `make openapi-diff` after. Not optional, because `make test` runs `tools/openapi-diff_test.sh`, which fails in CI when oasdiff is absent rather than skipping — the REST contract gate cannot be silently unverified
 - `oasdiff_sha256` (**required**): pinned linux/amd64 SHA256 for the oasdiff release archive, from `load-versions`. The install fails closed when it is missing or malformed rather than falling back to the release's own `checksums.txt`
 - `privileged_ci` (optional): whether the checked-out ref is trusted (default: `"true"`). Only trusted runs save the Go cache; restore is unconditional. `ok-to-test` passes `false` because it runs an untrusted PR head inside the default branch's cache scope
@@ -86,7 +86,7 @@ This action runs `tools/setup-tools --skip-go --skip-docker` in auto mode, which
 **Purpose**: Build the pinned `go-licenses` from this module with `GOFLAGS` pinned
 **When to use**: Any job running `make license-check`, `make notices`, or `make release`
 **Inputs**:
-- `version` (required): go-licenses version from `load-versions` (`.settings.yaml` `linting.go_licenses`). Validated for presence only — the version built comes from `go.mod`, which `TestToolPinsMatchGoMod` holds equal to this pin
+- `version` (required): go-licenses version from `load-versions`, which reads it from the `go.mod` require line. Validated for presence only — the version built comes from that same entry
 
 `go-licenses` publishes no binary release, so it cannot come from
 `setup-build-tools` (which installs from binary releases). It is instead a `tool`

@@ -33,10 +33,11 @@ import (
 )
 
 // nvsentinelObservabilityChartTimeout bounds the live `helm template`
-// subprocess this test spawns -- generous for a local render, short enough
-// that a wedged helm cannot stall the suite. Same convention as
+// subprocess this test spawns -- short enough that a wedged helm cannot stall
+// the suite, but it must also cover an OCI pull of the chart on a cold cache,
+// which was observed to exceed 30s. Same convention as
 // pkg/bundler/deployer/argocdhelm's helmTemplateTimeout.
-const nvsentinelObservabilityChartTimeout = 30 * time.Second
+const nvsentinelObservabilityChartTimeout = 90 * time.Second
 
 // nvsentinelObservabilityTestEndpoint is the OTLP endpoint this test
 // supplies the way a leaf override or operator --set would; the mixin

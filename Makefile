@@ -279,6 +279,15 @@ license-check: ## Check license is approved
         --ignore=github.com/cyberphone/json-canonicalization \
         --ignore=$$STDLIB_IGNORE
 
+# Ordered ahead of test-shell because a stale tool pin makes tools/api-diff exit
+# 17, which surfaces as nine unrelated-looking `want rc=16 got rc=17` shell
+# failures (#2741). This test names the stale file directly and runs in under a
+# second. Scoped to the one test: the rest of tests/architecture takes ~25s and
+# runs with the full suite below.
+.PHONY: test-tool-pins
+test-tool-pins: ## Checks go.mod is the only pin for tools built from this module
+	@GOFLAGS="-mod=readonly" go test -count=1 -run '^TestToolPinsLiveOnlyInGoMod$$' ./tests/architecture/
+
 .PHONY: test-shell
 test-shell: ## Runs shell unit tests (tools/*_test.sh, tests/uat/lib/*_test.sh; hermetic, no cluster)
 	@set -e; for t in tools/*_test.sh tests/uat/lib/*_test.sh; do [ -e "$$t" ] || continue; echo "Running $$t..."; bash "$$t"; done
@@ -306,7 +315,7 @@ test-shell: ## Runs shell unit tests (tools/*_test.sh, tests/uat/lib/*_test.sh; 
 # the same everywhere depends on.
 # ---------------------------------------------------------------------------
 .PHONY: test
-test: test-shell ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
+test: test-tool-pins test-shell ## Runs unit tests with race detector and coverage (use -short to skip integration tests)
 	@set -e; \
 	echo "Running tests with race detector..."; \
 	KUBEBUILDER_ASSETS=$$(setup-envtest use -p path 2>/dev/null || echo "") \
@@ -367,6 +376,12 @@ mirror-e2e: build ## Tests mirror list output with Hauler and Zarf against local
 	@set -e; \
 	echo "Running mirror list e2e tests..."; \
 	tools/mirror-e2e
+
+.PHONY: nvsentinel-object-monitor-e2e
+nvsentinel-object-monitor-e2e: ## Live Kind test: nvsentinel-object-monitor mixin emits a health event + node condition (#2612)
+	@set -e; \
+	echo "Running nvsentinel-object-monitor mixin e2e test..."; \
+	tests/e2e/nvsentinel-object-monitor/run.sh
 
 .PHONY: scan
 scan: ## Scans for vulnerabilities with grype

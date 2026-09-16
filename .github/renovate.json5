@@ -433,30 +433,23 @@
       },
     },
 
-    // ---- Keep .settings.yaml and go.mod in step for tools built from the module ----
-    // #2667 made apidiff and go-licenses `tool` directives in go.mod, so their
-    // version now lives in two files: go.mod (what `go build` produces) and
-    // .settings.yaml (what tools/check-tools verifies and the actions report).
-    // TestToolPinsMatchGoMod holds them equal.
+    // ---- Tools built from the module are pinned only in go.mod ----
+    // #2667 made apidiff and go-licenses `tool` directives, so `go build`
+    // resolves them from the require lines. The gomod manager skips both by
+    // default because each is `// indirect` (nothing in this repo imports them
+    // -- they are built, not linked), so this rule re-enables exactly those two.
     //
-    // Two managers see them, and by default they would move independently: the
-    // custom.regex manager bumps .settings.yaml, while the gomod manager skips
-    // both modules because each is `// indirect` (nothing in this repo imports
-    // them -- they are built, not linked). That would red every such PR. The
-    // two rules below enable the gomod side for exactly these modules and put
-    // both bumps in one PR.
+    // There is deliberately no .settings.yaml annotation for either version.
+    // Until #2741 there was one, and the custom.regex manager that reads it
+    // moved independently of the gomod manager: it shipped a PR bumping only
+    // .settings.yaml, which failed the api-diff gate with exit 17 because the
+    // built binary no longer matched the pin it was checked against. One file,
+    // one manager. TestToolPinsLiveOnlyInGoMod fails if the second copy returns.
     {
       matchManagers: ["gomod"],
       matchDepTypes: ["indirect"],
       matchDepNames: ["golang.org/x/exp", "github.com/google/go-licenses/v2"],
       enabled: true,
-    },
-    {
-      matchDepNames: [
-        "golang.org/x/exp",
-        "github.com/google/go-licenses/v2",
-        "google/go-licenses",
-      ],
       groupName: "module-built lint tools (apidiff, go-licenses)",
     },
 
