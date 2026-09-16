@@ -16,6 +16,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -97,6 +98,78 @@ func TestBuildReportRejectsEmptyLookups(t *testing.T) {
 	// Reporting "0 behind" would be a silent false negative.
 	if _, err := BuildReport(testPins(), map[string]Lookup{}, Meta{}); err == nil {
 		t.Fatal("want error when no pin resolved, got nil")
+	}
+}
+
+func TestBuildReportDivergentDuplicateDepNameIsUnresolved(t *testing.T) {
+	// prometheus-adapter and prometheus-adapter-ocp (see testPins) share one
+	// depName. Renovate emits one raw dep entry per regex match, so
+	// ParseRenovateReport's map keeps only the last one it saw; here that
+	// surviving entry reports currentValue 5.4.0, which disagrees with both
+	// pins' declared 5.3.0. A join to the wrong entry must be reported as
+	// unknown, never folded into Current or Drift.
+	lookups := map[string]Lookup{
+		"ghcr.io/nvidia/nvsentinel": {Current: "v1.20.0"},
+		"prometheus-adapter":        {Current: "5.4.0"},
+		"cert-manager":              {Current: "v1.20.2"},
+	}
+	got, err := BuildReport(testPins(), lookups, Meta{})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	if len(got.Drift) != 0 {
+		t.Fatalf("drift = %v, want none: a currentValue mismatch must never report an update", got.Drift)
+	}
+	for _, c := range got.Current {
+		if c == "prometheus-adapter" || c == "prometheus-adapter-ocp" {
+			t.Fatalf("component %q counted as current despite a currentValue mismatch", c)
+		}
+	}
+	if got.Summary.Unresolved != 1 || len(got.Unresolved) != 1 {
+		t.Fatalf("unresolved rows = %d, want 1 (the twins share a groupKey and collapse)", got.Summary.Unresolved)
+	}
+	want := []string{"prometheus-adapter", "prometheus-adapter-ocp"}
+	if !reflect.DeepEqual(got.Unresolved[0].Components, want) {
+		t.Errorf("unresolved components = %v, want %v", got.Unresolved[0].Components, want)
+	}
+	if !strings.Contains(got.Unresolved[0].Reason, "duplicate depName") {
+		t.Errorf("reason = %q, want it to call out the duplicate depName", got.Unresolved[0].Reason)
+	}
+}
+
+func TestBuildReportTotalOutageAllUnresolved(t *testing.T) {
+	// The realistic outage shape: every registry-chart dep resolves (Renovate
+	// ran) but every resolution carries a Problem (each lookup itself failed).
+	// resolved reaches the tracked count, so the "zero resolved" fail-closed
+	// guard deliberately does not fire — the report must still come back
+	// all-unresolved and 0-behind, not silently clean.
+	pins := []Pin{
+		{Component: "nvsentinel", Chart: "nvsentinel", Repository: "oci://ghcr.io/nvidia",
+			Version: "v1.20.0", Datasource: "docker", DepName: "ghcr.io/nvidia/nvsentinel", Annotated: true},
+		{Component: "cert-manager", Chart: "jetstack/cert-manager", Repository: "https://charts.jetstack.io",
+			Version: "v1.20.2", Datasource: "helm", DepName: "cert-manager", Annotated: true},
+		{Component: "dranet"}, // manifest-only: must not appear anywhere
+	}
+	lookups := map[string]Lookup{
+		"ghcr.io/nvidia/nvsentinel": {Problem: "registry unreachable"},
+		"cert-manager":              {Problem: "registry unreachable"},
+	}
+	got, err := BuildReport(pins, lookups, Meta{})
+	if err != nil {
+		t.Fatalf("BuildReport: %v", err)
+	}
+	const wantTracked = 2
+	if got.Summary.Tracked != wantTracked {
+		t.Fatalf("tracked = %d, want %d", got.Summary.Tracked, wantTracked)
+	}
+	if got.Summary.Unresolved != wantTracked {
+		t.Errorf("unresolved = %d, want %d (every tracked pin)", got.Summary.Unresolved, wantTracked)
+	}
+	if got.Summary.Behind != 0 {
+		t.Errorf("behind = %d, want 0", got.Summary.Behind)
+	}
+	if len(got.Current) != 0 {
+		t.Errorf("current = %v, want none: a total lookup outage must never read as a clean fleet", got.Current)
 	}
 }
 

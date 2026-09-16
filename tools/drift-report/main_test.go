@@ -76,6 +76,21 @@ func TestRunCreatesOutputDirectories(t *testing.T) {
 	if report.SchemaVersion != schemaVersion {
 		t.Errorf("SchemaVersion = %d, want %d", report.SchemaVersion, schemaVersion)
 	}
+	// runFixtureReport resolves only nvsentinel; every other tracked pin in the
+	// real registry.yaml is absent from the Renovate report and must land as
+	// unresolved, never as current. 30, not 33: three OpenShift twin pairs
+	// (prometheus-adapter, k8s-nim-operator, nvidia-dra-driver-gpu) share their
+	// non-OCP sibling's chart/registry/version and collapse into one row apiece.
+	const wantUnresolved = 30
+	if report.Summary.Unresolved != wantUnresolved {
+		t.Errorf("Summary.Unresolved = %d, want %d", report.Summary.Unresolved, wantUnresolved)
+	}
+	if report.Summary.Behind != 0 {
+		t.Errorf("Summary.Behind = %d, want 0", report.Summary.Behind)
+	}
+	if len(report.Current) != 1 {
+		t.Errorf("len(Current) = %d, want 1 (nvsentinel)", len(report.Current))
+	}
 
 	slackData, err := os.ReadFile(slackOut) //nolint:gosec // test-controlled path
 	if err != nil {

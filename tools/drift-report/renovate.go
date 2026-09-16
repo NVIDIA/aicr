@@ -36,6 +36,12 @@ type Lookup struct {
 // .github/renovate.json5. Deps of any other type belong to another manager.
 const registryChartDepType = "registry-chart"
 
+// renovateUpdate is one entry in a dep's `updates` array.
+type renovateUpdate struct {
+	NewValue   string `json:"newValue"`
+	UpdateType string `json:"updateType"`
+}
+
 type rawReport struct {
 	Repositories map[string]struct {
 		PackageFiles map[string][]struct {
@@ -49,10 +55,10 @@ type rawReport struct {
 				Warnings     []struct {
 					Message string `json:"message"`
 				} `json:"warnings"`
-				Updates []struct {
-					NewValue   string `json:"newValue"`
-					UpdateType string `json:"updateType"`
-				} `json:"updates"`
+				// Pointer so an absent `updates` key (Renovate lookup never ran)
+				// is distinguishable from a present, empty array (lookup ran,
+				// dep is current) — a nil slice decodes identically to both.
+				Updates *[]renovateUpdate `json:"updates"`
 			} `json:"deps"`
 		} `json:"packageFiles"`
 	} `json:"repositories"`
@@ -60,9 +66,9 @@ type rawReport struct {
 
 // updateRank orders update types by distance traveled, so a dep offering both
 // a patch and a minor reports the minor. Renovate emits one entry per type.
-// Unknown types (rollback, replace, lockFileMaintenance, bump, pinDigest) are
-// not selectable — a rollback is not forward drift and must never be reported
-// as Latest.
+// Unknown types (rollback, replacement, lockFileMaintenance, bump, pinDigest)
+// are not selectable — a rollback is not forward drift and must never be
+// reported as Latest.
 var updateRank = map[string]int{"digest": 1, "pin": 2, "patch": 3, "minor": 4, "major": 5}
 
 // ParseRenovateReport extracts the registry-chart deps from a Renovate report
@@ -88,10 +94,19 @@ func ParseRenovateReport(data []byte) (map[string]Lookup, error) {
 					for _, w := range dep.Warnings {
 						msgs = append(msgs, w.Message)
 					}
+					if dep.Updates == nil {
+						// No `updates` key at all: the Renovate lookup did not run
+						// for this dep. Report it as unresolved, never as current.
+						msgs = append(msgs, "no updates array: Renovate lookup did not run for this dep")
+					}
+					var updates []renovateUpdate
+					if dep.Updates != nil {
+						updates = *dep.Updates
+					}
 					best := 0
 					hasRecognizedUpdate := false
 					var unsupportedType string
-					for _, u := range dep.Updates {
+					for _, u := range updates {
 						if u.NewValue == "" {
 							continue
 						}

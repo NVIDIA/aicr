@@ -51,6 +51,12 @@ const sampleReport = `{
                 "updates": []
               },
               {
+                "depName": "no-lookup-chart",
+                "depType": "registry-chart",
+                "datasource": "helm",
+                "currentValue": "v2.0.0"
+              },
+              {
                 "depName": "golang.org/x/net",
                 "depType": "require",
                 "datasource": "go",
@@ -70,8 +76,8 @@ func TestParseRenovateReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRenovateReport: %v", err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("got %d registry-chart deps, want 3 (non-registry depTypes must be dropped)", len(got))
+	if len(got) != 4 {
+		t.Fatalf("got %d registry-chart deps, want 4 (non-registry depTypes must be dropped)", len(got))
 	}
 
 	tests := []struct {
@@ -80,8 +86,10 @@ func TestParseRenovateReport(t *testing.T) {
 		wantLatest, wantType, wantProb string
 	}{
 		{"highest update wins", "ghcr.io/nvidia/nvsentinel", "v1.23.0", "minor", ""},
-		{"no updates means current", "cert-manager", "", "", ""},
+		{"empty updates array means current", "cert-manager", "", "", ""},
 		{"skipReason surfaces as a problem", "dynamo-platform", "", "", "invalid-value: Failed to look up helm package"},
+		{"absent updates key means unresolved, not current", "no-lookup-chart", "", "",
+			"no updates array: Renovate lookup did not run for this dep"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -218,7 +226,7 @@ func TestParseRenovateReportUnsupportedUpdateTypes(t *testing.T) {
                 "currentValue": "v1.5.0",
                 "skipReason": "package-renamed",
                 "updates": [
-                  {"newValue": "v1.6.0", "updateType": "replace"}
+                  {"newValue": "v1.6.0", "updateType": "replacement"}
                 ]
               }
             ]
@@ -230,7 +238,7 @@ func TestParseRenovateReportUnsupportedUpdateTypes(t *testing.T) {
 }`,
 			"",
 			"",
-			"package-renamed: unsupported update type: replace",
+			"package-renamed: unsupported update type: replacement",
 		},
 	}
 

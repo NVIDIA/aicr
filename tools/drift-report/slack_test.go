@@ -50,7 +50,7 @@ func TestSlackPayloadDrift(t *testing.T) {
 	}
 	text := payloadText(t, r)
 	for _, want := range []string{
-		"34 pins, 2 behind, 1 unresolved",
+		"34 pins, 2 charts behind, 1 charts unresolved",
 		"nvsentinel",
 		"v1.20.0 -> v1.23.0",
 		"prometheus-adapter, prometheus-adapter-ocp",

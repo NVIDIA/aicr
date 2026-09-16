@@ -15,6 +15,7 @@
 package main
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -88,6 +89,10 @@ func BuildReport(pins []Pin, lookups map[string]Lookup, meta Meta) (Report, erro
 
 	drift := map[groupKey]*Row{}
 	unresolved := map[groupKey]*Unresolved{}
+	// resolved counts pins whose DepName appeared in lookups — including
+	// Problem-bearing ones — so the guard below only fires on total join
+	// failure (Renovate's report shape changed or the run failed outright),
+	// not on any single dep's lookup failure.
 	resolved := 0
 
 	for _, p := range pins {
@@ -103,6 +108,16 @@ func BuildReport(pins []Pin, lookups map[string]Lookup, meta Meta) (Report, erro
 		case l.Problem != "":
 			resolved++
 			appendUnresolved(unresolved, key, p, l.Problem)
+		case l.Current != "" && l.Current != p.Version:
+			// A depName shared by two pins (the OpenShift twins) but reported by
+			// Renovate at a currentValue that disagrees with this pin: the map in
+			// ParseRenovateReport kept a different dep entry than the one this pin
+			// expected. Report it as unknown rather than silently joining this pin
+			// to a lookup that was not run against it.
+			resolved++
+			appendUnresolved(unresolved, key, p, fmt.Sprintf(
+				"Renovate reported currentValue %q for depName %q; this pin is %q (duplicate depName)",
+				l.Current, p.DepName, p.Version))
 		case l.Latest == "":
 			resolved++
 			r.Current = append(r.Current, p.Component)
@@ -124,7 +139,7 @@ func BuildReport(pins []Pin, lookups map[string]Lookup, meta Meta) (Report, erro
 		}
 	}
 
-	if r.Summary.Tracked > 0 && resolved == 0 {
+	if r.Summary.Tracked == 0 || resolved == 0 {
 		return Report{}, errors.New(errors.ErrCodeInternal,
 			"no registry-chart dep resolved: the Renovate run failed or its report shape changed — "+
 				"refusing to report a clean fleet")

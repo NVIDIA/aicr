@@ -35,7 +35,10 @@ func SlackPayload(r Report) ([]byte, error) {
 	if r.Summary.Behind == 0 && r.Summary.Unresolved == 0 {
 		fmt.Fprintf(&b, "AICR component drift - %s: all %d pins current", date, r.Summary.Tracked)
 	} else {
-		fmt.Fprintf(&b, "AICR component drift - %s (%d pins, %d behind, %d unresolved)",
+		// Tracked counts pins; Behind and Unresolved count chart rows (the
+		// OpenShift twins share a row), so label them distinctly rather than
+		// implying all three share a unit.
+		fmt.Fprintf(&b, "AICR component drift - %s (%d pins, %d charts behind, %d charts unresolved)",
 			date, r.Summary.Tracked, r.Summary.Behind, r.Summary.Unresolved)
 		for _, row := range r.Drift {
 			fmt.Fprintf(&b, "\n• %s  %s -> %s  %s",
