@@ -273,14 +273,18 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		recipe.CriteriaServiceAny: {recipe.CriteriaAcceleratorB200, recipe.CriteriaAcceleratorGB200},
 	},
 	variantNET: {
-		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200},
+		// GB300 EKS runs the same p6e-gb300r EFA scale-out fabric as GB200's
+		// p6e-gb200.36xlarge — see testdata/gb300/eks/runtime-net.yaml.
+		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		// OKE GB200 NVL72: IB east-west (rdma0-3) via the
 		// rdmaSharedDevicePlugin's nvidia.com/mlnxnics shared HCAs —
 		// see testdata/gb200/oke/runtime-net.yaml.
 		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
 	},
 	variantNVLS: {
-		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200},
+		// GB300 EKS shares GB200's NVL72 MNNVL/IMEX topology — see
+		// testdata/gb300/eks/runtime-nvls.yaml.
+		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
 		// VR200 NVL72 on bare-metal RKE2: MNNVL across the IMEX domain, same
 		// shape as GB200 but with its own runtime (NGC pytorch image, distinct
@@ -442,7 +446,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	}
 
 	// Preflight cluster-side prerequisites before spending TrainJob time.
-	// On GB200/EKS and GB200/OKE the NET variant needs GPUDirect RDMA. Before
+	// On GB200/EKS, GB200/OKE, and GB300/EKS the NET variant needs GPUDirect RDMA. Before
 	// R595 that requires NVreg_GrdmaPciTopoCheckOverride=1 on the NVIDIA driver
 	// (R580 is the version AICR pins); R595 removed the parameter, substituting a
 	// topology requirement the preflight does not check, so there it fails rather
@@ -453,7 +457,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// environment contract, preflights included. (OKE takes the default
 	// fabric env here — AICR_NCCL_FABRIC's roce override is an EKS-only
 	// template concern.)
-	if customRuntime == "" && fabric == fabricEFA && gb200NetPreflightApplies(variant, target.accelerator, target.service) {
+	if customRuntime == "" && fabric == fabricEFA && graceBlackwellNetPreflightApplies(variant, target.accelerator, target.service) {
 		if pfErr := preflightGB200NetNVregFlag(ctx, gpuConfig.Nodes); pfErr != nil {
 			return "", false, pfErr
 		}

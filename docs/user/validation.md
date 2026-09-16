@@ -60,8 +60,8 @@ is installed on the cluster.
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the default fabric — see [GB200 NET preflight](#gb200-net-preflight-gpudirect-rdma-prerequisites). |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 (EKS, OKE); GB300 (generic); VR200 (RKE2). Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, GB200 + OKE, and GB300 + EKS. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the default fabric — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 (EKS, OKE); GB300 (EKS, generic); VR200 (RKE2). Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
@@ -164,14 +164,14 @@ driver, and Kubeflow Trainer are installed and healthy before the benchmark):
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
 ```
 
-### GB200 NET preflight: GPUDirect RDMA prerequisites
+### Grace Blackwell NET preflight: GPUDirect RDMA prerequisites
 
-Before running `nccl-all-reduce-bw-net` on GB200 (EKS or OKE), a preflight
-checks each GPU node for the driver-side prerequisite of GPUDirect RDMA.
-Without it NCCL falls back to the Socket transport. The `-net` check catches
-that on its own — it fails on a `Using network Socket` banner rather than
-reporting a figure — so the preflight exists to fail fast, naming the driver,
-instead of after a full benchmark run.
+Before running `nccl-all-reduce-bw-net` on GB200 (EKS or OKE) or GB300 (EKS), a
+preflight checks each GPU node for the driver-side prerequisite of GPUDirect
+RDMA. Without it NCCL falls back to the Socket transport. The `-net` check
+catches that on its own — it fails on a `Using network Socket` banner rather
+than reporting a figure — so the preflight exists to fail fast, naming the
+driver, instead of after a full benchmark run.
 
 The preflight runs on the default fabric only: EFA on EKS, built-in IB/verbs on
 OKE. `AICR_NCCL_FABRIC=roce` is EKS-only: there it selects a different template
@@ -264,8 +264,8 @@ the GPU nodes, exactly as `service: any` recipes do. When `--node-selector`
 is passed it replaces the automatic filters rather than narrowing them.
 
 Valid profiles are the pairs in the applicability table above: `b200/any`,
-`gb200/any`, `gb200/eks`, `gb200/oke`, `h100/aks`, `h100/eks`, `h100/gke`,
-`h200/eks`, `vr200/rke2`. A
+`gb200/any`, `gb200/eks`, `gb200/oke`, `gb300/eks`, `gb300/generic`,
+`h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/rke2`. A
 malformed or unknown value **fails** the check rather than silently skipping
 it. A valid profile that doesn't implement a requested variant (e.g.
 `gb200/eks` with the auto-detect `nccl-all-reduce-bw` check) skips just that
