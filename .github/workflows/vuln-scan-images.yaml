@@ -325,6 +325,19 @@ jobs:
           - ghcr.io/nvidia/aicr-validators/conformance
           - ghcr.io/nvidia/aicr-validators/aiperf-bench
           - ghcr.io/nvidia/aicr-gate
+          # The first image here AICR does not build. It ships only with the
+          # opt-in nvsentinel-object-monitor mixin (#2612), and the static BOM
+          # cannot see a mixin-gated subchart, so nothing else would surface a
+          # CVE in it. Because it is not built by this workflow it carries the
+          # nvsentinel chart's own version rather than SCAN_TAG -- see the
+          # override below.
+          - ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
+        include:
+          # Keep in lockstep with nvsentinel's defaultVersion in
+          # recipes/registry.yaml; TestObjectMonitorImagePinnedEverywhere
+          # fails if these drift apart.
+          - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
+            tag: v1.20.0
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -338,7 +351,9 @@ jobs:
         id: scan
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439  # v7.4.2
         with:
-          image: '${{ matrix.image }}:${{ env.SCAN_TAG }}'
+          # matrix.tag is set only for images this workflow does not build,
+          # which carry their upstream version instead of SCAN_TAG.
+          image: '${{ matrix.image }}:${{ matrix.tag || env.SCAN_TAG }}'
           severity-cutoff: 'high'
           output-format: json
           only-fixed: true
