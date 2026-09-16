@@ -157,6 +157,24 @@ func TestGKEGB200RDMAHealthCheckClusterStates(t *testing.T) {
 			},
 			wantOutput: "DaemonSet",
 		},
+		{
+			name: "nccl-rdma-installer pod pending fails closed",
+			mutate: func(f *fakeFetcher) {
+				f.addList("v1", "Pod", "kube-system", []map[string]any{
+					{
+						"apiVersion": "v1",
+						"kind":       "Pod",
+						"metadata": map[string]any{
+							"name":      "nccl-rdma-installer-x7f2p",
+							"namespace": "kube-system",
+							"labels":    map[string]any{"k8s-app": "nccl-rdma-installer"},
+						},
+						"status": map[string]any{"phase": "Pending"},
+					},
+				})
+			},
+			wantOutput: "nccl-rdma-installer-x7f2p",
+		},
 	}
 
 	for _, tt := range tests {
