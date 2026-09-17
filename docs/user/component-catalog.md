@@ -372,7 +372,13 @@ The mixin also restates `preflight.initContainers` in full — all three checks,
 
 Restating means AICR now pins that list's contents (both images, both bandwidth thresholds, and `DCGM_HOSTENGINE_ADDR`), so a chart bump cannot move them silently. `TestNVSentinelPreflightInitContainersMatchChart` renders the mixin's list against the chart's own and fails on any drift beyond the intended `defaultEnabled` line. That test runs weekly, not on every PR, so a chart bump can merge before it fires.
 
-**`failurePolicy: Ignore` is deliberate.** The webhook sits in the pod-creation path, so the chart's `Fail` would turn a webhook outage into a pod-creation outage for every labeled namespace. `Ignore` trades a missed check for availability — the right default while this is new, and worth revisiting once it has field time. The cost is that a broken webhook is *silent*: pods are admitted unchecked, with no error anywhere. `recipes/checks/nvsentinel-preflight/health-check.yaml` exists to catch exactly that, including the case where cert-manager has not injected the webhook's CA bundle.
+**`failurePolicy: Ignore` is deliberate.** The webhook sits in the pod-creation path, so the chart's `Fail` would turn a webhook outage into a pod-creation outage for every labeled namespace. `Ignore` trades a missed check for availability — the right default while this is new, and worth revisiting once it has field time. The cost is that a broken webhook is *silent*: pods are admitted unchecked, with no error anywhere. `recipes/checks/nvsentinel-preflight/health-check.yaml` detects exactly that, including the case where cert-manager has not injected the webhook's CA bundle — but **nothing runs it for you**. It is deliberately not registry-linked (the mixin is opt-in, so `make check-health-all` would run it against recipes that never deploy preflight), which is the same treatment `nvsentinel-observability` gets. Run it yourself after adopting the mixin:
+
+```shell
+make check-health COMPONENT=nvsentinel-preflight
+```
+
+Until you do, a webhook that never came up is indistinguishable from one that is working.
 
 **`processingStrategy: EXECUTE_REMEDIATION` is the chart default, kept deliberately.** It is what makes the init container's exit code gate the pod. The obvious-looking alternative, `STORE_ONLY`, is a trap: each check converts its own failure to exit code 0 (upstream logs `Check failed (STORE_ONLY — not blocking pod)`), *and* `platform-connectors` filters `STORE_ONLY` events out before they become a NodeCondition or a Kubernetes Event. Since AICR deploys no datastore, that combination would ship the cost of the checks with no gate and no record — the only trace of a failure would be an init-container log that disappears with the pod.
 

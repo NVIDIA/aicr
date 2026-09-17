@@ -329,7 +329,7 @@ func TestCheckNVSentinelPreflightDCGMReachable(t *testing.T) {
 			name: "bundlers= subset excluding gpu-operator -> passes",
 			recipeResult: subsetResult(
 				[]recipe.ComponentRef{sentinel(preflightOn(""))},
-				[]recipe.ComponentRef{sentinel(preflightOn("")), gpuOperator("gpu-operator")},
+				[]recipe.ComponentRef{sentinel(preflightOn("")), gpuOperatorWith("gpu-operator", dcgmEnabled(true))},
 			),
 		},
 		{
@@ -341,6 +341,60 @@ func TestCheckNVSentinelPreflightDCGMReachable(t *testing.T) {
 			wantBlocked: true,
 		},
 		{
+			// The reachable fail-open this gate previously had. gpu-operator's
+			// chart defaults dcgm.enabled to false, so an unset key means no
+			// standalone hostengine -- not "inherits an enabled default".
+			name:         "dcgm.enabled unset -> chart default false -> blocked",
+			recipeResult: result(sentinel(preflightOn("")), gpuOperator("gpu-operator")),
+			wantBlocked:  true,
+		},
+		{
+			// How that state is actually produced: --set-json deletes the key
+			// together with AICR's own dcgm.enabled: true.
+			name: "dcgm section explicitly null -> blocked",
+			recipeResult: result(
+				sentinel(preflightOn("")),
+				gpuOperatorWith("gpu-operator", map[string]any{"dcgm": nil}),
+			),
+			wantBlocked: true,
+		},
+		{
+			name: "dcgm.enabled explicitly null -> blocked",
+			recipeResult: result(
+				sentinel(preflightOn("")),
+				gpuOperatorWith("gpu-operator", map[string]any{"dcgm": map[string]any{"enabled": nil}}),
+			),
+			wantBlocked: true,
+		},
+		{
+			// The exact post-override state from the review:
+			// --set-json gpuoperator:dcgm='{"enabled":null}' deletes enabled and
+			// leaves dcgm as an empty map -- still a map, so a type assertion on
+			// the section alone accepts it while enabled is gone.
+			name: "dcgm present but empty map -> blocked",
+			recipeResult: result(
+				sentinel(preflightOn("")),
+				gpuOperatorWith("gpu-operator", map[string]any{"dcgm": map[string]any{}}),
+			),
+			wantBlocked: true,
+		},
+		{
+			name: "dcgm present as a non-map -> blocked",
+			recipeResult: result(
+				sentinel(preflightOn("")),
+				gpuOperatorWith("gpu-operator", map[string]any{"dcgm": "enabled"}),
+			),
+			wantBlocked: true,
+		},
+		{
+			name: "dcgm.enabled non-boolean -> blocked",
+			recipeResult: result(
+				sentinel(preflightOn("")),
+				gpuOperatorWith("gpu-operator", map[string]any{"dcgm": map[string]any{"enabled": "yes"}}),
+			),
+			wantBlocked: true,
+		},
+		{
 			// The exact production shape: pkg/bundler/bundler.go pins resolved
 			// values for the FILTERED set and attaches the declared union, so
 			// the pinned snapshot has no gpu-operator entry and the check must
@@ -348,7 +402,7 @@ func TestCheckNVSentinelPreflightDCGMReachable(t *testing.T) {
 			name: "bundlers= subset with pinned values omitting gpu-operator -> passes",
 			recipeResult: subsetResult(
 				[]recipe.ComponentRef{sentinel(preflightOn(""))},
-				[]recipe.ComponentRef{sentinel(preflightOn("")), gpuOperator("gpu-operator")},
+				[]recipe.ComponentRef{sentinel(preflightOn("")), gpuOperatorWith("gpu-operator", dcgmEnabled(true))},
 			).WithResolvedValues(map[string]map[string]any{
 				nvsentinelComponent: preflightOn(""),
 			}),
@@ -359,11 +413,11 @@ func TestCheckNVSentinelPreflightDCGMReachable(t *testing.T) {
 		},
 		{
 			name:         "preflight on, gpu-operator in its default namespace -> passes",
-			recipeResult: result(sentinel(preflightOn("")), gpuOperator("gpu-operator")),
+			recipeResult: result(sentinel(preflightOn("")), gpuOperatorWith("gpu-operator", dcgmEnabled(true))),
 		},
 		{
 			name:         "preflight on, gpu-operator namespace unset -> passes",
-			recipeResult: result(sentinel(preflightOn("")), gpuOperator("")),
+			recipeResult: result(sentinel(preflightOn("")), gpuOperatorWith("", dcgmEnabled(true))),
 		},
 		{
 			// Fails closed: with no gpu-operator nothing serves the Service.
@@ -393,7 +447,7 @@ func TestCheckNVSentinelPreflightDCGMReachable(t *testing.T) {
 			name: "retargeted address matching a relocated gpu-operator -> passes",
 			recipeResult: result(
 				sentinel(preflightOnWithAddr("", "nvidia-dcgm.privileged-gpu-operator.svc:5555")),
-				gpuOperator("privileged-gpu-operator"),
+				gpuOperatorWith("privileged-gpu-operator", dcgmEnabled(true)),
 			),
 			wantBlocked: false,
 		},

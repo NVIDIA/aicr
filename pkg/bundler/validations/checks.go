@@ -2605,14 +2605,28 @@ func CheckNVSentinelPreflightDCGMReachable(ctx context.Context, componentName st
 	if err != nil {
 		return nil, []error{err}
 	}
-	dcgm, ok := gpuValues["dcgm"].(map[string]any)
-	if !ok {
-		// Absent means the chart default applies, which enables it.
-		return nil, nil
-	}
-	if raw, present := dcgm["enabled"]; present && !helmTruthy(raw) {
+	// Unset is NOT "enabled": gpu-operator's chart defaults dcgm.enabled to
+	// false ("disabled by default to use embedded nv-hostengine by exporter"),
+	// so an absent key means no standalone hostengine and no Service. AICR's own
+	// values set it true, so absence here means an override removed it --
+	// `--set-json gpuoperator:dcgm='{"enabled":null}'` deletes enabled and leaves
+	// dcgm as an empty map, which a type assertion on the section alone accepts. Treating that as a pass shipped a green bundle whose GPU pods
+	// all strand in Init:Error, which is the state this gate exists to reject.
+	//
+	// ownershipToggle is the established reader for this shape: it separates
+	// unset from set-to-false and reports null/non-bool as a problem rather than
+	// silently coercing.
+	dcgmEnabled, problem := ownershipToggle(gpuValues, "dcgm")
+
+	switch {
+	case problem != "":
+		return fail(problem)
+	case dcgmEnabled == nil:
+		return fail(fmt.Sprintf("%s does not set dcgm.enabled, and the chart defaults it to false, so the standalone DCGM hostengine Service is never created", gpuName))
+	case !*dcgmEnabled:
 		return fail(fmt.Sprintf("%s runs with dcgm.enabled: false, so the standalone DCGM hostengine Service is never created", gpuName))
 	}
+
 	return nil, nil
 }
 
