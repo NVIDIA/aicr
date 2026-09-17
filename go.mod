@@ -9,7 +9,7 @@ require (
 	github.com/coreos/go-systemd/v22 v22.7.0
 	github.com/distribution/reference v0.6.0
 	github.com/go-logr/logr v1.4.4
-	github.com/google/cel-go v0.31.0
+	github.com/google/cel-go v0.32.0
 	github.com/google/gnostic-models v0.7.1
 	github.com/google/uuid v1.6.0
 	github.com/in-toto/attestation v1.2.0
