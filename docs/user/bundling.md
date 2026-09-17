@@ -105,9 +105,10 @@ built it, and which Helm release landed in which directory.
 `layout.releases` lists every Helm release the bundle installs, in deployment
 order, and that ordering is normative: there is no ordinal field, so a
 consumer reads sequence from list position rather than from a number. A
-release injected alongside a component — a `-pre` or `-post` folder when the
-component declares pre- or post-install manifests (independent of
-`--vendor-charts`), or a `-readiness` folder under `--readiness-hooks` — has
+release injected alongside a component — a `-pre` folder when it declares
+pre-install manifests, a `-post` folder when a component that also ships an
+upstream chart declares post-install manifests, or a `-readiness` folder
+under `--readiness-hooks` (none of the three tied to `--vendor-charts`) — has
 no recipe component of its own, so it names its parent in `component` while
 `name` carries its own suffixed name.
 
