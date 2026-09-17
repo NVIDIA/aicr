@@ -1,0 +1,231 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Auto-refresh of pkg/bundler/testdata/stock_render_golden.yaml on Renovate
+# PRs that touch recipes/components/**.
+#
+# The golden pins a digest per leaf overlay over its fully rendered
+# helm-deployer output (TestStockRenderParityGolden). Renovate's `kubernetes`
+# manager bumps digest-pinned images inside recipes/components/*/manifests/**
+# and its `helm-values` manager bumps image tags in
+# recipes/components/*/values.yaml; both classes are configured to
+# auto-merge (matchManagers: ["kubernetes"], matchUpdateTypes: ["digest",
+# "pin"], automerge: true, automergeType: "pr" in .github/renovate.json5).
+# Renovate never regenerates the golden, so such a PR goes red and its
+# auto-merge stalls until a human clones the repo and runs the regeneration
+# command by hand — which is exactly what happened on PR #2773 (a
+# ubuntu:26.04 digest bump), merged over the red gate, which then took main
+# down.
+#
+# Renovate branches only, never a human PR: the golden exists so a human sees
+# an unintended change to rendered output. Auto-refreshing it on every PR
+# that touches recipes/components/** would silently absorb exactly that
+# signal — a contributor's values edit that leaked into other leaves would be
+# papered over and merged green. A digest/tag bump's effect on the golden is
+# arithmetic, not judgment, so that narrow class is safe to automate; the
+# general case is not. The branch-prefix check is the discriminator because
+# Renovate runs self-hosted under GITHUB_TOKEN in this repo, so its PRs are
+# authored by the `github-actions` app rather than `renovate[bot]` — the
+# actor is not a reliable signal, but PR #2773's head
+# (`renovate/ubuntu-26.04`) shows the branch prefix is.
+#
+# Having only GITHUB_TOKEN (no App token, no PAT) shapes the push:
+#   * The refreshed file is committed through GitHub's GraphQL
+#     `createCommitOnBranch` mutation rather than `git push` or a plain REST
+#     Contents API PUT, so the commit is GitHub-signed (Verified) — the
+#     runner has no GPG key to `-S` with, and this repo requires signed +
+#     DCO signed-off commits. `expectedHeadOid` is pinned to the whole
+#     branch tip checked out above (`git rev-parse HEAD`), not just this
+#     file's blob sha, so a concurrent push anywhere on the branch during the
+#     regeneration window — a Renovate rebase (`rebaseWhen:
+#     "behind-base-branch"` in .github/renovate.json5) or a maintainer push,
+#     both of which also run under GITHUB_TOKEN and so would not otherwise
+#     retrigger this workflow — fails the mutation loudly instead of
+#     silently committing a golden computed against a stale pre-race tree.
+#     This mirrors the guard in .github/scripts/evidence-commit-signed.sh;
+#     that script's file path and commit headline are hardcoded to
+#     recipes/evidence/, so it is not reusable as-is and its
+#     createCommitOnBranch call is inlined below instead (kept to the
+#     workflow + RENOVATE.md scope of this change rather than adding a third
+#     script file).
+#   * A GITHUB_TOKEN-authored push fires no pull_request event (GitHub's
+#     anti-recursion rule for its own token), so the PR's checks stay bound
+#     to the pre-push head SHA. workflow_dispatch looks like a way around
+#     that — it is a documented exception to the anti-recursion rule, and
+#     merge-gate.yaml (this repo's sole required "gate" check; its `tests`
+#     job calls qualification.yaml, whose `tests` job is what actually runs
+#     this golden test) already declares `workflow_dispatch: {}` — but it
+#     does not work: a dispatched run's checks attach to the commit, not to
+#     the PR's statusCheckRollup, and required-status-check evaluation reads
+#     the rollup, not the commit's check-runs. Measured directly on PR #2780
+#     by dispatching merge-gate.yaml at this workflow's refreshed head: 70
+#     check-runs on the commit, 27 of them from the dispatched run, 0 of
+#     those 27 in the PR's statusCheckRollup (44 entries, none from the
+#     dispatched run). This workflow does not attempt a re-fire; see the
+#     hand-off step below instead.
+#
+# Hermetic: the golden test never fetches a chart — only the --vendor-charts
+# path does, which this test does not take (see
+# pkg/bundler/stock_render_parity_golden_test.go) — so this workflow has no
+# Helm setup and no network step, the same deliberate divergence from
+# bom-refresh.yaml that recipe-health-refresh.yaml documents for its own
+# render-free generator.
+#
+# Confirmed on PR #2780: the dispatched merge-gate.yaml run's check-paths
+# job classified changed paths correctly under workflow_dispatch (16 real
+# jobs + 11 skips, against 17 real + 11 skips on the PR-triggered run for
+# the same change), so path filtering was never the problem — rollup
+# association is. There is no workflow_dispatch input or path-filter fix for
+# that; a dispatched run's checks cannot satisfy a PR's required check,
+# full stop. The existing /ok-to-test maintainer-comment path
+# (.github/workflows/ok-to-test.yaml) does not help either: it dispatches
+# qualification.yaml directly, producing individual qualification check
+# names, not merge-gate.yaml's "gate" aggregate. After this workflow commits
+# a refresh, the PR's checks stay bound to the pre-refresh head SHA until a
+# maintainer pushes any commit to the branch, or closes and reopens the PR
+# — the hand-off step below leaves a notice and job-summary line saying so.
+
+name: Render Golden Refresh
+
+on:
+  pull_request:
+    paths:
+      - "recipes/components/**"
+      # recipes/registry.yaml also pins chart `defaultVersion` values that
+      # feed this render, but no Renovate manager targets that file today
+      # (see the coverage table in .github/RENOVATE.md) — add it here if one
+      # starts to, or a bump landing only through that file will not
+      # refresh the golden.
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    # Renovate branches only. The golden exists so a human sees an unintended
+    # change to rendered output; auto-refreshing it on a contributor's PR
+    # would absorb that signal. A digest/tag bump's effect on the golden is
+    # arithmetic, so that narrow class is safe to automate. Same-repo only: a
+    # fork PR's token is read-only and could not push anyway, but the check
+    # is explicit rather than relying on that.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.head_ref, 'renovate/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write   # commit the refreshed golden via createCommitOnBranch
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: ${{ github.head_ref }}
+          # The commit goes through the GraphQL API below, not git — no
+          # token needs to be persisted in .git/config.
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      - name: Regenerate render golden
+        run: |
+          set -uo pipefail
+          out=$(AICR_UPDATE_GOLDEN=1 go test ./pkg/bundler/ -run '^TestStockRenderParityGolden$' -count=1 -v 2>&1) && rc=0 || rc=$?
+          echo "$out"
+          if [ "$rc" -ne 0 ]; then
+            exit "$rc"
+          fi
+          # `go test -run <name>` exits 0 with "no tests to run" if the test
+          # is renamed or removed, which would let this workflow silently
+          # stop refreshing the golden. Require its PASS line, mirroring
+          # merge-gate.yaml's bom-freshness job.
+          if ! grep -q '^--- PASS: TestStockRenderParityGolden' <<<"$out"; then
+            echo "::error::TestStockRenderParityGolden did not execute (renamed or removed?); this workflow would silently stop refreshing the golden. Update the -run pattern above."
+            exit 1
+          fi
+
+      - name: Check for drift
+        id: drift
+        run: |
+          set -euo pipefail
+          if [ -n "$(git status --porcelain -- pkg/bundler/testdata/stock_render_golden.yaml)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat -- pkg/bundler/testdata/stock_render_golden.yaml
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Golden already current; nothing to refresh."
+          fi
+
+      - name: Commit refreshed golden through createCommitOnBranch
+        if: steps.drift.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          FILE=pkg/bundler/testdata/stock_render_golden.yaml
+          HEAD_OID="$(git rev-parse HEAD)"
+          CONTENTS="$(base64 -w0 "${FILE}")"
+          BODY="$(printf '%s\n\n%s' \
+            'Regenerated by render-golden-refresh.yaml after a Renovate dependency bump moved rendered output.' \
+            'Signed-off-by: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>')"
+
+          query='mutation ($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { oid url } } }'
+
+          filter='{input: {branch: {repositoryNameWithOwner: $repo, branchName: $branch},
+            expectedHeadOid: $oid, message: {headline: $headline, body: $body},
+            fileChanges: {additions: [{path: $path, contents: $contents}], deletions: []}}}'
+
+          variables=$(jq -n \
+            --arg repo "$REPO" \
+            --arg branch "$HEAD_REF" \
+            --arg oid "$HEAD_OID" \
+            --arg headline 'test(bundler): refresh render golden' \
+            --arg body "$BODY" \
+            --arg path "$FILE" \
+            --arg contents "$CONTENTS" \
+            "$filter")
+
+          commit_oid=$(jq -n --arg q "$query" --argjson v "$variables" '{query: $q, variables: $v}' \
+            | gh api graphql --input - --jq '.data.createCommitOnBranch.commit.oid')
+
+          echo "Committed refreshed golden as ${commit_oid} on ${HEAD_REF} (GitHub-signed, Verified)."
+
+      # workflow_dispatch cannot re-attach checks to the PR (see the header
+      # comment: a dispatched run's checks land on the commit, never on the
+      # PR's statusCheckRollup, confirmed on PR #2780), so this workflow
+      # does not attempt one. This step just makes the hand-off explicit
+      # instead of leaving a green job that silently did not unblock the PR.
+      - name: Hand off the manual re-trigger to a maintainer
+        if: steps.drift.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          MSG="The golden was refreshed on this branch. A GITHUB_TOKEN push emits no"
+          MSG="${MSG} pull_request event, so the PR's checks still point at the previous"
+          MSG="${MSG} head SHA. A maintainer must trigger a PR-associated run: push any"
+          MSG="${MSG} commit to the branch, or close and reopen the PR."
+          echo "::notice::${MSG}"
+          echo "${MSG}" >> "$GITHUB_STEP_SUMMARY"

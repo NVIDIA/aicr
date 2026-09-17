@@ -182,21 +182,25 @@ func CheckDRASupport(ctx *validators.Context) error {
 	if err != nil {
 		return err
 	}
-	if err = validateNVIDIAResourceSlices(ctx, dynClient, servedVersion); err != nil {
+	slices, err := validateNVIDIAResourceSlices(ctx, dynClient, servedVersion)
+	if err != nil {
 		return err
 	}
 
-	// 6. Behavioral GPU allocation subtest — only applicable when full-GPU
-	// DRA (gpu.nvidia.com) is usable. The probe and the behavioral test run
-	// at the served resource.k8s.io version (v1, v1beta2, or v1beta1), so
-	// beta-only clusters (K8s 1.32/1.33) exercise it too. In the supported
-	// ComputeDomain-only configuration there is no gpu.nvidia.com DeviceClass
-	// to allocate from; record the subtest as not applicable within a passing
-	// check — allowed only because the robust ResourceSlice validation above
-	// already passed.
-	// TODO(#1649): behaviorally exercise the MNNVL ComputeDomain →
-	// ResourceClaimTemplate → IMEX channel flow instead of recording N/A for
-	// ComputeDomain-only configurations.
+	// 6-8. Policy verification and the behavioral subtests.
+	return runDRABehavioralSubtests(ctx, dynClient, servedVersion, slices)
+}
+
+// runDRABehavioralSubtests is the tail of CheckDRASupport once DRA is in
+// scope and the ResourceSlices validated: inspect the GPU allocation mode,
+// verify the configured policy against it, then run the behavioral subtests
+// — the MNNVL IMEX channel subtest where applicable, and the full-GPU DRA
+// subtest where full-GPU DRA is usable and the policy permits it.
+func runDRABehavioralSubtests(ctx *validators.Context, dynClient dynamic.Interface, servedVersion string, slices *sliceValidation) error {
+	// 6. Inspect the GPU allocation mode and verify the configured policy
+	// against it BEFORE any behavioral subtest creates cluster resources: a
+	// policy/capability mismatch is a configuration failure and should fail
+	// fast and cheaply.
 	mode, err := detectGPUAllocationMode(ctx.Ctx, ctx.Clientset, dynClient)
 	if err != nil {
 		return err
@@ -223,6 +227,26 @@ func CheckDRASupport(ctx *validators.Context) error {
 	if verifyErr := verifyGPUAllocationPolicy(policy, mode); verifyErr != nil {
 		return verifyErr
 	}
+
+	// 7. Behavioral MNNVL ComputeDomain → ResourceClaimTemplate → IMEX
+	// channel subtest (#1649). Independent of the GPU allocation policy:
+	// ComputeDomain channels are always DRA-allocated, whichever mechanism
+	// hands out whole GPUs. Applicable only where a Ready, schedulable node
+	// carries the MNNVL clique label (see imexCandidateNodes); recorded as
+	// not applicable elsewhere, so non-MNNVL clusters keep today's verdict.
+	if err = validateIMEXChannelAllocation(ctx, dynClient, servedVersion, slices); err != nil {
+		return err
+	}
+
+	// 8. Behavioral full-GPU allocation subtest — only applicable when
+	// full-GPU DRA (gpu.nvidia.com) is usable. The probe and the behavioral
+	// test run at the served resource.k8s.io version (v1, v1beta2, or
+	// v1beta1), so beta-only clusters (K8s 1.32/1.33) exercise it too. In the
+	// supported ComputeDomain-only configuration there is no gpu.nvidia.com
+	// DeviceClass to allocate from; record the subtest as not applicable
+	// within a passing check — allowed because the robust ResourceSlice
+	// validation above already passed and, on MNNVL clusters, the IMEX
+	// channel subtest above exercised ComputeDomain allocation behaviorally.
 	if policy == validatorv1.GPUAllocationPolicyDevicePluginExtendedResource {
 		recordRawTextArtifact(ctx, "Behavioral GPU allocation", "",
 			"skipped (not applicable): configured GPU allocation policy is "+policy+
@@ -260,23 +284,32 @@ func CheckDRASupport(ctx *validators.Context) error {
 // but nested under the v1beta1 `basic` wrapper — deviceFields (in
 // validators/internal/allocmode) normalizes the wrapper so v1beta1 device
 // taints are honored too.
-func validateNVIDIAResourceSlices(ctx *validators.Context, dynClient dynamic.Interface, version string) error {
+//
+// On success it returns the per-driver usable node sets and the eligible
+// node map so the behavioral subtests can gate and place their probes on
+// the SAME nodes the structural validation accepted, without re-listing.
+func validateNVIDIAResourceSlices(ctx *validators.Context, dynClient dynamic.Interface, version string) (*sliceValidation, error) {
 	sliceList, err := dynClient.Resource(draGVRAt(version, "resourceslices")).List(ctx.Ctx, metav1.ListOptions{})
 	if err != nil {
-		return errors.Wrap(errors.ErrCodeInternal, "failed to list ResourceSlices", err)
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to list ResourceSlices", err)
 	}
 	nodeList, err := ctx.Clientset.CoreV1().Nodes().List(ctx.Ctx, metav1.ListOptions{})
 	if err != nil {
-		return classifyK8sReadError(err, "nodes for ResourceSlice validation")
+		return nil, classifyK8sReadError(err, "nodes for ResourceSlice validation")
 	}
 	eligible := eligibleReadySchedulableNodes(nodeList)
+	result := &sliceValidation{
+		usableByDriver: make(map[string]map[string]struct{}),
+		poolNodes:      make(map[string]map[string]string),
+		eligible:       eligible,
+	}
 
 	var sliceSummary strings.Builder
 	fmt.Fprintf(&sliceSummary, "Total ResourceSlices: %d\n", len(sliceList.Items))
 	nvidiaDrivers := make(map[string]struct{})
 	for _, item := range sliceList.Items {
 		if ctxErr := ctx.Ctx.Err(); ctxErr != nil {
-			return errors.Wrap(errors.ErrCodeTimeout,
+			return nil, errors.Wrap(errors.ErrCodeTimeout,
 				"ResourceSlice inventory scan canceled", ctxErr)
 		}
 		driver, _, _ := unstructured.NestedString(item.Object, "spec", "driver")
@@ -284,6 +317,16 @@ func validateNVIDIAResourceSlices(ctx *validators.Context, dynClient dynamic.Int
 		poolName, _, _ := unstructured.NestedString(item.Object, "spec", "pool", "name")
 		if strings.HasSuffix(driver, nvidiaDriverSuffix) {
 			nvidiaDrivers[driver] = struct{}{}
+			// Pool → node attribution for node-local slices. The K8s API
+			// does not require pool names to equal node names, so claim
+			// occupancy (allocation results carry the POOL) must resolve
+			// through this map, never through name equality.
+			if nodeName != "" && poolName != "" {
+				if result.poolNodes[driver] == nil {
+					result.poolNodes[driver] = make(map[string]string)
+				}
+				result.poolNodes[driver][poolName] = nodeName
+			}
 		}
 		fmt.Fprintf(&sliceSummary, "%-48s node=%s driver=%s pool=%s\n",
 			item.GetName(), nodeName, driver, poolName)
@@ -291,7 +334,7 @@ func validateNVIDIAResourceSlices(ctx *validators.Context, dynClient dynamic.Int
 
 	if len(nvidiaDrivers) == 0 {
 		recordRawTextArtifact(ctx, "ResourceSlices", "kubectl get resourceslices", sliceSummary.String())
-		return errors.New(errors.ErrCodeNotFound, fmt.Sprintf(
+		return nil, errors.New(errors.ErrCodeNotFound, fmt.Sprintf(
 			"no ResourceSlices from NVIDIA DRA drivers (e.g. %s, %s) found — NVIDIA resources not advertised",
 			draDriverComputeDomain, draDriverGPU))
 	}
@@ -302,9 +345,10 @@ func validateNVIDIAResourceSlices(ctx *validators.Context, dynClient dynamic.Int
 	for _, driver := range sortedNodeNames(nvidiaDrivers) {
 		usable, seen, sliceErr := usableDriverSliceNodes(ctx.Ctx, sliceList.Items, driver, eligible)
 		if sliceErr != nil {
-			return sliceErr
+			return nil, sliceErr
 		}
 		usableTotal += len(usable)
+		result.usableByDriver[driver] = usable
 		fmt.Fprintf(&sliceSummary,
 			"NVIDIA driver %s: %d slice(s), usable device(s) on %d Ready, schedulable node(s) [%s]\n",
 			driver, seen, len(usable), strings.Join(sortedNodeNames(usable), ","))
@@ -312,11 +356,26 @@ func validateNVIDIAResourceSlices(ctx *validators.Context, dynClient dynamic.Int
 	recordRawTextArtifact(ctx, "ResourceSlices", "kubectl get resourceslices", sliceSummary.String())
 
 	if usableTotal == 0 {
-		return errors.New(errors.ErrCodeInternal, fmt.Sprintf(
+		return nil, errors.New(errors.ErrCodeInternal, fmt.Sprintf(
 			"NVIDIA DRA driver ResourceSlices (*%s) exist but none passed validation — a slice counts only when it is in a complete, current-generation pool and advertises an untainted device on a Ready, schedulable node",
 			nvidiaDriverSuffix))
 	}
-	return nil
+	return result, nil
+}
+
+// sliceValidation is the successful outcome of validateNVIDIAResourceSlices:
+// which Ready, schedulable nodes each NVIDIA DRA driver advertises usable
+// devices on (complete current-generation pool, untainted device), plus the
+// eligible node map the validation resolved against.
+type sliceValidation struct {
+	// usableByDriver maps driver name (e.g. compute-domain.nvidia.com) to
+	// the set of node names with at least one usable device from it.
+	usableByDriver map[string]map[string]struct{}
+	// poolNodes maps driver name → ResourceSlice pool name → the node
+	// (spec.nodeName) publishing that pool, for node-local slices.
+	poolNodes map[string]map[string]string
+	// eligible is the Ready, schedulable node set (name → node).
+	eligible map[string]*corev1.Node
 }
 
 // resolveDRADriverNamespace returns the namespace the DRA driver probes

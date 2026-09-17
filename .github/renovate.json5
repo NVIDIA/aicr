@@ -118,6 +118,29 @@
         "# renovate-digest: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) packageName=(?<packageName>\\S+) branch=(?<currentValue>\\S+)(?:\\s+depType=(?<depType>\\S+))?\\s*\\n\\s*\\S+:\\s*['\"](?<currentDigest>[a-f0-9]{40})['\"]",
       ],
     },
+    {
+      // recipes/registry.yaml pins ~34 upstream Helm charts. They are NOT
+      // bumped by PR: an AICR component bump can rename a values path that
+      // nodeScheduling writes into, move the rendered image set (BOM), or
+      // require an ADR-021 upgrade record, none of which a one-line bot PR
+      // checks. The pins are extracted here and reported weekly by
+      // .github/workflows/registry-drift.yaml; the packageRule below keeps the
+      // weekday PR run from acting on them.
+      //
+      // The annotation carries registryUrl inline, unlike the .settings.yaml
+      // manager (see .github/RENOVATE.md): 16 HTTP charts span 10 repository
+      // URLs, so packageRules would be 16 near-identical entries far from the
+      // pin they describe. tools/drift-report's TestRegistryPinsAreRenovateTracked
+      // keeps the annotation and the neighbouring fields in sync, and
+      // TestRenovateRegexMatchesEveryAnnotation compiles this exact matchString
+      // against registry.yaml.
+      customType: "regex",
+      managerFilePatterns: ["/^recipes/registry\\.yaml$/"],
+      matchStrings: [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: registryUrl=(?<registryUrl>\\S+))?\\s+defaultVersion: [\"']?(?<currentValue>[^\"'\\s]+)[\"']?",
+      ],
+      depTypeTemplate: "registry-chart",
+    },
   ],
 
   // Kubernetes manager: scan AICR's component manifests for Pod-spec
@@ -171,6 +194,31 @@
         "sigstore/cosign",
         "mikefarah/yq",
       ],
+      minimumReleaseAge: "7 days",
+      automerge: true,
+      automergeType: "pr",
+      platformAutomerge: true,
+    },
+
+    // ---- Auto-merge: digest rotations in component manifests ----
+    // Scoped to digest/pin deliberately. A digest rotation re-pins the same
+    // tag as upstream rebuilds it (ADR-006), which is mechanical; a tag bump
+    // changes what the component actually deploys and keeps a human on it.
+    //
+    // These bumps also change two derived artifacts —
+    // pkg/bundler/testdata/stock_render_golden.yaml and
+    // docs/user/container-images.md — that Renovate cannot regenerate for
+    // itself: postUpgradeTasks run inside the Renovate image, which ships
+    // neither Go nor Helm, while `make bom-docs` needs both plus network
+    // chart pulls. So these PRs fail their own gate until someone
+    // regenerates, and platformAutomerge is what makes that outcome safe:
+    // it hands the merge to GitHub, which merges only once the required
+    // `gate` check passes. #2678 broke main because it was merged ten
+    // seconds before its gate started running; a PR left open until it is
+    // green is the failure mode to prefer.
+    {
+      matchManagers: ["kubernetes"],
+      matchUpdateTypes: ["digest", "pin"],
       minimumReleaseAge: "7 days",
       automerge: true,
       automergeType: "pr",
@@ -341,6 +389,70 @@
       },
     },
 
+    // ---- oasdiff bumps refresh the pinned linux/amd64 SHA256 via post-upgrade script ----
+    // Same contract as oras above. The setup-build-tools action verifies the
+    // downloaded archive against this pin, so a version bump without a refreshed
+    // digest fails the tests job on the Renovate PR itself rather than later.
+    {
+      matchDepNames: ["oasdiff/oasdiff"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-oasdiff-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
+    // ---- addlicense bumps refresh the pinned linux/amd64 SHA256 ----
+    // Same contract as oasdiff above. #2667 moved addlicense off `go install`
+    // onto a checksum-verified release binary, so a version bump without a
+    // refreshed digest fails the lint job on the Renovate PR. addlicense is on
+    // the auto-merge list above, which makes the refresh load-bearing rather
+    // than convenient: without it the automerge never fires and the PR sits red
+    // until someone computes a digest by hand.
+    {
+      matchDepNames: ["google/addlicense"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-addlicense-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
+    // ---- setup-envtest bumps refresh the pinned linux/amd64 SHA256 ----
+    // Same contract, with one difference worth knowing when reviewing the diff:
+    // controller-runtime publishes no checksums.txt for this asset, so the
+    // script hashes the downloaded binary. The value it writes records what the
+    // release served at refresh time rather than corroborating an upstream
+    // claim.
+    {
+      matchDepNames: ["sigs.k8s.io/controller-runtime/tools/setup-envtest"],
+      postUpgradeTasks: {
+        commands: ["./tools/update-setup-envtest-checksums {{{newVersion}}}"],
+        fileFilters: [".settings.yaml"],
+        executionMode: "update",
+      },
+    },
+
+    // ---- Tools built from the module are pinned only in go.mod ----
+    // #2667 made apidiff and go-licenses `tool` directives, so `go build`
+    // resolves them from the require lines. The gomod manager skips both by
+    // default because each is `// indirect` (nothing in this repo imports them
+    // -- they are built, not linked), so this rule re-enables exactly those two.
+    //
+    // There is deliberately no .settings.yaml annotation for either version.
+    // Until #2741 there was one, and the custom.regex manager that reads it
+    // moved independently of the gomod manager: it shipped a PR bumping only
+    // .settings.yaml, which failed the api-diff gate with exit 17 because the
+    // built binary no longer matched the pin it was checked against. One file,
+    // one manager. TestToolPinsLiveOnlyInGoMod fails if the second copy returns.
+    {
+      matchManagers: ["gomod"],
+      matchDepTypes: ["indirect"],
+      matchDepNames: ["golang.org/x/exp", "github.com/google/go-licenses/v2"],
+      enabled: true,
+      groupName: "module-built lint tools (apidiff, go-licenses)",
+    },
+
     // ---- aiperf-bench base image is capped below python 3.14 ----
     // PR #1906 auto-bumped this to 3.14 and broke the UAT validator image
     // build (aiperf's pyzmq/uvloop had no cp314 wheels, and the single-stage
@@ -354,6 +466,21 @@
       matchFileNames: ["validators/performance/aiperf-bench.Dockerfile"],
       matchDepNames: ["python"],
       allowedVersions: "<3.14",
+    },
+
+    // ---- Registry chart pins are extracted, never PR'd ----
+    {
+      // Report-only. Each run relies on exactly one config-level guard here:
+      // the weekday PR run is kept off registry-chart deps by this
+      // `enabled: false`, while the weekly registry-drift workflow
+      // force-enables the depType (RENOVATE_FORCE) and relies instead on
+      // RENOVATE_DRY_RUN=full, which makes this flag a no-op for that run.
+      // The genuinely independent second guard is `permissions:
+      // contents: read` on registry-drift.yaml — Renovate has no write
+      // access to push a branch there regardless of either flag.
+      description: "Registry chart pins are reported weekly, never PR'd — see .github/workflows/registry-drift.yaml",
+      matchDepTypes: ["registry-chart"],
+      enabled: false,
     },
   ],
 

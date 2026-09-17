@@ -27,7 +27,9 @@
 // What it does not do: no format translation, no status or justification
 // mapping, no merging of scan results. Statuses, justifications, impact
 // statements and subcomponents pass through untouched, because the curated
-// judgment is exactly what has value and any rewrite of it is a guess.
+// judgment is exactly what has value and any rewrite of it is a guess. The one
+// field it does rewrite besides `products` and `@id` is document-level
+// `tooling`, which names this tool rather than whatever the source carried.
 //
 // Output is deterministic — a pure function of the source bytes, the image
 // name and the digest, with no wall clock and no UUID — so a re-run of a

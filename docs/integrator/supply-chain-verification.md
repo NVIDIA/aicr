@@ -74,18 +74,33 @@ has a fixed subject:
 
 | Metadata | Predicate type | Subject | Retrieved with |
 |----------|----------------|---------|----------------|
-| SLSA build provenance | `https://slsa.dev/provenance/v1` | multi-platform index digest | `gh attestation verify` |
+| SLSA build provenance | `https://slsa.dev/provenance/v1` | index digest **and** each per-platform manifest digest | `gh attestation verify` |
 | CycloneDX SBOM | `https://cyclonedx.org/bom` | per-platform manifest digest | `cosign verify-attestation --type cyclonedx` |
 | OpenVEX | `https://openvex.dev/ns` | per-platform manifest digest | `cosign verify-attestation --type openvex` |
 | Third-party source (`aiperf-bench` only) | `application/vnd.nvidia.aicr.source.v1+tar` | multi-platform index digest | `oras pull` — see [Third-Party Source Code](#third-party-source-code) |
 
-The subjects differ because the claims differ. Provenance describes the build
-that produced the whole release image, so it belongs on the index. The SBOM and
-the VEX each describe exactly one root filesystem, so both are attached to that
-platform's own manifest digest; querying the index digest for either returns
-nothing. That also matches where they are looked for: a consumer that resolved
-`linux/amd64` enumerates referrers on the child manifest, and evidence on the
-index is invisible from there.
+The subjects differ because the claims differ. The SBOM and the VEX each
+describe exactly one root filesystem, so both are attached to that platform's
+own manifest digest; querying the index digest for either returns nothing. That
+matches where they are looked for: a consumer that resolved `linux/amd64`
+enumerates referrers on the child manifest, and evidence on the index is
+invisible from there.
+
+Provenance is published against all three subjects, so the evidence set is
+complete at whichever one you query. Each of the three is generated separately,
+with its in-toto `subject` naming the manifest it is published under — a single
+document re-pushed to extra OCI subjects would contradict its own statement. The
+three predicates are otherwise identical, and deliberately so: the buildType is
+`https://actions.github.io/buildtypes/workflow/v1`, whose fields are all
+functions of the repository, ref, commit and workflow run. It has no field for a
+target platform, so the per-platform copies carry no build detail the index copy
+lacks. They exist to spare a consumer standing at a platform manifest the walk
+back up to the index.
+
+Keep using the index copy for admission control. A policy engine resolves a tag
+to the index — Kyverno's `mutateDigest` does, measured on v1.19.0 — and no
+single rule can span an index and a child manifest, so the index attestation is
+the only one such a rule can reach.
 
 The two per-platform documents are deliberately in different formats. A
 referrer descriptor carries only `digest`, `mediaType`, `size`, `artifactType`,
@@ -134,7 +149,9 @@ Then one command per kind:
 # successful extraction.
 set -o pipefail
 
-# 1. Build provenance (index digest)
+# 1. Build provenance. Any of the three subjects works and all three verify
+# against the same signer; ${DIGEST_AMD64} or ${DIGEST_ARM64} substitute
+# directly. Use the index digest when the result feeds an admission policy.
 gh attestation verify "oci://${IMAGE}@${DIGEST}" \
   --repo NVIDIA/aicr \
   --signer-workflow NVIDIA/aicr/.github/workflows/attest-images.yaml \
@@ -169,7 +186,8 @@ Each of the seven released images (`aicr`, `aicrd`, `aicr-gate`, and the four
 name in `IMAGE` and re-resolve the digests. Commands 2 and 3 retrieve the
 `linux/amd64` evidence; repeat them with `PLATFORM=linux-arm64` and
 `DIGEST_PLATFORM="${DIGEST_ARM64}"` for the other platform, which carries its
-own SBOM and its own digest-bound VEX under its own filenames.
+own SBOM, its own digest-bound VEX and its own provenance under its own
+filenames.
 
 **Why `--bundle-from-oci`.** `gh attestation verify` fetches bundles from
 GitHub's attestations API unless told otherwise, so the default form would
@@ -787,24 +805,28 @@ digest. The results below are a separate measurement: `cosign attest` output on
 **platform manifests**, read with `type: SigstoreBundle`. Different producer,
 different subject, and both results hold.
 
-Measured on kind with Kubernetes v1.34.0, Kyverno v1.19.0 and cosign v3.0.6.
+Measured on kind with Kubernetes v1.34.0, Kyverno v1.19.0 and cosign v3.0.6,
+against a release that published provenance **only** on the index
+([#2728](https://github.com/NVIDIA/aicr/issues/2728) added the per-platform
+copies; the last row changes as a result, and is marked below).
 
 A deployment manifest names a tag, not a digest. Kyverno's `mutateDigest` is on
-by default and resolves that tag to the **index** digest, which is where
-provenance lives and where the SBOM and the VEX do not. Four policies against
-one image:
+by default and resolves that tag to the **index** digest, where provenance lives
+and the SBOM and the VEX do not. Four policies against one image:
 
 | Policy | Subject it evaluates | Result |
 |--------|----------------------|--------|
 | provenance only | index digest | admitted |
 | SBOM only | index digest | denied |
 | SBOM + VEX + provenance | platform manifest | denied |
-| provenance only | platform manifest | denied |
+| provenance only | platform manifest | denied — expected to admit now that provenance is published there; not re-measured |
 
 No single rule spans both digests. So for a normal tag-naming workload, SLSA
 provenance is enforceable at admission and the CycloneDX SBOM and the OpenVEX
 document are not. This follows from where the evidence is attached, not from how
-the policy is written, so a better policy will not recover it.
+the policy is written, so a better policy will not recover it. Per-platform
+provenance does not change that: it adds a subject, and the rule still cannot
+reach across to the one `mutateDigest` picked.
 
 The completeness property does work. Listing several `attestations[]` entries
 requires all of them, in both `ClusterPolicy` and `ImageValidatingPolicy`:
@@ -819,8 +841,10 @@ Three ways to live with this, none of them free:
 * **Split the gate.** Enforce provenance at admission, and the SBOM and VEX at
   build or promotion time where the platform digest is already known. This keeps
   every document truthful but moves part of the check off the admission path.
-* **Pin platform digests in pod specs.** One rule then covers everything, and
-  you give up multi-arch scheduling.
+* **Pin platform digests in pod specs.** One rule then covers everything — all
+  three predicate types are on the platform manifest since
+  [#2728](https://github.com/NVIDIA/aicr/issues/2728) — and you give up
+  multi-arch scheduling.
 
 ### Kyverno attestation payload limits
 

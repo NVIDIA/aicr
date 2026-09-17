@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -406,17 +407,21 @@ func TestExtractResultPodNotFoundDeadlineExceeded(t *testing.T) {
 			if result.CTRFStatus() != ctrf.StatusFailed {
 				t.Errorf("CTRFStatus = %q, want %q", result.CTRFStatus(), ctrf.StatusFailed)
 			}
-			// Asserted for every case, including the unpinned one, which must
-			// render the same default runPhase applies rather than a bare "0s".
-			// The deadline the Job actually enforced: BuildJobPlan truncates
-			// to whole seconds before setting activeDeadlineSeconds.
+			// The message must name BOTH clocks: the deadline Kubernetes
+			// enforced (now the Job deadline) and the check's own budget from
+			// the catalog. Naming only one leaves an operator comparing an 11m30s
+			// message against an 8m catalog entry.
 			want := tt.timeout
 			if want == 0 {
 				want = defaults.ValidatorDefaultTimeout
 			}
-			wantTimeout := (time.Duration(int64(want.Seconds())) * time.Second).String()
-			if !strings.Contains(result.TerminationMsg, wantTimeout) {
-				t.Errorf("TerminationMsg = %q, want it to name the deadline %s", result.TerminationMsg, wantTimeout)
+			checkBudget := (time.Duration(int64(want.Seconds())) * time.Second)
+			wantDeadline := v1.JobDeadlineFor(checkBudget).String()
+			if !strings.Contains(result.TerminationMsg, wantDeadline) {
+				t.Errorf("TerminationMsg = %q, want it to name the enforced deadline %s", result.TerminationMsg, wantDeadline)
+			}
+			if !strings.Contains(result.TerminationMsg, checkBudget.String()) {
+				t.Errorf("TerminationMsg = %q, want it to name the check budget %s", result.TerminationMsg, checkBudget)
 			}
 			for _, want := range tt.wantContains {
 				if !strings.Contains(result.TerminationMsg, want) {
@@ -1028,7 +1033,7 @@ func TestParseExtraSentinels(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cleaned, extra := parseExtraSentinels(tt.logs)
+			cleaned, extra, _ := parseExtraSentinels(tt.logs)
 			if cleaned != tt.wantCleaned {
 				t.Errorf("cleaned = %q, want %q", cleaned, tt.wantCleaned)
 			}
@@ -1055,7 +1060,7 @@ func TestProcessValidatorLogs(t *testing.T) {
 	}
 	b.WriteString(p + `{"nodesValidated":"1","nodesTotal":"2"}`)
 
-	extra, stdout := processValidatorLogs(b.String())
+	extra, _, stdout := processValidatorLogs(b.String())
 
 	if extra["nodesValidated"] != "1" || extra["nodesTotal"] != "2" {
 		t.Fatalf("late sentinel beyond truncation window was lost: extra=%v", extra)
@@ -1258,6 +1263,42 @@ func TestBoundTerminationMsg(t *testing.T) {
 			if trimmed := tt.maxBytes - suffixIdx; trimmed < 0 || trimmed >= utf8.UTFMax {
 				t.Errorf("trimmed %d bytes back from maxBytes=%d; want an incomplete-rune trim (0..%d)",
 					trimmed, tt.maxBytes, utf8.UTFMax-1)
+			}
+		})
+	}
+}
+
+func TestParseProvenanceSentinel(t *testing.T) {
+	const p = ctrf.ProvenanceLinePrefix
+	const x = ctrf.ExtraLinePrefix
+	good := p + `{"shippedDigest":"aa","derivedDigest":"bb","inheritedPaths":["spec.hostNetwork"]}`
+	tests := []struct {
+		name        string
+		logs        string
+		wantCleaned string
+		wantProv    bool
+		wantExtra   int
+	}{
+		{"record parsed and stripped", "work\n" + good + "\ndone", "work\ndone", true, 0},
+		{"both sentinels coexist", x + `{"runtimeSource":"delivered-artifact"}` + "\n" + good, "", true, 1},
+		{"malformed record dropped, earlier kept", good + "\n" + p + `{"shippedDigest":`, "", true, 0},
+		{"record without both digests is not a carrier", p + `{"shippedDigest":"aa"}`, "", false, 0},
+		{"no sentinel", "plain", "plain", false, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cleaned, extra, prov := parseExtraSentinels(tt.logs)
+			if cleaned != tt.wantCleaned {
+				t.Errorf("cleaned = %q, want %q", cleaned, tt.wantCleaned)
+			}
+			if (prov != nil) != tt.wantProv {
+				t.Errorf("prov = %+v, want present=%v", prov, tt.wantProv)
+			}
+			if prov != nil && (prov.ShippedDigest != "aa" || prov.DerivedDigest != "bb" || len(prov.InheritedPaths) != 1) {
+				t.Errorf("prov = %+v", prov)
+			}
+			if len(extra) != tt.wantExtra {
+				t.Errorf("extra = %v", extra)
 			}
 		})
 	}

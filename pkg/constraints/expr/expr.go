@@ -12,7 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package constraints
+// Package expr parses constraint expressions ("<operator> <value>") and
+// evaluates them against a single actual value.
+//
+// It is a leaf package: it depends only on pkg/errors and pkg/version. The
+// parent pkg/constraints imports pkg/recipe for snapshot-aware evaluation,
+// so pkg/recipe cannot import it back; keeping the pure expression grammar
+// here lets both sides share one parser instead of reimplementing it. The
+// parent re-exports every symbol declared here, so external callers keep
+// using pkg/constraints.
+package expr
 
 import (
 	"fmt"
@@ -66,7 +75,7 @@ type ParsedConstraint struct {
 // Examples:
 //   - ">= 1.32.4" -> {Operator: ">=", Value: "1.32.4", IsVersionComparison: true}
 //   - "ubuntu" -> {Operator: "", Value: "ubuntu", IsVersionComparison: false}
-//   - "== 24.04" -> {Operator: "==", Value: "24.04", IsVersionComparison: false}
+//   - "== 24.04" -> {Operator: "==", Value: "24.04", IsVersionComparison: true}
 func ParseConstraintExpression(expr string) (*ParsedConstraint, error) {
 	expr = strings.TrimSpace(expr)
 	if expr == "" {

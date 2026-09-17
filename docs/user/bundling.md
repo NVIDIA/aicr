@@ -39,10 +39,10 @@ are frozen at v1 and gated by `TestBundleLayoutMatchesManifest`, so a path
 shown here will not disappear or be renamed without a deliberate, reviewed
 change. Automation may read these paths.
 
-Every deployer writes `checksums.txt` and `README.md` at the bundle root. Four
-of the five group components into ordered `NNN-<component>` directories; Flux
-is the exception and uses a plain `<component>` directory with shared
-`sources/`.
+Every deployer writes `checksums.txt`, `README.md` and `recipe.yaml` at the
+bundle root. Four of the five group components into ordered `NNN-<component>`
+directories; Flux is the exception and uses a plain `<component>` directory
+with shared `sources/`.
 
 ```text
 helm/                          argocd/                     flux/
@@ -55,14 +55,14 @@ helm/                          argocd/                     flux/
     ...                          app-of-apps.yaml             gitrepo-<host>.yaml
   deploy.sh                      checksums.txt              kustomization.yaml
   recipe.yaml                    README.md                  checksums.txt
-  checksums.txt                                             README.md
-  README.md
+  checksums.txt                  recipe.yaml                README.md
+  README.md                                                 recipe.yaml
 ```
 
 `helmfile` shares Helm's per-component files but not its root: it writes
-`helmfile.yaml` instead of `deploy.sh`, and does not emit `recipe.yaml`. A
-recipe with dependencies also produces one `level-N.yaml` per dependency depth,
-which is derived from the recipe rather than fixed by the layout.
+`helmfile.yaml` instead of `deploy.sh`. A recipe with dependencies also
+produces one `level-N.yaml` per dependency depth, which is derived from the
+recipe rather than fixed by the layout.
 
 ```text
 helmfile/
@@ -70,6 +70,7 @@ helmfile/
   002-nfd/
   helmfile.yaml
   level-N.yaml                 one per dependency depth; absent when flat
+  recipe.yaml
   checksums.txt
   README.md
 ```

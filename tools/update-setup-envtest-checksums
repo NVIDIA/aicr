@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Refresh the pinned linux/amd64 SHA256 in .settings.yaml after a setup-envtest
+# version bump. Invoked by Renovate via postUpgradeTasks
+# (.github/renovate.json5) whenever testing_tools.setup_envtest is updated.
+#
+# Without this the version moves and the pin does not, so the tests job's
+# checksum verify fails closed on the next bump.
+#
+# Unlike every sibling refresher, this one HASHES THE ASSET rather than reading
+# a published manifest: controller-runtime ships setup-envtest as a bare binary
+# with no checksums.txt. That means the value this script writes is a
+# trust-on-first-use record of what the release served at refresh time, not a
+# corroboration of an upstream claim -- review the resulting diff accordingly.
+#
+# Usage: tools/update-setup-envtest-checksums <setup-envtest-version>
+#   e.g. tools/update-setup-envtest-checksums v0.25.0
+#
+# Idempotent: re-running with the currently-pinned version produces no diff.
+
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $0 <setup-envtest-version>" >&2
+  exit 64
+fi
+
+VERSION="$1"
+# The asset lives under a controller-runtime release tag, which carries a v.
+VERSION_V="v${VERSION#v}"
+
+SETTINGS_FILE=".settings.yaml"
+if [[ ! -f "${SETTINGS_FILE}" ]]; then
+  echo "ERROR: ${SETTINGS_FILE} not found (run from repo root)" >&2
+  exit 1
+fi
+
+KEY="setup_envtest_sha256_linux_amd64"
+ASSET="setup-envtest-linux-amd64"
+ASSET_URL="https://github.com/kubernetes-sigs/controller-runtime/releases/download/${VERSION_V}/${ASSET}"
+
+WORKDIR=$(mktemp -d)
+trap 'rm -rf "${WORKDIR}"' EXIT
+
+echo "Fetching ${ASSET_URL}"
+# Retry on transient failures (5xx, 408/429, connection refused, network
+# blips). --retry-delay 0 lets curl pick an exponential backoff; the total
+# retry window is capped at 180s. --max-time is larger than the sibling
+# scripts' because this downloads an ~11 MB binary, not a small manifest.
+if ! curl --fail --silent --show-error --location \
+      --connect-timeout 10 --max-time 300 \
+      --retry 5 --retry-delay 0 --retry-max-time 180 \
+      --retry-connrefused \
+      --output "${WORKDIR}/${ASSET}" \
+      "${ASSET_URL}"; then
+  echo "ERROR: failed to download ${ASSET_URL} after retries" >&2
+  exit 1
+fi
+
+# Refuse to pin an empty or absurdly small download. curl --fail already
+# rejects a 404, but a truncated transfer that still exits 0 would otherwise be
+# hashed and committed as if it were the release.
+SIZE=$(wc -c < "${WORKDIR}/${ASSET}" | tr -d '[:space:]')
+if [[ "${SIZE}" -lt 1000000 ]]; then
+  echo "ERROR: ${ASSET} is ${SIZE} bytes, expected a multi-MB binary" >&2
+  exit 1
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+  SHA=$(sha256sum "${WORKDIR}/${ASSET}" | awk '{print $1}')
+else
+  SHA=$(shasum -a 256 "${WORKDIR}/${ASSET}" | awk '{print $1}')  # macOS
+fi
+if [[ ! "${SHA}" =~ ^[0-9a-f]{64}$ ]]; then
+  echo "ERROR: computed value is not a sha256: '${SHA}'" >&2
+  exit 1
+fi
+echo "  ${KEY}: ${SHA}"
+
+# Targeted sed rather than yq: mikefarah/yq drops blank lines between top-level
+# mappings, which would reformat the whole file on every Renovate PR (see the
+# failure-modes note in .github/RENOVATE.md).
+sed_inplace() {
+  if sed --version >/dev/null 2>&1; then
+    sed -E -i "$@"          # GNU sed (Linux / Renovate runner)
+  else
+    sed -E -i '' "$@"       # BSD sed (macOS)
+  fi
+}
+
+# Pre-check: the key must exist in the expected shape, otherwise the sed below
+# silently no-ops and we ship a stale checksum.
+if ! grep -Eq "^[[:space:]]+${KEY}:[[:space:]]*'[0-9a-f]{64}'[[:space:]]*\$" "${SETTINGS_FILE}"; then
+  echo "ERROR: key '${KEY}' not found (or wrong shape) in ${SETTINGS_FILE}" >&2
+  exit 1
+fi
+
+# Guard the uniqueness the no-scoping decision rests on.
+OCCURRENCES=$(grep -Ec "^[[:space:]]+${KEY}:" "${SETTINGS_FILE}")
+if [[ "${OCCURRENCES}" -ne 1 ]]; then
+  echo "ERROR: expected exactly 1 '${KEY}' line, found ${OCCURRENCES}" >&2
+  exit 1
+fi
+
+sed_inplace \
+  -e "s|^([[:space:]]+${KEY}:[[:space:]]*)'[0-9a-f]{64}'\$|\1'${SHA}'|" \
+  "${SETTINGS_FILE}"
+
+# Post-check: confirm the new value landed on that key.
+if ! grep -Eq "^[[:space:]]+${KEY}:[[:space:]]*'${SHA}'[[:space:]]*\$" "${SETTINGS_FILE}"; then
+  echo "ERROR: ${KEY} did not update to '${SHA}' in ${SETTINGS_FILE}" >&2
+  exit 1
+fi
+
+echo "Updated ${SETTINGS_FILE} for setup-envtest ${VERSION_V}"

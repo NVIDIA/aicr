@@ -211,7 +211,10 @@ Discover them and run locally against a Kind cluster:
 
 ```bash
 make check-health COMPONENT=gpu-operator       # single component
-make check-health-all                           # all components
+make check-health-all                           # registry-linked components
+# opt-in-only checks (e.g. nvsentinel-observability) aren't in that
+# sweep -- run them directly:
+make check-health COMPONENT=nvsentinel-observability
 make validate-local RECIPE=recipe.yaml          # full pipeline
 ```
 
@@ -424,6 +427,23 @@ Start with the repo-server log (Argo CD) or source-controller log
 logs show reconciliation decisions and prune behavior;
 helm-controller logs surface per-`HelmRelease` install outcomes.
 
+Independently of the outcome, every `kwok-test` job also uploads
+`kwok-results-<recipe>-<deployer>-<run_id>-<attempt>` containing `kwok-results.json`,
+a [CTRF](https://ctrf.io) report written by `run-all-recipes.sh` (via the
+shared `tools/ctrf` emitter) with one test per `(recipe, deployer)` cell:
+`kwok/<recipe>/<deployer>` with status `passed`, `failed` (the message
+distinguishes a GitOps sync timeout from a generic failure), or `skipped`
+(no KWOK profile in implicit batch mode). The file is also written on the
+3-strike bail, so a truncated matrix still reports the cells it ran, and when
+cluster or `install-infra.sh` setup fails before any cell runs it holds a
+single `kwok/setup/<deployer>` entry with status `other` and the setup
+failure in its message. The report is flushed after every cell, and a TERM
+or INT while a cell runs records that cell as `other` ("interrupted") before
+the runner exits with the usual 128+signal status, so an interrupted matrix
+still reports what it completed.
+Locally the same file lands at `/tmp/kwok-debug-artifacts/kwok-results.json`
+(override with `KWOK_RESULTS_FILE`).
+
 ### Adding a New Deployer Value
 
 The deployer set is finite and matches what `pkg/bundler` emits. To
@@ -480,7 +500,9 @@ half of the pipeline and skips deploy-side assertions.
 
 - `test-coverage` — `go test -race ./...` plus the 83% coverage floor.
 - `lint` — golangci-lint with `.golangci.yaml`, yamllint, and the docs checks
-  (filenames, MDX patterns, MDX parse — see [Docs MDX Gate](#docs-mdx-gate)).
+  (filenames, MDX patterns, MDX parse, YAML fences — see
+  [Docs MDX Gate](#docs-mdx-gate) and
+  [Docs YAML Fence Gate](#docs-yaml-fence-gate)).
 - `e2e` — the end-to-end pipeline runner.
 - `scan` — Grype vulnerability scan.
 - `license-check` — license header / dependency-license sweep.
@@ -573,6 +595,25 @@ job that does — `fern generate --docs --preview` — runs as a `workflow_run`
 companion whose status never lands on the PR head SHA, so it cannot be a
 required check. `make check-docs-mdx-parse` exists to close that gap without a
 token or a dependency on Fern's service at merge time.
+
+## Docs YAML Fence Gate
+
+`make check-docs-yaml` checks every Markdown and MDX file under `docs/**`. Any
+fenced code block labelled `yaml` or `yml` must parse as YAML. This is a syntax
+check only: partial fragments are allowed and do not need to be complete
+Kubernetes resources.
+
+Inside a YAML fence, `...` is an explicit document-end marker. Content after it
+must start a new document with `---`; use `# ...` to show omitted content.
+Aliases must refer to an earlier anchor in the same YAML document. Empty
+fragments are valid, but malformed or incomplete YAML directives are rejected.
+Fences inside HTML or MDX comments are ignored.
+
+There is no `no-parse` bypass: `yaml no-parse` remains checked, and
+comma-suffixed labels such as `yaml,no-parse` are rejected. Relabel Helm or
+Go-template examples as `gotemplate`, and intentionally invalid examples as
+`text`. The checker needs Node 20+; without Node it warns and skips locally, but
+hard-fails in CI so the docs-only merge gate cannot pass without running it.
 
 ## Common Gotchas
 

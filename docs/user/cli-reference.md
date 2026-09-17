@@ -213,7 +213,7 @@ Drive `aicr snapshot` from an `AICRConfig` document so the snapshot inputs versi
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: gke-h100-training
 spec:
@@ -262,7 +262,7 @@ aicr snapshot --config aicr-config.yaml -o /tmp/snapshot.yaml
 
 The `--template` flag enables custom output formatting using Go templates with [Sprig functions](https://masterminds.github.io/sprig/). Templates receive the full Snapshot struct:
 
-```yaml
+```text
 # Available template data structure:
 .Kind           # Resource kind ("Snapshot")
 .APIVersion     # API version string
@@ -317,7 +317,7 @@ data:
 
 **Snapshot Structure:**
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 kind: Snapshot
 metadata:
   timestamp: "2025-12-31T10:30:00Z"
@@ -371,7 +371,7 @@ configuration choice. Select a non-default value with
 `--profile name=value`; omitting the flag applies the declaration's required
 default. A selection against a composition with no declaration, a wrong name,
 or an unknown value fails closed. Profile-bearing output records
-`metadata.selectedProfile`, uses recipe apiVersion `aicr.run/v1alpha3`, and
+`metadata.selectedProfile`, uses recipe apiVersion `aicr.run/v1beta2`, and
 locks every declared owned path: divergent `aicr bundle`/`aicr mirror`
 static overrides are rejected (identical values accepted), and
 argocd-helm install-time values are rejected on key *presence* alone —
@@ -432,7 +432,7 @@ The config file uses a Kubernetes-style envelope:
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: gb200-eks-ubuntu-training
 spec:
@@ -493,7 +493,7 @@ Generate recipes using direct system parameters:
 **Flags:**
 | Flag | Short | Type | Description |
 |------|-------|------|-------------|
-| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; `self-managed`, `self`, and `vanilla` are accepted aliases) — unlike the `any` wildcard, which matches every service and does not select `generic` recipes. `generic` is never detected from a snapshot (the fingerprint reports the provisioner it sees, such as `metal3` or `rke2`), so `generic` recipes require this flag as an explicit opt-in, also alongside `--snapshot` |
+| `--service` | | string | K8s service: eks, gke, aks, oke, ocp, kind, lke, bcm, metal3, rke2, generic, k0s. `generic` is a concrete value (self-managed Kubernetes with no distinguishing distro or provisioner; `self-managed`, `self`, and `vanilla` are accepted aliases) — unlike the `any` wildcard, which matches every service and does not select `generic` recipes. `generic` is never detected from a snapshot (the fingerprint reports the provisioner it sees, such as `metal3` or `rke2`), so `generic` recipes require this flag as an explicit opt-in, also alongside `--snapshot` |
 | `--accelerator` | `--gpu` | string | Accelerator/GPU type: h100, h200, gb200, gb300, b200, a100, l40, l40s, rtx-pro-6000, vr200 |
 | `--intent` | | string | Workload intent: training, inference |
 | `--os` | | string | OS family: ubuntu, rhel, cos, amazonlinux, ol, talos |
@@ -501,6 +501,7 @@ Generate recipes using direct system parameters:
 | `--profile` | | string | Profile selection in exact `name=value` form (e.g. `gpuStack=operator-managed` on AKS/OKE or `gpuStack=bundle-installer` on GKE); omit to use the declaration's default (`gpuStack=azure-managed` on AKS, `gpuStack=gke-default` on GKE, `gpuStack=oci-managed` on OKE) |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
+| `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
 | `--nodes` | | int | Number of GPU nodes in the cluster |
 | `--output` | `-o` | string | Output file (default: stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
@@ -640,6 +641,7 @@ target-cluster conflict detection.
 | `--profile` | | string | Profile selection in exact `name=value` form; omit to use the declaration's default |
 | `--slurm-accounting-mode` | | string | Slurm accounting ownership: disabled (default), customer-managed, aicr-provided |
 | `--runtime-inventory` | | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled`, `disabled`. Recorded in the generated recipe |
+| `--gke-tcpxo-interfaces` | | string | Ordered `eth1=<network>,...,eth8=<network>` GPU-NIC Network mapping for the `torch-distributed-tcpxo` runtime. Required when the resolved recipe ships it (h100 GKE kubeflow training); recorded in the generated recipe |
 | `--output` | `-o` | string | Output destination (file, ConfigMap URI, or stdout) |
 | `--format` | `-t` | string | Format: json, yaml, table (default: yaml) |
 | `--kubeconfig` | `-k` | string | Path to kubeconfig file (used when `--snapshot` or `--output` is a ConfigMap URI; overrides KUBECONFIG env) |
@@ -681,7 +683,7 @@ aicr recipe -s system.yaml --intent inference -o recipe.yaml --format yaml
 **Output structure:**
 
 ```yaml
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 kind: RecipeResult
 metadata:
   version: v1.0.0
@@ -721,7 +723,7 @@ apiVersion and records the selected identity and declaration-wide lock
 surface:
 
 ```yaml
-apiVersion: aicr.run/v1alpha3
+apiVersion: aicr.run/v1beta2
 kind: RecipeResult
 metadata:
   selectedProfile:
@@ -1114,21 +1116,21 @@ Validation can be run in different phases to validate different aspects of the d
 >
 > **Version skew:** Snapshots and recipes record the `aicr` version that produced them. When the recipe, the snapshot, and the running binary report different release versions, `validate` logs a single advisory warning (`version skew detected across validate inputs`) naming all three. This is a debugging breadcrumb — mixing artifacts from different versions can surface as confusing failures — and does **not** fail the command. Dev (`dev`) and pre-release (`-next`) builds are ignored to avoid noise.
 >
-> **apiVersion gate:** During v0.21, the ADR-022 reader-first release, AICR still
-> emits `aicr.run/v1alpha2` for snapshots and default recipes, and
-> `aicr.run/v1alpha3` for profile-bearing recipes. Readers additionally
-> accept `aicr.run/v1` for snapshots and default recipes,
-> `aicr.run/v1beta1` for config and ordinary catalog inputs, and
-> `aicr.run/v1beta2` for profile-bearing inputs. Unsupported artifact headers
+> **apiVersion gate:** As of v0.22, the ADR-022 emitter switch, AICR emits
+> `aicr.run/v1` for snapshots and default recipes, `aicr.run/v1beta1` for config
+> and ordinary catalog inputs, and `aicr.run/v1beta2` for profile-bearing
+> recipes. Readers additionally still accept the superseded
+> `aicr.run/v1alpha2` and `aicr.run/v1alpha3`, so artifacts produced by v0.21 or
+> earlier keep loading. Unsupported artifact headers
 > fail fast; raw external catalog headers are checked before merge or
 > hydration. Recapture, regenerate, or update the authored header with a
 > version supported by the running AICR release. See
 > [ADR-011](https://github.com/NVIDIA/aicr/blob/main/docs/design/011-artifact-apiversion-policy.md)
 > and
-> [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md). v0.22 switches
-> the emitters to the target values and v0.23 stops accepting the alpha values,
-> along with the empty header that the snapshot, recipe, and criteria readers
-> still tolerate. `AICRConfig` and external catalog headers already reject an
+> [ADR-022](https://github.com/NVIDIA/aicr/blob/main/docs/design/022-artifact-maturity-and-deprecation.md). v1.0.0 stops
+> accepting the alpha values, along with the empty header that the snapshot,
+> recipe, and criteria readers still tolerate. Reading either now logs a
+> deprecation warning naming the file. `AICRConfig` and external catalog headers already reject an
 > empty value, so they have no tolerance to retire.
 > [Catalog and binary compatibility](../integrator/data-extension.md#catalog-and-binary-compatibility)
 > has the release-by-release table.
@@ -1273,7 +1275,7 @@ through the precedence chain described on `--identity-token`.
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: prod-validate
 spec:
@@ -1579,7 +1581,7 @@ When both `spec.recipe.output.path` and `spec.bundle.input.recipe` are set, they
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   bundle:
     input:
@@ -2158,7 +2160,7 @@ my-bundle/
 **`provenance.yaml`** sits at the bundle root and lists one entry per vendored chart, using the same K8s-style `apiVersion`/`kind` shape as the rest of AICR's persisted formats:
 
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 kind: BundleProvenance
 vendoredCharts:
   - name: gpu-operator
@@ -2224,10 +2226,9 @@ Use `--dynamic` for values that genuinely vary per cluster — cluster names, su
 
 > **Attestation scope:** Dynamic values are supplied at install time and are
 > **not covered by `--attest`**. Attestation binds the generated closed-world
-> inventory, including `recipe.yaml` when present, not operator-provided
-> overrides. If you need to constrain dynamic values at deploy time, use
-> admission control or Argo sync hooks — see
-> [Attestation Scope](#attestation-scope).
+> inventory, including `recipe.yaml`, not operator-provided overrides. If you
+> need to constrain dynamic values at deploy time, use admission control or
+> Argo sync hooks — see [Attestation Scope](#attestation-scope).
 
 ```shell
 --dynamic component:path.to.field
@@ -2651,7 +2652,7 @@ When `--attest` is passed, the bundle command performs five steps:
 1. **Verifies the binary attestation file exists** — The running `aicr` binary must have a valid SLSA provenance file (`aicr-attestation.sigstore.json`) alongside it, included by the install script from a release archive. If missing, the command fails immediately with guidance on how to install correctly.
 2. **Acquires a signing credential** — in the default keyless mode this is an OIDC token (see [OIDC Token Sources](#oidc-token-sources) below); with `--signing-key` this step instead resolves the KMS key and no OIDC token is acquired (see [KMS-Backed Signing](#kms-backed-signing)).
 3. **Verifies the binary's own attestation** — Cryptographically verifies the SLSA provenance binds to the running binary and was signed by NVIDIA CI. This ensures only NVIDIA-built binaries can produce attested bundles.
-4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the generated closed-world inventory, including `recipe.yaml` when present, and the binary that produced it.
+4. **Signs the bundle** — Creates a SLSA Build Provenance v1 in-toto statement binding the creator's identity to the generated closed-world inventory, including `recipe.yaml`, and the binary that produced it.
 5. **Writes attestation files** — `attestation/bundle-attestation.sigstore.json` and `attestation/aicr-attestation.sigstore.json` are added to the bundle output.
 
 Attestation is opt-in; bundles are unsigned by default. By default, signing uses Sigstore keyless signing (Fulcio CA + Rekor transparency log) and records the entry in **Rekor v2** (the signing config is fetched from Sigstore's TUF repository, so shard rotation is handled automatically; a cold cache is fetched on demand). Verifying such bundles with `aicr verify` needs only the `aicr` binary; verifying them with `cosign verify-blob-attestation` needs Cosign v3.0.1+. For CI/CD environments without OIDC, pass `--signing-key` to sign with a KMS key instead; see [KMS-Backed Signing](#kms-backed-signing) below. For verification, see [`aicr verify`](#aicr-verify).
@@ -2809,9 +2810,9 @@ The `hashivault://<transit-key-name>` scheme signs through HashiCorp Vault's Tra
 ##### Attestation Scope
 
 Attestation binds a closed-world bundle inventory. `checksums.txt` contains one
-SHA256 entry for every regular payload file — including `recipe.yaml` when
-present, defaults, dynamic-value stubs, and external `--data` files copied into
-the bundle. Verification derives the required directories and rejects every
+SHA256 entry for every regular payload file — including `recipe.yaml`,
+defaults, dynamic-value stubs, and external `--data` files copied into the
+bundle. Verification derives the required directories and rejects every
 additional file or directory, symlink, and other non-regular object. Only
 `checksums.txt`, `attestation/bundle-attestation.sigstore.json`, and
 `attestation/aicr-attestation.sigstore.json` may exist outside the manifest;
@@ -3139,7 +3140,7 @@ a downstream consumer enforces against it.
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: prod-verify
 spec:
@@ -3288,7 +3289,10 @@ aicr evidence digest -r recipes/overlays/h100-aks-ubuntu-training.yaml \
 # CI drift gate: compare the digest pinned in a signed evidence bundle
 # against the recipe currently on the PR branch. For a profiled pointer,
 # replay its recorded selection — recomputing without it hydrates the
-# declaration default and false-stales every non-default value.
+# declaration default and false-stales every non-default value. For the
+# h100 GKE kubeflow training leaf (ships torch-distributed-tcpxo), replay
+# the recorded configuration.gke.tcpxoInterfaces too — overlay-direct
+# digest fails closed without it; hydrate the recipe first, then digest it.
 ptr=recipes/evidence/<slug>/<src>/<digest>.yaml
 prof=$(yq -r '.profile // ""' "$ptr")
 signed=$(aicr evidence verify "$ptr" --format json \
@@ -3891,7 +3895,7 @@ mkdir -p my-data/components/my-operator
 2. **Create registry.yaml with custom component:**
 ```yaml
 # my-data/registry.yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: ComponentRegistry
 components:
   - name: my-operator
@@ -3915,7 +3919,7 @@ image:
 ```yaml
 # my-data/overlays/my-custom-overlay.yaml
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: my-custom-overlay
 spec:

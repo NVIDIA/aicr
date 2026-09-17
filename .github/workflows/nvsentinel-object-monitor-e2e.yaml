@@ -1,0 +1,133 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Runtime Kind test for the nvsentinel-object-monitor mixin (#2612).
+#
+# Installs the mixin-enabled bundle via its own generated install.sh, drives an
+# unhealthy operator DaemonSet pod through a live cluster, and asserts both the
+# published health event and the resulting node condition -- coverage the CEL
+# unit tests cannot provide, since they never run the monitor. Not wired into
+# `make qualify`: it needs a Kind cluster and pulls the NVSentinel image set,
+# which `qualify` neither provides nor should pay for on every run.
+#
+# The path filter is deliberately narrow. This lane costs a cluster spin-up and
+# a full image pull, and pkg/recipe/** or pkg/bundler/** would drag it onto
+# most core PRs; the allowlist machinery those packages own is already covered
+# by unit tests that run everywhere.
+
+name: NVSentinel Object Monitor E2E
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - 'recipes/mixins/nvsentinel-object-monitor.yaml'
+      - 'recipes/registry.yaml'
+      - 'recipes/components/nvsentinel/**'
+      # The tested overlay inherits kind.yaml, which inherits base.yaml, and
+      # base.yaml is where nvsentinel enters the chain at all.
+      - 'recipes/overlays/h100-kind-training.yaml'
+      - 'recipes/overlays/kind.yaml'
+      - 'recipes/overlays/base.yaml'
+      - 'tests/e2e/nvsentinel-object-monitor/**'
+      # run.sh sources tools/common and is invoked through a make target.
+      - 'tools/common'
+      - 'Makefile'
+      - '.github/workflows/nvsentinel-object-monitor-e2e.yaml'
+      - '.github/actions/setup-build-tools/**'
+      - '.github/actions/prep-kind-runner/**'
+      - '.github/actions/load-versions/**'
+      - '.settings.yaml'
+  pull_request:
+    branches: [main]
+    paths: *paths
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: NVSentinel Object Monitor E2E
+    runs-on: ubuntu-latest
+    # The script's bounded waits alone sum to ~15 minutes worst case (node
+    # ready + a cold pull of the whole NVSentinel image set + the condition and
+    # negative windows), before kind create and go build. A cold amd64 runner
+    # was observed finishing in 7m25s.
+    timeout-minutes: 35
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Prep Kind runner
+        uses: ./.github/actions/prep-kind-runner
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      # run.sh's has_tools gate needs all four; installing only some of them
+      # fails the lane before it exercises anything.
+      - name: Install Kind, kubectl, Helm and yq
+        uses: ./.github/actions/setup-build-tools
+        with:
+          install_kind: 'true'
+          kind_version: '${{ steps.versions.outputs.kind }}'
+          install_kubectl: 'true'
+          kubectl_version: '${{ steps.versions.outputs.kubectl }}'
+          install_helm: 'true'
+          helm_version: '${{ steps.versions.outputs.helm }}'
+          install_yq: 'true'
+          yq_version: '${{ steps.versions.outputs.yq }}'
+
+      # KEEP_CLUSTER so the cluster survives for the diagnostics below; the
+      # script's own EXIT trap would otherwise delete it before they run,
+      # leaving a failure with nothing to inspect. The always() step after
+      # diagnostics does the teardown instead.
+      - name: Run nvsentinel-object-monitor e2e
+        env:
+          KEEP_CLUSTER: 'true'
+        run: make nvsentinel-object-monitor-e2e
+
+      # run.sh writes its kubeconfig inside a mktemp dir and removes that dir on
+      # exit, so KEEP_CLUSTER leaves the cluster running but no credentials to
+      # reach it. Re-export before querying anything.
+      - name: Collect diagnostics on failure
+        if: ${{ failure() }}
+        run: |
+          set +e
+          cluster=aicr-nvsentinel-object-monitor-e2e
+          export KUBECONFIG="${RUNNER_TEMP}/object-monitor-diag.kubeconfig"
+          kind export kubeconfig --name "$cluster" --kubeconfig "$KUBECONFIG" || exit 0
+          kubectl get pods -A
+          kubectl get nodes -o jsonpath='{range .items[*].status.conditions[*]}{.type}={.status}{"\n"}{end}'
+          kubectl -n gpu-operator get pods -o wide
+          kubectl -n nvsentinel logs \
+            -l app.kubernetes.io/name=kubernetes-object-monitor --tail=200
+
+      - name: Delete Kind cluster
+        if: ${{ always() }}
+        run: kind delete cluster --name aicr-nvsentinel-object-monitor-e2e || true

@@ -1,0 +1,272 @@
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Weekly drift report for the chart pins in recipes/registry.yaml.
+#
+# Renovate detects; humans decide. The registry's 34 chart pins are extracted by
+# the custom manager in .github/renovate.json5 but disabled there, so the weekday
+# PR run never touches them. This job re-enables exactly that depType under
+# RENOVATE_DRY_RUN=full — Renovate cannot push a branch at all — and turns the
+# resulting report into a Slack digest plus a machine-readable artifact for the
+# aicr-reviewing-component-drift skill.
+#
+# Why no PRs: an AICR component bump can rename a values path that
+# nodeScheduling writes into, move the rendered image set (BOM), require an
+# ADR-021 upgrade record, or raise the chart's kubeVersion past a recipe
+# constraint. A one-line bot PR that goes green asserts none of that was checked.
+#
+# A PR touching the drift surface also runs this report against its own
+# branch (Slack posting stays off) — see the pull_request trigger below.
+
+name: Registry Drift Report
+
+on:
+  schedule:
+    # Mondays 07:00 UTC, after bom-refresh (06:00) and recipe-health-refresh
+    # (06:30) so the three weeklies do not contend for runners.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+    inputs:
+      post_slack:
+        description: "Post the digest to Slack (off by default so manual runs can be validated silently)"
+        default: false
+        type: boolean
+  # A PR touching the drift surface runs the same report against its own
+  # branch. This is how Renovate's real report shape gets verified before merge:
+  # workflow_dispatch cannot target a branch until the workflow is on the default
+  # branch, so without this the first real run would be a post-merge surprise.
+  pull_request:
+    paths:
+      - ".github/workflows/registry-drift.yaml"
+      - ".github/renovate.json5"
+      - "recipes/registry.yaml"
+      - "tools/drift-report/**"
+
+concurrency:
+  # PR runs are keyed per branch; schedule and workflow_dispatch share one group
+  # (head_ref is empty for both), preserving the original serialization between
+  # a manual run and the cron. cancel-in-progress is scoped to pull_request:
+  # each push on a PR branch queues another 20-minute, 34-lookup run, so a
+  # superseded one is cancelled rather than left to finish behind the latest.
+  # Scheduled and manual runs are never cancelled — nothing there is safe to
+  # interrupt mid-upload.
+  group: ${{ github.workflow }}-${{ github.head_ref || 'scheduled' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    name: Report registry chart drift
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # A fork PR cannot be checked here: Renovate resolves RENOVATE_BASE_BRANCHES
+    # against RENOVATE_REPOSITORIES (the base repo), where a fork's head branch
+    # does not exist — the run would find zero registry-chart deps and the
+    # tool's fail-closed guard would turn that into a red X the contributor has
+    # no way to clear. Skipping is the honest signal; a maintainer's same-repo
+    # PR is what actually verifies the change.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # No elevation: this job pushes no branch, opens no PR, writes no issue.
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          # actions/checkout defaults to the synthetic merge commit on
+          # pull_request events. The "Point Renovate at the PR branch" step
+          # below sends Renovate to extract from github.head_ref (the PR head
+          # branch) directly, so LoadPins here must read registry.yaml from
+          # that same head commit — otherwise LoadPins, Renovate, and the
+          # report's recorded commit (below) could each describe a different
+          # revision.
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Load versions
+        id: versions
+        uses: ./.github/actions/load-versions
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache: false
+
+      # Renovate clones the repo itself and extracts from the default branch by
+      # default. On a PR that means reading registry.yaml and renovate.json5
+      # from main — without this PR's annotations or custom manager — so the run
+      # would find zero registry-chart deps and fail closed. Both variables are
+      # needed: the first moves the package files, the second moves the config.
+      - name: Point Renovate at the PR branch
+        if: github.event_name == 'pull_request'
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          set -euo pipefail
+          {
+            printf 'RENOVATE_BASE_BRANCHES=["%s"]\n' "${HEAD_REF}"
+            echo "RENOVATE_USE_BASE_BRANCH_CONFIG=merge"
+          } >> "${GITHUB_ENV}"
+
+      # Same action and digest-pinned image as renovate.yaml; keep them in
+      # lockstep with RENOVATE_VALIDATOR_IMAGE in the Makefile.
+      - name: Run Renovate (dry-run, registry chart pins only)
+        uses: renovatebot/github-action@c314dda4a9a93b08239ec978f2043b9a433b9ac4  # v46.3.0
+        with:
+          renovate-version: '43@sha256:00185c0d63462acec8331cc9a94dcd74a763f2765fca0edcc3ff568af1dc8104'
+        env:
+          RENOVATE_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RENOVATE_REPOSITORIES: '["${{ github.repository }}"]'
+          RENOVATE_ONBOARDING: "false"
+          # Guard 1: Renovate cannot create a branch or PR in this mode.
+          # Guard 2, independent of this flag: `permissions: contents: read`
+          # above and on this job — Renovate has no write access to push a
+          # branch or open a PR here regardless of RENOVATE_DRY_RUN. The
+          # `enabled: false` on the registry-chart depType in
+          # .github/renovate.json5 is a no-op for this run (RENOVATE_FORCE
+          # re-enables it below); that flag is what keeps the weekday
+          # Renovate PR job off these pins, not this workflow.
+          RENOVATE_DRY_RUN: full
+          # Extract only the custom managers; go.mod, Dockerfiles, and Terraform
+          # are irrelevant here and cost lookup time.
+          RENOVATE_ENABLED_MANAGERS: '["custom.regex"]'
+          # Catch-all disable, then a targeted enable, then a versioning fix:
+          # later packageRules win, so this leaves exactly the registry-chart
+          # deps active — the .settings.yaml and .go-version customManagers
+          # stay off.
+          #
+          # The third rule forces `semver` versioning on registry-chart OCI
+          # pins (datasource=docker). Docker's default `docker` versioning
+          # treats everything after a tag's first hyphen as a compatibility
+          # suffix, not a semver prerelease, so `v0.1.0-alpha.12` resolves as
+          # `v0.1.0` and a published `v0.1.0-alpha.13` never surfaces as an
+          # update — a false negative confirmed against grove-charts in a run
+          # of this workflow. Helm requires chart versions to be SemVer 2, so
+          # a hyphen in an OCI chart tag is always a prerelease and never an
+          # OS/arch variant (the case `docker` versioning exists to handle),
+          # which is what makes `semver` safe here. Scoped to the docker
+          # datasource only: the HTTP charts already extract under
+          # datasource=helm, whose versioning resolves prereleases correctly.
+          #
+          # This has to live in RENOVATE_FORCE, not as a repository-level
+          # packageRule in renovate.json5: Renovate's mergeChildConfig ends
+          # with `return {...config, ...config.force}`, so `force.packageRules`
+          # shallow-replaces the merged array instead of appending to it — a
+          # renovate.json5-level rule would be silently dropped for this run.
+          #
+          # The fourth rule pins grove-charts to its `-alpha.N` line. Under
+          # SemVer 2 precedence a prerelease's dot-separated identifiers
+          # compare pairwise, and an alphanumeric identifier always outranks
+          # a numeric one — so for grove's published tags, `alpha.12-rc2`
+          # (identifier `12-rc2` is alphanumeric) sorts above `alpha.13`
+          # (identifier `13` is numeric), and the general semver rule above
+          # picks the RC over the newer alpha release. This regex versioning
+          # matches only the `-alpha.N` line, excluding grove's `-rcN` and
+          # SHA-suffixed tags so the RC never wins the comparison.
+          RENOVATE_FORCE: >-
+            {"packageRules":[{"matchPackageNames":["*"],"enabled":false},
+            {"matchDepTypes":["registry-chart"],"enabled":true},
+            {"matchDepTypes":["registry-chart"],"matchDatasources":["docker"],"versioning":"semver"},
+            {"matchDepNames":["ghcr.io/ai-dynamo/grove/grove-charts"],"versioning":"regex:^v(?<major>[0-9]+)[.](?<minor>[0-9]+)[.](?<patch>[0-9]+)-alpha[.](?<build>[0-9]+)$"}]}
+          RENOVATE_REPORT_TYPE: file
+          # renovatebot/github-action mounts only /tmp:/tmp into the Renovate
+          # container (see docker-volumes in the run log); the workspace path
+          # is not shared, so a report written there vanishes with the
+          # container on exit and the host sees nothing.
+          RENOVATE_REPORT_PATH: /tmp/drift-report-raw.json
+          LOG_LEVEL: info
+
+      - name: Verify the Renovate report was written
+        run: |
+          set -euo pipefail
+          if [[ ! -s /tmp/drift-report-raw.json ]]; then
+            echo "::error::Renovate wrote no report at /tmp/drift-report-raw.json." >&2
+            echo "Check the Run Renovate step's own log for a failure before it" >&2
+            echo "wrote the report, and confirm the action's docker-volumes input" >&2
+            echo "still mounts /tmp into the container." >&2
+            exit 1
+          fi
+
+      - name: Copy the report into the workspace
+        run: cp /tmp/drift-report-raw.json ./drift-report-raw.json
+
+      - name: Build the drift report
+        env:
+          SERVER: ${{ github.server_url }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          # Same revision as the Checkout step's ref above, so the report's
+          # recorded commit matches what LoadPins actually read.
+          SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          GOFLAGS="-mod=readonly" go run ./tools/drift-report \
+            -repo-root "${PWD}" \
+            -renovate-report /tmp/drift-report-raw.json \
+            -out drift-report.json \
+            -slack-out slack-payload.json \
+            -run-url "${SERVER}/${REPO}/actions/runs/${RUN_ID}" \
+            -commit "${SHA}" \
+            -generated-at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+      - name: Upload the report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: drift-report
+          path: |
+            drift-report.json
+            drift-report-raw.json
+          # Longer than vuln-scan-images' 1 day on purpose: the review skill
+          # reads this artifact, sometimes weeks after the run.
+          retention-days: 90
+
+      - name: Post to Slack
+        env:
+          # Nothing is posted on a pull_request run (POST_SLACK below is
+          # always false there), so keep the secret out of that step's
+          # environment entirely — defense in depth against a PR-controlled
+          # script reading it.
+          SLACK_SERVICE: ${{ github.event_name != 'pull_request' && secrets.SLACK_SERVICE || '' }}
+          # Scheduled runs always post; manual runs post only when asked. The
+          # digest is echoed to the log either way — the vuln-scan-images shape.
+          POST_SLACK: ${{ github.event_name == 'schedule' || inputs.post_slack }}
+        run: |
+          set -euo pipefail
+          MESSAGE=$(python3 -c 'import json,sys; print(json.load(open("slack-payload.json"))["text"])')
+          echo "${MESSAGE}"
+          {
+            echo '## Registry chart drift'
+            echo '```'
+            echo "${MESSAGE}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [[ "${POST_SLACK}" != "true" ]]; then
+            echo "Slack post disabled for this run (POST_SLACK=${POST_SLACK}); skipping"
+          elif [[ -n "${SLACK_SERVICE}" ]]; then
+            # Bound the webhook request to prevent the step from hanging until the
+            # 20-minute workflow timeout if the Slack endpoint stalls. No --retry:
+            # a retried webhook POST can deliver duplicate digests.
+            curl -sSf -X POST \
+              -H 'Content-type: application/json' \
+              --connect-timeout 10 \
+              --max-time 30 \
+              --data @slack-payload.json \
+              "https://hooks.slack.com/services/${SLACK_SERVICE}"
+          else
+            echo "SLACK_SERVICE not set, skipping notification"
+          fi

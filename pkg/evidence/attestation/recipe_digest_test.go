@@ -63,6 +63,45 @@ func TestComputeRecipeDigestWithProfile_SelectionChangesDigest(t *testing.T) {
 	}
 }
 
+func TestComputeRecipeDigest_MatchesGeneratedRecipe(t *testing.T) {
+	ctx := context.Background()
+	dp := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
+
+	overlayDigest, err := ComputeRecipeDigest(ctx, dp, "../../../recipes/overlays/gb200-eks-ubuntu-training.yaml", "", "vtest")
+	if err != nil {
+		t.Fatalf("ComputeRecipeDigest(overlay): %v", err)
+	}
+
+	criteria := recipe.NewCriteria()
+	criteria.Service = recipe.CriteriaServiceEKS
+	criteria.Accelerator = recipe.CriteriaAcceleratorGB200
+	criteria.OS = recipe.CriteriaOSUbuntu
+	criteria.Intent = recipe.CriteriaIntentTraining
+	builder := recipe.NewBuilder(recipe.WithVersion("vtest"), recipe.WithDataProvider(dp))
+	generated, err := builder.BuildFromCriteria(ctx, criteria)
+	if err != nil {
+		t.Fatalf("BuildFromCriteria: %v", err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "generated.yaml")
+	generatedYAML, err := serializer.MarshalYAMLDeterministic(generated)
+	if err != nil {
+		t.Fatalf("MarshalYAMLDeterministic: %v", err)
+	}
+	err = os.WriteFile(path, generatedYAML, 0o600)
+	if err != nil {
+		t.Fatalf("write generated recipe: %v", err)
+	}
+	generatedDigest, err := ComputeRecipeDigest(ctx, dp, path, "", "vtest")
+	if err != nil {
+		t.Fatalf("ComputeRecipeDigest(generated): %v", err)
+	}
+
+	if overlayDigest != generatedDigest {
+		t.Errorf("overlay digest %q != generated recipe digest %q", overlayDigest, generatedDigest)
+	}
+}
+
 func TestComputeRecipeDigestWithProfile_MatchesBuilderHydration(t *testing.T) {
 	ctx := context.Background()
 	dp := recipe.NewEmbeddedDataProvider(recipe.GetEmbeddedFS(), "")
@@ -73,13 +112,13 @@ func TestComputeRecipeDigestWithProfile_MatchesBuilderHydration(t *testing.T) {
 		t.Fatalf("ComputeRecipeDigestWithProfile: %v", err)
 	}
 
+	criteria := recipe.NewCriteria()
+	criteria.Service = recipe.CriteriaServiceAKS
+	criteria.Accelerator = recipe.CriteriaAcceleratorH100
+	criteria.OS = recipe.CriteriaOSUbuntu
+	criteria.Intent = recipe.CriteriaIntentTraining
 	builder := recipe.NewBuilder(recipe.WithVersion("vtest"), recipe.WithDataProvider(dp))
-	rec, err := builder.BuildFromCriteriaWithProfile(ctx, &recipe.Criteria{
-		Service:     "aks",
-		Accelerator: "h100",
-		OS:          "ubuntu",
-		Intent:      "training",
-	}, "gpuStack=operator-managed")
+	rec, err := builder.BuildFromCriteriaWithProfile(ctx, criteria, "gpuStack=operator-managed")
 	if err != nil {
 		t.Fatalf("BuildFromCriteriaWithProfile: %v", err)
 	}
