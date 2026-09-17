@@ -139,11 +139,53 @@ func TestGenerate_WithChecksums(t *testing.T) {
 }
 
 func TestGenerateReportsLayout(t *testing.T) {
-	recipeResult := createTestRecipeResult()
+	// A standalone fixture rather than createTestRecipeResult() (shared by
+	// most other tests in this file): DeploymentOrder must diverge from
+	// alphabetical component-name order, or a Releases() regression that
+	// silently sorted by name — instead of preserving DeploymentOrder —
+	// would produce the same sequence and pass unnoticed. cert-manager, nfd,
+	// gpu-operator is also the real dependency order (nfd labels nodes
+	// before gpu-operator consumes those labels), not an arbitrary
+	// permutation chosen only to defeat the test.
+	recipeResult := &recipe.RecipeResult{
+		Kind:       "RecipeResult",
+		APIVersion: "aicr.run/v1alpha2",
+		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+		Criteria: &recipe.Criteria{
+			Service:     "eks",
+			Accelerator: "h100",
+			Intent:      "training",
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:      "cert-manager",
+				Namespace: "cert-manager",
+				Chart:     "cert-manager",
+				Version:   "v1.17.2",
+				Source:    "https://charts.jetstack.io",
+			},
+			{
+				Name:      "nfd",
+				Namespace: "node-feature-discovery",
+				Chart:     "node-feature-discovery",
+				Version:   "v0.16.4",
+				Source:    "https://kubernetes-sigs.github.io/node-feature-discovery-charts",
+			},
+			{
+				Name:      "gpu-operator",
+				Namespace: "gpu-operator",
+				Chart:     "gpu-operator",
+				Version:   "v25.3.3",
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+			},
+		},
+		DeploymentOrder: []string{"cert-manager", "nfd", "gpu-operator"},
+	}
 	g := &Generator{
 		RecipeResult: recipeResult,
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"nfd":          {"enabled": true},
 			"gpu-operator": {"enabled": true},
 		},
 		Version: "v1.0.0",
