@@ -216,6 +216,51 @@ func TestCleanupNCCLResources_RejectsEmptyUID(t *testing.T) {
 	}
 }
 
+// TestCleanupNCCLResources_ReturnsErrorOnTerminationTimeout verifies that a
+// namespace stuck in Terminating (e.g. a stuck DRA/IMEX finalizer) after a
+// successful Delete call is surfaced as a returned ErrCodeTimeout, not
+// silently swallowed — a finalizer-stuck teardown must not report a clean
+// "Deleted" while the ComputeDomain/ResourceClaimTemplate leaks forever.
+// terminationWait is injected as a tiny bound so the test doesn't wait out
+// the real production timeout.
+func TestCleanupNCCLResources_ReturnsErrorOnTerminationTimeout(t *testing.T) {
+	const ns = "aicr-nccl-perf-deadbeef"
+	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
+	nsGVR := v1.SchemeGroupVersion.WithResource("namespaces")
+
+	// Unlike TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace, this
+	// finalizer never clears: every Delete re-stamps DeletionTimestamp
+	// instead of ever letting the object actually disappear, so
+	// waitForNamespaceGone never observes NotFound within the bound. The
+	// fake client's default Delete otherwise ignores Finalizers entirely
+	// and removes the object outright, which is why a pre-seeded
+	// already-Terminating object alone (without this reactor) does not
+	// reproduce a stuck finalizer.
+	fakeClient.PrependReactor("delete", "namespaces", func(k8stesting.Action) (bool, runtime.Object, error) {
+		existing, getErr := fakeClient.Tracker().Get(nsGVR, "", ns)
+		obj, ok := existing.(*v1.Namespace)
+		if getErr != nil || !ok {
+			return false, nil, nil
+		}
+		held := obj.DeepCopy()
+		held.Finalizers = []string{"kubernetes"}
+		now := metav1.Now()
+		held.DeletionTimestamp = &now
+		if err := fakeClient.Tracker().Update(nsGVR, held, ""); err != nil {
+			return true, nil, err
+		}
+		return true, nil, nil
+	})
+
+	err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID, 10*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected a timeout error when the namespace never finishes terminating, got nil")
+	}
+	if !stderrors.Is(err, aicrErrors.New(aicrErrors.ErrCodeTimeout, "")) {
+		t.Errorf("got %v, want an ErrCodeTimeout-wrapped termination-wait failure", err)
+	}
+}
+
 // TestCleanupNCCLResources_UIDMismatchPreventsDelete verifies a UID
 // mismatch is treated like NotFound, not a cleanup failure. client-go's
 // fake ObjectTracker ignores Delete preconditions, so this reactor emulates
