@@ -356,7 +356,7 @@ _No images extracted._
 
 ### slinky-topograph
 
-- `ghcr.io/nvidia/topograph:v1.0.0`
+- `ghcr.io/dsx-ai-factory/topograph:v1.0.0`
 
 ### slurm-accounting-mariadb
 
