@@ -35,6 +35,9 @@ spec:
                 name: gvnic-1
               spec:
                 deviceMode: NetDevice
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
         - assert:
             resource:
               apiVersion: networking.gke.io/v1
@@ -47,6 +50,11 @@ spec:
                   group: networking.gke.io
                   kind: GKENetworkParamSet
                   name: gvnic-1
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+                (conditions[?type == 'ParamsReady']):
+                  - status: "True"
     - name: validate-rdma-network-objects
       try:
         - assert:
@@ -57,6 +65,9 @@ spec:
                 name: rdma-0
               spec:
                 deviceMode: RDMA
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
         - assert:
             resource:
               apiVersion: networking.gke.io/v1
@@ -69,6 +80,11 @@ spec:
                   group: networking.gke.io
                   kind: GKENetworkParamSet
                   name: rdma-0
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+                (conditions[?type == 'ParamsReady']):
+                  - status: "True"
         - assert:
             resource:
               apiVersion: networking.gke.io/v1
@@ -77,6 +93,9 @@ spec:
                 name: rdma-1
               spec:
                 deviceMode: RDMA
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
         - assert:
             resource:
               apiVersion: networking.gke.io/v1
@@ -89,6 +108,11 @@ spec:
                   group: networking.gke.io
                   kind: GKENetworkParamSet
                   name: rdma-1
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+                (conditions[?type == 'ParamsReady']):
+                  - status: "True"
         - assert:
             resource:
               apiVersion: networking.gke.io/v1
@@ -97,6 +121,9 @@ spec:
                 name: rdma-2
               spec:
                 deviceMode: RDMA
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
         - assert:
             resource:
               apiVersion: networking.gke.io/v1
@@ -109,6 +136,11 @@ spec:
                   group: networking.gke.io
                   kind: GKENetworkParamSet
                   name: rdma-2
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+                (conditions[?type == 'ParamsReady']):
+                  - status: "True"
         - assert:
             resource:
               apiVersion: networking.gke.io/v1
@@ -117,6 +149,9 @@ spec:
                 name: rdma-3
               spec:
                 deviceMode: RDMA
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
         - assert:
             resource:
               apiVersion: networking.gke.io/v1
@@ -129,6 +164,11 @@ spec:
                   group: networking.gke.io
                   kind: GKENetworkParamSet
                   name: rdma-3
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+                (conditions[?type == 'ParamsReady']):
+                  - status: "True"
     - name: validate-nccl-rdma-installer-fully-rolled-out
       try:
         - assert:

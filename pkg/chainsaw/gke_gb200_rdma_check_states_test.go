@@ -49,6 +49,11 @@ func TestGKEGB200RDMAHealthCheckClusterStates(t *testing.T) {
 				"vpcSubnet":  "prefix-sub",
 				"deviceMode": deviceMode,
 			},
+			"status": map[string]any{
+				"conditions": []map[string]any{
+					{"type": "Ready", "status": "True"},
+				},
+			},
 		}
 	}
 	gkeNetwork := func(name string) map[string]any {
@@ -62,6 +67,12 @@ func TestGKEGB200RDMAHealthCheckClusterStates(t *testing.T) {
 					"group": "networking.gke.io",
 					"kind":  "GKENetworkParamSet",
 					"name":  name,
+				},
+			},
+			"status": map[string]any{
+				"conditions": []map[string]any{
+					{"type": "Ready", "status": "True"},
+					{"type": "ParamsReady", "status": "True"},
 				},
 			},
 		}
@@ -115,6 +126,41 @@ func TestGKEGB200RDMAHealthCheckClusterStates(t *testing.T) {
 				f.gets["networking.gke.io/v1/Network//rdma-3"] = n
 			},
 			wantOutput: "rdma-3",
+		},
+		{
+			name: "gvnic-1 GKENetworkParamSet not Ready fails closed",
+			mutate: func(f *fakeFetcher) {
+				n := gkeNetworkParamSet("gvnic-1", "NetDevice")
+				n["status"].(map[string]any)["conditions"] = []map[string]any{
+					{"type": "Ready", "status": "False"},
+				}
+				f.gets["networking.gke.io/v1/GKENetworkParamSet//gvnic-1"] = n
+			},
+			wantOutput: "gvnic-1",
+		},
+		{
+			name: "rdma-0 Network not Ready fails closed",
+			mutate: func(f *fakeFetcher) {
+				n := gkeNetwork("rdma-0")
+				n["status"].(map[string]any)["conditions"] = []map[string]any{
+					{"type": "Ready", "status": "False"},
+					{"type": "ParamsReady", "status": "True"},
+				}
+				f.gets["networking.gke.io/v1/Network//rdma-0"] = n
+			},
+			wantOutput: "rdma-0",
+		},
+		{
+			name: "rdma-1 Network ParamsReady false fails closed",
+			mutate: func(f *fakeFetcher) {
+				n := gkeNetwork("rdma-1")
+				n["status"].(map[string]any)["conditions"] = []map[string]any{
+					{"type": "Ready", "status": "True"},
+					{"type": "ParamsReady", "status": "False"},
+				}
+				f.gets["networking.gke.io/v1/Network//rdma-1"] = n
+			},
+			wantOutput: "rdma-1",
 		},
 		{
 			name: "nccl-rdma-installer DaemonSet not fully rolled out fails closed",
