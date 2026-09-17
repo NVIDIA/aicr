@@ -20,7 +20,8 @@ metadata:
 spec:
   # Inherits from gb200-eks-inference recipe (GB200 + EKS + inference settings).
   # This overlay adds AL2023-specific OS constraints and the preinstalled-driver
-  # profile required by the NVIDIA AL2023 AMI family (AL2023_x86_64_NVIDIA).
+  # profile required by the NVIDIA AL2023 AMI family (AL2023 ARM NVIDIA) used
+  # by P6e-GB200 UltraServer instances.
   base: gb200-eks-inference
 
   criteria:
@@ -34,7 +35,7 @@ spec:
 
   constraints:
     - name: K8s.server.version
-      value: ">= 1.32.4"
+      value: ">= 1.33"
 
   # See h100-eks-amazonlinux-inference.yaml for the full profile rationale.
   profile:
@@ -42,8 +43,8 @@ spec:
     description: >-
       Who installs the GPU driver and container toolkit on EKS AL2023 GPU
       nodes. "ami-preinstalled" (the default) is the NVIDIA AL2023 AMI
-      family (AL2023_x86_64_NVIDIA): the AMI pre-installs driver and toolkit
-      at the host root; the GPU Operator installs neither.
+      family (AL2023 ARM NVIDIA) used by P6e-GB200: the AMI pre-installs
+      driver and toolkit at the host root; the GPU Operator installs neither.
       "operator-managed" is a BYO driverless AMI: the GPU Operator installs
       driver and toolkit, and the DRA driver reads the operator install path.
     default: ami-preinstalled

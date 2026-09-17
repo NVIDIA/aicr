@@ -46,7 +46,12 @@ spec:
       at the host root; the GPU Operator installs neither.
       "operator-managed" is a BYO driverless AMI: the GPU Operator installs
       driver and toolkit, and the DRA driver reads the operator install path.
-    default: ami-preinstalled
+    # G7e instances (RTX PRO 6000 Blackwell Server Edition) require NVIDIA
+    # driver >= 595.91.07. The stock AL2023 NVIDIA AMI ships driver 580, which
+    # does not meet this floor. Use operator-managed (the default here) so the
+    # GPU Operator installs a qualified driver, or supply a custom AL2023 AMI
+    # with driver >= 595 and select ami-preinstalled explicitly.
+    default: operator-managed
     values:
       ami-preinstalled:
         componentRefs:
