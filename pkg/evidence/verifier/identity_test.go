@@ -278,3 +278,41 @@ criteria:
 		t.Fatal("checkRecipeIdentity(nil recipe bytes) = nil, want fail-closed rejection")
 	}
 }
+
+// TestCheckRecipeIdentity_V3IgnoresMetadataVersion pins the point of V3:
+// a digest computed against one metadata.version must still identify a
+// recipe that differs only in that field. V1/V2 hash metadata.version, so
+// this same swap would fail under those types.
+func TestCheckRecipeIdentity_V3IgnoresMetadataVersion(t *testing.T) {
+	const recipeV1 = `kind: RecipeResult
+apiVersion: aicr.run/v1alpha2
+metadata:
+  version: 1.0.0
+criteria:
+  service: gke
+  accelerator: h100
+  os: cos
+  intent: training
+`
+	const recipeV2 = `kind: RecipeResult
+apiVersion: aicr.run/v1alpha2
+metadata:
+  version: 2.0.0
+criteria:
+  service: gke
+  accelerator: h100
+  os: cos
+  intent: training
+`
+	digest, err := attestation.SubjectDigestV3([]byte(recipeV1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pred := &attestation.Predicate{}
+	pred.Recipe.Name = "h100-gke-cos-training"
+	pred.Recipe.Digest = digest
+
+	if err := checkRecipeIdentity([]byte(recipeV2), nil, pred, attestation.PredicateTypeV3); err != nil {
+		t.Fatalf("checkRecipeIdentity(V3 metadata.version change) = %v, want nil", err)
+	}
+}
