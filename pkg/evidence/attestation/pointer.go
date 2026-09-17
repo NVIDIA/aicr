@@ -67,7 +67,7 @@ func BuildPointer(in PointerInputs) (*Pointer, error) {
 		Bundle: PointerBundle{
 			OCI:           in.BundleOCI,
 			Digest:        in.BundleHash,
-			PredicateType: in.Bundle.PredicateType,
+			PredicateType: resolvedPredicateType(in.Bundle),
 		},
 		Signer:     in.Signer,
 		AttestedAt: in.Bundle.Predicate.AttestedAt.UTC().Truncate(time.Second),
@@ -79,6 +79,17 @@ func BuildPointer(in PointerInputs) (*Pointer, error) {
 		Profile:       in.Bundle.Profile,
 		Attestations:  []PointerAttestation{att},
 	}, nil
+}
+
+// resolvedPredicateType returns b.PredicateType, falling back to
+// StatementPredicateType(b.Predicate) when unset. Build and loadOnDiskBundle
+// always populate PredicateType, so the fallback exists only for a caller
+// that constructs a Bundle by hand without it.
+func resolvedPredicateType(b *Bundle) string {
+	if b.PredicateType != "" {
+		return b.PredicateType
+	}
+	return StatementPredicateType(b.Predicate)
 }
 
 // ValidateBundleProfileCoherence rejects (ErrCodeInvalidRequest) a bundle
@@ -103,11 +114,7 @@ func ValidateBundleProfileCoherence(b *Bundle) error {
 	// rejects. In-repo constructors never build that shape — IdentityFor is
 	// a sha256 digest, so a profiled bundle's identity is never empty — but
 	// this is an exported entry point.
-	predicateType := b.PredicateType
-	if predicateType == "" {
-		predicateType = StatementPredicateType(b.Predicate)
-	}
-	if err := ValidatePredicateTypeCoherence(predicateType, b.Predicate); err != nil {
+	if err := ValidatePredicateTypeCoherence(resolvedPredicateType(b), b.Predicate); err != nil {
 		return err
 	}
 	switch {
