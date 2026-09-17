@@ -24,14 +24,19 @@ import (
 
 // ComputeRecipeDigest loads a recipe or overlay from path (auto-hydrating
 // overlays through the recipe builder, the same path aicr validate -r
-// takes) and returns the canonical subject digest — the value that
-// aicr validate --emit-attestation stamps into predicate.recipe.digest.
+// takes) and returns the V3 canonical subject digest, the value that
+// aicr validate --emit-attestation stamps into predicate.recipe.digest for
+// newly produced evidence. The digest is a pure function of recipe
+// content. metadata.version (the calling binary's own version) is
+// excluded, so the same overlay resolves to the same digest regardless of
+// which aicr binary computed it (see SubjectDigestV3).
 //
 // kubeconfig is consulted only when path is a cm://namespace/name URI.
-// version is the running aicr version threaded into the recipe builder.
-// dp is the DataProvider used to resolve recipe references (overlays,
-// component values); pass nil to fall back to the embedded provider when
-// no external data source is configured.
+// version is the running aicr version threaded into the recipe builder
+// (still recorded in the recipe's metadata.version for provenance, just
+// excluded from what gets hashed). dp is the DataProvider used to resolve
+// recipe references (overlays, component values). Pass nil to fall back to
+// the embedded provider when no external data source is configured.
 func ComputeRecipeDigest(ctx context.Context, dp recipe.DataProvider, path, kubeconfig, version string) (string, error) {
 	return ComputeRecipeDigestWithProfile(ctx, dp, path, kubeconfig, version, "")
 }
@@ -63,5 +68,5 @@ func ComputeRecipeDigestWithProfile(
 		return "", errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to marshal recipe for digest")
 	}
 
-	return SubjectDigest(recipeYAML)
+	return SubjectDigestV3(recipeYAML)
 }

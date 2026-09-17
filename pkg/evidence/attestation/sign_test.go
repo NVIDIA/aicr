@@ -161,6 +161,32 @@ func TestSignExisting_CanceledContextSurfacesAbort(t *testing.T) {
 	}
 }
 
+// TestSignExisting_RejectsPredicateTypeMismatch proves the pointer-vs-bundle
+// predicateType cross-check. A bundle freshly built by Emit is typed V3
+// (BuildStatement/StatementPredicateType), but the pointer under test claims
+// V1. SignExisting must fail closed on that divergence rather than sign a V3
+// artifact statement around what the pointer recorded as a V1 bundle, the
+// exact split that let a Fulcio cert get spent on evidence the verifier
+// then rejects.
+func TestSignExisting_RejectsPredicateTypeMismatch(t *testing.T) {
+	dir := emitUnsignedBundle(t)
+	pointer := signableSignPointer()
+	pointer.Attestations[0].Bundle.PredicateType = PredicateTypeV1
+
+	err := SignExisting(context.Background(), SignExistingOptions{
+		Pointer:     pointer,
+		PointerPath: filepath.Join(t.TempDir(), "pointer.yaml"),
+		BundleDir:   dir,
+		Artifact:    MainArtifactDescriptor{Digest: "sha256:abc", MediaType: "application/json", Size: 1},
+	})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeConflict, "")) {
+		t.Errorf("expected ErrCodeConflict, got %v", err)
+	}
+}
+
 func TestPointerSignerFromSignature(t *testing.T) {
 	if PointerSignerFromSignature(nil) != nil {
 		t.Errorf("nil signature should yield nil signer")

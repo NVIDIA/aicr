@@ -30,7 +30,7 @@ func TestCheckPhaseDigests_Match(t *testing.T) {
 	summary := summaryDirOf(t, buildTestBundle(t))
 	mat := &MaterializedBundle{BundleDir: summary}
 
-	pred, err := loadUnsignedPredicate(context.Background(), mat)
+	pred, _, err := loadUnsignedPredicate(context.Background(), mat)
 	if err != nil {
 		t.Fatalf("loadUnsignedPredicate: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestCheckPhaseDigests_TamperedReportFails(t *testing.T) {
 	summary := summaryDirOf(t, buildTestBundle(t))
 	mat := &MaterializedBundle{BundleDir: summary}
 
-	pred, err := loadUnsignedPredicate(context.Background(), mat)
+	pred, _, err := loadUnsignedPredicate(context.Background(), mat)
 	if err != nil {
 		t.Fatalf("loadUnsignedPredicate: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestCheckPhaseDigests_MissingReportFails(t *testing.T) {
 	summary := summaryDirOf(t, buildTestBundle(t))
 	mat := &MaterializedBundle{BundleDir: summary}
 
-	pred, err := loadUnsignedPredicate(context.Background(), mat)
+	pred, _, err := loadUnsignedPredicate(context.Background(), mat)
 	if err != nil {
 		t.Fatalf("loadUnsignedPredicate: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestCheckPhaseDigests_EmptyDigestFails(t *testing.T) {
 	summary := summaryDirOf(t, buildTestBundle(t))
 	mat := &MaterializedBundle{BundleDir: summary}
 
-	pred, err := loadUnsignedPredicate(context.Background(), mat)
+	pred, _, err := loadUnsignedPredicate(context.Background(), mat)
 	if err != nil {
 		t.Fatalf("loadUnsignedPredicate: %v", err)
 	}
