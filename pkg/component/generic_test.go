@@ -118,8 +118,10 @@ func TestEnrichConfigFromRegistry(t *testing.T) {
 		if len(cfg.SystemTolerationPaths) == 0 {
 			t.Error("SystemTolerationPaths should be populated")
 		}
-		if len(cfg.AcceleratedNodeSelectorPaths) == 0 {
-			t.Error("AcceleratedNodeSelectorPaths should be populated")
+		// gpu-operator has NO accelerated node selector paths by design (#2474): the
+		// chart/CRD have no daemonsets.nodeSelector, so the dead route was removed.
+		if len(cfg.AcceleratedNodeSelectorPaths) != 0 {
+			t.Error("AcceleratedNodeSelectorPaths should be empty for gpu-operator (no daemonsets.nodeSelector)")
 		}
 		if len(cfg.AcceleratedTolerationPaths) == 0 {
 			t.Error("AcceleratedTolerationPaths should be populated")
