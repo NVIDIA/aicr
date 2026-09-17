@@ -13,7 +13,7 @@
 # limitations under the License.
 
 kind: RecipeMetadata
-apiVersion: aicr.run/v1beta2
+apiVersion: aicr.run/v1alpha3
 metadata:
   name: rtx-pro-6000-eks-amazonlinux-inference
 
@@ -46,12 +46,11 @@ spec:
       at the host root; the GPU Operator installs neither.
       "operator-managed" is a BYO driverless AMI: the GPU Operator installs
       driver and toolkit, and the DRA driver reads the operator install path.
-    # G7e instances (RTX PRO 6000 Blackwell Server Edition) require NVIDIA
-    # driver >= 595.91.07. The stock AL2023 NVIDIA AMI ships driver 580, which
-    # does not meet this floor. Use operator-managed (the default here) so the
-    # GPU Operator installs a qualified driver, or supply a custom AL2023 AMI
-    # with driver >= 595 and select ami-preinstalled explicitly.
-    default: operator-managed
+    # The EKS AL2023 NVIDIA AMI (AL2023_x86_64_NVIDIA) supports G7e and
+    # includes a compatible driver and toolkit at the host root. The repository
+    # driver floor for RTX PRO 6000 is >= 575.57.08, which the AMI satisfies.
+    # Use operator-managed only with an explicit BYO driverless AMI.
+    default: ami-preinstalled
     values:
       ami-preinstalled:
         componentRefs:
