@@ -89,8 +89,17 @@ type benchmarkRuntimePlan struct {
 // pass no plan.
 func (p *benchmarkRuntimePlan) derived() bool { return p != nil && p.shipped != nil }
 
+// recipeSupplied reports whether the plan represents a recipe-supplied
+// runtime, which owns its own workload image end to end and must never be
+// overridden. Nil-safe, mirroring derived() — the override gate must not
+// panic on a nil plan from a test caller exercising the baked-in path
+// directly without constructing one.
+func (p *benchmarkRuntimePlan) recipeSupplied() bool {
+	return p != nil && p.source == runtimeSourceRecipeSupplied
+}
+
 // derivedRuntimeProvenance is the audit record for a derived runtime, computed
-// against the object that was actually applied (after scheduling was stamped)
+// against the object that was actuvalidators/performance/nccl_all_reduce_bw_constraint.goally applied (after scheduling was stamped)
 // so it describes what ran, not an intermediate. It is published two ways: the
 // human-readable listing on stdout (--full evidence), and the bounded
 // ctrf.RuntimeProvenance carrier via EmitRuntimeProvenance, which survives

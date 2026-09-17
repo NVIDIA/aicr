@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	aicrErrors "github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/validators"
 	coordinationv1 "k8s.io/api/coordination/v1"
@@ -47,9 +48,9 @@ var ncclGVRListKinds = map[schema.GroupVersionResource]string{
 	computeDomainGVR:         "ComputeDomainList",
 }
 
-func newFakeDynamicClient() dynamic.Interface {
+func newFakeDynamicClient(objs ...runtime.Object) dynamic.Interface {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
-		runtime.NewScheme(), ncclGVRListKinds)
+		runtime.NewScheme(), ncclGVRListKinds, objs...)
 }
 
 // roceClaimCount walks the RoCE ResourceClaimTemplate to the templated device
@@ -151,7 +152,7 @@ func testHeldLease(namespace string) *coordinationv1.Lease {
 func TestCleanupNCCLResources_ToleratesMissing(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	fakeClient := fake.NewClientset()
-	if err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID); err != nil {
+	if err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID, defaults.InferenceNamespaceTerminationWait); err != nil {
 		t.Fatalf("cleanup of a namespace that was never created should not error, got: %v", err)
 	}
 }
@@ -165,7 +166,7 @@ func TestCleanupNCCLResources_DeletesNamespace(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
 
-	if err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID); err != nil {
+	if err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID, defaults.InferenceNamespaceTerminationWait); err != nil {
 		t.Fatalf("cleanup should not error, got: %v", err)
 	}
 
@@ -185,7 +186,7 @@ func TestCleanupNCCLResources_ReturnsErrorOnDeleteFailure(t *testing.T) {
 		return true, nil, apierrors.NewServiceUnavailable("apiserver is down")
 	})
 
-	err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID)
+	err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID, defaults.InferenceNamespaceTerminationWait)
 	if err == nil {
 		t.Fatal("expected an error from a non-NotFound namespace delete failure, got nil")
 	}
@@ -203,7 +204,7 @@ func TestCleanupNCCLResources_RejectsEmptyUID(t *testing.T) {
 	const ns = "aicr-nccl-perf-deadbeef"
 	fakeClient := fake.NewClientset(&v1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns, UID: testNamespaceUID}})
 
-	err := cleanupNCCLResources(fakeClient, ns, "")
+	err := cleanupNCCLResources(fakeClient, ns, "", defaults.InferenceNamespaceTerminationWait)
 	if err == nil {
 		t.Fatal("expected an error for an empty owning UID, got nil")
 	}
@@ -236,7 +237,7 @@ func TestCleanupNCCLResources_UIDMismatchPreventsDelete(t *testing.T) {
 			stderrors.New("uid in precondition does not match uid in record"))
 	})
 
-	if err := cleanupNCCLResources(fakeClient, ns, "wrong-uid"); err != nil {
+	if err := cleanupNCCLResources(fakeClient, ns, "wrong-uid", defaults.InferenceNamespaceTerminationWait); err != nil {
 		t.Fatalf("expected a UID mismatch to be treated as already-replaced, got err=%v", err)
 	}
 	if _, getErr := fakeClient.CoreV1().Namespaces().Get(context.Background(), ns, metav1.GetOptions{}); getErr != nil {
@@ -289,7 +290,7 @@ func TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace(t *testing.T) {
 		_ = fakeClient.CoreV1().Namespaces().Delete(context.Background(), ns, metav1.DeleteOptions{})
 	}()
 
-	if err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID); err != nil {
+	if err := cleanupNCCLResources(fakeClient, ns, testNamespaceUID, defaults.InferenceNamespaceTerminationWait); err != nil {
 		t.Fatalf("cleanup should succeed once the finalizer clears, got: %v", err)
 	}
 	elapsed := time.Since(start)

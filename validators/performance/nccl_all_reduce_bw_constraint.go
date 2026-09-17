@@ -496,6 +496,7 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// Each platform has a per-platform TrainingRuntime with all platform-specific
 	// configuration (image, mpirun args, resources, sidecars). The TrainJob is shared.
 	logs, err := runNCCLTrainJob(ctx, gpuConfig, target.accelerator, target.service, variant, fabric, customRuntime, runtimeImage, plan)
+	emitRuntimeProvenance(plan)
 	if err != nil {
 		return "", false, err
 	}
@@ -1393,19 +1394,19 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 		return err
 	}
 	// Render the resolved workload image into every launcher/worker container
-	// this override governs (issue #1751). No-op when runtimeImage == "";
-	// applyNCCLResources is only called with a non-empty override on the
-	// baked-in template path — a recipe-supplied runtime (customRuntime != "")
-	// is never reachable here with runtimeImage set, since the resolve site in
-	// validateNcclAllReduceBw gates resolution on customRuntime == "".
-	// Defense in depth: even though the only current caller
-	// (validateNcclAllReduceBw) already gates runtimeImage resolution on
-	// customRuntime == "", applyNCCLResources must not silently overwrite a
-	// recipe-supplied image if ever called with both non-empty — the
-	// recipe-supplied runtime owns its image, full stop. This is the guard
-	// TestApplyNCCLResourcesRuntimeImageOverride's custom-runtime subtest
-	// (mchmarny, 691b3b3 review) asserts.
-	if customRuntime == "" {
+	// this override governs (issue #1751). No-op when runtimeImage == "".
+	// Gated on the runtime SOURCE, not customRuntime: a recipe-supplied
+	// runtime (plan.source == runtimeSourceRecipeSupplied) owns its image end
+	// to end and must never be overridden, but both the embedded capability
+	// fixture and a derived/delivered runtime are AICR's own artifacts and
+	// must honor the override. customRuntime is non-empty on the delivered
+	// path too (it carries plan.carrier, per resolveBenchmarkRuntimeSource),
+	// so the previous customRuntime == "" gate silently skipped the override
+	// there while actualValue still reported it as applied — false
+	// qualification evidence (yuanchen8911 review, item 2). recipeSupplied()
+	// is nil-safe so a test exercising the baked-in path with no plan still
+	// applies the override correctly.
+	if !plan.recipeSupplied() {
 		if overrideErr := applyNCCLRuntimeImageOverride(runtimeObj, runtimeImage); overrideErr != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to apply NCCL runtime image override", overrideErr)
 		}
@@ -2753,7 +2754,7 @@ func verifyTransportFromLogs(logs string, variant ncclVariant) error {
 // created or reclaimed, so a recreated same-named namespace is left alone
 // instead of silently deleted (see the check below for why it must be
 // non-empty).
-func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid types.UID) error {
+func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid types.UID, terminationWait time.Duration) error {
 	if uid == "" {
 		// Required, not just preferred: the fake client used in tests
 		// ignores delete preconditions and would otherwise silently
@@ -2787,12 +2788,16 @@ func cleanupNCCLResources(clientset kubernetes.Interface, namespace string, uid 
 			fmt.Sprintf("failed to delete NCCL benchmark namespace %q", namespace), err)
 	}
 
-	// Same bound as ensureNamespace's wait on the create side. Only logged
-	// on timeout, not returned, since the Delete call above already
-	// succeeded, so a slow-but-real teardown (e.g. NVLS's DRA/IMEX
-	// finalizers) must not fail an otherwise-passing benchmark just because
-	// this observability wait ran out first.
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), defaults.InferenceNamespaceTerminationWait)
+	// terminationWait bounds how long this waits for the namespace to
+	// actually disappear before failing. Injectable so tests can exercise
+	// the timeout path without waiting out the real production bound;
+	// production callers pass defaults.InferenceNamespaceTerminationWait
+	// (see cleanupNCCLRun). A timeout here IS returned, not merely logged:
+	// the Delete call above already succeeded, but a stuck finalizer (e.g.
+	// NVLS's DRA/IMEX teardown) leaves the namespace hung in Terminating,
+	// and silently swallowing that would report a clean "Deleted" while the
+	// ComputeDomain/ResourceClaimTemplate leaks forever.
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), terminationWait)
 	defer waitCancel()
 	if err := waitForNamespaceGone(waitCtx, nsClient, namespace); err != nil {
 		return aicrErrors.Wrap(aicrErrors.ErrCodeTimeout,
@@ -2833,7 +2838,7 @@ func cleanupNCCLRun(clientset kubernetes.Interface, dynamicClient dynamic.Interf
 		return benchErr
 	}
 
-	nsErr := cleanupNCCLResources(clientset, namespace, uid)
+	nsErr := cleanupNCCLResources(clientset, namespace, uid, defaults.InferenceNamespaceTerminationWait)
 	err := foldCleanupError(benchErr, nsErr, "NCCL benchmark succeeded but NCCL resource cleanup failed")
 	if nsErr != nil {
 		return err

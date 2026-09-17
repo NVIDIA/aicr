@@ -187,6 +187,7 @@ aicr-e2e.xml
 # Resolved MDX toolchain for tools/check-docs-mdx-parse. The manifest and
 # lockfile in tools/mdx/ ARE committed; only the installed tree is not.
 tools/mdx/node_modules/
+tools/mdx/.aicr-install-lock/
 *.pyc
 
 # Generated at release time: `make release` depends on `make notices`, and
