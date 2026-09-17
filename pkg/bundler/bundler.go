@@ -1212,14 +1212,22 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 			}
 			// a4xStorageClass.create is a bundling-only toggle, not a
 			// real chart value. Reject it here too, rather than letting
-			// it silently write a stray value into Helm values.
+			// it silently write a stray value into Helm values. This
+			// must catch not just an exact-path match but also a parent
+			// path (e.g. a4xStorageClass={"create":false}, which deep-merges
+			// create into chart values the same way) and a child path
+			// (e.g. a4xStorageClass.create.x), since ApplyTypedOverrides
+			// keys its map on the literal path string, not on parsed
+			// segments.
 			if ref.Name == dynamoPlatformComponentName {
-				if _, hasA4x := typedOverrides[dynamoA4xStorageClassCreateOverridePath]; hasA4x {
-					return nil, errors.New(errors.ErrCodeInvalidRequest,
-						fmt.Sprintf("component %q: %q is a bundling toggle and must be set with --set "+
-							"(e.g. --set %s:%s=false), not --set-json/--set-file",
-							ref.Name, dynamoA4xStorageClassCreateOverridePath,
-							ref.Name, dynamoA4xStorageClassCreateOverridePath))
+				for path := range typedOverrides {
+					if overridePathsIntersect(path, dynamoA4xStorageClassCreateOverridePath) {
+						return nil, errors.New(errors.ErrCodeInvalidRequest,
+							fmt.Sprintf("component %q: %q is a bundling toggle and must be set with --set "+
+								"(e.g. --set %s:%s=false), not --set-json/--set-file (got typed path %q)",
+								ref.Name, dynamoA4xStorageClassCreateOverridePath,
+								ref.Name, dynamoA4xStorageClassCreateOverridePath, path))
+					}
 				}
 			}
 			if applyErr := component.ApplyTypedOverrides(values, typedOverrides); applyErr != nil {
@@ -2902,6 +2910,20 @@ const (
 	dynamoA4xStorageClassManifestPath       = "components/dynamo-platform/manifests/a4x-storage-class.yaml"
 	dynamoA4xStorageClassCreateOverridePath = "a4xStorageClass.create"
 )
+
+// overridePathsIntersect reports whether two dot-separated override paths
+// reference overlapping data: equal paths, or one a dotted ancestor of the
+// other. A typed override's map key is the literal path string the caller
+// supplied, so "a4xStorageClass" (parent, value a whole object) and
+// "a4xStorageClass.create.x" (child) both need to be caught alongside the
+// exact "a4xStorageClass.create" match; a plain string-prefix check would
+// wrongly match an unrelated sibling like "a4xStorageClassOther".
+func overridePathsIntersect(a, b string) bool {
+	if a == b {
+		return true
+	}
+	return strings.HasPrefix(a, b+".") || strings.HasPrefix(b, a+".")
+}
 
 // dynamoA4xStorageClassEnabled reports whether the dynamo-platform bundle
 // should include the fixed a4x-compatible StorageClass manifest. It

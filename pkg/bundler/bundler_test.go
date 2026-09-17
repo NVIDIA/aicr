@@ -2337,34 +2337,50 @@ func TestMake_TypedEnabledToggleRejectedBelowCLI(t *testing.T) {
 
 // TestMake_TypedA4xStorageClassCreateRejected verifies the bundler rejects a
 // dynamo-platform:a4xStorageClass.create override supplied via
-// --set-json/--set-file. A typed override would write the value into Helm
-// chart values but would not affect whether the fixed a4x-compatible
+// --set-json/--set-file, whether the typed path is an exact match, a parent
+// (an object override deep-merging create into chart values the same way),
+// or a child of the toggle. A typed override would write the value into
+// Helm chart values but would not affect whether the fixed a4x-compatible
 // StorageClass manifest is included in the bundle.
 func TestMake_TypedA4xStorageClassCreateRejected(t *testing.T) {
-	cfg := config.NewConfig(
-		config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
-			{Component: "dynamo-platform", Path: "a4xStorageClass.create", Value: false},
-		}),
-	)
-	bundler, err := New(WithConfig(cfg))
-	if err != nil {
-		t.Fatalf("New() error = %v", err)
+	tests := []struct {
+		name  string
+		path  string
+		value any
+	}{
+		{name: "exact path", path: "a4xStorageClass.create", value: false},
+		{name: "parent path (whole object)", path: "a4xStorageClass", value: map[string]any{"create": false}},
+		{name: "child path", path: "a4xStorageClass.create.nested", value: "x"},
 	}
 
-	recipeResult := &recipe.RecipeResult{
-		APIVersion: "aicr.run/v1alpha2",
-		Kind:       "Recipe",
-		ComponentRefs: []recipe.ComponentRef{
-			{Name: "dynamo-platform", Version: "v0.1.0", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
-		},
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.NewConfig(
+				config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+					{Component: "dynamo-platform", Path: tt.path, Value: tt.value},
+				}),
+			)
+			bundler, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
 
-	_, makeErr := bundler.Make(context.Background(), recipeResult, t.TempDir())
-	if makeErr == nil {
-		t.Fatal("expected error: typed a4xStorageClass.create override must be rejected")
-	}
-	if !strings.Contains(makeErr.Error(), "a4xStorageClass.create") || !strings.Contains(makeErr.Error(), "--set") {
-		t.Errorf("error %q must name the a4xStorageClass.create toggle and point to --set", makeErr.Error())
+			recipeResult := &recipe.RecipeResult{
+				APIVersion: "aicr.run/v1alpha2",
+				Kind:       "Recipe",
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "dynamo-platform", Version: "v0.1.0", Type: "helm", Source: "https://helm.ngc.nvidia.com/nvidia"},
+				},
+			}
+
+			_, makeErr := bundler.Make(context.Background(), recipeResult, t.TempDir())
+			if makeErr == nil {
+				t.Fatalf("expected error: typed path %q must be rejected as intersecting a4xStorageClass.create", tt.path)
+			}
+			if !strings.Contains(makeErr.Error(), "a4xStorageClass.create") || !strings.Contains(makeErr.Error(), "--set") {
+				t.Errorf("error %q must name the a4xStorageClass.create toggle and point to --set", makeErr.Error())
+			}
+		})
 	}
 }
 
