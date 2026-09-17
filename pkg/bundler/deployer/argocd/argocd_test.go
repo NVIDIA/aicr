@@ -592,6 +592,74 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	}
 }
 
+// TestGenerateReportsLayout asserts Generate populates output.Entrypoint and
+// output.Releases with the layout it actually wrote to outputDir, mirroring
+// the helm deployer's equivalent coverage (pkg/bundler/deployer/helm).
+// argocd additionally sets Manifest on every release: it writes an
+// application.yaml declaring each release, which helm-orchestrated releases
+// do not have.
+func TestGenerateReportsLayout(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      "helm",
+			Source:    "https://charts.jetstack.io",
+		},
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager", "gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		Version:      "v0.9.0",
+	}
+
+	out, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	if out.Entrypoint != "app-of-apps.yaml" {
+		t.Errorf("Entrypoint = %q, want app-of-apps.yaml", out.Entrypoint)
+	}
+	if len(out.Releases) == 0 {
+		t.Fatal("Generate reported no releases; the bundle index would be empty")
+	}
+	for _, r := range out.Releases {
+		if r.Name == "" || r.Component == "" || r.Path == "" {
+			t.Errorf("incomplete release entry: %+v", r)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Path)); statErr != nil {
+			t.Errorf("release %q claims path %q, which does not exist: %v", r.Name, r.Path, statErr)
+		}
+	}
+
+	for _, r := range out.Releases {
+		if r.Manifest == "" {
+			t.Errorf("release %q reports no manifest; argocd declares every release in an application.yaml", r.Name)
+			continue
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Manifest)); statErr != nil {
+			t.Errorf("release %q claims manifest %q, which does not exist: %v", r.Name, r.Manifest, statErr)
+		}
+	}
+}
+
 func TestGenerate_DataFiles(t *testing.T) {
 	recipeResult := func() *recipe.RecipeResult {
 		r := &recipe.RecipeResult{}

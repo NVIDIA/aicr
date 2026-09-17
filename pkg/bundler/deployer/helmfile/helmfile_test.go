@@ -239,6 +239,46 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	}
 }
 
+// TestGenerateReportsLayout asserts Generate populates output.Entrypoint and
+// output.Releases with the layout it actually wrote to outputDir, mirroring
+// the helm deployer's equivalent coverage (pkg/bundler/deployer/helm).
+func TestGenerateReportsLayout(t *testing.T) {
+	g := &Generator{
+		RecipeResult: recipeWith(
+			ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2",
+				"https://charts.jetstack.io"),
+			ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3",
+				"https://helm.ngc.nvidia.com/nvidia"),
+		),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"gpu-operator": {"driver": map[string]any{"enabled": true}},
+		},
+		Version: testBundlerVersion,
+	}
+	outputDir := t.TempDir()
+
+	out, err := g.Generate(context.Background(), outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	if out.Entrypoint != "helmfile.yaml" {
+		t.Errorf("Entrypoint = %q, want helmfile.yaml", out.Entrypoint)
+	}
+	if len(out.Releases) == 0 {
+		t.Fatal("Generate reported no releases; the bundle index would be empty")
+	}
+	for _, r := range out.Releases {
+		if r.Name == "" || r.Component == "" || r.Path == "" {
+			t.Errorf("incomplete release entry: %+v", r)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Path)); statErr != nil {
+			t.Errorf("release %q claims path %q, which does not exist: %v", r.Name, r.Path, statErr)
+		}
+	}
+}
+
 // TestGenerate_WithDataFiles asserts external data files are picked up by
 // output.AddDataFiles and contribute to the file list / total size.
 func TestGenerate_WithDataFiles(t *testing.T) {

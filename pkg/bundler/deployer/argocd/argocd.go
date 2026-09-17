@@ -45,6 +45,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -601,6 +602,12 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 	g.vendorRecords = writeResult.VendoredCharts
 	folders := writeResult.Folders
+
+	output.Entrypoint = "app-of-apps.yaml"
+	output.Releases = writeResult.Releases()
+	for i := range output.Releases {
+		output.Releases[i].Manifest = path.Join(output.Releases[i].Path, "application.yaml")
+	}
 
 	if err := stripUnusedHelmFiles(outputDir, folders); err != nil {
 		return nil, err
