@@ -241,7 +241,9 @@ func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.Cri
 	}
 	// RoCE NET templates are fabric-keyed and accelerator-agnostic: any EKS RoCE
 	// node uses testdata/roce/{service}/..., not a per-accelerator directory.
-	if fabric == fabricRoCE {
+	// Scoped to variantNET. NVLS uses NVLink/IMEX, not fabric-selected NICs, so
+	// it has no testdata/roce/{service}/runtime-nvls.yaml to redirect to.
+	if fabric == fabricRoCE && variant == variantNET {
 		return filepath.Join("testdata", string(fabricRoCE), string(service), filename)
 	}
 	return filepath.Join("testdata", string(accelerator), string(service), filename)
@@ -1355,7 +1357,9 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// as a standalone object before the runtime (it must exist when the TrainJob
 	// later creates the worker pods that reference it). Skipped for a
 	// recipe-supplied runtime: it declares any DRA claims it needs itself.
-	if customRuntime == "" && fabric == fabricRoCE {
+	// Scoped to variantNET. NVLS claims GPUs through the IMEX ComputeDomain
+	// instead, so a testdata/roce/{service}/roce-claim.yaml never exists for it.
+	if customRuntime == "" && fabric == fabricRoCE && variant == variantNET {
 		// Claim one ConnectX RoCE device per GPU via DRA (NCCL maps GPU->NIC);
 		// the per-node device pool (e.g. 8 on p6e-gb300r) is >= GPUs/node. Set
 		// here — keyed by fabric, not service — so adding a non-EKS RoCE service

@@ -772,6 +772,18 @@ func TestTemplatePath(t *testing.T) {
 			filename:    "runtime.yaml",
 			expected:    filepath.Join("testdata", "gb200", "oke", "runtime-nvls.yaml"),
 		},
+		{
+			// NVLS uses NVLink/IMEX, not a fabric-selected NIC, so a stray
+			// AICR_NCCL_FABRIC=roce must not redirect it to testdata/roce/,
+			// which has no runtime-nvls.yaml for any service.
+			name:        "gke gb200 NVLS variant ignores roce fabric",
+			accelerator: recipe.CriteriaAcceleratorGB200,
+			service:     recipe.CriteriaServiceGKE,
+			variant:     variantNVLS,
+			fabric:      fabricRoCE,
+			filename:    "runtime.yaml",
+			expected:    filepath.Join("testdata", "gb200", "gke", "runtime-nvls.yaml"),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
