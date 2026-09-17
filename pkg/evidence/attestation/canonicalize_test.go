@@ -174,6 +174,37 @@ func TestCanonicalizeRecipeYAMLV3_StripsMetadataVersion(t *testing.T) {
 	}
 }
 
+func TestCanonicalizeRecipeYAMLV3_RemovesMetadataLeftEmptyByVersionStrip(t *testing.T) {
+	versionOnly := []byte("metadata:\n  version: 1.2.3\nfoo: bar\n")
+	noMetadata := []byte("foo: bar\n")
+
+	got, err := CanonicalizeRecipeYAMLV3(versionOnly)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if strings.Contains(string(got), "metadata") {
+		t.Errorf("expected metadata key to be removed once empty, got %q", got)
+	}
+	want, err := CanonicalizeRecipeYAMLV3(noMetadata)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("recipe with only metadata.version should canonicalize identically to one with no metadata key:\n%s\n---\n%s", got, want)
+	}
+}
+
+func TestCanonicalizeRecipeYAMLV3_PreservesExplicitlyEmptyMetadata(t *testing.T) {
+	in := []byte("metadata: {}\nfoo: bar\n")
+	got, err := CanonicalizeRecipeYAMLV3(in)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(string(got), "metadata") {
+		t.Errorf("expected an already-empty metadata mapping (no version removed) to survive, got %q", got)
+	}
+}
+
 func TestCanonicalizeRecipeYAMLV3_NoopWithoutMetadataOrVersion(t *testing.T) {
 	for _, in := range [][]byte{
 		[]byte("foo: bar\n"),

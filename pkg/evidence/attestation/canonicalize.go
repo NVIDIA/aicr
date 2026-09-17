@@ -154,8 +154,12 @@ type mapEntry struct {
 
 // stripMetadataVersion removes the top-level metadata.version entry from
 // doc, in place. doc must already be canonicalized, so its root is a
-// mapping node. A document with no metadata mapping, or no version key
-// within it, is left unchanged.
+// mapping node. If removing version empties the metadata mapping, the
+// metadata key is removed too, so a recipe whose only metadata field was
+// version canonicalizes identically to one with no metadata key at all. A
+// document with no metadata mapping, no version key within it, or a
+// metadata mapping that stays non-empty after removal, is otherwise left
+// unchanged.
 func stripMetadataVersion(doc *yaml.Node) {
 	if doc == nil || doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
 		return
@@ -170,13 +174,19 @@ func stripMetadataVersion(doc *yaml.Node) {
 			continue
 		}
 		filtered := make([]*yaml.Node, 0, len(metadata.Content))
+		removedVersion := false
 		for j := 0; j+1 < len(metadata.Content); j += 2 {
 			if metadata.Content[j].Value == "version" {
+				removedVersion = true
 				continue
 			}
 			filtered = append(filtered, metadata.Content[j], metadata.Content[j+1])
 		}
-		metadata.Content = filtered
+		if removedVersion && len(filtered) == 0 {
+			root.Content = append(root.Content[:i], root.Content[i+2:]...)
+		} else {
+			metadata.Content = filtered
+		}
 		return
 	}
 }
