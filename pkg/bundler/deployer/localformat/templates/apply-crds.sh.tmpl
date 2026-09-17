@@ -125,8 +125,19 @@ collect_crds() { # $1 = chart .tgz, $2 = destination directory
   while IFS= read -r f; do
     cp "${f}" "${2}/$(printf '%s' "${f#"${work}"/}" | tr '/' '_')"
   done < <(find "${work}" -type f -path '*/crds/*' \( -name '*.yaml' -o -name '*.yml' \))
+  # A dependency archive that cannot be read fails closed, exactly as the
+  # top-level one does. Swallowing it would let a chart whose CRDs live in a
+  # packaged subchart fall through to the emptiness guard and report "ships no
+  # CRDs" on a deploy that applied nothing, which is the shape this whole step
+  # exists to prevent. A valid archive that happens not to be a chart is not
+  # this case: it extracts fine and simply contributes no crds/ files.
   while IFS= read -r sub; do
-    collect_crds "${sub}" "${2}" || true
+    if ! collect_crds "${sub}" "${2}"; then
+      echo "ERROR: cannot read the packaged dependency ${sub##*/}; refusing to" >&2
+      echo "       continue and report its CRDs as absent." >&2
+      rm -rf "${work}"
+      return 1
+    fi
   done < <(find "${work}" -type f -path '*/charts/*' -name '*.tgz')
   rm -rf "${work}"
 }
@@ -266,6 +277,10 @@ fi
 # One file per CRD document, straight from the archive, so no separator
 # parsing is involved and the loop works the same on Helm 3 and Helm 4.
 while IFS= read -r doc; do
+  # A whitespace-only file under crds/ is not an error, but handing it to
+  # kubectl is: "no objects passed" aborts the deploy, and because the loop is
+  # sorted it can do so before the real CRDs are ever reached.
+  grep -q '[^[:space:]]' "${doc}" || continue
   if capture_bounded kubectl create -f "${doc}" ${KUBECONFIG_FLAG:-}; then
     continue
   fi
