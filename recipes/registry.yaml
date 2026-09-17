@@ -1151,9 +1151,12 @@ components:
     healthCheck:
       assertFile: checks/slinky-topograph/health-check.yaml
     helm:
-      defaultRepository: https://nvidia.github.io/topograph
+      # The topograph repo moved from the NVIDIA org to dsx-ai-factory;
+      # github.com/NVIDIA/topograph redirects, but this GitHub Pages Helm
+      # index does not.
+      defaultRepository: https://dsx-ai-factory.github.io/topograph
       defaultChart: topograph/topograph
-      # renovate: datasource=helm depName=topograph registryUrl=https://nvidia.github.io/topograph
+      # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
       defaultVersion: "1.0.0"
       defaultNamespace: topograph
     nodeScheduling:
