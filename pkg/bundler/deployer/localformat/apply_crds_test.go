@@ -295,15 +295,12 @@ func TestApplyCRDsScript_RejectsInjectedRecipeValues(t *testing.T) {
 		[]byte("#!/usr/bin/env bash\nexit 0\n"), 0o755); werr != nil {
 		t.Fatalf("write kubectl stub: %v", werr)
 	}
-	// helm pull must leave a tarball behind, since the script binds both
-	// phases to that one artifact and aborts if the pull produced nothing.
-	if werr := os.WriteFile(filepath.Join(stub, "helm"), []byte(
-		"#!/usr/bin/env bash\n"+
-			"if [[ \"$1\" == pull ]]; then\n"+
-			"  dest=.\n"+
-			"  while [[ $# -gt 0 ]]; do [[ \"$1\" == --destination ]] && dest=\"$2\"; shift; done\n"+
-			"  : >\"${dest}/stub-chart.tgz\"\n"+
-			"fi\nexit 0\n"), 0o755); werr != nil {
+	// helm pull must leave a *valid* archive behind: the script reads CRDs out
+	// of it and fails closed when it cannot. An empty file is not enough, and
+	// the difference is platform-dependent, since bsdtar tolerates one where
+	// GNU tar rejects it, so a stub that "works" locally can fail in CI.
+	if werr := os.WriteFile(filepath.Join(stub, "helm"),
+		[]byte(helmStub(":", chartArchiveWithCRD(t))), 0o755); werr != nil {
 		t.Fatalf("write helm stub: %v", werr)
 	}
 	// Prepend rather than replace: the script calls dirname and pwd, so a
