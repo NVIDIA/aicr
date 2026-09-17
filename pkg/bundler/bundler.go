@@ -1031,6 +1031,9 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe provenance path", provErr)
 	}
 	_, statErr := os.Stat(provenancePath)
+	if statErr != nil && !stderrors.Is(statErr, fs.ErrNotExist) {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to stat provenance file", statErr)
+	}
 	hasProvenance := statErr == nil
 
 	info := b.buildBundleInfo(recipeResult, output, recipeDigest, hasProvenance)

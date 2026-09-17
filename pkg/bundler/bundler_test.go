@@ -595,67 +595,103 @@ func TestMake_HelmBundlePassesVerifierChecksums(t *testing.T) {
 }
 
 // TestBundleWritesBundleInfo verifies that every bundle carries
-// bundle-info.yaml, written unconditionally, binding itself to the recipe
-// beside it and covered by checksums.txt like every other bundle payload.
+// bundle-info.yaml, binding itself to the recipe beside it and — when
+// checksums are enabled — covered by checksums.txt like every other bundle
+// payload.
+//
+// The includeChecksums=false case is the unconditionality proof: the write
+// must not live inside the `if b.Config.IncludeChecksums()` block in
+// runDeployer. Every other case in this package builds with checksums on
+// (config.NewConfig's own default), so without this case nothing here would
+// fail if a future refactor moved the write into that block.
 func TestBundleWritesBundleInfo(t *testing.T) {
-	dir := t.TempDir()
-	cfg := config.NewConfig(
-		config.WithDeployer(config.DeployerHelm),
-		config.WithIncludeChecksums(true),
-	)
-	b, err := New(WithConfig(cfg))
-	if err != nil {
-		t.Fatalf("New: %v", err)
+	tests := []struct {
+		name             string
+		includeChecksums bool
+	}{
+		{name: "checksums enabled", includeChecksums: true},
+		{name: "checksums disabled", includeChecksums: false},
 	}
 
-	recipeResult := closedWorldRecipeResult()
-	if _, makeErr := b.Make(context.Background(), recipeResult, dir); makeErr != nil {
-		t.Fatalf("Make: %v", makeErr)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := config.NewConfig(
+				config.WithDeployer(config.DeployerHelm),
+				config.WithIncludeChecksums(tt.includeChecksums),
+			)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
 
-	info, err := bundleinfo.Read(context.Background(), dir)
-	if err != nil {
-		t.Fatalf("Read: %v", err)
-	}
-	if info.Build.Deployer != "helm" {
-		t.Errorf("deployer = %q, want helm", info.Build.Deployer)
-	}
-	if info.Layout.Entrypoint != "deploy.sh" {
-		t.Errorf("entrypoint = %q, want deploy.sh", info.Layout.Entrypoint)
-	}
-	if len(info.Layout.Releases) == 0 {
-		t.Error("no releases indexed")
-	}
-	for i, want := range recipeResult.DeploymentOrder {
-		if i >= len(info.Layout.Releases) {
-			break
-		}
-		if info.Layout.Releases[i].Component != want {
-			t.Errorf("release[%d].Component = %q, want %q (deployer order must be preserved)",
-				i, info.Layout.Releases[i].Component, want)
-		}
-	}
+			recipeResult := closedWorldRecipeResult()
+			if _, makeErr := b.Make(context.Background(), recipeResult, dir); makeErr != nil {
+				t.Fatalf("Make: %v", makeErr)
+			}
 
-	// The record binds itself to the recipe beside it. SHA256RawContext
-	// returns RAW bytes, not hex — the repo hex-encodes with %x at the two
-	// existing call sites (checksum.go:156, inventory.go:170).
-	raw, err := checksum.SHA256RawContext(context.Background(), filepath.Join(dir, "recipe.yaml"))
-	if err != nil {
-		t.Fatalf("digest recipe.yaml: %v", err)
-	}
-	wantDigest := fmt.Sprintf("sha256:%x", raw)
-	if info.Build.Recipe.Digest != wantDigest {
-		t.Errorf("recipe digest = %q, want %q", info.Build.Recipe.Digest, wantDigest)
-	}
+			info, err := bundleinfo.Read(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			if info.Build.Deployer != "helm" {
+				t.Errorf("deployer = %q, want helm", info.Build.Deployer)
+			}
+			if info.Layout.Entrypoint != "deploy.sh" {
+				t.Errorf("entrypoint = %q, want deploy.sh", info.Layout.Entrypoint)
+			}
+			// The fixture has exactly one component and no injected
+			// -pre/-post/-readiness folders, so the release sequence is
+			// spelled out explicitly here rather than derived from
+			// len(recipeResult.DeploymentOrder): that length is not a
+			// valid invariant in general (injected folders have no
+			// component of their own), and deriving the expectation from
+			// the same input the code under test also reads would let a
+			// regression that drops or duplicates trailing releases hit a
+			// truncated comparison and pass.
+			wantReleases := []string{"gpu-operator"}
+			if len(info.Layout.Releases) != len(wantReleases) {
+				t.Fatalf("releases = %v, want %v (length mismatch)", info.Layout.Releases, wantReleases)
+			}
+			for i, want := range wantReleases {
+				if info.Layout.Releases[i].Component != want {
+					t.Errorf("release[%d].Component = %q, want %q (deployer order must be preserved)",
+						i, info.Layout.Releases[i].Component, want)
+				}
+			}
 
-	// The file is bundle content, so checksums.txt must cover it. A payload
-	// missing from the manifest is outside the attestation subject.
-	manifest, err := os.ReadFile(filepath.Join(dir, "checksums.txt"))
-	if err != nil {
-		t.Fatalf("read checksums.txt: %v", err)
-	}
-	if !strings.Contains(string(manifest), bundleinfo.FileName) {
-		t.Errorf("checksums.txt does not cover %s:\n%s", bundleinfo.FileName, manifest)
+			// The record binds itself to the recipe beside it. SHA256RawContext
+			// returns RAW bytes, not hex — the repo hex-encodes with %x at the
+			// two existing call sites (checksum.go:156, inventory.go:170).
+			raw, digestErr := checksum.SHA256RawContext(context.Background(), filepath.Join(dir, "recipe.yaml"))
+			if digestErr != nil {
+				t.Fatalf("digest recipe.yaml: %v", digestErr)
+			}
+			wantDigest := fmt.Sprintf("sha256:%x", raw)
+			if info.Build.Recipe.Digest != wantDigest {
+				t.Errorf("recipe digest = %q, want %q", info.Build.Recipe.Digest, wantDigest)
+			}
+
+			if !tt.includeChecksums {
+				// Unconditionality means bundle-info.yaml must exist with
+				// no checksums.txt anywhere in the bundle at all.
+				if _, statErr := os.Stat(filepath.Join(dir, "checksums.txt")); statErr == nil {
+					t.Error("checksums.txt exists despite includeChecksums=false")
+				}
+				return
+			}
+
+			// The file is bundle content, so checksums.txt must cover it. A
+			// payload missing from the manifest is outside the attestation
+			// subject.
+			manifest, readErr := os.ReadFile(filepath.Join(dir, "checksums.txt"))
+			if readErr != nil {
+				t.Fatalf("read checksums.txt: %v", readErr)
+			}
+			if !strings.Contains(string(manifest), bundleinfo.FileName) {
+				t.Errorf("checksums.txt does not cover %s:\n%s", bundleinfo.FileName, manifest)
+			}
+		})
 	}
 }
 
