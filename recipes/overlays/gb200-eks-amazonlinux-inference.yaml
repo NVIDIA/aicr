@@ -77,3 +77,16 @@ spec:
   componentRefs:
     - name: nvsentinel
       type: Helm
+
+    # AL2023 is not a Debian/Ubuntu OS — nvidia-setup does not support it.
+    # Override the nodewright-customizations inherited from the base chain
+    # (which would apply tuning.yaml and run nvidia-setup-kernel and
+    # nvidia-setup-full) with no-op.yaml so no nvidia-setup packages run.
+    # nvidia-tuned support for AL2023 is not yet validated; no tuning manifest
+    # is applied until OS coverage is confirmed.
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/no-op.yaml
+      dependencyRefs:
+        - nodewright-operator
