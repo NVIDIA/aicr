@@ -70,6 +70,18 @@ var appOfAppsTemplate string
 //go:embed templates/README.md.tmpl
 var readmeTemplate string
 
+// fileApplication is the per-folder Application manifest this deployer
+// writes inside every NNN-<name>/ directory. Named so the write site
+// (GenerateFromTemplate) and the reported deployer.Release.Manifest path
+// can't drift apart into referencing two different filenames.
+const fileApplication = "application.yaml"
+
+// fileAppOfApps is the top-level parent Application manifest this deployer
+// writes at the bundle root. Named so the write site, the reported
+// deployer.Output.Entrypoint, and the rendered deployment instructions
+// can't drift apart into referencing two different filenames.
+const fileAppOfApps = "app-of-apps.yaml"
+
 // ApplicationData contains data for rendering an Argo CD Application.
 //
 // IsLocalChart drives the Application shape: when true, the rendered
@@ -603,10 +615,10 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	g.vendorRecords = writeResult.VendoredCharts
 	folders := writeResult.Folders
 
-	output.Entrypoint = "app-of-apps.yaml"
+	output.Entrypoint = fileAppOfApps
 	output.Releases = writeResult.Releases()
 	for i := range output.Releases {
-		output.Releases[i].Manifest = path.Join(output.Releases[i].Path, "application.yaml")
+		output.Releases[i].Manifest = path.Join(output.Releases[i].Path, fileApplication)
 	}
 
 	if err := stripUnusedHelmFiles(outputDir, folders); err != nil {
@@ -733,7 +745,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
 				fmt.Sprintf("folder path unsafe: %s", f.Dir), joinErr)
 		}
-		appPath, appSize, genErr := deployer.GenerateFromTemplate(applicationTemplate, appData, folderDir, "application.yaml")
+		appPath, appSize, genErr := deployer.GenerateFromTemplate(applicationTemplate, appData, folderDir, fileApplication)
 		if genErr != nil {
 			return nil, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("failed to generate application.yaml for %s", f.Name), genErr)
@@ -750,7 +762,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		AppName:        appName,
 		CascadeDelete:  g.CascadeDelete,
 	}
-	appOfAppsPath, appOfAppsSize, err := deployer.GenerateFromTemplate(appOfAppsTemplate, appOfAppsData, outputDir, "app-of-apps.yaml")
+	appOfAppsPath, appOfAppsSize, err := deployer.GenerateFromTemplate(appOfAppsTemplate, appOfAppsData, outputDir, fileAppOfApps)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to generate app-of-apps.yaml", err)
 	}
@@ -801,7 +813,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Populate deployment steps for CLI output
 	output.DeploymentSteps = []string{
 		"Push the generated files to your GitOps repository",
-		fmt.Sprintf("kubectl apply -f %s/app-of-apps.yaml", outputDir),
+		fmt.Sprintf("kubectl apply -f %s/%s", outputDir, fileAppOfApps),
 	}
 	// Add note if repo URL needs to be updated
 	if g.RepoURL == "" {

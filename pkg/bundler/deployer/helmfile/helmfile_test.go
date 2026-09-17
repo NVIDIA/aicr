@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -243,13 +244,14 @@ func TestGenerate_WithChecksums(t *testing.T) {
 // output.Releases with the layout it actually wrote to outputDir, mirroring
 // the helm deployer's equivalent coverage (pkg/bundler/deployer/helm).
 func TestGenerateReportsLayout(t *testing.T) {
+	recipeResult := recipeWith(
+		ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2",
+			"https://charts.jetstack.io"),
+		ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3",
+			"https://helm.ngc.nvidia.com/nvidia"),
+	)
 	g := &Generator{
-		RecipeResult: recipeWith(
-			ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2",
-				"https://charts.jetstack.io"),
-			ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3",
-				"https://helm.ngc.nvidia.com/nvidia"),
-		),
+		RecipeResult: recipeResult,
 		ComponentValues: map[string]map[string]any{
 			"cert-manager": {"crds": map[string]any{"enabled": true}},
 			"gpu-operator": {"driver": map[string]any{"enabled": true}},
@@ -276,6 +278,23 @@ func TestGenerateReportsLayout(t *testing.T) {
 		if _, statErr := os.Stat(filepath.Join(outputDir, r.Path)); statErr != nil {
 			t.Errorf("release %q claims path %q, which does not exist: %v", r.Name, r.Path, statErr)
 		}
+	}
+
+	// Releases order is normative: consumers read deployment sequence from
+	// list position, since the artifact carries no ordinal field. Extract
+	// the primary releases (Name == Component; excludes injected -pre/-post
+	// entries) and confirm their relative order matches the recipe's
+	// DeploymentOrder — a sort or reversal of out.Releases must fail this
+	// check.
+	var primaryOrder []string
+	for _, r := range out.Releases {
+		if r.Name == r.Component {
+			primaryOrder = append(primaryOrder, r.Name)
+		}
+	}
+	if !slices.Equal(primaryOrder, recipeResult.DeploymentOrder) {
+		t.Errorf("primary release order = %v, want %v (recipe DeploymentOrder)",
+			primaryOrder, recipeResult.DeploymentOrder)
 	}
 }
 

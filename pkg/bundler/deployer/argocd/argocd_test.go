@@ -20,6 +20,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -657,6 +658,23 @@ func TestGenerateReportsLayout(t *testing.T) {
 		if _, statErr := os.Stat(filepath.Join(outputDir, r.Manifest)); statErr != nil {
 			t.Errorf("release %q claims manifest %q, which does not exist: %v", r.Name, r.Manifest, statErr)
 		}
+	}
+
+	// Releases order is normative: consumers read deployment sequence from
+	// list position, since the artifact carries no ordinal field. Extract
+	// the primary releases (Name == Component; excludes injected -pre/-post/
+	// -readiness entries) and confirm their relative order matches the
+	// recipe's DeploymentOrder — a sort or reversal of out.Releases must
+	// fail this check.
+	var primaryOrder []string
+	for _, r := range out.Releases {
+		if r.Name == r.Component {
+			primaryOrder = append(primaryOrder, r.Name)
+		}
+	}
+	if !slices.Equal(primaryOrder, recipeResult.DeploymentOrder) {
+		t.Errorf("primary release order = %v, want %v (recipe DeploymentOrder)",
+			primaryOrder, recipeResult.DeploymentOrder)
 	}
 }
 
