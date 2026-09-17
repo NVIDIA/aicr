@@ -32,6 +32,22 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// Release is one Helm release a deployer emits, reported so the bundler can
+// index the bundle without re-deriving paths the deployer already built.
+//
+// Component names the recipe component the release belongs to, which equals
+// Name for a primary release and names the parent for an injected -pre,
+// -post, or -readiness release. Path and Manifest are relative to the bundle
+// root; Manifest is empty for deployers that declare a release through an
+// orchestration script rather than a file.
+type Release struct {
+	Name      string
+	Component string
+	Namespace string
+	Path      string
+	Manifest  string
+}
+
 // Output contains the result of deployer generation.
 type Output struct {
 	// Files contains the paths of generated files.
@@ -48,6 +64,15 @@ type Output struct {
 
 	// DeploymentNotes contains optional deployment notes or warnings.
 	DeploymentNotes []string
+
+	// Entrypoint is the bundle-root file a consumer invokes or applies for
+	// this deployer, relative to the bundle root.
+	Entrypoint string
+
+	// Releases is every Helm release the bundle installs, in deployment
+	// order. The ordering is normative: consumers read sequence from list
+	// position, so a deployer must append in the order it deploys.
+	Releases []Release
 }
 
 // AddDataFiles resolves each relative data file path against outputDir (via

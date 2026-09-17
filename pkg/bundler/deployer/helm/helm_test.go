@@ -138,6 +138,38 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	}
 }
 
+func TestGenerateReportsLayout(t *testing.T) {
+	g := &Generator{
+		RecipeResult: createTestRecipeResult(),
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"gpu-operator": {"enabled": true},
+		},
+		Version: "v1.0.0",
+	}
+	outputDir := t.TempDir()
+
+	out, err := g.Generate(context.Background(), outputDir)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if out.Entrypoint != "deploy.sh" {
+		t.Errorf("Entrypoint = %q, want deploy.sh", out.Entrypoint)
+	}
+	if len(out.Releases) == 0 {
+		t.Fatal("Generate reported no releases; the bundle index would be empty")
+	}
+	for _, r := range out.Releases {
+		if r.Name == "" || r.Component == "" || r.Path == "" {
+			t.Errorf("incomplete release entry: %+v", r)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Path)); statErr != nil {
+			t.Errorf("release %q claims path %q, which does not exist: %v", r.Name, r.Path, statErr)
+		}
+	}
+}
+
 func TestGenerate_MissingRecipeFile(t *testing.T) {
 	g := &Generator{
 		RecipeResult: createTestRecipeResult(),

@@ -178,6 +178,8 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, err
 	}
 	g.vendorRecords = writeResult.VendoredCharts
+	output.Entrypoint = "deploy.sh"
+	output.Releases = writeResult.Releases()
 	for _, f := range writeResult.Folders {
 		// localformat returns paths relative to outputDir. Downstream consumers
 		// (checksum.WriteChecksums, output.TotalSize, deployment reporting) all
