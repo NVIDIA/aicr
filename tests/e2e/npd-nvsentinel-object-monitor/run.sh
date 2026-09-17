@@ -254,7 +254,12 @@ patch_node_condition() {
   local node now
   node=$(kubectl --context "${KUBE_CONTEXT}" get nodes -o jsonpath='{.items[0].metadata.name}')
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  kubectl --context "${KUBE_CONTEXT}" patch node "${node}" --subresource=status --type=merge -p \
+  # strategic, not merge: NodeCondition carries patchMergeKey "type", so a
+  # strategic patch merges this one condition in by type. A JSON merge patch
+  # replaces the whole conditions array, briefly dropping Ready and the pressure
+  # conditions until kubelet rewrites them -- visible to anything else watching
+  # the Node.
+  kubectl --context "${KUBE_CONTEXT}" patch node "${node}" --subresource=status --type=strategic -p \
     "{\"status\":{\"conditions\":[{\"type\":\"${condition_type}\",\"status\":\"${status}\",\"reason\":\"${reason}\",\"message\":\"e2e-injected\",\"lastHeartbeatTime\":\"${now}\",\"lastTransitionTime\":\"${now}\"}]}}" \
     >/dev/null
 }
@@ -333,11 +338,19 @@ test_condition_produces_health_event() {
   # The read's exit status is captured, not discarded: `|| true` would turn an
   # apiserver failure into empty output and record "no condition written" as a
   # PASS -- a negative assertion that passes on an ambiguous condition.
+  #
+  # The status is captured inside if/else, not after a bare assignment: under
+  # set -e a failing command substitution aborts the shell immediately, so a
+  # following `read_rc=$?` never runs and this failure would never be recorded.
+  # `if ! cmd` would not work either -- $? would then be the status of `!`.
   local node kom_condition read_rc
   node=$(kubectl --context "${KUBE_CONTEXT}" get nodes -o jsonpath='{.items[0].metadata.name}')
-  kom_condition=$(kubectl --context "${KUBE_CONTEXT}" get node "${node}" \
-    -o jsonpath='{.status.conditions[?(@.type=="NPDXfsShutdown")].status}' 2>/dev/null)
-  read_rc=$?
+  if kom_condition=$(kubectl --context "${KUBE_CONTEXT}" get node "${node}" \
+    -o jsonpath='{.status.conditions[?(@.type=="NPDXfsShutdown")].status}' 2>/dev/null); then
+    read_rc=0
+  else
+    read_rc=$?
+  fi
   if [[ "${read_rc}" -ne 0 ]]; then
     fail "npd-object-monitor/store-only-suppresses-node-condition" "could not read node conditions (kubectl exit ${read_rc}); the absence of a condition cannot be confirmed"
   elif [[ -z "${kom_condition}" ]]; then
