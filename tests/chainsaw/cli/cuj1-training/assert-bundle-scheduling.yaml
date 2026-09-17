@@ -28,10 +28,14 @@ operator:
     nodeGroup: system-pool
   upgradeCRD: true
 
-# ── Scheduling: GPU daemonsets ───────────────────────────────────────
+# ── Scheduling: GPU daemonsets ────────────────────────────────────
+# daemonsets.nodeSelector is gone (#2474): the gpu-operator chart/CRD have no
+# such field, so AICR no longer injects it. Operands self-place on GPU nodes.
+# Only the (real) daemonsets.tolerations are asserted here.
 daemonsets:
-  nodeSelector:
-    nodeGroup: gpu-worker
+  # regression guard: the route must stay gone (chainsaw asserts are subset-match,
+  # so without this the assert would still pass if the dead route were re-added)
+  (nodeSelector == null): true
   tolerations:
     - key: nvidia.com/gpu
       value: present
