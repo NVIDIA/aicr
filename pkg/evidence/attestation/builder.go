@@ -114,8 +114,18 @@ type Bundle struct {
 	// (pkg/evidence/verifier/identity.go, ADR-015 descriptor-currentness).
 	PolicyDescriptorIdentity string
 
-	// SubjectDigest is sha256(canonicalize(recipe.yaml)) as hex.
+	// SubjectDigest is SubjectDigestV3(recipe.yaml) as hex.
 	SubjectDigest string
+
+	// PredicateType is the predicateType the statement carrying Predicate
+	// was (or, for a newly built bundle, will be) signed under. Build sets
+	// it to PredicateTypeV3 unconditionally. loadOnDiskBundle instead
+	// copies it from the on-disk statement's own predicateType field, so a
+	// reconstructed legacy V1/V2 bundle keeps signing and pointer/OCI
+	// labeling under the algorithm its recipe.digest was actually computed
+	// with, rather than being relabeled V3 and rejected by the verifier's
+	// SubjectDigestForType dispatch.
+	PredicateType string
 
 	Predicate *Predicate
 
@@ -157,7 +167,14 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 	if writeErr := os.WriteFile(filepath.Join(summaryDir, RecipeFilename), canon, 0o600); writeErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe.yaml", writeErr)
 	}
-	subjectDigest := DigestOfCanonical(canon)
+	// The bundled recipe.yaml keeps its full content (including
+	// metadata.version) for human/audit purposes. The subject digest that
+	// goes into the predicate uses the V3 content-only canonicalization,
+	// so it does not depend on which aicr binary produced it.
+	subjectDigest, err := SubjectDigestV3(opts.RecipeYAML)
+	if err != nil {
+		return nil, err
+	}
 
 	if writeErr := os.WriteFile(filepath.Join(summaryDir, SnapshotFilename), opts.SnapshotYAML, 0o600); writeErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write snapshot.yaml", writeErr)
@@ -269,6 +286,7 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 		Advertiser:               ProfileAdvertiserString(opts.Recipe),
 		PolicyDescriptorIdentity: profileDescriptorIdentityOf(opts.Recipe),
 		SubjectDigest:            subjectDigest,
+		PredicateType:            StatementPredicateType(pred),
 		Predicate:                pred,
 		StatementJSON:            stmt,
 	}, nil
@@ -368,15 +386,14 @@ func ParsePointerProfile(selection string) (string, error) {
 	return ProfileSegment(&recipe.SelectedProfile{Name: sel.Name, Value: sel.Value})
 }
 
-// profilePredicateOf builds the v2 predicate profile block from a
-// profiled recipe (nil for unprofiled recipes, keeping the statement on
-// PredicateTypeV1). The recorded descriptor identity is recipe-scoped: the
-// deterministic identity of the descriptor entries contributing to THIS
-// recipe's effective closure (allocpolicy.IdentityFor over
-// ClosureDescriptorEntries) — not the identity of the entire global
-// descriptor, which would let an expansion that never touches this
-// recipe's closure spuriously invalidate its evidence (ADR-015
-// descriptor-currentness).
+// profilePredicateOf builds the predicate profile block from a profiled
+// recipe, or nil for an unprofiled one. The recorded descriptor identity is
+// recipe-scoped, the deterministic identity of the descriptor entries
+// contributing to this recipe's effective closure
+// (allocpolicy.IdentityFor over ClosureDescriptorEntries), not the identity
+// of the entire global descriptor. Scoping it to the recipe prevents an
+// expansion that never touches this recipe's closure from spuriously
+// invalidating its evidence (ADR-015 descriptor-currentness).
 func profilePredicateOf(rec *recipe.RecipeResult) *ProfilePredicate {
 	if rec == nil || rec.Metadata.SelectedProfile == nil {
 		return nil

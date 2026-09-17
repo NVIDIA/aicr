@@ -696,8 +696,14 @@ type ComponentRef struct {
 	// Kind is the deployment kind, e.g. "Helm" or "Kustomize".
 	Kind string
 
-	// Version is the component chart/manifest version.
+	// Version is the component chart/manifest version. Empty for a
+	// Kustomize component, which pins Tag instead.
 	Version string
+
+	// Tag is the resource tag a Kustomize component is pinned to
+	// (the registry's kustomize.defaultTag). Empty for Helm
+	// components, which pin Version instead.
+	Tag string
 
 	// Source is the upstream artifact location: a Helm chart
 	// repository URL for Helm components (e.g.

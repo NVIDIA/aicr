@@ -28,6 +28,8 @@ navigation:
         path: user/cli-reference.md
       - page: Generating Bundles
         path: user/bundling.md
+      - page: Upgrading a Deployed Stack
+        path: user/upgrading.md
       - page: Fabric-Attached Training
         path: user/fabric-attached-training.md
       - page: CLI Configuration File
@@ -112,6 +114,8 @@ navigation:
         path: contributor/recipe.md
       - page: Components
         path: contributor/component.md
+      - page: Upgrade Transition Records
+        path: contributor/upgrade-records.md
       - page: Collectors
         path: contributor/collector.md
       - page: Validators

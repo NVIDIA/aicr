@@ -1,0 +1,5 @@
+UPGRADE CHECK
+  from      a.yaml
+  to        b.yaml
+
+NO COMPONENT CHANGES

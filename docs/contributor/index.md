@@ -100,6 +100,7 @@ intent; the linked page has the walkthrough.
 | I want to... | Touch | Guide |
 |--------------|-------|-------|
 | Make an existing Helm or Kustomize chart available to recipes | `recipes/registry.yaml` entry | [component.md](component.md) |
+| Bump a pinned chart version, and record whether the upgrade is safe | `recipes/components/<name>/upgrades.yaml` | [upgrade-records.md](upgrade-records.md) |
 | Pin a chart version, set values, or define scheduling for a specific cluster shape | Recipe overlay in `recipes/overlays/` | [recipe.md](recipe.md) |
 | Share OS or platform fragments across overlays | Recipe mixin in `recipes/mixins/` | [recipe.md](recipe.md#mixin-composition) |
 | Capture a new dimension of cluster / OS / GPU state | New collector in `pkg/collector/<kind>/` | [collector.md](collector.md) |
@@ -306,6 +307,7 @@ By contributor task:
 
 - **Adding recipes, overlays, mixins, components** → [recipe.md](recipe.md)
 - **Adding a registry entry (Helm or Kustomize chart)** → [component.md](component.md)
+- **Bumping a pinned version (and writing its transition record)** → [upgrade-records.md](upgrade-records.md)
 - **Adding a CLI command** → [cli.md](cli.md)
 - **Adding an HTTP endpoint** → [api-server.md](api-server.md)
 - **Adding a snapshot collector** → [collector.md](collector.md)

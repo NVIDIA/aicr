@@ -35,5 +35,6 @@ This is a **different axis** from the per-recipe **Coverage** column in the reci
 | `skill` | demo | docs | — | not-yet-covered | documented in demos only; no executable test yet |
 | `snapshot` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
 | `trust update` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
+| `upgrade-check` | chainsaw | simulated / none | per-PR | covered | — |
 | `validate` | chainsaw, uat, demo | GPU (H100, real) | nightly | covered | — |
 | `verify` | chainsaw, demo | simulated / none | per-PR | covered | — |
