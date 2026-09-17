@@ -34,6 +34,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
@@ -590,6 +591,71 @@ func TestMake_HelmBundlePassesVerifierChecksums(t *testing.T) {
 	}
 	if verification.TrustLevel != bundleverifier.TrustUnverified {
 		t.Errorf("TrustLevel = %s, want %s", verification.TrustLevel, bundleverifier.TrustUnverified)
+	}
+}
+
+// TestBundleWritesBundleInfo verifies that every bundle carries
+// bundle-info.yaml, written unconditionally, binding itself to the recipe
+// beside it and covered by checksums.txt like every other bundle payload.
+func TestBundleWritesBundleInfo(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.NewConfig(
+		config.WithDeployer(config.DeployerHelm),
+		config.WithIncludeChecksums(true),
+	)
+	b, err := New(WithConfig(cfg))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	recipeResult := closedWorldRecipeResult()
+	if _, makeErr := b.Make(context.Background(), recipeResult, dir); makeErr != nil {
+		t.Fatalf("Make: %v", makeErr)
+	}
+
+	info, err := bundleinfo.Read(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if info.Build.Deployer != "helm" {
+		t.Errorf("deployer = %q, want helm", info.Build.Deployer)
+	}
+	if info.Layout.Entrypoint != "deploy.sh" {
+		t.Errorf("entrypoint = %q, want deploy.sh", info.Layout.Entrypoint)
+	}
+	if len(info.Layout.Releases) == 0 {
+		t.Error("no releases indexed")
+	}
+	for i, want := range recipeResult.DeploymentOrder {
+		if i >= len(info.Layout.Releases) {
+			break
+		}
+		if info.Layout.Releases[i].Component != want {
+			t.Errorf("release[%d].Component = %q, want %q (deployer order must be preserved)",
+				i, info.Layout.Releases[i].Component, want)
+		}
+	}
+
+	// The record binds itself to the recipe beside it. SHA256RawContext
+	// returns RAW bytes, not hex — the repo hex-encodes with %x at the two
+	// existing call sites (checksum.go:156, inventory.go:170).
+	raw, err := checksum.SHA256RawContext(context.Background(), filepath.Join(dir, "recipe.yaml"))
+	if err != nil {
+		t.Fatalf("digest recipe.yaml: %v", err)
+	}
+	wantDigest := fmt.Sprintf("sha256:%x", raw)
+	if info.Build.Recipe.Digest != wantDigest {
+		t.Errorf("recipe digest = %q, want %q", info.Build.Recipe.Digest, wantDigest)
+	}
+
+	// The file is bundle content, so checksums.txt must cover it. A payload
+	// missing from the manifest is outside the attestation subject.
+	manifest, err := os.ReadFile(filepath.Join(dir, "checksums.txt"))
+	if err != nil {
+		t.Fatalf("read checksums.txt: %v", err)
+	}
+	if !strings.Contains(string(manifest), bundleinfo.FileName) {
+		t.Errorf("checksums.txt does not cover %s:\n%s", bundleinfo.FileName, manifest)
 	}
 }
 
