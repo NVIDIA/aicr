@@ -308,6 +308,8 @@ components:
       - skyhook
     healthCheck:
       assertFile: checks/nodewright-operator/health-check.yaml
+    upgrades:
+      file: components/nodewright-operator/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/nvidia/nodewright/charts
       defaultChart: nodewright
