@@ -15,6 +15,7 @@
 package bundleinfo_test
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	stderrors "errors"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
+	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/header"
 )
@@ -119,6 +121,63 @@ func TestWriteIsDeterministic(t *testing.T) {
 	}
 	if string(a) != string(b) {
 		t.Errorf("bundle-info.yaml is not byte-stable across runs;\nfirst:\n%s\nsecond:\n%s", a, b)
+	}
+}
+
+// TestWriteRejectsAbsolutePaths guards the constraint that no absolute path
+// ever reaches bundle-info.yaml: downstream readers resolve emitted paths
+// with filepath.Join(outDir, path), which returns an absolute right-hand
+// argument unchanged, so an absolute value would silently escape outDir.
+func TestWriteRejectsAbsolutePaths(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*bundleinfo.BundleInfo)
+	}{
+		{
+			name: "absolute entrypoint",
+			mutate: func(info *bundleinfo.BundleInfo) {
+				info.Layout.Entrypoint = "/etc/passwd"
+			},
+		},
+		{
+			name: "absolute release path",
+			mutate: func(info *bundleinfo.BundleInfo) {
+				info.Layout.Releases[0].Path = "/etc/passwd"
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := sample()
+			tt.mutate(info)
+			_, err := bundleinfo.Write(context.Background(), t.TempDir(), info)
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
+			}
+		})
+	}
+}
+
+// TestReadRejectsOversizeFile guards the defaults.MaxBundleInfoBytes cap.
+// The oversize content is generated in memory rather than committed as a
+// fixture.
+func TestReadRejectsOversizeFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, bundleinfo.FileName)
+	oversize := bytes.Repeat([]byte("a"), int(defaults.MaxBundleInfoBytes+1))
+	if err := os.WriteFile(path, oversize, 0600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	_, err := bundleinfo.Read(context.Background(), dir)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
 

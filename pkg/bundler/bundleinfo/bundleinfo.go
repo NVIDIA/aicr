@@ -21,6 +21,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 
@@ -52,6 +53,10 @@ func Write(ctx context.Context, dir string, info *BundleInfo) (int64, error) {
 	info.APIVersion = header.StableGroupVersion
 	info.Kind = string(header.KindBundleInfo)
 
+	if err := validateRelativePaths(info); err != nil {
+		return 0, err
+	}
+
 	data, err := serializer.MarshalYAMLDeterministic(info)
 	if err != nil {
 		return 0, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to serialize bundle info")
@@ -59,7 +64,7 @@ func Write(ctx context.Context, dir string, info *BundleInfo) (int64, error) {
 
 	path, joinErr := deployer.SafeJoin(dir, FileName)
 	if joinErr != nil {
-		return 0, errors.Wrap(errors.ErrCodeInternal, "unsafe bundle info path", joinErr)
+		return 0, errors.PropagateOrWrap(joinErr, errors.ErrCodeInvalidRequest, "unsafe bundle info path")
 	}
 	if err := os.WriteFile(path, data, 0600); err != nil { //nolint:gosec // path validated by SafeJoin
 		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to write bundle info", err)
@@ -82,7 +87,7 @@ func Read(ctx context.Context, dir string) (*BundleInfo, error) {
 
 	path, joinErr := deployer.SafeJoin(dir, FileName)
 	if joinErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "unsafe bundle info path", joinErr)
+		return nil, errors.PropagateOrWrap(joinErr, errors.ErrCodeInvalidRequest, "unsafe bundle info path")
 	}
 
 	f, err := os.Open(path) //nolint:gosec // path validated by SafeJoin
@@ -123,4 +128,39 @@ func Read(ctx context.Context, dir string) (*BundleInfo, error) {
 	}
 
 	return &info, nil
+}
+
+// validateRelativePaths rejects info when any path it emits is absolute.
+// bundle-info.yaml feeds downstream tooling that resolves these paths with
+// filepath.Join(outDir, path); Join returns an absolute path argument
+// unchanged, so an absolute value here would silently escape outDir instead
+// of failing. This is the only place that can close that off, since every
+// reader trusts the record once it parses.
+func validateRelativePaths(info *BundleInfo) error {
+	check := func(field, value string) error {
+		if value != "" && filepath.IsAbs(value) {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("%s must be a relative path, got %q", field, value))
+		}
+		return nil
+	}
+
+	if err := check("build.recipe.path", info.Build.Recipe.Path); err != nil {
+		return err
+	}
+	if err := check("layout.entrypoint", info.Layout.Entrypoint); err != nil {
+		return err
+	}
+	if err := check("layout.provenance", info.Layout.Provenance); err != nil {
+		return err
+	}
+	for i, r := range info.Layout.Releases {
+		if err := check(fmt.Sprintf("layout.releases[%d].path", i), r.Path); err != nil {
+			return err
+		}
+		if err := check(fmt.Sprintf("layout.releases[%d].manifest", i), r.Manifest); err != nil {
+			return err
+		}
+	}
+	return nil
 }
