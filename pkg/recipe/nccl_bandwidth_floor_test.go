@@ -173,11 +173,12 @@ func TestGB200GKENCCLBandwidthFloor(t *testing.T) {
 		criteria  *Criteria
 		wantValue string
 		wantPerf  bool
-		// otherChecksExpected is true when the resolved performance phase
-		// legitimately carries checks unrelated to checkName (e.g. Dynamo's
-		// inference-perf), so the phase itself must not be asserted empty
-		// even though checkName is absent.
-		otherChecksExpected bool
+		// otherCheckExpected names a performance check unrelated to
+		// checkName that the resolved phase legitimately carries (e.g.
+		// Dynamo's inference-perf), so the phase itself must not be
+		// asserted empty even though checkName is absent. Empty means the
+		// phase must be empty when checkName is absent.
+		otherCheckExpected string
 	}{
 		{
 			name: "gb200-gke-cos-training",
@@ -234,8 +235,8 @@ func TestGB200GKENCCLBandwidthFloor(t *testing.T) {
 				Intent:      CriteriaIntentInference,
 				Platform:    CriteriaPlatformDynamo,
 			},
-			wantPerf:            false,
-			otherChecksExpected: true,
+			wantPerf:           false,
+			otherCheckExpected: "inference-perf",
 		},
 	}
 
@@ -272,8 +273,10 @@ func TestGB200GKENCCLBandwidthFloor(t *testing.T) {
 				if found {
 					t.Errorf("performance constraint %q should be cleared but resolved to %q", checkName, gotValue)
 				}
-				if !tt.otherChecksExpected {
+				if tt.otherCheckExpected == "" {
 					assertPerformancePhaseEmpty(t, result.Validation)
+				} else if !performanceCheckPresent(result.Validation, tt.otherCheckExpected) {
+					t.Errorf("performance check %q not present in resolved checks", tt.otherCheckExpected)
 				}
 			}
 		})
