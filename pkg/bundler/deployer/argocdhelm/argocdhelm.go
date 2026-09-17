@@ -86,6 +86,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -115,6 +116,15 @@ const (
 	profileLockTemplateName = "aicr-profile-lock"
 
 	profileLockTemplateHeader = "{{- /* AICR profile install-time ownership guard. */ -}}\n"
+)
+
+// Bundle-root file/directory names used by both the chart writer and the
+// released-layout index: fileChart is this deployer's Entrypoint, and
+// dirTemplates is where writeChartYAML's sibling per-folder templates land,
+// including each transformed folder's <name>.yaml.
+const (
+	fileChart    = "Chart.yaml"
+	dirTemplates = "templates"
 )
 
 // DefaultChartName is the Helm chart name used when ChartName is not set
@@ -377,6 +387,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	}
 
 	output := &deployer.Output{Files: make([]string, 0)}
+	output.Entrypoint = fileChart
 
 	// Write Chart.yaml
 	chartName := g.chartName()
@@ -398,7 +409,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// path-based Argo Applications can resolve `path: NNN-<name>` against
 	// the bundle, then transform that folder's application.yaml into a
 	// Helm chart template under templates/<name>.yaml.
-	templatesDir, err := deployer.SafeJoin(outputDir, "templates")
+	templatesDir, err := deployer.SafeJoin(outputDir, dirTemplates)
 	if err != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to resolve templates directory", err)
 	}
@@ -1300,6 +1311,17 @@ func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templ
 		output.Files = append(output.Files, copiedFiles...)
 		output.TotalSize += copySize
 
+		output.Releases = append(output.Releases, deployer.Release{
+			Name:      folderComponent,
+			Component: parentComponent,
+			Namespace: namespaceForComponent(g.RecipeResult.ComponentRefs, parentComponent),
+			Path:      folderName,
+			// The chart declares each release as a template, not as a
+			// per-folder application.yaml — that file is stripped by
+			// copyFolderContent and transformed into templates/<name>.yaml.
+			Manifest: path.Join(dirTemplates, folderComponent+".yaml"),
+		})
+
 		// Validate the composed child name at bundle time: the rendered
 		// template prepends `.Values.deployer.namePrefix` (defaulting to
 		// the baked NamePrefix in root values.yaml), so a prefix that
@@ -1689,6 +1711,19 @@ func findComponentByName(refs []recipe.ComponentRef, name string) bool {
 	return false
 }
 
+// namespaceForComponent returns the target namespace declared for name in the
+// recipe, or empty when the component is not declared. Injected -pre / -post
+// / -readiness folders resolve through their parent, so callers pass the
+// parent.
+func namespaceForComponent(refs []recipe.ComponentRef, name string) string {
+	for i := range refs {
+		if refs[i].Name == name {
+			return refs[i].Namespace
+		}
+	}
+	return ""
+}
+
 // copyFolderContent copies srcDir/folderName/* into outputDir/folderName/,
 // excluding any file whose basename is in skip. Used to relocate the argocd
 // deployer's NNN-folders into the argocdhelm bundle so path-based Argo
@@ -1841,7 +1876,7 @@ func convertToSingleSourceWithValues(app map[string]any, componentName, override
 }
 
 func writeChartYAML(outputDir, name, version string) (string, int64, error) {
-	chartPath, err := deployer.SafeJoin(outputDir, "Chart.yaml")
+	chartPath, err := deployer.SafeJoin(outputDir, fileChart)
 	if err != nil {
 		return "", 0, err
 	}
