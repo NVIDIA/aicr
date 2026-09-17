@@ -21,6 +21,7 @@ per-record inventory (image refs, pins, provenance) is produced by `make registr
 | `dl.k8s.io` | binary-release | pull |
 | `docker.gitea.com` | container-image | pull |
 | `docker.io` | container-image | pull |
+| `dsx-ai-factory.github.io` | helm-chart-http | pull |
 | `get.helm.sh` | binary-release | pull |
 | `ghcr.io` | container-image, oci-helm-chart | pull, push |
 | `github-actions` | github-action | pull |
@@ -31,7 +32,6 @@ per-record inventory (image refs, pins, provenance) is produced by `make registr
 | `kind.sigs.k8s.io` | binary-release | pull |
 | `kubernetes-sigs.github.io` | helm-chart-http | pull |
 | `nvcr.io` | container-image | pull |
-| `nvidia.github.io` | helm-chart-http | pull |
 | `open-policy-agent.github.io` | helm-chart-http | pull |
 | `prometheus-community.github.io` | helm-chart-http | pull |
 | `proxy.golang.org` | go-module | pull |
