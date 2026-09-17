@@ -39,24 +39,25 @@ are frozen at v1 and gated by `TestBundleLayoutMatchesManifest`, so a path
 shown here will not disappear or be renamed without a deliberate, reviewed
 change. Automation may read these paths.
 
-Every deployer writes `checksums.txt`, `README.md` and `recipe.yaml` at the
-bundle root. Four of the five group components into ordered `NNN-<component>`
-directories; Flux is the exception and uses a plain `<component>` directory
-with shared `sources/`.
+Every deployer writes `bundle-info.yaml`, `checksums.txt`, `README.md` and
+`recipe.yaml` at the bundle root. Four of the five group components into
+ordered `NNN-<component>` directories; Flux is the exception and uses a plain
+`<component>` directory with shared `sources/`.
 
 ```text
-helm/                          argocd/                     flux/
-  001-cert-manager/              001-cert-manager/            cert-manager/
-    values.yaml                    application.yaml             helmrelease.yaml
-    cluster-values.yaml            values.yaml                nfd/
-    install.sh                   002-nfd/                     helmrelease.yaml
-    upstream.env                   application.yaml           sources/
-  002-nfd/                         values.yaml                  helmrepo-<host>.yaml
-    ...                          app-of-apps.yaml             gitrepo-<host>.yaml
-  deploy.sh                      checksums.txt              kustomization.yaml
-  recipe.yaml                    README.md                  checksums.txt
-  checksums.txt                  recipe.yaml                README.md
-  README.md                                                 recipe.yaml
+helm/                            argocd/                      flux/
+  001-cert-manager/               001-cert-manager/            cert-manager/
+    values.yaml                     application.yaml             helmrelease.yaml
+    cluster-values.yaml             values.yaml                nfd/
+    install.sh                    002-nfd/                       helmrelease.yaml
+    upstream.env                    application.yaml           sources/
+  002-nfd/                          values.yaml                  helmrepo-<host>.yaml
+    ...                           app-of-apps.yaml               gitrepo-<host>.yaml
+  deploy.sh                       bundle-info.yaml             kustomization.yaml
+  bundle-info.yaml                checksums.txt                bundle-info.yaml
+  recipe.yaml                     README.md                    checksums.txt
+  checksums.txt                   recipe.yaml                  README.md
+  README.md                                                    recipe.yaml
 ```
 
 `helmfile` shares Helm's per-component files but not its root: it writes
@@ -71,6 +72,7 @@ helmfile/
   helmfile.yaml
   level-N.yaml                 one per dependency depth; absent when flat
   recipe.yaml
+  bundle-info.yaml
   checksums.txt
   README.md
 ```
@@ -81,12 +83,130 @@ helmfile/
 Two kinds of name appear in these trees, and only one is a promise:
 
 - **Fixed names are contract.** `deploy.sh`, `app-of-apps.yaml`,
-  `kustomization.yaml`, `checksums.txt`, `values.yaml`, `helmrelease.yaml`,
-  and the `NNN-<component>` convention itself.
+  `kustomization.yaml`, `bundle-info.yaml`, `checksums.txt`, `values.yaml`,
+  `helmrelease.yaml`, and the `NNN-<component>` convention itself.
 - **Derived names are not.** Flux writes one `helmrepo-<host>.yaml` per chart
   repository and helmfile one `level-N.yaml` per dependency depth, so both sets
   change with the recipe. Discover them by listing the directory rather than
   hardcoding a name.
+
+### Bundle info
+
+Every bundle carries a `bundle-info.yaml` at its root, written unconditionally
+by all five deployers — no flag turns it off. It answers three questions a
+bundle cannot answer for itself: which deployer built it, which `aicr` binary
+built it, and which Helm release landed in which directory.
+
+`layout.entrypoint` names the file a consumer invokes or applies —
+`deploy.sh`, `helmfile.yaml`, `app-of-apps.yaml`, `Chart.yaml`, or
+`kustomization.yaml` — so automation reads one key instead of branching on
+`build.deployer`.
+
+`layout.releases` lists every Helm release the bundle installs, in deployment
+order, and that ordering is normative: there is no ordinal field, so a
+consumer reads sequence from list position rather than from a number. A
+release injected alongside a component — the `-pre`, `-post`, or
+`-readiness` folders that `--vendor-charts` and `--readiness-hooks` can add —
+has no recipe component of its own, so it names its parent in `component`
+while `name` carries its own suffixed name.
+
+`bundle-info.yaml` deliberately carries no component inventory: `recipe.yaml`
+sits beside it at the bundle root and is already the source of truth for what
+the recipe resolved to. It also carries no timestamp — the record feeds
+`checksums.txt`, which is the subject of the bundle attestation, so a
+wall-clock field would make every bundle irreproducible.
+
+Below is a fully populated example, generated from the shipped serializer and
+extended with fields (`repoURL`, `provenance`, an injected `-post`/`-readiness`
+pair) that a single bundle rarely exercises all at once. Key order is
+alphabetical at every nesting level — `serializer.MarshalYAMLDeterministic`
+sorts mapping keys before writing — so the top level reads `apiVersion, build,
+kind, layout, metadata`, not a hand-arranged order. Expect the same
+alphabetical order in your own bundle.
+
+```yaml
+apiVersion: aicr.run/v1
+build:
+  deployer: argocd
+  recipe:
+    digest: sha256:d429490ec53e902e5a7f5a9b0221ab4a46f233ec70f808f1e62bbade2576e083
+    path: recipe.yaml
+    version: v0.22.0
+  settings:
+    appName: gpu-cluster
+    attested: true
+    checksums: true
+    components:
+      - cert-manager
+      - nfd
+      - network-operator
+    nodeScheduling:
+      accelerated:
+        selector:
+          nvidia.com/gpu.present: "true"
+        tolerations:
+          - effect: NoSchedule
+            key: nvidia.com/gpu
+            operator: Equal
+            value: present
+      system:
+        selector:
+          nodeGroup: system
+        tolerations:
+          - effect: NoSchedule
+            key: dedicated
+            operator: Equal
+            value: system
+    readinessHooks: true
+    repoURL: https://github.com/my-org/my-gitops-repo.git
+    serial: false
+    sharedStorageClass: shared-nfs
+    storageClass: local-nvme
+    targetRevision: main
+    vendorCharts: true
+kind: BundleInfo
+layout:
+  entrypoint: app-of-apps.yaml
+  provenance: provenance.yaml
+  releases:
+    - component: cert-manager
+      manifest: 001-cert-manager/application.yaml
+      name: cert-manager
+      namespace: cert-manager
+      path: 001-cert-manager
+    - component: nfd
+      manifest: 002-nfd/application.yaml
+      name: nfd
+      namespace: node-feature-discovery
+      path: 002-nfd
+    - component: network-operator
+      manifest: 003-network-operator/application.yaml
+      name: network-operator
+      namespace: network-operator
+      path: 003-network-operator
+    - component: network-operator
+      manifest: 004-network-operator-post/application.yaml
+      name: network-operator-post
+      namespace: network-operator
+      path: 004-network-operator-post
+    - component: network-operator
+      manifest: 005-network-operator-readiness/application.yaml
+      name: network-operator-readiness
+      namespace: network-operator
+      path: 005-network-operator-readiness
+metadata:
+  version: v0.22.0
+```
+
+`build.recipe.version` and `metadata.version` can diverge: the former is the
+`aicr` binary that resolved `recipe.yaml` (stamped by the recipe builder and
+never restamped), the latter is the `aicr` binary that ran `bundle`. They read
+the same on a one-step workflow and differ whenever recipe generation and
+bundling run on different releases. `build.settings` includes only settings
+whose effect is already observable elsewhere in the bundle's own files —
+Fulcio/Rekor endpoints, certificate identity, and free-form `--set` overrides
+are excluded by construction, since `values.yaml` already carries the effect
+of the latter.
 
 ### Generated chart versions
 
