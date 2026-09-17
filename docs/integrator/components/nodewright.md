@@ -140,6 +140,50 @@ CR is tracked in [#1844](https://github.com/NVIDIA/aicr/issues/1844).
 
 See [recipes/components/nodewright-customizations/manifests](https://github.com/NVIDIA/aicr/blob/main/recipes/components/nodewright-customizations/manifests) for the specifics on packages and their configuration.
 
+## Rollout pacing
+
+Every reboot-carrying tuning manifest (`tuning.yaml`, `tuning-gb300.yaml`,
+`tuning-generic.yaml`, `tuning-rke2.yaml`) pins
+`spec.interruptionBudget.count: 1`, so nodewright reboots one matched node at a
+time.
+
+The budget is load-bearing, not a style preference. An omitted
+`interruptionBudget` is not "unset": the operator's
+`createLegacyDefaultCompartment` substitutes `percent: 100`, so the whole
+matched GPU fleet reboots together. Nothing confines a generated bundle to
+build time — it can be applied to a cluster already running work — so the safe
+value has to be the default.
+
+`count: 1` costs N x (reboot time) to converge, and `runtimeRequired: true`
+keeps workloads gated on the last node for the whole rollout. On an **initial
+cluster build**, before any workload has landed, that serialization buys
+nothing. Two equivalent ways to opt out of it for bringup:
+
+- Delete the `interruptionBudget` block from the rendered CR, or
+- set `percent: 100`, which reproduces the pre-budget behavior exactly (`count`
+  and `percent` are mutually exclusive — set one or the other, never both).
+
+Restore the budget before the cluster starts taking work.
+
+## GB300 host kernel granule
+
+`nvidia-gb300-performance` sizes its hugepage pools for a 64k-page ARM64 kernel
+(2M + 512M, and no 1G — a 64k granule has no PUD level). On EKS,
+`nvidia-setup-kernel` installs the pinned 64k kernel, so profile and host agree
+by construction.
+
+On `--service generic` there is no `nvidia-setup` to pin one: it dispatches on
+`<service>-<accelerator>` and ships no `generic-*` config, so a bare-metal GB300
+node takes its kernel from the host image. A **64k-granule host kernel is the
+recommended image** there.
+
+A 4k-granule kernel is not fatal. Linux rejects the invalid `hugepagesz=512M`
+clause and silently drops the `hugepages=` count paired with it, so the node
+boots and runs — it just comes up without the pool the profile intended, at
+reduced performance. `aicr bundle` emits `CheckGB300HostKernelGranule` at
+`severity: info` for that combination, so the tradeoff is visible at generation
+time rather than only in a manifest comment.
+
 ## Tuning-gke
 
 A GKE + Container Optimized OS (COS) specific tuning that only sets some of the sysctl settings and does NOT require any interrupts due to being able to configure seamlessly while workloads are running.

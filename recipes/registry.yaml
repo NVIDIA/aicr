@@ -413,6 +413,21 @@ components:
           which deadlocks nodewright packages that declare interrupts on first
           install (NVIDIA/nodewright#296). Pass keyed tolerations instead, e.g.
           --accelerated-node-toleration nvidia.com/gpu:NoSchedule."
+      - function: CheckGB300HostKernelGranule
+        # Advisory, not blocking: a 4k-granule host still boots and runs, it
+        # just comes up without the 512M pool the profile sizes. Bundle time
+        # has no cluster-side signal to tell the two apart.
+        severity: info
+        conditions:
+          service:
+            - generic
+          accelerator:
+            - gb300
+        message: "nvidia-gb300-performance sizes hugepages for a 64k-page ARM64
+          kernel (2M + 512M). On a 4k-granule host image the hugepagesz=512M
+          clause is rejected at boot and its paired hugepages= count is dropped
+          silently, so the node runs without that pool. Prefer a 64k host
+          kernel; see docs/integrator/components/nodewright.md."
 
   - name: nvsentinel
     # Sole owner of its CRDs and no webhook conversion (audited, #2264).

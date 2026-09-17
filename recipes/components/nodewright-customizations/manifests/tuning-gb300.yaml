@@ -22,12 +22,15 @@
 # tuning.yaml would fail on this leaf. A bare-metal GB300 node therefore takes
 # its kernel and EFA from the host image.
 #
-# That makes the hugepage sizing a deployment-time precondition here, where on
-# EKS nvidia-setup guarantees it. nvidia-gb300-performance sizes its pools for a
-# 64k-page ARM64 kernel (2M + 512M, no 1G: a 64k granule has no PUD level). On a
-# 4k-granule kernel the hugepagesz=512M clause is rejected at boot and the
-# hugepages= paired with it is dropped silently, so do not point this manifest at
-# a GB300 node whose image ships a 4k kernel.
+# That leaves the host kernel's page granule as a performance variable here,
+# where on EKS nvidia-setup-kernel pins it. nvidia-gb300-performance sizes its
+# pools for a 64k-page ARM64 kernel (2M + 512M, no 1G: a 64k granule has no PUD
+# level). A 4k-granule kernel still boots and runs the node — Linux rejects the
+# hugepagesz=512M clause and silently drops the hugepages= count paired with it
+# — it just comes up without the pool the profile intended. So 64k is the
+# recommended host image, not a hard requirement: CheckGB300HostKernelGranule
+# warns at bundle time (severity: info, registry.yaml) and
+# docs/integrator/components/nodewright.md carries the user-facing statement.
 #
 # The gb300 profiles arrived in nvidia-tuned 0.10.0. `inference` and
 # `multiNodeTraining` are shims that resolve to nvidia-gb300-performance and add
@@ -68,6 +71,17 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   runtimeRequired: true
+  # Serialize this CR's reboots to one node at a time. nvidia-tuned carries
+  # `interrupt: reboot` for its [bootloader] section.
+  # An omitted budget is not "unset": createLegacyDefaultCompartment
+  # substitutes percent: 100, so every matched node reboots together.
+  #
+  # BRINGUP ESCAPE HATCH: on an initial cluster build, before any workload has
+  # landed, serializing buys nothing and costs N x (reboot time). Delete this
+  # block or set `percent: 100` — its exact equivalent — to converge in one
+  # batch. count and percent are mutually exclusive.
+  interruptionBudget:
+    count: 1
   # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
   {{- /* Sprig-safe: a "| default true" here would swallow an explicit false under --deployer flux. */}}
   autoTaintNewNodes: {{ ne (toString (index $cust "autoTaintNewNodes")) "false" }}
@@ -81,7 +95,16 @@ spec:
     # injected from scheduling defaults/flags.
     - operator: Exists
     {{- end }}
-  # Dynamic: Supports --accelerated-node-selector CLI flag
+  # Dynamic: Supports --accelerated-node-selector CLI flag.
+  # No nvidia.com/gpu.present fallback here, unlike tuning-rke2.yaml: that label
+  # is emitted by GFD, which ships inside gpu-operator, and gpu-operator lists
+  # nodewright-customizations in its dependencyRefs — so this CR is applied
+  # BEFORE the label can exist on a greenfield cluster. Selecting on it would
+  # match zero nodes at bringup and only start matching after the GPU driver
+  # stack is already up, inverting the tune-then-driver ordering that
+  # runtimeRequired and the provisioner's runtime-required pre-taint exist to
+  # enforce. tuning-rke2.yaml is safe because VR200 is a deliberate day-2 flow
+  # on an already-labeled cluster (docs/integrator/rke2-vr200-setup.md).
   {{- if $cust.acceleratedNodeSelector }}
   nodeSelectors:
     matchLabels:
