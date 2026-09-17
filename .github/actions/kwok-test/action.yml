@@ -64,11 +64,11 @@ inputs:
     required: false
     default: ''
   upload_artifacts:
-    description: 'Whether to upload debug artifacts on failure'
+    description: 'Whether to upload the CTRF results (every outcome) and debug artifacts (on failure)'
     required: false
     default: 'true'
   artifact_retention_days:
-    description: 'Number of days to retain debug artifacts'
+    description: 'Number of days to retain the CTRF results and debug artifacts'
     required: false
     default: '7'
   job_timeout_minutes:
@@ -272,6 +272,18 @@ runs:
         for cluster in $(kind get clusters 2>/dev/null); do
           kind export logs "/tmp/kwok-kind-logs/${cluster}" --name "$cluster" || true
         done
+
+    # run-all-recipes.sh records one CTRF test per (recipe, deployer) cell in
+    # /tmp/kwok-debug-artifacts/kwok-results.json (#1806). Upload it on every
+    # outcome so a green lane leaves structured evidence too, not only a red one.
+    - name: Upload CTRF results
+      if: always() && inputs.upload_artifacts == 'true'
+      uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f  # v6.0.0
+      with:
+        name: kwok-results-${{ inputs.recipe }}-${{ inputs.deployer }}-${{ github.run_id }}-${{ github.run_attempt }}
+        path: /tmp/kwok-debug-artifacts/kwok-results.json
+        retention-days: ${{ inputs.artifact_retention_days }}
+        if-no-files-found: warn
 
     - name: Upload debug artifacts
       if: failure() && inputs.upload_artifacts == 'true'

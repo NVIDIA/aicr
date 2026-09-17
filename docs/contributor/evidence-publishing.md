@@ -226,6 +226,12 @@ aicr validate -r recipes/overlays/<slug>.yaml -s snapshot.yaml --emit-attestatio
 #   aicr recipe -s snapshot.yaml --intent <intent> [--platform <platform>] \
 #     --profile gpuStack=<value> -o recipe.yaml
 #   aicr validate -r recipe.yaml -s snapshot.yaml --emit-attestation ./out
+# The h100 GKE kubeflow training leaf ships torch-distributed-tcpxo, which
+# requires the ordered GPU-NIC interface mapping — overlay-direct validate/
+# bundle/evidence-digest fails closed on it (auto-hydration supplies none).
+# Hydrate first and add --gke-tcpxo-interfaces eth1=<net>,...,eth8=<net>:
+#   aicr recipe -s snapshot.yaml --intent training --platform kubeflow \
+#     --profile gpuStack=<value> --gke-tcpxo-interfaces eth1=<net>,...,eth8=<net> -o recipe.yaml
 
 # Off VPN, where Sigstore is reachable: sign, push, and write the pointer.
 aicr evidence publish ./out --push ghcr.io/<your-fork-owner>/aicr-evidence

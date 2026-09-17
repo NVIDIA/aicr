@@ -29,7 +29,7 @@
 # See docs/contributor/recipe.md#criteria-wildcard-overlays for details.
 
 kind: RecipeMetadata
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 metadata:
   name: gb300-any
 

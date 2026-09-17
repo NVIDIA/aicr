@@ -9,3 +9,4 @@
 README.md
 checksums.txt
 helmfile.yaml
+recipe.yaml

@@ -31,7 +31,7 @@
 # deliberate: R595 is documented as backward incompatible with P6e EFA, see
 # issues #2383 and #2459.
 
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 kind: KWOKNodeProfile
 metadata:
   name: p6e-gb300

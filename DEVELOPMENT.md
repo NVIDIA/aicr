@@ -218,7 +218,7 @@ make test-coverage
 ### 4. Lint Your Code
 
 ```bash
-# Run all linters (Go, YAML, license headers, agents sync, docs filename/MDX gates, chart-version pins)
+# Run all linters (Go, YAML, license headers, agents sync, docs gates, chart-version pins)
 make lint
 
 # Or run individually for a faster loop (all of these already run as part of `make lint`)
@@ -229,11 +229,18 @@ make license      # Add/verify license headers (may modify files)
 # Docs published to Fern are parsed as MDX; both checks gate the merge
 make check-docs-mdx        # fast pattern approximation (no dependencies)
 make check-docs-mdx-parse  # real MDX parser, authoritative (needs Node 20+)
+
+# YAML-labelled code blocks throughout docs/ must contain parseable YAML
+make check-docs-yaml       # syntax only; partial YAML fragments are valid
 ```
 
 `check-docs-mdx-parse` warns and skips when Node is unavailable locally, but
 hard-fails in CI. See
 [Docs MDX Gate](docs/contributor/tests.md#docs-mdx-gate).
+
+`check-docs-yaml` has the same local-warning and CI-hard-fail behavior for a
+missing Node runtime. See
+[Docs YAML Fence Gate](docs/contributor/tests.md#docs-yaml-fence-gate).
 
 ### 5. Run E2E Tests
 
@@ -469,7 +476,7 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make qualify` | Full qualification (test-coverage, lint, tuning-check, e2e, scan, license-check, api-diff, openapi-diff) |
 | `make test` | Unit tests with race detector and coverage |
 | `make test-coverage` | Tests with coverage threshold (from `.settings.yaml` `quality.coverage_threshold`) |
-| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs filename/MDX gates, and chart-version pins |
+| `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, and chart-version pins |
 | `make lint-go` | Go linting only |
 | `make lint-yaml` | YAML linting only |
 | `make e2e` | CLI end-to-end tests |
@@ -479,7 +486,7 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 | `make kwok-test-all` | Test all recipes with KWOK (serial, shared cluster) |
 | `make kwok-e2e RECIPE=<name>` | Test single recipe with KWOK (e.g., gb200-eks-training) |
 | `make check-health COMPONENT=<name>` | Run chainsaw health check directly against Kind cluster |
-| `make check-health-all` | Run all chainsaw health checks against Kind cluster |
+| `make check-health-all` | Run chainsaw health checks for every registry-linked component against Kind cluster (opt-in-only checks like `nvsentinel-observability` run via `check-health COMPONENT=<name>`) |
 | `make validate-local RECIPE=<path>` | Build validator image, load into Kind, run deployment validation |
 
 ### Build & Release
@@ -671,7 +678,8 @@ Runs chainsaw directly against the Kind cluster. Fast (~5s), validates YAML synt
 # Run health check for a single component
 make check-health COMPONENT=nvsentinel
 
-# Run all health checks
+# Run health checks for every registry-linked component
+# (opt-in-only checks are excluded; run those with check-health COMPONENT=<name>)
 make check-health-all
 
 # List available components

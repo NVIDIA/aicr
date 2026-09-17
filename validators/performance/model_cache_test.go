@@ -449,10 +449,12 @@ func TestMachineFamily(t *testing.T) {
 	}
 }
 
-// TestCheckStorageClassNodeCompatibility verifies the rule-table lookup: a
+// TestCheckStorageClassNodeCompatibility verifies the rule-table lookup. A
 // machine family listed under a rule can only attach a StorageClass whose
-// parameters.type carries that rule's compatibleTypePrefix; every other
-// family/provisioner/type combination passes.
+// parameters.type is in that rule's compatibleTypes, or (per
+// TestCheckStorageClassNodeCompatibility_ExtraCompatibleTypes) named by
+// envModelCacheExtraCompatibleTypes. Every other family/provisioner/type
+// combination passes.
 func TestCheckStorageClassNodeCompatibility(t *testing.T) {
 	pdBalanced := &storagev1.StorageClass{
 		ObjectMeta:  metav1.ObjectMeta{Name: "standard-rwo"},
@@ -463,6 +465,14 @@ func TestCheckStorageClassNodeCompatibility(t *testing.T) {
 		ObjectMeta:  metav1.ObjectMeta{Name: "hyperdisk-balanced"},
 		Provisioner: "pd.csi.storage.gke.io",
 		Parameters:  map[string]string{"type": "hyperdisk-balanced"},
+	}
+	// hyperdisk-throughput is a real Hyperdisk type, but GKE does not support
+	// it as an attached volume on a4x. The compatibleTypes allowlist must
+	// reject it by exact name.
+	hyperdiskThroughput := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "hyperdisk-throughput"},
+		Provisioner: "pd.csi.storage.gke.io",
+		Parameters:  map[string]string{"type": "hyperdisk-throughput"},
 	}
 	dynamicSelect := &storagev1.StorageClass{
 		ObjectMeta:  metav1.ObjectMeta{Name: "dynamic-volume"},
@@ -479,24 +489,76 @@ func TestCheckStorageClassNodeCompatibility(t *testing.T) {
 		name         string
 		instanceType string
 		sc           *storagev1.StorageClass
+		fromRecipe   bool
 		wantErr      bool
+		wantErrMsg   string // substring; empty skips the check
 	}{
-		{"a4x with Persistent Disk is rejected", "a4x-highgpu-4g", pdBalanced, true},
-		{"a4x with explicit Hyperdisk selection is fine", "a4x-highgpu-4g", hyperdiskBalanced, false},
-		{"a4x with dynamic disk-type selection is fine", "a4x-highgpu-4g", dynamicSelect, false},
-		{"non-a4x family with Persistent Disk is fine", "n2-standard-4", pdBalanced, false},
-		{"non-a4x family with dynamic disk-type selection is fine", "n2-standard-4", dynamicSelect, false},
-		{"a4x with an unrelated provisioner is fine", "a4x-highgpu-4g", otherProvisioner, false},
-		{"nil StorageClass is fine (not this function's concern)", "a4x-highgpu-4g", nil, false},
+		{"a4x with Persistent Disk is rejected", "a4x-highgpu-4g", pdBalanced, false, true, envModelCacheStorageClass},
+		{"a4x with explicit Hyperdisk selection is fine", "a4x-highgpu-4g", hyperdiskBalanced, false, false, ""},
+		{"a4x with an unsupported Hyperdisk type is rejected", "a4x-highgpu-4g", hyperdiskThroughput, false, true, envModelCacheStorageClass},
+		{"a4x with dynamic disk-type selection is fine", "a4x-highgpu-4g", dynamicSelect, false, false, ""},
+		{"non-a4x family with Persistent Disk is fine", "n2-standard-4", pdBalanced, false, false, ""},
+		{"non-a4x family with dynamic disk-type selection is fine", "n2-standard-4", dynamicSelect, false, false, ""},
+		{"a4x with an unrelated provisioner is fine", "a4x-highgpu-4g", otherProvisioner, false, false, ""},
+		{"nil StorageClass is fine (not this function's concern)", "a4x-highgpu-4g", nil, false, false, ""},
+		{
+			"recipe-sourced StorageClass points remediation at the recipe constraint, not the env var",
+			"a4x-highgpu-4g", pdBalanced, true, true, perfConstraintModelCacheStorageClass,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := checkStorageClassNodeCompatibility(tt.instanceType, tt.sc)
+			err := checkStorageClassNodeCompatibility(tt.instanceType, tt.sc, tt.fromRecipe)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			if tt.wantErrMsg != "" && !strings.Contains(err.Error(), tt.wantErrMsg) {
+				t.Errorf("error = %v, want it to mention %q", err, tt.wantErrMsg)
+			}
+			if tt.fromRecipe && tt.wantErr && strings.Contains(err.Error(), "set "+envModelCacheStorageClass+" to") {
+				t.Errorf("error = %v, should not tell the user to set %s when the value came from a recipe constraint (that env var can't override it)", err, envModelCacheStorageClass)
+			}
+		})
+	}
+}
+
+// TestCheckStorageClassNodeCompatibility_ExtraCompatibleTypes verifies that
+// envModelCacheExtraCompatibleTypes lets an otherwise-rejected type through,
+// trims whitespace around each comma-separated entry, and leaves unrelated
+// types rejected.
+func TestCheckStorageClassNodeCompatibility_ExtraCompatibleTypes(t *testing.T) {
+	hyperdiskThroughput := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "hyperdisk-throughput"},
+		Provisioner: "pd.csi.storage.gke.io",
+		Parameters:  map[string]string{"type": "hyperdisk-throughput"},
+	}
+	pdBalanced := &storagev1.StorageClass{
+		ObjectMeta:  metav1.ObjectMeta{Name: "standard-rwo"},
+		Provisioner: "pd.csi.storage.gke.io",
+		Parameters:  map[string]string{"type": "pd-balanced"},
+	}
+
+	tests := []struct {
+		name    string
+		envVal  string
+		sc      *storagev1.StorageClass
+		wantErr bool
+	}{
+		{"unset rejects", "", hyperdiskThroughput, true},
+		{"listed type is allowed", "hyperdisk-throughput", hyperdiskThroughput, false},
+		{"listed type among several, with whitespace, is allowed", " foo , hyperdisk-throughput ,bar", hyperdiskThroughput, false},
+		{"listing an unrelated type does not allow this one", "some-other-type", hyperdiskThroughput, true},
+		{"listing the type does not allow an unrelated one", "hyperdisk-throughput", pdBalanced, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(envModelCacheExtraCompatibleTypes, tt.envVal)
+			err := checkStorageClassNodeCompatibility("a4x-highgpu-4g", tt.sc, false)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -516,10 +578,11 @@ func TestEnsureModelCache(t *testing.T) {
 	}
 
 	tests := []struct {
-		name    string
-		classes []runtime.Object
-		cfg     *inferenceWorkloadConfig
-		wantErr bool
+		name       string
+		classes    []runtime.Object
+		cfg        *inferenceWorkloadConfig
+		wantErr    bool
+		wantErrMsg string // substring; empty skips the check
 	}{
 		{
 			name: "disabled is a no-op",
@@ -540,13 +603,25 @@ func TestEnsureModelCache(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:    "incompatible explicit override is rejected",
+			name:    "incompatible explicit override from env is rejected, pointing at the env var",
 			classes: []runtime.Object{pdBalanced},
 			cfg: &inferenceWorkloadConfig{
 				namespace: "ns", model: "Qwen/Qwen3-8B", modelCacheSize: defaultModelCacheSize,
 				gpuNodeInstanceType: "a4x-highgpu-4g", modelCacheStorageClass: "standard-rwo",
 			},
-			wantErr: true,
+			wantErr:    true,
+			wantErrMsg: envModelCacheStorageClass,
+		},
+		{
+			name:    "incompatible explicit override from recipe is rejected, pointing at the recipe constraint",
+			classes: []runtime.Object{pdBalanced},
+			cfg: &inferenceWorkloadConfig{
+				namespace: "ns", model: "Qwen/Qwen3-8B", modelCacheSize: defaultModelCacheSize,
+				gpuNodeInstanceType: "a4x-highgpu-4g", modelCacheStorageClass: "standard-rwo",
+				modelCacheStorageClassFromRecipe: true,
+			},
+			wantErr:    true,
+			wantErrMsg: perfConstraintModelCacheStorageClass,
 		},
 	}
 	for _, tt := range tests {
@@ -559,6 +634,9 @@ func TestEnsureModelCache(t *testing.T) {
 			}
 			if tt.wantErr && !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 				t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+			}
+			if tt.wantErrMsg != "" && !strings.Contains(err.Error(), tt.wantErrMsg) {
+				t.Errorf("error = %v, want it to mention %q", err, tt.wantErrMsg)
 			}
 			pvcs, _ := client.CoreV1().PersistentVolumeClaims(tt.cfg.namespace).List(context.Background(), metav1.ListOptions{})
 			if len(pvcs.Items) != 0 {

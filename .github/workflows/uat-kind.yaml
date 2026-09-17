@@ -309,6 +309,18 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
+      # phase_prep records the live-cluster `aicr snapshot` outcome as CTRF
+      # (snapshot-result.json, #1806). Upload it on every outcome once prep ran,
+      # so the step has a machine-readable record on green and red runs alike.
+      - name: Upload snapshot result
+        if: always() && steps.prep.outcome != 'skipped'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: uat-kind-${{ inputs.intent }}-snapshot-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: snapshot-result.json
+          retention-days: 30
+          if-no-files-found: warn
+
       - name: Collect cluster debug bundle
         if: failure() && steps.prep.outcome != 'skipped'
         timeout-minutes: 8
@@ -324,6 +336,7 @@ jobs:
           name: uat-kind-${{ inputs.intent }}-debug-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             snapshot.yaml
+            snapshot-result.json
             recipe.yaml
             dry-run.json
             report.json

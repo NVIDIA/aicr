@@ -430,10 +430,11 @@ Two things are deliberately out of scope, both tracked as follow-ups:
 - **Container-image OCI referrer attestations** (SBOM / OpenVEX / SLSA
   provenance, [#1982](https://github.com/NVIDIA/aicr/issues/1982)). Those live in
   ghcr.io's referrer store — a different system with a different retention and GC
-  model from GitHub Releases — and re-verifying seven images times five
-  attestations each (provenance on the index, plus a CycloneDX SBOM and an
-  OpenVEX document on each of the two platform manifests) would add roughly
-  thirty-five registry round-trips per run, multiplying operational noise
+  model from GitHub Releases — and re-verifying seven images times seven
+  attestations each (provenance on the index and on each of the two platform
+  manifests, plus a CycloneDX SBOM and an OpenVEX document on each of those two
+  manifests) would add roughly forty-nine registry round-trips per run,
+  multiplying operational noise
   against the one signal this job exists to keep crisp. The images are already pulled and scanned weekly by
   `vuln-scan-images.yaml`. A registry-side sibling check must use
   `gh attestation verify --bundle-from-oci`, otherwise it reads GitHub's
@@ -457,6 +458,34 @@ the exact artifact:
   means the published bytes are not what the release signed and is an incident;
   an identity or predicate mismatch is a signing-path problem, and the remediation
   is different.
+
+## Registry Chart Drift Report
+
+`Registry Drift Report` (`.github/workflows/registry-drift.yaml`) runs weekly
+(Mondays 07:00 UTC) and answers a question the weekday Renovate PR run
+deliberately does not: which of the 34 chart pins in `recipes/registry.yaml`
+have moved upstream? Renovate's custom manager extracts every pin, but a
+`packageRules` guard disables the `registry-chart` depType for the weekday
+run, because an AICR component bump is never a version-string edit — it can
+rename a values path `nodeScheduling` writes into, move the rendered image
+set, or need an ADR-021 upgrade record, none of which a one-line bot PR
+checks. This workflow force-re-enables that depType under
+`RENOVATE_DRY_RUN=full`, so Renovate can report drift without ever pushing a
+branch or opening a PR.
+
+Each run posts a digest to Slack and the job summary, and uploads a
+`drift-report` artifact (`drift-report.json` plus the raw Renovate report)
+retained for 90 days — long enough to review weeks after the Monday post. A
+manual `workflow_dispatch` run has Slack posting off by default so it can be
+validated silently, and a same-repo PR touching the drift surface also runs
+the report against its own branch, always without posting.
+
+On receiving the Monday digest, review it with the
+[`aicr-reviewing-component-drift`](https://github.com/NVIDIA/aicr/blob/main/.agents/skills/aicr-reviewing-component-drift/SKILL.md)
+skill: it turns "what moved" into a ranked take/hold/defer recommendation per
+component, gathering values-path, lockstep-family, BOM, CRD/upgrade-record,
+and Kubernetes-compatibility evidence. The skill only recommends — the
+registry edit, `make bom-docs`, and the PR are separate, human-initiated work.
 
 ## Reviewing Recipe Contributions
 

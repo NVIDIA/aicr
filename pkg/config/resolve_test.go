@@ -223,6 +223,88 @@ func TestBundleResolve_RejectsMalformedSigstoreURL(t *testing.T) {
 	}
 }
 
+// TestBundleResolve_SigningKey covers signing-mode exclusivity and the key's
+// normal form at the Resolve boundary, so every caller inherits both.
+// attestation.ResolveAttesterLazy takes the KMS branch whenever SigningKey is
+// non-empty, so accepting a document that also names a Fulcio would sign with
+// the key while the caller believed they signed against that CA.
+func TestBundleResolve_SigningKey(t *testing.T) {
+	const key = "gcpkms://projects/p/locations/l/keyRings/r/cryptoKeys/k"
+	tests := []struct {
+		name    string
+		attest  *config.AttestationSpec
+		want    string
+		wantSub string
+	}{
+		{
+			name:   "kms alone projects the key",
+			attest: &config.AttestationSpec{Enabled: true, SigningKey: key},
+			want:   key,
+		},
+		{
+			name:   "surrounding whitespace is trimmed",
+			attest: &config.AttestationSpec{Enabled: true, SigningKey: "  " + key + "\n"},
+			want:   key,
+		},
+		{
+			name:   "absent key leaves keyless in place",
+			attest: &config.AttestationSpec{Enabled: true, FulcioURL: "https://fulcio.example.com"},
+			want:   "",
+		},
+		{
+			// The whole point of rejecting it here: a blank-but-present key is
+			// non-empty enough to select the KMS path, then fails late in the
+			// cosign URI parser with no spec path attached.
+			name:    "present but blank is rejected",
+			attest:  &config.AttestationSpec{Enabled: true, SigningKey: "   \t "},
+			wantSub: "spec.bundle.attestation.signingKey must not be blank",
+		},
+		{
+			name:    "kms plus fulcio is rejected",
+			attest:  &config.AttestationSpec{Enabled: true, SigningKey: key, FulcioURL: "https://fulcio.example.com"},
+			wantSub: "mutually exclusive",
+		},
+		{
+			// Not a conflict at this layer, deliberately: the CLI's
+			// --oidc-device-flow=false must still be able to correct a document
+			// that sets both, and that flag is read after Resolve.
+			// validateSigningKeyExclusivity rejects the config-only pair on the
+			// merged opts (pkg/cli TestBundleCmd_SigningKeyFromConfig).
+			name:   "kms plus device flow is allowed here",
+			attest: &config.AttestationSpec{Enabled: true, SigningKey: key, OIDCDeviceFlow: true},
+			want:   key,
+		},
+		{
+			// The transparency log is orthogonal to how the artifact is signed;
+			// "KMS key + private Rekor" is the enterprise air-gapped case.
+			name:   "kms plus rekor is allowed",
+			attest: &config.AttestationSpec{Enabled: true, SigningKey: key, RekorURL: "https://rekor.example.com"},
+			want:   key,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &config.BundleSpec{Attestation: tt.attest}
+			got, err := b.Resolve()
+			if tt.wantSub != "" {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tt.wantSub)
+				}
+				if !strings.Contains(err.Error(), tt.wantSub) {
+					t.Errorf("error %q must contain %q", err.Error(), tt.wantSub)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.SigningKey != tt.want {
+				t.Errorf("SigningKey = %q, want %q", got.SigningKey, tt.want)
+			}
+		})
+	}
+}
+
 func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 	b := &config.BundleSpec{
 		Input:  &config.BundleInputSpec{Recipe: "recipe.yaml"},
@@ -245,13 +327,15 @@ func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 			StorageClass:               "fast-ssd",
 			SharedStorageClass:         "shared-rwx",
 		},
+		// Keyless: signingKey is mutually exclusive with fulcioURL, so the two
+		// cannot appear in one populated-everything spec. SigningKey has its own
+		// projection case in TestBundleResolve_SigningKey.
 		Attestation: &config.AttestationSpec{
 			Enabled:                   true,
 			CertificateIdentityRegexp: ".+",
 			OIDCDeviceFlow:            true,
 			FulcioURL:                 "https://fulcio.internal.example.com",
 			RekorURL:                  "https://rekor.internal.example.com",
-			SigningKey:                "awskms://alias/aicr-signing",
 		},
 		Registry: &config.RegistrySpec{InsecureTLS: true, PlainHTTP: true},
 	}
@@ -317,8 +401,8 @@ func TestBundleResolve_AllFieldsPopulated(t *testing.T) {
 	if got.FulcioURL != "https://fulcio.internal.example.com" || got.RekorURL != "https://rekor.internal.example.com" {
 		t.Errorf("Sigstore URLs: got fulcio=%q rekor=%q", got.FulcioURL, got.RekorURL)
 	}
-	if got.SigningKey != "awskms://alias/aicr-signing" {
-		t.Errorf("SigningKey: got %q", got.SigningKey)
+	if got.SigningKey != "" {
+		t.Errorf("SigningKey: got %q, want empty for a keyless spec", got.SigningKey)
 	}
 	if !got.InsecureTLS || !got.PlainHTTP {
 		t.Errorf("Registry: got insecure=%v plain=%v", got.InsecureTLS, got.PlainHTTP)

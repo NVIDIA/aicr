@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -210,18 +211,22 @@ func documentedAPIRequests(t *testing.T) []docsRequest {
 
 		for _, block := range shellFencedBlocks(string(data)) {
 			for _, command := range shellCommands(block.content) {
-				req, ok, reason := parseCurlRequest(command.text)
-				if !ok {
-					if reason != "" {
-						t.Logf("skipped %s:%d (%s)", source,
-							block.startLine+command.offset, reason)
+				// One result per curl stage: a pipeline contributes each leg
+				// separately, so none is dropped without a skip line.
+				for _, result := range parseCurlRequests(command.text) {
+					if !result.ok {
+						if result.reason != "" {
+							t.Logf("skipped %s:%d (%s)", source,
+								block.startLine+command.offset, result.reason)
+						}
+						continue
 					}
-					continue
+					req := result.req
+					req.file = source
+					req.line = block.startLine + command.offset
+					applyDocsExpectation(&req, source)
+					requests = append(requests, req)
 				}
-				req.file = source
-				req.line = block.startLine + command.offset
-				applyDocsExpectation(&req, source)
-				requests = append(requests, req)
 			}
 		}
 	}
@@ -335,35 +340,116 @@ func continuesCommand(text string) bool {
 	return inSingle || inDouble
 }
 
-// curlSegment returns just the pipeline stage that runs curl.
+// curlSegments returns every pipeline stage that runs curl, in order.
 //
-// Later stages have their own flags, and some collide with curl's. The
+// Non-curl stages are excluded because their flags collide with curl's. The
 // reference pipes a header dump through `tr -d '\r'`, whose -d meant "data" to
 // this parser: the example was replayed as a POST carrying a carriage return,
 // and the gate reported a documented GET as broken. A false failure is worse
 // than a missed one here, because it teaches the reader to distrust the gate.
-func curlSegment(tokens []string) []string {
+//
+// Every stage is returned, not just the first. This used to stop at the first
+// curl, so `curl ... | curl -X POST ...` yielded only the GET: the POST was
+// discarded before any skip check could see it, so it was neither replayed nor
+// reported, and the gate claimed coverage it did not have (#2655). Silent
+// under-coverage is worse than an honest skip, because the skip lines are what
+// a maintainer reads to know what is not being checked.
+//
+// `&` separates as well as `|` and `;`, which covers `&&` because tokenizeShell
+// emits the character twice. Without it `curl A && curl -X POST B` was a single
+// stage, and parseCurlSegment kept A's URL with B's method and body -- the gate
+// replayed a fabricated request that neither documented command issues, which
+// is worse than dropping one (#2672).
+func curlSegments(tokens []string) []curlStage {
+	var stages []curlStage
 	start := 0
-	for i, token := range tokens {
-		switch token {
-		case "|", ";":
-			start = i + 1
-		case "curl":
-			end := len(tokens)
-			for j := i + 1; j < len(tokens); j++ {
-				if tokens[j] == "|" || tokens[j] == ";" {
-					end = j
-					break
-				}
-			}
-			return tokens[start:end]
+	add := func(seg []string) {
+		if kind := classifyStage(seg); kind != stageNotCurl {
+			stages = append(stages, curlStage{tokens: seg, kind: kind})
 		}
 	}
-	// No curl stage. Returning every token here would let `wget "http://...”`
-	// or a URL whose fragment happens to read "#curl" be replayed as a GET,
-	// inflating the request count and reporting coverage for text that is not
-	// a request at all.
-	return nil
+	for i, token := range tokens {
+		switch token {
+		case "|", ";", "&":
+			add(tokens[start:i])
+			start = i + 1
+		}
+	}
+	add(tokens[start:])
+	// A stage with no curl token at all yields nothing, silently. Returning it
+	// instead would let `wget "http://..."` or a URL whose fragment happens to
+	// read "#curl" be replayed as a GET, inflating the request count and
+	// reporting coverage for text that is not a request at all.
+	return stages
+}
+
+// curlStage is one pipeline stage that has something to do with curl.
+type curlStage struct {
+	tokens []string
+	kind   stageKind
+}
+
+// stageKind says how a pipeline stage relates to curl, which decides whether it
+// is replayed, reported as skipped, or ignored.
+type stageKind int
+
+const (
+	// stageNotCurl names no curl at all. Ignored without a skip line: reporting
+	// it would mean one for every kubectl, jq, and tr in the documentation.
+	stageNotCurl stageKind = iota
+	// stageCurl runs curl as its command word.
+	stageCurl
+	// stageIndirectCurl contains a bare curl token somewhere other than the
+	// command word -- behind a wrapper such as `sudo curl` or
+	// `kubectl exec … -- curl`, or as a plain argument, as in the package list
+	// of `apt-get install … curl …`.
+	//
+	// These are reported rather than replayed. Replaying would be wrong: a
+	// wrapper changes what a faithful replay means, and an argument is not an
+	// invocation at all. But dropping them silently is the #2655 defect over
+	// again, so they get a skip line and a maintainer decides.
+	stageIndirectCurl
+)
+
+// shellPrefixWords are the tokens that may precede a command word without
+// changing which command runs: POSIX reserved words, and the `!` negation.
+//
+// tokenizeShell already strips `$(`, so a substitution such as `x=$(curl …)`
+// arrives as the assignment token followed by `curl`.
+var shellPrefixWords = map[string]bool{
+	"if": true, "then": true, "elif": true, "else": true,
+	"while": true, "until": true, "do": true, "!": true,
+}
+
+// classifyStage decides how a pipeline stage relates to curl.
+//
+// Only the command word makes a stage replayable; treating a curl token
+// anywhere as an invocation would readmit the false positives curlSegments
+// exists to exclude -- a URL fragment reading "#curl", or a comment mentioning
+// it. Leading assignments and reserved words are stepped over to find that
+// command word: requiring curl at index 0 drops
+// `if metrics=$(curl -fsS …/metrics …); then` in
+// docs/integrator/kubernetes-deployment.md.
+//
+// A curl token found anywhere else makes the stage stageIndirectCurl rather
+// than nothing, so it is reported instead of vanishing. The distinction between
+// a wrapper and a mere argument needs to know what each command does with its
+// operands, which is unbounded -- so this does not try, and hands the maintainer
+// a skip line to judge instead.
+func classifyStage(segment []string) stageKind {
+	for _, token := range segment {
+		if strings.Contains(token, "=") || shellPrefixWords[token] {
+			continue
+		}
+		if token == "curl" {
+			return stageCurl
+		}
+		break
+	}
+	if slices.Contains(segment, "curl") {
+		return stageIndirectCurl
+	}
+	return stageNotCurl
 }
 
 // normalizeCurlTokens rewrites the option spellings curl accepts into the
@@ -406,31 +492,63 @@ func normalizeCurlTokens(tokens []string) []string {
 	return normalized
 }
 
-// parseCurlRequest converts a curl invocation into a replayable request.
-//
-// It returns ok=false with a reason for anything that cannot be replayed
-// faithfully. Skipping is deliberate and reported rather than silent: a request
-// this gate cannot model is not a request it should claim to cover.
-func parseCurlRequest(command string) (req docsRequest, ok bool, reason string) {
+// docsParse is one curl stage's parse outcome. A command may contain several.
+type docsParse struct {
+	req    docsRequest
+	ok     bool
+	reason string
+}
+
+// parseCurlRequests converts every curl stage in a command into a replayable
+// request, so a pipeline contributes one result per stage rather than one for
+// the whole command. Each result is independently ok or skipped-with-a-reason;
+// none is dropped (#2655).
+func parseCurlRequests(command string) []docsParse {
 	// A cheap reject before tokenizing. The authoritative check is the curl
-	// token below: this substring alone also matches prose and other commands
-	// that merely mention curl.
+	// token in classifyStage: this substring alone also matches prose and other
+	// commands that merely mention curl.
 	if !strings.Contains(command, "curl") {
-		return req, false, ""
+		return nil
 	}
 
 	tokens, err := tokenizeShell(command)
 	if err != nil {
-		return req, false, "unparseable: " + err.Error()
+		return []docsParse{{reason: "unparseable: " + err.Error()}}
 	}
 
-	segment := curlSegment(tokens)
-	if len(segment) == 0 {
-		// No curl stage. The command mentions curl in a URL fragment, a
-		// comment, or an argument to something else.
+	stages := curlSegments(tokens)
+	results := make([]docsParse, 0, len(stages))
+	for _, stage := range stages {
+		if stage.kind == stageIndirectCurl {
+			results = append(results, docsParse{
+				reason: "curl is not the command word",
+			})
+			continue
+		}
+		req, ok, reason := parseCurlSegment(stage.tokens)
+		results = append(results, docsParse{req: req, ok: ok, reason: reason})
+	}
+	return results
+}
+
+// parseCurlRequest reports the first curl stage in a command. It exists for the
+// single-invocation table tests; the gate itself uses parseCurlRequests so a
+// pipeline's later stages are not discarded.
+func parseCurlRequest(command string) (req docsRequest, ok bool, reason string) {
+	results := parseCurlRequests(command)
+	if len(results) == 0 {
 		return req, false, ""
 	}
-	tokens = normalizeCurlTokens(segment)
+	return results[0].req, results[0].ok, results[0].reason
+}
+
+// parseCurlSegment converts one curl invocation into a replayable request.
+//
+// It returns ok=false with a reason for anything that cannot be replayed
+// faithfully. Skipping is deliberate and reported rather than silent: a request
+// this gate cannot model is not a request it should claim to cover.
+func parseCurlSegment(segment []string) (req docsRequest, ok bool, reason string) {
+	tokens := normalizeCurlTokens(segment)
 
 	req.method = http.MethodGet
 	var rawURL string
@@ -512,7 +630,10 @@ func parseCurlRequest(command string) (req docsRequest, ok bool, reason string) 
 	if parsed.RawQuery != "" {
 		req.target += "?" + parsed.RawQuery
 	}
-	req.source = strings.Join(strings.Fields(command), " ")
+	// The stage's own tokens, not the whole command: for a pipeline this names
+	// the leg that produced the request rather than repeating the pipeline for
+	// each of them.
+	req.source = strings.Join(segment, " ")
 	if len(req.source) > 200 {
 		req.source = req.source[:200] + "…"
 	}
@@ -607,9 +728,14 @@ func tokenizeShell(command string) ([]string, error) {
 			}
 			current.WriteRune(c)
 			inWord = true
-		case '|', ';':
-			// Unquoted pipeline separator. Emitted as its own token so the
-			// caller can stop reading arguments at the end of this command.
+		case '|', ';', '&':
+			// Unquoted pipeline or list separator. Emitted as its own token so
+			// the caller can stop reading arguments at the end of this command.
+			//
+			// `&` matters because a URL's query string is full of them, and an
+			// unquoted one would end the command in a real shell too -- so
+			// every documented curl already quotes its URL, and a quoted `&`
+			// never reaches this switch.
 			flush()
 			tokens = append(tokens, string(c))
 		case ' ', '\t', '\n':
@@ -873,6 +999,147 @@ func TestParseCurlRequest(t *testing.T) {
 			}
 			if req.contentType != tt.wantContentType {
 				t.Errorf("contentType = %q, want %q", req.contentType, tt.wantContentType)
+			}
+		})
+	}
+}
+
+// TestParseCurlRequestsPipeline pins the multi-stage behavior separately from
+// the table above, which only ever inspects one request.
+//
+// Before #2655 the parser stopped at the first curl, so a `curl … | curl -X
+// POST …` example yielded only the GET. The POST was discarded before any skip
+// check ran, so it was neither replayed nor logged and the gate reported
+// coverage it did not have. A silently-passing gate is the dangerous direction.
+func TestParseCurlRequestsPipeline(t *testing.T) {
+	// wantMethod is the replayed method, or "" when the stage is expected to be
+	// skipped. A skipped stage must still carry a reason: the invariant is that
+	// every stage is accounted for, not that every stage is replayable.
+	tests := []struct {
+		name        string
+		command     string
+		wantMethods []string
+	}{
+		{
+			// The bundle example from demos/end-to-end-cli.md. The POST leg
+			// reads its body from stdin, so it is correctly skipped -- but it
+			// must be *seen* and reported, which is what previously did not
+			// happen.
+			name: "piped curl to curl accounts for both stages",
+			command: `curl -s "http://localhost:8080/v1/recipe?service=eks" | ` +
+				`curl -X POST "http://localhost:8080/v1/bundle?deployer=argocd" -d @-`,
+			wantMethods: []string{http.MethodGet, ""},
+		},
+		{
+			// The case curlSegments was originally written for: a later stage
+			// whose flags collide with curl's must not be parsed as curl.
+			// `-I` makes the first stage a HEAD.
+			name:        "non-curl pipeline stage is not a request",
+			command:     `curl -sI "http://localhost:8080/v1/recipe" | tr -d '\r'`,
+			wantMethods: []string{http.MethodHead},
+		},
+		{
+			name:        "single curl is unchanged",
+			command:     `curl "http://localhost:8080/v1/recipe?service=eks"`,
+			wantMethods: []string{http.MethodGet},
+		},
+		{
+			// docs/integrator/kubernetes-deployment.md's readiness probe.
+			// curl is not the first token: tokenizeShell strips `$(`, leaving
+			// `if`, `metrics=`, `curl`. An earlier draft of isCurlStage looked
+			// only at index 0 and dropped this one silently -- the same class
+			// of defect this test exists to prevent.
+			name: "curl behind a keyword and an assignment is found",
+			command: `if metrics=$(curl -fsS http://localhost:8080/metrics 2>/dev/null); ` +
+				`then ready=1; break; fi`,
+			wantMethods: []string{http.MethodGet},
+		},
+		{
+			// The other side of that allowance: stepping over reserved words
+			// must not turn a non-curl stage into a request.
+			name:        "keyword-led non-curl stage is not a request",
+			command:     `if kubectl get pods; then echo ok; fi`,
+			wantMethods: nil,
+		},
+		{
+			// Previously one stage, replayed as A's URL with B's method and
+			// body. Fabricating a request is worse than dropping one, because
+			// the gate then reports a pass or a failure for something no
+			// documented command issues.
+			name: "&& separates two curl invocations",
+			command: `curl "http://localhost:8080/v1/recipe?service=eks" && ` +
+				`curl -X POST "http://localhost:8080/v1/recipe" -d '{"service":"eks"}'`,
+			wantMethods: []string{http.MethodGet, http.MethodPost},
+		},
+		{
+			// `||` already worked by accident, because tokenizeShell emits `|`
+			// per character. Pinned so the `&` addition does not regress it.
+			name: "|| separates two curl invocations",
+			command: `curl "http://localhost:8080/v1/recipe?service=eks" || ` +
+				`curl "http://localhost:8080/health"`,
+			wantMethods: []string{http.MethodGet, http.MethodGet},
+		},
+		{
+			// A quoted `&` is a query-string separator, not a command
+			// separator, and must not split the stage.
+			name:        "ampersand inside a quoted URL does not split",
+			command:     `curl "http://localhost:8080/v1/recipe?service=eks&accelerator=h100"`,
+			wantMethods: []string{http.MethodGet},
+		},
+		{
+			// A wrapper runs curl as a child, so replaying the stage would not
+			// be faithful -- but it must still be reported. Dropping it is the
+			// same silent under-coverage this test exists to prevent.
+			name:        "wrapper-invoked curl is reported, not dropped",
+			command:     `sudo curl "http://localhost:8080/health"`,
+			wantMethods: []string{""},
+		},
+		{
+			name:        "curl reached through kubectl exec is reported",
+			command:     `kubectl exec -it aicrd-0 -- curl "http://localhost:8080/health"`,
+			wantMethods: []string{""},
+		},
+		{
+			// curl as a plain operand, not an invocation: DEVELOPMENT.md's
+			// prerequisites line. Reported for the same reason -- telling a
+			// wrapper from an argument needs per-command knowledge this gate
+			// does not have.
+			name:        "curl as a package name is reported",
+			command:     `sudo apt-get install -y make git curl pipx`,
+			wantMethods: []string{""},
+		},
+		{
+			name:        "no curl stage yields nothing",
+			command:     `wget "http://localhost:8080/v1/recipe" # like curl`,
+			wantMethods: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results := parseCurlRequests(tt.command)
+			if len(results) != len(tt.wantMethods) {
+				t.Fatalf("got %d stage(s), want %d -- a stage that is neither "+
+					"replayed nor skipped has been dropped",
+					len(results), len(tt.wantMethods))
+			}
+			for i, want := range tt.wantMethods {
+				switch {
+				case want == "":
+					if results[i].ok {
+						t.Errorf("stage %d replayed, want skipped", i)
+					}
+					if results[i].reason == "" {
+						t.Errorf("stage %d skipped with no reason; a silent "+
+							"skip is indistinguishable from a dropped stage", i)
+					}
+				case !results[i].ok:
+					t.Errorf("stage %d skipped (%q), want method %q",
+						i, results[i].reason, want)
+				case results[i].req.method != want:
+					t.Errorf("stage %d method = %q, want %q",
+						i, results[i].req.method, want)
+				}
 			}
 		})
 	}

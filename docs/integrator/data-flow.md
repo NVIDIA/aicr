@@ -128,7 +128,7 @@ metadata:
 data:
   snapshot.yaml: |
     # Complete snapshot YAML stored as ConfigMap data
-    apiVersion: aicr.run/v1alpha2
+    apiVersion: aicr.run/v1
     kind: Snapshot
     measurements: [...]
 ```
@@ -283,8 +283,8 @@ For the resolver internals (specificity scoring, deep-merge semantics) see
 
 ### Recipe Data Structure
 
-Unprofiled recipe results retain `aicr.run/v1alpha2`. Selecting a configuration
-profile produces `aicr.run/v1alpha3` and records the selected profile and its
+Unprofiled recipe results carry `aicr.run/v1`. Selecting a configuration
+profile produces `aicr.run/v1beta2` and records the selected profile and its
 owned value paths in result metadata.
 
 ```text
@@ -705,7 +705,7 @@ spec:
 
 **YAML:**
 ```yaml
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1
 kind: Snapshot
 measurements:
   - type: K8s

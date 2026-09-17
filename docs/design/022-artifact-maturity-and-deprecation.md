@@ -5,6 +5,13 @@
 Accepted on 2026-08-26 by ratification in
 [#2373](https://github.com/NVIDIA/aicr/pull/2373).
 
+Revised 2026-09-10 in [#2416](https://github.com/NVIDIA/aicr/issues/2416): §3's
+N+2 rebinds from v0.23 to **v1.0.0**. There is no v0.23 — v1.0.0 follows v0.22 —
+and retiring an alpha `apiVersion` owes no deprecation window (RELEASE.md,
+Artifact Compatibility), so N+2 may land in v1.0.0. It also has to: a v1.0.0 that
+still reads alpha makes alpha acceptance part of the frozen v1 surface. The same
+release switched the emitters (N+1) and wired the loader deprecation warning.
+
 Revised 2026-08-27 in [#2418](https://github.com/NVIDIA/aicr/pull/2418): §2's
 `ComponentUpgrades` row drops its pre-cut alpha branch and starts at
 `aicr.run/v1beta1` unconditionally, and §3 binds N, N+1, and N+2 to concrete
@@ -97,9 +104,9 @@ pretending that the legacy `Recipe` input is distinct from the canonical
 | `RecipeCriteria` | `v1alpha2` | `aicr.run/v1` | Public recipe-resolution input shared by the CLI, REST API, and Go client |
 | `BundleProvenance` (`provenance.yaml`, `localformat.ProvenanceAPIVersion`) | `v1alpha2` | `aicr.run/v1` | Bundle-root audit document consumed by downstream tooling |
 | `AICRConfig` | `v1alpha2` | `aicr.run/v1beta1` | Actively growing: #2026 bound 2 of 5 spec sections, #2245 binds the rest. Do not freeze a schema mid-expansion |
-| `RecipeMetadata`, `RecipeMixin` (catalog) | `v1alpha2` | `aicr.run/v1beta1` | Authoring schema exercised by 105 shipped catalog files (101 overlays, 4 mixins) |
+| `RecipeMetadata`, `RecipeMixin` (catalog) | `v1alpha2` | `aicr.run/v1beta1` | Authoring schema exercised by 126 shipped catalog files (122 overlays, 4 mixins) |
 | `ComponentRegistry` | `v1alpha2` | `aicr.run/v1beta1` | Required root of an external `--data` catalog; authoring schema consumed by bundling and validation |
-| `RecipeMetadata`, `RecipeResult` (profile-bearing) | `v1alpha3` | `aicr.run/v1beta2` | Newest (ADR-015), 2 overlays, opt-in via profiles; remains distinct from ordinary `RecipeMetadata` |
+| `RecipeMetadata`, `RecipeResult` (profile-bearing) | `v1alpha3` | `aicr.run/v1beta2` | Newest (ADR-015), 3 overlays, opt-in via profiles; remains distinct from ordinary `RecipeMetadata` |
 | `ComponentUpgrades` (proposed by [ADR-021](021-component-upgrade-safety.md)) | Not shipped | `aicr.run/v1beta1` | New, still-evolving authoring schema; its loader and records are not implemented. Starts at its target, with no alpha version to retire |
 
 `BundleProvenance` here means the bundle-root `provenance.yaml` document emitted
@@ -158,7 +165,7 @@ The sequence is bound to concrete AICR releases:
 |---|---|---|---|
 | N — v0.21 | alpha + target | alpha | [#2404](https://github.com/NVIDIA/aicr/pull/2404) |
 | N+1 — v0.22 | alpha + target | target | [#2416](https://github.com/NVIDIA/aicr/issues/2416) |
-| N+2 — v0.23 | target only | target | [#2417](https://github.com/NVIDIA/aicr/issues/2417) |
+| N+2 — v1.0.0 | target only | target | [#2417](https://github.com/NVIDIA/aicr/issues/2417) |
 
 Releases before N accept only the alpha values, so a target-stamped artifact
 does not load on v0.20 or earlier. `RELEASE.md` and
@@ -357,7 +364,7 @@ intent; silent downgrade is not.
 - `pkg/header` remains the single source of version strings while package-local
   emitters and readers select versions by wire kind and schema family, following
   the discriminator pattern ADR-015 established.
-- The initial migration spans N through N+2, bound to v0.21, v0.22, and v0.23.
+- The initial migration spans N through N+2, bound to v0.21, v0.22, and v1.0.0.
   N stages readers, N+1 switches emitters and committed inputs, and N+2 rejects
   alpha and empty values. Stored artifacts must be migrated during that interval
   or read with a retained older binary; authored configs and external catalogs

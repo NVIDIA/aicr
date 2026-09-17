@@ -15,7 +15,7 @@ validators:
     phase: deployment               # deployment | performance | conformance
     description: "Human-readable"   # Shown in CTRF report
     image: ghcr.io/.../img:latest   # OCI image reference
-    timeout: 2m                     # Job activeDeadlineSeconds
+    timeout: 2m                     # Check's own budget (AICR_CHECK_TIMEOUT); activeDeadlineSeconds adds headroom
     args: ["operator-health"]       # Container arguments
     env: []                         # Optional environment variables
     resources:                      # Optional (omit for defaults)
@@ -73,7 +73,7 @@ or, when its fabric matches no embedded template, with the
 | `pod-autoscaling` | Verify HPA-driven pod autoscaling with GPU metrics | 10m |
 | `cluster-autoscaling` | Verify cluster autoscaling with Karpenter | 10m |
 | `robust-controller` | Verify Dynamo operator controller and webhooks | 5m |
-| `secure-accelerator-access` | Verify secure GPU access via DRA or device plugin (no host device mounts) | 10m |
+| `secure-accelerator-access` | Verify secure GPU access via DRA or device plugin (no host device mounts); skips on Slinky Slurm recipes, whose GPUs the NodeSet reserves and Slurm allocates per job | 10m |
 | `slinky-slurm-health` | Verify Slinky Slurm controller, node inventory, job submission, GPU execution, and enabled accounting health | 8m |
 | `slinky-slurm-imex-channel` | Verify fixed IMEX resources and distinct channels for concurrent Slinky Slurm jobs | 5m |
 | `gpu-operator-health` | Verify GPU operator health (conformance diagnostic) | 2m |

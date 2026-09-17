@@ -28,7 +28,7 @@ The equivalent `AICRConfig` input is:
 
 ```yaml
 kind: AICRConfig
-apiVersion: aicr.run/v1alpha2
+apiVersion: aicr.run/v1beta1
 spec:
   recipe:
     criteria:
@@ -43,7 +43,7 @@ spec:
           mode: customer-managed
 ```
 
-Configured Slurm recipes use the `aicr.run/v1alpha3` `RecipeResult` schema and
+Configured Slurm recipes use the `aicr.run/v1beta2` `RecipeResult` schema and
 record:
 
 ```yaml

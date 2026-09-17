@@ -47,9 +47,10 @@ const RecipeResultAPIVersion = header.StableGroupVersion
 // this aliases header.AuthoringGroupVersion; the track's target is
 // header.GroupVersionV1Beta1.
 //
-// This is deliberately a separate constant from RecipeResultAPIVersion even
-// though both carry aicr.run/v1alpha2 today: ADR-022 sends the two kinds to
-// different targets, so a single shared constant could not be flipped.
+// This is deliberately a separate constant from RecipeResultAPIVersion. The two
+// carried the same aicr.run/v1alpha2 through the reader-first release, which is
+// what made a shared constant look adequate; ADR-022 sends the kinds to
+// different targets, and since the v0.22 emitter switch they differ.
 const RecipeMetadataAPIVersion = header.AuthoringGroupVersion
 
 // ConfiguredRecipeResultAPIVersion is the strict RecipeResult schema used
@@ -704,6 +705,9 @@ func (r *RecipeResult) ValidateCoherence() error {
 	if err := r.validateAccountingConfiguration(); err != nil {
 		return err
 	}
+	if err := r.validateGKEConfiguration(); err != nil {
+		return err
+	}
 	var problems []string
 	for i := range r.ComponentRefs {
 		if !r.ComponentRefs[i].IsEnabled() {
@@ -790,7 +794,7 @@ type RecipeMetadataHeader struct {
 	// Kind is always "RecipeMetadata".
 	Kind string `json:"kind" yaml:"kind"`
 
-	// APIVersion is the API version (e.g., "aicr.run/v1alpha2").
+	// APIVersion is the API version (e.g., "aicr.run/v1beta1").
 	APIVersion string `json:"apiVersion" yaml:"apiVersion"`
 
 	// Metadata contains the name and other metadata.
@@ -1197,6 +1201,11 @@ func (r *RecipeResult) DeepCopy() *RecipeResult {
 		// Omitting one does not alias it, it drops it: the copy keeps the
 		// component overrides a selection applied while losing the record
 		// explaining them, and Client.AdoptRecipe always deep-copies.
+		if r.Configuration.GKE != nil {
+			out.Configuration.GKE = &GKEConfiguration{
+				TCPXOInterfaces: slices.Clone(r.Configuration.GKE.TCPXOInterfaces),
+			}
+		}
 		if r.Configuration.RuntimeInventory != nil {
 			runtimeInventory := *r.Configuration.RuntimeInventory
 			out.Configuration.RuntimeInventory = &runtimeInventory
@@ -1283,18 +1292,29 @@ func (s *RecipeMetadataSpec) Merge(other *RecipeMetadataSpec) {
 		return s.Constraints[i].Name < s.Constraints[j].Name
 	})
 
-	// Merge componentRefs - overlay fields take precedence, but inherit missing from base
-	componentMap := make(map[string]ComponentRef)
+	// Merge componentRefs - overlay fields take precedence, but inherit missing from base.
+	// Cloned on entry: s.ComponentRefs can itself alias a cached source (e.g.
+	// initBaseMergedSpec copies s.Base.Spec.ComponentRefs by struct, which
+	// doesn't deep-copy the Overrides map) -- mergeComponentRef's deepMergeMap
+	// below writes into a matching base entry's Overrides in place, so without
+	// this clone a later overlay/mixin contribution would corrupt that cache.
+	componentMap := make(map[string]ComponentRef, len(s.ComponentRefs))
 	for _, c := range s.ComponentRefs {
-		componentMap[c.Name] = c
+		componentMap[c.Name] = cloneComponentRef(c)
 	}
 	for _, overlay := range other.ComponentRefs {
 		if base, exists := componentMap[overlay.Name]; exists {
 			// Merge overlay into base - overlay takes precedence for non-empty fields
 			componentMap[overlay.Name] = mergeComponentRef(base, overlay)
 		} else {
-			// New component from overlay
-			componentMap[overlay.Name] = overlay
+			// New component from overlay. Clone it: overlay's map/slice
+			// fields (e.g. Overrides) would otherwise alias the source --
+			// for a mixin's ComponentRefs, that source is the process-wide
+			// cached *RecipeMixin (store.Mixins), so a later merge into
+			// this entry (e.g. a second mixin targeting the same
+			// now-existing component) would mutate the cached mixin
+			// definition itself.
+			componentMap[overlay.Name] = cloneComponentRef(overlay)
 		}
 	}
 	s.ComponentRefs = make([]ComponentRef, 0, len(componentMap))
