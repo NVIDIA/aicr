@@ -27,6 +27,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/validator/catalog"
 	"github.com/NVIDIA/aicr/pkg/validator/ctrf"
+	v1 "github.com/NVIDIA/aicr/pkg/validator/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -406,17 +407,21 @@ func TestExtractResultPodNotFoundDeadlineExceeded(t *testing.T) {
 			if result.CTRFStatus() != ctrf.StatusFailed {
 				t.Errorf("CTRFStatus = %q, want %q", result.CTRFStatus(), ctrf.StatusFailed)
 			}
-			// Asserted for every case, including the unpinned one, which must
-			// render the same default runPhase applies rather than a bare "0s".
-			// The deadline the Job actually enforced: BuildJobPlan truncates
-			// to whole seconds before setting activeDeadlineSeconds.
+			// The message must name BOTH clocks: the deadline Kubernetes
+			// enforced (now the Job deadline) and the check's own budget from
+			// the catalog. Naming only one leaves an operator comparing an 11m30s
+			// message against an 8m catalog entry.
 			want := tt.timeout
 			if want == 0 {
 				want = defaults.ValidatorDefaultTimeout
 			}
-			wantTimeout := (time.Duration(int64(want.Seconds())) * time.Second).String()
-			if !strings.Contains(result.TerminationMsg, wantTimeout) {
-				t.Errorf("TerminationMsg = %q, want it to name the deadline %s", result.TerminationMsg, wantTimeout)
+			checkBudget := (time.Duration(int64(want.Seconds())) * time.Second)
+			wantDeadline := v1.JobDeadlineFor(checkBudget).String()
+			if !strings.Contains(result.TerminationMsg, wantDeadline) {
+				t.Errorf("TerminationMsg = %q, want it to name the enforced deadline %s", result.TerminationMsg, wantDeadline)
+			}
+			if !strings.Contains(result.TerminationMsg, checkBudget.String()) {
+				t.Errorf("TerminationMsg = %q, want it to name the check budget %s", result.TerminationMsg, checkBudget)
 			}
 			for _, want := range tt.wantContains {
 				if !strings.Contains(result.TerminationMsg, want) {

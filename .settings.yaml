@@ -34,7 +34,7 @@ linting:
   # followed immediately by `key: 'value'`, so any comment between them silently
   # drops this pin from Renovate's scan (#2657).
   # renovate: datasource=github-releases depName=oasdiff/oasdiff depType=linting
-  oasdiff: 'v1.31.0'
+  oasdiff: 'v1.32.0'
   # Refreshed automatically by tools/update-oasdiff-checksums via Renovate
   # postUpgradeTasks whenever the version above is bumped. Same reasoning as the
   # oras pin in security_tools: the checksums.txt served beside the tarball
@@ -52,7 +52,7 @@ linting:
   #
   # linux/amd64 only: this feeds the setup-build-tools action, which runs on
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
-  oasdiff_sha256_linux_amd64: '0177d4bc0bf04f4061e9277795b77335ee100a43b508e94fce5c46de083bbede'
+  oasdiff_sha256_linux_amd64: '5b2050787cfee2a9a3ba7b25cb50fe2c5cc45cdf5b96fbc51a4a60107f8b4aad'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.13.2'
   # renovate: datasource=pypi depName=yamllint depType=linting
@@ -287,7 +287,7 @@ testing:
   # static Go and detects GPUs driver-free via NFD/PCI, so it no longer needs a
   # CUDA base / nvidia-smi. Matches the NVIDIA static distroless base used for
   # the aicr image (see .ko.yaml).
-  snapshot_agent_base_image: 'nvcr.io/nvidia/distroless/static:v4.0.0@sha256:d90158b69e250d2018f32622b5c622925202ee97224a990a54b63811cb1e3d69'
+  snapshot_agent_base_image: 'nvcr.io/nvidia/distroless/static:v4.1.3@sha256:ec947edce045116008a8aeab38c5da643fbf110990b133bad200dbf5e4b6e296'
 
   # Component test harness configuration
   # Used by tools/component-test/ scripts to validate individual components

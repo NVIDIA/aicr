@@ -70,9 +70,11 @@ func TestTimeoutConstants(t *testing.T) {
 		{"TrainerControllerReadyTimeout", TrainerControllerReadyTimeout, 1 * time.Minute, 5 * time.Minute},
 
 		// Validator timeouts
-		{"ValidatorWaitBuffer", ValidatorWaitBuffer, 10 * time.Second, 60 * time.Second},
+		{"ValidatorWaitBuffer", ValidatorWaitBuffer, 1 * time.Minute, 5 * time.Minute},
+		{"ValidatorJobDeadlineHeadroom", ValidatorJobDeadlineHeadroom, 1 * time.Minute, 10 * time.Minute},
 		{"ValidatorDefaultTimeout", ValidatorDefaultTimeout, 1 * time.Minute, 15 * time.Minute},
 		{"ValidatorTerminationGracePeriod", ValidatorTerminationGracePeriod, 10 * time.Second, 60 * time.Second},
+		{"ValidatorMinCompletionWait", ValidatorMinCompletionWait, 10 * time.Second, 60 * time.Second},
 
 		// ConfigMap read/write budgets — held as distinct constants so the
 		// read path (serializer resolving cm:// URIs) and the write path
@@ -265,6 +267,41 @@ func TestValidatorTimeoutRelationships(t *testing.T) {
 	if ValidatorTerminationGracePeriod > ValidatorWaitBuffer {
 		t.Errorf("ValidatorTerminationGracePeriod (%v) should not exceed ValidatorWaitBuffer (%v)",
 			ValidatorTerminationGracePeriod, ValidatorWaitBuffer)
+	}
+	// The orchestrator must outlive the pod's own clean exit, so the wait
+	// buffer has to cover pod-start latency (scheduling + image pull).
+	if ValidatorWaitBuffer < K8sPodReadyTimeout {
+		t.Errorf("ValidatorWaitBuffer (%v) must be at least K8sPodReadyTimeout (%v)",
+			ValidatorWaitBuffer, K8sPodReadyTimeout)
+	}
+	// The two checks above do not backstop a dropped summand: if
+	// ValidatorTerminationGracePeriod were dropped from ValidatorWaitBuffer's
+	// definition, the result (2m) would still pass both the bounds-range table
+	// test and the >= K8sPodReadyTimeout check above. Assert the sum of the two
+	// independently named constants directly so a dropped summand fails here.
+	if ValidatorWaitBuffer < K8sPodReadyTimeout+ValidatorTerminationGracePeriod {
+		t.Errorf("ValidatorWaitBuffer (%v) must be at least K8sPodReadyTimeout + ValidatorTerminationGracePeriod (%v)",
+			ValidatorWaitBuffer, K8sPodReadyTimeout+ValidatorTerminationGracePeriod)
+	}
+	// Kubernetes must be the LOOSEST clock. If the Job deadline is not
+	// strictly beyond the orchestrator's wait, the Job controller can kill and
+	// delete the pod before the orchestrator reads its logs — issue #2473.
+	if ValidatorJobDeadlineHeadroom <= ValidatorWaitBuffer {
+		t.Errorf("ValidatorJobDeadlineHeadroom (%v) must exceed ValidatorWaitBuffer (%v)",
+			ValidatorJobDeadlineHeadroom, ValidatorWaitBuffer)
+	}
+	// The floor on a start-time-rebased wait has to leave room for a Job past
+	// its deadline to stamp a terminal condition, which takes at least the
+	// pod's SIGTERM-to-SIGKILL window; and it must stay under the wait buffer,
+	// or a floor larger than the budget it clamps would extend every wait
+	// instead of bounding the clamped ones.
+	if ValidatorMinCompletionWait < ValidatorTerminationGracePeriod {
+		t.Errorf("ValidatorMinCompletionWait (%v) must be at least ValidatorTerminationGracePeriod (%v)",
+			ValidatorMinCompletionWait, ValidatorTerminationGracePeriod)
+	}
+	if ValidatorMinCompletionWait > ValidatorWaitBuffer {
+		t.Errorf("ValidatorMinCompletionWait (%v) must not exceed ValidatorWaitBuffer (%v)",
+			ValidatorMinCompletionWait, ValidatorWaitBuffer)
 	}
 	// Default timeout must be positive and reasonable.
 	if ValidatorDefaultTimeout < 1*time.Minute {

@@ -60,8 +60,8 @@ is installed on the cluster.
 | Check | Transport | Default applicability (from recipe criteria) |
 |---|---|---|
 | `nccl-all-reduce-bw` | Auto-detect (whatever NCCL picks) | H100/H200 on EKS, H100 on GKE, H100 on AKS (ND-series InfiniBand — NCCL's built-in IB/verbs transport over the `rdma/hca_shared_devices_a` shared device pool), and B200/GB200 on self-managed clusters (`service=any`). Preserves the pre-variant behavior. |
-| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, and GB200 + OKE. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the default fabric — see [GB200 NET preflight](#gb200-net-preflight-gpudirect-rdma-prerequisites). |
-| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 (EKS, OKE); GB300 (generic); VR200 (RKE2). Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric when the IMEX domain is misconfigured. |
+| `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, GB200 + OKE, and GB300 + EKS. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the default fabric — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
+| `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 (EKS, OKE); GB300 (EKS, generic); VR200 (RKE2). Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric when the IMEX domain is misconfigured. |
 
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
@@ -191,14 +191,14 @@ driver, and Kubeflow Trainer are installed and healthy before the benchmark):
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
 ```
 
-### GB200 NET preflight: GPUDirect RDMA prerequisites
+### Grace Blackwell NET preflight: GPUDirect RDMA prerequisites
 
-Before running `nccl-all-reduce-bw-net` on GB200 (EKS or OKE), a preflight
-checks each GPU node for the driver-side prerequisite of GPUDirect RDMA.
-Without it NCCL falls back to the Socket transport. The `-net` check catches
-that on its own — it fails on a `Using network Socket` banner rather than
-reporting a figure — so the preflight exists to fail fast, naming the driver,
-instead of after a full benchmark run.
+Before running `nccl-all-reduce-bw-net` on GB200 (EKS or OKE) or GB300 (EKS), a
+preflight checks each GPU node for the driver-side prerequisite of GPUDirect
+RDMA. Without it NCCL falls back to the Socket transport. The `-net` check
+catches that on its own — it fails on a `Using network Socket` banner rather
+than reporting a figure — so the preflight exists to fail fast, naming the
+driver, instead of after a full benchmark run.
 
 The preflight runs on the default fabric only: EFA on EKS, built-in IB/verbs on
 OKE. `AICR_NCCL_FABRIC=roce` is EKS-only: there it selects a different template
@@ -291,8 +291,8 @@ the GPU nodes, exactly as `service: any` recipes do. When `--node-selector`
 is passed it replaces the automatic filters rather than narrowing them.
 
 Valid profiles are the pairs in the applicability table above: `b200/any`,
-`gb200/any`, `gb200/eks`, `gb200/oke`, `h100/aks`, `h100/eks`, `h100/gke`,
-`h200/eks`, `vr200/rke2`. A
+`gb200/any`, `gb200/eks`, `gb200/oke`, `gb300/eks`, `gb300/generic`,
+`h100/aks`, `h100/eks`, `h100/gke`, `h200/eks`, `vr200/rke2`. A
 malformed or unknown value **fails** the check rather than silently skipping
 it. A valid profile that doesn't implement a requested variant (e.g.
 `gb200/eks` with the auto-detect `nccl-all-reduce-bw` check) skips just that
@@ -978,8 +978,8 @@ error codes (see [`pkg/errors/exitcode.go`](https://github.com/NVIDIA/aicr/blob/
 
 > **Important:** two subtleties to be aware of when gating a pipeline on exit code:
 >
-> 1. Both `failed` and `other` are blocking. A phase whose status is `other` — the check produced no usable verdict, e.g. a crash, an OOM, or a Job that failed for a non-deadline reason with its pod already gone — drives the same non-zero exit as `failed` — an inconclusive check fails closed rather than passing silently. `--fail-on-error=false` suppresses **both** result-driven exits (the run reports the outcomes in the CTRF report and exits 0); it does not distinguish `failed` from `other`. A validator Job killed on `activeDeadlineSeconds` normally reports `failed` rather than `other`: its terminal `Failed/DeadlineExceeded` condition is a verdict, so the result names the deadline instead of the missing pod. One narrow exception remains — the CLI waits `activeDeadlineSeconds` plus a 30s buffer for the Job to become terminal, and that buffer equals the validator pod's termination grace period, so a validator that consumes its full grace can exhaust the wait before the condition is stamped. Such a run falls back to the CLI-wait path and still reports `other`.
-> 2. Exit 5 is narrower than it sounds. A timeout **inside** a check's own logic (DynamoGraphDeployment not ready, inference endpoint never healthy, AIPerf Job pod-wait deadline) surfaces as a failed phase, not as a structured `ErrCodeTimeout`, so the CLI exits **8**. So does a per-validator wait deadline: `runPhase` hands that error to the timeout handler and records the outcome as a check result rather than propagating it, which is the same path the full-grace exception in note 1 takes. The rule, rather than a list of sources: exit 5 applies whenever an `ErrCodeTimeout` reaches the top-level CLI. A timeout that is converted into a check result instead — whether raised inside a check or by a per-validator wait — surfaces as exit 8.
+> 1. Both `failed` and `other` are blocking. A phase whose status is `other` — the check produced no usable verdict, e.g. a crash, an OOM, or a Job that failed for a non-deadline reason with its pod already gone — drives the same non-zero exit as `failed` — an inconclusive check fails closed rather than passing silently. `--fail-on-error=false` suppresses **both** result-driven exits (the run reports the outcomes in the CTRF report and exits 0); it does not distinguish `failed` from `other`. A validator Job killed on `activeDeadlineSeconds` normally reports `failed` rather than `other`: its terminal `Failed/DeadlineExceeded` condition is a verdict, so the result names the deadline instead of the missing pod. One narrow exception remains — the CLI waits the catalog timeout plus `ValidatorWaitBuffer` (2m30s) for the Job to become terminal — measured from the Job's observed start time (`status.startTime` when the apiserver has stamped it, otherwise `creationTimestamp`, which is never later and so only ever ends the wait earlier), so it shares an origin with the Job's clock — a window that is deliberately shorter than the Job's own `activeDeadlineSeconds` (catalog timeout plus `ValidatorJobDeadlineHeadroom`, 3m30s), so a validator whose pod is still running when the CLI's wait expires exhausts the wait before the deadline condition is ever stamped. Such a run falls back to the CLI-wait path and still reports `other`.
+> 2. Exit 5 is narrower than it sounds. A timeout **inside** a check's own logic (DynamoGraphDeployment not ready, inference endpoint never healthy, AIPerf Job pod-wait deadline) surfaces as a failed phase, not as a structured `ErrCodeTimeout`, so the CLI exits **8**. So does a per-validator wait deadline: `runPhase` hands that error to the timeout handler and records the outcome as a check result rather than propagating it, which is the same path the wait-exhaustion exception in note 1 takes. The rule, rather than a list of sources: exit 5 applies whenever an `ErrCodeTimeout` reaches the top-level CLI. A timeout that is converted into a check result instead — whether raised inside a check or by a per-validator wait — surfaces as exit 8.
 
 Scripts that gate on validation outcome should treat **any non-zero code** as
 failure rather than branching on specific values, and should additionally
@@ -1091,7 +1091,7 @@ strategy.
 
 ### Benchmark Job stuck or timed out
 
-Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:`. For `inference-perf`, the full pipeline (workload ready → endpoint health → benchmark) can take up to 30 min on cold-start clusters. If it still times out:
+Each performance check has a Job-level `activeDeadlineSeconds` set by the catalog's `timeout:` plus `ValidatorJobDeadlineHeadroom` (3m30s) on top. For `inference-perf`, the full pipeline (workload ready → endpoint health → benchmark) can take up to 30 min on cold-start clusters. If it still times out:
 
 ```bash
 # validator orchestrator Job + AIPerf benchmark Job both live in aicr-validation.

@@ -377,18 +377,18 @@ Published to GitHub Container Registry (`ghcr.io/nvidia/`):
 
 | Image | Base | Description |
 |-------|------|-------------|
-| `aicr` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Pure-Go CLI/agent (driver-free GPU discovery) |
-| `aicrd` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Minimal API server |
-| `aicr-gate` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Bundle readiness-gate Job image (emitted by `aicr bundle --readiness-hooks`) |
+| `aicr` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Pure-Go CLI/agent (driver-free GPU discovery) |
+| `aicrd` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Minimal API server |
+| `aicr-gate` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Bundle readiness-gate Job image (emitted by `aicr bundle --readiness-hooks`) |
 
 Published to GitHub Container Registry (`ghcr.io/nvidia/aicr-validators/`):
 
 | Image | Base | Description |
 |-------|------|-------------|
-| `deployment` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Deployment validator |
-| `performance` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Performance validator |
-| `conformance` | `nvcr.io/nvidia/distroless/static:v4.0.0` | Conformance validator |
-| `aiperf-bench` | `nvcr.io/nvidia/distroless/python:3.13-v4.1.2` | AIPerf benchmark runner (built from `python:3.13-slim`) |
+| `deployment` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Deployment validator |
+| `performance` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Performance validator |
+| `conformance` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Conformance validator |
+| `aiperf-bench` | `nvcr.io/nvidia/distroless/python:3.13-v4.1.4` | AIPerf benchmark runner (built from `python:3.13-slim`) |
 
 Stable releases promote `vX.Y.Z` and `latest`; prereleases promote their
 `vX.Y.Z-rcN` version tags but never `latest`. The release workflow also retains
