@@ -253,8 +253,11 @@ func TestComponentRegistry_NodeSchedulingPaths(t *testing.T) {
 	if len(gpuOp.GetSystemTolerationPaths()) == 0 {
 		t.Error("gpu-operator should have system toleration paths")
 	}
-	if len(gpuOp.GetAcceleratedNodeSelectorPaths()) == 0 {
-		t.Error("gpu-operator should have accelerated node selector paths")
+	// gpu-operator has NO accelerated node selector paths by design: the chart and
+	// ClusterPolicy CRD have no daemonsets.nodeSelector, so the route was removed
+	// (#2474). The operator places operands via its own GFD/NFD deploy labels.
+	if len(gpuOp.GetAcceleratedNodeSelectorPaths()) != 0 {
+		t.Error("gpu-operator should have no accelerated node selector paths (daemonsets.nodeSelector does not exist)")
 	}
 	if len(gpuOp.GetAcceleratedTolerationPaths()) == 0 {
 		t.Error("gpu-operator should have accelerated toleration paths")

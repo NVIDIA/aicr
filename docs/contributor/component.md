@@ -165,23 +165,30 @@ This is the field most contributors get wrong on first PR.
   `--accelerated-node-selector` and `--accelerated-node-toleration`
   values here.
 
-Concrete example from `gpu-operator`:
+Concrete example from `nvidia-dra-driver-gpu`, which routes both sides:
 
 ```yaml
 nodeScheduling:
   system:
     nodeSelectorPaths:
-      - operator.nodeSelector
-      - node-feature-discovery.master.nodeSelector
+      - controller.nodeSelector
     tolerationPaths:
-      - operator.tolerations
+      - controller.tolerations
   accelerated:
     nodeSelectorPaths:
-      - daemonsets.nodeSelector
-      - node-feature-discovery.worker.nodeSelector
+      - kubeletPlugin.nodeSelector
     tolerationPaths:
-      - daemonsets.tolerations
+      - kubeletPlugin.tolerations
 ```
+
+The controller (a Deployment) lands on management nodes; the kubelet-plugin
+DaemonSet lands on GPU nodes — each routed by its own selector/toleration
+pair.
+
+`gpu-operator` is the exception worth knowing: its `accelerated` block is
+tolerations-only. Its operand DaemonSets have no chart/CRD nodeSelector
+field — the operator self-places via its GFD/NFD deploy labels — so only
+`tolerationPaths: [daemonsets.tolerations]` is routable there (#2474).
 
 Wrong column = workloads land on the wrong node class. A DaemonSet
 placed under `system` will miss GPU nodes; an operator under
