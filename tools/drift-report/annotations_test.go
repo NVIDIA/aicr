@@ -28,6 +28,7 @@ import (
 // pkg/recipe/version_pin_guard_test.go.
 var untrackedComponents = map[string]string{
 	"gke-nccl-tcpxo":            "manifest-only: in-tree manifests, no upstream chart",
+	"gke-gb200-rdma":            "manifest-only: in-tree manifests, no upstream chart",
 	"dranet":                    "manifest-only: in-tree manifests, no upstream chart",
 	"rdma-netns-exclusive":      "manifest-only: in-tree manifests, no upstream chart",
 	"gcp-driver-installer":      "manifest-only: in-tree manifests, no upstream chart",
