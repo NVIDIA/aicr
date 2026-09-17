@@ -50,6 +50,7 @@ func init() {
 	registerCheck("CheckAcceleratedSelectorMissing", CheckAcceleratedSelectorMissing)
 	registerCheck("CheckHostMofedWithoutNetworkOperator", CheckHostMofedWithoutNetworkOperator)
 	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
+	registerCheck("CheckNPDNotDuplicatingProviderNPD", CheckNPDNotDuplicatingProviderNPD)
 	registerCheck("CheckDriverOwnershipCoherence", CheckDriverOwnershipCoherence)
 	registerCheck("CheckMariaDBOperatorOwnershipCoherence", CheckMariaDBOperatorOwnershipCoherence)
 	registerCheck("CheckGKETCPXOInterfacesCoherence", CheckGKETCPXOInterfacesCoherence)
@@ -275,6 +276,105 @@ func CheckWildcardAcceleratedToleration(ctx context.Context, componentName strin
 		"conditions", conditions,
 	)
 	return []string{baseMsg}, nil
+}
+
+// npdQualifiedServices are the platforms on which installing
+// node-problem-detector has been verified safe: nothing else publishes its Node
+// Conditions, so AICR's instance is the only writer.
+//
+// Verified on live clusters (EKS, Kind) or from upstream packaging (RKE2).
+//
+// OKE is deliberately NOT here. Oracle ships oke-node-problem-detector in
+// kube-system, disabled behind the
+// oci.oraclecloud.com/oke-node-problem-detector-enabled node label. Observed
+// disabled on a live cluster, but that is a mutable, per-node setting an
+// operator can turn on at any time, before or after this bundle is installed,
+// and nothing at bundle time can see it. Permitting OKE would therefore rest on
+// a snapshot of state AICR does not control -- exactly the assumption this
+// allowlist exists to refuse.
+var npdQualifiedServices = map[recipe.CriteriaServiceType]bool{
+	recipe.CriteriaServiceEKS:  true,
+	recipe.CriteriaServiceKind: true,
+	recipe.CriteriaServiceRKE2: true,
+}
+
+// npdProviderRunsItsOwn are the platforms whose managed control plane already
+// runs NPD by default. A second instance competes for ownership of the same
+// Node Conditions and one silently loses its writes.
+var npdProviderRunsItsOwn = map[recipe.CriteriaServiceType]bool{
+	recipe.CriteriaServiceGKE: true,
+	recipe.CriteriaServiceAKS: true,
+}
+
+// CheckNPDNotDuplicatingProviderNPD blocks a bundle that would install
+// node-problem-detector where doing so is unsafe or unverified.
+//
+// An ALLOWLIST, not a denylist. NPD is a privileged DaemonSet that patches Node
+// status, and getting its ownership wrong fails silently -- two writers produce
+// flapping conditions with no error anywhere. So only platforms where this has
+// actually been checked are permitted; everything else is rejected with a
+// message saying what would settle it. A denylist would have let every
+// unexamined platform through by omission.
+//
+// Rejected, and why:
+//   - gke, aks: the provider already runs its own (npdProviderRunsItsOwn).
+//   - ocp: NPD needs a privileged SecurityContextConstraints binding that AICR
+//     does not ship, so the DaemonSet bundles cleanly and then fails admission.
+//   - os talos: recipes/mixins/os-talos.yaml relocates privileged components
+//     into privileged-* namespaces for Pod Security Admission. NPD is not in
+//     that list, so it would land in a restricted namespace and be denied.
+//   - anything else (lke, bcm, metal3, generic, k0s, ...): unverified.
+//   - no criteria at all: the platform is unknown, and checkConditions' "nil
+//     Criteria means condition not met" would skip the gate entirely. A
+//     hand-authored or already-hydrated RecipeResult legitimately carries no
+//     criteria (pkg/client/v1's loadedResultFromInternal), and that platform
+//     could be any of the above.
+func CheckNPDNotDuplicatingProviderNPD(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil {
+		return nil, nil
+	}
+
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil {
+		return nil, nil
+	}
+
+	// componentDisabled, not a per-key scan for "false": it resolves aliases in
+	// the bundler's own priority order, so a conflicting
+	// `--set npd:enabled=false --set node-problem-detector:enabled=true` cannot
+	// disarm the gate while the component is in fact still enabled.
+	keys := componentOverrideKeys(componentName, recipeResult.DataProvider())
+	if componentDisabled(ref, bundlerConfig, keys) {
+		return nil, nil
+	}
+
+	reject := func(reason string) ([]string, []error) {
+		err := aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s", componentName, reason))
+		slog.Warn(err.Error(), logKeyComponent, componentName)
+
+		return nil, []error{err}
+	}
+
+	if recipeResult.Criteria == nil {
+		return reject("installed but this recipe carries no criteria, so the target platform cannot be confirmed clear of a provider-installed node-problem-detector -- supply criteria, or disable it explicitly with --set once you have confirmed the platform")
+	}
+
+	service := recipeResult.Criteria.Service
+	switch {
+	case npdProviderRunsItsOwn[service]:
+		return reject(fmt.Sprintf("installed but %s already runs its own node-problem-detector by default; a second instance competes for ownership of the same Node Conditions and one silently loses its writes. Drop the npd mixin -- the platform's own NPD already publishes some of the conditions the nvsentinel-object-monitor policies read", service))
+	case service == recipe.CriteriaServiceOCP:
+		return reject("installed on OpenShift, where the privileged DaemonSet needs a SecurityContextConstraints binding that AICR does not ship; it would bundle cleanly and then be denied at admission")
+	case service == recipe.CriteriaServiceOKE:
+		return reject("installed on OKE, where Oracle ships its own oke-node-problem-detector in kube-system. It is disabled by default, behind the oci.oraclecloud.com/oke-node-problem-detector-enabled node label, but that label is operator-settable at any time and is not visible at bundle time -- so a second instance cannot be ruled out. Enable Oracle's instead, or disable node-problem-detector explicitly with --set if you have confirmed the label is unset and will stay so")
+	case !npdQualifiedServices[service]:
+		return reject(fmt.Sprintf("installed on %q, which has not been checked for a platform-provided node-problem-detector. Two instances fight over the same Node Conditions and one silently loses. Confirm the platform runs none, then add it to npdQualifiedServices", service))
+	case recipeResult.Criteria.OS == recipe.CriteriaOSTalos:
+		return reject("installed on Talos, where os-talos relocates privileged components into privileged-* namespaces for Pod Security Admission but does not relocate node-problem-detector; it would land in a restricted namespace and be denied at admission")
+	}
+
+	return nil, nil
 }
 
 // CheckHostMofedWithoutNetworkOperator warns when network-operator is disabled

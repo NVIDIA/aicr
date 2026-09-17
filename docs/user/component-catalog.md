@@ -15,6 +15,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **gpu-operator** | Manages the GPU driver and runtime lifecycle on Kubernetes nodes. Handles driver installation, container runtime configuration, device plugin, and GPU feature discovery. | [NVIDIA GPU Operator](https://github.com/NVIDIA/gpu-operator) |
 | **network-operator** | Manages high-performance networking for GPU workloads. Configures RDMA, SR-IOV, and host networking for multi-node communication. | [NVIDIA Network Operator](https://github.com/Mellanox/network-operator) |
 | **nfd** | Node Feature Discovery — labels nodes with hardware features (PCI device IDs, kernel modules, CPU capabilities). Both gpu-operator and network-operator consume these labels. On production GPU recipes, the Topology Updater publishes per-node `NodeResourceTopology` CRDs describing NUMA zones and GPU/NIC affinity for downstream NUMA-aware schedulers. | [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) |
+| **node-problem-detector** | Detects node-level faults the GPU stack does not watch — XFS shutdown, fatal UEFI CPER hardware errors, a read-only root filesystem — and publishes them as Node Conditions for NVSentinel's Object Monitor to consume. Opt-in via the `npd` mixin, and only where the platform does not already run its own. | [node-problem-detector](https://github.com/kubernetes/node-problem-detector) |
 | **gke-nccl-tcpxo** | NCCL TCPXO network plugin for GKE. Provides optimized collective communication for multi-node GPU workloads on Google Kubernetes Engine. GKE-specific. | — |
 | **gcp-driver-installer** | Google's cos-gpu-installer DaemonSet as an AICR-managed, values-gated component. Present in every GKE COS recipe; renders only under the `gpuStack=bundle-installer` profile value, where it installs the recipe-pinned NVIDIA driver on pools created with `gpu-driver-version=disabled`. GKE-specific. | — |
 | **aws-efa** | Device plugin for AWS Elastic Fabric Adapter. Enables low-latency networking on EKS clusters with EFA-capable instances. EKS-specific. | [AWS EFA K8s Device Plugin](https://github.com/aws/eks-charts) |
@@ -415,6 +416,70 @@ The entry stays in the list rather than being removed, because the webhook resol
 - **The loopback bandwidth threshold is not enforced.** The chart's 150 GB/s is calibrated for NVLink, while its own values note PCIe parts need roughly 15 — so on `l40`, `l40s` and `rtx-pro-6000` a healthy GPU would fail it. Because the checks now gate, that would be a pod-creation outage on those recipes, so the mixin sets `SKIP_BANDWIDTH_CHECK: "true"`. The loopback *connectivity* test still runs and still gates; only its bandwidth assertion is skipped. Revisit if upstream gains per-accelerator thresholds. The all-reduce check keeps its 100 GB/s threshold, but it is off by default.
 - **A DCGM outage blocks GPU pods.** `preflight-dcgm-diag` treats an unreachable hostengine as a fatal result, so while DCGM is down every GPU pod in an opted-in namespace strands in `Init:Error`. `CheckNVSentinelPreflightDCGMReachable` catches the *configuration* cases at bundle time — gpu-operator absent, disabled, relocated, or running with `dcgm.enabled: false` (which the shipped Kind overlay does) — but it cannot catch a runtime outage. This is the main operational risk of adopting the mixin.
 
+
+### Node Problem Detector
+
+NVSentinel watches GPUs, drivers, NVLink and syslog. It does not watch the rest of the node, so a read-only root filesystem or a fatal CPU/memory/PCIe error leaves the node taking jobs that all fail — and the fault looks like a workload problem. [node-problem-detector](https://github.com/kubernetes/node-problem-detector) (NPD) already detects these and publishes them as Node Conditions; the Object Monitor policies above turn three of them into NVSentinel health events.
+
+| Node Condition | Reason | Meaning |
+|---|---|---|
+| `XfsShutdown` | `XfsHasShutdown` | the XFS filesystem shut itself down |
+| `CperHardwareErrorFatal` | `CperHardwareErrorFatal` | firmware reported a fatal UEFI CPER hardware error |
+| `ReadonlyFilesystem` | `FilesystemIsReadOnly` | the root filesystem remounted read-only |
+
+**AICR installs NPD nowhere by default.** No shipped recipe enables it; the `npd` mixin is opt-in, and `TestNoShippedRecipeAdoptsNPDMixins` keeps it that way. Platform-default adoption, starting with EKS, is deliberately deferred until the policies have been qualified on real clusters — they are still `STORE_ONLY`, and NPD runs privileged.
+
+**Where it is safe to opt in depends on the platform, because a second copy is harmful.** Two NPD DaemonSets race to own the same Node Conditions and one silently loses its writes — no error, just conditions that flap.
+
+**The mixin is supported only on EKS, Kind and RKE2. Every other platform fails closed.**
+
+| Platform | Provider's own NPD | `npd` mixin |
+|---|---|---|
+| EKS | none | **supported** |
+| Kind | none | **supported** |
+| RKE2 | none — not in its packaged components | **supported** |
+| GKE | enabled by default (COS and Ubuntu images, and as an addon) | blocked at bundle time |
+| AKS | enabled by default via the AKS Linux Extension | blocked at bundle time |
+| OKE | ships `oke-node-problem-detector`, disabled behind the `oci.oraclecloud.com/oke-node-problem-detector-enabled=true` node label | blocked — the label is operator-settable and invisible at bundle time, so a second instance cannot be ruled out |
+| OCP | — | blocked — needs a SecurityContextConstraints binding AICR does not ship |
+| LKE, BCM, Metal3, k0s, generic | unverified | blocked until someone confirms they run none |
+
+The gate is an allowlist, not a denylist: a platform is permitted only once someone has checked it runs no NPD of its own. To qualify a new one, verify that, then add it to `npdQualifiedServices` in `pkg/bundler/validations/checks.go`.
+
+`CheckNPDNotDuplicatingProviderNPD` enforces that at bundle time. It permits only the platforms verified to run no NPD of their own — `eks`, `kind`, `rke2` — and rejects everything else with a reason:
+
+| Rejected | Why |
+|---|---|
+| `gke`, `aks` | the provider already runs its own |
+| `oke` | Oracle ships one disabled behind a node label; that label is operator-settable and invisible at bundle time, so a second instance cannot be ruled out |
+| `ocp` | the privileged DaemonSet needs a SecurityContextConstraints binding AICR does not ship — it would bundle cleanly, then fail admission |
+| `os: talos` | `os-talos` relocates privileged components into `privileged-*` namespaces for Pod Security Admission, but not NPD, so it would land in a restricted namespace |
+| `lke`, `bcm`, `metal3`, `k0s`, `generic` | unverified — nobody has checked whether they run their own |
+| no criteria at all | the platform is unknown, and could be any of the above |
+
+Each rejection names what would resolve it. Disabling the component explicitly (`--set node-problem-detector:enabled=false`) always skips the gate.
+
+**Opt in via the `npd` mixin**, on your own leaf overlay:
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  mixins:
+    - npd
+    - nvsentinel-object-monitor
+```
+
+The same catalog-registration rule applies as for the other mixins: the overlay must be committed to `recipes/overlays/` or supplied through `--data <dir>/overlays/`, because `aicr bundle -r` reads only `spec.criteria` from a directly passed file.
+
+**The two mixins are independent, and which you need depends on the platform.** `nvsentinel-object-monitor` carries the policies; `npd` installs the detector that produces the conditions they read. On GKE and AKS the provider's own NPD publishes *some* of them, but not all: measured on live clusters, GKE publishes `XfsShutdown` and `CperHardwareErrorFatal` but names the third `ReadOnlyRootFileSystem`, while AKS publishes only `ReadonlyFilesystem`. Both run customised NPD configs rather than upstream's, so a policy whose condition that provider does not publish simply never fires, and nothing reports that. Everywhere else, adopting the policies *without* `npd` gives no coverage at all, for the same silent reason.
+
+**All three NPD policies ship `processingStrategy: STORE_ONLY`**, unlike the operator-health policies alongside them. Upstream recommends `REPLACE_VM` for all three — the most destructive action in the pipeline — and that stays unvalidated until these have run on real clusters. `STORE_ONLY` records the event without acting on it. Two upstream caveats make that caution worth keeping: a `SystemLogMonitor` permanent condition **latches**, staying set after the underlying fault is repaired; and **restarting NPD resets its conditions**, which a consumer can read as recovery and use to cancel an active break-fix pipeline before recovery is confirmed.
+
+**GKE auto-repair already acts on node conditions.** Before enabling anything beyond `STORE_ONLY` on GKE, decide which system owns remediation there — otherwise two systems act on one fault.
+
+NPD runs as a privileged DaemonSet and patches Node status.
+
+The pinned chart (`oci://ghcr.io/deliveryhero/helm-charts/node-problem-detector`) is the one upstream itself documents: the [node-problem-detector installation guide](https://github.com/kubernetes/node-problem-detector#installation) names it as the primary method and gives that exact OCI reference, with hand-applied manifests offered only as the alternative. The project publishes no chart of its own. It is still the only chart AICR pins that NVIDIA does not publish, which is worth stating plainly for supply-chain review — but it is the upstream-recommended path, not a substitute chosen here. The image it deploys (`registry.k8s.io/node-problem-detector/node-problem-detector`) is upstream Kubernetes' own.
 
 ### Enabling Remediation
 
