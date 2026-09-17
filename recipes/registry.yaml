@@ -312,8 +312,10 @@ components:
       defaultRepository: oci://ghcr.io/nvidia/nodewright/charts
       defaultChart: nodewright
       # v0.18.0 renames Skyhook to NodeWright and writes status only on the new
-      # kind; do not bump past v0.17.x until the upgrade guidance (design 021)
-      # lands. See #2595.
+      # kind, which the deployment readiness gate does not read; v0.19.0 carries
+      # no fix. Do not bump past v0.17.x before the prerequisites in
+      # "Upgrade Notes" > nodewright-operator in docs/user/component-catalog.md.
+      # See #2593 and #2594.
       # renovate: datasource=docker depName=ghcr.io/nvidia/nodewright/charts/nodewright
       defaultVersion: v0.17.1
       defaultNamespace: skyhook
@@ -736,6 +738,8 @@ components:
     # with alpha.12's replacement). Verified live on aicr-gb300, 2026-09-02.
     healthCheck:
       assertFile: checks/grove/health-check.yaml
+    upgrades:
+      file: components/grove/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/ai-dynamo/grove
       defaultChart: grove-charts
