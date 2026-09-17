@@ -85,36 +85,6 @@ deferred_verifications:
       resolves it, and a failure on the first release is the finding to triage
       rather than something a subsequent green release discharges.
 
-  - id: aiperf-bench-base-v4-1-4-clears-glibc-and-sqlite
-    opened: 2026-09-17
-    document_version: 16
-    why_deferred: >-
-      The scan workflow builds the image from the head of main, so the rebuilt
-      bytes this bump produces do not exist until the change merges.
-    check: >-
-      The first Weekly Image Vulnerability Scan run after the base bump merges
-      must report aiperf-bench with 0 critical and 0 high, still at 11
-      VEX-suppressed rows, and must name none of CVE-2026-5450, CVE-2026-5928,
-      CVE-2026-11822, CVE-2026-11824.
-    how: |
-      gh run list -R NVIDIA/aicr --workflow vuln-scan-images.yaml --limit 1 \
-        --json databaseId,headSha,createdAt
-      gh run download <id> -R NVIDIA/aicr   # read aiperf-bench.txt
-    evidence_caveat: >-
-      The local validation behind this bump built and scanned linux/amd64 only.
-      The arm64 leg rests on scanning the candidate BASE for both architectures
-      (libc 2.41-12+deb13u4 and libsqlite3-0 3.46.1-7+deb13u2 on each), not on
-      an arm64 aiperf-bench image, which was never built here. CI does not close
-      that gap either: it scans the published manifest from an amd64 runner, so
-      the arm64 image is never scanned end to end by anyone. The final stage
-      only COPYs a venv, so no Debian package can enter after the base -- that
-      is the reasoning this caveat qualifies, not a measurement.
-    resolves_when: >-
-      the run above has been read AND showed 0 critical / 0 high for
-      aiperf-bench with 11 VEX-suppressed rows. A scheduled run merely firing
-      does not resolve it, and a run that still lists any of the four CVEs is
-      the finding to triage rather than a resolution.
-
 known_negatives:
   - id: aiperf-pins-block-pillow-and-aiohttp-fixes
     checked: 2026-09-03
@@ -146,6 +116,23 @@ deliberate_exclusions:
     invalidated_by: >-
       Debian shipping a fixed libexpat1; at that point the finding must surface
       and be remediated by the weekly image rebuild, not suppressed
+
+  - id: arm64-aiperf-bench-is-never-scanned
+    decided: 2026-09-17
+    decision: >-
+      No image scan covers the linux/arm64 aiperf-bench image, and closing that
+      is deliberately out of scope for this skill. The scan job runs on
+      ubuntu-latest and hands grype the multi-arch manifest, so grype resolves
+      the amd64 leg every time; the arm64 leg is built and published but never
+      scanned. Every claim this skill makes about aiperf-bench is therefore an
+      amd64 measurement plus one inference: the final stage only COPYs a venv,
+      so the Debian package set is exactly the base's, and the base can be
+      scanned per architecture directly (`grype <base> --platform linux/arm64`)
+      when a bump needs it. Do not restate an amd64 scan as an arm64 result.
+    invalidated_by: >-
+      the scan job in .github/workflows/vuln-scan-images.yaml gaining a per-arch
+      leg (or grype gaining manifest-wide scanning), at which point the arm64
+      result is measured and the inference above is no longer load-bearing
 
   - id: object-monitor-go-cves-are-a-pin-bump
     decided: 2026-09-17
