@@ -581,7 +581,8 @@ func TestCheckDRASupport_PassesComputeDomainOnlyWithoutBehavioralAllocation(t *t
 	// validated compute-domain ResourceSlices (complete current-generation
 	// pool, untainted device, Ready schedulable node), recording the
 	// behavioral GPU allocation subtest as not applicable, and must NOT
-	// create any test pod.
+	// create any test pod. Without a clique-labeled node the IMEX channel
+	// subtest is not applicable either.
 	client := k8sfake.NewClientset(append(healthyDRADriverObjects(), testNode("node1"))...)
 	withDRAAPIDiscovery(t, client)
 	created := markPodsSucceededOnCreate(client)
@@ -601,6 +602,11 @@ func TestCheckDRASupport_PassesComputeDomainOnlyWithoutBehavioralAllocation(t *t
 	}
 	if pod := findPodByPrefix(*created, gpuTestPodPrefix); pod != nil {
 		t.Errorf("behavioral allocation pod %s created, want none (full-GPU DRA not enabled)", pod.Name)
+	}
+	// node1 carries no clique label → the IMEX channel subtest is N/A too
+	// (see dra_imex_channel_check_test.go for the MNNVL paths).
+	if pod := findPodByPrefix(*created, imexTestPodPrefix); pod != nil {
+		t.Errorf("IMEX probe pod %s created, want none (no clique-labeled node)", pod.Name)
 	}
 }
 
@@ -673,7 +679,7 @@ func TestValidateNVIDIAResourceSlices_NodeListTimeout(t *testing.T) {
 	}
 
 	version := strings.TrimPrefix(draAPIGroupVersion, apiGroupResourceK8sIO+"/")
-	err := validateNVIDIAResourceSlices(ctx, newDRAFakeDynamicClient(), version)
+	_, err := validateNVIDIAResourceSlices(ctx, newDRAFakeDynamicClient(), version)
 	if err == nil {
 		t.Fatal("expected the node list to time out")
 	}

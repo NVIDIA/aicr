@@ -154,18 +154,11 @@ spec:
         - nccl-all-reduce-bw-net
         - nccl-all-reduce-bw-nvls
       constraints:
-        # Without this, both checks SKIP rather than run: the validator's
-        # applicability matrix registers only gb200 for EKS on the net and nvls
-        # variants, and an unsupported combination returns Skip — the
-        # thresholds below would be inert and the phase would report a vacuous
-        # pass. gb200/eks is the documented "existing service, new accelerator"
-        # borrow (see docs/user/validation.md), and it is the right template
-        # here because GB300 on EKS runs the same EFA scale-out fabric and the
-        # same NVL72 MNNVL/IMEX topology the gb200/eks profile was built for.
-        # Replace with a native gb300 matrix entry once GB300 runtime templates
-        # exist.
-        - name: nccl-benchmark-profile
-          value: gb200/eks
+        # gb300/eks is a native matrix entry (supportedNCCLCombinations) —
+        # no nccl-benchmark-profile override needed. Its templates
+        # (testdata/gb300/eks/runtime-{net,nvls}.yaml) are unchanged copies
+        # of the gb200/eks ones: GB300 on EKS runs the same EFA scale-out
+        # fabric and the same NVL72 MNNVL/IMEX topology.
         - name: nccl-all-reduce-bw-net
           value: ">= 40"
         - name: nccl-all-reduce-bw-nvls

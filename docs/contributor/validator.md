@@ -158,6 +158,32 @@ capability-driven via the shared `validators/internal/allocmode` probe, with
 inference-perf's worker wiring mode-dispatched per chosen node — but the
 saturation-ordering rationale stands for every GPU-needing check).
 
+On MNNVL clusters `dra-support` also runs a behavioral IMEX channel subtest
+(#1649). The gate is the intersection of Ready, schedulable nodes carrying the
+`nvidia.com/gpu.clique` label and nodes with a usable
+`compute-domain.nvidia.com` ResourceSlice: no clique-labeled node means the
+subtest is not applicable (non-MNNVL nodes such as H100 still publish
+compute-domain slices, so slice presence alone cannot gate it); clique-labeled
+nodes with no usable compute-domain slice fail the check. The driver serves one
+ComputeDomain channel claim per node, so candidate nodes whose channel is
+already held by an allocated claim (a standing ComputeDomain such as Slinky
+Slurm's, or a running MNNVL workload) are excluded from the probe. When every
+candidate is occupied the check does not record not applicable (that would
+certify DRA without behavioral evidence on a ComputeDomain-only cluster);
+it instead verifies allocation and preparation from the holding claims: a
+claim that is allocated, reserved by a pod, and whose pod is Running on that
+node proves the driver allocated the channel and the kubelet prepared it. If
+no holder verifies, the check fails as inconclusive. When applicable the
+check creates a per-run ComputeDomain (`numNodes: 0`, `Single` allocation),
+waits for the driver-generated ResourceClaimTemplate, and runs a busybox probe
+pinned to the candidate nodes that consumes one channel from it. The verdict is
+the pod reaching Succeeded with exactly one channel device visible under
+`/dev/nvidia-caps-imex-channels`; the generated ResourceClaim's post-terminal
+state is recorded as best-effort evidence only, because the resource-claim
+controller releases and garbage-collects a completed pod's template-generated
+claim. It shares the per-run namespace, ownership token, and UID-guarded
+cleanup of the other GPU allocation probes.
+
 The GPU allocation checks follow an **Inspect / Verify / Select** separation
 (#1327): `allocmode.Detect` is the INSPECT step — it probes cluster facts
 (usable full-GPU DRA, usable device plugin, per-node device counts) without
