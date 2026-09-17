@@ -244,22 +244,29 @@ func TestGenerate_WithChecksums(t *testing.T) {
 // output.Releases with the layout it actually wrote to outputDir, mirroring
 // the helm deployer's equivalent coverage (pkg/bundler/deployer/helm).
 func TestGenerateReportsLayout(t *testing.T) {
-	// DeploymentOrder must diverge from alphabetical component-name order,
-	// or a Releases() regression that silently sorted by name — instead of
-	// preserving DeploymentOrder — would produce the same sequence and pass
-	// unnoticed. recipeWith sets DeploymentOrder from declaration order, so
-	// cert-manager, nfd, gpu-operator (non-alphabetical: alphabetical would
-	// be cert-manager, gpu-operator, nfd) is also the real dependency order
-	// — nfd labels nodes before gpu-operator consumes those labels — not an
-	// arbitrary permutation chosen only to defeat the test.
+	// ComponentRefs declaration order, DeploymentOrder, and alphabetical
+	// component-name order are all deliberately distinct here:
+	//   - declaration (the ref() call order below): gpu-operator,
+	//     cert-manager, nfd
+	//   - DeploymentOrder: cert-manager, nfd, gpu-operator (the real
+	//     dependency order — nfd labels nodes before gpu-operator consumes
+	//     those labels)
+	//   - alphabetical: cert-manager, gpu-operator, nfd
+	// so the primaryOrder assertion below can only pass if Generate genuinely
+	// honors DeploymentOrder rather than sorting by name or falling back to
+	// declaration order (e.g. a dropped SortComponentRefsByDeploymentOrder
+	// call). recipeWith sets DeploymentOrder from declaration order, so it is
+	// overwritten below — this divergence from recipeWith's usual behavior is
+	// intentional, not a bug to "fix" back into agreement.
 	recipeResult := recipeWith(
+		ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3",
+			"https://helm.ngc.nvidia.com/nvidia"),
 		ref("cert-manager", "cert-manager", "cert-manager", "v1.17.2",
 			"https://charts.jetstack.io"),
 		ref("nfd", "node-feature-discovery", "node-feature-discovery", "v0.16.4",
 			"https://kubernetes-sigs.github.io/node-feature-discovery-charts"),
-		ref("gpu-operator", "gpu-operator", "gpu-operator", "v25.3.3",
-			"https://helm.ngc.nvidia.com/nvidia"),
 	)
+	recipeResult.DeploymentOrder = []string{"cert-manager", "nfd", "gpu-operator"}
 	g := &Generator{
 		RecipeResult: recipeResult,
 		ComponentValues: map[string]map[string]any{

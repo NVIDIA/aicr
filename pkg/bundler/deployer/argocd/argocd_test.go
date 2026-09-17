@@ -603,17 +603,28 @@ func TestGenerateReportsLayout(t *testing.T) {
 	ctx := context.Background()
 	outputDir := t.TempDir()
 
-	// DeploymentOrder must diverge from alphabetical component-name order,
-	// or a Releases() regression that silently sorted by name — instead of
-	// preserving DeploymentOrder — would produce the same sequence and pass
-	// unnoticed. cert-manager, nfd, gpu-operator is non-alphabetical
-	// (alphabetical would be cert-manager, gpu-operator, nfd) and is also
-	// the real dependency order — nfd labels nodes before gpu-operator
-	// consumes those labels — not an arbitrary permutation chosen only to
-	// defeat the test.
+	// ComponentRefs declaration order, DeploymentOrder, and alphabetical
+	// component-name order are all deliberately distinct here:
+	//   - declaration: gpu-operator, cert-manager, nfd
+	//   - DeploymentOrder: cert-manager, nfd, gpu-operator (the real
+	//     dependency order — nfd labels nodes before gpu-operator consumes
+	//     those labels)
+	//   - alphabetical: cert-manager, gpu-operator, nfd
+	// so the primaryOrder assertion below can only pass if Generate genuinely
+	// honors DeploymentOrder rather than sorting by name or falling back to
+	// declaration order (e.g. a dropped SortComponentRefsByDeploymentOrder
+	// call).
 	recipeResult := &recipe.RecipeResult{}
 	recipeResult.Metadata.Version = testVersion
 	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      "helm",
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
 		{
 			Name:      "cert-manager",
 			Namespace: "cert-manager",
@@ -629,14 +640,6 @@ func TestGenerateReportsLayout(t *testing.T) {
 			Version:   "v0.16.4",
 			Type:      "helm",
 			Source:    "https://kubernetes-sigs.github.io/node-feature-discovery-charts",
-		},
-		{
-			Name:      "gpu-operator",
-			Namespace: "gpu-operator",
-			Chart:     "gpu-operator",
-			Version:   "v25.3.3",
-			Type:      "helm",
-			Source:    "https://helm.ngc.nvidia.com/nvidia",
 		},
 	}
 	recipeResult.DeploymentOrder = []string{"cert-manager", "nfd", "gpu-operator"}
