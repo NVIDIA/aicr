@@ -204,6 +204,7 @@ const (
 	KindSnapshot     Kind = "Snapshot"
 	KindRecipe       Kind = "Recipe"
 	KindRecipeResult Kind = "RecipeResult"
+	KindBundleInfo   Kind = "BundleInfo"
 )
 
 // String returns the string representation of the Kind.

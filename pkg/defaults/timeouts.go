@@ -934,6 +934,13 @@ const (
 	// supply-chain artifacts.
 	MaxAttestationFileBytes int64 = 10 * 1024 * 1024 // 10 MiB
 
+	// MaxBundleInfoBytes caps the size of a bundle's bundle-info.yaml on
+	// read. The record is a build stamp plus one entry per emitted release,
+	// bounded in practice by the 999-folder NNN- prefix limit; 1 MiB is
+	// orders of magnitude above a real one and matches MaxChecksumFileBytes
+	// for parity across bundle-root metadata reads.
+	MaxBundleInfoBytes int64 = 1 * 1024 * 1024 // 1 MiB
+
 	// MaxManifestFileBytes caps the size of an in-bundle manifest.json
 	// file read by the verifier. A manifest entry is ~150 bytes (path +
 	// size + sha256); 1 MiB allows ~6k entries — well above any realistic
