@@ -40,13 +40,13 @@ hosts:
   - cr.agentgateway.dev              # agentgateway OCI Helm charts
   - docker.gitea.com                 # gitea image (KWOK flux/argocd git lanes)
   - docker.io                        # kindest/node, busybox, golang, python, openbao, ministack, ...
+  - dsx-ai-factory.github.io         # topograph Helm repo (moved from nvidia.github.io, #2793)
   - ghcr.io                          # AICR images (push) + OCI Helm charts + third-party CI images
   - github-actions                   # GitHub Actions marketplace (uses: refs)
   - helm.ngc.nvidia.com              # NVIDIA NGC Helm (gpu-operator, network-operator, nim, dynamo)
   - jmcgrath207.github.io            # k8s-ephemeral-storage-metrics Helm repo
   - kubernetes-sigs.github.io        # node-feature-discovery, aws-ebs-csi-driver Helm repos
   - nvcr.io                          # distroless/static base image (compiled-in)
-  - nvidia.github.io                 # topograph Helm repo
   - open-policy-agent.github.io      # gatekeeper Helm repo
   - prometheus-community.github.io   # kube-prometheus-stack, adapter, operator-crds Helm repos
   - public.ecr.aws                   # in-cluster registry image (KWOK)

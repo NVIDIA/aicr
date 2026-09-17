@@ -104,13 +104,50 @@ known_negatives:
       pyproject.toml before assuming the suppression is still unavoidable
 
 deliberate_exclusions:
-  - id: cve-2026-66046-libexpat1-wont-fix
+  - id: libexpat1-wont-fix-highs
     decided: 2026-08-27
+    rechecked: 2026-09-17
     decision: >-
-      This High finding on libexpat1 is deliberately NOT suppressed. Debian
-      marks it wont-fix, so `--only-fixed` already withholds it from the
-      reported counts, and pre-suppressing a wont-fix finding would hide it the
-      moment a fix ships.
+      The High findings on libexpat1 2.8.3-1~deb13u1 -- CVE-2026-66046, and
+      CVE-2026-76956 / CVE-2026-76957 seen on the same package at the 2026-09-17
+      recheck -- are deliberately NOT suppressed. Debian marks each wont-fix, so
+      `--only-fixed` already withholds them from the reported counts, and
+      pre-suppressing a wont-fix finding would hide it the moment a fix ships.
     invalidated_by: >-
       Debian shipping a fixed libexpat1; at that point the finding must surface
       and be remediated by the weekly image rebuild, not suppressed
+
+  - id: arm64-aiperf-bench-is-never-scanned
+    decided: 2026-09-17
+    decision: >-
+      No image scan covers the linux/arm64 aiperf-bench image, and closing that
+      is deliberately out of scope for this skill. The scan job runs on
+      ubuntu-latest and hands grype the multi-arch manifest, so grype resolves
+      the amd64 leg every time; the arm64 leg is built and published but never
+      scanned. Every claim this skill makes about aiperf-bench is therefore an
+      amd64 measurement plus one inference: the final stage only COPYs a venv,
+      so the Debian package set is exactly the base's, and the base can be
+      scanned per architecture directly (`grype <base> --platform linux/arm64`)
+      when a bump needs it. Do not restate an amd64 scan as an arm64 result.
+    invalidated_by: >-
+      the scan job in .github/workflows/vuln-scan-images.yaml gaining a per-arch
+      leg (or grype gaining manifest-wide scanning), at which point the arm64
+      result is measured and the inference above is no longer load-bearing
+
+  - id: object-monitor-go-cves-are-a-pin-bump
+    decided: 2026-09-17
+    decision: >-
+      The 9 High findings on ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
+      (8 Go stdlib advisories plus GHSA-2v4p-qf9q-27wj in grpc) get no VEX
+      statement. AICR does not build that image -- the scan matrix pins it to
+      nvsentinel's registry defaultVersion, currently v1.20.0 -- and the fix is
+      reachable by bumping that pin: v1.21.0, v1.22.0 and v1.23.0 each scan with
+      zero fixed-state findings at any severity. Remediation is tracked as the
+      nvsentinel bump (#2596, drift verdict `take` for v1.20.0 -> v1.23.0), not
+      here. A statement would also be a reachability claim about a third party's
+      Go binary that this repo has no source to support.
+    invalidated_by: >-
+      the nvsentinel defaultVersion in recipes/registry.yaml advancing past
+      v1.20.0, which removes the findings outright; or an object-monitor release
+      carrying HIGH+ findings with no clean successor version, which would make
+      the suppression question real for the first time
