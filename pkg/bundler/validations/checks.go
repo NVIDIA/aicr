@@ -380,6 +380,11 @@ func CheckNPDNotDuplicatingProviderNPD(ctx context.Context, componentName string
 	return nil, nil
 }
 
+// tuningEnabledKey is the nodewright-customizations value gating the
+// nvidia-tuned package. Absent or true renders it; only an explicit false
+// suppresses it, matching the Sprig-safe gate the tuning manifests use.
+const tuningEnabledKey = "tuningEnabled"
+
 // CheckGB300HostKernelGranule warns that the GB300 tuned profile assumes a
 // 64k-granule ARM64 host kernel. Scope it via registry conditions to the leaf
 // that has no nvidia-setup to pin one (service: generic, accelerator: gb300);
@@ -397,22 +402,19 @@ func CheckNPDNotDuplicatingProviderNPD(ctx context.Context, componentName string
 //
 // A component disabled via --set, or one whose tuning is gated off with
 // tuningEnabled=false, renders no nvidia-tuned package and applies no profile,
-// so it is skipped.
-func CheckGB300HostKernelGranule(_ context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+// so it is skipped. Both gates are read from the FINAL effective values
+// (recipe merge plus scalar --set and typed --set-json/--set-file, under the
+// canonical name and its registry aliases) rather than from the raw scalar
+// override map: a typed --set-json that suppresses the package must suppress
+// the advisory with it. The tuningEnabled comparison mirrors the manifest's
+// own `ne (toString ...) "false"` gate exactly, so the two cannot disagree.
+func CheckGB300HostKernelGranule(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
 	if bundlerConfig == nil {
 		return nil, nil
 	}
 
-	// Check if component exists in recipe
-	hasComponent := false
-	for _, ref := range recipeResult.ComponentRefs {
-		if ref.Name == componentName {
-			hasComponent = true
-			break
-		}
-	}
-
-	if !hasComponent {
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil {
 		return nil, nil
 	}
 
@@ -421,11 +423,17 @@ func CheckGB300HostKernelGranule(_ context.Context, componentName string, recipe
 		return nil, nil
 	}
 
-	overrides := bundlerConfig.ValueOverrides()
-	for _, key := range append([]string{componentName}, nodewrightCustomizationsOverrideAliases...) {
-		if overrides[key]["enabled"] == overrideValueFalse || overrides[key]["tuningEnabled"] == overrideValueFalse {
-			return nil, nil
-		}
+	keys := componentOverrideKeys(componentName, recipeResult.DataProvider())
+	if componentDisabled(ref, bundlerConfig, keys) {
+		return nil, nil
+	}
+
+	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, keys, "GB300 host kernel granule")
+	if err != nil {
+		return nil, []error{err}
+	}
+	if fmt.Sprint(values[tuningEnabledKey]) == overrideValueFalse {
+		return nil, nil
 	}
 
 	baseMsg := fmt.Sprintf("%s applies a tuned profile that sizes hugepages for a 64k-granule ARM64 host kernel", componentName)

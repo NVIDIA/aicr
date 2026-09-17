@@ -574,6 +574,43 @@ func TestCheckGB300HostKernelGranule(t *testing.T) {
 			wantErrors:   0,
 		},
 		{
+			// Regression: the check used to read only the scalar --set map,
+			// so a typed override suppressed the tuned package but still
+			// emitted the advisory.
+			name:          "tuning gated off via typed --set-json",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+				{Component: "nodewrightcustomizations", Path: tuningEnabledKey, Value: false},
+			})),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "tuning gated off via typed --set-json under the canonical name",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+				{Component: "nodewright-customizations", Path: tuningEnabledKey, Value: false},
+			})),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "typed --set-json tuningEnabled=true still warns",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+				{Component: "nodewrightcustomizations", Path: tuningEnabledKey, Value: true},
+			})),
+			conditions:     conditions,
+			wantWarnings:   1,
+			wantErrors:     0,
+			wantWarningMsg: wantMsg,
+		},
+		{
 			name:          "tuning gated off via skyhook alias",
 			componentName: "nodewright-customizations",
 			recipeResult:  genericGB300,
