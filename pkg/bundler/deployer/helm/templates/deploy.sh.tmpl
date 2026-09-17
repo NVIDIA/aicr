@@ -435,9 +435,9 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     #      we discover it whichever namespace the operator runs in
     #      (e.g. os-talos moves it to "privileged-gpu-operator").
     #   2. No nodes carry nvidia.com/gpu.deploy.driver=true — the
-    #      operator's reconciler sets that label only on nodes its
-    #      driver DaemonSet selects (this respects
-    #      --accelerated-node-selector). Waiting on every
+    #      operator's reconciler sets that label on the nodes where it
+    #      deploys the driver, driven by its own GFD/NFD GPU detection.
+    #      Waiting on every
     #      gpu.present=true node would block until the 15-min timeout
     #      for any GPU node the operator deliberately excludes.
     DRIVER_DS_NS=$(kubectl get daemonset -A -o jsonpath='{.items[?(@.metadata.name=="nvidia-driver-daemonset")].metadata.namespace}' 2>/dev/null | awk '{print $1}')
