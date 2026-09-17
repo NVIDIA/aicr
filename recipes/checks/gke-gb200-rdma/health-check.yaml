@@ -169,6 +169,61 @@ spec:
                   - status: "True"
                 (conditions[?type == 'ParamsReady']):
                   - status: "True"
+    # The Network/GKENetworkParamSet Ready conditions above are cluster-scoped.
+    # GKE's own docs state that Ready does not imply the network is available
+    # on any specific node. A GB200 node pool created without one of the five
+    # additionalNodeNetworkConfigs attachments still passes every assertion
+    # above. GKE annotates each node that actually has a network attached with
+    # networking.gke.io/network-status, a JSON array of {"name": ...} entries.
+    # See docs/integrator/gke-gb200-networking.md. Assert every GB200 node
+    # carries all five names in that annotation.
+    - name: validate-gb200-node-network-attachments
+      try:
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Node
+              metadata:
+                labels:
+                  cloud.google.com/gke-accelerator: nvidia-gb200
+                annotations:
+                  (!contains(@."networking.gke.io/network-status" || '', '"name":"gvnic-1"')): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Node
+              metadata:
+                labels:
+                  cloud.google.com/gke-accelerator: nvidia-gb200
+                annotations:
+                  (!contains(@."networking.gke.io/network-status" || '', '"name":"rdma-0"')): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Node
+              metadata:
+                labels:
+                  cloud.google.com/gke-accelerator: nvidia-gb200
+                annotations:
+                  (!contains(@."networking.gke.io/network-status" || '', '"name":"rdma-1"')): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Node
+              metadata:
+                labels:
+                  cloud.google.com/gke-accelerator: nvidia-gb200
+                annotations:
+                  (!contains(@."networking.gke.io/network-status" || '', '"name":"rdma-2"')): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Node
+              metadata:
+                labels:
+                  cloud.google.com/gke-accelerator: nvidia-gb200
+                annotations:
+                  (!contains(@."networking.gke.io/network-status" || '', '"name":"rdma-3"')): true
     - name: validate-nccl-rdma-installer-fully-rolled-out
       try:
         - assert:
@@ -178,11 +233,11 @@ spec:
               metadata:
                 name: nccl-rdma-installer
                 namespace: kube-system
-              # A DaemonSet has no spec.replicas; desiredNumberScheduled (node
+              # A DaemonSet has no spec.replicas. desiredNumberScheduled (node
               # count matching its selector) is both the desired count and the
-              # floor. numberReady alone accepts a stale rollout: a node still
-              # running the previous revision's pod counts as ready too, so
-              # updatedNumberScheduled must also match. observedGeneration
+              # floor. numberReady alone accepts a stale rollout, since a node
+              # still running the previous revision's pod counts as ready too,
+              # so updatedNumberScheduled must also match. observedGeneration
               # confirms status reflects the current spec, not a reconcile
               # from before the latest update.
               ((status.desiredNumberScheduled || `0`) > `0`): true

@@ -16,6 +16,7 @@ package chainsaw
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +78,29 @@ func TestGKEGB200RDMAHealthCheckClusterStates(t *testing.T) {
 			},
 		}
 	}
+	// gb200Node returns a Node with the given networks attached, formatted the
+	// way GKE actually annotates a node whose additionalNodeNetworkConfigs
+	// includes them (networking.gke.io/network-status, a JSON array of
+	// {"name": ...} entries). See docs/integrator/gke-gb200-networking.md.
+	gb200Node := func(name string, networks ...string) map[string]any {
+		entries := make([]string, 0, len(networks)+1)
+		entries = append(entries, `{"name":"default"}`)
+		for _, n := range networks {
+			entries = append(entries, fmt.Sprintf(`{"name":%q}`, n))
+		}
+		return map[string]any{
+			"apiVersion": "v1",
+			"kind":       "Node",
+			"metadata": map[string]any{
+				"name":   name,
+				"labels": map[string]any{"cloud.google.com/gke-accelerator": "nvidia-gb200"},
+				"annotations": map[string]any{
+					"networking.gke.io/network-status": "[" + strings.Join(entries, ",") + "]",
+				},
+			},
+		}
+	}
+	allFiveNetworks := []string{"gvnic-1", "rdma-0", "rdma-1", "rdma-2", "rdma-3"}
 
 	tests := []struct {
 		name string
@@ -221,6 +245,26 @@ func TestGKEGB200RDMAHealthCheckClusterStates(t *testing.T) {
 			},
 			wantOutput: "nccl-rdma-installer-x7f2p",
 		},
+		{
+			name: "gb200 node missing the rdma-2 attachment fails closed",
+			mutate: func(f *fakeFetcher) {
+				f.addList("v1", "Node", "", []map[string]any{
+					gb200Node("node-a", allFiveNetworks...),
+					gb200Node("node-b", "gvnic-1", "rdma-0", "rdma-1", "rdma-3"), // missing rdma-2
+				})
+			},
+			wantOutput: "node-b",
+		},
+		{
+			name: "gb200 node with no additional network attachments fails closed",
+			mutate: func(f *fakeFetcher) {
+				f.addList("v1", "Node", "", []map[string]any{
+					gb200Node("node-a", allFiveNetworks...),
+					gb200Node("node-b"), // only "default", no GB200 networks at all
+				})
+			},
+			wantOutput: "node-b",
+		},
 	}
 
 	for _, tt := range tests {
@@ -241,6 +285,10 @@ func TestGKEGB200RDMAHealthCheckClusterStates(t *testing.T) {
 				"status":     map[string]any{"desiredNumberScheduled": 2, "numberReady": 2, "updatedNumberScheduled": 2, "observedGeneration": 2},
 			})
 			fetcher.addList("v1", "Pod", "kube-system", nil)
+			fetcher.addList("v1", "Node", "", []map[string]any{
+				gb200Node("node-a", allFiveNetworks...),
+				gb200Node("node-b", allFiveNetworks...),
+			})
 
 			if tt.mutate != nil {
 				tt.mutate(fetcher)
