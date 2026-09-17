@@ -105,16 +105,25 @@ built it, and which Helm release landed in which directory.
 `layout.releases` lists every Helm release the bundle installs, in deployment
 order, and that ordering is normative: there is no ordinal field, so a
 consumer reads sequence from list position rather than from a number. A
-release injected alongside a component — the `-pre`, `-post`, or
-`-readiness` folders that `--vendor-charts` and `--readiness-hooks` can add —
-has no recipe component of its own, so it names its parent in `component`
-while `name` carries its own suffixed name.
+release injected alongside a component — a `-pre` or `-post` folder when the
+component declares pre- or post-install manifests (independent of
+`--vendor-charts`), or a `-readiness` folder under `--readiness-hooks` — has
+no recipe component of its own, so it names its parent in `component` while
+`name` carries its own suffixed name.
 
-`bundle-info.yaml` deliberately carries no component inventory: `recipe.yaml`
-sits beside it at the bundle root and is already the source of truth for what
-the recipe resolved to. It also carries no timestamp — the record feeds
-`checksums.txt`, which is the subject of the bundle attestation, so a
-wall-clock field would make every bundle irreproducible.
+`bundle-info.yaml` deliberately carries no component *inventory*:
+`recipe.yaml` sits beside it at the bundle root and is already the source of
+truth for what the recipe resolved to. `build.settings.components` in the
+example below is not an inventory — it is the REST API's `?bundlers=` filter
+(there is no CLI flag for it), recorded because the filtered `recipe.yaml`
+alongside it is written post-filter and would otherwise be indistinguishable
+from an unfiltered bundle of a smaller recipe. It is absent unless that
+filter was used; see [Overrides that cannot take effect are
+rejected](#overrides-that-cannot-take-effect-are-rejected) for the same
+`bundlers=` filter from the override side. `bundle-info.yaml` also carries no
+timestamp — the record feeds `checksums.txt`, which is the subject of the
+bundle attestation, so a wall-clock field would make every bundle
+irreproducible.
 
 Below is a fully populated example, generated from the shipped serializer and
 extended with fields (`repoURL`, `provenance`, an injected `-post`/`-readiness`
