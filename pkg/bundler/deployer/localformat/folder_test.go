@@ -21,14 +21,18 @@ import (
 )
 
 func TestWriteResultReleases(t *testing.T) {
+	// Declaration order deliberately disagrees with both alphabetical Name
+	// order and numeric Index/Dir order (gpu-operator, gpu-operator-post,
+	// cert-manager), so a Releases() that sorted by either field instead of
+	// preserving input order would fail the order assertion below.
 	wr := localformat.WriteResult{
 		Folders: []localformat.Folder{
-			{Index: 1, Dir: "001-cert-manager", Name: "cert-manager",
-				Namespace: "cert-manager", Parent: "cert-manager"},
 			{Index: 2, Dir: "002-gpu-operator", Name: "gpu-operator",
 				Namespace: "gpu-operator", Parent: "gpu-operator"},
 			{Index: 3, Dir: "003-gpu-operator-post", Name: "gpu-operator-post",
 				Namespace: "gpu-operator", Parent: "gpu-operator"},
+			{Index: 1, Dir: "001-cert-manager", Name: "cert-manager",
+				Namespace: "cert-manager", Parent: "cert-manager"},
 		},
 	}
 
@@ -36,16 +40,29 @@ func TestWriteResultReleases(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("releases = %d, want 3", len(got))
 	}
-	// Folder order is deployment order and must survive the mapping.
-	if got[0].Name != "cert-manager" || got[2].Name != "gpu-operator-post" {
-		t.Errorf("order not preserved: %v", got)
+	// Folder order is deployment order and must survive the mapping: the
+	// consuming artifact carries no ordinal field, so a consumer reads
+	// sequence from list position alone.
+	wantOrder := []string{"gpu-operator", "gpu-operator-post", "cert-manager"}
+	for i, want := range wantOrder {
+		if got[i].Name != want {
+			t.Errorf("order not preserved: got[%d].Name = %q, want %q (full: %v)", i, got[i].Name, want, got)
+		}
 	}
 	// An injected -post folder is its own release but names its parent,
 	// which is what lets a consumer group the three gpu-operator entries.
-	if got[2].Component != "gpu-operator" {
-		t.Errorf("injected folder Component = %q, want gpu-operator", got[2].Component)
+	if got[1].Component != "gpu-operator" {
+		t.Errorf("injected folder Component = %q, want gpu-operator", got[1].Component)
 	}
-	if got[2].Path != "003-gpu-operator-post" {
-		t.Errorf("Path = %q, want 003-gpu-operator-post", got[2].Path)
+	if got[1].Path != "003-gpu-operator-post" {
+		t.Errorf("Path = %q, want 003-gpu-operator-post", got[1].Path)
+	}
+	// Manifest stays empty in this mapping: deployers that declare a release
+	// through a per-folder file (rather than an orchestration script) set it
+	// afterwards, which this helper must not pre-empt.
+	for _, r := range got {
+		if r.Manifest != "" {
+			t.Errorf("Manifest = %q, want empty for %q", r.Manifest, r.Name)
+		}
 	}
 }
