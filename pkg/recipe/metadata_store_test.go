@@ -1581,13 +1581,14 @@ func TestMixinComponentRefSafeForMerge(t *testing.T) {
 			wantSafe: true,
 		},
 		{
-			name: "dependencyRefs set -> conflict",
+			// Additive: the merge unions and deduplicates, so a mixin can add
+			// an edge but cannot drop one the chain declared.
+			name: "dependencyRefs set -> safe",
 			ref: ComponentRef{
 				Name:           "gpu-operator",
 				DependencyRefs: []string{"cert-manager"},
 			},
-			wantSafe:      false,
-			wantOffending: "dependencyRefs",
+			wantSafe: true,
 		},
 		{
 			name:          "cleanup=true -> conflict",
