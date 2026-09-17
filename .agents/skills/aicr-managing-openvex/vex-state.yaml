@@ -85,6 +85,36 @@ deferred_verifications:
       resolves it, and a failure on the first release is the finding to triage
       rather than something a subsequent green release discharges.
 
+  - id: aiperf-bench-base-v4-1-4-clears-glibc-and-sqlite
+    opened: 2026-09-17
+    document_version: 16
+    why_deferred: >-
+      The scan workflow builds the image from the head of main, so the rebuilt
+      bytes this bump produces do not exist until the change merges.
+    check: >-
+      The first Weekly Image Vulnerability Scan run after the base bump merges
+      must report aiperf-bench with 0 critical and 0 high, still at 11
+      VEX-suppressed rows, and must name none of CVE-2026-5450, CVE-2026-5928,
+      CVE-2026-11822, CVE-2026-11824.
+    how: |
+      gh run list -R NVIDIA/aicr --workflow vuln-scan-images.yaml --limit 1 \
+        --json databaseId,headSha,createdAt
+      gh run download <id> -R NVIDIA/aicr   # read aiperf-bench.txt
+    evidence_caveat: >-
+      The local validation behind this bump built and scanned linux/amd64 only.
+      The arm64 leg rests on scanning the candidate BASE for both architectures
+      (libc 2.41-12+deb13u4 and libsqlite3-0 3.46.1-7+deb13u2 on each), not on
+      an arm64 aiperf-bench image, which was never built here. CI does not close
+      that gap either: it scans the published manifest from an amd64 runner, so
+      the arm64 image is never scanned end to end by anyone. The final stage
+      only COPYs a venv, so no Debian package can enter after the base -- that
+      is the reasoning this caveat qualifies, not a measurement.
+    resolves_when: >-
+      the run above has been read AND showed 0 critical / 0 high for
+      aiperf-bench with 11 VEX-suppressed rows. A scheduled run merely firing
+      does not resolve it, and a run that still lists any of the four CVEs is
+      the finding to triage rather than a resolution.
+
 known_negatives:
   - id: aiperf-pins-block-pillow-and-aiohttp-fixes
     checked: 2026-09-03
@@ -104,13 +134,33 @@ known_negatives:
       pyproject.toml before assuming the suppression is still unavoidable
 
 deliberate_exclusions:
-  - id: cve-2026-66046-libexpat1-wont-fix
+  - id: libexpat1-wont-fix-highs
     decided: 2026-08-27
+    rechecked: 2026-09-17
     decision: >-
-      This High finding on libexpat1 is deliberately NOT suppressed. Debian
-      marks it wont-fix, so `--only-fixed` already withholds it from the
-      reported counts, and pre-suppressing a wont-fix finding would hide it the
-      moment a fix ships.
+      The High findings on libexpat1 2.8.3-1~deb13u1 -- CVE-2026-66046, and
+      CVE-2026-76956 / CVE-2026-76957 seen on the same package at the 2026-09-17
+      recheck -- are deliberately NOT suppressed. Debian marks each wont-fix, so
+      `--only-fixed` already withholds them from the reported counts, and
+      pre-suppressing a wont-fix finding would hide it the moment a fix ships.
     invalidated_by: >-
       Debian shipping a fixed libexpat1; at that point the finding must surface
       and be remediated by the weekly image rebuild, not suppressed
+
+  - id: object-monitor-go-cves-are-a-pin-bump
+    decided: 2026-09-17
+    decision: >-
+      The 9 High findings on ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
+      (8 Go stdlib advisories plus GHSA-2v4p-qf9q-27wj in grpc) get no VEX
+      statement. AICR does not build that image -- the scan matrix pins it to
+      nvsentinel's registry defaultVersion, currently v1.20.0 -- and the fix is
+      reachable by bumping that pin: v1.21.0, v1.22.0 and v1.23.0 each scan with
+      zero fixed-state findings at any severity. Remediation is tracked as the
+      nvsentinel bump (#2596, drift verdict `take` for v1.20.0 -> v1.23.0), not
+      here. A statement would also be a reachability claim about a third party's
+      Go binary that this repo has no source to support.
+    invalidated_by: >-
+      the nvsentinel defaultVersion in recipes/registry.yaml advancing past
+      v1.20.0, which removes the findings outright; or an object-monitor release
+      carrying HIGH+ findings with no clean successor version, which would make
+      the suppression question real for the first time
