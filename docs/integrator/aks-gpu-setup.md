@@ -133,8 +133,11 @@ selector, and the DRA kubelet plugin runs on every accelerated node.
 
 The label matters only if you both run an operator-managed driver (see the
 `gpuStack=operator-managed` procedure below) and generate the bundle with
-`aicr bundle --dra-eviction-node-label key=value`. In that case set it **in the
-node pool definition**, with the other required node labels — an ad hoc
+`aicr bundle --dra-eviction-node-label key=value`. The bundle then carries
+`dra-node-labeler`, which applies the label to every GPU node from GFD's
+`nvidia.com/gpu.present`, so no node pool change is needed. If you disable the
+labeler (`--set dra-node-labeler:enabled=false`), set the label **in the node
+pool definition**, with the other required node labels — an ad hoc
 `kubectl label node` does not survive node replacement, recycling, autoscaling,
 or a pool scaled from zero, so later nodes arrive unlabeled.
 
@@ -625,7 +628,7 @@ configuration profile — one flag flips every ownership path together:
 aicr recipe --service aks --accelerator h100 --os ubuntu --intent training \
   --profile gpuStack=operator-managed -o recipe.yaml
 # AKS requires a keyed accelerated-node toleration; add
-# --dra-eviction-node-label only if you opted in and labelled the pool.
+# --dra-eviction-node-label opts in; dra-node-labeler labels the GPU nodes.
 aicr bundle -r recipe.yaml -o ./bundles \
   --accelerated-node-toleration nvidia.com/gpu:NoSchedule \
   --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true

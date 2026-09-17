@@ -447,6 +447,11 @@ Generate with `--dra-eviction-node-label key=value` to opt in. The rest of this
 section applies only then. The same applies to the corresponding `-ocp`
 components.
 
+Opting in also keeps `dra-node-labeler` in the bundle. It applies the
+configured `key=value` to every node GFD labels `nvidia.com/gpu.present=true`
+and never rewrites an existing value, so the node-pool labeling described below
+is only needed if you remove it with `--set dra-node-labeler:enabled=false`.
+
 ### Choosing whether to opt in
 
 The label is how GPU Operator's Driver Manager finds the plugin: it deschedules
@@ -491,6 +496,7 @@ Put the label in the **node pool definition** — an EKS managed nodegroup
 your provisioner — alongside the `nodeGroup=gpu-worker` label you already set
 there.
 
+The rest of this subsection applies when `dra-node-labeler` has been disabled.
 A one-off `kubectl label node` is a repair, not a configuration. It does not
 survive node replacement or recycling, cluster autoscaling adding GPU nodes, or
 a nodegroup scaled from zero. Any GPU node added afterwards arrives unlabeled

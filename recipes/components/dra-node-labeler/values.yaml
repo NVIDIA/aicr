@@ -1,0 +1,30 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# dra-node-labeler values.
+#
+# The bundler owns labelKey and labelValue: when --dra-eviction-node-label
+# (scheduling.draEvictionNodeLabel) is set they are overwritten with the
+# configured pair so the labeler, the DRA kubelet plugin's nodeSelector and
+# the GPU Operator Driver Manager's NODE_LABEL_FOR_GPU_POD_EVICTION agree.
+# Without the flag the bundler removes this component from the bundle
+# entirely; see docs/user/cli-reference.md, "DRA Driver Upgrade Eviction".
+labelKey: nvidia.com/dra-kubelet-plugin
+labelValue: "true"
+
+# Must carry a shell (the command is `/bin/sh -c`) and pull anonymously.
+# registry.k8s.io/kubectl is distroless and fails with RunContainerError;
+# alpine/kubectl is public, multi-arch, and ships busybox sh with kubectl.
+# Keep the tag within one minor of the catalog's Kubernetes floor.
+image: docker.io/alpine/kubectl:1.35.4@sha256:9ccd823647622b620dce092d0f1406b8b41d152ce08ac963e3d4683770b14dfd
