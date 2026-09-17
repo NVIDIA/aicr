@@ -147,9 +147,9 @@ func SubjectName(recipeName string) string {
 }
 
 // BuildStatement constructs the in-toto Statement carrying our
-// recipe-evidence predicate, typed via StatementPredicateType (v1 for
-// unprofiled recipes, v2 when the predicate carries a profile block).
-// The returned bytes are protobuf-canonical JSON suitable
+// recipe-evidence predicate, typed via StatementPredicateType (always
+// PredicateTypeV3 for a newly built predicate). The returned bytes are
+// protobuf-canonical JSON suitable
 // for DSSE wrapping. The recipe canonicalization happens upstream;
 // callers pass in the already-computed subject digest.
 func BuildStatement(recipeName, recipeSubjectDigest string, pred *Predicate) ([]byte, error) {
@@ -205,7 +205,17 @@ func BuildStatement(recipeName, recipeSubjectDigest string, pred *Predicate) ([]
 // discovery anchors on the artifact digest, so the signed subject must
 // match. Recipe identity is preserved via predicate.recipe.{name,digest},
 // which BuildArtifactStatement requires to be populated.
-func BuildArtifactStatement(ociRef, artifactDigest string, pred *Predicate) ([]byte, error) {
+//
+// predicateType is taken from the caller rather than derived via
+// StatementPredicateType. A freshly built bundle types it V3, but a bundle
+// reconstructed from an on-disk statement (Publish, SignExisting) must
+// re-sign under the type it was ORIGINALLY built with, because
+// pred.Recipe.Digest was computed with that type's canonicalization
+// algorithm. Stamping every reconstructed bundle V3 here would sign a V3
+// statement around a legacy digest, which the verifier's
+// SubjectDigestForType then recomputes under V3 canonicalization and
+// rejects as a mismatch.
+func BuildArtifactStatement(ociRef, artifactDigest, predicateType string, pred *Predicate) ([]byte, error) {
 	if ociRef == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "OCI reference is required")
 	}
@@ -221,8 +231,11 @@ func BuildArtifactStatement(ociRef, artifactDigest string, pred *Predicate) ([]b
 	if pred.Recipe.Name == "" || pred.Recipe.Digest == "" {
 		return nil, errors.New(errors.ErrCodeInvalidRequest, "predicate.recipe.{name,digest} must be populated for artifact-subject statement")
 	}
+	if predicateType == "" {
+		predicateType = StatementPredicateType(pred)
+	}
 	// Producer-side coherence — same rationale as BuildStatement.
-	if err := ValidatePredicateTypeCoherence(StatementPredicateType(pred), pred); err != nil {
+	if err := ValidatePredicateTypeCoherence(predicateType, pred); err != nil {
 		return nil, err
 	}
 
@@ -239,7 +252,7 @@ func BuildArtifactStatement(ociRef, artifactDigest string, pred *Predicate) ([]b
 				Digest: map[string]string{"sha256": artifactDigest},
 			},
 		},
-		PredicateType: StatementPredicateType(pred),
+		PredicateType: predicateType,
 		Predicate:     predicate,
 	}
 	if vErr := stmt.Validate(); vErr != nil {

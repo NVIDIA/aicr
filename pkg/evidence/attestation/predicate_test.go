@@ -194,7 +194,7 @@ func TestBuildArtifactStatement_SubjectIsArtifactDigest(t *testing.T) {
 		},
 	})
 	artifactDigest := strings.Repeat("b", 64)
-	stmt, err := BuildArtifactStatement("ghcr.io/example/aicr-evidence", artifactDigest, pred)
+	stmt, err := BuildArtifactStatement("ghcr.io/example/aicr-evidence", artifactDigest, "", pred)
 	if err != nil {
 		t.Fatalf("BuildArtifactStatement: %v", err)
 	}
@@ -266,7 +266,7 @@ func TestBuildArtifactStatement_RejectsBadInputs(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := BuildArtifactStatement(tt.ociRef, tt.artifactDigest, tt.pred)
+			_, err := BuildArtifactStatement(tt.ociRef, tt.artifactDigest, "", tt.pred)
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tt.wantContains)
 			}

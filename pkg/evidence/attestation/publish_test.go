@@ -97,7 +97,7 @@ func TestBundleReaders_CanceledContextSurfacesAbort(t *testing.T) {
 		run  func(ctx context.Context) error
 	}{
 		{"readBundlePredicate", func(ctx context.Context) error {
-			_, _, err := readBundlePredicate(ctx, summaryDir)
+			_, _, _, err := readBundlePredicate(ctx, summaryDir)
 			return err
 		}},
 		{"readBundleRecipeProfile", func(ctx context.Context) error {
@@ -253,6 +253,42 @@ func TestLoadOnDiskBundle_ParentDir(t *testing.T) {
 		t.Errorf("SubjectDigest %q != predicate.recipe.digest %q",
 			bundle.SubjectDigest, bundle.Predicate.Recipe.Digest)
 	}
+	if bundle.PredicateType != PredicateTypeV3 {
+		t.Errorf("PredicateType = %q, want %q (freshly emitted bundle)", bundle.PredicateType, PredicateTypeV3)
+	}
+}
+
+// TestLoadOnDiskBundle_PreservesLegacyPredicateType proves the fix for the
+// reconstructed-bundle relabeling bug. A bundle whose on-disk statement was
+// signed under a legacy predicateType keeps that recorded type on the
+// reconstructed Bundle rather than being unconditionally relabeled V3 (which
+// would then sign a V3 statement around a digest computed under the legacy
+// algorithm, and the verifier's SubjectDigestForType would reject the
+// mismatch).
+func TestLoadOnDiskBundle_PreservesLegacyPredicateType(t *testing.T) {
+	dir := emitUnsignedBundle(t)
+	summaryDir := filepath.Join(dir, SummaryBundleDirName)
+	stmtPath := filepath.Join(summaryDir, StatementFilename)
+
+	body, err := os.ReadFile(stmtPath) //nolint:gosec // test-local path
+	if err != nil {
+		t.Fatalf("read statement: %v", err)
+	}
+	legacy := strings.Replace(string(body), PredicateTypeV3, PredicateTypeV1, 1)
+	if legacy == string(body) {
+		t.Fatalf("statement did not contain %q to rewrite", PredicateTypeV3)
+	}
+	if err := os.WriteFile(stmtPath, []byte(legacy), 0o600); err != nil {
+		t.Fatalf("rewrite statement: %v", err)
+	}
+
+	bundle, _, err := loadOnDiskBundle(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("loadOnDiskBundle: %v", err)
+	}
+	if bundle.PredicateType != PredicateTypeV1 {
+		t.Errorf("PredicateType = %q, want %q (recorded on-disk type, not V3)", bundle.PredicateType, PredicateTypeV1)
+	}
 }
 
 func TestLoadOnDiskBundle_SummaryDirItself(t *testing.T) {
@@ -284,7 +320,7 @@ func TestResolveSummaryDir_NotABundle(t *testing.T) {
 }
 
 func TestReadBundlePredicate_MissingStatement(t *testing.T) {
-	_, _, err := readBundlePredicate(context.Background(), t.TempDir())
+	_, _, _, err := readBundlePredicate(context.Background(), t.TempDir())
 	if err == nil {
 		t.Fatalf("expected error for missing statement")
 	}
@@ -298,7 +334,7 @@ func TestReadBundlePredicate_InvalidJSON(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, StatementFilename), []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := readBundlePredicate(context.Background(), dir)
+	_, _, _, err := readBundlePredicate(context.Background(), dir)
 	wantInvalidRequest(t, err)
 }
 
@@ -308,7 +344,7 @@ func TestReadBundlePredicate_WrongPredicateType(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, StatementFilename), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := readBundlePredicate(context.Background(), dir)
+	_, _, _, err := readBundlePredicate(context.Background(), dir)
 	wantInvalidRequest(t, err)
 }
 

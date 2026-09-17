@@ -67,7 +67,7 @@ func BuildPointer(in PointerInputs) (*Pointer, error) {
 		Bundle: PointerBundle{
 			OCI:           in.BundleOCI,
 			Digest:        in.BundleHash,
-			PredicateType: StatementPredicateType(in.Bundle.Predicate),
+			PredicateType: in.Bundle.PredicateType,
 		},
 		Signer:     in.Signer,
 		AttestedAt: in.Bundle.Predicate.AttestedAt.UTC().Truncate(time.Second),
@@ -103,7 +103,11 @@ func ValidateBundleProfileCoherence(b *Bundle) error {
 	// rejects. In-repo constructors never build that shape — IdentityFor is
 	// a sha256 digest, so a profiled bundle's identity is never empty — but
 	// this is an exported entry point.
-	if err := ValidatePredicateTypeCoherence(StatementPredicateType(b.Predicate), b.Predicate); err != nil {
+	predicateType := b.PredicateType
+	if predicateType == "" {
+		predicateType = StatementPredicateType(b.Predicate)
+	}
+	if err := ValidatePredicateTypeCoherence(predicateType, b.Predicate); err != nil {
 		return err
 	}
 	switch {

@@ -117,6 +117,16 @@ type Bundle struct {
 	// SubjectDigest is SubjectDigestV3(recipe.yaml) as hex.
 	SubjectDigest string
 
+	// PredicateType is the predicateType the statement carrying Predicate
+	// was (or, for a newly built bundle, will be) signed under. Build sets
+	// it to PredicateTypeV3 unconditionally. loadOnDiskBundle instead
+	// copies it from the on-disk statement's own predicateType field, so a
+	// reconstructed legacy V1/V2 bundle keeps signing and pointer/OCI
+	// labeling under the algorithm its recipe.digest was actually computed
+	// with, rather than being relabeled V3 and rejected by the verifier's
+	// SubjectDigestForType dispatch.
+	PredicateType string
+
 	Predicate *Predicate
 
 	// StatementJSON is the protobuf-canonical JSON of the unsigned
@@ -276,6 +286,7 @@ func Build(ctx context.Context, opts BuildOptions) (*Bundle, error) {
 		Advertiser:               ProfileAdvertiserString(opts.Recipe),
 		PolicyDescriptorIdentity: profileDescriptorIdentityOf(opts.Recipe),
 		SubjectDigest:            subjectDigest,
+		PredicateType:            StatementPredicateType(pred),
 		Predicate:                pred,
 		StatementJSON:            stmt,
 	}, nil
