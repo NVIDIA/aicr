@@ -40,7 +40,7 @@ hosts:
   - cr.agentgateway.dev              # agentgateway OCI Helm charts
   - docker.gitea.com                 # gitea image (KWOK flux/argocd git lanes)
   - docker.io                        # kindest/node, busybox, golang, python, openbao, ministack, ...
-  - dsx-ai-factory.github.io         # topograph Helm repo (moved from NVIDIA org)
+  - dsx-ai-factory.github.io         # topograph Helm repo (moved from nvidia.github.io, #2793)
   - ghcr.io                          # AICR images (push) + OCI Helm charts + third-party CI images
   - github-actions                   # GitHub Actions marketplace (uses: refs)
   - helm.ngc.nvidia.com              # NVIDIA NGC Helm (gpu-operator, network-operator, nim, dynamo)
