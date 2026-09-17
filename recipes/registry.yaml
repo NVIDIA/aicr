@@ -115,8 +115,10 @@ components:
         tolerationPaths:
           - operator.tolerations
       accelerated:
-        nodeSelectorPaths:
-          - daemonsets.nodeSelector
+        # No nodeSelectorPaths: the gpu-operator chart and ClusterPolicy CRD have no
+        # daemonsets.nodeSelector — operands are placed by the operator's own
+        # GFD/NFD-driven deploy labels. Routing --accelerated-node-selector here was
+        # silently ignored (#2474).
         tolerationPaths:
           - daemonsets.tolerations
     validations:
@@ -1187,9 +1189,14 @@ components:
     healthCheck:
       assertFile: checks/slinky-topograph/health-check.yaml
     helm:
-      defaultRepository: https://nvidia.github.io/topograph
+      # The topograph repository moved from NVIDIA to dsx-ai-factory; GitHub
+      # redirects the repository but not its Pages site, so the old index
+      # 404s. Only the 1.0.0 entry in the new index was rewritten to this
+      # host — every earlier version still lists a nvidia.github.io download
+      # URL and cannot be fetched. See issue #2793.
+      defaultRepository: https://dsx-ai-factory.github.io/topograph
       defaultChart: topograph/topograph
-      # renovate: datasource=helm depName=topograph registryUrl=https://nvidia.github.io/topograph
+      # renovate: datasource=helm depName=topograph registryUrl=https://dsx-ai-factory.github.io/topograph
       defaultVersion: "1.0.0"
       defaultNamespace: topograph
     nodeScheduling:
