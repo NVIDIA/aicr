@@ -278,7 +278,7 @@ func TestLoadOnDiskBundle_PreservesLegacyPredicateType(t *testing.T) {
 	if legacy == string(body) {
 		t.Fatalf("statement did not contain %q to rewrite", PredicateTypeV3)
 	}
-	if err := os.WriteFile(stmtPath, []byte(legacy), 0o600); err != nil {
+	if err = os.WriteFile(stmtPath, []byte(legacy), 0o600); err != nil {
 		t.Fatalf("rewrite statement: %v", err)
 	}
 
@@ -319,8 +319,19 @@ func TestResolveSummaryDir_NotABundle(t *testing.T) {
 	wantInvalidRequest(t, err)
 }
 
+// readBundlePredicateErr runs readBundlePredicate and returns only the
+// error, for tests that assert on failure and don't need the predicate,
+// predicateType, or raw statement bytes.
+func readBundlePredicateErr(ctx context.Context, dir string) error {
+	pred, predicateType, body, err := readBundlePredicate(ctx, dir)
+	_ = pred
+	_ = predicateType
+	_ = body
+	return err
+}
+
 func TestReadBundlePredicate_MissingStatement(t *testing.T) {
-	_, _, _, err := readBundlePredicate(context.Background(), t.TempDir())
+	err := readBundlePredicateErr(context.Background(), t.TempDir())
 	if err == nil {
 		t.Fatalf("expected error for missing statement")
 	}
@@ -334,8 +345,7 @@ func TestReadBundlePredicate_InvalidJSON(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, StatementFilename), []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, err := readBundlePredicate(context.Background(), dir)
-	wantInvalidRequest(t, err)
+	wantInvalidRequest(t, readBundlePredicateErr(context.Background(), dir))
 }
 
 func TestReadBundlePredicate_WrongPredicateType(t *testing.T) {
@@ -344,8 +354,7 @@ func TestReadBundlePredicate_WrongPredicateType(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, StatementFilename), body, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, _, _, err := readBundlePredicate(context.Background(), dir)
-	wantInvalidRequest(t, err)
+	wantInvalidRequest(t, readBundlePredicateErr(context.Background(), dir))
 }
 
 func TestLoadOnDiskBundle_MissingRecipeIdentity(t *testing.T) {
