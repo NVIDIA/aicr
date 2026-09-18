@@ -19,30 +19,17 @@ import (
 	"github.com/NVIDIA/aicr/pkg/header"
 )
 
-// Annotations stamped into every generated wrapper Chart.yaml. Exported so
-// consumers that read a Helm release back out of a cluster share one
-// spelling with the templates that write them, and derived from header.Domain
-// per ADR-013 so an API-domain migration cannot leave them behind.
-//
-// The rule for a reader is one sentence with two branches: use
-// AnnotationComponentVersion when it is present, otherwise use the release's
-// own chart version. Its presence is exactly the signal that the chart
-// version describes the wrapper rather than the payload — an upstream chart
-// installed directly carries neither annotation, and its release version IS
-// the payload version (ADR-021 Decision 7).
+// Annotations stamped into every generated wrapper Chart.yaml, aliased from
+// pkg/header where the reading side also finds them; see there for what their
+// presence means.
 //
 // The Chart.yaml templates spell both keys literally, because a templated key
 // reads far worse than the value it labels. The tests that look annotations up
 // by these constants are what holds the two in sync: a domain change that
 // misses the templates turns every lookup into a miss and fails them.
 const (
-	// AnnotationComponentVersion carries the free-form version of the
-	// payload the wrapper contains.
-	AnnotationComponentVersion = header.Domain + "/component-version"
-
-	// AnnotationGeneratedBy carries the AICR build version that produced
-	// the wrapper. Mirrors Chart.yaml `version:`.
-	AnnotationGeneratedBy = header.Domain + "/generated-by"
+	AnnotationComponentVersion = header.AnnotationComponentVersion
+	AnnotationGeneratedBy      = header.AnnotationGeneratedBy
 )
 
 // chartStamp carries the two versions written into every generated wrapper
