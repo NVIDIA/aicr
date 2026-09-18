@@ -92,6 +92,14 @@ func TestSchemaTrackAPIVersions(t *testing.T) {
 			accepted: []string{RecipeResultGroupVersion, GroupVersionV1Beta2},
 			rejected: []string{"", GroupVersion, GroupVersionV1, GroupVersionV1Beta1},
 		},
+		{
+			// BundleInfo has no alpha to retire, so GroupVersion is rejected
+			// here while the shared stable-track predicate still accepts it.
+			name:     "bundleinfo",
+			check:    IsSupportedBundleInfoAPIVersion,
+			accepted: []string{GroupVersionV1},
+			rejected: []string{"", GroupVersion, RecipeResultGroupVersion, GroupVersionV1Beta1, GroupVersionV1Beta2},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -187,6 +187,15 @@ func IsSupportedProfileAPIVersion(v string) bool {
 	}
 }
 
+// IsSupportedBundleInfoAPIVersion reports whether v is accepted for a
+// BundleInfo. Unlike the other stable-track artifacts, this kind shipped
+// directly at its ADR-022 target with no alpha predecessor to retire, so the
+// alpha value IsSupportedAPIVersion still admits names a document that never
+// legitimately existed.
+func IsSupportedBundleInfoAPIVersion(v string) bool {
+	return v == StableGroupVersion
+}
+
 // IsSupportedRecipeResultAPIVersion reports whether v is a RecipeResult
 // version understood by this binary. The gate is the union of the default and
 // profile-bearing schema tracks; callers must still enforce the bidirectional
@@ -204,6 +213,7 @@ const (
 	KindSnapshot     Kind = "Snapshot"
 	KindRecipe       Kind = "Recipe"
 	KindRecipeResult Kind = "RecipeResult"
+	KindBundleInfo   Kind = "BundleInfo"
 )
 
 // String returns the string representation of the Kind.

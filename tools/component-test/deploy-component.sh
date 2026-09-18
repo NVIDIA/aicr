@@ -230,11 +230,20 @@ if [[ -n "$component_deps" ]]; then
 fi
 
 # Build a minimal resolved recipe (RecipeResult format, which aicr bundle expects)
+# criteria records what this harness actually provisions: ensure-cluster.sh
+# creates a Kind cluster. Without it, every component validation that reads
+# Criteria sees nil. Most treat that as "condition not met" and skip, but a gate
+# that fails closed on an unknown platform (CheckNPDNotDuplicatingProviderNPD)
+# would reject the recipe outright and make the component untestable here.
+# Stating the real platform is both more accurate and what lets those gates
+# evaluate the case the harness is actually exercising.
 cat > "${WORK_DIR}/recipe.yaml" <<EOF
 kind: RecipeResult
 apiVersion: aicr.run/v1alpha2
 metadata:
   version: component-test
+criteria:
+  service: kind
 componentRefs:
   - name: ${COMPONENT}
     namespace: ${HELM_NAMESPACE}

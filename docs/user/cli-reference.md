@@ -1576,7 +1576,7 @@ Every row states its reason in the detail block under the table, and `--format j
 
 **Why `--deployer` is required rather than defaulted:**
 
-Steps are deployer-scoped, and no bundle records which deployer built it ([#2767](https://github.com/NVIDIA/aicr/issues/2767)). Showing an Argo CD operator an imperative "delete the legacy CRDs" step is the exact failure deployer-scoping exists to prevent, so the command asks rather than guessing, and never renders every deployer's path. It is only required when some component actually carries steps.
+Steps are deployer-scoped. Showing an Argo CD operator an imperative "delete the legacy CRDs" step is the exact failure deployer-scoping exists to prevent, so the command asks rather than guessing, and never renders every deployer's path. It is only required when some component actually carries steps. A bundle now records the deployer that built it in [`bundle-info.yaml`](bundling.md#bundle-info), so `upgrade-check` can stop asking once it reads that record ([#2528](https://github.com/NVIDIA/aicr/issues/2528)).
 
 **Example:**
 

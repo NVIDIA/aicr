@@ -119,7 +119,7 @@
       ],
     },
     {
-      // recipes/registry.yaml pins ~34 upstream Helm charts. They are NOT
+      // recipes/registry.yaml pins ~35 upstream Helm charts. They are NOT
       // bumped by PR: an AICR component bump can rename a values path that
       // nodeScheduling writes into, move the rendered image set (BOM), or
       // require an ADR-021 upgrade record, none of which a one-line bot PR
