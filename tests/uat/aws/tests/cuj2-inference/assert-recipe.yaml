@@ -68,6 +68,7 @@ deploymentOrder:
   - prometheus-operator-crds
   - kube-prometheus-stack
   - gpu-operator
+  - dra-node-labeler
   - k8s-ephemeral-storage-metrics
   - kai-scheduler
   - dynamo-platform

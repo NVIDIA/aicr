@@ -60,6 +60,7 @@ deploymentOrder:
   - prometheus-operator-crds
   - kube-prometheus-stack
   - gpu-operator
+  - dra-node-labeler
   - gke-nccl-tcpxo
   - k8s-ephemeral-storage-metrics
   - kai-scheduler
