@@ -110,24 +110,21 @@ body:
     id: environment
     attributes:
       label: Environment
-      placeholder: |
-        - AICR version (CLI `aicr --version`, API image tag, or commit SHA):
-        - Install method (release binary / build from source / container image):
-        - Service (eks/gke/aks/oke/ocp/kind/lke/bcm/metal3/rke2/generic/k0s/other):
-        - Kubernetes version:
-        - OS (ubuntu/rhel/cos/amazonlinux/ol/talos/other) + version:
-        - Kernel version:
-        - GPU type (h100/h200/gb200/gb300/b200/a100/l40/l40s/rtx-pro-6000/vr200/other):
-        - Workload intent (training/inference):
+      description: |
+        Valid values — **service:** eks, gke, aks, oke, ocp, kind, lke, bcm,
+        metal3, rke2, generic, k0s · **OS:** ubuntu, rhel, cos, amazonlinux,
+        ol, talos · **GPU:** h100, h200, gb200, gb300, b200, a100, l40, l40s,
+        rtx-pro-6000, vr200 · **intent:** training, inference. Use "other" and
+        say what it is if none fit.
       value: |
         - AICR version (CLI `aicr --version`, API image tag, or commit SHA):
         - Install method (release binary / build from source / container image):
-        - Service (eks/gke/aks/oke/ocp/kind/lke/bcm/metal3/rke2/generic/k0s/other):
+        - Service:
         - Kubernetes version:
-        - OS (ubuntu/rhel/cos/amazonlinux/ol/talos/other) + version:
+        - OS + version:
         - Kernel version:
-        - GPU type (h100/h200/gb200/gb300/b200/a100/l40/l40s/rtx-pro-6000/vr200/other):
-        - Workload intent (training/inference):
+        - GPU type:
+        - Workload intent:
     validations:
       required: true
 
