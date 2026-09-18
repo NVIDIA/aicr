@@ -1157,6 +1157,21 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 				}
 				setOverrides = filtered
 			}
+			// dynamo-platform:a4xStorageClass.create is an AICR bundling
+			// toggle (see collectComponentManifestsByPhase), not a real
+			// ai-dynamo chart value. Strip it before it reaches Helm.
+			if ref.Name == dynamoPlatformComponentName {
+				if _, has := setOverrides[dynamoA4xStorageClassCreateOverridePath]; has {
+					filtered := make(map[string]string, len(setOverrides)-1)
+					for k, v := range setOverrides {
+						if k == dynamoA4xStorageClassCreateOverridePath {
+							continue
+						}
+						filtered[k] = v
+					}
+					setOverrides = filtered
+				}
+			}
 			if applyErr := component.ApplyMapOverrides(values, setOverrides); applyErr != nil {
 				// User-supplied --set overrides must produce the values the
 				// user asked for; silently dropping them ships a bundle
@@ -1220,6 +1235,26 @@ func (b *DefaultBundler) extractComponentValues(ctx context.Context, recipeResul
 					fmt.Sprintf("component %q: %q is the enable/disable toggle and must be set with --set "+
 						"(e.g. --set %s:%s=false), not --set-json/--set-file",
 						ref.Name, config.ComponentEnabledKey, ref.Name, config.ComponentEnabledKey))
+			}
+			// a4xStorageClass.create is a bundling-only toggle, not a
+			// real chart value. Reject it here too, rather than letting
+			// it silently write a stray value into Helm values. This
+			// must catch not just an exact-path match but also a parent
+			// path (e.g. a4xStorageClass={"create":false}, which deep-merges
+			// create into chart values the same way) and a child path
+			// (e.g. a4xStorageClass.create.x), since ApplyTypedOverrides
+			// keys its map on the literal path string, not on parsed
+			// segments.
+			if ref.Name == dynamoPlatformComponentName {
+				for path := range typedOverrides {
+					if overridePathsIntersect(path, dynamoA4xStorageClassCreateOverridePath) {
+						return nil, errors.New(errors.ErrCodeInvalidRequest,
+							fmt.Sprintf("component %q: %q is a bundling toggle and must be set with --set "+
+								"(e.g. --set %s:%s=false), not --set-json/--set-file (got typed path %q)",
+								ref.Name, dynamoA4xStorageClassCreateOverridePath,
+								ref.Name, dynamoA4xStorageClassCreateOverridePath, path))
+					}
+				}
 			}
 			if applyErr := component.ApplyTypedOverrides(values, typedOverrides); applyErr != nil {
 				return nil, errors.WrapWithContext(errors.ErrCodeInvalidRequest,
@@ -3001,6 +3036,51 @@ const (
 	phasePreManifests
 )
 
+// dynamoPlatformComponentName, dynamoA4xStorageClassManifestPath, and
+// dynamoA4xStorageClassCreateOverridePath identify the dynamo-platform
+// component, its fixed a4x-compatible StorageClass manifest, and the
+// bundling-time key that opts out of rendering it. See
+// dynamoA4xStorageClassEnabled.
+const (
+	dynamoPlatformComponentName             = "dynamo-platform"
+	dynamoA4xStorageClassManifestPath       = "components/dynamo-platform/manifests/a4x-storage-class.yaml"
+	dynamoA4xStorageClassCreateOverridePath = "a4xStorageClass.create"
+)
+
+// overridePathsIntersect reports whether two dot-separated override paths
+// reference overlapping data: equal paths, or one a dotted ancestor of the
+// other. A typed override's map key is the literal path string the caller
+// supplied, so "a4xStorageClass" (parent, value a whole object) and
+// "a4xStorageClass.create.x" (child) both need to be caught alongside the
+// exact "a4xStorageClass.create" match; a plain string-prefix check would
+// wrongly match an unrelated sibling like "a4xStorageClassOther".
+func overridePathsIntersect(a, b string) bool {
+	if a == b {
+		return true
+	}
+	return strings.HasPrefix(a, b+".") || strings.HasPrefix(b, a+".")
+}
+
+// dynamoA4xStorageClassEnabled reports whether the dynamo-platform bundle
+// should include the fixed a4x-compatible StorageClass manifest. It
+// defaults to true. Opt out with
+// --set dynamo-platform:a4xStorageClass.create=false when redirecting
+// inference-model-cache-storage-class to a StorageClass this release
+// doesn't own.
+func dynamoA4xStorageClassEnabled(overrides map[string]string) (bool, error) {
+	raw, ok := overrides[dynamoA4xStorageClassCreateOverridePath]
+	if !ok {
+		return true, nil
+	}
+	enabled, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"component %q: %s must be a boolean, got %q",
+			dynamoPlatformComponentName, dynamoA4xStorageClassCreateOverridePath, raw))
+	}
+	return enabled, nil
+}
+
 // collectComponentManifestsByPhase gathers manifest file contents from
 // all components for the requested phase, keyed by component name then
 // manifest path. The body is shared between phases via the manifestPhase
@@ -3033,6 +3113,21 @@ func (b *DefaultBundler) collectComponentManifestsByPhase(
 		}
 		if len(paths) == 0 {
 			continue
+		}
+
+		if phase == phasePostManifests && ref.Name == dynamoPlatformComponentName {
+			createA4xStorageClass, err := dynamoA4xStorageClassEnabled(b.getValueOverridesForComponent(ref.Name, provider))
+			if err != nil {
+				return nil, err
+			}
+			if !createA4xStorageClass {
+				paths = slices.DeleteFunc(slices.Clone(paths), func(p string) bool {
+					return p == dynamoA4xStorageClassManifestPath
+				})
+				if len(paths) == 0 {
+					continue
+				}
+			}
 		}
 
 		componentManifests := make(map[string][]byte, len(paths))

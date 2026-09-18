@@ -48,7 +48,7 @@ Row 2 — NVIDIA Green left edge (label "GPU Stack"):
 "GPU Operator" · "Device Plugin" · "Container Toolkit" · "DCGM" · "NVSentinel"
 
 Row 3 — Purple left edge (label "Observability & Storage"):
-"Prometheus" · "DCGM Exporter" · "AIStore"
+"Prometheus" · "DCGM Exporter" · "Ephemeral Storage Metrics"
 
 Row 4 — Amber left edge (label "Workload Platforms"):
 "Kubeflow" · "Dynamo" · "NIM Operator" · "Slinky" · "KAI Scheduler"

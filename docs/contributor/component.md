@@ -338,7 +338,7 @@ is a worked example of the latter.
 ## `deploymentOrder`
 
 `RecipeResult.DeploymentOrder` is **derived**, not authored.
-`TopologicalSort` in `pkg/recipe/metadata_store.go` orders components
+`TopologicalSort` in `pkg/recipe/metadata.go` orders components
 by `componentRefs[].dependencyRefs` declared in the overlay. When no
 dependencies are declared, the order falls back to the order in
 which components are listed in the overlay's `componentRefs`. Express

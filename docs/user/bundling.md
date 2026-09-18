@@ -23,7 +23,7 @@ re-render the same recipe for whatever pipeline you run:
 | `helmfile` | A `helmfile.yaml` release graph. |
 | `argocd` | Argo CD `Application` manifests (app-of-apps), published from a Git repo (`--repo`). |
 | `argocd-helm` | A Helm chart app-of-apps; `repoURL` defaults to the push-target registry — plain `helm install` works with no `--set repoURL` needed. Override with `--set repoURL=oci://mirror` when mirroring. Bringing your own root Application? Set `deployer.includeRootApp=false` to render children-only — see [Argo CD Deployer Options](cli-reference.md#argo-cd-deployer-options). |
-| `flux` | Flux `HelmRelease` and `Kustomization` manifests. |
+| `flux` | Flux `HelmRelease` manifests plus their source objects, and a plain Kustomize `kustomization.yaml` at the bundle root (not a Flux `Kustomization` CR). |
 
 ```bash
 # GitOps with Argo CD, sourced from your config repo
@@ -264,8 +264,8 @@ version. The annotation's presence is exactly the signal that the chart
 version describes the wrapper instead of what it wraps.
 
 So for the `gpu-operator-post` release generated alongside gpu-operator, a
-`helm list` reports chart `gpu-operator-post-1.4.0` — the AICR version — while
-its app version and `aicr.run/component-version` both read `v25.3.0`, the
+`helm list` reports chart `gpu-operator-post-0.22.0` — the AICR version — while
+its app version and `aicr.run/component-version` both read `v26.7.0`, the
 gpu-operator pin those manifests accompany.
 
 A component with no upstream pin — a manifest-only component, and the injected

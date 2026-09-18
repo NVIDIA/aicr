@@ -4,7 +4,7 @@ A transition record answers "is this component version transition safe?" as
 machine-readable data, so `aicr upgrade-check` can answer it for an operator
 before they run the upgrade. This page is how you author one.
 
-The design is [ADR-021](../design/021-component-upgrade-safety.md). The schema,
+The design is [ADR-021](https://github.com/NVIDIA/aicr/blob/main/docs/design/021-component-upgrade-safety.md). The schema,
 loader, and well-formedness rules live in `pkg/upgrade`.
 
 ## When you owe a record
@@ -92,7 +92,7 @@ report `unknown`.
 
 ## A version bump is a re-qualification event
 
-[ADR-019](../design/019-k8s-aibom-runtime-inventory.md) admitted a component
+[ADR-019](https://github.com/NVIDIA/aicr/blob/main/docs/design/019-k8s-aibom-runtime-inventory.md) admitted a component
 only after five categories of gate passed. Those ran once, against one release,
 and nothing re-runs them when a pin moves. So a bump re-opens them, but not all
 five equally.
@@ -292,6 +292,6 @@ and that boundary is what keeps the promise honest.
 
 ## See Also
 
-- [ADR-021: Component Upgrade Safety](../design/021-component-upgrade-safety.md)
+- [ADR-021: Component Upgrade Safety](https://github.com/NVIDIA/aicr/blob/main/docs/design/021-component-upgrade-safety.md)
 - [Upgrade Notes](../user/component-catalog.md#upgrade-notes): the operator-facing prose for migrations
 - [Components](component.md): adding and configuring registry components

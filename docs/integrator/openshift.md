@@ -237,7 +237,7 @@ NAME                                  DISPLAY        VERSION   REPLACES   PHASE
 oc get deployment -n <operator-namespace>
 ```
 
-The readiness gate checks both conditions — if you used `--readiness-hooks`, the bundle already waited for these before applying CRs.
+The readiness gate asserts only the first of these, the CSV phase — OLM advances a CSV to `Succeeded` only once the operator's Deployment reports available, so that one signal covers both. If you used `--readiness-hooks`, the bundle already waited on it before applying CRs.
 
 ### 5. Monitor Component Rollout
 
@@ -319,7 +319,7 @@ aicr recipe --service ocp --accelerator h100 --intent training --os rhel
 aicr recipe --service ocp --accelerator h100 --intent inference --os rhel
 ```
 
-Training overlays typically enable features like MIG Manager and GDRCopy for multi-node training workloads. Inference overlays use the base CR values.
+`recipes/overlays/ocp-training.yaml` declares no `componentRefs` of its own today — both training and inference resolve to the base OCP CR values.
 
 The available intents and platforms follow the same overlay inheritance pattern used by other services. Refer to `recipes/overlays/ocp-*.yaml` for the current set of supported combinations.
 

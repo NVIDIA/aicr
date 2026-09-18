@@ -687,7 +687,7 @@ identities lacked it:
 ```text
 missing required permissions:
   - the caller (your kubeconfig identity) cannot "delete" clusterroles.rbac.authorization.k8s.io (cluster-scoped)
-  - agent ServiceAccount "system:serviceaccount:gpu-operator/irsa-snapshotter" cannot "list" nodes (cluster-scoped)
+  - agent ServiceAccount "system:serviceaccount:gpu-operator:irsa-snapshotter" cannot "list" nodes (cluster-scoped)
 ```
 
 #### What the caller must be able to do
@@ -763,7 +763,7 @@ but a missing rule will surface as an in-pod failure minutes from now instead
 of here serviceAccount=irsa-snapshotter namespace=gpu-operator
 uncheckedRules=18 remedy="grant the caller 'create
 subjectaccessreviews.authorization.k8s.io', or verify by hand with: kubectl
-auth can-i --list --as system:serviceaccount:gpu-operator/irsa-snapshotter"
+auth can-i --list --as system:serviceaccount:gpu-operator:irsa-snapshotter"
 ```
 
 ### Pod Security Context

@@ -91,7 +91,7 @@ resizing it.
 
 Every recipe cell has a stable canonical address `<group>/<dashboard>/<tab>`
 derived by `pkg/recipe.CoordinateFor` from the recipe's resolved criteria
-(see [ADR-012](../design/012-recipe-coordinate-mapping.md)). Kubernetes
+(see [ADR-012](https://github.com/NVIDIA/aicr/blob/main/docs/design/012-recipe-coordinate-mapping.md)). Kubernetes
 version is deliberately **not** part of the coordinate — it is a per-build
 column facet — so a link such as
 `https://validation.aicr.run/#/eks/h100-ubuntu/training-kubeflow` remains
@@ -223,7 +223,7 @@ Specifically:
   adds independent confirmation from a distinct, verifiable party, not a
   second NVIDIA-controlled reproduction.
 
-This trust model is derived from [ADR-007](../design/007-recipe-evidence.md).
+This trust model is derived from [ADR-007](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md).
 The full allowlist posture and signer-class derivation are documented in
 [Artifact Verification — Per-Source Pointer Layout and the Signer Allowlist](./artifact-verification.md#per-source-pointer-layout-and-the-signer-allowlist).
 
@@ -294,11 +294,11 @@ The evidence corroboration dashboard (GP) and the [AICR TestGrid](./testgrid.md)
 - They read the same verified, source-keyed evidence tree in the same layout.
   (Whether the two surfaces share a single GCS bucket and publish service
   account, or stand up their own, is an open GP3/TG1 deconfliction tracked in
-  [ADR-012](../design/012-recipe-coordinate-mapping.md) — the shared contract
+  [ADR-012](https://github.com/NVIDIA/aicr/blob/main/docs/design/012-recipe-coordinate-mapping.md) — the shared contract
   is the evidence tree and its layout, not a specific bucket.)
 - They both derive recipe coordinates from the **single shared mapping
   function** `pkg/recipe.CoordinateFor` (see
-  [ADR-012](../design/012-recipe-coordinate-mapping.md)), the anti-drift
+  [ADR-012](https://github.com/NVIDIA/aicr/blob/main/docs/design/012-recipe-coordinate-mapping.md)), the anti-drift
   guarantee that anchors every consumer to the same **criteria-only base**
   group/dashboard/tab. Profile-bearing recipes refine that base per
   consumer: this dashboard's value routes append a `-<name>-<value>`
@@ -344,7 +344,7 @@ unsuffixed — its digest-bound build ID partitions per value.)
 This `index.json` is also available as an interim coordinate-presence source
 for the RQ2 link-integrity check while TG4a's own coordinate-presence endpoint
 isn't live yet — a sequencing option for RQ2, not a re-point of
-[ADR-012](../design/012-recipe-coordinate-mapping.md).
+[ADR-012](https://github.com/NVIDIA/aicr/blob/main/docs/design/012-recipe-coordinate-mapping.md).
 
 ### Relationship to Recipe Health
 
@@ -354,7 +354,7 @@ dashboard are **structural siblings that never duplicate each other**:
 - **Recipe Health** owns the **offline structural** signal — does the recipe
   resolve cleanly, are its charts pinned, are its constraints well-formed —
   computed hermetically without a cluster. Its design is in
-  [ADR-009](../design/009-recipe-health-tracking.md).
+  [ADR-009](https://github.com/NVIDIA/aicr/blob/main/docs/design/009-recipe-health-tracking.md).
 - **This dashboard** owns the **live corroboration** signal — derived from
   real, signed validation runs attested by distinct parties.
 

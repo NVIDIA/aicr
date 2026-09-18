@@ -22,6 +22,7 @@ This section is for integrators who:
 | [Kubernetes Deployment](kubernetes-deployment.md) | Self-hosted API server deployment with Kubernetes manifests |
 | [EKS Dynamo Networking](eks-dynamo-networking.md) | Security group prerequisites for Dynamo overlays on EKS |
 | [GKE TCPXO Networking](gke-tcpxo-networking.md) | GPUDirect TCPXO prerequisites for GKE training overlays |
+| [GKE GB200 Networking](gke-gb200-networking.md) | GPUDirect-RDMA prerequisites for GB200 (A4X) GKE overlays |
 | [AKS GPU Setup](aks-gpu-setup.md) | AKS prerequisites: Kubernetes 1.34+ (DRA GA), GPU driver setup, DRA configuration |
 | [GKE GPU Setup](gke-gpu-setup.md) | GKE device-plugin ownership: the `gpuStack` profile, node-pool setup for both values, verification, and troubleshooting |
 | [OKE GPU Setup](oke-gpu-setup.md) | OKE GPU stack ownership: the `gpuStack` profile (two values), the device-plugin add-on / disable label, and bring-your-own-image pools |

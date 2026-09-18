@@ -16,7 +16,7 @@ verify against the cluster's GPU-node labels.
 
 Both values keep `driver.enabled=false` in the GPU Operator values — the GPU
 Operator cannot install a driver on COS node images, so driver provisioning is
-never the operator's in either mode.
+never the operator's responsibility in either mode.
 
 Exactly **one** `nvidia.com/gpu` advertiser per node is required. Two plugins
 registering the same resource name is not a benign overlap: kubelet's device
@@ -108,8 +108,8 @@ gcloud container node-pools create POOL_NAME \
   --location=LOCATION \
   --node-locations=ZONE \
   --num-nodes=1 \
-  --machine-type=a3-highgpu-8g \
-  --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=default \
+  --machine-type=a3-megagpu-8g \
+  --accelerator type=nvidia-h100-mega-80gb,count=8,gpu-driver-version=default
 ```
 
 Two flags deserve care:
@@ -224,6 +224,16 @@ the request against the COS build's curated per-GPU-type list and rejects
 unqualified versions. Version bumps take effect on replaced or rebooted
 nodes only (the installer skips nodes with a loaded nvidia module).
 
+On A4X/GB200 (`a4x-highgpu-4g`, arm64) nodes, the component's default
+`partitionGpuImage` (the `partition-gpus` init container) is an amd64-only
+digest and fails with `exec format error` on arm64. Supported GB200 GKE
+recipes, including any that inherit from the training or inference
+overlays, already set `gcp-driver-installer.partitionGpuImage` to a
+multi-arch digest automatically. Only a custom recipe that does not
+inherit those overlays needs to set the override manually. See
+[GKE GB200 Networking › Driver Installer](gke-gb200-networking.md#driver-installer)
+for why and the exact digest.
+
 Set the label when you create the GPU node pool, alongside the disabled
 managed install:
 
@@ -233,8 +243,8 @@ gcloud container node-pools create POOL_NAME \
   --location=LOCATION \
   --node-locations=ZONE \
   --num-nodes=1 \
-  --machine-type=a3-highgpu-8g \
-  --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=disabled \
+  --machine-type=a3-megagpu-8g \
+  --accelerator type=nvidia-h100-mega-80gb,count=8,gpu-driver-version=disabled \
   --node-labels="gke-no-default-nvidia-gpu-device-plugin=true"
 ```
 
@@ -485,3 +495,4 @@ confirm exactly which advertiser owns each node.
 - [Component Catalog › GKE Device-Plugin Ownership](../user/component-catalog.md#gke-device-plugin-ownership)
 - [Validation readiness gate](../user/validation.md)
 - [GKE TCPXO Networking](gke-tcpxo-networking.md)
+- [GKE GB200 Networking](gke-gb200-networking.md)
