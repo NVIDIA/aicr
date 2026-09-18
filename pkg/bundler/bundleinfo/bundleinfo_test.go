@@ -35,6 +35,11 @@ import (
 )
 
 func sample() *bundleinfo.BundleInfo {
+	// The one pointer field this fixture would otherwise leave nil. Nil, it is
+	// never serialized by any test, so nothing would catch a yaml-tag or
+	// omitempty change to it.
+	tolerationSeconds := int64(300)
+
 	return &bundleinfo.BundleInfo{
 		APIVersion: header.StableGroupVersion,
 		Kind:       string(header.KindBundleInfo),
@@ -61,6 +66,8 @@ func sample() *bundleinfo.BundleInfo {
 						},
 						Tolerations: []bundleinfo.Toleration{
 							{Key: "nvidia.com/aicr-system", Operator: "Exists", Effect: "NoSchedule"},
+							{Key: "node.kubernetes.io/not-ready", Operator: "Exists",
+								Effect: "NoExecute", TolerationSeconds: &tolerationSeconds},
 						},
 					},
 				},
@@ -78,8 +85,17 @@ func sample() *bundleinfo.BundleInfo {
 	}
 }
 
+// TestWriteReadRoundTrip compares the whole record, not a chosen few fields.
+// Every optional field carries omitempty and several are maps, slices or
+// pointers whose serialization a spot check cannot reach, so a tag or
+// omitempty change on one of them shows up only as a whole-struct difference.
+//
+// want is a second sample() rather than the value handed to Write: Write
+// stamps APIVersion and Kind in place, so reusing that value would make those
+// two fields agree by construction.
 func TestWriteReadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
+	want := sample()
 	if _, err := bundleinfo.Write(context.Background(), dir, sample()); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -88,17 +104,20 @@ func TestWriteReadRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read: %v", err)
 	}
-	if got.Build.Deployer != "argocd" {
-		t.Errorf("deployer = %q, want argocd", got.Build.Deployer)
+	if !reflect.DeepEqual(got, want) {
+		raw, readErr := os.ReadFile(filepath.Join(dir, bundleinfo.FileName))
+		if readErr != nil {
+			t.Fatalf("read back %s: %v", bundleinfo.FileName, readErr)
+		}
+		t.Errorf("round trip changed the record;\non disk:\n%s\ngot:  %+v\nwant: %+v", raw, got, want)
 	}
-	if got.Layout.Entrypoint != "app-of-apps.yaml" {
-		t.Errorf("entrypoint = %q, want app-of-apps.yaml", got.Layout.Entrypoint)
-	}
+
 	if len(got.Layout.Releases) != 2 {
 		t.Fatalf("releases = %d, want 2", len(got.Layout.Releases))
 	}
 	// Order is normative: sequence carries deployment order, so a reader
-	// must see the same order the writer emitted.
+	// must see the same order the writer emitted. DeepEqual already covers
+	// it; this names the failure when it is the order that broke.
 	if got.Layout.Releases[0].Name != "cert-manager" || got.Layout.Releases[1].Name != "nfd" {
 		t.Errorf("release order = [%s %s], want [cert-manager nfd]",
 			got.Layout.Releases[0].Name, got.Layout.Releases[1].Name)
@@ -173,6 +192,15 @@ func TestWriteRejectsEscapingPaths(t *testing.T) {
 				info.Build.Recipe.Path = "../recipe.yaml"
 			},
 		},
+		{
+			// layout.provenance is populated only by a run that vendors
+			// charts, which needs upstream chart bytes and so has no
+			// unit-test coverage on the producing side.
+			name: "parent-traversal provenance path",
+			mutate: func(info *bundleinfo.BundleInfo) {
+				info.Layout.Provenance = "../provenance.yaml"
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -185,7 +213,32 @@ func TestWriteRejectsEscapingPaths(t *testing.T) {
 			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 			}
+			// Write rejects a malformed record for several reasons under this
+			// one code, so the code alone would let a case pass on a rejection
+			// it never meant to trigger.
+			if !strings.Contains(err.Error(), relativePathErr) {
+				t.Errorf("error = %v, want it to name %q", err, relativePathErr)
+			}
 		})
+	}
+}
+
+// relativePathErr is the fragment validateRelativePaths puts in its message.
+// A path case asserts on it because ErrCodeInvalidRequest is shared with the
+// required-field, size and filesystem-entry rejections, so the code alone
+// cannot say which check fired.
+const relativePathErr = "relative path"
+
+// TestWriteRejectsNilInfo covers the nil guard, which runs before Write
+// stamps APIVersion and Kind onto the record. Without it that stamp
+// dereferences the nil pointer and the process panics.
+func TestWriteRejectsNilInfo(t *testing.T) {
+	_, err := bundleinfo.Write(context.Background(), t.TempDir(), nil)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
 
@@ -326,6 +379,7 @@ func TestReadFailsClosed(t *testing.T) {
 		name    string
 		content string // empty means: write no file at all
 		code    errors.ErrorCode
+		wantMsg string // optional: substring naming which check must have fired
 	}{
 		{
 			name: "missing file",
@@ -360,18 +414,33 @@ func TestReadFailsClosed(t *testing.T) {
 			// The record on this side arrived from an OCI registry or a
 			// GitOps clone, so a path that resolves outside the bundle has to
 			// fail here — Write's guard never saw this file.
+			//
+			// recordWithLayout supplies the build block on purpose:
+			// validateRequiredFields runs ahead of validateRelativePaths, so
+			// a header-only document is rejected for a missing field and
+			// never reaches the path check at all.
 			name: "parent-traversal release path",
-			content: "apiVersion: " + header.StableGroupVersion + "\nkind: BundleInfo\n" +
-				"layout:\n  entrypoint: deploy.sh\n  releases:\n" +
+			content: recordWithLayout("layout:\n  entrypoint: deploy.sh\n  releases:\n" +
 				"    - name: cert-manager\n      component: cert-manager\n" +
-				"      path: ../../../etc\n",
-			code: errors.ErrCodeInvalidRequest,
+				"      path: ../../../etc\n"),
+			code:    errors.ErrCodeInvalidRequest,
+			wantMsg: relativePathErr,
 		},
 		{
-			name: "absolute entrypoint",
-			content: "apiVersion: " + header.StableGroupVersion + "\nkind: BundleInfo\n" +
-				"layout:\n  entrypoint: /etc/passwd\n",
-			code: errors.ErrCodeInvalidRequest,
+			name:    "absolute entrypoint",
+			content: recordWithLayout("layout:\n  entrypoint: /etc/passwd\n"),
+			code:    errors.ErrCodeInvalidRequest,
+			wantMsg: relativePathErr,
+		},
+		{
+			// The read half of the layout.provenance branch. Populating it
+			// takes a run that vendors charts, which needs upstream chart
+			// bytes, so no test reaches this field through a real bundle.
+			name: "parent-traversal provenance path",
+			content: recordWithLayout("layout:\n  entrypoint: deploy.sh\n" +
+				"  provenance: ../../../etc/passwd\n"),
+			code:    errors.ErrCodeInvalidRequest,
+			wantMsg: relativePathErr,
 		},
 	}
 	for _, tt := range tests {
@@ -390,6 +459,9 @@ func TestReadFailsClosed(t *testing.T) {
 			if !stderrors.Is(err, errors.New(tt.code, "")) {
 				t.Errorf("error = %v, want code %s", err, tt.code)
 			}
+			if tt.wantMsg != "" && !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error = %v, want it to name %q", err, tt.wantMsg)
+			}
 		})
 	}
 }
@@ -399,10 +471,17 @@ func TestReadFailsClosed(t *testing.T) {
 // resolved to no components emits exactly this, so an empty release list is
 // a legitimate record rather than a truncated one.
 func completeRecord() string {
+	return recordWithLayout("layout:\n  entrypoint: deploy.sh\n")
+}
+
+// recordWithLayout returns completeRecord's header and build block followed by
+// the caller's layout block, so a case that targets a check running after
+// validateRequiredFields can still satisfy it.
+func recordWithLayout(layout string) string {
 	return "apiVersion: " + header.StableGroupVersion + "\nkind: BundleInfo\n" +
 		"build:\n  deployer: helm\n  recipe:\n    path: recipe.yaml\n" +
 		"    digest: sha256:3b1f8c2ad9e7546102bb8f4c7d0e9a1358cc4f6b2e8d70a94f1c5b3e6d820947\n" +
-		"layout:\n  entrypoint: deploy.sh\n"
+		layout
 }
 
 // TestReadRejectsIncompleteRecord covers the half of "fails closed" that the
