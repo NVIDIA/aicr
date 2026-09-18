@@ -140,15 +140,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	// Sort components by deployment order and build the localformat input.
 	sortedRefs := deployer.SortComponentRefsByDeploymentOrder(
 		g.RecipeResult.ComponentRefs, g.RecipeResult.DeploymentOrder)
-	// Which components may have their CRDs applied ahead of `helm upgrade`.
-	// helmfile upgrades through Helm, which never updates a chart's crds/
-	// directory on upgrade.
-	crdOwners, err := deployer.ResolveCRDOwners(ctx, g.RecipeResult.DataProvider(), sortedRefs)
-	if err != nil {
-		return nil, err
-	}
-
-	lfComponents, namespaceByComponent := toLocalformatComponents(sortedRefs, g.ComponentValues, g.DynamicValues, crdOwners)
+	lfComponents, namespaceByComponent := toLocalformatComponents(sortedRefs, g.ComponentValues, g.DynamicValues)
 
 	writeResult, err := localformat.Write(ctx, localformat.Options{
 		OutputDir:              outputDir,
@@ -350,7 +342,6 @@ func toLocalformatComponents(
 	refs []recipe.ComponentRef,
 	values map[string]map[string]any,
 	dynamic map[string][]string,
-	crdOwners map[string]bool,
 ) ([]localformat.Component, map[string]string) {
 
 	out := make([]localformat.Component, 0, len(refs))
@@ -368,7 +359,6 @@ func toLocalformatComponents(
 			Path:         ref.Path,
 			Values:       values[ref.Name],
 			DynamicPaths: dynamic[ref.Name],
-			OwnsCRDs:     crdOwners[ref.Name],
 		})
 		ns[ref.Name] = ref.Namespace
 	}

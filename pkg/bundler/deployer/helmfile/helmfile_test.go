@@ -85,15 +85,13 @@ func TestGenerate_Scenarios(t *testing.T) {
 			goldens: []string{"helmfile.yaml", "level-0.yaml", "level-1.yaml", "README.md"},
 		},
 		{
-			// k8s-aibom is marked ownsCRDs in the registry, so its release
-			// carries a presync hook running the folder's apply-crds.sh.
-			// helmfile upgrades through Helm, which never updates a chart's
-			// crds/ directory on upgrade (#2525).
-			//
-			// The ref is spelled to match the registry pin exactly, because
-			// UsesRegistryChart disqualifies any other chart: the audit
-			// ownsCRDs records covers only the pinned one.
-			name: "owns_crds_presync_hook",
+			// k8s-aibom is marked ownsCRDs, and this deployer still emits no
+			// CRD step for it. A presync hook fires only for releases
+			// helmfile decides to sync, and `helmfile apply` selects on
+			// detected change, so the step would hold on a chart bump and
+			// silently not hold on an unchanged rerun. The golden pins the
+			// absence: no hooks key on the release (#2525).
+			name: "owns_crds_no_hook",
 			gen: &Generator{
 				RecipeResult: recipeWith(
 					ref("k8s-aibom", "k8s-aibom-system", "k8s-aibom", "1.3.0",
@@ -108,12 +106,8 @@ func TestGenerate_Scenarios(t *testing.T) {
 		},
 		{
 			// The same component with its version overridden away from the
-			// registry pin. The hook must not appear: the audit says nothing
-			// about a chart it did not cover, so replacing that chart's CRDs
-			// is exactly the destructive case the opt-in design avoids.
-			//
-			// Sibling of owns_crds_presync_hook, so diffing the two goldens
-			// shows the whole effect of the guard.
+			// registry pin, kept as the sibling case so the two goldens stay
+			// comparable if a CRD step is ever added back here.
 			name: "owns_crds_version_override",
 			gen: &Generator{
 				RecipeResult: recipeWith(

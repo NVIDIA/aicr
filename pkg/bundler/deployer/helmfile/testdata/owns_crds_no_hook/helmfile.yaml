@@ -14,10 +14,3 @@ releases:
     values:
       - ./001-k8s-aibom/values.yaml
     disableValidation: true
-    hooks:
-      - events:
-          - presync
-        command: bash
-        args:
-          - ./001-k8s-aibom/apply-crds.sh
-        showlogs: true
