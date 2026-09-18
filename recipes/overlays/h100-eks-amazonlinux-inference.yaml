@@ -1,0 +1,107 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+kind: RecipeMetadata
+apiVersion: aicr.run/v1beta2
+metadata:
+  name: h100-eks-amazonlinux-inference
+
+spec:
+  # Inherits from h100-eks-inference recipe (H100 + EKS + inference settings).
+  # This overlay adds AL2023-specific OS constraints and the preinstalled-driver
+  # profile required by the NVIDIA AL2023 AMI family (AL2023_x86_64_NVIDIA).
+  base: h100-eks-inference
+
+  criteria:
+    service: eks
+    accelerator: h100
+    os: amazonlinux
+    intent: inference
+
+  # AL2023 OS constraints via mixin (defined once in recipes/mixins/os-amazonlinux.yaml)
+  mixins:
+    - os-amazonlinux
+
+  # H100 + EKS specific constraints (not covered by mixin)
+  constraints:
+    - name: K8s.server.version
+      value: ">= 1.32.4"
+
+  # GPU stack shape for EKS AL2023 GPU nodes (ADR-015). The NVIDIA AL2023
+  # AMI family (AL2023_x86_64_NVIDIA) pre-installs the driver and container
+  # toolkit at the host root; deploying the GPU Operator driver DaemonSet on
+  # top would double-install the driver. "ami-preinstalled" (the default)
+  # models the AWS-managed AMI shape; "operator-managed" is a BYO driverless
+  # image. NVSentinel labeler.assumeDriverInstalled polarity follows driver
+  # ownership: the AMI supplies no driver pod for the labeler to watch, so
+  # the preinstalled value must be asserted explicitly (#2175).
+  profile:
+    name: gpuStack
+    description: >-
+      Who installs the GPU driver and container toolkit on EKS AL2023 GPU
+      nodes. "ami-preinstalled" (the default) is the NVIDIA AL2023 AMI
+      family (AL2023_x86_64_NVIDIA): the AMI pre-installs driver and toolkit
+      at the host root; the GPU Operator installs neither.
+      "operator-managed" is a BYO driverless AMI: the GPU Operator installs
+      driver and toolkit, and the DRA driver reads the operator install path.
+    default: ami-preinstalled
+    values:
+      # AWS-managed NVIDIA AMI: driver and toolkit pre-installed at host root.
+      # The operator driver and toolkit DaemonSets must be off to avoid
+      # double-installing over the AMI-provided stack.
+      ami-preinstalled:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver: {enabled: false}
+              toolkit: {enabled: false}
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: /
+          - name: nvsentinel
+            overrides:
+              labeler: {assumeDriverInstalled: true}
+      # BYO driverless AMI: the GPU Operator installs driver and toolkit;
+      # the DRA driver reads the operator install path.
+      operator-managed:
+        componentRefs:
+          - name: gpu-operator
+            overrides:
+              driver: {enabled: true}
+              toolkit: {enabled: true}
+          - name: nvidia-dra-driver-gpu
+            overrides:
+              nvidiaDriverRoot: /run/nvidia/driver
+          - name: nvsentinel
+            overrides:
+              labeler: {assumeDriverInstalled: false}
+
+  # nvsentinel declared here to make its presence profile-owned; it cannot
+  # be filtered out of a profiled AL2023 bundle (#2181).
+  componentRefs:
+    - name: nvsentinel
+      type: Helm
+
+    # AL2023 is not a Debian/Ubuntu OS — nvidia-setup does not support it.
+    # Override the nodewright-customizations inherited from the base chain
+    # (which would apply tuning.yaml and run nvidia-setup-kernel and
+    # nvidia-setup-full) with no-op.yaml so no nvidia-setup packages run.
+    # nvidia-tuned support for AL2023 is not yet validated; no tuning manifest
+    # is applied until OS coverage is confirmed.
+    - name: nodewright-customizations
+      type: Helm
+      manifestFiles:
+        - components/nodewright-customizations/manifests/no-op.yaml
+      dependencyRefs:
+        - nodewright-operator
