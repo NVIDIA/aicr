@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Verify that every checksum pin in .settings.yaml still describes the artifact
+# its sibling version pin names.
+#
+# Usage: tools/check-settings-checksums
+#
+# Requires network access, so this is NOT part of `make test`/`make qualify`.
+# It runs as its own merge-gate job on any change to .settings.yaml or to a
+# refresh script (see .github/workflows/merge-gate.yaml).
+#
+# Why this exists: .settings.yaml pairs a version pin with a checksum pin, and
+# the two are kept in step by the tools/update-*-checksums scripts, wired to
+# Renovate postUpgradeTasks. A hook that runs and *fails* (renamed release
+# asset, egress blip, allowlist miss) leaves the new version pinned against the
+# old digest, and Renovate reports that only as a warning in the PR body.
+# Whether that stale pair is caught before merge depends entirely on which
+# consumer reads it: helmfile/chainsaw digests feed setup-build-tools on
+# PR-gating jobs and fail there, while helm_diff_checksums is read solely by
+# tests/uat/lib/phases.sh, so a stale helm-diff pin passes every PR check and
+# would first surface in nightly UAT across every cloud. PR #2801 is an open
+# Renovate PR that reproduces exactly that: helm_diff moved to v3.15.13 with the
+# v3.15.12 digests left behind, and a fully green check run.
+#
+# The verification leans on a property every refresh script documents and is
+# tested for: re-running it with the currently-pinned version produces no diff.
+# So running each script against a throwaway copy of .settings.yaml and diffing
+# re-derives the digest from upstream rather than restating a constant here,
+# which would just be a second copy to go stale.
+#
+# ---------------------------------------------------------------------------
+# Two causes of drift, which must NOT be reported the same way
+# ---------------------------------------------------------------------------
+#
+# Re-deriving from upstream answers "do these bytes hash to the committed pin
+# *today*". That question has two very different answers, and conflating them
+# would turn this check into the laundering path the pins exist to block.
+#
+#   1. The version pin CHANGED in this diff and the digest did not. This is the
+#      #2801 defect. The committed digest describes a release nobody is pinning
+#      any more, so it carries no trust; refreshing it is simply finishing the
+#      bump. Safe to fix mechanically.
+#
+#   2. The version pin did NOT change, and upstream now serves different bytes
+#      for the same tag. Nobody re-tagged anything on this branch, so the
+#      committed digest is a value a human reviewed at a specific SHA, and
+#      .settings.yaml says exactly why that matters (see the comment on
+#      oras_sha256_linux_amd64): "an attacker who replaces both the archive and
+#      its checksum still fails against a value committed and reviewed at this
+#      SHA." Re-running the refresher here would overwrite that reviewed value
+#      with whatever upstream serves now — i.e. it would launder a tampered
+#      release into the repo, with CI's blessing.
+#
+# So the version pin is read from the baseline commit as well as the working
+# tree, and only case 1 is offered the "re-run the refresher" remedy. Case 2
+# fails with no copy-paste fix and says to verify out of band. When the baseline
+# cannot be resolved the cause is unknown, and it is reported as case 2 — the
+# cautious reading — rather than assumed benign.
+#
+# Not covered: mkcert_checksums has no refresh script (.settings.yaml documents
+# it as a manual update), so there is nothing to re-derive it from. Adding a
+# tools/update-mkcert-checksums would bring it under this gate automatically.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# AICR_REPO_ROOT exists so the companion test can point this at a fixture tree
+# with stub refreshers instead of reaching the network. Production callers never
+# set it.
+REPO_ROOT="${AICR_REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+
+# The commit to read the previous version pins from. HEAD^ is the right default
+# for both events this runs on: on a pull_request the checked-out ref is the
+# merge commit, whose first parent is the base branch tip, and on a push to main
+# it is the preceding commit. The merge-gate job sets fetch-depth accordingly.
+BASELINE_REF="${AICR_BASELINE_REF:-HEAD^}"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  sed -n '5,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  exit 0
+fi
+
+SETTINGS_FILE="${REPO_ROOT}/.settings.yaml"
+if [[ ! -f "${SETTINGS_FILE}" ]]; then
+  echo "ERROR: ${SETTINGS_FILE} not found" >&2
+  exit 1
+fi
+
+# "<refresh script basename>|<version key in .settings.yaml>"
+#
+# The version key is matched exactly, so helm_diff does not also match
+# helm_diff_checksums. Adding a checksum-pinned tool means adding a line here;
+# the companion test asserts this list covers every tools/update-*-checksums
+# script, so a new refresher cannot be added without also being gated.
+SPECS=(
+  "update-addlicense-checksums|addlicense"
+  "update-chainsaw-checksums|chainsaw"
+  "update-helm-diff-checksums|helm_diff"
+  "update-helmfile-checksums|helmfile"
+  "update-oasdiff-checksums|oasdiff"
+  "update-oras-checksums|oras"
+  "update-setup-envtest-checksums|setup_envtest"
+)
+
+# Extract a pinned version from a .settings.yaml on stdin-named file. Values are
+# single-quoted; both 'v1.2.3' and '1.2.3' spellings are in use and each
+# refresher normalizes what it is handed, so the value passes through verbatim.
+# Returns 1 when absent, 2 when the key appears more than once.
+version_from() {
+  local file="$1" key="$2" matches count
+  matches=$(grep -E "^[[:space:]]+${key}:[[:space:]]*'[^']+'[[:space:]]*\$" "${file}" || true)
+  if [[ -z "${matches}" ]]; then
+    return 1
+  fi
+  count=$(printf '%s\n' "${matches}" | wc -l | tr -d ' ')
+  if [[ "${count}" -ne 1 ]]; then
+    return 2
+  fi
+  printf '%s\n' "${matches}" | sed -E "s/^[[:space:]]+${key}:[[:space:]]*'([^']+)'[[:space:]]*\$/\1/"
+}
+
+# Snapshot the baseline .settings.yaml once. A missing baseline is not fatal on
+# its own -- it only means drift cannot be attributed, which downgrades the
+# verdict to the cautious branch rather than skipping the check.
+BASELINE_SETTINGS=""
+BASELINE_NOTE=""
+baseline_tmp=$(mktemp)
+if git -C "${REPO_ROOT}" show "${BASELINE_REF}:.settings.yaml" >"${baseline_tmp}" 2>/dev/null; then
+  BASELINE_SETTINGS="${baseline_tmp}"
+else
+  rm -f "${baseline_tmp}"
+  BASELINE_NOTE="baseline ${BASELINE_REF} could not be read"
+fi
+
+STALE=()          # version pin moved in this diff, digest left behind
+UPSTREAM_DRIFT=() # version pin unchanged, upstream bytes moved
+BROKEN=()         # could not be verified at all
+CHECKED=0
+
+cleanup() {
+  [[ -n "${BASELINE_SETTINGS}" ]] && rm -f "${BASELINE_SETTINGS}"
+  [[ -n "${CURRENT_WORKDIR:-}" ]] && rm -rf "${CURRENT_WORKDIR}"
+  return 0
+}
+trap cleanup EXIT
+
+for spec in "${SPECS[@]}"; do
+  script_name="${spec%%|*}"
+  version_key="${spec##*|}"
+  script_path="${REPO_ROOT}/tools/${script_name}"
+
+  if [[ ! -x "${script_path}" ]]; then
+    BROKEN+=("${version_key}: tools/${script_name} is missing or not executable")
+    continue
+  fi
+
+  version=""
+  if ! version=$(version_from "${SETTINGS_FILE}" "${version_key}"); then
+    BROKEN+=("${version_key}: no unique \"${version_key}: '<version>'\" line in .settings.yaml")
+    continue
+  fi
+
+  CURRENT_WORKDIR=$(mktemp -d)
+  if ! cp "${SETTINGS_FILE}" "${CURRENT_WORKDIR}/.settings.yaml"; then
+    BROKEN+=("${version_key}: could not stage a working copy of .settings.yaml")
+    rm -rf "${CURRENT_WORKDIR}"
+    CURRENT_WORKDIR=""
+    continue
+  fi
+
+  # Refreshers resolve .settings.yaml relative to the working directory, so the
+  # subshell cd is what sandboxes the rewrite to the throwaway copy. Keep the
+  # real file out of reach: a refresher bug must not edit the tree from a check.
+  refresh_log="${CURRENT_WORKDIR}/refresh.log"
+  if ! (cd "${CURRENT_WORKDIR}" && "${script_path}" "${version}") >"${refresh_log}" 2>&1; then
+    detail=$(tail -n 1 "${refresh_log}")
+    BROKEN+=("${version_key} (${version}): tools/${script_name} failed${detail:+ -- ${detail}}")
+    rm -rf "${CURRENT_WORKDIR}"
+    CURRENT_WORKDIR=""
+    continue
+  fi
+
+  if ! diff -q "${SETTINGS_FILE}" "${CURRENT_WORKDIR}/.settings.yaml" >/dev/null 2>&1; then
+    # Attribute the drift. Did this diff move the version pin, or did upstream
+    # move under a pin nobody touched?
+    #
+    # Only a demonstrated version change earns the mechanical remedy. Anything
+    # else -- same version, or a baseline we could not read -- is treated as the
+    # tampering case, because handing out "re-run the refresher" on an unproven
+    # assumption is the one outcome this check must never produce.
+    if [[ -z "${BASELINE_SETTINGS}" ]]; then
+      UPSTREAM_DRIFT+=("${version_key} (${version}, cause unattributable)")
+      echo "--- unattributed drift: ${version_key} is pinned at ${version} and its digests do not match"
+    else
+      baseline_version=$(version_from "${BASELINE_SETTINGS}" "${version_key}" || true)
+      if [[ -z "${baseline_version}" ]]; then
+        # Absent from the baseline: this pin is being introduced by this diff,
+        # so there is no reviewed digest to protect.
+        STALE+=("${version_key}|${script_name}|${version}")
+        echo "--- new pin: ${version_key} was added at ${version} without matching digests"
+      elif [[ "${baseline_version}" == "${version}" ]]; then
+        UPSTREAM_DRIFT+=("${version_key} (${version}, unchanged since ${BASELINE_REF})")
+        echo "--- upstream drift: ${version_key} is still pinned at ${version}, but upstream now serves different bytes"
+      else
+        STALE+=("${version_key}|${script_name}|${version}")
+        echo "--- stale pin: ${version_key} moved ${baseline_version} -> ${version} without refreshing its digests"
+      fi
+    fi
+    diff -u "${SETTINGS_FILE}" "${CURRENT_WORKDIR}/.settings.yaml" \
+      | grep -E '^[+-][^+-]' || true
+  fi
+
+  CHECKED=$((CHECKED + 1))
+  rm -rf "${CURRENT_WORKDIR}"
+  CURRENT_WORKDIR=""
+done
+
+if [[ ${#BROKEN[@]} -gt 0 ]]; then
+  echo >&2
+  echo "ERROR: ${#BROKEN[@]} checksum pin(s) could not be verified:" >&2
+  for entry in "${BROKEN[@]}"; do
+    echo "  - ${entry}" >&2
+  done
+  echo >&2
+  echo "A refresher that cannot run is how a stale pin gets committed, so this" >&2
+  echo "fails rather than passing on unverified pins." >&2
+  exit 1
+fi
+
+if [[ ${#UPSTREAM_DRIFT[@]} -gt 0 ]]; then
+  echo >&2
+  echo "ERROR: ${#UPSTREAM_DRIFT[@]} pin(s) drifted WITHOUT a version bump:" >&2
+  for entry in "${UPSTREAM_DRIFT[@]}"; do
+    echo "  - ${entry}" >&2
+  done
+  if [[ -n "${BASELINE_NOTE}" ]]; then
+    echo "  (${BASELINE_NOTE}, so drift could not be attributed to a version bump)" >&2
+  fi
+  echo >&2
+  echo "Nobody re-pinned these here, so the committed digest is a value a human" >&2
+  echo "reviewed at a specific SHA. Upstream serving different bytes for the same" >&2
+  echo "tag means the release was altered after that review, or the tag was moved." >&2
+  echo >&2
+  echo "Do NOT run the refresh script to make this pass: that would overwrite the" >&2
+  echo "reviewed digest with whatever upstream serves now, which is precisely what" >&2
+  echo "the committed pin exists to detect. Verify out of band first." >&2
+  exit 1
+fi
+
+if [[ ${#STALE[@]} -gt 0 ]]; then
+  echo >&2
+  echo "ERROR: ${#STALE[@]} checksum pin(s) do not match their bumped version:" >&2
+  for entry in "${STALE[@]}"; do
+    IFS='|' read -r key script ver <<<"${entry}"
+    echo "  - ${key} -> ${ver}: fix with  tools/${script} ${ver}" >&2
+  done
+  exit 1
+fi
+
+echo "All ${CHECKED} checksum pin(s) match their pinned versions"

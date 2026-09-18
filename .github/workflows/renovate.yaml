@@ -125,15 +125,19 @@ jobs:
           # `[a-z-]+` (not `[a-z]+`) so hyphenated tool names match too, e.g.
           # tools/update-helm-diff-checksums.
           #
-          # The stale-checksum symptom above is not uniform across the three
-          # tools. A hook that runs but *fails* (renamed asset, egress blip)
-          # leaves the new version pinned against the old checksums, and only
-          # helmfile/chainsaw fail a PR-gating job for it — qualification.yaml
-          # feeds their sha256 into setup-build-tools, which verifies it.
-          # helm_diff_checksums is read solely by tests/uat/lib/phases.sh, so a
-          # stale helm-diff pin stays green on every PR check and first surfaces
-          # in nightly UAT, across all clouds. Renovate's "Artifact update
-          # problem" warning in the PR body is the signal to heed; helm-diff is
-          # deliberately not auto-merged, so a human sees it.
+          # A hook that runs but *fails* (renamed asset, egress blip) leaves the
+          # new version pinned against the old checksums. That used to be caught
+          # unevenly: helmfile/chainsaw digests feed setup-build-tools on
+          # PR-gating jobs and fail there, but helm_diff_checksums is read
+          # solely by tests/uat/lib/phases.sh, so a stale helm-diff pin passed
+          # every PR check and first surfaced in nightly UAT, across all clouds
+          # (PR #2801).
+          #
+          # The merge-gate `settings-checksums` job now closes that gap for all
+          # seven checksum-pinned tools by re-deriving each digest from upstream
+          # (tools/check-settings-checksums), so a stale pin fails the required
+          # gate pre-merge rather than reaching UAT. Renovate's "Artifact update
+          # problem" warning in the PR body is still the earliest signal, and
+          # helm-diff is deliberately not auto-merged, so a human sees it first.
           RENOVATE_ALLOWED_POST_UPGRADE_COMMANDS: '["^\\./tools/update-[a-z-]+-checksums "]'
           LOG_LEVEL: ${{ inputs.logLevel || 'info' }}
