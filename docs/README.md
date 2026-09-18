@@ -14,8 +14,8 @@ overview, see the [repository README](https://github.com/NVIDIA/aicr).
 
 | If you are a... | Start here |
 |-----------------|-----------|
-| **User** — operator deploying AICR to provision or validate a cluster | [User Guide](user/index.md) |
-| **Integrator** — engineer embedding AICR in a CI/CD pipeline, GitOps flow, or larger platform | [Integrator Guide](integrator/index.md) |
+| **User** — operator deploying AICR to provision or validate a cluster | [User Guide](https://github.com/NVIDIA/aicr/blob/main/docs/user/index.md) |
+| **Integrator** — engineer embedding AICR in a CI/CD pipeline, GitOps flow, or larger platform | [Integrator Guide](https://github.com/NVIDIA/aicr/blob/main/docs/integrator/index.md) |
 | **Contributor** — developer extending AICR or shipping recipes | [Contributor Guide](contributor/index.md) |
 
 ### User Guide
@@ -99,7 +99,7 @@ Reference for the terms used across the docs site.
 | **Component** | A deployable software package (e.g., GPU Operator, Network Operator). Lives in `recipes/registry.yaml`. |
 | **ComponentRef** | A reference to a component inside a recipe — version, source, values file, dependencies. |
 | **Constraint** | A declarative validation rule on a recipe (e.g., `K8s.server.version >= 1.32.4`). |
-| **Validation Phase** | A stage of `aicr validate`: readiness (always implicit), deployment, performance, conformance. |
+| **Validation Phase** | A stage of `aicr validate`, run in order: readiness (always implicit), deployment, conformance, performance. |
 | **Measurement** | A snapshot data point keyed by type (K8s, OS, GPU, SystemD, NodeTopology, NetworkTopology), subtype, and reading. |
 | **Specificity** | A score counting non-`any` criteria fields. More-specific overlays merge later. |
 | **Asymmetric matching** | Criteria-matching rule: recipe `any` is a wildcard; query `any` does not match a specific recipe. |
