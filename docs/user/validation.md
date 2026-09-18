@@ -63,6 +63,25 @@ is installed on the cluster.
 | `nccl-all-reduce-bw-net` | NET (EFA on EKS by default; ConnectX RoCE via `AICR_NCCL_FABRIC=roce`; built-in IB/verbs on OKE) | GB200 + EKS, GB200 + OKE, and GB300 + EKS. Asserts the intended NET fabric actually carried traffic — EFA on EKS, the NVL72 InfiniBand east-west fabric (`nvidia.com/mlnxnics` shared HCAs) on OKE — catching silent fallback to Socket when GPUDirect RDMA is unavailable. A driver preflight gates the benchmark on the default fabric — see [Grace Blackwell NET preflight](#grace-blackwell-net-preflight-gpudirect-rdma-prerequisites). |
 | `nccl-all-reduce-bw-nvls` | NVLS (MNNVL across an NVL72 IMEX domain) | GB200 (EKS, OKE); GB300 (EKS, generic); VR200 (RKE2). Asserts the NVLS communicator actually initialized — catches silent fallback to the NET fabric when the IMEX domain is misconfigured. |
 
+An opt-in pair of Cluster Readiness Engine (CRE) checks runs against public CRE
+(`nvcre.nvidia.com`, [cluster-readiness-engine](https://github.com/NVIDIA/cluster-readiness-engine)).
+Neither check branches on service or accelerator; which combinations are
+qualified is recorded as data, and `eks` x `h100` is the combination qualified
+today. Shipped overlays keep the TrainJob `nccl-all-reduce-bw` path. Add `nvcre`
+and the CRE check names only when you intend to run CRE. Each CRE check requires
+a same-named constraint:
+
+| Check | What it measures |
+|---|---|
+| `nccl-cre-all-reduce-bw` | Bus bandwidth from a CRE `Certification` `BandwidthMeasurement`; AICR still asserts the transport from launcher logs |
+| `cre-training-goodput` | Runtime goodput from a CRE `Certification` `GoodputMeasurement` |
+
+The catalog entry each check drives, and the node footprint it runs on, come
+from the qualification record rather than the check. On `eks` x `h100` that is
+`communication/nccl-all-reduce` and `training/nemotron5-8b`, each on two nodes.
+A combination with no entry skips, because it has no calibrated threshold to
+judge against.
+
 The applicability column is the *default*, derived from the recipe's
 `criteria`. A recipe whose criteria fall outside it can still run these
 benchmarks explicitly — either by
