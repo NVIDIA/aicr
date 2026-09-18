@@ -42,6 +42,12 @@ var deployScriptTemplate string
 // criteriaAny is the wildcard value for criteria fields.
 const criteriaAny = "any"
 
+// fileDeployScript is the orchestration script this deployer writes at the
+// bundle root. Named so the write site (GenerateFromTemplate) and the
+// reported deployer.Output.Entrypoint can't drift apart into referencing two
+// different filenames.
+const fileDeployScript = "deploy.sh"
+
 // ComponentData contains data for rendering per-component template blocks.
 // The helm deployer no longer owns per-component folder content (localformat
 // does). ComponentData now carries only the fields needed by the orchestration
@@ -178,7 +184,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, err
 	}
 	g.vendorRecords = writeResult.VendoredCharts
-	output.Entrypoint = "deploy.sh"
+	output.Entrypoint = fileDeployScript
 	output.Releases = writeResult.Releases()
 	for _, f := range writeResult.Folders {
 		// localformat returns paths relative to outputDir. Downstream consumers
@@ -387,7 +393,7 @@ func (g *Generator) generateDeployScript(ctx context.Context, components []Compo
 		ReadinessHelmTimeout: (defaults.ReadinessGateMaxWait + defaults.ReadinessGateHelmTimeoutBuffer).String(),
 	}
 
-	deployPath, deploySize, err := deployer.GenerateFromTemplate(deployScriptTemplate, data, outputDir, "deploy.sh")
+	deployPath, deploySize, err := deployer.GenerateFromTemplate(deployScriptTemplate, data, outputDir, fileDeployScript)
 	if err != nil {
 		return "", 0, err
 	}

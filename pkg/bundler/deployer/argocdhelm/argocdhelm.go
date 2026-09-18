@@ -1248,6 +1248,12 @@ func (g *Generator) writeParentApplicationTemplate(templatesDir string) (string,
 // chart template under templatesDir. Output's Files/TotalSize are updated
 // in place. Extracted from Generate to keep that function under the funlen
 // threshold; the loop body is too long to inline cleanly.
+//
+// Release order is os.ReadDir's lexical sort, and it equals deployment order
+// only because the NNN- prefix is zero-padded to three digits — the same
+// bound localformat enforces when it refuses to emit more than 999 folders.
+// Widening that prefix without padding to the new width silently reorders
+// this index.
 func (g *Generator) processFolders(ctx context.Context, tmpDir, outputDir, templatesDir string, output *deployer.Output) error {
 	folderEntries, readErr := os.ReadDir(tmpDir)
 	if readErr != nil {

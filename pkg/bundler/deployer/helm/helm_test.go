@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -229,7 +230,7 @@ func TestGenerateReportsLayout(t *testing.T) {
 			primaryOrder = append(primaryOrder, r.Name)
 		}
 	}
-	if !reflect.DeepEqual(primaryOrder, recipeResult.DeploymentOrder) {
+	if !slices.Equal(primaryOrder, recipeResult.DeploymentOrder) {
 		t.Errorf("primary release order = %v, want %v (recipe DeploymentOrder)",
 			primaryOrder, recipeResult.DeploymentOrder)
 	}

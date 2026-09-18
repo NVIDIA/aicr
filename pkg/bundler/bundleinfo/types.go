@@ -127,6 +127,12 @@ type Layout struct {
 // -pre, -post and -readiness folders are releases with no component of their
 // own; each names its parent in Component.
 //
+// Component is whatever the deployer reports, and it is undefined for a recipe
+// that declares a component whose name ends in one of those reserved suffixes
+// alongside the matching base name: the deployers disagree on whether such a
+// folder is its own component or an injected one, so the same recipe yields
+// different values and a consumer cannot tell which it got.
+//
 // Releases is emitted in deployment order and that ordering is normative:
 // consumers read sequence from list position. There is deliberately no
 // ordinal field — it would restate list position, restate the NNN- path
