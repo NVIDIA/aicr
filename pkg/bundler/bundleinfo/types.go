@@ -131,7 +131,12 @@ type Layout struct {
 // that declares a component whose name ends in one of those reserved suffixes
 // alongside the matching base name: the deployers disagree on whether such a
 // folder is its own component or an injected one, so the same recipe yields
-// different values and a consumer cannot tell which it got.
+// different values and a consumer cannot tell which it got. No name in the
+// shipped registry ends in a reserved suffix, which is why an aicr.run/v1
+// schema can carry the ambiguity: resolving it is a reserved additive change,
+// and a later minor may add an explicit discriminator separating a primary
+// release from an injected one. Until then a consumer must not treat the
+// Component value for that collision as stable.
 //
 // Releases is emitted in deployment order and that ordering is normative:
 // consumers read sequence from list position. There is deliberately no

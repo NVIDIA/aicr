@@ -110,7 +110,13 @@ pre-install manifests, a `-post` folder when a component that also ships an
 upstream chart declares post-install manifests, or a `-readiness` folder
 under `--readiness-hooks` (none of the three tied to `--vendor-charts`) — has
 no recipe component of its own, so it names its parent in `component` while
-`name` carries its own suffixed name.
+`name` carries its own suffixed name. One collision is deliberately left
+undefined: a recipe that declares a component whose own name ends in `-pre`,
+`-post` or `-readiness` alongside the matching base name makes `component`
+deployer-dependent for that release, so do not rely on its value there. No
+component in the shipped registry has such a name, and resolving this is a
+reserved additive change — a later release may add an explicit field
+distinguishing a primary release from an injected one.
 
 `bundle-info.yaml` deliberately carries no component *inventory*:
 `recipe.yaml` sits beside it at the bundle root and is already the source of
