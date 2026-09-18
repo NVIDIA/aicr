@@ -71,7 +71,7 @@ func TestCheckExpectedResources_IncludesDeploymentCompletenessAndGPUReadiness(t 
 			activeNamespace("skyhook"),
 			activeNamespace("nvidia-dra-driver"),
 			activeNamespace("app-ns"),
-			readyDeployment("app-ns", "app-deployment", 1),
+			readyDeployment("app-ns", "app-deployment"),
 			readyDaemonSet("nvidia-dra-driver", testDefaultDRADSName, 2),
 		},
 		[]runtime.Object{
@@ -155,7 +155,7 @@ func TestCheckExpectedResources_SkipsDisabledComponents(t *testing.T) {
 	ctx := newDeploymentTestContext(t,
 		[]runtime.Object{
 			activeNamespace("app-ns"),
-			readyDeployment("app-ns", "app-deployment", 1),
+			readyDeployment("app-ns", "app-deployment"),
 		},
 		nil,
 		[]recipe.ComponentRef{
@@ -1264,6 +1264,32 @@ func TestRuntimeRequiredTaints(t *testing.T) {
 			wantErrSub: "is not a valid taint",
 		},
 		{
+			// Distinct from an unparseable value: the operator's own options
+			// validation requires a runtime-required taint, so an empty one
+			// means it is not running rather than that the gate cannot read it.
+			name: "empty env value names the operator config, not a parse failure",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnvVar(ns,
+				corev1.EnvVar{Name: runtimeRequiredTaintEnv, Value: ""})},
+			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			wantErrSub: "refuses to start without one",
+		},
+		{
+			// The gate reads the Deployment spec, so an indirected value is
+			// unreadable rather than invalid. Fails closed either way.
+			name: "valueFrom env fails closed as unresolvable",
+			objects: []runtime.Object{nodewrightOperatorDeploymentWithEnvVar(ns, corev1.EnvVar{
+				Name: runtimeRequiredTaintEnv,
+				ValueFrom: &corev1.EnvVarSource{
+					ConfigMapKeyRef: &corev1.ConfigMapKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "cm"},
+						Key:                  "taint",
+					},
+				},
+			})},
+			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			wantErrSub: "valueFrom",
+		},
+		{
 			name:       "non-NotFound read error fails closed",
 			getErr:     apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, nodewrightOperatorDeployment, stderrors.New("forbidden")),
 			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
@@ -1911,7 +1937,8 @@ func inactiveNamespace(name string) *corev1.Namespace {
 	}
 }
 
-func readyDeployment(namespace, name string, replicas int32) *appsv1.Deployment {
+func readyDeployment(namespace, name string) *appsv1.Deployment {
+	replicas := int32(1)
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -1971,12 +1998,22 @@ func nodeWithRuntimeRequiredTaint(name string) *corev1.Node {
 // Deployment fixture with the given RUNTIME_REQUIRED_TAINT env value; an empty
 // value omits the env entirely (an older chart).
 func nodewrightOperatorDeploymentWithEnv(namespace, taintStr string) *appsv1.Deployment {
-	d := readyDeployment(namespace, nodewrightOperatorDeployment, 1)
+	d := readyDeployment(namespace, nodewrightOperatorDeployment)
 	container := corev1.Container{Name: "manager"}
 	if taintStr != "" {
 		container.Env = []corev1.EnvVar{{Name: runtimeRequiredTaintEnv, Value: taintStr}}
 	}
 	d.Spec.Template.Spec.Containers = []corev1.Container{container}
+	return d
+}
+
+// nodewrightOperatorDeploymentWithEnvVar builds the operator Deployment with a
+// RUNTIME_REQUIRED_TAINT entry supplied verbatim, so a test can express the
+// shapes nodewrightOperatorDeploymentWithEnv cannot: present but empty, and
+// sourced from valueFrom. Both are distinct from the env being absent.
+func nodewrightOperatorDeploymentWithEnvVar(namespace string, env corev1.EnvVar) *appsv1.Deployment {
+	d := readyDeployment(namespace, nodewrightOperatorDeployment)
+	d.Spec.Template.Spec.Containers = []corev1.Container{{Name: "manager", Env: []corev1.EnvVar{env}}}
 	return d
 }
 

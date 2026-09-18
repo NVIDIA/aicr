@@ -959,6 +959,20 @@ func runtimeRequiredTaints(ctx *validators.Context, refs []recipe.ComponentRef, 
 			if env.Name != runtimeRequiredTaintEnv {
 				continue
 			}
+			if env.Value == "" {
+				// Naming the parse failure here would read as though AICR
+				// cannot understand a value the operator accepted. It cannot:
+				// the operator's own options validation requires a
+				// runtime-required taint and refuses to start without one, so
+				// an empty value means the operator is not running, not that
+				// the gate is confused.
+				detail := "is empty, and the operator refuses to start without one"
+				if env.ValueFrom != nil {
+					detail = "is sourced from valueFrom, which this gate cannot resolve; set it literally"
+				}
+				return nil, errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("Deployment %s env %s %s", deployRef, runtimeRequiredTaintEnv, detail))
+			}
 			configured, perr := snapshotter.ParseTaint(env.Value)
 			if perr != nil {
 				return nil, errors.Wrap(errors.ErrCodeInvalidRequest,

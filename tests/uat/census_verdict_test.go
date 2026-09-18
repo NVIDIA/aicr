@@ -239,12 +239,13 @@ func skyhookTaintedNode(name string) string {
 		`[{"key":"skyhook.nvidia.com/tuning","effect":"NoSchedule"}]`)
 }
 
-// nodewrightTaintedNode is Ready but carries the runtime-required NoSchedule
-// taint under the nodewright.nvidia.com prefix the operator defaults to from
-// v0.18.0.
+// nodewrightTaintedNode is Ready but carries the operator's default
+// runtime-required taint from v0.18.0, verbatim: the key is the bare
+// nodewright.nvidia.com domain and runtime-required is the value, which is the
+// shape the chart's runtimeRequiredTaint default parses to.
 func nodewrightTaintedNode(name string) string {
 	return node(name, "True", false,
-		`[{"key":"nodewright.nvidia.com/runtime-required","effect":"NoSchedule"}]`)
+		`[{"key":"nodewright.nvidia.com","value":"runtime-required","effect":"NoSchedule"}]`)
 }
 
 // node renders one node object with the fields gpu_census_verdict inspects:
