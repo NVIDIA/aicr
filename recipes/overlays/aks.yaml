@@ -24,6 +24,15 @@ spec:
   criteria:
     service: aks
 
+  # This overlay deploys network-operator (Mellanox ConnectX), the only
+  # fabric upstream's nic-health-monitor supports. Declared on the AKS root
+  # rather than each leaf so a new AKS overlay cannot silently miss it --
+  # mixins accumulate into all descendants (pkg/recipe/metadata.go Merge).
+  # Pools without an InfiniBand/RoCE NIC simply report no devices; the
+  # mixin is STORE_ONLY, so that is inert rather than harmful.
+  mixins:
+    - nvsentinel-nic-health-monitor
+
   # AKS-specific constraints
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   # DRA (Dynamic Resource Allocation) is included in all AKS recipes via base.yaml
