@@ -3486,8 +3486,10 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 func (b *DefaultBundler) warnDRAEvictionLabelDerived(draNames []string, label config.NodeLabel) {
 	for _, name := range draNames {
 		msg := fmt.Sprintf(
-			"%s schedules its kubelet plugin only on nodes labeled %s=%s; dra-node-labeler applies that label to every node GFD reports as nvidia.com/gpu.present=true, so no node-pool labeling is required. A GPU node without gpu.present (GFD not yet running, or a node GPU Operator does not manage) runs no kubelet plugin and publishes no ResourceSlices. To provision the label yourself instead, pass --set %s:enabled=false",
+			"%s schedules its kubelet plugin only on nodes labeled %s=%s; dra-node-labeler applies that label to every node GFD reports as nvidia.com/gpu.present=true, so no node-pool labeling is required. A GPU node without gpu.present (GFD not yet running, or a node GPU Operator does not manage) that does not already carry %s=%s runs no kubelet plugin and publishes no ResourceSlices. To provision the label yourself instead, pass --set %s:enabled=false",
 			name,
+			label.Key,
+			label.Value,
 			label.Key,
 			label.Value,
 			draNodeLabelerComponentName,

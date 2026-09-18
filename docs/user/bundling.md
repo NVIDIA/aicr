@@ -474,8 +474,9 @@ with no plugin rather than with an uncoordinated one.
 Opt in when GPU Operator manages the driver (`driver.enabled=true`). With the
 bundled `dra-node-labeler` the label follows GFD's `nvidia.com/gpu.present`, so
 nodes added later by autoscaling or replacement are labeled as soon as GFD sees
-them; the remaining gap is a GPU node GFD has not labeled, which runs no kubelet
-plugin until it is. If you disable the labeler, opt in only when you can
+them; the remaining gap is a GPU node GFD has not labeled and that does not
+already carry the configured `key=value`, which runs no kubelet plugin until
+one of the two appears. If you disable the labeler, opt in only when you can
 guarantee the label is set at provisioning time for every GPU node; otherwise
 the default is the safer choice: a plugin that always runs, with a documented
 risk at driver restarts, beats a plugin that silently does not run on some nodes.
