@@ -184,7 +184,7 @@ The signal is supplied as an `oci ce cluster list-addons --cluster-id <cluster-o
 
 AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration: it detects GPU and node faults and publishes health events, but takes no automatic action on a node. AICR does not disable remediation — the upstream chart ships it off, and AICR inherits that default rather than overriding it.
 
-`recipes/components/nvsentinel/values.yaml` enables and disables no NVSentinel *component*. It carries deployment-shaping values only: `fullnameOverride`, tolerate-all scheduling so GPU-node DaemonSets land on tainted nodes, `networkPolicy.enabled: false` (the metrics policy otherwise blocks cert-manager webhook traffic in the same namespace — this is the one upstream default AICR overrides here), `platformConnector` resources, and `janitor-provider.csp.provider: generic`, which selects the reboot mechanism used *if* remediation is later enabled but does not enable it. Every component on/off default below is the chart's.
+`recipes/components/nvsentinel/values.yaml` enables and disables no NVSentinel *component*. It carries deployment-shaping values: `fullnameOverride`, tolerate-all scheduling so GPU-node DaemonSets land on tainted nodes, `networkPolicy.enabled: false` (the metrics policy otherwise blocks cert-manager webhook traffic in the same namespace — this is the one upstream default AICR overrides here), `platformConnector` resources, and `janitor-provider.csp.provider: generic`, which selects the reboot mechanism used *if* remediation is later enabled but does not enable it. It also tunes which *checks* an already-on component runs: `syslog-health-monitor.enabledChecks` adds `SysLogsNICDriverError` to the three GPU checks the chart enables by default — see [NIC and fabric fault detection](#nic-and-fabric-fault-detection). Every component on/off default below is the chart's.
 
 **On by default** — the detection path:
 
@@ -207,6 +207,8 @@ AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration:
 | `janitor` / `janitorProvider` | executes it — reboot or terminate |
 
 Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.20.0`, the version pinned in `recipes/registry.yaml`.
+
+`nicHealthMonitor` is the one entry above that AICR's shipped recipes turn back on, and only on AKS and OKE — see [NIC and fabric fault detection](#nic-and-fabric-fault-detection).
 
 **The practical effect.** A stock AICR bundle surfaces GPU faults; it does not act on them. A node that needs a reboot is reported, not rebooted, and an operator intervenes. That is deliberate: `janitor` can reboot or terminate nodes, and enabling it without the operator having chosen to is not a safe default.
 
@@ -494,6 +496,43 @@ The same catalog-registration rule applies as for the other mixins: the overlay 
 NPD runs as a privileged DaemonSet and patches Node status.
 
 The pinned chart (`oci://ghcr.io/deliveryhero/helm-charts/node-problem-detector`) is the one upstream itself documents: the [node-problem-detector installation guide](https://github.com/kubernetes/node-problem-detector#installation) names it as the primary method and gives that exact OCI reference, with hand-applied manifests offered only as the alternative. The project publishes no chart of its own. It is still the only chart AICR pins that NVIDIA does not publish, which is worth stating plainly for supply-chain review — but it is the upstream-recommended path, not a substitute chosen here. The image it deploys (`registry.k8s.io/node-problem-detector/node-problem-detector`) is upstream Kubernetes' own.
+
+### NIC and Fabric Fault Detection
+
+A degraded InfiniBand or RoCE link is the failure this covers: the port stays UP and keeps passing traffic while the effective bandwidth for every GPU in a collective silently drops, so the job hangs or crashes with no obvious hardware error. NVSentinel splits the detection across three layers, and AICR ships them at two different scopes because they have different hardware requirements.
+
+**Layer 3 — driver faults — is on everywhere.** `syslog-health-monitor` already runs on every GPU node, but AICR inherited the chart's default `enabledChecks`, which lists only the three GPU checks. `recipes/components/nvsentinel/values.yaml` adds `SysLogsNICDriverError` and enables all 11 `nicDriverDetection` patterns, which match `mlx5_core` kernel-log lines: firmware command timeouts, lost health-poll heartbeats, NAPI soft lockups. This adds no image, no component and no RBAC, and the patterns simply never fire on a node with no Mellanox driver loaded — so it is unconditional rather than platform-scoped. Note that `enabledChecks` replaces the chart's list rather than merging with it, so the values file restates all three GPU checks alongside the new one.
+
+**Layers 1 and 2 — link state and link counters — are AKS and OKE only.** These come from the `nic-health-monitor` subchart, which reads sysfs and InfiniBand counters directly. Upstream's support matrix has exactly one row:
+
+> Current scope: Mellanox/NVIDIA InfiniBand and RoCE devices only.
+
+Mapped onto what AICR's overlays actually deploy:
+
+| Platform | Fabric component | `nicHealthMonitor` |
+|---|---|---|
+| AKS | `network-operator` (ConnectX) | on |
+| OKE | `network-operator` (ConnectX) | on |
+| EKS | `aws-efa` | off — not Mellanox |
+| GKE COS | `gke-nccl-tcpxo` | off — not Mellanox |
+| Kind | `network-operator`, simulated | off — no real NICs |
+
+The `nvsentinel-nic-health-monitor` mixin (`recipes/mixins/nvsentinel-nic-health-monitor.yaml`) carries the toggle, and the `aks` and `oke-ol` root overlays reference it. Mixins accumulate down the inheritance chain, so every AKS and OKE leaf gets it without restating it, and a newly added overlay in either family inherits it rather than silently missing it. Compose the mixin on your own leaf overlay to enable it elsewhere:
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-nic-health-monitor
+```
+
+Upstream's validated-platform list covers DGX and OCI hardware and does **not** name Azure. AKS is included here because its GPU pools deploy `network-operator`/ConnectX, which is the actual hardware precondition — not because upstream qualified AKS specifically.
+
+**Both layers ship `processingStrategy: STORE_ONLY`.** This is a deliberate downgrade from the chart's `EXECUTE_REMEDIATION` default, and more conservative than upstream's own example configuration, which reserves `STORE_ONLY` for a single pattern. Several counters — `link_downed` among them — treat any increment as fatal, and the remediation upstream recommends for them is `REPLACE_VM`, the most destructive action in the pipeline. Observation first; revisit once real coverage has been measured.
+
+**`metadataCollector` is a hard dependency.** `nic-health-monitor` reads GPU-to-NIC topology from `/var/lib/nvsentinel/gpu_metadata.json` and has no devices to check without it. Because a missing dependency renders and deploys silently, `CheckNVSentinelNicHealthMonitorRequiresMetadataCollector` blocks the bundle instead: enabling `global.nicHealthMonitor.enabled` with `global.metadataCollector.enabled: false` fails unless `nic-health-monitor.nicInclusionRegexOverride` carries a value the monitor will actually accept. Set is not enough — the gate requires a string with at least one non-empty pattern, and every comma-separated pattern must compile, because the chart writes the value straight into the monitor's config and it refuses to start on one that does not. An override it rejects is not a bypass; it is the same missing inventory in a crash loop. That override is the documented bypass, and it forfeits the automatic management-NIC exclusion along with the dependency, so prefer enabling `metadataCollector`. No AKS or OKE overlay disables it; the overlays that do (VR200/RKE2, H200/k0s) are not in either family and never compose this mixin.
+
+**Escalation needs the datastore.** The "three events in one hour escalates" behaviour lives in the Health Events Analyzer, which needs MongoDB. Without it ([#1014](https://github.com/NVIDIA/aicr/issues/1014)) only fatal events surface.
 
 ### Enabling Remediation
 

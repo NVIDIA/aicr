@@ -441,9 +441,9 @@ components:
         tolerationPaths:
           - global.systemNodeTolerations
     # Opt-in surface for the nvsentinel-observability (#2617),
-    # nvsentinel-object-monitor (#2612) and nvsentinel-preflight (#2610)
-    # mixins: the exact leaf paths a mixin may set on this
-    # already-base-chained component. global.tracing.endpoint is
+    # nvsentinel-object-monitor (#2612), nvsentinel-preflight (#2610) and
+    # nvsentinel-nic-health-monitor mixins: the exact leaf paths a mixin may
+    # set on this already-base-chained component. global.tracing.endpoint is
     # deliberately absent -- it must come from outside the mixin (a leaf
     # recipe's own override, or an operator --set), never from a mixin, so
     # CheckNVSentinelTracingEndpointRequired always has a real value to
@@ -482,6 +482,8 @@ components:
       - preflight.gangDiscovery.podGroupGVR.resource
       - preflight.gangDiscovery.minCountExpr
       - preflight.initContainers
+      - global.nicHealthMonitor.enabled
+      - nic-health-monitor.processingStrategy
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
@@ -541,6 +543,16 @@ components:
       # crash-loops, and failurePolicy: Ignore then admits every GPU pod
       # unchecked. A no-op unless preflight gang discovery targets KAI.
       - function: CheckNVSentinelPreflightGangSchedulerRequired
+        severity: error
+      # Blocking: nic-health-monitor discovers which NICs to check from the
+      # GPU-to-NIC topology metadata-collector writes to
+      # /var/lib/nvsentinel/gpu_metadata.json. Enabled without it, and
+      # without a usable nicInclusionRegexOverride -- one whose every
+      # comma-separated pattern compiles, since the monitor refuses to
+      # start otherwise -- the DaemonSet renders, deploys, and checks
+      # nothing, invisible to `aicr bundle`/`aicr validate`. A no-op for
+      # every recipe that doesn't set global.nicHealthMonitor.enabled.
+      - function: CheckNVSentinelNicHealthMonitorRequiresMetadataCollector
         severity: error
 
   - name: nvidia-dra-driver-gpu
