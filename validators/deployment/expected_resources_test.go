@@ -1290,6 +1290,29 @@ func TestRuntimeRequiredTaints(t *testing.T) {
 			wantErrSub: "valueFrom",
 		},
 		{
+			// The VR reference clusters install nodewright out of band with no
+			// fullnameOverride, so the chart's own Deployment name is what is
+			// live. Reading only the bundle name would fall back to chart
+			// defaults and gate on a taint this operator never applies.
+			name: "out-of-band Deployment name is honored",
+			objects: []runtime.Object{nodewrightOperatorDeploymentNamed(ns,
+				nodewrightOperatorDeploymentOutOfBand, "custom.io/gate=true:NoExecute")},
+			refs: []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			want: dedupeTaints(custom, legacyRuntimeRequiredTaint),
+		},
+		{
+			// Neither can be shown to own the taint the nodes carry, and
+			// picking one would gate on a value the other never applies.
+			name: "both Deployment names present fails closed",
+			objects: []runtime.Object{
+				nodewrightOperatorDeploymentWithEnv(ns, "custom.io/gate=true:NoExecute"),
+				nodewrightOperatorDeploymentNamed(ns, nodewrightOperatorDeploymentOutOfBand,
+					"other.io/gate=true:NoSchedule"),
+			},
+			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
+			wantErrSub: "cannot tell which operator governs",
+		},
+		{
 			name:       "non-NotFound read error fails closed",
 			getErr:     apierrors.NewForbidden(schema.GroupResource{Group: "apps", Resource: "deployments"}, nodewrightOperatorDeployment, stderrors.New("forbidden")),
 			refs:       []recipe.ComponentRef{{Name: nodewrightOperatorComponent, Namespace: ns}},
@@ -1997,6 +2020,12 @@ func nodeWithRuntimeRequiredTaint(name string) *corev1.Node {
 // nodewrightOperatorDeploymentWithEnv builds the operator's controller-manager
 // Deployment fixture with the given RUNTIME_REQUIRED_TAINT env value; an empty
 // value omits the env entirely (an older chart).
+func nodewrightOperatorDeploymentNamed(namespace, name, taintStr string) *appsv1.Deployment {
+	d := nodewrightOperatorDeploymentWithEnv(namespace, taintStr)
+	d.Name = name
+	return d
+}
+
 func nodewrightOperatorDeploymentWithEnv(namespace, taintStr string) *appsv1.Deployment {
 	d := readyDeployment(namespace, nodewrightOperatorDeployment)
 	container := corev1.Container{Name: "manager"}
