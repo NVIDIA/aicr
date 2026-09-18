@@ -59,6 +59,9 @@ func Write(ctx context.Context, dir string, info *BundleInfo) (int64, error) {
 	info.APIVersion = header.StableGroupVersion
 	info.Kind = string(header.KindBundleInfo)
 
+	if err := validateRequiredFields(info); err != nil {
+		return 0, err
+	}
 	if err := validateRelativePaths(info); err != nil {
 		return 0, err
 	}
@@ -147,11 +150,11 @@ func contextError(ctx context.Context) error {
 // Read loads and validates dir/bundle-info.yaml.
 //
 // Fails closed in every direction: the filesystem entry, the size, the
-// header, the required fields, and every path the record carries. A bundle
-// produced before this artifact shipped has no file at all, and that returns
-// ErrCodeNotFound naming the reason: a consumer must treat it as a real state
-// and ask the operator for the deployer, never fall back to guessing one from
-// the directory layout.
+// header, the required fields, any content trailing the first YAML document,
+// and every path the record carries. A bundle produced before this artifact
+// shipped has no file at all, and that returns ErrCodeNotFound naming the
+// reason: a consumer must treat it as a real state and ask the operator for
+// the deployer, never fall back to guessing one from the directory layout.
 func Read(ctx context.Context, dir string) (*BundleInfo, error) {
 	if err := contextError(ctx); err != nil {
 		return nil, err
@@ -207,6 +210,16 @@ func Read(ctx context.Context, dir string) (*BundleInfo, error) {
 		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "failed to parse bundle info", err)
 	}
 
+	// A second Decode must hit EOF: anything else, including a second
+	// document that decodes cleanly, means content rides after the record
+	// that every check below validates, so that content itself is never
+	// checked at all.
+	var trailing any
+	if err := dec.Decode(&trailing); !stderrors.Is(err, io.EOF) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s contains a trailing YAML document after the bundle info record", FileName))
+	}
+
 	if info.Kind != string(header.KindBundleInfo) {
 		return nil, errors.New(errors.ErrCodeInvalidRequest,
 			fmt.Sprintf("%s declares kind %q, want %q", FileName, info.Kind, header.KindBundleInfo))
@@ -228,13 +241,14 @@ func Read(ctx context.Context, dir string) (*BundleInfo, error) {
 }
 
 // validateRequiredFields rejects a record that clears the kind, apiVersion and
-// path checks while still saying nothing.
+// path checks while still saying nothing. Every field it demands is
+// non-optional in the schema.
 //
-// Every field it demands is non-optional in the schema, so a record missing
-// one did not come from Write: it was hand-written or truncated in transit,
-// and this parser consumes files that arrive from OCI registries and GitOps
-// clones. Only Read calls it; Write's input is assembled field by field from
-// the run that just produced the bundle.
+// Both Read and Write call it. Read is the side that matters: it parses files
+// that arrive from OCI registries and GitOps clones, where a missing field
+// means the record was hand-written or truncated in transit. Write is
+// exported, so its call closes the gap that would otherwise let an external
+// caller persist exactly the record Read then rejects.
 //
 // Releases are exempt from presence: a recipe that resolves to no components
 // emits none, and an empty list is the honest record of that. A release that

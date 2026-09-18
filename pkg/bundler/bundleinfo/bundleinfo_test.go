@@ -189,6 +189,61 @@ func TestWriteRejectsEscapingPaths(t *testing.T) {
 	}
 }
 
+// TestWriteRejectsIncompleteRecord guards the gap Write otherwise leaves
+// open: Write is exported, so without this check an external caller could
+// persist a record missing a required field, and Read — which runs this same
+// check — would then reject exactly what Write had just produced.
+func TestWriteRejectsIncompleteRecord(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*bundleinfo.BundleInfo)
+	}{
+		{
+			name: "empty deployer",
+			mutate: func(info *bundleinfo.BundleInfo) {
+				info.Build.Deployer = ""
+			},
+		},
+		{
+			name: "empty recipe path",
+			mutate: func(info *bundleinfo.BundleInfo) {
+				info.Build.Recipe.Path = ""
+			},
+		},
+		{
+			name: "empty recipe digest",
+			mutate: func(info *bundleinfo.BundleInfo) {
+				info.Build.Recipe.Digest = ""
+			},
+		},
+		{
+			name: "empty entrypoint",
+			mutate: func(info *bundleinfo.BundleInfo) {
+				info.Layout.Entrypoint = ""
+			},
+		},
+		{
+			name: "release without a name",
+			mutate: func(info *bundleinfo.BundleInfo) {
+				info.Layout.Releases[0].Name = ""
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := sample()
+			tt.mutate(info)
+			_, err := bundleinfo.Write(context.Background(), t.TempDir(), info)
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
+			}
+		})
+	}
+}
+
 // TestReadRejectsOversizeFile guards the defaults.MaxBundleInfoBytes cap.
 // The oversize content is generated in memory rather than committed as a
 // fixture.
@@ -463,6 +518,65 @@ func TestReadAcceptsCompleteRecord(t *testing.T) {
 	}
 	if len(info.Layout.Releases) != 0 {
 		t.Errorf("releases = %d, want 0", len(info.Layout.Releases))
+	}
+}
+
+// TestReadRejectsTrailingDocument guards the untrusted read path against
+// content that rides after the first YAML document: yaml.Decoder.Decode
+// consumes only one document per call, so a second one would pass every
+// check in Read unseen while a different YAML consumer, or a human opening
+// the file, could still act on it.
+//
+// The single-document case pins the boundary empirically rather than by
+// assumption: completeRecord ends in a plain trailing newline (what Write
+// itself produces), which the decoder reports as io.EOF on the second
+// Decode. A bare trailing "---" with nothing meaningful after it does not —
+// the decoder reports a clean decode of a nil document — so it is rejected
+// same as a populated second document, per Read's fail-closed contract.
+func TestReadRejectsTrailingDocument(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		wantErr bool
+	}{
+		{
+			name:    "single document, trailing newline only",
+			content: completeRecord(),
+			wantErr: false,
+		},
+		{
+			name:    "second document with content",
+			content: completeRecord() + "---\nextra: true\n",
+			wantErr: true,
+		},
+		{
+			name:    "trailing document separator with nothing after",
+			content: completeRecord() + "---\n",
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, bundleinfo.FileName),
+				[]byte(tt.content), 0600); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+
+			_, err := bundleinfo.Read(context.Background(), dir)
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("Read: %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
+			}
+		})
 	}
 }
 

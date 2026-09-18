@@ -98,8 +98,12 @@ func (d closedWorldTestDeployer) Generate(_ context.Context, outputDir string) (
 		}
 	}
 	return &deployer.Output{
-		Files:     []string{payloadPath},
-		TotalSize: int64(len(payload)),
+		Files: []string{payloadPath},
+		// Every real deployer sets Entrypoint unconditionally (helm.go's is
+		// "deploy.sh"), so bundleinfo.Write's required-field check treats an
+		// empty one as a truncated record, not a legitimate helm bundle.
+		Entrypoint: "deploy.sh",
+		TotalSize:  int64(len(payload)),
 	}, nil
 }
 
