@@ -112,9 +112,9 @@ ORIG_XFS_CONDITION=""
 
 cleanup() {
   local rc=$?
-  if [[ -n "${WORK}" && -d "${WORK}" ]]; then
-    rm -rf "${WORK}"
-  fi
+  # WORK is deleted last, not first: KUBECONFIG lives inside it, so removing
+  # it here would leave every kubectl call below without a kubeconfig, and
+  # their `|| true` would hide the failure -- silently restoring nothing.
   # A cluster this run created is about to be deleted, so only the reuse path
   # needs its Node put back: otherwise the injected XfsShutdown lingers, and a
   # condition that existed beforehand has been overwritten.
@@ -137,6 +137,9 @@ cleanup() {
     kind delete cluster --name "${CLUSTER_NAME}" &>/dev/null || true
   elif [[ "${CREATED_CLUSTER}" == "true" ]]; then
     msg "KEEP_CLUSTER=true: leaving cluster ${CLUSTER_NAME} running for inspection."
+  fi
+  if [[ -n "${WORK}" && -d "${WORK}" ]]; then
+    rm -rf "${WORK}"
   fi
   exit "${rc}"
 }
@@ -283,6 +286,17 @@ patch_node_condition() {
     PATCHED_NODE="${node}"
     ORIG_XFS_CONDITION=$(kubectl --context "${KUBE_CONTEXT}" get node "${node}" \
       -o jsonpath='{.status.conditions[?(@.type=="XfsShutdown")]}' 2>/dev/null || true)
+    # kubectl's jsonpath printer JSON-marshals a non-scalar value, so this is
+    # a JSON object ready to splice into the restore patch. Verified on the
+    # pinned kubectl, but guarded rather than assumed: anything that is not an
+    # object is discarded, which downgrades cleanup to removing the injected
+    # condition instead of emitting a malformed patch that silently restores
+    # nothing.
+    if [[ "${ORIG_XFS_CONDITION}" != "{"*"}" ]]; then
+      [[ -n "${ORIG_XFS_CONDITION}" ]] &&
+        msg "WARN: unexpected XfsShutdown snapshot format; cleanup will remove the injected condition instead of restoring."
+      ORIG_XFS_CONDITION=""
+    fi
   fi
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   # strategic, not merge: NodeCondition carries patchMergeKey "type", so a
@@ -355,8 +369,15 @@ test_condition_produces_health_event() {
     fail "npd-object-monitor/kom-publishes-event" "kubernetes-object-monitor never logged publishing an NPDXfsShutdown health event within 60s"
   fi
 
+  # Match the skip branch's own message, not checkName+processingStrategy:
+  # PlatformConnectorServer.HealthEventOccurredV1 logs the whole HealthEvents
+  # payload ("Health events received") on arrival, before any strategy is
+  # applied, and that record carries both of those fields -- so asserting on
+  # them alone passes even when the STORE_ONLY branch never runs. This string
+  # is emitted only by filterProcessableEvents' skip path
+  # (platform-connectors/pkg/connectors/kubernetes/process_node_events.go).
   if wait_for_log_line nvsentinel "${PC_POD}" \
-    60 "${since}" '"checkName":"NPDXfsShutdown"' 'processingStrategy":"STORE_ONLY"'; then
+    60 "${since}" 'Skipping non-remediation health event' '"checkName":"NPDXfsShutdown"'; then
     pass "npd-object-monitor/platform-connectors-store-only"
   else
     fail "npd-object-monitor/platform-connectors-store-only" "platform-connectors never logged skipping the STORE_ONLY event within 60s"

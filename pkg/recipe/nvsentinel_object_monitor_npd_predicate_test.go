@@ -148,6 +148,16 @@ func TestNVSentinelObjectMonitor_NPDPolicyPredicates_MatchNPDConditions(t *testi
 			want:   false,
 		},
 		{
+			// Mirror of the wrong-reason row above: the reason here is the
+			// FIRED one, so a predicate that dropped its status check would
+			// match a cleared condition. Every other False row also changes
+			// the reason, which would mask exactly that regression.
+			name:   "XfsShutdown: fired reason at status False never fires",
+			policy: "NPDXfsShutdown",
+			node:   newNode([]any{condition("XfsShutdown", "False", "XfsHasShutdown")}),
+			want:   false,
+		},
+		{
 			// Without this row, a predicate that dropped its reason check
 			// and matched on type+status alone would still pass every
 			// other XfsShutdown case above.
@@ -175,6 +185,12 @@ func TestNVSentinelObjectMonitor_NPDPolicyPredicates_MatchNPDConditions(t *testi
 			want:   false,
 		},
 		{
+			name:   "CperHardwareErrorFatal: fired reason at status False never fires",
+			policy: "NPDCperHardwareErrorFatal",
+			node:   newNode([]any{condition("CperHardwareErrorFatal", "False", "CperHardwareErrorFatal")}),
+			want:   false,
+		},
+		{
 			name:   "CperHardwareErrorFatal: status True but wrong reason never fires",
 			policy: "NPDCperHardwareErrorFatal",
 			node:   newNode([]any{condition("CperHardwareErrorFatal", "True", "SomeOtherReason")}),
@@ -190,6 +206,12 @@ func TestNVSentinelObjectMonitor_NPDPolicyPredicates_MatchNPDConditions(t *testi
 			name:   "ReadonlyFilesystem: default reason at status False never fires",
 			policy: "NPDReadonlyFilesystem",
 			node:   newNode([]any{condition("ReadonlyFilesystem", "False", "FilesystemIsNotReadOnly")}),
+			want:   false,
+		},
+		{
+			name:   "ReadonlyFilesystem: fired reason at status False never fires",
+			policy: "NPDReadonlyFilesystem",
+			node:   newNode([]any{condition("ReadonlyFilesystem", "False", "FilesystemIsReadOnly")}),
 			want:   false,
 		},
 		{

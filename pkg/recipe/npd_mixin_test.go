@@ -15,6 +15,7 @@
 package recipe
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -80,12 +81,23 @@ func TestMixinNPD_ContributesTheComponent(t *testing.T) {
 func TestNoShippedRecipeAdoptsNPDMixins(t *testing.T) {
 	_, store := objectMonitorStore(t)
 
-	for name, overlay := range store.Overlays {
-		for _, mixin := range overlay.Spec.Mixins {
+	adopts := func(where string, mixins []string) {
+		for _, mixin := range mixins {
 			if mixin == npdMixin || mixin == objectMonitorMixin {
-				t.Errorf("overlay %q adopts mixin %q; both stay opt-in until the NPD policies are validated beyond STORE_ONLY", name, mixin)
+				t.Errorf("%s adopts mixin %q; both stay opt-in until the NPD policies are validated beyond STORE_ONLY", where, mixin)
 			}
 		}
+	}
+
+	// The base is checked as well as the overlays: mixins accumulate down the
+	// inheritance chain, so one declared on the base enables it for every
+	// recipe while no individual overlay names it.
+	adopts("recipes/overlays/base.yaml", store.Base.Spec.Mixins)
+	for name, overlay := range store.Overlays {
+		if overlay == nil {
+			continue
+		}
+		adopts(fmt.Sprintf("overlay %q", name), overlay.Spec.Mixins)
 	}
 }
 
