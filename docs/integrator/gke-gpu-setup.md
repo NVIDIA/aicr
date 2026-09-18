@@ -398,8 +398,9 @@ pool commands below needs `nvidia.com/dra-kubelet-plugin`.
 
 If you opt in anyway, AICR renders the selector and deploys `dra-node-labeler`,
 which applies the **same `key=value` pair** you passed to every node GFD labels
-`nvidia.com/gpu.present=true`. Setting it in the node pool definition as well is
-optional and only required if you disable the labeler:
+`nvidia.com/gpu.present=true`; the node pool needs no extra label. Only if you
+disable the labeler (`--set dra-node-labeler:enabled=false`) does the pool have
+to carry the pair itself:
 
 ```bash
 aicr bundle --recipe recipe.yaml \

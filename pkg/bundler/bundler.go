@@ -1400,8 +1400,6 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 		enabledSet[ref.Name] = struct{}{}
 	}
 
-	enabledRefs = b.dropUnservedDRANodeLabeler(enabledRefs, enabledSet, excludedReasons)
-
 	// Apply the positive component-name filter (POST /v1/bundle ?bundlers=…,
 	// config.WithBundlers). Requested names must be declared AND enabled —
 	// an unknown name is a typo the operator needs to hear about, and a
@@ -1443,6 +1441,10 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 			enabledRefs = kept
 		}
 	}
+
+	// After the positive filter, so a `bundlers` selection that keeps the
+	// labeler but drops either half of the contract it serves still removes it.
+	enabledRefs = b.dropUnservedDRANodeLabeler(enabledRefs, enabledSet, excludedReasons)
 
 	if len(enabledRefs) == 0 {
 		return nil, nil, nil, errors.New(errors.ErrCodeInvalidRequest,

@@ -26,5 +26,8 @@ labelValue: "true"
 # Must carry a shell (the command is `/bin/sh -c`) and pull anonymously.
 # registry.k8s.io/kubectl is distroless and fails with RunContainerError;
 # alpine/kubectl is public, multi-arch, and ships busybox sh with kubectl.
-# Keep the tag within one minor of the catalog's Kubernetes floor.
-image: docker.io/alpine/kubectl:1.35.4@sha256:9ccd823647622b620dce092d0f1406b8b41d152ce08ac963e3d4683770b14dfd
+# Same tag and digest as nodewright-operator's webhook.removalImage so the
+# catalog carries one kubectl image. The script only reads and labels a
+# core/v1 Node, an API unchanged across the supported Kubernetes range, so
+# kubectl's one-minor skew policy is a warning here, not a failure.
+image: docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95

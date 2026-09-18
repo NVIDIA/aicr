@@ -82,6 +82,18 @@ func TestFilterEnabledComponents_DRANodeLabelerGate(t *testing.T) {
 			wantKept: true,
 		},
 		{
+			// The positive bundlers filter runs before the gate: selecting
+			// the labeler without the components it serves must not render
+			// a labeler that labels nodes nothing selects on.
+			name: "bundlers filter that excludes the DRA driver drops the labeler",
+			opts: []config.Option{
+				config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()),
+				config.WithBundlers([]string{gpuOperatorComponentName, draNodeLabelerComponentName}),
+			},
+			wantKept:   false,
+			wantReason: "needs both a GPU Operator and a DRA driver",
+		},
+		{
 			name: "opted in without a DRA driver drops the labeler",
 			opts: []config.Option{config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel())},
 			mutate: func(rr *recipe.RecipeResult) {

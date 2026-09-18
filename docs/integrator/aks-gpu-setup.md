@@ -601,9 +601,12 @@ az aks nodepool add \
   --node-count 1
 ```
 
-Add the eviction label to this pool only if you also opt in at bundle time. The
-node label and the flag value must be the **same `key=value` pair** — the flag
-selects the convention, and AICR renders exactly what you pass:
+Add the eviction label to this pool only if you opt in at bundle time **and**
+disable the bundled labeler (`--set dra-node-labeler:enabled=false`). With the
+labeler in the bundle, `dra-node-labeler` applies the label itself and the pool
+needs nothing. When you do provision it, the node label and the flag value must
+be the **same `key=value` pair** — the flag selects the convention, and AICR
+renders exactly what you pass:
 
 `az aks nodepool update --labels` **replaces** the pool's entire user-label map
 rather than merging, so repeat every label the pool already carries or they are
