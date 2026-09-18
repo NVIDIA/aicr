@@ -1,4 +1,5 @@
 README.md
+bundle-info.yaml
 cert-manager/helmrelease.yaml
 checksums.txt
 kustomization.yaml

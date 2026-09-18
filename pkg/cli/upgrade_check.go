@@ -49,8 +49,8 @@ through the recipe.yaml at its root. Omitting --to re-resolves the --from artifa
 criteria against this binary's registry, which answers "am I behind, and does
 catching up hurt?" rather than "is this move safe?".
 
-Operator steps are deployer-scoped, and no bundle records which deployer
-built it, so --deployer is required whenever any component needs steps.
+Operator steps are deployer-scoped, so --deployer is required whenever any
+component needs steps.
 
 Exits non-zero on any verdict other than safe, unknown included: a
 transition nobody assessed is not a transition anyone approved. Records are
