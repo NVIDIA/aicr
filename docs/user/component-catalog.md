@@ -1582,8 +1582,43 @@ requires, at minimum:
 4. Deployment-phase validation passes on a live cluster carrying
    `nodewright-customizations`.
 
+Upstream's own account of the rename is
+[`docs/getting-started/migration.md`](https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md),
+which sets a hard operational prerequisite for the upgrade itself:
+[every `Skyhook` must be `complete` with no nodes in progress](https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md#prerequisite-all-skyhooks-must-be-complete)
+before the operator is upgraded. It is a requirement rather than a
+recommendation — the migration relabels the operator's package and per-node
+ConfigMaps so the post-rename operator adopts them, and that flow assumes no
+in-flight package work to disrupt. `paused` and `disabled` objects are fine to
+leave as they are. Check with:
+
+```bash
+kubectl get skyhooks.skyhook.nvidia.com \
+  -o custom-columns=NAME:.metadata.name,STATUS:.status.status,INPROGRESS:.status.nodesInProgress
+```
+
 Tracked in [#2593](https://github.com/NVIDIA/aicr/issues/2593) and
-[#2594](https://github.com/NVIDIA/aicr/issues/2594). Once the pin moves, this
-entry becomes a transition record at
-`recipes/components/nodewright-operator/upgrades.yaml` and `aicr upgrade-check`
-reports it directly.
+[#2594](https://github.com/NVIDIA/aicr/issues/2594).
+
+`aicr upgrade-check` reports all of this. The transition record at
+`recipes/components/nodewright-operator/upgrades.yaml` describes the `v0.18.0`
+boundary itself — the rename, the prerequisite above, and per-deployer steps —
+and stops its `to` ceiling there. So crossing `v0.18.0` is `manual` with steps,
+while any target above it is `blocked` and told to take the rename on its own:
+
+```console
+$ aicr upgrade-check --from old.yaml --to new.yaml --deployer helm
+COMPONENT            FROM     TO       VERDICT  NOTES
+nodewright-operator  v0.17.1  v0.18.0  manual   1 minor, 5 steps
+
+$ aicr upgrade-check --from old.yaml --to newer.yaml --deployer helm
+COMPONENT            FROM     TO       VERDICT  NOTES
+nodewright-operator  v0.17.1  v0.19.0  blocked  2 minors, stops at =0.18.0
+```
+
+The record sits above the pin deliberately. Only a `safe` verdict is held to the
+pinned version, so upgrade guidance can be written before the bump it describes
+— which is the order that qualifies a bump in the first place. The steps
+therefore tell you how upstream's migration works *and* that AICR's own
+readiness gate does not yet survive it; the prerequisites above are what moving
+the pin needs.
