@@ -2276,22 +2276,22 @@ The `--vendor-charts` flag pulls upstream Helm chart bytes into the bundle at bu
 
 ```text
 my-bundle/
-  001-gpu-operator/
+  001-kube-prometheus-stack/
     Chart.yaml                     # wrapper, declares the vendored subchart
-    charts/gpu-operator-v26.7.0.tgz # vendored upstream tarball
+    charts/kube-prometheus-stack-vXX.Y.Z.tgz  # vendored upstream tarball
     values.yaml                    # values nested under the subchart name
     cluster-values.yaml            # dynamic values, also nested
     install.sh                     # helm upgrade --install <name> ./<dir> ...
-  002-gpu-operator-post/           # mixed component: recipe-side manifests,
-    Chart.yaml                     #   emitted immediately after its primary
-    templates/                     #   plain local chart, no vendored tarball
-      clusterrole.yaml             #   ordinary template, no helm.sh/hook
+  002-gpu-operator/
+    Chart.yaml
+    charts/gpu-operator-v26.7.0.tgz
     values.yaml
     cluster-values.yaml
     install.sh
-  003-kube-prometheus-stack/
-    Chart.yaml
-    charts/kube-prometheus-stack-vXX.Y.Z.tgz
+  003-gpu-operator-post/           # mixed component: recipe-side manifests,
+    Chart.yaml                     #   emitted immediately after its primary
+    templates/                     #   plain local chart, no vendored tarball
+      clusterrole.yaml             #   ordinary template, no helm.sh/hook
     values.yaml
     cluster-values.yaml
     install.sh
@@ -2436,11 +2436,11 @@ aicr bundle -r recipe.yaml \
 **Bundle structure with `--dynamic`** (Helm deployer):
 ```
 bundles/
-├── 001-gpu-operator/
-│   └── values.yaml                # No dynamic values, no cluster-values.yaml
-├── 002-kube-prometheus-stack/
+├── 001-kube-prometheus-stack/
 │   ├── values.yaml                # Static values (the dynamic path removed)
 │   └── cluster-values.yaml        # Dynamic values (override before deploying)
+├── 002-gpu-operator/
+│   └── values.yaml                # No dynamic values, no cluster-values.yaml
 ├── deploy.sh                      # Passes -f cluster-values.yaml when present
 └── ...
 ```
