@@ -59,6 +59,7 @@ func init() {
 	registerCheck("CheckNVSentinelTracingEndpointRequired", CheckNVSentinelTracingEndpointRequired)
 	registerCheck("CheckNVSentinelPreflightDCGMReachable", CheckNVSentinelPreflightDCGMReachable)
 	registerCheck("CheckNVSentinelPreflightGangSchedulerRequired", CheckNVSentinelPreflightGangSchedulerRequired)
+	registerCheck("CheckNVSentinelNicHealthMonitorRequiresMetadataCollector", CheckNVSentinelNicHealthMonitorRequiresMetadataCollector)
 }
 
 // registerCheck is a helper to register validation functions from checks.go.
@@ -1732,7 +1733,7 @@ func CheckNVSentinelDriverLabelDetectable(ctx context.Context, componentName str
 		// remedy path is itself dynamic and an install-time edit can
 		// strip it.
 		if dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
-			[]string{"global.metadataCollector.enabled", "global.syslogHealthMonitor.enabled"},
+			[]string{nvsentinelMetadataCollectorEnabledPath, "global.syslogHealthMonitor.enabled"},
 			"cleared the driver-label gate (both label consumers are disabled, so "+
 				"nothing reads the label — an install-time edit re-enabling a consumer "+
 				"would recreate the silent 0-desired DaemonSet state of issue #2175, "+
@@ -2007,7 +2008,7 @@ func CheckNVSentinelRuntimeClassCoherence(ctx context.Context, componentName str
 			return nil, nil
 		}
 		if dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
-			[]string{"global.metadataCollector.enabled"},
+			[]string{nvsentinelMetadataCollectorEnabledPath},
 			"cleared the RuntimeClass-coherence gate (the metadata-collector "+
 				"subchart is disabled and its runtime class is not verifiably "+
 				"coherent — misaligned, unreadable, or itself declared dynamic — so "+
@@ -2199,6 +2200,145 @@ func CheckNVSentinelTracingEndpointRequired(ctx context.Context, componentName s
 		fmt.Sprintf("component %q: global.tracing.enabled=true but global.tracing.endpoint is empty; "+
 			"the chart renders an OTLP exporter with no destination and fails silently at runtime -- "+
 			"set --set nv-sentinel:global.tracing.endpoint=<host:port>", componentName))}
+}
+
+// nvsentinelNicHealthMonitorEnabledPath is the subchart condition
+// Chart.yaml gates nic-health-monitor on.
+const nvsentinelNicHealthMonitorEnabledPath = "global.nicHealthMonitor.enabled"
+
+// nvsentinelMetadataCollectorEnabledPath is the subchart condition
+// Chart.yaml gates metadata-collector on.
+const nvsentinelMetadataCollectorEnabledPath = "global.metadataCollector.enabled"
+
+// nicInclusionRegexOverridePath is the documented bypass for
+// nic-health-monitor's metadata-collector dependency: a manual device list
+// used instead of discovered inventory. Subchart-scoped, since
+// "nic-health-monitor" has no alias in the parent Chart.yaml.
+const nicInclusionRegexOverridePath = "nic-health-monitor.nicInclusionRegexOverride"
+
+// nvsentinelSubchartRenders reports whether a Chart.yaml dependency
+// condition at global.<key>.enabled leaves its subchart rendering.
+//
+// Dependency conditions are strictly boolean, unlike a template's
+// `{{ if }}` -- helmTruthy is the wrong reader here. Helm resolves the
+// path and, on anything that is not a Go bool, logs "returned non-bool
+// value", ignores the condition, and renders the subchart anyway
+// (verified against chart v1.20.0: `--set global.nicHealthMonitor.enabled=0`
+// still renders nic-health-monitor, while `=false` does not). So only the
+// literal false switches a subchart off. present is false when the key is
+// absent, leaving the chart's own default to decide.
+func nvsentinelSubchartRenders(values map[string]any, key string) (renders, present bool) {
+	global, ok := values["global"].(map[string]any)
+	if !ok {
+		return false, false
+	}
+	section, ok := global[key].(map[string]any)
+	if !ok {
+		return false, false
+	}
+	raw, ok := section["enabled"]
+	if !ok {
+		return false, false
+	}
+	enabled, isBool := raw.(bool)
+
+	return !isBool || enabled, true
+}
+
+// CheckNVSentinelNicHealthMonitorRequiresMetadataCollector blocks a bundle
+// that enables the nic-health-monitor subchart without the NIC inventory it
+// depends on.
+//
+// nic-health-monitor's link-state and link-counter checks run against the
+// GPU-to-NIC topology metadata-collector writes to
+// /var/lib/nvsentinel/gpu_metadata.json; the one documented bypass is an
+// operator-supplied nicInclusionRegexOverride, which substitutes a manual
+// device list and forfeits the automatic management-NIC exclusion with it.
+// With metadata-collector disabled and no override the DaemonSet renders,
+// deploys, and discovers zero devices, which nothing downstream reports.
+// Registration details (severity, no-op conditions) are in
+// recipes/registry.yaml.
+func CheckNVSentinelNicHealthMonitorRequiresMetadataCollector(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	sentinelRef := recipeResult.GetComponentRef(componentName)
+	if sentinelRef == nil {
+		return nil, nil
+	}
+	provider := recipeResult.DataProvider()
+	sentinelKeys := componentOverrideKeys(componentName, provider)
+	if componentDisabled(sentinelRef, bundlerConfig, sentinelKeys) {
+		return nil, nil
+	}
+
+	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, sentinelKeys,
+		"NVSentinel nic-health-monitor metadata-collector dependency")
+	if err != nil {
+		return nil, []error{err}
+	}
+
+	// Absent means the chart default, which is off for nicHealthMonitor and
+	// on for metadataCollector -- hence the asymmetry in how each is read.
+	monitorEnabled, _ := nvsentinelSubchartRenders(values, "nicHealthMonitor")
+	collectorDisabled := nvsentinelMetadataCollectorDisabled(values)
+	override, _, overrideValid := resolvedStringValue(values, nicInclusionRegexOverridePath)
+	overrideEmpty := overrideValid && strings.TrimSpace(override) == ""
+
+	// Relation-aware dynamic guard: the broken state needs all three of
+	// {monitor enabled, collector disabled, override empty}. A --dynamic
+	// declaration on any one of them is only a hazard when the other two
+	// can still reach their bad polarity after an install-time edit, so
+	// each term below is "could be bad", not "is bad". Blocking any
+	// dynamic path unconditionally would reject safe configurations —
+	// e.g. a dynamic monitor toggle alongside a statically enabled
+	// collector can never reach the broken state.
+	monitorDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{nvsentinelNicHealthMonitorEnabledPath})) > 0
+	collectorDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{nvsentinelMetadataCollectorEnabledPath})) > 0
+	overrideDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{nicInclusionRegexOverridePath})) > 0
+	if monitorDynamic || collectorDynamic || overrideDynamic {
+		if (monitorDynamic || monitorEnabled) && (collectorDynamic || collectorDisabled) && (overrideDynamic || overrideEmpty) {
+			var paths []string
+			if monitorDynamic {
+				paths = append(paths, nvsentinelNicHealthMonitorEnabledPath)
+			}
+			if collectorDynamic {
+				paths = append(paths, nvsentinelMetadataCollectorEnabledPath)
+			}
+			if overrideDynamic {
+				paths = append(paths, nicInclusionRegexOverridePath)
+			}
+			dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys, paths,
+				"decides whether nic-health-monitor runs, whether metadata-collector can supply the NIC "+
+					"inventory it reads, or whether an override replaces that inventory — and the other fields "+
+					"cannot rule out an enabled monitor with nothing to discover after an install-time edit")
+			for _, msg := range dynMsgs {
+				slog.Warn(msg, logKeyComponent, componentName)
+			}
+			return dynMsgs, nil
+		}
+	}
+
+	if !monitorEnabled || !collectorDisabled {
+		return nil, nil
+	}
+	// Fail closed on an unreadable override: this gate exists to catch a
+	// monitor that cannot discover devices, and a non-string override
+	// leaves that unverifiable rather than merely unset.
+	if !overrideValid {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s must be a string", componentName, nicInclusionRegexOverridePath))}
+	}
+	if !overrideEmpty {
+		return nil, nil
+	}
+
+	return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+		fmt.Sprintf("component %q: %s=true but global.metadataCollector.enabled=false and %s is unset; "+
+			"nic-health-monitor reads its NIC inventory from metadata-collector and has no devices to check "+
+			"without it -- enable metadata-collector, or set --set nv-sentinel:%s=<regex>",
+			componentName, nvsentinelNicHealthMonitorEnabledPath, nicInclusionRegexOverridePath,
+			nicInclusionRegexOverridePath))}
 }
 
 // CheckMariaDBOperatorOwnershipCoherence enforces the snapshot-driven
