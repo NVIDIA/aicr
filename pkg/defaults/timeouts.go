@@ -934,8 +934,10 @@ const (
 	// supply-chain artifacts.
 	MaxAttestationFileBytes int64 = 10 * 1024 * 1024 // 10 MiB
 
-	// MaxBundleInfoBytes caps the size of a bundle's bundle-info.yaml on
-	// read. The record is a build stamp plus one entry per emitted release,
+	// MaxBundleInfoBytes caps the size of a bundle's bundle-info.yaml, on
+	// write as well as on read, so an oversize record is refused before it
+	// ships rather than on the consumer's side. The record is a build stamp
+	// plus one entry per emitted release,
 	// bounded in practice by the 999-folder NNN- prefix limit; 1 MiB is
 	// orders of magnitude above a real one and matches MaxChecksumFileBytes
 	// for parity across bundle-root metadata reads.

@@ -27,6 +27,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -51,8 +52,8 @@ func Write(ctx context.Context, dir string, info *BundleInfo) (int64, error) {
 	if info == nil {
 		return 0, errors.New(errors.ErrCodeInvalidRequest, "bundle info is required")
 	}
-	if err := ctx.Err(); err != nil {
-		return 0, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
+	if err := contextError(ctx); err != nil {
+		return 0, err
 	}
 
 	info.APIVersion = header.StableGroupVersion
@@ -66,28 +67,94 @@ func Write(ctx context.Context, dir string, info *BundleInfo) (int64, error) {
 	if err != nil {
 		return 0, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to serialize bundle info")
 	}
+	// Checked on this side too, not just on read: an oversize record would
+	// otherwise ship inside checksums.txt and the attestation subject, and
+	// fail only once a consumer tried to read it back.
+	if int64(len(data)) > defaults.MaxBundleInfoBytes {
+		return 0, errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s is %d bytes, over the %d-byte limit", FileName, len(data), defaults.MaxBundleInfoBytes))
+	}
 
 	path, joinErr := deployer.SafeJoin(dir, FileName)
 	if joinErr != nil {
 		return 0, errors.PropagateOrWrap(joinErr, errors.ErrCodeInvalidRequest, "unsafe bundle info path")
 	}
-	if err := os.WriteFile(path, data, 0600); err != nil { //nolint:gosec // path validated by SafeJoin
-		return 0, errors.Wrap(errors.ErrCodeInternal, "failed to write bundle info", err)
+	if err := writeNoFollow(path, data); err != nil {
+		return 0, err
 	}
 
 	slog.Debug("wrote bundle info", "path", path, "deployer", info.Build.Deployer)
 	return int64(len(data)), nil
 }
 
+// writeNoFollow writes data to path through a descriptor that refuses a
+// symlink, then confirms the descriptor is a regular file.
+//
+// ValidateOutputRoot rejects a symlinked bundle-info.yaml, but it runs as a
+// preflight: anything with write access to the output directory can plant one
+// in the window before this write, and os.WriteFile follows the final link and
+// truncates whatever it points at (CWE-59). O_NONBLOCK keeps a planted FIFO
+// from parking the write on a reader that never arrives.
+func writeNoFollow(path string, data []byte) (err error) {
+	f, openErr := os.OpenFile( //nolint:gosec // path validated by SafeJoin
+		path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0600)
+	if openErr != nil {
+		if stderrors.Is(openErr, syscall.ELOOP) {
+			return errors.Wrap(errors.ErrCodeInvalidRequest,
+				"refusing to follow file symlink "+path, openErr)
+		}
+		return errors.Wrap(errors.ErrCodeInternal, "failed to open bundle info for writing", openErr)
+	}
+	defer func() {
+		// The handle is writable, so Close can surface a deferred flush error.
+		closeErr := f.Close()
+		if err == nil && closeErr != nil {
+			err = errors.Wrap(errors.ErrCodeInternal, "failed to close bundle info", closeErr)
+		}
+	}()
+
+	opened, statErr := f.Stat()
+	if statErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to inspect opened bundle info", statErr)
+	}
+	if !opened.Mode().IsRegular() {
+		return errors.New(errors.ErrCodeInvalidRequest, "bundle info is not a regular file: "+path)
+	}
+
+	if _, writeErr := f.Write(data); writeErr != nil {
+		return errors.Wrap(errors.ErrCodeInternal, "failed to write bundle info", writeErr)
+	}
+	return nil
+}
+
+// contextError codes a dead context by its cause. A deadline is an
+// environmental fault worth retrying and a cancellation is an instruction to
+// stop, and errors.IsTransient splits on exactly that — so collapsing both
+// onto ErrCodeTimeout can send a caller back into a retry loop after a
+// deliberate abort.
+func contextError(ctx context.Context) error {
+	err := ctx.Err()
+	switch {
+	case err == nil:
+		return nil
+	case stderrors.Is(err, context.Canceled):
+		return errors.Wrap(errors.ErrCodeCanceled, "context canceled", err)
+	default:
+		return errors.Wrap(errors.ErrCodeTimeout, "context deadline exceeded", err)
+	}
+}
+
 // Read loads and validates dir/bundle-info.yaml.
 //
-// Fails closed in every direction. A bundle produced before this artifact
-// shipped has no file at all, and that returns ErrCodeNotFound naming the
-// reason: a consumer must treat it as a real state and ask the operator for
-// the deployer, never fall back to guessing one from the directory layout.
+// Fails closed in every direction: the filesystem entry, the size, the
+// header, the required fields, and every path the record carries. A bundle
+// produced before this artifact shipped has no file at all, and that returns
+// ErrCodeNotFound naming the reason: a consumer must treat it as a real state
+// and ask the operator for the deployer, never fall back to guessing one from
+// the directory layout.
 func Read(ctx context.Context, dir string) (*BundleInfo, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, errors.Wrap(errors.ErrCodeTimeout, "context cancelled", err)
+	if err := contextError(ctx); err != nil {
+		return nil, err
 	}
 
 	path, joinErr := deployer.SafeJoin(dir, FileName)
@@ -150,11 +217,62 @@ func Read(ctx context.Context, dir string) (*BundleInfo, error) {
 				FileName, info.APIVersion))
 	}
 
+	if err := validateRequiredFields(&info); err != nil {
+		return nil, err
+	}
 	if err := validateRelativePaths(&info); err != nil {
 		return nil, err
 	}
 
 	return &info, nil
+}
+
+// validateRequiredFields rejects a record that clears the kind, apiVersion and
+// path checks while still saying nothing.
+//
+// Every field it demands is non-optional in the schema, so a record missing
+// one did not come from Write: it was hand-written or truncated in transit,
+// and this parser consumes files that arrive from OCI registries and GitOps
+// clones. Only Read calls it; Write's input is assembled field by field from
+// the run that just produced the bundle.
+//
+// Releases are exempt from presence: a recipe that resolves to no components
+// emits none, and an empty list is the honest record of that. A release that
+// is present must still identify itself and where it landed.
+func validateRequiredFields(info *BundleInfo) error {
+	for _, f := range []struct{ field, value string }{
+		{"build.deployer", info.Build.Deployer},
+		{"build.recipe.path", info.Build.Recipe.Path},
+		{"build.recipe.digest", info.Build.Recipe.Digest},
+		{"layout.entrypoint", info.Layout.Entrypoint},
+	} {
+		if f.value == "" {
+			return errors.New(errors.ErrCodeInvalidRequest,
+				fmt.Sprintf("%s is missing %s", FileName, f.field))
+		}
+	}
+
+	// Parsed rather than wrapped so the error names the field and the
+	// accepted set; config.ParseDeployerType's own message names neither.
+	if _, err := config.ParseDeployerType(info.Build.Deployer); err != nil {
+		return errors.New(errors.ErrCodeInvalidRequest,
+			fmt.Sprintf("%s declares build.deployer %q, which is not one of %v",
+				FileName, info.Build.Deployer, config.GetDeployerTypes()))
+	}
+
+	for i, r := range info.Layout.Releases {
+		for _, f := range []struct{ field, value string }{
+			{"name", r.Name},
+			{"component", r.Component},
+			{"path", r.Path},
+		} {
+			if f.value == "" {
+				return errors.New(errors.ErrCodeInvalidRequest,
+					fmt.Sprintf("%s is missing layout.releases[%d].%s", FileName, i, f.field))
+			}
+		}
+	}
+	return nil
 }
 
 // validateRelativePaths rejects info when any path it carries points outside

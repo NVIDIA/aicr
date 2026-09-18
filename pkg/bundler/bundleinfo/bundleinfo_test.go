@@ -22,6 +22,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	stderrors "errors"
 
@@ -230,9 +231,7 @@ func TestReadRejectsNonRegularFile(t *testing.T) {
 				// decoder would reject anyway makes this pass whether or not
 				// the link was followed, which is the wrong reason.
 				outside := filepath.Join(t.TempDir(), "elsewhere.yaml")
-				valid := "apiVersion: " + header.StableGroupVersion + "\nkind: BundleInfo\n" +
-					"layout:\n  entrypoint: deploy.sh\n"
-				if err := os.WriteFile(outside, []byte(valid), 0600); err != nil {
+				if err := os.WriteFile(outside, []byte(completeRecord()), 0600); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.Symlink(outside, path); err != nil {
@@ -337,6 +336,265 @@ func TestReadFailsClosed(t *testing.T) {
 				t.Errorf("error = %v, want code %s", err, tt.code)
 			}
 		})
+	}
+}
+
+// completeRecord is the smallest document Read must accept: every
+// non-optional semantic field set, and no releases. A bundle whose recipe
+// resolved to no components emits exactly this, so an empty release list is
+// a legitimate record rather than a truncated one.
+func completeRecord() string {
+	return "apiVersion: " + header.StableGroupVersion + "\nkind: BundleInfo\n" +
+		"build:\n  deployer: helm\n  recipe:\n    path: recipe.yaml\n" +
+		"    digest: sha256:3b1f8c2ad9e7546102bb8f4c7d0e9a1358cc4f6b2e8d70a94f1c5b3e6d820947\n" +
+		"layout:\n  entrypoint: deploy.sh\n"
+}
+
+// TestReadRejectsIncompleteRecord covers the half of "fails closed" that the
+// kind, apiVersion and path checks leave open: a document that clears all
+// three and still says nothing. Every field below is required by its struct
+// tag, so a record missing one did not come from Write — it was hand-written
+// or truncated in transit, and the file Read parses arrived from an OCI
+// registry or a GitOps clone.
+func TestReadRejectsIncompleteRecord(t *testing.T) {
+	const header0 = "apiVersion: " + header.StableGroupVersion + "\nkind: BundleInfo\n"
+	const recipeFields = "  recipe:\n    path: recipe.yaml\n" +
+		"    digest: sha256:3b1f8c2ad9e7546102bb8f4c7d0e9a1358cc4f6b2e8d70a94f1c5b3e6d820947\n"
+
+	tests := []struct {
+		name    string
+		content string
+		wantErr string // substring naming the offending field
+	}{
+		{
+			name:    "header only",
+			content: header0,
+			wantErr: "build.deployer",
+		},
+		{
+			name: "missing deployer",
+			content: header0 + "build:\n" + recipeFields +
+				"layout:\n  entrypoint: deploy.sh\n",
+			wantErr: "build.deployer",
+		},
+		{
+			name: "deployer outside the accepted set",
+			content: header0 + "build:\n  deployer: kustomize\n" + recipeFields +
+				"layout:\n  entrypoint: deploy.sh\n",
+			wantErr: "build.deployer",
+		},
+		{
+			name: "missing recipe path",
+			content: header0 + "build:\n  deployer: helm\n  recipe:\n" +
+				"    digest: sha256:3b1f8c2ad9e7546102bb8f4c7d0e9a1358cc4f6b2e8d70a94f1c5b3e6d820947\n" +
+				"layout:\n  entrypoint: deploy.sh\n",
+			wantErr: "build.recipe.path",
+		},
+		{
+			name: "missing recipe digest",
+			content: header0 + "build:\n  deployer: helm\n  recipe:\n    path: recipe.yaml\n" +
+				"layout:\n  entrypoint: deploy.sh\n",
+			wantErr: "build.recipe.digest",
+		},
+		{
+			name:    "missing entrypoint",
+			content: header0 + "build:\n  deployer: helm\n" + recipeFields,
+			wantErr: "layout.entrypoint",
+		},
+		{
+			name: "release without a name",
+			content: header0 + "build:\n  deployer: helm\n" + recipeFields +
+				"layout:\n  entrypoint: deploy.sh\n  releases:\n" +
+				"    - component: cert-manager\n      path: 001-cert-manager\n",
+			wantErr: "layout.releases[0].name",
+		},
+		{
+			name: "release without a component",
+			content: header0 + "build:\n  deployer: helm\n" + recipeFields +
+				"layout:\n  entrypoint: deploy.sh\n  releases:\n" +
+				"    - name: cert-manager\n      path: 001-cert-manager\n",
+			wantErr: "layout.releases[0].component",
+		},
+		{
+			name: "release without a path",
+			content: header0 + "build:\n  deployer: helm\n" + recipeFields +
+				"layout:\n  entrypoint: deploy.sh\n  releases:\n" +
+				"    - name: cert-manager\n      component: cert-manager\n",
+			wantErr: "layout.releases[0].path",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, bundleinfo.FileName),
+				[]byte(tt.content), 0600); err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			_, err := bundleinfo.Read(context.Background(), dir)
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Errorf("error = %v, want it to name %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestReadAcceptsCompleteRecord is the positive half of the rejection table:
+// a record with every required field and no releases must still round-trip,
+// so the new gate cannot be satisfied by rejecting everything.
+func TestReadAcceptsCompleteRecord(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, bundleinfo.FileName),
+		[]byte(completeRecord()), 0600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	info, err := bundleinfo.Read(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	if info.Build.Deployer != "helm" {
+		t.Errorf("deployer = %q, want helm", info.Build.Deployer)
+	}
+	if len(info.Layout.Releases) != 0 {
+		t.Errorf("releases = %d, want 0", len(info.Layout.Releases))
+	}
+}
+
+// TestWriteRefusesSymlinkedTarget covers the window ValidateOutputRoot cannot
+// close: it rejects a symlinked bundle-info.yaml at preflight, but anything
+// with write access to the output directory can plant one between that check
+// and the write. os.WriteFile follows the final symlink and truncates its
+// target (CWE-59), so the open itself has to refuse.
+func TestWriteRefusesSymlinkedTarget(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(t.TempDir(), "victim.yaml")
+	const original = "do not truncate me\n"
+	if err := os.WriteFile(target, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(dir, bundleinfo.FileName)); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := bundleinfo.Write(context.Background(), dir, sample())
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
+	}
+
+	got, readErr := os.ReadFile(target) //nolint:gosec // test-local temp path
+	if readErr != nil {
+		t.Fatalf("read symlink target: %v", readErr)
+	}
+	if string(got) != original {
+		t.Errorf("symlink target was written through: content = %q, want %q", got, original)
+	}
+}
+
+// TestContextErrorsAreCodedByCause pins cancellation to ErrCodeCanceled and
+// only a deadline to ErrCodeTimeout. Collapsing both onto the timeout code
+// makes a deliberate Ctrl-C look retryable: errors.IsTransient reports true
+// for a timeout and false for a cancellation.
+func TestContextErrorsAreCodedByCause(t *testing.T) {
+	canceled := func() context.Context {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx
+	}
+	expired := func() context.Context {
+		ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Hour))
+		t.Cleanup(cancel)
+		return ctx
+	}
+
+	tests := []struct {
+		name     string
+		ctx      context.Context
+		call     func(context.Context, string) error
+		wantCode errors.ErrorCode
+		wantErr  error
+	}{
+		{
+			name: "write canceled",
+			ctx:  canceled(),
+			call: func(ctx context.Context, dir string) error {
+				_, err := bundleinfo.Write(ctx, dir, sample())
+				return err
+			},
+			wantCode: errors.ErrCodeCanceled,
+			wantErr:  context.Canceled,
+		},
+		{
+			name: "write deadline exceeded",
+			ctx:  expired(),
+			call: func(ctx context.Context, dir string) error {
+				_, err := bundleinfo.Write(ctx, dir, sample())
+				return err
+			},
+			wantCode: errors.ErrCodeTimeout,
+			wantErr:  context.DeadlineExceeded,
+		},
+		{
+			name: "read canceled",
+			ctx:  canceled(),
+			call: func(ctx context.Context, dir string) error {
+				_, err := bundleinfo.Read(ctx, dir)
+				return err
+			},
+			wantCode: errors.ErrCodeCanceled,
+			wantErr:  context.Canceled,
+		},
+		{
+			name: "read deadline exceeded",
+			ctx:  expired(),
+			call: func(ctx context.Context, dir string) error {
+				_, err := bundleinfo.Read(ctx, dir)
+				return err
+			},
+			wantCode: errors.ErrCodeTimeout,
+			wantErr:  context.DeadlineExceeded,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.call(tt.ctx, t.TempDir())
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !stderrors.Is(err, errors.New(tt.wantCode, "")) {
+				t.Errorf("error = %v, want code %s", err, tt.wantCode)
+			}
+			if !stderrors.Is(err, tt.wantErr) {
+				t.Errorf("error = %v, want the original %v preserved as the cause", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestWriteRejectsOversizeRecord keeps Write from producing a file Read
+// refuses: without the check the bundle ships, checksums cover the oversize
+// record, and the failure surfaces only when a consumer tries to read it.
+func TestWriteRejectsOversizeRecord(t *testing.T) {
+	info := sample()
+	filler := strings.Repeat("c", 1024)
+	for len(info.Build.Settings.Components)*len(filler) <= int(defaults.MaxBundleInfoBytes) {
+		info.Build.Settings.Components = append(info.Build.Settings.Components, filler)
+	}
+
+	_, err := bundleinfo.Write(context.Background(), t.TempDir(), info)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+		t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
 	}
 }
 
