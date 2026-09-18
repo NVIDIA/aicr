@@ -332,6 +332,102 @@ spec:
 	}
 }
 
+// TestWrite_HookExemptionIsScopedToReadiness pins both halves of the hook
+// exemption in one run, with a readiness folder and a post folder side by
+// side in the same bundle.
+//
+// The exemption is narrow on purpose. The readiness folder is the only one
+// localformat writes that localformat's own caller authored: it comes from
+// gatemanifest.Render, which already chose the annotations for the target
+// deployer. Every other folder carries RECIPE content, whose author cannot
+// know which deployer will consume it -- and the recipe's mandated
+// hook-delete-policy: before-hook-creation is precisely what made those
+// resources delete and recreate on every upgrade before #1835.
+//
+// So the post folder must still be stripped. A blanket exemption would pass
+// the readiness half of this test and reopen that bug.
+func TestWrite_HookExemptionIsScopedToReadiness(t *testing.T) {
+	outDir := t.TempDir()
+
+	const hookAnnotations = `  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+`
+
+	res, err := localformat.Write(context.Background(), localformat.Options{
+		OutputDir: outDir,
+		Components: []localformat.Component{{
+			Name:       "gpu-operator",
+			Namespace:  "gpu-operator",
+			Repository: "https://nvidia.github.io/gpu-operator",
+			ChartName:  "nvidia/gpu-operator",
+			Version:    "v24.9.1",
+		}},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/policy.yaml": []byte(`apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gpu-operator-policy
+  namespace: gpu-operator
+` + hookAnnotations + `data:
+  policy: default
+`),
+			},
+		},
+		ComponentReadiness: map[string]map[string][]byte{
+			"gpu-operator": {
+				"readiness.yaml": []byte(`apiVersion: batch/v1
+kind: Job
+metadata:
+  name: gpu-operator-readiness-gate
+  namespace: {{ .Release.Namespace }}
+` + hookAnnotations + `spec:
+  template:
+    spec:
+      containers:
+        - name: gate
+          image: ghcr.io/nvidia/aicr-gate:dev
+`),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if len(res.Folders) != 3 {
+		t.Fatalf("want 3 folders (primary + post + readiness), got %d", len(res.Folders))
+	}
+
+	gate, err := os.ReadFile(filepath.Join(outDir, "002-gpu-operator-post", "templates", "policy.yaml"))
+	if err != nil {
+		t.Fatalf("read post manifest: %v", err)
+	}
+	if strings.Contains(string(gate), "helm.sh/hook") {
+		t.Errorf("a post wrapper kept its hook annotations; the exemption is not phase-scoped:\n%s", gate)
+	}
+
+	readiness, err := os.ReadFile(filepath.Join(outDir, "003-gpu-operator-readiness", "templates", "readiness.yaml"))
+	if err != nil {
+		t.Fatalf("read readiness manifest: %v", err)
+	}
+	for _, want := range []string{
+		"helm.sh/hook: post-install,post-upgrade",
+		"helm.sh/hook-delete-policy: before-hook-creation",
+	} {
+		if !strings.Contains(string(readiness), want) {
+			t.Errorf("the gate lost %q; localformat is second-guessing gatemanifest:\n%s", want, readiness)
+		}
+	}
+
+	// The gate still goes through the YAML round-trip, which is this
+	// folder's only validity check. Template tokens resolving proves the
+	// render ran; re-encoded two-space indent proves the rewrite did.
+	if strings.Contains(string(readiness), "{{") {
+		t.Errorf("readiness manifest still contains template tokens:\n%s", readiness)
+	}
+}
+
 // TestWrite_NoReadinessGate verifies that, absent ComponentReadiness entries,
 // the writer emits exactly the primary folder — readiness emission is opt-in
 // and must not change default output.

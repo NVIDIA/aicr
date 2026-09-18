@@ -100,6 +100,7 @@ func writeLocalHelmFolder(
 	outputDir, dir string, idx int, c Component,
 	manifests map[string][]byte, renderInput manifest.RenderInput,
 	name, parent string, createNamespace bool, stamp chartStamp,
+	keepHookAnnotations bool,
 ) (Folder, error) {
 
 	folderDir, err := deployer.SafeJoin(outputDir, dir)
@@ -166,17 +167,31 @@ func writeLocalHelmFolder(
 			return Folder{}, errors.Wrap(errors.ErrCodeInternal,
 				fmt.Sprintf("render manifest %s for %s", p, c.Name), rerr)
 		}
-		// Strip helm.sh/hook* annotations: NNN-folder ordering at the
-		// bundle layer subsumes their role, and leaving them in causes
-		// Argo CD to treat the resource as a PostSync hook that never
-		// fires under syncPolicy.automated for path-based sources. See
-		// stripHelmHooks for the full rationale.
-		stripped, stripErr := stripHelmHooks(rendered)
-		if stripErr != nil {
-			return Folder{}, errors.PropagateOrWrap(stripErr, errors.ErrCodeInternal,
-				fmt.Sprintf("strip helm hooks from manifest %s for %s", p, c.Name))
+		// Both branches run the same YAML round-trip; only the filter
+		// differs. keepHookAnnotations skips the FILTER, never the
+		// rewrite -- the round-trip is also this folder's only
+		// YAML-validity check, and what keeps its bytes stable. See
+		// normalizeYAMLDocs.
+		if keepHookAnnotations {
+			normalized, normErr := normalizeYAMLDocs(rendered)
+			if normErr != nil {
+				return Folder{}, errors.PropagateOrWrap(normErr, errors.ErrCodeInternal,
+					fmt.Sprintf("normalize manifest %s for %s", p, c.Name))
+			}
+			rendered = normalized
+		} else {
+			// Strip helm.sh/hook* annotations: NNN-folder ordering at the
+			// bundle layer subsumes their role, and leaving them in causes
+			// Argo CD to treat the resource as a PostSync hook that never
+			// fires under syncPolicy.automated for path-based sources. See
+			// stripHelmHooks for the full rationale.
+			stripped, stripErr := stripHelmHooks(rendered)
+			if stripErr != nil {
+				return Folder{}, errors.PropagateOrWrap(stripErr, errors.ErrCodeInternal,
+					fmt.Sprintf("strip helm hooks from manifest %s for %s", p, c.Name))
+			}
+			rendered = stripped
 		}
-		rendered = stripped
 		// Skip writing if the rendered output has no YAML objects (only
 		// comments / blanks / separators) — typical for fully-conditional
 		// manifests when the relevant value was set false at bundle time.
