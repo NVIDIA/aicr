@@ -148,6 +148,15 @@ func TestNVSentinelObjectMonitor_NPDPolicyPredicates_MatchNPDConditions(t *testi
 			want:   false,
 		},
 		{
+			// Without this row, a predicate that dropped its reason check
+			// and matched on type+status alone would still pass every
+			// other XfsShutdown case above.
+			name:   "XfsShutdown: status True but wrong reason never fires",
+			policy: "NPDXfsShutdown",
+			node:   newNode([]any{condition("XfsShutdown", "True", "SomeOtherReason")}),
+			want:   false,
+		},
+		{
 			name:   "XfsShutdown: condition type absent never fires",
 			policy: "NPDXfsShutdown",
 			node:   newNode([]any{condition("Ready", "True", "KubeletReady")}),
@@ -163,6 +172,12 @@ func TestNVSentinelObjectMonitor_NPDPolicyPredicates_MatchNPDConditions(t *testi
 			name:   "CperHardwareErrorFatal: default reason at status False never fires",
 			policy: "NPDCperHardwareErrorFatal",
 			node:   newNode([]any{condition("CperHardwareErrorFatal", "False", "CperHardwareHasNoFatalError")}),
+			want:   false,
+		},
+		{
+			name:   "CperHardwareErrorFatal: status True but wrong reason never fires",
+			policy: "NPDCperHardwareErrorFatal",
+			node:   newNode([]any{condition("CperHardwareErrorFatal", "True", "SomeOtherReason")}),
 			want:   false,
 		},
 		{

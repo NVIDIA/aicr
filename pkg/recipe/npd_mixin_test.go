@@ -38,10 +38,28 @@ func TestMixinNPD_ContributesTheComponent(t *testing.T) {
 		t.Fatalf("%s mixin not present; check recipes/mixins/%s.yaml", npdMixin, npdMixin)
 	}
 
-	spec := nvsentinelLeaf([]string{npdMixin}, nil)
-	if _, already := findComponentRefByName(spec.ComponentRefs, npdComponent); already {
-		t.Fatalf("%s is already in the base chain; this mixin would become an override composition", npdComponent)
+	// Scan the shipped catalog, not the synthetic leaf below: the leaf is
+	// built here and could never contain node-problem-detector, so asserting
+	// against it would pass no matter what the real overlays declare.
+	for _, ref := range store.Base.Spec.ComponentRefs {
+		if ref.Name == npdComponent {
+			t.Fatalf("recipes/overlays/base.yaml declares %s; this mixin would become an override "+
+				"composition subject to mixinSafeOverridePaths", npdComponent)
+		}
 	}
+	for name, overlay := range store.Overlays {
+		if overlay == nil {
+			continue
+		}
+		for _, ref := range overlay.Spec.ComponentRefs {
+			if ref.Name == npdComponent {
+				t.Fatalf("overlay %q declares %s; this mixin would become an override "+
+					"composition subject to mixinSafeOverridePaths", name, npdComponent)
+			}
+		}
+	}
+
+	spec := nvsentinelLeaf([]string{npdMixin}, nil)
 	if _, err := store.mergeMixins(ctx, &spec); err != nil {
 		t.Fatalf("mergeMixins(%s): %v", npdMixin, err)
 	}

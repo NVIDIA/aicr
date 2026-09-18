@@ -103,11 +103,34 @@ KUBE_CONTEXT="kind-${CLUSTER_NAME}"
 WORK=""
 CREATED_CLUSTER=false
 PC_POD=""
+# Set only on the reuse path, where the Node outlives the run: the name of the
+# patched Node, and its XfsShutdown condition exactly as found. An empty
+# ORIG_XFS_CONDITION with a non-empty PATCHED_NODE means the condition did not
+# exist and must be removed rather than restored.
+PATCHED_NODE=""
+ORIG_XFS_CONDITION=""
 
 cleanup() {
   local rc=$?
   if [[ -n "${WORK}" && -d "${WORK}" ]]; then
     rm -rf "${WORK}"
+  fi
+  # A cluster this run created is about to be deleted, so only the reuse path
+  # needs its Node put back: otherwise the injected XfsShutdown lingers, and a
+  # condition that existed beforehand has been overwritten.
+  if [[ "${CREATED_CLUSTER}" != "true" && -n "${PATCHED_NODE}" ]]; then
+    if [[ -n "${ORIG_XFS_CONDITION}" ]]; then
+      msg "Restoring the original XfsShutdown condition on ${PATCHED_NODE}..."
+      kubectl --context "${KUBE_CONTEXT}" patch node "${PATCHED_NODE}" --subresource=status \
+        --type=strategic -p "{\"status\":{\"conditions\":[${ORIG_XFS_CONDITION}]}}" >/dev/null 2>&1 || true
+    else
+      msg "Removing the e2e-injected XfsShutdown condition from ${PATCHED_NODE}..."
+      # $patch: delete removes one list entry by its patchMergeKey (type),
+      # leaving Ready and the pressure conditions untouched.
+      kubectl --context "${KUBE_CONTEXT}" patch node "${PATCHED_NODE}" --subresource=status \
+        --type=strategic -p \
+        '{"status":{"conditions":[{"type":"XfsShutdown","$patch":"delete"}]}}' >/dev/null 2>&1 || true
+    fi
   fi
   if [[ "${CREATED_CLUSTER}" == "true" && "${KEEP_CLUSTER}" != "true" ]]; then
     msg "Deleting Kind cluster ${CLUSTER_NAME}..."
@@ -253,6 +276,14 @@ patch_node_condition() {
   local condition_type="$1" status="$2" reason="$3"
   local node now
   node=$(kubectl --context "${KUBE_CONTEXT}" get nodes -o jsonpath='{.items[0].metadata.name}')
+  # Snapshot once, before the first write, so cleanup can put the Node back on
+  # a cluster this run did not create. Captured for XfsShutdown only -- the one
+  # condition this test patches.
+  if [[ "${condition_type}" == "XfsShutdown" && -z "${PATCHED_NODE}" ]]; then
+    PATCHED_NODE="${node}"
+    ORIG_XFS_CONDITION=$(kubectl --context "${KUBE_CONTEXT}" get node "${node}" \
+      -o jsonpath='{.status.conditions[?(@.type=="XfsShutdown")]}' 2>/dev/null || true)
+  fi
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
   # strategic, not merge: NodeCondition carries patchMergeKey "type", so a
   # strategic patch merges this one condition in by type. A JSON merge patch
