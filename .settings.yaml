@@ -19,7 +19,7 @@
 # Build Tools
 build_tools:
   # renovate: datasource=github-releases depName=goreleaser/goreleaser depType=build_tools
-  goreleaser: 'v2.18.1'
+  goreleaser: 'v2.18.2'
   # renovate: datasource=github-releases depName=ko-build/ko depType=build_tools
   ko: 'v0.19.1'
   # renovate: datasource=github-releases depName=google/go-containerregistry depType=build_tools
@@ -34,7 +34,7 @@ linting:
   # followed immediately by `key: 'value'`, so any comment between them silently
   # drops this pin from Renovate's scan (#2657).
   # renovate: datasource=github-releases depName=oasdiff/oasdiff depType=linting
-  oasdiff: 'v1.32.0'
+  oasdiff: 'v1.32.1'
   # Refreshed automatically by tools/update-oasdiff-checksums via Renovate
   # postUpgradeTasks whenever the version above is bumped. Same reasoning as the
   # oras pin in security_tools: the checksums.txt served beside the tarball
@@ -52,7 +52,7 @@ linting:
   #
   # linux/amd64 only: this feeds the setup-build-tools action, which runs on
   # ubuntu runners. tools/setup-tools handles local dev on other platforms.
-  oasdiff_sha256_linux_amd64: '5b2050787cfee2a9a3ba7b25cb50fe2c5cc45cdf5b96fbc51a4a60107f8b4aad'
+  oasdiff_sha256_linux_amd64: '7c8939fc49b75ee11fec66a5b83b37a2fca6aee109fed85013b1ba2ac2a1ee7f'
   # renovate: datasource=github-releases depName=golangci/golangci-lint depType=linting
   golangci_lint: 'v2.13.2'
   # renovate: datasource=pypi depName=yamllint depType=linting
@@ -84,11 +84,11 @@ linting:
 # Security Tools
 security_tools:
   # renovate: datasource=github-releases depName=anchore/grype depType=security_tools
-  grype: 'v0.118.0'
+  grype: 'v0.119.0'
   # renovate: datasource=github-releases depName=sigstore/cosign depType=security_tools
   cosign: 'v3.1.3'
   # renovate: datasource=github-releases depName=anchore/syft depType=security_tools
-  syft: 'v1.51.1'
+  syft: 'v1.52.0'
   # Attaches the aiperf-bench third-party source archive as an OCI 1.1 referrer
   # (tools/generate-aiperf-source). Cosign cannot attach arbitrary artifacts, so
   # this is a separate dependency from the signing/attestation path.
@@ -180,14 +180,14 @@ testing_tools:
     darwin_amd64: 'b0f836ad0ca146f896d0da16ffd03bde4d414cd2e2920b11455cd551f3adf933'
     darwin_arm64: 'cb9e5b6cb157e17bc70ca0f719635914fa9c39e89b82d67a0b78c4538632b580'
   # renovate: datasource=github-releases depName=helmfile/helmfile depType=testing_tools
-  helmfile: 'v1.7.4'
+  helmfile: 'v1.8.0'
   # helmfile_checksums are refreshed automatically by tools/update-helmfile-checksums
   # via Renovate postUpgradeTasks whenever the helmfile version above is bumped.
   helmfile_checksums:
-    linux_amd64: 'f96ef0a015df06b29d7f38bf0ca08821018ae25eb96bf2c7abd3affa1b84e112'
-    linux_arm64: '0292f57a4638a21e775b0ce8bde37ee3fdd65dbbdbe0e5b9a06718f1dd04c7fa'
-    darwin_amd64: '7a0951fcc5bb991d7ea3a0c80e35754eb3981dcadba19795edbec7cba2518ae2'
-    darwin_arm64: 'e1490d371fecc1f2d9aae914ef34058f3cb2363c9ee63350b37a85c3994d71d9'
+    linux_amd64: '35d5d39fc608342b23fc7ce1dd0c3bf0c96cc07ec3796507ab6894a5d172bf20'
+    linux_arm64: '01037dc187840a778ec65eae66b549b63d619a853540c8983f90d73ccbce5033'
+    darwin_amd64: 'd367d72d035985b69863f0e0a6e1815c23a546a1bcdae3cdbb9c17893303e6f3'
+    darwin_arm64: 'b377e295940018fb0e49ca9e0aabdabb00fc612af3d9e12003f01635dc87e1ef'
   # renovate: datasource=github-releases depName=kubernetes-sigs/kwok depType=testing_tools
   kwok: 'v0.8.0'
   # renovate: datasource=github-releases depName=kyverno/chainsaw depType=testing_tools
@@ -262,7 +262,7 @@ testing_tools:
   # renovate: datasource=github-releases depName=hauler-dev/hauler depType=testing_tools
   hauler: 'v2.1.0'
   # renovate: datasource=github-releases depName=zarf-dev/zarf depType=testing_tools
-  zarf: 'v0.85.0'
+  zarf: 'v0.86.0'
 # Quality Thresholds
 quality:
   coverage_threshold: '83'
