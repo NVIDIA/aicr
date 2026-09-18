@@ -19,6 +19,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **dranet** | DRA network driver ([kubernetes-sigs/dranet](https://github.com/kubernetes-sigs/dranet)) for the ConnectX-9 RDMA fabric on VR200 (Vera Rubin NVL72) RKE2 clusters. Publishes the mlx5 NICs as `ResourceSlice`s (driver `dra.net`) and injects them into pods via NRI under `DeviceClass` `mlnx-cx9`. Manifest-only (vendored `dranet.yaml`), evaluated as a lean alternative to `network-operator`. Ships only in the VR200 RKE2 overlays. | [DraNet](https://github.com/kubernetes-sigs/dranet) |
 | **rdma-netns-exclusive** | Host RDMA "exclusive" netns-mode Nodewright (Skyhook) CR. Pairs with `dranet` so a pod sees only its DRA-allocated HCA, which keeps NCCL/GPUDirect device enumeration clean. Sets the `ib_core` `netns_mode=0` module parameter through `modprobe.d` and **reboots the node** — the parameter cannot be changed live. Requires `nodewright-operator` (declared as a `componentRef` dependency). Ships only in the VR200 RKE2 overlays. | — |
 | **gke-nccl-tcpxo** | NCCL TCPXO network plugin for GKE. Provides optimized collective communication for multi-node GPU workloads on Google Kubernetes Engine. GKE-specific. | — |
+| **gke-gb200-rdma** | NCCL gIB (GPUDirect-RDMA over RoCE) plugin installer for GB200 (A4X, ARM64) GKE nodes. Installs RDMA binaries and the NCCL library so workloads select `NCCL_NET=gIB` over the cluster's `gvnic-1`/`rdma-0..rdma-3` `Network` objects. GKE-specific — see [GKE GB200 Networking](../integrator/gke-gb200-networking.md). | — |
 | **gcp-driver-installer** | Google's cos-gpu-installer DaemonSet as an AICR-managed, values-gated component. Present in every GKE COS recipe; renders only under the `gpuStack=bundle-installer` profile value, where it installs the recipe-pinned NVIDIA driver on pools created with `gpu-driver-version=disabled`. GKE-specific. | — |
 | **aws-efa** | Device plugin for AWS Elastic Fabric Adapter. Enables low-latency networking on EKS clusters with EFA-capable instances. EKS-specific. | [AWS EFA K8s Device Plugin](https://github.com/aws/eks-charts) |
 | **cert-manager** | Automates TLS certificate management. Required by several operators for webhook and API server certificates. | [cert-manager](https://github.com/cert-manager/cert-manager) |
@@ -1210,6 +1211,33 @@ under a newer operator is the same version-skew class that caused the
 frontend discovery panic fixed in #1193 -- setting `DYN_EVENT_PLANE=zmq`
 on the old workload is defense in depth, not a substitute for bumping its
 image to match the operator.
+
+### `dynamo-platform`: reusing an existing StorageClass for the GB200 model-weights cache
+
+On GB200 (`a4x-highgpu-4g`) GKE leaves, `dynamo-platform` bundles a fixed
+`a4x-compatible` StorageClass
+(`recipes/components/dynamo-platform/manifests/a4x-storage-class.yaml`) so
+the `inference-perf` model-weights cache PVC has somewhere Hyperdisk-backed
+to bind, since those nodes can't attach Persistent Disk at all. See
+[GKE GB200 networking](../integrator/gke-gb200-networking.md#storage-prerequisites).
+
+Redirecting the cache PVC to a different, already-existing StorageClass,
+via the recipe's `inference-model-cache-storage-class` constraint or the
+`AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` catalog env (see
+[Validation](validation.md)), doesn't stop AICR from also rendering
+`a4x-compatible`. If a StorageClass named `a4x-compatible` already exists on the
+cluster under someone else's ownership, adopting it into this release's
+Helm lifecycle either fails the install or takes over an object this bundle
+doesn't need. Opt out of rendering it at bundle time with:
+
+```bash
+aicr bundle --recipe recipes/overlays/gb200-gke-cos-inference-dynamo.yaml \
+  --set dynamo-platform:a4xStorageClass.create=false \
+  --output ./bundle
+```
+
+`a4xStorageClass.create` is a bundling-time toggle read by AICR itself, not
+an `ai-dynamo` chart value. It never reaches the rendered Helm values.
 
 ### `gpu-operator` and `nvidia-dra-driver-gpu`: ComputeDomain CRD ownership on Argo CD
 

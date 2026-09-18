@@ -1,0 +1,288 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# GKE GB200 RDMA/RoCE Health Check
+#
+# gvnic-1/rdma-0..3 are a cluster provisioning prerequisite (see
+# docs/integrator/gke-gb200-networking.md), not created by AICR. vpc/vpcSubnet
+# aren't asserted since their names are cluster-specific.
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: gke-gb200-rdma-health-check
+spec:
+  timeouts:
+    assert: 5m
+  steps:
+    - name: validate-gvnic-network-objects
+      try:
+        - assert:
+            resource:
+              apiVersion: networking.gke.io/v1
+              kind: GKENetworkParamSet
+              metadata:
+                name: gvnic-1
+              spec:
+                deviceMode: NetDevice
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: networking.gke.io/v1
+              kind: Network
+              metadata:
+                name: gvnic-1
+              spec:
+                type: Device
+                parametersRef:
+                  group: networking.gke.io
+                  kind: GKENetworkParamSet
+                  name: gvnic-1
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+                (conditions[?type == 'ParamsReady']):
+                  - status: "True"
+    - name: validate-rdma-network-objects
+      try:
+        - assert:
+            resource:
+              apiVersion: networking.gke.io/v1
+              kind: GKENetworkParamSet
+              metadata:
+                name: rdma-0
+              spec:
+                deviceMode: RDMA
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: networking.gke.io/v1
+              kind: Network
+              metadata:
+                name: rdma-0
+              spec:
+                type: Device
+                parametersRef:
+                  group: networking.gke.io
+                  kind: GKENetworkParamSet
+                  name: rdma-0
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+                (conditions[?type == 'ParamsReady']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: networking.gke.io/v1
+              kind: GKENetworkParamSet
+              metadata:
+                name: rdma-1
+              spec:
+                deviceMode: RDMA
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: networking.gke.io/v1
+              kind: Network
+              metadata:
+                name: rdma-1
+              spec:
+                type: Device
+                parametersRef:
+                  group: networking.gke.io
+                  kind: GKENetworkParamSet
+                  name: rdma-1
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+                (conditions[?type == 'ParamsReady']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: networking.gke.io/v1
+              kind: GKENetworkParamSet
+              metadata:
+                name: rdma-2
+              spec:
+                deviceMode: RDMA
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: networking.gke.io/v1
+              kind: Network
+              metadata:
+                name: rdma-2
+              spec:
+                type: Device
+                parametersRef:
+                  group: networking.gke.io
+                  kind: GKENetworkParamSet
+                  name: rdma-2
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+                (conditions[?type == 'ParamsReady']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: networking.gke.io/v1
+              kind: GKENetworkParamSet
+              metadata:
+                name: rdma-3
+              spec:
+                deviceMode: RDMA
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+        - assert:
+            resource:
+              apiVersion: networking.gke.io/v1
+              kind: Network
+              metadata:
+                name: rdma-3
+              spec:
+                type: Device
+                parametersRef:
+                  group: networking.gke.io
+                  kind: GKENetworkParamSet
+                  name: rdma-3
+              status:
+                (conditions[?type == 'Ready']):
+                  - status: "True"
+                (conditions[?type == 'ParamsReady']):
+                  - status: "True"
+    # The Network/GKENetworkParamSet Ready conditions above are cluster-scoped.
+    # GKE's own docs state that Ready does not imply the network is available
+    # on any specific node. A GB200 node pool created without one of the five
+    # additionalNodeNetworkConfigs attachments still passes every assertion
+    # above. GKE annotates each node that actually has a network attached with
+    # networking.gke.io/network-status, a JSON array of {"name": ...} entries.
+    # See docs/integrator/gke-gb200-networking.md. Assert every GB200 node
+    # carries all five names in that annotation.
+    - name: validate-gb200-node-network-attachments
+      try:
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Node
+              metadata:
+                labels:
+                  cloud.google.com/gke-accelerator: nvidia-gb200
+                annotations:
+                  (!contains(@."networking.gke.io/network-status" || '', '"name":"gvnic-1"')): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Node
+              metadata:
+                labels:
+                  cloud.google.com/gke-accelerator: nvidia-gb200
+                annotations:
+                  (!contains(@."networking.gke.io/network-status" || '', '"name":"rdma-0"')): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Node
+              metadata:
+                labels:
+                  cloud.google.com/gke-accelerator: nvidia-gb200
+                annotations:
+                  (!contains(@."networking.gke.io/network-status" || '', '"name":"rdma-1"')): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Node
+              metadata:
+                labels:
+                  cloud.google.com/gke-accelerator: nvidia-gb200
+                annotations:
+                  (!contains(@."networking.gke.io/network-status" || '', '"name":"rdma-2"')): true
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Node
+              metadata:
+                labels:
+                  cloud.google.com/gke-accelerator: nvidia-gb200
+                annotations:
+                  (!contains(@."networking.gke.io/network-status" || '', '"name":"rdma-3"')): true
+    - name: validate-nccl-rdma-installer-fully-rolled-out
+      try:
+        - assert:
+            resource:
+              apiVersion: apps/v1
+              kind: DaemonSet
+              metadata:
+                name: nccl-rdma-installer
+                namespace: kube-system
+              # A DaemonSet has no spec.replicas. desiredNumberScheduled (node
+              # count matching its selector) is both the desired count and the
+              # floor. numberReady alone accepts a stale rollout, since a node
+              # still running the previous revision's pod counts as ready too,
+              # so updatedNumberScheduled must also match. observedGeneration
+              # confirms status reflects the current spec, not a reconcile
+              # from before the latest update.
+              ((status.desiredNumberScheduled || `0`) > `0`): true
+              ((status.numberReady || `0`) == status.desiredNumberScheduled): true
+              ((status.updatedNumberScheduled || `0`) == status.desiredNumberScheduled): true
+              ((status.observedGeneration || `0`) == metadata.generation): true
+    - name: validate-all-pods-healthy
+      try:
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: kube-system
+                labels:
+                  k8s-app: nccl-rdma-installer
+              status:
+                phase: Pending
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: kube-system
+                labels:
+                  k8s-app: nccl-rdma-installer
+              status:
+                phase: Failed
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: kube-system
+                labels:
+                  k8s-app: nccl-rdma-installer
+              status:
+                phase: Unknown
+        - error:
+            resource:
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                namespace: kube-system
+                labels:
+                  k8s-app: nccl-rdma-installer
+              status:
+                ((initContainerStatuses || `[]`)[?state.waiting.reason == 'CrashLoopBackOff' || state.waiting.reason == 'ImagePullBackOff' || state.waiting.reason == 'ErrImagePull' || state.waiting.reason == 'CreateContainerConfigError'] | length(@) > `0`): true

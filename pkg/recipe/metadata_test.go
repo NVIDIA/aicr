@@ -2322,6 +2322,8 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"rtx-pro-6000-lke-inference", criteria{CriteriaServiceLKE, CriteriaAcceleratorRTXPro6000, "", CriteriaIntentInference, ""}, true},
 		{"b200-gke-cos-training", criteria{CriteriaServiceGKE, CriteriaAcceleratorB200, CriteriaOSCOS, CriteriaIntentTraining, ""}, true},
 		{"b200-gke-cos-inference", criteria{CriteriaServiceGKE, CriteriaAcceleratorB200, CriteriaOSCOS, CriteriaIntentInference, ""}, true},
+		{"gb200-gke-cos-training", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentTraining, ""}, true},
+		{"gb200-gke-cos-inference", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentInference, ""}, true},
 		// Deeper specialized leaves — inherited via base: chain; a future overlay
 		// that replaces (rather than deep-merges) componentRefs would break these.
 		// H100 EKS Ubuntu variants
@@ -2341,6 +2343,10 @@ func TestNFDTopologyUpdater_OverlayCoverage(t *testing.T) {
 		{"h100-gke-cos-training-kubeflow", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
 		{"h100-gke-cos-training-slurm", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
 		{"h100-gke-cos-inference-dynamo", criteria{CriteriaServiceGKE, CriteriaAcceleratorH100, CriteriaOSCOS, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
+		// GB200 GKE COS platform variants (GKE uses COS, no Ubuntu variant)
+		{"gb200-gke-cos-training-kubeflow", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformKubeflow}, true},
+		{"gb200-gke-cos-training-slurm", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentTraining, CriteriaPlatformSlurm}, true},
+		{"gb200-gke-cos-inference-dynamo", criteria{CriteriaServiceGKE, CriteriaAcceleratorGB200, CriteriaOSCOS, CriteriaIntentInference, CriteriaPlatformDynamo}, true},
 		// GB200 EKS Ubuntu variants
 		{"gb200-eks-ubuntu-training", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentTraining, ""}, true},
 		{"gb200-eks-ubuntu-inference", criteria{CriteriaServiceEKS, CriteriaAcceleratorGB200, CriteriaOSUbuntu, CriteriaIntentInference, ""}, true},
@@ -2578,5 +2584,72 @@ func TestRecipeResultNormalizeKindNilReceiver(t *testing.T) {
 	var r *RecipeResult
 	if err := r.NormalizeKind(); err != nil {
 		t.Errorf("NormalizeKind() on nil receiver = %v, want nil", err)
+	}
+}
+
+// TestGB200GKEIncludesRDMA: gke+gb200+cos must resolve to the GB200 GKE
+// leaf (not gke-cos + gb200-any) and keep gke-gb200-rdma plus the
+// dma-buf kernel-module ConfigMap.
+func TestGB200GKEIncludesRDMA(t *testing.T) {
+	builder := NewBuilder()
+	if builder == nil {
+		t.Fatal("NewBuilder() returned nil")
+	}
+	leaves := []struct {
+		label    string
+		intent   CriteriaIntentType
+		platform CriteriaPlatformType // empty for the unspecialized base leaf
+		// wantPerf is explicit per leaf. The Slurm leaf does not declare
+		// nccl-all-reduce-bw-nvls even though its intent is training, so
+		// this cannot be derived from intent alone.
+		wantPerf bool
+	}{
+		{"training", CriteriaIntentTraining, "", true},
+		{"inference", CriteriaIntentInference, "", false},
+		{"training-kubeflow", CriteriaIntentTraining, CriteriaPlatformKubeflow, true},
+		{"training-slurm", CriteriaIntentTraining, CriteriaPlatformSlurm, false},
+		{"inference-dynamo", CriteriaIntentInference, CriteriaPlatformDynamo, false},
+	}
+
+	ctx := context.Background()
+	for _, leaf := range leaves {
+		cr := NewCriteria()
+		cr.Service = CriteriaServiceGKE
+		cr.Accelerator = CriteriaAcceleratorGB200
+		cr.OS = CriteriaOSCOS
+		cr.Intent = leaf.intent
+		cr.Platform = leaf.platform
+		result, err := builder.BuildFromCriteria(ctx, cr)
+		if err != nil {
+			t.Fatalf("BuildFromCriteria(gke/gb200/cos/%s): %v", leaf.label, err)
+		}
+		if result.GetComponentRef("gke-gb200-rdma") == nil {
+			t.Errorf("gke-gb200-rdma missing from resolved gke/gb200/cos/%s recipe", leaf.label)
+		}
+		gpuOp := result.GetComponentRef("gpu-operator")
+		if gpuOp == nil {
+			t.Fatalf("gpu-operator missing from resolved gke/gb200/cos/%s recipe", leaf.label)
+		}
+		km, ok := gpuOp.Overrides["driver"].(map[string]any)
+		if !ok {
+			t.Errorf("gpu-operator.driver override missing for gke/gb200/cos/%s", leaf.label)
+			continue
+		}
+		cfg, ok := km["kernelModuleConfig"].(map[string]any)
+		if !ok || cfg["name"] != "nvidia-kernel-module-params" {
+			t.Errorf("kernelModuleConfig.name = %v, want nvidia-kernel-module-params for gke/gb200/cos/%s", km["kernelModuleConfig"], leaf.label)
+		}
+		checkPresent := performanceCheckPresent(result.Validation, "nccl-all-reduce-bw-nvls")
+		floor, floorFound := findPerformanceConstraint(result.Validation, "nccl-all-reduce-bw-nvls")
+		if leaf.wantPerf {
+			if !checkPresent {
+				t.Errorf("performance check nccl-all-reduce-bw-nvls missing for gke/gb200/cos/%s", leaf.label)
+			}
+			if !floorFound || floor != ">= 250" {
+				t.Errorf("nccl-all-reduce-bw-nvls = %q found=%v, want >= 250 for gke/gb200/cos/%s", floor, floorFound, leaf.label)
+			}
+		} else if checkPresent || floorFound {
+			t.Errorf("gke/gb200/cos/%s must not declare NCCL performance; check=%v floor=%q", leaf.label, checkPresent, floor)
+		}
 	}
 }
