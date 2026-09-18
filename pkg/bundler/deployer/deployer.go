@@ -69,6 +69,13 @@ type Output struct {
 	// this deployer, relative to the bundle root.
 	Entrypoint string
 
+	// Provenance is the chart-provenance audit file this run wrote, relative
+	// to the bundle root, and empty when the run wrote none. A deployer must
+	// report it rather than let a caller stat the bundle: the file is written
+	// only for a vendored bundle and is never pruned, so a stat would also
+	// find one left behind by an earlier run into the same directory.
+	Provenance string
+
 	// Releases is every Helm release the bundle installs, in deployment
 	// order. The ordering is normative: consumers read sequence from list
 	// position, so a deployer must append in the order it deploys.

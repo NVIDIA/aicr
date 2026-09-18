@@ -40,6 +40,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	bundleverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -690,6 +691,72 @@ func TestBundleWritesBundleInfo(t *testing.T) {
 			}
 			if !strings.Contains(string(manifest), bundleinfo.FileName) {
 				t.Errorf("checksums.txt does not cover %s:\n%s", bundleinfo.FileName, manifest)
+			}
+		})
+	}
+}
+
+// TestBundleInfoIgnoresStaleProvenance covers the one bundle-root file that
+// does not self-heal on a rerun into the same directory.
+//
+// provenance.yaml is written only when a run vendors charts, and
+// localformat.pruneStaleFolders removes NNN-<name>/ directories and nothing
+// else. Bundle with --vendor-charts and then without, into the same output
+// directory, and the file from the first run survives into the second. A
+// record derived from the directory rather than from the run then claims
+// layout.provenance beside build.settings.vendorCharts=false, pointing a
+// consumer at a file this run neither wrote nor covered by its checksums.txt
+// — outside the bundle's own attestation subject.
+//
+// Vendoring needs upstream chart bytes, so the stale file is planted directly
+// rather than produced by a first run. Checksums are off because the exact
+// inventory finalization rejects any unexpected bundle file before the record
+// can be observed; that path fails loudly, and this one is the quiet one.
+func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
+	tests := []struct {
+		name     string
+		deployer config.DeployerType
+		repoURL  string
+	}{
+		{name: "helm", deployer: config.DeployerHelm},
+		{name: "argocd", deployer: config.DeployerArgoCD, repoURL: "https://github.com/example/bundles.git"},
+		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
+		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
+		{name: "helmfile", deployer: config.DeployerHelmfile},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			stale := filepath.Join(dir, localformat.ProvenanceFileName)
+			if err := os.WriteFile(stale, []byte("charts: []\n"), 0600); err != nil {
+				t.Fatalf("plant stale provenance: %v", err)
+			}
+
+			b, err := New(WithConfig(config.NewConfig(
+				config.WithDeployer(tt.deployer),
+				config.WithRepoURL(tt.repoURL),
+				config.WithIncludeChecksums(false),
+				config.WithVendorCharts(false),
+			)))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if _, makeErr := b.Make(context.Background(), closedWorldRecipeResult(), dir); makeErr != nil {
+				t.Fatalf("Make: %v", makeErr)
+			}
+
+			info, err := bundleinfo.Read(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			if info.Build.Settings.VendorCharts {
+				t.Fatal("vendorCharts is true; the run this asserts against must not vendor")
+			}
+			if info.Layout.Provenance != "" {
+				t.Errorf("layout.provenance = %q for a run that vendored nothing; the record "+
+					"indexes a file left behind by an earlier run, which this run's "+
+					"checksums.txt does not cover", info.Layout.Provenance)
 			}
 		})
 	}

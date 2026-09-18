@@ -800,6 +800,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 		output.Files = append(output.Files, provPath)
 		output.TotalSize += provSize
+		output.Provenance = localformat.ProvenanceFileName
 	}
 
 	if g.IncludeChecksums {

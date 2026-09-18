@@ -40,7 +40,6 @@ import (
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/flux"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helm"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/helmfile"
-	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	"github.com/NVIDIA/aicr/pkg/bundler/result"
 	"github.com/NVIDIA/aicr/pkg/bundler/types"
 	"github.com/NVIDIA/aicr/pkg/bundler/validations"
@@ -1026,17 +1025,7 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	}
 	recipeDigest := fmt.Sprintf("sha256:%x", rawDigest)
 
-	provenancePath, provErr := deployer.SafeJoin(dir, localformat.ProvenanceFileName)
-	if provErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe provenance path", provErr)
-	}
-	_, statErr := os.Stat(provenancePath)
-	if statErr != nil && !stderrors.Is(statErr, fs.ErrNotExist) {
-		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to stat provenance file", statErr)
-	}
-	hasProvenance := statErr == nil
-
-	info := b.buildBundleInfo(recipeResult, output, recipeDigest, hasProvenance)
+	info := b.buildBundleInfo(recipeResult, output, recipeDigest)
 	infoSize, infoErr := bundleinfo.Write(ctx, dir, info)
 	if infoErr != nil {
 		return nil, errors.PropagateOrWrap(infoErr, errors.ErrCodeInternal, "failed to write bundle info")
@@ -2850,7 +2839,6 @@ func (b *DefaultBundler) buildBundleInfo(
 	recipeResult *recipe.RecipeResult,
 	out *deployer.Output,
 	recipeDigest string,
-	hasProvenance bool,
 ) *bundleinfo.BundleInfo {
 
 	info := &bundleinfo.BundleInfo{
@@ -2866,11 +2854,9 @@ func (b *DefaultBundler) buildBundleInfo(
 		},
 		Layout: bundleinfo.Layout{
 			Entrypoint: out.Entrypoint,
+			Provenance: out.Provenance,
 			Releases:   make([]bundleinfo.Release, 0, len(out.Releases)),
 		},
-	}
-	if hasProvenance {
-		info.Layout.Provenance = localformat.ProvenanceFileName
 	}
 	for _, r := range out.Releases {
 		info.Layout.Releases = append(info.Layout.Releases, bundleinfo.Release{
