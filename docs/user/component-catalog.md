@@ -80,6 +80,20 @@ The platform-neutral `inference` coordinate is the base the Dynamo leaf inherits
 
 For the definitional Preview-vs-Supported distinction, see [Preview recipes](../integrator/recipe-development.md#preview-recipes). For bare-metal cluster prerequisites, Skyhook reboot behavior, and known gaps on this coordinate, see [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md).
 
+## k0s Preview coverage
+
+> **`service=k0s` is Preview.** It publishes an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. Published validation evidence exists at [validation.aicr.run](https://validation.aicr.run/).
+
+One coordinate ships today:
+
+| Coordinate | Evidence |
+|---|---|
+| `k0s / h200 / ubuntu / training` | [validation.aicr.run/#/k0s/h200-ubuntu/training](https://validation.aicr.run/#/k0s/h200-ubuntu/training) |
+
+> **Node-level prerequisites differ from the VR200 coordinates.** This leaf ships no rebooting Skyhook CRs and declares no NCCL performance floor. It does expect the node image to carry the NVIDIA driver: the GPU Operator's driver install is off, and the container toolkit targets k0s's own bundled containerd through its drop-in directory.
+
+For the definitional Preview-vs-Supported distinction, see [Preview recipes](../integrator/recipe-development.md#preview-recipes). For cluster prerequisites, the host-provided driver posture, and known gaps on this coordinate, see [k0s H200 Setup](../integrator/k0s-h200-setup.md).
+
 ## How Components Are Selected
 
 Not every component appears in every recipe. The recipe engine selects components based on the overlay chain for your environment:
