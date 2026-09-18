@@ -82,10 +82,10 @@ func TestRunCreatesOutputDirectories(t *testing.T) {
 	}
 	// runFixtureReport resolves only nvsentinel; every other tracked pin in the
 	// real registry.yaml is absent from the Renovate report and must land as
-	// unresolved, never as current. 30, not 33: three OpenShift twin pairs
+	// unresolved, never as current. 31, not 34: three OpenShift twin pairs
 	// (prometheus-adapter, k8s-nim-operator, nvidia-dra-driver-gpu) share their
 	// non-OCP sibling's chart/registry/version and collapse into one row apiece.
-	const wantUnresolved = 30
+	const wantUnresolved = 31
 	if report.Summary.Unresolved != wantUnresolved {
 		t.Errorf("Summary.Unresolved = %d, want %d", report.Summary.Unresolved, wantUnresolved)
 	}
