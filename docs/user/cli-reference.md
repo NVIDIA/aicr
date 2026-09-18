@@ -1568,11 +1568,11 @@ Components whose version is identical on both sides produce no row. Added compon
 | Route | When | `reason` | Renders steps |
 |---|---|---|---|
 | A record describes this move and blocks it | One record is crossed and its `from` covers your source | `recorded` | yes |
-| You would skip a boundary | Two or more records are crossed, or a crossed `blocked` record was written for a different starting point | `multiple-boundaries`, `record-blocks` | no |
+| You would skip a boundary | Two or more records that ask something of you are crossed, or a crossed `blocked` record was written for a different starting point | `multiple-boundaries`, `record-blocks` | no |
 | Nothing describes your starting version | One record is crossed, but its `from` does not cover your source, usually because you are below the lowest recorded starting point | `undefined-origin` | no |
 | Your target is past what the record assessed | One record is crossed and its `from` covers your source, but your target sits above the ceiling that record's `to` names | `beyond-record-ceiling` | no |
 
-The first renders its record's steps, deployer-scoped, exactly as a `manual` row does: the author marked the move `blocked` and then wrote what to do instead. The other three render none, because the record that carries them describes a different move than the one you asked about. All four name a stopping point.
+A crossed `safe` boundary does not count toward the second row: it carries no steps by construction, so crossing one composes nothing and skips nothing, and a jump whose only *substantive* boundary describes the whole move reports that record rather than stopping. The first row renders its record's steps, deployer-scoped, exactly as a `manual` row does: the author marked the move `blocked` and then wrote what to do instead. The other three render none, because the record that carries them describes a different move than the one you asked about. All four name a stopping point.
 
 The fourth exists because a record vouches only as far as its own `to` ceiling. A record claiming `>=0.18.0 <0.19.0` says nothing about `0.25.0`, and letting it lend its verdict there would report eight minors as safe on the strength of a two-minor claim. Stop at the assessed ceiling and re-run, or have the record widened. This is also how a component deliberately held below a breaking release reports: its record's ceiling sits at that release, so any target above it is told to stop there and take the boundary on its own.
 

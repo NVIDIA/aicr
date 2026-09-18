@@ -1644,11 +1644,13 @@ kubectl get skyhooks.skyhook.nvidia.com \
   -o custom-columns=NAME:.metadata.name,STATUS:.status.status,INPROGRESS:.status.nodesInProgress
 ```
 
-`aicr upgrade-check` reports the boundary. The transition record at
-`recipes/components/nodewright-operator/upgrades.yaml` describes `v0.18.0`
-itself — the rename, the prerequisite above, and per-deployer steps — and stops
-its `to` ceiling there. So crossing `v0.18.0` is `manual` with steps, while any
-target above it is `blocked` and told to take the rename on its own:
+`aicr upgrade-check` reports both boundaries. The transition record at
+`recipes/components/nodewright-operator/upgrades.yaml` describes `v0.18.0` —
+the rename, the prerequisite above, and per-deployer steps — and `v0.19.0`
+separately, which is `safe`: it changes when a drain is considered complete but
+asks nothing of an operator on upgrade. Crossing the rename is `manual`
+whatever you land on, and you do **not** have to stop at `v0.18.0` to get past
+it:
 
 ```console
 $ aicr upgrade-check --from old.yaml --to new.yaml --deployer helm
@@ -1657,8 +1659,19 @@ nodewright-operator  v0.17.1  v0.18.0  manual   1 minor, 4 steps
 
 $ aicr upgrade-check --from old.yaml --to newer.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
-nodewright-operator  v0.18.0  v0.19.0  blocked  1 minor, stops at =0.18.0
+nodewright-operator  v0.16.0  v0.19.0  manual   3 minors, 4 steps
+
+$ aicr upgrade-check --from cur.yaml --to newer.yaml --deployer helm
+COMPONENT            FROM     TO       VERDICT  NOTES
+nodewright-operator  v0.18.0  v0.19.0  safe     1 minor, verified
 ```
+
+`v0.19.0` also changes drain timing: an interrupt now begins roughly the
+longest `terminationGracePeriodSeconds` on the node later than before, and
+`spec.drainConfig.timeout` — which has no default — bounds time-to-drain rather
+than time-to-accept-evictions. AICR's tuning CRs declare interrupts and set no
+timeout, so an undrainable pod holds its node in `in_progress` without bound.
+Set a timeout on the CRs you author if you need that wait bounded.
 
 The legacy `Skyhook` group is removed upstream in `v0.20.0`, so the CRs AICR
 ships under `nodewright-customizations` still need renaming before a pin at or

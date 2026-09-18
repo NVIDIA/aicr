@@ -362,6 +362,22 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		return r
 	}
 	if len(crossed) > 1 {
+		// A safe boundary asks nothing of the operator, so crossing it composes
+		// nothing and skips nothing. When it is the only thing standing beside
+		// one substantive record that does describe this jump, defer to that
+		// record rather than stopping a move whose extra boundary is "nothing
+		// to do". Reached only after the blocked checks above, so an authored
+		// block still outranks everything here.
+		if only, ok := loneSubstantive(crossed); ok && fromCovers(only.tr, src) {
+			if _, past := beyondCeiling(only.tr, tgt); !past {
+				r.Verdict = only.tr.Verdict
+				r.Transition = only.tr
+				r.Span = claimSpan(src, only.tr)
+				r.Reason = ReasonRecorded
+				r.Explanation = recordedExplanation(r, only)
+				return r
+			}
+		}
 		// Composing both records' steps would be wrong rather than merely
 		// cautious: an intermediate record's work never runs on a jump straight
 		// past it, so the report names where to stop instead.
@@ -384,6 +400,22 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 	r.StoppedAt = only.tr.To
 	r.Explanation = undefinedOriginExplanation(u, r, only, src)
 	return r
+}
+
+// loneSubstantive returns the single crossed boundary that asks something of
+// the operator, when every other one crossed is safe. A safe record carries no
+// steps by construction (rule 4 forbids them), so it is never the skipped
+// migration multiple-boundaries exists to prevent.
+func loneSubstantive(crossed []crossing) (crossing, bool) {
+	var only crossing
+	found := 0
+	for _, c := range crossed {
+		if c.tr.Verdict == VerdictSafe {
+			continue
+		}
+		only, found = c, found+1
+	}
+	return only, found == 1
 }
 
 // crossing pairs a transition with the floor its `to` names.

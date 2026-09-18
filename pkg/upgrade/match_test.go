@@ -637,6 +637,75 @@ func TestMatchCrossingIgnoresFromMembership(t *testing.T) {
 // every Reason they can produce, including the invariants a blocked result must
 // hold: no Transition to render another record's steps from, and a StoppedAt
 // the report can name.
+// A safe boundary carries no steps, so crossing one composes nothing and skips
+// nothing. It must not stop a jump whose only substantive boundary describes
+// the whole move -- the nodewright shape, where a manual rename is followed by
+// a safe release and a jump spanning both should land on the rename's steps.
+func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
+	rename := trans("<0.18.0", ">=0.18.0 <=0.19.0", VerdictManual, "rename")
+	drain := trans(">=0.18.0 <0.19.0", ">=0.19.0 <=0.19.0", VerdictSafe, "drain")
+	secondManual := trans(">=0.18.0 <0.19.0", ">=0.19.0 <=0.19.0", VerdictManual, "second")
+
+	tests := []struct {
+		name        string
+		set         Set
+		from, to    string
+		wantVerdict Verdict
+		wantReason  Reason
+		wantMatched string
+	}{
+		{
+			// Crosses both boundaries. The safe one asks nothing, so the
+			// rename's own verdict and steps carry the jump.
+			name:        "manual plus safe defers to the manual record",
+			set:         oneComponent(rename, drain),
+			from:        "0.16.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictManual,
+			wantReason:  ReasonRecorded,
+			wantMatched: "rename",
+		},
+		{
+			// Crosses only the safe boundary.
+			name:        "the safe boundary alone still reads safe",
+			set:         oneComponent(rename, drain),
+			from:        "0.18.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "drain",
+		},
+		{
+			// The control: two boundaries that both ask something still block,
+			// because composing them is the failure the rule exists to prevent.
+			name:        "two substantive boundaries still block",
+			set:         oneComponent(rename, secondManual),
+			from:        "0.16.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonMultipleBoundaries,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := matchVersions(tt.set["c"], "c", tt.from, tt.to)
+			if got.Verdict != tt.wantVerdict {
+				t.Errorf("verdict = %q, want %q", got.Verdict, tt.wantVerdict)
+			}
+			if got.Reason != tt.wantReason {
+				t.Errorf("reason = %q, want %q", got.Reason, tt.wantReason)
+			}
+			matched := ""
+			if got.Transition != nil {
+				matched = got.Transition.Summary
+			}
+			if matched != tt.wantMatched {
+				t.Errorf("matched record = %q, want %q", matched, tt.wantMatched)
+			}
+		})
+	}
+}
+
 func TestMatchVerdictSelection(t *testing.T) {
 	safeLow := trans("<2.0.0", ">=2.0.0 <2.1.0", VerdictSafe, "S")
 	blockedHigh := trans("<3.0.0", ">=3.0.0 <=3.0.0", VerdictBlocked, "B")
