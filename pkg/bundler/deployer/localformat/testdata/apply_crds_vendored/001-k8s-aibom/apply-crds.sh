@@ -56,6 +56,18 @@ fi
 # actionable message is the safer trade: the operator can install coreutils, or
 # apply the CRDs by hand with the command in the component catalog.
 CRD_STEP_TIMEOUT="${AICR_CRD_STEP_TIMEOUT:-30}"
+# Validate before it reaches timeout(1). GNU timeout treats 0 as "no timeout",
+# so an override of 0 would silently disable the bound this script's
+# fail-closed behavior depends on, and a non-numeric value would be rejected
+# only at the first call. Whole seconds only: a suffixed duration would pass to
+# timeout but not to the arithmetic comparison, so it is refused rather than
+# half-honored.
+if ! [[ "${CRD_STEP_TIMEOUT}" =~ ^[0-9]+$ ]] || (( CRD_STEP_TIMEOUT <= 0 )); then
+  echo "ERROR: AICR_CRD_STEP_TIMEOUT must be a positive whole number of seconds;" >&2
+  echo "       got '${CRD_STEP_TIMEOUT}'. A value of 0 disables timeout(1) entirely," >&2
+  echo "       which would let a wedged helm or kubectl hang the deploy." >&2
+  exit 1
+fi
 TIMEOUT_BIN=""
 for candidate in timeout gtimeout; do
   if command -v "${candidate}" >/dev/null 2>&1; then
@@ -87,7 +99,8 @@ run_bounded() {
 # such reader, so the step returns when the bounded process does.
 BOUNDED_OUT="$(mktemp)"
 CRD_DIR="$(mktemp -d)"
-trap 'rm -f "${BOUNDED_OUT}"; rm -rf "${CRD_DIR}"' EXIT
+PULL_DIR=""
+trap 'rm -f "${BOUNDED_OUT}"; rm -rf "${CRD_DIR}"; [[ -n "${PULL_DIR}" ]] && rm -rf "${PULL_DIR}"' EXIT
 # Progress is announced before each bounded call and timed after it. deploy.sh
 # captures this and prints it only when a component fails, so it costs nothing
 # on a good run and names the slow call on a bad one. Without it a stalled step

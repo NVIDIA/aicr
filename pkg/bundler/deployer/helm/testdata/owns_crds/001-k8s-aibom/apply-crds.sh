@@ -56,6 +56,18 @@ fi
 # actionable message is the safer trade: the operator can install coreutils, or
 # apply the CRDs by hand with the command in the component catalog.
 CRD_STEP_TIMEOUT="${AICR_CRD_STEP_TIMEOUT:-30}"
+# Validate before it reaches timeout(1). GNU timeout treats 0 as "no timeout",
+# so an override of 0 would silently disable the bound this script's
+# fail-closed behavior depends on, and a non-numeric value would be rejected
+# only at the first call. Whole seconds only: a suffixed duration would pass to
+# timeout but not to the arithmetic comparison, so it is refused rather than
+# half-honored.
+if ! [[ "${CRD_STEP_TIMEOUT}" =~ ^[0-9]+$ ]] || (( CRD_STEP_TIMEOUT <= 0 )); then
+  echo "ERROR: AICR_CRD_STEP_TIMEOUT must be a positive whole number of seconds;" >&2
+  echo "       got '${CRD_STEP_TIMEOUT}'. A value of 0 disables timeout(1) entirely," >&2
+  echo "       which would let a wedged helm or kubectl hang the deploy." >&2
+  exit 1
+fi
 TIMEOUT_BIN=""
 for candidate in timeout gtimeout; do
   if command -v "${candidate}" >/dev/null 2>&1; then
@@ -87,7 +99,8 @@ run_bounded() {
 # such reader, so the step returns when the bounded process does.
 BOUNDED_OUT="$(mktemp)"
 CRD_DIR="$(mktemp -d)"
-trap 'rm -f "${BOUNDED_OUT}"; rm -rf "${CRD_DIR}"' EXIT
+PULL_DIR=""
+trap 'rm -f "${BOUNDED_OUT}"; rm -rf "${CRD_DIR}"; [[ -n "${PULL_DIR}" ]] && rm -rf "${PULL_DIR}"' EXIT
 # Progress is announced before each bounded call and timed after it. deploy.sh
 # captures this and prints it only when a component fails, so it costs nothing
 # on a good run and names the slow call on a bad one. Without it a stalled step
@@ -190,23 +203,31 @@ source ./upstream.env
 # impossible, so both phases are bound to one file here: install.sh installs
 # PULLED_CHART when this script leaves it behind.
 #
-# Removed first, so a tarball from an earlier run can never be mistaken for
-# this one's.
+# Pull into a private directory, so the archive taken forward is the one this
+# pull produced and nothing else.
+#
+# The component directory is not ours to reason about: generation does not
+# clear it, and an interrupted pull or a regeneration at a different version
+# can leave a tarball behind. Selecting "some .tgz in the folder" would let a
+# stale artifact be renamed as the current result, and its CRDs would then be
+# replaced while the release installed different bytes. An empty directory we
+# just created has no such ambiguity, and exactly one archive is required so a
+# surprise is an error rather than a coin flip.
 PULLED_CHART="${SCRIPT_DIR}/.aicr-chart.tgz"
 rm -f "${PULLED_CHART}"
+PULL_DIR="$(mktemp -d)"
 if ! capture_bounded helm pull "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" \
-  --destination "${SCRIPT_DIR}"; then
+  --destination "${PULL_DIR}"; then
   echo "ERROR: cannot fetch the ${RELEASE} chart: $(cat "${BOUNDED_OUT}")" >&2
   exit 1
 fi
-# helm pull names the file after the chart and version; there is exactly one
-# because the directory was cleared of tarballs above.
-pulled="$(find "${SCRIPT_DIR}" -maxdepth 1 -name '*.tgz' -print -quit)"
-if [[ -z "${pulled}" ]]; then
-  echo "ERROR: helm pull reported success but produced no chart for ${RELEASE}." >&2
+pulled_count="$(find "${PULL_DIR}" -maxdepth 1 -type f -name '*.tgz' | wc -l | tr -d '[:space:]')"
+if [[ "${pulled_count}" != "1" ]]; then
+  echo "ERROR: expected exactly one chart archive from helm pull for ${RELEASE}," >&2
+  echo "       found ${pulled_count}; refusing to guess which bytes to use." >&2
   exit 1
 fi
-mv -f "${pulled}" "${PULLED_CHART}"
+mv -f "$(find "${PULL_DIR}" -maxdepth 1 -type f -name '*.tgz' -print -quit)" "${PULLED_CHART}"
 
 if ! collect_crds "${PULLED_CHART}" "${CRD_DIR}"; then
   echo "ERROR: cannot read CRDs from the ${RELEASE} chart archive." >&2

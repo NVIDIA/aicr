@@ -81,8 +81,12 @@ bash install.sh
 > **CRDs on upgrade.** Helm installs a chart's `crds/` directory on first
 > install and never touches it again, so a chart bump whose CRDs changed would
 > otherwise run the new controller against the old schema. Folders that also
-> contain an `apply-crds.sh` have `install.sh` run it first, which applies the
-> pinned chart's CRDs with `kubectl apply --server-side --force-conflicts`.
+> contain an `apply-crds.sh` have `install.sh` run it first. It pulls the
+> pinned chart once, reads the CRDs out of that archive, and creates or
+> replaces each one, so a field the new chart removes actually disappears;
+> server-side apply would leave fields Helm still owns in place. Only
+> components audited as the sole owner of every CRD they ship get this, and
+> only while the ref matches the registry's pinned source, chart, and version.
 > Those folders need `kubectl` and `timeout` (GNU coreutils) on `$PATH` in
 > addition to `helm`; the script refuses to run rather than run unbounded
 > inside a deploy, so on macOS install coreutils or apply the CRDs by hand.

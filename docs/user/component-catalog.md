@@ -805,10 +805,22 @@ chart's `crds/` directory on upgrade, so a cluster that missed the CRD step can
 run a new controller against the previous schema while the older version stays
 served and the controller keeps working.
 
-`k8s-aibom` is marked `ownsCRDs` in the registry, so every deployer does update
-its CRDs: Flux through `spec.upgrade.crds: CreateReplace`, `helm` and
+`k8s-aibom` is marked `ownsCRDs` in the registry, so the deployers update its
+CRDs for you: Flux through `spec.upgrade.crds: CreateReplace`, `helm` and
 `helmfile` through the generated `apply-crds.sh`, and Argo CD by applying them
-as ordinary manifests each sync. The assertion is still worth making on every
+as ordinary manifests each sync.
+
+**That automation is tied to the registry-pinned coordinates, not to the
+component.** `ownsCRDs` records an audit of one specific chart, so Flux, `helm`,
+and `helmfile` all check that the componentRef still resolves to the registry's
+`source`, `chart`, and `version` before acting, and do nothing when any of the
+three is overridden. A recipe that overrides the version — including the
+override described under [Overriding the chart version](#overriding-the-chart-version-requires-overriding-this-assertion)
+below — therefore upgrades the controller with **no** CRD update on those three
+deployers, silently. Such a recipe needs its own audit of the chart it points
+at and its own CRD step; the fallback command below is the manual form. Argo CD
+is unaffected, since it applies whatever CRDs the rendered chart contains
+regardless of provenance. The assertion is still worth making on every
 deployer, because it proves the deployed CRDs match the pinned chart rather
 than merely that some deployer was expected to update them.
 
@@ -933,26 +945,40 @@ bundle, or when `apply-crds.sh` failed and you are reproducing it:
 CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
 VERSION="1.3.0"   # replace with the version you are upgrading to
 
-helm show crds "${CHART}" --version "${VERSION}" \
-  | sed -n '/^---$/,$p' \
-  | kubectl apply --server-side --force-conflicts -f -
+work="$(mktemp -d)"
+helm pull "${CHART}" --version "${VERSION}" --destination "${work}"
+tar -xzf "${work}"/*.tgz -C "${work}"
+
+# One kubectl call per CRD file, create first and replace if it exists.
+find "${work}" -type f -path '*/crds/*' \( -name '*.yaml' -o -name '*.yml' \) \
+  | sort \
+  | while read -r crd; do
+      grep -q '[^[:space:]]' "${crd}" || continue
+      kubectl create -f "${crd}" 2>/dev/null || kubectl replace -f "${crd}"
+    done
 ```
 
-Three details in that command are load-bearing. The obvious shorter form —
-piping `helm show crds` straight into `kubectl apply --server-side` — fails on
-the first two:
+Three details are load-bearing, and the obvious shorter forms fail on them:
 
-- **`sed -n '/^---$/,$p'`** drops `helm`'s progress output. For an OCI chart,
-  `helm show crds` writes `Pulled:` and `Digest:` lines to *stdout*, and those
-  two lines parse as a valid YAML mapping, so `kubectl` rejects the stream with
-  `error validating data: [apiVersion not set, kind not set]`.
-- **`--force-conflicts`** is required because Helm created these CRDs on
-  install and owns their fields. Without it, server-side apply refuses with a
-  field-manager conflict.
-- **`--server-side`** is required because the CRDs exceed the annotation size
-  limit that client-side apply depends on.
+- **Create-or-replace, not `kubectl apply`.** Server-side apply deletes a field
+  the manifest omits only when no other manager owns it, and Helm created these
+  CRDs. A schema field or `spec.versions` entry that the new chart *removes*
+  therefore survives an apply that exits 0, leaving the controller and the
+  schema out of step. Replace makes the chart authoritative for the whole
+  object. This is why `ownsCRDs` requires that no CRD use
+  `spec.conversion.strategy: Webhook`: replace discards a `caBundle` injected at
+  runtime.
+- **Read the CRDs from the chart archive, not from `helm show crds`.** That
+  command's output shape differs by major version: Helm 4 prepends `---` before
+  every CRD, Helm 3 prepends one only for `show all` and emits nothing between
+  documents. Any separator-based filter silently yields nothing on Helm 3.
+- **Pull once and work from that archive.** Repository, chart, and version are
+  coordinates, not content. Reading CRDs through them and letting the upgrade
+  resolve them again is two fetches, and a mutable tag does not promise the same
+  bytes.
 
-Verified against a live GKE cluster across a 1.2.0 to 1.3.0 upgrade.
+The generated `apply-crds.sh` does exactly this, with each call bounded; it is
+the reference if you need the details.
 
 Which deployers need that step differs, so check yours:
 

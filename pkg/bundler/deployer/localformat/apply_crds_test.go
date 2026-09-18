@@ -907,3 +907,103 @@ func TestApplyCRDsScript_SkipsWhitespaceOnlyCRDFile(t *testing.T) {
 			"shadowed it\n%s", statErr, out)
 	}
 }
+
+// TestApplyCRDsScript_IgnoresPreexistingTarball pins that a tarball already
+// sitting in the component directory is never mistaken for the pull's result.
+//
+// Generation does not clear that directory, and an interrupted pull or a
+// regeneration at another version can leave one behind. Selecting "some .tgz
+// in the folder" would let stale bytes have their CRDs replaced while the
+// release installed something else.
+func TestApplyCRDsScript_IgnoresPreexistingTarball(t *testing.T) {
+	for _, bin := range []string{"bash", "tar"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not available", bin)
+		}
+	}
+	scriptPath := writeApplyCRDs(t, ownsCRDsComponent(true))
+	applied := filepath.Join(t.TempDir(), "applied")
+
+	// A stale archive whose CRD is named differently from the real one, so the
+	// stub can tell which set was applied.
+	stale := t.TempDir()
+	staleCRDs := filepath.Join(stale, "old", "crds")
+	if err := os.MkdirAll(staleCRDs, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	staleCRD := "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n" +
+		"metadata:\n  name: STALE.example.com\n"
+	if err := os.WriteFile(filepath.Join(staleCRDs, "stale.yaml"), []byte(staleCRD), 0o644); err != nil {
+		t.Fatalf("write stale crd: %v", err)
+	}
+	staleTgz := filepath.Join(filepath.Dir(scriptPath), "leftover.tgz")
+	if out, err := exec.Command("tar", "-czf", staleTgz, "-C", stale, "old").CombinedOutput(); err != nil {
+		t.Fatalf("tar stale: %v\n%s", err, out)
+	}
+
+	// Record what actually reached kubectl so a stale application is visible.
+	seen := filepath.Join(t.TempDir(), "seen")
+	kubectl := "#!/usr/bin/env bash\n" +
+		"case \"$1\" in\n" +
+		"  create|replace)\n" +
+		"    for a in \"$@\"; do [[ -f \"$a\" ]] && cat \"$a\" >>" + seen + "; done\n" +
+		"    touch " + applied + " ;;\n" +
+		"esac\nexit 0\n"
+
+	path := stubPATH(t, map[string]string{
+		"helm":    helmStub("echo k8s-aibom", chartArchiveWithCRD(t)),
+		"kubectl": kubectl,
+		"timeout": passthroughTimeoutStub,
+	})
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+path)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("script failed: %v\n%s", err, out)
+	}
+	body, readErr := os.ReadFile(seen)
+	if readErr != nil {
+		t.Fatalf("nothing was applied (%v)\n%s", readErr, out)
+	}
+	if strings.Contains(string(body), "STALE.example.com") {
+		t.Fatalf("the leftover tarball was applied instead of the pulled chart\n%s", body)
+	}
+}
+
+// TestApplyCRDsScript_RejectsTimeoutOverrideOfZero pins that an override which
+// would disable the bound is refused before any external call.
+//
+// GNU timeout treats 0 as "no timeout", so AICR_CRD_STEP_TIMEOUT=0 would
+// silently remove the bound that the fail-closed behavior depends on, leaving
+// a wedged helm or kubectl able to hang the deploy.
+func TestApplyCRDsScript_RejectsTimeoutOverrideOfZero(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not available")
+	}
+	scriptPath := writeApplyCRDs(t, ownsCRDsComponent(true))
+	applied := filepath.Join(t.TempDir(), "applied")
+
+	path := stubPATH(t, map[string]string{
+		"helm":    helmStub("echo k8s-aibom", chartArchiveWithCRD(t)),
+		"kubectl": kubectlStub(applied, ""),
+		"timeout": passthroughTimeoutStub,
+	})
+
+	for _, bad := range []string{"0", "-1", "abc", "5m"} {
+		t.Run("override="+bad, func(t *testing.T) {
+			cmd := exec.Command("bash", scriptPath)
+			cmd.Env = append(os.Environ(), "PATH="+path, "AICR_CRD_STEP_TIMEOUT="+bad)
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("script accepted AICR_CRD_STEP_TIMEOUT=%q\n%s", bad, out)
+			}
+			if !strings.Contains(string(out), "positive whole number") {
+				t.Errorf("rejected for some other reason than the bad override:\n%s", out)
+			}
+			// It must refuse before touching the cluster or the registry.
+			if strings.Contains(string(out), "crd-step: running") {
+				t.Errorf("an external call ran before the override was validated\n%s", out)
+			}
+		})
+	}
+}

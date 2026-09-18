@@ -41,7 +41,10 @@ runs it before the upgrade. helmfile upgrades through Helm, which installs a
 chart's `crds/` directory on first install and never touches it again, so
 without the hook a chart bump whose CRDs changed would run the new controller
 against the old schema. The script applies the pinned chart's CRDs with
-`kubectl apply --server-side --force-conflicts`. It skips only when neither the
+`kubectl create` or `kubectl replace` per CRD, read out of the pinned chart's
+own archive, so a field the new chart removes actually disappears rather than
+surviving under Helm's field ownership. It applies only while the ref still
+matches the registry's pinned source, chart, and version. It skips only when neither the
 release nor any of the chart's CRDs exist yet, since only then does `helm
 install` create them; a release that was uninstalled leaves its CRDs behind, so
 a reinstall still applies them. Every helm and kubectl call it makes is bounded,
