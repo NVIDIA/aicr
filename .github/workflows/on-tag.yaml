@@ -361,7 +361,7 @@ jobs:
         run: echo "GOMODCACHE=${RUNNER_TEMP}/aicr-release-modcache" >> "$GITHUB_ENV"
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
 
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
@@ -472,7 +472,7 @@ jobs:
         run: echo "GOMODCACHE=${RUNNER_TEMP}/aicr-release-modcache" >> "$GITHUB_ENV"
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
 
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
@@ -579,7 +579,7 @@ jobs:
         uses: ./.github/actions/ghcr-login
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
 
       # Inline by design: this job creates only run-unique candidate manifests.
       # The shared docker-manifest action also writes public aliases, which must
