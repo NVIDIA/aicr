@@ -545,10 +545,11 @@ components:
       # Blocking: nic-health-monitor discovers which NICs to check from the
       # GPU-to-NIC topology metadata-collector writes to
       # /var/lib/nvsentinel/gpu_metadata.json. Enabled without it, and
-      # without the documented nicInclusionRegexOverride bypass, the
-      # DaemonSet renders, deploys, and checks nothing -- invisible to
-      # `aicr bundle`/`aicr validate`. A no-op for every recipe that
-      # doesn't set global.nicHealthMonitor.enabled.
+      # without a usable nicInclusionRegexOverride -- one whose every
+      # comma-separated pattern compiles, since the monitor refuses to
+      # start otherwise -- the DaemonSet renders, deploys, and checks
+      # nothing, invisible to `aicr bundle`/`aicr validate`. A no-op for
+      # every recipe that doesn't set global.nicHealthMonitor.enabled.
       - function: CheckNVSentinelNicHealthMonitorRequiresMetadataCollector
         severity: error
 
