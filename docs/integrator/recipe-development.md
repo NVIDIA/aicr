@@ -824,7 +824,7 @@ criteria dimension and overlays must not author
 The AICR install gate is consumed by `ComponentRef.IsEnabled` before deployer,
 mirror, BOM, and health paths. It is not an upstream chart value. Mode-owned
 paths are immutable at bundle time. See
-[ADR-016](../design/016-slurm-accounting-enablement.md) and the
+[ADR-016](https://github.com/NVIDIA/aicr/blob/main/docs/design/016-slurm-accounting-enablement.md) and the
 [Slurm Accounting guide](../user/slinky-slurm-accounting.md).
 
 ## Disable a Component in an Overlay
@@ -925,8 +925,7 @@ validation:
   deployment:
     checks: [expected-resources]
   performance:
-    infrastructure: nccl-doctor
-    checks: [nccl-bandwidth-test]
+    checks: [nccl-all-reduce-bw]
 ```
 
 **Phases:** `deployment`, `performance`, `conformance` (readiness constraints are evaluated implicitly)
@@ -940,8 +939,8 @@ aicr validate --recipe recipe.yaml --snapshot snapshot.yaml
 # Phase-specific
 aicr validate --recipe recipe.yaml --snapshot snapshot.yaml --phase deployment
 
-# Run validation tests
-go test -v ./pkg/recipe/... -run TestConstraintPathsUseValidMeasurementTypes
+# Run the recipe test suite
+go test -v ./pkg/recipe/...
 ```
 
 ## Working with Recipes
@@ -1086,7 +1085,7 @@ Tests in [`pkg/recipe/yaml_test.go`](https://github.com/NVIDIA/aicr/blob/main/pk
 ```bash
 make test  # All tests
 go test -v ./pkg/recipe/...  # Recipe tests only
-go test -v ./pkg/recipe/... -run TestAllMetadataFilesConformToSchema  # Specific test
+go test -v ./pkg/recipe/... -run TestNoDuplicateCriteriaAcrossOverlays  # Specific test
 ```
 
 ### Test Workflow

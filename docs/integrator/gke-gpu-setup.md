@@ -16,7 +16,7 @@ verify against the cluster's GPU-node labels.
 
 Both values keep `driver.enabled=false` in the GPU Operator values — the GPU
 Operator cannot install a driver on COS node images, so driver provisioning is
-never the operator's in either mode.
+never the operator's responsibility in either mode.
 
 Exactly **one** `nvidia.com/gpu` advertiser per node is required. Two plugins
 registering the same resource name is not a benign overlap: kubelet's device
@@ -108,8 +108,8 @@ gcloud container node-pools create POOL_NAME \
   --location=LOCATION \
   --node-locations=ZONE \
   --num-nodes=1 \
-  --machine-type=a3-highgpu-8g \
-  --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=default \
+  --machine-type=a3-megagpu-8g \
+  --accelerator type=nvidia-h100-mega-80gb,count=8,gpu-driver-version=default
 ```
 
 Two flags deserve care:
@@ -243,8 +243,8 @@ gcloud container node-pools create POOL_NAME \
   --location=LOCATION \
   --node-locations=ZONE \
   --num-nodes=1 \
-  --machine-type=a3-highgpu-8g \
-  --accelerator type=nvidia-h100-80gb,count=8,gpu-driver-version=disabled \
+  --machine-type=a3-megagpu-8g \
+  --accelerator type=nvidia-h100-mega-80gb,count=8,gpu-driver-version=disabled \
   --node-labels="gke-no-default-nvidia-gpu-device-plugin=true"
 ```
 

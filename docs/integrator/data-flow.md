@@ -66,7 +66,7 @@ Each stage transforms input data into a different format:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ Snapshot (aicr.run/v1alpha2)                      │
+│ Snapshot (aicr.run/v1)                                  │
 ├─────────────────────────────────────────────────────────┤
 │ metadata:                                               │
 │   timestamp: RFC3339 string                             │
@@ -296,7 +296,7 @@ owned value paths in result metadata.
 │   appliedOverlays: inheritance chain (root to leaf)     │
 │   excludedOverlays: matched-but-excluded overlays       │
 │   selectedProfile: name, value, and ownedPaths          │
-│                    (v1alpha3 only)                      │
+│                    (v1beta2 only)                       │
 │                                                         │
 │ criteria: Criteria (6 dimensions — see mapping above)   │
 │                                                         │
@@ -697,7 +697,7 @@ spec:
 **JSON:**
 ```json
 {
-  "apiVersion": "aicr.run/v1alpha2",
+  "apiVersion": "aicr.run/v1",
   "kind": "Snapshot",
   "measurements": [...]
 }
@@ -748,11 +748,14 @@ HTTP Request → Middleware Chain → Handler → Response
 
 1. Metrics Middleware (record request)
 2. Version Middleware (check API version)
-3. RequestID Middleware (add/echo request ID)
-4. Panic Recovery (catch panics)
-5. Rate Limit (100 req/s)
+3. Deprecation Middleware (Deprecation/Sunset/Link headers)
+4. RequestID Middleware (add/echo request ID)
+5. Timeout (90s request context)
 6. Logging (structured logs)
-7. Handler:
+7. Panic Recovery (catch panics)
+8. Rate Limit (100 req/s)
+9. Body Limit (8 MiB)
+10. Handler:
    ├─ Recipe/query routes
    │  ├─ Parse query parameters
    │  ├─ Build Query
@@ -803,7 +806,7 @@ X-RateLimit-Reset: 1735650000
   distinct from the in-process caches above
 
 **Bundle Templates:**
-- Location: `pkg/bundler/*/templates/*.tmpl`
+- Location: `pkg/bundler/deployer/*/templates/*.tmpl`
 - Embedded at compile time: `//go:embed templates/*.tmpl`
 - Parsed once per bundler initialization
 

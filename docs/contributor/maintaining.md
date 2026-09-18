@@ -463,7 +463,7 @@ the exact artifact:
 
 `Registry Drift Report` (`.github/workflows/registry-drift.yaml`) runs weekly
 (Mondays 07:00 UTC) and answers a question the weekday Renovate PR run
-deliberately does not: which of the 34 chart pins in `recipes/registry.yaml`
+deliberately does not: which of the chart pins in `recipes/registry.yaml`
 have moved upstream? Renovate's custom manager extracts every pin, but a
 `packageRules` guard disables the `registry-chart` depType for the weekday
 run, because an AICR component bump is never a version-string edit — it can
@@ -522,7 +522,7 @@ attestation + maintainer judgement.
 > recipe-evidence verify gate (signature/integrity against OCI). Cryptographic
 > trust is enforced **after merge, at ingest** (`evidence-ingest.yaml`), which
 > verifies the signature pinned to the claimed signer before any result is
-> counted (#1535). (This ingest verification is implemented but **currently fails closed** — the GP2 loader cannot yet parse the canonical `identityPattern`/`source` allowlist; tracked in [#1505](https://github.com/NVIDIA/aicr/issues/1505).) The ADR-007 `spec.maintainers` work (PR-D) is still future
+> counted (#1535). The ADR-007 `spec.maintainers` work (PR-D) is still future
 > state. Treat
 > proposed-only items below as design contract, not operational guide.
 

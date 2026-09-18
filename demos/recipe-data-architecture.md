@@ -112,6 +112,7 @@ This matches:
 ```yaml
   appliedOverlays:
     - base
+    - monitoring-hpa
     - eks
 ```
 
@@ -135,6 +136,7 @@ This matches:
 ```yaml
   appliedOverlays:
     - base
+    - monitoring-hpa
     - eks
     - eks-training
 ```
@@ -156,11 +158,13 @@ This matches all levels:
 ```yaml
   appliedOverlays:
     - base
+    - monitoring-hpa
+    - gb200-any
     - eks
     - eks-training
     - gb200-eks-training
     - gb200-eks-ubuntu-training
-    # Platform-specific overlays (e.g., kubeflow) would be applied here
+    - gb200-eks-ubuntu-training-kubeflow
 ```
 
 ## Deployment Order

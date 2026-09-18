@@ -12,6 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Fern's navigation manifest, and therefore the authoritative list of pages
+# Fern publishes (see tools/docs-published-files). A page missing here is not
+# published and not gated by the MDX checkers.
+#
+# Deliberately excluded:
+#   - docs/design/ and docs/conformance/ (mirrored in .lychee.toml)
+#   - docs/user/index.md and docs/integrator/index.md, whose link tables are
+#     superseded by the sections below (docs/contributor/index.md IS published,
+#     as Architecture Overview — it carries more than a link table)
+#   - docs/user/container-images.md and docs/user/component-version-matrix.md,
+#     which are generated with HTML-comment region markers that MDX cannot parse
 navigation:
   - section: Overview
     contents:
@@ -75,6 +86,8 @@ navigation:
         path: integrator/aks-gpu-setup.md
       - page: GKE GPU Setup
         path: integrator/gke-gpu-setup.md
+      - page: OKE GPU Setup
+        path: integrator/oke-gpu-setup.md
       - page: RKE2 VR200 Setup
         path: integrator/rke2-vr200-setup.md
       - page: k0s H200 Setup
@@ -112,6 +125,8 @@ navigation:
     contents:
       - page: Architecture Overview
         path: contributor/index.md
+      - page: Architecture Boundary Gate
+        path: contributor/architecture-gate.md
       - page: Recipes, Overlays, and Mixins
         path: contributor/recipe.md
       - page: Components

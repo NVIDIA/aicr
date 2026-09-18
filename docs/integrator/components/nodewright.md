@@ -24,7 +24,7 @@ configMap:
     service: eks
 ```
 
-Supported accelerators: `h100`, `gb200`
+Supported accelerators: see the generated table below.
 
 Integration notes:
   * If you provide a service it MUST exist in the [profiles service directory](https://github.com/NVIDIA/nodewright-packages/tree/main/nvidia-tuned/profiles/service)

@@ -4,7 +4,7 @@ Discover every container image and Helm chart a recipe needs, then mirror them
 into a private registry for air-gapped deployment. For the per-flag reference,
 see [CLI reference: aicr mirror list](cli-reference.md#aicr-mirror-list). For
 the static image inventory across all registered components, see
-[Container Image Inventory](container-images.md).
+[Container Image Inventory](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md).
 
 ## Overview
 
@@ -26,17 +26,17 @@ overlay. The output is available in four formats — two general-purpose
 > arbitrary template code from those charts.
 
 ```text
-                      ┌────────────────────-──┐
+                      ┌───────────────────────┐
   aicr recipe ───────▶│  aicr mirror list     │
   (or query params)   │  --format hauler|zarf │
-                      └──────────┬──────-─────┘
+                      └──────────┬────────────┘
                                  │
               ┌──────────────────┼──────────────────┐
               ▼                                     ▼
-     ┌────────────────┐                   ┌─────────--────────┐
+     ┌────────────────┐                   ┌───────────────────┐
      │  hauler store  │                   │  zarf package     │
      │  sync → copy   │                   │  create → mirror  │
-     └───────┬────────┘                   └────────┬──────--──┘
+     └───────┬────────┘                   └────────┬──────────┘
              │                                     │
              ▼                                     ▼
      ┌────────────────────────────────────────────────────┐
@@ -123,7 +123,7 @@ metadata:
 spec:
   charts:
     - name: gpu-operator
-      repoURL: oci://ghcr.io/nvidia
+      repoURL: https://helm.ngc.nvidia.com/nvidia
       version: v26.7.0
     # ...
 ```
@@ -178,25 +178,31 @@ The output is a `ZarfPackageConfig`:
 
 ```yaml
 apiVersion: zarf.dev/v1alpha1
-kind: ZarfPackageConfig
-metadata:
-  name: aicr
-  description: Container images and Helm charts for AICR recipe deployment
-  version: 0.0.1
 components:
-  - name: aicr-images
-    required: true
+  - charts:
+      - name: gpu-operator
+        namespace: gpu-operator
+        repoName: gpu-operator
+        url: https://helm.ngc.nvidia.com/nvidia
+        version: v26.7.0
+      # ...
     images:
       - nvcr.io/nvidia/gpu-operator:v26.7.0
       - registry.k8s.io/nfd/node-feature-discovery:v0.19.0
       # ...
-    charts:
-      - name: gpu-operator
-        url: oci://ghcr.io/nvidia/gpu-operator
-        version: v26.7.0
-        namespace: gpu-operator
-      # ...
+    name: aicr-images
+    required: true
+kind: ZarfPackageConfig
+metadata:
+  description: NVIDIA AI Cluster Runtime container images and Helm charts for air-gapped deployment
+  name: aicr
 ```
+
+Keys are sorted at every level: the renderer marshals through
+`serializer.MarshalYAMLDeterministic`, so given the same discovered inventory it
+produces byte-identical output. Discovery itself is best-effort and can omit a
+component's images without failing the command — see the completeness caveat
+under [Relationship to Container Image Inventory](#relationship-to-container-image-inventory).
 
 ### 2. Create the Zarf package
 
@@ -252,7 +258,7 @@ alias from the registry (e.g., `gpuoperator` for `gpu-operator`).
 
 ## Relationship to Container Image Inventory
 
-The [Container Image Inventory](container-images.md) is a static reference
+The [Container Image Inventory](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md) is a static reference
 generated from `recipes/registry.yaml` with default values. It lists every
 image across all registered components regardless of recipe.
 

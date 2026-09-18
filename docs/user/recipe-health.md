@@ -10,9 +10,9 @@ You may obtain a copy of the License at
 
 # Recipe Health
 
-This page reports the **structural health** of every recipe AICR can resolve — one row per leaf criteria combination (service × accelerator × OS × intent × platform), plus any non-leaf coordinate retained because it carries published dashboard evidence (a plain coordinate that gained a platform sibling keeps its row so its Evidence link is never silently dropped). It answers *"across the whole matrix, what is the current structural state of each recipe?"* and is the catalog-wide complement to per-recipe [conformance evidence](../design/007-recipe-evidence.md). For a family carrying an ADR-015 configuration profile (`gpuStack` on AKS and GKE), the row grades the composition resolved at the **declaration default** (`azure-managed` on AKS, `gke-default` on GKE); per-profile-value rows are a follow-up.
+This page reports the **structural health** of every recipe AICR can resolve — one row per leaf criteria combination (service × accelerator × OS × intent × platform), plus any non-leaf coordinate retained because it carries published dashboard evidence (a plain coordinate that gained a platform sibling keeps its row so its Evidence link is never silently dropped). It answers *"across the whole matrix, what is the current structural state of each recipe?"* and is the catalog-wide complement to per-recipe [conformance evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md). For a family carrying an ADR-015 configuration profile (`gpuStack` on AKS, GKE, and OKE), the row grades the composition resolved at the **declaration default** (`azure-managed` on AKS, `gke-default` on GKE, `oci-managed` on OKE); per-profile-value rows are a follow-up.
 
-The matrix is computed **hermetically and offline**: every signal is a pure read of the resolved recipe — no Helm render, no GPU, no cluster, no network. It is regenerated from the recipe catalog by `make recipe-health-docs` and is kept current by a weekly bot PR. `make recipe-health-check` is an advisory staleness check (it is **not** wired into `make qualify` or the merge gate). The full design is recorded in [ADR-009](../design/009-recipe-health-tracking.md).
+The matrix is computed **hermetically and offline**: every signal is a pure read of the resolved recipe — no Helm render, no GPU, no cluster, no network. It is regenerated from the recipe catalog by `make recipe-health-docs` and is kept current by a weekly bot PR. `make recipe-health-check` is an advisory staleness check (it is **not** wired into `make qualify` or the merge gate). The full design is recorded in [ADR-009](https://github.com/NVIDIA/aicr/blob/main/docs/design/009-recipe-health-tracking.md).
 
 ## What the columns mean
 
@@ -25,7 +25,7 @@ The matrix is computed **hermetically and offline**: every signal is a pure read
 
 > **Structural soundness is not a validation verdict.** A recipe that resolves cleanly is *structurally sound*, **not** *validated and performant*. Runtime/validation claims come only from signed conformance evidence, which is out of scope for this matrix today (see the Evidence column below).
 
-**chart_pinned (folded into Status).** One of the graded signals behind `Status` checks that every resolved Helm component references an explicit chart version, per [ADR-006](../design/006-image-pinning-policy.md). This is **layer 1 only** — the chart-version pin — *not* image-digest pinning, and it is a render-free read of the resolved recipe (it does not pull or template the chart).
+**chart_pinned (folded into Status).** One of the graded signals behind `Status` checks that every resolved Helm component references an explicit chart version, per [ADR-006](https://github.com/NVIDIA/aicr/blob/main/docs/design/006-image-pinning-policy.md). This is **layer 1 only** — the chart-version pin — *not* image-digest pinning, and it is a render-free read of the resolved recipe (it does not pull or template the chart).
 
 **Coverage** is a descriptor — it is *never* graded, so a deliberately minimal recipe is never penalized for declaring fewer checks. It is a compact per-phase summary of the **declared** validation checks, in the form `R:n D:n P:n C:n` — the count of named checks declared for the readiness, deployment, performance, and conformance phases respectively.
 
@@ -35,7 +35,7 @@ The link is constructed **hermetically and deterministically** from the recipe's
 
 > **Community-source posture is author-asserted provenance, not independently-verified correctness.** A coordinate's tab placement and any community-sourced results on the dashboard are declared by the signing author; corroboration counts agreement at the same AICR version but does not itself certify runtime correctness. Read the linked board accordingly.
 
-The deep-link is the current Evidence rendering. It is distinct from — and coexists with — [ADR-009](../design/009-recipe-health-tracking.md)'s deferred, verify-gated *in-cell freshness* state (`unattested` vs aged, derived from a signed attestation's `AttestedAt`): the link points at the live board, and an optional freshness token can later annotate the same cell without replacing the link. See also the [coverage matrix](coverage-matrix.md) for the complementary breadth view.
+The deep-link is the current Evidence rendering. It is distinct from — and coexists with — [ADR-009](https://github.com/NVIDIA/aicr/blob/main/docs/design/009-recipe-health-tracking.md)'s deferred, verify-gated *in-cell freshness* state (`unattested` vs aged, derived from a signed attestation's `AttestedAt`): the link points at the live board, and an optional freshness token can later annotate the same cell without replacing the link. See also the [coverage matrix](coverage-matrix.md) for the complementary breadth view.
 
 {/* BEGIN AICR-HEALTH */}
 ## Summary

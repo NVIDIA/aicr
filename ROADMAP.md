@@ -5,11 +5,12 @@ enhancements that continue after v1.
 
 ## v1 exit gates
 
-AICR v1 is blocked by two remaining outcomes:
+AICR v1 is defined by two outcomes:
 
 1. **Defensible API stability** — the CLI, REST API, Go SDK facade, bundle
    layout, and artifact schemas have explicit compatibility boundaries backed
-   by released baselines and merge-blocking compatibility gates.
+   by released baselines and merge-blocking compatibility gates. **Met**: all
+   four baselines are committed and gated (see below).
 2. **Sufficient validated coverage** — the existing recipe portfolio remains
    the supported baseline, GB300 coverage is published and validated, VR200 is
    available as Preview, and validation evidence is publicly verifiable.
@@ -31,16 +32,16 @@ Two distinct conditions must hold:
 - **Compatibility enforcement:** each surface has a committed baseline and a
   CI gate that fails on unintended breakage.
 
-| Surface | Functional scope | Remaining v1 work |
+| Surface | Functional scope | Baseline and gate |
 |---|---|---|
-| CLI flags and subcommands | Established | Commit the surface baseline and compatibility gate ([#2111](https://github.com/NVIDIA/aicr/issues/2111)) |
-| REST API | Established in `api/aicr/v1/server.yaml` | Commit the OpenAPI baseline and breaking-change gate ([#2112](https://github.com/NVIDIA/aicr/issues/2112)) |
-| Go SDK facade | Substantially complete | Complete the facade-only `snapshot → criteria → recipe → validate → bundle → verify` workflow ([#2016](https://github.com/NVIDIA/aicr/issues/2016)) |
-| Bundle layout and artifact schemas | Established, with maturity rollout governed by [ADR-022](docs/design/022-artifact-maturity-and-deprecation.md) | Commit layout/schema baselines and compatibility gates ([#2113](https://github.com/NVIDIA/aicr/issues/2113)) |
+| CLI flags and subcommands | Established | `pkg/cli/testdata/cli-surface.golden`, gated by `pkg/cli/surface_test.go` ([#2111](https://github.com/NVIDIA/aicr/issues/2111)) |
+| REST API | Established in `api/aicr/v1/server.yaml` | Committed OpenAPI baseline, gated by `make openapi-diff` ([#2112](https://github.com/NVIDIA/aicr/issues/2112)) |
+| Go SDK facade | Complete | Exported surface gated by `make api-diff` against the latest stable release ([#2016](https://github.com/NVIDIA/aicr/issues/2016)) |
+| Bundle layout and artifact schemas | Established, with maturity rollout governed by [ADR-022](docs/design/022-artifact-maturity-and-deprecation.md) | `pkg/bundler/testdata/layout/manifests/` and `api/aicr/v1/schemas/baseline/`, gated by `make test` ([#2113](https://github.com/NVIDIA/aicr/issues/2113)) |
 
-The cross-surface freeze and final closure are tracked by
-[#2370](https://github.com/NVIDIA/aicr/issues/2370). Artifact maturity and the
-project's v1 release remain separate axes.
+All four baselines are committed and their gates run in `make qualify` and the
+merge gate; the cross-surface freeze ([#2370](https://github.com/NVIDIA/aicr/issues/2370))
+is closed. Artifact maturity and the project's v1 release remain separate axes.
 
 ### Acceptance
 
