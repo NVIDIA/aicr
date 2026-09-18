@@ -103,7 +103,7 @@ pretending that the legacy `Recipe` input is distinct from the canonical
 | `RecipeResult` (default resolved recipe) | `v1alpha2` | `aicr.run/v1` | Public resolved artifact emitted to bundles; legacy `Recipe` input normalizes to this kind |
 | `RecipeCriteria` | `v1alpha2` | `aicr.run/v1` | Public recipe-resolution input shared by the CLI, REST API, and Go client |
 | `BundleProvenance` (`provenance.yaml`, `localformat.ProvenanceAPIVersion`) | `v1alpha2` | `aicr.run/v1` | Bundle-root audit document consumed by downstream tooling |
-| `BundleInfo` (`bundle-info.yaml`, `header.KindBundleInfo` / `header.StableGroupVersion`) | Not shipped | `aicr.run/v1` | Bundle-root build record consumed by `upgrade-check` and integrator automation; starts at its target under §7, with no alpha to retire |
+| `BundleInfo` (`bundle-info.yaml`, `header.KindBundleInfo` / `header.StableGroupVersion`) | Not shipped | `aicr.run/v1` | Bundle-root build record consumed by `upgrade-check` and integrator automation; small test-gated schema, additive-only by construction (`omitempty` throughout), inside the bundle attestation subject from day one |
 | `AICRConfig` | `v1alpha2` | `aicr.run/v1beta1` | Actively growing: #2026 bound 2 of 5 spec sections, #2245 binds the rest. Do not freeze a schema mid-expansion |
 | `RecipeMetadata`, `RecipeMixin` (catalog) | `v1alpha2` | `aicr.run/v1beta1` | Authoring schema exercised by 126 shipped catalog files (122 overlays, 4 mixins) |
 | `ComponentRegistry` | `v1alpha2` | `aicr.run/v1beta1` | Required root of an external `--data` catalog; authoring schema consumed by bundling and validation |
