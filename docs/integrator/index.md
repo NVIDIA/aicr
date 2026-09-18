@@ -26,6 +26,7 @@ This section is for integrators who:
 | [GKE GPU Setup](gke-gpu-setup.md) | GKE device-plugin ownership: the `gpuStack` profile, node-pool setup for both values, verification, and troubleshooting |
 | [OKE GPU Setup](oke-gpu-setup.md) | OKE GPU stack ownership: the `gpuStack` profile (two values), the device-plugin add-on / disable label, and bring-your-own-image pools |
 | [RKE2 VR200 Setup](rke2-vr200-setup.md) | Bare-metal RKE2 setup for the VR200 (Vera Rubin) NVL72 Preview coordinates: cluster prerequisites (K8s window, StorageClass, LoadBalancer, host `nvidia-imex` mask), Skyhook reboot behavior, and known gaps |
+| [k0s H200 Setup](k0s-h200-setup.md) | k0s setup for the H200 training Preview coordinate: host-provided driver posture, k0s's bundled containerd wiring, StorageClass note, and known gaps |
 | [Talos Integration](talos-integration.md) | Running AICR on Talos Linux |
 | [OpenShift Deployment](openshift.md) | OpenShift/OCP-specific Helm and OLM integration and two-phase operator deployment |
 | [Recipe Development](recipe-development.md) | Creating and modifying recipe metadata for custom environments |
