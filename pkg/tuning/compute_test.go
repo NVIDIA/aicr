@@ -43,14 +43,15 @@ func TestCompute_Structure(t *testing.T) {
 		{"bcm", "h100", "-", "nvidia-setup", ""},
 		{"eks", "a100", "h100", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "gb200", "-", "nvidia-setup", "nvidia-tuned"},
-		// GB300 wires the no-op placeholder: no setup or tuning package until a
-		// nodewright gb300 profile exists.
-		{"eks", "gb300", "-", "", ""},
+		// GB300 on EKS takes the shared tuning.yaml setup chain: nvidia-setup
+		// 0.8.0 added the eks-gb300 combination.
+		{"eks", "gb300", "-", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "h100", "-", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "h200", "h100", "nvidia-setup", "nvidia-tuned"},
 		{"eks", "rtx-pro-6000", "generic", "", "nvidia-tuned"},
-		// Generic bare-metal GB300 wires the no-op placeholder, same as EKS.
-		{"generic", "gb300", "-", "", ""},
+		// Bare-metal GB300 stays tuned-only: nvidia-setup ships no generic-* config,
+		// so the kernel comes from the host image.
+		{"generic", "gb300", "-", "", "nvidia-tuned"},
 		{"gke", "a100", "h100", "", "nvidia-tuning-gke"},
 		{"gke", "b200", "-", "", "nvidia-tuning-gke"},
 		{"gke", "gb200", "-", "", "nvidia-tuning-gke"},

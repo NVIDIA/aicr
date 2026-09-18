@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"maps"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -50,6 +51,8 @@ func init() {
 	registerCheck("CheckAcceleratedSelectorMissing", CheckAcceleratedSelectorMissing)
 	registerCheck("CheckHostMofedWithoutNetworkOperator", CheckHostMofedWithoutNetworkOperator)
 	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
+	registerCheck("CheckGB300HostKernelGranule", CheckGB300HostKernelGranule)
+	registerCheck("CheckNPDNotDuplicatingProviderNPD", CheckNPDNotDuplicatingProviderNPD)
 	registerCheck("CheckDriverOwnershipCoherence", CheckDriverOwnershipCoherence)
 	registerCheck("CheckMariaDBOperatorOwnershipCoherence", CheckMariaDBOperatorOwnershipCoherence)
 	registerCheck("CheckGKETCPXOInterfacesCoherence", CheckGKETCPXOInterfacesCoherence)
@@ -58,6 +61,7 @@ func init() {
 	registerCheck("CheckNVSentinelTracingEndpointRequired", CheckNVSentinelTracingEndpointRequired)
 	registerCheck("CheckNVSentinelPreflightDCGMReachable", CheckNVSentinelPreflightDCGMReachable)
 	registerCheck("CheckNVSentinelPreflightGangSchedulerRequired", CheckNVSentinelPreflightGangSchedulerRequired)
+	registerCheck("CheckNVSentinelNicHealthMonitorRequiresMetadataCollector", CheckNVSentinelNicHealthMonitorRequiresMetadataCollector)
 }
 
 // registerCheck is a helper to register validation functions from checks.go.
@@ -270,6 +274,169 @@ func CheckWildcardAcceleratedToleration(ctx context.Context, componentName strin
 	}
 
 	baseMsg := fmt.Sprintf("%s renders a wildcard (keyless) accelerated-node toleration", componentName)
+	slog.Warn(baseMsg,
+		logKeyComponent, componentName,
+		"conditions", conditions,
+	)
+	return []string{baseMsg}, nil
+}
+
+// npdQualifiedServices are the platforms on which installing
+// node-problem-detector has been verified safe: nothing else publishes its Node
+// Conditions, so AICR's instance is the only writer.
+//
+// Verified on live clusters (EKS, Kind) or from upstream packaging (RKE2).
+//
+// OKE is deliberately NOT here. Oracle ships oke-node-problem-detector in
+// kube-system, disabled behind the
+// oci.oraclecloud.com/oke-node-problem-detector-enabled node label. Observed
+// disabled on a live cluster, but that is a mutable, per-node setting an
+// operator can turn on at any time, before or after this bundle is installed,
+// and nothing at bundle time can see it. Permitting OKE would therefore rest on
+// a snapshot of state AICR does not control -- exactly the assumption this
+// allowlist exists to refuse.
+var npdQualifiedServices = map[recipe.CriteriaServiceType]bool{
+	recipe.CriteriaServiceEKS:  true,
+	recipe.CriteriaServiceKind: true,
+	recipe.CriteriaServiceRKE2: true,
+}
+
+// npdProviderRunsItsOwn are the platforms whose managed control plane already
+// runs NPD by default. A second instance competes for ownership of the same
+// Node Conditions and one silently loses its writes.
+var npdProviderRunsItsOwn = map[recipe.CriteriaServiceType]bool{
+	recipe.CriteriaServiceGKE: true,
+	recipe.CriteriaServiceAKS: true,
+}
+
+// CheckNPDNotDuplicatingProviderNPD blocks a bundle that would install
+// node-problem-detector where doing so is unsafe or unverified.
+//
+// An ALLOWLIST, not a denylist. NPD is a privileged DaemonSet that patches Node
+// status, and getting its ownership wrong fails silently -- two writers produce
+// flapping conditions with no error anywhere. So only platforms where this has
+// actually been checked are permitted; everything else is rejected with a
+// message saying what would settle it. A denylist would have let every
+// unexamined platform through by omission.
+//
+// Rejected, and why:
+//   - gke, aks: the provider already runs its own (npdProviderRunsItsOwn).
+//   - ocp: NPD needs a privileged SecurityContextConstraints binding that AICR
+//     does not ship, so the DaemonSet bundles cleanly and then fails admission.
+//   - os talos: recipes/mixins/os-talos.yaml relocates privileged components
+//     into privileged-* namespaces for Pod Security Admission. NPD is not in
+//     that list, so it would land in a restricted namespace and be denied.
+//   - anything else (lke, bcm, metal3, generic, k0s, ...): unverified.
+//   - no criteria at all: the platform is unknown, and checkConditions' "nil
+//     Criteria means condition not met" would skip the gate entirely. A
+//     hand-authored or already-hydrated RecipeResult legitimately carries no
+//     criteria (pkg/client/v1's loadedResultFromInternal), and that platform
+//     could be any of the above.
+func CheckNPDNotDuplicatingProviderNPD(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil {
+		return nil, nil
+	}
+
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil {
+		return nil, nil
+	}
+
+	// componentDisabled, not a per-key scan for "false": it resolves aliases in
+	// the bundler's own priority order, so a conflicting
+	// `--set npd:enabled=false --set node-problem-detector:enabled=true` cannot
+	// disarm the gate while the component is in fact still enabled.
+	keys := componentOverrideKeys(componentName, recipeResult.DataProvider())
+	if componentDisabled(ref, bundlerConfig, keys) {
+		return nil, nil
+	}
+
+	reject := func(reason string) ([]string, []error) {
+		err := aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s", componentName, reason))
+		slog.Warn(err.Error(), logKeyComponent, componentName)
+
+		return nil, []error{err}
+	}
+
+	if recipeResult.Criteria == nil {
+		return reject("installed but this recipe carries no criteria, so the target platform cannot be confirmed clear of a provider-installed node-problem-detector -- supply criteria, or disable it explicitly with --set once you have confirmed the platform")
+	}
+
+	service := recipeResult.Criteria.Service
+	switch {
+	case npdProviderRunsItsOwn[service]:
+		return reject(fmt.Sprintf("installed but %s already runs its own node-problem-detector by default; a second instance competes for ownership of the same Node Conditions and one silently loses its writes. Drop the npd mixin -- the platform's own NPD already publishes some of the conditions the nvsentinel-object-monitor policies read", service))
+	case service == recipe.CriteriaServiceOCP:
+		return reject("installed on OpenShift, where the privileged DaemonSet needs a SecurityContextConstraints binding that AICR does not ship; it would bundle cleanly and then be denied at admission")
+	case service == recipe.CriteriaServiceOKE:
+		return reject("installed on OKE, where Oracle ships its own oke-node-problem-detector in kube-system. It is disabled by default, behind the oci.oraclecloud.com/oke-node-problem-detector-enabled node label, but that label is operator-settable at any time and is not visible at bundle time -- so a second instance cannot be ruled out. Enable Oracle's instead, or disable node-problem-detector explicitly with --set if you have confirmed the label is unset and will stay so")
+	case !npdQualifiedServices[service]:
+		return reject(fmt.Sprintf("installed on %q, which has not been checked for a platform-provided node-problem-detector. Two instances fight over the same Node Conditions and one silently loses. Confirm the platform runs none, then add it to npdQualifiedServices", service))
+	case recipeResult.Criteria.OS == recipe.CriteriaOSTalos:
+		return reject("installed on Talos, where os-talos relocates privileged components into privileged-* namespaces for Pod Security Admission but does not relocate node-problem-detector; it would land in a restricted namespace and be denied at admission")
+	}
+
+	return nil, nil
+}
+
+// tuningEnabledKey is the nodewright-customizations value gating the
+// nvidia-tuned package. Absent or true renders it; only an explicit false
+// suppresses it, matching the Sprig-safe gate the tuning manifests use.
+const tuningEnabledKey = "tuningEnabled"
+
+// CheckGB300HostKernelGranule warns that the GB300 tuned profile assumes a
+// 64k-granule ARM64 host kernel. Scope it via registry conditions to the leaf
+// that has no nvidia-setup to pin one (service: generic, accelerator: gb300);
+// every other GB300 route runs nvidia-setup-kernel, which installs the pinned
+// 64k kernel itself.
+//
+// nvidia-gb300-performance sizes its hugepage pools for that granule
+// (hugepagesz=512M, and no 1G, which a 64k granule cannot register). A
+// 4k-granule host still boots and runs: Linux rejects the invalid hugepagesz
+// clause and silently drops the hugepages= count paired with it, so the node
+// comes up without the 512M pool the profile intended. That is a performance
+// regression rather than a failure, which is why the registry wires this at
+// severity: info — bundle time has no cluster-side signal to tell the two
+// apart, and blocking would refuse a configuration that works.
+//
+// A component disabled via --set, or one whose tuning is gated off with
+// tuningEnabled=false, renders no nvidia-tuned package and applies no profile,
+// so it is skipped. Both gates are read from the FINAL effective values
+// (recipe merge plus scalar --set and typed --set-json/--set-file, under the
+// canonical name and its registry aliases) rather than from the raw scalar
+// override map: a typed --set-json that suppresses the package must suppress
+// the advisory with it. The tuningEnabled comparison mirrors the manifest's
+// own `ne (toString ...) "false"` gate exactly, so the two cannot disagree.
+func CheckGB300HostKernelGranule(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if bundlerConfig == nil {
+		return nil, nil
+	}
+
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil {
+		return nil, nil
+	}
+
+	// Check conditions (e.g., service: generic, accelerator: gb300)
+	if !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+
+	keys := componentOverrideKeys(componentName, recipeResult.DataProvider())
+	if componentDisabled(ref, bundlerConfig, keys) {
+		return nil, nil
+	}
+
+	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, keys, "GB300 host kernel granule")
+	if err != nil {
+		return nil, []error{err}
+	}
+	if fmt.Sprint(values[tuningEnabledKey]) == overrideValueFalse {
+		return nil, nil
+	}
+
+	baseMsg := fmt.Sprintf("%s applies a tuned profile that sizes hugepages for a 64k-granule ARM64 host kernel", componentName)
 	slog.Warn(baseMsg,
 		logKeyComponent, componentName,
 		"conditions", conditions,
@@ -1632,7 +1799,7 @@ func CheckNVSentinelDriverLabelDetectable(ctx context.Context, componentName str
 		// remedy path is itself dynamic and an install-time edit can
 		// strip it.
 		if dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
-			[]string{"global.metadataCollector.enabled", "global.syslogHealthMonitor.enabled"},
+			[]string{nvsentinelMetadataCollectorEnabledPath, "global.syslogHealthMonitor.enabled"},
 			"cleared the driver-label gate (both label consumers are disabled, so "+
 				"nothing reads the label — an install-time edit re-enabling a consumer "+
 				"would recreate the silent 0-desired DaemonSet state of issue #2175, "+
@@ -1907,7 +2074,7 @@ func CheckNVSentinelRuntimeClassCoherence(ctx context.Context, componentName str
 			return nil, nil
 		}
 		if dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys,
-			[]string{"global.metadataCollector.enabled"},
+			[]string{nvsentinelMetadataCollectorEnabledPath},
 			"cleared the RuntimeClass-coherence gate (the metadata-collector "+
 				"subchart is disabled and its runtime class is not verifiably "+
 				"coherent — misaligned, unreadable, or itself declared dynamic — so "+
@@ -2099,6 +2266,199 @@ func CheckNVSentinelTracingEndpointRequired(ctx context.Context, componentName s
 		fmt.Sprintf("component %q: global.tracing.enabled=true but global.tracing.endpoint is empty; "+
 			"the chart renders an OTLP exporter with no destination and fails silently at runtime -- "+
 			"set --set nv-sentinel:global.tracing.endpoint=<host:port>", componentName))}
+}
+
+// nvsentinelNicHealthMonitorEnabledPath is the subchart condition
+// Chart.yaml gates nic-health-monitor on.
+const nvsentinelNicHealthMonitorEnabledPath = "global.nicHealthMonitor.enabled"
+
+// nvsentinelMetadataCollectorEnabledPath is the subchart condition
+// Chart.yaml gates metadata-collector on.
+const nvsentinelMetadataCollectorEnabledPath = "global.metadataCollector.enabled"
+
+// nicInclusionRegexOverridePath is the documented bypass for
+// nic-health-monitor's metadata-collector dependency: a manual device list
+// used instead of discovered inventory. Subchart-scoped, since
+// "nic-health-monitor" has no alias in the parent Chart.yaml.
+const nicInclusionRegexOverridePath = "nic-health-monitor.nicInclusionRegexOverride"
+
+// nicInclusionOverrideUsable reports whether an inclusion-regex override is
+// one nic-health-monitor will actually accept.
+//
+// The chart writes the value straight into config.toml, where the monitor
+// compiles every comma-separated pattern at startup and refuses to start on
+// one that does not compile, or on a list with no non-empty pattern at all
+// (upstream's validateInclusionRegexList). An override it rejects is not a
+// bypass for the missing metadata-collector inventory -- it is the same
+// missing inventory, in a crash loop. Empty patterns between separators are
+// skipped rather than rejected, matching upstream.
+func nicInclusionOverrideUsable(override string) bool {
+	if strings.TrimSpace(override) == "" {
+		return false
+	}
+
+	usable := false
+
+	for _, pattern := range strings.Split(override, ",") {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		if _, err := regexp.Compile(pattern); err != nil {
+			return false
+		}
+		usable = true
+	}
+
+	return usable
+}
+
+// nvsentinelSubchartRenders reports whether a Chart.yaml dependency
+// condition at global.<key>.enabled leaves its subchart rendering.
+//
+// Dependency conditions are strictly boolean, unlike a template's
+// `{{ if }}` -- helmTruthy is the wrong reader here. Helm resolves the
+// path and, on anything that is not a Go bool, logs "returned non-bool
+// value", ignores the condition, and renders the subchart anyway
+// (verified against chart v1.20.0: `--set global.nicHealthMonitor.enabled=0`
+// still renders nic-health-monitor, while `=false` does not). So only the
+// literal false switches a subchart off, and only a well-formed table can
+// carry it. present is false when the key is absent, leaving the chart's
+// own default to decide.
+func nvsentinelSubchartRenders(values map[string]any, key string) (renders, present bool) {
+	global, ok := values["global"].(map[string]any)
+	if !ok {
+		return false, false
+	}
+	sectionRaw, present := global[key]
+	if !present {
+		return false, false
+	}
+	section, isMap := sectionRaw.(map[string]any)
+	if !isMap {
+		// A non-table section (--set-json global.<key>=true, =null, a
+		// string) leaves the condition path unresolvable, so Helm warns
+		// and falls back to rendering the dependency. Reading it as
+		// "absent, therefore off" would let exactly that through.
+		return true, true
+	}
+	raw, ok := section["enabled"]
+	if !ok {
+		return false, false
+	}
+	enabled, isBool := raw.(bool)
+
+	return !isBool || enabled, true
+}
+
+// CheckNVSentinelNicHealthMonitorRequiresMetadataCollector blocks a bundle
+// that enables the nic-health-monitor subchart without the NIC inventory it
+// depends on.
+//
+// nic-health-monitor's link-state and link-counter checks run against the
+// GPU-to-NIC topology metadata-collector writes to
+// /var/lib/nvsentinel/gpu_metadata.json; the one documented bypass is an
+// operator-supplied nicInclusionRegexOverride, which substitutes a manual
+// device list and forfeits the automatic management-NIC exclusion with it.
+// With metadata-collector disabled and no override the DaemonSet renders,
+// deploys, and discovers zero devices, which nothing downstream reports.
+// Registration details (severity, no-op conditions) are in
+// recipes/registry.yaml.
+func CheckNVSentinelNicHealthMonitorRequiresMetadataCollector(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if recipeResult == nil || !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+	sentinelRef := recipeResult.GetComponentRef(componentName)
+	if sentinelRef == nil {
+		return nil, nil
+	}
+	provider := recipeResult.DataProvider()
+	sentinelKeys := componentOverrideKeys(componentName, provider)
+	if componentDisabled(sentinelRef, bundlerConfig, sentinelKeys) {
+		return nil, nil
+	}
+
+	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, sentinelKeys,
+		"NVSentinel nic-health-monitor metadata-collector dependency")
+	if err != nil {
+		return nil, []error{err}
+	}
+
+	// Absent means the chart default, which is off for nicHealthMonitor and
+	// on for metadataCollector -- hence the asymmetry in how each is read.
+	monitorEnabled, _ := nvsentinelSubchartRenders(values, "nicHealthMonitor")
+	collectorDisabled := nvsentinelMetadataCollectorDisabled(values)
+	override, _, overrideValid := resolvedStringValue(values, nicInclusionRegexOverridePath)
+	overrideEmpty := overrideValid && strings.TrimSpace(override) == ""
+
+	// Relation-aware dynamic guard: the broken state needs the monitor
+	// enabled, the collector disabled, and no usable override. A --dynamic
+	// declaration on any one of them is only a hazard when the others can
+	// still reach their bad polarity after an install-time edit, so each
+	// term below is "could be bad", not "is bad". Blocking any dynamic
+	// path unconditionally would reject safe configurations — e.g. a
+	// dynamic monitor toggle alongside a statically enabled collector can
+	// never reach the broken state.
+	monitorDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{nvsentinelNicHealthMonitorEnabledPath})) > 0
+	collectorDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{nvsentinelMetadataCollectorEnabledPath})) > 0
+	overrideDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{nicInclusionRegexOverridePath})) > 0
+	// Only a readable, usable, non-dynamic override rescues the broken
+	// state. Empty cannot, a value the operator can still blank cannot,
+	// an unreadable one cannot, and neither can one the monitor will
+	// reject at startup.
+	overrideRescues := overrideValid && !overrideDynamic && nicInclusionOverrideUsable(override)
+	if monitorDynamic || collectorDynamic || overrideDynamic {
+		if (monitorDynamic || monitorEnabled) && (collectorDynamic || collectorDisabled) && !overrideRescues {
+			var paths []string
+			if monitorDynamic {
+				paths = append(paths, nvsentinelNicHealthMonitorEnabledPath)
+			}
+			if collectorDynamic {
+				paths = append(paths, nvsentinelMetadataCollectorEnabledPath)
+			}
+			if overrideDynamic {
+				paths = append(paths, nicInclusionRegexOverridePath)
+			}
+			dynMsgs := nvsentinelDynamicGuardViolations(bundlerConfig, componentName, sentinelKeys, paths,
+				"decides whether nic-health-monitor runs, whether metadata-collector can supply the NIC "+
+					"inventory it reads, or whether an override replaces that inventory — and the other fields "+
+					"cannot rule out an enabled monitor with nothing to discover after an install-time edit")
+			for _, msg := range dynMsgs {
+				slog.Warn(msg, logKeyComponent, componentName)
+			}
+			return dynMsgs, nil
+		}
+	}
+
+	if !monitorEnabled || !collectorDisabled {
+		return nil, nil
+	}
+	// Fail closed on an unreadable override: this gate exists to catch a
+	// monitor that cannot discover devices, and a non-string override
+	// leaves that unverifiable rather than merely unset.
+	if !overrideValid {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s must be a string", componentName, nicInclusionRegexOverridePath))}
+	}
+	if nicInclusionOverrideUsable(override) {
+		return nil, nil
+	}
+	// A present-but-unusable override gets its own message: "set the
+	// override" would be unhelpful advice to someone who already has.
+	if !overrideEmpty {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s is set to %q, which nic-health-monitor rejects at startup -- "+
+				"every comma-separated pattern must compile and at least one must be non-empty. "+
+				"The monitor would crash-loop with the same missing inventory it is meant to work around",
+				componentName, nicInclusionRegexOverridePath, override))}
+	}
+
+	return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+		fmt.Sprintf("component %q: %s=true but global.metadataCollector.enabled=false and %s is unset; "+
+			"nic-health-monitor reads its NIC inventory from metadata-collector and has no devices to check "+
+			"without it -- enable metadata-collector, or set --set nv-sentinel:%s=<regex>",
+			componentName, nvsentinelNicHealthMonitorEnabledPath, nicInclusionRegexOverridePath,
+			nicInclusionRegexOverridePath))}
 }
 
 // CheckMariaDBOperatorOwnershipCoherence enforces the snapshot-driven

@@ -83,10 +83,23 @@ PREFLIGHT_IMAGES=(
 # mixin-gated subchart rather than a mixin-gated values override.
 OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.20.0"
 
+# The images the nvsentinel-nic-health-monitor mixin pulls in. The subchart
+# image is invisible to the static BOM for the same reason as the object
+# monitor's. The init-container image is the chart's global.initContainerImage
+# and is versioned independently of nvsentinel, so its tag does not move with
+# defaultVersion; discovery walks a different path for init containers than
+# for main ones, so asserting only the subchart image would let an
+# init-container regression through.
+NIC_HEALTH_MONITOR_IMAGES=(
+    "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.20.0"
+    "docker.io/bitnamilegacy/os-shell:12-debian-12-r30"
+)
+
 # Every mixin-gated image, asserted in all three `mirror list` formats.
 MIXIN_IMAGES=(
     "${OBJECT_MONITOR_IMAGE}"
     "${PREFLIGHT_IMAGES[@]}"
+    "${NIC_HEALTH_MONITOR_IMAGES[@]}"
 )
 
 # The subset carried through the Hauler sync, Zarf package and registry
@@ -212,7 +225,7 @@ REGISTRY_EOF
     # constraints and validation cannot drift out of sync with the real one;
     # the only difference is the composed mixin. An external overlay of the
     # same name replaces its embedded counterpart.
-    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight"]' \
+    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor"]' \
         "${ROOT}/recipes/overlays/h100-kind-training.yaml" \
         > "${data_dir}/overlays/h100-kind-training.yaml"
 
@@ -242,6 +255,9 @@ REGISTRY_EOF
     fi
     if ! grep -q "processingStrategy" "${WORK}/recipe.yaml"; then
         err "nvsentinel-preflight mixin did not apply -- the recipe carries no preflight override"
+    fi
+    if ! grep -q "nicHealthMonitor" "${WORK}/recipe.yaml"; then
+        err "nvsentinel-nic-health-monitor mixin did not apply -- the recipe carries no nicHealthMonitor override"
     fi
     msg "Recipe generated at ${WORK}/recipe.yaml"
 }

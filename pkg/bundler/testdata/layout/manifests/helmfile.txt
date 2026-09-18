@@ -7,6 +7,7 @@
 002-nfd/upstream.env
 002-nfd/values.yaml
 README.md
+bundle-info.yaml
 checksums.txt
 helmfile.yaml
 recipe.yaml

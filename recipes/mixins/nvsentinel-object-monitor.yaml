@@ -157,3 +157,92 @@ spec:
                 recommendedAction: CONTACT_SUPPORT
                 errorCode:
                   - NETWORK_OPERATOR_POD_UNHEALTHY
+            # NPD policies (#2614). These read Node Conditions published by
+            # node-problem-detector, not pods, so they fire only where NPD
+            # runs: GKE and AKS run their own, elsewhere the npd mixin
+            # installs it. Condition type/status/reason triples verified
+            # against the pinned image's own config/kernel-monitor.json and
+            # config/readonly-monitor.json
+            # (registry.k8s.io/node-problem-detector:v1.35.1).
+            #
+            # processingStrategy: STORE_ONLY on all three, deliberately and
+            # unlike the operator policies above: upstream recommends
+            # REPLACE_VM, the most destructive action in the pipeline, and
+            # that stays unvalidated until these have run on real clusters.
+            # STORE_ONLY records the event without acting on it. Note two
+            # upstream caveats that make early validation important: a
+            # SystemLogMonitor permanent condition latches after the fault is
+            # repaired, and restarting NPD resets conditions, which a
+            # consumer can read as recovery.
+            - name: NPDXfsShutdown
+              enabled: true
+              resource:
+                group: ""
+                version: v1
+                kind: Node
+              predicate:
+                expression: |
+                  has(resource.status) && has(resource.status.conditions) &&
+                  resource.status.conditions.exists(c,
+                    c.type == 'XfsShutdown' &&
+                    c.status == 'True' &&
+                    has(c.reason) && c.reason == 'XfsHasShutdown'
+                  )
+              nodeAssociation:
+                expression: resource.metadata.name
+              healthEvent:
+                componentClass: Node
+                isFatal: true
+                message: "Node Problem Detector reported an XFS filesystem shutdown"
+                recommendedAction: REPLACE_VM
+                errorCode:
+                  - NPD_XFS_SHUTDOWN
+                processingStrategy: STORE_ONLY
+            - name: NPDCperHardwareErrorFatal
+              enabled: true
+              resource:
+                group: ""
+                version: v1
+                kind: Node
+              predicate:
+                expression: |
+                  has(resource.status) && has(resource.status.conditions) &&
+                  resource.status.conditions.exists(c,
+                    c.type == 'CperHardwareErrorFatal' &&
+                    c.status == 'True' &&
+                    has(c.reason) && c.reason == 'CperHardwareErrorFatal'
+                  )
+              nodeAssociation:
+                expression: resource.metadata.name
+              healthEvent:
+                componentClass: Node
+                isFatal: true
+                message: "Node Problem Detector reported a fatal UEFI CPER hardware error"
+                recommendedAction: REPLACE_VM
+                errorCode:
+                  - NPD_CPER_HARDWARE_ERROR_FATAL
+                processingStrategy: STORE_ONLY
+            - name: NPDReadonlyFilesystem
+              enabled: true
+              resource:
+                group: ""
+                version: v1
+                kind: Node
+              predicate:
+                expression: |
+                  has(resource.status) && has(resource.status.conditions) &&
+                  resource.status.conditions.exists(c,
+                    c.type == 'ReadonlyFilesystem' &&
+                    c.status == 'True' &&
+                    has(c.reason) && c.reason == 'FilesystemIsReadOnly'
+                  )
+              nodeAssociation:
+                expression: resource.metadata.name
+              healthEvent:
+                componentClass: Node
+                isFatal: true
+                message: "Node Problem Detector reported a read-only root filesystem"
+                recommendedAction: REPLACE_VM
+                errorCode:
+                  - NPD_READONLY_FILESYSTEM
+                processingStrategy: STORE_ONLY

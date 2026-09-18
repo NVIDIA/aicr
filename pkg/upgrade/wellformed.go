@@ -250,6 +250,23 @@ func checkStepGroups(where string, t *Transition) []string {
 // checkPinCeiling implements rule 2. It fires per transition, so a record
 // carrying only a replaces block is untouched: it has no `to` to compare.
 //
+// Only safe is held to the pin. ADR-021 originally held every verdict to it,
+// reasoning that an author cannot have read the migration notes for a version
+// nobody has released. That reasoning covers safe and only safe: safe is the
+// vouching verdict, and vouching past what AICR ships is the false-confidence
+// failure the ADR exists to prevent. manual and blocked are warnings carrying
+// instructions, and holding those to the pin forced the wrong order of work —
+// bump first, document after — when the order that actually qualifies an
+// upgrade is to read the migration notes, write the record, then bump. A
+// component AICR deliberately holds below a known-breaking release is the case
+// that exposed this: the record most worth having described the release AICR
+// would not ship, so the rule forbade exactly the guidance operators needed.
+// Over-warning is the safe direction; a manual or blocked record reaching
+// forward can never read as a pass.
+//
+// The obligation stays self-renewing without this: rule 3 fails any bump that
+// leaves a from gap below the new pin, which is what forces a record back open.
+//
 // The non-comparable-pin failure is an addition to ADR-021 rather than a
 // transcription of it. The ADR assigns such a pin the unversioned verdict at
 // check time and does not make it an authoring error; failing closed here means
@@ -287,6 +304,11 @@ func checkPinCeiling(where string, t *Transition, pin string) []string {
 	if b.upper.unbounded {
 		return v
 	}
+	// Everything below compares the ceiling against the pin, which only a
+	// vouching verdict owes an answer to.
+	if t.Verdict != VerdictSafe {
+		return v
+	}
 	if strings.Contains(pin, "+") {
 		return append(v, fmt.Sprintf(
 			"%s is pinned at %q, which carries build metadata; semver orders build metadata as equal, so such a bump would move past no ceiling",
@@ -300,7 +322,7 @@ func checkPinCeiling(where string, t *Transition, pin string) []string {
 	}
 	if b.upper.ver.Compare(pinVer) > 0 {
 		v = append(v, fmt.Sprintf(
-			"%s has a to ceiling of %s which reaches past the pinned version %s; widen from backward instead",
+			"%s is safe with a to ceiling of %s which reaches past the pinned version %s; widen from backward instead, or say manual or blocked if this is guidance written ahead of the bump",
 			where, b.upper.ver, pinVer))
 	}
 	return v

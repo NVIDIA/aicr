@@ -83,6 +83,7 @@ jobs:
       actions: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.actions }}
       deps: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.deps }}
       renovate: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.renovate }}
+      settings: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.settings }}
       bom: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.bom }}
       tuning: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.tuning }}
       notices: ${{ github.event_name == 'push' && 'true' || steps.changes.outputs.notices }}
@@ -146,6 +147,15 @@ jobs:
               # Make target or its pinned image trigger the gate.
               - '.github/renovate.json5'
               - 'Makefile'
+            settings:
+              # Inputs to the checksum-freshness gate. The pins live in
+              # .settings.yaml and the refresh scripts are what re-derive them,
+              # so a change to either can leave a version pinned against a
+              # digest that describes a different artifact. The checker itself
+              # is watched so a change to it re-runs its own gate.
+              - '.settings.yaml'
+              - 'tools/update-*-checksums'
+              - 'tools/check-settings-checksums'
             bom:
               # Inputs to the committed-BOM version-freshness check. The full
               # `tests` job already runs it for code changes, but a docs-only
@@ -518,6 +528,60 @@ jobs:
       - run: echo "No Renovate config changes — validation not required"
 
   # ---------------------------------------------------------------------------
+  # .settings.yaml checksum freshness
+  #
+  # Each checksum pin is kept in step with its version pin by a
+  # tools/update-*-checksums script wired to Renovate postUpgradeTasks. A hook
+  # that runs and *fails* leaves the new version pinned against the old digest,
+  # and Renovate surfaces that only as a warning in the PR body.
+  #
+  # Whether that got caught before merge depended on which consumer read the
+  # pin: helmfile/chainsaw digests feed setup-build-tools on PR-gating jobs and
+  # fail there, but helm_diff_checksums is read solely by
+  # tests/uat/lib/phases.sh, so a stale helm-diff pin passed every PR check and
+  # would first surface in nightly UAT across every cloud. #2801 shipped that
+  # exact pair with a fully green check run.
+  #
+  # This closes it for every pinned tool at once, and for humans as well as
+  # bots — the failure mode is a property of the file, not of who edited it.
+  # ---------------------------------------------------------------------------
+
+  settings-checksums:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.settings == 'true'
+    runs-on: ubuntu-latest
+    # Sized from the check's own worst case, not from how long it normally
+    # takes (~1 min). It runs 7 refreshers sequentially and each makes 2-3 curl
+    # calls capped at --retry-max-time 180, so a sustained github.com blip can
+    # legitimately burn ~45 minutes before every call has given up. The budget
+    # has to clear that, because a timeout is reported as `cancelled`, the gate
+    # treats `cancelled` exactly like `failure`, and the author then sees a bare
+    # Actions timeout with none of this check's own diagnostics — which is the
+    # one failure mode it cannot explain. Letting it run to completion turns
+    # that into an explicit "could not be verified" message naming the tool.
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          # The check reads the previous version pins from HEAD^ to tell a
+          # bumped-but-unrefreshed pin apart from upstream changing bytes under
+          # a pin nobody touched. On a pull_request the checked-out ref is the
+          # merge commit, whose first parent is the base tip; on a push to main
+          # it is the preceding commit. Depth 2 is the minimum that resolves it.
+          fetch-depth: 2
+      - name: Verify checksum pins match their pinned versions
+        run: make check-settings-checksums
+
+  settings-checksums-skip:
+    needs: [check-paths]
+    if: needs.check-paths.outputs.settings != 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: echo "No .settings.yaml or refresh-script changes — checksum freshness not required"
+
+  # ---------------------------------------------------------------------------
   # Docs parser gates — parse every Fern-published doc as MDX and every YAML
   # fence under docs/ as YAML.
   #
@@ -752,6 +816,8 @@ jobs:
       - verify-licenses-skip
       - verify-renovate
       - verify-renovate-skip
+      - settings-checksums
+      - settings-checksums-skip
       - docs-mdx
       - docs-mdx-skip
       - bom-freshness

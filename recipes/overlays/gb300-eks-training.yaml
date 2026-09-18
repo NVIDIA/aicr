@@ -90,20 +90,28 @@ spec:
           kernelModuleConfig:
             name: nvidia-kernel-module-params
 
-    # GB300 node tuning is deferred: nodewright ships no gb300 profile, and the
-    # gb200 profile's baseline has not been validated against GB300's Grace
-    # ARM64 64KB-page kernel (enabling it there would also require
-    # kernelAllowNewer: true). Until a GB300 profile exists, wire the documented
-    # no-op placeholder — it establishes the Skyhook CR (autoTaint, tolerations,
-    # node selectors from the --accelerated-node-* flags) while applying no
-    # tuning packages.
+    # GB300 takes the shared tuning.yaml chain (nvidia-setup-kernel ->
+    # nvidia-tuned -> nvidia-setup-full), same as gb200. nvidia-setup 0.8.0 added
+    # the eks-gb300 combination; before that the setup packages failed on
+    # accelerator=gb300 and this leaf ran tuning-gb300.yaml (nvidia-tuned alone).
     #
-    # To turn training tuning on later, swap the manifest for tuning.yaml and
-    # set the profile overrides (service/accelerator/intent).
+    # The setup chain is what makes the tuned profile correct here, not just
+    # extra host prep: nvidia-gb300-performance sizes its hugepages for a 64k
+    # granule (hugepagesz=512M, and no 1G, which a 64k granule cannot register),
+    # and nvidia-setup-kernel installs the pinned kernel, which resolves to
+    # 6.17.0-1019-aws-64k on arm64. Running the profile on a 4k-granule kernel
+    # would get the 512M clause rejected at boot and its hugepages= dropped.
+    #
+    # multiNodeTraining is a shim onto nvidia-gb300-performance in nvidia-tuned
+    # 0.10.0; the performance profile is the tuning that actually applies.
     - name: nodewright-customizations
       type: Helm
       manifestFiles:
-        - components/nodewright-customizations/manifests/no-op.yaml
+        - components/nodewright-customizations/manifests/tuning.yaml
+      overrides:
+        service: eks
+        accelerator: gb300
+        intent: multiNodeTraining
       dependencyRefs:
         - nodewright-operator
 

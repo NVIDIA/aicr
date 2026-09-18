@@ -54,16 +54,23 @@ func TestNVSentinelObjectMonitor_PolicyPredicates_MatchNVSentinelSemantics(t *te
 	komValues, _ := nvsentinelRef.Overrides["kubernetes-object-monitor"].(map[string]any)
 	policies, _ := komValues["policies"].([]any)
 
+	// Pod policies only. The mixin also carries Node-kind NPD policies, whose
+	// fixtures and semantics are entirely different; they are exercised by
+	// TestNVSentinelObjectMonitor_NPDPolicyPredicates.
 	predicates := map[string]string{}
 	for _, p := range policies {
 		policy := p.(map[string]any)
+		resource, _ := policy["resource"].(map[string]any)
+		if kind, _ := resource["kind"].(string); kind != "Pod" {
+			continue
+		}
 		name, _ := policy["name"].(string)
 		predicate, _ := policy["predicate"].(map[string]any)
 		expr, _ := predicate["expression"].(string)
 		predicates[name] = expr
 	}
 	if len(predicates) != 2 {
-		t.Fatalf("expected 2 policy predicates, got %d: %v", len(predicates), predicates)
+		t.Fatalf("expected 2 Pod policy predicates, got %d: %v", len(predicates), predicates)
 	}
 
 	env, err := cel.NewEnv(

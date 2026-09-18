@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **48**
-- Unique images: **112**
+- Components: **50**
+- Unique images: **113**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -38,6 +38,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
 | cert-manager-ocp | manifest | — | — | 0 |
 | cert-manager-ocp-olm | manifest | — | — | 0 |
+| dra-node-labeler | manifest | — | — | 1 |
 | dranet | manifest | — | — | 1 |
 | dynamo-platform | helm | dynamo-platform | 1.4.2 | 1 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
@@ -64,6 +65,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nfd | helm | node-feature-discovery | 0.19.0 | 1 |
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
+| node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
 | nodewright-customizations | manifest | — | — | 6 |
 | nodewright-operator | helm | nodewright | v0.17.1 | 3 |
 | nvcre | helm | cluster-readiness-engine | v0.2.0 | 1 |
@@ -127,6 +129,10 @@ _No images extracted._
 
 _No images extracted._
 
+### dra-node-labeler
+
+- `docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
+
 ### dranet
 
 - `registry.k8s.io/networking/dranet:stable@sha256:3248d8a520584100a5e87a2b92039591ea3b83a5492cc3e2d881b20d3b18ada6`
@@ -156,7 +162,7 @@ _No images extracted._
 
 - `gcr.io/gke-release/nri-device-injector:1.0.25-gke.6@sha256:7704e2bd74b8edbb76b6913c7904cc2362f1fa887c4d4aba7b19778ea353537c`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
-- `ubuntu:26.04@sha256:5cf058a7d21293819d67c8514b422f782570e5f5126126201d0f1bcbb74f6414`
+- `ubuntu:26.04@sha256:9559ceb7c21e528e233e8dff26a0fb2682f4094cce06176eeb075d87a22b31de`
 - `us-docker.pkg.dev/gce-ai-infra/gpudirect-tcpxo/nccl-plugin-gpudirecttcpx-dev:v1.0.15@sha256:4c9f0de3f39455a2ea35e844e0fc92564ca5629f6b03250fde40e8160719dae4`
 
 ### gpu-operator
@@ -285,12 +291,16 @@ _No images extracted._
 
 _No images extracted._
 
+### node-problem-detector
+
+- `registry.k8s.io/node-problem-detector/node-problem-detector:v1.35.1`
+
 ### nodewright-customizations
 
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.3.0@sha256:f17c951d60b519d097c20a3d9f49668f043a996adb31b9bb4db24a112a8f60a2`
-- `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.5.0@sha256:f3994267c9b5e62fb7720012dcd4d473fc2f8474f4276e203bba842c970307ad`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.8.0@sha256:1551abdd54476f6bddce863d383903a0a76f8a91bb4daa53c4f3c9490b980dae`
+- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.10.0@sha256:124f3bdedbb651125cec1bf20d3e2f7fcbbe10588c44f36d8e5680b38b9ef8f6`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.3.2@sha256:a8bdca40dbe36de9d7a13e6afada49870714784fd9a3b9ce08717d675978c2b6`
-- `ghcr.io/nvidia/nodewright-packages/nvidia-tuned:0.9.0@sha256:a33d0d5e0a0c7f192a34042f7ff14b7a98f10bae97bb4cf820ea9cd0ce013320`
 - `ghcr.io/nvidia/nodewright-packages/nvidia-tuning-gke:0.1.2@sha256:6671d49f006afdbeefd8858f1fa1216f7748205bc42edab3340210a2cc459a81`
 - `ghcr.io/nvidia/skyhook-packages/shellscript:1.1.1`
 
@@ -356,7 +366,7 @@ _No images extracted._
 
 ### slinky-topograph
 
-- `ghcr.io/dsx-ai-factory/topograph:v1.0.0`
+- `ghcr.io/nvidia/topograph:v1.0.0`
 
 ### slurm-accounting-mariadb
 
@@ -387,14 +397,15 @@ Air-gapped OpenShift deployments must separately mirror the relevant Red Hat cer
 
 The trade-off is intentional. Pinning an image gives reproducibility; deferring to the upstream chart lets security patches flow without an AICR release. The split is policy, not oversight — see the [supply chain epic](https://github.com/NVIDIA/aicr/issues/739) for how each component's policy is being made explicit.
 
-**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Three known cases, none counted in the `nvsentinel` row's image count above:
+**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Four known cases, none counted in the `nvsentinel` row's image count above. Three set a `global.*` toggle:
 
 - The [`nvsentinel-observability` mixin](component-catalog.md#audit-logging-and-tracing) sets `global.auditLogging.enabled: true`, which conditionally adds a `fix-audit-log-permissions` init container (`docker.io/bitnamilegacy/os-shell:12-debian-12-r30`) to the `platform-connectors` DaemonSet and `labeler` Deployment. It is a third-party image AICR does not otherwise mirror.
 - The [`nvsentinel-object-monitor` mixin](component-catalog.md#kubernetes-object-monitor) sets `global.kubernetesObjectMonitor.enabled`, turning on the chart's `kubernetes-object-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.20.0`. That image is in AICR's weekly image scan despite not being built here, since nothing else would surface a CVE in it.
+- The [`nvsentinel-nic-health-monitor` mixin](component-catalog.md#nic-and-fabric-fault-detection) sets `global.nicHealthMonitor.enabled`, turning on the chart's `nic-health-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.20.0`. Its `chown` init container reuses `docker.io/bitnamilegacy/os-shell:12-debian-12-r30` — the same third-party image the observability mixin above already pulls in, not a second one. Unlike the other two, this mixin is referenced by the shipped `aks` and `oke-ol` overlays, so every AKS and OKE recipe deploys these images; the other families do not.
 
-A recipe composing any of these mixins **with `nvsentinel` still enabled** adds these images to what it deploys and mirrors; `aicr bundle`/`aicr mirror` on such a recipe surfaces them even though this static BOM cannot. A chain that disables `nvsentinel` (the OCP overlay, for example) can compose a mixin and ship neither.
+A recipe composing any of these mixins **with `nvsentinel` still enabled** adds that mixin's images to what it deploys and mirrors; `aicr bundle`/`aicr mirror` on such a recipe surfaces them even though this static BOM cannot. A chain that disables `nvsentinel` (the OCP overlay, for example) can compose a mixin and ship none of them.
 
-The `nvsentinel-preflight` mixin (see [Preflight Checks](component-catalog.md#preflight-checks)) is the third case. Setting `global.preflight.enabled: true` on `nvsentinel` adds four images, all from `ghcr.io/nvidia/nvsentinel/` at the chart's own version and therefore already covered by the NVIDIA mirroring path — but none of them appear in the `nvsentinel` row above:
+The `nvsentinel-preflight` mixin (see [Preflight Checks](component-catalog.md#preflight-checks)) is the fourth case. Setting `global.preflight.enabled: true` on `nvsentinel` adds four images, all from `ghcr.io/nvidia/nvsentinel/` at the chart's own version and therefore already covered by the NVIDIA mirroring path — but none of them appear in the `nvsentinel` row above:
 
 | Image | Role |
 |---|---|

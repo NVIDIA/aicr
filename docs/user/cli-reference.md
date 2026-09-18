@@ -519,6 +519,8 @@ node shape the resolved recipe targets. See
 
 > **`--service rke2` and `--accelerator vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence at [validation.aicr.run](https://validation.aicr.run/) for current coverage.
 
+> **`--service k0s` is Preview**, covering the single `k0s / h200 / ubuntu / training` coordinate. See [k0s H200 Setup](../integrator/k0s-h200-setup.md) for its prerequisites and known gaps.
+
 **Examples:**
 ```shell
 # Basic recipe for Ubuntu on EKS with H100
@@ -1029,8 +1031,12 @@ echo "gpu_driver_version = \"${DRIVER_VERSION}\""
 # H100: real tuning packages (kernel setup, nvidia-tuned, full setup)
 aicr query --service eks --accelerator h100 --intent training \
   --selector components.nodewright-customizations.values
-# GB200: same value structure, but manifest renders a no-op (ARM64 packages pending)
+# GB200: same manifest and value structure; the accelerator/intent overrides
+# select the gb200 profile instead
 aicr query --service eks --accelerator gb200 --intent training \
+  --selector components.nodewright-customizations.values
+# GB300 on EKS: same shared setup-and-tuning manifest as gb200
+aicr query --service eks --accelerator gb300 --intent training \
   --selector components.nodewright-customizations.values
 
 # Watch constraints tighten as you add specificity
@@ -1553,7 +1559,7 @@ The report still reports a **breaking boundary** (a major bump, a minor bump whi
 
 `blocked` and `unknown` say opposite things. `blocked` means AICR has something to tell you and a version to stop at: read it and act on it. `unknown` means AICR has nothing for you: read the component's own upstream release notes and decide. Neither is a pass.
 
-**Rollout note: expect red today.** Exactly one registry component ships a transition record so far, so most components that change version report `unknown` and the check exits non-zero on most comparisons. That is a coverage problem being worked ([#2535](https://github.com/NVIDIA/aicr/issues/2535) makes records mandatory per pin bump), not a tool limitation, and it shrinks as records are authored. Use `--fail-on-error=false` if you want the report without the gate in the meantime.
+**Rollout note: expect red today.** Only two registry components ship a transition record so far, so most components that change version report `unknown` and the check exits non-zero on most comparisons. That is a coverage problem being worked ([#2535](https://github.com/NVIDIA/aicr/issues/2535) makes records mandatory per pin bump), not a tool limitation, and it shrinks as records are authored. Use `--fail-on-error=false` if you want the report without the gate in the meantime.
 
 Components whose version is identical on both sides produce no row. Added components are reported with nothing to do; removed components are reported and **stay installed**, because AICR does not uninstall them.
 
@@ -1568,13 +1574,13 @@ Components whose version is identical on both sides produce no row. Added compon
 
 The first renders its record's steps, deployer-scoped, exactly as a `manual` row does: the author marked the move `blocked` and then wrote what to do instead. The other three render none, because the record that carries them describes a different move than the one you asked about. All four name a stopping point.
 
-The fourth exists because a record vouches only as far as its own `to` ceiling. An author cannot have read the migration notes for a release nobody had cut, so a record claiming `>=0.18.0 <0.19.0` says nothing about `0.25.0`, and letting it lend its verdict there would report eight minors as safe on the strength of a two-minor claim. Stop at the assessed ceiling and re-run, or have the record widened.
+The fourth exists because a record vouches only as far as its own `to` ceiling. A record claiming `>=0.18.0 <0.19.0` says nothing about `0.25.0`, and letting it lend its verdict there would report eight minors as safe on the strength of a two-minor claim. Stop at the assessed ceiling and re-run, or have the record widened. This is also how a component deliberately held below a breaking release reports: its record's ceiling sits at that release, so any target above it is told to stop there and take the boundary on its own.
 
 Every row states its reason in the detail block under the table, and `--format json` carries the same thing as `reason` (a stable code: `recorded`, `record-blocks`, `multiple-boundaries`, `undefined-origin`, `beyond-record-ceiling`, `no-record`, `no-boundary-crossed`, `downgrade`, `not-comparable`) plus `explanation`, the sentence naming your versions.
 
 **Why `--deployer` is required rather than defaulted:**
 
-Steps are deployer-scoped, and no bundle records which deployer built it ([#2767](https://github.com/NVIDIA/aicr/issues/2767)). Showing an Argo CD operator an imperative "delete the legacy CRDs" step is the exact failure deployer-scoping exists to prevent, so the command asks rather than guessing, and never renders every deployer's path. It is only required when some component actually carries steps.
+Steps are deployer-scoped. Showing an Argo CD operator an imperative "delete the legacy CRDs" step is the exact failure deployer-scoping exists to prevent, so the command asks rather than guessing, and never renders every deployer's path. It is only required when some component actually carries steps. A bundle now records the deployer that built it in [`bundle-info.yaml`](bundling.md#bundle-info), so `upgrade-check` can stop asking once it reads that record ([#2528](https://github.com/NVIDIA/aicr/issues/2528)).
 
 **Example:**
 
@@ -1661,7 +1667,7 @@ aicr bundle [flags]
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
 | `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable). Same `requireNodeSelector` caveat as `--system-node-selector` above applies to components that declare it on their accelerated paths. |
 | `--accelerated-node-toleration` | | string[] | Toleration for accelerated/GPU nodes (format: key=value:effect, repeatable) |
-| `--dra-eviction-node-label` | | string | Opt in to DRA kubelet-plugin eviction coordination with GPU Operator driver upgrades (format: `key=value`; no default — unset means AICR injects nothing). Applied only when both components are enabled. Nodes must then carry the label. |
+| `--dra-eviction-node-label` | | string | Opt in to DRA kubelet-plugin eviction coordination with GPU Operator driver upgrades (format: `key=value`; no default — unset means AICR injects nothing). Applied only when both components are enabled. Also deploys `dra-node-labeler`, which applies the label to every GPU node from GFD's `nvidia.com/gpu.present`; pass `--set dra-node-labeler:enabled=false` to provision the label yourself instead. |
 | `--workload-gate` | | string | Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
 | `--workload-selector` | | string[] | Label selector for nodewright-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when nodewright-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
@@ -1813,6 +1819,8 @@ This results in:
 
 **What the opt-in does.** When a recipe includes both `nvidia-dra-driver-gpu` and `gpu-operator` and a label is configured, AICR merges that `key=value` into `kubeletPlugin.nodeSelector` and sets the GPU Operator `driver.manager.env` entry `NODE_LABEL_FOR_GPU_POD_EVICTION` to the same key, so GPU Operator's Driver Manager can deschedule the plugin ahead of a driver container restart. The same applies to the `-ocp` components. Existing accelerated-node selectors and unrelated Driver Manager environment variables are preserved.
 
+**The label is derived, not provisioned.** The same opt-in keeps the `dra-node-labeler` component in the bundle: a small DaemonSet that runs on every node GFD reports as `nvidia.com/gpu.present=true` and applies the configured `key=value` once, after GPU Operator is up. It never rewrites an existing value, so the Driver Manager's `paused-for-driver-upgrade` and a hand-set `false` opt-out both survive a labeler restart. Nodes added later by autoscaling, replacement, or a pool scaled from zero are labeled the same way as soon as GFD labels them. Without the flag, or when a `bundlers` filter leaves out the labeler, the labeler is left out of the bundle entirely (a `bundlers` selection that names the labeler without the flag or without both components it serves is rejected as invalid); node labeling is then required only if both components remain and eviction is still opted in. OpenShift recipes are not wired for the labeler yet (#2828) and keep the provisioning workflow. To provision the label yourself (node-pool labels, Karpenter `NodePool` labels) pass `--set dra-node-labeler:enabled=false`; the requirements in the next paragraphs then apply.
+
 ```bash
 aicr bundle --recipe recipe.yaml \
   --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
@@ -1823,7 +1831,7 @@ aicr bundle --recipe recipe.yaml \
 
 This does not apply where the driver is provider-installed (`driver.enabled=false` — AKS `azure-managed`, GKE COS, OKE). Those deploy no GPU Operator driver pod and therefore no Driver Manager, so there is nothing to coordinate with and no warning is emitted.
 
-**If you do opt in, every GPU node must carry the label.** Set it in the **node pool definition** — an EKS managed nodegroup `labels` entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the equivalent for your provisioner. An ad hoc `kubectl label node` is a repair, not a configuration: it does not survive node replacement, recycling, autoscaling, or a nodegroup scaled from zero.
+**If you disable the labeler, every GPU node must carry the label.** Set it in the **node pool definition** — an EKS managed nodegroup `labels` entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the equivalent for your provisioner. An ad hoc `kubectl label node` is a repair, not a configuration: it does not survive node replacement, recycling, autoscaling, or a nodegroup scaled from zero. With the labeler in the bundle (the default once opted in) none of this is required; the remaining gap is a GPU node GFD has not labeled that does not already carry the configured `key=value` (for example from a node pool that still provisions it): such a node runs no kubelet plugin until `nvidia.com/gpu.present` appears.
 
 ```bash
 kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true
@@ -1961,7 +1969,7 @@ When `--storage-class` is not set, any `storageClassName` values already defined
 
 If a rendered component creates a PVC at a registry-declared `storageClassPaths` entry and no usable `storageClassName` is set after overlay, `--storage-class`, and `--set` precedence is resolved, `aicr bundle` emits a non-blocking warning. The bundle still relies on the target cluster's default StorageClass in that case.
 
-`aicr bundle` reports cluster-state dependencies it cannot verify as non-blocking warnings of this kind. Two more concern DRA eviction. Without `--dra-eviction-node-label`, and only where GPU Operator manages the driver, the bundle warns that automatic eviction was not configured and that a driver restart carries the documented risks. With the flag set, it warns that every GPU node must carry the configured label, that the label belongs in the node pool definition rather than an ad hoc `kubectl label`, and that unlabeled nodes silently run without DRA — no `ResourceSlices`, and `DESIRED=0` if no GPU node matches at all. These describe state AICR deliberately does not own — StorageClasses and node labels are cluster infrastructure. See [DRA Driver Upgrade Eviction](#dra-driver-upgrade-eviction).
+`aicr bundle` reports cluster-state dependencies it cannot verify as non-blocking warnings of this kind. Two more concern DRA eviction. Without `--dra-eviction-node-label`, and only where GPU Operator manages the driver, the bundle warns that automatic eviction was not configured and that a driver restart carries the documented risks. With the flag set, it reports that `dra-node-labeler` derives the label from `nvidia.com/gpu.present` and that a GPU node GFD has not labeled, and that does not already carry the configured label, runs without DRA; with the labeler disabled it warns instead that every GPU node must carry the configured label, that the label belongs in the node pool definition rather than an ad hoc `kubectl label`, and that unlabeled nodes silently run without DRA — no `ResourceSlices`, and `DESIRED=0` if no GPU node matches at all. These describe state AICR deliberately does not own — StorageClasses and node labels are cluster infrastructure. See [DRA Driver Upgrade Eviction](#dra-driver-upgrade-eviction).
 
 `--shared-storage-class` is a separate input for registry-declared
 `sharedStorageClassPaths`. It is used by opt-in Slinky Slurm PVCs mounted at

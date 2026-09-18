@@ -91,6 +91,21 @@ spec:
       valuesFile: components/nvidia-dra-driver-gpu/values.yaml
       dependencyRefs:
         - gpu-operator
+        # Hard dependency when DRA eviction is opted in: until the labeler has
+        # run, no node carries the eviction label and the kubelet plugin sits
+        # at DESIRED=0. Pruned automatically when the bundler drops the labeler.
+        - dra-node-labeler
+
+    # Applies the DRA eviction label from GFD's nvidia.com/gpu.present. Present
+    # in the bundle only when --dra-eviction-node-label is set (#2676). Depends
+    # on gpu-operator because GFD ships as its subchart, so gpu.present does
+    # not exist until the operator is up.
+    - name: dra-node-labeler
+      type: Helm
+      source: ""
+      valuesFile: components/dra-node-labeler/values.yaml
+      dependencyRefs:
+        - gpu-operator
 
     - name: kai-scheduler
       type: Helm

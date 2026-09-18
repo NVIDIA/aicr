@@ -77,6 +77,8 @@ navigation:
         path: integrator/gke-gpu-setup.md
       - page: RKE2 VR200 Setup
         path: integrator/rke2-vr200-setup.md
+      - page: k0s H200 Setup
+        path: integrator/k0s-h200-setup.md
       - page: EKS Dynamo Networking
         path: integrator/eks-dynamo-networking.md
       - page: GKE TCPXO Networking
