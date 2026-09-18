@@ -22,6 +22,15 @@ spec:
     service: oke
     os: ol
 
+  # This overlay deploys network-operator (Mellanox ConnectX), the only
+  # fabric upstream's nic-health-monitor supports. Declared on the OKE root
+  # rather than each leaf so a new OKE overlay cannot silently miss it --
+  # mixins accumulate into all descendants (pkg/recipe/metadata.go Merge).
+  # Shapes without an InfiniBand/RoCE NIC simply report no devices; the
+  # mixin is STORE_ONLY, so that is inert rather than harmful.
+  mixins:
+    - nvsentinel-nic-health-monitor
+
   # OKE-specific constraints
   # Constraint names use fully qualified measurement paths: {type}.{subtype}.{key}
   constraints:
