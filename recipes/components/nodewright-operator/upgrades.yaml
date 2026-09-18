@@ -30,7 +30,7 @@ kind: ComponentUpgrades
 component: nodewright-operator
 transitions:
   - from: "<0.18.0"
-    to: ">=0.18.0 <=0.18.0"
+    to: "=0.18.0"
     verdict: manual
     summary: >-
       v0.18.0 renames skyhook.nvidia.com/v1alpha1 Skyhook to

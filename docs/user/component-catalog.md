@@ -1495,7 +1495,7 @@ nodewright-operator  v0.17.1  v0.18.0  manual   1 minor, 5 steps
 
 $ aicr upgrade-check --from old.yaml --to newer.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
-nodewright-operator  v0.17.1  v0.19.0  blocked  2 minors, stops at >=0.18.0 <=0.18.0
+nodewright-operator  v0.17.1  v0.19.0  blocked  2 minors, stops at =0.18.0
 ```
 
 The record sits above the pin deliberately. Only a `safe` verdict is held to the
