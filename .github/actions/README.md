@@ -495,12 +495,12 @@ To use these actions in other repositories:
 ```yaml
 - uses: NVIDIA/aicr/.github/actions/go-test@main
   with:
-    go_version: '1.26'
-    helm_version: 'v4.2.4'
-    setup_envtest_version: 'v0.25.0'
-    setup_envtest_sha256: 'c20be44bade1c38a8ead39f191acc35bbb50f2f2d796ba4f45c18c77e76029c7'
-    oasdiff_version: 'v1.31.0'
-    oasdiff_sha256: '0177d4bc0bf04f4061e9277795b77335ee100a43b508e94fce5c46de083bbede'
+    go_version: '1.27.1'
+    helm_version: 'v4.3.0'
+    setup_envtest_version: 'v0.25.1'
+    setup_envtest_sha256: '531726d9a1d9e4c5661e22ab90186e186f5dbebbc109b13333fa7e237068f06d'
+    oasdiff_version: 'v1.32.1'
+    oasdiff_sha256: '7c8939fc49b75ee11fec66a5b83b37a2fca6aee109fed85013b1ba2ac2a1ee7f'
     coverage_report: 'true'
 ```
 

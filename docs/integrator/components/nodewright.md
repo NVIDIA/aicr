@@ -24,7 +24,7 @@ configMap:
     service: eks
 ```
 
-Supported accelerators: `h100`, `gb200`
+Supported accelerators: see the generated table below.
 
 Integration notes:
   * If you provide a service it MUST exist in the [profiles service directory](https://github.com/NVIDIA/nodewright-packages/tree/main/nvidia-tuned/profiles/service)
@@ -75,26 +75,27 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 
 | Service | Accelerator  | Profile | Setup              | Tuning                  |
 |---------|--------------|---------|--------------------|-------------------------|
-| aks     | a100         | h100    | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
-| aks     | h100         | -       | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
+| aks     | a100         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
+| aks     | h100         | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
 | bcm     | *            | h100    | nvidia-setup 0.3.0 | -                       |
 | bcm     | h100         | -       | nvidia-setup 0.3.0 | -                       |
-| eks     | a100         | h100    | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
-| eks     | gb200        | -       | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
-| eks     | gb300        | -       | -                  | -                       |
-| eks     | h100         | -       | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
-| eks     | h200         | h100    | nvidia-setup 0.5.0 | nvidia-tuned 0.3.2      |
+| eks     | a100         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
+| eks     | gb200        | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
+| eks     | gb300        | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
+| eks     | h100         | -       | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
+| eks     | h200         | h100    | nvidia-setup 0.8.0 | nvidia-tuned 0.10.0     |
 | eks     | rtx-pro-6000 | generic | -                  | nvidia-tuned 0.3.2      |
-| generic | gb300        | -       | -                  | -                       |
+| generic | gb300        | -       | -                  | nvidia-tuned 0.10.0     |
 | gke     | a100         | h100    | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | b200         | -       | -                  | nvidia-tuning-gke 0.1.2 |
+| gke     | gb200        | -       | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | h100         | -       | -                  | nvidia-tuning-gke 0.1.2 |
-| rke2    | vr200        | -       | -                  | nvidia-tuned 0.9.0      |
+| rke2    | vr200        | -       | -                  | nvidia-tuned 0.10.0     |
 
 {/* END AICR-TUNING */}
 
 Note: the generated table lists the packages *pinned in the manifests* and
-cannot see per-recipe value gates. The `aks` rows show `nvidia-tuned 0.3.2`,
+cannot see per-recipe value gates. The `aks` rows show `nvidia-tuned 0.10.0`,
 but AKS recipes disable it by default via `nodewright-customizations`
 `tuningEnabled: false` under the Azure-managed driver profile; see
 [AKS GPU setup](../aks-gpu-setup.md#infiniband-rdma-host-setup-nodewright)
@@ -103,10 +104,10 @@ for the rationale and re-enable path.
 The `tuningEnabled` gate (default `true`; only an explicit `false` disables)
 applies uniformly across the tuning manifests: on the shared `tuning.yaml` it
 omits the `nvidia-tuned` package while `nvidia-setup` keeps running, and on the
-single-package manifests (`tuning-gke.yaml`, `tuning-generic.yaml`) it
-suppresses the whole tuning Skyhook CR, since the tuning package is that CR's
-only content. No recipe sets it outside AKS today, so default renderings are
-unchanged elsewhere.
+single-package manifests (`tuning-gke.yaml`, `tuning-generic.yaml`,
+`tuning-rke2.yaml`, `tuning-gb300.yaml`) it suppresses the whole tuning Skyhook
+CR, since the tuning package is that CR's only content. No recipe sets it
+outside AKS today, so default renderings are unchanged elsewhere.
 
 The tuning Skyhook CR is a normal release-managed resource (no Helm hooks), so
 flipping `tuningEnabled` from `true` to `false` retracts it on all deployers —
@@ -130,14 +131,59 @@ Helm/Argo clusters are unaffected (they never created it as a hook).
 Known limitation: the `nodewright-customizations` deployment health check
 asserts the `tuning` Skyhook CR reaches `status.status: complete` and cannot
 see value gates. When the whole CR is suppressed — `tuningEnabled: false` on a
-`tuning-gke.yaml`/`tuning-generic.yaml` recipe, or `enabled: false` anywhere —
-`aicr validate --phase deployment` fails that check on the deliberately
-untuned cluster; skip it in that configuration. (AKS is unaffected by
+`tuning-gke.yaml`/`tuning-generic.yaml`/`tuning-rke2.yaml`/`tuning-gb300.yaml`
+recipe, or `enabled: false` anywhere — `aicr validate --phase deployment`
+fails that check on the deliberately untuned cluster; skip it in that
+configuration. (AKS is unaffected by
 `tuningEnabled: false`: its `tuning` CR still renders with the `nvidia-setup`
 packages.) A value-aware health check that tolerates the intentionally-absent
 CR is tracked in [#1844](https://github.com/NVIDIA/aicr/issues/1844).
 
 See [recipes/components/nodewright-customizations/manifests](https://github.com/NVIDIA/aicr/blob/main/recipes/components/nodewright-customizations/manifests) for the specifics on packages and their configuration.
+
+## Rollout pacing
+
+Every reboot-carrying tuning manifest (`tuning.yaml`, `tuning-gb300.yaml`,
+`tuning-generic.yaml`, `tuning-rke2.yaml`) pins
+`spec.interruptionBudget.count: 1`, so nodewright reboots one matched node at a
+time.
+
+The budget is load-bearing, not a style preference. An omitted
+`interruptionBudget` is not "unset": the operator's
+`createLegacyDefaultCompartment` substitutes `percent: 100`, so the whole
+matched GPU fleet reboots together. Nothing confines a generated bundle to
+build time — it can be applied to a cluster already running work — so the safe
+value has to be the default.
+
+`count: 1` costs N x (reboot time) to converge, and `runtimeRequired: true`
+keeps workloads gated on the last node for the whole rollout. On an **initial
+cluster build**, before any workload has landed, that serialization buys
+nothing. Two equivalent ways to opt out of it for bringup:
+
+- Delete the `interruptionBudget` block from the rendered CR, or
+- set `percent: 100`, which reproduces the pre-budget behavior exactly (`count`
+  and `percent` are mutually exclusive — set one or the other, never both).
+
+Restore the budget before the cluster starts taking work.
+
+## GB300 host kernel granule
+
+`nvidia-gb300-performance` sizes its hugepage pools for a 64k-page ARM64 kernel
+(2M + 512M, and no 1G — a 64k granule has no PUD level). On EKS,
+`nvidia-setup-kernel` installs the pinned 64k kernel, so profile and host agree
+by construction.
+
+On `--service generic` there is no `nvidia-setup` to pin one: it dispatches on
+`<service>-<accelerator>` and ships no `generic-*` config, so a bare-metal GB300
+node takes its kernel from the host image. A **64k-granule host kernel is the
+recommended image** there.
+
+A 4k-granule kernel is not fatal. Linux rejects the invalid `hugepagesz=512M`
+clause and silently drops the `hugepages=` count paired with it, so the node
+boots and runs — it just comes up without the pool the profile intended, at
+reduced performance. `aicr bundle` emits `CheckGB300HostKernelGranule` at
+`severity: info` for that combination, so the tradeoff is visible at generation
+time rather than only in a manifest comment.
 
 ## Tuning-gke
 

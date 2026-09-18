@@ -974,7 +974,7 @@ model-weights cache's StorageClass resolves with the same precedence via the
 | `AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT` | `10m` | Wait for the `DynamoGraphDeployment` to become ready (image pull + model load + worker health). Large models load slower — raise this **and** the catalog entry's `timeout` in tandem, or the parent deadline caps it. |
 | `AICR_INFERENCE_PERF_HEALTH_TIMEOUT` | `5m` | Wait for the endpoint to serve a real chat-completion *after* the workload reports Ready. Concurrent first-load from one RWO cache PVC can push first-serve past 5m; raise it (bounded by the catalog `timeout`). |
 | `AICR_INFERENCE_PERF_MODEL_CACHE_SIZE` | `100Gi` (on) | The PVC-backed model-weights cache is **on by default**. Set a different K8s quantity to resize, or a disable sentinel (`off`/`0`/`none`/`disabled`) to turn it off and download from HF directly. |
-| `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` | cluster default | StorageClass for the cache PVC. On a cluster with **no default SC and no value here**, the check **fails fast** with guidance rather than leaving the PVC `Pending` until timeout. AICR-deployed EKS gets a default `gp3` SC from `aws-ebs-csi-driver`, and GKE Standard typically ships with `standard-rwo`, but neither default is guaranteed to attach for every node machine family. Prefer the per-accelerator `inference-model-cache-storage-class` recipe constraint over this global knob. |
+| `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` | cluster default | StorageClass for the cache PVC. On a cluster with **no default SC and no value here**, the check **fails fast** with guidance rather than leaving the PVC `Pending` until timeout. AICR-deployed EKS gets a default `gp3` SC from `aws-ebs-csi-driver`, and GKE Standard typically ships with `standard-rwo`, but neither default is guaranteed to attach for every node machine family (A4X/GB200 nodes reject `pd-balanced` disks and need a Hyperdisk-backed class, see [GKE GB200 Storage Prerequisites](../integrator/gke-gb200-networking.md#storage-prerequisites)). Prefer the per-accelerator `inference-model-cache-storage-class` recipe constraint over this global knob. |
 | `AICR_INFERENCE_PERF_MODEL_CACHE_EXTRA_COMPATIBLE_TYPES` | unset | Comma-separated `parameters.type` values to add to the compiled machine-family/StorageClass compatibility allowlist (`storageCompatibilityRules` in `validators/performance/model_cache.go`), for example a new Hyperdisk type a cloud provider ships before AICR's allowlist is updated to include it. Without a matching entry here, the selected StorageClass (the `inference-model-cache-storage-class` constraint, `AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS`, or the cluster default when neither is set) fails closed with `ErrCodeInvalidRequest` if its type isn't allowlisted for the node's machine family, rather than binding a PVC that fails to attach at Job-run time. |
 | `AICR_INFERENCE_PERF_MODEL_CACHE_POPULATE_TIMEOUT` | `13m` | Wait for the one-time model-cache populate Job (cold image pull + first-ever Hugging Face download into the PVC). Separate from — and larger than — `AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT` because the populate Job pays a cold pull *and* a multi-GB download; provide the optional HF-token secret to remove anonymous-download throttling. Raise it (and the catalog `timeout`) for very large models. **Migration:** the cache-populate wait no longer honors `AICR_INFERENCE_PERF_WORKLOAD_READY_TIMEOUT` (which now bounds only the DynamoGraphDeployment readiness wait) — set this knob instead to widen the populate budget. |
 
@@ -1154,7 +1154,7 @@ components:
 | Field | Required | Notes |
 |-------|----------|-------|
 | `function` | yes | Must match a name registered in `pkg/bundler/validations/checks.go::init()` |
-| `severity` | yes | `warning` appends to report; `error` stops the bundle |
+| `severity` | yes | `error` stops the bundle; `warning` (the default for any unrecognized value) appends to the deployment notes; `info` logs only |
 | `conditions` | no | Keys are criteria fields from `pkg/recipe/criteria.go`. Empty = always runs |
 | `message` | no | Actionable detail appended to function output |
 
@@ -1162,6 +1162,23 @@ Conditions are evaluated via `checkConditions(recipeResult, conditions)`.
 Keys = AND across, values within a key = OR. When a new accelerator,
 service, OS, intent, or platform is added to `pkg/recipe/criteria.go`,
 audit existing condition blocks per CLAUDE.md's enum-expansion rule.
+
+`RunValidations` (`pkg/bundler/validations/registry.go`) dispatches on the
+lowercased severity, and all three arms consume both return values of the
+check — a returned `error` is never silently dropped:
+
+| Severity | Warnings become | Errors become |
+|----------|-----------------|---------------|
+| `error` | blocking errors | blocking errors |
+| `warning` | deployment notes | blocking errors |
+| `info` | `slog.Info` only | `slog.Info` only |
+
+`info` is for an advisory that is true of a valid configuration — something the
+operator should weigh, not something they must fix — so it stays out of the
+deployment notes and surfaces only under `--debug`. Note the asymmetry: under
+`info` a returned error is logged rather than raised, so do not use `info` for
+a gate whose failure must be acted on. `warning` is the fallback for any
+unrecognized value, which keeps a typo'd severity non-silent.
 
 ### Shipping functions
 
@@ -1171,6 +1188,7 @@ audit existing condition blocks per CLAUDE.md's enum-expansion rule.
 | `CheckAcceleratedSelectorMissing` | nodewright `--accelerated-node-selector` set |
 | `CheckHostMofedWithoutNetworkOperator` | Host-mode MOFED component paired with `network-operator` |
 | `CheckWildcardAcceleratedToleration` | Accelerated-node tolerations carry no wildcard (keyless) entry — on AKS a wildcard deadlocks nodewright interrupt packages ([nodewright#296](https://github.com/NVIDIA/nodewright/issues/296)); wired at `severity: error`, skipped when the component is disabled via `--set` |
+| `CheckGB300HostKernelGranule` | Bare-metal GB300 (`service: generic`, `accelerator: gb300`) applies a tuned profile that sizes hugepages for a 64k-granule ARM64 host kernel. A 4k-granule host still boots — Linux rejects the `hugepagesz=512M` clause and drops its paired `hugepages=` count — so the node just runs without that pool. Advisory only (`severity: info`); skipped when the component is disabled or `tuningEnabled` resolves to false on the final effective values (recipe merge plus scalar `--set` and typed `--set-json`/`--set-file`, under the canonical name and its registry aliases). |
 | `CheckDriverOwnershipCoherence` | GPU driver-ownership coherence on the final effective values (recipe merge + `--set`/`--set-json`/`--set-file` under canonical names and registry aliases): a recipe whose snapshot observed no NVIDIA driver (`metadata.gpuDriverState: absent`) must not bundle with the preinstalled-driver assumption. When GPU Operator manages the driver, `nvidia-dra-driver-gpu.nvidiaDriverRoot` must equal `gpu-operator hostPaths.driverInstallDir`; with a preinstalled driver, the DRA root must avoid the unpopulated operator container root and may intentionally differ from `hostPaths.driverInstallDir` ([#1087](https://github.com/NVIDIA/aicr/issues/1087), [#1757](https://github.com/NVIDIA/aicr/issues/1757)). Wired at `severity: error`. |
 | `CheckMariaDBOperatorOwnershipCoherence` | MariaDB Operator installation safety for AICR-provided Slurm accounting: `metadata.mariaDBOperatorState` values `crs-detected` and `unknown` block bundling, `api-detected` or omitted evidence warns, and `absent` proceeds silently. Wired at `severity: warning` so warning results remain non-blocking while returned errors still fail the bundle. |
 
@@ -1226,7 +1244,8 @@ The same assertion file now powers TWO surfaces:
    sanity invoked manually by chart authors. `check-health-all` sweeps
    only registry-linked components (`registry.yaml`'s
    `healthCheck.assertFile` entries); an opt-in-only check like
-   `nvsentinel-observability` runs via `check-health COMPONENT=<name>`.
+   `nvsentinel-observability` or `nvsentinel-preflight` runs via
+   `check-health COMPONENT=<name>`.
 2. **`aicr validate --phase deployment`** — registry-declared content is
    loaded into `ComponentRef.HealthCheckAsserts` during recipe
    resolution (PR #1219) and executed by the deployment validator's
@@ -1347,8 +1366,10 @@ restricted at runtime to read-only Chainsaw operations
 `apply`, `create`, `delete`, `patch`, `update`, `wait`, `command`,
 `sleep`, `podLogs`, `events`, `describe`, `get`) is rejected with
 `ErrCodeInvalidRequest`, as is an operation that sets both `assert` and
-`error`. PR #1223 will add the same enforcement at lint time so
-violations are caught before they ever reach the validator.
+`error`. PR-time enforcement shipped in #1223:
+`pkg/chainsaw.TestValidateTestReadOnly_RegistryContent` walks every
+registry-declared assert file against this allowlist under `make qualify`,
+so violations are caught before they ever reach the validator.
 
 **Value-gate awareness (#1844).** A registry assert file is static — it
 cannot see the component's effective Helm values. That is a problem for a
@@ -1487,7 +1508,7 @@ Patterns common to all four surfaces.
   `NoCluster` is true, RBAC and Jobs are skipped, all checks report
   `skipped - no-cluster mode`, but constraints still evaluate.
 - **Table-driven tests.** Required for multi-case logic per CLAUDE.md.
-  See `pkg/constraints/constraint_test.go` and
+  See `pkg/constraints/evaluate_test.go` and
   `pkg/bundler/validations/checks_test.go` for the canonical shapes.
 - **Synthetic inputs.** Component validations take a hand-built
   `RecipeResult` and `bundlerConfig`. Container checks take a

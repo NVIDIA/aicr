@@ -137,7 +137,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
 
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
@@ -162,7 +162,7 @@ jobs:
         run: ./tools/build-validator-binaries
 
       - name: Build and push
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           file: ${{ matrix.dockerfile || format('validators/{0}/Dockerfile', matrix.phase) }}
@@ -220,7 +220,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
 
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
@@ -249,7 +249,7 @@ jobs:
           file dist/gate
 
       - name: Build and push
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           file: cmd/gate/Dockerfile
@@ -285,7 +285,7 @@ jobs:
         uses: ./.github/actions/ghcr-login
 
       - name: Setup Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
+        uses: docker/setup-buildx-action@594f3bf4285d9ea8dc53c9a0c9c4092420091003  # v4.4.0
 
       - name: Create multi-arch manifests
         run: |
@@ -310,7 +310,11 @@ jobs:
     name: Scan (${{ matrix.image }})
     runs-on: ubuntu-latest
     needs: [build-ko, docker-manifest]
-    timeout-minutes: 15
+    # 30, not 15: the two NVSentinel NCCL check images are ~9.9 GiB compressed
+    # each, so the pull and extraction alone outlast the budget the small
+    # AICR-built images need. Matrix jobs get their own runner, so the larger
+    # budget costs nothing for the images that finish in two minutes.
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: read
@@ -325,19 +329,45 @@ jobs:
           - ghcr.io/nvidia/aicr-validators/conformance
           - ghcr.io/nvidia/aicr-validators/aiperf-bench
           - ghcr.io/nvidia/aicr-gate
-          # The first image here AICR does not build. It ships only with the
-          # opt-in nvsentinel-object-monitor mixin (#2612), and the static BOM
-          # cannot see a mixin-gated subchart, so nothing else would surface a
-          # CVE in it. Because it is not built by this workflow it carries the
-          # nvsentinel chart's own version rather than SCAN_TAG -- see the
-          # override below.
+          # AICR does not build the seven below. They ship only with the
+          # opt-in nvsentinel-object-monitor (#2612), nvsentinel-preflight
+          # (#2610) and nvsentinel-nic-health-monitor mixins, and the static
+          # BOM cannot see a mixin-gated image, so nothing else would surface
+          # a CVE in them. Because they are not built by this workflow they
+          # carry the nvsentinel chart's own version rather than SCAN_TAG --
+          # see the overrides below.
           - ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
+          - ghcr.io/nvidia/nvsentinel/preflight
+          - ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
+          - ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
+          - ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
+          - ghcr.io/nvidia/nvsentinel/nic-health-monitor
+          # Third-party, and the only one here not published by NVIDIA: the
+          # chart's global.initContainerImage, used by chown/permission init
+          # containers in the nic-health-monitor and audit-logging paths.
+          - docker.io/bitnamilegacy/os-shell
         include:
           # Keep in lockstep with nvsentinel's defaultVersion in
-          # recipes/registry.yaml; TestObjectMonitorImagePinnedEverywhere
-          # fails if these drift apart.
+          # recipes/registry.yaml; TestObjectMonitorImagePinnedEverywhere,
+          # TestPreflightImagesPinnedEverywhere and
+          # TestNICHealthMonitorImagePinnedEverywhere fail if these drift apart.
           - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
             tag: v1.20.0
+          - image: ghcr.io/nvidia/nvsentinel/preflight
+            tag: v1.20.0
+          - image: ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
+            tag: v1.20.0
+          - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
+            tag: v1.20.0
+          - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
+            tag: v1.20.0
+          - image: ghcr.io/nvidia/nvsentinel/nic-health-monitor
+            tag: v1.20.0
+          # Versioned independently of the nvsentinel chart -- this tag comes
+          # from the chart's global.initContainerImage, not its appVersion, so
+          # it does not move with defaultVersion.
+          - image: docker.io/bitnamilegacy/os-shell
+            tag: 12-debian-12-r30
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -346,6 +376,17 @@ jobs:
 
       - name: Authenticate to registry
         uses: ./.github/actions/ghcr-login
+
+      # Only for images this workflow does not build. An ubuntu-latest runner
+      # ships with roughly 21 GiB free, and grype extracts the image before
+      # scanning it, so a ~9.9 GiB compressed NCCL check image does not fit
+      # without this. matrix.tag is the marker for "upstream image".
+      - name: Free disk space for large upstream images
+        if: ${{ matrix.tag != '' }}
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc
+          docker system prune -f
+          df -h /
 
       - name: Scan container image
         id: scan

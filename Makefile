@@ -148,6 +148,14 @@ check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 check-upgrade-records: ## Verifies committed ComponentUpgrades records are well-formed (ADR-021)
 	@./tools/check-upgrade-records
 
+# Deliberately NOT in `lint` or `qualify`: it re-downloads each pinned tool's
+# upstream checksums, so it needs network and is the one gate here that can go
+# red without the tree changing. Merge Gate runs it on any change to
+# .settings.yaml or a refresh script, which is where a stale pin is introduced.
+.PHONY: check-settings-checksums
+check-settings-checksums: ## Verifies .settings.yaml checksum pins match their pinned versions (needs network)
+	@./tools/check-settings-checksums
+
 .PHONY: check-docs-mdx
 check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments, autolinks, bare <tags>)
 	@./tools/check-docs-mdx
@@ -382,6 +390,18 @@ nvsentinel-object-monitor-e2e: ## Live Kind test: nvsentinel-object-monitor mixi
 	@set -e; \
 	echo "Running nvsentinel-object-monitor mixin e2e test..."; \
 	tests/e2e/nvsentinel-object-monitor/run.sh
+
+.PHONY: nvsentinel-preflight-e2e
+nvsentinel-preflight-e2e: ## Live Kind test: nvsentinel-preflight mixin injects node checks into opted-in GPU pods (#2610)
+	@set -e; \
+	echo "Running nvsentinel-preflight mixin e2e test..."; \
+	tests/e2e/nvsentinel-preflight/run.sh
+
+.PHONY: npd-nvsentinel-object-monitor-e2e
+npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
+	@set -e; \
+	echo "Running NPD -> nvsentinel-object-monitor e2e test..."; \
+	tests/e2e/npd-nvsentinel-object-monitor/run.sh
 
 .PHONY: scan
 scan: ## Scans for vulnerabilities with grype

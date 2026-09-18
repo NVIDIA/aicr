@@ -22,8 +22,8 @@ release.
 
 | Version | Status |
 |---------|--------|
-| `0.20.x` (latest released minor) | Supported: receives security fixes |
-| `< 0.20` | End-of-life: upgrade to the latest release |
+| `0.21.x` (latest released minor) | Supported: receives security fixes |
+| `< 0.21` | End-of-life: upgrade to the latest release |
 
 A fix ships in a new patch or minor release cut from `main` under the cadence
 above, never as a backport to an end-of-life version. When AICR reaches 1.0
@@ -388,7 +388,7 @@ Published to GitHub Container Registry (`ghcr.io/nvidia/aicr-validators/`):
 | `deployment` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Deployment validator |
 | `performance` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Performance validator |
 | `conformance` | `nvcr.io/nvidia/distroless/static:v4.1.3` | Conformance validator |
-| `aiperf-bench` | `nvcr.io/nvidia/distroless/python:3.13-v4.1.2` | AIPerf benchmark runner (built from `python:3.13-slim`) |
+| `aiperf-bench` | `nvcr.io/nvidia/distroless/python:3.13-v4.1.4` | AIPerf benchmark runner (built from `python:3.13-slim`) |
 
 Stable releases promote `vX.Y.Z` and `latest`; prereleases promote their
 `vX.Y.Z-rcN` version tags but never `latest`. The release workflow also retains

@@ -73,7 +73,7 @@ go get github.com/NVIDIA/aicr@latest
 For reproducibility in downstream projects, pin a specific tag:
 
 ```bash
-go get github.com/NVIDIA/aicr@v0.19.0
+go get github.com/NVIDIA/aicr@v0.21.1
 ```
 
 ## Quick start
@@ -271,7 +271,7 @@ snap, err := client.CollectSnapshot(snapCtx, &aicr.AgentConfig{
 	// full run-scoped RBAC set. Leaving it unset, as here, keeps the
 	// run-scoped default and never probes for an existing ServiceAccount.
 	Namespace:       "aicr-snapshot",
-	Image:           "ghcr.io/nvidia/aicr:v0.19.0",
+	Image:           "ghcr.io/nvidia/aicr:v0.21.1",
 	Timeout:         5 * time.Minute,
 	Cleanup:         true,
 	AKSGPUPoolsPath: "/path/to/aks-gpu-pools.json", // AKS only
@@ -1694,7 +1694,8 @@ the CLI does with `--os`. An unparsed `Talos` would miss the agent's exact
 errors here instead of traveling.
 
 `Kubeconfig`, `Debug`, `ClusterConfigPath`, `AKSGPUPoolsPath`,
-`DiscoverNetwork`, `RunID` and `NameBase` have no config counterpart and stay
+`OKEAddonsPath`, `DiscoverNetwork`, `RunID` and `NameBase` have no config
+counterpart and stay
 zero — they are per-invocation or caller-owned.
 
 **A document with no `spec.snapshot` yields a zero value, which is not a

@@ -774,7 +774,8 @@ Package with explicit tag (overrides CLI version):
 			&cli.StringSliceFlag{
 				Name: "dynamic",
 				Usage: `Declare value paths as install-time parameters
-	(format: component:path.to.field, e.g., --dynamic alloy:clusterName).
+	(format: component:path.to.field, e.g.,
+	--dynamic kubeprometheusstack:prometheus.prometheusSpec.externalLabels.cluster).
 	Dynamic paths are removed from values.yaml and placed in cluster-values.yaml
 	for the user to fill in at install time.`,
 				Category: catDeployment,

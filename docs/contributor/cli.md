@@ -39,6 +39,7 @@ Subcommands registered in `pkg/cli/root.go` (`Commands:` slice on
 | `evidence sign` | `evidence_sign.go` | Sign an emitted evidence bundle. |
 | `evidence publish` | `evidence_publish.go` | Sign and push an already-emitted evidence bundle; write its pointer. |
 | `evidence verify` | `evidence_verify.go` | Verify integrity claims on an evidence bundle (offline or registry). |
+| `upgrade-check` | `upgrade_check.go` | Report whether moving between two recipes or bundles is safe to apply (`--from` / `--to` / `--deployer`). |
 | `diff` | `diff.go` | Compare two snapshots field-by-field, reporting added, removed, and modified readings (optionally failing on drift). |
 | `mirror` / `mirror list` | `mirror.go` | Mirror charts and images referenced by a recipe to an air-gapped registry; list what would be mirrored. |
 | `trust update` | `trust.go` | Refresh the Sigstore TUF trust root used by `verify` / `evidence verify`. |

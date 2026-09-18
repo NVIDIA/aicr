@@ -24,7 +24,7 @@ make lint           # Run linters
 make build          # Build binaries
 
 # 3. Before submitting PR
-make qualify        # Full check: test-coverage + lint + tuning-check + e2e + scan + license-check + api-diff + openapi-diff
+make qualify        # Full check: test-coverage + lint + tuning-check + coverage-check + e2e + scan + license-check + api-diff + openapi-diff
 ```
 
 ## Prerequisites
@@ -33,7 +33,7 @@ make qualify        # Full check: test-coverage + lint + tuning-check + e2e + sc
 
 | Tool | Purpose | Installation |
 |------|---------|--------------|
-| **Go 1.26+** | Language runtime | [golang.org/dl](https://golang.org/dl/) |
+| **Go 1.27+** | Language runtime (exact CI toolchain pinned in `.go-version`) | [golang.org/dl](https://golang.org/dl/) |
 | **make** | Build automation | Pre-installed on macOS; `apt install make` on Ubuntu/Debian |
 | **git** | Version control | Pre-installed on most systems |
 | **Docker** | Container builds | [docs.docker.com/get-docker](https://docs.docker.com/get-docker/) |
@@ -270,7 +270,7 @@ Before submitting a PR, run everything:
 make qualify
 ```
 
-This runs: `test-coverage` → `lint` → `tuning-check` → `e2e` → `scan` → `license-check` → `api-diff` → `openapi-diff`
+This runs: `test-coverage` → `lint` → `tuning-check` → `coverage-check` → `e2e` → `scan` → `license-check` → `api-diff` → `openapi-diff`
 
 ## Local Kubernetes Development
 
@@ -451,13 +451,13 @@ make kwok-e2e RECIPE=gb200-eks-training # Test single recipe
 
 Recipes with `spec.criteria.service` defined are auto-discovered. KWOK validates scheduling (node selectors, tolerations, resource requests) but not runtime behavior (no container execution or GPU functionality).
 
-For the deployer matrix (argocd / argocd-helm OCI lanes), see [Deployer Coverage Matrix](docs/contributor/tests.md#deployer-coverage-matrix).
+For the deployer matrix (Argo CD and Flux, OCI and Git source lanes), see [Deployer Coverage Matrix](docs/contributor/tests.md#deployer-coverage-matrix).
 
 | Command | Description |
 |---------|-------------|
 | `make kwok-test-all` | Test all recipes in shared cluster (serial) |
 | `make kwok-e2e RECIPE=<name>` | Full e2e: cluster, nodes, validate |
-| `make kwok-test-deployer RECIPE=<name> DEPLOYER=<name>` | Validate single recipe under a specific deployer (`helm`, `argocd-oci`, `argocd-helm-oci`) |
+| `make kwok-test-deployer RECIPE=<name> DEPLOYER=<name>` | Validate single recipe under a specific deployer (`helm`, `argocd-oci`, `argocd-helm-oci`, `argocd-git`, `flux-oci`, `flux-git`) |
 | `make kwok-test RECIPE=<name>` | Validate bundle scheduling on an existing KWOK cluster |
 | `make kwok-cluster` | Create Kind cluster with KWOK |
 | `make kwok-nodes RECIPE=<name>` | Create KWOK nodes from a recipe overlay |
@@ -473,7 +473,7 @@ See [kwok/README.md](kwok/README.md) for adding recipes, profiles, and troublesh
 
 | Target | Description |
 |--------|-------------|
-| `make qualify` | Full qualification (test-coverage, lint, tuning-check, e2e, scan, license-check, api-diff, openapi-diff) |
+| `make qualify` | Full qualification (test-coverage, lint, tuning-check, coverage-check, e2e, scan, license-check, api-diff, openapi-diff) |
 | `make test` | Unit tests with race detector and coverage |
 | `make test-coverage` | Tests with coverage threshold (from `.settings.yaml` `quality.coverage_threshold`) |
 | `make lint` | Lint Go and YAML; verify license headers, agents sync, docs gates, and chart-version pins |

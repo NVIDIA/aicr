@@ -51,3 +51,54 @@ platformConnector:
 janitor-provider:
   csp:
     provider: generic
+
+# Layer 3 of NIC fault detection: mlx5_core driver faults from the
+# kernel log. Unconditional -- the DaemonSet already runs everywhere and
+# these patterns only match nodes with a Mellanox driver loaded.
+syslog-health-monitor:
+  # Replaces the chart default wholesale (Helm does not merge lists). The
+  # three GPU checks are carried forward; SysLogsNICDriverError is the
+  # addition.
+  enabledChecks:
+    - SysLogsXIDError
+    - SysLogsSXIDError
+    - SysLogsGPUFallenOff
+    - SysLogsNICDriverError
+  # All 11 chart-supported patterns, each STORE_ONLY so they override the
+  # chart-wide processingStrategy: EXECUTE_REMEDIATION without touching the
+  # XID/SXID/GPUFallenOff checks that keep it.
+  nicDriverDetection:
+    patterns:
+      - name: cmd_exec_timeout
+        enabled: true
+        processingStrategy: STORE_ONLY
+      - name: health_poll_failed
+        enabled: true
+        processingStrategy: STORE_ONLY
+      - name: unrecoverable_err
+        enabled: true
+        processingStrategy: STORE_ONLY
+      - name: netdev_watchdog
+        enabled: true
+        processingStrategy: STORE_ONLY
+      - name: pci_power_insufficient
+        enabled: true
+        processingStrategy: STORE_ONLY
+      - name: port_module_high_temp
+        enabled: true
+        processingStrategy: STORE_ONLY
+      - name: access_reg_failed
+        enabled: true
+        processingStrategy: STORE_ONLY
+      - name: module_unplugged
+        enabled: true
+        processingStrategy: STORE_ONLY
+      - name: mlx5_tx_timeout_detected
+        enabled: true
+        processingStrategy: STORE_ONLY
+      - name: mlx5_rx_timeout_detected
+        enabled: true
+        processingStrategy: STORE_ONLY
+      - name: mlx5_napi_soft_lockup
+        enabled: true
+        processingStrategy: STORE_ONLY

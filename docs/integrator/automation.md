@@ -291,7 +291,7 @@ done
 scrape_configs:
   - job_name: 'aicrd'
     static_configs:
-      - targets: ['aicrd.default.svc.cluster.local:8080']
+      - targets: ['aicrd.aicr.svc.cluster.local:80']
     metrics_path: /metrics
 ```
 

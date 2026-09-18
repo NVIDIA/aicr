@@ -96,8 +96,7 @@ type EmitResult struct {
 }
 
 // Emit builds, optionally signs, and optionally pushes a recipe-evidence
-// bundle (predicateType v1 for unprofiled recipes, v2 when the recipe
-// carries a configuration profile), then writes the pointer file. The
+// bundle (predicateType v3, unconditionally), then writes the pointer file. The
 // pointer is written last, only when every earlier stage succeeds — a
 // push-ref validation, build, sign, or push error returns before any
 // pointer is written. When Push is absent the pointer is still written
@@ -306,7 +305,7 @@ func signAndPush(ctx context.Context, bundle *Bundle, opts signPushOptions) (emi
 		SourceDir:     bundle.SummaryDir,
 		Reference:     pushRef,
 		AICRVersion:   opts.AICRVersion,
-		PredicateType: StatementPredicateType(bundle.Predicate),
+		PredicateType: bundle.PredicateType,
 		PlainHTTP:     opts.PlainHTTP,
 		InsecureTLS:   opts.InsecureTLS,
 	})
@@ -328,6 +327,7 @@ func signAndPush(ctx context.Context, bundle *Bundle, opts signPushOptions) (emi
 	artifactStmt, err := BuildArtifactStatement(
 		oci.TrimScheme(summary.Reference),
 		artifactDigestHex,
+		bundle.PredicateType,
 		bundle.Predicate,
 	)
 	if err != nil {

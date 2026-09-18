@@ -460,6 +460,221 @@ func TestCheckWildcardAcceleratedToleration(t *testing.T) {
 	}
 }
 
+func TestCheckGB300HostKernelGranule(t *testing.T) {
+	genericGB300 := &recipe.RecipeResult{
+		ComponentRefs: []recipe.ComponentRef{
+			{Name: "nodewright-customizations"},
+		},
+		Criteria: &recipe.Criteria{
+			Service:     recipe.CriteriaServiceGeneric,
+			Accelerator: recipe.CriteriaAcceleratorGB300,
+		},
+	}
+	conditions := map[string][]string{
+		"service":     {"generic"},
+		"accelerator": {"gb300"},
+	}
+	const wantMsg = "64k-granule ARM64 host kernel"
+
+	tests := []struct {
+		name           string
+		componentName  string
+		recipeResult   *recipe.RecipeResult
+		bundlerConfig  *config.Config
+		conditions     map[string][]string
+		wantWarnings   int
+		wantErrors     int
+		wantWarningMsg string
+	}{
+		{
+			name:           "generic gb300 warns",
+			componentName:  "nodewright-customizations",
+			recipeResult:   genericGB300,
+			bundlerConfig:  config.NewConfig(),
+			conditions:     conditions,
+			wantWarnings:   1,
+			wantErrors:     0,
+			wantWarningMsg: wantMsg,
+		},
+		{
+			name:          "eks gb300 runs nvidia-setup-kernel, no warning",
+			componentName: "nodewright-customizations",
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "nodewright-customizations"},
+				},
+				Criteria: &recipe.Criteria{
+					Service:     recipe.CriteriaServiceEKS,
+					Accelerator: recipe.CriteriaAcceleratorGB300,
+				},
+			},
+			bundlerConfig: config.NewConfig(),
+			conditions:    conditions,
+			wantWarnings:  0,
+			wantErrors:    0,
+		},
+		{
+			name:          "generic non-gb300 accelerator, no warning",
+			componentName: "nodewright-customizations",
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "nodewright-customizations"},
+				},
+				Criteria: &recipe.Criteria{
+					Service:     recipe.CriteriaServiceGeneric,
+					Accelerator: recipe.CriteriaAcceleratorH100,
+				},
+			},
+			bundlerConfig: config.NewConfig(),
+			conditions:    conditions,
+			wantWarnings:  0,
+			wantErrors:    0,
+		},
+		{
+			name:          "component not in recipe",
+			componentName: "nodewright-customizations",
+			recipeResult: &recipe.RecipeResult{
+				ComponentRefs: []recipe.ComponentRef{
+					{Name: "gpu-operator"},
+				},
+				Criteria: &recipe.Criteria{
+					Service:     recipe.CriteriaServiceGeneric,
+					Accelerator: recipe.CriteriaAcceleratorGB300,
+				},
+			},
+			bundlerConfig: config.NewConfig(),
+			conditions:    conditions,
+			wantWarnings:  0,
+			wantErrors:    0,
+		},
+		{
+			name:          "component disabled via --set",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"nodewrightcustomizations": {"enabled": "false"},
+				}),
+			),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "tuning gated off renders no tuned package",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"nodewrightcustomizations": {"tuningEnabled": "false"},
+				}),
+			),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			// Regression: the check used to read only the scalar --set map,
+			// so a typed override suppressed the tuned package but still
+			// emitted the advisory.
+			name:          "tuning gated off via typed --set-json",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+				{Component: "nodewrightcustomizations", Path: tuningEnabledKey, Value: false},
+			})),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "tuning gated off via typed --set-json under the canonical name",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+				{Component: "nodewright-customizations", Path: tuningEnabledKey, Value: false},
+			})),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "typed --set-json tuningEnabled=true still warns",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(config.WithValueOverridesTypedPaths([]config.TypedComponentPath{
+				{Component: "nodewrightcustomizations", Path: tuningEnabledKey, Value: true},
+			})),
+			conditions:     conditions,
+			wantWarnings:   1,
+			wantErrors:     0,
+			wantWarningMsg: wantMsg,
+		},
+		{
+			name:          "tuning gated off via skyhook alias",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"skyhookcustomizations": {"tuningEnabled": "false"},
+				}),
+			),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "tuning gated off via exact hyphenated name",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: config.NewConfig(
+				config.WithValueOverrides(map[string]map[string]string{
+					"nodewright-customizations": {"tuningEnabled": "false"},
+				}),
+			),
+			conditions:   conditions,
+			wantWarnings: 0,
+			wantErrors:   0,
+		},
+		{
+			name:          "nil config",
+			componentName: "nodewright-customizations",
+			recipeResult:  genericGB300,
+			bundlerConfig: nil,
+			conditions:    conditions,
+			wantWarnings:  0,
+			wantErrors:    0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			warnings, errors := CheckGB300HostKernelGranule(ctx, tt.componentName, tt.recipeResult, tt.bundlerConfig, tt.conditions)
+
+			if len(warnings) != tt.wantWarnings {
+				t.Errorf("CheckGB300HostKernelGranule() warnings = %d, want %d", len(warnings), tt.wantWarnings)
+			}
+			if len(errors) != tt.wantErrors {
+				t.Errorf("CheckGB300HostKernelGranule() errors = %d, want %d", len(errors), tt.wantErrors)
+			}
+
+			if tt.wantWarningMsg != "" && len(warnings) > 0 {
+				found := false
+				for _, w := range warnings {
+					if strings.Contains(w, tt.wantWarningMsg) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("CheckGB300HostKernelGranule() warnings = %v, want to contain %q", warnings, tt.wantWarningMsg)
+				}
+			}
+		})
+	}
+}
+
 func TestCheckHostMofedWithoutNetworkOperator(t *testing.T) {
 	tests := []struct {
 		name           string

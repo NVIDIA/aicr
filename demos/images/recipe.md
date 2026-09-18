@@ -72,7 +72,7 @@ Benefit: Eliminates duplication, common settings inherited automatically
 **Asymmetric Matching:**
 - Empty field in criteria = WILDCARD (matches any value)
 - Empty field in query = NO MATCH (field not provided)
-- Criteria fields: service, accelerator, os, intent, nodes
+- Criteria fields: service, accelerator, os, intent, platform
 - Overlays SELECT queries, queries don't select overlays
 
 Caption: "overlay.criteria.IsMatch(query) is not equal to query.IsMatch(overlay.criteria)"

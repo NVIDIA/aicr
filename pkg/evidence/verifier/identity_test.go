@@ -103,7 +103,7 @@ criteria:
 			if tt.mutate != nil {
 				tt.mutate(p)
 			}
-			err := checkRecipeIdentity([]byte(recipeYAML), ptr(tt.profile), p)
+			err := checkRecipeIdentity([]byte(recipeYAML), ptr(tt.profile), p, attestation.PredicateTypeV1)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("checkRecipeIdentity() = %v, want nil", err)
@@ -197,7 +197,7 @@ componentRefs:
 		t.Run(tt.name, func(t *testing.T) {
 			p := pred()
 			tt.mutate(p)
-			err := checkRecipeIdentity([]byte(recipeYAML), ptr, p)
+			err := checkRecipeIdentity([]byte(recipeYAML), ptr, p, attestation.PredicateTypeV2)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("checkRecipeIdentity() = %v, want nil", err)
@@ -262,19 +262,57 @@ criteria:
 	// exactly what the pre-fix path-based reread accepted. This subcheck
 	// keeps the regression honest: if it ever fails, the rejection below
 	// no longer proves anything about the swap.
-	if cErr := checkRecipeIdentity([]byte(recipeB), nil, predB); cErr != nil {
+	if cErr := checkRecipeIdentity([]byte(recipeB), nil, predB, attestation.PredicateTypeV1); cErr != nil {
 		t.Fatalf("swapped bytes should satisfy predicate B (the false-PASS shape): %v", cErr)
 	}
 
 	// The fix: identity binds the inventory-verified bytes, so predicate B
 	// is rejected against captured recipe A.
-	if idErr := checkRecipeIdentity(captured, nil, predB); idErr == nil {
+	if idErr := checkRecipeIdentity(captured, nil, predB, attestation.PredicateTypeV1); idErr == nil {
 		t.Fatal("checkRecipeIdentity(captured A bytes, predicate B) = nil, want rejection: identity accepted bytes the manifest never covered")
 	}
 
 	// And a nil capture (no manifest-verified recipe) must fail closed,
 	// never fall back to a path read of the swapped file.
-	if nilErr := checkRecipeIdentity(nil, nil, predB); nilErr == nil {
+	if nilErr := checkRecipeIdentity(nil, nil, predB, attestation.PredicateTypeV1); nilErr == nil {
 		t.Fatal("checkRecipeIdentity(nil recipe bytes) = nil, want fail-closed rejection")
+	}
+}
+
+// TestCheckRecipeIdentity_V3IgnoresMetadataVersion pins the point of V3:
+// a digest computed against one metadata.version must still identify a
+// recipe that differs only in that field. V1/V2 hash metadata.version, so
+// this same swap would fail under those types.
+func TestCheckRecipeIdentity_V3IgnoresMetadataVersion(t *testing.T) {
+	const recipeV1 = `kind: RecipeResult
+apiVersion: aicr.run/v1alpha2
+metadata:
+  version: 1.0.0
+criteria:
+  service: gke
+  accelerator: h100
+  os: cos
+  intent: training
+`
+	const recipeV2 = `kind: RecipeResult
+apiVersion: aicr.run/v1alpha2
+metadata:
+  version: 2.0.0
+criteria:
+  service: gke
+  accelerator: h100
+  os: cos
+  intent: training
+`
+	digest, err := attestation.SubjectDigestV3([]byte(recipeV1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pred := &attestation.Predicate{}
+	pred.Recipe.Name = "h100-gke-cos-training"
+	pred.Recipe.Digest = digest
+
+	if err := checkRecipeIdentity([]byte(recipeV2), nil, pred, attestation.PredicateTypeV3); err != nil {
+		t.Fatalf("checkRecipeIdentity(V3 metadata.version change) = %v, want nil", err)
 	}
 }

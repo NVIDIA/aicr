@@ -143,8 +143,8 @@ func TestBuild_HappyPathWritesExpectedTree(t *testing.T) {
 	if err := json.Unmarshal(bundle.StatementJSON, &stmt); err != nil {
 		t.Fatalf("statement unmarshal: %v", err)
 	}
-	if stmt["predicateType"] != PredicateTypeV1 {
-		t.Errorf("statement predicateType = %v", stmt["predicateType"])
+	if stmt["predicateType"] != PredicateTypeV3 {
+		t.Errorf("statement predicateType = %v, want %v", stmt["predicateType"], PredicateTypeV3)
 	}
 
 	if bundle.Predicate.BOM.ImageCount != 2 {

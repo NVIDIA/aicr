@@ -1442,6 +1442,7 @@ func facadeResultFromInternal(r *recipe.RecipeResult, name string) *RecipeResult
 			Name:      c.Name,
 			Kind:      string(c.Type),
 			Version:   c.Version,
+			Tag:       c.Tag,
 			Source:    c.Source,
 			Chart:     chart,
 			Namespace: c.Namespace,

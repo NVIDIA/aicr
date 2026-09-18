@@ -241,7 +241,9 @@ func templatePath(accelerator recipe.CriteriaAcceleratorType, service recipe.Cri
 	}
 	// RoCE NET templates are fabric-keyed and accelerator-agnostic: any EKS RoCE
 	// node uses testdata/roce/{service}/..., not a per-accelerator directory.
-	if fabric == fabricRoCE {
+	// Scoped to variantNET. NVLS uses NVLink/IMEX, not fabric-selected NICs, so
+	// it has no testdata/roce/{service}/runtime-nvls.yaml to redirect to.
+	if fabric == fabricRoCE && variant == variantNET {
 		return filepath.Join("testdata", string(fabricRoCE), string(service), filename)
 	}
 	return filepath.Join("testdata", string(accelerator), string(service), filename)
@@ -286,6 +288,7 @@ var supportedNCCLCombinations = map[ncclVariant]map[recipe.CriteriaServiceType][
 		// testdata/gb300/eks/runtime-nvls.yaml.
 		recipe.CriteriaServiceEKS: {recipe.CriteriaAcceleratorGB200, recipe.CriteriaAcceleratorGB300},
 		recipe.CriteriaServiceOKE: {recipe.CriteriaAcceleratorGB200},
+		recipe.CriteriaServiceGKE: {recipe.CriteriaAcceleratorGB200},
 		// VR200 NVL72 on bare-metal RKE2: MNNVL across the IMEX domain, same
 		// shape as GB200 but with its own runtime (NGC pytorch image, distinct
 		// mpirun path) — see testdata/vr200/rke2/runtime-nvls.yaml.
@@ -1286,9 +1289,9 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 
 	var instanceType string
 
-	// For GKE, discover GPU NIC network names (cluster-specific prefixes).
-	// Skipped for a recipe-supplied runtime, which owns its own fabric wiring.
-	if customRuntime == "" && service == recipe.CriteriaServiceGKE {
+	// GKE GPU NIC discovery only applies to the TCPXO (gpu-nic-*) fabric;
+	// GB200 uses the gke-gb200-rdma Network CRs instead.
+	if customRuntime == "" && service == recipe.CriteriaServiceGKE && accelerator != recipe.CriteriaAcceleratorGB200 {
 		gpuNICs, err := gkenet.DiscoverGPUNICNetworks(ctx.Ctx, dynamicClient)
 		if err != nil {
 			return aicrErrors.Wrap(aicrErrors.ErrCodeInternal, "failed to discover GKE GPU NIC networks", err)
@@ -1354,7 +1357,9 @@ func applyNCCLResources(ctx *validators.Context, dynamicClient dynamic.Interface
 	// as a standalone object before the runtime (it must exist when the TrainJob
 	// later creates the worker pods that reference it). Skipped for a
 	// recipe-supplied runtime: it declares any DRA claims it needs itself.
-	if customRuntime == "" && fabric == fabricRoCE {
+	// Scoped to variantNET. NVLS claims GPUs through the IMEX ComputeDomain
+	// instead, so a testdata/roce/{service}/roce-claim.yaml never exists for it.
+	if customRuntime == "" && fabric == fabricRoCE && variant == variantNET {
 		// Claim one ConnectX RoCE device per GPU via DRA (NCCL maps GPU->NIC);
 		// the per-node device pool (e.g. 8 on p6e-gb300r) is >= GPUs/node. Set
 		// here — keyed by fabric, not service — so adding a non-EKS RoCE service

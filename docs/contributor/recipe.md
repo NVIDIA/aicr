@@ -144,7 +144,7 @@ except exemption-declared divergences — see
 - `make lint` validates every committed record via
   `check-upgrade-records`.
 
-See [ADR-021](../design/021-component-upgrade-safety.md) for the full
+See [ADR-021](https://github.com/NVIDIA/aicr/blob/main/docs/design/021-component-upgrade-safety.md) for the full
 field reference.
 
 ## Overlay (`recipes/overlays/`)
@@ -338,7 +338,8 @@ spec:
 
 Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
 `platform-inference`, `platform-kubeflow`, `nvsentinel-observability`,
-`nvsentinel-object-monitor`.
+`nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
+`nvsentinel-preflight`, `npd`.
 
 **Mixin rules:**
 
@@ -351,13 +352,20 @@ Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
   are restricted to additive merges via `mixinComponentRefSafeForMerge`
   (see `pkg/recipe/metadata_store.go`). Such a componentRef may
   unconditionally set `name`, `namespace`, `manifestFiles`,
-  `preManifestFiles`. Setting any of `chart`, `type`, `source`,
-  `version`, `tag`, `path`, `valuesFile`, `patches`,
-  `dependencyRefs`, `cleanup`, `expectedResources`,
+  `preManifestFiles`, `dependencyRefs`. Setting any of `chart`,
+  `type`, `source`, `version`, `tag`, `path`, `valuesFile`,
+  `patches`, `cleanup`, `expectedResources`,
   `healthCheckAsserts` is rejected at compose time — those fields
   silently override the chain's chosen chart, so the resolver names
   the offending field and refuses to merge (see ADR-005 "Silent
   constraint override" mitigation).
+  `dependencyRefs` is in the safe set because the merge is a
+  deduplicated union, never a replacement: a mixin can add an edge the
+  component needs but cannot drop one the chain declared, and the
+  resolver still rejects a reference to an absent component or a cycle.
+  `nvsentinel-preflight` is the reason it is there — its controller
+  fails closed without `kai-scheduler`'s `PodGroup` CRD, so it must
+  add that edge to an already-chained `nvsentinel`.
 - A mixin **introducing a genuinely new component** (one not already in
   the chain) may set those structural fields — that is how
   `platform-kubeflow` and `platform-inference` add their components.
@@ -928,8 +936,8 @@ prevents.
 - [component.md](component.md) — adding a component to the registry
 - [validator.md](validator.md#component-validations-bundle-time) — adding bundle-time component validation checks
 - [validator.md](validator.md) — adding a validator check or health check
-- [ADR-005](../design/005-overlay-refactoring.md) — overlay refactoring rationale (mixin composition, maximal-leaf resolver, wildcard overlays)
-- [ADR-007](../design/007-recipe-evidence.md) — fingerprint, evidence bundle, verification
-- [ADR-021](../design/021-component-upgrade-safety.md) — component upgrade transition records: schema, verdicts, well-formedness rules
+- [ADR-005](https://github.com/NVIDIA/aicr/blob/main/docs/design/005-overlay-refactoring.md) — overlay refactoring rationale (mixin composition, maximal-leaf resolver, wildcard overlays)
+- [ADR-007](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md) — fingerprint, evidence bundle, verification
+- [ADR-021](https://github.com/NVIDIA/aicr/blob/main/docs/design/021-component-upgrade-safety.md) — component upgrade transition records: schema, verdicts, well-formedness rules
 - [pkg/recipe godoc](https://github.com/NVIDIA/aicr/tree/main/pkg/recipe) — implementation
 - [api/aicr/v1/server.yaml](https://github.com/NVIDIA/aicr/blob/main/api/aicr/v1/server.yaml) — recipe API contract and criteria enums

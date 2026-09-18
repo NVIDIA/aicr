@@ -18,6 +18,8 @@ import (
 	"encoding/base64"
 	stderrors "errors"
 	"testing"
+
+	"github.com/NVIDIA/aicr/pkg/evidence/attestation"
 )
 
 func TestLooksLikeJSON(t *testing.T) {
@@ -127,12 +129,15 @@ func TestParseStatement(t *testing.T) {
   "predicateType": "https://aicr.run/recipe-evidence/v1",
   "predicate": {"schemaVersion": "1.0.0", "aicrVersion": "v0.13.0"}
 }`)
-	hex, pred, err := parseStatement(good)
+	hex, predType, pred, err := parseStatement(good)
 	if err != nil {
 		t.Fatalf("parseStatement: %v", err)
 	}
 	if hex != "abc123" {
 		t.Errorf("subject hex = %q, want abc123", hex)
+	}
+	if predType != attestation.PredicateTypeV1 {
+		t.Errorf("predicateType = %q, want %q", predType, attestation.PredicateTypeV1)
 	}
 	if pred == nil || pred.SchemaVersion != "1.0.0" {
 		t.Errorf("predicate parse missing or wrong; got %+v", pred)
@@ -151,7 +156,7 @@ func TestParseStatement_Rejects(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, _, err := parseStatement([]byte(tt.in)); err == nil {
+			if _, _, _, err := parseStatement([]byte(tt.in)); err == nil {
 				t.Errorf("expected error")
 			}
 		})

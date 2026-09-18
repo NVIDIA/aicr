@@ -91,7 +91,7 @@ the `< 1.36.0` Kubernetes cap and the Gateway API / LoadBalancer prerequisites
 
 ## Rollout Behavior
 
-**Both VR200 leaves reboot every GPU node they touch.** Two rebooting Skyhook
+**All four VR200 coordinates reboot every GPU node they touch.** Two rebooting Skyhook
 CRs ship in each leaf and are applied when the bundle deploys:
 
 - `tuning-rke2` — writes the native `vr200/rke2` `nvidia-tuned` profile to

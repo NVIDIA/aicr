@@ -20,9 +20,10 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
@@ -39,13 +40,14 @@ const (
 	stockRenderGoldenPath = "testdata/stock_render_golden.yaml"
 
 	// stockRenderVersion pins both the recipe builder version and the bundler
-	// version so the digest is a pure function of the catalog and the render
+	// version so the digests are a pure function of the catalog and the render
 	// logic, not of the release the test happens to run on.
 	stockRenderVersion = "stock-render-golden"
 
 	// renderErrorSentinel stands in for a leaf that resolved but failed to
 	// render, so a leaf flipping between renderable and erroring flips the
-	// golden rather than dropping out of the comparison.
+	// golden rather than dropping out of the comparison. It is stored as the
+	// leaf's only entry, keyed and valued by the sentinel.
 	renderErrorSentinel = "render-error"
 
 	// stockRenderBudget bounds the ENTIRE render loop, not one leaf.
@@ -59,8 +61,12 @@ const (
 	stockRenderBudget = 5 * time.Minute
 )
 
+// renderGolden maps each leaf overlay name to its rendered files: bundle
+// relative path to SHA-256 of the file's contents.
+type renderGolden map[string]map[string]string
+
 // TestStockRenderParityGolden pins the rendered bundle bytes of every leaf
-// recipe in the embedded catalog.
+// recipe in the embedded catalog, one digest per rendered file.
 //
 // Companion to TestCatalogParityGolden in pkg/recipe, and NOT redundant with
 // it. Resolution records which components a recipe selects and which values
@@ -69,6 +75,12 @@ const (
 // to recipes/components/<name>/values.yaml therefore moves this golden while
 // leaving the resolution golden untouched. Together the two cover #2240's
 // "resolved and rendered bytes remain unchanged".
+//
+// The golden is keyed per file rather than collapsed to one digest per leaf
+// so its diff names what moved: a shared template edit shows up as the same
+// path changing under every leaf that renders it, while a values change shows
+// up under the leaves that select that component (#2810). Paths keep their
+// install-order prefix because a reordering is a real bundle change.
 //
 // Hermetic: the helm deployer emits values and manifests that reference the
 // upstream chart by coordinates. Chart bytes are only fetched on the
@@ -93,7 +105,7 @@ func TestStockRenderParityGolden(t *testing.T) {
 		t.Fatal("catalog resolved zero leaves; a golden over an empty set proves nothing")
 	}
 
-	got := make(map[string]string, len(leaves))
+	got := make(renderGolden, len(leaves))
 	for _, leaf := range leaves {
 		name := leaf.Entry.Name
 		if leaf.Err != nil {
@@ -102,13 +114,13 @@ func TestStockRenderParityGolden(t *testing.T) {
 			t.Errorf("leaf %q failed to resolve: %v", name, leaf.Err)
 			continue
 		}
-		digest, renderErr := renderLeafDigest(ctx, t, leaf.Result)
+		files, renderErr := renderLeafFileDigests(ctx, t, leaf.Result)
 		if renderErr != nil {
 			t.Errorf("leaf %q failed to render: %v", name, renderErr)
-			got[name] = renderErrorSentinel
+			got[name] = renderErrorLeaf()
 			continue
 		}
-		got[name] = digest
+		got[name] = files
 	}
 
 	if os.Getenv("AICR_UPDATE_GOLDEN") == "1" {
@@ -124,40 +136,123 @@ func TestStockRenderParityGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden (run with AICR_UPDATE_GOLDEN=1 to create): %v", err)
 	}
-	want := map[string]string{}
+	want := renderGolden{}
 	if err := yaml.Unmarshal(raw, &want); err != nil {
 		t.Fatalf("unmarshal golden: %v", err)
 	}
 
-	for _, name := range sortedStringKeys(got) {
-		w, ok := want[name]
-		if !ok {
-			t.Errorf("leaf %q is not in the golden (new overlay?) — regenerate deliberately", name)
-			continue
-		}
-		if w != got[name] {
-			t.Errorf("leaf %q rendered bytes changed: golden %s, now %s\n"+
-				"If this change was intended, regenerate with AICR_UPDATE_GOLDEN=1 and justify the diff "+
-				"in the PR. If it was not, a change meant to be scoped to one component has leaked into "+
-				"this recipe's bundle.", name, w, got[name])
+	fileDrift := false
+	for _, d := range diffRenderGolden(want, got) {
+		switch d.Kind {
+		case driftLeafAdded:
+			t.Errorf("leaf %q is not in the golden (new overlay?) — regenerate deliberately", d.Leaf)
+		case driftLeafRemoved:
+			t.Errorf("golden leaf %q is no longer produced (overlay removed?) — regenerate deliberately", d.Leaf)
+		case driftRenderState:
+			state := "renderable"
+			if isRenderErrorLeaf(got[d.Leaf]) {
+				state = "erroring"
+			}
+			t.Errorf("leaf %q changed render state: now %s", d.Leaf, state)
+		default:
+			fileDrift = true
+			t.Errorf("leaf %q: %s %s", d.Leaf, d.Kind, d.Path)
 		}
 	}
-	for _, name := range sortedStringKeys(want) {
-		if _, ok := got[name]; !ok {
-			t.Errorf("golden leaf %q is no longer produced (overlay removed?) — regenerate deliberately", name)
-		}
+	if fileDrift {
+		t.Error("Rendered bytes changed for the files listed above. If this change was intended, " +
+			"regenerate with AICR_UPDATE_GOLDEN=1 and justify the diff in the PR. If it was not, a change " +
+			"meant to be scoped to one component has leaked into these bundles.")
 	}
 }
 
-// renderLeafDigest bundles one resolved recipe and returns a digest over the
-// full emitted tree.
+// Kinds of drift diffRenderGolden reports, from coarsest to finest.
+const (
+	driftLeafAdded   = "leaf added"
+	driftLeafRemoved = "leaf removed"
+	driftRenderState = "render state changed"
+	driftFileAdded   = "file added"
+	driftFileRemoved = "file removed"
+	driftFileChanged = "file changed"
+)
+
+// renderDrift is one difference between the golden and the current render.
+// Path is empty for leaf-level kinds.
+type renderDrift struct {
+	Leaf string
+	Kind string
+	Path string
+}
+
+// diffRenderGolden compares two goldens and reports every difference in a
+// deterministic order: leaves ascending, then paths ascending within a leaf.
+// A leaf that flipped between renderable and erroring reports a single
+// render-state drift rather than every file as added or removed.
+func diffRenderGolden(want, got renderGolden) []renderDrift {
+	var out []renderDrift
+	leaves := slices.Sorted(maps.Keys(want))
+	for leaf := range got {
+		if _, ok := want[leaf]; !ok {
+			leaves = append(leaves, leaf)
+		}
+	}
+	slices.Sort(leaves)
+
+	for _, leaf := range leaves {
+		w, inWant := want[leaf]
+		g, inGot := got[leaf]
+		switch {
+		case !inWant:
+			out = append(out, renderDrift{Leaf: leaf, Kind: driftLeafAdded})
+			continue
+		case !inGot:
+			out = append(out, renderDrift{Leaf: leaf, Kind: driftLeafRemoved})
+			continue
+		case isRenderErrorLeaf(w) != isRenderErrorLeaf(g):
+			out = append(out, renderDrift{Leaf: leaf, Kind: driftRenderState})
+			continue
+		}
+
+		paths := slices.Sorted(maps.Keys(w))
+		for p := range g {
+			if _, ok := w[p]; !ok {
+				paths = append(paths, p)
+			}
+		}
+		slices.Sort(paths)
+		for _, p := range paths {
+			wd, inW := w[p]
+			gd, inG := g[p]
+			switch {
+			case !inW:
+				out = append(out, renderDrift{Leaf: leaf, Kind: driftFileAdded, Path: p})
+			case !inG:
+				out = append(out, renderDrift{Leaf: leaf, Kind: driftFileRemoved, Path: p})
+			case wd != gd:
+				out = append(out, renderDrift{Leaf: leaf, Kind: driftFileChanged, Path: p})
+			}
+		}
+	}
+	return out
+}
+
+func renderErrorLeaf() map[string]string {
+	return map[string]string{renderErrorSentinel: renderErrorSentinel}
+}
+
+func isRenderErrorLeaf(files map[string]string) bool {
+	return len(files) == 1 && files[renderErrorSentinel] == renderErrorSentinel
+}
+
+// renderLeafFileDigests bundles one resolved recipe and returns a digest per
+// file in the emitted tree.
 //
 // The scheduling, storage, and node-count inputs below are fixed synthetic
 // values, applied identically to every leaf. Several components' bundle
 // contracts require them, and supplying them is what lets the golden cover the
 // injection paths rather than only the components that need no input. Their
 // exact values are irrelevant; that they never vary is what matters.
-func renderLeafDigest(ctx context.Context, t *testing.T, rr *recipe.RecipeResult) (string, error) {
+func renderLeafFileDigests(ctx context.Context, t *testing.T, rr *recipe.RecipeResult) (map[string]string, error) {
 	t.Helper()
 
 	cfg := config.NewConfig(
@@ -182,27 +277,21 @@ func renderLeafDigest(ctx context.Context, t *testing.T, rr *recipe.RecipeResult
 
 	b, err := New(WithConfig(cfg))
 	if err != nil {
-		return "", fmt.Errorf("new bundler: %w", err)
+		return nil, fmt.Errorf("new bundler: %w", err)
 	}
 
 	outputDir := t.TempDir()
 	if _, err := b.Make(ctx, rr, outputDir); err != nil {
-		return "", fmt.Errorf("make: %w", err)
+		return nil, fmt.Errorf("make: %w", err)
 	}
-	return digestTree(outputDir)
+	return digestTreeFiles(outputDir)
 }
 
-// digestTree hashes a directory into one stable digest: the sorted set of
-// relative paths, each paired with the SHA-256 of its contents. Paths are
-// included so a file rename moves the digest even when total bytes are
-// unchanged, and sorting removes the filesystem's walk-order from the result.
-func digestTree(root string) (string, error) {
-	type entry struct {
-		path   string
-		digest string
-	}
-	var entries []entry
-
+// digestTreeFiles hashes every file under root, keyed by slash-separated
+// relative path, so a rename is visible as a removed and an added path even
+// when total bytes are unchanged.
+func digestTreeFiles(root string) (map[string]string, error) {
+	files := map[string]string{}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -219,25 +308,19 @@ func digestTree(root string) (string, error) {
 			return readErr
 		}
 		sum := sha256.Sum256(content)
-		entries = append(entries, entry{path: filepath.ToSlash(rel), digest: hex.EncodeToString(sum[:])})
+		files[filepath.ToSlash(rel)] = hex.EncodeToString(sum[:])
 		return nil
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if len(entries) == 0 {
-		return "", fmt.Errorf("bundle tree at %s is empty", root)
+	if len(files) == 0 {
+		return nil, fmt.Errorf("bundle tree at %s is empty", root)
 	}
-
-	sort.Slice(entries, func(i, j int) bool { return entries[i].path < entries[j].path })
-	h := sha256.New()
-	for _, e := range entries {
-		fmt.Fprintf(h, "%s %s\n", e.path, e.digest)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
+	return files, nil
 }
 
-func writeStockRenderGolden(t *testing.T, got map[string]string) {
+func writeStockRenderGolden(t *testing.T, got renderGolden) {
 	t.Helper()
 	raw, err := serializer.MarshalYAMLDeterministic(got)
 	if err != nil {
@@ -246,18 +329,86 @@ func writeStockRenderGolden(t *testing.T, got map[string]string) {
 	header := []byte("# Generated by TestStockRenderParityGolden. Do not hand-edit.\n" +
 		"# Regenerate: AICR_UPDATE_GOLDEN=1 go test ./pkg/bundler/ -run TestStockRenderParityGolden\n" +
 		"#\n" +
-		"# One entry per leaf overlay: a digest over its fully rendered helm-deployer\n" +
-		"# bundle tree (sorted relative paths paired with per-file content hashes).\n")
+		"# One entry per leaf overlay, mapping each file in its fully rendered\n" +
+		"# helm-deployer bundle tree (relative path, install-order prefix kept) to\n" +
+		"# the sha256 of that file's contents. A leaf that failed to render is\n" +
+		"# recorded as the single entry `render-error: render-error`.\n")
 	if err := os.WriteFile(stockRenderGoldenPath, append(header, raw...), 0o600); err != nil {
 		t.Fatalf("write golden: %v", err)
 	}
 }
 
-func sortedStringKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+func TestDiffRenderGolden(t *testing.T) {
+	base := renderGolden{
+		"leaf-a": {"001-x/values.yaml": "aa", "001-x/deploy.sh": "bb"},
+		"leaf-b": {"001-x/values.yaml": "cc"},
 	}
-	sort.Strings(keys)
-	return keys
+	clone := func(mutate func(renderGolden)) renderGolden {
+		g := renderGolden{}
+		for leaf, files := range base {
+			g[leaf] = maps.Clone(files)
+		}
+		mutate(g)
+		return g
+	}
+
+	tests := []struct {
+		name string
+		got  renderGolden
+		want []renderDrift
+	}{
+		{"identical", clone(func(renderGolden) {}), nil},
+		{
+			"file added",
+			clone(func(g renderGolden) { g["leaf-a"]["001-x/new.yaml"] = "dd" }),
+			[]renderDrift{{Leaf: "leaf-a", Kind: driftFileAdded, Path: "001-x/new.yaml"}},
+		},
+		{
+			"file removed",
+			clone(func(g renderGolden) { delete(g["leaf-a"], "001-x/deploy.sh") }),
+			[]renderDrift{{Leaf: "leaf-a", Kind: driftFileRemoved, Path: "001-x/deploy.sh"}},
+		},
+		{
+			"file changed in every leaf that renders it, reported per leaf in order",
+			clone(func(g renderGolden) {
+				g["leaf-b"]["001-x/values.yaml"] = "zz"
+				g["leaf-a"]["001-x/values.yaml"] = "zz"
+			}),
+			[]renderDrift{
+				{Leaf: "leaf-a", Kind: driftFileChanged, Path: "001-x/values.yaml"},
+				{Leaf: "leaf-b", Kind: driftFileChanged, Path: "001-x/values.yaml"},
+			},
+		},
+		{
+			"leaf added",
+			clone(func(g renderGolden) { g["leaf-c"] = map[string]string{"001-x/values.yaml": "ee"} }),
+			[]renderDrift{{Leaf: "leaf-c", Kind: driftLeafAdded}},
+		},
+		{
+			"leaf removed",
+			clone(func(g renderGolden) { delete(g, "leaf-b") }),
+			[]renderDrift{{Leaf: "leaf-b", Kind: driftLeafRemoved}},
+		},
+		{
+			"leaf started erroring reports one render-state drift, not every file removed",
+			clone(func(g renderGolden) { g["leaf-a"] = renderErrorLeaf() }),
+			[]renderDrift{{Leaf: "leaf-a", Kind: driftRenderState}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := diffRenderGolden(base, tt.got); !slices.Equal(got, tt.want) {
+				t.Errorf("diffRenderGolden() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+
+	t.Run("leaf recovered from erroring reports one render-state drift", func(t *testing.T) {
+		errWant := renderGolden{"leaf-a": renderErrorLeaf()}
+		got := renderGolden{"leaf-a": {"001-x/values.yaml": "aa"}}
+		want := []renderDrift{{Leaf: "leaf-a", Kind: driftRenderState}}
+		if d := diffRenderGolden(errWant, got); !slices.Equal(d, want) {
+			t.Errorf("diffRenderGolden() = %v, want %v", d, want)
+		}
+	})
 }
