@@ -104,6 +104,32 @@ const (
 	GroupVersionV1 = APIGroup + "/" + APIVersionV1
 )
 
+// Annotations AICR stamps onto a generated Helm wrapper chart, derived from
+// Domain per ADR-013 so an API-domain migration cannot leave them behind.
+//
+// They live here rather than beside the writer that emits them because the
+// reader that consumes them is `aicr upgrade-check --from cluster`, which
+// reads a cluster and has no business importing the bundle writer. A single
+// spelling is the whole point: a reader looking up a key the writer stopped
+// emitting sees an unstamped chart, and reports a wrapper's version as the
+// payload's.
+//
+// The rule for a reader is one sentence with two branches: use
+// AnnotationComponentVersion when it is present, otherwise use the release's
+// own chart version. Its presence is exactly the signal that the chart version
+// describes the wrapper rather than the payload — an upstream chart installed
+// directly carries neither annotation, and its release version IS the payload
+// version (ADR-021 Decision 7).
+const (
+	// AnnotationComponentVersion carries the free-form version of the payload
+	// the wrapper contains.
+	AnnotationComponentVersion = Domain + "/component-version"
+
+	// AnnotationGeneratedBy carries the AICR build version that produced the
+	// wrapper. Mirrors Chart.yaml `version:`.
+	AnnotationGeneratedBy = Domain + "/generated-by"
+)
+
 // AlphaRemovedIn is the release that stops reading the alpha apiVersion values
 // and the legacy empty header. ADR-022 §3 binds N+2 to v1.0.0 (#2417): shipping
 // v1.0.0 while it still reads alpha would make alpha acceptance part of the
