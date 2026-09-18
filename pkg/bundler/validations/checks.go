@@ -2225,16 +2225,25 @@ const nicInclusionRegexOverridePath = "nic-health-monitor.nicInclusionRegexOverr
 // value", ignores the condition, and renders the subchart anyway
 // (verified against chart v1.20.0: `--set global.nicHealthMonitor.enabled=0`
 // still renders nic-health-monitor, while `=false` does not). So only the
-// literal false switches a subchart off. present is false when the key is
-// absent, leaving the chart's own default to decide.
+// literal false switches a subchart off, and only a well-formed table can
+// carry it. present is false when the key is absent, leaving the chart's
+// own default to decide.
 func nvsentinelSubchartRenders(values map[string]any, key string) (renders, present bool) {
 	global, ok := values["global"].(map[string]any)
 	if !ok {
 		return false, false
 	}
-	section, ok := global[key].(map[string]any)
-	if !ok {
+	sectionRaw, present := global[key]
+	if !present {
 		return false, false
+	}
+	section, isMap := sectionRaw.(map[string]any)
+	if !isMap {
+		// A non-table section (--set-json global.<key>=true, =null, a
+		// string) leaves the condition path unresolvable, so Helm warns
+		// and falls back to rendering the dependency. Reading it as
+		// "absent, therefore off" would let exactly that through.
+		return true, true
 	}
 	raw, ok := section["enabled"]
 	if !ok {

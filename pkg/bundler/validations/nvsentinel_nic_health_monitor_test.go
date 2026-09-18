@@ -223,6 +223,30 @@ func TestCheckNVSentinelNicHealthMonitorRequiresMetadataCollector(t *testing.T) 
 			wantBlocked:   true,
 		},
 		{
+			// Helm cannot resolve global.nicHealthMonitor.enabled when the
+			// section itself is not a table, so it warns and renders the
+			// subchart anyway (verified against chart v1.20.0). Reading a
+			// non-map section as "absent, therefore off" would ship exactly
+			// the no-inventory deployment this gate exists to reject.
+			name: "monitor section is a non-map, collector disabled → blocked",
+			recipeResult: result(sentinelRef(map[string]any{
+				"global": map[string]any{
+					"nicHealthMonitor":  true,
+					"metadataCollector": map[string]any{"enabled": false},
+				},
+			})),
+			wantBlocked: true,
+		},
+		{
+			name: "monitor section is a non-map, collector enabled → passes",
+			recipeResult: result(sentinelRef(map[string]any{
+				"global": map[string]any{
+					"nicHealthMonitor":  true,
+					"metadataCollector": map[string]any{"enabled": true},
+				},
+			})),
+		},
+		{
 			name:          "all three dynamic → blocked",
 			recipeResult:  result(sentinelRef(values(nil, nil, nil))),
 			bundlerConfig: dynamic("global.nicHealthMonitor.enabled", "global.metadataCollector.enabled", "nic-health-monitor.nicInclusionRegexOverride"),
