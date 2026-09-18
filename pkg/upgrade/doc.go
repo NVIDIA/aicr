@@ -124,9 +124,9 @@
 // and in its detail block where it has one: the steps there were authored for a
 // version boundary and neither perform the relocation nor account for it.
 //
-// The deployer cannot be inferred. ADR-021 Decision 5 would take it from a `to`
-// bundle, but no bundle artifact records which deployer built it, so
-// RequiresDeployer reports when a caller has to supply one. It is true for a
+// The deployer is not inferred. ADR-021 Decision 5 would take it from a `to`
+// bundle, which does record it in bundle-info.yaml, but the check does not read
+// that file, so RequiresDeployer reports when a caller has to supply one. It is true for a
 // manual row, and for a blocked row that carries a record; the step-less
 // blocked rows do not make it true, because a deployer would name a scope
 // nothing renders.
