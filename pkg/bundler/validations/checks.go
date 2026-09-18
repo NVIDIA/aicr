@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"maps"
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -2216,6 +2217,37 @@ const nvsentinelMetadataCollectorEnabledPath = "global.metadataCollector.enabled
 // "nic-health-monitor" has no alias in the parent Chart.yaml.
 const nicInclusionRegexOverridePath = "nic-health-monitor.nicInclusionRegexOverride"
 
+// nicInclusionOverrideUsable reports whether an inclusion-regex override is
+// one nic-health-monitor will actually accept.
+//
+// The chart writes the value straight into config.toml, where the monitor
+// compiles every comma-separated pattern at startup and refuses to start on
+// one that does not compile, or on a list with no non-empty pattern at all
+// (upstream's validateInclusionRegexList). An override it rejects is not a
+// bypass for the missing metadata-collector inventory -- it is the same
+// missing inventory, in a crash loop. Empty patterns between separators are
+// skipped rather than rejected, matching upstream.
+func nicInclusionOverrideUsable(override string) bool {
+	if strings.TrimSpace(override) == "" {
+		return false
+	}
+
+	usable := false
+
+	for _, pattern := range strings.Split(override, ",") {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		if _, err := regexp.Compile(pattern); err != nil {
+			return false
+		}
+		usable = true
+	}
+
+	return usable
+}
+
 // nvsentinelSubchartRenders reports whether a Chart.yaml dependency
 // condition at global.<key>.enabled leaves its subchart rendering.
 //
@@ -2305,11 +2337,11 @@ func CheckNVSentinelNicHealthMonitorRequiresMetadataCollector(ctx context.Contex
 	monitorDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{nvsentinelNicHealthMonitorEnabledPath})) > 0
 	collectorDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{nvsentinelMetadataCollectorEnabledPath})) > 0
 	overrideDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{nicInclusionRegexOverridePath})) > 0
-	// Only a readable, non-empty, non-dynamic override rescues the broken
+	// Only a readable, usable, non-dynamic override rescues the broken
 	// state. Empty cannot, a value the operator can still blank cannot,
-	// and neither can a malformed one -- testing "is it empty" instead
-	// would read an unreadable override as a working bypass.
-	overrideRescues := overrideValid && !overrideEmpty && !overrideDynamic
+	// an unreadable one cannot, and neither can one the monitor will
+	// reject at startup.
+	overrideRescues := overrideValid && !overrideDynamic && nicInclusionOverrideUsable(override)
 	if monitorDynamic || collectorDynamic || overrideDynamic {
 		if (monitorDynamic || monitorEnabled) && (collectorDynamic || collectorDisabled) && !overrideRescues {
 			var paths []string
@@ -2343,8 +2375,17 @@ func CheckNVSentinelNicHealthMonitorRequiresMetadataCollector(ctx context.Contex
 		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
 			fmt.Sprintf("component %q: %s must be a string", componentName, nicInclusionRegexOverridePath))}
 	}
-	if !overrideEmpty {
+	if nicInclusionOverrideUsable(override) {
 		return nil, nil
+	}
+	// A present-but-unusable override gets its own message: "set the
+	// override" would be unhelpful advice to someone who already has.
+	if !overrideEmpty {
+		return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
+			fmt.Sprintf("component %q: %s is set to %q, which nic-health-monitor rejects at startup -- "+
+				"every comma-separated pattern must compile and at least one must be non-empty. "+
+				"The monitor would crash-loop with the same missing inventory it is meant to work around",
+				componentName, nicInclusionRegexOverridePath, override))}
 	}
 
 	return nil, []error{aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,

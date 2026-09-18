@@ -247,6 +247,34 @@ func TestCheckNVSentinelNicHealthMonitorRequiresMetadataCollector(t *testing.T) 
 			})),
 		},
 		{
+			// The chart writes this straight into config.toml, where the
+			// monitor compiles every comma-separated pattern at startup and
+			// refuses to start on a bad one. An override it will reject is
+			// not a bypass -- it is the same missing inventory, in a crash
+			// loop.
+			name:         "monitor on, collector disabled, override is an invalid regex → blocked",
+			recipeResult: result(sentinelRef(values(true, false, "["))),
+			wantBlocked:  true,
+		},
+		{
+			// Upstream additionally requires at least one non-empty pattern,
+			// so a list of separators enables an override that matches
+			// nothing.
+			name:         "monitor on, collector disabled, override is only separators → blocked",
+			recipeResult: result(sentinelRef(values(true, false, ",,"))),
+			wantBlocked:  true,
+		},
+		{
+			name:         "monitor on, collector disabled, override is a valid multi-pattern list → passes",
+			recipeResult: result(sentinelRef(values(true, false, "^mlx5_,^ib"))),
+		},
+		{
+			name:          "monitor dynamic, collector disabled, override an invalid regex → blocked",
+			recipeResult:  result(sentinelRef(values(nil, false, "["))),
+			bundlerConfig: dynamic("global.nicHealthMonitor.enabled"),
+			wantBlocked:   true,
+		},
+		{
 			name:          "all three dynamic → blocked",
 			recipeResult:  result(sentinelRef(values(nil, nil, nil))),
 			bundlerConfig: dynamic("global.nicHealthMonitor.enabled", "global.metadataCollector.enabled", "nic-health-monitor.nicInclusionRegexOverride"),
