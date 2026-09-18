@@ -550,11 +550,26 @@ jobs:
     needs: [check-paths]
     if: needs.check-paths.outputs.settings == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Sized from the check's own worst case, not from how long it normally
+    # takes (~1 min). It runs 7 refreshers sequentially and each makes 2-3 curl
+    # calls capped at --retry-max-time 180, so a sustained github.com blip can
+    # legitimately burn ~45 minutes before every call has given up. The budget
+    # has to clear that, because a timeout is reported as `cancelled`, the gate
+    # treats `cancelled` exactly like `failure`, and the author then sees a bare
+    # Actions timeout with none of this check's own diagnostics — which is the
+    # one failure mode it cannot explain. Letting it run to completion turns
+    # that into an explicit "could not be verified" message naming the tool.
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+          # The check reads the previous version pins from HEAD^ to tell a
+          # bumped-but-unrefreshed pin apart from upstream changing bytes under
+          # a pin nobody touched. On a pull_request the checked-out ref is the
+          # merge commit, whose first parent is the base tip; on a push to main
+          # it is the preceding commit. Depth 2 is the minimum that resolves it.
+          fetch-depth: 2
       - name: Verify checksum pins match their pinned versions
         run: make check-settings-checksums
 
