@@ -309,6 +309,48 @@ func resolveRuntimeImageForBakedInPath(customRuntime string) (string, error) {
 	return resolveNCCLRuntimeImage()
 }
 
+// runNCCLPreflights checks cluster-side prerequisites before any TrainJob
+// time is spent. Extracted out of validateNcclAllReduceBw to keep that
+// function under the funlen statement limit.
+//
+// GB200/EKS, GB200/OKE, and GB300/EKS NET preflight: before R595 that variant
+// needs GPUDirect RDMA via NVreg_GrdmaPciTopoCheckOverride=1 on the NVIDIA
+// driver (R580 is the version AICR pins); R595 removed the parameter,
+// substituting a topology requirement the preflight does not check, so there
+// it fails rather than assume (#2459). Without the flag the PCIe-attached NIC
+// (EFA on EKS, ConnectX IB on OKE) can't attach dma-buf to GPU HBM and NCCL
+// silently falls back to Socket. Preflights key off the benchmark target:
+// opting into a profile opts into that profile's environment contract,
+// preflights included. (OKE takes the default fabric env here —
+// AICR_NCCL_FABRIC's roce override is an EKS-only template concern.) Skipped
+// for a recipe-supplied runtime, which owns its own fabric end to end.
+//
+// GKE TCPXO preflight: on GKE H100, worker pods depend on GPUDirect-TCPXO
+// host artifacts (nccl-env-profile.sh + FastRak libraries) laid down by the
+// nccl-tcpxo-installer DaemonSet. On freshly provisioned nodes that DaemonSet
+// may not have finished when this check runs; without the artifacts the
+// workers never start sshd and the launcher mpirun fails with an opaque "pod
+// failed" minutes later. Fail fast with an actionable error naming the
+// unready nodes instead. Applies to both the embedded capability fixture and
+// a derived/delivered runtime (plan.source.runsGKETCPXOChecks()), never to a
+// recipe-supplied runtime.
+func runNCCLPreflights(ctx *validators.Context, gpuConfig *gpuConfiguration, target ncclBenchmarkTarget,
+	variant ncclVariant, fabric ncclFabricType, customRuntime string, plan *benchmarkRuntimePlan) error {
+	if customRuntime == "" && fabric == fabricEFA && graceBlackwellNetPreflightApplies(variant, target.accelerator, target.service) {
+		if pfErr := preflightGB200NetNVregFlag(ctx, gpuConfig.Nodes); pfErr != nil {
+			return pfErr
+		}
+	}
+
+	if plan.source.runsGKETCPXOChecks() && gkeTCPXOPreflightApplies(variant, target.accelerator, target.service) {
+		if pfErr := preflightGKETCPXOReady(ctx, gpuConfig.Nodes); pfErr != nil {
+			return pfErr
+		}
+	}
+
+	return nil
+}
+
 // validateNcclAllReduceBw validates NCCL All Reduce bandwidth using Kubeflow TrainJob + MPI.
 // Each platform has its own TrainingRuntime; the TrainJob is shared (just runtimeRef + numNodes).
 // The variant selects a transport-class template (NET, NVLS) when the recipe needs per-fabric
@@ -477,23 +519,8 @@ func validateNcclAllReduceBw(ctx *validators.Context, constraint recipe.Constrai
 	// environment contract, preflights included. (OKE takes the default
 	// fabric env here — AICR_NCCL_FABRIC's roce override is an EKS-only
 	// template concern.)
-	if customRuntime == "" && fabric == fabricEFA && graceBlackwellNetPreflightApplies(variant, target.accelerator, target.service) {
-		if pfErr := preflightGB200NetNVregFlag(ctx, gpuConfig.Nodes); pfErr != nil {
-			return "", false, pfErr
-		}
-	}
-
-	// On GKE H100, the worker pods depend on GPUDirect-TCPXO host artifacts
-	// (nccl-env-profile.sh + FastRak libraries) laid down by the
-	// nccl-tcpxo-installer DaemonSet. On freshly provisioned nodes that
-	// DaemonSet may not have finished when this check runs; without the
-	// artifacts the workers never start sshd and the launcher mpirun fails
-	// with an opaque "pod failed" minutes later. Fail fast with an actionable
-	// error naming the unready nodes instead.
-	if plan.source.runsGKETCPXOChecks() && gkeTCPXOPreflightApplies(variant, target.accelerator, target.service) {
-		if pfErr := preflightGKETCPXOReady(ctx, gpuConfig.Nodes); pfErr != nil {
-			return "", false, pfErr
-		}
+	if pfErr := runNCCLPreflights(ctx, gpuConfig, target, variant, fabric, customRuntime, plan); pfErr != nil {
+		return "", false, pfErr
 	}
 
 	// Run the NCCL all-reduce benchmark using Kubeflow TrainJob + MPI.

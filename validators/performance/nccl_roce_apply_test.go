@@ -48,9 +48,9 @@ var ncclGVRListKinds = map[schema.GroupVersionResource]string{
 	computeDomainGVR:         "ComputeDomainList",
 }
 
-func newFakeDynamicClient(objs ...runtime.Object) dynamic.Interface {
+func newFakeDynamicClient() dynamic.Interface {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
-		runtime.NewScheme(), ncclGVRListKinds, objs...)
+		runtime.NewScheme(), ncclGVRListKinds)
 }
 
 // roceClaimCount walks the RoCE ResourceClaimTemplate to the templated device
@@ -355,7 +355,7 @@ func TestCleanupNCCLResources_WaitsForFinalizerHeldNamespace(t *testing.T) {
 // TestWaitForNamespaceGone_TimesOutWhenNeverDeleted guards the bounded-wait
 // contract of waitForNamespaceGone itself. If finalizers never clear within
 // the deadline, it must return ErrCodeTimeout rather than hang indefinitely
-// (cleanupNCCLResources itself only logs this and returns nil). Calls it
+// (cleanupNCCLResources surfaces this as a returned ErrCodeTimeout). Calls it
 // directly with a short local context to avoid the real 5-minute
 // production bound.
 func TestWaitForNamespaceGone_TimesOutWhenNeverDeleted(t *testing.T) {
