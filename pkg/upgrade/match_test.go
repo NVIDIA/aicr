@@ -646,6 +646,8 @@ func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
 	drain := trans(">=0.18.0 <0.19.0", ">=0.19.0 <=0.19.0", VerdictSafe, "drain")
 	secondManual := trans(">=0.18.0 <0.19.0", ">=0.19.0 <=0.19.0", VerdictManual, "second")
 	firstSafe := trans("<0.18.0", ">=0.18.0 <=0.18.0", VerdictSafe, "first-safe")
+	boundedA := trans(">=1.0.0 <1.1.0", ">=1.1.0 <=1.1.0", VerdictSafe, "bounded-A")
+	boundedB := trans(">=1.1.0 <1.2.0", ">=1.2.0 <=1.2.0", VerdictSafe, "bounded-B")
 
 	tests := []struct {
 		name        string
@@ -687,6 +689,30 @@ func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
 			wantVerdict: VerdictSafe,
 			wantReason:  ReasonRecorded,
 			wantMatched: "drain",
+		},
+		{
+			// An origin no record assessed stays refused however many
+			// boundaries the jump crosses. Before the fromCovers guard this
+			// came back safe on two crossings while the identical origin was
+			// refused on one, so asking to go further bought a verdict that
+			// vouches. The floors are bounded below, which is the ADR's
+			// ordinary shape and the only one that exercises this.
+			name:        "an unassessed origin is not rescued by crossing more boundaries",
+			set:         oneComponent(boundedA, boundedB),
+			from:        "0.9.0",
+			to:          "1.2.0",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonMultipleBoundaries,
+		},
+		{
+			// The same origin across a single boundary, for the comparison the
+			// case above exists to hold: one crossing already refused it.
+			name:        "an unassessed origin across one boundary is refused",
+			set:         oneComponent(boundedA, boundedB),
+			from:        "0.9.0",
+			to:          "1.1.0",
+			wantVerdict: VerdictBlocked,
+			wantReason:  ReasonUndefinedOrigin,
 		},
 		{
 			// The control: two boundaries that both ask something still block,

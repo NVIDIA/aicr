@@ -373,7 +373,12 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		// wrong. Coverage (rule 3) is what makes the chain trustworthy, since
 		// it leaves no hole below the pin, so the only question left is
 		// whether the assessment reaches the target.
-		if top, ok := everySafeCrossing(crossed); ok {
+		// crossings orders by floor, so crossed[0] is the boundary that has to
+		// own the origin while top is the one that has to reach the target.
+		// Both must hold: skipping the origin check let a jump from a version
+		// no record assessed come back safe purely because it crossed two
+		// boundaries instead of one.
+		if top, ok := everySafeCrossing(crossed); ok && fromCovers(crossed[0].tr, src) {
 			if _, past := beyondCeiling(top.tr, tgt); !past {
 				r.Verdict = VerdictSafe
 				r.Transition = top.tr
@@ -428,10 +433,11 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 // stopping point where nothing happens, which is the false-confidence
 // direction rather than the cautious one.
 //
-// fromCovers is deliberately not consulted, unlike the lone-substantive case
-// below: a safe record carries no steps, so there is no guidance that could
-// have been authored for the wrong starting point. The ceiling check at the
-// call site is what still has to hold.
+// This answers only "does anything ask something of the operator". The origin
+// and the ceiling are separate questions the call site still has to ask, and
+// conflating them is a mistake worth naming: a safe record carrying no steps
+// says nothing about whether the starting version was ever assessed, which is
+// what undefined-origin is about.
 func everySafeCrossing(crossed []crossing) (crossing, bool) {
 	if len(crossed) == 0 {
 		return crossing{}, false
