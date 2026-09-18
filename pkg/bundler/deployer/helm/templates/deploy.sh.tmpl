@@ -437,9 +437,9 @@ for dir in "${SCRIPT_DIR}"/[0-9][0-9][0-9]-*/; do
     #   2. No nodes carry nvidia.com/gpu.deploy.driver=true — the
     #      operator's reconciler sets that label on the nodes where it
     #      deploys the driver, driven by its own GFD/NFD GPU detection.
-    #      Waiting on every
-    #      gpu.present=true node would block until the 15-min timeout
-    #      for any GPU node the operator deliberately excludes.
+    #      Waiting on every gpu.present=true node would block until the
+    #      15-min timeout for any GPU node the operator deliberately
+    #      excludes.
     DRIVER_DS_NS=$(kubectl get daemonset -A -o jsonpath='{.items[?(@.metadata.name=="nvidia-driver-daemonset")].metadata.namespace}' 2>/dev/null | awk '{print $1}')
     if [[ -z "${DRIVER_DS_NS}" ]]; then
       echo "  gpu-operator nvidia-driver-daemonset not present (host-managed driver); skipping migration wait"
