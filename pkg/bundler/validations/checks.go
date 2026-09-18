@@ -51,6 +51,7 @@ func init() {
 	registerCheck("CheckAcceleratedSelectorMissing", CheckAcceleratedSelectorMissing)
 	registerCheck("CheckHostMofedWithoutNetworkOperator", CheckHostMofedWithoutNetworkOperator)
 	registerCheck("CheckWildcardAcceleratedToleration", CheckWildcardAcceleratedToleration)
+	registerCheck("CheckGB300HostKernelGranule", CheckGB300HostKernelGranule)
 	registerCheck("CheckNPDNotDuplicatingProviderNPD", CheckNPDNotDuplicatingProviderNPD)
 	registerCheck("CheckDriverOwnershipCoherence", CheckDriverOwnershipCoherence)
 	registerCheck("CheckMariaDBOperatorOwnershipCoherence", CheckMariaDBOperatorOwnershipCoherence)
@@ -377,6 +378,70 @@ func CheckNPDNotDuplicatingProviderNPD(ctx context.Context, componentName string
 	}
 
 	return nil, nil
+}
+
+// tuningEnabledKey is the nodewright-customizations value gating the
+// nvidia-tuned package. Absent or true renders it; only an explicit false
+// suppresses it, matching the Sprig-safe gate the tuning manifests use.
+const tuningEnabledKey = "tuningEnabled"
+
+// CheckGB300HostKernelGranule warns that the GB300 tuned profile assumes a
+// 64k-granule ARM64 host kernel. Scope it via registry conditions to the leaf
+// that has no nvidia-setup to pin one (service: generic, accelerator: gb300);
+// every other GB300 route runs nvidia-setup-kernel, which installs the pinned
+// 64k kernel itself.
+//
+// nvidia-gb300-performance sizes its hugepage pools for that granule
+// (hugepagesz=512M, and no 1G, which a 64k granule cannot register). A
+// 4k-granule host still boots and runs: Linux rejects the invalid hugepagesz
+// clause and silently drops the hugepages= count paired with it, so the node
+// comes up without the 512M pool the profile intended. That is a performance
+// regression rather than a failure, which is why the registry wires this at
+// severity: info — bundle time has no cluster-side signal to tell the two
+// apart, and blocking would refuse a configuration that works.
+//
+// A component disabled via --set, or one whose tuning is gated off with
+// tuningEnabled=false, renders no nvidia-tuned package and applies no profile,
+// so it is skipped. Both gates are read from the FINAL effective values
+// (recipe merge plus scalar --set and typed --set-json/--set-file, under the
+// canonical name and its registry aliases) rather than from the raw scalar
+// override map: a typed --set-json that suppresses the package must suppress
+// the advisory with it. The tuningEnabled comparison mirrors the manifest's
+// own `ne (toString ...) "false"` gate exactly, so the two cannot disagree.
+func CheckGB300HostKernelGranule(ctx context.Context, componentName string, recipeResult *recipe.RecipeResult, bundlerConfig *config.Config, conditions map[string][]string) ([]string, []error) {
+	if bundlerConfig == nil {
+		return nil, nil
+	}
+
+	ref := recipeResult.GetComponentRef(componentName)
+	if ref == nil {
+		return nil, nil
+	}
+
+	// Check conditions (e.g., service: generic, accelerator: gb300)
+	if !checkConditions(recipeResult, conditions) {
+		return nil, nil
+	}
+
+	keys := componentOverrideKeys(componentName, recipeResult.DataProvider())
+	if componentDisabled(ref, bundlerConfig, keys) {
+		return nil, nil
+	}
+
+	values, err := effectiveComponentValues(ctx, recipeResult, bundlerConfig, componentName, keys, "GB300 host kernel granule")
+	if err != nil {
+		return nil, []error{err}
+	}
+	if fmt.Sprint(values[tuningEnabledKey]) == overrideValueFalse {
+		return nil, nil
+	}
+
+	baseMsg := fmt.Sprintf("%s applies a tuned profile that sizes hugepages for a 64k-granule ARM64 host kernel", componentName)
+	slog.Warn(baseMsg,
+		logKeyComponent, componentName,
+		"conditions", conditions,
+	)
+	return []string{baseMsg}, nil
 }
 
 // CheckHostMofedWithoutNetworkOperator warns when network-operator is disabled

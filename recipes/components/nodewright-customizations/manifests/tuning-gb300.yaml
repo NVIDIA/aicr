@@ -12,33 +12,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Nodewright GPU customization that runs ONLY nvidia-tuned with the rke2
-# service profile (no nvidia-setup).
+# Nodewright GB300 GPU customization for bare metal: nvidia-tuned only, no
+# nvidia-setup.
 #
-# Used by bare-metal RKE2 leaves whose accelerator profile carries a
-# [bootloader] stanza that has to reach the host kernel command line. Where
-# service=bcm re-roots the accelerator onto a bootloader-free base so nothing
-# needs a reboot, service=rke2 is the opposite trade: it ships no profile
-# overrides at all, so each accelerator falls through to its own workload
-# profile with the [bootloader] stanza intact (vr200: iommu.passthrough=1,
-# init_on_alloc=0, numa_balancing=disable, hugepages, earlycon) and the node
-# reboots to pick it up.
+# Used by gb300-generic-ubuntu-training. The EKS gb300 leaves use the shared
+# tuning.yaml instead, since nvidia-setup 0.8.0 added the eks-gb300 combination.
+# There is no equivalent for bare metal: nvidia-setup dispatches on
+# `<service>-<accelerator>` and ships no `generic-*` config at all, so
+# tuning.yaml would fail on this leaf. A bare-metal GB300 node therefore takes
+# its kernel and EFA from the host image.
 #
-# Keeping the stanza is not enough on its own: tuned rewrites
-# /etc/default/grub, but Ubuntu assembles GRUB_CMDLINE_LINUX_DEFAULT from
-# /etc/default/grub.d/ instead, so nvidia-tuned's configure-bootloader step
-# writes a drop-in there and regenerates grub, appending rather than replacing
-# so the platform's own arguments (serial console) survive. After the reboot,
-# post-interrupt-bootloader-check asserts every argument in
-# /etc/tuned/bootcmdline reached /proc/cmdline, which is the check worth
-# having: grub quietly failing to pick the drop-in up is invisible from the
-# config stage.
+# That leaves the host kernel's page granule as a performance variable here,
+# where on EKS nvidia-setup-kernel pins it. nvidia-gb300-performance sizes its
+# pools for a 64k-page ARM64 kernel (2M + 512M, no 1G: a 64k granule has no PUD
+# level). A 4k-granule kernel still boots and runs the node — Linux rejects the
+# hugepagesz=512M clause and silently drops the hugepages= count paired with it
+# — it just comes up without the pool the profile intended. So 64k is the
+# recommended host image, not a hard requirement: CheckGB300HostKernelGranule
+# warns at bundle time (severity: info, registry.yaml) and
+# docs/integrator/components/nodewright.md carries the user-facing statement.
 #
-# Scope: the bootloader step is Debian-family only (grub.d sourcing is a
-# Debian/Ubuntu patch to grub-mkconfig) and the vr200 profiles are Ubuntu
-# 26.04 only. nvidia-setup is deliberately absent — its kernel-headers
-# aliasing is a bcm-path concern, and the RKE2 reference image provisions its
-# own kernel.
+# The gb300 profiles arrived in nvidia-tuned 0.10.0. `inference` and
+# `multiNodeTraining` are shims that resolve to nvidia-gb300-performance and add
+# nothing — no gb300-specific inference or training deltas have been measured
+# yet — so all three intents land on the same tuning. Before 0.10.0 the package
+# exited non-zero on those intents rather than falling back.
+#
+# service is deliberately optional and unset by the bare-metal leaf: nvidia-tuned
+# exits non-zero on a service directory it does not ship, and there is no
+# `generic` service.
 #
 # Minimal templating - only tolerations/nodeSelectors are dynamic for CLI flag support.
 {{- $cust := index .Values "nodewright-customizations" }}
@@ -69,21 +71,15 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   runtimeRequired: true
-  # Serialize this CR's reboots to one node at a time. An omitted budget
-  # defaults to 100% (createLegacyDefaultCompartment), i.e. every matched
-  # node rebooting together. Unconditional rather than flag-gated, for the
-  # same reason rdma-netns-exclusive sets it: the safe value must not
-  # depend on the caller passing an optional flag.
+  # Serialize this CR's reboots to one node at a time. nvidia-tuned carries
+  # `interrupt: reboot` for its [bootloader] section.
+  # An omitted budget is not "unset": createLegacyDefaultCompartment
+  # substitutes percent: 100, so every matched node reboots together.
   #
-  # SCALE LIMITATION: count: 1 costs N x (reboot time) to converge, which
-  # is fine for the small NVL72 clusters VR200 Preview targets and for
-  # rolling out gradually on a cluster already running work, but does not
-  # scale to hundreds of nodes. The nodewright maintainer's guidance for
-  # that case is a ramping deployment policy with a failure threshold
-  # rather than a fixed count — noting that runtimeRequired: true means
-  # workloads stay blocked on the last node for the whole rollout, so a
-  # ramp trades convergence time against how long that blocking lasts.
-  # Revisit if VR200 deployments grow past a rack.
+  # BRINGUP ESCAPE HATCH: on an initial cluster build, before any workload has
+  # landed, serializing buys nothing and costs N x (reboot time). Delete this
+  # block or set `percent: 100` — its exact equivalent — to converge in one
+  # batch. count and percent are mutually exclusive.
   interruptionBudget:
     count: 1
   # Default: true. Disable with --set nodewrightcustomizations:autoTaintNewNodes=false
@@ -100,46 +96,37 @@ spec:
     - operator: Exists
     {{- end }}
   # Dynamic: Supports --accelerated-node-selector CLI flag.
-  # An ABSENT selector matches every node in nodewright, so omitting the block
-  # entirely would let a reboot-carrying CR target control-plane nodes on a
-  # stock bundle — generation only warns when the flag is unset, it does not
-  # fail. Fall back to the GPU-node label instead, as rdma-netns-exclusive
-  # does; an explicit --accelerated-node-selector still overrides it.
+  # No nvidia.com/gpu.present fallback here, unlike tuning-rke2.yaml: that label
+  # is emitted by GFD, which ships inside gpu-operator, and gpu-operator lists
+  # nodewright-customizations in its dependencyRefs — so this CR is applied
+  # BEFORE the label can exist on a greenfield cluster. Selecting on it would
+  # match zero nodes at bringup and only start matching after the GPU driver
+  # stack is already up, inverting the tune-then-driver ordering that
+  # runtimeRequired and the provisioner's runtime-required pre-taint exist to
+  # enforce. tuning-rke2.yaml is safe because VR200 is a deliberate day-2 flow
+  # on an already-labeled cluster (docs/integrator/rke2-vr200-setup.md).
+  {{- if $cust.acceleratedNodeSelector }}
   nodeSelectors:
     matchLabels:
-      {{- if $cust.acceleratedNodeSelector }}
       {{- toYaml $cust.acceleratedNodeSelector | nindent 6 }}
-      {{- else }}
-      nvidia.com/gpu.present: "true"
-      {{- end }}
+  {{- end }}
   # Dynamic: Supports --workload-selector CLI flag
   {{- if $cust.workloadSelector }}
   podNonInterruptLabels:
     matchLabels:
       {{- toYaml $cust.workloadSelector | nindent 6 }}
   {{- end }}
-  # Tuning: nvidia-tuned rke2 service profile only (no nvidia-setup).
+  # Tuning: nvidia-tuned gb300 profile only (no nvidia-setup).
   packages:
     nvidia-tuned:
       image: ghcr.io/nvidia/nodewright-packages/nvidia-tuned
       version: "0.10.0"
       containerSHA: sha256:124f3bdedbb651125cec1bf20d3e2f7fcbbe10588c44f36d8e5680b38b9ef8f6
-      # Required by the rke2 service: the accelerator's [bootloader] stanza is
-      # written during config and none of it is live until the node reboots.
+      # nvidia-gb300-performance carries a [bootloader] section (iommu.passthrough,
+      # hugepages, numa_balancing, earlycon), which takes effect only on reboot.
       interrupt:
         type: reboot
-      # The cmdline is resolved from (accelerator, intent, service), so a change
-      # to any of them needs another reboot to take effect.
-      configInterrupts:
-        accelerator:
-          type: reboot
-        intent:
-          type: reboot
-        service:
-          type: reboot
       env:
-        # Lets config-check tolerate the `tuned-adm verify` failures that only a
-        # reboot can resolve; post-interrupt-check still enforces them after it.
         - name: INTERRUPT
           value: "true"
       configMap:
