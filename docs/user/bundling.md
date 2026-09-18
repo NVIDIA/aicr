@@ -450,7 +450,11 @@ components.
 Opting in also keeps `dra-node-labeler` in the bundle. It applies the
 configured `key=value` to every node GFD labels `nvidia.com/gpu.present=true`
 and never rewrites an existing value, so the node-pool labeling described below
-is only needed if you remove it with `--set dra-node-labeler:enabled=false`.
+is only needed when the labeler is not in the bundle: because you removed it
+with `--set dra-node-labeler:enabled=false`, because a `bundlers` filter left
+it or one of its prerequisites out, or on OpenShift, where it is not yet wired
+(NVIDIA/aicr#2828). Everything below that says "labeler disabled" applies to
+those cases equally.
 
 ### Choosing whether to opt in
 
