@@ -5,11 +5,26 @@ For the **GB200 GKE COS** recipes (`gb200-gke-cos-training`,
 `gb200-gke-cos-inference`, and `gb200-gke-cos-inference-dynamo`, all on
 `a4x-highgpu-4g` nodes),
 GPUDirect-RDMA over RoCE enables high-speed inter-node GPU communication on
-GKE. The recipe's NCCL workloads set `NCCL_NET=gIB` explicitly (see
-`recipes/components/gke-gb200-rdma/manifests/nccl-gib-installer-arm64.yaml`)
-rather than letting NCCL auto-select a plugin, so a missing or
-misconfigured RDMA fabric doesn't silently fall back to a slower network
-path: it fails outright.
+GKE. AICR's own GB200/GKE validation workload sets `NCCL_NET=gIB` explicitly
+(see `recipes/components/gke-gb200-rdma/manifests/nccl-gib-installer-arm64.yaml`
+and the runtime it applies,
+`validators/performance/testdata/gb200/gke/runtime-nvls.yaml`) rather than
+letting NCCL auto-select a plugin, so a missing or misconfigured RDMA fabric
+doesn't silently fall back to a slower network path. It fails outright
+instead.
+
+This fail-closed behavior belongs to the validation workload, not to every
+workload the recipe can run. The `gb200-gke-cos-training-kubeflow` leaf
+ships a generic Kubeflow `torch-distributed` `ClusterTrainingRuntime`
+(`recipes/components/kubeflow-trainer/manifests/torch-distributed-cluster-training-runtime.yaml`)
+that sets none of the RDMA network attachments, gIB host mounts, or NCCL
+environment described in this guide, and requests GPUs per the submitted
+`TrainJob` rather than a fixed whole node. A `TrainJob` needing the same
+RDMA guarantee must add the `networking.gke.io/default-interface` and
+`networking.gke.io/interfaces` pod annotations, mount
+`/home/kubernetes/bin/nvidia` and `/home/kubernetes/bin/gib` from the host,
+set `NCCL_NET=gIB`, and request all 4 GPUs on the node itself. The
+validator's runtime above is a working reference for that configuration.
 
 GPUDirect RDMA on `a4x-highgpu-4g` is also incompatible with NCCL Fast
 Socket and the GPUDirect TCPX/TCPXO plugin (see
