@@ -403,10 +403,17 @@ disable the labeler (`--set dra-node-labeler:enabled=false`) does the pool have
 to carry the pair itself:
 
 ```bash
+# With the labeler (default once opted in): no node-pool label needed.
 aicr bundle --recipe recipe.yaml \
   --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
   --output bundle
 
+# Provisioning the label yourself instead: disable the labeler and put the
+# same pair on the pool.
+aicr bundle --recipe recipe.yaml \
+  --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
+  --set dra-node-labeler:enabled=false \
+  --output bundle
 gcloud container node-pools create <pool> --cluster <cluster> \
   --node-labels="nvidia.com/dra-kubelet-plugin=true"
 ```

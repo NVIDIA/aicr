@@ -462,16 +462,19 @@ with no plugin rather than with an uncoordinated one.
 
 | | Not opted in (default) | Opted in |
 |---|---|---|
-| Node labeling | none needed | every GPU node, in the node pool definition |
+| Node labeling | none needed | applied by `dra-node-labeler` from `nvidia.com/gpu.present`; every GPU node in the node pool definition only if the labeler is disabled |
 | Plugin placement | every accelerated node | only nodes carrying the label |
 | Driver restart | plugin is not descheduled first | plugin is descheduled and restored |
 | If a node is missed | n/a | that node silently runs without DRA |
 
-Opt in when GPU Operator manages the driver (`driver.enabled=true`) and you can
-guarantee the label is set at provisioning time for every GPU node, including
-ones added later by autoscaling or node replacement. Otherwise the default is
-the safer choice: a plugin that always runs, with a documented risk at driver
-restarts, beats a plugin that silently does not run on some nodes.
+Opt in when GPU Operator manages the driver (`driver.enabled=true`). With the
+bundled `dra-node-labeler` the label follows GFD's `nvidia.com/gpu.present`, so
+nodes added later by autoscaling or replacement are labeled as soon as GFD sees
+them; the remaining gap is a GPU node GFD has not labeled, which runs no kubelet
+plugin until it is. If you disable the labeler, opt in only when you can
+guarantee the label is set at provisioning time for every GPU node; otherwise
+the default is the safer choice: a plugin that always runs, with a documented
+risk at driver restarts, beats a plugin that silently does not run on some nodes.
 
 There is nothing to opt in to where the driver is provider-installed
 (`driver.enabled=false` — AKS `azure-managed`, GKE COS, OKE). GPU Operator
@@ -484,19 +487,21 @@ covers the standalone DRA kubelet plugin, so ordering against DRA claim holders
 and completion of plugin teardown are not guaranteed. See
 [NVIDIA/k8s-driver-manager#250](https://github.com/NVIDIA/k8s-driver-manager/issues/250).
 
-> **Opt-in requirement:** label every GPU node that must run the DRA kubelet
-> plugin *before* applying the bundle. Applying it first can reduce the
-> DaemonSet to zero eligible nodes, interrupting ComputeDomain/IMEX and any
-> whole-GPU resources advertised through DRA.
+> **Opt-in requirement (labeler disabled only):** if you pass
+> `--set dra-node-labeler:enabled=false`, label every GPU node that must run
+> the DRA kubelet plugin *before* applying the bundle. Applying it first can
+> reduce the DaemonSet to zero eligible nodes, interrupting ComputeDomain/IMEX
+> and any whole-GPU resources advertised through DRA. With the labeler in the
+> bundle there is nothing to pre-label; the plugin follows the labeler.
 
-### Set the label at node-pool provisioning time
+### Set the label at node-pool provisioning time (labeler disabled)
 
-Put the label in the **node pool definition** — an EKS managed nodegroup
-`labels` entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the equivalent for
-your provisioner — alongside the `nodeGroup=gpu-worker` label you already set
-there.
+This subsection applies only when `dra-node-labeler` has been disabled. Put the
+label in the **node pool definition** — an EKS managed nodegroup `labels`
+entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the
+equivalent for your provisioner — alongside the `nodeGroup=gpu-worker` label
+you already set there.
 
-The rest of this subsection applies when `dra-node-labeler` has been disabled.
 A one-off `kubectl label node` is a repair, not a configuration. It does not
 survive node replacement or recycling, cluster autoscaling adding GPU nodes, or
 a nodegroup scaled from zero. Any GPU node added afterwards arrives unlabeled

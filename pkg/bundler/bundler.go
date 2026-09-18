@@ -3316,17 +3316,15 @@ func (b *DefaultBundler) draNodeLabelerDropReason(enabledSet map[string]struct{}
 	if b == nil || b.Config == nil || b.Config.DRAEvictionNodeLabel() == (config.NodeLabel{}) {
 		return "DRA eviction is not opted in (--dra-eviction-node-label unset), so the eviction label it would apply is not selected on", true
 	}
-	hasDRA, hasGPUOperator := false, false
-	for name := range enabledSet {
-		if isDRAComponent(name) {
-			hasDRA = true
-		}
-		if isGPUOperatorComponent(name) {
-			hasGPUOperator = true
-		}
-	}
+	// The exact non-OpenShift names, not the -ocp aliases: the labeler's
+	// dependency edges in base.yaml point at gpu-operator and are declared on
+	// nvidia-dra-driver-gpu, so on an OCP recipe (which disables both) it
+	// would render unordered ahead of gpu-operator-ocp. OCP keeps the
+	// provisioning workflow until #2828 wires it.
+	_, hasDRA := enabledSet[draComponentName]
+	_, hasGPUOperator := enabledSet[gpuOperatorComponentName]
 	if !hasDRA || !hasGPUOperator {
-		return "the DRA eviction contract needs both a GPU Operator and a DRA driver in the bundle", true
+		return "the DRA eviction contract needs both gpu-operator and nvidia-dra-driver-gpu in the bundle (the OpenShift variants are not wired for it; see NVIDIA/aicr#2828)", true
 	}
 	return "", false
 }
@@ -3562,7 +3560,7 @@ func (b *DefaultBundler) warnDRAEvictionNotConfigured(
 
 	for _, name := range draNames {
 		msg := fmt.Sprintf(
-			"AICR did not configure automatic eviction for %s: no DRA eviction node label is set, so the kubelet plugin is not descheduled before a GPU driver container restart. The plugin runs on every accelerated node and needs no extra node label. On a driver upgrade the module unload can fail with \"failed to uninstall nvidia driver components\"; on an unchanged-config restart the stale driver rootfs is unmounted underneath the running plugin, which upstream documents as leaving NodePrepareResources unable to build CDI specs for full-GPU allocation, with no error at restart time. Set --dra-eviction-node-label (or scheduling.draEvictionNodeLabel) to opt in, and label every GPU node at node-pool provisioning time",
+			"AICR did not configure automatic eviction for %s: no DRA eviction node label is set, so the kubelet plugin is not descheduled before a GPU driver container restart. The plugin runs on every accelerated node and needs no extra node label. On a driver upgrade the module unload can fail with \"failed to uninstall nvidia driver components\"; on an unchanged-config restart the stale driver rootfs is unmounted underneath the running plugin, which upstream documents as leaving NodePrepareResources unable to build CDI specs for full-GPU allocation, with no error at restart time. Set --dra-eviction-node-label (or scheduling.draEvictionNodeLabel) to opt in; the bundle then carries dra-node-labeler, which applies the label from GFD's nvidia.com/gpu.present, so no node-pool labeling is needed (pass --set dra-node-labeler:enabled=false to provision it yourself)",
 			name,
 		)
 		b.appendWarning(msg)

@@ -21,8 +21,6 @@ import (
 	"strings"
 	"testing"
 
-	corev1 "k8s.io/api/core/v1"
-
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
@@ -91,7 +89,29 @@ func TestFilterEnabledComponents_DRANodeLabelerGate(t *testing.T) {
 				config.WithBundlers([]string{gpuOperatorComponentName, draNodeLabelerComponentName}),
 			},
 			wantKept:   false,
-			wantReason: "needs both a GPU Operator and a DRA driver",
+			wantReason: "needs both gpu-operator and nvidia-dra-driver-gpu",
+		},
+		{
+			// OpenShift recipes disable gpu-operator and nvidia-dra-driver-gpu in
+			// favor of the -ocp aliases; the labeler's edges are not wired there
+			// (#2828), so it must not render.
+			name: "OpenShift aliases do not satisfy the gate",
+			opts: []config.Option{config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel())},
+			mutate: func(rr *recipe.RecipeResult) {
+				for i := range rr.ComponentRefs {
+					if rr.ComponentRefs[i].Name == draComponentName || rr.ComponentRefs[i].Name == gpuOperatorComponentName {
+						rr.ComponentRefs[i].Overrides = map[string]any{"enabled": false}
+					}
+				}
+				rr.ComponentRefs = append(rr.ComponentRefs,
+					recipe.ComponentRef{Name: "gpu-operator-ocp", Type: recipe.ComponentTypeHelm, Source: "",
+						ManifestFiles: []string{"components/gpu-operator-ocp/manifests/clusterpolicy.yaml"}},
+					recipe.ComponentRef{Name: "nvidia-dra-driver-gpu-ocp", Type: recipe.ComponentTypeHelm, Source: "https://helm.ngc.nvidia.com/nvidia", Version: "25.12.0"},
+				)
+				rr.DeploymentOrder = append(rr.DeploymentOrder, "gpu-operator-ocp", "nvidia-dra-driver-gpu-ocp")
+			},
+			wantKept:   false,
+			wantReason: "OpenShift variants are not wired",
 		},
 		{
 			name: "opted in without a DRA driver drops the labeler",
@@ -104,7 +124,7 @@ func TestFilterEnabledComponents_DRANodeLabelerGate(t *testing.T) {
 				}
 			},
 			wantKept:   false,
-			wantReason: "needs both a GPU Operator and a DRA driver",
+			wantReason: "needs both gpu-operator and nvidia-dra-driver-gpu",
 		},
 	}
 
@@ -236,6 +256,35 @@ func TestInjectDRAEvictionLabel_WithoutLabelerKeepsProvisioningWarning(t *testin
 	}
 }
 
+// TestWarnDRAEvictionNotConfigured_NoProvisioningClause pins the opt-out
+// message an operator reads before deciding to opt in: it must describe the
+// labeler, not tell them to label node pools (that cost is what the labeler
+// removes).
+func TestWarnDRAEvictionNotConfigured_NoProvisioningClause(t *testing.T) {
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	values := map[string]map[string]any{draComponentName: {}, gpuOperatorComponentName: {}}
+	rr := &recipe.RecipeResult{ComponentRefs: []recipe.ComponentRef{{Name: gpuOperatorComponentName}, {Name: draComponentName}}}
+	if err := b.injectDRAEvictionLabel(values, rr); err != nil {
+		t.Fatalf("injectDRAEvictionLabel() error = %v", err)
+	}
+	for _, w := range b.warnings {
+		if !strings.Contains(w, "did not configure automatic eviction") {
+			continue
+		}
+		if strings.Contains(w, "node-pool provisioning time") {
+			t.Errorf("opt-out warning still asks for node-pool labeling: %s", w)
+		}
+		if !strings.Contains(w, "dra-node-labeler") {
+			t.Errorf("opt-out warning does not mention the labeler: %s", w)
+		}
+		return
+	}
+	t.Fatalf("opt-out warning not emitted: %v", b.warnings)
+}
+
 // TestRejectDRAEvictionDynamicPaths_LabelerPaths: the labeler's pair is
 // bundler-managed once opted in, so a --dynamic declaration on it is rejected
 // exactly like the kubelet-plugin selector and Driver Manager env.
@@ -264,10 +313,10 @@ func TestMake_DRANodeLabelerRendered(t *testing.T) {
 	label := config.NodeLabel{Key: "example.com/dra-ready", Value: "enabled"}
 
 	t.Run("opted in renders the labeler with the configured pair", func(t *testing.T) {
-		b, err := New(WithConfig(config.NewConfig(
-			config.WithDRAEvictionNodeLabel(label),
-			config.WithAcceleratedNodeTolerations([]corev1.Toleration{{Key: "nvidia.com/gpu", Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}}),
-		)))
+		// No accelerated tolerations on purpose: this is the SDK path, where
+		// WithAcceleratedNodeTolerations(nil) is a no-op, so the template's
+		// own fallback must render.
+		b, err := New(WithConfig(config.NewConfig(config.WithDRAEvictionNodeLabel(label))))
 		if err != nil {
 			t.Fatalf("New() error = %v", err)
 		}
@@ -283,7 +332,15 @@ func TestMake_DRANodeLabelerRendered(t *testing.T) {
 			`LABEL_VALUE="enabled"`,
 			"key: nvidia.com/gpu.present",
 			`maxUnavailable: "100%"`,
-			"key: nvidia.com/gpu",
+			// SDK-path toleration fallback.
+			"- operator: Exists",
+			// Ready only once the node carries the key (#2813 review).
+			`command: ["test", "-f", "/var/run/dra-node-labeler/labeled"]`,
+			`touch "${READY}"`,
+			// Literal, digest-pinned image so tools/bom inventories it.
+			"image: docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95",
+			"cpu: 20m",
+			"cpu: 200m",
 		} {
 			if !strings.Contains(manifest, want) {
 				t.Errorf("rendered labeler lacks %q", want)
@@ -291,6 +348,12 @@ func TestMake_DRANodeLabelerRendered(t *testing.T) {
 		}
 		if strings.Contains(manifest, "hostNetwork") {
 			t.Errorf("labeler must not request hostNetwork")
+		}
+		if strings.Contains(manifest, "set -e") {
+			t.Errorf("labeler must retry in place, not exit (restarts fail the health check)")
+		}
+		if strings.Contains(manifest, "{{") {
+			t.Errorf("unrendered template expression in labeler manifest")
 		}
 	})
 

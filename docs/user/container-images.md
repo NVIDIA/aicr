@@ -38,7 +38,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
 | cert-manager-ocp | manifest | — | — | 0 |
 | cert-manager-ocp-olm | manifest | — | — | 0 |
-| dra-node-labeler | manifest | — | — | 0 |
+| dra-node-labeler | manifest | — | — | 1 |
 | dranet | manifest | — | — | 1 |
 | dynamo-platform | helm | dynamo-platform | 1.4.2 | 1 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
@@ -130,7 +130,7 @@ _No images extracted._
 
 ### dra-node-labeler
 
-_No images extracted._
+- `docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
 
 ### dranet
 

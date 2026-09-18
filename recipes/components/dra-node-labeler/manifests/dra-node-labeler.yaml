@@ -106,32 +106,59 @@ spec:
                     operator: In
                     values:
                       - "true"
-      {{- if $vals.acceleratedTolerations }}
+      # GPU pools are tainted; without a toleration the labeler stays Pending while
+      # GFD sets gpu.present, the label never lands, and the kubelet plugin sits at
+      # DESIRED=0. The CLI injects the accelerated tolerations (a wildcard when none
+      # are passed); the SDK path may leave them nil, so fall back the same way
+      # gcp-driver-installer does.
       tolerations:
+        {{- if $vals.acceleratedTolerations }}
         {{- toYaml $vals.acceleratedTolerations | nindent 8 }}
-      {{- end }}
+        {{- else }}
+        - operator: Exists
+        {{- end }}
+      volumes:
+        - name: state
+          emptyDir: {}
       containers:
         - name: labeler
-          image: {{ $vals.image | quote }}
+          # Literal, not templated from values: tools/bom inventories embedded
+          # manifests without rendering values, and the mirror flow rewrites literal
+          # references. Same tag and digest as nodewright-operator's
+          # webhook.removalImage so the catalog carries one kubectl image.
+          image: docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95
           command:
             - /bin/sh
             - -c
             - |
-              set -e
               LABEL_KEY={{ $vals.labelKey | quote }}
               LABEL_VALUE={{ $vals.labelValue | quote }}
+              READY=/var/run/dra-node-labeler/labeled
 
+              # Retry in place instead of exiting: a container restart would be the
+              # only retry and the health check treats restarts as failure. The pod
+              # stays unready (no marker) until the node carries the key.
+              has_key() {
+                LABELS=$(kubectl get node "${NODE_NAME}" -o jsonpath='{.metadata.labels}') || return 2
+                printf '%s' "${LABELS}" | grep -Fq "\"${LABEL_KEY}\":"
+              }
               # Key presence, not value: a jsonpath value lookup reads an empty value as
               # absent, and kubectl label without --overwrite then refuses it. Any existing
               # value is another writer's ("false" opt-out, Driver Manager pause) and is
               # never touched, so this labels once and sleeps rather than reconciling.
-              LABELS=$(kubectl get node "${NODE_NAME}" -o jsonpath='{.metadata.labels}' 2>/dev/null || echo "")
-              if printf '%s' "${LABELS}" | grep -Fq "\"${LABEL_KEY}\":"; then
-                echo "${LABEL_KEY} already present on ${NODE_NAME}, leaving as-is"
-              else
-                kubectl label node "${NODE_NAME}" "${LABEL_KEY}=${LABEL_VALUE}"
-                echo "labeled ${NODE_NAME} with ${LABEL_KEY}=${LABEL_VALUE}"
-              fi
+              while :; do
+                has_key; rc=$?
+                if [ "${rc}" -eq 0 ]; then
+                  echo "${LABEL_KEY} already present on ${NODE_NAME}, leaving as-is"
+                  break
+                elif [ "${rc}" -eq 1 ] && kubectl label node "${NODE_NAME}" "${LABEL_KEY}=${LABEL_VALUE}"; then
+                  echo "labeled ${NODE_NAME} with ${LABEL_KEY}=${LABEL_VALUE}"
+                  break
+                fi
+                echo "node API not ready or label write raced, retrying"
+                sleep 5
+              done
+              touch "${READY}"
 
               while true; do sleep 3600; done
           env:
@@ -139,12 +166,26 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+          # Ready means "this node carries the key", not "the shell started": kubelet
+          # marks a probe-less container Ready immediately, which let the health
+          # check pass while kubectl was still blocked.
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/var/run/dra-node-labeler/labeled"]
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          volumeMounts:
+            - name: state
+              mountPath: /var/run/dra-node-labeler
+          # 20m/200m rather than 10m/100m: kubectl startup against a large Node
+          # object was throttled to 80-100% during GPU discovery on big clusters,
+          # delaying the label and therefore DRA on every node.
           resources:
             requests:
-              cpu: 10m
+              cpu: 20m
               memory: 32Mi
             limits:
-              cpu: 100m
+              cpu: 200m
               memory: 64Mi
           securityContext:
             allowPrivilegeEscalation: false
