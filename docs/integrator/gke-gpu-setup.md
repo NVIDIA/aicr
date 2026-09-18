@@ -396,14 +396,24 @@ So bundles generated for GKE add no eviction node selector, and the DRA kubelet
 plugin runs on every accelerated node with no extra label. Nothing in the node
 pool commands below needs `nvidia.com/dra-kubelet-plugin`.
 
-If you opt in anyway, AICR renders the selector and every GPU node must carry
-the **same `key=value` pair** you passed, set in the node pool definition:
+If you opt in anyway, AICR renders the selector and deploys `dra-node-labeler`,
+which applies the **same `key=value` pair** you passed to every node GFD labels
+`nvidia.com/gpu.present=true`; the node pool needs no extra label. Only if you
+disable the labeler (`--set dra-node-labeler:enabled=false`) does the pool have
+to carry the pair itself:
 
 ```bash
+# With the labeler (default once opted in): no node-pool label needed.
 aicr bundle --recipe recipe.yaml \
   --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
   --output bundle
 
+# Provisioning the label yourself instead: disable the labeler and put the
+# same pair on the pool.
+aicr bundle --recipe recipe.yaml \
+  --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
+  --set dra-node-labeler:enabled=false \
+  --output bundle
 gcloud container node-pools create <pool> --cluster <cluster> \
   --node-labels="nvidia.com/dra-kubelet-plugin=true"
 ```

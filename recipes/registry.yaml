@@ -594,6 +594,29 @@ components:
         tolerationPaths:
           - kubeletPlugin.tolerations
 
+  # Mirrors GFD's nvidia.com/gpu.present onto the DRA eviction label the
+  # kubelet plugin selects on, so opting in to Driver Manager eviction
+  # (--dra-eviction-node-label) no longer requires labeling GPU node pools by
+  # hand (#2676). Manifest-only. The bundler removes it from the bundle unless
+  # the eviction label is configured, and owns labelKey/labelValue. Affinity is
+  # authored on gpu.present in the manifest (hardware truth); only accelerated
+  # tolerations are injected.
+  - name: dra-node-labeler
+    displayName: dra-node-labeler
+    valueOverrideKeys:
+      - dranodelabeler
+    healthCheck:
+      assertFile: checks/dra-node-labeler/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: gpu-operator
+    manifestFiles:
+      - components/dra-node-labeler/manifests/dra-node-labeler.yaml
+    nodeScheduling:
+      accelerated:
+        tolerationPaths:
+          - acceleratedTolerations
+
   - name: prometheus-operator-crds
     displayName: prometheus-operator-crds
     valueOverrideKeys:

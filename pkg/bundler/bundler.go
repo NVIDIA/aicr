@@ -1442,6 +1442,13 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 		}
 	}
 
+	// After the positive filter, so a `bundlers` selection that keeps the
+	// labeler but drops either half of the contract it serves still removes it.
+	enabledRefs, labelerErr := b.dropUnservedDRANodeLabeler(enabledRefs, enabledSet, excludedReasons)
+	if labelerErr != nil {
+		return nil, nil, nil, labelerErr
+	}
+
 	if len(enabledRefs) == 0 {
 		return nil, nil, nil, errors.New(errors.ErrCodeInvalidRequest,
 			"recipe has no enabled components after filtering")
@@ -3236,6 +3243,15 @@ const (
 	draEvictionEnvName            = "NODE_LABEL_FOR_GPU_POD_EVICTION"
 	draEvictionNodeSelectorPath   = "kubeletPlugin.nodeSelector"
 	gpuOperatorDRAEvictionEnvPath = "driver.manager.env"
+
+	// draNodeLabelerComponentName is the manifest-only component that mirrors
+	// GFD's nvidia.com/gpu.present onto the eviction label, so the label is
+	// derived from hardware rather than provisioned per node pool (#2676). It
+	// is dropped from the bundle unless the eviction contract is opted into
+	// (see filterEnabledComponents) and its label pair is bundler-owned.
+	draNodeLabelerComponentName = "dra-node-labeler"
+	draNodeLabelerKeyPath       = "labelKey"
+	draNodeLabelerValuePath     = "labelValue"
 )
 
 var (
@@ -3245,6 +3261,85 @@ var (
 
 func isDRAComponent(name string) bool {
 	return slices.Contains(draComponentNames, name)
+}
+
+// recipeHasDRANodeLabeler reports whether the (filtered) recipe still carries
+// the dra-node-labeler component, i.e. the eviction label is derived rather
+// than provisioned.
+func recipeHasDRANodeLabeler(recipeResult *recipe.RecipeResult) bool {
+	if recipeResult == nil {
+		return false
+	}
+	for _, ref := range recipeResult.ComponentRefs {
+		if ref.Name == draNodeLabelerComponentName {
+			return true
+		}
+	}
+	return false
+}
+
+// dropUnservedDRANodeLabeler applies the bundle-time gate on dra-node-labeler.
+// Recipes declare it enabled so the dependency graph is authored once, and the
+// bundle carries it only when the eviction contract it serves is opted into
+// (#2676). Dropping it here, like a --set enabled=false, lets
+// filterEnabledComponents prune the nvidia-dra-driver-gpu edge and keeps the
+// health check and BOM consistent with what is rendered.
+//
+// A labeler named explicitly in the bundlers filter is not dropped silently:
+// like an unknown or disabled name there, a selection that asks for the
+// labeler while the flag or a prerequisite is missing is a contradictory
+// request and is rejected with ErrCodeInvalidRequest.
+func (b *DefaultBundler) dropUnservedDRANodeLabeler(
+	enabledRefs []recipe.ComponentRef,
+	enabledSet map[string]struct{},
+	excludedReasons map[string]string,
+) ([]recipe.ComponentRef, error) {
+
+	if _, declared := enabledSet[draNodeLabelerComponentName]; !declared {
+		return enabledRefs, nil
+	}
+	reason, drop := b.draNodeLabelerDropReason(enabledSet)
+	if !drop {
+		return enabledRefs, nil
+	}
+	if b.Config != nil && slices.Contains(b.Config.Bundlers(), draNodeLabelerComponentName) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"component %q was selected via the bundlers filter but cannot be rendered: %s",
+			draNodeLabelerComponentName, reason))
+	}
+	slog.Info("skipping component", "component", draNodeLabelerComponentName, "reason", reason)
+	excludedReasons[draNodeLabelerComponentName] = reason
+	delete(enabledSet, draNodeLabelerComponentName)
+	kept := make([]recipe.ComponentRef, 0, len(enabledRefs))
+	for _, ref := range enabledRefs {
+		if ref.Name != draNodeLabelerComponentName {
+			kept = append(kept, ref)
+		}
+	}
+	return kept, nil
+}
+
+// draNodeLabelerDropReason decides whether the labeler is rendered. It is
+// useful only when the eviction contract is opted into AND both halves of
+// that contract (a GPU Operator and a DRA driver) are in the bundle; in every
+// other case it would label nodes nothing selects on. Returns the reason
+// phrase quoted back by rejectOverridesForAbsentComponents, and ok=false when
+// the component should be kept.
+func (b *DefaultBundler) draNodeLabelerDropReason(enabledSet map[string]struct{}) (string, bool) {
+	if b == nil || b.Config == nil || b.Config.DRAEvictionNodeLabel() == (config.NodeLabel{}) {
+		return "DRA eviction is not opted in (--dra-eviction-node-label unset), so the eviction label it would apply is not selected on", true
+	}
+	// The exact non-OpenShift names, not the -ocp aliases: the labeler's
+	// dependency edges in base.yaml point at gpu-operator and are declared on
+	// nvidia-dra-driver-gpu, so on an OCP recipe (which disables both) it
+	// would render unordered ahead of gpu-operator-ocp. OCP keeps the
+	// provisioning workflow until #2828 wires it.
+	_, hasDRA := enabledSet[draComponentName]
+	_, hasGPUOperator := enabledSet[gpuOperatorComponentName]
+	if !hasDRA || !hasGPUOperator {
+		return "the DRA eviction contract needs both gpu-operator and nvidia-dra-driver-gpu in the bundle (the OpenShift variants are not wired for it; see NVIDIA/aicr#2828)", true
+	}
+	return "", false
 }
 
 func isGPUOperatorComponent(name string) bool {
@@ -3296,6 +3391,8 @@ func rejectDRAEvictionDynamicPaths(
 	}{
 		{componentNames: draNames, path: draEvictionNodeSelectorPath},
 		{componentNames: gpuOperatorNames, path: gpuOperatorDRAEvictionEnvPath},
+		{componentNames: []string{draNodeLabelerComponentName}, path: draNodeLabelerKeyPath},
+		{componentNames: []string{draNodeLabelerComponentName}, path: draNodeLabelerValuePath},
 	}
 	for _, managed := range managedPaths {
 		for _, componentName := range managed.componentNames {
@@ -3377,9 +3474,45 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 		}
 	}
 
+	if recipeHasDRANodeLabeler(recipeResult) {
+		values := componentValues[draNodeLabelerComponentName]
+		if values == nil {
+			values = make(map[string]any)
+			componentValues[draNodeLabelerComponentName] = values
+		}
+		values[draNodeLabelerKeyPath] = label.Key
+		values[draNodeLabelerValuePath] = label.Value
+		b.warnDRAEvictionLabelDerived(draNames, label)
+		return nil
+	}
+
 	b.warnDRAEvictionNodeLabelRequired(draNames, label)
 
 	return nil
+}
+
+// warnDRAEvictionLabelDerived is the counterpart of
+// warnDRAEvictionNodeLabelRequired for bundles that carry dra-node-labeler:
+// the label is applied by the labeler from GFD's nvidia.com/gpu.present, so no
+// node-pool provisioning is required, and the remaining gap is a GPU node GFD
+// has not labeled (no gpu.present, no eviction label, no kubelet plugin).
+func (b *DefaultBundler) warnDRAEvictionLabelDerived(draNames []string, label config.NodeLabel) {
+	for _, name := range draNames {
+		msg := fmt.Sprintf(
+			"%s schedules its kubelet plugin only on nodes labeled %s=%s; dra-node-labeler applies that label to every node GFD reports as nvidia.com/gpu.present=true, so no node-pool labeling is required. A GPU node without gpu.present (GFD not yet running, or a node GPU Operator does not manage) that does not already carry %s=%s runs no kubelet plugin and publishes no ResourceSlices. To provision the label yourself instead, pass --set %s:enabled=false",
+			name,
+			label.Key,
+			label.Value,
+			label.Key,
+			label.Value,
+			draNodeLabelerComponentName,
+		)
+		b.appendWarning(msg)
+		slog.Warn("DRA kubelet plugin label derived by dra-node-labeler",
+			"component", name,
+			"label", label.String(),
+		)
+	}
 }
 
 // warnDRAEvictionNodeLabelRequired emits the non-blocking bundle-time warning
@@ -3442,7 +3575,7 @@ func (b *DefaultBundler) warnDRAEvictionNotConfigured(
 
 	for _, name := range draNames {
 		msg := fmt.Sprintf(
-			"AICR did not configure automatic eviction for %s: no DRA eviction node label is set, so the kubelet plugin is not descheduled before a GPU driver container restart. The plugin runs on every accelerated node and needs no extra node label. On a driver upgrade the module unload can fail with \"failed to uninstall nvidia driver components\"; on an unchanged-config restart the stale driver rootfs is unmounted underneath the running plugin, which upstream documents as leaving NodePrepareResources unable to build CDI specs for full-GPU allocation, with no error at restart time. Set --dra-eviction-node-label (or scheduling.draEvictionNodeLabel) to opt in, and label every GPU node at node-pool provisioning time",
+			"AICR did not configure automatic eviction for %s: no DRA eviction node label is set, so the kubelet plugin is not descheduled before a GPU driver container restart. The plugin runs on every accelerated node and needs no extra node label. On a driver upgrade the module unload can fail with \"failed to uninstall nvidia driver components\"; on an unchanged-config restart the stale driver rootfs is unmounted underneath the running plugin, which upstream documents as leaving NodePrepareResources unable to build CDI specs for full-GPU allocation, with no error at restart time. Set --dra-eviction-node-label (or scheduling.draEvictionNodeLabel) to opt in; the bundle then carries dra-node-labeler, which applies the label from GFD's nvidia.com/gpu.present, so no node-pool labeling is needed (pass --set dra-node-labeler:enabled=false to provision it yourself)",
 			name,
 		)
 		b.appendWarning(msg)

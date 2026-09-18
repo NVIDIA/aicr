@@ -854,3 +854,30 @@ func TestSurveyComponentSourceOnlyChartFallback(t *testing.T) {
 		t.Errorf("manifest-only effectiveChart() = %q, want empty", got)
 	}
 }
+
+// TestSurveyComponent_DRANodeLabelerImageInventoried pins the supply-chain
+// contract for dra-node-labeler: its one executable image is a literal,
+// digest-pinned reference in the embedded manifest, so the manifest walk (no
+// Helm rendering) must inventory exactly that reference (#2813 review).
+func TestSurveyComponent_DRANodeLabelerImageInventoried(t *testing.T) {
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("repo root: %v", err)
+	}
+	c := component{
+		Name:        "dra-node-labeler",
+		DisplayName: "dra-node-labeler",
+		Helm:        helmCfg{DefaultNamespace: "gpu-operator"},
+	}
+	got, surveyErr := surveyComponent(context.Background(), repoRoot, c, nil, true)
+	if surveyErr != nil {
+		t.Fatalf("surveyComponent() error = %v", surveyErr)
+	}
+	want := "docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95"
+	if len(got.Images) != 1 || got.Images[0] != want {
+		t.Fatalf("dra-node-labeler images = %v, want exactly [%s]; a templated image renders as a placeholder and drops out of the BOM", got.Images, want)
+	}
+	if got.Type != kindManifest {
+		t.Errorf("type = %q, want %q", got.Type, kindManifest)
+	}
+}
