@@ -148,6 +148,14 @@ check-docs-filenames: ## Enforces lowercase kebab-case filenames in docs/
 check-upgrade-records: ## Verifies committed ComponentUpgrades records are well-formed (ADR-021)
 	@./tools/check-upgrade-records
 
+# Deliberately NOT in `lint` or `qualify`: it re-downloads each pinned tool's
+# upstream checksums, so it needs network and is the one gate here that can go
+# red without the tree changing. Merge Gate runs it on any change to
+# .settings.yaml or a refresh script, which is where a stale pin is introduced.
+.PHONY: check-settings-checksums
+check-settings-checksums: ## Verifies .settings.yaml checksum pins match their pinned versions (needs network)
+	@./tools/check-settings-checksums
+
 .PHONY: check-docs-mdx
 check-docs-mdx: ## Checks docs/ markdown for MDX compatibility (void elements, bare braces, HTML comments, autolinks, bare <tags>)
 	@./tools/check-docs-mdx

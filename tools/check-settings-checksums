@@ -1,0 +1,158 @@
+#!/usr/bin/env bash
+# Copyright (c) 2026, NVIDIA CORPORATION.  All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Verify that every checksum pin in .settings.yaml still describes the artifact
+# its sibling version pin names.
+#
+# Usage: tools/check-settings-checksums
+#
+# Requires network access, so this is NOT part of `make test`/`make qualify`.
+# It runs as its own merge-gate job on any change to .settings.yaml or to a
+# refresh script (see .github/workflows/merge-gate.yaml).
+#
+# Why this exists as a separate gate: .settings.yaml pairs a version pin with a
+# checksum pin, and the two are kept in step by the tools/update-*-checksums
+# scripts, wired to Renovate postUpgradeTasks. A hook that runs and *fails*
+# (renamed release asset, egress blip, allowlist miss) leaves the new version
+# pinned against the old digest, and Renovate reports that only as a warning in
+# the PR body. Whether that stale pair is caught before merge depends entirely
+# on which consumer reads it: helmfile/chainsaw digests feed setup-build-tools
+# on PR-gating jobs and fail there, while helm_diff_checksums is read solely by
+# tests/uat/lib/phases.sh, so a stale helm-diff pin passes every PR check and
+# first surfaces in nightly UAT across every cloud (#2801 shipped exactly that,
+# with a fully green check run).
+#
+# The verification leans on a property every refresh script already documents
+# and is tested for: re-running it with the currently-pinned version produces no
+# diff. So running each script against a throwaway copy of .settings.yaml and
+# diffing is a complete check -- it re-derives the digest from upstream rather
+# than restating a constant here, which would just be a second copy to go stale.
+#
+# A refresher that cannot run at all is also a failure. That is the same signal
+# that silently produced the stale pin in the first place, so it must not be
+# reported as a pass.
+#
+# Not covered: mkcert_checksums has no refresh script (.settings.yaml documents
+# it as a manual update), so there is nothing to re-derive it from. Adding a
+# tools/update-mkcert-checksums would bring it under this gate automatically.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# AICR_REPO_ROOT exists so the companion test can point this at a fixture tree
+# with stub refreshers instead of reaching the network. Production callers never
+# set it.
+REPO_ROOT="${AICR_REPO_ROOT:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  sed -n '5,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  exit 0
+fi
+
+SETTINGS_FILE="${REPO_ROOT}/.settings.yaml"
+if [[ ! -f "${SETTINGS_FILE}" ]]; then
+  echo "ERROR: ${SETTINGS_FILE} not found" >&2
+  exit 1
+fi
+
+# "<refresh script basename>|<version key in .settings.yaml>"
+#
+# The version key is matched exactly, so helm_diff does not also match
+# helm_diff_checksums. Adding a checksum-pinned tool means adding a line here;
+# the companion test asserts this list covers every tools/update-*-checksums
+# script, so a new refresher cannot be added without also being gated.
+SPECS=(
+  "update-addlicense-checksums|addlicense"
+  "update-chainsaw-checksums|chainsaw"
+  "update-helm-diff-checksums|helm_diff"
+  "update-helmfile-checksums|helmfile"
+  "update-oasdiff-checksums|oasdiff"
+  "update-oras-checksums|oras"
+  "update-setup-envtest-checksums|setup_envtest"
+)
+
+# Extract a pinned version. Values are single-quoted in .settings.yaml; both
+# 'v1.2.3' and '1.2.3' spellings are in use and each refresher normalizes what
+# it is handed, so pass the value through verbatim.
+pinned_version() {
+  local key="$1" line
+  line=$(grep -E "^[[:space:]]+${key}:[[:space:]]*'[^']+'[[:space:]]*\$" "${SETTINGS_FILE}" || true)
+  if [[ -z "${line}" ]]; then
+    return 1
+  fi
+  if [[ $(printf '%s\n' "${line}" | wc -l) -ne 1 ]]; then
+    return 2
+  fi
+  printf '%s\n' "${line}" | sed -E "s/^[[:space:]]+${key}:[[:space:]]*'([^']+)'[[:space:]]*\$/\1/"
+}
+
+STALE=()
+BROKEN=()
+CHECKED=0
+
+for spec in "${SPECS[@]}"; do
+  script_name="${spec%%|*}"
+  version_key="${spec##*|}"
+  script_path="${REPO_ROOT}/tools/${script_name}"
+
+  if [[ ! -x "${script_path}" ]]; then
+    BROKEN+=("${version_key}: tools/${script_name} is missing or not executable")
+    continue
+  fi
+
+  version=""
+  if ! version=$(pinned_version "${version_key}"); then
+    BROKEN+=("${version_key}: no unique \"${version_key}: '<version>'\" line in .settings.yaml")
+    continue
+  fi
+
+  workdir=$(mktemp -d)
+  cp "${SETTINGS_FILE}" "${workdir}/.settings.yaml"
+
+  # Refreshers resolve .settings.yaml relative to the working directory, so the
+  # subshell cd is what sandboxes the rewrite to the throwaway copy. Keep the
+  # real file out of reach: a refresher bug must not edit the tree from a check.
+  refresh_log="${workdir}/refresh.log"
+  if ! (cd "${workdir}" && "${script_path}" "${version}") >"${refresh_log}" 2>&1; then
+    BROKEN+=("${version_key} (${version}): tools/${script_name} failed -- $(tail -n 1 "${refresh_log}")")
+    rm -rf "${workdir}"
+    continue
+  fi
+
+  if ! diff -q "${SETTINGS_FILE}" "${workdir}/.settings.yaml" >/dev/null 2>&1; then
+    STALE+=("${version_key} (${version})")
+    echo "--- stale pin: ${version_key} is pinned at ${version}, committed digests do not match it"
+    diff -u "${SETTINGS_FILE}" "${workdir}/.settings.yaml" \
+      | grep -E '^[+-][^+-]' || true
+  fi
+
+  CHECKED=$((CHECKED + 1))
+  rm -rf "${workdir}"
+done
+
+if [[ ${#BROKEN[@]} -gt 0 ]]; then
+  echo >&2
+  echo "ERROR: ${#BROKEN[@]} checksum pin(s) could not be verified:" >&2
+  for entry in "${BROKEN[@]}"; do
+    echo "  - ${entry}" >&2
+  done
+  echo >&2
+  echo "A refresher that cannot run is how a stale pin gets committed, so this" >&2
+  echo "fails rather than passing on unverified pins." >&2
+  exit 1
+fi
+
+if [[ ${#STALE[@]} -gt 0 ]]; then
+  echo >&2
+  echo "ERROR: ${#STALE[@]} checksum pin(s) do not match their pinned version:" >&2
+  for entry in "${STALE[@]}"; do
+    echo "  - ${entry}" >&2
+  done
+  echo >&2
+  echo "Fix by re-running the matching refresher from the repo root, e.g.:" >&2
+  echo "  tools/update-helm-diff-checksums \$(version from .settings.yaml)" >&2
+  exit 1
+fi
+
+echo "All ${CHECKED} checksum pin(s) match their pinned versions"
