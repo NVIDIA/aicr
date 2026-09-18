@@ -800,21 +800,33 @@ closed. Zero `AIBOM` objects is healthy before any namespace opts in.
 
 The check also requires both shipped CRDs, `aiboms.aibom.k8saibom.dev` and
 `aibomcontrollerconfigs.aibom.k8saibom.dev`, to report the storage version of
-the chart version pinned in the registry. It matters because Helm and Helmfile
-skip a chart's `crds/` directory on upgrade, so a cluster can run a new
-controller against the previous schema while the older version stays served
-and the controller keeps working.
+the chart version pinned in the registry. It matters because Helm skips a
+chart's `crds/` directory on upgrade, so a cluster that missed the CRD step can
+run a new controller against the previous schema while the older version stays
+served and the controller keeps working.
 
-Flux is the exception for this component: `k8s-aibom` is marked `ownsCRDs` in
-the registry, so its generated `HelmRelease` sets
-`spec.upgrade.crds: CreateReplace` and Flux applies the CRDs itself. Argo CD
-applies them as ordinary manifests each sync. The assertion is still worth
-making on every deployer, because it proves the deployed CRDs match the pinned
-chart rather than merely that some deployer was expected to update them.
+`k8s-aibom` is marked `ownsCRDs` in the registry, so the deployers update its
+CRDs for you: Flux through `spec.upgrade.crds: CreateReplace`, `helm` and
+`helmfile` through the generated `apply-crds.sh`, and Argo CD by applying them
+as ordinary manifests each sync.
+
+**That automation is tied to the registry-pinned coordinates, not to the
+component.** `ownsCRDs` records an audit of one specific chart, so Flux, `helm`,
+and `helmfile` all check that the componentRef still resolves to the registry's
+`source`, `chart`, and `version` before acting, and do nothing when any of the
+three is overridden. A recipe that overrides the version — including the
+override described under [Overriding the chart version](#overriding-the-chart-version-requires-overriding-this-assertion)
+below — therefore upgrades the controller with **no** CRD update on those three
+deployers, silently. Such a recipe needs its own audit of the chart it points
+at and its own CRD step; the fallback command below is the manual form. Argo CD
+is unaffected, since it applies whatever CRDs the rendered chart contains
+regardless of provenance. The assertion is still worth making on every
+deployer, because it proves the deployed CRDs match the pinned chart rather
+than merely that some deployer was expected to update them.
 
 Both CRDs are asserted separately, so a failure names which one is stranded
 and a partially applied CRD set cannot pass. If this check fails after a chart
-bump, the pre-upgrade CRD step in
+bump, the CRD command in
 [Upgrade, uninstall, and troubleshooting](#upgrade-uninstall-and-troubleshooting)
 is the thing to run.
 
@@ -915,67 +927,88 @@ image: chart, CRDs, status API, and image are one qualified set. Quiesce
 configuration changes during rollback and confirm that
 `AIBOMControllerConfig/default` returns to a current `Ready=True` state.
 
-**Apply CRDs before the bundle upgrade — `helm` and `helmfile` only.** The
-chart ships its CRDs under `crds/`. Helm installs that directory on first
-install and never touches it again on upgrade, so a chart bump whose CRDs
-changed leaves the previous schema in place and the API server silently prunes
-the new controller's writes to added fields.
+**CRDs are applied for you; the manual command is a fallback.** The chart
+ships its CRDs under `crds/`. Helm installs that directory on first install and
+never touches it again on upgrade, so a chart bump whose CRDs changed would
+leave the previous schema in place and the API server would silently prune the
+new controller's writes to added fields.
 
-The `flux`, `argocd`, and `argocd-helm` bundles handle this themselves for this
-component and need no manual step; see the deployer table below. For `helm` and
-`helmfile`, apply the CRDs from the exact qualified chart first, then upgrade:
+Every deployer closes that on its own, by a different route; see the deployer
+table below. `helm` and `helmfile` bundles carry an `apply-crds.sh` in the
+component's folder, run automatically before the upgrade; `flux` and Argo CD
+apply the CRDs through their own controllers.
+
+Run the command below by hand only when you are upgrading outside a generated
+bundle, or when `apply-crds.sh` failed and you are reproducing it:
 
 ```bash
 CHART="oci://ghcr.io/googlecloudplatform/charts/k8s-aibom"
 VERSION="1.3.0"   # replace with the version you are upgrading to
 
-helm show crds "${CHART}" --version "${VERSION}" \
-  | sed -n '/^---$/,$p' \
-  | kubectl apply --server-side --force-conflicts -f -
+work="$(mktemp -d)"
+helm pull "${CHART}" --version "${VERSION}" --destination "${work}"
+tar -xzf "${work}"/*.tgz -C "${work}"
+
+# One kubectl call per CRD file, create first and replace if it exists.
+find "${work}" -type f -path '*/crds/*' \( -name '*.yaml' -o -name '*.yml' \) \
+  | sort \
+  | while read -r crd; do
+      grep -q '[^[:space:]]' "${crd}" || continue
+      kubectl create -f "${crd}" 2>/dev/null || kubectl replace -f "${crd}"
+    done
 ```
 
-Three details in that command are load-bearing. The obvious shorter form —
-piping `helm show crds` straight into `kubectl apply --server-side` — fails on
-the first two:
+Three details are load-bearing, and the obvious shorter forms fail on them:
 
-- **`sed -n '/^---$/,$p'`** drops `helm`'s progress output. For an OCI chart,
-  `helm show crds` writes `Pulled:` and `Digest:` lines to *stdout*, and those
-  two lines parse as a valid YAML mapping, so `kubectl` rejects the stream with
-  `error validating data: [apiVersion not set, kind not set]`.
-- **`--force-conflicts`** is required because Helm created these CRDs on
-  install and owns their fields. Without it, server-side apply refuses with a
-  field-manager conflict.
-- **`--server-side`** is required because the CRDs exceed the annotation size
-  limit that client-side apply depends on.
+- **Create-or-replace, not `kubectl apply`.** Server-side apply deletes a field
+  the manifest omits only when no other manager owns it, and Helm created these
+  CRDs. A schema field or `spec.versions` entry that the new chart *removes*
+  therefore survives an apply that exits 0, leaving the controller and the
+  schema out of step. Replace makes the chart authoritative for the whole
+  object. This is why `ownsCRDs` requires that no CRD use
+  `spec.conversion.strategy: Webhook`: replace discards a `caBundle` injected at
+  runtime.
+- **Read the CRDs from the chart archive, not from `helm show crds`.** That
+  command's output shape differs by major version: Helm 4 prepends `---` before
+  every CRD, Helm 3 prepends one only for `show all` and emits nothing between
+  documents. Any separator-based filter silently yields nothing on Helm 3.
+- **Pull once and work from that archive.** Repository, chart, and version are
+  coordinates, not content. Reading CRDs through them and letting the upgrade
+  resolve them again is two fetches, and a mutable tag does not promise the same
+  bytes.
 
-Verified against a live GKE cluster across a 1.2.0 to 1.3.0 upgrade.
+The generated `apply-crds.sh` does exactly this, with each call bounded; it is
+the reference if you need the details.
 
 Which deployers need that step differs, so check yours:
 
-| Deployer | CRD behavior on upgrade | Pre-upgrade step needed |
+| Deployer | CRD behavior on upgrade | Manual step needed |
 |---|---|---|
-| `helm` | `helm upgrade` skips `crds/` | Yes |
-| `helmfile` | `helmfile apply` upgrades through Helm, so it also skips `crds/` | Yes |
+| `helm` | `helm upgrade` skips `crds/`, so the bundle emits `apply-crds.sh` for components the registry marks `ownsCRDs` and `install.sh` runs it first | Only for components without `ownsCRDs` |
+| `helmfile` | Upgrades through Helm, so it skips `crds/` too; the release carries a `presync` hook running the same `apply-crds.sh` | Only for components without `ownsCRDs` |
 | `flux` | The generated `HelmRelease` sets `spec.upgrade.crds: CreateReplace` for components the registry marks `ownsCRDs`, and leaves the helm-controller `Skip` default in place for the rest | Only for components without `ownsCRDs` |
 | `argocd`, `argocd-helm` | Argo CD renders the chart with CRDs included and applies them as ordinary manifests each sync | No |
+
+Argo CD is the one deployer that upgrades CRDs for *every* component rather
+than only the opted-in ones, because including them is how it renders a Helm
+source at all. Suppressing that per component is not available: `skipCrds`
+would also drop the CRDs on first install.
 
 `ownsCRDs` is opt-in, and narrow on purpose. Of the 15 registry components
 that ship CRDs under `crds/`, 11 share at least one CRD with another
 component: `nfd`, `gpu-operator`, and `network-operator` all ship the
 NodeFeature CRDs, and `nfd`, `gpu-operator`, and `kai-scheduler` all appear
 together in `base.yaml`. If every release replaced CRDs on upgrade, two or
-three `HelmRelease` objects would rewrite the same CRD on every reconcile,
-each with the schema its own chart pins. The `Skip` default is what prevents
-that today, so it stays the default.
+three releases would rewrite the same CRD on every reconcile or redeploy,
+each with the schema its own chart pins. Requiring the opt-in is what
+prevents that, so it stays opt-in.
 
 A component qualifies only if it solely owns every CRD it ships and ships none
 using `spec.conversion.strategy: Webhook`, since replace discards a `caBundle`
 injected at runtime. `kubeflow-trainer` is excluded for that second reason.
-Currently `gatekeeper`, `k8s-aibom`, `nvcre`, and `nvsentinel` qualify.
-
-`helm` and `helmfile` always need the step, because skipping `crds/` on
-upgrade is Helm's own behavior rather than something the generated bundle can
-change.
+Currently `gatekeeper`, `k8s-aibom`, `nvcre`, and `nvsentinel` qualify; the
+audited chart version for each is pinned in `pkg/recipe/ownscrds_audit_test.go`,
+so bumping a pin without re-auditing fails CI.
 
 Uninstall in this order. Removing the component from the overlay and applying a
 regenerated bundle does **not** remove the previously installed release: the

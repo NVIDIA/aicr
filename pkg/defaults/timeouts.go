@@ -1340,6 +1340,27 @@ const (
 	HelmValueResolutionConcurrency = 8
 )
 
+// Bundle deploy-time timeouts.
+const (
+	// BundleCRDStepTimeout bounds every helm and kubectl call in a bundle's
+	// generated apply-crds.sh: the release lookup, the registry read, and the
+	// apply. That script runs inside the deploy path, where a command that
+	// never returns hangs the whole rollout instead of failing it, since
+	// deploy.sh retries a component that exits non-zero but cannot interrupt
+	// one still running. A wedged registry and a wedged apiserver both produce
+	// that, so reads and the write are bounded alike. Matches
+	// MirrorHelmTemplateTimeout, the other per-chart helm invocation.
+	// Operators can override per-run with AICR_CRD_STEP_TIMEOUT.
+	//
+	// 30s rather than the 90s a lone helm invocation would justify, because
+	// deploy.sh multiplies it: a component that keeps failing is retried six
+	// times with backoff, so three bounded calls at 90s each can consume ~31
+	// minutes and exceed the CI job budget before the retry loop ever reports
+	// anything. A CRD read or apply that needs more than 30s is already
+	// pathological, and the override exists for the exception.
+	BundleCRDStepTimeout = 30 * time.Second
+)
+
 // Mirror discovery timeouts and defaults.
 const (
 	// MirrorHelmTemplateTimeout is the per-component timeout for helm
