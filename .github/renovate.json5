@@ -475,6 +475,34 @@
       allowedVersions: "<3.14",
     },
 
+    // ---- cel-go is capped below the module-path rename ----
+    // cel-go v0.32.0 renamed its module path from github.com/google/cel-go to
+    // cel.dev/cel-go. That is not a version bump Go can perform: fetching the
+    // new version under the old path fails outright at `go get`, with
+    //   module declares its path as: cel.dev/cel-go
+    //           but was required as: github.com/google/cel-go
+    // so no edit confined to go.mod can produce a buildable tree. Adopting it
+    // means rewriting every `github.com/google/cel-go/...` import.
+    //
+    // Renovate cannot see the rename, so it kept proposing v0.32.0 as an
+    // ordinary bump. PR #2803 is that proposal: unmergeable by construction,
+    // failing seven checks including the gate, and not fixable by rebasing.
+    // The cap stops the repeat rather than leaving a permanently red PR open as
+    // the only record.
+    //
+    // Deliberately a cap and not `enabled: false`: a cap still lets Renovate
+    // track and patch the 0.31.x line. It does hide a fix published only in
+    // 0.32+, but that is not silent — `make scan` catalogs go.mod directly, so
+    // grype reports a cel-go advisory against the pinned version regardless of
+    // what Renovate is allowed to propose.
+    //
+    // Lift this together with the import migration, not before.
+    {
+      matchManagers: ["gomod"],
+      matchDepNames: ["github.com/google/cel-go"],
+      allowedVersions: "<0.32.0",
+    },
+
     // ---- Registry chart pins are extracted, never PR'd ----
     {
       // Report-only. Each run relies on exactly one config-level guard here:
