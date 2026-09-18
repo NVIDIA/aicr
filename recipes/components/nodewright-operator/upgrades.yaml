@@ -70,8 +70,8 @@ transitions:
               The chart ships both groups' CRDs and RBAC, and the mirror
               imports each Skyhook into a NodeWright. Per-node state is copied
               to the nodewright.nvidia.com/* prefix, so packages are not
-              re-run. The new objects are untracked by Argo at this point;
-              it neither prunes nor flags them.
+              re-run. The new objects are outside the reconciler's inventory
+              at this point, so it neither prunes nor flags them.
           - id: rename-crs-in-one-commit
             description: >-
               In a single git commit, remove each Skyhook manifest and add the

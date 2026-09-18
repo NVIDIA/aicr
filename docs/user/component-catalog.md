@@ -1657,7 +1657,7 @@ $ aicr upgrade-check --from old.yaml --to new.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
 nodewright-operator  v0.17.1  v0.18.0  manual   1 minor, 4 steps
 
-$ aicr upgrade-check --from old.yaml --to newer.yaml --deployer helm
+$ aicr upgrade-check --from older.yaml --to newer.yaml --deployer helm
 COMPONENT            FROM     TO       VERDICT  NOTES
 nodewright-operator  v0.16.0  v0.19.0  manual   3 minors, 4 steps
 

@@ -368,6 +368,21 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 		// record rather than stopping a move whose extra boundary is "nothing
 		// to do". Reached only after the blocked checks above, so an authored
 		// block still outranks everything here.
+		// N safe boundaries compose exactly as one does: none carries steps,
+		// so there is no work to skip and no origin whose guidance could be
+		// wrong. Coverage (rule 3) is what makes the chain trustworthy, since
+		// it leaves no hole below the pin, so the only question left is
+		// whether the assessment reaches the target.
+		if top, ok := everySafeCrossing(crossed); ok {
+			if _, past := beyondCeiling(top.tr, tgt); !past {
+				r.Verdict = VerdictSafe
+				r.Transition = top.tr
+				r.Span = claimSpan(src, top.tr)
+				r.Reason = ReasonRecorded
+				r.Explanation = recordedExplanation(r, top)
+				return r
+			}
+		}
 		if only, ok := loneSubstantive(crossed); ok && fromCovers(only.tr, src) {
 			if _, past := beyondCeiling(only.tr, tgt); !past {
 				r.Verdict = only.tr.Verdict
@@ -400,6 +415,33 @@ func matchVersions(u *ComponentUpgrades, name, fromVer, toVer string) ComponentR
 	r.StoppedAt = only.tr.To
 	r.Explanation = undefinedOriginExplanation(u, r, only, src)
 	return r
+}
+
+// everySafeCrossing returns the boundary nearest the target when every crossed
+// boundary is safe, so the caller can lend that verdict instead of blocking a
+// jump across boundaries that each ask nothing. crossings orders by floor, so
+// the last is the one whose ceiling has to reach the target.
+//
+// If one safe boundary composes nothing and skips nothing, N of them compose
+// nothing either: rule 4 forbids a safe record carrying steps, so there is no
+// intermediate work a jump past it could miss. Blocking such a jump names a
+// stopping point where nothing happens, which is the false-confidence
+// direction rather than the cautious one.
+//
+// fromCovers is deliberately not consulted, unlike the lone-substantive case
+// below: a safe record carries no steps, so there is no guidance that could
+// have been authored for the wrong starting point. The ceiling check at the
+// call site is what still has to hold.
+func everySafeCrossing(crossed []crossing) (crossing, bool) {
+	if len(crossed) == 0 {
+		return crossing{}, false
+	}
+	for _, c := range crossed {
+		if c.tr.Verdict != VerdictSafe {
+			return crossing{}, false
+		}
+	}
+	return crossed[len(crossed)-1], true
 }
 
 // loneSubstantive returns the single crossed boundary that asks something of

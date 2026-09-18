@@ -231,11 +231,15 @@ func pollUntilStable(ctx *validators.Context, label string, probe func() error, 
 //
 // gatedHealthCheckSuppressed and buildResourceFetcher still return directly on
 // error — both are hard errors, not budget-exhaustion handling.
-// gatedHealthCheckSuppressed's error can itself be cancellation-induced (it
-// threads ctx.Ctx into a Helm render), and that path discards whatever
-// failures were already collected under an ErrCodeInternal wrap rather than
-// the fail-closed ErrCodeTimeout above — a known gap, deliberately out of
-// scope here.
+// gatedHealthCheckSuppressed's error has three sources, and that path discards
+// whatever failures were already collected under an ErrCodeInternal wrap
+// rather than the fail-closed ErrCodeTimeout above. Two are rare: a broken
+// Helm render, and cancellation (it threads ctx.Ctx into that render). The
+// third is not — it calls resolveNodewrightGVR, so a transient non-NotFound
+// discovery error, an apiserver 503 while the loop happens to be on
+// nodewright-customizations, collapses the whole expected-resources report
+// into one ErrCodeInternal. Routing it through the failures accumulator is a
+// known gap, deliberately out of scope here.
 func checkExpectedResources(ctx *validators.Context) error {
 	if ctx.ValidationInput == nil {
 		return errors.New(errors.ErrCodeInvalidRequest, "validation is not available")

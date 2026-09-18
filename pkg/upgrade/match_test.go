@@ -645,6 +645,7 @@ func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
 	rename := trans("<0.18.0", ">=0.18.0 <=0.19.0", VerdictManual, "rename")
 	drain := trans(">=0.18.0 <0.19.0", ">=0.19.0 <=0.19.0", VerdictSafe, "drain")
 	secondManual := trans(">=0.18.0 <0.19.0", ">=0.19.0 <=0.19.0", VerdictManual, "second")
+	firstSafe := trans("<0.18.0", ">=0.18.0 <=0.18.0", VerdictSafe, "first-safe")
 
 	tests := []struct {
 		name        string
@@ -670,6 +671,18 @@ func TestMatchSafeBoundaryDoesNotBlockComposition(t *testing.T) {
 			name:        "the safe boundary alone still reads safe",
 			set:         oneComponent(rename, drain),
 			from:        "0.18.0",
+			to:          "0.19.0",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "drain",
+		},
+		{
+			// N safe boundaries compose exactly as one does. Blocking here
+			// would tell an operator to stop at a version where nothing
+			// happens, which is the outcome this reduction exists to prevent.
+			name:        "a crossing that is entirely safe reads safe",
+			set:         oneComponent(firstSafe, drain),
+			from:        "0.17.0",
 			to:          "0.19.0",
 			wantVerdict: VerdictSafe,
 			wantReason:  ReasonRecorded,
@@ -755,13 +768,22 @@ func TestMatchVerdictSelection(t *testing.T) {
 			wantStoppedAt: ">=2.5.0 <2.6.0",
 		},
 		{
-			name:          "two non-blocking boundaries still block the jump",
-			set:           oneComponent(safeLow, trans("<2.5.0", ">=2.5.0 <2.6.0", VerdictSafe, "S2")),
-			from:          "1.5.0",
-			to:            "2.5.1",
-			wantVerdict:   VerdictBlocked,
-			wantReason:    ReasonMultipleBoundaries,
-			wantStoppedAt: ">=2.0.0 <2.1.0",
+			// Reversed in #2829: this used to expect blocked /
+			// multiple-boundaries. That rule exists because an intermediate
+			// record's steps never run on a jump straight past it, and a safe
+			// record has no steps by construction, so crossing two of them
+			// skips nothing. Blocking named 2.0.0 as somewhere to stop when
+			// landing there asks nothing of anyone, which is the
+			// false-confidence direction rather than the cautious one. The
+			// furthest crossed record still has to reach the target, which is
+			// what keeps this from vouching past anyone's assessment.
+			name:        "two non-blocking boundaries do not block the jump",
+			set:         oneComponent(safeLow, trans("<2.5.0", ">=2.5.0 <2.6.0", VerdictSafe, "S2")),
+			from:        "1.5.0",
+			to:          "2.5.1",
+			wantVerdict: VerdictSafe,
+			wantReason:  ReasonRecorded,
+			wantMatched: "S2",
 		},
 		{
 			name:        "one crossed record whose from covers the source lends its verdict",
