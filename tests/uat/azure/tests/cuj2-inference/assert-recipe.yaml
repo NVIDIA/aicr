@@ -45,6 +45,7 @@ componentRefs: ## emitted order (as generated) — chainsaw list asserts are per
   - name: agentgateway
   - name: agentgateway-crds
   - name: cert-manager
+  - name: dra-node-labeler
   - name: dynamo-platform
   - name: gpu-operator
   - name: grove

@@ -29,6 +29,7 @@ import (
 var untrackedComponents = map[string]string{
 	"gke-nccl-tcpxo":            "manifest-only: in-tree manifests, no upstream chart",
 	"dranet":                    "manifest-only: in-tree manifests, no upstream chart",
+	"dra-node-labeler":          "manifest-only: in-tree manifests, no upstream chart",
 	"rdma-netns-exclusive":      "manifest-only: in-tree manifests, no upstream chart",
 	"gcp-driver-installer":      "manifest-only: in-tree manifests, no upstream chart",
 	"nodewright-customizations": "manifest-only: in-tree customization manifests",

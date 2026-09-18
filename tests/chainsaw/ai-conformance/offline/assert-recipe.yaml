@@ -41,6 +41,7 @@ componentRefs: ## alphabetically sorted
   - name: aws-ebs-csi-driver
   - name: aws-efa
   - name: cert-manager
+  - name: dra-node-labeler
   - name: dynamo-platform
   - name: gpu-operator
   - name: grove

@@ -36,6 +36,7 @@ constraints:
     value: '!gke-no-default-nvidia-gpu-device-plugin'
 componentRefs: ## alphabetically sorted
   - name: cert-manager
+  - name: dra-node-labeler
   - name: gcp-driver-installer
   - name: gke-nccl-tcpxo
   - name: gpu-operator

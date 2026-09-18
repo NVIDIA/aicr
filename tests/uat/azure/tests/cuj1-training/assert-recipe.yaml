@@ -42,6 +42,7 @@ constraints:
     value: '>= 6.8'
 componentRefs: ## emitted order (as generated) — chainsaw list asserts are per-index
   - name: cert-manager
+  - name: dra-node-labeler
   - name: gpu-operator
   - name: k8s-ephemeral-storage-metrics
   - name: kai-scheduler

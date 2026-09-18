@@ -39,6 +39,7 @@ componentRefs: ## alphabetically sorted
   - name: agentgateway
   - name: agentgateway-crds
   - name: cert-manager
+  - name: dra-node-labeler
   - name: dynamo-platform
   - name: gcp-driver-installer
   - name: gpu-operator
