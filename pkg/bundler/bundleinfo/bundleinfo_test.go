@@ -25,6 +25,8 @@ import (
 
 	stderrors "errors"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/defaults"
 	"github.com/NVIDIA/aicr/pkg/errors"
@@ -203,6 +205,65 @@ func TestReadRejectsOversizeFile(t *testing.T) {
 	}
 	if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
 		t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
+	}
+}
+
+// TestReadRejectsNonRegularFile guards the filesystem entry Read opens, which
+// is a separate question from the paths inside the document.
+//
+// validateRelativePaths inspects decoded fields, and deployer.SafeJoin is
+// purely lexical over the constant FileName — neither ever stats the entry. A
+// bundle that arrived from an OCI registry or a GitOps clone can therefore
+// carry a bundle-info.yaml that is a symlink to anywhere the process can
+// reach, and a following open would feed up to MaxBundleInfoBytes of it to the
+// YAML decoder.
+func TestReadRejectsNonRegularFile(t *testing.T) {
+	tests := []struct {
+		name  string
+		plant func(t *testing.T, path string)
+	}{
+		{
+			name: "symlink to a file outside the bundle",
+			plant: func(t *testing.T, path string) {
+				t.Helper()
+				// The target parses as a valid record on purpose. A target the
+				// decoder would reject anyway makes this pass whether or not
+				// the link was followed, which is the wrong reason.
+				outside := filepath.Join(t.TempDir(), "elsewhere.yaml")
+				valid := "apiVersion: " + header.StableGroupVersion + "\nkind: BundleInfo\n" +
+					"layout:\n  entrypoint: deploy.sh\n"
+				if err := os.WriteFile(outside, []byte(valid), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, path); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "fifo",
+			plant: func(t *testing.T, path string) {
+				t.Helper()
+				if err := unix.Mkfifo(path, 0600); err != nil {
+					t.Skipf("FIFO unsupported: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			tt.plant(t, filepath.Join(dir, bundleinfo.FileName))
+
+			_, err := bundleinfo.Read(context.Background(), dir)
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+			if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want code %s", err, errors.ErrCodeInvalidRequest)
+			}
+		})
 	}
 }
 

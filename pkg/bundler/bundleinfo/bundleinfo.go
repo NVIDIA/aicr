@@ -17,11 +17,13 @@ package bundleinfo
 import (
 	"bytes"
 	"context"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"gopkg.in/yaml.v3"
 
@@ -93,8 +95,18 @@ func Read(ctx context.Context, dir string) (*BundleInfo, error) {
 		return nil, errors.PropagateOrWrap(joinErr, errors.ErrCodeInvalidRequest, "unsafe bundle info path")
 	}
 
-	f, err := os.Open(path) //nolint:gosec // path validated by SafeJoin
+	// SafeJoin is lexical: it only ever sees the constant FileName and never
+	// touches the filesystem, so nothing before this point can tell that the
+	// entry is a symlink or a device. O_NOFOLLOW and the regular-file check
+	// are what keep an untrusted bundle from redirecting this read, matching
+	// verifier.readBoundedFileContext and checksum's bundle opens.
+	f, err := os.OpenFile( //nolint:gosec // path validated by SafeJoin
+		path, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if err != nil {
+		if stderrors.Is(err, syscall.ELOOP) {
+			return nil, errors.Wrap(errors.ErrCodeInvalidRequest,
+				"refusing to follow file symlink "+path, err)
+		}
 		if os.IsNotExist(err) {
 			return nil, errors.New(errors.ErrCodeNotFound,
 				fmt.Sprintf("%s has no %s, so the deployer that built it was not recorded; "+
@@ -103,6 +115,14 @@ func Read(ctx context.Context, dir string) (*BundleInfo, error) {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to open bundle info", err)
 	}
 	defer func() { _ = f.Close() }()
+
+	opened, err := f.Stat()
+	if err != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to inspect opened bundle info", err)
+	}
+	if !opened.Mode().IsRegular() {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, "bundle info is not a regular file: "+path)
+	}
 
 	data, err := io.ReadAll(io.LimitReader(f, defaults.MaxBundleInfoBytes+1))
 	if err != nil {
