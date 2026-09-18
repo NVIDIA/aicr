@@ -154,6 +154,8 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		return nil, err
 	}
 	g.vendorRecords = writeResult.VendoredCharts
+	output.Entrypoint = fileHelmfile
+	output.Releases = writeResult.Releases()
 	for _, f := range writeResult.Folders {
 		for _, rel := range f.Files {
 			abs, joinErr := deployer.SafeJoin(outputDir, rel)
@@ -203,6 +205,7 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 		}
 		output.Files = append(output.Files, provPath)
 		output.TotalSize += provSize
+		output.Provenance = localformat.ProvenanceFileName
 	}
 
 	if g.IncludeChecksums {

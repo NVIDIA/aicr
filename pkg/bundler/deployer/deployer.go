@@ -32,6 +32,42 @@ import (
 	"github.com/NVIDIA/aicr/pkg/errors"
 )
 
+// Release is one Helm release a deployer emits, reported so the bundler can
+// index the bundle without re-deriving paths the deployer already built.
+//
+// Component names the recipe component the release belongs to, which equals
+// Name for a primary release and names the parent for an injected -pre,
+// -post, or -readiness release. Path and Manifest are relative to the bundle
+// root; Manifest is empty for deployers that declare a release through an
+// orchestration script rather than a file.
+type Release struct {
+	Name      string
+	Component string
+	Namespace string
+	Path      string
+	Manifest  string
+}
+
+// Source is the deployment-source coordinates a deployer resolved and baked
+// into the bundle it just wrote.
+//
+// A deployer sets a field only when the resolved value is observable in a
+// file it emitted, and it reports the value it actually wrote — including a
+// default or a placeholder the caller never supplied, because the placeholder
+// is what the bundle ships. A field left empty means this deployer's bundle
+// never mentions that coordinate, which is not the same as the caller
+// omitting it.
+type Source struct {
+	// RepoURL is the repository the emitted manifests point at.
+	RepoURL string
+
+	// TargetRevision is the revision those manifests pin.
+	TargetRevision string
+
+	// AppName is the parent application name the bundle installs under.
+	AppName string
+}
+
 // Output contains the result of deployer generation.
 type Output struct {
 	// Files contains the paths of generated files.
@@ -48,6 +84,27 @@ type Output struct {
 
 	// DeploymentNotes contains optional deployment notes or warnings.
 	DeploymentNotes []string
+
+	// Entrypoint is the bundle-root file a consumer invokes or applies for
+	// this deployer, relative to the bundle root.
+	Entrypoint string
+
+	// Provenance is the chart-provenance audit file this run wrote, relative
+	// to the bundle root, and empty when the run wrote none. A deployer must
+	// report it rather than let a caller stat the bundle: the file is written
+	// only for a vendored bundle and is never pruned, so a stat would also
+	// find one left behind by an earlier run into the same directory.
+	Provenance string
+
+	// Releases is every Helm release the bundle installs, in deployment
+	// order. The ordering is normative: consumers read sequence from list
+	// position, so a deployer must append in the order it deploys.
+	Releases []Release
+
+	// Source is what the deployer resolved for the bundle's deployment
+	// source, reported rather than re-derived by the caller: re-deriving it
+	// would put each deployer's defaults in a second place to drift from.
+	Source Source
 }
 
 // AddDataFiles resolves each relative data file path against outputDir (via

@@ -22,6 +22,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -135,6 +136,103 @@ func TestGenerate_WithChecksums(t *testing.T) {
 	lastFile := output.Files[len(output.Files)-1]
 	if !strings.HasSuffix(lastFile, "checksums.txt") {
 		t.Errorf("expected last file to be checksums.txt, got %s", lastFile)
+	}
+}
+
+func TestGenerateReportsLayout(t *testing.T) {
+	// A standalone fixture rather than createTestRecipeResult() (shared by
+	// most other tests in this file). ComponentRefs declaration order,
+	// DeploymentOrder, and alphabetical component-name order are all
+	// deliberately distinct here:
+	//   - declaration: gpu-operator, cert-manager, nfd
+	//   - DeploymentOrder: cert-manager, nfd, gpu-operator (the real
+	//     dependency order — nfd labels nodes before gpu-operator consumes
+	//     those labels)
+	//   - alphabetical: cert-manager, gpu-operator, nfd
+	// so the primaryOrder assertion below can only pass if Generate genuinely
+	// honors DeploymentOrder rather than sorting by name or falling back to
+	// declaration order (e.g. a dropped SortComponentRefsByDeploymentOrder
+	// call).
+	recipeResult := &recipe.RecipeResult{
+		Kind:       "RecipeResult",
+		APIVersion: "aicr.run/v1alpha2",
+		Metadata:   recipe.RecipeResultMetadata{Version: "v0.1.0"},
+		Criteria: &recipe.Criteria{
+			Service:     "eks",
+			Accelerator: "h100",
+			Intent:      "training",
+		},
+		ComponentRefs: []recipe.ComponentRef{
+			{
+				Name:      "gpu-operator",
+				Namespace: "gpu-operator",
+				Chart:     "gpu-operator",
+				Version:   "v25.3.3",
+				Source:    "https://helm.ngc.nvidia.com/nvidia",
+			},
+			{
+				Name:      "cert-manager",
+				Namespace: "cert-manager",
+				Chart:     "cert-manager",
+				Version:   "v1.17.2",
+				Source:    "https://charts.jetstack.io",
+			},
+			{
+				Name:      "nfd",
+				Namespace: "node-feature-discovery",
+				Chart:     "node-feature-discovery",
+				Version:   "v0.16.4",
+				Source:    "https://kubernetes-sigs.github.io/node-feature-discovery-charts",
+			},
+		},
+		DeploymentOrder: []string{"cert-manager", "nfd", "gpu-operator"},
+	}
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"nfd":          {"enabled": true},
+			"gpu-operator": {"enabled": true},
+		},
+		Version: "v1.0.0",
+	}
+	outputDir := t.TempDir()
+
+	out, err := g.Generate(context.Background(), outputDir)
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	if out.Entrypoint != "deploy.sh" {
+		t.Errorf("Entrypoint = %q, want deploy.sh", out.Entrypoint)
+	}
+	if len(out.Releases) == 0 {
+		t.Fatal("Generate reported no releases; the bundle index would be empty")
+	}
+	for _, r := range out.Releases {
+		if r.Name == "" || r.Component == "" || r.Path == "" {
+			t.Errorf("incomplete release entry: %+v", r)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Path)); statErr != nil {
+			t.Errorf("release %q claims path %q, which does not exist: %v", r.Name, r.Path, statErr)
+		}
+	}
+
+	// Releases order is normative: consumers read deployment sequence from
+	// list position, since the artifact carries no ordinal field. Extract
+	// the primary releases (Name == Component; excludes injected -pre/-post/
+	// -readiness entries) and confirm their relative order matches the
+	// recipe's DeploymentOrder — a sort or reversal of out.Releases must
+	// fail this check.
+	var primaryOrder []string
+	for _, r := range out.Releases {
+		if r.Name == r.Component {
+			primaryOrder = append(primaryOrder, r.Name)
+		}
+	}
+	if !slices.Equal(primaryOrder, recipeResult.DeploymentOrder) {
+		t.Errorf("primary release order = %v, want %v (recipe DeploymentOrder)",
+			primaryOrder, recipeResult.DeploymentOrder)
 	}
 }
 
