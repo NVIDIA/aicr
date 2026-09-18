@@ -94,7 +94,8 @@ Use in shell scripts:
 		Flags: queryCmdFlags(),
 		Action: func(ctx context.Context, cmd *cli.Command) error {
 			if err := validateSingleValueFlags(cmd, "service", "accelerator", "intent", "os", "platform",
-				flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, flagGKETCPXOInterfaces, "snapshot", "config", "format", "selector"); err != nil {
+				flagProfile, flagSlurmAccountingMode, flagRuntimeInventory, flagGKETCPXOInterfaces,
+				flagInheritFrom, "snapshot", "config", "format", "selector"); err != nil {
 				return err
 			}
 
@@ -318,6 +319,21 @@ func gkeTCPXOInterfacesResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aic
 	return []aicr.RecipeResolveOption{aicr.WithGKETCPXOInterfaces(value)}, nil
 }
 
+// inheritFromResolveOptions turns the --inherit-from flag into a resolve
+// option. Unlike the mode selections there is no AICRConfig fallback: the
+// value names a prior artifact on the invoking machine's disk, so it belongs
+// to the invocation rather than to a shared, committed configuration.
+//
+// The reference is passed through unvalidated — the facade reads it and fails
+// closed on a cm:// URI, a missing path, or a directory holding no recipe.
+func inheritFromResolveOptions(cmd *cli.Command) []aicr.RecipeResolveOption {
+	ref := cmd.String(flagInheritFrom)
+	if ref == "" {
+		return nil
+	}
+	return []aicr.RecipeResolveOption{aicr.WithInheritFrom(ref)}
+}
+
 // buildSelectionResolveOptions gathers every generation-time selection into one
 // option slice, so callers cannot wire one and forget the other.
 func buildSelectionResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aicr.RecipeResolveOption, error) {
@@ -334,7 +350,8 @@ func buildSelectionResolveOptions(cmd *cli.Command, cfg *aicr.Config) ([]aicr.Re
 	if err != nil {
 		return nil, err
 	}
-	return append(opts, tcpxoOpts...), nil
+	opts = append(opts, tcpxoOpts...)
+	return append(opts, inheritFromResolveOptions(cmd)...), nil
 }
 
 // statedDimensions converts the touched set into the argument

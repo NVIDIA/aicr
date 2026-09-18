@@ -53,6 +53,12 @@ type ReportComponent struct {
 	From string `json:"from,omitempty" yaml:"from,omitempty"`
 	To   string `json:"to,omitempty" yaml:"to,omitempty"`
 
+	// IdentityChanges are the moves the version columns cannot show: a
+	// component that held its version and relocated anyway, or one that moved
+	// on both axes in the same hop. Explanation names them in prose too, but a
+	// machine consumer reads them here rather than parsing a sentence.
+	IdentityChanges []ReportIdentityChange `json:"identityChanges,omitempty" yaml:"identityChanges,omitempty"`
+
 	// Verdict is empty on an added or removed row, which made no transition.
 	Verdict Verdict `json:"verdict,omitempty" yaml:"verdict,omitempty"`
 
@@ -93,6 +99,14 @@ type ReportComponent struct {
 	// FailsRun mirrors ComponentResult.FailsRun so a consumer reading only the
 	// report reaches the same conclusion the exit code did.
 	FailsRun bool `json:"failsRun" yaml:"failsRun"`
+}
+
+// ReportIdentityChange is one move on the identity axis, restated with JSON
+// names.
+type ReportIdentityChange struct {
+	Field string `json:"field" yaml:"field"`
+	From  string `json:"from" yaml:"from"`
+	To    string `json:"to" yaml:"to"`
 }
 
 // ReportStep is one operator action, restated with JSON names.
@@ -171,19 +185,20 @@ func NewReport(results []ComponentResult, opts ReportOptions) *Report {
 
 func reportComponent(r ComponentResult, deployer string) ReportComponent {
 	c := ReportComponent{
-		Component:   r.Component,
-		Change:      r.Change,
-		From:        r.From,
-		To:          r.To,
-		Verdict:     r.Verdict,
-		Jump:        spanPhrase(r.Jump),
-		Covers:      spanPhrase(r.Span),
-		Breaking:    r.Breaking,
-		Downgrade:   r.Downgrade,
-		StoppedAt:   r.StoppedAt,
-		Reason:      r.Reason,
-		Explanation: r.Explanation,
-		FailsRun:    r.FailsRun(),
+		Component:       r.Component,
+		Change:          r.Change,
+		From:            r.From,
+		To:              r.To,
+		IdentityChanges: reportIdentityChanges(r.IdentityChanges),
+		Verdict:         r.Verdict,
+		Jump:            spanPhrase(r.Jump),
+		Covers:          spanPhrase(r.Span),
+		Breaking:        r.Breaking,
+		Downgrade:       r.Downgrade,
+		StoppedAt:       r.StoppedAt,
+		Reason:          r.Reason,
+		Explanation:     r.Explanation,
+		FailsRun:        r.FailsRun(),
 	}
 	if r.Change == ChangeReplaced {
 		c.From = r.ReplacedComponent
@@ -228,6 +243,17 @@ func stepsFor(groups []StepGroup, deployer string) []Step {
 	return remainder
 }
 
+func reportIdentityChanges(changes []IdentityChange) []ReportIdentityChange {
+	if len(changes) == 0 {
+		return nil
+	}
+	out := make([]ReportIdentityChange, len(changes))
+	for i, c := range changes {
+		out[i] = ReportIdentityChange(c)
+	}
+	return out
+}
+
 func reportSteps(steps []Step) []ReportStep {
 	if len(steps) == 0 {
 		return nil
@@ -264,6 +290,15 @@ func notes(r ComponentResult, c ReportComponent) string {
 			parts = append(parts, plural(len(c.Steps), "step", "steps"))
 		}
 		return strings.Join(parts, ", ")
+	case ChangeIdentity:
+		// The FROM and TO columns carry the relocation on this row, so the
+		// version they displaced is stated here. No coverage gap is named
+		// alongside it: none can be closed, because the record vocabulary
+		// describes version boundaries and this row crossed none.
+		if r.From == "" {
+			return "version unchanged, no record covers a relocation"
+		}
+		return r.From + " unchanged, no record covers a relocation"
 	case ChangeVersion:
 		// Composed below: a version change is the only kind whose notes
 		// depend on the verdict.
@@ -295,6 +330,10 @@ func notes(r ComponentResult, c ReportComponent) string {
 		switch {
 		case r.Downgrade:
 			parts = append(parts, "unassessable")
+		case r.Reason == ReasonIdentityChanged:
+			// Nothing is named here because the relocation appended below is
+			// the whole gap: the version hop may well be recorded, and "no
+			// record" would send the reader to author one that cannot exist.
 		case r.Reason == ReasonNoBoundaryCrossed:
 			parts = append(parts, "record exists, no boundary here")
 		default:
@@ -309,8 +348,26 @@ func notes(r ComponentResult, c ReportComponent) string {
 	case VerdictUnversioned:
 		parts = append(parts, "versions are not comparable")
 	}
-	if c.Covers != "" && r.Span != r.Jump {
+	// Covers is the matched record's claim, so it is withheld where a
+	// relocation withdrew that record's verdict: "unknown across 1 minor"
+	// would put the withdrawn verdict back into the sentence.
+	if c.Covers != "" && r.Span != r.Jump && r.Reason != ReasonIdentityChanged {
 		parts = append(parts, fmt.Sprintf("%s across %s", r.Verdict, c.Covers))
+	}
+	// Last, so the fragments about the version axis stay together: this one is
+	// about the other axis entirely.
+	if len(c.IdentityChanges) > 0 {
+		parts = append(parts, movedFieldsPhrase(c.IdentityChanges))
+	}
+	return strings.Join(parts, ", ")
+}
+
+// movedFieldsPhrase states the identity moves the way the FROM and TO columns
+// state a version move, so a row carrying both axes reads the same on each.
+func movedFieldsPhrase(changes []ReportIdentityChange) string {
+	parts := make([]string, len(changes))
+	for i, c := range changes {
+		parts[i] = fmt.Sprintf("%s %s -> %s", c.Field, c.From, c.To)
 	}
 	return strings.Join(parts, ", ")
 }

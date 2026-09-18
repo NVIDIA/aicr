@@ -17,6 +17,7 @@ package aicr_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -2741,6 +2742,305 @@ func TestResolveRecipeRuntimeInventoryMode(t *testing.T) {
 			if (resolveErr != nil) != tt.wantErr {
 				t.Fatalf("ResolveRecipeFromCriteriaWithOptions() error = %v, wantErr %v",
 					resolveErr, tt.wantErr)
+			}
+		})
+	}
+}
+
+// inheritTestRequest is the criteria the inherit-from tests resolve. Any
+// overlay with several components would do; this one is already exercised
+// elsewhere in this file, so a registry change that breaks it breaks a
+// louder test first.
+func inheritTestRequest(inheritFrom string) aicr.RecipeRequest {
+	return aicr.RecipeRequest{
+		Service:     "eks",
+		Accelerator: "h100",
+		OS:          "ubuntu",
+		Intent:      "training",
+		InheritFrom: inheritFrom,
+	}
+}
+
+func inheritTestClient(t *testing.T) *aicr.Client {
+	t.Helper()
+	client, err := aicr.NewClient(aicr.WithRecipeSource(aicr.EmbeddedSource()))
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	return client
+}
+
+// priorRecipe writes a hydrated RecipeResult naming each component at the
+// namespace a previous resolution installed it into. Only the namespace is
+// read back; the type/source/version fields are the minimum a hydrated recipe
+// must carry to pass the loader's coherence rules.
+func priorRecipe(t *testing.T, path string, namespaces map[string]string) string {
+	t.Helper()
+	doc := "kind: RecipeResult\napiVersion: aicr.run/v1alpha2\nmetadata:\n  version: test\ncomponentRefs:\n"
+	for _, name := range sortedKeys(namespaces) {
+		doc += fmt.Sprintf(
+			"  - name: %s\n    type: Helm\n    source: https://charts.invalid/prior\n    version: 1.0.0\n    namespace: %s\n",
+			name, namespaces[name])
+	}
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
+		t.Fatalf("setup: write %s: %v", path, err)
+	}
+	return path
+}
+
+func namespacesOf(result *aicr.RecipeResult) map[string]string {
+	out := make(map[string]string, len(result.Components))
+	for _, c := range result.Components {
+		out[c.Name] = c.Namespace
+	}
+	return out
+}
+
+// TestResolveRecipe_InheritFrom proves that a prior artifact's resolved
+// namespaces survive re-resolution, which is what keeps a moved registry
+// default from installing a second copy of a running component beside the one
+// already deployed (#2830). Both accepted artifact forms are covered: a recipe
+// file, and a bundle directory read through the recipe.yaml at its root.
+func TestResolveRecipe_InheritFrom(t *testing.T) {
+	t.Parallel()
+
+	client := inheritTestClient(t)
+
+	// Baseline: what the registry alone resolves to. The pinned component and
+	// the expected namespaces are derived from it rather than hardcoded, so a
+	// registry edit cannot silently make the assertion vacuous.
+	baseline, err := client.ResolveRecipe(t.Context(), inheritTestRequest(""))
+	if err != nil {
+		t.Fatalf("baseline ResolveRecipe: %v", err)
+	}
+	if len(baseline.Components) < 2 {
+		t.Fatalf("baseline resolved %d components, need at least 2 to tell inherited from default",
+			len(baseline.Components))
+	}
+	pinned := baseline.Components[0].Name
+	other := baseline.Components[1].Name
+	const movedNamespace = "legacy-install-namespace"
+
+	defaults := namespacesOf(baseline)
+	if defaults[pinned] == movedNamespace {
+		t.Fatalf("setup: %s already resolves to %q, so the test would assert nothing", pinned, movedNamespace)
+	}
+	want := namespacesOf(baseline)
+	want[pinned] = movedNamespace
+
+	dir := t.TempDir()
+	file := priorRecipe(t, filepath.Join(dir, "prior.yaml"), map[string]string{
+		pinned: movedNamespace,
+		// Absent from the resolved recipe, so it must contribute nothing
+		// rather than appear as a component.
+		"synthetic-not-in-registry": "somewhere-else",
+	})
+
+	bundleDir := filepath.Join(dir, "bundle")
+	if mkErr := os.Mkdir(bundleDir, 0o750); mkErr != nil {
+		t.Fatalf("setup: mkdir bundle: %v", mkErr)
+	}
+	priorRecipe(t, filepath.Join(bundleDir, "recipe.yaml"), map[string]string{pinned: movedNamespace})
+
+	tests := []struct {
+		name        string
+		inheritFrom string
+	}{
+		{"recipe file", file},
+		{"bundle directory", bundleDir},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, resolveErr := client.ResolveRecipe(t.Context(), inheritTestRequest(tt.inheritFrom))
+			if resolveErr != nil {
+				t.Fatalf("ResolveRecipe: %v", resolveErr)
+			}
+			got := namespacesOf(result)
+			// Spelled out before the whole-map compare so a failure names the
+			// two behaviors under test rather than only diffing two maps.
+			if got[pinned] != movedNamespace {
+				t.Errorf("%s namespace = %q, want the inherited %q", pinned, got[pinned], movedNamespace)
+			}
+			if got[other] != defaults[other] {
+				t.Errorf("%s namespace = %q, want the registry default %q", other, got[other], defaults[other])
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("namespaces = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestResolveRecipe_InheritFromRejects covers the fail-closed inputs: an
+// artifact that is not there must not resolve as a first deploy, and cm://
+// must be refused at the facade rather than reaching a loader that would try
+// to contact a cluster for it.
+func TestResolveRecipe_InheritFromRejects(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	emptyDir := filepath.Join(dir, "no-recipe")
+	if err := os.Mkdir(emptyDir, 0o750); err != nil {
+		t.Fatalf("setup: mkdir: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		inheritFrom string
+		wantMsg     string
+	}{
+		{"missing path", filepath.Join(dir, "absent.yaml"), "is not readable"},
+		{"directory without a recipe.yaml", emptyDir, "neither a recipe nor a bundle"},
+		{"configmap uri", "cm://gpu-operator/aicr-recipe", "does not support cm:// locations yet"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := inheritTestClient(t)
+			_, err := client.ResolveRecipe(t.Context(), inheritTestRequest(tt.inheritFrom))
+			if err == nil {
+				t.Fatal("ResolveRecipe = nil error, want rejection")
+			}
+			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantMsg) {
+				t.Errorf("error = %v, want it to contain %q", err, tt.wantMsg)
+			}
+		})
+	}
+}
+
+// inheritTestCriteria is the criteria the option-taking resolvers resolve,
+// which take a Criteria rather than a RecipeRequest. It states the three
+// dimensions TestResolveRecipeFromSnapshot states: naming os as well would be
+// covered on the criteria path but not on the snapshot one, where the
+// os-specific chain's constraints fail against a K8s-version-only snapshot
+// and the strict coverage post-condition then rejects the resolve.
+func inheritTestCriteria(t *testing.T) *aicr.Criteria {
+	t.Helper()
+	crit, err := recipe.BuildCriteriaWithRegistry(nil,
+		recipe.WithServiceRegistry("eks"),
+		recipe.WithAcceleratorRegistry("h100"),
+		recipe.WithIntentRegistry("training"),
+	)
+	if err != nil {
+		t.Fatalf("BuildCriteriaWithRegistry: %v", err)
+	}
+	return aicr.WrapCriteria(crit)
+}
+
+// inheritOptionResolver names one of the two entry points that take
+// RecipeResolveOption. Neither reads RecipeRequest.InheritFrom, and they are
+// the only recipe paths the CLI and the HTTP server use, so WithInheritFrom
+// has to be honored on both or the flag reaches nothing.
+type inheritOptionResolver struct {
+	name    string
+	resolve func(*testing.T, *aicr.Client, ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error)
+}
+
+func inheritOptionResolvers() []inheritOptionResolver {
+	return []inheritOptionResolver{
+		{
+			name: "from criteria",
+			resolve: func(t *testing.T, c *aicr.Client, opts ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error) {
+				t.Helper()
+				return c.ResolveRecipeFromCriteriaWithOptions(t.Context(), inheritTestCriteria(t), opts...)
+			},
+		},
+		{
+			name: "from snapshot",
+			resolve: func(t *testing.T, c *aicr.Client, opts ...aicr.RecipeResolveOption) (*aicr.RecipeResult, error) {
+				t.Helper()
+				return c.ResolveRecipeFromSnapshotWithOptions(
+					t.Context(), inheritTestCriteria(t), k8sVersionSnapshot(), opts...)
+			},
+		},
+	}
+}
+
+// TestResolveRecipeWithOptions_InheritFrom is TestResolveRecipe_InheritFrom for
+// the option-taking resolvers: a prior artifact's namespace has to survive
+// re-resolution there too, because that is the path every CLI and REST recipe
+// generation actually takes (#2830).
+func TestResolveRecipeWithOptions_InheritFrom(t *testing.T) {
+	t.Parallel()
+
+	const movedNamespace = "legacy-install-namespace"
+
+	for _, tt := range inheritOptionResolvers() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := inheritTestClient(t)
+
+			// Baseline first, so the pinned component and the expected
+			// namespaces come from the registry rather than being hardcoded
+			// here — a registry edit cannot make the assertion vacuous.
+			baseline, err := tt.resolve(t, client)
+			if err != nil {
+				t.Fatalf("baseline resolve: %v", err)
+			}
+			if len(baseline.Components) < 2 {
+				t.Fatalf("baseline resolved %d components, need at least 2 to tell inherited from default",
+					len(baseline.Components))
+			}
+			pinned := baseline.Components[0].Name
+			other := baseline.Components[1].Name
+			defaultNamespaces := namespacesOf(baseline)
+			if defaultNamespaces[pinned] == movedNamespace {
+				t.Fatalf("setup: %s already resolves to %q, so the test would assert nothing",
+					pinned, movedNamespace)
+			}
+			want := namespacesOf(baseline)
+			want[pinned] = movedNamespace
+
+			prior := priorRecipe(t, filepath.Join(t.TempDir(), "prior.yaml"),
+				map[string]string{pinned: movedNamespace})
+
+			result, err := tt.resolve(t, client, aicr.WithInheritFrom(prior))
+			if err != nil {
+				t.Fatalf("resolve with WithInheritFrom: %v", err)
+			}
+			got := namespacesOf(result)
+			if got[pinned] != movedNamespace {
+				t.Errorf("%s namespace = %q, want the inherited %q", pinned, got[pinned], movedNamespace)
+			}
+			if got[other] != defaultNamespaces[other] {
+				t.Errorf("%s namespace = %q, want the registry default %q",
+					other, got[other], defaultNamespaces[other])
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("namespaces = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+// TestResolveRecipeWithOptions_InheritFromRejectsConfigMapURI keeps the
+// fail-closed contract on the option path: cm:// is refused at the facade
+// rather than reaching a loader that would try to contact a cluster for it.
+func TestResolveRecipeWithOptions_InheritFromRejectsConfigMapURI(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range inheritOptionResolvers() {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			client := inheritTestClient(t)
+			_, err := tt.resolve(t, client, aicr.WithInheritFrom("cm://gpu-operator/aicr-recipe"))
+			if err == nil {
+				t.Fatal("resolve = nil error, want rejection")
+			}
+			if !errors.Is(err, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest, "")) {
+				t.Errorf("error = %v, want ErrCodeInvalidRequest", err)
+			}
+			if !strings.Contains(err.Error(), "does not support cm:// locations yet") {
+				t.Errorf("error = %v, want the cm:// rejection", err)
 			}
 		})
 	}

@@ -853,6 +853,15 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 		return nil, err
 	}
 
+	// Applied to the resolved refs before the facade projection, so the
+	// emitted recipe, the Components view and anything bundled from them all
+	// name the namespace the prior artifact deployed into.
+	if req.InheritFrom != "" {
+		if inheritErr := c.inheritIdentity(ctx, req.InheritFrom, internal); inheritErr != nil {
+			return nil, inheritErr
+		}
+	}
+
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
 		return nil, err
@@ -863,6 +872,31 @@ func (c *Client) ResolveRecipe(ctx context.Context, req RecipeRequest) (*RecipeR
 	// is unexported.
 	result.owner = c
 	return result, nil
+}
+
+// inheritIdentity overwrites resolved's namespaces with the ones a prior
+// recipe or bundle already deployed into, so a moved registry default does not
+// relocate a running component when the recipe is regenerated.
+//
+// No kubeconfig is threaded through: inheritedRecipePath rejects the only
+// artifact form that would need one.
+func (c *Client) inheritIdentity(ctx context.Context, inheritFrom string, resolved *recipe.RecipeResult) error {
+	path, err := inheritedRecipePath(inheritFrom)
+	if err != nil {
+		return err
+	}
+	prior, err := c.LoadRecipe(ctx, path, "")
+	if err != nil {
+		// LoadRecipe already returns structured errors with the right code.
+		return err
+	}
+	priorInternal := prior.Resolved()
+	if priorInternal == nil {
+		return errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"inherit-from %s carries no components to inherit namespaces from", inheritFrom))
+	}
+	recipe.ApplyInheritedIdentity(resolved.ComponentRefs, priorInternal.ComponentRefs)
+	return nil
 }
 
 // resolveCriteria is the shared path: allowlist enforcement + build. Callers
@@ -1007,6 +1041,19 @@ func (c *Client) ResolveRecipeFromCriteriaWithOptions(
 	internal, err := c.resolveCriteria(ctx, builder, toInternalCriteria(criteria), opts...)
 	if err != nil {
 		return nil, err
+	}
+	// Re-read the options for the inherit reference alone. resolveCriteria has
+	// already surfaced any option validation failure, so reading them here
+	// rather than before the resolve keeps the reported error the one the
+	// caller would have seen without this option.
+	cfg, err := resolveRecipeConfig(opts...)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.inheritFrom != "" {
+		if inheritErr := c.inheritIdentity(ctx, cfg.inheritFrom, internal); inheritErr != nil {
+			return nil, inheritErr
+		}
 	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {
@@ -1204,6 +1251,13 @@ func (c *Client) ResolveRecipeFromSnapshotWithOptions(
 	// unsafe AICR-provided states after the complete recipe is available.
 	if applyErr := applyMariaDBOperatorState(ctx, internal, internalSnap); applyErr != nil {
 		return nil, applyErr
+	}
+	// Last write to the refs before the facade projection, so the emitted
+	// recipe and the Components view agree on where each component lives.
+	if resolveCfg.inheritFrom != "" {
+		if inheritErr := c.inheritIdentity(ctx, resolveCfg.inheritFrom, internal); inheritErr != nil {
+			return nil, inheritErr
+		}
 	}
 	result, err := recipeResultFromInternal(internal)
 	if err != nil {

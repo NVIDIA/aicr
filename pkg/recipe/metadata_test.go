@@ -2180,6 +2180,53 @@ func TestComponentRefApplyRegistryDefaults_ManifestFiles(t *testing.T) {
 	})
 }
 
+// TestApplyInheritedIdentity verifies that a prior recipe's resolved namespaces
+// survive re-resolution against a registry whose defaults have moved.
+func TestApplyInheritedIdentity(t *testing.T) {
+	tests := []struct {
+		name   string
+		refs   []ComponentRef
+		prior  []ComponentRef
+		wantNS map[string]string
+	}{
+		{
+			name:   "prior namespace wins over registry default",
+			refs:   []ComponentRef{{Name: "nodewright-operator", Namespace: "nodewright"}},
+			prior:  []ComponentRef{{Name: "nodewright-operator", Namespace: "skyhook"}},
+			wantNS: map[string]string{"nodewright-operator": "skyhook"},
+		},
+		{
+			name:   "empty prior namespace does not clobber the default",
+			refs:   []ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
+			prior:  []ComponentRef{{Name: "gpu-operator", Namespace: ""}},
+			wantNS: map[string]string{"gpu-operator": "gpu-operator"},
+		},
+		{
+			name:   "component absent from prior keeps the default",
+			refs:   []ComponentRef{{Name: "new-thing", Namespace: "new-thing"}},
+			prior:  []ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
+			wantNS: map[string]string{"new-thing": "new-thing"},
+		},
+		{
+			name:   "nil prior is a no-op",
+			refs:   []ComponentRef{{Name: "gpu-operator", Namespace: "gpu-operator"}},
+			prior:  nil,
+			wantNS: map[string]string{"gpu-operator": "gpu-operator"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			refs := slices.Clone(tt.refs)
+			ApplyInheritedIdentity(refs, tt.prior)
+			for _, ref := range refs {
+				if got := ref.Namespace; got != tt.wantNS[ref.Name] {
+					t.Errorf("%s namespace = %q, want %q", ref.Name, got, tt.wantNS[ref.Name])
+				}
+			}
+		})
+	}
+}
+
 // TestComponentRefMergeWithPath verifies that the Path field is correctly merged
 // when merging ComponentRefs (overlay into base).
 func TestComponentRefMergeWithPath(t *testing.T) {

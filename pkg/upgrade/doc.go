@@ -52,15 +52,26 @@
 //
 // # Matching
 //
-// Match answers "does this jump need attention?" over two component-to-version
-// tables, and is pure: no filesystem, no cluster, no registry.
+// MatchIdentities answers "does this move need attention?" over two
+// component-to-identity tables, and is pure: no filesystem, no cluster, no
+// registry. Match is the same question for a caller holding versions alone.
 //
-// A record is *crossed* when the source sits below the floor its `to` names and
-// the target reaches it. Crossing is a property of the jump alone; `from` is
-// not consulted, because a record whose `from` excludes the source still
-// describes a boundary the jump flies over, and skipping it there is how a
-// recorded block goes unreported. `from` answers the separate question of
-// whether that record's guidance was authored for this starting point.
+// An identity moves on two axes. Only the version axis is assessed by anybody,
+// because that is what a record describes; a namespace move is invisible to a
+// version comparison yet relocates running objects, and Helm cannot move a
+// release between namespaces. So a component that moved on the identity axis
+// alone gets a ChangeIdentity row that a version comparison would not report at
+// all, a component that moved on both gets one row carrying both, and a safe
+// verdict is withdrawn to unknown wherever the identity moved: the record
+// vouched for a version hop and was never asked about a relocation.
+//
+// On the version axis, a record is *crossed* when the source sits below the
+// floor its `to` names and the target reaches it. Crossing is a property of the
+// jump alone; `from` is not consulted, because a record whose `from` excludes
+// the source still describes a boundary the jump flies over, and skipping it
+// there is how a recorded block goes unreported. `from` answers the separate
+// question of whether that record's guidance was authored for this starting
+// point.
 //
 // Verdict selection runs in this order:
 //
@@ -86,9 +97,9 @@
 // and every result carries a Reason code and an Explanation sentence saying
 // which rule it was and what to do about it.
 //
-// Match takes an already validated Set and does not re-run Validate. Validate
-// is therefore not optional: a record that violates a well-formedness rule
-// still applies and still lends its verdict. A safe record missing its
+// Matching takes an already validated Set and does not re-run Validate.
+// Validate is therefore not optional: a record that violates a well-formedness
+// rule still applies and still lends its verdict. A safe record missing its
 // verifiedBy (rule 4) is the case that matters, because it reports safe and
 // passes a strict run, which is exactly the false confidence a wrong safe
 // buys. Only two malformed shapes are inert here, and only because they leave
@@ -105,6 +116,13 @@
 // and a report has to outlive it. WriteTable renders that report; a blocked row
 // computed from several records, or from none naming the operator's starting
 // point, renders no steps, so its detail block is the Explanation alone.
+//
+// An identity row held its version, so its FROM and TO columns carry the fields
+// that moved rather than the version printed twice, which is the one rendering
+// that would read as nothing having happened. A row that moved on both axes
+// keeps its versions in those columns and names the relocation in its notes,
+// and in its detail block where it has one: the steps there were authored for a
+// version boundary and neither perform the relocation nor account for it.
 //
 // The deployer cannot be inferred. ADR-021 Decision 5 would take it from a `to`
 // bundle, but no bundle artifact records which deployer built it, so

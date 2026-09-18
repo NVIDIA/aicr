@@ -281,6 +281,31 @@ func (ref *ComponentRef) ApplyRegistryDefaults(config *ComponentConfig) {
 	// DataProvider is available. See issue #1219.
 }
 
+// ApplyInheritedIdentity overwrites each ref's namespace with the one a prior
+// recipe resolved for the same component, so an AICR upgrade does not silently
+// relocate a running component when a registry default moves. A component the
+// prior recipe does not name keeps its default: it is a first deploy as far as
+// that artifact knows.
+//
+// Runs after ApplyRegistryDefaults rather than inside it, because that method is
+// exported and called from four packages.
+func ApplyInheritedIdentity(refs []ComponentRef, prior []ComponentRef) {
+	if len(prior) == 0 {
+		return
+	}
+	namespaces := make(map[string]string, len(prior))
+	for _, p := range prior {
+		if p.Namespace != "" {
+			namespaces[p.Name] = p.Namespace
+		}
+	}
+	for i := range refs {
+		if ns, ok := namespaces[refs[i].Name]; ok {
+			refs[i].Namespace = ns
+		}
+	}
+}
+
 // coherenceProblem reports why a resolved ComponentRef's deployment-shape
 // fields are internally inconsistent, or "" if the ref is coherent. The rules
 // mirror what the deployers enforce so an incoherent ref is rejected at
