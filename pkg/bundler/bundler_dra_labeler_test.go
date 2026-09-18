@@ -16,12 +16,14 @@ package bundler
 
 import (
 	"context"
+	stderrors "errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
+	"github.com/NVIDIA/aicr/pkg/errors"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 )
 
@@ -68,6 +70,7 @@ func TestFilterEnabledComponents_DRANodeLabelerGate(t *testing.T) {
 		mutate     func(*recipe.RecipeResult)
 		wantKept   bool
 		wantReason string
+		wantErr    string
 	}{
 		{
 			name:       "not opted in drops the labeler",
@@ -80,16 +83,33 @@ func TestFilterEnabledComponents_DRANodeLabelerGate(t *testing.T) {
 			wantKept: true,
 		},
 		{
-			// The positive bundlers filter runs before the gate: selecting
-			// the labeler without the components it serves must not render
-			// a labeler that labels nodes nothing selects on.
-			name: "bundlers filter that excludes the DRA driver drops the labeler",
+			// The positive bundlers filter runs before the gate: a selection
+			// that names the labeler but leaves out a component it serves is
+			// contradictory and is rejected rather than rendered without it.
+			name: "bundlers filter naming the labeler without the DRA driver is rejected",
 			opts: []config.Option{
 				config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()),
 				config.WithBundlers([]string{gpuOperatorComponentName, draNodeLabelerComponentName}),
 			},
+			wantErr: "needs both gpu-operator and nvidia-dra-driver-gpu",
+		},
+		{
+			name: "bundlers filter naming the labeler without the flag is rejected",
+			opts: []config.Option{
+				config.WithBundlers([]string{gpuOperatorComponentName, draComponentName, draNodeLabelerComponentName}),
+			},
+			wantErr: "not opted in",
+		},
+		{
+			// Leaving the labeler out of the selection is not a request for
+			// it, so the gate has nothing to reject.
+			name: "bundlers filter that omits the labeler drops it quietly",
+			opts: []config.Option{
+				config.WithDRAEvictionNodeLabel(config.DefaultDRAEvictionNodeLabel()),
+				config.WithBundlers([]string{gpuOperatorComponentName, draComponentName}),
+			},
 			wantKept:   false,
-			wantReason: "needs both gpu-operator and nvidia-dra-driver-gpu",
+			wantReason: "the bundlers filter excludes it",
 		},
 		{
 			// OpenShift recipes disable gpu-operator and nvidia-dra-driver-gpu in
@@ -143,6 +163,18 @@ func TestFilterEnabledComponents_DRANodeLabelerGate(t *testing.T) {
 			}
 
 			enabled, order, reasons, err := b.filterEnabledComponents(rr)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("filterEnabledComponents() error = nil, want substring %q", tt.wantErr)
+				}
+				if !stderrors.Is(err, errors.New(errors.ErrCodeInvalidRequest, "")) {
+					t.Errorf("error code = %v, want ErrCodeInvalidRequest", err)
+				}
+				if !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %q, want substring %q", err.Error(), tt.wantErr)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("filterEnabledComponents() error = %v", err)
 			}

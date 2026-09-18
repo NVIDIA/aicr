@@ -1444,7 +1444,10 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 
 	// After the positive filter, so a `bundlers` selection that keeps the
 	// labeler but drops either half of the contract it serves still removes it.
-	enabledRefs = b.dropUnservedDRANodeLabeler(enabledRefs, enabledSet, excludedReasons)
+	enabledRefs, labelerErr := b.dropUnservedDRANodeLabeler(enabledRefs, enabledSet, excludedReasons)
+	if labelerErr != nil {
+		return nil, nil, nil, labelerErr
+	}
 
 	if len(enabledRefs) == 0 {
 		return nil, nil, nil, errors.New(errors.ErrCodeInvalidRequest,
@@ -3281,18 +3284,28 @@ func recipeHasDRANodeLabeler(recipeResult *recipe.RecipeResult) bool {
 // (#2676). Dropping it here, like a --set enabled=false, lets
 // filterEnabledComponents prune the nvidia-dra-driver-gpu edge and keeps the
 // health check and BOM consistent with what is rendered.
+//
+// A labeler named explicitly in the bundlers filter is not dropped silently:
+// like an unknown or disabled name there, a selection that asks for the
+// labeler while the flag or a prerequisite is missing is a contradictory
+// request and is rejected with ErrCodeInvalidRequest.
 func (b *DefaultBundler) dropUnservedDRANodeLabeler(
 	enabledRefs []recipe.ComponentRef,
 	enabledSet map[string]struct{},
 	excludedReasons map[string]string,
-) []recipe.ComponentRef {
+) ([]recipe.ComponentRef, error) {
 
 	if _, declared := enabledSet[draNodeLabelerComponentName]; !declared {
-		return enabledRefs
+		return enabledRefs, nil
 	}
 	reason, drop := b.draNodeLabelerDropReason(enabledSet)
 	if !drop {
-		return enabledRefs
+		return enabledRefs, nil
+	}
+	if b.Config != nil && slices.Contains(b.Config.Bundlers(), draNodeLabelerComponentName) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"component %q was selected via the bundlers filter but cannot be rendered: %s",
+			draNodeLabelerComponentName, reason))
 	}
 	slog.Info("skipping component", "component", draNodeLabelerComponentName, "reason", reason)
 	excludedReasons[draNodeLabelerComponentName] = reason
@@ -3303,7 +3316,7 @@ func (b *DefaultBundler) dropUnservedDRANodeLabeler(
 			kept = append(kept, ref)
 		}
 	}
-	return kept
+	return kept, nil
 }
 
 // draNodeLabelerDropReason decides whether the labeler is rendered. It is
