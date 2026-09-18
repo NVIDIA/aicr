@@ -22,7 +22,7 @@ CI-only checks (see [The `make qualify` Gate](#the-make-qualify-gate)).
 |---|---|---|---|---|
 | **Unit tests (Go)** | Logic exercisable without K8s API | `*_test.go` next to source | `make test` | `make qualify`, push CI |
 | **Integration tests (Go)** | Logic touching the K8s API | `*_test.go` with envtest / fake client | `make test` (Kind for live cases) | `make qualify`, push CI |
-| **Chainsaw health checks** | Component-level post-deploy health | `recipes/checks/<name>/health-check.yaml` | `make check-health COMPONENT=<name>` | `gpu-h100-kind-runtime-test.yaml` |
+| **Chainsaw health checks** | Component-level post-deploy health | `recipes/checks/<name>/health-check.yaml` | `make check-health COMPONENT=<name>` | UAT readiness gate (`aicr validate --phase deployment`); statically by `TestValidateTestReadOnly_RegistryContent` under `make test` |
 | **KWOK matrix tests** | Recipe scheduling shape + deployer output without GPUs | `kwok/scripts/*`, `recipes/overlays/*` | `make kwok-test-deployer RECIPE=… DEPLOYER=…` | `kwok-recipes.yaml` workflow |
 | **E2E tests** | Full pipeline against real cloud accounts | `tools/e2e` | `unset GITLAB_TOKEN && ./tools/e2e` | `make qualify`, e2e workflow |
 

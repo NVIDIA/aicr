@@ -188,7 +188,7 @@ git commit's signature status.
 
 A signed, nested pointer is **not** sufficient on its own. The contract gate
 also requires the pointer's claimed signer to be listed in
-[`recipes/evidence/allowlist.yaml`](../../recipes/evidence/allowlist.yaml) as a
+[`recipes/evidence/allowlist.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/evidence/allowlist.yaml) as a
 `community` or `partner` entry; an unlisted signer is rejected (it would only
 ever count as "reported", never corroborating). Your fork's GitHub Actions OIDC
 identity is a **new signer** that the existing entries do not cover, so you must

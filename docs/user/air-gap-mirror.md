@@ -178,25 +178,29 @@ The output is a `ZarfPackageConfig`:
 
 ```yaml
 apiVersion: zarf.dev/v1alpha1
-kind: ZarfPackageConfig
-metadata:
-  name: aicr
-  description: NVIDIA AI Cluster Runtime container images and Helm charts for air-gapped deployment
 components:
-  - name: aicr-images
-    required: true
+  - charts:
+      - name: gpu-operator
+        namespace: gpu-operator
+        repoName: gpu-operator
+        url: https://helm.ngc.nvidia.com/nvidia
+        version: v26.7.0
+      # ...
     images:
       - nvcr.io/nvidia/gpu-operator:v26.7.0
       - registry.k8s.io/nfd/node-feature-discovery:v0.19.0
       # ...
-    charts:
-      - name: gpu-operator
-        url: https://helm.ngc.nvidia.com/nvidia
-        repoName: gpu-operator
-        version: v26.7.0
-        namespace: gpu-operator
-      # ...
+    name: aicr-images
+    required: true
+kind: ZarfPackageConfig
+metadata:
+  description: NVIDIA AI Cluster Runtime container images and Helm charts for air-gapped deployment
+  name: aicr
 ```
+
+Keys are sorted at every level: the renderer marshals through
+`serializer.MarshalYAMLDeterministic`, so repeated runs over the same recipe
+produce byte-identical output.
 
 ### 2. Create the Zarf package
 
