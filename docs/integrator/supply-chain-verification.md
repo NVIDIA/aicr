@@ -457,9 +457,11 @@ All AICR releases are built using GitHub Actions with full transparency:
 gh api repos/NVIDIA/aicr/releases | \
   jq -r '.[] | "\(.tag_name): \(.html_url)"'
 
-# View specific build logs
+# View specific build logs. A release run has ~48 jobs and `--log` fails above
+# 25, so open the run in a browser or narrow to a single job.
 gh run list --repo NVIDIA/aicr --workflow=on-tag.yaml
-gh run view 34368619680 --repo NVIDIA/aicr --log
+gh run view 34368619680 --repo NVIDIA/aicr --web
+gh run view 34368619680 --repo NVIDIA/aicr --job <job-id> --log
 ```
 
 **Verify in the transparency log (Rekor):**
