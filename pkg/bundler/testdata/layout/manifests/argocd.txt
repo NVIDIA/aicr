@@ -4,5 +4,6 @@
 002-nfd/values.yaml
 README.md
 app-of-apps.yaml
+bundle-info.yaml
 checksums.txt
 recipe.yaml
