@@ -207,6 +207,22 @@ func TestCheckNVSentinelNicHealthMonitorRequiresMetadataCollector(t *testing.T) 
 			bundlerConfig: dynamic("nic-health-monitor.nicInclusionRegexOverride"),
 		},
 		{
+			// A malformed override is not a bypass: it cannot be read, so
+			// it can no more rescue the broken state than an empty one.
+			// Treating it as "present, therefore safe" would let an
+			// install-time edit enable the monitor with no inventory.
+			name:          "monitor dynamic, collector statically disabled, override non-string → blocked",
+			recipeResult:  result(sentinelRef(values(nil, false, 42))),
+			bundlerConfig: dynamic("global.nicHealthMonitor.enabled"),
+			wantBlocked:   true,
+		},
+		{
+			name:          "collector dynamic, monitor statically on, override non-string → blocked",
+			recipeResult:  result(sentinelRef(values(true, nil, 42))),
+			bundlerConfig: dynamic("global.metadataCollector.enabled"),
+			wantBlocked:   true,
+		},
+		{
 			name:          "all three dynamic → blocked",
 			recipeResult:  result(sentinelRef(values(nil, nil, nil))),
 			bundlerConfig: dynamic("global.nicHealthMonitor.enabled", "global.metadataCollector.enabled", "nic-health-monitor.nicInclusionRegexOverride"),

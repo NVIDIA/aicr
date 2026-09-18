@@ -2285,19 +2285,24 @@ func CheckNVSentinelNicHealthMonitorRequiresMetadataCollector(ctx context.Contex
 	override, _, overrideValid := resolvedStringValue(values, nicInclusionRegexOverridePath)
 	overrideEmpty := overrideValid && strings.TrimSpace(override) == ""
 
-	// Relation-aware dynamic guard: the broken state needs all three of
-	// {monitor enabled, collector disabled, override empty}. A --dynamic
-	// declaration on any one of them is only a hazard when the other two
-	// can still reach their bad polarity after an install-time edit, so
-	// each term below is "could be bad", not "is bad". Blocking any
-	// dynamic path unconditionally would reject safe configurations —
-	// e.g. a dynamic monitor toggle alongside a statically enabled
-	// collector can never reach the broken state.
+	// Relation-aware dynamic guard: the broken state needs the monitor
+	// enabled, the collector disabled, and no usable override. A --dynamic
+	// declaration on any one of them is only a hazard when the others can
+	// still reach their bad polarity after an install-time edit, so each
+	// term below is "could be bad", not "is bad". Blocking any dynamic
+	// path unconditionally would reject safe configurations — e.g. a
+	// dynamic monitor toggle alongside a statically enabled collector can
+	// never reach the broken state.
 	monitorDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{nvsentinelNicHealthMonitorEnabledPath})) > 0
 	collectorDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{nvsentinelMetadataCollectorEnabledPath})) > 0
 	overrideDynamic := len(dynamicPathIntersections(bundlerConfig, sentinelKeys, []string{nicInclusionRegexOverridePath})) > 0
+	// Only a readable, non-empty, non-dynamic override rescues the broken
+	// state. Empty cannot, a value the operator can still blank cannot,
+	// and neither can a malformed one -- testing "is it empty" instead
+	// would read an unreadable override as a working bypass.
+	overrideRescues := overrideValid && !overrideEmpty && !overrideDynamic
 	if monitorDynamic || collectorDynamic || overrideDynamic {
-		if (monitorDynamic || monitorEnabled) && (collectorDynamic || collectorDisabled) && (overrideDynamic || overrideEmpty) {
+		if (monitorDynamic || monitorEnabled) && (collectorDynamic || collectorDisabled) && !overrideRescues {
 			var paths []string
 			if monitorDynamic {
 				paths = append(paths, nvsentinelNicHealthMonitorEnabledPath)
