@@ -433,7 +433,7 @@ commit SHA, workflow, and run. A representative slice:
         "sourceRepositoryURI": "https://github.com/NVIDIA/aicr",
         "sourceRepositoryDigest": "41bd4bb7b6449857c1afbf7cfb2a496cb1f83112",
         "runnerEnvironment": "github-hosted",
-        "runInvocationURI": "https://github.com/NVIDIA/aicr/actions/runs/34368619680/attempts/1"
+        "runInvocationURI": "https://github.com/NVIDIA/aicr/actions/runs/34368619680/attempts/3"
       }
     }
   }
@@ -459,7 +459,7 @@ gh api repos/NVIDIA/aicr/releases | \
 
 # View specific build logs
 gh run list --repo NVIDIA/aicr --workflow=on-tag.yaml
-gh run view 20642050863 --repo NVIDIA/aicr --log
+gh run view 34368619680 --repo NVIDIA/aicr --log
 ```
 
 **Verify in the transparency log (Rekor):**

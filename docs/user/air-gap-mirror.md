@@ -199,8 +199,10 @@ metadata:
 ```
 
 Keys are sorted at every level: the renderer marshals through
-`serializer.MarshalYAMLDeterministic`, so repeated runs over the same recipe
-produce byte-identical output.
+`serializer.MarshalYAMLDeterministic`, so given the same discovered inventory it
+produces byte-identical output. Discovery itself is best-effort and can omit a
+component's images without failing the command — see the completeness caveat
+under [Relationship to Container Image Inventory](#relationship-to-container-image-inventory).
 
 ### 2. Create the Zarf package
 
