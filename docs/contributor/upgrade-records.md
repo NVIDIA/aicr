@@ -21,15 +21,23 @@ moved nvsentinel from `v1.9.0` to `v1.20.0` in one step, skipping eleven minor
 versions, typed as `Build/CI/tooling` with the breaking-change box unchecked.
 Nothing claimed the upgrade was safe, because nothing asked.
 
-Two rules in `pkg/upgrade` make the obligation self-renewing rather than
-something you can defer:
+Three rules in `pkg/upgrade` govern how far a record may reach, and keep the
+obligation self-renewing rather than something you can defer:
 
-- A record's `to` ceiling **may not reach past the currently pinned version**.
-  An author cannot have read the migration notes for a version nobody has
-  released, so a record can only ever describe ground already covered. Every pin
-  bump therefore lands outside the existing record and forces you back into it.
+- A **`safe`** record's `to` ceiling **may not reach past the currently pinned
+  version**. `safe` is the vouching verdict, and an author cannot have read the
+  migration notes for a version nobody has released.
+- **`manual` and `blocked` may reach past the pin.** They are warnings carrying
+  instructions, so reaching forward over-warns rather than passing something
+  unassessed — and holding them to the pin forced the wrong order of work. The
+  order that qualifies an upgrade is: read the migration notes, write the
+  record, *then* bump. A component deliberately held below a known-breaking
+  release is the case that proves it, since the record most worth having is the
+  one describing the release you are not shipping yet.
 - The `from` domains **may not leave a hole** below the pin. An operator sitting
-  on a version in the hole would match no transition at all.
+  on a version in the hole would match no transition at all. This is the rule
+  that makes the obligation self-renewing: a bump that leaves a hole below the
+  new pin fails, whatever any record's ceiling says.
 
 ## Where a record lives
 
@@ -127,7 +135,7 @@ kind: ComponentUpgrades
 component: <name>              # must match the registry entry
 transitions:
   - from: "<0.18.0"            # needs an upper bound, or it cannot be shown forward-only
-    to: ">=0.18.0 <=0.19.0"    # needs both bounds; ceiling at or below the pin
+    to: ">=0.18.0 <=0.19.0"    # needs both bounds; if safe, ceiling at or below the pin
     verdict: manual
     summary: >-
       What breaks, in one or two sentences. Not a changelog.
@@ -242,11 +250,19 @@ the ceiling you assessed and re-run, or get the record widened. They get no
 verdict and no steps, for the same reason as the floor case, and the report
 names your ceiling as the place to stop.
 
-That is not a limitation to route around. It is the match-time form of the rule
-that already stops you writing a ceiling above the current pin: you cannot have
-read the migration notes for a release nobody has cut. A ceiling is your claim
-about how far forward you actually looked, so put it where you looked, and widen
-it deliberately later rather than reaching for headroom now.
+That is not a limitation to route around. A ceiling is your claim about how far
+forward you actually looked, so put it where you looked, and widen it
+deliberately later rather than reaching for headroom now.
+
+Note what the ceiling is *not* pinned to. Authoring-time rule 2 holds only a
+`safe` ceiling at or below the current pin; a `manual` or `blocked` ceiling may
+sit above it. So the two ends of a held component work like this: the ceiling
+says how far you read, and the pin says how far AICR ships. When AICR
+deliberately stays below a breaking release, those diverge, and the record that
+describes the release you are *not* shipping is exactly the one an operator
+needs. Put the ceiling at the boundary you assessed and let a target above it
+land on `beyond-record-ceiling`, which is what turns "this jump has to be taken
+on its own" into something the tool says rather than something prose asks for.
 
 ## Checking your work
 
