@@ -695,6 +695,87 @@ func TestBundleWritesBundleInfo(t *testing.T) {
 	}
 }
 
+// TestBundleInfoScopesSourceSettingsPerDeployer pins which deployers record
+// repoURL, targetRevision and appName.
+//
+// TestSettingsKeysAreAllowlisted in pkg/bundler/bundleinfo cannot catch this:
+// all three keys are legitimate, and what is wrong is pairing one with a
+// deployer that never showed its effect. bundle-info.yaml is pushed to
+// registries and committed to GitOps repos, so an unconsumed setting
+// publishes a value the bundle itself never mentions — for argocd-helm, the
+// deployer built for OCI publication, a private GitOps URL in the only place
+// in the artifact it appears.
+//
+// Each expectation below was established against the emitted tree, not
+// against buildDeployer's argument lists: argocd-helm is handed RepoURL and
+// TargetRevision and shows neither, because the chart is URL-portable and
+// rewrites both into `.Values` directives.
+func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
+	const (
+		repoURL        = "https://github.com/my-org/private-gitops.git"
+		targetRevision = "v1.2.3"
+		appName        = "tenant-stack"
+	)
+
+	tests := []struct {
+		deployer           config.DeployerType
+		wantRepoURL        string
+		wantTargetRevision string
+		wantAppName        string
+	}{
+		// helm and helmfile: the generators declare none of the three fields.
+		{deployer: config.DeployerHelm},
+		{deployer: config.DeployerHelmfile},
+		{
+			deployer:           config.DeployerArgoCD,
+			wantRepoURL:        repoURL,
+			wantTargetRevision: targetRevision,
+			wantAppName:        appName,
+		},
+		{deployer: config.DeployerArgoCDHelm, wantAppName: appName},
+		{
+			deployer:           config.DeployerFlux,
+			wantRepoURL:        repoURL,
+			wantTargetRevision: targetRevision,
+		},
+	}
+
+	covered := make(map[string]bool, len(tests))
+	for _, tt := range tests {
+		covered[tt.deployer.String()] = true
+		t.Run(tt.deployer.String(), func(t *testing.T) {
+			b, err := New(WithConfig(config.NewConfig(
+				config.WithDeployer(tt.deployer),
+				config.WithRepoURL(repoURL),
+				config.WithTargetRevision(targetRevision),
+				config.WithAppName(appName),
+			)))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			got := b.bundleInfoSettings()
+			if got.RepoURL != tt.wantRepoURL {
+				t.Errorf("repoURL = %q, want %q", got.RepoURL, tt.wantRepoURL)
+			}
+			if got.TargetRevision != tt.wantTargetRevision {
+				t.Errorf("targetRevision = %q, want %q", got.TargetRevision, tt.wantTargetRevision)
+			}
+			if got.AppName != tt.wantAppName {
+				t.Errorf("appName = %q, want %q", got.AppName, tt.wantAppName)
+			}
+		})
+	}
+
+	// A deployer added without a case here would default to recording
+	// nothing, which is the safe direction but an undeclared one.
+	for _, name := range config.GetDeployerTypes() {
+		if !covered[name] {
+			t.Errorf("deployer %q has no case; declare which source settings its bundle shows", name)
+		}
+	}
+}
+
 func TestNew_AttestWithoutBinaryAttestation(t *testing.T) {
 	// The test binary won't have an attestation file next to it,
 	// simulating a "go install" or manual download scenario.

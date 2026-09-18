@@ -2862,22 +2862,7 @@ func (b *DefaultBundler) buildBundleInfo(
 				Digest:  recipeDigest,
 				Version: recipeResult.Metadata.Version,
 			},
-			Settings: bundleinfo.Settings{
-				Checksums:          b.Config.IncludeChecksums(),
-				Attested:           b.Config.Attest(),
-				VendorCharts:       b.Config.VendorCharts(),
-				ReadinessHooks:     b.Config.ReadinessHooks(),
-				Serial:             b.Config.Serial(),
-				Components:         b.Config.Bundlers(),
-				RepoURL:            b.Config.RepoURL(),
-				TargetRevision:     b.Config.TargetRevision(),
-				AppName:            b.Config.AppName(),
-				StorageClass:       b.Config.StorageClass(),
-				SharedStorageClass: b.Config.SharedStorageClass(),
-				NodeScheduling: nodeScheduling(
-					b.Config.SystemNodeSelector(), b.Config.SystemNodeTolerations(),
-					b.Config.AcceleratedNodeSelector(), b.Config.AcceleratedNodeTolerations()),
-			},
+			Settings: b.bundleInfoSettings(),
 		},
 		Layout: bundleinfo.Layout{
 			Entrypoint: out.Entrypoint,
@@ -2897,6 +2882,53 @@ func (b *DefaultBundler) buildBundleInfo(
 		})
 	}
 	return info
+}
+
+// bundleInfoSettings records the resolved bundler settings, admitting a
+// setting only when its effect is already observable in the bundle's own
+// files.
+//
+// repoURL, targetRevision and appName are the settings that survive that rule
+// on some deployers and not others, so the switch mirrors buildDeployer's:
+// helm and helmfile generators declare none of the three, and the fields are
+// omitempty, so an unconsumed setting leaves no key behind.
+//
+// argocd-helm is the case that does not follow from buildDeployer. It is
+// handed RepoURL and TargetRevision there, yet neither reaches the bundle:
+// that chart is URL-portable, so every baked occurrence is rewritten to a
+// `.Values` directive and the root values.yaml writes both keys empty
+// (argocdhelm.writeValuesFiles) — buildDeployer even warns that --repo is
+// ignored. Recording them would stamp a private GitOps URL into the one
+// artifact built for registry publication, in the only place it appears.
+func (b *DefaultBundler) bundleInfoSettings() bundleinfo.Settings {
+	s := bundleinfo.Settings{
+		Checksums:          b.Config.IncludeChecksums(),
+		Attested:           b.Config.Attest(),
+		VendorCharts:       b.Config.VendorCharts(),
+		ReadinessHooks:     b.Config.ReadinessHooks(),
+		Serial:             b.Config.Serial(),
+		Components:         b.Config.Bundlers(),
+		StorageClass:       b.Config.StorageClass(),
+		SharedStorageClass: b.Config.SharedStorageClass(),
+		NodeScheduling: nodeScheduling(
+			b.Config.SystemNodeSelector(), b.Config.SystemNodeTolerations(),
+			b.Config.AcceleratedNodeSelector(), b.Config.AcceleratedNodeTolerations()),
+	}
+
+	switch b.Config.Deployer() {
+	case config.DeployerArgoCD:
+		s.RepoURL = b.Config.RepoURL()
+		s.TargetRevision = b.Config.TargetRevision()
+		s.AppName = b.Config.AppName()
+	case config.DeployerArgoCDHelm:
+		s.AppName = b.Config.AppName()
+	case config.DeployerFlux:
+		s.RepoURL = b.Config.RepoURL()
+		s.TargetRevision = b.Config.TargetRevision()
+	case config.DeployerHelm, config.DeployerHelmfile:
+	}
+
+	return s
 }
 
 // nodeScheduling converts the config's corev1 tolerations to the artifact's

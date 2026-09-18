@@ -218,6 +218,14 @@ Fulcio/Rekor endpoints, certificate identity, and free-form `--set` overrides
 are excluded by construction, since `values.yaml` already carries the effect
 of the latter.
 
+That test is applied per deployer, so `repoURL`, `targetRevision` and
+`appName` appear only where the bundle shows them: all three under `argocd`,
+`repoURL` and `targetRevision` under `flux`, `appName` alone under
+`argocd-helm` (whose chart is URL-portable and takes the publish location at
+`helm install --set repoURL=...` time, which is also why `--repo` warns that
+it is ignored there), and none of the three under `helm` or `helmfile`. The
+keys are omitted entirely rather than written empty.
+
 ### Generated chart versions
 
 Not every chart in a bundle comes from upstream. AICR generates one for each
