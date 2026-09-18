@@ -34,30 +34,14 @@ import (
 // moment one does. It asserts no verdict — only that whatever was authored is
 // well-formed — so "make the test green" cannot be satisfied by writing safe.
 func TestRealUpgradeRecordsWellFormed(t *testing.T) {
-	registry, err := GetComponentRegistry()
-	if err != nil {
-		t.Fatalf("GetComponentRegistry: %v", err)
-	}
 	provider := defaultEmbeddedProvider
 
-	var comps []upgrade.Component
-	for i := range registry.Components {
-		c := &registry.Components[i]
-		if c.Upgrades.File == "" {
-			continue
-		}
-		comps = append(comps, upgrade.Component{
-			Name:          c.Name,
-			File:          c.Upgrades.File,
-			PinnedVersion: pinnedVersionFor(c),
-		})
-	}
-	t.Logf("checking %d component(s) with upgrade records", len(comps))
-
-	set, err := upgrade.Load(context.Background(), provider, comps)
+	set, comps, err := LoadUpgradeRecords(context.Background(), provider)
 	if err != nil {
 		t.Fatalf("loading upgrade records: %v", err)
 	}
+	t.Logf("checking %d component(s) with upgrade records", len(comps))
+
 	if err := set.Validate(comps); err != nil {
 		t.Fatalf("upgrade records are not well-formed: %v", err)
 	}
@@ -206,10 +190,3 @@ const componentsDir = "components"
 // upgradesFileName is the ADR-021 record's filename within a component's
 // directory.
 const upgradesFileName = "upgrades.yaml"
-
-func pinnedVersionFor(c *ComponentConfig) string {
-	if c.Helm.DefaultVersion != "" {
-		return c.Helm.DefaultVersion
-	}
-	return c.Kustomize.DefaultTag
-}

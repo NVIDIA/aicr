@@ -34,11 +34,13 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocd"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer/argocdhelm"
+	"github.com/NVIDIA/aicr/pkg/bundler/deployer/localformat"
 	bundleverifier "github.com/NVIDIA/aicr/pkg/bundler/verifier"
 	"github.com/NVIDIA/aicr/pkg/component"
 	"github.com/NVIDIA/aicr/pkg/defaults"
@@ -96,8 +98,12 @@ func (d closedWorldTestDeployer) Generate(_ context.Context, outputDir string) (
 		}
 	}
 	return &deployer.Output{
-		Files:     []string{payloadPath},
-		TotalSize: int64(len(payload)),
+		Files: []string{payloadPath},
+		// Every real deployer sets Entrypoint unconditionally (helm.go's is
+		// "deploy.sh"), so bundleinfo.Write's required-field check treats an
+		// empty one as a truncated record, not a legitimate helm bundle.
+		Entrypoint: "deploy.sh",
+		TotalSize:  int64(len(payload)),
 	}, nil
 }
 
@@ -519,18 +525,18 @@ func TestMake_EveryDeployerEmitsRecipe(t *testing.T) {
 				t.Fatalf("Make() error = %v", err)
 			}
 
-			data, err := os.ReadFile(filepath.Join(dir, recipeFileName))
+			data, err := os.ReadFile(filepath.Join(dir, RecipeFileName))
 			if err != nil {
-				t.Fatalf("read %s: %v", recipeFileName, err)
+				t.Fatalf("read %s: %v", RecipeFileName, err)
 			}
 			emitted[tt.name] = data
 
 			var reloaded recipe.RecipeResult
 			if unmarshalErr := yaml.Unmarshal(data, &reloaded); unmarshalErr != nil {
-				t.Errorf("emitted %s does not parse as a RecipeResult: %v", recipeFileName, unmarshalErr)
+				t.Errorf("emitted %s does not parse as a RecipeResult: %v", RecipeFileName, unmarshalErr)
 			}
 			if len(reloaded.ComponentRefs) == 0 {
-				t.Errorf("emitted %s carries no componentRefs", recipeFileName)
+				t.Errorf("emitted %s carries no componentRefs", RecipeFileName)
 			}
 
 			// A recipe outside checksums.txt is outside the attestation
@@ -540,18 +546,18 @@ func TestMake_EveryDeployerEmitsRecipe(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ReadAndVerifyBundle() error = %v", err)
 			}
-			if !slices.Contains(inventory.RelativeFiles(), recipeFileName) {
-				t.Errorf("%s missing from checksum inventory %v", recipeFileName, inventory.RelativeFiles())
+			if !slices.Contains(inventory.RelativeFiles(), RecipeFileName) {
+				t.Errorf("%s missing from checksum inventory %v", RecipeFileName, inventory.RelativeFiles())
 			}
 			var reported bool
 			for _, res := range output.Results {
-				if slices.Contains(res.Files, filepath.Join(dir, recipeFileName)) {
+				if slices.Contains(res.Files, filepath.Join(dir, RecipeFileName)) {
 					reported = true
 					break
 				}
 			}
 			if !reported {
-				t.Errorf("%s missing from the reported result files", recipeFileName)
+				t.Errorf("%s missing from the reported result files", RecipeFileName)
 			}
 		})
 	}
@@ -563,7 +569,7 @@ func TestMake_EveryDeployerEmitsRecipe(t *testing.T) {
 	for name, got := range emitted {
 		if !bytes.Equal(got, want) {
 			t.Errorf("%s emitted a different %s than helm; the recipe is re-marshaled "+
-				"per deployer instead of sharing one serializer path", name, recipeFileName)
+				"per deployer instead of sharing one serializer path", name, RecipeFileName)
 		}
 	}
 }
@@ -591,6 +597,353 @@ func TestMake_HelmBundlePassesVerifierChecksums(t *testing.T) {
 	if verification.TrustLevel != bundleverifier.TrustUnverified {
 		t.Errorf("TrustLevel = %s, want %s", verification.TrustLevel, bundleverifier.TrustUnverified)
 	}
+}
+
+// TestBundleWritesBundleInfo verifies that every bundle carries
+// bundle-info.yaml, binding itself to the recipe beside it and — when
+// checksums are enabled — covered by checksums.txt like every other bundle
+// payload.
+//
+// The includeChecksums=false case is the unconditionality proof: the write
+// must not live inside the `if b.Config.IncludeChecksums()` block in
+// runDeployer. Every other case in this package builds with checksums on
+// (config.NewConfig's own default), so without this case nothing here would
+// fail if a future refactor moved the write into that block.
+func TestBundleWritesBundleInfo(t *testing.T) {
+	tests := []struct {
+		name             string
+		includeChecksums bool
+	}{
+		{name: "checksums enabled", includeChecksums: true},
+		{name: "checksums disabled", includeChecksums: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			cfg := config.NewConfig(
+				config.WithDeployer(config.DeployerHelm),
+				config.WithIncludeChecksums(tt.includeChecksums),
+			)
+			b, err := New(WithConfig(cfg))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			recipeResult := closedWorldRecipeResult()
+			if _, makeErr := b.Make(context.Background(), recipeResult, dir); makeErr != nil {
+				t.Fatalf("Make: %v", makeErr)
+			}
+
+			info, err := bundleinfo.Read(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			if info.Build.Deployer != "helm" {
+				t.Errorf("deployer = %q, want helm", info.Build.Deployer)
+			}
+			if info.Layout.Entrypoint != "deploy.sh" {
+				t.Errorf("entrypoint = %q, want deploy.sh", info.Layout.Entrypoint)
+			}
+			// The fixture has exactly one component and no injected
+			// -pre/-post/-readiness folders, so the release sequence is
+			// spelled out explicitly here rather than derived from
+			// len(recipeResult.DeploymentOrder): that length is not a
+			// valid invariant in general (injected folders have no
+			// component of their own), and deriving the expectation from
+			// the same input the code under test also reads would let a
+			// regression that drops or duplicates trailing releases hit a
+			// truncated comparison and pass.
+			wantReleases := []string{"gpu-operator"}
+			if len(info.Layout.Releases) != len(wantReleases) {
+				t.Fatalf("releases = %v, want %v (length mismatch)", info.Layout.Releases, wantReleases)
+			}
+			for i, want := range wantReleases {
+				if info.Layout.Releases[i].Component != want {
+					t.Errorf("release[%d].Component = %q, want %q (deployer order must be preserved)",
+						i, info.Layout.Releases[i].Component, want)
+				}
+			}
+
+			// The record binds itself to the recipe beside it. SHA256RawContext
+			// returns RAW bytes, not hex — the repo hex-encodes with %x at the
+			// two existing call sites (checksum.go:156, inventory.go:170).
+			raw, digestErr := checksum.SHA256RawContext(context.Background(), filepath.Join(dir, "recipe.yaml"))
+			if digestErr != nil {
+				t.Fatalf("digest recipe.yaml: %v", digestErr)
+			}
+			wantDigest := fmt.Sprintf("sha256:%x", raw)
+			if info.Build.Recipe.Digest != wantDigest {
+				t.Errorf("recipe digest = %q, want %q", info.Build.Recipe.Digest, wantDigest)
+			}
+
+			if !tt.includeChecksums {
+				// Unconditionality means bundle-info.yaml must exist with
+				// no checksums.txt anywhere in the bundle at all.
+				if _, statErr := os.Stat(filepath.Join(dir, "checksums.txt")); statErr == nil {
+					t.Error("checksums.txt exists despite includeChecksums=false")
+				}
+				return
+			}
+
+			// The file is bundle content, so checksums.txt must cover it. A
+			// payload missing from the manifest is outside the attestation
+			// subject.
+			manifest, readErr := os.ReadFile(filepath.Join(dir, "checksums.txt"))
+			if readErr != nil {
+				t.Fatalf("read checksums.txt: %v", readErr)
+			}
+			if !strings.Contains(string(manifest), bundleinfo.FileName) {
+				t.Errorf("checksums.txt does not cover %s:\n%s", bundleinfo.FileName, manifest)
+			}
+		})
+	}
+}
+
+// TestBundleInfoIgnoresStaleProvenance covers the one bundle-root file that
+// does not self-heal on a rerun into the same directory.
+//
+// provenance.yaml is written only when a run vendors charts, and
+// localformat.pruneStaleFolders removes NNN-<name>/ directories and nothing
+// else. Bundle with --vendor-charts and then without, into the same output
+// directory, and the file from the first run survives into the second. A
+// record derived from the directory rather than from the run then claims
+// layout.provenance beside build.settings.vendorCharts=false, pointing a
+// consumer at a file this run neither wrote nor covered by its checksums.txt
+// — outside the bundle's own attestation subject.
+//
+// Vendoring needs upstream chart bytes, so the stale file is planted directly
+// rather than produced by a first run. Checksums are off because the exact
+// inventory finalization rejects any unexpected bundle file before the record
+// can be observed; that path fails loudly, and this one is the quiet one.
+func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
+	tests := []struct {
+		name     string
+		deployer config.DeployerType
+		repoURL  string
+	}{
+		{name: "helm", deployer: config.DeployerHelm},
+		{name: "argocd", deployer: config.DeployerArgoCD, repoURL: "https://github.com/example/bundles.git"},
+		{name: "argocd-helm", deployer: config.DeployerArgoCDHelm, repoURL: "https://github.com/example/bundles.git"},
+		{name: "flux", deployer: config.DeployerFlux, repoURL: "https://github.com/example/bundles.git"},
+		{name: "helmfile", deployer: config.DeployerHelmfile},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			stale := filepath.Join(dir, localformat.ProvenanceFileName)
+			if err := os.WriteFile(stale, []byte("charts: []\n"), 0600); err != nil {
+				t.Fatalf("plant stale provenance: %v", err)
+			}
+
+			b, err := New(WithConfig(config.NewConfig(
+				config.WithDeployer(tt.deployer),
+				config.WithRepoURL(tt.repoURL),
+				config.WithIncludeChecksums(false),
+				config.WithVendorCharts(false),
+			)))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if _, makeErr := b.Make(context.Background(), closedWorldRecipeResult(), dir); makeErr != nil {
+				t.Fatalf("Make: %v", makeErr)
+			}
+
+			info, err := bundleinfo.Read(context.Background(), dir)
+			if err != nil {
+				t.Fatalf("Read: %v", err)
+			}
+			if info.Build.Settings.VendorCharts {
+				t.Fatal("vendorCharts is true; the run this asserts against must not vendor")
+			}
+			if info.Layout.Provenance != "" {
+				t.Errorf("layout.provenance = %q for a run that vendored nothing; the record "+
+					"indexes a file left behind by an earlier run, which this run's "+
+					"checksums.txt does not cover", info.Layout.Provenance)
+			}
+		})
+	}
+}
+
+// sourceSettingsRecipeResult is a one-component recipe every deployer
+// generates from. It spells the component type as recipe.ComponentTypeHelm
+// rather than the lowercase literal closedWorldRecipeResult uses: flux
+// switches on the typed constant and rejects anything else, where the other
+// four deployers never inspect the field.
+func sourceSettingsRecipeResult() *recipe.RecipeResult {
+	rr := closedWorldRecipeResult()
+	rr.ComponentRefs[0].Type = recipe.ComponentTypeHelm
+	rr.ComponentRefs[0].Chart = "gpu-operator"
+	rr.ComponentRefs[0].Namespace = "gpu-operator"
+	return rr
+}
+
+// TestBundleInfoScopesSourceSettingsPerDeployer pins which deployers record
+// repoURL, targetRevision and appName, and with what value.
+//
+// TestSettingsKeysAreAllowlisted in pkg/bundler/bundleinfo cannot catch this:
+// all three keys are legitimate, and what is wrong is pairing one with a
+// deployer that never showed its effect. bundle-info.yaml is pushed to
+// registries and committed to GitOps repos, so an unconsumed setting
+// publishes a value the bundle itself never mentions — for argocd-helm, the
+// deployer built for OCI publication, a private GitOps URL in the only place
+// in the artifact it appears.
+//
+// The unset cases are the other half: a deployer that resolves a default when
+// the operator passes nothing bakes that default into the bundle, so the
+// record has to carry it. Recording the raw config value instead would leave
+// the key absent and tell a consumer nothing was configured, while the bundle
+// ships an unusable placeholder URL.
+//
+// Each case runs the real generator and asserts against its output rather
+// than against buildDeployer's argument lists: argocd-helm is handed RepoURL
+// and TargetRevision and shows neither, because the chart is URL-portable and
+// rewrites both into `.Values` directives. Every recorded repoURL is then
+// looked for in the emitted tree, which is what makes "already observable in
+// the bundle" an assertion instead of a claim.
+func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
+	const (
+		repoURL        = "https://github.com/my-org/private-gitops.git"
+		targetRevision = "v1.2.3"
+		appName        = "tenant-stack"
+	)
+
+	tests := []struct {
+		name               string
+		deployer           config.DeployerType
+		configure          bool
+		wantRepoURL        string
+		wantTargetRevision string
+		wantAppName        string
+	}{
+		// helm and helmfile: the generators declare none of the three fields,
+		// configured or not.
+		{name: "helm", deployer: config.DeployerHelm, configure: true},
+		{name: "helm unset", deployer: config.DeployerHelm},
+		{name: "helmfile", deployer: config.DeployerHelmfile, configure: true},
+		{name: "helmfile unset", deployer: config.DeployerHelmfile},
+		{
+			name:               "argocd",
+			deployer:           config.DeployerArgoCD,
+			configure:          true,
+			wantRepoURL:        repoURL,
+			wantTargetRevision: targetRevision,
+			wantAppName:        appName,
+		},
+		{
+			// The deployers' own fallbacks. They are spelled out here rather
+			// than read back from the deployer so a silent change to either
+			// one has to be restated in a test.
+			name:               "argocd unset",
+			deployer:           config.DeployerArgoCD,
+			wantRepoURL:        "https://github.com/YOUR-ORG/YOUR-REPO.git",
+			wantTargetRevision: "main",
+			wantAppName:        "nvidia-stack",
+		},
+		{
+			name:        "argocd-helm",
+			deployer:    config.DeployerArgoCDHelm,
+			configure:   true,
+			wantAppName: appName,
+		},
+		{
+			name:        "argocd-helm unset",
+			deployer:    config.DeployerArgoCDHelm,
+			wantAppName: "aicr-stack",
+		},
+		{
+			name:               "flux",
+			deployer:           config.DeployerFlux,
+			configure:          true,
+			wantRepoURL:        repoURL,
+			wantTargetRevision: targetRevision,
+		},
+		{
+			name:               "flux unset",
+			deployer:           config.DeployerFlux,
+			wantRepoURL:        "https://github.com/YOUR_ORG/YOUR_REPO.git",
+			wantTargetRevision: "main",
+		},
+	}
+
+	covered := make(map[string]bool, len(tests))
+	for _, tt := range tests {
+		covered[tt.deployer.String()] = true
+		t.Run(tt.name, func(t *testing.T) {
+			opts := []config.Option{config.WithDeployer(tt.deployer)}
+			if tt.configure {
+				opts = append(opts,
+					config.WithRepoURL(repoURL),
+					config.WithTargetRevision(targetRevision),
+					config.WithAppName(appName),
+				)
+			}
+			b, err := New(WithConfig(config.NewConfig(opts...)))
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			ctx := context.Background()
+			d, err := b.buildDeployer(ctx, sourceSettingsRecipeResult(), nil, nil)
+			if err != nil {
+				t.Fatalf("buildDeployer: %v", err)
+			}
+			outDir := t.TempDir()
+			out, err := d.Generate(ctx, outDir)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+
+			got := b.bundleInfoSettings(out)
+			if got.RepoURL != tt.wantRepoURL {
+				t.Errorf("repoURL = %q, want %q", got.RepoURL, tt.wantRepoURL)
+			}
+			if got.TargetRevision != tt.wantTargetRevision {
+				t.Errorf("targetRevision = %q, want %q", got.TargetRevision, tt.wantTargetRevision)
+			}
+			if got.AppName != tt.wantAppName {
+				t.Errorf("appName = %q, want %q", got.AppName, tt.wantAppName)
+			}
+			if got.RepoURL != "" && !treeContains(t, outDir, got.RepoURL) {
+				t.Errorf("recorded repoURL %q appears in no file the bundle emitted; "+
+					"a setting belongs in the record only when the bundle already shows it",
+					got.RepoURL)
+			}
+		})
+	}
+
+	// A deployer added without a case here would default to recording
+	// nothing, which is the safe direction but an undeclared one.
+	for _, name := range config.GetDeployerTypes() {
+		if !covered[name] {
+			t.Errorf("deployer %q has no case; declare which source settings its bundle shows", name)
+		}
+	}
+}
+
+// treeContains reports whether any file under root contains want.
+func treeContains(t *testing.T, root, want string) bool {
+	t.Helper()
+
+	found := false
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || found || entry.IsDir() {
+			return err
+		}
+		data, readErr := os.ReadFile(path) //nolint:gosec // test-local temp tree
+		if readErr != nil {
+			return readErr
+		}
+		if bytes.Contains(data, []byte(want)) {
+			found = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	return found
 }
 
 func TestNew_AttestWithoutBinaryAttestation(t *testing.T) {
@@ -1042,13 +1395,13 @@ func TestMake_RecipeCoveredByChecksums(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", checksum.ChecksumFileName, err)
 	}
-	if !strings.Contains(string(checksums), "  "+recipeFileName+"\n") {
-		t.Fatalf("%s does not cover %s:\n%s", checksum.ChecksumFileName, recipeFileName, checksums)
+	if !strings.Contains(string(checksums), "  "+RecipeFileName+"\n") {
+		t.Fatalf("%s does not cover %s:\n%s", checksum.ChecksumFileName, RecipeFileName, checksums)
 	}
 
-	recipePath := filepath.Join(bundleDir, recipeFileName)
+	recipePath := filepath.Join(bundleDir, RecipeFileName)
 	if err = os.WriteFile(recipePath, []byte("tampered: true\n"), 0600); err != nil {
-		t.Fatalf("tamper %s: %v", recipeFileName, err)
+		t.Fatalf("tamper %s: %v", RecipeFileName, err)
 	}
 
 	verifyResult, err := bundleverifier.Verify(context.Background(), bundleDir, nil)
@@ -1056,10 +1409,10 @@ func TestMake_RecipeCoveredByChecksums(t *testing.T) {
 		t.Fatalf("Verify() error = %v", err)
 	}
 	if verifyResult.ChecksumsPassed {
-		t.Fatalf("Verify() passed after %s was tampered with", recipeFileName)
+		t.Fatalf("Verify() passed after %s was tampered with", RecipeFileName)
 	}
-	if !strings.Contains(strings.Join(verifyResult.Errors, "\n"), recipeFileName) {
-		t.Errorf("Verify() errors do not identify %s: %v", recipeFileName, verifyResult.Errors)
+	if !strings.Contains(strings.Join(verifyResult.Errors, "\n"), RecipeFileName) {
+		t.Errorf("Verify() errors do not identify %s: %v", RecipeFileName, verifyResult.Errors)
 	}
 }
 

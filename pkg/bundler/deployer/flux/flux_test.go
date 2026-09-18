@@ -22,8 +22,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -143,6 +145,143 @@ func TestGenerate_Success(t *testing.T) {
 	// Verify deployment steps.
 	if len(output.DeploymentSteps) == 0 {
 		t.Error("Generate() returned no deployment steps")
+	}
+}
+
+// TestGenerateReportsLayout asserts Generate populates output.Entrypoint and
+// output.Releases with the layout it actually wrote to outputDir, mirroring
+// the helmfile deployer's equivalent coverage (pkg/bundler/deployer/helmfile).
+// gpu-operator carries both pre- and post-manifests so the fixture exercises
+// all three appendRelease call sites (pre, primary, post) in one run.
+func TestGenerateReportsLayout(t *testing.T) {
+	// ComponentRefs declaration order, DeploymentOrder, and alphabetical
+	// component-name order are all deliberately distinct here:
+	//   - declaration (ComponentRefs order below): gpu-operator,
+	//     cert-manager, nfd
+	//   - DeploymentOrder: cert-manager, nfd, gpu-operator (the real
+	//     dependency order — nfd labels nodes before gpu-operator consumes
+	//     those labels)
+	//   - alphabetical: cert-manager, gpu-operator, nfd
+	// so the primaryOrder assertion below can only pass if Generate genuinely
+	// honors DeploymentOrder rather than sorting by name or falling back to
+	// declaration order (e.g. a dropped SortComponentRefsByDeploymentOrder
+	// call).
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	recipeResult := &recipe.RecipeResult{}
+	recipeResult.Metadata.Version = testVersion
+	recipeResult.ComponentRefs = []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+		{
+			Name:      "nfd",
+			Namespace: "nfd",
+			Chart:     "node-feature-discovery",
+			Version:   "v0.16.4",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://kubernetes-sigs.github.io/node-feature-discovery-charts",
+		},
+	}
+	recipeResult.DeploymentOrder = []string{"cert-manager", "nfd", "gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: recipeResult,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"enabled": true}},
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"nfd":          {"enabled": true},
+		},
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"quota.yaml": []byte("apiVersion: v1\nkind: ResourceQuota\nmetadata:\n  name: q\n  namespace: gpu-operator\n"),
+			},
+		},
+		ComponentManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"dcgm-exporter.yaml": []byte("apiVersion: apps/v1\nkind: DaemonSet\nmetadata:\n  name: dcgm-exporter\n"),
+			},
+		},
+		Version: testVersion,
+	}
+
+	out, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	if out.Entrypoint != fileKustomization {
+		t.Errorf("Entrypoint = %q, want %s", out.Entrypoint, fileKustomization)
+	}
+	if len(out.Releases) == 0 {
+		t.Fatal("Generate reported no releases; the bundle index would be empty")
+	}
+	for _, r := range out.Releases {
+		if r.Name == "" || r.Component == "" || r.Path == "" {
+			t.Errorf("incomplete release entry: %+v", r)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Path)); statErr != nil {
+			t.Errorf("release %q claims path %q, which does not exist: %v", r.Name, r.Path, statErr)
+		}
+		if r.Manifest != "" {
+			if _, statErr := os.Stat(filepath.Join(outputDir, r.Manifest)); statErr != nil {
+				t.Errorf("release %q claims manifest %q, which does not exist: %v", r.Name, r.Manifest, statErr)
+			}
+		}
+	}
+
+	// Flux paths carry no NNN- prefix; the release index is the only place
+	// a consumer can learn the directory name without guessing.
+	for _, r := range out.Releases {
+		if strings.HasPrefix(r.Path, "00") {
+			t.Errorf("flux release %q reports a prefixed path %q; flux does not prefix", r.Name, r.Path)
+		}
+		if r.Manifest != path.Join(r.Path, fileHelmRelease) {
+			t.Errorf("release %q manifest = %q, want %s/%s", r.Name, r.Manifest, r.Path, fileHelmRelease)
+		}
+	}
+
+	// Releases order is normative: consumers read deployment sequence from
+	// list position, since the artifact carries no ordinal field. Extract
+	// the primary releases (Name == Component; excludes injected -pre/-post
+	// entries) and confirm their relative order matches the recipe's
+	// DeploymentOrder — a sort or reversal of out.Releases must fail this
+	// check.
+	var primaryOrder []string
+	for _, r := range out.Releases {
+		if r.Name == r.Component {
+			primaryOrder = append(primaryOrder, r.Name)
+		}
+	}
+	if !slices.Equal(primaryOrder, recipeResult.DeploymentOrder) {
+		t.Errorf("primary release order = %v, want %v (recipe DeploymentOrder)",
+			primaryOrder, recipeResult.DeploymentOrder)
+	}
+
+	// gpu-operator's -pre and -post injections must be grouped under it via
+	// Component, and land immediately before/after its primary in emission
+	// order — matching the chain Generate actually builds.
+	names := make([]string, len(out.Releases))
+	for i, r := range out.Releases {
+		names[i] = r.Name
+	}
+	wantNames := []string{"cert-manager", "nfd", "gpu-operator-pre", "gpu-operator", "gpu-operator-post"}
+	if !slices.Equal(names, wantNames) {
+		t.Errorf("release name order = %v, want %v", names, wantNames)
 	}
 }
 

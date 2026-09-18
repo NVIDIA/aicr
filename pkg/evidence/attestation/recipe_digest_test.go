@@ -126,9 +126,9 @@ func TestComputeRecipeDigestWithProfile_MatchesBuilderHydration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalYAMLDeterministic: %v", err)
 	}
-	builderDigest, err := SubjectDigest(recipeYAML)
+	builderDigest, err := SubjectDigestV3(recipeYAML)
 	if err != nil {
-		t.Fatalf("SubjectDigest: %v", err)
+		t.Fatalf("SubjectDigestV3: %v", err)
 	}
 	if overlayDigest != builderDigest {
 		t.Errorf("overlay-path digest %q != builder-hydrated digest %q", overlayDigest, builderDigest)

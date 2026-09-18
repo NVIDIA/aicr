@@ -14,6 +14,8 @@
 
 package localformat
 
+import "github.com/NVIDIA/aicr/pkg/bundler/deployer"
+
 // FolderKind classifies a written folder by the presence/absence of Chart.yaml.
 type FolderKind int
 
@@ -75,4 +77,20 @@ type Folder struct {
 	// ManifestsUseChartCRDs components) instead of re-deriving the
 	// folder shape from release-name suffixes alone.
 	CarriesPostManifests bool
+}
+
+// Releases maps the written folders to deployer.Release entries, preserving
+// folder order (which is deployment order). Manifest is left empty; deployers
+// that add a per-folder declaration file set it afterwards.
+func (r WriteResult) Releases() []deployer.Release {
+	out := make([]deployer.Release, 0, len(r.Folders))
+	for _, f := range r.Folders {
+		out = append(out, deployer.Release{
+			Name:      f.Name,
+			Component: f.Parent,
+			Namespace: f.Namespace,
+			Path:      f.Dir,
+		})
+	}
+	return out
 }

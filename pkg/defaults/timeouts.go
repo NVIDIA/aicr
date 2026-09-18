@@ -359,6 +359,12 @@ const (
 	// CLISnapshotTimeout is the default timeout for snapshot operations.
 	CLISnapshotTimeout = 5 * time.Minute
 
+	// CLIUpgradeCheckTimeout bounds one `aicr upgrade-check` run. The command
+	// performs two recipe operations, each already bounded by
+	// RecipeOperationTimeout, plus the registry's upgrade-record reads, so the
+	// ceiling is derived from the operation it repeats rather than picked.
+	CLIUpgradeCheckTimeout = 3 * RecipeOperationTimeout
+
 	// OIDCAuthTimeout is the maximum time to wait for a user to complete
 	// any interactive OIDC authentication flow — browser callback or
 	// device-code (RFC 8628). Prevents indefinite blocking if the flow is
@@ -927,6 +933,15 @@ const (
 	// 10 MiB matches MaxSigstoreBundleSize for parity across signed
 	// supply-chain artifacts.
 	MaxAttestationFileBytes int64 = 10 * 1024 * 1024 // 10 MiB
+
+	// MaxBundleInfoBytes caps the size of a bundle's bundle-info.yaml, on
+	// write as well as on read, so an oversize record is refused before it
+	// ships rather than on the consumer's side. The record is a build stamp
+	// plus one entry per emitted release,
+	// bounded in practice by the 999-folder NNN- prefix limit; 1 MiB is
+	// orders of magnitude above a real one and matches MaxChecksumFileBytes
+	// for parity across bundle-root metadata reads.
+	MaxBundleInfoBytes int64 = 1 * 1024 * 1024 // 1 MiB
 
 	// MaxManifestFileBytes caps the size of an in-bundle manifest.json
 	// file read by the verifier. A manifest entry is ~150 bytes (path +

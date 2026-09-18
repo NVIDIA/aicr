@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **47**
-- Unique images: **111**
+- Components: **48**
+- Unique images: **112**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -63,6 +63,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nfd | helm | node-feature-discovery | 0.19.0 | 1 |
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
+| node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
 | nodewright-customizations | manifest | — | — | 6 |
 | nodewright-operator | helm | nodewright | v0.17.1 | 3 |
 | nvcre | helm | cluster-readiness-engine | v0.2.0 | 1 |
@@ -279,6 +280,10 @@ _No images extracted._
 
 _No images extracted._
 
+### node-problem-detector
+
+- `registry.k8s.io/node-problem-detector/node-problem-detector:v1.35.1`
+
 ### nodewright-customizations
 
 - `ghcr.io/nvidia/nodewright-packages/nvidia-setup:0.3.0@sha256:f17c951d60b519d097c20a3d9f49668f043a996adb31b9bb4db24a112a8f60a2`
@@ -381,12 +386,23 @@ Air-gapped OpenShift deployments must separately mirror the relevant Red Hat cer
 
 The trade-off is intentional. Pinning an image gives reproducibility; deferring to the upstream chart lets security patches flow without an AICR release. The split is policy, not oversight — see the [supply chain epic](https://github.com/NVIDIA/aicr/issues/739) for how each component's policy is being made explicit.
 
-**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Two known cases, neither counted in the `nvsentinel` row's image count above:
+**Opt-in values enabled by a leaf override or mixin are a fourth gap.** A handful of images only appear once a component's *values*, not just its enablement, are overridden outside the shared `recipes/components/<name>/values.yaml` this BOM renders (`tools/bom/main.go`'s `renderHelmComponent` resolves each component against only its base values file, so it cannot see leaf or mixin overrides). Three known cases, none counted in the `nvsentinel` row's image count above:
 
 - The [`nvsentinel-observability` mixin](component-catalog.md#audit-logging-and-tracing) sets `global.auditLogging.enabled: true`, which conditionally adds a `fix-audit-log-permissions` init container (`docker.io/bitnamilegacy/os-shell:12-debian-12-r30`) to the `platform-connectors` DaemonSet and `labeler` Deployment. It is a third-party image AICR does not otherwise mirror.
 - The [`nvsentinel-object-monitor` mixin](component-catalog.md#kubernetes-object-monitor) sets `global.kubernetesObjectMonitor.enabled`, turning on the chart's `kubernetes-object-monitor` subchart and pulling in `ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.20.0`. That image is in AICR's weekly image scan despite not being built here, since nothing else would surface a CVE in it.
 
-A recipe composing either mixin **with `nvsentinel` still enabled** adds these images to what it deploys and mirrors; `aicr bundle`/`aicr mirror` on such a recipe surfaces them even though this static BOM cannot. A chain that disables `nvsentinel` (the OCP overlay, for example) can compose a mixin and ship neither.
+A recipe composing any of these mixins **with `nvsentinel` still enabled** adds these images to what it deploys and mirrors; `aicr bundle`/`aicr mirror` on such a recipe surfaces them even though this static BOM cannot. A chain that disables `nvsentinel` (the OCP overlay, for example) can compose a mixin and ship neither.
+
+The `nvsentinel-preflight` mixin (see [Preflight Checks](component-catalog.md#preflight-checks)) is the third case. Setting `global.preflight.enabled: true` on `nvsentinel` adds four images, all from `ghcr.io/nvidia/nvsentinel/` at the chart's own version and therefore already covered by the NVIDIA mirroring path — but none of them appear in the `nvsentinel` row above:
+
+| Image | Role |
+|---|---|
+| `ghcr.io/nvidia/nvsentinel/preflight` | the admission webhook controller |
+| `ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag` | injected init container: DCGM level-2 diagnostic |
+| `ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback` | injected init container: NCCL loopback bandwidth test |
+| `ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce` | injected init container: NCCL all-reduce bandwidth test |
+
+`TestNVSentinelPreflightChartRender` pins all four against the rendered chart, so a bump that changes a repository fails there rather than silently diverging from this table.
 
 ### Registries spanned
 

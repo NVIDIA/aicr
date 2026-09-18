@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
@@ -50,6 +51,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/netutil"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // readBoundedFile streams a file through io.LimitReader against maxBytes.
@@ -77,12 +79,15 @@ const (
 	// digestAlgoSHA256 is the algorithm key used in attestation digest maps.
 	digestAlgoSHA256 = "sha256"
 
-	// recipeFileName is the resolved recipe written into every bundle.
-	recipeFileName = "recipe.yaml"
-
 	accountingDatabaseUsername = "slurm"
 	componentInstallKey        = "install"
 )
+
+// RecipeFileName is the resolved recipe written at the root of every bundle.
+// Exported because reading it back is how a consumer recognizes a directory as
+// a bundle and recovers the recipe it was built from, and a second copy of the
+// literal would drift silently.
+const RecipeFileName = "recipe.yaml"
 
 // errCtxKeyComponent is the structured-error context key carrying the
 // component name in bundle value-override failures.
@@ -1004,8 +1009,29 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	if writeErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
 	}
-	output.Files = append(output.Files, filepath.Join(dir, recipeFileName))
+	output.Files = append(output.Files, filepath.Join(dir, RecipeFileName))
 	output.TotalSize += recipeSize
+
+	recipePath, joinErr := deployer.SafeJoin(dir, RecipeFileName)
+	if joinErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe recipe file path", joinErr)
+	}
+	// SHA256RawContext returns raw bytes; %x is how this repo renders them
+	// (checksum.go:156).
+	rawDigest, digestErr := checksum.SHA256RawContext(ctx, recipePath)
+	if digestErr != nil {
+		return nil, errors.PropagateOrWrap(digestErr, errors.ErrCodeInternal,
+			"failed to digest recipe for bundle info")
+	}
+	recipeDigest := fmt.Sprintf("sha256:%x", rawDigest)
+
+	info := b.buildBundleInfo(recipeResult, output, recipeDigest)
+	infoSize, infoErr := bundleinfo.Write(ctx, dir, info)
+	if infoErr != nil {
+		return nil, errors.PropagateOrWrap(infoErr, errors.ErrCodeInternal, "failed to write bundle info")
+	}
+	output.Files = append(output.Files, filepath.Join(dir, bundleinfo.FileName))
+	output.TotalSize += infoSize
 
 	if b.Config.IncludeChecksums() {
 		if checksumErr := checksum.WriteChecksums(ctx, dir, output); checksumErr != nil {
@@ -2790,7 +2816,7 @@ func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir 
 		return 0, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to serialize recipe")
 	}
 
-	recipePath, joinErr := deployer.SafeJoin(dir, recipeFileName)
+	recipePath, joinErr := deployer.SafeJoin(dir, RecipeFileName)
 	if joinErr != nil {
 		return 0, errors.Wrap(errors.ErrCodeInternal, "unsafe recipe file path", joinErr)
 	}
@@ -2800,6 +2826,109 @@ func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir 
 
 	slog.Debug("wrote recipe file", "path", recipePath)
 	return int64(len(recipeData)), nil
+}
+
+// buildBundleInfo assembles the bundle's build record from the resolved
+// configuration, the recipe, and the layout the deployer just reported.
+//
+// It reads paths from out rather than re-deriving them: the NNN- prefix
+// convention is the deployer's, and flux does not use it at all, so
+// reconstructing a path here would be a guess that happens to be right four
+// times out of five.
+func (b *DefaultBundler) buildBundleInfo(
+	recipeResult *recipe.RecipeResult,
+	out *deployer.Output,
+	recipeDigest string,
+) *bundleinfo.BundleInfo {
+
+	info := &bundleinfo.BundleInfo{
+		Metadata: bundleinfo.Metadata{Version: b.Config.Version()},
+		Build: bundleinfo.Build{
+			Deployer: b.Config.Deployer().String(),
+			Recipe: bundleinfo.Recipe{
+				Path:    RecipeFileName,
+				Digest:  recipeDigest,
+				Version: recipeResult.Metadata.Version,
+			},
+			Settings: b.bundleInfoSettings(out),
+		},
+		Layout: bundleinfo.Layout{
+			Entrypoint: out.Entrypoint,
+			Provenance: out.Provenance,
+			Releases:   make([]bundleinfo.Release, 0, len(out.Releases)),
+		},
+	}
+	for _, r := range out.Releases {
+		info.Layout.Releases = append(info.Layout.Releases, bundleinfo.Release{
+			Name:      r.Name,
+			Component: r.Component,
+			Namespace: r.Namespace,
+			Path:      r.Path,
+			Manifest:  r.Manifest,
+		})
+	}
+	return info
+}
+
+// bundleInfoSettings records the resolved bundler settings, admitting a
+// setting only when its effect is already observable in the bundle's own
+// files.
+//
+// repoURL, targetRevision and appName are the settings that survive that rule
+// on some deployers and not others, and they are read from out rather than
+// from b.Config: the deployer reports what it resolved and baked, defaults
+// and placeholders included, so an unconfigured --repo is recorded as the
+// placeholder URL the bundle actually ships instead of vanishing under
+// omitempty. A deployer that consumes none of the three reports none, and the
+// fields are omitempty, so no key is left behind.
+func (b *DefaultBundler) bundleInfoSettings(out *deployer.Output) bundleinfo.Settings {
+	return bundleinfo.Settings{
+		RepoURL:            out.Source.RepoURL,
+		TargetRevision:     out.Source.TargetRevision,
+		AppName:            out.Source.AppName,
+		Checksums:          b.Config.IncludeChecksums(),
+		Attested:           b.Config.Attest(),
+		VendorCharts:       b.Config.VendorCharts(),
+		ReadinessHooks:     b.Config.ReadinessHooks(),
+		Serial:             b.Config.Serial(),
+		Components:         b.Config.Bundlers(),
+		StorageClass:       b.Config.StorageClass(),
+		SharedStorageClass: b.Config.SharedStorageClass(),
+		NodeScheduling: nodeScheduling(
+			b.Config.SystemNodeSelector(), b.Config.SystemNodeTolerations(),
+			b.Config.AcceleratedNodeSelector(), b.Config.AcceleratedNodeTolerations()),
+	}
+}
+
+// nodeScheduling converts the config's corev1 tolerations to the artifact's
+// own wire type. Returns nil when nothing is pinned, so the key is omitted
+// rather than emitted empty.
+func nodeScheduling(sysSel map[string]string, sysTol []corev1.Toleration,
+	accSel map[string]string, accTol []corev1.Toleration) *bundleinfo.NodeScheduling {
+
+	system := scheduling(sysSel, sysTol)
+	accelerated := scheduling(accSel, accTol)
+	if system == nil && accelerated == nil {
+		return nil
+	}
+	return &bundleinfo.NodeScheduling{System: system, Accelerated: accelerated}
+}
+
+func scheduling(selector map[string]string, tolerations []corev1.Toleration) *bundleinfo.Scheduling {
+	if len(selector) == 0 && len(tolerations) == 0 {
+		return nil
+	}
+	s := &bundleinfo.Scheduling{Selector: selector}
+	for _, t := range tolerations {
+		s.Tolerations = append(s.Tolerations, bundleinfo.Toleration{
+			Key:               t.Key,
+			Operator:          string(t.Operator),
+			Value:             t.Value,
+			Effect:            string(t.Effect),
+			TolerationSeconds: t.TolerationSeconds,
+		})
+	}
+	return s
 }
 
 // buildDynamicValuesMap re-keys the config's dynamic values from user override keys

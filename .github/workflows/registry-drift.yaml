@@ -14,7 +14,7 @@
 
 # Weekly drift report for the chart pins in recipes/registry.yaml.
 #
-# Renovate detects; humans decide. The registry's 34 chart pins are extracted by
+# Renovate detects; humans decide. The registry's 35 chart pins are extracted by
 # the custom manager in .github/renovate.json5 but disabled there, so the weekday
 # PR run never touches them. This job re-enables exactly that depType under
 # RENOVATE_DRY_RUN=full — Renovate cannot push a branch at all — and turns the
@@ -57,7 +57,7 @@ concurrency:
   # PR runs are keyed per branch; schedule and workflow_dispatch share one group
   # (head_ref is empty for both), preserving the original serialization between
   # a manual run and the cron. cancel-in-progress is scoped to pull_request:
-  # each push on a PR branch queues another 20-minute, 34-lookup run, so a
+  # each push on a PR branch queues another 20-minute, 35-lookup run, so a
   # superseded one is cancelled rather than left to finish behind the latest.
   # Scheduled and manual runs are never cancelled — nothing there is safe to
   # interrupt mid-upload.
@@ -125,7 +125,7 @@ jobs:
       # Same action and digest-pinned image as renovate.yaml; keep them in
       # lockstep with RENOVATE_VALIDATOR_IMAGE in the Makefile.
       - name: Run Renovate (dry-run, registry chart pins only)
-        uses: renovatebot/github-action@c314dda4a9a93b08239ec978f2043b9a433b9ac4  # v46.3.0
+        uses: renovatebot/github-action@dcfba84a42d1b5d5e49bf131b1bf53511851a123  # v46.3.1
         with:
           renovate-version: '43@sha256:00185c0d63462acec8331cc9a94dcd74a763f2765fca0edcc3ff568af1dc8104'
         env:

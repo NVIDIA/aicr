@@ -270,13 +270,14 @@ func readManifest(t *testing.T, deployer string) []string {
 // recipe.yaml is listed for all five because it was helm-only until #2753, and
 // the additive direction of TestBundleLayoutMatchesManifest cannot catch its
 // loss on the other four -- a regression there would read as a manifest that
-// had not been refreshed.
+// had not been refreshed. bundle-info.yaml is listed for the same reason: it
+// arrived after the baselines were frozen (#2758).
 var requiredRootPaths = map[string][]string{
-	"helm":        {"checksums.txt", "README.md", "deploy.sh", "recipe.yaml"},
-	"argocd":      {"checksums.txt", "README.md", "app-of-apps.yaml", "recipe.yaml"},
-	"argocd-helm": {"checksums.txt", "README.md", "Chart.yaml", "values.yaml", "recipe.yaml"},
-	"flux":        {"checksums.txt", "README.md", "kustomization.yaml", "recipe.yaml"},
-	"helmfile":    {"checksums.txt", "README.md", "helmfile.yaml", "recipe.yaml"},
+	"helm":        {"checksums.txt", "README.md", "deploy.sh", "recipe.yaml", "bundle-info.yaml"},
+	"argocd":      {"checksums.txt", "README.md", "app-of-apps.yaml", "recipe.yaml", "bundle-info.yaml"},
+	"argocd-helm": {"checksums.txt", "README.md", "Chart.yaml", "values.yaml", "recipe.yaml", "bundle-info.yaml"},
+	"flux":        {"checksums.txt", "README.md", "kustomization.yaml", "recipe.yaml", "bundle-info.yaml"},
+	"helmfile":    {"checksums.txt", "README.md", "helmfile.yaml", "recipe.yaml", "bundle-info.yaml"},
 }
 
 // TestBundleLayoutManifestsAreComplete rejects a truncated manifest.

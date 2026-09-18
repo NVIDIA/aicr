@@ -687,11 +687,11 @@ func (s *MetadataStore) filterToMaximalLeaves(matches []*RecipeMetadata) []*Reci
 //
 // ComponentRef semantics: a mixin componentRef whose name already exists is
 // allowed when the mixin entry sets nothing beyond the safe additive field
-// set ({Namespace, ManifestFiles, PreManifestFiles}), OR sets only Overrides
+// set ({Namespace, ManifestFiles, PreManifestFiles, DependencyRefs}), OR sets only Overrides
 // paths the target component's own registry entry has explicitly
 // allowlisted for mixin use (see mixinOverridesSafeForMerge). Every other
 // identity/sourcing field (Chart, Type, Source, Version, Tag, Path,
-// ValuesFile, Patches, DependencyRefs, Cleanup, ExpectedResources,
+// ValuesFile, Patches, Cleanup, ExpectedResources,
 // HealthCheckAsserts) still conflicts unconditionally — this preserves
 // ADR-005's "no silent chart identity override" mitigation while letting
 // OS-conditional mixins like os-talos contribute namespace +
@@ -755,7 +755,7 @@ func (s *MetadataStore) mergeMixins(ctx context.Context, mergedSpec *RecipeMetad
 			if isExisting {
 				if offending, ok := mixinComponentRefSafeForMerge(c); !ok {
 					return nil, aicrerrors.New(aicrerrors.ErrCodeInvalidRequest,
-						fmt.Sprintf("mixin %q component %q sets identity/sourcing field %q which conflicts with the inheritance chain; mixins may only contribute Namespace, ManifestFiles, PreManifestFiles, or registry-allowlisted Overrides paths to an existing component", mixinName, c.Name, offending))
+						fmt.Sprintf("mixin %q component %q sets identity/sourcing field %q which conflicts with the inheritance chain; mixins may only contribute Namespace, ManifestFiles, PreManifestFiles, DependencyRefs, or registry-allowlisted Overrides paths to an existing component", mixinName, c.Name, offending))
 				}
 			} else {
 				// A component whose owner hasn't declared a
@@ -1433,9 +1433,9 @@ func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, eval
 
 // mixinComponentRefSafeForMerge reports whether a mixin's componentRef sets
 // only fields that are unconditionally safe to merge into an existing
-// component (Name, Namespace, ManifestFiles, PreManifestFiles). Identity /
-// sourcing fields (Chart, Type, Source, Version, Tag, Path, ValuesFile,
-// Patches, DependencyRefs, Cleanup, ExpectedResources, HealthCheckAsserts)
+// component (Name, Namespace, ManifestFiles, PreManifestFiles,
+// DependencyRefs). Identity / sourcing fields (Chart, Type, Source, Version,
+// Tag, Path, ValuesFile, Patches, Cleanup, ExpectedResources, HealthCheckAsserts)
 // silently override the chain's chosen chart and so a mixin must NOT set
 // them — see ADR-005's "Silent constraint override" mitigation. Returns the
 // first offending field name so the resolver's error message names the
@@ -1458,6 +1458,14 @@ func (s *MetadataStore) evaluateOverlayConstraints(overlay *RecipeMetadata, eval
 // safe set is exactly the set of fields the merge handles additively or as
 // pure namespace remap. Any new ComponentRef field that joins the additive
 // set must also be added here.
+//
+// DependencyRefs is in the safe set on that basis: mergeComponentRef unions
+// and deduplicates it rather than replacing it, so a mixin can add an edge
+// but cannot remove or reorder one the chain already declared. A mixin that
+// enables a component needing another applied first (#2610's preflight
+// controller, which validates the KAI PodGroup CRD at startup and fails
+// closed) has no other way to express that ordering, and the resolver still
+// rejects unknown references and cycles downstream.
 func mixinComponentRefSafeForMerge(c ComponentRef) (string, bool) {
 	switch {
 	case c.Chart != "":
@@ -1476,8 +1484,6 @@ func mixinComponentRefSafeForMerge(c ComponentRef) (string, bool) {
 		return "valuesFile", false
 	case len(c.Patches) > 0:
 		return "patches", false
-	case len(c.DependencyRefs) > 0:
-		return "dependencyRefs", false
 	case c.Cleanup:
 		return "cleanup", false
 	case len(c.ExpectedResources) > 0:

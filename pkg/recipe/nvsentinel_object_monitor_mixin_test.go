@@ -17,6 +17,7 @@ package recipe
 import (
 	"context"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -95,13 +96,30 @@ func TestMixinNVSentinelObjectMonitor_ComposesCleanly(t *testing.T) {
 		t.Fatalf("global.kubernetesObjectMonitor.enabled = %v, want true", kom)
 	}
 
-	// Exactly two, and the loop below requires both to be ours -- so no chart
-	// default survives. Asserting the count rather than a specific default's
-	// name keeps this meaningful when upstream renames it (node-not-ready
-	// becomes ReplaceNotReadyNode in the version #2596 bumps to).
+	// The exact NAME SET, not a count. Both catch a surviving chart default,
+	// but the set keeps working when the mixin legitimately grows (the NPD
+	// policies below) and still fails on an upstream rename (node-not-ready
+	// becomes ReplaceNotReadyNode in the version #2596 bumps to), because the
+	// new name is not in this list. Anything added here has to be deliberate.
 	policies := objectMonitorPolicies(t, nvsentinel)
-	if len(policies) != 2 {
-		t.Fatalf("policies has %d entries, want exactly the mixin's 2 -- a chart default may no longer be replaced", len(policies))
+	wantNames := []string{
+		"gpu-operator-pods-health",
+		"network-operator-pod-health",
+		"NPDXfsShutdown",
+		"NPDCperHardwareErrorFatal",
+		"NPDReadonlyFilesystem",
+	}
+	gotNames := make([]string, 0, len(policies))
+	for _, entry := range policies {
+		policy, _ := entry.(map[string]any)
+		name, _ := policy["name"].(string)
+		gotNames = append(gotNames, name)
+	}
+	slices.Sort(gotNames)
+	sortedWant := slices.Clone(wantNames)
+	slices.Sort(sortedWant)
+	if !slices.Equal(gotNames, sortedWant) {
+		t.Fatalf("policy names = %v, want exactly %v -- an unexpected entry means a chart default survived the list replacement", gotNames, sortedWant)
 	}
 
 	for _, name := range []string{"gpu-operator-pods-health", "network-operator-pod-health"} {
@@ -148,6 +166,42 @@ func TestMixinNVSentinelObjectMonitor_ComposesCleanly(t *testing.T) {
 			if _, present := healthEvent[key]; present {
 				t.Errorf("policy %q sets %s, want unset", name, key)
 			}
+		}
+	}
+
+	// The NPD policies read Node Conditions, so every shape assertion above is
+	// wrong for them: a different resource kind, a different node association,
+	// and no grace period (a latched condition is already the debounce).
+	// STORE_ONLY is the load-bearing one -- upstream recommends REPLACE_VM,
+	// and shipping that unvalidated would let a filesystem fault replace a VM.
+	for name, wantCondition := range map[string]string{
+		"NPDXfsShutdown":            "XfsShutdown",
+		"NPDCperHardwareErrorFatal": "CperHardwareErrorFatal",
+		"NPDReadonlyFilesystem":     "ReadonlyFilesystem",
+	} {
+		policy := policyByName(policies, name)
+		if policy == nil {
+			t.Errorf("policy %q missing from rendered policies", name)
+			continue
+		}
+		if policy["enabled"] != true {
+			t.Errorf("policy %q enabled = %v, want true", name, policy["enabled"])
+		}
+		resource, _ := policy["resource"].(map[string]any)
+		if got, _ := resource["kind"].(string); got != "Node" {
+			t.Errorf("policy %q resource.kind = %q, want Node", name, got)
+		}
+		nodeAssociation, _ := policy["nodeAssociation"].(map[string]any)
+		if got, _ := nodeAssociation["expression"].(string); got != "resource.metadata.name" {
+			t.Errorf("policy %q nodeAssociation.expression = %q, want resource.metadata.name", name, got)
+		}
+		predicate, _ := policy["predicate"].(map[string]any)
+		if expr, _ := predicate["expression"].(string); !strings.Contains(expr, wantCondition) {
+			t.Errorf("policy %q predicate does not read condition %q: %s", name, wantCondition, expr)
+		}
+		healthEvent, _ := policy["healthEvent"].(map[string]any)
+		if got, _ := healthEvent["processingStrategy"].(string); got != "STORE_ONLY" {
+			t.Errorf("policy %q processingStrategy = %q, want STORE_ONLY -- REPLACE_VM is unvalidated", name, got)
 		}
 	}
 }

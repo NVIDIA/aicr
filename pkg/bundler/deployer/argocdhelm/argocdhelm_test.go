@@ -23,8 +23,10 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -1955,6 +1957,154 @@ func TestBundleGolden_ReadinessGate(t *testing.T) {
 		"002-gpu-operator-readiness/templates/readiness.yaml",
 	} {
 		assertGolden(t, outputDir, "testdata/readiness_gate", rel)
+	}
+}
+
+// TestGenerateReportsLayout asserts Generate populates output.Entrypoint and
+// output.Releases with the layout it actually wrote to outputDir, mirroring
+// the flux and helmfile deployers' equivalent coverage. gpu-operator carries
+// pre-manifests, post-manifests, AND a readiness gate so the fixture
+// exercises the full `-pre` / `-post` / `-readiness` suffix-strip in
+// processFolders in one run.
+//
+// ComponentRefs declaration order, DeploymentOrder, and alphabetical
+// component-name order are all deliberately distinct here:
+//   - declaration (ComponentRefs order below): gpu-operator, cert-manager, nfd
+//   - DeploymentOrder: cert-manager, nfd, gpu-operator (the real dependency
+//     order — nfd labels nodes before gpu-operator consumes those labels)
+//   - alphabetical: cert-manager, gpu-operator, nfd
+//
+// so the primaryOrder assertion below can only pass if Generate genuinely
+// honors DeploymentOrder rather than sorting by name or falling back to
+// declaration order.
+func TestGenerateReportsLayout(t *testing.T) {
+	ctx := context.Background()
+	outputDir := t.TempDir()
+
+	rr := newRecipeResult("v1.0.0", []recipe.ComponentRef{
+		{
+			Name:      "gpu-operator",
+			Namespace: "gpu-operator",
+			Chart:     "gpu-operator",
+			Version:   "v25.3.3",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://helm.ngc.nvidia.com/nvidia",
+		},
+		{
+			Name:      "cert-manager",
+			Namespace: "cert-manager",
+			Chart:     "cert-manager",
+			Version:   "v1.17.2",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://charts.jetstack.io",
+		},
+		{
+			Name:      "nfd",
+			Namespace: "nfd",
+			Chart:     "node-feature-discovery",
+			Version:   "v0.16.4",
+			Type:      recipe.ComponentTypeHelm,
+			Source:    "https://kubernetes-sigs.github.io/node-feature-discovery-charts",
+		},
+	})
+	rr.DeploymentOrder = []string{"cert-manager", "nfd", "gpu-operator"}
+
+	g := &Generator{
+		RecipeResult: rr,
+		ComponentValues: map[string]map[string]any{
+			"gpu-operator": {"driver": map[string]any{"version": "580"}},
+			"cert-manager": {"crds": map[string]any{"enabled": true}},
+			"nfd":          {"enabled": true},
+		},
+		Version:        "v0.0.0-test",
+		RepoURL:        "https://github.com/example/aicr-bundles.git",
+		TargetRevision: "main",
+		ComponentPreManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/cos-namespace.yaml": []byte(
+					"apiVersion: v1\nkind: Namespace\nmetadata:\n  name: gpu-operator\n",
+				),
+			},
+		},
+		ComponentPostManifests: map[string]map[string][]byte{
+			"gpu-operator": {
+				"components/gpu-operator/manifests/dcgm-exporter.yaml": []byte(
+					"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: dcgm-config\n",
+				),
+			},
+		},
+		ComponentReadiness: map[string]map[string][]byte{
+			"gpu-operator": {
+				"readiness.yaml": readinessGateManifest(t, config.DeployerArgoCDHelm),
+			},
+		},
+	}
+
+	out, err := g.Generate(ctx, outputDir)
+	if err != nil {
+		t.Fatalf("Generate() error = %v", err)
+	}
+
+	if out.Entrypoint != fileChart {
+		t.Errorf("Entrypoint = %q, want %s", out.Entrypoint, fileChart)
+	}
+	if len(out.Releases) == 0 {
+		t.Fatal("Generate reported no releases; the bundle index would be empty")
+	}
+	for _, r := range out.Releases {
+		if r.Name == "" || r.Component == "" || r.Path == "" || r.Namespace == "" {
+			t.Errorf("incomplete release entry: %+v", r)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Path)); statErr != nil {
+			t.Errorf("release %q claims path %q, which does not exist: %v", r.Name, r.Path, statErr)
+		}
+		// This deployer always declares a release through a chart template
+		// (never through an orchestration script), so Manifest must never
+		// be empty.
+		if r.Manifest == "" {
+			t.Errorf("release %q has empty Manifest; argocd-helm always declares one", r.Name)
+		}
+		wantManifest := path.Join("templates", r.Name+".yaml")
+		if r.Manifest != wantManifest {
+			t.Errorf("release %q manifest = %q, want %q", r.Name, r.Manifest, wantManifest)
+		}
+		if _, statErr := os.Stat(filepath.Join(outputDir, r.Manifest)); statErr != nil {
+			t.Errorf("release %q claims manifest %q, which does not exist: %v", r.Name, r.Manifest, statErr)
+		}
+	}
+
+	// Releases order is normative: consumers read deployment sequence from
+	// list position. Extract the primary releases (Name == Component;
+	// excludes injected -pre/-post/-readiness entries) and confirm their
+	// relative order matches the recipe's DeploymentOrder — a sort or
+	// reversal of out.Releases must fail this check.
+	var primaryOrder []string
+	for _, r := range out.Releases {
+		if r.Name == r.Component {
+			primaryOrder = append(primaryOrder, r.Name)
+		}
+	}
+	if !slices.Equal(primaryOrder, rr.DeploymentOrder) {
+		t.Errorf("primary release order = %v, want %v (recipe DeploymentOrder)",
+			primaryOrder, rr.DeploymentOrder)
+	}
+
+	// gpu-operator's -pre / -post / -readiness injections must be grouped
+	// under it via Component, and land in the emission order the delegated
+	// argocd generator's NNN- prefixes actually assigned.
+	names := make([]string, len(out.Releases))
+	components := make([]string, len(out.Releases))
+	for i, r := range out.Releases {
+		names[i] = r.Name
+		components[i] = r.Component
+	}
+	wantNames := []string{"cert-manager", "nfd", "gpu-operator-pre", "gpu-operator", "gpu-operator-post", "gpu-operator-readiness"}
+	if !slices.Equal(names, wantNames) {
+		t.Errorf("release name order = %v, want %v", names, wantNames)
+	}
+	wantComponents := []string{"cert-manager", "nfd", "gpu-operator", "gpu-operator", "gpu-operator", "gpu-operator"}
+	if !slices.Equal(components, wantComponents) {
+		t.Errorf("release component order = %v, want %v", components, wantComponents)
 	}
 }
 

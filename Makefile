@@ -383,6 +383,18 @@ nvsentinel-object-monitor-e2e: ## Live Kind test: nvsentinel-object-monitor mixi
 	echo "Running nvsentinel-object-monitor mixin e2e test..."; \
 	tests/e2e/nvsentinel-object-monitor/run.sh
 
+.PHONY: nvsentinel-preflight-e2e
+nvsentinel-preflight-e2e: ## Live Kind test: nvsentinel-preflight mixin injects node checks into opted-in GPU pods (#2610)
+	@set -e; \
+	echo "Running nvsentinel-preflight mixin e2e test..."; \
+	tests/e2e/nvsentinel-preflight/run.sh
+
+.PHONY: npd-nvsentinel-object-monitor-e2e
+npd-nvsentinel-object-monitor-e2e: ## Live Kind test: an NPD Node condition becomes an NVSentinel health event (#2614)
+	@set -e; \
+	echo "Running NPD -> nvsentinel-object-monitor e2e test..."; \
+	tests/e2e/npd-nvsentinel-object-monitor/run.sh
+
 .PHONY: scan
 scan: ## Scans for vulnerabilities with grype
 	@set -e; \
