@@ -103,6 +103,7 @@ pretending that the legacy `Recipe` input is distinct from the canonical
 | `RecipeResult` (default resolved recipe) | `v1alpha2` | `aicr.run/v1` | Public resolved artifact emitted to bundles; legacy `Recipe` input normalizes to this kind |
 | `RecipeCriteria` | `v1alpha2` | `aicr.run/v1` | Public recipe-resolution input shared by the CLI, REST API, and Go client |
 | `BundleProvenance` (`provenance.yaml`, `localformat.ProvenanceAPIVersion`) | `v1alpha2` | `aicr.run/v1` | Bundle-root audit document consumed by downstream tooling |
+| `BundleInfo` (`bundle-info.yaml`, `header.KindBundleInfo` / `header.StableGroupVersion`) | Not shipped | `aicr.run/v1` | Bundle-root build record consumed by `upgrade-check` and integrator automation, inside the bundle attestation subject from day one; a mechanical projection of settled deployer and config state, not an authoring surface — which is why authoring and config kinds sit at beta and bundle-root outputs do not. Strict decoding makes a shipped v1 reader reject a later-added field, so additive extension rests on §3's mixed-pipeline rule |
 | `AICRConfig` | `v1alpha2` | `aicr.run/v1beta1` | Actively growing: #2026 bound 2 of 5 spec sections, #2245 binds the rest. Do not freeze a schema mid-expansion |
 | `RecipeMetadata`, `RecipeMixin` (catalog) | `v1alpha2` | `aicr.run/v1beta1` | Authoring schema exercised by 126 shipped catalog files (122 overlays, 4 mixins) |
 | `ComponentRegistry` | `v1alpha2` | `aicr.run/v1beta1` | Required root of an external `--data` catalog; authoring schema consumed by bundling and validation |
@@ -116,11 +117,11 @@ predicate excluded from this ADR's scope. The producer emits the version in its
 parsing the document.
 
 The stable artifact path is at `v1`: `Snapshot`, the default resolved
-`RecipeResult`, `RecipeCriteria`, and bundle provenance. `pkg/client/v1` is the
-Go facade that consumes those artifacts, but this statement does not select a
-REST path family; `/v1` versus `/v2` remains #2112. Local
-authoring/configuration and opt-in or emerging contracts can sit at beta
-honestly.
+`RecipeResult`, `RecipeCriteria`, bundle provenance, and bundle info.
+`pkg/client/v1` is the Go facade that consumes those artifacts, but this
+statement does not select a REST path family; `/v1` versus `/v2` remains
+#2112. Local authoring/configuration and opt-in or emerging contracts can sit
+at beta honestly.
 
 Maturity also constrains shared nested wire types. A field or nested type
 reachable from any `aicr.run/v1` document has GA stability obligations even
