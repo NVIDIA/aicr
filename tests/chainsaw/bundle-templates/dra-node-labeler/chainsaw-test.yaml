@@ -34,6 +34,7 @@ spec:
       try:
         - script:
             content: |
+              set -eu
               AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
               WORK="/tmp/chainsaw-bundle-dra-node-labeler-templates"
               rm -rf "${WORK}" && mkdir -p "${WORK}"
@@ -61,6 +62,7 @@ spec:
       try:
         - script:
             content: |
+              set -eu
               AICR_BIN="${AICR_BIN:?}"
               WORK="/tmp/chainsaw-bundle-dra-node-labeler-templates"
               ${AICR_BIN} bundle --recipe "${WORK}/recipe.yaml" \
