@@ -237,7 +237,7 @@ NAME                                  DISPLAY        VERSION   REPLACES   PHASE
 oc get deployment -n <operator-namespace>
 ```
 
-The readiness gate checks that condition — if you used `--readiness-hooks`, the bundle already waited for these before applying CRs.
+The readiness gate asserts only the first of these, the CSV phase — OLM advances a CSV to `Succeeded` only once the operator's Deployment reports available, so that one signal covers both. If you used `--readiness-hooks`, the bundle already waited on it before applying CRs.
 
 ### 5. Monitor Component Rollout
 
