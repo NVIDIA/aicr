@@ -18,7 +18,9 @@
 #
 # Deliberately excluded:
 #   - docs/design/ and docs/conformance/ (mirrored in .lychee.toml)
-#   - docs/*/index.md landing pages, superseded by the sections below
+#   - docs/user/index.md and docs/integrator/index.md, whose link tables are
+#     superseded by the sections below (docs/contributor/index.md IS published,
+#     as Architecture Overview — it carries more than a link table)
 #   - docs/user/container-images.md and docs/user/component-version-matrix.md,
 #     which are generated with HTML-comment region markers that MDX cannot parse
 navigation:

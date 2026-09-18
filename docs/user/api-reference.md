@@ -254,7 +254,7 @@ curl -s -X POST "http://localhost:8080/v1/recipe" \
   "apiVersion": "aicr.run/v1",
   "kind": "RecipeResult",
   "metadata": {
-    "version": "v0.14.0",
+    "version": "v0.22.0",
     "appliedOverlays": [
       "base",
       "eks",

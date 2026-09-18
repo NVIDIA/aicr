@@ -2282,16 +2282,16 @@ my-bundle/
     values.yaml                    # values nested under the subchart name
     cluster-values.yaml            # dynamic values, also nested
     install.sh                     # helm upgrade --install <name> ./<dir> ...
-  002-kube-prometheus-stack/
-    Chart.yaml
-    charts/kube-prometheus-stack-vXX.Y.Z.tgz
+  002-gpu-operator-post/           # mixed component: recipe-side manifests,
+    Chart.yaml                     #   emitted immediately after its primary
+    templates/                     #   plain local chart, no vendored tarball
+      clusterrole.yaml             #   ordinary template, no helm.sh/hook
     values.yaml
     cluster-values.yaml
     install.sh
-  003-gpu-operator-post/           # mixed component: recipe-side manifests
-    Chart.yaml                     #   plain local chart, no vendored tarball
-    templates/
-      clusterrole.yaml             #   ordinary template, no helm.sh/hook
+  003-kube-prometheus-stack/
+    Chart.yaml
+    charts/kube-prometheus-stack-vXX.Y.Z.tgz
     values.yaml
     cluster-values.yaml
     install.sh
@@ -2398,8 +2398,8 @@ The `--deployer argocd-helm` generates a Helm chart app-of-apps where all non-pr
 
 ```shell
 helm install aicr-bundle ./bundle \
-  --set kubePrometheusStack.prometheus.prometheusSpec.externalLabels.cluster=prod-east \
-  --set kubePrometheusStack.prometheus.prometheusSpec.externalLabels.region=us-east-1
+  --set prometheus.prometheus.prometheusSpec.externalLabels.cluster=prod-east \
+  --set prometheus.prometheus.prometheusSpec.externalLabels.region=us-east-1
 ```
 
 **Examples:**
@@ -2436,11 +2436,11 @@ aicr bundle -r recipe.yaml \
 **Bundle structure with `--dynamic`** (Helm deployer):
 ```
 bundles/
-├── kube-prometheus-stack/
+├── 001-gpu-operator/
+│   └── values.yaml                # No dynamic values, no cluster-values.yaml
+├── 002-kube-prometheus-stack/
 │   ├── values.yaml                # Static values (the dynamic path removed)
 │   └── cluster-values.yaml        # Dynamic values (override before deploying)
-├── gpu-operator/
-│   └── values.yaml                # No dynamic values, no cluster-values.yaml
 ├── deploy.sh                      # Passes -f cluster-values.yaml when present
 └── ...
 ```

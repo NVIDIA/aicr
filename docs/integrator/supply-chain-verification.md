@@ -431,9 +431,9 @@ commit SHA, workflow, and run. A representative slice:
         "githubWorkflowRepository": "NVIDIA/aicr",
         "githubWorkflowRef": "refs/tags/v0.21.1",
         "sourceRepositoryURI": "https://github.com/NVIDIA/aicr",
-        "sourceRepositoryDigest": "ba6cbbe8b1a8fc8b72bb18454c10a3ba31d94a2e",
+        "sourceRepositoryDigest": "41bd4bb7b6449857c1afbf7cfb2a496cb1f83112",
         "runnerEnvironment": "github-hosted",
-        "runInvocationURI": "https://github.com/NVIDIA/aicr/actions/runs/20642050863/attempts/1"
+        "runInvocationURI": "https://github.com/NVIDIA/aicr/actions/runs/34368619680/attempts/1"
       }
     }
   }
