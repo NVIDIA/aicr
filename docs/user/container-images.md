@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **47**
-- Unique images: **111**
+- Components: **48**
+- Unique images: **112**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -63,6 +63,7 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | nfd | helm | node-feature-discovery | 0.19.0 | 1 |
 | nfd-ocp | manifest | — | — | 0 |
 | nfd-ocp-olm | manifest | — | — | 0 |
+| node-problem-detector | helm | node-problem-detector | 2.4.1 | 1 |
 | nodewright-customizations | manifest | — | — | 6 |
 | nodewright-operator | helm | nodewright | v0.17.1 | 3 |
 | nvcre | helm | cluster-readiness-engine | v0.2.0 | 1 |
@@ -278,6 +279,10 @@ _No images extracted._
 ### nfd-ocp-olm
 
 _No images extracted._
+
+### node-problem-detector
+
+- `registry.k8s.io/node-problem-detector/node-problem-detector:v1.35.1`
 
 ### nodewright-customizations
 

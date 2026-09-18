@@ -22,7 +22,7 @@ Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are d
 | `validators/*/Dockerfile` | `dockerfile` |
 | `infra/**/*.tf` | `terraform` (grouped) |
 | `recipes/components/*/values.yaml` | `helm-values` (partial — see limitations) |
-| `recipes/registry.yaml` (34 chart pins) | custom regex manager (`# renovate:` annotations) — **report-only**, see [Registry drift report](#registry-drift-report) |
+| `recipes/registry.yaml` (35 chart pins) | custom regex manager (`# renovate:` annotations) — **report-only**, see [Registry drift report](#registry-drift-report) |
 | `.settings.yaml` (28 tool entries) | custom regex manager (`# renovate:` annotations) |
 | `.settings.yaml` `nvkind` SHA | dedicated git-refs digest customManager (`# renovate-digest:`) |
 | `.settings.yaml` `chainsaw_checksums` | `postUpgradeTasks` → `tools/update-chainsaw-checksums` |
@@ -81,7 +81,7 @@ CI re-runs `make lint-renovate` automatically via `merge-gate.yaml` whenever `.g
 
 ## Registry drift report
 
-The 34 chart pins in `recipes/registry.yaml` are extracted by a custom regex
+The 35 chart pins in `recipes/registry.yaml` are extracted by a custom regex
 manager but never bumped by PR: `packageRules` disables the `registry-chart`
 depType, and [`registry-drift.yaml`](workflows/registry-drift.yaml) re-enables it
 weekly under `RENOVATE_DRY_RUN=full` to produce a Slack digest and a

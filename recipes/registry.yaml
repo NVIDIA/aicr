@@ -301,6 +301,38 @@ components:
           - cainjector.tolerations
           - startupapicheck.tolerations
 
+  - name: node-problem-detector
+    displayName: Node Problem Detector
+    valueOverrideKeys:
+      - npd
+      - nodeproblemdetector
+    healthCheck:
+      assertFile: checks/node-problem-detector/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/deliveryhero/helm-charts
+      defaultChart: node-problem-detector
+      # renovate: datasource=docker depName=ghcr.io/deliveryhero/helm-charts/node-problem-detector
+      defaultVersion: "2.4.1"
+      defaultNamespace: node-problem-detector
+    # No nodeScheduling block on purpose. The only toleration path this chart
+    # exposes is `tolerations`, which components/node-problem-detector/
+    # values.yaml already sets to a wildcard. System-toleration injection
+    # REPLACES that value, so wiring it here would let
+    # --system-node-toleration narrow the wildcard and stop the DaemonSet
+    # scheduling onto GPU-tainted nodes -- the opposite of what it is for.
+    validations:
+      - function: CheckNPDNotDuplicatingProviderNPD
+        # Blocking: two NPD instances race to own the same Node Conditions and
+        # the loser's writes are silently overwritten -- no error anywhere,
+        # just conditions that flap.
+        #
+        # No `conditions:` block on purpose. That field can only express
+        # "run when the criteria match", so it cannot say "permit only the
+        # platforms we have checked". The allowlist lives in the function
+        # (npdQualifiedServices), which rejects unverified platforms, OpenShift
+        # and Talos with a reason specific to each.
+        severity: error
+
   - name: nodewright-operator
     displayName: nodewright
     valueOverrideKeys:
