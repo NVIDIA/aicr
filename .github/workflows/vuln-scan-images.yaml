@@ -162,7 +162,7 @@ jobs:
         run: ./tools/build-validator-binaries
 
       - name: Build and push
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           file: ${{ matrix.dockerfile || format('validators/{0}/Dockerfile', matrix.phase) }}
@@ -249,7 +249,7 @@ jobs:
           file dist/gate
 
       - name: Build and push
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           file: cmd/gate/Dockerfile
@@ -329,21 +329,28 @@ jobs:
           - ghcr.io/nvidia/aicr-validators/conformance
           - ghcr.io/nvidia/aicr-validators/aiperf-bench
           - ghcr.io/nvidia/aicr-gate
-          # AICR does not build the five below. They ship only with the
-          # opt-in nvsentinel-object-monitor (#2612) and nvsentinel-preflight
-          # (#2610) mixins, and the static BOM cannot see a mixin-gated image,
-          # so nothing else would surface a CVE in them. Because they are not
-          # built by this workflow they carry the nvsentinel chart's own
-          # version rather than SCAN_TAG -- see the overrides below.
+          # AICR does not build the seven below. They ship only with the
+          # opt-in nvsentinel-object-monitor (#2612), nvsentinel-preflight
+          # (#2610) and nvsentinel-nic-health-monitor mixins, and the static
+          # BOM cannot see a mixin-gated image, so nothing else would surface
+          # a CVE in them. Because they are not built by this workflow they
+          # carry the nvsentinel chart's own version rather than SCAN_TAG --
+          # see the overrides below.
           - ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
           - ghcr.io/nvidia/nvsentinel/preflight
           - ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag
           - ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback
           - ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
+          - ghcr.io/nvidia/nvsentinel/nic-health-monitor
+          # Third-party, and the only one here not published by NVIDIA: the
+          # chart's global.initContainerImage, used by chown/permission init
+          # containers in the nic-health-monitor and audit-logging paths.
+          - docker.io/bitnamilegacy/os-shell
         include:
           # Keep in lockstep with nvsentinel's defaultVersion in
-          # recipes/registry.yaml; TestObjectMonitorImagePinnedEverywhere and
-          # TestPreflightImagesPinnedEverywhere fail if these drift apart.
+          # recipes/registry.yaml; TestObjectMonitorImagePinnedEverywhere,
+          # TestPreflightImagesPinnedEverywhere and
+          # TestNICHealthMonitorImagePinnedEverywhere fail if these drift apart.
           - image: ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor
             tag: v1.20.0
           - image: ghcr.io/nvidia/nvsentinel/preflight
@@ -354,6 +361,13 @@ jobs:
             tag: v1.20.0
           - image: ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce
             tag: v1.20.0
+          - image: ghcr.io/nvidia/nvsentinel/nic-health-monitor
+            tag: v1.20.0
+          # Versioned independently of the nvsentinel chart -- this tag comes
+          # from the chart's global.initContainerImage, not its appVersion, so
+          # it does not move with defaultVersion.
+          - image: docker.io/bitnamilegacy/os-shell
+            tag: 12-debian-12-r30
     steps:
       - name: Checkout Code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

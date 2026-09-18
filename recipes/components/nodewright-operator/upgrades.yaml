@@ -1,0 +1,170 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# This record describes a boundary above the current pin, which rule 2 permits
+# for manual and blocked because only safe vouches. AICR holds the pin at
+# v0.17.1 until #2593 and #2594 land, and the guidance for crossing v0.18.0 is
+# worth having before the bump rather than after it: reading the migration
+# notes is what qualifies the bump in the first place.
+#
+# The ceiling is v0.18.0 itself, so a jump from below it to v0.19.0 or beyond
+# reports blocked and is told to stop at v0.18.0 — the rename has to be crossed
+# on its own, not composed with whatever follows it.
+#
+# Transcribed from NVIDIA/nodewright docs/getting-started/migration.md, which
+# remains the authoritative account. AICR's own reasons for holding are
+# "Upgrade Notes" > nodewright-operator in docs/user/component-catalog.md.
+apiVersion: aicr.run/v1beta1
+kind: ComponentUpgrades
+component: nodewright-operator
+transitions:
+  - from: "<0.18.0"
+    to: "=0.18.0"
+    verdict: manual
+    summary: >-
+      v0.18.0 renames skyhook.nvidia.com/v1alpha1 Skyhook to
+      nodewright.nvidia.com/v1alpha1 NodeWright, moves DeploymentPolicy to the
+      same group, and shifts the on-node annotation, label and finalizer
+      prefix. An operator-side mirror migrates the objects for you, but
+      completion status is then written only on the new kind and the attempt
+      to mirror it back to the legacy object fails in a reconcile conflict
+      loop, so Skyhook.status stays empty forever. AICR's deployment readiness
+      gate and the nodewright-customizations health check both poll the legacy
+      kind, so they wait on a status that never populates and time out on a
+      cluster where tuning has genuinely finished.
+    precondition: >-
+      Every Skyhook is complete with no nodes in progress. Upstream makes this
+      a requirement rather than a recommendation: the migration relabels the
+      operator's package and per-node ConfigMaps so the post-rename operator
+      adopts them instead of recreating them, and that flow assumes no
+      in-flight package work to disrupt. Check with `kubectl get
+      skyhooks.skyhook.nvidia.com -o
+      custom-columns=NAME:.metadata.name,STATUS:.status.status,INPROGRESS:.status.nodesInProgress`
+      and proceed only when nothing is actively rolling out. paused and
+      disabled objects are fine to leave as they are — the mirror carries that
+      state onto the NodeWright — but do not unpause or enable one until its
+      pre-upgrade package pods are gone.
+    reversible: false
+    affectedResources:
+      - group: skyhook.nvidia.com
+        kinds:
+          - Skyhook
+          - DeploymentPolicy
+    stepsByDeployer:
+      - deployers: [argocd, argocd-helm]
+        steps:
+          - id: upgrade-operator
+            description: >-
+              Bump the operator's chart version in its own Application and
+              sync it, before touching any CR.
+            reason: >-
+              The chart ships both groups' CRDs and RBAC, and the mirror
+              imports each Skyhook into a NodeWright. Per-node state is copied
+              to the nodewright.nvidia.com/* prefix, so packages are not
+              re-run. The new objects are untracked by Argo at this point;
+              it neither prunes nor flags them.
+          - id: rename-crs-in-one-commit
+            description: >-
+              In a single git commit, remove each Skyhook manifest and add the
+              NodeWright equivalent: apiVersion skyhook.nvidia.com/v1alpha1
+              becomes nodewright.nvidia.com/v1alpha1, kind Skyhook becomes
+              NodeWright, metadata.name is unchanged. DeploymentPolicy changes
+              apiVersion only. Then sync.
+            reason: >-
+              Argo adopts the mirror-created NodeWright and prunes the Skyhook
+              in one sync. Leaving both in git opens a window where the mirror
+              and Argo both write the NodeWright and a stale Skyhook re-import
+              stomps the git edit. Rewrite apiVersion and kind only: a blanket
+              substitution also rewrites nodeSelectors and
+              podNonInterruptLabels, which name your labels rather than the
+              operator's, and pointing them at keys nothing carries makes the
+              CR match no node.
+          - id: verify-migration
+            description: >-
+              kubectl get nodewrights.nodewright.nvidia.com lists a NodeWright
+              for each former Skyhook, node annotations are present under the
+              nodewright.nvidia.com/ prefix, and no package re-ran.
+            reason: >-
+              Confirms the mirror adopted live lifecycle position rather than
+              handing the new object a fresh rollout.
+          - id: expect-aicr-readiness-to-fail
+            description: >-
+              Do not read a failing AICR deployment phase on this cluster as a
+              migration error. Until #2593 and #2594 land, the readiness gate
+              and the nodewright-customizations health check poll the legacy
+              Skyhook and will time out.
+            reason: >-
+              This is why AICR pins v0.17.1 and why this record's ceiling
+              stops here. Crossing it is supported by upstream, not yet by
+              AICR's own validation path.
+      - steps:
+          - id: upgrade-operator
+            description: >-
+              helm upgrade the operator chart (flux: reconcile the operator's
+              HelmRelease onto the new chart version), before touching any CR.
+            reason: >-
+              The chart ships both groups' CRDs and RBAC, and the mirror
+              imports each Skyhook into a NodeWright. Per-node state is copied
+              to the nodewright.nvidia.com/* prefix, so packages are not
+              re-run.
+          - id: rename-crs
+            description: >-
+              Rewrite your CR manifests and apply them:
+              sed -e '/^ *apiVersion:/ s|skyhook\.nvidia\.com/|nodewright.nvidia.com/|'
+              -e 's|^\( *kind: *\)Skyhook[[:space:]]*$|\1NodeWright|'
+              my-skyhook.yaml > my-nodewright.yaml
+            reason: >-
+              The mirror already created the object, so this applies as a
+              no-op adoption rather than a fresh create. Rewrite apiVersion
+              and kind only: a blanket substitution also rewrites
+              nodeSelectors and podNonInterruptLabels, which name your labels
+              rather than the operator's, and that turns a no-op adoption into
+              a real spec change against keys nothing carries.
+          - id: delete-legacy-crs
+            description: >-
+              Once the NodeWright exists and reconciles: kubectl delete
+              skyhook.skyhook.nvidia.com <name>, then kubectl delete
+              deploymentpolicy.skyhook.nvidia.com <name>.
+            reason: >-
+              Skyhooks must go before the DeploymentPolicy they reference. The
+              NodeWright survives, because the mirror never deletes it. Legacy
+              per-node state and pre-rename package pods are kept for the
+              LEGACY_CLEANUP_DELAY rollback window and pruned later, not now.
+              Do not remove the skyhook.nvidia.com CRD itself until every
+              legacy object is gone, since that cascade-deletes whatever
+              remains.
+          - id: verify-migration
+            description: >-
+              kubectl get nodewrights.nodewright.nvidia.com lists a NodeWright
+              for each former Skyhook, node annotations are present under the
+              nodewright.nvidia.com/ prefix, and no package re-ran.
+            reason: >-
+              Confirms the mirror adopted live lifecycle position rather than
+              handing the new object a fresh rollout.
+          - id: expect-aicr-readiness-to-fail
+            description: >-
+              Do not read a failing AICR deployment phase on this cluster as a
+              migration error. Until #2593 and #2594 land, the readiness gate
+              and the nodewright-customizations health check poll the legacy
+              Skyhook and will time out.
+            reason: >-
+              This is why AICR pins v0.17.1 and why this record's ceiling
+              stops here. Crossing it is supported by upstream, not yet by
+              AICR's own validation path.
+    references:
+      - https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md
+      - https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md#prerequisite-all-skyhooks-must-be-complete
+      - https://github.com/NVIDIA/aicr/blob/main/docs/user/component-catalog.md#nodewright-operator-staying-on-v017x
+      - https://github.com/NVIDIA/aicr/issues/2593
+      - https://github.com/NVIDIA/aicr/issues/2594

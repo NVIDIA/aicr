@@ -519,6 +519,8 @@ node shape the resolved recipe targets. See
 
 > **`--service rke2` and `--accelerator vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence at [validation.aicr.run](https://validation.aicr.run/) for current coverage.
 
+> **`--service k0s` is Preview**, covering the single `k0s / h200 / ubuntu / training` coordinate. See [k0s H200 Setup](../integrator/k0s-h200-setup.md) for its prerequisites and known gaps.
+
 **Examples:**
 ```shell
 # Basic recipe for Ubuntu on EKS with H100
@@ -1553,7 +1555,7 @@ The report still reports a **breaking boundary** (a major bump, a minor bump whi
 
 `blocked` and `unknown` say opposite things. `blocked` means AICR has something to tell you and a version to stop at: read it and act on it. `unknown` means AICR has nothing for you: read the component's own upstream release notes and decide. Neither is a pass.
 
-**Rollout note: expect red today.** Exactly one registry component ships a transition record so far, so most components that change version report `unknown` and the check exits non-zero on most comparisons. That is a coverage problem being worked ([#2535](https://github.com/NVIDIA/aicr/issues/2535) makes records mandatory per pin bump), not a tool limitation, and it shrinks as records are authored. Use `--fail-on-error=false` if you want the report without the gate in the meantime.
+**Rollout note: expect red today.** Only two registry components ship a transition record so far, so most components that change version report `unknown` and the check exits non-zero on most comparisons. That is a coverage problem being worked ([#2535](https://github.com/NVIDIA/aicr/issues/2535) makes records mandatory per pin bump), not a tool limitation, and it shrinks as records are authored. Use `--fail-on-error=false` if you want the report without the gate in the meantime.
 
 Components whose version is identical on both sides produce no row. Added components are reported with nothing to do; removed components are reported and **stay installed**, because AICR does not uninstall them.
 
@@ -1568,7 +1570,7 @@ Components whose version is identical on both sides produce no row. Added compon
 
 The first renders its record's steps, deployer-scoped, exactly as a `manual` row does: the author marked the move `blocked` and then wrote what to do instead. The other three render none, because the record that carries them describes a different move than the one you asked about. All four name a stopping point.
 
-The fourth exists because a record vouches only as far as its own `to` ceiling. An author cannot have read the migration notes for a release nobody had cut, so a record claiming `>=0.18.0 <0.19.0` says nothing about `0.25.0`, and letting it lend its verdict there would report eight minors as safe on the strength of a two-minor claim. Stop at the assessed ceiling and re-run, or have the record widened.
+The fourth exists because a record vouches only as far as its own `to` ceiling. A record claiming `>=0.18.0 <0.19.0` says nothing about `0.25.0`, and letting it lend its verdict there would report eight minors as safe on the strength of a two-minor claim. Stop at the assessed ceiling and re-run, or have the record widened. This is also how a component deliberately held below a breaking release reports: its record's ceiling sits at that release, so any target above it is told to stop there and take the boundary on its own.
 
 Every row states its reason in the detail block under the table, and `--format json` carries the same thing as `reason` (a stable code: `recorded`, `record-blocks`, `multiple-boundaries`, `undefined-origin`, `beyond-record-ceiling`, `no-record`, `no-boundary-crossed`, `downgrade`, `not-comparable`) plus `explanation`, the sentence naming your versions.
 
