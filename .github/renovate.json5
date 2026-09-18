@@ -3,8 +3,11 @@
   // SPDX-License-Identifier: Apache-2.0
   //
   // Renovate configuration for NVIDIA/aicr.
-  // Runs alongside .github/dependabot.yml during the soft-launch phase; will
-  // replace it after rollout. Extends dependency coverage to .settings.yaml.
+  // Owns every ecosystem except GitHub Actions, which .github/dependabot.yml
+  // keeps permanently — Renovate cannot push to .github/workflows/* with the
+  // auto-issued GITHUB_TOKEN, and this repo runs no App or PAT with `workflows`
+  // scope. That split is the end state, not a migration step; see
+  // .github/dependabot.yml. Extends dependency coverage to .settings.yaml.
   // Workflow: .github/workflows/renovate.yaml (self-hosted via renovatebot/github-action).
   // Schema: https://docs.renovatebot.com/renovate-schema.json
   $schema: "https://docs.renovatebot.com/renovate-schema.json",
@@ -226,7 +229,11 @@
     },
 
     // ---- Grouping: bundle related bumps into single PRs ----
-    // Preserve dependabot's gomod groups verbatim.
+    // These groups were transcribed from dependabot's gomod config so the two
+    // bots produced identically-shaped PRs during the migration. That migration
+    // is now finished — the gomod ecosystem was removed from
+    // .github/dependabot.yml — so these are the only definition of the
+    // grouping, not a mirror of one.
     {
       groupName: "kubernetes",
       matchManagers: ["gomod"],
