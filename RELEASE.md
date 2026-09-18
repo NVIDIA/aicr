@@ -22,8 +22,8 @@ release.
 
 | Version | Status |
 |---------|--------|
-| `0.20.x` (latest released minor) | Supported: receives security fixes |
-| `< 0.20` | End-of-life: upgrade to the latest release |
+| `0.21.x` (latest released minor) | Supported: receives security fixes |
+| `< 0.21` | End-of-life: upgrade to the latest release |
 
 A fix ships in a new patch or minor release cut from `main` under the cadence
 above, never as a backport to an end-of-life version. When AICR reaches 1.0

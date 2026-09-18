@@ -17,7 +17,7 @@ Caption: "Config complexity: manual errors, drift, version mismatches"
 Icon: Mixing bowl with ingredients
 Command: `aicr recipe --service eks --accelerator h100 --intent training --os ubuntu --platform kubeflow -o recipe.yaml`
 Visual: Cluster Snapshot + Intent toggle (Training/Inference) → glowing recipe.yaml
-Callouts: Driver 580.82.07, Device Plugin v0.17.4, CDI Enabled
+Callouts: Driver 580.173.02, GPU Operator v26.7.0, CDI Enabled
 Caption: "Generate hardware-specific optimizations for workload intent"
 
 **Step 2 - BUNDLE**

@@ -33,7 +33,7 @@ When `aicr bundle` resolves that recipe, the `os-talos` mixin:
    Namespace resource with PSA-privileged labels) via the
    `preManifestFiles` field — so the bundler emits a `-pre` folder
    at a lower sync-wave than the corresponding chart.
-3. Adds a `OS.release.ID == talos` constraint to the recipe so the
+3. Adds an `OS.release.ID == talos` constraint to the recipe so the
    bundle won't silently install on a non-Talos cluster.
 
 No operator pre-cluster setup is required. `kubectl apply -f` or an

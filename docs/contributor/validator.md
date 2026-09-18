@@ -1366,8 +1366,10 @@ restricted at runtime to read-only Chainsaw operations
 `apply`, `create`, `delete`, `patch`, `update`, `wait`, `command`,
 `sleep`, `podLogs`, `events`, `describe`, `get`) is rejected with
 `ErrCodeInvalidRequest`, as is an operation that sets both `assert` and
-`error`. PR #1223 will add the same enforcement at lint time so
-violations are caught before they ever reach the validator.
+`error`. PR-time enforcement shipped in #1223:
+`pkg/chainsaw.TestValidateTestReadOnly_RegistryContent` walks every
+registry-declared assert file against this allowlist under `make qualify`,
+so violations are caught before they ever reach the validator.
 
 **Value-gate awareness (#1844).** A registry assert file is static — it
 cannot see the component's effective Helm values. That is a problem for a
@@ -1506,7 +1508,7 @@ Patterns common to all four surfaces.
   `NoCluster` is true, RBAC and Jobs are skipped, all checks report
   `skipped - no-cluster mode`, but constraints still evaluate.
 - **Table-driven tests.** Required for multi-case logic per CLAUDE.md.
-  See `pkg/constraints/constraint_test.go` and
+  See `pkg/constraints/evaluate_test.go` and
   `pkg/bundler/validations/checks_test.go` for the canonical shapes.
 - **Synthetic inputs.** Component validations take a hand-built
   `RecipeResult` and `bundlerConfig`. Container checks take a

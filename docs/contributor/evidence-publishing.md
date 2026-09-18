@@ -258,5 +258,5 @@ signer lands the pointer under a different `<src>` directory.
 
 ## See also
 
-- [ADR-007: Verifiable Recipe Test Evidence](../design/007-recipe-evidence.md) — trust model and bundle format.
+- [ADR-007: Verifiable Recipe Test Evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md) — trust model and bundle format.
 - [`aicr evidence` CLI reference](../user/cli-reference.md#aicr-evidence-sign) — `sign`, `publish`, `verify`.

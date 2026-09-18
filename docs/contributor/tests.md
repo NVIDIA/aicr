@@ -13,8 +13,8 @@ against real cloud accounts.
 
 The pre-push gate is **`make qualify`**. It runs tests with the race
 detector and coverage threshold, lints (golangci-lint + yamllint),
-e2e, vulnerability scan, and license check. CI runs the equivalent — if `make qualify` passes
-locally, CI will pass.
+e2e, vulnerability scan, and license check. CI runs the equivalent plus a few
+CI-only checks (see [The `make qualify` Gate](#the-make-qualify-gate)).
 
 ## Test Surfaces
 
@@ -22,7 +22,7 @@ locally, CI will pass.
 |---|---|---|---|---|
 | **Unit tests (Go)** | Logic exercisable without K8s API | `*_test.go` next to source | `make test` | `make qualify`, push CI |
 | **Integration tests (Go)** | Logic touching the K8s API | `*_test.go` with envtest / fake client | `make test` (Kind for live cases) | `make qualify`, push CI |
-| **Chainsaw health checks** | Component-level post-deploy health | `recipes/checks/<name>/health-check.yaml` | `make check-health COMPONENT=<name>` | Bundle-validate workflow |
+| **Chainsaw health checks** | Component-level post-deploy health | `recipes/checks/<name>/health-check.yaml` | `make check-health COMPONENT=<name>` | `gpu-h100-kind-runtime-test.yaml` |
 | **KWOK matrix tests** | Recipe scheduling shape + deployer output without GPUs | `kwok/scripts/*`, `recipes/overlays/*` | `make kwok-test-deployer RECIPE=… DEPLOYER=…` | `kwok-recipes.yaml` workflow |
 | **E2E tests** | Full pipeline against real cloud accounts | `tools/e2e` | `unset GITLAB_TOKEN && ./tools/e2e` | `make qualify`, e2e workflow |
 
@@ -504,6 +504,8 @@ half of the pipeline and skips deploy-side assertions.
   (filenames, MDX patterns, MDX parse, YAML fences — see
   [Docs MDX Gate](#docs-mdx-gate) and
   [Docs YAML Fence Gate](#docs-yaml-fence-gate)).
+- `tuning-check` — node-tuning profile freshness.
+- `coverage-check` — the committed CUJ/CLI coverage matrix against the tree.
 - `e2e` — the end-to-end pipeline runner.
 - `scan` — Grype vulnerability scan.
 - `license-check` — license header / dependency-license sweep.
@@ -522,8 +524,9 @@ half of the pipeline and skips deploy-side assertions.
   repository-local type closure reachable through transparent aliases, against
   the latest stable release.
 
-CI runs the equivalent. If `make qualify` passes locally on the
-current branch, push CI will pass.
+CI runs the equivalent, plus a few checks that exist only there — the lychee
+link check on `docs/**`, CodeQL, and the GPU test lanes — so a green local
+`make qualify` makes CI likely to pass, not certain.
 
 **Branch lint gate for Go changes.** If a PR changes any `.go` file,
 you must also run:

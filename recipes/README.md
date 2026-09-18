@@ -48,7 +48,6 @@ All recipe metadata and component values are validated as part of `make test`:
 
 ```bash
 make test
-go test -v ./pkg/recipe/... -run TestAllMetadataFilesConformToSchema
 go test -v ./pkg/recipe/... -run TestNoDuplicateCriteriaAcrossOverlays
 ```
 

@@ -7,7 +7,7 @@ attestations, plus admission-policy enforcement and offline/air-gapped
 verification.
 
 For a quick trust overview and how to report a vulnerability, see the
-top-level [`SECURITY.md`](../../SECURITY.md).
+top-level [`SECURITY.md`](https://github.com/NVIDIA/aicr/blob/main/SECURITY.md).
 
 Everything below drives verification from the shell. To do the same
 from Go — verifying bundles, evidence, the recipe catalog, and the
@@ -49,7 +49,6 @@ export VERSION=${TAG#v}  # strip leading 'v' for release filenames
 export IMAGE="ghcr.io/nvidia/aicr"
 export DIGEST=$(crane digest "${IMAGE}:${TAG}")   # crane required; `docker inspect` only resolves a digest after `docker pull`
 export IMAGE_DIGEST="${IMAGE}@${DIGEST}"
-export IMAGE_SBOM="$IMAGE:sha256-$(echo "$DIGEST" | cut -d: -f2).sbom"
 
 # API server image
 export IMAGE_API="ghcr.io/nvidia/aicrd"
@@ -229,7 +228,7 @@ The archive is attached as an OCI referrer, so it is **not** fetched by
 `docker pull` and will not appear in the image's layers. Retrieve it explicitly:
 
 ```bash
-IMAGE="ghcr.io/nvidia/aicr-validators/aiperf-bench:v0.19.0"
+IMAGE="ghcr.io/nvidia/aicr-validators/aiperf-bench:${TAG}"
 
 # 1. Resolve the image to its digest and list what is attached to it.
 DIGEST=$(crane digest "${IMAGE}")
@@ -426,11 +425,11 @@ commit SHA, workflow, and run. A representative slice:
   "verificationResult": {
     "signature": {
       "certificate": {
-        "subjectAlternativeName": "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/v0.8.12",
+        "subjectAlternativeName": "https://github.com/NVIDIA/aicr/.github/workflows/attest-images.yaml@refs/tags/v0.21.1",
         "issuer": "https://token.actions.githubusercontent.com",
-        "githubWorkflowName": "on_tag",
+        "githubWorkflowName": "On Tag Release",
         "githubWorkflowRepository": "NVIDIA/aicr",
-        "githubWorkflowRef": "refs/tags/v0.8.12",
+        "githubWorkflowRef": "refs/tags/v0.21.1",
         "sourceRepositoryURI": "https://github.com/NVIDIA/aicr",
         "sourceRepositoryDigest": "ba6cbbe8b1a8fc8b72bb18454c10a3ba31d94a2e",
         "runnerEnvironment": "github-hosted",
@@ -588,7 +587,7 @@ package URLs):
   "dataLicense": "CC0-1.0",
   "name": "aicr",
   "creationInfo": {
-    "creators": ["Organization: Anchore, Inc", "Tool: syft-1.38.2"]
+    "creators": ["Organization: Anchore, Inc", "Tool: syft-1.52.0"]
   },
   "packages": [
     {
@@ -614,7 +613,7 @@ other:
   "bomFormat": "CycloneDX",
   "specVersion": "1.6",
   "metadata": {
-    "tools": {"components": [{"name": "syft", "version": "1.45.1", "type": "application"}]},
+    "tools": {"components": [{"name": "syft", "version": "1.52.0", "type": "application"}]},
     "component": {"type": "container", "name": "ghcr.io/nvidia/aicr"}
   },
   "components": [
@@ -769,7 +768,7 @@ aicr verify ./my-bundle --min-trust-level verified
 For full CLI flag documentation, see the
 [CLI Reference](../user/cli-reference.md#aicr-verify) (`aicr verify`,
 `aicr bundle --attest`, `aicr trust update`). For a hands-on walkthrough,
-see the [Bundle Attestation Demo](../../demos/bundle-attestation.md).
+see the [Bundle Attestation Demo](https://github.com/NVIDIA/aicr/blob/main/demos/bundle-attestation.md).
 
 ## Enforcing with Admission Policies
 

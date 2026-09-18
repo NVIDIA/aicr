@@ -102,7 +102,7 @@ spec:
       template: ""                   # optional Go template path
     agent:                           # in-cluster snapshot Job pod
       namespace: aicr-validation
-      image: ""                      # default: ghcr.io/nvidia/aicr:latest
+      image: ""                      # default: matches the CLI version (:latest on dev/-next builds)
       imagePullSecrets: []
       # jobName is an optional PREFIX, not a name — the run ID is always
       # appended. serviceAccountName is exact-if-exists: an existing
@@ -156,7 +156,7 @@ spec:
       target: ./bundles              # local dir or oci:// URI
       imageRefs: ""                  # external digest file; OCI output only
     deployment:
-      deployer: helmfile             # helm | helmfile | argocd | argocd-helm | flux | ...
+      deployer: helmfile             # helm | helmfile | argocd | argocd-helm | flux
       repo: ""
       set: []                        # value overrides, "key:path=value"
       dynamic: []
@@ -263,6 +263,8 @@ exclusive** — query by criteria or derive from a snapshot, not both.
 | `criteria.nodes` | int | Target GPU node count |
 | `profile` | string | Optional configuration profile selection in `name=value` form. Empty applies the resolved declaration's default. |
 | `configuration.slurm.accounting.mode` | string | Slurm accounting ownership: `disabled` (default) \| `customer-managed` \| `aicr-provided`; mirrors `--slurm-accounting-mode`. Only valid when the resolved recipe platform is `slurm` (whether from `criteria.platform`, a snapshot, or `--platform`) — an explicit mode (even `disabled`) on any other platform is rejected with `INVALID_REQUEST` |
+| `configuration.runtimeInventory.mode` | string | Runtime AI inventory (`k8s-aibom`) selection: `enabled` \| `disabled`; mirrors `--runtime-inventory` |
+| `configuration.gke.tcpxoInterfaces` | []object | Ordered `interfaceName`/`network` pairs (eth1–eth8) for the `torch-distributed-tcpxo` runtime; mirrors `--gke-tcpxo-interfaces` |
 | `input.snapshot` | string | Snapshot path to derive the recipe from |
 | `output.path` | string | Recipe output path |
 | `output.format` | string | `yaml` \| `json` \| `table` |
@@ -318,7 +320,7 @@ Inputs to `aicr validate`.
 | `evidence.cncf.dir` | string | CNCF AI Conformance evidence directory (`--evidence-dir`) |
 | `evidence.cncf.cncfSubmission` | bool (tri-state) | Emit submission layout; requires `dir` |
 | `evidence.cncf.features` | []string | Empty = all features; honored only with `cncfSubmission` |
-| `evidence.attestation.out` | string | Recipe-evidence result path (v1 for unprofiled recipes, v2 for profiled ones) — setting it **enables** the attestation path |
+| `evidence.attestation.out` | string | Recipe-evidence result path (predicateType v3) — setting it **enables** the attestation path |
 | `evidence.attestation.bom` / `.push` | string | BOM input; OCI ref for the signed bundle push |
 | `evidence.attestation.plainHTTP` / `.insecureTLS` | bool (tri-state) | Push transport options |
 

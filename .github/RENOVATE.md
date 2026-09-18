@@ -23,7 +23,7 @@ Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are d
 | `infra/**/*.tf` | `terraform` (grouped) |
 | `recipes/components/*/values.yaml` | `helm-values` (partial — see limitations) |
 | `recipes/registry.yaml` (35 chart pins) | custom regex manager (`# renovate:` annotations) — **report-only**, see [Registry drift report](#registry-drift-report) |
-| `.settings.yaml` (28 tool entries) | custom regex manager (`# renovate:` annotations) |
+| `.settings.yaml` (39 tool entries) | custom regex manager (`# renovate:` annotations) |
 | `.settings.yaml` `nvkind` SHA | dedicated git-refs digest customManager (`# renovate-digest:`) |
 | `.settings.yaml` `chainsaw_checksums` | `postUpgradeTasks` → `tools/update-chainsaw-checksums` |
 | `.settings.yaml` `helmfile_checksums` | `postUpgradeTasks` → `tools/update-helmfile-checksums` |
