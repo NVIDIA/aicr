@@ -1112,6 +1112,7 @@ gb200-gke-cos-training-kubeflow:
   014-kubeflow-trainer-post/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   014-kubeflow-trainer-post/install.sh: 52644789814af91e233603e6b59ac5e9f24af031cd93ab7c3a2d8596175a14bb
   014-kubeflow-trainer-post/templates/torch-distributed-cluster-training-runtime.yaml: 43469066cda97ab45e7391317079de3d546ecc575c7a037b2f44d5deda146af5
+  014-kubeflow-trainer-post/templates/torch-distributed-rdma-cluster-training-runtime.yaml: d69465fcef3314b46938b3809864d99c3a901fbb9818cbe20dca453b3b15decb
   014-kubeflow-trainer-post/values.yaml: 1718ceee86a061f6b39028307f1e19c5389d71c25b00a9abba716888d680ab00
   015-nvidia-dra-driver-gpu/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   015-nvidia-dra-driver-gpu/install.sh: 12f34fa69a684f89cfce7f9dce6c033d536db6a9145e06ce07ad7ffd435e3fb8
@@ -1127,10 +1128,10 @@ gb200-gke-cos-training-kubeflow:
   017-prometheus-adapter/upstream.env: 9ab918b32522baca13cd37bad7f420a206a19bb763b81041e174fffffe3da724
   017-prometheus-adapter/values.yaml: 95231d7a46d650f96f844ca3734614271152a41f1230022c9d79960e44647c00
   README.md: 416403ded09e8fdbd492b32ba4a14d8e1f7fb680e7e5d18b84fd24c0125edf68
-  bundle-info.yaml: 53bd3b880b6dcceea52de582d6b7dd189997a2782dcbe83d0ed869d932a80327
-  checksums.txt: 779c8f1786d0a05665217912a06cee87b02d8da3f3aed8176681bd02c21d9be5
+  bundle-info.yaml: 72fd359283188ac93f05424966a9a25365d350cc2a1af00e92a8f4b07d89ff0f
+  checksums.txt: be9f4f0d46b6b1de5bb53d06c55ef75345fc0ef45b29db5c65ee62e074cfc70b
   deploy.sh: 953e79b08a94c79c97adaa5e2bcb3b8192576e28062bf07d004878e323ff8309
-  recipe.yaml: c824b562feb14619113cd16ba0be35db7e32b678a4306ed73f5ea2024356c565
+  recipe.yaml: 48b7e25cb03230592717468d373c82c9a3b59e9d702440f9513c05c7b733399c
 gb200-gke-cos-training-slurm:
   001-cert-manager/cluster-values.yaml: 49f560d440b0b58c4ec35c7f72fc187f23b94a69f5f7135482fa7070310bae26
   001-cert-manager/install.sh: 53771e9eb43e824b0cc9277db000fbcb163dbc92d1056e73edacae4b44e79872
