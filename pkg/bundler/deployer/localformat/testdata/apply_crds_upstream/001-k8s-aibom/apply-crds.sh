@@ -129,29 +129,47 @@ capture_bounded() {
 # Recurses into packaged dependencies so a chart whose CRDs arrive through a
 # subchart is covered, matching what `helm show crds` reported.
 collect_crds() { # $1 = chart .tgz, $2 = destination directory
-  local work sub f
-  work="$(mktemp -d)"
+  # Every step is checked explicitly. This function is called from an `if !`
+  # condition, which disables `set -e` inside it, so an unchecked cp or find
+  # would be followed by a successful cleanup and a 0 return. Losing every file
+  # that way reports "chart ships no CRDs" on a deploy that applied nothing;
+  # losing some replaces an incomplete set and carries on. Both are the
+  # fail-open shape this step exists to prevent.
+  local work listing sub f
+  work="$(mktemp -d)" || return 1
   if ! tar -xzf "$1" -C "${work}" 2>/dev/null; then
     rm -rf "${work}"
     return 1
   fi
+  if ! listing="$(find "${work}" -type f -path '*/crds/*' \( -name '*.yaml' -o -name '*.yml' \))"; then
+    rm -rf "${work}"
+    return 1
+  fi
   while IFS= read -r f; do
-    cp "${f}" "${2}/$(printf '%s' "${f#"${work}"/}" | tr '/' '_')"
-  done < <(find "${work}" -type f -path '*/crds/*' \( -name '*.yaml' -o -name '*.yml' \))
+    [[ -z "${f}" ]] && continue
+    if ! cp "${f}" "${2}/$(printf '%s' "${f#"${work}"/}" | tr '/' '_')"; then
+      rm -rf "${work}"
+      return 1
+    fi
+  done <<< "${listing}"
   # A dependency archive that cannot be read fails closed, exactly as the
   # top-level one does. Swallowing it would let a chart whose CRDs live in a
   # packaged subchart fall through to the emptiness guard and report "ships no
-  # CRDs" on a deploy that applied nothing, which is the shape this whole step
-  # exists to prevent. A valid archive that happens not to be a chart is not
-  # this case: it extracts fine and simply contributes no crds/ files.
+  # CRDs" on a deploy that applied nothing. A valid archive that happens not to
+  # be a chart is not this case: it extracts fine and contributes no crds/.
+  if ! listing="$(find "${work}" -type f -path '*/charts/*' -name '*.tgz')"; then
+    rm -rf "${work}"
+    return 1
+  fi
   while IFS= read -r sub; do
+    [[ -z "${sub}" ]] && continue
     if ! collect_crds "${sub}" "${2}"; then
       echo "ERROR: cannot read the packaged dependency ${sub##*/}; refusing to" >&2
       echo "       continue and report its CRDs as absent." >&2
       rm -rf "${work}"
       return 1
     fi
-  done < <(find "${work}" -type f -path '*/charts/*' -name '*.tgz')
+  done <<< "${listing}"
   rm -rf "${work}"
 }
 
@@ -267,32 +285,37 @@ if [[ "${RELEASE_EXISTS}" == "false" ]]; then
   echo "${RELEASE}: no release but CRDs remain from a previous install; updating them."
 fi
 
-# Create or replace, not apply.
+# Server-side apply under Helm's own field manager.
 #
-# Server-side apply resolves conflicts over fields present in the manifest, but
-# deletes an omitted field only when no other manager owns it. Helm created
-# these CRDs, so a schema field or spec.versions entry that a chart bump
-# *removes* stays owned by Helm and survives an apply that exits 0. Replace
-# makes the chart authoritative for the whole object, so removals converge.
+# Two things have to be true at once: the chart must be authoritative, so a
+# field or spec.versions entry it removes actually disappears, and the call has
+# to work on a CRD that already exists.
 #
-# This is the semantic ownsCRDs was audited for: Flux uses
-# spec.upgrade.crds: CreateReplace for these same components, and the audit
-# criteria (sole ownership, no spec.conversion.strategy: Webhook) exist because
-# replace discards a runtime-injected caBundle. Applying different update
-# semantics per deployer for one audited flag is the thing to avoid.
+# `kubectl replace` cannot do the second. Kubernetes rejects an update whose
+# object carries no metadata.resourceVersion, and kubectl forwards the manifest
+# as given, so replacing a chart's raw CRD fails on precisely the upgrade this
+# step exists for. Verified against a live cluster: the API returns a Conflict.
 #
-# One file per CRD document, straight from the archive, so no separator
-# parsing is involved and the loop works the same on Helm 3 and Helm 4.
+# Plain `kubectl apply --server-side` cannot do the first. Server-side apply
+# removes an omitted field only when the applying manager owns it, and these
+# CRDs are owned by Helm, so a removal would survive under the default
+# `kubectl` manager.
+#
+# Applying as `helm` satisfies both. The apply adopts Helm's fieldset, so
+# anything Helm owned and the chart no longer declares is pruned, and apply
+# creates the object when it is absent. Verified on a live cluster against both
+# a Helm 4 install (field manager `helm`, operation Apply) and a Helm 3 install
+# (same manager, operation Update): a removed schema property disappeared in
+# both cases. --force-conflicts is still required because other managers may
+# hold individual fields.
 while IFS= read -r doc; do
   # A whitespace-only file under crds/ is not an error, but handing it to
   # kubectl is: "no objects passed" aborts the deploy, and because the loop is
   # sorted it can do so before the real CRDs are ever reached.
   grep -q '[^[:space:]]' "${doc}" || continue
-  if capture_bounded kubectl create -f "${doc}" ${KUBECONFIG_FLAG:-}; then
-    continue
-  fi
-  if ! capture_bounded kubectl replace -f "${doc}" ${KUBECONFIG_FLAG:-}; then
-    echo "ERROR: could not create or replace a ${RELEASE} CRD: $(cat "${BOUNDED_OUT}")" >&2
+  if ! capture_bounded kubectl apply --server-side --force-conflicts \
+    --field-manager=helm -f "${doc}" ${KUBECONFIG_FLAG:-}; then
+    echo "ERROR: could not apply a ${RELEASE} CRD: $(cat "${BOUNDED_OUT}")" >&2
     exit 1
   fi
 done < <(find "${CRD_DIR}" -type f -name '*.y*ml' | sort)

@@ -219,8 +219,7 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 		"only absent release AND no CRDs skips":     `    echo "${RELEASE}: no release and no existing CRDs; helm install creates them."`,
 		"bound kills a wedged client":               `  "${TIMEOUT_BIN}" -k 5 "${CRD_STEP_TIMEOUT}" "$@" </dev/null`,
 		"missing timeout fails closed":              "cannot be bounded",
-		"create-or-replace, not apply":              `  if capture_bounded kubectl create -f "${doc}" ${KUBECONFIG_FLAG:-}; then`,
-		"replace makes the chart authoritative":     `  if ! capture_bounded kubectl replace -f "${doc}" ${KUBECONFIG_FLAG:-}; then`,
+		"applies under helm's field manager":        `    --field-manager=helm -f "${doc}" ${KUBECONFIG_FLAG:-}; then`,
 		"both phases share one artifact":            `if ! capture_bounded helm pull "${CHART}" ${REPO:+--repo "${REPO}"} --version "${VERSION}" \`,
 		"CRDs come from the archive, not show crds": `if ! collect_crds "${PULLED_CHART}" "${CRD_DIR}"; then`,
 	}
@@ -238,7 +237,7 @@ func TestApplyCRDsScript_GatesAndBounds(t *testing.T) {
 	// into the deploy path once already, so it must stay in a file.
 	for _, banned := range []string{
 		"$(helm show crds", "$(helm list", "$(run_bounded", "| kubectl apply",
-		"${crds//", "${retained//", "kubectl apply --server-side", "capture_bounded helm show", "sed -n '/^---$/,$p'",
+		"${crds//", "${retained//", "capture_bounded helm show", "sed -n '/^---$/,$p'",
 	} {
 		if strings.Contains(got, banned) {
 			t.Errorf("apply-crds.sh runs %q outside run_bounded; an unbounded call hangs "+
@@ -492,7 +491,9 @@ func helmStub(listBody, tgz string) string {
 		"  pull)\n" +
 		"    dest=.\n" +
 		"    while [[ $# -gt 0 ]]; do [[ \"$1\" == --destination ]] && dest=\"$2\"; shift; done\n" +
-		"    cp " + tgz + " \"${dest}/pulled.tgz\" ;;\n" +
+		// cat, not cp: a test that stubs cp to fail must break collect_crds,
+		// not this stub's own copy.
+		"    cat " + tgz + " >\"${dest}/pulled.tgz\" ;;\n" +
 		"esac\nexit 0\n"
 }
 
@@ -510,7 +511,7 @@ func kubectlStub(applied, getOutput string) string {
 	return "#!/usr/bin/env bash\n" +
 		"case \"$1\" in\n" +
 		"  get) echo '" + getOutput + "' ;;\n" +
-		"  create|replace)\n" +
+		"  apply)\n" +
 		"    f=\"\"; prev=\"\"\n" +
 		"    for a in \"$@\"; do [[ \"${prev}\" == -f ]] && f=\"${a}\"; prev=\"${a}\"; done\n" +
 		"    if [[ -n \"${f}\" && -e \"${f}\" ]] && ! grep -q '[^[:space:]]' \"${f}\"; then\n" +
@@ -945,7 +946,7 @@ func TestApplyCRDsScript_IgnoresPreexistingTarball(t *testing.T) {
 	seen := filepath.Join(t.TempDir(), "seen")
 	kubectl := "#!/usr/bin/env bash\n" +
 		"case \"$1\" in\n" +
-		"  create|replace)\n" +
+		"  apply)\n" +
 		"    for a in \"$@\"; do [[ -f \"$a\" ]] && cat \"$a\" >>" + seen + "; done\n" +
 		"    touch " + applied + " ;;\n" +
 		"esac\nexit 0\n"
@@ -1005,5 +1006,48 @@ func TestApplyCRDsScript_RejectsTimeoutOverrideOfZero(t *testing.T) {
 				t.Errorf("an external call ran before the override was validated\n%s", out)
 			}
 		})
+	}
+}
+
+// TestApplyCRDsScript_FailsClosedWhenCollectionLosesFiles injects a copy
+// failure into collect_crds and asserts the deploy stops.
+//
+// The function is called from an `if !` condition, which disables `set -e`
+// inside it, so an unchecked cp or find could be followed by a successful
+// cleanup and a 0 return. Losing every file that way reports "chart ships no
+// CRDs" on a deploy that applied nothing; losing some replaces an incomplete
+// set and continues. The destination is made read-only here, which is the
+// cheapest way to make every cp fail for real rather than simulating it.
+func TestApplyCRDsScript_FailsClosedWhenCollectionLosesFiles(t *testing.T) {
+	for _, bin := range []string{"bash", "tar"} {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not available", bin)
+		}
+	}
+	scriptPath := writeApplyCRDs(t, ownsCRDsComponent(true))
+	applied := filepath.Join(t.TempDir(), "applied")
+
+	// Fail the copy itself. collect_crds is the only caller of cp, so shadowing
+	// it on PATH injects the failure at exactly the step under test, without
+	// depending on how mktemp treats an unwritable TMPDIR.
+	path := stubPATH(t, map[string]string{
+		"helm":    helmStub("echo k8s-aibom", chartArchiveWithCRD(t)),
+		"kubectl": kubectlStub(applied, ""),
+		"timeout": passthroughTimeoutStub,
+		"cp":      "#!/usr/bin/env bash\nexit 1\n",
+	})
+	cmd := exec.Command("bash", scriptPath)
+	cmd.Env = append(os.Environ(), "PATH="+path)
+	out, err := cmd.CombinedOutput()
+
+	if err == nil {
+		t.Fatalf("script succeeded despite being unable to collect any CRDs\n%s", out)
+	}
+	if strings.Contains(string(out), "ships no CRDs") {
+		t.Fatalf("a collection failure was reported as the chart having no CRDs, which "+
+			"is the fail-open shape this step exists to prevent\n%s", out)
+	}
+	if _, statErr := os.Stat(applied); statErr == nil {
+		t.Fatalf("CRDs were applied from an incomplete collection\n%s", out)
 	}
 }
