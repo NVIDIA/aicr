@@ -581,6 +581,15 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	repoURL, targetRevision := resolveRepoSettings(g)
 
+	// All three are baked unconditionally below: repoURL and targetRevision
+	// into app-of-apps.yaml and every child application.yaml, appName into
+	// the parent's metadata.name.
+	output.Source = deployer.Source{
+		RepoURL:        repoURL,
+		TargetRevision: targetRevision,
+		AppName:        g.appName(),
+	}
+
 	// Sort components by deployment order; validate names early.
 	components := deployer.SortComponentRefsByDeploymentOrder(
 		g.RecipeResult.ComponentRefs,

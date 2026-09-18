@@ -2850,7 +2850,7 @@ func (b *DefaultBundler) buildBundleInfo(
 				Digest:  recipeDigest,
 				Version: recipeResult.Metadata.Version,
 			},
-			Settings: b.bundleInfoSettings(),
+			Settings: b.bundleInfoSettings(out),
 		},
 		Layout: bundleinfo.Layout{
 			Entrypoint: out.Entrypoint,
@@ -2875,19 +2875,17 @@ func (b *DefaultBundler) buildBundleInfo(
 // files.
 //
 // repoURL, targetRevision and appName are the settings that survive that rule
-// on some deployers and not others, so the switch mirrors buildDeployer's:
-// helm and helmfile generators declare none of the three, and the fields are
-// omitempty, so an unconsumed setting leaves no key behind.
-//
-// argocd-helm is the case that does not follow from buildDeployer. It is
-// handed RepoURL and TargetRevision there, yet neither reaches the bundle:
-// that chart is URL-portable, so every baked occurrence is rewritten to a
-// `.Values` directive and the root values.yaml writes both keys empty
-// (argocdhelm.writeValuesFiles) — buildDeployer even warns that --repo is
-// ignored. Recording them would stamp a private GitOps URL into the one
-// artifact built for registry publication, in the only place it appears.
-func (b *DefaultBundler) bundleInfoSettings() bundleinfo.Settings {
-	s := bundleinfo.Settings{
+// on some deployers and not others, and they are read from out rather than
+// from b.Config: the deployer reports what it resolved and baked, defaults
+// and placeholders included, so an unconfigured --repo is recorded as the
+// placeholder URL the bundle actually ships instead of vanishing under
+// omitempty. A deployer that consumes none of the three reports none, and the
+// fields are omitempty, so no key is left behind.
+func (b *DefaultBundler) bundleInfoSettings(out *deployer.Output) bundleinfo.Settings {
+	return bundleinfo.Settings{
+		RepoURL:            out.Source.RepoURL,
+		TargetRevision:     out.Source.TargetRevision,
+		AppName:            out.Source.AppName,
 		Checksums:          b.Config.IncludeChecksums(),
 		Attested:           b.Config.Attest(),
 		VendorCharts:       b.Config.VendorCharts(),
@@ -2900,21 +2898,6 @@ func (b *DefaultBundler) bundleInfoSettings() bundleinfo.Settings {
 			b.Config.SystemNodeSelector(), b.Config.SystemNodeTolerations(),
 			b.Config.AcceleratedNodeSelector(), b.Config.AcceleratedNodeTolerations()),
 	}
-
-	switch b.Config.Deployer() {
-	case config.DeployerArgoCD:
-		s.RepoURL = b.Config.RepoURL()
-		s.TargetRevision = b.Config.TargetRevision()
-		s.AppName = b.Config.AppName()
-	case config.DeployerArgoCDHelm:
-		s.AppName = b.Config.AppName()
-	case config.DeployerFlux:
-		s.RepoURL = b.Config.RepoURL()
-		s.TargetRevision = b.Config.TargetRevision()
-	case config.DeployerHelm, config.DeployerHelmfile:
-	}
-
-	return s
 }
 
 // nodeScheduling converts the config's corev1 tolerations to the artifact's

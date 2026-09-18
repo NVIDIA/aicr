@@ -48,6 +48,26 @@ type Release struct {
 	Manifest  string
 }
 
+// Source is the deployment-source coordinates a deployer resolved and baked
+// into the bundle it just wrote.
+//
+// A deployer sets a field only when the resolved value is observable in a
+// file it emitted, and it reports the value it actually wrote — including a
+// default or a placeholder the caller never supplied, because the placeholder
+// is what the bundle ships. A field left empty means this deployer's bundle
+// never mentions that coordinate, which is not the same as the caller
+// omitting it.
+type Source struct {
+	// RepoURL is the repository the emitted manifests point at.
+	RepoURL string
+
+	// TargetRevision is the revision those manifests pin.
+	TargetRevision string
+
+	// AppName is the parent application name the bundle installs under.
+	AppName string
+}
+
 // Output contains the result of deployer generation.
 type Output struct {
 	// Files contains the paths of generated files.
@@ -80,6 +100,11 @@ type Output struct {
 	// order. The ordering is normative: consumers read sequence from list
 	// position, so a deployer must append in the order it deploys.
 	Releases []Release
+
+	// Source is what the deployer resolved for the bundle's deployment
+	// source, reported rather than re-derived by the caller: re-deriving it
+	// would put each deployer's defaults in a second place to drift from.
+	Source Source
 }
 
 // AddDataFiles resolves each relative data file path against outputDir (via

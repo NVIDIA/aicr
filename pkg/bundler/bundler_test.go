@@ -762,8 +762,21 @@ func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
 	}
 }
 
+// sourceSettingsRecipeResult is a one-component recipe every deployer
+// generates from. It spells the component type as recipe.ComponentTypeHelm
+// rather than the lowercase literal closedWorldRecipeResult uses: flux
+// switches on the typed constant and rejects anything else, where the other
+// four deployers never inspect the field.
+func sourceSettingsRecipeResult() *recipe.RecipeResult {
+	rr := closedWorldRecipeResult()
+	rr.ComponentRefs[0].Type = recipe.ComponentTypeHelm
+	rr.ComponentRefs[0].Chart = "gpu-operator"
+	rr.ComponentRefs[0].Namespace = "gpu-operator"
+	return rr
+}
+
 // TestBundleInfoScopesSourceSettingsPerDeployer pins which deployers record
-// repoURL, targetRevision and appName.
+// repoURL, targetRevision and appName, and with what value.
 //
 // TestSettingsKeysAreAllowlisted in pkg/bundler/bundleinfo cannot catch this:
 // all three keys are legitimate, and what is wrong is pairing one with a
@@ -773,10 +786,18 @@ func TestBundleInfoIgnoresStaleProvenance(t *testing.T) {
 // deployer built for OCI publication, a private GitOps URL in the only place
 // in the artifact it appears.
 //
-// Each expectation below was established against the emitted tree, not
-// against buildDeployer's argument lists: argocd-helm is handed RepoURL and
-// TargetRevision and shows neither, because the chart is URL-portable and
-// rewrites both into `.Values` directives.
+// The unset cases are the other half: a deployer that resolves a default when
+// the operator passes nothing bakes that default into the bundle, so the
+// record has to carry it. Recording the raw config value instead would leave
+// the key absent and tell a consumer nothing was configured, while the bundle
+// ships an unusable placeholder URL.
+//
+// Each case runs the real generator and asserts against its output rather
+// than against buildDeployer's argument lists: argocd-helm is handed RepoURL
+// and TargetRevision and shows neither, because the chart is URL-portable and
+// rewrites both into `.Values` directives. Every recorded repoURL is then
+// looked for in the emitted tree, which is what makes "already observable in
+// the bundle" an assertion instead of a claim.
 func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
 	const (
 		repoURL        = "https://github.com/my-org/private-gitops.git"
@@ -785,43 +806,92 @@ func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
 	)
 
 	tests := []struct {
+		name               string
 		deployer           config.DeployerType
+		configure          bool
 		wantRepoURL        string
 		wantTargetRevision string
 		wantAppName        string
 	}{
-		// helm and helmfile: the generators declare none of the three fields.
-		{deployer: config.DeployerHelm},
-		{deployer: config.DeployerHelmfile},
+		// helm and helmfile: the generators declare none of the three fields,
+		// configured or not.
+		{name: "helm", deployer: config.DeployerHelm, configure: true},
+		{name: "helm unset", deployer: config.DeployerHelm},
+		{name: "helmfile", deployer: config.DeployerHelmfile, configure: true},
+		{name: "helmfile unset", deployer: config.DeployerHelmfile},
 		{
+			name:               "argocd",
 			deployer:           config.DeployerArgoCD,
+			configure:          true,
 			wantRepoURL:        repoURL,
 			wantTargetRevision: targetRevision,
 			wantAppName:        appName,
 		},
-		{deployer: config.DeployerArgoCDHelm, wantAppName: appName},
 		{
+			// The deployers' own fallbacks. They are spelled out here rather
+			// than read back from the deployer so a silent change to either
+			// one has to be restated in a test.
+			name:               "argocd unset",
+			deployer:           config.DeployerArgoCD,
+			wantRepoURL:        "https://github.com/YOUR-ORG/YOUR-REPO.git",
+			wantTargetRevision: "main",
+			wantAppName:        "nvidia-stack",
+		},
+		{
+			name:        "argocd-helm",
+			deployer:    config.DeployerArgoCDHelm,
+			configure:   true,
+			wantAppName: appName,
+		},
+		{
+			name:        "argocd-helm unset",
+			deployer:    config.DeployerArgoCDHelm,
+			wantAppName: "aicr-stack",
+		},
+		{
+			name:               "flux",
 			deployer:           config.DeployerFlux,
+			configure:          true,
 			wantRepoURL:        repoURL,
 			wantTargetRevision: targetRevision,
+		},
+		{
+			name:               "flux unset",
+			deployer:           config.DeployerFlux,
+			wantRepoURL:        "https://github.com/YOUR_ORG/YOUR_REPO.git",
+			wantTargetRevision: "main",
 		},
 	}
 
 	covered := make(map[string]bool, len(tests))
 	for _, tt := range tests {
 		covered[tt.deployer.String()] = true
-		t.Run(tt.deployer.String(), func(t *testing.T) {
-			b, err := New(WithConfig(config.NewConfig(
-				config.WithDeployer(tt.deployer),
-				config.WithRepoURL(repoURL),
-				config.WithTargetRevision(targetRevision),
-				config.WithAppName(appName),
-			)))
+		t.Run(tt.name, func(t *testing.T) {
+			opts := []config.Option{config.WithDeployer(tt.deployer)}
+			if tt.configure {
+				opts = append(opts,
+					config.WithRepoURL(repoURL),
+					config.WithTargetRevision(targetRevision),
+					config.WithAppName(appName),
+				)
+			}
+			b, err := New(WithConfig(config.NewConfig(opts...)))
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
 
-			got := b.bundleInfoSettings()
+			ctx := context.Background()
+			d, err := b.buildDeployer(ctx, sourceSettingsRecipeResult(), nil, nil)
+			if err != nil {
+				t.Fatalf("buildDeployer: %v", err)
+			}
+			outDir := t.TempDir()
+			out, err := d.Generate(ctx, outDir)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+
+			got := b.bundleInfoSettings(out)
 			if got.RepoURL != tt.wantRepoURL {
 				t.Errorf("repoURL = %q, want %q", got.RepoURL, tt.wantRepoURL)
 			}
@@ -830,6 +900,11 @@ func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
 			}
 			if got.AppName != tt.wantAppName {
 				t.Errorf("appName = %q, want %q", got.AppName, tt.wantAppName)
+			}
+			if got.RepoURL != "" && !treeContains(t, outDir, got.RepoURL) {
+				t.Errorf("recorded repoURL %q appears in no file the bundle emitted; "+
+					"a setting belongs in the record only when the bundle already shows it",
+					got.RepoURL)
 			}
 		})
 	}
@@ -841,6 +916,30 @@ func TestBundleInfoScopesSourceSettingsPerDeployer(t *testing.T) {
 			t.Errorf("deployer %q has no case; declare which source settings its bundle shows", name)
 		}
 	}
+}
+
+// treeContains reports whether any file under root contains want.
+func treeContains(t *testing.T, root, want string) bool {
+	t.Helper()
+
+	found := false
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || found || entry.IsDir() {
+			return err
+		}
+		data, readErr := os.ReadFile(path) //nolint:gosec // test-local temp tree
+		if readErr != nil {
+			return readErr
+		}
+		if bytes.Contains(data, []byte(want)) {
+			found = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", root, err)
+	}
+	return found
 }
 
 func TestNew_AttestWithoutBinaryAttestation(t *testing.T) {

@@ -388,6 +388,11 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 
 	output := &deployer.Output{Files: make([]string, 0)}
 	output.Entrypoint = fileChart
+	// AppName alone: this chart is URL-portable, so the repo URL and the
+	// target revision are rewritten into `.Values` directives rather than
+	// baked, and the root values.yaml writes both keys empty. The parent
+	// Application's metadata.name is the one coordinate the chart fixes.
+	output.Source = deployer.Source{AppName: cmp.Or(g.AppName, DefaultAppName)}
 
 	// Write Chart.yaml
 	chartName := g.chartName()

@@ -223,8 +223,17 @@ That test is applied per deployer, so `repoURL`, `targetRevision` and
 `repoURL` and `targetRevision` under `flux`, `appName` alone under
 `argocd-helm` (whose chart is URL-portable and takes the publish location at
 `helm install --set repoURL=...` time, which is also why `--repo` warns that
-it is ignored there), and none of the three under `helm` or `helmfile`. The
-keys are omitted entirely rather than written empty.
+it is ignored there), and none of the three under `helm` or `helmfile`. Where
+a key does not apply it is omitted entirely rather than written empty.
+
+Each deployer reports what it resolved, so the recorded value is the one the
+bundle carries — including the fallback it applies when you pass no flag. A
+`flux` bundle built without `--repo` records
+`repoURL: https://github.com/YOUR_ORG/YOUR_REPO.git`, the same placeholder
+written into `sources/gitrepo-*.yaml`, and `targetRevision: main`. That is
+deliberate: the placeholder is what ships, and a bundle that needs its repo
+URL replaced before it can be applied should say so rather than look
+unconfigured.
 
 ### Generated chart versions
 

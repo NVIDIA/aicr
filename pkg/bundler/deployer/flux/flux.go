@@ -334,6 +334,13 @@ func (g *Generator) Generate(ctx context.Context, outputDir string) (*deployer.O
 	var gitSources map[string]*GitRepoSourceData
 	if g.OCISourceName == "" {
 		gitSources = collectGitSources(g.resolveRepoURL(), g.resolveTargetRevision(), ns)
+		// Reported only on this branch: OCI mode writes no GitRepository and
+		// no HelmRelease that names one, so neither coordinate reaches any
+		// file in that bundle, whatever the caller passed.
+		output.Source = deployer.Source{
+			RepoURL:        g.resolveRepoURL(),
+			TargetRevision: g.resolveTargetRevision(),
+		}
 	} else {
 		gitSources = make(map[string]*GitRepoSourceData)
 	}
