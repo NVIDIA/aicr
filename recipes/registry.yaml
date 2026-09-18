@@ -301,6 +301,38 @@ components:
           - cainjector.tolerations
           - startupapicheck.tolerations
 
+  - name: node-problem-detector
+    displayName: Node Problem Detector
+    valueOverrideKeys:
+      - npd
+      - nodeproblemdetector
+    healthCheck:
+      assertFile: checks/node-problem-detector/health-check.yaml
+    helm:
+      defaultRepository: oci://ghcr.io/deliveryhero/helm-charts
+      defaultChart: node-problem-detector
+      # renovate: datasource=docker depName=ghcr.io/deliveryhero/helm-charts/node-problem-detector
+      defaultVersion: "2.4.1"
+      defaultNamespace: node-problem-detector
+    # No nodeScheduling block on purpose. The only toleration path this chart
+    # exposes is `tolerations`, which components/node-problem-detector/
+    # values.yaml already sets to a wildcard. System-toleration injection
+    # REPLACES that value, so wiring it here would let
+    # --system-node-toleration narrow the wildcard and stop the DaemonSet
+    # scheduling onto GPU-tainted nodes -- the opposite of what it is for.
+    validations:
+      - function: CheckNPDNotDuplicatingProviderNPD
+        # Blocking: two NPD instances race to own the same Node Conditions and
+        # the loser's writes are silently overwritten -- no error anywhere,
+        # just conditions that flap.
+        #
+        # No `conditions:` block on purpose. That field can only express
+        # "run when the criteria match", so it cannot say "permit only the
+        # platforms we have checked". The allowlist lives in the function
+        # (npdQualifiedServices), which rejects unverified platforms, OpenShift
+        # and Talos with a reason specific to each.
+        severity: error
+
   - name: nodewright-operator
     displayName: nodewright
     valueOverrideKeys:
@@ -308,12 +340,16 @@ components:
       - skyhook
     healthCheck:
       assertFile: checks/nodewright-operator/health-check.yaml
+    upgrades:
+      file: components/nodewright-operator/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/nvidia/nodewright/charts
       defaultChart: nodewright
       # v0.18.0 renames Skyhook to NodeWright and writes status only on the new
-      # kind; do not bump past v0.17.x until the upgrade guidance (design 021)
-      # lands. See #2595.
+      # kind, which the deployment readiness gate does not read; v0.19.0 carries
+      # no fix. Do not bump past v0.17.x before the prerequisites in
+      # "Upgrade Notes" > nodewright-operator in docs/user/component-catalog.md.
+      # See #2593 and #2594.
       # renovate: datasource=docker depName=ghcr.io/nvidia/nodewright/charts/nodewright
       defaultVersion: v0.17.1
       defaultNamespace: skyhook
@@ -377,6 +413,21 @@ components:
           which deadlocks nodewright packages that declare interrupts on first
           install (NVIDIA/nodewright#296). Pass keyed tolerations instead, e.g.
           --accelerated-node-toleration nvidia.com/gpu:NoSchedule."
+      - function: CheckGB300HostKernelGranule
+        # Advisory, not blocking: a 4k-granule host still boots and runs, it
+        # just comes up without the 512M pool the profile sizes. Bundle time
+        # has no cluster-side signal to tell the two apart.
+        severity: info
+        conditions:
+          service:
+            - generic
+          accelerator:
+            - gb300
+        message: "nvidia-gb300-performance sizes hugepages for a 64k-page ARM64
+          kernel (2M + 512M). On a 4k-granule host image the hugepagesz=512M
+          clause is rejected at boot and its paired hugepages= count is dropped
+          silently, so the node runs without that pool. Prefer a 64k host
+          kernel; see docs/integrator/components/nodewright.md."
 
   - name: nvsentinel
     # Sole owner of its CRDs and no webhook conversion (audited, #2264).
@@ -404,15 +455,26 @@ components:
           - global.systemNodeSelector
         tolerationPaths:
           - global.systemNodeTolerations
-    # Opt-in surface for the nvsentinel-observability mixin (#2617) and the
-    # nvsentinel-object-monitor mixin (#2612): the exact leaf paths a mixin
-    # may set on this already-base-chained component.
-    # global.tracing.endpoint is deliberately absent -- it must come from
-    # outside the mixin (a leaf recipe's own override, or an operator
-    # --set), never from a mixin, so
+    # Opt-in surface for the nvsentinel-observability (#2617),
+    # nvsentinel-object-monitor (#2612), nvsentinel-preflight (#2610) and
+    # nvsentinel-nic-health-monitor mixins: the exact leaf paths a mixin may
+    # set on this already-base-chained component. global.tracing.endpoint is
+    # deliberately absent -- it must come from outside the mixin (a leaf
+    # recipe's own override, or an operator --set), never from a mixin, so
     # CheckNVSentinelTracingEndpointRequired always has a real value to
     # demand. See pkg/recipe/metadata_store.go's mixinOverridesSafeForMerge
     # for how this allowlist is enforced.
+    #
+    # preflight.initContainers is allowlisted, and the mixin restates the whole
+    # list, because the chart's default is not safe here: preflight-nccl-allreduce
+    # is injected into every GPU pod, but POD_NAME is injected only when the pod
+    # carries a gang annotation at CREATE. A non-gang pod therefore fails the
+    # check's own config load and is stuck in Init:Error on healthy hardware.
+    # defaultEnabled is the chart's only per-check switch and it lives inside the
+    # list, so owning the list is the only way to turn that check off.
+    # Restating pins chart content (images, thresholds, the DCGM address), so
+    # TestNVSentinelPreflightInitContainersMatchChart diffs the mixin's list
+    # against the chart's on every render-check run.
     mixinSafeOverridePaths:
       - global.auditLogging.enabled
       - global.auditLogging.logRequestBody
@@ -424,6 +486,19 @@ components:
       - global.tracing.insecure
       - global.kubernetesObjectMonitor.enabled
       - kubernetes-object-monitor.policies
+      - global.preflight.enabled
+      - preflight.processingStrategy
+      - preflight.webhook.failurePolicy
+      - preflight.gangCoordination.enabled
+      - preflight.gangDiscovery.name
+      - preflight.gangDiscovery.annotationKeys
+      - preflight.gangDiscovery.podGroupGVR.group
+      - preflight.gangDiscovery.podGroupGVR.version
+      - preflight.gangDiscovery.podGroupGVR.resource
+      - preflight.gangDiscovery.minCountExpr
+      - preflight.initContainers
+      - global.nicHealthMonitor.enabled
+      - nic-health-monitor.processingStrategy
     validations:
       # Blocking: the NVSentinel labeler decides
       # nvsentinel.dgxc.nvidia.com/driver.installed by watching for a GPU
@@ -470,6 +545,30 @@ components:
       # doesn't set global.tracing.enabled.
       - function: CheckNVSentinelTracingEndpointRequired
         severity: error
+      # Blocking: the preflight DCGM check reaches the hostengine at a fixed
+      # address inside preflight.initContainers, so it is only correct while
+      # gpu-operator sits in its default namespace. The os-talos mixin
+      # relocates it, and the mismatch is invisible until a GPU pod starts in
+      # a labeled namespace. A no-op unless global.preflight.enabled is set.
+      - function: CheckNVSentinelPreflightDCGMReachable
+        severity: error
+      # Blocking: the mixin's kai-scheduler dependencyRef only orders the
+      # install, and the bundler prunes an edge to a declared-but-disabled
+      # component. Without the PodGroup CRD the preflight controller
+      # crash-loops, and failurePolicy: Ignore then admits every GPU pod
+      # unchecked. A no-op unless preflight gang discovery targets KAI.
+      - function: CheckNVSentinelPreflightGangSchedulerRequired
+        severity: error
+      # Blocking: nic-health-monitor discovers which NICs to check from the
+      # GPU-to-NIC topology metadata-collector writes to
+      # /var/lib/nvsentinel/gpu_metadata.json. Enabled without it, and
+      # without a usable nicInclusionRegexOverride -- one whose every
+      # comma-separated pattern compiles, since the monitor refuses to
+      # start otherwise -- the DaemonSet renders, deploys, and checks
+      # nothing, invisible to `aicr bundle`/`aicr validate`. A no-op for
+      # every recipe that doesn't set global.nicHealthMonitor.enabled.
+      - function: CheckNVSentinelNicHealthMonitorRequiresMetadataCollector
+        severity: error
 
   - name: nvidia-dra-driver-gpu
     displayName: nvidia-dra-driver-gpu
@@ -494,6 +593,29 @@ components:
           - kubeletPlugin.nodeSelector
         tolerationPaths:
           - kubeletPlugin.tolerations
+
+  # Mirrors GFD's nvidia.com/gpu.present onto the DRA eviction label the
+  # kubelet plugin selects on, so opting in to Driver Manager eviction
+  # (--dra-eviction-node-label) no longer requires labeling GPU node pools by
+  # hand (#2676). Manifest-only. The bundler removes it from the bundle unless
+  # the eviction label is configured, and owns labelKey/labelValue. Affinity is
+  # authored on gpu.present in the manifest (hardware truth); only accelerated
+  # tolerations are injected.
+  - name: dra-node-labeler
+    displayName: dra-node-labeler
+    valueOverrideKeys:
+      - dranodelabeler
+    healthCheck:
+      assertFile: checks/dra-node-labeler/health-check.yaml
+    helm:
+      defaultRepository: ""
+      defaultNamespace: gpu-operator
+    manifestFiles:
+      - components/dra-node-labeler/manifests/dra-node-labeler.yaml
+    nodeScheduling:
+      accelerated:
+        tolerationPaths:
+          - acceleratedTolerations
 
   - name: prometheus-operator-crds
     displayName: prometheus-operator-crds
@@ -700,6 +822,8 @@ components:
     # with alpha.12's replacement). Verified live on aicr-gb300, 2026-09-02.
     healthCheck:
       assertFile: checks/grove/health-check.yaml
+    upgrades:
+      file: components/grove/upgrades.yaml
     helm:
       defaultRepository: oci://ghcr.io/ai-dynamo/grove
       defaultChart: grove-charts

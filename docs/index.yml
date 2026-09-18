@@ -28,6 +28,8 @@ navigation:
         path: user/cli-reference.md
       - page: Generating Bundles
         path: user/bundling.md
+      - page: Upgrading a Deployed Stack
+        path: user/upgrading.md
       - page: Fabric-Attached Training
         path: user/fabric-attached-training.md
       - page: CLI Configuration File
@@ -75,6 +77,8 @@ navigation:
         path: integrator/gke-gpu-setup.md
       - page: RKE2 VR200 Setup
         path: integrator/rke2-vr200-setup.md
+      - page: k0s H200 Setup
+        path: integrator/k0s-h200-setup.md
       - page: EKS Dynamo Networking
         path: integrator/eks-dynamo-networking.md
       - page: GKE TCPXO Networking
@@ -110,6 +114,8 @@ navigation:
         path: contributor/recipe.md
       - page: Components
         path: contributor/component.md
+      - page: Upgrade Transition Records
+        path: contributor/upgrade-records.md
       - page: Collectors
         path: contributor/collector.md
       - page: Validators

@@ -94,9 +94,20 @@ func SignExisting(ctx context.Context, opts SignExistingOptions) error {
 	if err != nil {
 		return err
 	}
+	// The pointer's recorded predicateType (from Publish) and the bundle's
+	// (read back from the same on-disk statement) must agree before an OIDC
+	// round-trip and a Fulcio cert are spent. A divergence means the
+	// signature that follows would bind a predicateType the verifier
+	// rejects on digest mismatch.
+	pointerType := opts.Pointer.Attestations[0].Bundle.PredicateType
+	if pointerType != "" && pointerType != bundle.PredicateType {
+		return errors.New(errors.ErrCodeConflict,
+			"pointer predicateType "+pointerType+" does not match the pushed bundle's statement predicateType "+
+				bundle.PredicateType+". Re-publish the bundle before signing")
+	}
 
 	artifactDigestHex := strings.TrimPrefix(opts.Artifact.Digest, "sha256:")
-	artifactStmt, err := BuildArtifactStatement(oci.TrimScheme(reference), artifactDigestHex, bundle.Predicate)
+	artifactStmt, err := BuildArtifactStatement(oci.TrimScheme(reference), artifactDigestHex, bundle.PredicateType, bundle.Predicate)
 	if err != nil {
 		return err
 	}

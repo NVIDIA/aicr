@@ -519,6 +519,8 @@ node shape the resolved recipe targets. See
 
 > **`--service rke2` and `--accelerator vr200` are Preview.** They publish an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. See the published validation evidence at [validation.aicr.run](https://validation.aicr.run/) for current coverage.
 
+> **`--service k0s` is Preview**, covering the single `k0s / h200 / ubuntu / training` coordinate. See [k0s H200 Setup](../integrator/k0s-h200-setup.md) for its prerequisites and known gaps.
+
 **Examples:**
 ```shell
 # Basic recipe for Ubuntu on EKS with H100
@@ -1029,8 +1031,12 @@ echo "gpu_driver_version = \"${DRIVER_VERSION}\""
 # H100: real tuning packages (kernel setup, nvidia-tuned, full setup)
 aicr query --service eks --accelerator h100 --intent training \
   --selector components.nodewright-customizations.values
-# GB200: same value structure, but manifest renders a no-op (ARM64 packages pending)
+# GB200: same manifest and value structure; the accelerator/intent overrides
+# select the gb200 profile instead
 aicr query --service eks --accelerator gb200 --intent training \
+  --selector components.nodewright-customizations.values
+# GB300 on EKS: same shared setup-and-tuning manifest as gb200
+aicr query --service eks --accelerator gb300 --intent training \
   --selector components.nodewright-customizations.values
 
 # Watch constraints tighten as you add specificity
@@ -1082,7 +1088,7 @@ aicr validate [flags]
 | `--evidence-dir` | | string | | Directory to write conformance evidence artifacts |
 | `--cncf-submission` | | bool | false | Generate CNCF conformance submission artifacts |
 | `--feature` | `-f` | string[] | | CNCF evidence-collection feature(s) to scope (repeatable). Valid names: `dra-support`, `gang-scheduling`, `secure-access`, `accelerator-metrics`, `ai-service-metrics`, `inference-gateway`, `robust-operator`, `pod-autoscaling`, `cluster-autoscaling`. Empty selects all features. |
-| `--emit-attestation` | | string | | Directory to write a recipe-evidence attestation bundle — predicateType v1, or v2 when the recipe carries a configuration profile (signed when `--push` is set, unless `--no-sign`). The bundle is minimized by default — see `--full`. See [ADR-007](../design/007-recipe-evidence.md). |
+| `--emit-attestation` | | string | | Directory to write a recipe-evidence attestation bundle, predicateType v3, with a content-only recipe digest for the recipe content resolved by the selected profile. The digest excludes `metadata.version`, so it is independent of the aicr binary version that produced the recipe (signed when `--push` is set, unless `--no-sign`). The bundle is minimized by default, see `--full`. See [ADR-007](../design/007-recipe-evidence.md). |
 | `--full` | | bool | false | Emit the full (unredacted) evidence bundle. By default the bundle is minimized: `snapshot.yaml` is reduced to an allowlisted set of fields (dropping node names, provider instance IDs, the node label/taint set, OS tuning, loaded modules, systemd config) and per-test CTRF `stdout`/`message` are omitted. `--full` ships the raw payloads. The cryptographic verification story holds either way; minimal bundles record the applied policy in `predicate.redaction` and self-verify with `aicr evidence verify`. |
 | `--bom` | | string | | Path to a CycloneDX BOM (`bom.cdx.json`) to embed. Optional with `--emit-attestation`; when omitted, aicr synthesizes a recipe-bound BOM from the recipe's component refs + validator catalog images. Pass `make bom`'s output for an exhaustive BOM. |
 | `--push` | | string | | OCI registry reference to push the signed summary bundle to. Triggers Sigstore keyless signing via the precedence chain documented under `--identity-token`. The `sha256:` digest is the canonical address, so the tag is only a human-readable label — tag choice never affects verification. Omit the tag and aicr derives a unique per-recipe one, `<recipe-slug>-<short-fingerprint>` (e.g. `ghcr.io/myorg/aicr-evidence:h100-eks-ubuntu-training-3f9a1c2b4d5e`), so distinct attestations never collide on a shared tag. Pass an explicit tag to override. |
@@ -1501,6 +1507,140 @@ aicr diff --baseline ./golden.yaml --target cm://default/aicr-snapshot
 
 ---
 
+### aicr upgrade-check
+
+Compare two recipes or bundles component by component and report, for each version that changed, whether moving between them is safe to apply. Verdicts come from the [transition records](../contributor/upgrade-records.md) the running `aicr` release ships. No cluster state is inspected, which makes this the CI and GitOps path: the comparison reads two artifacts and nothing else. A `cm://` path is an artifact location like a file path, so reading or writing one does contact that cluster's API for the ConfigMap itself.
+
+**Synopsis:**
+```shell
+aicr upgrade-check --from <recipe|bundle> [--to <recipe|bundle>] [--deployer <name>] [flags]
+```
+
+**Flags:**
+| Flag | Short | Type | Default | Description |
+|------|-------|------|---------|-------------|
+| `--from` | `-f` | string | | Source artifact: recipe file, bundle directory, or ConfigMap URI. **Required.** |
+| `--to` | | string | re-resolve | Target artifact. When omitted, `--from`'s own criteria are re-resolved against this binary's registry. |
+| `--deployer` | `-d` | string | | Deployer the reported steps are scoped to: `argocd`, `argocd-helm`, `flux`, `helm`, `helmfile`. **Required whenever any component needs steps.** |
+| `--fail-on-error` | | bool | **true** | Exit non-zero when any component needs attention. |
+| `--output` | `-o` | string | stdout | Output destination: file path, ConfigMap URI (`cm://namespace/name`, JSON/YAML only), or stdout. |
+| `--format` | `-t` | string | **table** | Output format: `json`, `yaml`, or `table`. |
+| `--kubeconfig` | `-k` | string | | Kubeconfig used for `cm://` artifact reads and a `cm://` `--output`. Overrides `KUBECONFIG` and `~/.kube/config`. No cluster is contacted unless an argument is a ConfigMap URI. |
+
+Note the two defaults that differ from sibling commands. `--format` defaults to `table` rather than `yaml`, because the report's payload is a list of operator steps that folded YAML scalars make unreadable. `--fail-on-error` defaults to **true**, the opposite of `aicr diff --fail-on-drift`: you chose to run this check, so its exit code is what makes running it worth something in a pipeline.
+
+**The two questions it answers:**
+
+`--from X --to Y` asks *"is this specific move safe?"* and presumes you already know your target.
+
+Omitting `--to` asks *"am I behind, and does catching up hurt?"*, which is usually the real question: what an operator holds is an old artifact, not a chosen destination. The `--from` artifact's embedded criteria are re-resolved against the running binary's pins to synthesize the target.
+
+**Verdicts:**
+
+| Verdict | Meaning | Fails a strict run |
+|---------|---------|--------------------|
+| `safe` | Upgrade in place. Nothing to do. | no |
+| `manual` | Operator steps are required first. | yes |
+| `blocked` | Do not make this jump in one step. The report names the boundary it stops at. | yes |
+| `unknown` | No record covers this transition. A gap in the **data**. | yes |
+| `unversioned` | One side's version is not comparable. A gap in the **inputs**, closed by pinning something comparable. | yes |
+
+Anything other than `safe` exits non-zero. `unknown` is included deliberately: a transition nobody assessed is not a transition anyone approved, and the distance moved does not change that.
+
+The report still reports a **breaking boundary** (a major bump, a minor bump while the major version is `0`, or a changed prerelease identifier over an otherwise unchanged `major.minor.patch`) in the NOTES cell and the JSON `breaking` field, because the size of a move tells you how hard to look. It no longer affects the exit code.
+
+**Three kinds of `unknown`.** They differ in what would close the gap, so they carry different `reason` codes and different report text:
+
+| `reason` | Situation | Closed by |
+|---|---|---|
+| `no-record` | No record exists for this component | Somebody authoring the first record |
+| `no-boundary-crossed` | A record exists but says nothing about this range | Widening it, or confirming no boundary belongs there |
+| `downgrade` | You are rolling back | Nothing. Records describe forward moves only, so this can never become known |
+
+`blocked` and `unknown` say opposite things. `blocked` means AICR has something to tell you and a version to stop at: read it and act on it. `unknown` means AICR has nothing for you: read the component's own upstream release notes and decide. Neither is a pass.
+
+**Rollout note: expect red today.** Only two registry components ship a transition record so far, so most components that change version report `unknown` and the check exits non-zero on most comparisons. That is a coverage problem being worked ([#2535](https://github.com/NVIDIA/aicr/issues/2535) makes records mandatory per pin bump), not a tool limitation, and it shrinks as records are authored. Use `--fail-on-error=false` if you want the report without the gate in the meantime.
+
+Components whose version is identical on both sides produce no row. Added components are reported with nothing to do; removed components are reported and **stay installed**, because AICR does not uninstall them.
+
+**The four routes to `blocked`.** A record is *crossed* when your source version sits below the boundary its `to` names and your target reaches it. That is a property of the jump alone, so a record still counts even when the jump flies straight over it:
+
+| Route | When | `reason` | Renders steps |
+|---|---|---|---|
+| A record describes this move and blocks it | One record is crossed and its `from` covers your source | `recorded` | yes |
+| You would skip a boundary | Two or more records are crossed, or a crossed `blocked` record was written for a different starting point | `multiple-boundaries`, `record-blocks` | no |
+| Nothing describes your starting version | One record is crossed, but its `from` does not cover your source, usually because you are below the lowest recorded starting point | `undefined-origin` | no |
+| Your target is past what the record assessed | One record is crossed and its `from` covers your source, but your target sits above the ceiling that record's `to` names | `beyond-record-ceiling` | no |
+
+The first renders its record's steps, deployer-scoped, exactly as a `manual` row does: the author marked the move `blocked` and then wrote what to do instead. The other three render none, because the record that carries them describes a different move than the one you asked about. All four name a stopping point.
+
+The fourth exists because a record vouches only as far as its own `to` ceiling. A record claiming `>=0.18.0 <0.19.0` says nothing about `0.25.0`, and letting it lend its verdict there would report eight minors as safe on the strength of a two-minor claim. Stop at the assessed ceiling and re-run, or have the record widened. This is also how a component deliberately held below a breaking release reports: its record's ceiling sits at that release, so any target above it is told to stop there and take the boundary on its own.
+
+Every row states its reason in the detail block under the table, and `--format json` carries the same thing as `reason` (a stable code: `recorded`, `record-blocks`, `multiple-boundaries`, `undefined-origin`, `beyond-record-ceiling`, `no-record`, `no-boundary-crossed`, `downgrade`, `not-comparable`) plus `explanation`, the sentence naming your versions.
+
+**Why `--deployer` is required rather than defaulted:**
+
+Steps are deployer-scoped. Showing an Argo CD operator an imperative "delete the legacy CRDs" step is the exact failure deployer-scoping exists to prevent, so the command asks rather than guessing, and never renders every deployer's path. It is only required when some component actually carries steps. A bundle now records the deployer that built it in [`bundle-info.yaml`](bundling.md#bundle-info), so `upgrade-check` can stop asking once it reads that record ([#2528](https://github.com/NVIDIA/aicr/issues/2528)).
+
+**Example:**
+
+```console
+$ aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer helm
+UPGRADE CHECK
+  from      old-recipe.yaml
+  to        new-recipe.yaml
+  deployer  helm
+
+COMPONENT  FROM            TO               VERDICT  NOTES
+---------  ----            --               -------  -----
+grove      v0.1.0-alpha.8  v0.1.0-alpha.12  manual   3 steps
+
+grove v0.1.0-alpha.8 -> v0.1.0-alpha.12  (manual)
+  alpha.12 drops the clustertopologies.grove.io CRD (kind ClusterTopology) in
+  favor of clustertopologybindings.grove.io, which reuses the shortname ct.
+
+  PRECONDITION
+    No ClusterTopology objects exist in the cluster.
+
+  STEPS (deployer: helm)
+    1. delete-legacy-crd
+       kubectl delete crd clustertopologies.grove.io
+    ...
+
+1 component change, 1 needs attention
+```
+
+**More examples:**
+
+```shell
+# Two recipes, for a pipeline that already knows its deployer
+aicr upgrade-check --from old-recipe.yaml --to new-recipe.yaml --deployer argocd
+
+# Am I behind, and does catching up hurt?
+aicr upgrade-check --from ./bundles-v0.16.0 --deployer helm
+
+# JSON for a pipeline, reporting without gating
+aicr upgrade-check --from old.yaml --to new.yaml \
+  --format json --output report.json --fail-on-error=false
+```
+
+**Exit Codes:**
+
+| Code | Description |
+|------|-------------|
+| `0` | No component needs attention, or `--fail-on-error=false` |
+| `2` | Invalid input (missing `--from`, unknown deployer, a bundle with no `recipe.yaml`, a missing `--deployer` where steps are needed) **or** a component needs attention (mapped from `ErrCodeConflict`) |
+
+> **Note on CI gating:** as with `aicr diff`, a bad invocation and a failing check both exit `2`. To tell them apart without parsing stderr, write the report with `--format json --output report.json` and branch on the file's presence plus its `summary.failing` count.
+
+**Limitations:**
+
+- **A bundle is read through the `recipe.yaml` at its root.** Every deployer writes one as of [#2759](https://github.com/NVIDIA/aicr/pull/2759); a directory without it is neither a recipe nor a bundle and is rejected rather than misread.
+- **Coverage starts near zero.** Every transition without an authored record reports `unknown`. See the [authoring guide](../contributor/upgrade-records.md).
+- **No cluster comparison yet.** `--from cluster`, which reads installed Helm release inventory, is tracked in [#2531](https://github.com/NVIDIA/aicr/issues/2531).
+
+---
+
 ### aicr bundle
 
 Generate deployment-ready bundles from recipes containing Helm values, manifests, scripts, and documentation.
@@ -1527,7 +1667,7 @@ aicr bundle [flags]
 | `--system-node-toleration` | | string[] | Toleration for system components (format: key=value:effect, repeatable) |
 | `--accelerated-node-selector` | | string[] | Node selector for accelerated/GPU nodes (format: key=value, repeatable). Same `requireNodeSelector` caveat as `--system-node-selector` above applies to components that declare it on their accelerated paths. |
 | `--accelerated-node-toleration` | | string[] | Toleration for accelerated/GPU nodes (format: key=value:effect, repeatable) |
-| `--dra-eviction-node-label` | | string | Opt in to DRA kubelet-plugin eviction coordination with GPU Operator driver upgrades (format: `key=value`; no default — unset means AICR injects nothing). Applied only when both components are enabled. Nodes must then carry the label. |
+| `--dra-eviction-node-label` | | string | Opt in to DRA kubelet-plugin eviction coordination with GPU Operator driver upgrades (format: `key=value`; no default — unset means AICR injects nothing). Applied only when both components are enabled. Also deploys `dra-node-labeler`, which applies the label to every GPU node from GFD's `nvidia.com/gpu.present`; pass `--set dra-node-labeler:enabled=false` to provision the label yourself instead. |
 | `--workload-gate` | | string | Taint for nodewright-operator runtime required (format: key=value:effect or key:effect). This is a day 2 option for cluster scaling operations. |
 | `--workload-selector` | | string[] | Label selector for nodewright-customizations to prevent eviction of running training jobs (format: key=value, repeatable). Required when nodewright-customizations is enabled with training intent. |
 | `--nodes` | | int | Estimated number of GPU nodes (default: 0 = unset). At bundle time, written to Helm value paths declared in the registry under `nodeScheduling.nodeCountPaths`. |
@@ -1679,6 +1819,8 @@ This results in:
 
 **What the opt-in does.** When a recipe includes both `nvidia-dra-driver-gpu` and `gpu-operator` and a label is configured, AICR merges that `key=value` into `kubeletPlugin.nodeSelector` and sets the GPU Operator `driver.manager.env` entry `NODE_LABEL_FOR_GPU_POD_EVICTION` to the same key, so GPU Operator's Driver Manager can deschedule the plugin ahead of a driver container restart. The same applies to the `-ocp` components. Existing accelerated-node selectors and unrelated Driver Manager environment variables are preserved.
 
+**The label is derived, not provisioned.** The same opt-in keeps the `dra-node-labeler` component in the bundle: a small DaemonSet that runs on every node GFD reports as `nvidia.com/gpu.present=true` and applies the configured `key=value` once, after GPU Operator is up. It never rewrites an existing value, so the Driver Manager's `paused-for-driver-upgrade` and a hand-set `false` opt-out both survive a labeler restart. Nodes added later by autoscaling, replacement, or a pool scaled from zero are labeled the same way as soon as GFD labels them. Without the flag, or when a `bundlers` filter leaves out the labeler, the labeler is left out of the bundle entirely (a `bundlers` selection that names the labeler without the flag or without both components it serves is rejected as invalid); node labeling is then required only if both components remain and eviction is still opted in. OpenShift recipes are not wired for the labeler yet (#2828) and keep the provisioning workflow. To provision the label yourself (node-pool labels, Karpenter `NodePool` labels) pass `--set dra-node-labeler:enabled=false`; the requirements in the next paragraphs then apply.
+
 ```bash
 aicr bundle --recipe recipe.yaml \
   --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
@@ -1689,7 +1831,7 @@ aicr bundle --recipe recipe.yaml \
 
 This does not apply where the driver is provider-installed (`driver.enabled=false` — AKS `azure-managed`, GKE COS, OKE). Those deploy no GPU Operator driver pod and therefore no Driver Manager, so there is nothing to coordinate with and no warning is emitted.
 
-**If you do opt in, every GPU node must carry the label.** Set it in the **node pool definition** — an EKS managed nodegroup `labels` entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the equivalent for your provisioner. An ad hoc `kubectl label node` is a repair, not a configuration: it does not survive node replacement, recycling, autoscaling, or a nodegroup scaled from zero.
+**If you disable the labeler, every GPU node must carry the label.** Set it in the **node pool definition** — an EKS managed nodegroup `labels` entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the equivalent for your provisioner. An ad hoc `kubectl label node` is a repair, not a configuration: it does not survive node replacement, recycling, autoscaling, or a nodegroup scaled from zero. With the labeler in the bundle (the default once opted in) none of this is required; the remaining gap is a GPU node GFD has not labeled that does not already carry the configured `key=value` (for example from a node pool that still provisions it): such a node runs no kubelet plugin until `nvidia.com/gpu.present` appears.
 
 ```bash
 kubectl label node <node-name> nvidia.com/dra-kubelet-plugin=true
@@ -1827,7 +1969,7 @@ When `--storage-class` is not set, any `storageClassName` values already defined
 
 If a rendered component creates a PVC at a registry-declared `storageClassPaths` entry and no usable `storageClassName` is set after overlay, `--storage-class`, and `--set` precedence is resolved, `aicr bundle` emits a non-blocking warning. The bundle still relies on the target cluster's default StorageClass in that case.
 
-`aicr bundle` reports cluster-state dependencies it cannot verify as non-blocking warnings of this kind. Two more concern DRA eviction. Without `--dra-eviction-node-label`, and only where GPU Operator manages the driver, the bundle warns that automatic eviction was not configured and that a driver restart carries the documented risks. With the flag set, it warns that every GPU node must carry the configured label, that the label belongs in the node pool definition rather than an ad hoc `kubectl label`, and that unlabeled nodes silently run without DRA — no `ResourceSlices`, and `DESIRED=0` if no GPU node matches at all. These describe state AICR deliberately does not own — StorageClasses and node labels are cluster infrastructure. See [DRA Driver Upgrade Eviction](#dra-driver-upgrade-eviction).
+`aicr bundle` reports cluster-state dependencies it cannot verify as non-blocking warnings of this kind. Two more concern DRA eviction. Without `--dra-eviction-node-label`, and only where GPU Operator manages the driver, the bundle warns that automatic eviction was not configured and that a driver restart carries the documented risks. With the flag set, it reports that `dra-node-labeler` derives the label from `nvidia.com/gpu.present` and that a GPU node GFD has not labeled, and that does not already carry the configured label, runs without DRA; with the labeler disabled it warns instead that every GPU node must carry the configured label, that the label belongs in the node pool definition rather than an ad hoc `kubectl label`, and that unlabeled nodes silently run without DRA — no `ResourceSlices`, and `DESIRED=0` if no GPU node matches at all. These describe state AICR deliberately does not own — StorageClasses and node labels are cluster infrastructure. See [DRA Driver Upgrade Eviction](#dra-driver-upgrade-eviction).
 
 `--shared-storage-class` is a separate input for registry-declared
 `sharedStorageClassPaths`. It is used by opt-in Slinky Slurm PVCs mounted at

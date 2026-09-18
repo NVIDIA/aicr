@@ -39,24 +39,25 @@ are frozen at v1 and gated by `TestBundleLayoutMatchesManifest`, so a path
 shown here will not disappear or be renamed without a deliberate, reviewed
 change. Automation may read these paths.
 
-Every deployer writes `checksums.txt`, `README.md` and `recipe.yaml` at the
-bundle root. Four of the five group components into ordered `NNN-<component>`
-directories; Flux is the exception and uses a plain `<component>` directory
-with shared `sources/`.
+Every deployer writes `bundle-info.yaml`, `checksums.txt`, `README.md` and
+`recipe.yaml` at the bundle root. Four of the five group components into
+ordered `NNN-<component>` directories; Flux is the exception and uses a plain
+`<component>` directory with shared `sources/`.
 
 ```text
-helm/                          argocd/                     flux/
-  001-cert-manager/              001-cert-manager/            cert-manager/
-    values.yaml                    application.yaml             helmrelease.yaml
-    cluster-values.yaml            values.yaml                nfd/
-    install.sh                   002-nfd/                     helmrelease.yaml
-    upstream.env                   application.yaml           sources/
-  002-nfd/                         values.yaml                  helmrepo-<host>.yaml
-    ...                          app-of-apps.yaml             gitrepo-<host>.yaml
-  deploy.sh                      checksums.txt              kustomization.yaml
-  recipe.yaml                    README.md                  checksums.txt
-  checksums.txt                  recipe.yaml                README.md
-  README.md                                                 recipe.yaml
+helm/                            argocd/                      flux/
+  001-cert-manager/               001-cert-manager/            cert-manager/
+    values.yaml                     application.yaml             helmrelease.yaml
+    cluster-values.yaml             values.yaml                nfd/
+    install.sh                    002-nfd/                       helmrelease.yaml
+    upstream.env                    application.yaml           sources/
+  002-nfd/                          values.yaml                  helmrepo-<host>.yaml
+    ...                           app-of-apps.yaml               gitrepo-<host>.yaml
+  deploy.sh                       bundle-info.yaml             kustomization.yaml
+  bundle-info.yaml                checksums.txt                bundle-info.yaml
+  recipe.yaml                     README.md                    checksums.txt
+  checksums.txt                   recipe.yaml                  README.md
+  README.md                                                    recipe.yaml
 ```
 
 `helmfile` shares Helm's per-component files but not its root: it writes
@@ -71,6 +72,7 @@ helmfile/
   helmfile.yaml
   level-N.yaml                 one per dependency depth; absent when flat
   recipe.yaml
+  bundle-info.yaml
   checksums.txt
   README.md
 ```
@@ -81,12 +83,163 @@ helmfile/
 Two kinds of name appear in these trees, and only one is a promise:
 
 - **Fixed names are contract.** `deploy.sh`, `app-of-apps.yaml`,
-  `kustomization.yaml`, `checksums.txt`, `values.yaml`, `helmrelease.yaml`,
-  and the `NNN-<component>` convention itself.
+  `kustomization.yaml`, `bundle-info.yaml`, `checksums.txt`, `values.yaml`,
+  `helmrelease.yaml`, and the `NNN-<component>` convention itself.
 - **Derived names are not.** Flux writes one `helmrepo-<host>.yaml` per chart
   repository and helmfile one `level-N.yaml` per dependency depth, so both sets
   change with the recipe. Discover them by listing the directory rather than
   hardcoding a name.
+
+### Bundle info
+
+Every bundle carries a `bundle-info.yaml` at its root, written unconditionally
+by all five deployers — no flag turns it off. It answers three questions a
+bundle cannot answer for itself: which deployer built it, which `aicr` binary
+built it, and which Helm release landed in which directory.
+
+`layout.entrypoint` names the file a consumer invokes or applies —
+`deploy.sh`, `helmfile.yaml`, `app-of-apps.yaml`, `Chart.yaml`, or
+`kustomization.yaml` — so automation reads one key instead of branching on
+`build.deployer`.
+
+`layout.releases` lists every Helm release the bundle installs, in deployment
+order, and that ordering is normative: there is no ordinal field, so a
+consumer reads sequence from list position rather than from a number. A
+release injected alongside a component — a `-pre` folder when it declares
+pre-install manifests, a `-post` folder when a component that also ships an
+upstream chart declares post-install manifests, or a `-readiness` folder
+under `--readiness-hooks` (none of the three tied to `--vendor-charts`) — has
+no recipe component of its own, so it names its parent in `component` while
+`name` carries its own suffixed name. One collision is deliberately left
+undefined: a recipe that declares a component whose own name ends in `-pre`,
+`-post` or `-readiness` alongside the matching base name makes `component`
+deployer-dependent for that release, so do not rely on its value there. No
+component in the shipped registry has such a name, and resolving this is a
+reserved additive change — a later release may add an explicit field
+distinguishing a primary release from an injected one.
+
+`bundle-info.yaml` deliberately carries no component *inventory*:
+`recipe.yaml` sits beside it at the bundle root and is already the source of
+truth for what the recipe resolved to. `build.settings.components` in the
+example below is not an inventory — it is the REST API's `?bundlers=` filter
+(there is no CLI flag for it), recorded because the filtered `recipe.yaml`
+alongside it is written post-filter and would otherwise be indistinguishable
+from an unfiltered bundle of a smaller recipe. It is absent unless that
+filter was used; see [Overrides that cannot take effect are
+rejected](#overrides-that-cannot-take-effect-are-rejected) for the same
+`bundlers=` filter from the override side. `bundle-info.yaml` also carries no
+timestamp — the record feeds `checksums.txt`, which is the subject of the
+bundle attestation, so a wall-clock field would make every bundle
+irreproducible.
+
+Below is a fully populated example, generated from the shipped serializer and
+extended with fields (`repoURL`, `provenance`, an injected `-post`/`-readiness`
+pair) that a single bundle rarely exercises all at once. Key order is
+alphabetical at every nesting level — `serializer.MarshalYAMLDeterministic`
+sorts mapping keys before writing — so the top level reads `apiVersion, build,
+kind, layout, metadata`, not a hand-arranged order. Expect the same
+alphabetical order in your own bundle.
+
+```yaml
+apiVersion: aicr.run/v1
+build:
+  deployer: argocd
+  recipe:
+    digest: sha256:d429490ec53e902e5a7f5a9b0221ab4a46f233ec70f808f1e62bbade2576e083
+    path: recipe.yaml
+    version: v0.22.0
+  settings:
+    appName: gpu-cluster
+    attested: true
+    checksums: true
+    components:
+      - cert-manager
+      - nfd
+      - network-operator
+    nodeScheduling:
+      accelerated:
+        selector:
+          nvidia.com/gpu.present: "true"
+        tolerations:
+          - effect: NoSchedule
+            key: nvidia.com/gpu
+            operator: Equal
+            value: present
+      system:
+        selector:
+          nodeGroup: system
+        tolerations:
+          - effect: NoSchedule
+            key: dedicated
+            operator: Equal
+            value: system
+    readinessHooks: true
+    repoURL: https://github.com/my-org/my-gitops-repo.git
+    serial: false
+    sharedStorageClass: shared-nfs
+    storageClass: local-nvme
+    targetRevision: main
+    vendorCharts: true
+kind: BundleInfo
+layout:
+  entrypoint: app-of-apps.yaml
+  provenance: provenance.yaml
+  releases:
+    - component: cert-manager
+      manifest: 001-cert-manager/application.yaml
+      name: cert-manager
+      namespace: cert-manager
+      path: 001-cert-manager
+    - component: nfd
+      manifest: 002-nfd/application.yaml
+      name: nfd
+      namespace: node-feature-discovery
+      path: 002-nfd
+    - component: network-operator
+      manifest: 003-network-operator/application.yaml
+      name: network-operator
+      namespace: network-operator
+      path: 003-network-operator
+    - component: network-operator
+      manifest: 004-network-operator-post/application.yaml
+      name: network-operator-post
+      namespace: network-operator
+      path: 004-network-operator-post
+    - component: network-operator
+      manifest: 005-network-operator-readiness/application.yaml
+      name: network-operator-readiness
+      namespace: network-operator
+      path: 005-network-operator-readiness
+metadata:
+  version: v0.22.0
+```
+
+`build.recipe.version` and `metadata.version` can diverge: the former is the
+`aicr` binary that resolved `recipe.yaml` (stamped by the recipe builder and
+never restamped), the latter is the `aicr` binary that ran `bundle`. They read
+the same on a one-step workflow and differ whenever recipe generation and
+bundling run on different releases. `build.settings` includes only settings
+whose effect is already observable elsewhere in the bundle's own files —
+Fulcio/Rekor endpoints, certificate identity, and free-form `--set` overrides
+are excluded by construction, since `values.yaml` already carries the effect
+of the latter.
+
+That test is applied per deployer, so `repoURL`, `targetRevision` and
+`appName` appear only where the bundle shows them: all three under `argocd`,
+`repoURL` and `targetRevision` under `flux`, `appName` alone under
+`argocd-helm` (whose chart is URL-portable and takes the publish location at
+`helm install --set repoURL=...` time, which is also why `--repo` warns that
+it is ignored there), and none of the three under `helm` or `helmfile`. Where
+a key does not apply it is omitted entirely rather than written empty.
+
+Each deployer reports what it resolved, so the recorded value is the one the
+bundle carries — including the fallback it applies when you pass no flag. A
+`flux` bundle built without `--repo` records
+`repoURL: https://github.com/YOUR_ORG/YOUR_REPO.git`, the same placeholder
+written into `sources/gitrepo-*.yaml`, and `targetRevision: main`. That is
+deliberate: the placeholder is what ships, and a bundle that needs its repo
+URL replaced before it can be applied should say so rather than look
+unconfigured.
 
 ### Generated chart versions
 
@@ -294,6 +447,16 @@ Generate with `--dra-eviction-node-label key=value` to opt in. The rest of this
 section applies only then. The same applies to the corresponding `-ocp`
 components.
 
+Opting in also keeps `dra-node-labeler` in the bundle. It applies the
+configured `key=value` to every node GFD labels `nvidia.com/gpu.present=true`
+and never rewrites an existing value, so the node-pool labeling described below
+is only needed when the labeler is not in the bundle: because you removed it
+with `--set dra-node-labeler:enabled=false`, because a `bundlers` filter left
+it out, or on OpenShift, where it is not yet wired (NVIDIA/aicr#2828). A
+`bundlers` selection that names the labeler but omits the flag or one of its
+prerequisites is rejected rather than rendered without it. Everything below that says "labeler disabled" applies to
+those cases equally.
+
 ### Choosing whether to opt in
 
 The label is how GPU Operator's Driver Manager finds the plugin: it deschedules
@@ -304,16 +467,20 @@ with no plugin rather than with an uncoordinated one.
 
 | | Not opted in (default) | Opted in |
 |---|---|---|
-| Node labeling | none needed | every GPU node, in the node pool definition |
+| Node labeling | none needed | applied by `dra-node-labeler` from `nvidia.com/gpu.present`; every GPU node in the node pool definition only if the labeler is disabled |
 | Plugin placement | every accelerated node | only nodes carrying the label |
 | Driver restart | plugin is not descheduled first | plugin is descheduled and restored |
 | If a node is missed | n/a | that node silently runs without DRA |
 
-Opt in when GPU Operator manages the driver (`driver.enabled=true`) and you can
-guarantee the label is set at provisioning time for every GPU node, including
-ones added later by autoscaling or node replacement. Otherwise the default is
-the safer choice: a plugin that always runs, with a documented risk at driver
-restarts, beats a plugin that silently does not run on some nodes.
+Opt in when GPU Operator manages the driver (`driver.enabled=true`). With the
+bundled `dra-node-labeler` the label follows GFD's `nvidia.com/gpu.present`, so
+nodes added later by autoscaling or replacement are labeled as soon as GFD sees
+them; the remaining gap is a GPU node GFD has not labeled and that does not
+already carry the configured `key=value`, which runs no kubelet plugin until
+one of the two appears. If you disable the labeler, opt in only when you can
+guarantee the label is set at provisioning time for every GPU node; otherwise
+the default is the safer choice: a plugin that always runs, with a documented
+risk at driver restarts, beats a plugin that silently does not run on some nodes.
 
 There is nothing to opt in to where the driver is provider-installed
 (`driver.enabled=false` — AKS `azure-managed`, GKE COS, OKE). GPU Operator
@@ -326,17 +493,20 @@ covers the standalone DRA kubelet plugin, so ordering against DRA claim holders
 and completion of plugin teardown are not guaranteed. See
 [NVIDIA/k8s-driver-manager#250](https://github.com/NVIDIA/k8s-driver-manager/issues/250).
 
-> **Opt-in requirement:** label every GPU node that must run the DRA kubelet
-> plugin *before* applying the bundle. Applying it first can reduce the
-> DaemonSet to zero eligible nodes, interrupting ComputeDomain/IMEX and any
-> whole-GPU resources advertised through DRA.
+> **Opt-in requirement (labeler disabled only):** if you pass
+> `--set dra-node-labeler:enabled=false`, label every GPU node that must run
+> the DRA kubelet plugin *before* applying the bundle. Applying it first can
+> reduce the DaemonSet to zero eligible nodes, interrupting ComputeDomain/IMEX
+> and any whole-GPU resources advertised through DRA. With the labeler in the
+> bundle there is nothing to pre-label; the plugin follows the labeler.
 
-### Set the label at node-pool provisioning time
+### Set the label at node-pool provisioning time (labeler disabled)
 
-Put the label in the **node pool definition** — an EKS managed nodegroup
-`labels` entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the equivalent for
-your provisioner — alongside the `nodeGroup=gpu-worker` label you already set
-there.
+This subsection applies only when `dra-node-labeler` has been disabled. Put the
+label in the **node pool definition** — an EKS managed nodegroup `labels`
+entry, a Karpenter `NodePool` `spec.template.metadata.labels` entry, or the
+equivalent for your provisioner — alongside the `nodeGroup=gpu-worker` label
+you already set there.
 
 A one-off `kubectl label node` is a repair, not a configuration. It does not
 survive node replacement or recycling, cluster autoscaling adding GPU nodes, or

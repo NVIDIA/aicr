@@ -1154,7 +1154,7 @@ components:
 | Field | Required | Notes |
 |-------|----------|-------|
 | `function` | yes | Must match a name registered in `pkg/bundler/validations/checks.go::init()` |
-| `severity` | yes | `warning` appends to report; `error` stops the bundle |
+| `severity` | yes | `error` stops the bundle; `warning` (the default for any unrecognized value) appends to the deployment notes; `info` logs only |
 | `conditions` | no | Keys are criteria fields from `pkg/recipe/criteria.go`. Empty = always runs |
 | `message` | no | Actionable detail appended to function output |
 
@@ -1162,6 +1162,23 @@ Conditions are evaluated via `checkConditions(recipeResult, conditions)`.
 Keys = AND across, values within a key = OR. When a new accelerator,
 service, OS, intent, or platform is added to `pkg/recipe/criteria.go`,
 audit existing condition blocks per CLAUDE.md's enum-expansion rule.
+
+`RunValidations` (`pkg/bundler/validations/registry.go`) dispatches on the
+lowercased severity, and all three arms consume both return values of the
+check — a returned `error` is never silently dropped:
+
+| Severity | Warnings become | Errors become |
+|----------|-----------------|---------------|
+| `error` | blocking errors | blocking errors |
+| `warning` | deployment notes | blocking errors |
+| `info` | `slog.Info` only | `slog.Info` only |
+
+`info` is for an advisory that is true of a valid configuration — something the
+operator should weigh, not something they must fix — so it stays out of the
+deployment notes and surfaces only under `--debug`. Note the asymmetry: under
+`info` a returned error is logged rather than raised, so do not use `info` for
+a gate whose failure must be acted on. `warning` is the fallback for any
+unrecognized value, which keeps a typo'd severity non-silent.
 
 ### Shipping functions
 
@@ -1171,6 +1188,7 @@ audit existing condition blocks per CLAUDE.md's enum-expansion rule.
 | `CheckAcceleratedSelectorMissing` | nodewright `--accelerated-node-selector` set |
 | `CheckHostMofedWithoutNetworkOperator` | Host-mode MOFED component paired with `network-operator` |
 | `CheckWildcardAcceleratedToleration` | Accelerated-node tolerations carry no wildcard (keyless) entry — on AKS a wildcard deadlocks nodewright interrupt packages ([nodewright#296](https://github.com/NVIDIA/nodewright/issues/296)); wired at `severity: error`, skipped when the component is disabled via `--set` |
+| `CheckGB300HostKernelGranule` | Bare-metal GB300 (`service: generic`, `accelerator: gb300`) applies a tuned profile that sizes hugepages for a 64k-granule ARM64 host kernel. A 4k-granule host still boots — Linux rejects the `hugepagesz=512M` clause and drops its paired `hugepages=` count — so the node just runs without that pool. Advisory only (`severity: info`); skipped when the component is disabled or `tuningEnabled` resolves to false on the final effective values (recipe merge plus scalar `--set` and typed `--set-json`/`--set-file`, under the canonical name and its registry aliases). |
 | `CheckDriverOwnershipCoherence` | GPU driver-ownership coherence on the final effective values (recipe merge + `--set`/`--set-json`/`--set-file` under canonical names and registry aliases): a recipe whose snapshot observed no NVIDIA driver (`metadata.gpuDriverState: absent`) must not bundle with the preinstalled-driver assumption. When GPU Operator manages the driver, `nvidia-dra-driver-gpu.nvidiaDriverRoot` must equal `gpu-operator hostPaths.driverInstallDir`; with a preinstalled driver, the DRA root must avoid the unpopulated operator container root and may intentionally differ from `hostPaths.driverInstallDir` ([#1087](https://github.com/NVIDIA/aicr/issues/1087), [#1757](https://github.com/NVIDIA/aicr/issues/1757)). Wired at `severity: error`. |
 | `CheckMariaDBOperatorOwnershipCoherence` | MariaDB Operator installation safety for AICR-provided Slurm accounting: `metadata.mariaDBOperatorState` values `crs-detected` and `unknown` block bundling, `api-detected` or omitted evidence warns, and `absent` proceeds silently. Wired at `severity: warning` so warning results remain non-blocking while returned errors still fail the bundle. |
 
@@ -1226,7 +1244,8 @@ The same assertion file now powers TWO surfaces:
    sanity invoked manually by chart authors. `check-health-all` sweeps
    only registry-linked components (`registry.yaml`'s
    `healthCheck.assertFile` entries); an opt-in-only check like
-   `nvsentinel-observability` runs via `check-health COMPONENT=<name>`.
+   `nvsentinel-observability` or `nvsentinel-preflight` runs via
+   `check-health COMPONENT=<name>`.
 2. **`aicr validate --phase deployment`** — registry-declared content is
    loaded into `ComponentRef.HealthCheckAsserts` during recipe
    resolution (PR #1219) and executed by the deployment validator's

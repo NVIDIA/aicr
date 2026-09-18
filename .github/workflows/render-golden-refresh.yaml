@@ -15,8 +15,8 @@
 # Auto-refresh of pkg/bundler/testdata/stock_render_golden.yaml on Renovate
 # PRs that touch recipes/components/**.
 #
-# The golden pins a digest per leaf overlay over its fully rendered
-# helm-deployer output (TestStockRenderParityGolden). Renovate's `kubernetes`
+# The golden pins, for every leaf overlay, a digest of each file in its
+# fully rendered helm-deployer output (TestStockRenderParityGolden). Renovate's `kubernetes`
 # manager bumps digest-pinned images inside recipes/components/*/manifests/**
 # and its `helm-values` manager bumps image tags in
 # recipes/components/*/values.yaml; both classes are configured to

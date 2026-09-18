@@ -46,6 +46,7 @@ coordinates:
   # suffixed paths together with that change).
   - eks/h100-ubuntu/inference-dynamo
   - eks/h100-ubuntu/training-kubeflow
+  - k0s/h200-ubuntu/training
   - rke2/vr200-ubuntu/inference-dynamo
   - rke2/vr200-ubuntu/training
   - rke2/vr200-ubuntu/training-kubeflow

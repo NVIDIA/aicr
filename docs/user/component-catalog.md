@@ -15,15 +15,17 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **gpu-operator** | Manages the GPU driver and runtime lifecycle on Kubernetes nodes. Handles driver installation, container runtime configuration, device plugin, and GPU feature discovery. | [NVIDIA GPU Operator](https://github.com/NVIDIA/gpu-operator) |
 | **network-operator** | Manages high-performance networking for GPU workloads. Configures RDMA, SR-IOV, and host networking for multi-node communication. | [NVIDIA Network Operator](https://github.com/Mellanox/network-operator) |
 | **nfd** | Node Feature Discovery — labels nodes with hardware features (PCI device IDs, kernel modules, CPU capabilities). Both gpu-operator and network-operator consume these labels. On production GPU recipes, the Topology Updater publishes per-node `NodeResourceTopology` CRDs describing NUMA zones and GPU/NIC affinity for downstream NUMA-aware schedulers. | [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) |
+| **node-problem-detector** | Detects node-level faults the GPU stack does not watch — XFS shutdown, fatal UEFI CPER hardware errors, a read-only root filesystem — and publishes them as Node Conditions for NVSentinel's Object Monitor to consume. Opt-in via the `npd` mixin, and only where the platform does not already run its own. | [node-problem-detector](https://github.com/kubernetes/node-problem-detector) |
 | **gke-nccl-tcpxo** | NCCL TCPXO network plugin for GKE. Provides optimized collective communication for multi-node GPU workloads on Google Kubernetes Engine. GKE-specific. | — |
 | **gcp-driver-installer** | Google's cos-gpu-installer DaemonSet as an AICR-managed, values-gated component. Present in every GKE COS recipe; renders only under the `gpuStack=bundle-installer` profile value, where it installs the recipe-pinned NVIDIA driver on pools created with `gpu-driver-version=disabled`. GKE-specific. | — |
 | **aws-efa** | Device plugin for AWS Elastic Fabric Adapter. Enables low-latency networking on EKS clusters with EFA-capable instances. EKS-specific. | [AWS EFA K8s Device Plugin](https://github.com/aws/eks-charts) |
 | **cert-manager** | Automates TLS certificate management. Required by several operators for webhook and API server certificates. | [cert-manager](https://github.com/cert-manager/cert-manager) |
 | **gatekeeper** | Admission controller for Kubernetes. Enforces policies and governance across the cluster using OPA (Open Policy Agent) ConstraintTemplates and Constraints. | [Open Policy Agent Gatekeeper](https://github.com/open-policy-agent/gatekeeper) |
-| **nodewright-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. | [Nodewright](https://github.com/nvidia/nodewright) |
+| **nodewright-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. Pinned to `v0.17.x` on purpose: `v0.18.0` renamed the `Skyhook` API to `NodeWright` and writes status only on the new kind, which the readiness gate does not yet read — see [Upgrade Notes](#nodewright-operator-staying-on-v017x) below. | [Nodewright](https://github.com/nvidia/nodewright) |
 | **nodewright-customizations** | Environment-specific node tuning profiles applied via Nodewright. Extends the operator with kernel params, hugepages, and other host-level configurations. | — |
 | **nvsentinel** | GPU health monitoring. Detects GPU errors and publishes health events; the components that cordon, drain, reboot or terminate a node are off by default — see [NVSentinel Deployment Posture](#nvsentinel-deployment-posture). On platforms where the provider installs the driver but no driver pod is observable by NVSentinel, the recipes set `labeler.assumeDriverInstalled` for you — see [NVSentinel on provider-installed-driver platforms](#nvsentinel-on-provider-installed-driver-platforms). | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
 | **nvidia-dra-driver-gpu** | Dynamic Resource Allocation (DRA) driver. Advertises devices via the Kubernetes `resource.k8s.io` API (`v1` on 1.34+, `v1beta1`/`v1beta2` on 1.32/1.33) — ComputeDomain/IMEX channels for MNNVL platforms, and optionally whole GPUs. Stock recipes disable whole-GPU DRA advertisement (`resources.gpus.enabled: false`) — the device plugin is the production default whole-GPU advertiser, and DRA whole-GPU allocation is an experimental recipe-level opt-in ([#1327](https://github.com/NVIDIA/aicr/issues/1327)). Whole-GPU DRA and the GPU Operator device plugin (`nvidia.com/gpu`) are mutually exclusive per node: recipe-backed validation rejects a configuration that enables both (at policy-resolution time — skipping validation bypasses the check), because the two allocators keep independent ledgers and concurrent advertisement can double-allocate the same physical GPUs (see the guidance in `recipes/components/nvidia-dra-driver-gpu/values.yaml`). See [AKS GPU Setup](../integrator/aks-gpu-setup.md#dynamic-resource-allocation-dra) for details. CLI alias: `dradriver`. | [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu) |
+| **dra-node-labeler** | Applies the DRA eviction node label (`--dra-eviction-node-label`) to every node GFD reports as `nvidia.com/gpu.present=true`, so the DRA kubelet plugin's node selector and GPU Operator's Driver Manager eviction hook need no node-pool labeling. Write-once: an existing value, including the Driver Manager's `paused-for-driver-upgrade`, is never rewritten. Present in the bundle only when the eviction label is configured. | — |
 | **prometheus-operator-crds** | Custom Resource Definitions for the prometheus-operator (`Alertmanager`, `AlertmanagerConfig`, `PodMonitor`, `Probe`, `Prometheus`, `PrometheusRule`, `ServiceMonitor`, `ThanosRuler`). Shipped as a separate release so the CRDs land before any chart that creates monitoring CRs; this breaks the helm-diff self-reference that otherwise blocks `helmfile apply` on a fresh cluster. | [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds) |
 | **kube-prometheus-stack** | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
 | **prometheus-adapter** | Exposes custom metrics from Prometheus to the Kubernetes metrics API. Enables HPA scaling based on GPU utilization and other custom metrics. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
@@ -78,6 +80,20 @@ The platform-neutral `inference` coordinate is the base the Dynamo leaf inherits
 > **Every VR200 coordinate carries the same node-level prerequisites** — the 64k-page kernel, the Skyhook kernel-cmdline reboots, and the mandatory host `nvidia-imex` masking. Other requirements differ by intent (the inference leaves additionally cap Kubernetes at `< 1.36.0`). See [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md) before deploying any of them.
 
 For the definitional Preview-vs-Supported distinction, see [Preview recipes](../integrator/recipe-development.md#preview-recipes). For bare-metal cluster prerequisites, Skyhook reboot behavior, and known gaps on this coordinate, see [RKE2 VR200 Setup](../integrator/rke2-vr200-setup.md).
+
+## k0s Preview coverage
+
+> **`service=k0s` is Preview.** It publishes an early-adopter recipe path without the full production support and lifecycle qualification required for Supported status. Published validation evidence exists at [validation.aicr.run](https://validation.aicr.run/).
+
+One coordinate ships today:
+
+| Coordinate | Evidence |
+|---|---|
+| `k0s / h200 / ubuntu / training` | [validation.aicr.run/#/k0s/h200-ubuntu/training](https://validation.aicr.run/#/k0s/h200-ubuntu/training) |
+
+> **Node-level prerequisites differ from the VR200 coordinates.** This leaf ships no rebooting Skyhook CRs and declares no NCCL performance floor. It does expect the node image to carry the NVIDIA driver: the GPU Operator's driver install is off, and the container toolkit targets k0s's own bundled containerd through its drop-in directory.
+
+For the definitional Preview-vs-Supported distinction, see [Preview recipes](../integrator/recipe-development.md#preview-recipes). For cluster prerequisites, the host-provided driver posture, and known gaps on this coordinate, see [k0s H200 Setup](../integrator/k0s-h200-setup.md).
 
 ## How Components Are Selected
 
@@ -169,7 +185,7 @@ The signal is supplied as an `oci ce cluster list-addons --cluster-id <cluster-o
 
 AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration: it detects GPU and node faults and publishes health events, but takes no automatic action on a node. AICR does not disable remediation — the upstream chart ships it off, and AICR inherits that default rather than overriding it.
 
-`recipes/components/nvsentinel/values.yaml` enables and disables no NVSentinel *component*. It carries deployment-shaping values only: `fullnameOverride`, tolerate-all scheduling so GPU-node DaemonSets land on tainted nodes, `networkPolicy.enabled: false` (the metrics policy otherwise blocks cert-manager webhook traffic in the same namespace — this is the one upstream default AICR overrides here), `platformConnector` resources, and `janitor-provider.csp.provider: generic`, which selects the reboot mechanism used *if* remediation is later enabled but does not enable it. Every component on/off default below is the chart's.
+`recipes/components/nvsentinel/values.yaml` enables and disables no NVSentinel *component*. It carries deployment-shaping values: `fullnameOverride`, tolerate-all scheduling so GPU-node DaemonSets land on tainted nodes, `networkPolicy.enabled: false` (the metrics policy otherwise blocks cert-manager webhook traffic in the same namespace — this is the one upstream default AICR overrides here), `platformConnector` resources, and `janitor-provider.csp.provider: generic`, which selects the reboot mechanism used *if* remediation is later enabled but does not enable it. It also tunes which *checks* an already-on component runs: `syslog-health-monitor.enabledChecks` adds `SysLogsNICDriverError` to the three GPU checks the chart enables by default — see [NIC and fabric fault detection](#nic-and-fabric-fault-detection). Every component on/off default below is the chart's.
 
 **On by default** — the detection path:
 
@@ -193,6 +209,8 @@ AICR ships NVSentinel in the upstream chart's **monitoring-only** configuration:
 
 Also off: `healthEventsAnalyzer`, `lifecycleManager`, `cspHealthMonitor`, `kubernetesObjectMonitor`, `nicHealthMonitor`, `slurmDrainMonitor`, `preflight`, `eventExporter`, `inclusterFileServer`, `k8sdatastoreCrds`. Verified against chart `v1.20.0`, the version pinned in `recipes/registry.yaml`.
 
+`nicHealthMonitor` is the one entry above that AICR's shipped recipes turn back on, and only on AKS and OKE — see [NIC and fabric fault detection](#nic-and-fabric-fault-detection).
+
 **The practical effect.** A stock AICR bundle surfaces GPU faults; it does not act on them. A node that needs a reboot is reported, not rebooted, and an operator intervenes. That is deliberate: `janitor` can reboot or terminate nodes, and enabling it without the operator having chosen to is not a safe default.
 
 ### Audit Logging and Tracing
@@ -208,7 +226,7 @@ spec:
     - nvsentinel-observability
 ```
 
-**This overlay must be part of the resolved catalog** -- either an embedded overlay in `recipes/overlays/` (a real PR to this repo) or a file under an external `--data <dir>/overlays/` directory (`aicr recipe --data <dir> ...`, `aicr bundle --data <dir> ...`). An external `--data` directory must also carry a `registry.yaml` at its root even when it adds nothing but an overlay; see [the minimal stub](../integrator/data-extension.md#registryyaml-is-required). Passing your leaf overlay file directly to `aicr bundle -r <file>` or `aicr validate -r <file>` does **not** work for this (`aicr recipe` has no equivalent flag -- it only builds a recipe from criteria or an AICRConfig `--config` file, never loads an existing overlay directly): AICR auto-hydrates a directly-passed overlay by re-resolving its `spec.criteria` against the catalog (so a bare `aicr recipe` step isn't required first) -- it does not read `spec.mixins` or any other field from that file. A leaf overlay containing `mixins: [nvsentinel-observability]` that is never registered via `--data` silently composes without the mixin: the bundle still succeeds, still accepts `--set nv-sentinel:global.tracing.endpoint=...` with no error, but ships neither audit logging nor tracing. Confirm the mixin actually applied by checking the generated recipe's `nvsentinel` componentRef for `global.auditLogging`/`global.tracing` before bundling.
+**This overlay must be part of the resolved catalog** -- either an embedded overlay in `recipes/overlays/` (a real PR to this repo) or a file under an external `--data <dir>/overlays/` directory (`aicr recipe --data <dir> ...`, `aicr bundle --data <dir> ...`). An external `--data` directory must also carry a `registry.yaml` at its root even when it adds nothing but an overlay; see [the minimal stub](../integrator/data-extension.md#registryyaml-is-required). Passing your leaf overlay file directly to `aicr bundle -r <file>` or `aicr validate -r <file>` does **not** work for this (`aicr recipe` has no equivalent flag -- it only builds a recipe from criteria or an AICRConfig `--config` file, never loads an existing overlay directly): AICR auto-hydrates a directly-passed overlay by re-resolving its `spec.criteria` against the catalog (so a bare `aicr recipe` step isn't required first) -- it does not read `spec.mixins` or any other field from that file. A leaf overlay containing `mixins: [nvsentinel-observability]` that is never registered via `--data` therefore cannot contribute it, and AICR rejects the direct load with `INVALID_REQUEST` naming the dropped mixin rather than shipping a bundle without audit logging and tracing. A mixin that another applied overlay in the chain already supplies is not reported, since its content did reach the recipe.
 
 **Has no effect if `nvsentinel` is disabled by the chain.** The OCP overlay, for example, sets `nvsentinel`'s `overrides.enabled: false`; composing this mixin on top still succeeds (a `slog.Warn` names the mixin and the disabled component, but the recipe/bundle call itself returns success either way) and produces values nothing ever reads. Confirm `nvsentinel` isn't disabled elsewhere in your chain before relying on this mixin.
 
@@ -307,6 +325,215 @@ Because neither label is contractual, an operator release that renames one would
 Both policies set `isFatal: true` and leave `quarantineOverrides`/`drainOverrides` unset -- deliberately, not by omission. Today, with no quarantine component enabled anywhere in this repo's recipes, `isFatal: true` produces only a node condition; there is nothing to cordon or drain yet. Once remediation is enabled through #1014, the same policies drive an actual cordon/drain when an operator DaemonSet pod stays unhealthy past the grace period -- which is the correct behavior for a fault that means the node can no longer safely run GPU or RDMA workloads, not an accident of inheriting upstream's default.
 
 **`node-not-ready` is deliberately dropped, not inherited.** The `kubernetes-object-monitor` subchart ships a third policy by default, `node-not-ready` (watches `Node` for `Ready=False`); setting `kubernetes-object-monitor.policies` replaces that default list wholesale (Helm values do not merge lists), so this mixin does not carry it forward. It is a general node-readiness signal unrelated to this mixin's scope (operator DaemonSet pod health) and would enable a new class of node-cordon behavior nobody asked for here. Adopt it explicitly, with its own deliberate `isFatal`/quarantine decision, via your own leaf overlay's `componentRefs` if you want it.
+
+### Preflight Checks
+
+Off by default. NVSentinel's preflight is a mutating admission webhook that appends init containers to GPU pods, so the node runs hardware checks *before* your workload's own containers start.
+
+**These checks gate.** A node that fails one leaves the pod in `Init:Error` — the workload's own containers never start — and the failure is recorded on the node: a **fatal** result becomes a NodeCondition named after the check, while an **unhealthy but non-fatal** result becomes a Kubernetes Event instead. (They are alternatives, not both.) That is the point: the job fails in seconds rather than hanging minutes into training. Nothing is cordoned, drained or rebooted; AICR deploys no remediation component.
+
+**Opt in via the `nvsentinel-preflight` mixin** (`recipes/mixins/nvsentinel-preflight.yaml`) on your own leaf overlay:
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-preflight
+```
+
+The catalog-registration rule described under [Audit Logging and Tracing](#audit-logging-and-tracing) applies here too: the overlay must be in the resolved catalog — committed to `recipes/overlays/`, or placed at `<dir>/overlays/` and loaded with `--data <dir>`. Passing the file directly to `aicr bundle -r` or `aicr validate -r` hydrates it from `spec.criteria` alone and never reads `spec.mixins`, so the mixin cannot compose that way; AICR rejects the load with `INVALID_REQUEST`, naming the mixins that were dropped, rather than shipping a bundle without them. The "has no effect if `nvsentinel` is disabled by the chain" caveat applies equally, as does the allowlist mechanism — `nvsentinel`'s `mixinSafeOverridePaths` entry names each `preflight.*` leaf path this mixin may set, and anything outside it fails at compose time.
+
+**Two gates, not one.** Adopting the mixin only deploys the webhook. Nothing is injected until you also label the namespaces whose pods should be checked:
+
+```shell
+kubectl label namespace <ns> nvsentinel.nvidia.com/preflight=enabled
+```
+
+Within a labeled namespace, only pods that request a GPU resource (`nvidia.com/gpu`) are mutated; everything else passes through untouched.
+
+**Adopting this on a cluster that already runs NVSentinel needs one manual step.** The preflight subchart ships its `PreflightConfig` CRD under `crds/`, and Helm installs a `crds/` directory only on `helm install`, never on `helm upgrade`. A cluster that installed NVSentinel *before* adopting this mixin had the subchart — and therefore its CRD — pruned by the `global.preflight.enabled` condition, so enabling the mixin later cannot backfill it. The controller still admits and injects correctly, but its `preflightconfig` controller never starts and it logs `no matches for kind "PreflightConfig"` every 10 seconds. Apply the CRD once, from the chart:
+
+```shell
+kubectl apply -f <chart>/charts/preflight/crds/preflight.nvsentinel.nvidia.com_preflightconfigs.yaml
+```
+
+A fresh bundle install is unaffected, which is also why CI does not catch this — every bundle in CI is a first install.
+
+**What the mixin sets:**
+
+```yaml
+global:
+  preflight:
+    enabled: true
+preflight:
+  processingStrategy: EXECUTE_REMEDIATION   # chart default; the checks gate
+  webhook:
+    failurePolicy: Ignore             # chart default is Fail
+  gangCoordination:
+    enabled: true
+  gangDiscovery:
+    name: kai
+    annotationKeys: [pod-group-name]
+    podGroupGVR:
+      group: scheduling.run.ai
+      version: v2alpha2
+      resource: podgroups
+    minCountExpr: "podGroup.spec.minMember"
+  initContainers:                       # restated from the chart, see below
+    - name: preflight-dcgm-diag         #   (chart defaults)
+    - name: preflight-nccl-loopback     #   (chart defaults)
+    - name: preflight-nccl-allreduce
+      defaultEnabled: false             # the one deviation
+```
+
+The mixin also restates `preflight.initContainers` in full — all three checks, verbatim from the chart, with one addition: `defaultEnabled: false` on `preflight-nccl-allreduce`. The next section explains why.
+
+Restating means AICR now pins that list's contents (both images, both bandwidth thresholds, and `DCGM_HOSTENGINE_ADDR`), so a chart bump cannot move them silently. `TestNVSentinelPreflightInitContainersMatchChart` renders the mixin's list against the chart's own and fails on any drift beyond the intended `defaultEnabled` line. That test runs weekly, not on every PR, so a chart bump can merge before it fires.
+
+**`failurePolicy: Ignore` is deliberate.** The webhook sits in the pod-creation path, so the chart's `Fail` would turn a webhook outage into a pod-creation outage for every labeled namespace. `Ignore` trades a missed check for availability — the right default while this is new, and worth revisiting once it has field time. The cost is that a broken webhook is *silent*: pods are admitted unchecked, with no error anywhere. `recipes/checks/nvsentinel-preflight/health-check.yaml` detects exactly that, including the case where cert-manager has not injected the webhook's CA bundle — but **nothing runs it for you**. It is deliberately not registry-linked (the mixin is opt-in, so `make check-health-all` would run it against recipes that never deploy preflight), which is the same treatment `nvsentinel-observability` gets. Run it yourself after adopting the mixin:
+
+```shell
+make check-health COMPONENT=nvsentinel-preflight
+```
+
+Until you do, a webhook that never came up is indistinguishable from one that is working.
+
+**`processingStrategy: EXECUTE_REMEDIATION` is the chart default, kept deliberately.** It is what makes the init container's exit code gate the pod. The obvious-looking alternative, `STORE_ONLY`, is a trap: each check converts its own failure to exit code 0 (upstream logs `Check failed (STORE_ONLY — not blocking pod)`), *and* `platform-connectors` filters `STORE_ONLY` events out before they become a NodeCondition or a Kubernetes Event. Since AICR deploys no datastore, that combination would ship the cost of the checks with no gate and no record — the only trace of a failure would be an init-container log that disappears with the pod.
+
+**The name is misleading here: nothing is remediated.** The strategy controls whether the event is processable, not whether anything acts on it. All six NVSentinel remediation components (`faultQuarantine`, `nodeDrainer`, `faultRemediation`, `janitor`, `lifecycleManager`, `janitorProvider`) default off and AICR enables none, and `fault-quarantine` — the only consumer that would cordon or drain — is not deployed. The complete effect is: the pod is stranded, and the node gets either a NodeCondition (fatal) or a Kubernetes Event (non-fatal).
+
+**What this means operationally:** a bad GPU now blocks the pods scheduled onto it. That is the intended behaviour, but it is a real change in failure mode — budget for pods sitting in `Init:Error` rather than running slowly. `failurePolicy: Ignore` limits the blast radius of a *webhook* outage, not of a failing check.
+
+**One asymmetry worth knowing:** the strategy affects *check* failures. A check that cannot load its own configuration exits non-zero regardless.
+
+**Gang discovery points at KAI.** The chart's default (`{}`) relies on native Kubernetes gang-scheduling APIs that exist only on 1.35+/1.36+, while AICR's floor is 1.32 and managed control planes do not expose the alpha gates — so it is pointed at KAI's `PodGroup` CRs instead. `annotationKeys` is load-bearing, not decorative: upstream builds a PodGroup discoverer only when `name`, `annotationKeys` (or `labelKeys`), a full `podGroupGVR` and `minCountExpr` are all present, and anything short of that fails fast at controller startup. Because the controller validates the `PodGroup` CRD at startup and fails closed, the mixin adds `kai-scheduler` as a `dependencyRef` on `nvsentinel` so a DAG-stratified deployer applies the scheduler first. Every shipped recipe already carries `kai-scheduler`, and `TestMixinNVSentinelPreflight_ComposesOntoEveryLeaf` keeps it that way.
+
+Gang coordination also makes the chart generate the `preflight-gang-discovery-builtin` ClusterRole from `podGroupGVR` and aggregate it into the role the controller binds — which is why the mixin ships no RBAC of its own.
+
+**The multi-node check is configured but off by default.** `preflight-nccl-allreduce` needs gang context, and the webhook injects `POD_NAME` into it *only* when the pod already carries a gang annotation at creation time. A plain GPU pod would get the container without that variable, and the check exits on the missing variable — stranding a pod in `Init:Error` on perfectly healthy hardware. So the mixin ships it disabled and you request it per pod, with **both** annotations:
+
+```yaml
+metadata:
+  annotations:
+    pod-group-name: my-gang
+    nvsentinel.nvidia.com/preflight-checks: "preflight-dcgm-diag,preflight-nccl-loopback,preflight-nccl-allreduce"
+```
+
+The entry stays in the list rather than being removed, because the webhook resolves an annotation-requested name against every configured check — deleting it would turn this opt-in into a pod-creation error. **This path is exercised only at admission time in CI**: the e2e asserts the container and its `POD_NAME` are injected, but nothing in AICR has ever run the check itself.
+
+**The checks cost startup time.** Two init containers run in sequence before your workload's first container starts: a DCGM level-2 diagnostic (~2 min) and an NCCL loopback bandwidth test. Budget for this on every GPU pod in a labeled namespace, including short-lived ones — which is the main reason the namespace label exists rather than the mixin turning injection on cluster-wide.
+
+**The check images are not counted in the BOM table.** The three `preflight-*` check images and the `preflight` controller image come from `ghcr.io/nvidia/nvsentinel/` at the chart's own version; see the opt-in image note in [container images](container-images.md).
+
+**Limitations.**
+
+- **Rejected with `os-talos`, at bundle time.** That mixin relocates `gpu-operator` to `privileged-gpu-operator`, where `nvidia-dcgm.gpu-operator.svc:5555` does not resolve. The mixin pins that address and cannot vary it per composition — a second mixin setting the same allowlisted path collides at compose time. Rather than ship a DCGM check that cannot reach its hostengine, `CheckNVSentinelPreflightDCGMReachable` fails the bundle whenever preflight is enabled and gpu-operator is absent, disabled, relocated, or running with `dcgm.enabled: false`.
+- **The multi-node check is unusable on Grove-scheduled recipes.** Grove's gang model is hierarchical while preflight assumes one flat PodGroup per gang ([NVIDIA/NVSentinel#1354](https://github.com/NVIDIA/NVSentinel/issues/1354)), so gang discovery finds nothing there. Because the check is off by default this costs nothing unless you request it — and if you do request it on such a recipe, the pod is stranded rather than merely uncoordinated. The two single-node checks are unaffected. Every `*-inference-dynamo` leaf is affected and no other leaf is -- today that is `b200-gke-cos`, `gb200-eks-ubuntu`, `gb200-oke-ubuntu`, `gb300-eks-ubuntu`, `h100-aks-ubuntu`, `h100-eks-ubuntu`, `h100-gke-cos`, `h100-kind`, `rtx-pro-6000-eks-ubuntu` and `vr200-rke2-ubuntu`. `TestGroveLeavesAreExactlyTheDynamoLeaves` pins the correspondence -- a Grove leaf under another name, or a dynamo leaf that moves off Grove, fails there -- but it does not read the names above, so re-check them when a dynamo leaf is added.
+- **`kai-scheduler` must stay enabled, and the bundle now enforces it.** The mixin's dependency edge only orders the install — the bundler prunes an edge to a declared-but-disabled component as satisfied externally, so ordering alone would let a bundle look well-formed while `podgroups.scheduling.run.ai` never exists, crash-looping the controller and leaving `failurePolicy: Ignore` to admit every GPU pod unchecked. `CheckNVSentinelPreflightGangSchedulerRequired` blocks that at bundle time.
+- **The loopback bandwidth threshold is not enforced.** The chart's 150 GB/s is calibrated for NVLink, while its own values note PCIe parts need roughly 15 — so on `l40`, `l40s` and `rtx-pro-6000` a healthy GPU would fail it. Because the checks now gate, that would be a pod-creation outage on those recipes, so the mixin sets `SKIP_BANDWIDTH_CHECK: "true"`. The loopback *connectivity* test still runs and still gates; only its bandwidth assertion is skipped. Revisit if upstream gains per-accelerator thresholds. The all-reduce check keeps its 100 GB/s threshold, but it is off by default.
+- **A DCGM outage blocks GPU pods.** `preflight-dcgm-diag` treats an unreachable hostengine as a fatal result, so while DCGM is down every GPU pod in an opted-in namespace strands in `Init:Error`. `CheckNVSentinelPreflightDCGMReachable` catches the *configuration* cases at bundle time — gpu-operator absent, disabled, relocated, or running with `dcgm.enabled: false` (which the shipped Kind overlay does) — but it cannot catch a runtime outage. This is the main operational risk of adopting the mixin.
+
+
+### Node Problem Detector
+
+NVSentinel watches GPUs, drivers, NVLink and syslog. It does not watch the rest of the node, so a read-only root filesystem or a fatal CPU/memory/PCIe error leaves the node taking jobs that all fail — and the fault looks like a workload problem. [node-problem-detector](https://github.com/kubernetes/node-problem-detector) (NPD) already detects these and publishes them as Node Conditions; the Object Monitor policies above turn three of them into NVSentinel health events.
+
+| Node Condition | Reason | Meaning |
+|---|---|---|
+| `XfsShutdown` | `XfsHasShutdown` | the XFS filesystem shut itself down |
+| `CperHardwareErrorFatal` | `CperHardwareErrorFatal` | firmware reported a fatal UEFI CPER hardware error |
+| `ReadonlyFilesystem` | `FilesystemIsReadOnly` | the root filesystem remounted read-only |
+
+**AICR installs NPD nowhere by default.** No shipped recipe enables it; the `npd` mixin is opt-in, and `TestNoShippedRecipeAdoptsNPDMixins` keeps it that way. Platform-default adoption, starting with EKS, is deliberately deferred until the policies have been qualified on real clusters — they are still `STORE_ONLY`, and NPD runs privileged.
+
+**Where it is safe to opt in depends on the platform, because a second copy is harmful.** Two NPD DaemonSets race to own the same Node Conditions and one silently loses its writes — no error, just conditions that flap.
+
+**The mixin is supported only on EKS, Kind and RKE2. Every other platform fails closed.**
+
+| Platform | Provider's own NPD | `npd` mixin |
+|---|---|---|
+| EKS | none | **supported** |
+| Kind | none | **supported** |
+| RKE2 | none — not in its packaged components | **supported** |
+| GKE | enabled by default (COS and Ubuntu images, and as an addon) | blocked at bundle time |
+| AKS | enabled by default via the AKS Linux Extension | blocked at bundle time |
+| OKE | ships `oke-node-problem-detector`, disabled behind the `oci.oraclecloud.com/oke-node-problem-detector-enabled=true` node label | blocked — the label is operator-settable and invisible at bundle time, so a second instance cannot be ruled out |
+| OCP | — | blocked — needs a SecurityContextConstraints binding AICR does not ship |
+| LKE, BCM, Metal3, k0s, generic | unverified | blocked until someone confirms they run none |
+
+The gate is an allowlist, not a denylist: a platform is permitted only once someone has checked it runs no NPD of its own. To qualify a new one, verify that, then add it to `npdQualifiedServices` in `pkg/bundler/validations/checks.go`.
+
+`CheckNPDNotDuplicatingProviderNPD` enforces that at bundle time. It permits only the platforms verified to run no NPD of their own — `eks`, `kind`, `rke2` — and rejects everything else with a reason:
+
+| Rejected | Why |
+|---|---|
+| `gke`, `aks` | the provider already runs its own |
+| `oke` | Oracle ships one disabled behind a node label; that label is operator-settable and invisible at bundle time, so a second instance cannot be ruled out |
+| `ocp` | the privileged DaemonSet needs a SecurityContextConstraints binding AICR does not ship — it would bundle cleanly, then fail admission |
+| `os: talos` | `os-talos` relocates privileged components into `privileged-*` namespaces for Pod Security Admission, but not NPD, so it would land in a restricted namespace |
+| `lke`, `bcm`, `metal3`, `k0s`, `generic` | unverified — nobody has checked whether they run their own |
+| no criteria at all | the platform is unknown, and could be any of the above |
+
+Each rejection names what would resolve it. Disabling the component explicitly (`--set node-problem-detector:enabled=false`) always skips the gate.
+
+**Opt in via the `npd` mixin**, on your own leaf overlay:
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  mixins:
+    - npd
+    - nvsentinel-object-monitor
+```
+
+The same catalog-registration rule applies as for the other mixins: the overlay must be committed to `recipes/overlays/` or supplied through `--data <dir>/overlays/`, because `aicr bundle -r` reads only `spec.criteria` from a directly passed file.
+
+**The two mixins are independent, and which you need depends on the platform.** `nvsentinel-object-monitor` carries the policies; `npd` installs the detector that produces the conditions they read. On GKE and AKS the provider's own NPD publishes *some* of them, but not all: measured on live clusters, GKE publishes `XfsShutdown` and `CperHardwareErrorFatal` but names the third `ReadOnlyRootFileSystem`, while AKS publishes only `ReadonlyFilesystem`. Both run customised NPD configs rather than upstream's, so a policy whose condition that provider does not publish simply never fires, and nothing reports that. On OKE it depends on the cluster rather than the recipe: Oracle ships an NPD disabled behind an operator-settable node label, so whether the policies fire at all — and which of the three — is a property of how that cluster was configured, and is not visible at bundle time. Where no provider NPD runs at all (EKS, Kind, RKE2, and the unverified platforms), adopting the policies *without* `npd` gives no coverage whatsoever, for the same silent reason.
+
+**All three NPD policies ship `processingStrategy: STORE_ONLY`**, unlike the operator-health policies alongside them. Upstream recommends `REPLACE_VM` for all three — the most destructive action in the pipeline — and that stays unvalidated until these have run on real clusters. `STORE_ONLY` records the event without acting on it. Two upstream caveats make that caution worth keeping: a `SystemLogMonitor` permanent condition **latches**, staying set after the underlying fault is repaired; and **restarting NPD resets its conditions**, which a consumer can read as recovery and use to cancel an active break-fix pipeline before recovery is confirmed.
+
+**GKE auto-repair already acts on node conditions.** Before enabling anything beyond `STORE_ONLY` on GKE, decide which system owns remediation there — otherwise two systems act on one fault.
+
+NPD runs as a privileged DaemonSet and patches Node status.
+
+The pinned chart (`oci://ghcr.io/deliveryhero/helm-charts/node-problem-detector`) is the one upstream itself documents: the [node-problem-detector installation guide](https://github.com/kubernetes/node-problem-detector#installation) names it as the primary method and gives that exact OCI reference, with hand-applied manifests offered only as the alternative. The project publishes no chart of its own. It is still the only chart AICR pins that NVIDIA does not publish, which is worth stating plainly for supply-chain review — but it is the upstream-recommended path, not a substitute chosen here. The image it deploys (`registry.k8s.io/node-problem-detector/node-problem-detector`) is upstream Kubernetes' own.
+
+### NIC and Fabric Fault Detection
+
+A degraded InfiniBand or RoCE link is the failure this covers: the port stays UP and keeps passing traffic while the effective bandwidth for every GPU in a collective silently drops, so the job hangs or crashes with no obvious hardware error. NVSentinel splits the detection across three layers, and AICR ships them at two different scopes because they have different hardware requirements.
+
+**Layer 3 — driver faults — is on everywhere.** `syslog-health-monitor` already runs on every GPU node, but AICR inherited the chart's default `enabledChecks`, which lists only the three GPU checks. `recipes/components/nvsentinel/values.yaml` adds `SysLogsNICDriverError` and enables all 11 `nicDriverDetection` patterns, which match `mlx5_core` kernel-log lines: firmware command timeouts, lost health-poll heartbeats, NAPI soft lockups. This adds no image, no component and no RBAC, and the patterns simply never fire on a node with no Mellanox driver loaded — so it is unconditional rather than platform-scoped. Note that `enabledChecks` replaces the chart's list rather than merging with it, so the values file restates all three GPU checks alongside the new one.
+
+**Layers 1 and 2 — link state and link counters — are AKS and OKE only.** These come from the `nic-health-monitor` subchart, which reads sysfs and InfiniBand counters directly. Upstream's support matrix has exactly one row:
+
+> Current scope: Mellanox/NVIDIA InfiniBand and RoCE devices only.
+
+Mapped onto what AICR's overlays actually deploy:
+
+| Platform | Fabric component | `nicHealthMonitor` |
+|---|---|---|
+| AKS | `network-operator` (ConnectX) | on |
+| OKE | `network-operator` (ConnectX) | on |
+| EKS | `aws-efa` | off — not Mellanox |
+| GKE COS | `gke-nccl-tcpxo` | off — not Mellanox |
+| Kind | `network-operator`, simulated | off — no real NICs |
+
+The `nvsentinel-nic-health-monitor` mixin (`recipes/mixins/nvsentinel-nic-health-monitor.yaml`) carries the toggle, and the `aks` and `oke-ol` root overlays reference it. Mixins accumulate down the inheritance chain, so every AKS and OKE leaf gets it without restating it, and a newly added overlay in either family inherits it rather than silently missing it. Compose the mixin on your own leaf overlay to enable it elsewhere:
+
+```yaml
+# your-leaf-overlay.yaml
+spec:
+  mixins:
+    - nvsentinel-nic-health-monitor
+```
+
+Upstream's validated-platform list covers DGX and OCI hardware and does **not** name Azure. AKS is included here because its GPU pools deploy `network-operator`/ConnectX, which is the actual hardware precondition — not because upstream qualified AKS specifically.
+
+**Both layers ship `processingStrategy: STORE_ONLY`.** This is a deliberate downgrade from the chart's `EXECUTE_REMEDIATION` default, and more conservative than upstream's own example configuration, which reserves `STORE_ONLY` for a single pattern. Several counters — `link_downed` among them — treat any increment as fatal, and the remediation upstream recommends for them is `REPLACE_VM`, the most destructive action in the pipeline. Observation first; revisit once real coverage has been measured.
+
+**`metadataCollector` is a hard dependency.** `nic-health-monitor` reads GPU-to-NIC topology from `/var/lib/nvsentinel/gpu_metadata.json` and has no devices to check without it. Because a missing dependency renders and deploys silently, `CheckNVSentinelNicHealthMonitorRequiresMetadataCollector` blocks the bundle instead: enabling `global.nicHealthMonitor.enabled` with `global.metadataCollector.enabled: false` fails unless `nic-health-monitor.nicInclusionRegexOverride` carries a value the monitor will actually accept. Set is not enough — the gate requires a string with at least one non-empty pattern, and every comma-separated pattern must compile, because the chart writes the value straight into the monitor's config and it refuses to start on one that does not. An override it rejects is not a bypass; it is the same missing inventory in a crash loop. That override is the documented bypass, and it forfeits the automatic management-NIC exclusion along with the dependency, so prefer enabling `metadataCollector`. No AKS or OKE overlay disables it; the overlays that do (VR200/RKE2, H200/k0s) are not in either family and never compose this mixin.
+
+**Escalation needs the datastore.** The "three events in one hour escalates" behaviour lives in the Health Events Analyzer, which needs MongoDB. Without it ([#1014](https://github.com/NVIDIA/aicr/issues/1014)) only fatal events surface.
 
 ### Enabling Remediation
 
@@ -1321,3 +1548,78 @@ the path is resolved inside the controller's own filesystem.
 `MultiKueueKubeConfigPathValidation` is alpha and off by default in 0.19 and
 upstream expects to turn it on later, so prefer `locationType: Secret` or
 `ClusterProfile` rather than taking that dependency.
+
+### `nodewright-operator`: staying on `v0.17.x`
+
+AICR pins `nodewright-operator` at `v0.17.1` and deliberately does **not** track
+upstream's latest. Upstream `v0.18.0` renamed the `skyhook.nvidia.com/v1alpha1
+Skyhook` API to `nodewright.nvidia.com/v1alpha1 NodeWright`, migrates each
+existing `Skyhook` into a `NodeWright`, and writes completion status **only** on
+the new kind. Its attempt to mirror status back to the legacy object fails in a
+reconcile conflict loop, so `Skyhook.status` stays empty on a cluster where node
+tuning has genuinely finished.
+
+That matters because AICR's deployment-phase readiness gate and the
+`nodewright-customizations` health check both poll the legacy `Skyhook` CR. On a
+`v0.18.0` or newer operator they wait on a status that never populates and time
+out, failing the deployment phase while tuning has completed. This was observed
+live on a bare-metal GB300 cluster, where `NodeWright` reported `complete` with
+`completeNodes 2/2` while `Skyhook.status` was `{}`. AICR briefly pinned
+`v0.18.0` and rolled back; no released AICR version ever shipped it.
+
+`v0.19.0` carries no fix for the status mirror, so the same applies there.
+
+**Do not bump this pin ahead of the readiness path.** Moving to `v0.19.x`
+requires, at minimum:
+
+1. The deployment validator and the `nodewright-customizations` health check
+   read `NodeWright`, with a `Skyhook` fallback for older operators. The
+   fallback is needed regardless of the pin, since `Skyhook` is deprecated and
+   the API server already warns that it will be removed.
+2. The `Skyhook` CRs AICR ships under `nodewright-customizations` move to
+   `NodeWright`.
+3. The runtime-required taint key tracks the operator's default, which `v0.18.0`
+   changed from `skyhook.nvidia.com` to `nodewright.nvidia.com`.
+4. Deployment-phase validation passes on a live cluster carrying
+   `nodewright-customizations`.
+
+Upstream's own account of the rename is
+[`docs/getting-started/migration.md`](https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md),
+which sets a hard operational prerequisite for the upgrade itself:
+[every `Skyhook` must be `complete` with no nodes in progress](https://github.com/NVIDIA/nodewright/blob/main/docs/getting-started/migration.md#prerequisite-all-skyhooks-must-be-complete)
+before the operator is upgraded. It is a requirement rather than a
+recommendation — the migration relabels the operator's package and per-node
+ConfigMaps so the post-rename operator adopts them, and that flow assumes no
+in-flight package work to disrupt. `paused` and `disabled` objects are fine to
+leave as they are. Check with:
+
+```bash
+kubectl get skyhooks.skyhook.nvidia.com \
+  -o custom-columns=NAME:.metadata.name,STATUS:.status.status,INPROGRESS:.status.nodesInProgress
+```
+
+Tracked in [#2593](https://github.com/NVIDIA/aicr/issues/2593) and
+[#2594](https://github.com/NVIDIA/aicr/issues/2594).
+
+`aicr upgrade-check` reports all of this. The transition record at
+`recipes/components/nodewright-operator/upgrades.yaml` describes the `v0.18.0`
+boundary itself — the rename, the prerequisite above, and per-deployer steps —
+and stops its `to` ceiling there. So crossing `v0.18.0` is `manual` with steps,
+while any target above it is `blocked` and told to take the rename on its own:
+
+```console
+$ aicr upgrade-check --from old.yaml --to new.yaml --deployer helm
+COMPONENT            FROM     TO       VERDICT  NOTES
+nodewright-operator  v0.17.1  v0.18.0  manual   1 minor, 5 steps
+
+$ aicr upgrade-check --from old.yaml --to newer.yaml --deployer helm
+COMPONENT            FROM     TO       VERDICT  NOTES
+nodewright-operator  v0.17.1  v0.19.0  blocked  2 minors, stops at =0.18.0
+```
+
+The record sits above the pin deliberately. Only a `safe` verdict is held to the
+pinned version, so upgrade guidance can be written before the bump it describes
+— which is the order that qualifies a bump in the first place. The steps
+therefore tell you how upstream's migration works *and* that AICR's own
+readiness gate does not yet survive it; the prerequisites above are what moving
+the pin needs.

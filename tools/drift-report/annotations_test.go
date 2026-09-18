@@ -29,6 +29,7 @@ import (
 var untrackedComponents = map[string]string{
 	"gke-nccl-tcpxo":            "manifest-only: in-tree manifests, no upstream chart",
 	"dranet":                    "manifest-only: in-tree manifests, no upstream chart",
+	"dra-node-labeler":          "manifest-only: in-tree manifests, no upstream chart",
 	"rdma-netns-exclusive":      "manifest-only: in-tree manifests, no upstream chart",
 	"gcp-driver-installer":      "manifest-only: in-tree manifests, no upstream chart",
 	"nodewright-customizations": "manifest-only: in-tree customization manifests",
@@ -110,8 +111,8 @@ func TestRegistryPinsAreRenovateTracked(t *testing.T) {
 		}
 	}
 
-	if tracked != 34 {
-		t.Errorf("tracked chart pins = %d, want 34; update this count and the spec deliberately", tracked)
+	if tracked != 35 {
+		t.Errorf("tracked chart pins = %d, want 35; update this count and the spec deliberately", tracked)
 	}
 
 	// report.go joins Renovate's lookups by DepName alone (lookups[p.DepName]),

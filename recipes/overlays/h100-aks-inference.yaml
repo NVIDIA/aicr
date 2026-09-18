@@ -42,7 +42,7 @@ spec:
         - kube-prometheus-stack
         - nodewright-customizations
 
-    # Same tuning manifest as EKS: nvidia-setup 0.5.0 supports service: aks
+    # Same tuning manifest as EKS: nvidia-setup 0.8.0 supports service: aks
     # (aks-h100), covering host IB RDMA + memlock setup that the
     # ib-node-config-aks DaemonSet used to perform. nvidia-tuned (which would
     # apply the aks-h100-inference profile) is disabled by default under the

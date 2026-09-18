@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/aicr/pkg/bundler/attestation"
+	"github.com/NVIDIA/aicr/pkg/bundler/bundleinfo"
 	"github.com/NVIDIA/aicr/pkg/bundler/checksum"
 	"github.com/NVIDIA/aicr/pkg/bundler/config"
 	"github.com/NVIDIA/aicr/pkg/bundler/deployer"
@@ -50,6 +51,7 @@ import (
 	"github.com/NVIDIA/aicr/pkg/netutil"
 	"github.com/NVIDIA/aicr/pkg/recipe"
 	"github.com/NVIDIA/aicr/pkg/serializer"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // readBoundedFile streams a file through io.LimitReader against maxBytes.
@@ -77,12 +79,15 @@ const (
 	// digestAlgoSHA256 is the algorithm key used in attestation digest maps.
 	digestAlgoSHA256 = "sha256"
 
-	// recipeFileName is the resolved recipe written into every bundle.
-	recipeFileName = "recipe.yaml"
-
 	accountingDatabaseUsername = "slurm"
 	componentInstallKey        = "install"
 )
+
+// RecipeFileName is the resolved recipe written at the root of every bundle.
+// Exported because reading it back is how a consumer recognizes a directory as
+// a bundle and recovers the recipe it was built from, and a second copy of the
+// literal would drift silently.
+const RecipeFileName = "recipe.yaml"
 
 // errCtxKeyComponent is the structured-error context key carrying the
 // component name in bundle value-override failures.
@@ -1004,8 +1009,29 @@ func (b *DefaultBundler) runDeployer(ctx context.Context, d deployer.Deployer, r
 	if writeErr != nil {
 		return nil, errors.Wrap(errors.ErrCodeInternal, "failed to write recipe file", writeErr)
 	}
-	output.Files = append(output.Files, filepath.Join(dir, recipeFileName))
+	output.Files = append(output.Files, filepath.Join(dir, RecipeFileName))
 	output.TotalSize += recipeSize
+
+	recipePath, joinErr := deployer.SafeJoin(dir, RecipeFileName)
+	if joinErr != nil {
+		return nil, errors.Wrap(errors.ErrCodeInternal, "unsafe recipe file path", joinErr)
+	}
+	// SHA256RawContext returns raw bytes; %x is how this repo renders them
+	// (checksum.go:156).
+	rawDigest, digestErr := checksum.SHA256RawContext(ctx, recipePath)
+	if digestErr != nil {
+		return nil, errors.PropagateOrWrap(digestErr, errors.ErrCodeInternal,
+			"failed to digest recipe for bundle info")
+	}
+	recipeDigest := fmt.Sprintf("sha256:%x", rawDigest)
+
+	info := b.buildBundleInfo(recipeResult, output, recipeDigest)
+	infoSize, infoErr := bundleinfo.Write(ctx, dir, info)
+	if infoErr != nil {
+		return nil, errors.PropagateOrWrap(infoErr, errors.ErrCodeInternal, "failed to write bundle info")
+	}
+	output.Files = append(output.Files, filepath.Join(dir, bundleinfo.FileName))
+	output.TotalSize += infoSize
 
 	if b.Config.IncludeChecksums() {
 		if checksumErr := checksum.WriteChecksums(ctx, dir, output); checksumErr != nil {
@@ -1414,6 +1440,13 @@ func (b *DefaultBundler) filterEnabledComponents(recipeResult *recipe.RecipeResu
 			}
 			enabledRefs = kept
 		}
+	}
+
+	// After the positive filter, so a `bundlers` selection that keeps the
+	// labeler but drops either half of the contract it serves still removes it.
+	enabledRefs, labelerErr := b.dropUnservedDRANodeLabeler(enabledRefs, enabledSet, excludedReasons)
+	if labelerErr != nil {
+		return nil, nil, nil, labelerErr
 	}
 
 	if len(enabledRefs) == 0 {
@@ -2790,7 +2823,7 @@ func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir 
 		return 0, errors.PropagateOrWrap(err, errors.ErrCodeInternal, "failed to serialize recipe")
 	}
 
-	recipePath, joinErr := deployer.SafeJoin(dir, recipeFileName)
+	recipePath, joinErr := deployer.SafeJoin(dir, RecipeFileName)
 	if joinErr != nil {
 		return 0, errors.Wrap(errors.ErrCodeInternal, "unsafe recipe file path", joinErr)
 	}
@@ -2800,6 +2833,109 @@ func (b *DefaultBundler) writeRecipeFile(recipeResult *recipe.RecipeResult, dir 
 
 	slog.Debug("wrote recipe file", "path", recipePath)
 	return int64(len(recipeData)), nil
+}
+
+// buildBundleInfo assembles the bundle's build record from the resolved
+// configuration, the recipe, and the layout the deployer just reported.
+//
+// It reads paths from out rather than re-deriving them: the NNN- prefix
+// convention is the deployer's, and flux does not use it at all, so
+// reconstructing a path here would be a guess that happens to be right four
+// times out of five.
+func (b *DefaultBundler) buildBundleInfo(
+	recipeResult *recipe.RecipeResult,
+	out *deployer.Output,
+	recipeDigest string,
+) *bundleinfo.BundleInfo {
+
+	info := &bundleinfo.BundleInfo{
+		Metadata: bundleinfo.Metadata{Version: b.Config.Version()},
+		Build: bundleinfo.Build{
+			Deployer: b.Config.Deployer().String(),
+			Recipe: bundleinfo.Recipe{
+				Path:    RecipeFileName,
+				Digest:  recipeDigest,
+				Version: recipeResult.Metadata.Version,
+			},
+			Settings: b.bundleInfoSettings(out),
+		},
+		Layout: bundleinfo.Layout{
+			Entrypoint: out.Entrypoint,
+			Provenance: out.Provenance,
+			Releases:   make([]bundleinfo.Release, 0, len(out.Releases)),
+		},
+	}
+	for _, r := range out.Releases {
+		info.Layout.Releases = append(info.Layout.Releases, bundleinfo.Release{
+			Name:      r.Name,
+			Component: r.Component,
+			Namespace: r.Namespace,
+			Path:      r.Path,
+			Manifest:  r.Manifest,
+		})
+	}
+	return info
+}
+
+// bundleInfoSettings records the resolved bundler settings, admitting a
+// setting only when its effect is already observable in the bundle's own
+// files.
+//
+// repoURL, targetRevision and appName are the settings that survive that rule
+// on some deployers and not others, and they are read from out rather than
+// from b.Config: the deployer reports what it resolved and baked, defaults
+// and placeholders included, so an unconfigured --repo is recorded as the
+// placeholder URL the bundle actually ships instead of vanishing under
+// omitempty. A deployer that consumes none of the three reports none, and the
+// fields are omitempty, so no key is left behind.
+func (b *DefaultBundler) bundleInfoSettings(out *deployer.Output) bundleinfo.Settings {
+	return bundleinfo.Settings{
+		RepoURL:            out.Source.RepoURL,
+		TargetRevision:     out.Source.TargetRevision,
+		AppName:            out.Source.AppName,
+		Checksums:          b.Config.IncludeChecksums(),
+		Attested:           b.Config.Attest(),
+		VendorCharts:       b.Config.VendorCharts(),
+		ReadinessHooks:     b.Config.ReadinessHooks(),
+		Serial:             b.Config.Serial(),
+		Components:         b.Config.Bundlers(),
+		StorageClass:       b.Config.StorageClass(),
+		SharedStorageClass: b.Config.SharedStorageClass(),
+		NodeScheduling: nodeScheduling(
+			b.Config.SystemNodeSelector(), b.Config.SystemNodeTolerations(),
+			b.Config.AcceleratedNodeSelector(), b.Config.AcceleratedNodeTolerations()),
+	}
+}
+
+// nodeScheduling converts the config's corev1 tolerations to the artifact's
+// own wire type. Returns nil when nothing is pinned, so the key is omitted
+// rather than emitted empty.
+func nodeScheduling(sysSel map[string]string, sysTol []corev1.Toleration,
+	accSel map[string]string, accTol []corev1.Toleration) *bundleinfo.NodeScheduling {
+
+	system := scheduling(sysSel, sysTol)
+	accelerated := scheduling(accSel, accTol)
+	if system == nil && accelerated == nil {
+		return nil
+	}
+	return &bundleinfo.NodeScheduling{System: system, Accelerated: accelerated}
+}
+
+func scheduling(selector map[string]string, tolerations []corev1.Toleration) *bundleinfo.Scheduling {
+	if len(selector) == 0 && len(tolerations) == 0 {
+		return nil
+	}
+	s := &bundleinfo.Scheduling{Selector: selector}
+	for _, t := range tolerations {
+		s.Tolerations = append(s.Tolerations, bundleinfo.Toleration{
+			Key:               t.Key,
+			Operator:          string(t.Operator),
+			Value:             t.Value,
+			Effect:            string(t.Effect),
+			TolerationSeconds: t.TolerationSeconds,
+		})
+	}
+	return s
 }
 
 // buildDynamicValuesMap re-keys the config's dynamic values from user override keys
@@ -3107,6 +3243,15 @@ const (
 	draEvictionEnvName            = "NODE_LABEL_FOR_GPU_POD_EVICTION"
 	draEvictionNodeSelectorPath   = "kubeletPlugin.nodeSelector"
 	gpuOperatorDRAEvictionEnvPath = "driver.manager.env"
+
+	// draNodeLabelerComponentName is the manifest-only component that mirrors
+	// GFD's nvidia.com/gpu.present onto the eviction label, so the label is
+	// derived from hardware rather than provisioned per node pool (#2676). It
+	// is dropped from the bundle unless the eviction contract is opted into
+	// (see filterEnabledComponents) and its label pair is bundler-owned.
+	draNodeLabelerComponentName = "dra-node-labeler"
+	draNodeLabelerKeyPath       = "labelKey"
+	draNodeLabelerValuePath     = "labelValue"
 )
 
 var (
@@ -3116,6 +3261,85 @@ var (
 
 func isDRAComponent(name string) bool {
 	return slices.Contains(draComponentNames, name)
+}
+
+// recipeHasDRANodeLabeler reports whether the (filtered) recipe still carries
+// the dra-node-labeler component, i.e. the eviction label is derived rather
+// than provisioned.
+func recipeHasDRANodeLabeler(recipeResult *recipe.RecipeResult) bool {
+	if recipeResult == nil {
+		return false
+	}
+	for _, ref := range recipeResult.ComponentRefs {
+		if ref.Name == draNodeLabelerComponentName {
+			return true
+		}
+	}
+	return false
+}
+
+// dropUnservedDRANodeLabeler applies the bundle-time gate on dra-node-labeler.
+// Recipes declare it enabled so the dependency graph is authored once, and the
+// bundle carries it only when the eviction contract it serves is opted into
+// (#2676). Dropping it here, like a --set enabled=false, lets
+// filterEnabledComponents prune the nvidia-dra-driver-gpu edge and keeps the
+// health check and BOM consistent with what is rendered.
+//
+// A labeler named explicitly in the bundlers filter is not dropped silently:
+// like an unknown or disabled name there, a selection that asks for the
+// labeler while the flag or a prerequisite is missing is a contradictory
+// request and is rejected with ErrCodeInvalidRequest.
+func (b *DefaultBundler) dropUnservedDRANodeLabeler(
+	enabledRefs []recipe.ComponentRef,
+	enabledSet map[string]struct{},
+	excludedReasons map[string]string,
+) ([]recipe.ComponentRef, error) {
+
+	if _, declared := enabledSet[draNodeLabelerComponentName]; !declared {
+		return enabledRefs, nil
+	}
+	reason, drop := b.draNodeLabelerDropReason(enabledSet)
+	if !drop {
+		return enabledRefs, nil
+	}
+	if b.Config != nil && slices.Contains(b.Config.Bundlers(), draNodeLabelerComponentName) {
+		return nil, errors.New(errors.ErrCodeInvalidRequest, fmt.Sprintf(
+			"component %q was selected via the bundlers filter but cannot be rendered: %s",
+			draNodeLabelerComponentName, reason))
+	}
+	slog.Info("skipping component", "component", draNodeLabelerComponentName, "reason", reason)
+	excludedReasons[draNodeLabelerComponentName] = reason
+	delete(enabledSet, draNodeLabelerComponentName)
+	kept := make([]recipe.ComponentRef, 0, len(enabledRefs))
+	for _, ref := range enabledRefs {
+		if ref.Name != draNodeLabelerComponentName {
+			kept = append(kept, ref)
+		}
+	}
+	return kept, nil
+}
+
+// draNodeLabelerDropReason decides whether the labeler is rendered. It is
+// useful only when the eviction contract is opted into AND both halves of
+// that contract (a GPU Operator and a DRA driver) are in the bundle; in every
+// other case it would label nodes nothing selects on. Returns the reason
+// phrase quoted back by rejectOverridesForAbsentComponents, and ok=false when
+// the component should be kept.
+func (b *DefaultBundler) draNodeLabelerDropReason(enabledSet map[string]struct{}) (string, bool) {
+	if b == nil || b.Config == nil || b.Config.DRAEvictionNodeLabel() == (config.NodeLabel{}) {
+		return "DRA eviction is not opted in (--dra-eviction-node-label unset), so the eviction label it would apply is not selected on", true
+	}
+	// The exact non-OpenShift names, not the -ocp aliases: the labeler's
+	// dependency edges in base.yaml point at gpu-operator and are declared on
+	// nvidia-dra-driver-gpu, so on an OCP recipe (which disables both) it
+	// would render unordered ahead of gpu-operator-ocp. OCP keeps the
+	// provisioning workflow until #2828 wires it.
+	_, hasDRA := enabledSet[draComponentName]
+	_, hasGPUOperator := enabledSet[gpuOperatorComponentName]
+	if !hasDRA || !hasGPUOperator {
+		return "the DRA eviction contract needs both gpu-operator and nvidia-dra-driver-gpu in the bundle (the OpenShift variants are not wired for it; see NVIDIA/aicr#2828)", true
+	}
+	return "", false
 }
 
 func isGPUOperatorComponent(name string) bool {
@@ -3167,6 +3391,8 @@ func rejectDRAEvictionDynamicPaths(
 	}{
 		{componentNames: draNames, path: draEvictionNodeSelectorPath},
 		{componentNames: gpuOperatorNames, path: gpuOperatorDRAEvictionEnvPath},
+		{componentNames: []string{draNodeLabelerComponentName}, path: draNodeLabelerKeyPath},
+		{componentNames: []string{draNodeLabelerComponentName}, path: draNodeLabelerValuePath},
 	}
 	for _, managed := range managedPaths {
 		for _, componentName := range managed.componentNames {
@@ -3248,9 +3474,45 @@ func (b *DefaultBundler) injectDRAEvictionLabel(
 		}
 	}
 
+	if recipeHasDRANodeLabeler(recipeResult) {
+		values := componentValues[draNodeLabelerComponentName]
+		if values == nil {
+			values = make(map[string]any)
+			componentValues[draNodeLabelerComponentName] = values
+		}
+		values[draNodeLabelerKeyPath] = label.Key
+		values[draNodeLabelerValuePath] = label.Value
+		b.warnDRAEvictionLabelDerived(draNames, label)
+		return nil
+	}
+
 	b.warnDRAEvictionNodeLabelRequired(draNames, label)
 
 	return nil
+}
+
+// warnDRAEvictionLabelDerived is the counterpart of
+// warnDRAEvictionNodeLabelRequired for bundles that carry dra-node-labeler:
+// the label is applied by the labeler from GFD's nvidia.com/gpu.present, so no
+// node-pool provisioning is required, and the remaining gap is a GPU node GFD
+// has not labeled (no gpu.present, no eviction label, no kubelet plugin).
+func (b *DefaultBundler) warnDRAEvictionLabelDerived(draNames []string, label config.NodeLabel) {
+	for _, name := range draNames {
+		msg := fmt.Sprintf(
+			"%s schedules its kubelet plugin only on nodes labeled %s=%s; dra-node-labeler applies that label to every node GFD reports as nvidia.com/gpu.present=true, so no node-pool labeling is required. A GPU node without gpu.present (GFD not yet running, or a node GPU Operator does not manage) that does not already carry %s=%s runs no kubelet plugin and publishes no ResourceSlices. To provision the label yourself instead, pass --set %s:enabled=false",
+			name,
+			label.Key,
+			label.Value,
+			label.Key,
+			label.Value,
+			draNodeLabelerComponentName,
+		)
+		b.appendWarning(msg)
+		slog.Warn("DRA kubelet plugin label derived by dra-node-labeler",
+			"component", name,
+			"label", label.String(),
+		)
+	}
 }
 
 // warnDRAEvictionNodeLabelRequired emits the non-blocking bundle-time warning
@@ -3313,7 +3575,7 @@ func (b *DefaultBundler) warnDRAEvictionNotConfigured(
 
 	for _, name := range draNames {
 		msg := fmt.Sprintf(
-			"AICR did not configure automatic eviction for %s: no DRA eviction node label is set, so the kubelet plugin is not descheduled before a GPU driver container restart. The plugin runs on every accelerated node and needs no extra node label. On a driver upgrade the module unload can fail with \"failed to uninstall nvidia driver components\"; on an unchanged-config restart the stale driver rootfs is unmounted underneath the running plugin, which upstream documents as leaving NodePrepareResources unable to build CDI specs for full-GPU allocation, with no error at restart time. Set --dra-eviction-node-label (or scheduling.draEvictionNodeLabel) to opt in, and label every GPU node at node-pool provisioning time",
+			"AICR did not configure automatic eviction for %s: no DRA eviction node label is set, so the kubelet plugin is not descheduled before a GPU driver container restart. The plugin runs on every accelerated node and needs no extra node label. On a driver upgrade the module unload can fail with \"failed to uninstall nvidia driver components\"; on an unchanged-config restart the stale driver rootfs is unmounted underneath the running plugin, which upstream documents as leaving NodePrepareResources unable to build CDI specs for full-GPU allocation, with no error at restart time. Set --dra-eviction-node-label (or scheduling.draEvictionNodeLabel) to opt in; the bundle then carries dra-node-labeler, which applies the label from GFD's nvidia.com/gpu.present, so no node-pool labeling is needed (pass --set dra-node-labeler:enabled=false to provision it yourself)",
 			name,
 		)
 		b.appendWarning(msg)

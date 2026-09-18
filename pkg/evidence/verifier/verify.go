@@ -89,19 +89,20 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	// present, sigstore-go anchors the DSSE-wrapped Statement to a
 	// Fulcio cert + optional Rekor entry. The predicate inside that
 	// verified Statement is the cryptographically authoritative value.
-	verifiedPredicate, pendingSignature := stepSignatureCheck(ctx, r, mat, opts)
+	verifiedPredicate, verifiedType, pendingSignature := stepSignatureCheck(ctx, r, mat, opts)
 
 	// Step 3 — predicate parse. Prefer the predicate the signature
 	// step produced (cryptographically anchored); fall back to the
 	// bundle's unsigned statement.intoto.json when no signature was
 	// attached. Either way the manifest digest comes from this value.
-	pred, perr := resolvePredicate(ctx, verifiedPredicate, mat)
+	pred, predType, perr := resolvePredicate(ctx, verifiedPredicate, verifiedType, mat)
 	if perr != nil {
 		record(r, stepPredicate, StepFailed, perr.Error(), nil)
 		recordFailure(r, stepPredicate, perr)
 		return r, nil
 	}
 	r.Predicate = pred
+	r.PredicateType = predType
 	r.RecipeName = pred.Recipe.Name
 	// Early pointer-to-predicate name check (fast fail with clear step
 	// attribution). The AUTHORITATIVE identity binding — including the
@@ -141,7 +142,7 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 		// claim disagrees with the committed report — fail closed.
 		record(r, stepInventory, StepFailed, phaseErr.Error(), phaseRows)
 		recordFailure(r, stepInventory, phaseErr)
-	} else if idErr := checkRecipeIdentity(recipeYAML, pointer, pred); idErr != nil {
+	} else if idErr := checkRecipeIdentity(recipeYAML, pointer, pred, predType); idErr != nil {
 		// Content-bound identity: the pointer/predicate recipe name,
 		// profile claim (presence, selection, advertiser, descriptor
 		// currentness), and digest must all derive from the
@@ -173,18 +174,17 @@ func Verify(ctx context.Context, opts VerifyOptions) (*VerifyResult, error) {
 	return r, nil
 }
 
-// stepSignatureCheck runs step 2 and returns the cryptographically
-// anchored predicate when the bundle is signed (nil otherwise) plus whether
-// the bundle is unsigned (a candidate "pending signature" state). Side
-// effects: records the step row, sets r.Signer, may update r.Exit. The
-// caller decides whether to surface Pending, since that is only valid once
-// the final exit is known.
+// stepSignatureCheck runs step 2, returning the cryptographically anchored
+// pred and predType when the bundle is signed. pending reports whether the
+// bundle is unsigned instead (a candidate "pending signature" state). It
+// also records the step row, sets r.Signer, and may update r.Exit. The
+// caller decides whether to surface Pending on VerifyResult, since that is
+// only valid once the final exit is known.
 //
 // When the input is a pointer file with a signer claim, this step also
-// cross-checks the pointer's claim against the actual cert. A
-// malicious pointer that names a different signer than the bundle
-// fails here.
-func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedBundle, opts VerifyOptions) (*attestation.Predicate, bool) {
+// cross-checks the pointer's claim against the actual cert. A malicious
+// pointer that names a different signer than the bundle fails here.
+func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedBundle, opts VerifyOptions) (pred *attestation.Predicate, predType string, pending bool) {
 	sig, sigErr := VerifySignature(ctx, mat, opts)
 
 	var claimedSigner *attestation.PointerSigner
@@ -199,7 +199,7 @@ func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedB
 			if ccErr := CrossCheckPointerSigner(claimedSigner, nil); ccErr != nil {
 				record(r, stepSignature, StepFailed, ccErr.Error(), nil)
 				recordFailure(r, stepSignature, ccErr)
-				return nil, false
+				return nil, "", false
 			}
 		}
 		// Unsigned with no signer claim: a candidate "pending signature"
@@ -207,17 +207,17 @@ func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedB
 		// and awaits the signing leg; verification of the rest of the bundle
 		// continues. The caller sets r.Pending only if the final exit is 0.
 		record(r, stepSignature, StepSkipped, "no signature attached (unsigned bundle — pending signature)", nil)
-		return nil, true
+		return nil, "", true
 	case sigErr != nil:
 		record(r, stepSignature, StepFailed, sigErr.Error(), nil)
 		recordFailure(r, stepSignature, sigErr)
-		return nil, false
+		return nil, "", false
 	default:
 		r.Signer = sig.Signer
 		if ccErr := CrossCheckPointerSigner(claimedSigner, sig.Signer); ccErr != nil {
 			record(r, stepSignature, StepFailed, ccErr.Error(), nil)
 			recordFailure(r, stepSignature, ccErr)
-			return nil, false
+			return nil, "", false
 		}
 		detail := "signer " + sig.Signer.Identity + " (issuer " + sig.Signer.Issuer + ")"
 		var sub []KV
@@ -226,22 +226,23 @@ func stepSignatureCheck(ctx context.Context, r *VerifyResult, mat *MaterializedB
 				Value: strconv.FormatInt(*sig.Signer.RekorLogIndex, 10)}}
 		}
 		record(r, stepSignature, StepPassed, detail, sub)
-		return sig.Predicate, false
+		return sig.Predicate, sig.PredicateType, false
 	}
 }
 
-// resolvePredicate picks the predicate to use for downstream steps.
-// Verified payload takes precedence; otherwise we fall back to the
-// unsigned statement.intoto.json. Both shapes go through the same
-// PredicateTypeV1 check.
+// resolvePredicate picks the predicate and its predicateType for
+// downstream steps. Verified payload takes precedence. Otherwise it falls
+// back to the unsigned statement.intoto.json. Both shapes go through the
+// same ValidatePredicateTypeCoherence check.
 func resolvePredicate(
 	ctx context.Context,
 	verified *attestation.Predicate,
+	verifiedType string,
 	mat *MaterializedBundle,
-) (*attestation.Predicate, error) {
+) (*attestation.Predicate, string, error) {
 
 	if verified != nil {
-		return verified, nil
+		return verified, verifiedType, nil
 	}
 	return loadUnsignedPredicate(ctx, mat)
 }
@@ -252,26 +253,27 @@ func record(r *VerifyResult, step int, status StepStatus, detail string, sub []K
 	})
 }
 
-// loadUnsignedPredicate reads the bundle's unsigned in-toto Statement
-// and returns the predicate body. Used when no Sigstore Bundle was
-// emitted; the predicate is trusted as-is (self-consistency only).
-func loadUnsignedPredicate(ctx context.Context, mat *MaterializedBundle) (*attestation.Predicate, error) {
+// loadUnsignedPredicate reads the bundle's unsigned in-toto Statement and
+// returns the predicate body and its predicateType. Used when no Sigstore
+// Bundle was emitted. The predicate is trusted as-is (self-consistency
+// only).
+func loadUnsignedPredicate(ctx context.Context, mat *MaterializedBundle) (*attestation.Predicate, string, error) {
 	path := filepath.Join(mat.BundleDir, attestation.StatementFilename)
 	body, err := readBoundedFile(ctx, path, "in-toto Statement", defaults.MaxAttestationFileBytes)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var envelope struct {
 		PredicateType string                `json:"predicateType"`
 		Predicate     attestation.Predicate `json:"predicate"`
 	}
 	if uErr := json.Unmarshal(body, &envelope); uErr != nil {
-		return nil, errors.Wrap(errors.ErrCodeInvalidRequest, "Statement is not valid JSON", uErr)
+		return nil, "", errors.Wrap(errors.ErrCodeInvalidRequest, "Statement is not valid JSON", uErr)
 	}
 	if cErr := attestation.ValidatePredicateTypeCoherence(envelope.PredicateType, &envelope.Predicate); cErr != nil {
-		return nil, cErr
+		return nil, "", cErr
 	}
-	return &envelope.Predicate, nil
+	return &envelope.Predicate, envelope.PredicateType, nil
 }
 
 func hasPhaseFailures(pred *attestation.Predicate) bool {

@@ -26,8 +26,9 @@
 # 1. Builds the aicr binary
 # 2. Ensures a Kind cluster + local registry (ctlptl, reuses .ctlptl.yaml)
 # 3. Generates a recipe via query parameters, with the
-#    nvsentinel-object-monitor mixin composed so its mixin-gated image
-#    flows through every step below
+#    nvsentinel-object-monitor and nvsentinel-preflight mixins composed, so
+#    their mixin-gated images are asserted in every manifest format and the
+#    two small controller images are carried through the transfer
 # 4. Runs `aicr mirror list` in all formats (validates the full pipeline)
 # 5. Trims Hauler/Zarf manifests to public images only (avoids NGC auth)
 # 6. Syncs trimmed manifest via Hauler into the local registry
@@ -57,6 +58,57 @@ ROOT="$(cd "${DIR}/.." && pwd)"
 REGISTRY_HOST="localhost:5001"
 MAX_IMAGES="${MAX_IMAGES:-5}"
 WORK=""
+
+# The images the nvsentinel-preflight mixin pulls in. Invisible to the static
+# BOM, so this script is their only mirror coverage. Tags must match
+# nvsentinel's defaultVersion in recipes/registry.yaml --
+# TestPreflightImagesPinnedEverywhere enforces that.
+#
+# All are asserted in the three `mirror list` formats, but only the ~13 MiB
+# controller image is carried through the Hauler sync, Zarf package and
+# registry verification: preflight-dcgm-diag is ~1.7 GiB and the two NCCL
+# checks ~9.9 GiB each, which would exhaust an ubuntu-latest runner's disk and
+# blow the lane's timeout on every recipe PR. Carrying a mixin-gated image
+# through the whole transfer path is what discovery alone does not prove.
+PREFLIGHT_CONTROLLER_IMAGE="ghcr.io/nvidia/nvsentinel/preflight:v1.20.0"
+PREFLIGHT_IMAGES=(
+    "ghcr.io/nvidia/nvsentinel/preflight:v1.20.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-dcgm-diag:v1.20.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-nccl-loopback:v1.20.0"
+    "ghcr.io/nvidia/nvsentinel/preflight-nccl-allreduce:v1.20.0"
+)
+
+# The image the nvsentinel-object-monitor mixin pulls in (#2612). Same
+# invisibility to the static BOM, for a different reason: it lives in a
+# mixin-gated subchart rather than a mixin-gated values override.
+OBJECT_MONITOR_IMAGE="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.20.0"
+
+# The images the nvsentinel-nic-health-monitor mixin pulls in. The subchart
+# image is invisible to the static BOM for the same reason as the object
+# monitor's. The init-container image is the chart's global.initContainerImage
+# and is versioned independently of nvsentinel, so its tag does not move with
+# defaultVersion; discovery walks a different path for init containers than
+# for main ones, so asserting only the subchart image would let an
+# init-container regression through.
+NIC_HEALTH_MONITOR_IMAGES=(
+    "ghcr.io/nvidia/nvsentinel/nic-health-monitor:v1.20.0"
+    "docker.io/bitnamilegacy/os-shell:12-debian-12-r30"
+)
+
+# Every mixin-gated image, asserted in all three `mirror list` formats.
+MIXIN_IMAGES=(
+    "${OBJECT_MONITOR_IMAGE}"
+    "${PREFLIGHT_IMAGES[@]}"
+    "${NIC_HEALTH_MONITOR_IMAGES[@]}"
+)
+
+# The subset carried through the Hauler sync, Zarf package and registry
+# verification. Both are small; the three preflight check images are excluded
+# by size, as explained above.
+TRANSFERRED_MIXIN_IMAGES=(
+    "${OBJECT_MONITOR_IMAGE}"
+    "${PREFLIGHT_CONTROLLER_IMAGE}"
+)
 
 # Track which optional tools are available
 HAS_HAULER=false
@@ -141,18 +193,20 @@ ensure_cluster() {
 }
 
 generate_recipe() {
-    msg "Generating recipe (with the nvsentinel-object-monitor mixin composed)..."
+    msg "Generating recipe (with the nvsentinel-object-monitor and nvsentinel-preflight mixins composed)..."
     # No --os: the Kind overlay tree is OS-agnostic, and a stated OS that no
     # Kind overlay distinguishes fails criteria coverage (issue #1542).
     #
     # The recipe is generated through an external --data overlay that composes
-    # the nvsentinel-object-monitor mixin, so the mixin-gated
-    # kubernetes-object-monitor image flows through everything below --
-    # `mirror list`, the Hauler sync, the Zarf package, and the registry
-    # verification -- rather than only through a separate discovery check.
-    # That image is invisible to the static BOM (it appears only once a mixin
-    # overrides the component's values), so this is the one place a mirror
-    # regression on it would surface.
+    # both nvsentinel mixins, so every mixin-gated image is discovered by
+    # `mirror list` and asserted in the generated Hauler and Zarf manifests.
+    # Only the two small controller images are carried through the sync,
+    # package and registry verification -- the three preflight check images
+    # are 1.7-9.9 GiB each and would exhaust the runner. None of these images
+    # appears until a mixin overrides the component's values (and three are
+    # named only inside a ConfigMap's embedded config.yaml), so the static BOM
+    # cannot see any of them: this is the one place a mirror regression on
+    # them would surface.
     local data_dir="${WORK}/data"
     mkdir -p "${data_dir}/overlays"
 
@@ -171,7 +225,7 @@ REGISTRY_EOF
     # constraints and validation cannot drift out of sync with the real one;
     # the only difference is the composed mixin. An external overlay of the
     # same name replaces its embedded counterpart.
-    yq '.spec.mixins = ["nvsentinel-object-monitor"]' \
+    yq '.spec.mixins = ["nvsentinel-object-monitor", "nvsentinel-preflight", "nvsentinel-nic-health-monitor"]' \
         "${ROOT}/recipes/overlays/h100-kind-training.yaml" \
         > "${data_dir}/overlays/h100-kind-training.yaml"
 
@@ -186,12 +240,40 @@ REGISTRY_EOF
         err "Recipe file was not created"
     fi
 
+    # The Kind overlay disables the standalone DCGM hostengine, which
+    # CheckNVSentinelPreflightDCGMReachable rejects alongside the preflight
+    # mixin. This lane only discovers and moves images -- it never runs a
+    # check -- so the value is set on the recipe to get past a gate that is
+    # about runtime reachability.
+    yq -i '(.componentRefs[] | select(.name == "gpu-operator") | .overrides.dcgm.enabled) = true' "${WORK}/recipe.yaml"
+
     # Fail loudly here rather than letting a silently-unapplied mixin turn the
-    # image assertions below into no-ops.
+    # image assertions below into no-ops. Both are checked: either mixin
+    # failing to compose would quietly halve this lane's coverage.
     if ! grep -q "kubernetesObjectMonitor" "${WORK}/recipe.yaml"; then
         err "nvsentinel-object-monitor mixin did not apply -- the recipe carries no kubernetesObjectMonitor override"
     fi
+    if ! grep -q "processingStrategy" "${WORK}/recipe.yaml"; then
+        err "nvsentinel-preflight mixin did not apply -- the recipe carries no preflight override"
+    fi
+    if ! grep -q "nicHealthMonitor" "${WORK}/recipe.yaml"; then
+        err "nvsentinel-nic-health-monitor mixin did not apply -- the recipe carries no nicHealthMonitor override"
+    fi
     msg "Recipe generated at ${WORK}/recipe.yaml"
+}
+
+# assert_mixin_images fails the run unless every mixin-gated image appears in
+# the generated manifest $2, read with yq expression $3. Discovery in the JSON
+# output alone would not catch a formatter that drops them.
+assert_mixin_images() {
+    local label="$1" manifest="$2" expr="$3" listed img
+    listed=$(yq eval "${expr}" "${manifest}" 2>/dev/null) ||
+        err "could not read images out of the ${label} manifest"
+    for img in "${MIXIN_IMAGES[@]}"; do
+        grep -Fxq "${img}" <<<"${listed}" ||
+            err "${img} is missing from the generated ${label} manifest -- a mixin-gated image is not reaching air-gap consumers"
+    done
+    msg "  ${label}: ${#MIXIN_IMAGES[@]} mixin-gated images present"
 }
 
 run_mirror_list() {
@@ -206,6 +288,7 @@ run_mirror_list() {
     if ! grep -q "kind: Images" "${WORK}/hauler-full.yaml"; then
         err "Hauler manifest missing 'kind: Images'"
     fi
+    assert_mixin_images hauler "${WORK}/hauler-full.yaml" 'select(.kind == "Images") | .spec.images[].name'
     msg "  hauler: ${WORK}/hauler-full.yaml ($(wc -l < "${WORK}/hauler-full.yaml") lines)"
 
     # Zarf package config
@@ -217,6 +300,7 @@ run_mirror_list() {
     if ! grep -q "kind: ZarfPackageConfig" "${WORK}/zarf-full.yaml"; then
         err "Zarf config missing 'kind: ZarfPackageConfig'"
     fi
+    assert_mixin_images zarf "${WORK}/zarf-full.yaml" '.components[0].images[]'
     msg "  zarf:   ${WORK}/zarf-full.yaml ($(wc -l < "${WORK}/zarf-full.yaml") lines)"
 
     # JSON — validate it parses
@@ -226,15 +310,16 @@ run_mirror_list() {
         err "JSON output is not valid JSON"
     fi
 
-    # The mixin-gated subchart image. The static BOM cannot see it (it renders
-    # each component against its base values only), so discovery here is what
-    # keeps an airgap install from silently missing it. Keep the tag in step
-    # with nvsentinel's defaultVersion in recipes/registry.yaml.
-    local want_image="ghcr.io/nvidia/nvsentinel/kubernetes-object-monitor:v1.20.0"
-    if ! jq -e --arg img "$want_image" '.images | index($img)' "${WORK}/mirror.json" >/dev/null 2>&1; then
-        err "${want_image} is missing from 'aicr mirror list' output -- the image the nvsentinel-object-monitor mixin pulls in is not reachable from a mixin-enabled recipe"
-    fi
-    msg "  json:   valid (object-monitor image discovered)"
+    # The mixin-gated images. Keep the tags in step with nvsentinel's
+    # defaultVersion in recipes/registry.yaml; TestPreflightImagesPinnedEverywhere
+    # and TestObjectMonitorImagePinnedEverywhere fail if they drift apart.
+    local want_image
+    for want_image in "${MIXIN_IMAGES[@]}"; do
+        if ! jq -e --arg img "$want_image" '.images | index($img)' "${WORK}/mirror.json" >/dev/null 2>&1; then
+            err "${want_image} is missing from 'aicr mirror list' output -- an image a nvsentinel mixin pulls in is not reachable from a mixin-enabled recipe"
+        fi
+    done
+    msg "  json:   valid (${#MIXIN_IMAGES[@]} mixin-gated images discovered)"
 
     # YAML — validate it parses
     "$AICR_BIN" mirror list --recipe "${WORK}/recipe.yaml" --format yaml \
@@ -260,23 +345,21 @@ trim_to_public_images() {
     #     DIGEST_INVALID with plain-HTTP registries for these refs
     #     (https://github.com/hauler-dev/hauler/issues/259).
     #     Strip the @sha256:... suffix so Hauler pulls by tag only.
-    local candidates
-    candidates=$(echo "$all_images" \
+    # The multi-GiB preflight check images are filtered out before the cap;
+    # the two small controller images are appended after it, because
+    # alphabetical ordering puts them well past MAX_IMAGES and head() would
+    # otherwise always drop them.
+    public_images=$(echo "$all_images" \
         | grep -v '^nvcr\.io' \
-        | sed -E 's/(:[^@]*)@sha256:[a-f0-9]*/\1/' || true)
-
-    # The mixin-gated object-monitor image is the one this script exists to
-    # cover for #2612, and MAX_IMAGES would otherwise drop it on alphabetical
-    # position alone. Pin it to the front and let the cap fill the rest, so it
-    # always reaches the Hauler sync, the Zarf package, and the registry
-    # verification rather than only the JSON discovery check above.
-    local pinned
-    pinned=$(echo "$candidates" | grep '/nvsentinel/kubernetes-object-monitor:' || true)
-    if [[ -z "$pinned" ]]; then
-        err "object-monitor image missing from the public image set -- it should have come from the composed mixin"
-    fi
-    public_images=$( { echo "$pinned"; echo "$candidates" | grep -v '/nvsentinel/kubernetes-object-monitor:'; } \
+        | grep -Ev '/nvsentinel/(preflight(-[a-z-]+)?|kubernetes-object-monitor):' \
+        | sed -E 's/(:[^@]*)@sha256:[a-f0-9]*/\1/' \
         | head -n "${MAX_IMAGES}" || true)
+    local mixin_img
+    for mixin_img in "${TRANSFERRED_MIXIN_IMAGES[@]}"; do
+        grep -Fxq "${mixin_img}" <<<"$all_images" ||
+            err "${mixin_img} absent from the discovered set -- it should have come from the composed mixins"
+        public_images=$(printf '%s\n%s\n' "$public_images" "${mixin_img}")
+    done
 
     if [[ -z "$public_images" ]]; then
         msg "WARNING: No public images found after filtering. Skipping Hauler/Zarf tests."

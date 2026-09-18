@@ -410,29 +410,47 @@ func TestValidatePinCeiling(t *testing.T) {
 		name     string
 		to       string
 		pin      string
+		verdict  Verdict
 		wantErr  bool
 		wantText string
 	}{
-		{"ceiling equals the pin", ">=0.18.0 <=0.18.0", "v0.18.0", false, ""},
-		{"ceiling below the pin", ">=0.17.0 <=0.17.9", "v0.18.0", false, ""},
-		{"ADR ordinary idiom", ">=25.0.0 <=25.3.0", "v25.3.0", false, ""},
-		{"ceiling above the pin", ">=0.18.0 <=0.20.0", "v0.18.0", true, "reaches past"},
-		{"exclusive ceiling above the pin", ">=0.18.0 <0.20.0", "v0.18.0", true, "reaches past"},
-		{"unbounded above fails", ">=0.18.0", "v0.18.0", true, "upper bound"},
-		{"unbounded below fails", "<=0.18.0", "v0.18.0", true, "lower bound"},
-		{"non-semver pin fails", ">=0.18.0 <=0.18.0", "main", true, "not a comparable version"},
-		{"commit sha pin fails", ">=0.18.0 <=0.18.0", "9f8e7d6c5b4a", true, "not a comparable version"},
-		{"build metadata pin fails", ">=0.18.0 <=0.18.0", "v0.18.0+build.5", true, "build metadata"},
+		{"ceiling equals the pin", ">=0.18.0 <=0.18.0", "v0.18.0", VerdictSafe, false, ""},
+		{"ceiling below the pin", ">=0.17.0 <=0.17.9", "v0.18.0", VerdictSafe, false, ""},
+		{"ADR ordinary idiom", ">=25.0.0 <=25.3.0", "v25.3.0", VerdictSafe, false, ""},
+		{"safe above the pin", ">=0.18.0 <=0.20.0", "v0.18.0", VerdictSafe, true, "reaches past"},
+		{"safe with an exclusive ceiling above the pin",
+			">=0.18.0 <0.20.0", "v0.18.0", VerdictSafe, true, "reaches past"},
+		// Guidance written ahead of the bump. Only safe vouches, so only safe
+		// is held to the pin; a warning reaching forward cannot read as a pass.
+		{"manual above the pin", ">=0.18.0 <=0.20.0", "v0.17.1", VerdictManual, false, ""},
+		{"blocked above the pin", ">=0.18.0 <=0.20.0", "v0.17.1", VerdictBlocked, false, ""},
+		{"manual against a non-semver pin", ">=0.18.0 <=0.18.0", "main", VerdictManual, false, ""},
+		{"manual against a build-metadata pin",
+			">=0.18.0 <=0.18.0", "v0.18.0+build.5", VerdictManual, false, ""},
+		// The `to` shape itself is not a claim about the pin, so these hold
+		// whatever the verdict is.
+		{"unbounded above fails", ">=0.18.0", "v0.18.0", VerdictManual, true, "upper bound"},
+		{"unbounded below fails", "<=0.18.0", "v0.18.0", VerdictManual, true, "lower bound"},
+		{"non-semver pin fails", ">=0.18.0 <=0.18.0", "main", VerdictSafe, true, "not a comparable version"},
+		{"commit sha pin fails",
+			">=0.18.0 <=0.18.0", "9f8e7d6c5b4a", VerdictSafe, true, "not a comparable version"},
+		{"build metadata pin fails",
+			">=0.18.0 <=0.18.0", "v0.18.0+build.5", VerdictSafe, true, "build metadata"},
 		{"prerelease pin with matching prerelease ceiling passes",
-			">=0.1.0-alpha.1 <=0.1.0-alpha.12", "v0.1.0-alpha.12", false, ""},
+			">=0.1.0-alpha.1 <=0.1.0-alpha.12", "v0.1.0-alpha.12", VerdictSafe, false, ""},
 		{"prerelease pin with release ceiling fails",
-			">=0.1.0-alpha.1 <=0.1.0", "v0.1.0-alpha.12", true, "reaches past"},
+			">=0.1.0-alpha.1 <=0.1.0", "v0.1.0-alpha.12", VerdictSafe, true, "reaches past"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			set, comps := rec(tt.pin, tr(func(x *Transition) {
 				x.To = tt.to
 				x.From = "<0.0.1"
+				x.Verdict = tt.verdict
+				if tt.verdict == VerdictSafe {
+					x.VerifiedBy = "the UAT lane"
+					x.StepsByDeployer = nil
+				}
 			}))
 			err := set.Validate(comps)
 			if got := mentions(err, rule2Fragments...); got != tt.wantErr {
@@ -949,6 +967,9 @@ func TestValidatePinCeilingRejectsReleaseCeilingAtPrereleasePin(t *testing.T) {
 	set, comps := rec("v0.1.0-alpha.12", tr(func(x *Transition) {
 		x.From = "<0.1.0"
 		x.To = ">=0.1.0 <=0.1.0"
+		x.Verdict = VerdictSafe
+		x.VerifiedBy = "the UAT lane"
+		x.StepsByDeployer = nil
 	}))
 	err := set.Validate(comps)
 	if !mentions(err, rule2Fragments...) {

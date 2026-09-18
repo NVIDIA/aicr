@@ -388,8 +388,8 @@ func TestBuildPointer_ProducesSingleAttestation(t *testing.T) {
 		t.Fatalf("expected 1 attestation, got %d", len(p.Attestations))
 	}
 	att := p.Attestations[0]
-	if att.Bundle.PredicateType != PredicateTypeV1 {
-		t.Errorf("PredicateType = %q", att.Bundle.PredicateType)
+	if att.Bundle.PredicateType != PredicateTypeV3 {
+		t.Errorf("PredicateType = %q, want %q", att.Bundle.PredicateType, PredicateTypeV3)
 	}
 	if att.Bundle.OCI != "ghcr.io/foo/aicr-evidence:abc" {
 		t.Errorf("OCI mismatch: %q", att.Bundle.OCI)
@@ -541,8 +541,8 @@ func TestPointer_PrePushBundleFieldsEmpty(t *testing.T) {
 	if att.Bundle.OCI != "" || att.Bundle.Digest != "" {
 		t.Errorf("pre-push pointer should leave bundle.{oci,digest} empty; got %+v", att.Bundle)
 	}
-	if att.Bundle.PredicateType != PredicateTypeV1 {
-		t.Errorf("predicate type should be set even pre-push")
+	if att.Bundle.PredicateType != PredicateTypeV3 {
+		t.Errorf("predicate type should be set even pre-push, got %q want %q", att.Bundle.PredicateType, PredicateTypeV3)
 	}
 }
 

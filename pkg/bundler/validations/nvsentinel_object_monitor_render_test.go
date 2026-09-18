@@ -232,15 +232,45 @@ func TestNVSentinelObjectMonitorChartRender(t *testing.T) {
 	}
 
 	// Setting `policies` replaces the chart's default list wholesale rather
-	// than merging, so the rendered config must carry the mixin's two and
-	// nothing else. Counting blocks rather than naming the chart's default
-	// keeps this meaningful across the rename upstream has already made
+	// than merging, so the rendered config must carry the mixin's own entries
+	// and nothing else. The count is derived from the mixin rather than
+	// hardcoded, so appending a policy there does not silently weaken this
+	// into a check that a chart default survived -- which is what it exists
+	// to catch, including across the rename upstream has already made
 	// (node-not-ready -> ReplaceNotReadyNode, landing with #2596).
-	if got := strings.Count(out, "[[policies]]"); got != 2 {
-		t.Errorf("rendered config has %d policy blocks, want exactly the mixin's 2 -- a chart default may no longer be replaced", got)
+	mixinPolicies := objectMonitorMixinPolicyNames(t, nvsentinelObjectMonitorResolvedValues(t, store))
+	if got := strings.Count(out, "[[policies]]"); got != len(mixinPolicies) {
+		t.Errorf("rendered config has %d policy blocks, want the mixin's %d -- a chart default may no longer be replaced", got, len(mixinPolicies))
+	}
+	for _, name := range mixinPolicies {
+		if !strings.Contains(out, name) {
+			t.Errorf("rendered config is missing policy %q", name)
+		}
 	}
 
 	if !strings.Contains(out, nvsentinelObjectMonitorImage) {
 		t.Errorf("rendered chart does not carry %s; docs/user/container-images.md has drifted from the chart", nvsentinelObjectMonitorImage)
 	}
+}
+
+// objectMonitorMixinPolicyNames returns the policy names the mixin declares,
+// read through the same resolved values the render above uses, so the
+// assertions track the mixin instead of a literal that drifts the moment a
+// policy is added.
+func objectMonitorMixinPolicyNames(t *testing.T, values map[string]any) []string {
+	t.Helper()
+	kom, _ := values["kubernetes-object-monitor"].(map[string]any)
+	policies, _ := kom["policies"].([]any)
+	names := make([]string, 0, len(policies))
+	for _, entry := range policies {
+		policy, _ := entry.(map[string]any)
+		if name, _ := policy["name"].(string); name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		t.Fatal("mixin declares no policies; the render assertions would be vacuous")
+	}
+
+	return names
 }

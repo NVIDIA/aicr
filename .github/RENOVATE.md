@@ -22,7 +22,7 @@ Policy choices (schedule, cooldown, auto-merge scope, group consolidation) are d
 | `validators/*/Dockerfile` | `dockerfile` |
 | `infra/**/*.tf` | `terraform` (grouped) |
 | `recipes/components/*/values.yaml` | `helm-values` (partial — see limitations) |
-| `recipes/registry.yaml` (34 chart pins) | custom regex manager (`# renovate:` annotations) — **report-only**, see [Registry drift report](#registry-drift-report) |
+| `recipes/registry.yaml` (35 chart pins) | custom regex manager (`# renovate:` annotations) — **report-only**, see [Registry drift report](#registry-drift-report) |
 | `.settings.yaml` (28 tool entries) | custom regex manager (`# renovate:` annotations) |
 | `.settings.yaml` `nvkind` SHA | dedicated git-refs digest customManager (`# renovate-digest:`) |
 | `.settings.yaml` `chainsaw_checksums` | `postUpgradeTasks` → `tools/update-chainsaw-checksums` |
@@ -81,7 +81,7 @@ CI re-runs `make lint-renovate` automatically via `merge-gate.yaml` whenever `.g
 
 ## Registry drift report
 
-The 34 chart pins in `recipes/registry.yaml` are extracted by a custom regex
+The 35 chart pins in `recipes/registry.yaml` are extracted by a custom regex
 manager but never bumped by PR: `packageRules` disables the `registry-chart`
 depType, and [`registry-drift.yaml`](workflows/registry-drift.yaml) re-enables it
 weekly under `RENOVATE_DRY_RUN=full` to produce a Slack digest and a
@@ -120,7 +120,7 @@ auto-merged bumps elsewhere in this file.
 
 ## Auto-merge and the render golden
 
-`pkg/bundler/testdata/stock_render_golden.yaml` pins a digest per leaf overlay over its fully rendered output. The `kubernetes` manager's digest bumps inside `recipes/components/*/manifests/**` and the `helm-values` manager's tag bumps in `recipes/components/*/values.yaml` both change rendered bytes and move this golden — and both are configured to `automerge: true`. Left alone, such a PR goes red on an unregenerated golden and stalls its own auto-merge until a human clones the repo and runs the regeneration command by hand (this happened on PR #2773 and took `main` down when the red PR was merged anyway).
+`pkg/bundler/testdata/stock_render_golden.yaml` pins, for every leaf overlay, a digest of each file in its fully rendered output. The `kubernetes` manager's digest bumps inside `recipes/components/*/manifests/**` and the `helm-values` manager's tag bumps in `recipes/components/*/values.yaml` both change rendered bytes and move this golden — and both are configured to `automerge: true`. Left alone, such a PR goes red on an unregenerated golden and stalls its own auto-merge until a human clones the repo and runs the regeneration command by hand (this happened on PR #2773 and took `main` down when the red PR was merged anyway).
 
 [`render-golden-refresh.yaml`](workflows/render-golden-refresh.yaml) closes half of that gap: on a PR whose branch matches `renovate/*`, it regenerates the golden and, if it drifted, commits the refresh back onto the same PR branch (via GraphQL `createCommitOnBranch`, pinned to the branch's current tip so a concurrent push during regeneration fails loudly instead of landing a stale commit). It does **not** re-fire the PR's checks: a `GITHUB_TOKEN`-authored commit fires no `pull_request` event, and dispatching `merge-gate.yaml` via `workflow_dispatch` does not substitute for that — its checks attach to the commit but never appear in the PR's status-check rollup, so they cannot satisfy the required `gate` check (confirmed against PR #2780: dispatching `merge-gate.yaml` at the refreshed head produced 27 check-runs on the commit and 0 entries in the PR's rollup). After a refresh commit, the PR's checks still point at the pre-refresh head SHA; the workflow leaves a `::notice::` and job-summary line saying a maintainer must push any commit to the branch, or close and reopen the PR, to get a PR-associated run.
 
