@@ -1530,6 +1530,35 @@ func TestCheckExpectedResources_LegacyOperatorSkipsNodeWrightAssert(t *testing.T
 // pins nodewright-operator below the rename, or carries no usable pin at all;
 // a rename-or-later pin on a legacy-only cluster fails closed; neither group
 // served skips (#607).
+// resolveNodewrightGVR runs ahead of pollUntilStable, so a discovery call that
+// ignores the validator context would outlive both cancellation and the
+// readiness budget and hang until the Job is killed. client-go's
+// DiscoveryInterface.ServerResourcesForGroupVersion issues its request with
+// context.TODO() internally, which is why the probe goes through
+// helper.GroupVersionResources instead. The fake clientset exposes no
+// RESTClient, so this exercises that helper's guard rather than a real
+// in-flight cancellation, which is the reachable half here.
+func TestResolveNodewrightGVRHonorsCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx := newDeploymentTestContextWithDiscovery(t, nil, nil,
+		[]schema.GroupVersion{nodewrightGVR.GroupVersion()}, nil, nil)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	ctx.Ctx = canceled
+
+	_, registered, err := resolveNodewrightGVR(ctx)
+	if err == nil {
+		t.Fatal("resolveNodewrightGVR() error = nil, want the cancellation to surface")
+	}
+	if registered {
+		t.Error("registered = true, want false — a discovery that never completed cannot report a served group")
+	}
+	if !stderrors.Is(err, errors.New(errors.ErrCodeTimeout, "")) {
+		t.Errorf("error = %v, want ErrCodeTimeout so the phase fails closed on the budget", err)
+	}
+}
+
 func TestResolveNodewrightGVR_VersionGate(t *testing.T) {
 	t.Parallel()
 

@@ -813,15 +813,23 @@ func verifyNodewrightReady(ctx *validators.Context, ref recipe.ComponentRef, gat
 func resolveNodewrightGVR(ctx *validators.Context) (gvr schema.GroupVersionResource, registered bool, err error) {
 	served := func(candidate schema.GroupVersionResource) (bool, error) {
 		gv := candidate.GroupVersion().String()
-		_, discErr := ctx.Clientset.Discovery().ServerResourcesForGroupVersion(gv)
+		// Through helper rather than DiscoveryInterface directly: the
+		// interface method issues its request with context.TODO() internally,
+		// so an unresponsive apiserver would outlive both cancellation and the
+		// readiness budget. This runs ahead of pollUntilStable, which is the
+		// window where nothing else would notice.
+		_, discErr := helper.GroupVersionResources(ctx.Ctx, ctx.Clientset, gv)
 		switch {
 		case discErr == nil:
 			return true, nil
 		case apierrors.IsNotFound(discErr):
 			return false, nil
+		case stderrors.Is(discErr, context.Canceled), stderrors.Is(discErr, context.DeadlineExceeded):
+			return false, errors.Wrap(errors.ErrCodeTimeout,
+				fmt.Sprintf("Nodewright discovery of %s did not complete within the validation budget", gv), discErr)
 		default:
 			return false, errors.Wrap(errors.ErrCodeInternal,
-				fmt.Sprintf("failed to discover %s resources (is the API server reachable and RBAC in order?)", gv), discErr)
+				fmt.Sprintf("Nodewright: failed to discover %s resources (is the API server reachable and RBAC in order?)", gv), discErr)
 		}
 	}
 
