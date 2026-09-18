@@ -1,0 +1,129 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# yaml-language-server: $schema=https://raw.githubusercontent.com/kyverno/chainsaw/main/.schemas/json/test-chainsaw-v1alpha1.json
+apiVersion: chainsaw.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: cli-bundle-dra-node-labeler-templates
+spec:
+  description: |
+    The DRA eviction contract has three halves that must agree on one label:
+    the Driver Manager env (gpu-operator), the kubelet-plugin nodeSelector
+    (nvidia-dra-driver-gpu) and the dra-node-labeler that applies it. This
+    test bundles an EKS H100 training recipe with and without
+    --dra-eviction-node-label and checks that the labeler is present only when
+    opted in, carries the configured pair, and is keyed on GFD hardware truth.
+    Run with: AICR_BIN=$(pwd)/dist/e2e/aicr chainsaw test --no-cluster --test-dir tests/chainsaw/bundle-templates/dra-node-labeler
+  timeouts:
+    exec: 60s
+  steps:
+
+    - name: generate-recipe
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?Set AICR_BIN to the path of the aicr binary}"
+              WORK="/tmp/chainsaw-bundle-dra-node-labeler-templates"
+              rm -rf "${WORK}" && mkdir -p "${WORK}"
+              ${AICR_BIN} recipe --service eks --accelerator h100 --os ubuntu --intent training \
+                --output "${WORK}/recipe.yaml"
+
+    - name: bundle-without-flag-drops-labeler
+      description: Without the eviction flag the labeler is not rendered and no half of the contract is injected.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?}"
+              WORK="/tmp/chainsaw-bundle-dra-node-labeler-templates"
+              ${AICR_BIN} bundle --recipe "${WORK}/recipe.yaml" --output "${WORK}/bundle-default" >/dev/null
+              if ls -d "${WORK}"/bundle-default/*-dra-node-labeler >/dev/null 2>&1; then
+                echo "FAIL: dra-node-labeler rendered without --dra-eviction-node-label" >&2; exit 1
+              fi
+              DRA_VALUES="$(ls -d "${WORK}"/bundle-default/*-nvidia-dra-driver-gpu/values.yaml)"
+              if grep -q 'dra-kubelet-plugin' "${DRA_VALUES}"; then
+                echo "FAIL: kubelet-plugin selector carries the eviction label without the flag" >&2; exit 1
+              fi
+
+    - name: bundle-with-custom-label
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?}"
+              WORK="/tmp/chainsaw-bundle-dra-node-labeler-templates"
+              ${AICR_BIN} bundle --recipe "${WORK}/recipe.yaml" \
+                --dra-eviction-node-label example.com/dra-ready=enabled \
+                --accelerated-node-toleration nvidia.com/gpu:NoSchedule \
+                --output "${WORK}/bundle-labeled" >/dev/null
+
+    - name: assert-three-halves-agree
+      description: Driver Manager env, kubelet-plugin selector and labeler carry the same key; the labeler applies the same value.
+      try:
+        - script:
+            content: |
+              set -eu
+              YQ="${YQ:-yq}"
+              WORK="/tmp/chainsaw-bundle-dra-node-labeler-templates"
+              B="${WORK}/bundle-labeled"
+              GPU_OP_VALUES="$(ls -d "${B}"/*-gpu-operator/values.yaml)"
+              DRA_VALUES="$(ls -d "${B}"/*-nvidia-dra-driver-gpu/values.yaml)"
+              LABELER_DIR="$(ls -d "${B}"/*-dra-node-labeler)"
+              LABELER_VALUES="${LABELER_DIR}/values.yaml"
+              MANIFEST="${LABELER_DIR}/templates/dra-node-labeler.yaml"
+              EVICT="$("${YQ}" e '.driver.manager.env[] | select(.name == "NODE_LABEL_FOR_GPU_POD_EVICTION") | .value' "${GPU_OP_VALUES}")"
+              [ "${EVICT}" = "example.com/dra-ready" ] || { echo "FAIL: NODE_LABEL_FOR_GPU_POD_EVICTION='${EVICT}'" >&2; exit 1; }
+              SEL="$("${YQ}" e '.kubeletPlugin.nodeSelector["example.com/dra-ready"]' "${DRA_VALUES}")"
+              [ "${SEL}" = "enabled" ] || { echo "FAIL: kubelet-plugin selector value '${SEL}'" >&2; exit 1; }
+              KEY="$("${YQ}" e '.labelKey' "${LABELER_VALUES}")"; VAL="$("${YQ}" e '.labelValue' "${LABELER_VALUES}")"
+              [ "${KEY}" = "example.com/dra-ready" ] && [ "${VAL}" = "enabled" ] \
+                || { echo "FAIL: labeler values key='${KEY}' value='${VAL}'" >&2; exit 1; }
+              grep -q 'LABEL_KEY="example.com/dra-ready"' "${MANIFEST}" && grep -q 'LABEL_VALUE="enabled"' "${MANIFEST}" \
+                || { echo "FAIL: labeler script does not carry the configured pair" >&2; exit 1; }
+              # Hardware truth, not the accelerated node selector.
+              grep -q 'key: nvidia.com/gpu.present' "${MANIFEST}" \
+                || { echo "FAIL: labeler affinity is not keyed on nvidia.com/gpu.present" >&2; exit 1; }
+              # Accelerated tolerations are injected; a nodeSelector is not.
+              grep -q 'key: nvidia.com/gpu$' "${MANIFEST}" \
+                || { echo "FAIL: accelerated toleration not injected into the labeler" >&2; exit 1; }
+              # Labeler sits after gpu-operator (GFD) and before the DRA driver in deployment order.
+              L="$(basename "${LABELER_DIR}" | cut -d- -f1)"; G="$(basename "$(dirname "${GPU_OP_VALUES}")" | cut -d- -f1)"; D="$(basename "$(dirname "${DRA_VALUES}")" | cut -d- -f1)"
+              [ "${G}" -lt "${L}" ] && [ "${L}" -lt "${D}" ] \
+                || { echo "FAIL: order gpu-operator=${G} labeler=${L} dra-driver=${D}" >&2; exit 1; }
+              # Public digest-pinned image, no pull secret, fleet-wide rollout.
+              IMAGE="$("${YQ}" e 'select(.kind == "DaemonSet") | .spec.template.spec.containers[0].image' "${MANIFEST}")"
+              case "${IMAGE}" in docker.io/alpine/kubectl:*@sha256:*) ;; *) echo "FAIL: image '${IMAGE}'" >&2; exit 1 ;; esac
+              [ "$("${YQ}" e 'select(.kind == "DaemonSet") | .spec.updateStrategy.rollingUpdate.maxUnavailable' "${MANIFEST}")" = "100%" ] \
+                || { echo "FAIL: maxUnavailable != 100%" >&2; exit 1; }
+
+    - name: bundle-with-labeler-disabled
+      description: The provisioning path stays available; disabling the labeler keeps the other two halves.
+      try:
+        - script:
+            content: |
+              set -eu
+              AICR_BIN="${AICR_BIN:?}"; YQ="${YQ:-yq}"
+              WORK="/tmp/chainsaw-bundle-dra-node-labeler-templates"
+              ${AICR_BIN} bundle --recipe "${WORK}/recipe.yaml" \
+                --dra-eviction-node-label nvidia.com/dra-kubelet-plugin=true \
+                --set dra-node-labeler:enabled=false \
+                --output "${WORK}/bundle-optout" >/dev/null
+              if ls -d "${WORK}"/bundle-optout/*-dra-node-labeler >/dev/null 2>&1; then
+                echo "FAIL: dra-node-labeler rendered despite --set dra-node-labeler:enabled=false" >&2; exit 1
+              fi
+              DRA_VALUES="$(ls -d "${WORK}"/bundle-optout/*-nvidia-dra-driver-gpu/values.yaml)"
+              [ "$("${YQ}" e '.kubeletPlugin.nodeSelector["nvidia.com/dra-kubelet-plugin"]' "${DRA_VALUES}")" = "true" ] \
+                || { echo "FAIL: kubelet-plugin selector missing with labeler disabled" >&2; exit 1; }

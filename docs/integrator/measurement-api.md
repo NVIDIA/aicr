@@ -469,7 +469,7 @@ a label literally named that and drops one reading. Consumers read `items` and
 fall back to `data` only for older snapshots — `topology.LabelReadings` /
 `TaintReadings` do exactly that, and `HasLosslessReadings` reports which form a
 subtype carries. Adding `items` beside `data` is additive-only, so the snapshot
-`apiVersion` is unchanged ([ADR-011](../design/011-artifact-apiversion-policy.md) §2).
+`apiVersion` is unchanged ([ADR-011](https://github.com/NVIDIA/aicr/blob/main/docs/design/011-artifact-apiversion-policy.md) §2).
 
 `data` cannot be slimmed within `v1alpha2`: binaries predating `items` read it
 directly, and ADR-011 requires its encoding and semantics to stay as published.

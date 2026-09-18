@@ -24,7 +24,7 @@ configMap:
     service: eks
 ```
 
-Supported accelerators: `h100`, `gb200`
+Supported accelerators: see the generated table below.
 
 Integration notes:
   * If you provide a service it MUST exist in the [profiles service directory](https://github.com/NVIDIA/nodewright-packages/tree/main/nvidia-tuned/profiles/service)
@@ -88,6 +88,7 @@ The table below is generated from the recipes by `make tuning-docs` — **do not
 | generic | gb300        | -       | -                  | nvidia-tuned 0.10.0     |
 | gke     | a100         | h100    | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | b200         | -       | -                  | nvidia-tuning-gke 0.1.2 |
+| gke     | gb200        | -       | -                  | nvidia-tuning-gke 0.1.2 |
 | gke     | h100         | -       | -                  | nvidia-tuning-gke 0.1.2 |
 | rke2    | vr200        | -       | -                  | nvidia-tuned 0.10.0     |
 

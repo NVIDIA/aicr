@@ -19,8 +19,8 @@ A machine-readable **CycloneDX 1.6 JSON** companion to this page is produced by 
 <!-- BEGIN AICR-BOM -->
 ## Summary
 
-- Components: **48**
-- Unique images: **112**
+- Components: **50**
+- Unique images: **113**
 - Distinct registries: **11**
 
 Registries: `602401143452.dkr.ecr.us-west-2.amazonaws.com`, `cr.agentgateway.dev`, `docker.io`, `gcr.io`, `ghcr.io`, `gke.gcr.io`, `nvcr.io`, `public.ecr.aws`, `quay.io`, `registry.k8s.io`, `us-docker.pkg.dev`
@@ -38,10 +38,12 @@ _Rendering fidelity:_ `catalog-parity: charts are rendered with the shared recip
 | cert-manager | helm | jetstack/cert-manager | v1.20.2 | 4 |
 | cert-manager-ocp | manifest | — | — | 0 |
 | cert-manager-ocp-olm | manifest | — | — | 0 |
+| dra-node-labeler | manifest | — | — | 1 |
 | dranet | manifest | — | — | 1 |
 | dynamo-platform | helm | dynamo-platform | 1.4.2 | 1 |
 | gatekeeper | helm | gatekeeper/gatekeeper | 3.22.2 | 3 |
 | gcp-driver-installer | manifest | — | — | 3 |
+| gke-gb200-rdma | manifest | — | — | 2 |
 | gke-nccl-tcpxo | manifest | — | — | 4 |
 | gpu-operator | helm | nvidia/gpu-operator | v26.7.0 | 15 |
 | gpu-operator-ocp | manifest | — | — | 0 |
@@ -127,6 +129,10 @@ _No images extracted._
 
 _No images extracted._
 
+### dra-node-labeler
+
+- `docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95`
+
 ### dranet
 
 - `registry.k8s.io/networking/dranet:stable@sha256:3248d8a520584100a5e87a2b92039591ea3b83a5492cc3e2d881b20d3b18ada6`
@@ -146,6 +152,11 @@ _No images extracted._
 - `cos-nvidia-installer:fixed`
 - `gcr.io/gke-release/nvidia-partition-gpu@sha256:e226275da6c45816959fe43cde907ee9a85c6a2aa8a429418a4cadef8ecdb86a`
 - `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
+
+### gke-gb200-rdma
+
+- `gke.gcr.io/pause:3.8@sha256:880e63f94b145e46f1b1082bb71b85e21f16b99b180b9996407d61240ceb9830`
+- `us-docker.pkg.dev/gce-ai-infra/gpudirect-gib/nccl-plugin-gib-arm64:v1.1.2@sha256:6b7950cac6e6833661d4206920f5633b6e361b18bfd5315b63f9bf4a4b84a80e`
 
 ### gke-nccl-tcpxo
 

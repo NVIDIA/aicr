@@ -1,0 +1,199 @@
+# Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# DRA node labeler: mirrors GFD's nvidia.com/gpu.present onto every GPU node as
+# the DRA eviction label the nvidia-dra-driver-gpu kubelet plugin selects on.
+#
+# The mirror is the point. gpu.present belongs to GFD and cannot be flipped, so
+# the kubelet plugin cannot select on it directly: the GPU Operator Driver
+# Manager needs a label it owns to evict the plugin ahead of an in-place driver
+# upgrade (NODE_LABEL_FOR_GPU_POD_EVICTION). It sets that label to
+# "paused-for-driver-upgrade", the plugin leaves the node, the driver is
+# replaced, and restoring the value brings DRA back. Deriving the label from
+# gpu.present removes the node-pool provisioning requirement that made the
+# eviction contract opt-in (issues #2456, #2469, #2676).
+#
+# Placement is hardware truth, not provisioning intent: affinity on
+# gpu.present rather than the accelerated node selector, so a GPU host in a
+# login or CPU pool that carries the operator stack still gets the label.
+# Tolerations come from the registry's accelerated toleration injection.
+# Labeling therefore waits for GFD, which lands with the GPU Operator.
+{{- $vals := index .Values "dra-node-labeler" }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dra-node-labeler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: dra-node-labeler
+    app.kubernetes.io/instance: dra-node-labeler
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dra-node-labeler
+  labels:
+    app.kubernetes.io/name: dra-node-labeler
+    app.kubernetes.io/instance: dra-node-labeler
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dra-node-labeler
+  labels:
+    app.kubernetes.io/name: dra-node-labeler
+    app.kubernetes.io/instance: dra-node-labeler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dra-node-labeler
+subjects:
+  - kind: ServiceAccount
+    name: dra-node-labeler
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: dra-node-labeler
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: dra-node-labeler
+    app.kubernetes.io/name: dra-node-labeler
+    app.kubernetes.io/instance: dra-node-labeler
+spec:
+  selector:
+    matchLabels:
+      app: dra-node-labeler
+  # Nothing consumes a running labeler pod and the node label survives pod
+  # restarts, so there is no availability to preserve; the default
+  # maxUnavailable of 1 only serializes the rollout across a large fleet.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: "100%"
+  template:
+    metadata:
+      labels:
+        app: dra-node-labeler
+        app.kubernetes.io/name: dra-node-labeler
+        app.kubernetes.io/instance: dra-node-labeler
+    spec:
+      serviceAccountName: dra-node-labeler
+      priorityClassName: system-node-critical
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: nvidia.com/gpu.present
+                    operator: In
+                    values:
+                      - "true"
+      # GPU pools are tainted; without a toleration the labeler stays Pending while
+      # GFD sets gpu.present, the label never lands, and the kubelet plugin sits at
+      # DESIRED=0. The CLI injects the accelerated tolerations (a wildcard when none
+      # are passed); the SDK path may leave them nil, so fall back the same way
+      # gcp-driver-installer does.
+      tolerations:
+        {{- if $vals.acceleratedTolerations }}
+        {{- toYaml $vals.acceleratedTolerations | nindent 8 }}
+        {{- else }}
+        - operator: Exists
+        {{- end }}
+      volumes:
+        - name: state
+          emptyDir: {}
+      containers:
+        - name: labeler
+          # Literal, not templated from values: tools/bom inventories embedded
+          # manifests without rendering values, and the mirror flow rewrites literal
+          # references. Same tag and digest as nodewright-operator's
+          # webhook.removalImage so the catalog carries one kubectl image.
+          image: docker.io/alpine/kubectl:1.36.2@sha256:01d138ce994b684abc62d9cfdff44de42a4c8996dcc12626dd0193afc3fb5a95
+          command:
+            - /bin/sh
+            - -c
+            - |
+              LABEL_KEY={{ $vals.labelKey | quote }}
+              LABEL_VALUE={{ $vals.labelValue | quote }}
+              READY=/var/run/dra-node-labeler/labeled
+
+              # Retry in place instead of exiting: a container restart would be the
+              # only retry and the health check treats restarts as failure. The pod
+              # stays unready (no marker) until the node carries the key.
+              has_key() {
+                LABELS=$(kubectl get node "${NODE_NAME}" -o jsonpath='{.metadata.labels}') || return 2
+                printf '%s' "${LABELS}" | grep -Fq "\"${LABEL_KEY}\":"
+              }
+              # Key presence, not value: a jsonpath value lookup reads an empty value as
+              # absent, and kubectl label without --overwrite then refuses it. Any existing
+              # value is another writer's ("false" opt-out, Driver Manager pause) and is
+              # never touched, so this labels once and sleeps rather than reconciling.
+              while :; do
+                has_key; rc=$?
+                if [ "${rc}" -eq 0 ]; then
+                  echo "${LABEL_KEY} already present on ${NODE_NAME}, leaving as-is"
+                  break
+                elif [ "${rc}" -eq 1 ] && kubectl label node "${NODE_NAME}" "${LABEL_KEY}=${LABEL_VALUE}"; then
+                  echo "labeled ${NODE_NAME} with ${LABEL_KEY}=${LABEL_VALUE}"
+                  break
+                fi
+                echo "node API not ready or label write raced, retrying"
+                sleep 5
+              done
+              touch "${READY}"
+
+              while true; do sleep 3600; done
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          # Ready means "this node carries the key", not "the shell started": kubelet
+          # marks a probe-less container Ready immediately, which let the health
+          # check pass while kubectl was still blocked.
+          readinessProbe:
+            exec:
+              command: ["test", "-f", "/var/run/dra-node-labeler/labeled"]
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          volumeMounts:
+            - name: state
+              mountPath: /var/run/dra-node-labeler
+          # 20m/200m rather than 10m/100m: kubectl startup against a large Node
+          # object was throttled to 80-100% during GPU discovery on big clusters,
+          # delaying the label and therefore DRA on every node.
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65534
+            seccompProfile:
+              type: RuntimeDefault

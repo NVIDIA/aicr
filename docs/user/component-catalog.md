@@ -16,15 +16,19 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **network-operator** | Manages high-performance networking for GPU workloads. Configures RDMA, SR-IOV, and host networking for multi-node communication. | [NVIDIA Network Operator](https://github.com/Mellanox/network-operator) |
 | **nfd** | Node Feature Discovery — labels nodes with hardware features (PCI device IDs, kernel modules, CPU capabilities). Both gpu-operator and network-operator consume these labels. On production GPU recipes, the Topology Updater publishes per-node `NodeResourceTopology` CRDs describing NUMA zones and GPU/NIC affinity for downstream NUMA-aware schedulers. | [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) |
 | **node-problem-detector** | Detects node-level faults the GPU stack does not watch — XFS shutdown, fatal UEFI CPER hardware errors, a read-only root filesystem — and publishes them as Node Conditions for NVSentinel's Object Monitor to consume. Opt-in via the `npd` mixin, and only where the platform does not already run its own. | [node-problem-detector](https://github.com/kubernetes/node-problem-detector) |
+| **dranet** | DRA network driver ([kubernetes-sigs/dranet](https://github.com/kubernetes-sigs/dranet)) for the ConnectX-9 RDMA fabric on VR200 (Vera Rubin NVL72) RKE2 clusters. Publishes the mlx5 NICs as `ResourceSlice`s (driver `dra.net`) and injects them into pods via NRI under `DeviceClass` `mlnx-cx9`. Manifest-only (vendored `dranet.yaml`), evaluated as a lean alternative to `network-operator`. Ships only in the VR200 RKE2 overlays. | [DraNet](https://github.com/kubernetes-sigs/dranet) |
+| **rdma-netns-exclusive** | Host RDMA "exclusive" netns-mode Nodewright (Skyhook) CR. Pairs with `dranet` so a pod sees only its DRA-allocated HCA, which keeps NCCL/GPUDirect device enumeration clean. Sets the `ib_core` `netns_mode=0` module parameter through `modprobe.d` and **reboots the node** — the parameter cannot be changed live. Requires `nodewright-operator` (declared as a `componentRef` dependency). Ships only in the VR200 RKE2 overlays. | — |
 | **gke-nccl-tcpxo** | NCCL TCPXO network plugin for GKE. Provides optimized collective communication for multi-node GPU workloads on Google Kubernetes Engine. GKE-specific. | — |
+| **gke-gb200-rdma** | NCCL gIB (GPUDirect-RDMA over RoCE) plugin installer for GB200 (A4X, ARM64) GKE nodes. Installs RDMA binaries and the NCCL library so workloads select `NCCL_NET=gIB` over the cluster's `gvnic-1`/`rdma-0..rdma-3` `Network` objects. GKE-specific — see [GKE GB200 Networking](../integrator/gke-gb200-networking.md). | — |
 | **gcp-driver-installer** | Google's cos-gpu-installer DaemonSet as an AICR-managed, values-gated component. Present in every GKE COS recipe; renders only under the `gpuStack=bundle-installer` profile value, where it installs the recipe-pinned NVIDIA driver on pools created with `gpu-driver-version=disabled`. GKE-specific. | — |
 | **aws-efa** | Device plugin for AWS Elastic Fabric Adapter. Enables low-latency networking on EKS clusters with EFA-capable instances. EKS-specific. | [AWS EFA K8s Device Plugin](https://github.com/aws/eks-charts) |
 | **cert-manager** | Automates TLS certificate management. Required by several operators for webhook and API server certificates. | [cert-manager](https://github.com/cert-manager/cert-manager) |
 | **gatekeeper** | Admission controller for Kubernetes. Enforces policies and governance across the cluster using OPA (Open Policy Agent) ConstraintTemplates and Constraints. | [Open Policy Agent Gatekeeper](https://github.com/open-policy-agent/gatekeeper) |
-| **nodewright-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. Pinned to `v0.17.x` on purpose: `v0.18.0` renamed the `Skyhook` API to `NodeWright` and writes status only on the new kind, which the readiness gate does not yet read — see [Upgrade Notes](#nodewright-operator-staying-on-v017x) below. | [Nodewright](https://github.com/nvidia/nodewright) |
+| **nodewright-operator** | OS-level node tuning and configuration management. Applies kernel parameters, sysctl settings, and system-level optimizations to nodes. Pinned to `v0.17.x` on purpose: `v0.18.0` renamed the `Skyhook` API to `NodeWright` and writes status only on the new kind, which the readiness gate does not yet read — see [Upgrade Notes](#nodewright-operator-staying-on-v017x) below. | [Nodewright](https://github.com/NVIDIA/nodewright) |
 | **nodewright-customizations** | Environment-specific node tuning profiles applied via Nodewright. Extends the operator with kernel params, hugepages, and other host-level configurations. | — |
 | **nvsentinel** | GPU health monitoring. Detects GPU errors and publishes health events; the components that cordon, drain, reboot or terminate a node are off by default — see [NVSentinel Deployment Posture](#nvsentinel-deployment-posture). On platforms where the provider installs the driver but no driver pod is observable by NVSentinel, the recipes set `labeler.assumeDriverInstalled` for you — see [NVSentinel on provider-installed-driver platforms](#nvsentinel-on-provider-installed-driver-platforms). | [NVSentinel](https://github.com/NVIDIA/nvsentinel) |
 | **nvidia-dra-driver-gpu** | Dynamic Resource Allocation (DRA) driver. Advertises devices via the Kubernetes `resource.k8s.io` API (`v1` on 1.34+, `v1beta1`/`v1beta2` on 1.32/1.33) — ComputeDomain/IMEX channels for MNNVL platforms, and optionally whole GPUs. Stock recipes disable whole-GPU DRA advertisement (`resources.gpus.enabled: false`) — the device plugin is the production default whole-GPU advertiser, and DRA whole-GPU allocation is an experimental recipe-level opt-in ([#1327](https://github.com/NVIDIA/aicr/issues/1327)). Whole-GPU DRA and the GPU Operator device plugin (`nvidia.com/gpu`) are mutually exclusive per node: recipe-backed validation rejects a configuration that enables both (at policy-resolution time — skipping validation bypasses the check), because the two allocators keep independent ledgers and concurrent advertisement can double-allocate the same physical GPUs (see the guidance in `recipes/components/nvidia-dra-driver-gpu/values.yaml`). See [AKS GPU Setup](../integrator/aks-gpu-setup.md#dynamic-resource-allocation-dra) for details. CLI alias: `dradriver`. | [NVIDIA DRA Driver](https://github.com/kubernetes-sigs/dra-driver-nvidia-gpu) |
+| **dra-node-labeler** | Applies the DRA eviction node label (`--dra-eviction-node-label`) to every node GFD reports as `nvidia.com/gpu.present=true`, so the DRA kubelet plugin's node selector and GPU Operator's Driver Manager eviction hook need no node-pool labeling. Write-once: an existing value, including the Driver Manager's `paused-for-driver-upgrade`, is never rewritten. Present in the bundle only when the eviction label is configured. | — |
 | **prometheus-operator-crds** | Custom Resource Definitions for the prometheus-operator (`Alertmanager`, `AlertmanagerConfig`, `PodMonitor`, `Probe`, `Prometheus`, `PrometheusRule`, `ServiceMonitor`, `ThanosRuler`). Shipped as a separate release so the CRDs land before any chart that creates monitoring CRs; this breaks the helm-diff self-reference that otherwise blocks `helmfile apply` on a fresh cluster. | [prometheus-operator-crds](https://github.com/prometheus-community/helm-charts/tree/main/charts/prometheus-operator-crds) |
 | **kube-prometheus-stack** | Cluster monitoring: Prometheus, Grafana, Alertmanager, and node exporters. Provides GPU and cluster metrics collection and dashboards. CRDs are installed by the sibling `prometheus-operator-crds` release (this chart runs with `crds.enabled: false`). | [kube-prometheus-stack](https://github.com/prometheus-community/helm-charts) |
 | **prometheus-adapter** | Exposes custom metrics from Prometheus to the Kubernetes metrics API. Enables HPA scaling based on GPU utilization and other custom metrics. | [prometheus-adapter](https://github.com/kubernetes-sigs/prometheus-adapter) |
@@ -46,7 +50,7 @@ The source of truth is [`recipes/registry.yaml`](https://github.com/NVIDIA/aicr/
 | **slinky-slurm-operator-crds** | Custom Resource Definitions for the SchedMD Slinky Slurm operator. Installs the `slinky.slurm.net` CRDs (Controller, NodeSet, LoginSet, Accounting, RestApi, Token). Installed separately to support CRD lifecycle management. | [Slinky Slurm Operator](https://github.com/SlinkyProject/slurm-operator) |
 | **slinky-slurm-operator** | SchedMD Slinky Slurm operator and admission webhook. Manages the lifecycle of Slurm clusters declared via Slinky CRs (Controller, NodeSet, LoginSet, Accounting, RestApi, Token). AICR's system node-selector and toleration bundle flags apply to both deployments; affinity remains available through component values or typed overrides. | [Slinky Slurm Operator](https://github.com/SlinkyProject/slurm-operator) |
 | **slinky-slurm** | Slinky-managed Slurm cluster instance: Controller (slurmctld) + LoginSet (sackd/sshd) + NodeSet (slurmd) + RestApi (slurmrestd), with SlurmDBD derived from the recipe's typed accounting mode. Reconciled by `slinky-slurm-operator`. See [Slurm Accounting](slinky-slurm-accounting.md), [Slurm Enroot Configuration](slinky-slurm-enroot.md), and [Slurm Shared Storage](slinky-slurm-storage.md). | [Slinky Slurm Cluster Chart](https://github.com/SlinkyProject/slurm-operator/tree/main/helm/slurm) |
-| **slinky-topograph** | Slinky/Slurm-scoped instance of Topograph — queries cloud provider topology APIs (GCP, AWS, OCI …) to generate Slurm `topology.conf`, enabling topology-aware placement decisions in the Slinky-managed scheduler. **Not installed by default**; leaf overlays opt in by adding an explicit `componentRef` entry for `slinky-topograph` — the `componentRef` is what schedules the release; `dependencyRefs` alone does not install anything. That `componentRef` declares `slinky-slurm` as a `dependencyRef` to deploy **after** it: `slinky-slurm` renders and owns the `slinky-slurm-config-extra` ConfigMap (from its `configFiles`, mounted into slurmctld via the Controller CR's `configFileRefs`), and Topograph patches only that ConfigMap's `topology.conf` key on each sync, preserving the chart-owned `cgroup.conf`/`gres.conf` keys — Helm has to own the ConfigMap first. `TopologyPlugin: topology/tree` is set per-leaf via `slinky-slurm`'s `controller.extraConfMap`. Includes the `node-observer` component, which watches the topograph API pod and regenerates topology on restarts or selected node/pod changes. Requires cloud provider IAM access (e.g. GCP `roles/compute.viewer` for Workload Identity). | [Topograph](https://github.com/NVIDIA/topograph) |
+| **slinky-topograph** | Slinky/Slurm-scoped instance of Topograph — queries cloud provider topology APIs (GCP, AWS, OCI …) to generate Slurm `topology.conf`, enabling topology-aware placement decisions in the Slinky-managed scheduler. **Not installed by default**; leaf overlays opt in by adding an explicit `componentRef` entry for `slinky-topograph` — the `componentRef` is what schedules the release; `dependencyRefs` alone does not install anything. That `componentRef` declares `slinky-slurm` as a `dependencyRef` to deploy **after** it: `slinky-slurm` renders and owns the `slinky-slurm-config-extra` ConfigMap (from its `configFiles`, mounted into slurmctld via the Controller CR's `configFileRefs`), and Topograph patches only that ConfigMap's `topology.conf` key on each sync, preserving the chart-owned `cgroup.conf`/`gres.conf` keys — Helm has to own the ConfigMap first. `TopologyPlugin: topology/tree` is set per-leaf via `slinky-slurm`'s `controller.extraConfMap`. Includes the `node-observer` component, which watches the topograph API pod and regenerates topology on restarts or selected node/pod changes. Requires cloud provider IAM access (e.g. GCP `roles/compute.viewer` for Workload Identity). | [Topograph](https://github.com/dsx-ai-factory/topograph) |
 | **nfd-ocp-olm** | OLM installer for Node Feature Discovery on OpenShift. Creates the OperatorGroup and Subscription resources that install NFD via the Operator Lifecycle Manager. Paired with `nfd-ocp`. OCP-specific. | [Node Feature Discovery (Certified)](https://catalog.redhat.com/software/container-stacks/detail/5ec53e8c110f56bd24f5f8db) |
 | **nfd-ocp** | Node Feature Discovery CR for OpenShift. Configures NFD's operand (worker, topology updater) via a NodeFeatureDiscovery custom resource. Deployed after `nfd-ocp-olm`. OCP-specific. | [Node Feature Discovery](https://github.com/kubernetes-sigs/node-feature-discovery) |
 | **gpu-operator-ocp-olm** | OLM installer for the GPU Operator on OpenShift. Creates the OperatorGroup and Subscription resources that install the certified GPU Operator via the Operator Lifecycle Manager. Paired with `gpu-operator-ocp`. OCP-specific. | [NVIDIA GPU Operator (Certified)](https://catalog.redhat.com/software/container-stacks/detail/5e7b210b8a3c1e00013d636d) |
@@ -401,7 +405,7 @@ Until you do, a webhook that never came up is indistinguishable from one that is
 
 **The name is misleading here: nothing is remediated.** The strategy controls whether the event is processable, not whether anything acts on it. All six NVSentinel remediation components (`faultQuarantine`, `nodeDrainer`, `faultRemediation`, `janitor`, `lifecycleManager`, `janitorProvider`) default off and AICR enables none, and `fault-quarantine` — the only consumer that would cordon or drain — is not deployed. The complete effect is: the pod is stranded, and the node gets either a NodeCondition (fatal) or a Kubernetes Event (non-fatal).
 
-**What this means operationally:** a bad GPU now blocks the pods scheduled onto it. That is the intended behaviour, but it is a real change in failure mode — budget for pods sitting in `Init:Error` rather than running slowly. `failurePolicy: Ignore` limits the blast radius of a *webhook* outage, not of a failing check.
+**What this means operationally:** a bad GPU now blocks the pods scheduled onto it. That is the intended behavior, but it is a real change in failure mode — budget for pods sitting in `Init:Error` rather than running slowly. `failurePolicy: Ignore` limits the blast radius of a *webhook* outage, not of a failing check.
 
 **One asymmetry worth knowing:** the strategy affects *check* failures. A check that cannot load its own configuration exits non-zero regardless.
 
@@ -422,7 +426,7 @@ The entry stays in the list rather than being removed, because the webhook resol
 
 **The checks cost startup time.** Two init containers run in sequence before your workload's first container starts: a DCGM level-2 diagnostic (~2 min) and an NCCL loopback bandwidth test. Budget for this on every GPU pod in a labeled namespace, including short-lived ones — which is the main reason the namespace label exists rather than the mixin turning injection on cluster-wide.
 
-**The check images are not counted in the BOM table.** The three `preflight-*` check images and the `preflight` controller image come from `ghcr.io/nvidia/nvsentinel/` at the chart's own version; see the opt-in image note in [container images](container-images.md).
+**The check images are not counted in the BOM table.** The three `preflight-*` check images and the `preflight` controller image come from `ghcr.io/nvidia/nvsentinel/` at the chart's own version; see the opt-in image note in [container images](https://github.com/NVIDIA/aicr/blob/main/docs/user/container-images.md).
 
 **Limitations.**
 
@@ -532,7 +536,7 @@ Upstream's validated-platform list covers DGX and OCI hardware and does **not** 
 
 **`metadataCollector` is a hard dependency.** `nic-health-monitor` reads GPU-to-NIC topology from `/var/lib/nvsentinel/gpu_metadata.json` and has no devices to check without it. Because a missing dependency renders and deploys silently, `CheckNVSentinelNicHealthMonitorRequiresMetadataCollector` blocks the bundle instead: enabling `global.nicHealthMonitor.enabled` with `global.metadataCollector.enabled: false` fails unless `nic-health-monitor.nicInclusionRegexOverride` carries a value the monitor will actually accept. Set is not enough — the gate requires a string with at least one non-empty pattern, and every comma-separated pattern must compile, because the chart writes the value straight into the monitor's config and it refuses to start on one that does not. An override it rejects is not a bypass; it is the same missing inventory in a crash loop. That override is the documented bypass, and it forfeits the automatic management-NIC exclusion along with the dependency, so prefer enabling `metadataCollector`. No AKS or OKE overlay disables it; the overlays that do (VR200/RKE2, H200/k0s) are not in either family and never compose this mixin.
 
-**Escalation needs the datastore.** The "three events in one hour escalates" behaviour lives in the Health Events Analyzer, which needs MongoDB. Without it ([#1014](https://github.com/NVIDIA/aicr/issues/1014)) only fatal events surface.
+**Escalation needs the datastore.** The "three events in one hour escalates" behavior lives in the Health Events Analyzer, which needs MongoDB. Without it ([#1014](https://github.com/NVIDIA/aicr/issues/1014)) only fatal events surface.
 
 ### Enabling Remediation
 
@@ -546,7 +550,7 @@ If you need remediation before #1014 lands, start from the chart's self-containe
 - **The datastore is a real dependency.** `mongodbStore` deploys an in-cluster database. The chart also supports an external datastore and a `postgresql` provider; see the `global.datastore` block in the chart's values.
 - **Check arm64 before enabling on ARM.** The chart's default MongoDB image has no `linux/arm64` manifest. arm64 works via the Percona path ([NVIDIA/NVSentinel#1328](https://github.com/NVIDIA/NVSentinel/issues/1328)).
 
-**NVSentinel is included by default, not universally required.** `recipes/overlays/base.yaml` includes it unconditionally, so every recipe carries it unless something later removes it, and ADR-018 classifies it as `core` rather than `ops` on the rule that `ops` must be GPU-free and verifiable on CPU-only clusters. Two things can still remove it: an overlay that overrides `enabled` (the OCP overlay does), and a bundle-time exclusion on a platform whose presence is not profile-locked (EKS and OKE). Only the AKS and GKE-COS `gpuStack` profiles make its presence mandatory — see [NVSentinel is mandatory on the profiled families](#nvsentinel-on-provider-installed-driver-platforms) below.
+**NVSentinel is included by default, not universally required.** `recipes/overlays/base.yaml` includes it unconditionally, so every recipe carries it unless something later removes it, and ADR-018 classifies it as `core` rather than `ops` on the rule that `ops` must be GPU-free and verifiable on CPU-only clusters. Two things can still remove it: an overlay that overrides `enabled` (the OCP overlay does), and a bundle-time exclusion on a platform whose presence is not profile-locked (EKS). Only the AKS, GKE-COS, and OKE `gpuStack` profiles make its presence mandatory — see [NVSentinel is mandatory on the profiled families](#nvsentinel-on-provider-installed-driver-platforms) below.
 
 **The component values AICR sets are platform-correctness values, not remediation policy.** `labeler.assumeDriverInstalled` and `metadata-collector.runtimeClassName` describe facts about the target cluster that the chart cannot infer — who installs the driver, and what the RuntimeClass is named. The next section gives the per-platform values, when an explicit value is needed, and what each failure looks like when it is missing. Which components run is a different matter and stays upstream's call.
 
@@ -967,7 +971,7 @@ that today, so it stays the default.
 A component qualifies only if it solely owns every CRD it ships and ships none
 using `spec.conversion.strategy: Webhook`, since replace discards a `caBundle`
 injected at runtime. `kubeflow-trainer` is excluded for that second reason.
-Currently `gatekeeper`, `k8s-aibom`, and `nvsentinel` qualify.
+Currently `gatekeeper`, `k8s-aibom`, `nvcre`, and `nvsentinel` qualify.
 
 `helm` and `helmfile` always need the step, because skipping `crds/` on
 upgrade is Helm's own behavior rather than something the generated bundle can
@@ -1208,6 +1212,33 @@ frontend discovery panic fixed in #1193 -- setting `DYN_EVENT_PLANE=zmq`
 on the old workload is defense in depth, not a substitute for bumping its
 image to match the operator.
 
+### `dynamo-platform`: reusing an existing StorageClass for the GB200 model-weights cache
+
+On GB200 (`a4x-highgpu-4g`) GKE leaves, `dynamo-platform` bundles a fixed
+`a4x-compatible` StorageClass
+(`recipes/components/dynamo-platform/manifests/a4x-storage-class.yaml`) so
+the `inference-perf` model-weights cache PVC has somewhere Hyperdisk-backed
+to bind, since those nodes can't attach Persistent Disk at all. See
+[GKE GB200 networking](../integrator/gke-gb200-networking.md#storage-prerequisites).
+
+Redirecting the cache PVC to a different, already-existing StorageClass,
+via the recipe's `inference-model-cache-storage-class` constraint or the
+`AICR_INFERENCE_PERF_MODEL_CACHE_STORAGE_CLASS` catalog env (see
+[Validation](validation.md)), doesn't stop AICR from also rendering
+`a4x-compatible`. If a StorageClass named `a4x-compatible` already exists on the
+cluster under someone else's ownership, adopting it into this release's
+Helm lifecycle either fails the install or takes over an object this bundle
+doesn't need. Opt out of rendering it at bundle time with:
+
+```bash
+aicr bundle --recipe recipes/overlays/gb200-gke-cos-inference-dynamo.yaml \
+  --set dynamo-platform:a4xStorageClass.create=false \
+  --output ./bundle
+```
+
+`a4xStorageClass.create` is a bundling-time toggle read by AICR itself, not
+an `ai-dynamo` chart value. It never reaches the rendered Helm values.
+
 ### `gpu-operator` and `nvidia-dra-driver-gpu`: ComputeDomain CRD ownership on Argo CD
 
 `gpu-operator` and `nvidia-dra-driver-gpu` (and `nvidia-dra-driver-gpu-ocp`) both
@@ -1334,7 +1365,7 @@ before concluding the upgrade needs nothing from you. Anything else returned mea
 for every version between the old and new pin and validate off-production
 first — a multi-version jump has to absorb every breaking change in between,
 not just the newest one. Use the
-[component version matrix](component-version-matrix.md) to find which versions
+[component version matrix](https://github.com/NVIDIA/aicr/blob/main/docs/user/component-version-matrix.md) to find which versions
 those are.
 
 One limit worth stating plainly: AICR CI exercises **fresh installs** of a

@@ -39,6 +39,7 @@ componentRefs: ## alphabetically sorted
   - name: agentgateway
   - name: agentgateway-crds
   - name: cert-manager
+  - name: dra-node-labeler
   - name: dynamo-platform
   - name: gcp-driver-installer
   - name: gpu-operator
@@ -65,6 +66,7 @@ deploymentOrder:
   - prometheus-operator-crds
   - kube-prometheus-stack
   - gpu-operator
+  - dra-node-labeler
   - k8s-ephemeral-storage-metrics
   - kai-scheduler
   - dynamo-platform

@@ -28,7 +28,7 @@ NVIDIA AI Cluster Runtime (AICR) generates validated GPU-accelerated Kubernetes 
  state         config         vs actual     manifests
 ```
 
-**Tech Stack:** Go 1.26, Kubernetes, golangci-lint, Ko for images (pinned versions in `.settings.yaml`)
+**Tech Stack:** Go 1.27, Kubernetes, golangci-lint, Ko for images (Go toolchain pinned in `.go-version`; other tool versions in `.settings.yaml`)
 
 ## Commands
 
@@ -38,7 +38,7 @@ NVIDIA AI Cluster Runtime (AICR) generates validated GPU-accelerated Kubernetes 
 unset GITLAB_TOKEN
 
 # Development workflow
-make qualify      # Full check: test-coverage + lint + tuning-check + e2e + scan + license-check + api-diff + openapi-diff (run before PR)
+make qualify      # Full check: test-coverage + lint + tuning-check + coverage-check + e2e + scan + license-check + api-diff + openapi-diff (run before PR)
 make test         # Unit tests with -race
 make lint         # golangci-lint + yamllint
 make scan         # Grype vulnerability scan

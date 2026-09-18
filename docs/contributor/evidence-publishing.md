@@ -188,7 +188,7 @@ git commit's signature status.
 
 A signed, nested pointer is **not** sufficient on its own. The contract gate
 also requires the pointer's claimed signer to be listed in
-[`recipes/evidence/allowlist.yaml`](../../recipes/evidence/allowlist.yaml) as a
+[`recipes/evidence/allowlist.yaml`](https://github.com/NVIDIA/aicr/blob/main/recipes/evidence/allowlist.yaml) as a
 `community` or `partner` entry; an unlisted signer is rejected (it would only
 ever count as "reported", never corroborating). Your fork's GitHub Actions OIDC
 identity is a **new signer** that the existing entries do not cover, so you must
@@ -258,5 +258,5 @@ signer lands the pointer under a different `<src>` directory.
 
 ## See also
 
-- [ADR-007: Verifiable Recipe Test Evidence](../design/007-recipe-evidence.md) — trust model and bundle format.
+- [ADR-007: Verifiable Recipe Test Evidence](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md) — trust model and bundle format.
 - [`aicr evidence` CLI reference](../user/cli-reference.md#aicr-evidence-sign) — `sign`, `publish`, `verify`.

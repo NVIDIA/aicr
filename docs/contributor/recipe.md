@@ -144,7 +144,7 @@ except exemption-declared divergences — see
 - `make lint` validates every committed record via
   `check-upgrade-records`.
 
-See [ADR-021](../design/021-component-upgrade-safety.md) for the full
+See [ADR-021](https://github.com/NVIDIA/aicr/blob/main/docs/design/021-component-upgrade-safety.md) for the full
 field reference.
 
 ## Overlay (`recipes/overlays/`)
@@ -338,7 +338,8 @@ spec:
 
 Mixin files currently in the tree: `os-ubuntu`, `os-talos`,
 `platform-inference`, `platform-kubeflow`, `nvsentinel-observability`,
-`nvsentinel-object-monitor`, `nvsentinel-preflight`, `npd`.
+`nvsentinel-object-monitor`, `nvsentinel-nic-health-monitor`,
+`nvsentinel-preflight`, `npd`.
 
 **Mixin rules:**
 
@@ -935,8 +936,8 @@ prevents.
 - [component.md](component.md) — adding a component to the registry
 - [validator.md](validator.md#component-validations-bundle-time) — adding bundle-time component validation checks
 - [validator.md](validator.md) — adding a validator check or health check
-- [ADR-005](../design/005-overlay-refactoring.md) — overlay refactoring rationale (mixin composition, maximal-leaf resolver, wildcard overlays)
-- [ADR-007](../design/007-recipe-evidence.md) — fingerprint, evidence bundle, verification
-- [ADR-021](../design/021-component-upgrade-safety.md) — component upgrade transition records: schema, verdicts, well-formedness rules
+- [ADR-005](https://github.com/NVIDIA/aicr/blob/main/docs/design/005-overlay-refactoring.md) — overlay refactoring rationale (mixin composition, maximal-leaf resolver, wildcard overlays)
+- [ADR-007](https://github.com/NVIDIA/aicr/blob/main/docs/design/007-recipe-evidence.md) — fingerprint, evidence bundle, verification
+- [ADR-021](https://github.com/NVIDIA/aicr/blob/main/docs/design/021-component-upgrade-safety.md) — component upgrade transition records: schema, verdicts, well-formedness rules
 - [pkg/recipe godoc](https://github.com/NVIDIA/aicr/tree/main/pkg/recipe) — implementation
 - [api/aicr/v1/server.yaml](https://github.com/NVIDIA/aicr/blob/main/api/aicr/v1/server.yaml) — recipe API contract and criteria enums
